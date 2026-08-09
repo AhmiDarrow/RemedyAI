@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { apiFetch } from '../../api/client'
 import { isTauri, tauriInvoke } from '../../api/tauri'
 import { EmptyState } from '../EmptyState'
@@ -23,11 +23,40 @@ export function FilesSlide({
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('')
+  const [filter, setFilter] = useState('')
+  const [focusIdx, setFocusIdx] = useState(-1)
+  const statusTimer = useRef<number | null>(null)
+  const listRef = useRef<HTMLDivElement | null>(null)
+  /** Ignore out-of-order /files responses after session or path thrash. */
+  const loadGen = useRef(0)
+
+  const flashStatus = useCallback((msg: string, ms = 2800) => {
+    setStatus(msg)
+    if (statusTimer.current != null) {
+      window.clearTimeout(statusTimer.current)
+      statusTimer.current = null
+    }
+    if (msg) {
+      statusTimer.current = window.setTimeout(() => {
+        statusTimer.current = null
+        setStatus('')
+      }, ms)
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (statusTimer.current != null) window.clearTimeout(statusTimer.current)
+      loadGen.current += 1 // invalidate in-flight list on unmount
+    }
+  }, [])
 
   const load = useCallback(
     async (p: string) => {
+      const gen = ++loadGen.current
       setLoading(true)
       setError('')
+      setFocusIdx(-1)
       try {
         const q = new URLSearchParams({ path: p })
         if (sessionId) q.set('session_id', sessionId)
@@ -37,21 +66,37 @@ export function FilesSlide({
           root?: string
           error?: string
         }>(`/files?${q}`)
-        setFiles(data.files || [])
+        if (gen !== loadGen.current) return
+        // Dirs first, then name (case-insensitive)
+        const list = [...(data.files || [])].sort((a, b) => {
+          if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
+          return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+        })
+        setFiles(list)
         setPath(data.path || p)
         if (data.root) setRoot(data.root)
+        else if (p === '.') setRoot('')
         if (data.error) setError(data.error)
       } catch (e: unknown) {
+        if (gen !== loadGen.current) return
         setError(e instanceof Error ? e.message : 'Failed to list files')
         setFiles([])
       } finally {
-        setLoading(false)
+        if (gen === loadGen.current) setLoading(false)
       }
     },
     [sessionId],
   )
 
+  // Reset to project root whenever the session changes (new project path).
   useEffect(() => {
+    setPath('.')
+    setRoot('')
+    setFiles([])
+    setError('')
+    setStatus('')
+    setFilter('')
+    setFocusIdx(-1)
     void load('.')
   }, [load])
 
@@ -73,17 +118,17 @@ export function FilesSlide({
 
   const openEntry = async (f: Entry) => {
     if (f.is_dir) {
+      setFilter('')
       void load(f.path)
       return
     }
     const full = absPath(f.path)
-    setStatus(`Opening ${f.name}…`)
+    flashStatus(`Opening ${f.name}…`, 1500)
     try {
       if (isTauri()) {
-        // Prefer dedicated open_path; fall back to external open via shell
         try {
           await tauriInvoke('open_path', { path: full })
-          setStatus(`Opened ${f.name}`)
+          flashStatus(`Opened ${f.name}`)
           return
         } catch {
           await tauriInvoke('open_external_url', {
@@ -92,53 +137,109 @@ export function FilesSlide({
           }).catch(() => {
             throw new Error('open failed')
           })
-          setStatus(`Opened ${f.name}`)
+          flashStatus(`Opened ${f.name}`)
           return
         }
       }
       window.open(`file:///${full.replace(/\\/g, '/')}`, '_blank')
-      setStatus(`Opened ${f.name}`)
+      flashStatus(`Opened ${f.name}`)
     } catch (e: unknown) {
-      setStatus(e instanceof Error ? e.message : String(e))
+      flashStatus(e instanceof Error ? e.message : String(e), 4000)
     }
   }
 
-  const copyPath = async (f: Entry) => {
-    const full = absPath(f.path)
+  const copyPath = async (full: string, label = 'Copied path') => {
     try {
       await navigator.clipboard.writeText(full)
-      setStatus(`Copied path: ${full}`)
+      flashStatus(label)
       onAttachPath?.(full)
     } catch {
-      setStatus(full)
+      flashStatus(full, 5000)
+    }
+  }
+
+  const q = filter.trim().toLowerCase()
+  const visible = q
+    ? files.filter((f) => f.name.toLowerCase().includes(q))
+    : files
+
+  useEffect(() => {
+    setFocusIdx((i) => (visible.length === 0 ? -1 : Math.min(i, visible.length - 1)))
+  }, [visible.length])
+
+  const dirCount = visible.filter((f) => f.is_dir).length
+  const fileCount = visible.length - dirCount
+  const canGoUp = Boolean(path && path !== '.')
+  const rootLabel = root
+    ? root.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || root
+    : 'Project files'
+
+  const onListKeyDown = (e: KeyboardEvent) => {
+    if (!visible.length) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setFocusIdx((i) => Math.min(visible.length - 1, (i < 0 ? -1 : i) + 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setFocusIdx((i) => Math.max(0, (i < 0 ? visible.length : i) - 1))
+    } else if (e.key === 'Enter' && focusIdx >= 0 && focusIdx < visible.length) {
+      e.preventDefault()
+      void openEntry(visible[focusIdx])
+    } else if (e.key === 'Backspace' && !filter && canGoUp) {
+      e.preventDefault()
+      goUp()
+    } else if ((e.key === 'c' || e.key === 'C') && (e.ctrlKey || e.metaKey) && focusIdx >= 0) {
+      const f = visible[focusIdx]
+      if (f && !f.is_dir) {
+        e.preventDefault()
+        void copyPath(absPath(f.path))
+      }
     }
   }
 
   return (
     <div className="flex flex-col h-full min-h-0 text-xs">
       <div
-        className="px-2 py-1.5 border-b shrink-0 truncate"
+        className="px-2 py-1.5 border-b shrink-0 flex items-center gap-1"
         style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
-        title={root}
       >
-        {root || 'Project files'}
+        <button
+          type="button"
+          className="truncate flex-1 min-w-0 text-left rounded px-0.5 py-0.5 hover:opacity-90"
+          style={{ color: 'var(--text-muted)' }}
+          title={root ? `${root} — click to copy` : 'No project path on this session'}
+          onClick={() => {
+            if (root) void copyPath(root, 'Copied project root')
+          }}
+        >
+          <span style={{ color: 'var(--text-secondary)' }}>{rootLabel}</span>
+        </button>
+        {loading && (
+          <span className="shrink-0 text-[10px] tabular-nums" style={{ color: 'var(--accent)' }}>
+            …
+          </span>
+        )}
       </div>
       <div className="px-2 py-1 flex gap-1 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
         <button
           type="button"
-          className="px-1.5 py-0.5 rounded"
+          className="px-1.5 py-0.5 rounded shrink-0 disabled:opacity-40"
           style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)' }}
           onClick={goUp}
-          disabled={path === '.'}
+          disabled={!canGoUp || loading}
+          title="Parent folder (Backspace)"
+          aria-label="Parent folder"
         >
-          ↑ Up
+          ↑
         </button>
         <input
           value={path}
           onChange={(e) => setPath(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') void load(path || '.')
+            if (e.key === 'Escape') e.currentTarget.blur()
           }}
+          onFocus={(e) => e.currentTarget.select()}
           className="flex-1 min-w-0 rounded px-1 py-0.5 outline-none font-mono"
           style={{
             background: 'var(--bg-primary)',
@@ -147,23 +248,69 @@ export function FilesSlide({
             fontSize: 11,
           }}
           spellCheck={false}
+          aria-label="Folder path"
+          title={path}
         />
         <button
           type="button"
-          className="px-1.5 py-0.5 rounded"
+          className="px-1.5 py-0.5 rounded shrink-0 disabled:opacity-40"
           style={{ background: 'var(--bg-primary)', color: 'var(--text-secondary)' }}
           onClick={() => void load(path || '.')}
+          disabled={loading}
+          title="Refresh"
+          aria-label="Refresh"
         >
           ↻
         </button>
       </div>
-      {status && (
-        <div className="px-2 py-0.5 truncate" style={{ color: 'var(--text-muted)' }}>
+      <div className="px-2 py-1 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
+        <input
+          value={filter}
+          onChange={(e) => {
+            setFilter(e.target.value)
+            setFocusIdx(0)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && filter) {
+              e.preventDefault()
+              setFilter('')
+            } else if (e.key === 'ArrowDown' || e.key === 'Enter') {
+              // Hand off focus into the list
+              listRef.current?.focus()
+              if (e.key === 'Enter' && visible[0]) void openEntry(visible[0])
+            }
+          }}
+          className="w-full rounded px-1.5 py-0.5 outline-none"
+          style={{
+            background: 'var(--bg-primary)',
+            border: '1px solid var(--border)',
+            color: 'var(--text-primary)',
+            fontSize: 11,
+          }}
+          placeholder="Filter in folder…"
+          aria-label="Filter files"
+          spellCheck={false}
+        />
+      </div>
+      {status ? (
+        <div
+          className="px-2 py-0.5 truncate shrink-0"
+          style={{ color: 'var(--text-muted)' }}
+          role="status"
+          title={status}
+        >
           {status}
         </div>
-      )}
-      <div className="flex-1 min-h-0 overflow-y-auto py-1">
-        {loading && (
+      ) : null}
+      <div
+        ref={listRef}
+        className="flex-1 min-h-0 overflow-y-auto py-1 outline-none"
+        tabIndex={0}
+        role="listbox"
+        aria-label="Files"
+        onKeyDown={onListKeyDown}
+      >
+        {loading && files.length === 0 && (
           <div className="px-2 py-2" style={{ color: 'var(--text-muted)' }}>
             Loading…
           </div>
@@ -184,17 +331,27 @@ export function FilesSlide({
             title="No files here"
             description={
               root
-                ? 'This folder is empty, or the project path is not set.'
+                ? 'This folder is empty.'
                 : 'Attach a project to this session to browse files.'
             }
           />
         )}
-        {!loading &&
-          files.map((f) => (
+        {!loading && !error && files.length > 0 && visible.length === 0 && (
+          <div className="px-2 py-3 text-center" style={{ color: 'var(--text-muted)' }}>
+            No matches for “{filter}”
+          </div>
+        )}
+        {!error &&
+          visible.map((f, i) => (
             <div
               key={f.path}
-              className="flex items-center gap-0.5 px-1 group"
+              className={`files-row flex items-center gap-0.5 px-1 group${
+                i === focusIdx ? ' is-focused' : ''
+              }`}
+              role="option"
+              aria-selected={i === focusIdx}
               draggable={!f.is_dir}
+              onMouseEnter={() => setFocusIdx(i)}
               onDragStart={(e) => {
                 if (f.is_dir) return
                 const full = absPath(f.path)
@@ -210,37 +367,45 @@ export function FilesSlide({
                   color: f.is_dir ? 'var(--accent)' : 'var(--text-secondary)',
                   background: 'transparent',
                 }}
-                onClick={() => void openEntry(f)}
-                onDoubleClick={() => void openEntry(f)}
-                title={f.path}
+                onClick={() => {
+                  setFocusIdx(i)
+                  void openEntry(f)
+                }}
+                title={absPath(f.path)}
               >
-                {f.is_dir ? '▸ ' : '  '}
+                <span className="inline-block w-3 opacity-70" aria-hidden>
+                  {f.is_dir ? '▸' : '·'}
+                </span>
                 {f.name}
               </button>
-              {!f.is_dir && (
-                <button
-                  type="button"
-                  className="px-1 py-0.5 opacity-0 group-hover:opacity-100 text-[10px]"
-                  style={{ color: 'var(--text-muted)' }}
-                  title="Copy full path (paste into chat)"
-                  onClick={() => void copyPath(f)}
-                >
-                  path
-                </button>
-              )}
+              <button
+                type="button"
+                className="px-1 py-0.5 opacity-0 group-hover:opacity-100 focus:opacity-100 text-[10px] rounded"
+                style={{ color: 'var(--text-muted)' }}
+                title="Copy full path"
+                aria-label={`Copy path for ${f.name}`}
+                onClick={() => void copyPath(absPath(f.path))}
+              >
+                path
+              </button>
             </div>
           ))}
-        {!loading && !files.length && !error && (
-          <div className="px-2 py-4 text-center" style={{ color: 'var(--text-muted)' }}>
-            Empty folder
-          </div>
-        )}
       </div>
       <div
-        className="px-2 py-1 text-[10px] border-t shrink-0"
+        className="px-2 py-1 text-[10px] border-t shrink-0 flex items-center gap-2"
         style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
       >
-        Double-click open · drag file into chat · follows session project
+        <span className="truncate flex-1">
+          ↑↓ open · drag into chat · filter
+        </span>
+        {!loading && !error && visible.length > 0 && (
+          <span className="shrink-0 tabular-nums" title="Folders / files">
+            {dirCount > 0 ? `${dirCount}d` : ''}
+            {dirCount > 0 && fileCount > 0 ? ' · ' : ''}
+            {fileCount > 0 ? `${fileCount}f` : ''}
+            {q && files.length !== visible.length ? ` / ${files.length}` : ''}
+          </span>
+        )}
       </div>
     </div>
   )

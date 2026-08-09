@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { ThemeId, Theme } from '../themes'
 import { THEME_LIST, themeSwatch, systemThemeSwatch } from '../themes'
 import { browserStackHold } from '../utils/browserStack'
@@ -39,7 +39,7 @@ export function ThemeSwitcher({ currentId, onChange }: ThemeSwitcherProps) {
     return browserStackHold('theme-menu')
   }, [open])
 
-  const onListKey = (e: React.KeyboardEvent) => {
+  const onListKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       e.preventDefault()
       setOpen(false)

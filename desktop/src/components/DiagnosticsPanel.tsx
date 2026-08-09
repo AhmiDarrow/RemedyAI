@@ -8,6 +8,7 @@ import {
   type DiagnosticsSnapshot,
 } from '../api/diagnostics'
 import { formatCost, formatTokens } from '../utils/tokenCost'
+import { browserStackHold } from '../utils/browserStack'
 
 interface DiagnosticsPanelProps {
   open: boolean
@@ -251,7 +252,11 @@ export function DiagnosticsPanel({ open, onClose }: DiagnosticsPanelProps) {
       if (e.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    const release = browserStackHold('diagnostics-panel')
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      release()
+    }
   }, [open, onClose])
 
   const remoteProviders = useMemo(() => {

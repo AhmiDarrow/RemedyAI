@@ -240,6 +240,9 @@ class TierPolicy:
         }
 
 
+# Partner 2026-08-09: 2k/12k tool-result caps were neutering file_read of
+# real source (app.py ~25k, pdf_engine ~17k). L2/L3 must ship full files to
+# the model; only L0 stays lean. 0 = no tier soft-cap (HARD_SAFETY only).
 _POLICIES: dict[TurnTier, TierPolicy] = {
     TurnTier.L0_INSTANT: TierPolicy(
         tier=TurnTier.L0_INSTANT,
@@ -251,7 +254,7 @@ _POLICIES: dict[TurnTier, TierPolicy] = {
         record_ir=False,
         shadow_high_blast=False,
         allow_critical_verify=False,
-        max_tool_result_chars=4000,
+        max_tool_result_chars=16_000,
         system_note="",
     ),
     TurnTier.L1_LEAN: TierPolicy(
@@ -264,7 +267,8 @@ _POLICIES: dict[TurnTier, TierPolicy] = {
         record_ir=False,
         shadow_high_blast=False,
         allow_critical_verify=False,
-        max_tool_result_chars=2000,
+        # Was 2000 — that truncated every real file_read when mis-tiered
+        max_tool_result_chars=64_000,
         system_note=(
             "[Tier L1] Lean chat: answer from context. "
             "Tools only if the user clearly needs machine work."
@@ -280,7 +284,8 @@ _POLICIES: dict[TurnTier, TierPolicy] = {
         record_ir=True,
         shadow_high_blast=True,
         allow_critical_verify=True,
-        max_tool_result_chars=12_000,
+        # 0 = unlimited soft-cap (HARD_SAFETY_CHARS still applies)
+        max_tool_result_chars=0,
         system_note=(
             "[Tier L2] Agency: prefer tools over monologue; "
             "batch independent reads; do not re-read known paths."
@@ -296,7 +301,7 @@ _POLICIES: dict[TurnTier, TierPolicy] = {
         record_ir=True,
         shadow_high_blast=True,
         allow_critical_verify=True,
-        max_tool_result_chars=12_000,
+        max_tool_result_chars=0,
         system_note=(
             "[Tier L3] Deep / work-alone: finish end-to-end. "
             "When work partitions, use spread_run. Record progress; verify before done."

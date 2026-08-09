@@ -23,6 +23,10 @@ PyPI **`remedy-ai==0.22.0`** · GitHub tag **v0.22.0**.
 - **Multi-tab + messengers** — safer concurrent streams; remote chats get the same
   post-turn continuity as desktop.
 - **Retention defaults** — sessions 180 days, attachments 90 days (set 0 to keep forever).
+- **Ship path** — after green verify: `git_push` / `gh_release` tools; no re-pytest
+  thrash on continue; Stop unblocks stuck 409 streams.
+- **RMB** — does **not** auto-start with `remedy serve` (start from Settings when
+  you want local muscle).
 
 ## 0.21.1 - Continuity + self-inject safety
 

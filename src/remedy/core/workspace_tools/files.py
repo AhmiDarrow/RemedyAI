@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,6 @@ from remedy.core.react_policy import (
 from remedy.core.security import check_dangerous_command
 from remedy.core.workspace_tools.guards import (
     FULL_WRITE_PREFER_EDIT_BYTES as _FULL_WRITE_PREFER_EDIT_BYTES,
-    HISTORY_STUB_MARKERS as _HISTORY_STUB_MARKERS,
     TINY_REWRITE_ABS as _TINY_REWRITE_ABS,
     TINY_REWRITE_RATIO as _TINY_REWRITE_RATIO,
     junk_write_guard,
@@ -104,6 +104,8 @@ def register_files_tools(runtime: Any) -> None:
             )
         # Optional line window (models often pass offset/limit like list_dir).
         # Full file remains default; only emergency OOM guard after slicing.
+        # Ignore tiny accidental limits (models often pass limit=50/200 and then
+        # claim the file is "capped at 2000 chars" — partner must see full source).
         try:
             off = max(0, int(offset or 0))
         except (TypeError, ValueError):
@@ -112,6 +114,9 @@ def register_files_tools(runtime: Any) -> None:
         try:
             lim = None if limit is None else max(1, int(limit))
         except (TypeError, ValueError):
+            lim = None
+        if lim is not None and lim < 500 and off == 0:
+            # Treat as "full file" unless the file is enormous (then use a floor)
             lim = None
         if off or lim is not None:
             lines = data.splitlines(keepends=True)
@@ -139,12 +144,40 @@ def register_files_tools(runtime: Any) -> None:
         return data
 
     async def file_write(
-        path: str,
+        path: str = "",
         content: str = "",
         force_full_write: bool = False,
+        **kwargs: Any,
     ) -> str:
         from remedy.core.approvals import APPROVALS
         from remedy.core.turn_context import turn_session_id
+
+        # Models often send file/filepath instead of path — never TypeError.
+        if not (path or "").strip():
+            path = str(
+                kwargs.get("file")
+                or kwargs.get("filepath")
+                or kwargs.get("filename")
+                or kwargs.get("target")
+                or kwargs.get("path")
+                or ""
+            ).strip()
+        if content == "" and kwargs.get("content") is not None:
+            content = kwargs.get("content")  # type: ignore[assignment]
+        if isinstance(content, (dict, list)):
+            import json as _json
+
+            content = _json.dumps(content, ensure_ascii=False)
+        if not (path or "").strip():
+            return format_tool_error(
+                "file_write requires path= (or file=/filepath=)",
+                code="MISSING_PATH",
+                tool_name="file_write",
+                suggestion=(
+                    'file_write(path="src/core/app.py", content="...") with a path '
+                    "under the project root."
+                ),
+            )
 
         bad = _reserved_guard(path)
         if bad:
@@ -167,33 +200,67 @@ def register_files_tools(runtime: Any) -> None:
             )
         new_body = content if content is not None else ""
         # Refuse writing provider-history summaries as file bodies (corrupts tree).
-        head = (new_body or "")[:240]
+        # Soft-skip when the real file is already on disk (breaks HISTORY_STUB loops).
+        from remedy.core.workspace_tools.guards import (
+            looks_like_history_stub_text,
+            resolve_stub_write_skip,
+        )
+
         body_s = new_body if isinstance(new_body, str) else str(new_body)
-        if (
-            any(m in head for m in _HISTORY_STUB_MARKERS)
-            or any(m in body_s for m in _HISTORY_STUB_MARKERS)
-            or (
-                body_s.strip().startswith("[")
-                and "omitted from provider history" in body_s
-            )
-            or (
-                isinstance(content, dict)
-                and (
-                    content.get("_invalid_json")
-                    or content.get("_truncated")
-                    or content.get("_history_summarized")
+        # Partner: never wipe source with empty body or looped-import spam.
+        from remedy.core.workspace_tools.guards import (
+            refuse_bad_file_write,
+            resolve_empty_write_skip,
+        )
+
+        bad_body = refuse_bad_file_write(
+            path, body_s, force_full_write=bool(force_full_write)
+        )
+        if bad_body:
+            # Soft-skip empty wipe when real file already exists (screenshot 2026-08-08)
+            if "empty file_write" in bad_body:
+                skip_empty = resolve_empty_write_skip(
+                    runtime, path, tool_name="file_write"
                 )
+                if skip_empty:
+                    return skip_empty
+            code = (
+                "EMPTY_SOURCE_WRITE"
+                if "empty file_write" in bad_body
+                else "SPAM_SOURCE_WRITE"
             )
-        ):
+            return format_tool_error(
+                bad_body,
+                code=code,
+                tool_name="file_write",
+                suggestion=(
+                    "file_read the path first, then file_edit a small hunk — "
+                    "or file_write once with complete real source (not blank, "
+                    "not a repeated import list). Never send content=\"\"."
+                ),
+            )
+        is_stub_body = looks_like_history_stub_text(body_s) or (
+            isinstance(content, dict)
+            and (
+                content.get("_invalid_json")
+                or content.get("_truncated")
+                or content.get("_history_summarized")
+                or content.get("_body_omitted")
+            )
+        )
+        if is_stub_body:
+            skip = resolve_stub_write_skip(runtime, path, tool_name="file_write")
+            if skip:
+                return skip
             return format_tool_error(
                 "refusing to write provider-history summary stub as file content "
                 f"({path}). That text is not source code — it was redacted for the LLM.",
                 code="HISTORY_STUB",
                 tool_name="file_write",
                 suggestion=(
-                    "file_read the real path first; then file_edit surgical hunks, "
-                    "or file_write with the full real source (force_full_write=true "
-                    "if replacing a large existing file)."
+                    "Write **new real source** (not history_stub text). "
+                    "file_read the path if it exists, then file_edit; or file_write "
+                    "a short skeleton and grow it with file_edit."
                 ),
             )
         # Path jail before approval so denied scopes never create Ask tickets.
@@ -238,35 +305,14 @@ def register_files_tools(runtime: Any) -> None:
                 previous = target.read_text(encoding="utf-8", errors="replace")
         except OSError:
             previous = None
-        # Prefer surgical edits for existing large files (unless forced).
-        if (
-            existed
-            and previous is not None
-            and not force_full_write
-            and len(previous) >= _FULL_WRITE_PREFER_EDIT_BYTES
-        ):
-            old_len = len(previous)
-            new_len = len(new_body)
-            delta = abs(new_len - old_len)
-            tiny = delta <= max(
-                _TINY_REWRITE_ABS, int(old_len * _TINY_REWRITE_RATIO)
+        # Partner rule (2026-08-08): NEVER refuse a real rewrite with PREFER_FILE_EDIT.
+        # That guard blocked 31k app.py rewrites and taught the agent to monologue.
+        # Only no-op when content is byte-identical. Prefer file_edit is a tip, not a wall.
+        if existed and previous is not None and new_body == previous:
+            return (
+                f"No change: {path} already has identical content "
+                f"({len(previous)} chars)."
             )
-            if tiny and new_body != previous:
-                return format_tool_error(
-                    (
-                        f"file_write refused: {path} already exists ({old_len} chars) and "
-                        f"new content is only ±{delta} chars different. "
-                        "Use file_edit / file_edit_batch for small changes."
-                    ),
-                    code="PREFER_FILE_EDIT",
-                    tool_name="file_write",
-                    suggestion=(
-                        'file_edit(path=..., old_string="…", new_string="…") or '
-                        "file_write(..., force_full_write=true) only for intentional full rewrites."
-                    ),
-                )
-            if not tiny and new_body == previous:
-                return f"No change: {path} already has identical content ({old_len} chars)."
 
         try:
             target.parent.mkdir(parents=True, exist_ok=True)

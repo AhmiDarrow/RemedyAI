@@ -223,7 +223,41 @@ class ApprovalQueue:
                 return True
             if session_id and fp in self._session_fps.get(session_id, set()):
                 return True
+            # Session: any approved bash_exec that is the same *git/gh verb family*
+            # counts (agent retries with slightly different flags after Approve).
+            if session_id and (tool_name or "").strip() == "bash_exec":
+                fam = self._vcs_family(command)
+                if fam:
+                    for prev in self._session_fps.get(session_id, set()):
+                        if not prev.startswith("bash_exec::"):
+                            continue
+                        if self._vcs_family(prev.split("::", 1)[-1]) == fam:
+                            return True
+            if (tool_name or "").strip() == "bash_exec":
+                fam = self._vcs_family(command)
+                if fam:
+                    for prev in self._approved_fps:
+                        if not prev.startswith("bash_exec::"):
+                            continue
+                        if self._vcs_family(prev.split("::", 1)[-1]) == fam:
+                            return True
         return False
+
+    @staticmethod
+    def _vcs_family(command: str) -> str | None:
+        """Normalize git/gh push-family commands for sticky session approval."""
+        c = (command or "").strip().lower()
+        if not c:
+            return None
+        if re.search(r"\bgit\s+push\b", c):
+            return "git_push"
+        if re.search(
+            r"\bgh\s+(pr\s+create|repo\s+create|auth\s+login|release\s+create)\b", c
+        ):
+            return "gh_publish"
+        if re.search(r"\bgit\s+(commit|add|status|diff|log|remote|branch|tag)\b", c):
+            return "git_write"
+        return None
 
     def create(
         self,

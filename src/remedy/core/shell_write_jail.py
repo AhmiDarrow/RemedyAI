@@ -401,15 +401,23 @@ def check_shell_write_jail(
             "paths under the focus folder."
         )
 
-    # python -c / node -e: without extractable path tokens we cannot prove the
-    # write target (open/writeFile/pathlib/dynamic paths). Fail closed.
-    # When every candidate is under roots (no offenders), allow proven in-root
-    # one-shots such as python -c "open(r'<project>\\x','w')…".
+    # Project-cwd python -c / node -e: allow when cwd is inside write roots.
+    # Partner was blocked from dump/analyze one-shots mid-build (RemedyPDF log).
+    # Still fail closed if cwd is unknown/outside roots.
     if not offenders and not candidates and _INTERPRETER_ONESHOT_RE.search(cmd):
+        if cwd is not None:
+            try:
+                from pathlib import Path as _P
+
+                c = _P(cwd).expanduser().resolve()
+                if _under_any(c, roots):
+                    return None
+            except Exception:
+                pass
         return (
-            "shell write jail: interpreter -c/-e write cannot be proven under "
-            f"write roots [{roots_s}]. Use file_write/file_edit, or pass a "
-            "literal path under the focus folder."
+            "shell write jail: interpreter -c/-e cannot be proven under "
+            f"write roots [{roots_s}]. Prefer file_write/file_edit, run with "
+            "project workdir=, or pass a literal path under the focus folder."
         )
 
     # Mutation with zero extractable path tokens: allow only if cwd is under

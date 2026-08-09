@@ -34,6 +34,10 @@ logger = logging.getLogger(__name__)
 _COMPLETION_FRAC = 0.18
 _COMPLETION_MIN = 768
 _COMPLETION_MAX = 4096
+# Write/edit tool rounds need far more n_predict (JSON path + old + new).
+_COMPLETION_FRAC_WRITE = 0.35
+_COMPLETION_MIN_WRITE = 4096
+_COMPLETION_MAX_WRITE = 12288
 _SAFETY = 192
 
 # Core tools that can ship a calculator / multi-file app under a tight window.
@@ -129,16 +133,30 @@ def estimate_tools_tokens(tools: list[dict[str, Any]] | None) -> int:
     return max(1, len(raw) // 3 + 8 * len(tools))
 
 
-def prompt_budget(window: int) -> tuple[int, int]:
-    """Return (prompt_budget, completion_reserve) for a fixed n_ctx."""
+def prompt_budget(window: int, *, write_tools: bool = False) -> tuple[int, int]:
+    """Return (prompt_budget, completion_reserve) for a fixed n_ctx.
+
+    When *write_tools* is True (file_write/file_edit armed), reserve a much
+    larger completion band so tool-call JSON is not cut mid-stream
+    (TOOL_ARGS_TRUNCATED / HISTORY_STUB fail loops).
+    """
     win = max(2048, int(window or 8192))
-    completion = max(
-        _COMPLETION_MIN,
-        min(_COMPLETION_MAX, int(win * _COMPLETION_FRAC)),
-    )
-    # On tiny windows still leave something for the answer
-    if win < 6000:
-        completion = max(512, min(1024, win // 4))
+    if write_tools:
+        completion = max(
+            _COMPLETION_MIN_WRITE,
+            min(_COMPLETION_MAX_WRITE, int(win * _COMPLETION_FRAC_WRITE)),
+        )
+        # 8k-class windows: still leave ≥2k completion for a small edit
+        if win < 10000:
+            completion = max(2048, min(4096, win // 3))
+    else:
+        completion = max(
+            _COMPLETION_MIN,
+            min(_COMPLETION_MAX, int(win * _COMPLETION_FRAC)),
+        )
+        # On tiny windows still leave something for the answer
+        if win < 6000:
+            completion = max(512, min(1024, win // 4))
     budget = max(1024, win - completion - _SAFETY)
     return budget, completion
 
@@ -382,7 +400,17 @@ def fit_local_request(
     """
     msgs: list[dict[str, Any]] = [dict(m) for m in (messages or []) if isinstance(m, dict)]
     tls: list[dict[str, Any]] | None = list(tools) if tools else None
-    budget, completion = prompt_budget(window)
+    # Prefer write headroom when write tools are armed (or coding pack present)
+    _writes = False
+    try:
+        from remedy.core.local_agent_optimize import tools_include_writes
+
+        _writes = tools_include_writes(tools)
+        if not _writes and coding_bias and tools:
+            _writes = True
+    except Exception:
+        _writes = bool(coding_bias and tools)
+    budget, completion = prompt_budget(window, write_tools=_writes)
     max_tools, desc_chars, max_props = tool_pack_for_window(window)
     meta: dict[str, Any] = {
         "window": int(window),
@@ -438,10 +466,11 @@ def fit_local_request(
             if estimate_messages_tokens(msgs) + estimate_tools_tokens(trial) <= budget:
                 tls = trial
 
-    # L2 — offload fat tool results
+    # L2 — offload fat tool results (keep real bodies longer — partner needs source)
     if _est() > budget:
         meta["levels"].append("offload_tools")
-        msgs = _offload_fat_tool_results(msgs, body_cap=700 if window <= 16384 else 1200)
+        _cap = 4_000 if window <= 16384 else 12_000
+        msgs = _offload_fat_tool_results(msgs, body_cap=_cap)
 
     # L3 — shrink system head (skills catalog, soul prose, manuals, …)
     if _est() > budget:
@@ -453,9 +482,9 @@ def fit_local_request(
     # L4 — collapse middle history (rolling workspace)
     if _est() > budget:
         meta["levels"].append("collapse_history")
-        keep = 6 if window <= 16384 else 10
+        keep = 8 if window <= 16384 else 14
         msgs = _collapse_old_history(msgs, keep_tail=keep)
-        msgs = _offload_fat_tool_results(msgs, body_cap=500)
+        msgs = _offload_fat_tool_results(msgs, body_cap=2_000)
 
     # L5 — name-only tool schemas (last tool shrinkage)
     if _est() > budget and tls:
@@ -463,21 +492,32 @@ def fit_local_request(
         tls = slim_tools_pack(
             tls,
             names=CODING_TOOL_PACK if coding_bias else None,
-            max_tools=min(14, max_tools),
+            max_tools=min(max_tools, 20),
             name_only=True,
         )
 
-    # L6 — aggressive history: keep system + last 4 turns only
+    # L6 — aggressive history: keep system + recent turns (never starve write tools)
     if _est() > budget:
         meta["levels"].append("aggressive_tail")
-        msgs = _collapse_old_history(msgs, keep_tail=4)
-        msgs = _offload_fat_tool_results(msgs, body_cap=350)
+        msgs = _collapse_old_history(msgs, keep_tail=6)
+        msgs = _offload_fat_tool_results(msgs, body_cap=1_200)
         msgs = _shrink_system_head(msgs, max(600, int(budget * 0.25) * 3))
 
-    # L7 — emergency: strip all tools if still over (rare; pure completion)
+    # L7 — NEVER strip tools on coding/build turns (drop_tools was neutering agents).
+    # If still over budget: keep CODING_TOOL_PACK at minimum, trim history harder.
     if _est() > budget and tls:
-        # Keep tools if we're only slightly over; else drop
-        if _est() - estimate_tools_tokens(tls) <= budget:
+        if coding_bias:
+            meta["levels"].append("keep_coding_tools")
+            tls = slim_tools_pack(
+                tools or tls,
+                names=CODING_TOOL_PACK,
+                max_tools=min(12, max_tools),
+                desc_chars=80,
+                max_props=8,
+            )
+            msgs = _collapse_old_history(msgs, keep_tail=4)
+            msgs = _offload_fat_tool_results(msgs, body_cap=600)
+        elif _est() - estimate_tools_tokens(tls) <= budget:
             meta["levels"].append("drop_tools")
             tls = None
         else:
@@ -579,14 +619,26 @@ def apply_fit_to_body(
     else:
         body["tools"] = fitted_tools
     # Completion reserve from fit — clamp max_tokens if present
-    _, completion = prompt_budget(window)
+    try:
+        from remedy.core.local_agent_optimize import tools_include_writes
+
+        _writes = tools_include_writes(fitted_tools)
+    except Exception:
+        _writes = False
+    _, completion = prompt_budget(window, write_tools=_writes)
     # Remaining after fitted prompt
     used = estimate_messages_tokens(fitted_msgs) + estimate_tools_tokens(fitted_tools)
     remain = max(256, window - used - _SAFETY)
+    # Hard ceiling for this request: never exceed free context
     cap = max(256, min(completion, remain))
     if body.get("max_tokens") is not None:
         try:
-            body["max_tokens"] = min(int(body["max_tokens"]), cap)
+            cur = int(body["max_tokens"])
+            if _writes:
+                # Prefer the larger of provider request and write reserve, ≤ remain
+                body["max_tokens"] = max(256, min(max(cur, cap), remain))
+            else:
+                body["max_tokens"] = max(256, min(cur, cap))
         except (TypeError, ValueError):
             body["max_tokens"] = cap
     else:

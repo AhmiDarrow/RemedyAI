@@ -885,6 +885,7 @@ export function MessageFeed({
                   key={s.label}
                   type="button"
                   className="starter-chip"
+                  title={s.text}
                   onClick={() => onQuickPrompt(s.text)}
                 >
                   {s.label}

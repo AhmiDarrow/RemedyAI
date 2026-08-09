@@ -67,7 +67,21 @@ export interface RmbStatus {
   }
   live_note?: string
   runtime_applied?: boolean
+  /** GGUF stem synced to config / status bar after load */
+  chat_model?: string
+  llm_model?: string
+  chat_sync?: { synced?: boolean; stem?: string; llm_model?: string }
   error?: string
+}
+
+/** Broadcast so Status bar + Provider form adopt the Loaded GGUF stem. */
+export function notifyRmbModelChanged(detail: {
+  stem: string
+  path?: string
+  provider?: string
+}) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('remedy:rmb-model-changed', { detail }))
 }
 
 export async function getRmbStatus(): Promise<RmbStatus> {
@@ -78,12 +92,15 @@ export async function getRmbCatalog(): Promise<RmbStatus['catalog']> {
   return apiFetch('/rmb/catalog')
 }
 
+/** Large GGUF reloads often exceed the default 30s HTTP budget. */
+const RMB_LONG_MS = 180_000
+
 export async function startRmb(): Promise<Record<string, unknown>> {
-  return apiFetch('/rmb/start', { method: 'POST' })
+  return apiFetch('/rmb/start', { method: 'POST', timeout: RMB_LONG_MS })
 }
 
 export async function stopRmb(): Promise<Record<string, unknown>> {
-  return apiFetch('/rmb/stop', { method: 'POST' })
+  return apiFetch('/rmb/stop', { method: 'POST', timeout: 60_000 })
 }
 
 export async function patchRmbSettings(
@@ -92,12 +109,14 @@ export async function patchRmbSettings(
   return apiFetch('/rmb/settings', {
     method: 'POST',
     body: JSON.stringify(body),
+    // Live apply may stop+start llama-server (minutes for big models)
+    timeout: RMB_LONG_MS,
   })
 }
 
 /** Switch chat provider to RMB (API call — not a React hook). */
 export async function applyRmbAsProvider(): Promise<Record<string, unknown>> {
-  return apiFetch('/rmb/use', { method: 'POST' })
+  return apiFetch('/rmb/use', { method: 'POST', timeout: RMB_LONG_MS })
 }
 
 /** @deprecated Prefer applyRmbAsProvider — name looked like a React hook to linters. */

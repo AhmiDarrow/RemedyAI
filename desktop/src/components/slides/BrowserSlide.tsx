@@ -148,6 +148,7 @@ export function BrowserSlide() {
   const goRef = useRef<(raw: string) => Promise<void>>(async () => {})
   /** True while user is editing the address bar — do not clobber with live URL. */
   const urlEditing = useRef(false)
+  const statusTimer = useRef<number | null>(null)
   const [bookmarks, setBookmarks] = useState<BrowserBookmark[]>(() => loadBookmarks())
   const [bmOpen, setBmOpen] = useState(false)
   const bmPanelRef = useRef<HTMLDivElement | null>(null)
@@ -159,6 +160,29 @@ export function BrowserSlide() {
    * Browser panel (not the whole app). Rust keeps WebView2 bounds = host rect.
    */
   const [pageFullscreen, setPageFullscreen] = useState(false)
+
+  /** Transient status that auto-clears (sticky “ready” messages stay briefly). */
+  const flashStatus = useCallback((msg: string, ms = 3200) => {
+    setStatus(msg)
+    if (statusTimer.current != null) {
+      window.clearTimeout(statusTimer.current)
+      statusTimer.current = null
+    }
+    if (!msg) return
+    // Keep errors longer; short-lived confirmations fade
+    const hold =
+      /fail|error|blocked|too small|not available/i.test(msg) ? Math.max(ms, 5000) : ms
+    statusTimer.current = window.setTimeout(() => {
+      statusTimer.current = null
+      setStatus((cur) => (cur === msg ? '' : cur))
+    }, hold)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (statusTimer.current != null) window.clearTimeout(statusTimer.current)
+    }
+  }, [])
 
   // Privacy Shield status (desktop)
   useEffect(() => {
@@ -204,7 +228,11 @@ export function BrowserSlide() {
     void tauriListen<{ fullscreen?: boolean }>('browser-page-fullscreen', (payload) => {
       const on = Boolean(payload?.fullscreen)
       setPageFullscreen(on)
-      setStatus(on ? 'Fullscreen in Browser rail (Esc to exit)' : 'Browser ready')
+      if (on) {
+        setStatus('Fullscreen in Browser rail (Esc to exit)')
+      } else {
+        setStatus('Browser ready')
+      }
       // Layout settles after chrome hide/show — push host bounds into WebView2
       const kick = () => {
         window.dispatchEvent(new Event('remedy:browser-resync-bounds'))
@@ -410,7 +438,7 @@ export function BrowserSlide() {
       // Omnibox: real URL if possible, else DuckDuckGo search
       const u = resolveBrowserAddressBar(raw)
       if (!u) {
-        setStatus('Enter a URL or search')
+        flashStatus('Enter a URL or search', 2500)
         return
       }
       urlEditing.current = false
@@ -419,7 +447,7 @@ export function BrowserSlide() {
       if (!isTauri()) {
         // Web UI: iframe is best-effort (many sites block framing)
         setLoaded(true)
-        setStatus('Web UI iframe (desktop embeds WebView2)')
+        flashStatus('Web UI iframe (desktop embeds WebView2)', 4000)
         return
       }
       // Wait for layout if the rail just opened (bounds often 0 for a frame).
@@ -431,7 +459,7 @@ export function BrowserSlide() {
         }
       }
       if (!b) {
-        setStatus('Browser panel too small — expand the Browser rail, then press Go')
+        flashStatus('Browser panel too small — expand the Browser rail, then press Go', 6000)
         return
       }
       setBusy(true)
@@ -443,7 +471,7 @@ export function BrowserSlide() {
         })
         setActiveUrl(nav || u)
         setLoaded(true)
-        setStatus('Loaded in Remedy (WebView2)')
+        flashStatus('Loaded', 2200)
         const resync = () => void pushBounds()
         window.requestAnimationFrame(resync)
         window.setTimeout(resync, 50)
@@ -452,13 +480,13 @@ export function BrowserSlide() {
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e)
         console.warn('[remedy] browser_navigate failed', msg)
-        setStatus(`Embed failed: ${msg}`)
+        flashStatus(`Embed failed: ${msg}`, 6000)
         setLoaded(false)
       } finally {
         setBusy(false)
       }
     },
-    [pushBounds],
+    [pushBounds, flashStatus],
   )
   goRef.current = go
 
@@ -545,6 +573,7 @@ export function BrowserSlide() {
     if (!isTauri() || autoStarted.current) return
     let cancelled = false
     let attempts = 0
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
     const tick = async () => {
       if (cancelled || autoStarted.current) return
       attempts += 1
@@ -559,12 +588,12 @@ export function BrowserSlide() {
             if (cur && !cur.startsWith('about:')) {
               setUrl(cur)
               setActiveUrl(cur)
-              setStatus(`Restored ${cur}`)
+              flashStatus('Restored previous page', 2200)
             } else {
-              setStatus('Browser ready')
+              flashStatus('Browser ready', 2000)
             }
           } catch {
-            setStatus('Browser ready')
+            flashStatus('Browser ready', 2000)
           }
           await pushBounds()
           await tauriInvoke('browser_show').catch(() => {})
@@ -573,6 +602,7 @@ export function BrowserSlide() {
       } catch {
         /* */
       }
+      if (cancelled) return
       const b = readBounds(hostRef.current)
       if (b) {
         autoStarted.current = true
@@ -580,36 +610,41 @@ export function BrowserSlide() {
         return
       }
       if (attempts < 40) {
-        window.setTimeout(() => void tick(), 50)
+        retryTimer = window.setTimeout(() => void tick(), 50)
       } else {
-        setStatus('Expand Browser rail, then press Go (or ↗ for system browser)')
+        flashStatus('Expand Browser rail, then press Go (or ↗ for system browser)', 8000)
       }
     }
     const id = window.requestAnimationFrame(() => void tick())
     return () => {
       cancelled = true
       window.cancelAnimationFrame(id)
+      if (retryTimer != null) window.clearTimeout(retryTimer)
     }
-  }, [home, pushBounds])
+  }, [home, pushBounds, flashStatus])
 
   const closeEmbed = useCallback(async () => {
     if (!isTauri()) {
       setLoaded(false)
-      setStatus('Closed')
+      flashStatus('Closed', 2000)
       return
     }
     try {
       await tauriInvoke('browser_close')
       setLoaded(false)
       autoStarted.current = false
-      setStatus('Browser closed')
+      flashStatus('Browser closed', 2500)
     } catch (e: unknown) {
-      setStatus(e instanceof Error ? e.message : String(e))
+      flashStatus(e instanceof Error ? e.message : String(e), 5000)
     }
-  }, [])
+  }, [flashStatus])
 
   const openExternal = async () => {
     const u = normalizeBrowserUrl(url) || activeUrl
+    if (!u) {
+      flashStatus('Nothing to open — enter a URL first', 2500)
+      return
+    }
     try {
       if (isTauri()) {
         try {
@@ -617,13 +652,13 @@ export function BrowserSlide() {
         } catch {
           await tauriInvoke('open_external_url', { url: u })
         }
-        setStatus('Opened in system browser (popup)')
+        flashStatus('Opened in system browser', 2500)
         return
       }
       window.open(u, '_blank', 'noopener,noreferrer')
-      setStatus('Opened in browser tab')
+      flashStatus('Opened in browser tab', 2500)
     } catch (e: unknown) {
-      setStatus(e instanceof Error ? e.message : String(e))
+      flashStatus(e instanceof Error ? e.message : String(e), 5000)
     }
   }
 
@@ -650,6 +685,38 @@ export function BrowserSlide() {
           void go(url)
         }}
       >
+        <button
+          type="button"
+          className="px-1.5 py-1 rounded disabled:opacity-40"
+          style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+          title="Back"
+          aria-label="Back"
+          disabled={!loaded || busy}
+          onClick={() => {
+            if (!isTauri() || !loaded) return
+            void tauriInvoke('browser_go_back')
+              .then(() => flashStatus('Back', 1200))
+              .catch(() => flashStatus('Cannot go back', 2000))
+          }}
+        >
+          ←
+        </button>
+        <button
+          type="button"
+          className="px-1.5 py-1 rounded disabled:opacity-40"
+          style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+          title="Forward"
+          aria-label="Forward"
+          disabled={!loaded || busy}
+          onClick={() => {
+            if (!isTauri() || !loaded) return
+            void tauriInvoke('browser_go_forward')
+              .then(() => flashStatus('Forward', 1200))
+              .catch(() => flashStatus('Cannot go forward', 2000))
+          }}
+        >
+          →
+        </button>
         <button
           type="button"
           className="px-1.5 py-1 rounded"
@@ -679,10 +746,11 @@ export function BrowserSlide() {
             })
               .then((s) => {
                 setShieldOn(Boolean(s?.enabled ?? next))
-                setStatus(
+                flashStatus(
                   s?.enabled ?? next
                     ? 'Privacy Shield on'
                     : 'Privacy Shield off',
+                  2200,
                 )
               })
               .catch(() => {})
@@ -692,14 +760,14 @@ export function BrowserSlide() {
         </button>
         <button
           type="button"
-          className="px-1.5 py-1 rounded"
+          className="px-1.5 py-1 rounded disabled:opacity-40"
           style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
           title="Reload"
           disabled={!loaded || busy}
           onClick={() => {
             if (!isTauri() || !loaded) return
             void tauriInvoke('browser_reload')
-              .then(() => setStatus('Reloaded'))
+              .then(() => flashStatus('Reloaded', 1800))
               .catch(() => void go(activeUrl))
           }}
         >
@@ -708,8 +776,10 @@ export function BrowserSlide() {
         <input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          onFocus={() => {
+          onFocus={(e) => {
             urlEditing.current = true
+            // Select all for quick replace (omnibox-style), once per focus
+            e.currentTarget.select()
           }}
           onBlur={() => {
             // Defer so a click on Go still sees the typed value first
@@ -717,7 +787,16 @@ export function BrowserSlide() {
               urlEditing.current = false
             }, 180)
           }}
-          className="flex-1 min-w-0 rounded px-1.5 py-1 outline-none"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              // Restore live URL and leave the bar
+              e.preventDefault()
+              urlEditing.current = false
+              setUrl(activeUrl || home)
+              e.currentTarget.blur()
+            }
+          }}
+          className="flex-1 min-w-0 rounded px-1.5 py-1 outline-none font-mono text-[11px]"
           style={{
             background: 'var(--bg-primary)',
             border: '1px solid var(--border)',
@@ -726,14 +805,18 @@ export function BrowserSlide() {
           placeholder="Search or enter URL"
           aria-label="Browser address — URL or search"
           spellCheck={false}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
         />
         <button
           type="submit"
-          className="px-2 py-1 rounded font-medium"
+          className="px-2 py-1 rounded font-medium disabled:opacity-60"
           style={{ background: 'var(--accent)', color: '#fff' }}
           disabled={busy}
+          title={busy ? 'Loading…' : 'Navigate'}
         >
-          Go
+          {busy ? '…' : 'Go'}
         </button>
         <button
           type="button"
@@ -754,7 +837,7 @@ export function BrowserSlide() {
             const target = activeUrl || url
             const { list, added } = toggleBookmark(target)
             setBookmarks(list)
-            setStatus(added ? 'Bookmarked' : 'Bookmark removed')
+            flashStatus(added ? 'Bookmarked' : 'Bookmark removed', 2000)
           }}
         >
           {isBookmarked(activeUrl || url, bookmarks) ? '★' : '☆'}
@@ -853,7 +936,7 @@ export function BrowserSlide() {
           aria-label={desktopSite ? 'Desktop site on' : 'Mobile view on'}
           onClick={() => {
             if (!isTauri()) {
-              setStatus('Mobile/Desktop view needs the desktop app (WebView2)')
+              flashStatus('Mobile/Desktop view needs the desktop app (WebView2)', 4000)
               return
             }
             const next = !desktopSite
@@ -878,7 +961,7 @@ export function BrowserSlide() {
                 setDesktopSite(on)
                 setLoaded(true)
                 const how = s?.method ? ` (${s.method})` : ''
-                setStatus(on ? `Desktop site${how}` : `Mobile view${how}`)
+                flashStatus(on ? `Desktop site${how}` : `Mobile view${how}`, 2500)
                 // Ensure host bounds + paint after reload
                 window.requestAnimationFrame(() => void pushBounds())
                 window.setTimeout(() => void pushBounds(), 100)
@@ -887,10 +970,11 @@ export function BrowserSlide() {
               .catch((e: unknown) => {
                 setDesktopSite(prev)
                 const msg = e instanceof Error ? e.message : String(e)
-                setStatus(
+                flashStatus(
                   msg.includes('not allowed') || msg.includes('Forbidden')
                     ? 'View mode blocked — rebuild Desktop with browser permissions'
                     : `View mode failed: ${msg}`,
+                  6000,
                 )
                 // Last-resort SPA path: try full navigate with stored flag
                 void goRef.current(target).catch(() => {})
@@ -973,14 +1057,27 @@ export function BrowserSlide() {
         )}
       </div>
 
-      {status && !pageFullscreen && (
+      {!pageFullscreen && (
         <div
           data-browser-status
-          className="px-2 py-1 border-t truncate shrink-0"
+          className="px-2 py-1 border-t truncate shrink-0 flex items-center gap-2"
           style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
-          title={status}
+          title={status || activeUrl || undefined}
+          role="status"
         >
-          {status}
+          <span className="truncate flex-1 min-w-0">
+            {status || (loaded ? activeUrl : 'Ready')}
+          </span>
+          {busy && (
+            <span className="shrink-0 text-[10px] tabular-nums" style={{ color: 'var(--accent)' }}>
+              …
+            </span>
+          )}
+          {loaded && desktopSite && !status && (
+            <span className="shrink-0 text-[10px]" title="Desktop site mode">
+              🖥
+            </span>
+          )}
         </div>
       )}
     </div>

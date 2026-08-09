@@ -135,6 +135,17 @@ RECOVERY_NUDGE = (
     "Finish the user's task with corrected tool calls."
 )
 
+# Empty / spam file_write — model must resend full content (not monologue).
+EMPTY_WRITE_NUDGE = (
+    "[Partner · EMPTY/SPAM file_write blocked] You tried to write blank or "
+    "looped-import content. The real file on disk was **kept** (not wiped).\n"
+    "Next tool_calls MUST be one of:\n"
+    "1) file_read the path you meant to change\n"
+    "2) file_edit with a small real hunk (old_string → new_string)\n"
+    "3) file_write with the **complete** source in content= (never \"\", never spam imports)\n"
+    "Illegal: monologue, empty content=, or claiming the file was written when Error said no."
+)
+
 # Once per turn when the model serializes explore as one tool per step (slow).
 # Does not strip tools or force-answer — only asks for denser parallel batches.
 SPEED_BATCH_NUDGE = (
@@ -220,36 +231,35 @@ REACT_MAX_STALE_EPOCHS = _env_int("REMEDY_REACT_MAX_STALE_EPOCHS", 8, lo=1, hi=5
 # Back-compat alias: historical name meant "max steps this turn".
 # Now points at absolute safety total so long runs are not capped at 256.
 MAX_REACT_STEPS = REACT_MAX_TOTAL_STEPS
-MAX_PARALLEL_TOOLS = 16
+# Parallel tool fan-out (was 16 — felt "neutered" on capable providers)
+MAX_PARALLEL_TOOLS = _env_int("REMEDY_MAX_PARALLEL_TOOLS", 32, lo=4, hi=64)
 # Prefer recent turns, but allow very long multi-turn sessions.
-HISTORY_MSG_LIMIT = 400
+HISTORY_MSG_LIMIT = 800
 # Practical multi-turn budget (tiered). Full mode can raise via env.
-HISTORY_CHAR_BUDGET = 3_000_000
+HISTORY_CHAR_BUDGET = 6_000_000
 # Soft-trim only for very large individual history messages.
-HISTORY_MSG_SOFT_TRIM = 200_000
-# Tiered defaults: keep answers complete while bounding tool bloat.
-# Set REMEDY_FULL_CONTEXT=1 for legacy "uncapped" behavior.
-_FULL = str(os.environ.get("REMEDY_FULL_CONTEXT", "")).lower() in (
-    "1",
-    "true",
-    "yes",
-    "on",
-)
+HISTORY_MSG_SOFT_TRIM = 500_000
+# Partner default: **full power**. Caps only exist as OOM emergency brakes.
+# Set REMEDY_FULL_CONTEXT=0 to re-enable tight tiered budgets (small local hosts).
+# Unset or "1"/"true"/"on" → full (default). Explicit "0"/"false" → tight.
+_FULL_ENV = str(os.environ.get("REMEDY_FULL_CONTEXT", "1")).strip().lower()
+_FULL = _FULL_ENV not in ("0", "false", "no", "off")
 if _FULL:
+    # 0 = no soft cap; callers use HARD_SAFETY_CHARS only
     TOOL_RESULT_CHAR_CAP = 0
     FILE_READ_CHAR_CAP = 0
     HARD_SAFETY_CHARS = 50_000_000
-    HISTORY_CHAR_BUDGET = 8_000_000
-    HISTORY_MSG_LIMIT = 2_000
+    HISTORY_CHAR_BUDGET = 12_000_000
+    HISTORY_MSG_LIMIT = 4_000
     HISTORY_MSG_SOFT_TRIM = 0
 else:
-    TOOL_RESULT_CHAR_CAP = 128_000
-    FILE_READ_CHAR_CAP = 256_000
+    TOOL_RESULT_CHAR_CAP = 256_000
+    FILE_READ_CHAR_CAP = 512_000
     # Absolute emergency only (OOM guard).
-    HARD_SAFETY_CHARS = 2_000_000
+    HARD_SAFETY_CHARS = 5_000_000
 
-# Skill body inject cap (progressive disclosure stage 2)
-SKILL_BODY_CHAR_CAP = 24_000
+# Skill body inject cap (progressive disclosure stage 2) — full docs when needed
+SKILL_BODY_CHAR_CAP = 120_000 if _FULL else 48_000
 
 # Messages that look like they need filesystem / shell / computer tools.
 _TOOL_HINT_RE = re.compile(
@@ -1446,14 +1456,33 @@ def batch_has_approval_required(tool_messages: list[dict[str, Any]]) -> bool:
     return False
 
 
+def batch_has_empty_or_spam_write(tool_messages: list[dict[str, Any]]) -> bool:
+    """True when a batch hit EMPTY_SOURCE_WRITE / SPAM_SOURCE_WRITE."""
+    for msg in tool_messages:
+        if not isinstance(msg, dict) or msg.get("role") != "tool":
+            continue
+        content = str(msg.get("content") or "")
+        if (
+            "EMPTY_SOURCE_WRITE" in content
+            or "SPAM_SOURCE_WRITE" in content
+            or "empty file_write" in content
+            or "repetitive spam file_write" in content
+        ):
+            return True
+    return False
+
+
 def recovery_nudge_message(
     *,
     empty_search: bool = False,
     approval: bool = False,
+    empty_write: bool = False,
 ) -> dict[str, str]:
     """User-role message that triggers one automatic recovery attempt."""
     if approval:
         return {"role": "user", "content": APPROVAL_NUDGE}
+    if empty_write:
+        return {"role": "user", "content": EMPTY_WRITE_NUDGE}
     if empty_search:
         return {"role": "user", "content": EMPTY_SEARCH_NUDGE + "\n" + RECOVERY_NUDGE}
     return {"role": "user", "content": RECOVERY_NUDGE}

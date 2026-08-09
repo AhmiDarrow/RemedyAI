@@ -427,24 +427,54 @@ async def prepare_turn_preamble(
         )
 
         if is_local_binding(_bind0.provider, _bind0.model, _bind0.base_url):
-            if message_wants_implement(str(message or "")):
-                ensure_local_power_approvals()
+            # Always auto-approve + low thinking for local builds — never stall
+            # mid-file_write on thumbs-down mode or High thinking monologues.
+            ensure_local_power_approvals()
+            with suppress(Exception):
+                runtime._thinking_level = "low"
             _proj = ""
             with suppress(Exception):
                 _proj = str(runtime.effective_project_path() or "")
+            # Continue/empty "continue" still gets full implement contract
+            _um = str(message or "")
+            if not message_wants_implement(_um):
+                _um = f"{_um} build implement".strip()
             messages = inject_local_messages(
                 messages,
-                user_message=str(message or ""),
+                user_message=_um,
                 provider=_bind0.provider,
                 model=_bind0.model,
                 base_url=_bind0.base_url,
                 project_path=_proj,
             )
+            # First-step explore inject so the model cannot pure-monologue
+            with suppress(Exception):
+                from remedy.core.local_agent_optimize import project_listing_snapshot
+
+                listing = project_listing_snapshot(_proj)
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "[Partner · PROJECT TREE — tools required]\n"
+                            f"{listing}\n\n"
+                            "Reply with native tool_calls only "
+                            "(file_read / file_write / file_edit / bash_exec). "
+                            "Do not restate the plan."
+                        ),
+                    }
+                )
     with suppress(Exception):
         proto = getattr(runtime, "_build_protocol_pending", None)
         if proto:
             messages.append({"role": "system", "content": str(proto)})
             runtime._build_protocol_pending = None
+    # Frontier continue inject (brief + ledger) — light rails only
+    with suppress(Exception):
+        fc = getattr(runtime, "_frontier_continue_pending", None)
+        if isinstance(fc, dict) and fc.get("content"):
+            messages.append(fc)
+            runtime._frontier_continue_pending = None
 
     library_suggest_json: str | None = None
     with suppress(Exception):

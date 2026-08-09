@@ -66,6 +66,7 @@ export function useComposerAttachments(opts: {
     }, 2500)
   }, [])
 
+  const attachNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const flashAttached = useCallback((n: number) => {
     if (n <= 0) return
     setAttachNotice(
@@ -73,7 +74,11 @@ export function useComposerAttachments(opts: {
         ? '1 file attached to this message'
         : `${n} files attached to this message`,
     )
-    window.setTimeout(() => setAttachNotice(''), 2500)
+    if (attachNoticeTimer.current) clearTimeout(attachNoticeTimer.current)
+    attachNoticeTimer.current = setTimeout(() => {
+      attachNoticeTimer.current = null
+      setAttachNotice('')
+    }, 2500)
   }, [])
 
   const clearAttachments = useCallback(() => {

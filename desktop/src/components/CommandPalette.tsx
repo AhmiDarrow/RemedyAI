@@ -1,4 +1,6 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, type KeyboardEvent } from 'react'
+import { browserStackHold } from '../utils/browserStack'
+import { EmptyState } from './EmptyState'
 
 export interface CommandItem {
   id: string
@@ -20,20 +22,25 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
-  const filtered = query
+  const q = query.trim().toLowerCase()
+  const filtered = q
     ? commands.filter(
         (c) =>
-          c.label.toLowerCase().includes(query.toLowerCase()) ||
-          c.description.toLowerCase().includes(query.toLowerCase()) ||
-          c.category.toLowerCase().includes(query.toLowerCase()),
+          c.label.toLowerCase().includes(q)
+          || c.description.toLowerCase().includes(q)
+          || c.category.toLowerCase().includes(q)
+          || c.id.toLowerCase().includes(q),
       )
     : commands
+
+  const visible = filtered.slice(0, 40)
 
   useEffect(() => {
     setIdx(0)
     setQuery('')
     if (open) {
-      setTimeout(() => inputRef.current?.focus(), 50)
+      const t = window.setTimeout(() => inputRef.current?.focus(), 40)
+      return () => window.clearTimeout(t)
     }
   }, [open])
 
@@ -46,6 +53,22 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
     el?.scrollIntoView({ block: 'nearest' })
   }, [idx])
 
+  // Keep native Browser embed from covering the palette
+  useEffect(() => {
+    if (!open) return
+    return browserStackHold('command-palette')
+  }, [open])
+
+  // Esc / backdrop already close; also stop body scroll while open
+  useEffect(() => {
+    if (!open) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [open])
+
   const execute = useCallback(
     (item: CommandItem) => {
       item.action()
@@ -55,21 +78,29 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
   )
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+    (e: KeyboardEvent) => {
+      const n = Math.max(visible.length, 1)
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setIdx((i) => (i + 1) % Math.max(filtered.length, 1))
+        setIdx((i) => (i + 1) % n)
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
-        setIdx((i) => (i - 1 + filtered.length) % Math.max(filtered.length, 1))
+        setIdx((i) => (i - 1 + n) % n)
+      } else if (e.key === 'Home') {
+        e.preventDefault()
+        setIdx(0)
+      } else if (e.key === 'End') {
+        e.preventDefault()
+        setIdx(Math.max(0, visible.length - 1))
       } else if (e.key === 'Enter') {
         e.preventDefault()
-        if (filtered[idx]) execute(filtered[idx])
+        if (visible[idx]) execute(visible[idx])
       } else if (e.key === 'Escape') {
+        e.preventDefault()
         onClose()
       }
     },
-    [filtered, idx, execute, onClose],
+    [visible, idx, execute, onClose],
   )
 
   if (!open) return null
@@ -78,6 +109,7 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
     <div
       className="fixed inset-0 z-50 flex items-start justify-center pt-[14vh] px-4 ui-overlay"
       onClick={onClose}
+      role="presentation"
     >
       <div
         className="command-palette ui-surface w-full max-w-[560px] max-h-[62vh] overflow-hidden flex flex-col"
@@ -103,13 +135,24 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search commands, sessions, agents…"
+            placeholder="Search commands…"
             className="flex-1 outline-none text-sm bg-transparent"
             style={{ color: 'var(--text-primary)' }}
             aria-label="Search commands"
+            aria-controls="command-palette-list"
+            autoComplete="off"
+            spellCheck={false}
           />
+          {q ? (
+            <span
+              className="text-[0.65rem] tabular-nums shrink-0"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              {filtered.length}
+            </span>
+          ) : null}
           <kbd
-            className="text-[0.65rem] px-1.5 py-0.5 rounded-md font-mono"
+            className="text-[0.65rem] px-1.5 py-0.5 rounded-md font-mono shrink-0"
             style={{
               background: 'var(--bg-tertiary)',
               color: 'var(--text-muted)',
@@ -120,16 +163,26 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
           </kbd>
         </div>
 
-        <div ref={listRef} className="overflow-y-auto flex-1 py-1">
-          {filtered.length === 0 ? (
-            <div className="px-4 py-10 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
-              No matching commands
-            </div>
+        <div
+          ref={listRef}
+          id="command-palette-list"
+          className="overflow-y-auto flex-1 py-1"
+          role="listbox"
+          aria-label="Commands"
+        >
+          {visible.length === 0 ? (
+            <EmptyState
+              compact
+              title="No matching commands"
+              description={q ? `Nothing matches “${query.trim()}”.` : 'No commands registered.'}
+            />
           ) : (
-            filtered.slice(0, 30).map((item, i) => (
+            visible.map((item, i) => (
               <div
                 key={item.id}
                 data-cmd-idx={i}
+                role="option"
+                aria-selected={i === idx}
                 className={`command-palette-row text-sm${i === idx ? ' is-active' : ''}`}
                 onMouseEnter={() => setIdx(i)}
                 onMouseDown={(e) => {
@@ -153,6 +206,7 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
                 <span
                   className="text-xs flex-shrink-0 truncate max-w-[200px]"
                   style={{ color: 'var(--text-muted)' }}
+                  title={item.description}
                 >
                   {item.description}
                 </span>
@@ -162,7 +216,7 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
         </div>
 
         <div
-          className="px-4 py-2 text-[0.65rem] flex flex-wrap gap-x-4 gap-y-1"
+          className="px-4 py-2 text-[0.65rem] flex flex-wrap gap-x-4 gap-y-1 items-center"
           style={{
             borderTop: '1px solid color-mix(in srgb, var(--border) 85%, transparent)',
             color: 'var(--text-muted)',
@@ -178,6 +232,13 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
           <span>
             <kbd className="font-mono opacity-80">Esc</kbd> dismiss
           </span>
+          {filtered.length > visible.length ? (
+            <span className="ml-auto tabular-nums">
+              Showing {visible.length} of {filtered.length}
+            </span>
+          ) : (
+            <span className="ml-auto tabular-nums">{commands.length} commands</span>
+          )}
         </div>
       </div>
     </div>

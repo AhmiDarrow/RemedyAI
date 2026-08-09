@@ -26,9 +26,11 @@ from remedy.runtime.rmb.mode import (
 )
 from remedy.runtime.rmb.service import (
     ensure_rmb_server,
+    ensure_rmb_watchdog,
     get_rmb_status,
     start_rmb_server,
     stop_rmb_server,
+    wait_rmb_ready,
     wake_rmb_async,
 )
 
@@ -36,6 +38,7 @@ __all__ = [
     "DEFAULT_CHAT_PORT",
     "DEFAULT_HOST",
     "ensure_rmb_server",
+    "ensure_rmb_watchdog",
     "force_path_only_images",
     "get_rmb_status",
     "harness_pcts_for_local_agent",
@@ -51,5 +54,6 @@ __all__ = [
     "silent_context_for_local_agent",
     "start_rmb_server",
     "stop_rmb_server",
+    "wait_rmb_ready",
     "wake_rmb_async",
 ]

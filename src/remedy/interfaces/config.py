@@ -475,9 +475,10 @@ def normalize_llm_settings(
 
     # Flexible providers can host any model id (Ollama pulls deepseek-*, etc.).
     # Poe hosts many labs' bots under Poe bot names (not closed native catalogs).
+    # RMB / llama.cpp load arbitrary GGUF stems — must NOT snap to catalog 7B.
     # Demo is *not* flexible — guest gateway junk (image/video/foreign) is clamped
     # to the curated allowlist so free-setup never silently hits blocked models.
-    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "poe"})
+    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "poe", "rmb", "llamacpp"})
 
     model_owner = infer_provider_from_model(mid)
     if model_owner and model_owner != prov and prov not in _FLEXIBLE and prov != "demo":
@@ -550,7 +551,7 @@ def validate_provider_model(provider: str | None, model: str | None) -> str:
         raise ValueError(
             f"Unknown demo model {mid!r}. Guest free chat allows: {sample}."
         )
-    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "poe"})
+    _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "poe", "rmb", "llamacpp"})
     if prov in _FLEXIBLE or prov not in PROVIDER_CATALOG:
         return mid
     # Apply legacy aliases first

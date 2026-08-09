@@ -175,6 +175,86 @@ export function useSessionLlm(opts: {
     window.setTimeout(() => setSwitchToast(null), 4200)
   }, [])
 
+  const refreshConnected = useCallback(async () => {
+    try {
+      const conn = await listConnectedProviders()
+      setConnectedProviders(
+        conn.picker?.length ? conn.picker : conn.connected || [],
+      )
+      return conn
+    } catch {
+      return null
+    }
+  }, [])
+
+  // RMB settings / GGUF load → keep status bar + session bind on the same stem
+  useEffect(() => {
+    const onRmb = (ev: Event) => {
+      const d = (ev as CustomEvent<{ stem?: string; path?: string }>).detail
+      const stem = (d?.stem || '').trim()
+      if (!stem) return
+      setLlmProvider('rmb')
+      setModel(stem)
+      if (activeId) {
+        setSessionBind(activeId, 'rmb', stem)
+        // Persist session bind so reloads stay on this GGUF
+        void applySessionLlm(activeId, 'rmb', stem, true).catch(() => {})
+      } else {
+        void updateSettings({
+          llm_provider: 'rmb',
+          llm_model: stem,
+          llm_base_url: 'http://127.0.0.1:8787/v1',
+        }).catch(() => {})
+      }
+      void refreshModels({ provider: 'rmb' }).catch(() => {})
+      void refreshConnected()
+      showSwitchToast(`Now using ${stem}`)
+    }
+    window.addEventListener('remedy:rmb-model-changed', onRmb)
+    return () => window.removeEventListener('remedy:rmb-model-changed', onRmb)
+  }, [activeId, setSessionBind, refreshModels, refreshConnected, showSwitchToast])
+
+  // While on RMB, periodically adopt the host's Loaded GGUF (no user action)
+  useEffect(() => {
+    if ((barProvider || llmProvider) !== 'rmb') return
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const { getRmbStatus } = await import('../api/rmb')
+        const st = await getRmbStatus()
+        if (cancelled || !st) return
+        const stem =
+          (st.chat_model || st.llm_model || '').trim()
+          || (st.model_path
+            ? st.model_path.replace(/^.*[\\/]/, '').replace(/\.gguf$/i, '')
+            : '')
+        if (!stem) return
+        if (stem !== (barModel || model)) {
+          setLlmProvider('rmb')
+          setModel(stem)
+          if (activeId) setSessionBind(activeId, 'rmb', stem)
+          void refreshConnected()
+        }
+      } catch {
+        /* offline */
+      }
+    }
+    void tick()
+    const id = window.setInterval(() => void tick(), 8000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [
+    barProvider,
+    llmProvider,
+    barModel,
+    model,
+    activeId,
+    setSessionBind,
+    refreshConnected,
+  ])
+
   const onProviderModelChange = useCallback(
     (prov: string, mid: string) => {
       if (streaming) return
@@ -182,22 +262,32 @@ export function useSessionLlm(opts: {
         setLlmProvider(prov)
         setModel(mid)
         void updateSettings({ llm_provider: prov, llm_model: mid }).catch(() => {})
+        void refreshConnected()
         return
       }
       setSessionBind(activeId, prov, mid)
       void applySessionLlm(activeId, prov, mid, false)
-        .then((r) => showSwitchToast(r.toast))
-        .catch(() => {})
-      void refreshModels({ provider: prov }).catch(() => {})
-      void listConnectedProviders()
-        .then((conn) => {
-          setConnectedProviders(
-            conn.picker?.length ? conn.picker : conn.connected || [],
-          )
+        .then(async (r) => {
+          // After RMB GGUF switch, server may return the resolved stem
+          const resolved = (r as { model?: string; provider?: string })?.model
+          if (resolved && prov === 'rmb') {
+            setSessionBind(activeId, 'rmb', resolved)
+            setModel(resolved)
+          }
+          showSwitchToast(r.toast)
+          await refreshModels({ provider: prov })
+          await refreshConnected()
         })
         .catch(() => {})
     },
-    [streaming, activeId, setSessionBind, refreshModels, showSwitchToast],
+    [
+      streaming,
+      activeId,
+      setSessionBind,
+      refreshModels,
+      refreshConnected,
+      showSwitchToast,
+    ],
   )
 
   const onModelChange = useCallback(

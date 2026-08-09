@@ -32,9 +32,9 @@ from remedy.models import ToolCall
 
 logger = logging.getLogger(__name__)
 
-# SSE/UI process-trace preview only (model payload uses TOOL_RESULT_CHAR_CAP / tier).
-# Keep below typical L2/L3 model caps (12k) so fat dumps stay readable in Process Trace.
-UI_TOOL_RESULT_PREVIEW_CHARS = 8_000
+# SSE/UI process-trace preview (model payload uses TOOL_RESULT_CHAR_CAP / HARD).
+# High enough for full app.py / pdf_engine.py in Process Trace.
+UI_TOOL_RESULT_PREVIEW_CHARS = 256_000
 
 
 def progress_marker(
@@ -151,48 +151,173 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             args = {}
         if not isinstance(args, dict):
             args = {}
+        # Normalize write-tool arg aliases (model dumps file=/filepath= often)
+        if name in _WRITE_TOOLS and isinstance(args, dict):
+            if not str(args.get("path") or "").strip():
+                for alt in ("file", "filepath", "filename", "target"):
+                    if str(args.get(alt) or "").strip():
+                        args["path"] = str(args.get(alt)).strip()
+                        break
+            if "content" not in args or args.get("content") is None:
+                for alt in ("text", "body", "data", "source"):
+                    if alt in args and args.get(alt) is not None:
+                        args["content"] = args.get(alt)
+                        break
+            # Always allow full rewrite — PREFER_FILE_EDIT is dead for agents
+            if name == "file_write":
+                args["force_full_write"] = True
 
         # Refuse corrupted / history-summarized args before they hit the disk.
-        # (Provider history stubs and stream-truncated JSON must never execute.)
+        # Note: live stream cut-offs used to surface as the same HISTORY_STUB
+        # message — distinguish stream budget vs real history stubs for the model.
         if isinstance(args, dict) and (
             args.get("_invalid_json")
             or args.get("_truncated")
             or args.get("_history_summarized")
         ):
-            content_str = format_tool_error(
-                "tool arguments were summarized or truncated for history — not real source",
-                code="HISTORY_STUB",
-                tool_name=name or "unknown",
-                suggestion=(
-                    "file_read the real path, then file_edit surgical hunks or "
-                    "file_write with the full real source (not history stub text)."
-                ),
-            )
-            result_cache[fp] = content_str
-            seen_fps.add(fp)
-            return content_str
+            tname = (name or "").strip().lower()
+            # Salvage path-only tools (file_read/list_dir) instead of hard-fail
+            salvage_path = str(args.get("path") or "").strip()
+            if not salvage_path:
+                with suppress(Exception):
+                    from remedy.core.provider_sanitize import (
+                        _extract_path_from_tool_json,
+                    )
+
+                    salvage_path = (
+                        _extract_path_from_tool_json(str(args.get("preview") or ""))
+                        or ""
+                    )
+            if salvage_path and tname in (
+                "file_read",
+                "list_dir",
+                "repo_search",
+            ):
+                args = {"path": salvage_path}
+                # fall through and execute
+            elif args.get("_stream_truncated") or args.get("_invalid_json"):
+                with suppress(Exception):
+                    setattr(
+                        runtime,
+                        "_remedy_write_budget",
+                        max(int(getattr(runtime, "_remedy_write_budget", 0) or 0), 8192),
+                    )
+                if tname in ("file_edit", "file_edit_batch"):
+                    content_str = format_tool_error(
+                        "file_edit JSON was cut off mid-stream (edit too large). "
+                        "Nothing was changed.",
+                        code="TOOL_ARGS_TRUNCATED",
+                        tool_name=name or "unknown",
+                        suggestion=(
+                            "Use a **smaller** file_edit hunk (≤40 lines). "
+                            "Or file_write a short skeleton, then grow with edits."
+                        ),
+                    )
+                elif tname == "file_write":
+                    content_str = format_tool_error(
+                        "file_write JSON was cut off mid-stream (content too large). "
+                        "Nothing was written.",
+                        code="TOOL_ARGS_TRUNCATED",
+                        tool_name=name or "unknown",
+                        suggestion=(
+                            "Write ≤150 lines per file_write, or skeleton + file_edit."
+                        ),
+                    )
+                elif tname in ("file_read", "list_dir", "repo_search"):
+                    content_str = format_tool_error(
+                        f"{tname} arguments were incomplete (no path recovered). "
+                        "Nothing was read.",
+                        code="TOOL_ARGS_TRUNCATED",
+                        tool_name=name or "unknown",
+                        suggestion=(
+                            f'{tname}(path="src/…") with a short path only — '
+                            "do not put file contents in the tool arguments."
+                        ),
+                    )
+                else:
+                    content_str = format_tool_error(
+                        f"{tname or 'tool'} arguments JSON was cut off mid-stream.",
+                        code="TOOL_ARGS_TRUNCATED",
+                        tool_name=name or "unknown",
+                        suggestion="Retry with smaller arguments or fewer fields.",
+                    )
+                result_cache[fp] = content_str
+                seen_fps.add(fp)
+                return content_str
+            else:
+                content_str = format_tool_error(
+                    "tool arguments were summarized for provider history — not real source",
+                    code="HISTORY_STUB",
+                    tool_name=name or "unknown",
+                    suggestion=(
+                        "file_read the real path, then file_edit surgical hunks or "
+                        "file_write with the full real source (not history stub text)."
+                    ),
+                )
+                result_cache[fp] = content_str
+                seen_fps.add(fp)
+                return content_str
+        # Drop internal repair flags before invoking the tool
+        if isinstance(args, dict) and (
+            args.get("_repaired_truncated") or args.get("_repaired_closed") is not None
+        ):
+            args = {
+                k: v
+                for k, v in args.items()
+                if not str(k).startswith("_repaired")
+            }
         if name in _WRITE_TOOLS:
+            from remedy.core.workspace_tools.guards import (
+                looks_like_history_stub_text,
+                resolve_stub_write_skip,
+            )
+
             blob = " ".join(
                 str(args.get(k) or "")
                 for k in ("content", "old_string", "new_string", "edits", "patch")
             )
-            if any(
-                m in blob
-                for m in (
-                    "history_stub kind=",
-                    "DO_NOT_file_write_this_string",
-                    "<<NOT_SOURCE_CODE",
-                    "[file_write content omitted",
-                    "omitted from provider history",
+            path_arg = str(args.get("path") or args.get("file") or "").strip()
+            content_arg = args.get("content")
+            # Empty content + history flags: model replaying omitted body
+            is_stub = looks_like_history_stub_text(blob) or looks_like_history_stub_text(
+                content_arg if isinstance(content_arg, str) else None
+            )
+            if not is_stub and name == "file_write" and (
+                args.get("_body_omitted") or args.get("_history_summarized")
+            ):
+                is_stub = True
+            if (
+                not is_stub
+                and name == "file_write"
+                and isinstance(content_arg, str)
+                and not content_arg.strip()
+                and path_arg
+                and (
+                    args.get("_history_summarized")
+                    or args.get("_body_omitted")
+                    or "omitted" in str(args.get("history_note") or "").lower()
                 )
             ):
+                is_stub = True
+            if is_stub:
+                # Soft-success if real file already on disk — breaks ×N fail loops
+                skip_msg = resolve_stub_write_skip(
+                    runtime, path_arg, tool_name=name or "file_write"
+                )
+                if skip_msg:
+                    result_cache[fp] = skip_msg
+                    seen_fps.add(fp)
+                    return skip_msg
                 content_str = format_tool_error(
-                    "refusing write: arguments look like a provider-history stub",
+                    "refusing write: arguments look like a provider-history stub "
+                    "(or empty body replayed from history). Nothing was written.",
                     code="HISTORY_STUB",
                     tool_name=name or "unknown",
                     suggestion=(
-                        "file_read the real path first; never re-write history stub text. "
-                        "Use file_edit or a full real file_write body."
+                        "Do **not** copy history_stub / omitted-body text. "
+                        "file_write with **new real source code** for a small file, "
+                        "or file_read the path then file_edit. "
+                        f"Path was: {path_arg or '(missing)'}."
                     ),
                 )
                 result_cache[fp] = content_str
@@ -221,6 +346,27 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                     tool_name=name or "unknown",
                     suggestion="Retry with corrected arguments or a different tool.",
                 )
+            # Partner: if a stale PREFER_FILE_EDIT still appears, retry once with
+            # force_full_write so agent rewrites always land.
+            if (
+                name == "file_write"
+                and isinstance(args, dict)
+                and "PREFER_FILE_EDIT" in str(content_str)
+                and not args.get("force_full_write")
+            ):
+                retry_args = dict(args)
+                retry_args["force_full_write"] = True
+                result2 = await runtime.call_tool(
+                    ToolCall(tool_name=name, arguments=retry_args)
+                )
+                if result2.success:
+                    result = result2
+                    payload = result2.data
+                    content_str = (
+                        payload
+                        if isinstance(payload, str)
+                        else json.dumps(payload, default=str)
+                    )
             effective_ok = bool(result.success)
             if effective_ok:
                 with suppress(Exception):
@@ -324,15 +470,22 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
         else:
             result, content_str, effective_ok = await _call()
 
-        # Full tool results for the model (cap only if TOOL_RESULT_CHAR_CAP > 0).
-        # Tier policy may further tighten (L0/L1 lean).
+        # Full tool results for the model.
+        # TOOL_RESULT_CHAR_CAP=0 and tier max=0 → HARD_SAFETY only (full source files).
+        # Never let a lean tier shrink L2/L3 file_read below HARD when soft caps are off.
         cap = _TOOL_RESULT_CHAR_CAP if _TOOL_RESULT_CHAR_CAP > 0 else _HARD_SAFETY_CHARS
         with suppress(Exception):
             from remedy.core.metabolism.tier import tier_policy
 
             tpol = tier_policy(int(getattr(runtime, "_turn_tier", 2) or 2))
-            if tpol.max_tool_result_chars and tpol.max_tool_result_chars < cap:
-                cap = int(tpol.max_tool_result_chars)
+            tcap = int(getattr(tpol, "max_tool_result_chars", 0) or 0)
+            # tcap==0 means unlimited at tier; only tighten when tier sets a positive cap
+            # AND global soft cap is also positive (local tight mode).
+            if tcap > 0 and _TOOL_RESULT_CHAR_CAP > 0 and tcap < cap:
+                cap = tcap
+            elif tcap > 0 and _TOOL_RESULT_CHAR_CAP == 0:
+                # Full-context mode: ignore tier soft caps for tool bodies
+                pass
         if len(content_str) > cap:
             content_str = (
                 content_str[:cap]

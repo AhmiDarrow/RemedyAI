@@ -9,6 +9,7 @@ import atexit
 import contextlib
 import logging
 import os
+import re
 import socket
 import subprocess
 import threading
@@ -19,6 +20,7 @@ from urllib.request import Request
 
 from remedy.runtime.rmb.catalog import (
     DEFAULT_RMB_MODEL_ID,
+    RMB_MODELS,
     RMB_PROFILES,
     catalog_public,
     get_model_spec,
@@ -42,8 +44,29 @@ _starting_until: float = 0.0
 _user_stopped: bool = False
 
 _running_cache: dict[str, Any] = {"ts": 0.0, "value": False, "key": ""}
-_RUNNING_CACHE_TTL_S = 2.0
-_HEALTH_TIMEOUT_S = 0.4
+_RUNNING_CACHE_TTL_S = 1.5
+_HEALTH_TIMEOUT_S = 0.9
+# Rock-solid host: background watchdog restarts RMB if it dies mid-session.
+_watchdog_thread: threading.Thread | None = None
+_watchdog_stop = threading.Event()
+_watchdog_home: str | Path | None = None
+_watchdog_fail_streak = 0
+_WATCHDOG_INTERVAL_S = 8.0
+_WATCHDOG_FAIL_THRESHOLD = 2  # consecutive unhealthy polls before restart
+# Loading stall: port open + not healthy longer than this → force restart
+_LOADING_STALL_S = 180.0
+_loading_since: float = 0.0
+# Crash-loop protection: max restarts in a rolling window
+_WATCHDOG_RESTART_WINDOW_S = 300.0
+_WATCHDOG_MAX_RESTARTS = 4
+_watchdog_restart_times: list[float] = []
+# Single-flight start: concurrent waiters join one spawn instead of racing
+_start_flight_lock = threading.Lock()
+_start_flight_active = False
+_start_flight_result: dict[str, Any] | None = None
+_start_flight_event = threading.Event()
+_last_start_error: str | None = None
+_last_health_detail: str = ""
 
 
 def _port_open(host: str, port: int, timeout: float = 0.15) -> bool:
@@ -55,25 +78,129 @@ def _port_open(host: str, port: int, timeout: float = 0.15) -> bool:
 
 
 def _health(base_url: str, timeout: float = _HEALTH_TIMEOUT_S) -> bool:
+    """True when llama-server is accepting model queries (not mid-load).
+
+    Checks ``/health`` and ``/v1/models``. HTTP 503 Loading model → not ready.
+    """
+    global _last_health_detail
+    from urllib.error import HTTPError, URLError
+
     from remedy.core.security import is_loopback_service_url, urlopen_no_redirect
 
     base = (base_url or "").rstrip("/")
     if not base or not is_loopback_service_url(base):
+        _last_health_detail = "bad_url"
         return False
-    for path in ("/models", "/v1/models"):
-        url = base if base.endswith(path) else base.rstrip("/") + path
-        if path == "/v1/models" and base.endswith("/v1"):
-            url = base + "/models"
-        elif path == "/models" and base.endswith("/v1"):
-            url = base + "/models"
+    # Strip trailing /v1 for /health which is usually on the root
+    root = base
+    if root.endswith("/v1"):
+        root = root[:-3]
+    paths_try = (
+        root + "/health",
+        base + "/models" if base.endswith("/v1") else base + "/v1/models",
+        base + "/models" if not base.endswith("/models") else base,
+    )
+    # Deduplicate URLs
+    seen: set[str] = set()
+    saw_loading = False
+    last_err = ""
+    for url in paths_try:
+        if url in seen:
+            continue
+        seen.add(url)
         try:
             req = Request(url, headers={"User-Agent": "RemedyAI-RMB/1.0"})
             with urlopen_no_redirect(req, timeout=timeout) as resp:  # type: ignore[union-attr]
-                if 200 <= getattr(resp, "status", 200) < 300:
+                status = int(getattr(resp, "status", 200) or 200)
+                if status == 503:
+                    saw_loading = True
+                    last_err = "503"
+                    continue
+                if 200 <= status < 300:
+                    # Prefer body that says ok when present (llama /health JSON)
+                    try:
+                        body = resp.read(256).decode("utf-8", errors="ignore").lower()
+                    except Exception:
+                        body = ""
+                    if body and (
+                        '"status":"error"' in body.replace(" ", "")
+                        or '"error"' in body[:40]
+                    ):
+                        last_err = "health_error_body"
+                        continue
+                    if "loading" in body and "ok" not in body:
+                        saw_loading = True
+                        last_err = "loading_body"
+                        continue
+                    _last_health_detail = "ok"
                     return True
-        except Exception:
+        except HTTPError as exc:
+            code = int(getattr(exc, "code", 0) or 0)
+            if code == 503:
+                saw_loading = True
+                last_err = "503"
+                continue
+            last_err = f"http_{code}"
             continue
+        except URLError as exc:
+            last_err = f"urlerr:{exc.reason!s}"[:80]
+            continue
+        except Exception as exc:
+            err = str(exc).lower()
+            if "503" in err or "loading" in err:
+                saw_loading = True
+                last_err = "503"
+                continue
+            last_err = type(exc).__name__
+            continue
+    _last_health_detail = "loading" if saw_loading else (last_err or "unreachable")
     return False
+
+
+def _note_loading_state(loading: bool) -> None:
+    """Track how long the host has been in loading/wedged state."""
+    global _loading_since
+    now = time.time()
+    if loading:
+        if _loading_since <= 0:
+            _loading_since = now
+    else:
+        _loading_since = 0.0
+
+
+def loading_for_s(home_dir: str | Path | None = None) -> float:
+    """Seconds the host has been port-up but not healthy (0 if ready/down)."""
+    if not is_loading(home_dir):
+        return 0.0
+    if _loading_since <= 0:
+        return 0.0
+    return max(0.0, time.time() - _loading_since)
+
+
+def loading_stalled(
+    home_dir: str | Path | None = None,
+    *,
+    max_s: float = _LOADING_STALL_S,
+) -> bool:
+    """True when weights never became healthy within *max_s* (wedged load)."""
+    return loading_for_s(home_dir) >= max(30.0, float(max_s))
+
+
+def is_loading(home_dir: str | Path | None = None) -> bool:
+    """Port open but health not ready (weights still loading or wedged)."""
+    state = merge_state(load_rmb_json(home_dir))
+    host = str(state.get("host") or DEFAULT_HOST)
+    port = int(state.get("port") or DEFAULT_CHAT_PORT)
+    base = str(state.get("base_url") or f"http://{host}:{port}/v1")
+    if not _port_open(host, port):
+        _note_loading_state(False)
+        return False
+    if _health(base, timeout=0.9):
+        _note_loading_state(False)
+        return False
+    # Port open + not healthy ≈ loading or wedged
+    _note_loading_state(True)
+    return True
 
 
 def mark_used() -> None:
@@ -106,6 +233,14 @@ def is_running(
     base = str(state.get("base_url") or f"http://{host}:{port}/v1")
     key = f"{host}:{port}:{'h' if require_http else 'p'}"
     now = time.time()
+
+    # Dead managed child → drop cache immediately (avoid 2s "still up" lie)
+    proc = _proc
+    child = proc is not None and proc.poll() is None
+    if proc is not None and not child:
+        invalidate_cache()
+        force = True
+
     if (
         not force
         and _running_cache.get("key") == key
@@ -113,8 +248,6 @@ def is_running(
     ):
         return bool(_running_cache.get("value"))
 
-    proc = _proc
-    child = proc is not None and proc.poll() is None
     port_up = _port_open(host, port)
     if child and port_up:
         ok = True if not require_http else _health(base)
@@ -124,6 +257,8 @@ def is_running(
         ok = healthy if require_http else (healthy or child)
     else:
         ok = False
+    if ok:
+        _note_loading_state(False)
     _running_cache["ts"] = now
     _running_cache["value"] = ok
     _running_cache["key"] = key
@@ -136,34 +271,417 @@ def invalidate_cache() -> None:
 
 
 def _looks_like_llama_server(pid: int) -> bool:
-    """Avoid killing unrelated processes when rmb.json pid is stale."""
+    """Avoid killing unrelated processes when rmb.json pid is stale.
+
+    Prefer killing on doubt when the process name contains llama / is our
+    configured runtime binary — a sticky host is worse than a false positive
+    on a developer-named binary.
+    """
     if pid <= 0:
         return False
     if os.name != "nt":
         try:
             cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
             text = cmdline.replace(b"\x00", b" ").decode("utf-8", errors="ignore").lower()
-            return "llama-server" in text or "llama_server" in text
+            return "llama-server" in text or "llama_server" in text or "llama.cpp" in text
         except OSError:
             return True
     try:
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        # ProcessName + Path (CUDA builds report ProcessName=llama-server)
         out = subprocess.run(
             [
                 "powershell",
                 "-NoProfile",
                 "-Command",
-                f"(Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue).ProcessName",
+                (
+                    f"$p=Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue; "
+                    "if(-not $p){''}else{"
+                    "($p.ProcessName+' '+($p.Path|Out-String)).Trim()}"
+                ),
             ],
             capture_output=True,
             text=True,
-            timeout=3,
+            timeout=4,
             creationflags=creationflags,
         )
         name = (out.stdout or "").strip().lower()
-        return "llama" in name or name in ("llama-server", "llama_server")
+        if not name:
+            return False
+        return (
+            "llama" in name
+            or "llama-server" in name
+            or "llama_server" in name
+            or name.endswith("server.exe")
+            and "llama" in name
+        )
+    except Exception:
+        # If we can't inspect, allow kill when pid matches rmb.json (caller decides)
+        return True
+
+
+def _kill_pid(pid: int) -> bool:
+    """Force-kill *pid* (and children on Windows). Returns True if a kill was attempted."""
+    if pid <= 0:
+        return False
+    try:
+        if os.name == "nt":
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            r = subprocess.run(
+                ["taskkill", "/PID", str(int(pid)), "/T", "/F"],
+                capture_output=True,
+                creationflags=flags,
+                timeout=8,
+            )
+            if r.returncode == 0:
+                return True
+            # Fallback: PowerShell Stop-Process (taskkill sometimes fails on protected trees)
+            r2 = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    f"Stop-Process -Id {int(pid)} -Force -ErrorAction SilentlyContinue",
+                ],
+                capture_output=True,
+                creationflags=flags,
+                timeout=8,
+            )
+            return r2.returncode == 0
+        os.kill(pid, 15)
+        time.sleep(0.2)
+        with contextlib.suppress(Exception):
+            os.kill(pid, 9)
+        return True
     except Exception:
         return False
+
+
+def _find_pid_on_port(port: int) -> int | None:
+    """Return PID listening on *port*, or None."""
+    if port <= 0:
+        return None
+    try:
+        if os.name == "nt":
+            out = subprocess.run(
+                ["netstat", "-ano"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            needle = f":{int(port)}"
+            for line in (out.stdout or "").splitlines():
+                up = line.upper()
+                if "LISTENING" not in up and "LISTEN" not in up:
+                    continue
+                if needle not in line:
+                    continue
+                parts = line.split()
+                if not parts:
+                    continue
+                with contextlib.suppress(ValueError, IndexError):
+                    pid = int(parts[-1])
+                    if pid > 0:
+                        return pid
+        else:
+            out = subprocess.run(
+                ["lsof", "-ti", f":{int(port)}"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            for line in (out.stdout or "").splitlines():
+                with contextlib.suppress(ValueError):
+                    pid = int(line.strip())
+                    if pid > 0:
+                        return pid
+    except Exception:
+        logger.debug("RMB: find pid on port failed", exc_info=True)
+    return None
+
+
+def adopt_existing_host(home_dir: str | Path | None = None) -> dict[str, Any]:
+    """If a healthy llama-server is already on the RMB port, adopt its PID.
+
+    After API recycle the child Popen handle is lost; adopting prevents a
+    second spawn and keeps watchdog/stop working.
+    """
+    state = merge_state(load_rmb_json(home_dir))
+    host = str(state.get("host") or DEFAULT_HOST)
+    port = int(state.get("port") or DEFAULT_CHAT_PORT)
+    base = str(state.get("base_url") or f"http://{host}:{port}/v1")
+    if not _health(base, timeout=1.0):
+        return {"ok": False, "adopted": False, "reason": "not_healthy"}
+    pid = _find_pid_on_port(port)
+    if not pid:
+        return {"ok": True, "adopted": False, "reason": "healthy_no_pid", "base_url": base}
+    state["pid"] = pid
+    state["enabled"] = True
+    state["vision_suspended"] = True
+    save_rmb_json(state, home_dir)
+    mark_used()
+    invalidate_cache()
+    logger.info("RMB: adopted existing host pid=%s on port %s", pid, port)
+    return {"ok": True, "adopted": True, "pid": pid, "base_url": base}
+
+
+def _watchdog_can_restart() -> bool:
+    """Crash-loop guard: allow restart only if under max in rolling window."""
+    global _watchdog_restart_times
+    now = time.time()
+    _watchdog_restart_times = [
+        t for t in _watchdog_restart_times if (now - t) < _WATCHDOG_RESTART_WINDOW_S
+    ]
+    return len(_watchdog_restart_times) < _WATCHDOG_MAX_RESTARTS
+
+
+def _watchdog_record_restart() -> None:
+    global _watchdog_restart_times
+    _watchdog_restart_times.append(time.time())
+
+
+def ensure_rmb_watchdog(home_dir: str | Path | None = None) -> None:
+    """Start a daemon watchdog that restarts RMB if it dies (auto_start mode)."""
+    global _watchdog_thread, _watchdog_home
+    _watchdog_home = home_dir
+    if _watchdog_thread is not None and _watchdog_thread.is_alive():
+        return
+    _watchdog_stop.clear()
+
+    def _loop() -> None:
+        global _watchdog_fail_streak, _last_start_error
+        while not _watchdog_stop.wait(_WATCHDOG_INTERVAL_S):
+            try:
+                if _user_stopped:
+                    _watchdog_fail_streak = 0
+                    continue
+                st = merge_state(load_rmb_json(_watchdog_home))
+                if not st.get("enabled", True) or not st.get("auto_start", False):
+                    _watchdog_fail_streak = 0
+                    continue
+                if is_running(_watchdog_home, force=True, require_http=True):
+                    _watchdog_fail_streak = 0
+                    _note_loading_state(False)
+                    # Keep pid in sync if we lost the child handle
+                    if not managed_process_alive():
+                        with contextlib.suppress(Exception):
+                            adopt_existing_host(_watchdog_home)
+                    continue
+                # Loading is fine unless it stalls past deadline (wedged GPU load)
+                if is_loading(_watchdog_home) or is_starting():
+                    if not loading_stalled(_watchdog_home):
+                        continue
+                    logger.warning(
+                        "RMB watchdog: loading stalled for %.0fs — force restart",
+                        loading_for_s(_watchdog_home),
+                    )
+                    if not _watchdog_can_restart():
+                        logger.error(
+                            "RMB watchdog: crash-loop limit (%s/%ss) — not restarting stalled host",
+                            _WATCHDOG_MAX_RESTARTS,
+                            int(_WATCHDOG_RESTART_WINDOW_S),
+                        )
+                        continue
+                    with contextlib.suppress(Exception):
+                        stop_rmb_server(
+                            home_dir=_watchdog_home,
+                            resume_vision=False,
+                            user_intent=False,
+                        )
+                    _watchdog_fail_streak = 0
+                    _watchdog_record_restart()
+                    with contextlib.suppress(Exception):
+                        r = start_rmb_server(home_dir=_watchdog_home, wait_s=120.0)
+                        if not r.get("ok"):
+                            _last_start_error = str(r.get("error") or "stall restart failed")
+                    continue
+                _watchdog_fail_streak += 1
+                if _watchdog_fail_streak < _WATCHDOG_FAIL_THRESHOLD:
+                    logger.info(
+                        "RMB watchdog: unhealthy (%s/%s) detail=%s",
+                        _watchdog_fail_streak,
+                        _WATCHDOG_FAIL_THRESHOLD,
+                        _last_health_detail,
+                    )
+                    continue
+                if not _watchdog_can_restart():
+                    logger.error(
+                        "RMB watchdog: crash-loop limit hit — backing off "
+                        "(%s restarts in %ss). Last error: %s",
+                        _WATCHDOG_MAX_RESTARTS,
+                        int(_WATCHDOG_RESTART_WINDOW_S),
+                        _last_start_error or _last_health_detail,
+                    )
+                    # Stretch fail streak so we don't log-spam every tick
+                    _watchdog_fail_streak = 0
+                    continue
+                logger.warning(
+                    "RMB watchdog: host down — auto-restarting (fail_streak=%s)",
+                    _watchdog_fail_streak,
+                )
+                _watchdog_fail_streak = 0
+                # Do not clear user_stopped — only heal if not user-stopped
+                if not _user_stopped:
+                    _watchdog_record_restart()
+                    with contextlib.suppress(Exception):
+                        r = start_rmb_server(home_dir=_watchdog_home, wait_s=90.0)
+                        if not r.get("ok"):
+                            _last_start_error = str(
+                                r.get("error") or "watchdog restart failed"
+                            )
+                            logger.warning(
+                                "RMB watchdog: restart failed: %s", _last_start_error
+                            )
+            except Exception:
+                logger.exception("RMB watchdog tick failed")
+
+    _watchdog_thread = threading.Thread(
+        target=_loop, name="remedy-rmb-watchdog", daemon=True
+    )
+    _watchdog_thread.start()
+    logger.info("RMB watchdog started (interval=%ss)", _WATCHDOG_INTERVAL_S)
+
+
+def _kill_listeners_on_port(port: int) -> int:
+    """Kill any process listening on *port* (Windows netstat / lsof). Returns kill attempts."""
+    if port <= 0:
+        return 0
+    killed = 0
+    try:
+        pids: set[int] = set()
+        if os.name == "nt":
+            out = subprocess.run(
+                ["netstat", "-ano"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            needle = f":{int(port)}"
+            for line in (out.stdout or "").splitlines():
+                if "LISTENING" not in line.upper() and "LISTEN" not in line.upper():
+                    continue
+                if needle not in line:
+                    continue
+                parts = line.split()
+                if not parts:
+                    continue
+                with contextlib.suppress(ValueError, IndexError):
+                    pids.add(int(parts[-1]))
+        else:
+            pid = _find_pid_on_port(port)
+            if pid:
+                pids.add(pid)
+        for pid in pids:
+            if pid <= 0 or pid == os.getpid():
+                continue
+            if _kill_pid(pid):
+                killed += 1
+                logger.info("RMB: killed listener pid=%s on port %s", pid, port)
+    except Exception:
+        logger.debug("RMB: port listener kill failed", exc_info=True)
+    return killed
+
+
+def _tail_log(path: str | Path | None, *, max_bytes: int = 2500) -> str:
+    """Last chunk of llama-server.log for error payloads."""
+    if not path:
+        return ""
+    try:
+        p = Path(path)
+        if not p.is_file():
+            return ""
+        data = p.read_bytes()
+        if len(data) > max_bytes:
+            data = data[-max_bytes:]
+        text = data.decode("utf-8", errors="replace").strip()
+        return text[-max_bytes:]
+    except Exception:
+        return ""
+
+
+def _wait_for_port_healthy(
+    host: str,
+    port: int,
+    base: str,
+    *,
+    timeout_s: float = 90.0,
+    poll_s: float = 0.5,
+) -> bool:
+    """Wait until *base* is healthy or timeout. Used when port is mid-load."""
+    deadline = time.time() + max(1.0, float(timeout_s))
+    while time.time() < deadline:
+        if _user_stopped:
+            return False
+        if _health(base, timeout=1.0):
+            _note_loading_state(False)
+            return True
+        if not _port_open(host, port):
+            return False
+        time.sleep(max(0.2, float(poll_s)))
+    return _health(base, timeout=1.0)
+
+
+def _resolve_occupied_port(
+    host: str,
+    port: int,
+    base: str,
+    *,
+    wait_s: float = 90.0,
+) -> dict[str, Any]:
+    """Handle port-open-but-not-healthy before spawn.
+
+    Rock-solid partner path:
+    - llama mid-load → wait for healthy (do not refuse start)
+    - llama wedged / stall → kill and free the port
+    - non-llama occupant → kill if it looks safe, else error
+    """
+    if not _port_open(host, port):
+        return {"ok": True, "free": True}
+    if _health(base, timeout=1.0):
+        return {"ok": True, "already_healthy": True}
+
+    pid = _find_pid_on_port(port)
+    looks_llama = bool(pid and _looks_like_llama_server(pid))
+    # Always give a loading llama-server time to finish weights
+    if looks_llama or pid is None:
+        logger.info(
+            "RMB: port %s open but not healthy (pid=%s llama=%s) — waiting up to %.0fs",
+            port,
+            pid,
+            looks_llama,
+            wait_s,
+        )
+        _note_loading_state(True)
+        if _wait_for_port_healthy(host, port, base, timeout_s=min(wait_s, 120.0)):
+            return {"ok": True, "became_healthy": True, "pid": pid}
+        logger.warning(
+            "RMB: port %s still not healthy after wait — clearing listeners",
+            port,
+        )
+
+    # Wedged or foreign process — free the port
+    if pid and _kill_pid(pid):
+        logger.info("RMB: killed occupant pid=%s on port %s", pid, port)
+    _kill_listeners_on_port(port)
+    # Brief settle so bind succeeds
+    for _ in range(20):
+        if not _port_open(host, port):
+            return {"ok": True, "cleared": True, "pid": pid}
+        time.sleep(0.15)
+        _kill_listeners_on_port(port)
+    if _port_open(host, port) and not _health(base):
+        return {
+            "ok": False,
+            "error": (
+                f"Port {port} is in use but not a healthy llama-server and could not "
+                "be freed. Stop the other process or change RMB port in Settings."
+            ),
+            "port": port,
+            "pid": pid,
+        }
+    return {"ok": True, "cleared": True, "pid": pid}
 
 
 def _model_search_roots(home_dir: str | Path | None) -> list[Path]:
@@ -234,31 +752,51 @@ def discover_ggufs(home_dir: str | Path | None = None) -> list[dict[str, Any]]:
     """List GGUF files Remedy can load into RMB (any model, not catalog-only)."""
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
+
+    def _add(p: Path) -> None:
+        if not p.is_file() or p.suffix.lower() != ".gguf":
+            return
+        try:
+            key = str(p.resolve()).lower()
+        except OSError:
+            key = str(p).lower()
+        if key in seen:
+            return
+        seen.add(key)
+        try:
+            size_gb = round(p.stat().st_size / (1024**3), 2)
+        except OSError:
+            size_gb = 0.0
+        out.append(
+            {
+                "path": str(p),
+                "name": p.name,
+                "size_gb": size_gb,
+                "dir": str(p.parent),
+                # Stem id for status-bar / session LLM switch (stable, no path sep)
+                "id": p.stem,
+            }
+        )
+
+    # Always include sticky configured path (even outside search roots)
+    try:
+        st = merge_state(load_rmb_json(home_dir))
+        sticky = str(st.get("model_path") or "").strip()
+        if sticky:
+            _add(Path(sticky))
+    except Exception:
+        pass
+
     for root in _model_search_roots(home_dir):
         if not root.is_dir():
             continue
         try:
             for p in sorted(root.glob("*.gguf")):
-                if not p.is_file():
-                    continue
-                key = str(p.resolve()).lower()
-                if key in seen:
-                    continue
-                seen.add(key)
-                try:
-                    size_gb = round(p.stat().st_size / (1024**3), 2)
-                except OSError:
-                    size_gb = 0.0
-                out.append(
-                    {
-                        "path": str(p),
-                        "name": p.name,
-                        "size_gb": size_gb,
-                        "dir": str(root),
-                    }
-                )
+                _add(p)
         except Exception:
             continue
+    # Prefer larger / more recently used first for UI (size desc, then name)
+    out.sort(key=lambda g: (-float(g.get("size_gb") or 0), str(g.get("name") or "").lower()))
     return out
 
 
@@ -304,17 +842,45 @@ def _gguf_matches_model_id(path: Path, model_id: str) -> bool:
     return bool(size)
 
 
-def _resolve_model_path(state: dict[str, Any], home_dir: str | Path | None) -> Path | None:
-    """Resolve any GGUF for RMB — catalog-aware sticky path, then scan."""
+def _resolve_model_path(
+    state: dict[str, Any],
+    home_dir: str | Path | None,
+    *,
+    trust_sticky_path: bool = False,
+) -> Path | None:
+    """Resolve any GGUF for RMB — catalog-aware sticky path, then scan.
+
+    *trust_sticky_path*: when True (user just picked an explicit GGUF path),
+    never replace a real on-disk path with a different catalog match. That was
+    the “always loads Coder 7B again” bug — free-form Downloads files got
+    re-resolved to the first 7B catalog file under models/.
+    """
     from remedy.runtime.rmb.catalog import catalog_id_from_hint
 
     mid_raw = str(state.get("model_id") or DEFAULT_RMB_MODEL_ID)
     mid = catalog_id_from_hint(mid_raw) or mid_raw
     mp = str(state.get("model_path") or "").strip()
-    # Sticky path only wins when it matches the selected catalog model.
-    # Otherwise switching 7B→14B left the 7B GGUF loaded forever.
-    if mp and Path(mp).is_file() and _gguf_matches_model_id(Path(mp), mid):
-        return Path(mp)
+    # Explicit path always wins when the file exists and we trust the sticky
+    # path (user selection) OR it matches the catalog model id.
+    if mp and Path(mp).is_file():
+        p = Path(mp)
+        if trust_sticky_path:
+            return p
+        # Free-form model_id (stem) matching this file — compare against the
+        # *path* identity only. Never include catalog mid in the tuple (that
+        # made ``mid_raw in (…, mid)`` always true and stuck on wrong-size GGUF).
+        stem = p.stem.lower()
+        req = mid_raw.strip().lower()
+        path_hint = (catalog_id_from_hint(p.name) or "").lower()
+        if req and req in {stem, p.name.lower(), path_hint}:
+            return p
+        if mid and mid not in RMB_MODELS:
+            # Non-catalog id → trust path only when stem-ish matches
+            if req in stem or stem in req or path_hint == req:
+                return p
+            # else fall through to catalog scan
+        elif _gguf_matches_model_id(p, mid or mid_raw):
+            return p
 
     spec = get_model_spec(mid)
     size_tag = (spec.size_label or "7b").upper()  # e.g. 7B, 14B
@@ -378,6 +944,193 @@ def _nvidia_ok() -> bool:
         return False
 
 
+def _live_process_has_mtp_flags(state: dict[str, Any] | None = None) -> bool:
+    """True when the running llama-server already has --spec-type draft-mtp.
+
+    Avoids restarting a healthy host just because rmb.json lost host_auto
+    after an API recycle (that restart causes mid-chat 503 Loading model).
+    """
+    st = state or {}
+    # Prefer explicit state
+    ha = st.get("host_auto") if isinstance(st.get("host_auto"), dict) else {}
+    if ha.get("mtp_armed"):
+        return True
+    # Managed child cmdline
+    proc = _proc
+    if proc is not None and proc.poll() is None:
+        try:
+            # Popen.args may be list
+            args = proc.args
+            if isinstance(args, (list, tuple)):
+                joined = " ".join(str(a) for a in args).lower()
+            else:
+                joined = str(args or "").lower()
+            if "draft-mtp" in joined or "--spec-type" in joined:
+                return True
+        except Exception:
+            pass
+    # Windows: query by port listener PID
+    try:
+        port = int(st.get("port") or DEFAULT_CHAT_PORT)
+    except (TypeError, ValueError):
+        port = DEFAULT_CHAT_PORT
+    try:
+        if os.name == "nt":
+            import subprocess as _sp
+
+            r = _sp.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    (
+                        f"$c=Get-NetTCPConnection -LocalPort {port} -State Listen "
+                        "-ErrorAction SilentlyContinue | Select-Object -First 1;"
+                        "if($c){(Get-CimInstance Win32_Process -Filter "
+                        "\"ProcessId=$($c.OwningProcess)\").CommandLine}"
+                    ),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=4,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            cmd = (r.stdout or "").lower()
+            if "draft-mtp" in cmd or "--spec-type" in cmd:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+# --- GGUF host autoconfig (MTP / coding / template) ---
+# Partner rule: user loads a GGUF; Remedy wires llama-server correctly.
+# No Settings knobs for --spec-type, draft length, or parallel slots.
+
+_MTP_NAME_RE = re.compile(r"(?:^|[-_.\s])mtp(?:[-_.\s]|$)", re.IGNORECASE)
+_CODER_NAME_RE = re.compile(
+    r"(?:^|[-_.\s])(coder|coding|code)(?:[-_.\s]|$)", re.IGNORECASE
+)
+_QWEN3_NAME_RE = re.compile(r"qwen\s*3|qwopus|qwen3", re.IGNORECASE)
+
+# Cache binary capability probes (path + mtime → bool)
+_spec_cap_cache: dict[str, tuple[float, bool]] = {}
+
+
+def detect_gguf_host_profile(model: Path | str | None) -> dict[str, Any]:
+    """Infer llama-server host knobs from GGUF path/name.
+
+    Returns a stable dict used by ``_build_cmd`` and status:
+    - mtp: Multi-Token Prediction heads present (filename signal)
+    - coder: coding-tuned model
+    - qwen3_family: Jinja/system-first sensitive family
+    - force_parallel_1: MTP needs single slot
+    - spec_type / spec_draft_n_max: when MTP + capable binary
+    """
+    if model is None:
+        return {
+            "mtp": False,
+            "coder": False,
+            "qwen3_family": False,
+            "force_parallel_1": False,
+            "spec_type": None,
+            "spec_draft_n_max": None,
+            "reasons": [],
+        }
+    p = Path(model)
+    name = f"{p.name} {p.stem}".lower()
+    reasons: list[str] = []
+    mtp = bool(_MTP_NAME_RE.search(name)) or "multi-token" in name or "multitoken" in name
+    if mtp:
+        reasons.append("filename_mtp")
+    coder = bool(_CODER_NAME_RE.search(name))
+    if coder:
+        reasons.append("filename_coder")
+    qwen3 = bool(_QWEN3_NAME_RE.search(name))
+    if qwen3:
+        reasons.append("filename_qwen3_family")
+
+    # Conservative draft length: Unsloth default 2; slightly higher for larger coders
+    draft_n = 2
+    if mtp:
+        try:
+            size_gb = p.stat().st_size / (1024**3) if p.is_file() else 0.0
+        except OSError:
+            size_gb = 0.0
+        if size_gb >= 12 or re.search(r"\b(14b|27b|32b|35b|70b)\b", name):
+            draft_n = 3
+
+    return {
+        "mtp": mtp,
+        "coder": coder,
+        "qwen3_family": qwen3,
+        "force_parallel_1": mtp,  # llama.cpp MTP is single-slot
+        "spec_type": "draft-mtp" if mtp else None,
+        "spec_draft_n_max": draft_n if mtp else None,
+        "reasons": reasons,
+        "model_stem": p.stem,
+    }
+
+
+def binary_supports_draft_mtp(binary: Path | str | None) -> bool:
+    """True when this llama-server build knows ``--spec-type draft-mtp``.
+
+    Windows CUDA builds split flags into ``llama-common.dll`` / impl DLLs;
+    we probe sibling binaries for the flag strings. Result is cached per
+    path+mtime so Start stays fast.
+    """
+    if not binary:
+        return False
+    b = Path(binary)
+    if not b.is_file():
+        return False
+    try:
+        mtime = b.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    key = str(b.resolve()) if b.exists() else str(b)
+    hit = _spec_cap_cache.get(key)
+    if hit is not None and hit[0] == mtime:
+        return hit[1]
+
+    needles = (b"draft-mtp", b"--spec-type", b"spec-draft-n-max", b"LLAMA_ARG_SPEC_TYPE")
+    found = False
+    candidates: list[Path] = [b]
+    parent = b.parent
+    for pattern in (
+        "llama-common*.dll",
+        "llama-server*.dll",
+        "llama-common.so*",
+        "libcommon*",
+        "llama-server",
+    ):
+        with contextlib.suppress(Exception):
+            candidates.extend(parent.glob(pattern))
+    seen: set[str] = set()
+    for c in candidates:
+        try:
+            ck = str(c.resolve())
+        except OSError:
+            ck = str(c)
+        if ck in seen or not c.is_file():
+            continue
+        seen.add(ck)
+        try:
+            # Cap read for huge CUDA libs — flags live in common/server, not ggml-cuda
+            size = c.stat().st_size
+            if size > 40 * 1024 * 1024:
+                continue
+            data = c.read_bytes()
+        except OSError:
+            continue
+        if any(n in data for n in needles):
+            found = True
+            break
+
+    _spec_cap_cache[key] = (mtime, found)
+    return found
+
+
 def _build_cmd(
     binary: Path,
     model: Path,
@@ -389,7 +1142,19 @@ def _build_cmd(
     threads: int,
     parallel: int,
     flash_attn: bool,
+    host_profile: dict[str, Any] | None = None,
+    enable_mtp: bool | None = None,
 ) -> list[str]:
+    """Build llama-server argv. Auto-enables MTP speculative flags when the
+    GGUF looks like MTP **and** the binary supports draft-mtp.
+
+    ``enable_mtp=False`` forces a plain start (soft-retry after bad flags).
+    """
+    profile = host_profile if host_profile is not None else detect_gguf_host_profile(model)
+    use_parallel = int(parallel)
+    if profile.get("force_parallel_1"):
+        use_parallel = 1
+
     cmd = [
         str(binary),
         "-m",
@@ -403,7 +1168,7 @@ def _build_cmd(
         "-ngl",
         str(int(ngl)),
         "--parallel",
-        str(max(1, int(parallel))),
+        str(max(1, use_parallel)),
         "--cont-batching",
         "--jinja",
     ]
@@ -411,6 +1176,35 @@ def _build_cmd(
         cmd.extend(["--threads", str(int(threads))])
     if flash_attn:
         cmd.extend(["-fa", "on"])
+
+    # MTP: baked-in multi-token heads — no separate draft GGUF
+    want_mtp = bool(profile.get("mtp")) if enable_mtp is None else bool(enable_mtp)
+    if want_mtp and profile.get("mtp"):
+        if binary_supports_draft_mtp(binary):
+            spec = str(profile.get("spec_type") or "draft-mtp")
+            n_max = int(profile.get("spec_draft_n_max") or 2)
+            n_max = max(1, min(8, n_max))
+            cmd.extend(
+                [
+                    "--spec-type",
+                    spec,
+                    "--spec-draft-n-max",
+                    str(n_max),
+                ]
+            )
+            logger.info(
+                "RMB autoconfig: MTP enabled (%s n_max=%s) for %s",
+                spec,
+                n_max,
+                model.name,
+            )
+        else:
+            logger.warning(
+                "RMB autoconfig: GGUF looks like MTP (%s) but llama-server "
+                "build lacks draft-mtp — starting without speculative flags. "
+                "Update the CUDA/CPU runtime to unlock ~2x decode.",
+                model.name,
+            )
     return cmd
 
 
@@ -497,13 +1291,96 @@ def _clear_starting() -> None:
     _starting_until = 0.0
 
 
+def wait_rmb_ready(
+    home_dir: str | Path | None = None,
+    *,
+    timeout_s: float = 120.0,
+    poll_s: float = 0.5,
+) -> dict[str, Any]:
+    """Block until RMB is healthy or *timeout_s* elapses.
+
+    Partner path for HTTP 503 / WinError 64 / connection refused: restart the
+    host if needed and wait for weights (typical 3–30s on GPU). Mid-turn
+    recovery must not depend on the user.
+    """
+    deadline = time.time() + max(1.0, float(timeout_s))
+    kicked_async = False
+    kicked_sync = False
+    cleared_stall = False
+    ensure_rmb_watchdog(home_dir)
+    while time.time() < deadline:
+        if is_running(home_dir, force=True, require_http=True):
+            mark_used()
+            return {"ok": True, "ready": True}
+        if _user_stopped:
+            return {
+                "ok": False,
+                "ready": False,
+                "error": "RMB was stopped by user",
+            }
+        # Mid-load is OK — just wait; only force-clear when stalled
+        if is_loading(home_dir) and not loading_stalled(home_dir, max_s=min(150.0, timeout_s)):
+            time.sleep(max(0.2, float(poll_s)))
+            continue
+        if loading_stalled(home_dir, max_s=min(150.0, timeout_s)) and not cleared_stall:
+            cleared_stall = True
+            logger.warning("RMB wait_rmb_ready: loading stall — force stop + restart")
+            with contextlib.suppress(Exception):
+                stop_rmb_server(
+                    home_dir=home_dir, resume_vision=False, user_intent=False
+                )
+            kicked_sync = False  # allow a fresh sync start
+        alive = managed_process_alive() or is_starting() or is_loading(home_dir)
+        if not alive:
+            remaining = deadline - time.time()
+            if not kicked_sync and remaining > 10:
+                # Sync start once — more reliable than fire-and-forget mid-turn
+                kicked_sync = True
+                try:
+                    r = start_rmb_server(
+                        home_dir=home_dir,
+                        wait_s=min(100.0, max(20.0, remaining - 2)),
+                    )
+                    if r.get("ok") and is_running(
+                        home_dir, force=True, require_http=True
+                    ):
+                        mark_used()
+                        return {"ok": True, "ready": True, "restarted": True}
+                    # Start claimed ok but still loading — keep waiting
+                    if r.get("ok") or r.get("starting"):
+                        continue
+                except Exception:
+                    logger.exception("RMB wait_rmb_ready sync start failed")
+            elif not kicked_async:
+                wake_rmb_async(home_dir)
+                kicked_async = True
+        time.sleep(max(0.2, float(poll_s)))
+    return {
+        "ok": False,
+        "ready": False,
+        "error": f"RMB not ready within {timeout_s:.0f}s",
+        "starting": is_starting() or managed_process_alive() or is_loading(home_dir),
+        "detail": _last_health_detail,
+        "last_error": _last_start_error,
+    }
+
+
 def wake_rmb_async(home_dir: str | Path | None = None) -> dict[str, Any]:
     """Start RMB in a daemon thread if needed (never blocks the chat path)."""
+    ensure_rmb_watchdog(home_dir)
+    # Adopt orphan host from previous API process before spawning a second one
+    with contextlib.suppress(Exception):
+        ad = adopt_existing_host(home_dir)
+        if ad.get("ok") and (ad.get("adopted") or is_running(home_dir, force=True, require_http=True)):
+            mark_used()
+            return {"ok": True, "already_running": True, "adopted": bool(ad.get("adopted"))}
     if is_running(home_dir, force=True, require_http=True):
         mark_used()
         return {"ok": True, "already_running": True}
     if is_starting() or managed_process_alive():
         return {"ok": True, "starting": True}
+    if is_loading(home_dir):
+        return {"ok": True, "starting": True, "loading": True}
     if _user_stopped:
         return {"ok": False, "error": "RMB was stopped by user; Start RMB to load again"}
 
@@ -527,35 +1404,233 @@ def start_rmb_server(
 
     Unloads SmolVLM first. On failure, clears vision_suspended.
     Health wait does **not** hold the process lock so Stop can interrupt.
+
+    Never returns ``already_running`` when the disk model_path differs from
+    what we would spawn — callers that changed GGUF must get a real restart.
+
+    Concurrent callers single-flight: one spawn, others wait for the same result.
     """
     global _proc, _atexit_registered, _user_stopped
+    global _start_flight_active, _start_flight_result, _last_start_error
 
-    # Fast path outside lock
-    if is_running(home_dir, force=True, require_http=True):
-        mark_used()
-        _set_vision_suspended(home_dir, True)
-        st0 = merge_state(load_rmb_json(home_dir))
-        with contextlib.suppress(Exception):
-            sync_context_window_cache(st0)
-        return {
-            "ok": True,
-            "already_running": True,
-            "base_url": st0.get("base_url"),
-            "ctx_size": int(st0.get("ctx_size") or 0) or None,
-            "vision_suspended": True,
-        }
+    ensure_rmb_watchdog(home_dir)
 
-    with _lock:
+    # Single-flight: if another thread is already starting, join its wait
+    with _start_flight_lock:
+        if _start_flight_active:
+            join = True
+        else:
+            join = False
+            _start_flight_active = True
+            _start_flight_result = None
+            _start_flight_event.clear()
+
+    if join:
+        logger.info("RMB: joining in-flight start (single-flight)")
+        # Wait a bit longer than the outer wait so the leader finishes first
+        _start_flight_event.wait(timeout=max(30.0, float(wait_s) + 30.0))
         if is_running(home_dir, force=True, require_http=True):
             mark_used()
-            _set_vision_suspended(home_dir, True)
             return {
                 "ok": True,
                 "already_running": True,
+                "joined_flight": True,
                 "base_url": merge_state(load_rmb_json(home_dir)).get("base_url"),
-                "pid": _proc.pid if managed_process_alive() else None,
-                "vision_suspended": True,
             }
+        if isinstance(_start_flight_result, dict):
+            return dict(_start_flight_result)
+        return {
+            "ok": is_running(home_dir, force=True, require_http=True),
+            "joined_flight": True,
+            "starting": is_starting() or is_loading(home_dir),
+        }
+
+    result: dict[str, Any] = {"ok": False, "error": "start failed"}
+    try:
+        result = _start_rmb_server_impl(home_dir=home_dir, wait_s=wait_s)
+    except Exception as exc:
+        logger.exception("RMB start_rmb_server crashed")
+        result = {"ok": False, "error": f"start crashed: {exc}"}
+    finally:
+        with _start_flight_lock:
+            _start_flight_result = dict(result)
+            if not result.get("ok"):
+                _last_start_error = str(result.get("error") or "start failed")
+            elif result.get("ok"):
+                _last_start_error = None
+            _start_flight_active = False
+            _start_flight_event.set()
+    return result
+
+
+def _start_rmb_server_impl(
+    *,
+    home_dir: str | Path | None = None,
+    wait_s: float = 90.0,
+) -> dict[str, Any]:
+    """Inner start (single-flight leader only)."""
+    global _proc, _atexit_registered, _user_stopped, _last_start_error
+
+    # Desired GGUF on disk (after settings write)
+    st_probe = merge_state(load_rmb_json(home_dir))
+    want_model = _resolve_model_path(st_probe, home_dir, trust_sticky_path=True)
+    want_name = want_model.name.lower() if want_model else ""
+
+    # Fast path only if healthy AND already the desired GGUF (check via /v1/models id)
+    if is_running(home_dir, force=True, require_http=True):
+        same = True
+        if want_name:
+            try:
+                from urllib.request import urlopen
+
+                base = str(
+                    st_probe.get("base_url") or f"http://{DEFAULT_HOST}:{DEFAULT_CHAT_PORT}/v1"
+                ).rstrip("/")
+                with urlopen(base + "/models", timeout=1.5) as resp:  # noqa: S310
+                    import json as _json
+
+                    data = _json.loads(resp.read().decode("utf-8", errors="ignore") or "{}")
+                ids = []
+                for row in data.get("data") or data.get("models") or []:
+                    if isinstance(row, dict):
+                        ids.append(str(row.get("id") or row.get("model") or "").lower())
+                # ids often contain full path or filename
+                same = any(want_name in i or Path(i).name.lower() == want_name for i in ids) if ids else False
+            except Exception:
+                same = False
+        if same:
+            # Upgrade path: MTP GGUF running without speculative flags after
+            # autoconfig was added/improved → restart so partner gets full speed.
+            # Do NOT restart when the live process already has draft-mtp (host_auto
+            # may be missing after API recycle) — mid-chat restart → 503 Loading.
+            want_profile = detect_gguf_host_profile(want_model)
+            prev_auto = (
+                st_probe.get("host_auto")
+                if isinstance(st_probe.get("host_auto"), dict)
+                else {}
+            )
+            live_mtp = _live_process_has_mtp_flags(st_probe)
+            if live_mtp and not prev_auto.get("mtp_armed"):
+                # Heal rmb.json without bounce
+                prev_auto = {
+                    **want_profile,
+                    **prev_auto,
+                    "mtp_armed": True,
+                    "binary_supports_mtp": True,
+                }
+                st_probe["host_auto"] = prev_auto
+                with contextlib.suppress(Exception):
+                    save_rmb_json(st_probe, home_dir)
+            needs_mtp_upgrade = bool(
+                want_profile.get("mtp")
+                and binary_supports_draft_mtp(st_probe.get("runtime_binary") or "")
+                and not prev_auto.get("mtp_armed")
+                and not prev_auto.get("mtp_soft_disabled")
+                and not live_mtp
+            )
+            if needs_mtp_upgrade:
+                logger.info(
+                    "RMB autoconfig: restarting to arm MTP for %s",
+                    want_name or "?",
+                )
+                stop_rmb_server(
+                    home_dir=home_dir, resume_vision=False, user_intent=False
+                )
+                _user_stopped = False
+            else:
+                mark_used()
+                _set_vision_suspended(home_dir, True)
+                with contextlib.suppress(Exception):
+                    sync_context_window_cache(st_probe)
+                # Always re-align chat identity to the live GGUF (status bar / settings)
+                chat_sync = sync_rmb_chat_identity(
+                    st_probe, home_dir=home_dir, force_provider=True
+                )
+                return {
+                    "ok": True,
+                    "already_running": True,
+                    "base_url": st_probe.get("base_url"),
+                    "ctx_size": int(st_probe.get("ctx_size") or 0) or None,
+                    "model_path": str(want_model)
+                    if want_model
+                    else st_probe.get("model_path"),
+                    "chat_sync": chat_sync,
+                    "chat_model": chat_sync.get("stem"),
+                    "vision_suspended": True,
+                    "host_auto": prev_auto or want_profile,
+                }
+        else:
+            # Wrong GGUF still serving — tear down before spawn
+            logger.info(
+                "RMB: healthy host holds wrong GGUF (want %s); force stop before start",
+                want_name or "?",
+            )
+            stop_rmb_server(home_dir=home_dir, resume_vision=False, user_intent=False)
+            _user_stopped = False
+
+    # Outside lock: mid-load wait / clear wedged occupant (Stop must not block on this)
+    host_probe = str(st_probe.get("host") or DEFAULT_HOST)
+    try:
+        port_probe = int(st_probe.get("port") or DEFAULT_CHAT_PORT)
+    except (TypeError, ValueError):
+        port_probe = DEFAULT_CHAT_PORT
+    base_probe = str(
+        st_probe.get("base_url") or f"http://{host_probe}:{port_probe}/v1"
+    )
+    if (
+        not is_running(home_dir, force=True, require_http=True)
+        and _port_open(host_probe, port_probe)
+        and not _health(base_probe)
+    ):
+        resolved = _resolve_occupied_port(
+            host_probe, port_probe, base_probe, wait_s=min(float(wait_s), 120.0)
+        )
+        if resolved.get("already_healthy") or resolved.get("became_healthy"):
+            mark_used()
+            with contextlib.suppress(Exception):
+                adopt_existing_host(home_dir)
+            chat_sync = {}
+            with contextlib.suppress(Exception):
+                chat_sync = sync_rmb_chat_identity(
+                    merge_state(load_rmb_json(home_dir)),
+                    home_dir=home_dir,
+                    force_provider=True,
+                )
+            return {
+                "ok": True,
+                "already_running": True,
+                "adopted": True,
+                "base_url": base_probe,
+                "model_path": str(want_model) if want_model else st_probe.get("model_path"),
+                "chat_sync": chat_sync,
+                "vision_suspended": True,
+                "waited_for_load": bool(resolved.get("became_healthy")),
+            }
+        if not resolved.get("ok"):
+            _last_start_error = str(
+                resolved.get("error") or f"Port {port_probe} occupied"
+            )
+            return {
+                "ok": False,
+                "error": _last_start_error,
+                "port": port_probe,
+                "pid": resolved.get("pid"),
+                "vision_suspended": False,
+            }
+
+    with _lock:
+        if is_running(home_dir, force=True, require_http=True):
+            # Still up after force stop attempt — kill port again inside lock
+            try:
+                port_k = int(st_probe.get("port") or DEFAULT_CHAT_PORT)
+            except (TypeError, ValueError):
+                port_k = DEFAULT_CHAT_PORT
+            _kill_listeners_on_port(port_k)
+            if _proc is not None:
+                with contextlib.suppress(Exception):
+                    _proc.kill()
+                _proc = None
+            invalidate_cache()
         if managed_process_alive():
             # Another start in progress
             _mark_starting(float(wait_s) + 30)
@@ -575,6 +1650,9 @@ def start_rmb_server(
             payload = dict(payload)
             payload.setdefault("vision_suspended", False)
             payload.setdefault("vision", vision_suspend)
+            if payload.get("error"):
+                global _last_start_error
+                _last_start_error = str(payload.get("error"))
             return payload
 
         host = str(state.get("host") or DEFAULT_HOST)
@@ -595,7 +1673,8 @@ def start_rmb_server(
                 }
             )
 
-        model = _resolve_model_path(state, home_dir)
+        # Trust sticky path from settings — never re-pick catalog 7B over user choice
+        model = _resolve_model_path(state, home_dir, trust_sticky_path=True)
         if model is None:
             spec = get_model_spec(str(state.get("model_id") or DEFAULT_RMB_MODEL_ID))
             found = discover_ggufs(home_dir)
@@ -612,18 +1691,20 @@ def start_rmb_server(
                 }
             )
 
-        # If configured port is occupied by a non-healthy service, refuse (don't hop)
+        # Quick re-check under lock (no long wait — that happens outside)
         if _port_open(host, port) and not _health(base):
-            return _fail(
-                {
-                    "ok": False,
-                    "error": (
-                        f"Port {port} is in use but not a healthy llama-server. "
-                        "Stop the other process or change RMB port in Settings."
-                    ),
-                    "port": port,
-                }
-            )
+            _kill_listeners_on_port(port)
+            if _port_open(host, port) and not _health(base):
+                return _fail(
+                    {
+                        "ok": False,
+                        "error": (
+                            f"Port {port} is in use but not a healthy llama-server. "
+                            "Stop the other process or change RMB port in Settings."
+                        ),
+                        "port": port,
+                    }
+                )
 
         profile = str(state.get("profile") or "agent")
         prof = RMB_PROFILES.get(profile) or RMB_PROFILES["agent"]
@@ -636,6 +1717,13 @@ def start_rmb_server(
         if ngl < 0 and not _nvidia_ok():
             ngl = 0
 
+        # Autoconfig from GGUF name — MTP / coder / single-slot (no user knobs)
+        host_profile = detect_gguf_host_profile(model)
+        use_parallel = int(state.get("parallel") or 1)
+        if host_profile.get("force_parallel_1"):
+            use_parallel = 1
+            state["parallel"] = 1
+
         cmd = _build_cmd(
             binary,
             model,
@@ -644,9 +1732,21 @@ def start_rmb_server(
             ctx=ctx,
             ngl=ngl,
             threads=int(state.get("threads") or 0),
-            parallel=int(state.get("parallel") or 1),
+            parallel=use_parallel,
             flash_attn=bool(state.get("flash_attn", True)),
+            host_profile=host_profile,
         )
+        mtp_armed = (
+            bool(host_profile.get("mtp"))
+            and "--spec-type" in cmd
+            and binary_supports_draft_mtp(binary)
+        )
+        host_auto = {
+            **host_profile,
+            "mtp_armed": mtp_armed,
+            "binary_supports_mtp": binary_supports_draft_mtp(binary),
+            "cmd_flags": [a for a in cmd if a.startswith("--") or a in ("-fa", "-ngl", "-m")],
+        }
 
         creation = 0
         if os.name == "nt":
@@ -666,30 +1766,78 @@ def start_rmb_server(
         except Exception:
             log_f = subprocess.DEVNULL
 
-        try:
-            _proc = subprocess.Popen(
-                cmd,
+        def _spawn(argv: list[str]) -> subprocess.Popen[Any]:
+            return subprocess.Popen(
+                argv,
                 stdout=log_f,
                 stderr=subprocess.STDOUT,
                 env=env,
                 cwd=str(binary.parent),
                 creationflags=creation,
             )
+
+        try:
+            _proc = _spawn(cmd)
         except Exception as e:
             if log_f is not subprocess.DEVNULL:
                 with contextlib.suppress(Exception):
                     log_f.close()
             return _fail({"ok": False, "error": f"failed to spawn llama-server: {e}"})
 
+        # Soft-retry: if MTP flags make an older binary die instantly, restart plain.
+        # Partner rule — never fail to load a valid GGUF because of speculative knobs.
+        if mtp_armed:
+            time.sleep(0.35)
+            if _proc.poll() is not None:
+                logger.warning(
+                    "RMB autoconfig: MTP spawn exited code %s — retrying without "
+                    "speculative flags so the model still loads",
+                    _proc.returncode,
+                )
+                cmd = _build_cmd(
+                    binary,
+                    model,
+                    host=host,
+                    port=port,
+                    ctx=ctx,
+                    ngl=ngl,
+                    threads=int(state.get("threads") or 0),
+                    parallel=use_parallel,
+                    flash_attn=bool(state.get("flash_attn", True)),
+                    host_profile=host_profile,
+                    enable_mtp=False,
+                )
+                host_auto["mtp_armed"] = False
+                host_auto["mtp_soft_disabled"] = True
+                host_auto["mtp_soft_reason"] = (
+                    f"speculative flags rejected (exit {_proc.returncode})"
+                )
+                try:
+                    _proc = _spawn(cmd)
+                except Exception as e:
+                    if log_f is not subprocess.DEVNULL:
+                        with contextlib.suppress(Exception):
+                            log_f.close()
+                    return _fail(
+                        {"ok": False, "error": f"failed to spawn llama-server: {e}"}
+                    )
+
         state["model_path"] = str(model)
+        # Free-form stem as model_id so identity never snaps to catalog 7B
+        with contextlib.suppress(Exception):
+            state["model_id"] = model.stem
         state["runtime_binary"] = str(binary)
         state["pid"] = _proc.pid
         state["enabled"] = True
         state["vision_suspended"] = True
         state["base_url"] = base
         state["port"] = port
+        state["host_auto"] = host_auto
         save_rmb_json(state, home_dir)
         invalidate_cache()
+        # Auto chat identity: Provider + status bar follow this GGUF
+        with contextlib.suppress(Exception):
+            sync_rmb_chat_identity(state, home_dir=home_dir, force_provider=True)
 
         if not _atexit_registered:
             atexit.register(
@@ -708,6 +1856,7 @@ def start_rmb_server(
         wait_log = str(log_path)
         wait_vision = vision_suspend
         wait_mid = state.get("model_id")
+        wait_host_auto = host_auto
 
     # --- health wait OUTSIDE lock so Stop can run ---
     if wait_s <= 0:
@@ -718,6 +1867,7 @@ def start_rmb_server(
             "pid": wait_pid,
             "vision_suspended": True,
             "vision": wait_vision,
+            "host_auto": wait_host_auto,
         }
 
     deadline = time.time() + max(1.0, float(wait_s))
@@ -738,16 +1888,20 @@ def start_rmb_server(
             if log_f is not subprocess.DEVNULL:
                 with contextlib.suppress(Exception):
                     log_f.close()
+            tail = _tail_log(wait_log)
+            _last_start_error = f"llama-server exited early (code {code})"
             return {
                 "ok": False,
                 "error": f"llama-server exited early (code {code}). See {wait_log}",
                 "log": wait_log,
+                "log_tail": tail,
                 "vision_suspended": False,
                 "vision": wait_vision,
             }
         if is_running(home_dir, force=True, require_http=True):
             mark_used()
             _clear_starting()
+            _note_loading_state(False)
             with contextlib.suppress(Exception):
                 from remedy.nanoswarm.token_nanobot import cache_context_window
 
@@ -764,7 +1918,10 @@ def start_rmb_server(
                 "log": wait_log,
                 "vision_suspended": True,
                 "vision": wait_vision,
+                "host_auto": wait_host_auto,
             }
+        # Track loading while waiting for weights
+        _note_loading_state(True)
         time.sleep(0.4)
 
     # Timeout: kill orphan
@@ -783,13 +1940,17 @@ def start_rmb_server(
     if log_f is not subprocess.DEVNULL:
         with contextlib.suppress(Exception):
             log_f.close()
+    tail = _tail_log(wait_log)
+    _last_start_error = f"llama-server did not become healthy within {wait_s}s"
     return {
         "ok": False,
         "error": f"llama-server did not become healthy within {wait_s}s",
         "log": wait_log,
+        "log_tail": tail,
         "base_url": wait_base,
         "vision_suspended": False,
         "vision": wait_vision,
+        "detail": _last_health_detail,
     }
 
 
@@ -797,15 +1958,22 @@ def stop_rmb_server(
     home_dir: str | Path | None = None,
     *,
     resume_vision: bool = True,
+    user_intent: bool = True,
 ) -> dict[str, Any]:
     """Stop RMB chat host; clear vision suspend; optionally restore SmolVLM.
 
     ``resume_vision=False`` for atexit/lifespan so we never restart Smol while
     the process is exiting.
+
+    ``user_intent=True`` (default): mark user-stopped so background auto-wake
+    will not restart until the user hits Start / selects a model.
+    ``user_intent=False``: used when we are about to restart with a new GGUF —
+    must not leave the host sticky on the old weights.
     """
     global _proc, _user_stopped
     with _lock:
-        _user_stopped = True
+        if user_intent:
+            _user_stopped = True
         _clear_starting()
         killed = False
         if _proc is not None:
@@ -825,28 +1993,35 @@ def stop_rmb_server(
                 ipid = int(pid)
             except (TypeError, ValueError):
                 ipid = 0
-            if ipid and _looks_like_llama_server(ipid):
-                if os.name == "nt":
-                    with contextlib.suppress(Exception):
-                        subprocess.run(
-                            ["taskkill", "/PID", str(ipid), "/T", "/F"],
-                            capture_output=True,
-                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                        )
-                        killed = True
+            if ipid:
+                # Always try kill for stored pid — failing to kill leaves the
+                # previous GGUF sticky (Stop → pick new model still serves old).
+                if _kill_pid(ipid):
+                    killed = True
                 else:
-                    with contextlib.suppress(Exception):
-                        os.kill(ipid, 15)
-                        killed = True
-            elif ipid:
-                logger.warning(
-                    "RMB pid %s does not look like llama-server; skipping kill",
-                    ipid,
-                )
+                    logger.warning("RMB: taskkill failed for pid %s", ipid)
+        # Always free the RMB port — handles orphan llama-server after API restart
+        try:
+            port = int(state.get("port") or DEFAULT_CHAT_PORT)
+        except (TypeError, ValueError):
+            port = DEFAULT_CHAT_PORT
+        if _kill_listeners_on_port(port):
+            killed = True
         state["pid"] = None
         state["vision_suspended"] = False
         save_rmb_json(state, home_dir)
         invalidate_cache()
+
+    # Brief wait so the port is free before a restart spawn
+    for _ in range(15):
+        try:
+            port = int(merge_state(load_rmb_json(home_dir)).get("port") or DEFAULT_CHAT_PORT)
+        except (TypeError, ValueError):
+            port = DEFAULT_CHAT_PORT
+        if not _port_open(str(DEFAULT_HOST), port):
+            break
+        time.sleep(0.15)
+        _kill_listeners_on_port(port)
 
     vision_resume: dict[str, Any] = {"resumed": False, "skipped": True}
     if resume_vision:
@@ -866,10 +2041,23 @@ def ensure_rmb_server(
     force: bool = False,
 ) -> dict[str, Any]:
     """Start if enabled. Does not start when disabled unless force=True."""
+    ensure_rmb_watchdog(home_dir)
     state = merge_state(load_rmb_json(home_dir))
     if is_running(home_dir, force=True, require_http=True):
         mark_used()
+        with contextlib.suppress(Exception):
+            adopt_existing_host(home_dir)
         return {"ok": True, "already_running": True, "base_url": state.get("base_url")}
+    # Adopt orphan healthy host (API recycle) before spawning
+    with contextlib.suppress(Exception):
+        ad = adopt_existing_host(home_dir)
+        if ad.get("ok") and is_running(home_dir, force=True, require_http=True):
+            return {
+                "ok": True,
+                "already_running": True,
+                "adopted": True,
+                "base_url": state.get("base_url"),
+            }
     if _user_stopped and not force:
         return {"ok": False, "error": "RMB stopped by user"}
     if not state.get("enabled") and not force:
@@ -886,12 +2074,49 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     rmb_cfg = {}
     if isinstance(cfg, dict) and isinstance(cfg.get("rmb"), dict):
         rmb_cfg = dict(cfg["rmb"])
-    state = merge_state({**load_rmb_json(home), **rmb_cfg})
+    # rmb.json is the live control plane (Settings / stop / start). config.toml
+    # only fills gaps — never re-force auto_start on after the user disabled it.
+    disk = load_rmb_json(home)
+    state = merge_state({**rmb_cfg, **disk})
+    # Soft auto-heal: only when auto_start is explicitly on (never default on)
+    ensure_rmb_watchdog(home)
+    if (
+        not _user_stopped
+        and state.get("enabled", True)
+        and state.get("auto_start", False)
+        and not is_running(home, force=True, require_http=True)
+        and not is_starting()
+        and not is_loading(home)
+    ):
+        with contextlib.suppress(Exception):
+            adopt_existing_host(home)
+        if not is_running(home, force=True, require_http=True):
+            with contextlib.suppress(Exception):
+                wake_rmb_async(home)
     model_path = _resolve_model_path(state, home)
     binary = _find_llama_binary(state, home)
     running = is_running(home, force=True, require_http=True)
     ready = running
-    starting = is_starting()
+    loading_now = bool(is_loading(home)) and not ready
+    starting = is_starting() or loading_now
+    load_for = loading_for_s(home) if loading_now else 0.0
+
+    # Keep pid accurate for stop/UI even after API recycle (orphan adopt)
+    pid_val: int | None = None
+    try:
+        raw_pid = state.get("pid")
+        if raw_pid is not None:
+            pid_val = int(raw_pid)
+    except (TypeError, ValueError):
+        pid_val = None
+    if (running or loading_now) and (not pid_val or pid_val <= 0):
+        with contextlib.suppress(Exception):
+            found = _find_pid_on_port(int(state.get("port") or DEFAULT_CHAT_PORT))
+            if found:
+                pid_val = found
+                state["pid"] = found
+                with contextlib.suppress(Exception):
+                    save_rmb_json(state, home)
 
     # Auto-heal stuck suspend only when nothing is starting/alive
     if (
@@ -923,34 +2148,66 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         skip_vision = bool(state.get("vision_suspended")) or running
     vision_suspended = bool(state.get("vision_suspended")) or running or starting
 
+    # Public name = live GGUF stem always (what status bar / chat use)
+    chat_stem = model_path.stem if model_path is not None else str(state.get("model_id") or "")
     model_public = spec.to_public()
     if model_path is not None:
         model_public = {
             **model_public,
+            "id": chat_stem,
             "filename": model_path.name,
-            "name": (
-                model_path.stem
-                if model_path.name != spec.filename
-                else model_public.get("name")
-            ),
+            "name": chat_stem,
             "path": str(model_path),
         }
+    # Heal config drift automatically (no user action)
+    if model_path is not None and ready:
+        with contextlib.suppress(Exception):
+            sync_rmb_chat_identity(
+                {
+                    **state,
+                    "model_path": str(model_path),
+                    "base_url": state.get("base_url"),
+                },
+                home_dir=home,
+                force_provider=True,
+            )
+    restarts_recent = len(
+        [
+            t
+            for t in _watchdog_restart_times
+            if (time.time() - t) < _WATCHDOG_RESTART_WINDOW_S
+        ]
+    )
     return {
         "ok": True,
         "brand": "RMB",
         "brand_full": "Remedy Muscle Bridge",
         "engine": "llama.cpp",
         "enabled": bool(state.get("enabled")),
-        "auto_start": bool(state.get("auto_start", True)),
+        "auto_start": bool(state.get("auto_start", False)),
         "installed": installed,
         "running": running or starting,
         "ready": ready,
         "starting": starting,
+        "loading": loading_now,
+        "loading_for_s": round(load_for, 1) if load_for else 0,
+        "loading_stalled": bool(loading_stalled(home)) if loading_now else False,
+        "pid": pid_val,
+        "managed_child": managed_process_alive(),
+        "watchdog": bool(
+            _watchdog_thread is not None and _watchdog_thread.is_alive()
+        ),
+        "watchdog_restarts_recent": restarts_recent,
+        "health_detail": _last_health_detail or None,
+        "last_error": _last_start_error,
+        "user_stopped": bool(_user_stopped),
         "base_url": state.get("base_url"),
         "host": state.get("host"),
         "port": state.get("port"),
-        "model_id": state.get("model_id"),
+        "model_id": chat_stem or state.get("model_id"),
         "model": model_public,
+        "chat_model": chat_stem or None,
+        "llm_model": chat_stem or None,
         "model_path": str(model_path) if model_path else None,
         "model_present": model_path is not None,
         "runtime_binary": str(binary) if binary else None,
@@ -961,7 +2218,6 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         "nvidia": _nvidia_ok(),
         "catalog": catalog_public(),
         "discovered_ggufs": discovered[:24],
-        "user_stopped": _user_stopped,
         "not_ready_hint": (
             None
             if ready
@@ -971,13 +2227,22 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
                 else (
                     "Install llama-server (Local vision runtime once) then Start RMB"
                     if not binary
-                    else ("Starting…" if starting else "Start RMB to load the model")
+                    else (
+                        "Loading model…"
+                        if loading_now
+                        else ("Starting…" if starting else "Start RMB to load the model")
+                    )
                 )
             )
         ),
         "local_agent_mode": local_agent or running,
         "skips_vision_stack": skip_vision or vision_suspended,
         "vision_suspended": vision_suspended,
+        "host_auto": (
+            state.get("host_auto")
+            if isinstance(state.get("host_auto"), dict)
+            else detect_gguf_host_profile(model_path)
+        ),
         "endless_session": {
             "harness_min_pct": 0.55,
             "harness_max_pct": 0.78,
@@ -1068,16 +2333,50 @@ def apply_rmb_chat_model(
     live: bool = True,
     wait_s: float = 120.0,
 ) -> dict[str, Any]:
-    """Switch RMB catalog/GGUF from a status-bar or settings model id/stem.
+    """Switch RMB catalog/GGUF from a status-bar or settings model id/stem/path.
 
     Used when chat provider is already ``rmb`` and the user picks 7B vs 14B
-    (or any catalog/status-bar id) — updates rmb.json and restarts the host.
+    (or any catalog id, GGUF stem, or absolute path) — updates rmb.json and
+    restarts the host so the loaded weights match the picker.
     """
     from remedy.runtime.rmb.catalog import catalog_id_from_hint
 
     hint = (model_hint or "").strip()
     if not hint:
         return {"ok": False, "error": "empty model"}
+
+    # Absolute / relative path to a real GGUF
+    hint_path = Path(hint)
+    if hint_path.is_file() and hint_path.suffix.lower() == ".gguf":
+        return apply_rmb_settings(
+            {"model_path": str(hint_path.resolve()), "enabled": True},
+            home_dir=home_dir,
+            cfg=cfg,
+            live=live,
+            wait_s=wait_s,
+        )
+
+    # Match discovered files by filename or stem (any folder we scan)
+    hint_l = hint.lower()
+    if hint_l.endswith(".gguf"):
+        hint_l = hint_l[:-5]
+    for g in discover_ggufs(home_dir):
+        raw = str(g.get("path") or "").strip()
+        if not raw:
+            continue
+        p = Path(raw)
+        name_l = p.name.lower()
+        stem_l = p.stem.lower()
+        if hint_l in (name_l, stem_l, name_l.replace(".gguf", "")):
+            return apply_rmb_settings(
+                {"model_path": str(p), "enabled": True},
+                home_dir=home_dir,
+                cfg=cfg,
+                live=live,
+                wait_s=wait_s,
+            )
+
+    # Catalog id / fuzzy stem → catalog model (re-resolves GGUF on disk)
     mid = catalog_id_from_hint(hint) or hint
     return apply_rmb_settings(
         {"model_id": mid, "enabled": True},
@@ -1086,6 +2385,68 @@ def apply_rmb_chat_model(
         live=live,
         wait_s=wait_s,
     )
+
+
+def sync_rmb_chat_identity(
+    state: dict[str, Any],
+    *,
+    home_dir: str | Path | None = None,
+    force_provider: bool = False,
+) -> dict[str, Any]:
+    """Align config.toml + last_model so Provider / status bar match Loaded GGUF.
+
+    Canonical chat model id for RMB is the **GGUF stem** (filename without
+    .gguf). Catalog ids stay in rmb.json ``model_id`` for heuristics only.
+    """
+    out: dict[str, Any] = {"synced": False}
+    path = str(state.get("model_path") or "").strip()
+    if not path:
+        return out
+    try:
+        stem = Path(path).stem
+    except Exception:
+        return out
+    if not stem:
+        return out
+    base = str(state.get("base_url") or f"http://{DEFAULT_HOST}:{DEFAULT_CHAT_PORT}/v1")
+    out["stem"] = stem
+    out["model_path"] = path
+    out["base_url"] = base
+    try:
+        from remedy.interfaces.api_support import (
+            _find_config_path,
+            _write_config,
+            invalidate_config_cache,
+            load_config,
+        )
+
+        invalidate_config_cache()
+        disk = load_config()
+        if not isinstance(disk, dict):
+            return out
+        last_by = dict(disk.get("last_model_by_provider") or {})
+        last_by["rmb"] = stem
+        disk["last_model_by_provider"] = last_by
+        prov = str(disk.get("llm_provider") or "").strip().lower()
+        if force_provider or prov == "rmb":
+            disk["llm_provider"] = "rmb"
+            disk["llm_model"] = stem
+            disk["llm_base_url"] = base
+            # Local agent defaults when chat is on RMB
+            disk["harness_mode"] = disk.get("harness_mode") or "auto"
+            disk["harness_min_context_pct"] = 0.55
+            disk["harness_max_context_pct"] = 0.78
+            out["provider"] = "rmb"
+            out["llm_model"] = stem
+        cfg_path = _find_config_path()
+        if cfg_path is not None:
+            _write_config(cfg_path, disk)
+            invalidate_config_cache()
+            out["synced"] = True
+            out["config_path"] = str(cfg_path)
+    except Exception:
+        logger.debug("RMB chat identity sync failed", exc_info=True)
+    return out
 
 
 def apply_rmb_settings(
@@ -1158,11 +2519,15 @@ def apply_rmb_settings(
     if "model_id" in patch and "model_path" not in patch and old_mid != new_mid:
         state["model_path"] = ""
 
-    # Explicit path may imply a catalog id (Discovered GGUF / free path)
-    if "model_path" in patch and state.get("model_path") and "model_id" not in patch:
-        path_id = catalog_id_from_hint(str(state.get("model_path")))
-        if path_id:
-            state["model_id"] = path_id
+    # Explicit path: prefer GGUF stem as model_id for chat identity (status bar /
+    # session llm). Catalog mapping is optional metadata only — never preferred
+    # over the real filename (prevents Qwopus→Coder-7B snap).
+    explicit_path = "model_path" in patch and bool(str(state.get("model_path") or "").strip())
+    if explicit_path:
+        with contextlib.suppress(Exception):
+            stem = Path(str(state["model_path"])).stem
+            if stem:
+                state["model_id"] = stem
 
     if "profile" in patch and patch["profile"] in RMB_PROFILES:
         prof = RMB_PROFILES[str(patch["profile"])]
@@ -1173,8 +2538,14 @@ def apply_rmb_settings(
 
     # Re-resolve path after model_id/path changes so disk + restart load the
     # correct GGUF (and config mirror gets the right llm_model stem).
+    # CRITICAL: when the user picks an explicit GGUF path, trust it — do not
+    # replace Downloads/foo.gguf with the first catalog 7B under models/.
     if "model_id" in patch or "model_path" in patch or not str(state.get("model_path") or "").strip():
-        resolved = _resolve_model_path(state, home_dir)
+        resolved = _resolve_model_path(
+            state,
+            home_dir,
+            trust_sticky_path=explicit_path,
+        )
         if resolved is not None:
             state["model_path"] = str(resolved)
         elif "model_id" in patch and "model_path" not in patch and old_mid != new_mid:
@@ -1193,6 +2564,20 @@ def apply_rmb_settings(
     state["base_url"] = f"http://{host}:{port}/v1"
     state = merge_state(state)
     save_rmb_json(state, home_dir)
+
+    # Auto: any GGUF / model change becomes the chat model — users never
+    # need a separate "Use as chat provider" step for RMB.
+    model_changed = (
+        "model_path" in patch
+        or "model_id" in patch
+        or bool(patch.get("use_as_chat_provider"))
+        or bool(patch.get("enabled"))
+    )
+    chat_sync = sync_rmb_chat_identity(
+        state,
+        home_dir=home_dir,
+        force_provider=model_changed or bool(state.get("enabled")),
+    )
 
     # Which process knobs actually differ after merge (includes profile side-effects)?
     changed_process: list[str] = []
@@ -1234,11 +2619,22 @@ def apply_rmb_settings(
             "profile": state.get("profile"),
             "ctx_size": state.get("ctx_size"),
         }
+        # Canonical chat id = GGUF stem (never get_model_spec fallback to 7B)
+        chat_stem = ""
+        if state.get("model_path"):
+            with contextlib.suppress(Exception):
+                chat_stem = Path(str(state["model_path"])).stem
+        if not chat_stem:
+            mid0 = str(state.get("model_id") or "")
+            if mid0 in RMB_MODELS:
+                chat_stem = get_model_spec(mid0).filename.replace(".gguf", "")
+            else:
+                chat_stem = mid0 or DEFAULT_RMB_MODEL_ID
+
         if state.get("enabled") and patch.get("use_as_chat_provider"):
             cfg["llm_provider"] = "rmb"
             cfg["llm_base_url"] = state.get("base_url")
-            mid = str(state.get("model_id") or DEFAULT_RMB_MODEL_ID)
-            cfg["llm_model"] = get_model_spec(mid).filename.replace(".gguf", "")
+            cfg["llm_model"] = chat_stem
             cfg["harness_mode"] = cfg.get("harness_mode") or "auto"
             cfg["harness_min_context_pct"] = 0.55
             cfg["harness_max_context_pct"] = 0.78
@@ -1257,10 +2653,14 @@ def apply_rmb_settings(
             disk = load_config()
             if isinstance(disk, dict):
                 disk["rmb"] = cfg["rmb"]
+                last_by = dict(disk.get("last_model_by_provider") or {})
+                if chat_stem:
+                    last_by["rmb"] = chat_stem
+                    disk["last_model_by_provider"] = last_by
                 if state.get("enabled") and patch.get("use_as_chat_provider"):
                     disk["llm_provider"] = cfg["llm_provider"]
                     disk["llm_base_url"] = cfg["llm_base_url"]
-                    disk["llm_model"] = cfg["llm_model"]
+                    disk["llm_model"] = chat_stem
                     disk["harness_min_context_pct"] = 0.55
                     disk["harness_max_context_pct"] = 0.78
                     disk["approval_mode"] = "auto"
@@ -1276,15 +2676,8 @@ def apply_rmb_settings(
                 # with live host so next turn doesn't use stale config.
                 elif str(disk.get("llm_provider") or "").lower() == "rmb":
                     disk["llm_base_url"] = state.get("base_url")
-                    mid = str(state.get("model_id") or DEFAULT_RMB_MODEL_ID)
-                    if state.get("model_path"):
-                        stem = Path(str(state["model_path"])).stem
-                        if stem:
-                            disk["llm_model"] = stem
-                    else:
-                        disk["llm_model"] = get_model_spec(mid).filename.replace(
-                            ".gguf", ""
-                        )
+                    if chat_stem:
+                        disk["llm_model"] = chat_stem
                     disk["harness_min_context_pct"] = 0.55
                     disk["harness_max_context_pct"] = 0.78
                     # Full local power: don't leave ask-mode blocking every write
@@ -1318,34 +2711,67 @@ def apply_rmb_settings(
 
     if live:
         try:
+            global _user_stopped
             # Disable → stop immediately
             if enabled_before and not enabled_now:
-                stop_rmb_server(home_dir=home_dir, resume_vision=True)
+                stop_rmb_server(home_dir=home_dir, resume_vision=True, user_intent=True)
                 live_meta["stopped"] = True
-            # Process knobs changed while enabled (or still running)
-            elif enabled_now and changed_process and was_running:
+            # Model / ctx / GPU / port changed — always hard-stop then start so
+            # we never keep the previous GGUF (even if "Stop" left an orphan
+            # listener on :8787 or was_running was wrong).
+            elif enabled_now and changed_process:
                 logger.info(
-                    "RMB live apply: restarting for %s",
+                    "RMB live apply: force restart for %s (was_running=%s)",
                     ",".join(changed_process),
+                    was_running,
                 )
-                stop_rmb_server(home_dir=home_dir, resume_vision=False)
+                stop_rmb_server(
+                    home_dir=home_dir, resume_vision=False, user_intent=False
+                )
+                _user_stopped = False  # intentional restart, not user "stay off"
                 live_meta["stopped"] = True
                 start = start_rmb_server(home_dir=home_dir, wait_s=float(wait_s))
-                live_meta["started"] = bool(start.get("ok"))
+                live_meta["started"] = bool(
+                    start.get("ok") or start.get("starting")
+                )
                 live_meta["restarted"] = True
                 if start.get("ok"):
                     live_meta["ctx_size_live"] = start.get("ctx_size")
                     sync_context_window_cache(
                         {**state, "ctx_size": start.get("ctx_size") or state.get("ctx_size")}
                     )
+                    # Verify the live path matches what we intended
+                    got = str(start.get("model_path") or state.get("model_path") or "")
+                    want = str(state.get("model_path") or "")
+                    if want and got and Path(want).name.lower() != Path(got).name.lower():
+                        live_meta["live_error"] = (
+                            f"Host loaded {Path(got).name} but wanted {Path(want).name}"
+                        )
+                elif start.get("already_running"):
+                    # Should not happen after force stop — kill port and retry once
+                    logger.warning("RMB: already_running after force stop; retry kill+start")
+                    try:
+                        port = int(state.get("port") or DEFAULT_CHAT_PORT)
+                    except (TypeError, ValueError):
+                        port = DEFAULT_CHAT_PORT
+                    _kill_listeners_on_port(port)
+                    time.sleep(0.3)
+                    _user_stopped = False
+                    start2 = start_rmb_server(home_dir=home_dir, wait_s=float(wait_s))
+                    live_meta["started"] = bool(start2.get("ok") or start2.get("starting"))
+                    if not start2.get("ok"):
+                        live_meta["live_error"] = (
+                            start2.get("error")
+                            or "restart failed (old host still holding the port)"
+                        )
                 else:
                     live_meta["live_error"] = start.get("error") or "restart failed"
             # Enabled but not running: start so settings take effect now
             elif enabled_now and (not was_running) and (
-                changed_process
-                or patch.get("enabled") is True
+                patch.get("enabled") is True
                 or patch.get("use_as_chat_provider")
             ):
+                _user_stopped = False
                 start = start_rmb_server(home_dir=home_dir, wait_s=float(wait_s))
                 live_meta["started"] = bool(start.get("ok") or start.get("starting"))
                 if start.get("ok"):
@@ -1364,6 +2790,15 @@ def apply_rmb_settings(
 
     status = get_rmb_status(cfg)
     status["live_apply"] = live_meta
+    status["chat_sync"] = chat_sync
+    # Canonical stem for UI (status bar + provider form)
+    if chat_sync.get("stem"):
+        status["chat_model"] = chat_sync["stem"]
+        status["llm_model"] = chat_sync["stem"]
+    elif status.get("model_path"):
+        with contextlib.suppress(Exception):
+            status["chat_model"] = Path(str(status["model_path"])).stem
+            status["llm_model"] = status["chat_model"]
     # Surface a clear note for the UI when restart happened
     if live_meta.get("restarted"):
         if live_meta.get("started"):

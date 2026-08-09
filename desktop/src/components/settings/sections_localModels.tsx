@@ -8,6 +8,7 @@ import {
   FormLabel,
   FormNotice,
   FormSegmented,
+  FormSelect,
   FormStatusCard,
   FormStatusRow,
   FormToggle,
@@ -26,8 +27,19 @@ import {
   stopRmb,
   patchRmbSettings,
   applyRmbAsProvider,
+  getRmbStatus,
+  notifyRmbModelChanged,
   type RmbStatus,
 } from '../../api/rmb'
+
+function emitRmbChatModel(r: RmbStatus | null | undefined, fallbackPath?: string) {
+  const path = r?.model_path || fallbackPath || ''
+  const stem =
+    (r?.chat_model || r?.llm_model || r?.chat_sync?.stem || '').trim()
+    || (path ? path.replace(/^.*[\\/]/, '').replace(/\.gguf$/i, '') : '')
+  if (!stem) return
+  notifyRmbModelChanged({ stem, path: path || undefined, provider: 'rmb' })
+}
 import { updateSettings } from '../../api/settings'
 
 export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
@@ -54,32 +66,30 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
     <>
       <SettingsSection {...sectionProps('rmb')}>
         <FormHint>
-          <strong style={{ color: 'var(--text-secondary)' }}>Remedy Muscle Bridge</strong>
-          {' '}— on-device agent host for long coding sessions (llama.cpp). Context is automatic —
-          Session Brief + harness prune/offload; you never manage it. While RMB is running,
-          SmolVLM is <strong>unloaded</strong> until you stop RMB. Drop any GGUF in{' '}
+          <strong style={{ color: 'var(--text-secondary)' }}>Local models (RMB)</strong>
+          {' '}— pick a GGUF. Remedy <strong>loads it, sets chat to RMB, and keeps the
+          status bar in sync</strong> automatically. No other provider settings needed.
+          Files in Downloads or{' '}
           <code className="text-[9px]">~/.remedy/rmb/models/</code>.
         </FormHint>
         <FormStatusCard>
-          <FormStatusRow label="Engine">{rmb?.engine || 'llama.cpp'}</FormStatusRow>
-          <FormStatusRow label="Model">
-            {rmb?.model?.name || rmb?.model_id || '—'}
-          </FormStatusRow>
           <FormStatusRow label="Status">
             {!rmb
               ? '…'
               : rmb.ready
-                ? 'Ready'
+                ? '● Ready'
                 : rmb.running
-                  ? 'Starting…'
+                  ? '● Starting…'
                   : rmb.model_present && rmb.runtime_present
-                    ? 'Stopped'
+                    ? '○ Stopped'
                     : rmb.not_ready_hint || 'Not ready'}
           </FormStatusRow>
-          <FormStatusRow label="SmolVLM">
-            {rmb?.vision_suspended || rmb?.running
-              ? 'Suspended (RMB exclusive)'
-              : 'Available when RMB stops'}
+          <FormStatusRow label="Loaded GGUF">
+            <span className="font-mono text-[9px]" title={rmb?.model_path || undefined}>
+              {rmb?.model_path
+                ? rmb.model_path.replace(/^.*[\\/]/, '')
+                : rmb?.model?.name || rmb?.model_id || '— none —'}
+            </span>
           </FormStatusRow>
           <FormStatusRow label="Endpoint">
             <span className="font-mono text-[9px]">
@@ -88,25 +98,278 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
           </FormStatusRow>
           <FormStatusRow label="Context">
             {rmb?.ctx_size ?? 8192} tok · {rmb?.profile || 'agent'}
-            {rmb?.endless_session?.silent_context ? ' · auto memory' : ''}
+            {rmb?.nvidia ? ' · NVIDIA' : ' · CPU'}
           </FormStatusRow>
-          <FormStatusRow label="GPU">
-            {rmb?.nvidia ? 'NVIDIA detected' : 'CPU / no NVIDIA'}
+          <FormStatusRow label="Runtime">
+            {rmb?.runtime_present
+              ? (rmb.runtime_binary || 'llama-server').replace(/^.*[\\/]/, '')
+              : 'Missing — install Local vision once'}
           </FormStatusRow>
-          {rmb?.model_path ? (
-            <FormStatusRow label="GGUF">
-              <span className="font-mono text-[9px]" title={rmb.model_path}>
-                {rmb.model_path.replace(/^.*[\\/]/, '')}
-              </span>
-            </FormStatusRow>
-          ) : null}
+          <FormStatusRow label="SmolVLM">
+            {rmb?.vision_suspended || rmb?.running
+              ? 'Suspended (RMB exclusive)'
+              : 'Available when RMB stops'}
+          </FormStatusRow>
         </FormStatusCard>
         {rmbMsg ? (
-          <div className="text-[10px] mb-2" style={{ color: 'var(--text-secondary)' }}>
+          <FormNotice tone={/fail|error|not found|missing/i.test(rmbMsg) ? 'warn' : undefined}>
             {rmbMsg}
-          </div>
+          </FormNotice>
         ) : null}
-        <div className="flex flex-wrap gap-1.5 mb-2">
+
+        {/* Primary: pick GGUF from disk scan — options prop so values always stick */}
+        <div className="mt-2 mb-2 space-y-1.5">
+          <FormLabel>GGUF model (select to load)</FormLabel>
+          <FormSelect
+            size="sm"
+            disabled={rmbBusy}
+            value={rmb?.model_path || ''}
+            title="Discovered GGUF files — selecting restarts RMB with that file"
+            options={[
+              {
+                value: '',
+                label:
+                  (rmb?.discovered_ggufs?.length ?? 0) > 0
+                    ? '— pick a GGUF —'
+                    : '— no GGUFs found (Downloads or ~/.remedy/rmb/models) —',
+              },
+              ...(rmb?.discovered_ggufs || [])
+                .filter((g) => Boolean(g.path))
+                .map((g) => ({
+                  value: String(g.path),
+                  label: `${g.name || g.path}${
+                    g.size_gb != null ? ` (${g.size_gb} GB)` : ''
+                  }`,
+                })),
+            ]}
+            onChange={(model_path) => {
+              if (!model_path || rmbBusy) return
+              const cur = (rmb?.model_path || '').replace(/\//g, '\\').toLowerCase()
+              const next = model_path.replace(/\//g, '\\').toLowerCase()
+              if (cur === next && (rmb?.ready || rmb?.running)) {
+                setRmbMsg('Already loaded — pick a different GGUF')
+                return
+              }
+              void (async () => {
+                setRmbBusy(true)
+                const file = model_path.replace(/^.*[\\/]/, '')
+                setRmbMsg(`Loading ${file}… (restart may take 30–90s)`)
+                try {
+                  const r = await patchRmbSettings({
+                    model_path,
+                    enabled: true,
+                    // Always make this the active chat model — no extra clicks
+                    use_as_chat_provider: true,
+                  })
+                  const liveErr = r?.live_apply?.live_error
+                  const note = r?.live_note
+                  const loaded = (r?.model_path || model_path).replace(/^.*[\\/]/, '')
+                  // Optimistic UI: show selected path immediately
+                  await refreshRmb()
+                  emitRmbChatModel(r, model_path)
+                  if (liveErr) {
+                    setRmbMsg(`${loaded}: ${liveErr}`)
+                  } else if (r?.live_apply?.restarted || r?.ready || r?.running) {
+                    setRmbMsg(note || `Loaded ${loaded}`)
+                  } else if (note) {
+                    setRmbMsg(note)
+                  } else {
+                    // Disk saved but host not up — force start
+                    setRmbMsg(`Selected ${loaded} — starting host…`)
+                    const start = (await startRmb()) as { ok?: boolean; error?: string }
+                    setRmbMsg(
+                      start?.ok
+                        ? `Loaded ${loaded}`
+                        : start?.error || `Selected ${loaded} — Start RMB if needed`,
+                    )
+                    await refreshRmb()
+                    emitRmbChatModel(r, model_path)
+                  }
+                  onSettingsSaved?.()
+                } catch (err) {
+                  setRmbMsg(String(err))
+                  await refreshRmb()
+                } finally {
+                  setRmbBusy(false)
+                }
+              })()
+            }}
+          />
+          {(rmb?.catalog?.models?.length ?? 0) > 0 ? (
+            <>
+              <FormLabel>Catalog shortcut</FormLabel>
+              <FormSelect
+                size="sm"
+                disabled={rmbBusy}
+                value={rmb?.model_id || rmb?.catalog?.default_model_id || ''}
+                options={(rmb?.catalog?.models || []).map((m) => ({
+                  value: m.id,
+                  label: `${m.name}${m.approx_gb != null ? ` (~${m.approx_gb} GB)` : ''}`,
+                }))}
+                onChange={(model_id) => {
+                  if (rmbBusy || !model_id) return
+                  void (async () => {
+                    setRmbBusy(true)
+                    setRmbMsg(`Switching catalog → ${model_id}…`)
+                    try {
+                      const r = await patchRmbSettings({
+                        model_id,
+                        model_path: '',
+                        enabled: true,
+                        use_as_chat_provider: true,
+                      })
+                      const liveErr = r?.live_apply?.live_error
+                      const file = (r?.model_path || '').replace(/^.*[\\/]/, '')
+                      await refreshRmb()
+                      emitRmbChatModel(r)
+                      if (liveErr) setRmbMsg(`Model ${model_id}: ${liveErr}`)
+                      else if (r?.live_note) setRmbMsg(r.live_note)
+                      else {
+                        setRmbMsg(
+                          file
+                            ? `Catalog ${model_id} → ${file}`
+                            : `Catalog ${model_id}: no matching GGUF on disk`,
+                        )
+                      }
+                      onSettingsSaved?.()
+                    } catch (err) {
+                      setRmbMsg(String(err))
+                    } finally {
+                      setRmbBusy(false)
+                    }
+                  })()
+                }}
+              />
+            </>
+          ) : null}
+          <FormLabel>Or paste full path</FormLabel>
+          <input
+            type="text"
+            className="ui-input ui-input-sm mb-1 font-mono w-full"
+            disabled={rmbBusy}
+            defaultValue={rmb?.model_path || ''}
+            key={rmb?.model_path || 'rmb-path'}
+            placeholder="C:\Users\…\model.gguf"
+            onBlur={async (e) => {
+              const model_path = e.target.value.trim()
+              if (model_path === (rmb?.model_path || '')) return
+              setRmbBusy(true)
+              try {
+                const r = await patchRmbSettings({
+                  model_path: model_path || '',
+                  enabled: true,
+                  use_as_chat_provider: Boolean(model_path),
+                })
+                setRmbMsg(
+                  model_path
+                    ? r?.live_apply?.live_error ||
+                        r?.live_note ||
+                        `Path: ${model_path.replace(/^.*[\\/]/, '')}`
+                    : 'Path cleared',
+                )
+                await refreshRmb()
+                if (model_path) emitRmbChatModel(r, model_path)
+                onSettingsSaved?.()
+              } catch (err) {
+                setRmbMsg(String(err))
+              } finally {
+                setRmbBusy(false)
+              }
+            }}
+          />
+        </div>
+
+        <FormSegmented
+          value={((rmb?.profile || 'agent') as 'agent' | 'turbo' | 'quality')}
+          options={[
+            { id: 'agent', label: 'Agent' },
+            { id: 'turbo', label: 'Turbo' },
+            { id: 'quality', label: 'Quality' },
+          ]}
+          onChange={(pid) => {
+            if (rmbBusy) return
+            void (async () => {
+              setRmbBusy(true)
+              try {
+                await patchRmbSettings({ profile: pid, enabled: true })
+                setRmbMsg(`Profile: ${pid}`)
+                await refreshRmb()
+              } catch (e) {
+                setRmbMsg(String(e))
+              } finally {
+                setRmbBusy(false)
+              }
+            })()
+          }}
+        />
+        <div className="flex gap-2 mt-2">
+          <div className="flex-1 min-w-0">
+            <FormLabel>Context size</FormLabel>
+            <FormSelect
+              size="sm"
+              disabled={rmbBusy}
+              value={String(rmb?.ctx_size ?? 8192)}
+              options={[4096, 8192, 12288, 16384, 32768].map((n) => ({
+                value: String(n),
+                label: String(n),
+              }))}
+              onChange={(v) => {
+                const ctx_size = parseInt(v, 10)
+                if (Number.isNaN(ctx_size) || rmbBusy) return
+                void (async () => {
+                  setRmbBusy(true)
+                  try {
+                    const res = (await patchRmbSettings({
+                      ctx_size,
+                      enabled: true,
+                    })) as RmbStatus
+                    const live =
+                      res.live_apply?.ctx_size_live ?? res.ctx_size ?? ctx_size
+                    setRmbMsg(
+                      res.live_note ||
+                        (res.live_apply?.restarted
+                          ? `Context live: ${live} (restarted)`
+                          : `Context: ${live}`),
+                    )
+                    await refreshRmb()
+                  } catch (err) {
+                    setRmbMsg(String(err))
+                  } finally {
+                    setRmbBusy(false)
+                  }
+                })()
+              }}
+            />
+          </div>
+          <div className="flex-1 min-w-0">
+            <FormLabel>GPU layers (−1 = all)</FormLabel>
+            <input
+              type="number"
+              className="ui-input ui-input-sm mb-2 w-full"
+              disabled={rmbBusy}
+              defaultValue={
+                rmb?.n_gpu_layers != null ? String(rmb.n_gpu_layers) : '-1'
+              }
+              key={`ngl-${rmb?.n_gpu_layers ?? -1}`}
+              onBlur={async (e) => {
+                const n = parseInt(e.target.value, 10)
+                if (Number.isNaN(n)) return
+                setRmbBusy(true)
+                try {
+                  await patchRmbSettings({ n_gpu_layers: n, enabled: true })
+                  setRmbMsg(`GPU layers: ${n}`)
+                  await refreshRmb()
+                } catch (err) {
+                  setRmbMsg(String(err))
+                } finally {
+                  setRmbBusy(false)
+                }
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5 mt-1 mb-1">
           <FormActionButton
             variant="primary"
             disabled={rmbBusy}
@@ -114,9 +377,18 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
               setRmbBusy(true)
               setRmbMsg('Starting RMB…')
               try {
-                const r = (await startRmb()) as { ok?: boolean; error?: string }
+                const r = (await startRmb()) as {
+                  ok?: boolean
+                  error?: string
+                  model_path?: string
+                }
                 setRmbMsg(r?.ok ? 'RMB running' : r?.error || 'Start failed')
                 await refreshRmb()
+                if (r?.ok) {
+                  const st = await getRmbStatus().catch(() => null)
+                  emitRmbChatModel(st, r?.model_path)
+                }
+                onSettingsSaved?.()
               } catch (e) {
                 setRmbMsg(String(e))
               } finally {
@@ -150,14 +422,17 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
               setRmbMsg('Switching chat to RMB…')
               try {
                 const r = (await applyRmbAsProvider()) as {
-                  start?: { ok?: boolean; error?: string }
+                  start?: { ok?: boolean; error?: string; model_path?: string }
+                  status?: RmbStatus
                 }
                 setRmbMsg(
                   r?.start?.ok
-                    ? 'Chat provider set to RMB — start a new message'
-                    : r?.start?.error || 'Configured; start may still be loading',
+                    ? 'Chat provider = RMB — ready for messages'
+                    : r?.start?.error || 'Provider set; host may still be loading',
                 )
                 await refreshRmb()
+                const st = await getRmbStatus().catch(() => null)
+                emitRmbChatModel(st || r?.status, r?.start?.model_path)
                 onSettingsSaved?.()
               } catch (e) {
                 setRmbMsg(String(e))
@@ -173,225 +448,12 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             disabled={rmbBusy}
             onClick={() => void refreshRmb()}
           >
-            Refresh
+            Refresh list
           </FormActionButton>
         </div>
-        <FormSegmented
-          value={((rmb?.profile || 'agent') as 'agent' | 'turbo' | 'quality')}
-          options={[
-            { id: 'agent', label: 'Agent' },
-            { id: 'turbo', label: 'Turbo' },
-            { id: 'quality', label: 'Quality' },
-          ]}
-          onChange={(pid) => {
-            if (rmbBusy) return
-            void (async () => {
-              setRmbBusy(true)
-              try {
-                await patchRmbSettings({ profile: pid, enabled: true })
-                setRmbMsg(`Profile: ${pid}`)
-                await refreshRmb()
-              } catch (e) {
-                setRmbMsg(String(e))
-              } finally {
-                setRmbBusy(false)
-              }
-            })()
-          }}
-        />
-        {/* Model / GGUF / context — any model path */}
-        <div className="mt-2 mb-1 space-y-1.5">
-          {(rmb?.catalog?.models?.length ?? 0) > 0 ? (
-            <div>
-              <FormLabel>
-                Catalog model
-              </FormLabel>
-              <select
-                className="ui-select ui-select-sm w-full mb-2"
-                disabled={rmbBusy}
-                value={rmb?.model_id || rmb?.catalog?.default_model_id || ''}
-                onChange={async (e) => {
-                  const model_id = e.target.value
-                  setRmbBusy(true)
-                  try {
-                    // Clear sticky model_path so 7B→14B re-resolves (backend also clears)
-                    const r = await patchRmbSettings({
-                      model_id,
-                      model_path: '',
-                      enabled: true,
-                    })
-                    const liveErr = r?.live_apply?.live_error
-                    const note = r?.live_note
-                    if (liveErr) {
-                      setRmbMsg(`Model ${model_id}: ${liveErr}`)
-                    } else if (note) {
-                      setRmbMsg(note)
-                    } else {
-                      const file = (r?.model_path || '').replace(/^.*[\\/]/, '')
-                      setRmbMsg(
-                        file
-                          ? `Model: ${model_id} → ${file}`
-                          : `Model: ${model_id} (GGUF not found yet — place file or pick path)`,
-                      )
-                    }
-                    await refreshRmb()
-                  } catch (err) {
-                    setRmbMsg(String(err))
-                  } finally {
-                    setRmbBusy(false)
-                  }
-                }}
-              >
-                {(rmb?.catalog?.models || []).map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                    {m.approx_gb != null ? ` (~${m.approx_gb} GB)` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : null}
-          {(rmb?.discovered_ggufs?.length ?? 0) > 0 ? (
-            <div>
-              <FormLabel>
-                Discovered GGUF
-              </FormLabel>
-              <select
-                className="ui-select ui-select-sm w-full mb-2 font-mono"
-                disabled={rmbBusy}
-                value={rmb?.model_path || ''}
-                onChange={async (e) => {
-                  const model_path = e.target.value
-                  setRmbBusy(true)
-                  try {
-                    await patchRmbSettings({ model_path, enabled: true })
-                    setRmbMsg(`GGUF: ${model_path.replace(/^.*[\\/]/, '')}`)
-                    await refreshRmb()
-                  } catch (err) {
-                    setRmbMsg(String(err))
-                  } finally {
-                    setRmbBusy(false)
-                  }
-                }}
-              >
-                <option value="">— pick file —</option>
-                {(rmb?.discovered_ggufs || []).map((g) => (
-                  <option key={g.path || g.name} value={g.path || ''}>
-                    {g.name}
-                    {g.size_gb != null ? ` (${g.size_gb} GB)` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : null}
-          <div>
-            <FormLabel>
-              Model path (any .gguf)
-            </FormLabel>
-            <input
-              type="text"
-              className="ui-input ui-input-sm mb-2 font-mono"
-              disabled={rmbBusy}
-              defaultValue={rmb?.model_path || ''}
-              key={rmb?.model_path || 'rmb-path'}
-              placeholder="C:\\…\\model.gguf or leave blank to auto-discover"
-              onBlur={async (e) => {
-                const model_path = e.target.value.trim()
-                if (model_path === (rmb?.model_path || '')) return
-                setRmbBusy(true)
-                try {
-                  await patchRmbSettings({
-                    model_path: model_path || '',
-                    enabled: true,
-                  })
-                  setRmbMsg(model_path ? 'Model path saved' : 'Path cleared')
-                  await refreshRmb()
-                } catch (err) {
-                  setRmbMsg(String(err))
-                } finally {
-                  setRmbBusy(false)
-                }
-              }}
-            />
-          </div>
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <FormLabel>
-                Context size
-              </FormLabel>
-              <select
-                className="ui-select ui-select-sm w-full mb-2"
-                disabled={rmbBusy}
-                value={String(rmb?.ctx_size ?? 8192)}
-                onChange={async (e) => {
-                  const ctx_size = parseInt(e.target.value, 10)
-                  setRmbBusy(true)
-                  try {
-                    const res = (await patchRmbSettings({
-                      ctx_size,
-                      enabled: true,
-                    })) as RmbStatus & {
-                      live_note?: string
-                      live_apply?: { restarted?: boolean; ctx_size_live?: number }
-                    }
-                    const live =
-                      res.live_apply?.ctx_size_live ?? res.ctx_size ?? ctx_size
-                    setRmbMsg(
-                      res.live_note ||
-                        (res.live_apply?.restarted
-                          ? `Context live: ${live} (RMB restarted)`
-                          : `Context: ${live}`),
-                    )
-                    await refreshRmb()
-                  } catch (err) {
-                    setRmbMsg(String(err))
-                  } finally {
-                    setRmbBusy(false)
-                  }
-                }}
-              >
-                {[4096, 8192, 12288, 16384, 32768].map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex-1">
-              <FormLabel>
-                GPU layers (−1 = all)
-              </FormLabel>
-              <input
-                type="number"
-                className="ui-input ui-input-sm mb-2"
-                disabled={rmbBusy}
-                defaultValue={
-                  rmb?.n_gpu_layers != null ? String(rmb.n_gpu_layers) : '-1'
-                }
-                key={`ngl-${rmb?.n_gpu_layers ?? -1}`}
-                onBlur={async (e) => {
-                  const n = parseInt(e.target.value, 10)
-                  if (Number.isNaN(n)) return
-                  setRmbBusy(true)
-                  try {
-                    await patchRmbSettings({ n_gpu_layers: n, enabled: true })
-                    setRmbMsg(`GPU layers: ${n}`)
-                    await refreshRmb()
-                  } catch (err) {
-                    setRmbMsg(String(err))
-                  } finally {
-                    setRmbBusy(false)
-                  }
-                }}
-              />
-            </div>
-          </div>
-        </div>
         <FormHint>
-          Put a coding GGUF (e.g. Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf) in{' '}
-          <code className="text-[9px]">~/.remedy/rmb/models/</code> or paste a full path above.
-          Restart RMB after changing model/ctx. Install Local vision once if llama-server is
-          missing (shared runtime).
+          Selecting a GGUF restarts the host and switches chat to that model automatically.
+          Stop only if you want the host off.
         </FormHint>
       </SettingsSection>
 

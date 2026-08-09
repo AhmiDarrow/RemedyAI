@@ -200,32 +200,20 @@ function MenuItem({
     <button
       type="button"
       role="menuitem"
-      className="w-full flex items-center justify-between gap-4 mx-1 px-2.5 py-1.5 text-left text-xs rounded-md"
+      className={`titlebar-menu-item w-full flex items-center justify-between gap-4 mx-1 px-2.5 py-1.5 text-left text-xs rounded-md${
+        accent ? ' is-accent' : ''
+      }${danger ? ' is-danger' : ''}`}
       style={{
         width: 'calc(100% - 0.5rem)',
-        background: 'transparent',
-        color: danger ? 'var(--error)' : accent ? 'var(--accent)' : 'var(--text-primary)',
         border: 'none',
         cursor: 'pointer',
         fontWeight: accent || danger ? 600 : 500,
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = 'color-mix(in srgb, var(--bg-tertiary) 90%, transparent)'
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'transparent'
       }}
       onClick={onClick}
     >
       <span>{label}</span>
       {shortcut && (
-        <span
-          style={{
-            color: 'var(--text-muted)',
-            fontSize: '0.62rem',
-            fontFamily: 'ui-monospace, Cascadia Code, monospace',
-          }}
-        >
+        <span className="titlebar-menu-shortcut">
           {shortcut}
         </span>
       )}

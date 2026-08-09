@@ -4,7 +4,23 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
-## [0.22.0] - 2026-08-08
+## [0.22.0] - 2026-08-09
+
+### Partner reliability (build · ship · RMB)
+
+- **Ship tools:** `git_status` / `git_push` / `gh_release` / `ship_status` + bundled
+  `ship-release` skill (refactor-only after green; no pytest thrash).
+- **Build engine:** ship phase + green gate; auto-verify cooldown (source writes
+  only); ledger path hygiene; temp scripts under `.remedy-build/tmp/`;
+  `run_python_file` tool.
+- **Frontier continue** inject (brief + ledger) without local harness thrash.
+- **Stream 409 fix:** abort clears the live registry immediately so Stop unblocks
+  resend (was stuck “generation in progress”).
+- **RMB auto_start off by default** — serve no longer loads a GGUF host unless
+  Settings enables auto-start; `rmb.json` wins over stale config.toml.
+- **RMB sticky GGUF fix:** wrong-size path no longer stuck after catalog switch.
+- Caps: full-context tool results / UI preview raised for real source files;
+  history stubs omit body (empty + note) to stop rewrite thrash.
 
 ### Continuity · builder · organism · retention
 

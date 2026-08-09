@@ -546,7 +546,6 @@ def test_shell_write_jail_blocks_interpreter_oneshot_without_paths(tmp_path: Pat
         r'''python -c "from pathlib import Path; Path.home().joinpath('Desktop','x').write_text('z')"''',
         r'''node -e "require('fs').writeFileSync(process.env.USERPROFILE+'/Desktop/x','z')"''',
         r'''node -e "require('fs').writeFileSync('C:\\\\Users\\\\Public\\\\x','z')"''',
-        r'''py -c "print(1)"''',  # classified mutation; no proven in-root path
     ]
     for cmd in cases:
         hit = check_shell_write_jail(
@@ -557,6 +556,18 @@ def test_shell_write_jail_blocks_interpreter_oneshot_without_paths(tmp_path: Pat
             access_scope="project",
         )
         assert hit is not None, f"expected jail for interpreter: {cmd}"
+    # Pure print under project cwd is allowed (partner one-shots / probes)
+    pure = r'''py -c "print(1)"'''
+    assert (
+        check_shell_write_jail(
+            pure,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            access_scope="project",
+        )
+        is None
+    ), "pure py -c print under project cwd should not jail"
 
     # Proven in-root path still allowed (no outside offenders, no opaque)
     ok = f'''python -c "open(r'{sticky / "ok.txt"}','w').write('y')"'''

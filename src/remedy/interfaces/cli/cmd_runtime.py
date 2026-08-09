@@ -13,7 +13,11 @@ from rich.panel import Panel
 
 from remedy import __version__
 from remedy.interfaces.cli.util import console
-from remedy.interfaces.config import config_to_agent_config, resolve_config
+from remedy.interfaces.config import (
+    config_to_agent_config,
+    create_default_config,
+    resolve_config,
+)
 from remedy.interfaces.wizard import ensure_setup_before_launch
 from remedy.memory.store import MemoryStore
 
@@ -117,6 +121,10 @@ def _cmd_serve(args) -> None:
         attach_messengers_to_gateway(runtime, gateway)
 
         return runtime, gateway, memory, n_skills
+
+    # Partner full-power defaults (unset only if operator forces tight mode)
+    os.environ.setdefault("REMEDY_FULL_CONTEXT", "1")
+    os.environ.setdefault("REMEDY_REACT_AUTO_CONTINUE", "1")
 
     runtime, gateway, memory, n_skills = asyncio.run(_start())
 

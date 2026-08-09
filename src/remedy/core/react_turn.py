@@ -30,7 +30,8 @@ logger = logging.getLogger(__name__)
 # Pseudo-tool recoveries allowed per turn (local models re-emit JSON often).
 MAX_PSEUDO_RECOVERIES = 4
 # Disconnect / transient transport retries (non-stream re-POST).
-MAX_DISCONNECT_RETRIES = 1
+# Partner path: WinError 64 / mid-load drops are common on local RMB — retry hard.
+MAX_DISCONNECT_RETRIES = 8
 # Local: max tool schemas per model step after write-first pack.
 LOCAL_MAX_TOOLS_PER_STEP = 8
 
@@ -411,18 +412,17 @@ def synthesize_from_tools(
         parts.append("**Issues**")
         parts.extend(errors[-8:])
         parts.append(
-            "I can continue from here — say **continue** or restate the goal."
+            "Issues above will be addressed on the next tool steps automatically."
         )
     if not parts:
         parts.append(
-            "I ran tools this turn but the model stream stopped before a summary. "
-            "Session history is intact — ask me to **continue**."
+            "Tools ran this turn but the model stream stopped before a summary. "
+            "History is intact; the next step will resume the build."
         )
     else:
         parts.insert(
             0,
-            "I finished the tool work, but the model stream cut out before a full "
-            "answer. Here is what completed:",
+            "Tool work completed (model stream cut mid-summary). What landed:",
         )
     text = "\n".join(parts)
     if len(text) > max_chars:
@@ -444,8 +444,15 @@ def is_disconnect_error(exc: BaseException | str) -> bool:
             "not enough data",
             "connection aborted",
             "broken pipe",
+            "network name is no longer available",
+            "winerror 64",
             "winerror 10054",
             "winerror 10053",
+            "winerror 10061",  # connection refused (RMB down)
+            "actively refused",
+            "connectionerror",
+            "timeout",
+            "timed out",
         )
     )
 
