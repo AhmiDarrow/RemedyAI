@@ -2,11 +2,17 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.22.2**.
+Current series: **v0.22.3**.
 
 ## Contents
 
-- [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+- [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+
+## 0.22.3 - Clear mid-turn stops
+
+Disconnects, Stop, and stream errors leave a **real chat message** (not a
+vanishing status banner). Recovery after a dead Sleev proxy stays on the real
+provider. PyPI **`remedy-ai==0.22.3`** · tag **v0.22.3**.
 
 ## 0.22.2 - Sleev fail-open
 

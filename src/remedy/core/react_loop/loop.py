@@ -624,6 +624,18 @@ async def call_llm_stream(runtime, message: str,
                     from remedy.core.turn_context import is_turn_aborted
 
                     if is_turn_aborted():
+                        # Durable note — @@aborted alone never lands in the chat bubble.
+                        if tools_executed_this_turn > 0 or tool_batches_this_turn > 0:
+                            yield (
+                                "\n*(Stopped.) Tools already ran this turn are kept "
+                                "in history. Send **continue** to resume.*\n"
+                            )
+                        else:
+                            yield (
+                                "\n*(Generation stopped before a final answer. "
+                                "History is intact — send a new message or "
+                                "**continue**.)*\n"
+                            )
                         yield "@@aborted\n"
                         return
 
@@ -1488,7 +1500,27 @@ async def call_llm_stream(runtime, message: str,
                     collected = {"content": None, "tool_calls": None}
                     round_state = StreamRoundState()
                     continue
-                  raise
+                  # Retries exhausted — always leave a durable chat explanation
+                  # (@@status banners alone never save to the session).
+                  _why = str(_stream_exc or "connection lost")[:240]
+                  _sleev_hint = ""
+                  if (
+                    "17321" in _why
+                    or "sleev" in _why.lower()
+                    or bool(getattr(runtime, "_sleev_force_direct", False))
+                  ):
+                    _sleev_hint = (
+                        " The Sleev proxy looked unreachable; turn **Sleev** off "
+                        "in Settings → Provider until the gateway is healthy, or "
+                        "point it at a live local `127.0.0.1` host."
+                    )
+                  yield (
+                    f"\nI could not finish this turn — the model connection "
+                    f"failed after several retries ({_why}).{_sleev_hint} "
+                    "Nothing further was written here. History is intact — "
+                    "send **continue** or restate the request.\n"
+                  )
+                  return
 
                 # Ledger + stream usage once per LLM HTTP call (not per SSE chunk).
                 _u_final = getattr(round_state, "last_usage", None)
@@ -2900,26 +2932,34 @@ async def call_llm_stream(runtime, message: str,
             _msgs = messages  # type: ignore[name-defined]
             if _turn.tools_executed > 0 or _turn.tool_batches > 0:
                 # Partner: never end the turn asking the user to resend.
-                # Restart RMB if needed and complete a short status ourselves.
-                yield "@@status:Host blip after tools — recovering RMB and finishing…\n"
+                # Finish a short status ourselves; only wait on RMB when local.
+                yield (
+                    "@@status:Host blip after tools — recovering and finishing…\n"
+                )
                 _finished = False
                 if _is_disc(e) or True:
                     for _attempt in range(3):
                         try:
                             import asyncio as _aio
 
-                            from remedy.runtime.rmb.service import wait_rmb_ready
-
-                            _wr = await _aio.to_thread(
-                                wait_rmb_ready, None, timeout_s=90.0
-                            )
-                            if not _wr.get("ok"):
-                                continue
-                            import aiohttp as _ah
-
                             from remedy.core.llm_binding import get_llm_binding
+                            from remedy.core.local_agent_optimize import (
+                                is_local_binding as _ilb_rec,
+                            )
 
                             _b2 = get_llm_binding(runtime)
+                            if _ilb_rec(
+                                _b2.provider, _b2.model, _b2.base_url
+                            ):
+                                from remedy.runtime.rmb.service import wait_rmb_ready
+
+                                _wr = await _aio.to_thread(
+                                    wait_rmb_ready, None, timeout_s=90.0
+                                )
+                                if not _wr.get("ok"):
+                                    continue
+                            import aiohttp as _ah
+
                             _ad2 = _b2.adapter()
                             _fin_msgs = list(_msgs) + [
                                 {
@@ -2949,12 +2989,21 @@ async def call_llm_stream(runtime, message: str,
                             with suppress(Exception):
                                 from remedy.core.sleev import prepare_llm_http
 
+                                # Prefer direct provider after any Sleev blip —
+                                # recovery must not re-hit a dead proxy.
                                 _ep, _hdr = prepare_llm_http(
                                     provider=_b2.provider,
                                     base_url=_b2.base_url,
                                     api_key=_b2.api_key,
                                     adapter=_ad2,
                                     runtime=runtime,
+                                    force_direct=bool(
+                                        getattr(runtime, "_sleev_force_direct", False)
+                                    )
+                                    or (
+                                        "17321" in str(e)
+                                        or "sleev" in str(e).lower()
+                                    ),
                                 )
                             async with (
                                 _ah.ClientSession() as _sess,
@@ -3004,23 +3053,46 @@ async def call_llm_stream(runtime, message: str,
                 return
         except Exception:
             pass
-        # Disconnect with zero tools: hard-restart RMB then stop cleanly
+        # Disconnect with zero tools: explain in-chat (not status-only banners).
         if is_disconnect_error(e):
+            _why = str(e)[:240]
+            _is_local = False
             with suppress(Exception):
-                import asyncio as _aio
+                from remedy.core.llm_binding import get_llm_binding as _glb_x
+                from remedy.core.local_agent_optimize import is_local_binding as _ilb_x
 
-                from remedy.runtime.rmb.service import wait_rmb_ready
+                _bx = _glb_x(runtime)
+                _is_local = bool(
+                    _ilb_x(_bx.provider, _bx.model, _bx.base_url)
+                )
+            if _is_local:
+                with suppress(Exception):
+                    import asyncio as _aio
 
-                yield "@@status:Model connection lost — restarting RMB…\n"
-                await _aio.to_thread(wait_rmb_ready, None, timeout_s=90.0)
+                    from remedy.runtime.rmb.service import wait_rmb_ready
+
+                    yield "@@status:Model connection lost — checking local host…\n"
+                    await _aio.to_thread(wait_rmb_ready, None, timeout_s=90.0)
+            _sleev_note = ""
+            if (
+                "17321" in _why
+                or "sleev" in _why.lower()
+                or bool(getattr(runtime, "_sleev_force_direct", False))
+            ):
+                _sleev_note = (
+                    " If you enabled Sleev, turn it **off** in Settings until "
+                    "the gateway is running again."
+                )
             yield (
-                "\n@@status:Local host rechecked. "
-                "History intact — next message continues the build.\n"
+                f"\nConnection to the model was lost mid-turn ({_why})."
+                f"{_sleev_note} "
+                "No final answer was written for this step. "
+                "History is intact — send **continue** to resume.\n"
             )
             return
         yield (
-            f"\n[LLM STREAM EXCEPTION]\n{e}\n[END LLM STREAM EXCEPTION]\n\n"
-            "History is intact; next message continues the build.\n"
+            f"\nSomething went wrong mid-turn ({e}).\n\n"
+            "History is intact; send **continue** or restate the request.\n"
         )
 
 

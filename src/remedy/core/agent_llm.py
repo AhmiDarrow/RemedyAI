@@ -278,6 +278,7 @@ async def post_chat(
             api_key=bind.api_key,
             adapter=adapter,
             runtime=runtime,
+            force_direct=bool(getattr(runtime, "_sleev_force_direct", False)),
         )
     except Exception:
         pass
@@ -351,6 +352,9 @@ async def post_chat(
                                 api_key=bind.api_key,
                                 adapter=adapter,
                                 runtime=runtime,
+                                force_direct=bool(
+                                    getattr(runtime, "_sleev_force_direct", False)
+                                ),
                             )
                         except Exception:
                             pass

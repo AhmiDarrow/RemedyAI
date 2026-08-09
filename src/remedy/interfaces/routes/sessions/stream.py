@@ -392,10 +392,6 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                 ):
                     status = "no_key"
 
-                # Abort path already emitted event:aborted — skip usage/done.
-                if aborted:
-                    return
-
                 # Final usage: prefer provider totals; fall back to char estimate.
                 final_usage: dict | None = None
                 try:
@@ -416,13 +412,23 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                         final_usage = merge_usage(usage_acc)
                     else:
                         final_usage = merge_usage(est)
-                    yield (
-                        "event: usage\ndata: "
-                        + json.dumps({"type": "usage", **final_usage})
-                        + "\n\n"
-                    )
+                    if not aborted and isinstance(final_usage, dict):
+                        yield (
+                            "event: usage\ndata: "
+                            + json.dumps({"type": "usage", **final_usage})
+                            + "\n\n"
+                        )
                 except Exception:
                     final_usage = None
+
+                # Always leave a durable assistant row when we have any text
+                # (including stop/disconnect explanations). Status-only turns
+                # used to vanish with no chat bubble.
+                if aborted and not (full_response or "").strip():
+                    full_response = (
+                        "*(Generation stopped. History is intact — "
+                        "send **continue** to resume.)*"
+                    )
 
                 if full_response and memory:
                     tok = None
@@ -459,8 +465,12 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                                     role="assistant",
                                 )
 
-                done_payload: dict = {"type": "done", "request_id": request_id}
-                if isinstance(final_usage, dict):
+                done_payload: dict = {
+                    "type": "done",
+                    "request_id": request_id,
+                    "status": "aborted" if aborted else "ok",
+                }
+                if isinstance(final_usage, dict) and not aborted:
                     done_payload["usage"] = final_usage
                 yield f"event: done\ndata: {json.dumps(done_payload)}\n\n"
 
@@ -491,6 +501,27 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                 if not safe_msg.strip():
                     safe_msg = "Stream error"
                 yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': safe_msg})}\n\n"
+                # Persist a short explanation so the chat is not empty after a crash.
+                with contextlib.suppress(Exception):
+                    if memory is not None:
+                        note = (
+                            full_response.strip() + "\n\n"
+                            if (full_response or "").strip()
+                            else ""
+                        )
+                        note += (
+                            f"*(Turn ended with an error: {safe_msg}. "
+                            "History is intact — send **continue** to resume.)*"
+                        )
+                        await memory.add_chat_message(
+                            ChatMessage(
+                                session_id=session_id,
+                                role=ChatMessageRole.ASSISTANT,
+                                content=note,
+                                model=req.model
+                                or getattr(runtime, "_llm_model", None),
+                            )
+                        )
             finally:
                 default_registry.counter(
                     "remedy_chat_requests_total", path="session_stream", status=status

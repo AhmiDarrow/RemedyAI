@@ -38,7 +38,7 @@
 | **Who it’s for** | Owners who want power without multi-agent theater — chat, files, shell, browser rail, computer use |
 | **What stays local** | Memory, Session Brief, skills, approvals, DPAPI secrets, optional SmolVLM2 vision |
 | **What you bring** | Your API keys / local Ollama — no Remedy cloud account for core use |
-| **Current** | **v0.22.2** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
+| **Current** | **v0.22.3** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
 
 From the creator: *My name is Ahmi, I hope you enjoy my Remedy.*  
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.
@@ -47,7 +47,7 @@ In-app: title-bar / tray → **About Remedy** · **Settings → About**.
 
 ## What’s new
 
-**Latest: [v0.22.2](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.22.2)** — Sleev dead-gateway fail-open (chat no longer stuck).
+**Latest: [v0.22.3](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.22.3)** — Mid-turn failures leave a clear chat note; Sleev recovery stays direct.
 
 <p align="center">
   <img src="docs/manual/assets/remedy-partner-architecture.jpg" alt="How Remedy fits together" width="640" />
