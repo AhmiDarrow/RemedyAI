@@ -8,13 +8,13 @@ from remedy.interfaces.config import (
     DEMO_DUMMY_API_KEY,
     PROVIDER_CATALOG,
     apply_env_provider_bootstrap,
-    free_options_public,
     normalize_llm_settings,
     provider_credentials_ready,
     public_provider_catalog,
     resolve_provider_api_key,
     validate_provider_model,
 )
+from remedy.interfaces.provider_catalog import free_options_public
 
 
 def test_demo_in_catalog():
