@@ -57,6 +57,29 @@ export interface RmbStatus {
     mlock?: boolean
     no_mmap?: boolean
     cache_type?: string
+    typical_p?: number | null
+    tfs_z?: number | null
+    mirostat?: number | null
+    mirostat_tau?: number | null
+    mirostat_eta?: number | null
+    presence_penalty?: number | null
+    frequency_penalty?: number | null
+    main_gpu?: number | null
+    threads_batch?: number | null
+    tensor_split?: string
+    samplers?: string
+    rope_scaling?: string
+    yarn_orig_ctx?: number | null
+    yarn_factor?: number | null
+    yarn_beta_fast?: number | null
+    yarn_beta_slow?: number | null
+    no_kv_offload?: boolean
+    dry_multiplier?: number | null
+    dry_base?: number | null
+    dry_allowed_length?: number | null
+    dry_penalty_last_n?: number | null
+    xtc_probability?: number | null
+    xtc_threshold?: number | null
   }
   nvidia?: boolean
   not_ready_hint?: string | null

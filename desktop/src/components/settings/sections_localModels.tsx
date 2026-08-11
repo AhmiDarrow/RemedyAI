@@ -712,6 +712,85 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                   )
                 }
               />
+              <RmbEngineNumber
+                label="Dry multiplier (0 = off)"
+                value={rmb?.engine?.dry_multiplier ?? ''}
+                min={0}
+                step={0.1}
+                disabled={rmbBusy}
+                onApply={(dry_multiplier) =>
+                  void patchKnob(
+                    { dry_multiplier: Math.max(0, dry_multiplier) },
+                    `Dry: ${dry_multiplier}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Dry base"
+                value={rmb?.engine?.dry_base ?? ''}
+                min={0}
+                step={0.05}
+                disabled={rmbBusy}
+                onApply={(dry_base) =>
+                  void patchKnob(
+                    { dry_base: Math.max(0, dry_base) },
+                    `Dry base: ${dry_base}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Dry allowed length"
+                value={rmb?.engine?.dry_allowed_length ?? ''}
+                min={0}
+                step={1}
+                disabled={rmbBusy}
+                onApply={(dry_allowed_length) =>
+                  void patchKnob(
+                    { dry_allowed_length: Math.max(0, Math.round(dry_allowed_length)) },
+                    `Dry length: ${dry_allowed_length}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Dry penalty last N (−1 = all)"
+                value={rmb?.engine?.dry_penalty_last_n ?? ''}
+                step={1}
+                disabled={rmbBusy}
+                onApply={(dry_penalty_last_n) =>
+                  void patchKnob(
+                    { dry_penalty_last_n: Math.round(dry_penalty_last_n) },
+                    `Dry last N: ${dry_penalty_last_n}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="XTC probability (0 = off)"
+                value={rmb?.engine?.xtc_probability ?? ''}
+                min={0}
+                max={1}
+                step={0.05}
+                disabled={rmbBusy}
+                onApply={(xtc_probability) =>
+                  void patchKnob(
+                    { xtc_probability: Math.min(1, Math.max(0, xtc_probability)) },
+                    `XTC: ${xtc_probability}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="XTC threshold"
+                value={rmb?.engine?.xtc_threshold ?? ''}
+                min={0}
+                max={1}
+                step={0.05}
+                disabled={rmbBusy}
+                onApply={(xtc_threshold) =>
+                  void patchKnob(
+                    { xtc_threshold: Math.min(1, Math.max(0, xtc_threshold)) },
+                    `XTC threshold: ${xtc_threshold}`,
+                  )
+                }
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-x-2 gap-y-1">
