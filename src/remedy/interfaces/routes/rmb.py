@@ -66,6 +66,13 @@ class RmbSettingsPatch(BaseModel):
     yarn_beta_fast: float | None = None
     yarn_beta_slow: float | None = None
     no_kv_offload: bool | None = None
+    # --- DRY + XTC samplers (KoboldCpp parity) ---
+    dry_multiplier: float | None = None
+    dry_base: float | None = None
+    dry_allowed_length: int | None = None
+    dry_penalty_last_n: int | None = None
+    xtc_probability: float | None = None
+    xtc_threshold: float | None = None
 
 
 def register_rmb_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:

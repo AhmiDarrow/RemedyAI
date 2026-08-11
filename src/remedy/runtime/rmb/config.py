@@ -120,6 +120,13 @@ def default_state() -> dict[str, Any]:
         "mlock": False,
         "no_mmap": False,
         "cache_type": "",  # '' | q8_0 | f16 | bf16 (--cache-type-k/v)
+        # --- DRY + XTC samplers (KoboldCpp parity) ---
+        "dry_multiplier": 0.0,  # --dry-multiplier (0 = off)
+        "dry_base": 1.75,  # --dry-base
+        "dry_allowed_length": 2,  # --dry-allowed-length
+        "dry_penalty_last_n": -1,  # --dry-penalty-last-n (-1 = all tokens)
+        "xtc_probability": 0.0,  # --xtc-probability (0 = off)
+        "xtc_threshold": 0.1,  # --xtc-threshold
         "profile": "agent",  # agent | turbo | quality
         "pid": None,
         # Set True while RMB owns GPU; cleared on stop / failed start
