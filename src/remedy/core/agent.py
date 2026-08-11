@@ -853,6 +853,34 @@ class BasicRuntime(AgentRuntime):
         ):
             yield item
 
+    def _right_size_max_tokens(self) -> int:
+        """Compute the completion budget for the bound provider/model.
+
+        Reasoning must never be truncated mid-stream: request the provider's
+        accepted maximum (DeepSeek legacy caps at 8k, V4 at 64k, OpenAI-compat
+        at 128k). Stored on the runtime so the request builder passes it
+        explicitly; auto-continue still covers true finish_reason=length walls.
+        """
+        from remedy.core.providers import MAX_OUTPUT_TOKENS
+
+        cap = MAX_OUTPUT_TOKENS
+        try:
+            from remedy.core.llm_binding import get_llm_binding
+
+            bind = get_llm_binding(self)
+            adapter = bind.adapter()
+            model = bind.model or self._llm_model
+            with suppress(Exception):
+                cap = int(adapter.provider_max_output_tokens(model))
+        except Exception:
+            with suppress(Exception):
+                adapter = getattr(self, "_provider", None)
+                if adapter is not None:
+                    cap = int(adapter.provider_max_output_tokens(self._llm_model))
+        cap = max(1, cap)
+        self._llm_max_output_tokens = cap
+        return cap
+
     async def _call_llm_stream(
         self,
         message: str,
@@ -861,17 +889,50 @@ class BasicRuntime(AgentRuntime):
         *,
         plan_mode: bool = False,
     ) -> AsyncIterator[str]:
-        """Call the LLM with a smooth ReAct loop."""
+        """Call the LLM with a smooth ReAct loop.
+
+        Right-sizes max_tokens up front (reasoning is never truncated
+        mid-stream), then runs the loop with ONE retry-with-backoff on
+        transient failures before a clean turn-end.
+        """
         from remedy.core.agent_react_loop import call_llm_stream
 
-        async for chunk in call_llm_stream(
-            self,
-            message,
-            session_id=session_id,
-            attachments=attachments,
-            plan_mode=plan_mode,
-        ):
-            yield chunk
+        self._right_size_max_tokens()
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                async for chunk in call_llm_stream(
+                    self,
+                    message,
+                    session_id=session_id,
+                    attachments=attachments,
+                    plan_mode=plan_mode,
+                ):
+                    yield chunk
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if attempt >= 2:
+                    # Clean turn-end: no traceback, no dangling stream.
+                    logger.warning(
+                        "LLM stream failed after 2 attempts — clean turn-end: %s",
+                        exc,
+                    )
+                    yield (
+                        "\n*(The model request failed after one retry — "
+                        "history is intact. Resend or say **continue**.)*\n"
+                    )
+                    return
+                logger.warning(
+                    "LLM stream transient failure (attempt %d) — retrying "
+                    "with backoff: %s",
+                    attempt,
+                    exc,
+                )
+                yield "@@status:Connection blip — retrying once…\n"
+                await asyncio.sleep(1.5 * attempt)
 
     async def _post_chat(
         self, body: dict[str, Any]

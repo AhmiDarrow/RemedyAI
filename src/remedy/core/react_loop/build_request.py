@@ -82,12 +82,16 @@ def build_step_request_body(
             _stream = False
             use_openai_sse = False
 
+    # Right-size the completion budget (reasoning is never truncated
+    # mid-stream): prefer the runtime's computed provider cap when set.
+    _mt_override = getattr(runtime, "_llm_max_output_tokens", None)
     body = adapter.build_body(
         model=bind.model,
         messages=messages,
         tools=tools,
         stream=_stream,
         thinking_level=think,
+        max_tokens=(int(_mt_override) if _mt_override else None),
     )
     with suppress(Exception):
         from remedy.core.local_agent_optimize import apply_local_body_optimize
