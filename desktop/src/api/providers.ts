@@ -219,11 +219,11 @@ export const FALLBACK_PROVIDERS: ProviderInfo[] = [
     id: 'ollama',
     name: 'Ollama (local)',
     base_url: 'http://127.0.0.1:11434/v1',
-    models: [
-      { id: 'llama3.2', name: 'Llama 3.2' },
-      { id: 'qwen2.5', name: 'Qwen 2.5' },
-    ],
-    default_model: 'llama3.2',
+    // No curated models — the local server's pulled models are fetched live
+    // (detectOllama / GET /api/models?provider=ollama). Guessing model names
+    // produced dead sessions for users who never pulled them.
+    models: [],
+    default_model: '',
     auth: ['none'],
     oauth: false,
     env_keys: [],
@@ -256,14 +256,15 @@ export const FALLBACK_PROVIDERS: ProviderInfo[] = [
   {
     id: 'custom',
     name: 'Custom / OpenAI-compatible',
-    base_url: 'http://127.0.0.1:5001/api/v1',
+    base_url: 'http://127.0.0.1:5001/v1',
     models: [{ id: 'default', name: 'Default' }],
     default_model: 'default',
     auth: ['api_key'],
     oauth: false,
     env_keys: [],
     show_base_url: true,
-    // Always primary (not behind Advanced) — LM Studio / llama.cpp / local hosts.
+    // Always primary (not behind Advanced) — LM Studio / llama.cpp / KoboldCpp
+    // local hosts. KoboldCpp serves the OpenAI API at /v1 (not /api/v1).
     advanced: false,
   },
 ]

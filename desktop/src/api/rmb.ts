@@ -35,6 +35,29 @@ export interface RmbStatus {
   ctx_size?: number
   n_gpu_layers?: number | null
   profile?: string
+  /** Live inference-engine knobs (llama-server argv). */
+  engine?: {
+    threads?: number
+    parallel?: number
+    flash_attn?: boolean
+    temperature?: number | null
+    top_p?: number | null
+    top_k?: number | null
+    min_p?: number | null
+    repeat_penalty?: number | null
+    repeat_last_n?: number | null
+    seed?: number | null
+    batch_size?: number | null
+    ubatch_size?: number | null
+    mmproj?: string
+    chat_template?: string
+    use_jinja?: boolean
+    rope_freq_scale?: number | null
+    rope_freq_base?: number | null
+    mlock?: boolean
+    no_mmap?: boolean
+    cache_type?: string
+  }
   nvidia?: boolean
   not_ready_hint?: string | null
   catalog?: {

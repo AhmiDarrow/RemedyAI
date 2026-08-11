@@ -66,6 +66,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [customName, setCustomName] = useState('')
   const [ollamaHint, setOllamaHint] = useState('')
+  const [ollamaModels, setOllamaModels] = useState<string[]>([])
   const [xaiConnected, setXaiConnected] = useState(false)
   const [xaiLoginBusy, setXaiLoginBusy] = useState(false)
   const [xaiUserCode, setXaiUserCode] = useState('')
@@ -96,11 +97,14 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   )
   const activeMeta = catalog.find((p) => p.id === provider) || FALLBACK_PROVIDERS[0]
   const showBaseUrl = Boolean(activeMeta?.show_base_url || provider === 'custom')
-  // Demo: full curated set; other providers use catalog models.
+  // Demo: full curated set. Ollama: live models pulled on the local server only
+  // (curated guesses were never installed and produced dead sessions).
   const modelOptions =
     provider === 'demo'
       ? demoModelOptions(activeMeta?.models).map((m) => m.id)
-      : (activeMeta?.models || []).map((m) => m.id)
+      : provider === 'ollama' && ollamaModels.length
+        ? ollamaModels
+        : (activeMeta?.models || []).map((m) => m.id)
 
   const stopXaiPoll = useCallback(() => {
     if (xaiPollRef.current) {
@@ -179,12 +183,13 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       try {
         const ollama = await detectOllama()
         if (cancelled) return
+        const names = (ollama.models || []).map((m) => String(m))
+        setOllamaModels(names)
         if (ollama.available) {
-          const names = (ollama.models || []).slice(0, 4).join(', ')
           setOllamaHint(
-            names
-              ? `Ollama detected locally (${names}). You can pick Ollama without an API key.`
-              : 'Ollama detected locally. You can pick Ollama without an API key.',
+            names.length
+              ? 'Ollama detected locally — pulled: ' + names.slice(0, 4).join(', ') + (names.length > 4 ? '…' : '') + '.'
+              : 'Ollama detected locally, but no models pulled yet — run "ollama pull llama3.1" (or pick another provider).',
           )
         } else {
           setOllamaHint('')
@@ -200,11 +205,22 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
 
   const handleProviderChange = useCallback(
     (p: string) => {
+      const prev = provider
       setProvider(p)
       const preset = catalog.find((x) => x.id === p)
       if (preset) {
-        setBaseUrl(preset.base_url)
-        setModel(preset.default_model)
+        const prevPreset = catalog.find((x) => x.id === prev)
+        // Adopt the preset URL only when the current value is untouched
+        // (empty or still the previous provider's default). Never clobber a
+        // base URL the user typed (e.g. custom → KoboldCpp 127.0.0.1:5001).
+        const baseIsUntouched =
+          !baseUrl || (prevPreset ? baseUrl === prevPreset.base_url : true)
+        if (baseIsUntouched) setBaseUrl(preset.base_url)
+        if (p === 'ollama' && ollamaModels.length) {
+          setModel(ollamaModels[0])
+        } else {
+          setModel(preset.default_model)
+        }
       }
       setError('')
       setXaiLoginMsg('')
@@ -215,7 +231,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         setXaiLoginBusy(false)
       }
     },
-    [stopXaiPoll, catalog],
+    [stopXaiPoll, catalog, baseUrl, ollamaModels, provider],
   )
 
   const handleXaiSignIn = useCallback(async () => {
@@ -473,6 +489,14 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   )
 
   const handleFinish = useCallback(async () => {
+    if (provider === 'ollama' && !ollamaModels.includes(model)) {
+      setError(
+        ollamaModels.length
+          ? 'Pick a model actually pulled on your Ollama server (pulled: ' + ollamaModels.join(', ') + ').'
+          : 'No models found on the local Ollama server. Start Ollama and pull one (e.g. "ollama pull llama3.1") — or pick another provider.',
+      )
+      return
+    }
     setSaving(true)
     setError('')
     try {

@@ -28,6 +28,44 @@ class RmbSettingsPatch(BaseModel):
         default=None,
         description="When true, set llm_provider=rmb and base_url to this host",
     )
+    # --- inference-engine knobs (llama-server argv; all optional) ---
+    threads: int | None = None
+    parallel: int | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    min_p: float | None = None
+    repeat_penalty: float | None = None
+    repeat_last_n: int | None = None
+    seed: int | None = None
+    batch_size: int | None = None
+    ubatch_size: int | None = None
+    mmproj: str | None = None
+    chat_template: str | None = None
+    use_jinja: bool | None = None
+    rope_freq_scale: float | None = None
+    rope_freq_base: float | None = None
+    mlock: bool | None = None
+    no_mmap: bool | None = None
+    cache_type: str | None = None
+    # --- KoboldCpp-class parity knobs (all optional; skipped when unset) ---
+    typical_p: float | None = None
+    tfs_z: float | None = None
+    mirostat: int | None = None
+    mirostat_tau: float | None = None
+    mirostat_eta: float | None = None
+    presence_penalty: float | None = None
+    frequency_penalty: float | None = None
+    main_gpu: int | None = None
+    threads_batch: int | None = None
+    tensor_split: str | None = None
+    samplers: str | None = None
+    rope_scaling: str | None = None
+    yarn_orig_ctx: int | None = None
+    yarn_factor: float | None = None
+    yarn_beta_fast: float | None = None
+    yarn_beta_slow: float | None = None
+    no_kv_offload: bool | None = None
 
 
 def register_rmb_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:

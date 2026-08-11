@@ -85,6 +85,41 @@ def default_state() -> dict[str, Any]:
         "parallel": DEFAULT_PARALLEL,
         "flash_attn": True,
         "chat_template": "",  # optional path or empty
+        # --- inference engine knobs (llama-server) ---
+        "temperature": 0.8,
+        "top_p": 0.95,
+        "top_k": 40,
+        "min_p": 0.05,
+        "repeat_penalty": 1.1,
+        "repeat_last_n": 64,
+        "seed": -1,  # -1 = random (flag omitted)
+        "batch_size": 2048,
+        "ubatch_size": 512,
+        "mmproj": "",  # multimodal projector GGUF (vision in chat)
+        "use_jinja": True,  # --jinja (use GGUF-embedded chat template)
+        "rope_freq_scale": 0.0,  # 0 = llama.cpp default
+        "rope_freq_base": 0.0,  # 0 = llama.cpp default
+        # --- KoboldCpp-class parity knobs ('' / 0 / None = llama.cpp default) ---
+        "typical_p": 0.0,  # --typical (0 = off)
+        "tfs_z": 0.0,  # --tfs (0 = off)
+        "mirostat": 0,  # 0 off | 1 v1 | 2 v2 (--mirostat)
+        "mirostat_tau": 0.0,
+        "mirostat_eta": 0.0,
+        "presence_penalty": 0.0,
+        "frequency_penalty": 0.0,
+        "main_gpu": 0,  # --main-gpu (multi-GPU)
+        "threads_batch": 0,  # --threads-batch (0 = default)
+        "tensor_split": "",  # e.g. "0,512" (--tensor-split)
+        "samplers": "",  # e.g. "top_k;top_p;min_p;temp" (--samplers)
+        "rope_scaling": "",  # '' | linear | yarn (--rope-scaling)
+        "yarn_orig_ctx": 0,  # --yarn-orig-ctx
+        "yarn_factor": 0.0,  # --yarn-factor
+        "yarn_beta_fast": 0.0,  # --yarn-beta-fast
+        "yarn_beta_slow": 0.0,  # --yarn-beta-slow
+        "no_kv_offload": False,  # --no-kv-offload
+        "mlock": False,
+        "no_mmap": False,
+        "cache_type": "",  # '' | q8_0 | f16 | bf16 (--cache-type-k/v)
         "profile": "agent",  # agent | turbo | quality
         "pid": None,
         # Set True while RMB owns GPU; cleared on stop / failed start
