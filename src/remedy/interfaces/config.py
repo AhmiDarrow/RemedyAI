@@ -1109,7 +1109,24 @@ def public_provider_catalog(config: dict[str, Any] | None = None) -> list[dict[s
         models = list(meta.get("models") or [])
         default_model = str(models[0]["id"]) if models else "default"
         name = meta.get("label") or pid
+        base_url = meta.get("base_url")
         if pid == "custom":
+            # A user-saved custom base URL must win over the 127.0.0.1:5001
+            # placeholder, or the catalog/connected UI shows the stale default
+            # even after the user changes it (bug: "5001 stuck").
+            saved_url = ""
+            if config is not None:
+                saved_url = str(config.get("llm_base_url") or "").strip()
+                prov_now = str(config.get("llm_provider") or "").strip().lower()
+            else:
+                try:
+                    cfg_disk = load_config()
+                    saved_url = str(cfg_disk.get("llm_base_url") or "").strip()
+                    prov_now = str(cfg_disk.get("llm_provider") or "").strip().lower()
+                except Exception:
+                    prov_now = ""
+            if saved_url and prov_now == "custom":
+                base_url = saved_url
             custom_name = str((config or {}).get("custom_llm_name") or "").strip()
             if config is None:
                 try:
@@ -1121,7 +1138,7 @@ def public_provider_catalog(config: dict[str, Any] | None = None) -> list[dict[s
             {
                 "id": pid,
                 "name": name,
-                "base_url": meta.get("base_url"),
+                "base_url": base_url,
                 "models": models,
                 "default_model": default_model,
                 "auth": auth_modes,
