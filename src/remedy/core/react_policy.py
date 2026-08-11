@@ -522,6 +522,43 @@ _CHAT_SHORT_SET = frozenset(
 )
 
 
+def message_asks_to_stop(message: str) -> bool:
+    """True when the user's latest message asks to stop/halt/cancel work.
+
+    Mission continuity, open tasks, and epoch walls must never override an
+    explicit stop request. Conservative: whole-word stop intents only, so
+    normal prose ("stop and also…") still counts when unambiguous.
+    """
+    msg = (message or "").strip().lower()
+    if not msg or len(msg) > 200:
+        return False
+    # Whole-clause match: "never mind, forget it" trips because each clause
+    # is an exact stop phrase — but "stop at the store" never does.
+    for clause in msg.replace(";", ",").split(","):
+        clause = clause.strip()
+        if clause in ("stop", "halt", "abort", "quit", "cancel", "never mind", "forget it", "leave it", "drop it"):
+            return True
+    hard = (
+        "stop the mission",
+        "cancel the mission",
+        "abort the mission",
+        "stop working",
+        "stop now",
+        "stop this",
+        "stop everything",
+        "halt now",
+        "cancel everything",
+        "don't continue",
+        "do not continue",
+        "don't keep going",
+        "do not keep going",
+        "stop and don't",
+        "leave it",
+        "drop it",
+    )
+    return any(h in msg for h in hard)
+
+
 def message_wants_tools(message: str) -> bool:
     """Return False for chit-chat / simple Qs so models answer in one shot.
 

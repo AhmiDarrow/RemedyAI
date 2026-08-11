@@ -58,6 +58,7 @@ from remedy.core.react_policy import (
     is_serial_explore_batch,
     looks_like_false_progress,
     looks_like_leaked_scratchpad,
+    message_asks_to_stop,
     mission_verify_gate_message,
     post_tools_user_summary_nudge,
     recovery_nudge_message,
@@ -267,6 +268,31 @@ async def call_llm_stream(runtime, message: str,
         # Pure action kicks must NOT resume older open_tasks from history
         if pure_action_kick or clear_goals_only or browse_pre_url or page_interaction:
             open_tasks_for_wall = []
+        # Hard stop: the user's latest message asks to stop → mission
+        # continuity cannot override it. Cancel the active mission and clear
+        # open tasks so no epoch wall / re-arm keeps the loop alive.
+        user_wants_stop = message_asks_to_stop(message or "")
+        if user_wants_stop:
+            open_tasks_for_wall = []
+            with suppress(Exception):
+                from remedy.core.mission import MissionStore
+
+                _home_m = getattr(
+                    getattr(runtime, "config", None), "home_dir", None
+                )
+                _mid_m = str(
+                    session_id
+                    or getattr(runtime, "_session_id", "")
+                    or ""
+                ) or None
+                _ms = MissionStore(_home_m)
+                _m = _ms.latest(_mid_m)
+                if _m is not None and _m.status == "active":
+                    _m.status = "cancelled"
+                    _ms.save(_m)
+                    logger.info(
+                        "User asked to stop — mission %s cancelled", _m.id
+                    )
 
         # Shared turn control plane (deep-dive #1)
         turn = TurnState(
@@ -934,6 +960,29 @@ async def call_llm_stream(runtime, message: str,
                         logger.error(
                             "LLM API error %d: %s", resp.status, safe_err[:500]
                         )
+                        # Circuit breaker: 3 consecutive API/billing errors in a
+                        # session quarantine the provider (xAI 403 → auto-skip).
+                        with suppress(Exception):
+                            from remedy.core.providers import (
+                                provider_quarantined as _pq,
+                                record_provider_error as _rpe,
+                            )
+
+                            _tripped = _rpe(
+                                str(getattr(_bind, "provider", "") or ""),
+                                resp.status,
+                            )
+                            if _tripped or _pq(
+                                str(getattr(_bind, "provider", "") or "")
+                            ):
+                                yield (
+                                    "\n[LLM notice — provider quarantined]\n"
+                                    "This provider hit 3 consecutive API/billing "
+                                    "errors this session and is now auto-skipped. "
+                                    "Switch providers/models in Settings, then "
+                                    "resend.\n"
+                                )
+                                return
                         # Local: auto-shrink + retry once on exceed_context_size
                         if (
                             resp.status == 400
@@ -1385,6 +1434,12 @@ async def call_llm_stream(runtime, message: str,
                     reasoning_parts = round_state.reasoning_parts
 
                    # Successful HTTP round — leave the local retry loop
+                   with suppress(Exception):
+                       from remedy.core.providers import (
+                           record_provider_success as _rps,
+                       )
+
+                       _rps(str(getattr(_bind, "provider", "") or ""))
                    _http_round_ok = True
                    break
                   else:
@@ -2748,9 +2803,25 @@ async def call_llm_stream(runtime, message: str,
                         or ""
                     ) or None
                     m = MissionStore(home).latest(mid)
+                    # Missions past their retry limit auto-fail — no more
+                    # verify nudges or unfinished-work blocking.
                     if (
                         m is not None
                         and m.status == "active"
+                        and int(m.retries or 0) >= int(m.max_retries or 5)
+                    ):
+                        m.status = "failed"
+                        MissionStore(home).save(m)
+                        logger.info(
+                            "Mission %s auto-failed (retries %d/%d)",
+                            m.id,
+                            m.retries,
+                            m.max_retries,
+                        )
+                    if (
+                        m is not None
+                        and m.status == "active"
+                        and not user_wants_stop
                         and m.verify_command
                         and m.verify_status != "passed"
                         and m.steps
