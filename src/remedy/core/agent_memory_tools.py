@@ -99,7 +99,12 @@ def register_memory_tools(runtime: Any) -> None:
             return f"Memory save failed: {e}"
 
     async def compress_context(focus: str = "") -> str:
-        """Memory Harness L1: merge history into Session Brief (send-view stays lean)."""
+        """Memory Harness L1: merge history into Session Brief (send-view stays lean).
+
+        One-shot per session: the first call compresses; later calls in the
+        same session are no-ops (proven to seal the loop). Always appends the
+        "do not re-arm cancelled missions" instruction to the brief thread.
+        """
         from remedy.core.session_quality import get_session_quality
         from remedy.memory.harness.brief import SessionBrief
         from remedy.memory.harness.compressor import (
@@ -114,6 +119,18 @@ def register_memory_tools(runtime: Any) -> None:
             )
         history: list[dict[str, Any]] = []
         sid = getattr(runtime, "_session_id", None)
+        # One-shot per session: never re-run compression in the same session.
+        _done_key = str(sid or "").strip() or "_anon"
+        _done_set = set(
+            getattr(runtime, "_compress_done_sessions", None) or set()
+        )
+        if _done_key in _done_set:
+            return (
+                "Context already compressed this session (one-shot). "
+                "Do not re-arm cancelled missions."
+            )
+        _done_set.add(_done_key)
+        runtime._compress_done_sessions = _done_set
         if sid and runtime.memory is not None:
             with suppress(Exception):
                 history = await runtime._load_session_history(sid, "")
@@ -126,12 +143,14 @@ def register_memory_tools(runtime: Any) -> None:
             intent_hint=(focus or None),
         )
         brief = runtime._session_brief
-        # Cumulative history thread entry (manual /compact)
+        # Cumulative history thread entry (manual /compact) — always seal the
+        # loop: cancelled missions must never be re-armed by continuity.
         with suppress(Exception):
             brief.append_history_thread(
                 "Manual compress_context"
                 + (f" focus={focus[:120]}" if focus else "")
-                + f". Intent: {(brief.intent or focus or '')[:200]}",
+                + f". Intent: {(brief.intent or focus or '')[:200]}"
+                + ". Do not re-arm cancelled missions.",
                 decisions_why=list(brief.decisions[-4:]),
                 blockers=list(brief.blockers[-3:]),
             )
@@ -192,6 +211,7 @@ def register_memory_tools(runtime: Any) -> None:
             f"Decisions: {len(brief.decisions)}. "
             f"History thread: {len(brief.history_thread)}."
             f"{qline}"
+            " Do not re-arm cancelled missions."
         )
 
     runtime.tool_registry.register_builtin_handler(

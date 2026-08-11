@@ -42,6 +42,77 @@ _THINKING_NUDGES = {
 # rejects absurd values (e.g. DeepSeek historically capped ~8k–64k).
 MAX_OUTPUT_TOKENS = 128_000
 
+# Session circuit breaker: any cloud provider that yields 3 consecutive
+# API/billing errors (401/402/403/407/429/5xx) in this process is quarantined
+# and auto-skipped until a successful round resets it. xAI 403 (billing /
+# forbidden) is the canonical trigger — one bad session no longer hammers the
+# same endpoint or burns the turn on doomed retries.
+QUARANTINE_THRESHOLD = 3
+_QUARANTINE_STATUSES = frozenset((401, 402, 403, 407, 429, 500, 502, 503, 504))
+_PROVIDER_BREAKER: dict[str, dict[str, Any]] = {}
+
+
+# Local hosts are never quarantined: 5xx there is transient (model loading /
+# host busy), not an API/billing problem, and the loop already waits + retries.
+_NON_QUARANTINABLE = frozenset(("demo", "custom", "ollama", "llamacpp", "rmb"))
+
+
+def _breaker_slot(provider_name: str | None) -> dict[str, Any] | None:
+    p = (provider_name or "").lower().strip()
+    if not p or p in _NON_QUARANTINABLE:
+        return None
+    return _PROVIDER_BREAKER.setdefault(p, {"errors": 0, "quarantined": False})
+
+
+def record_provider_error(provider_name: str | None, status: int) -> bool:
+    """Count one API/billing error for *provider_name* (session scope).
+
+    Returns True exactly when the provider just crossed the quarantine
+    threshold (3 consecutive API/billing errors) — callers auto-skip it.
+    """
+    slot = _breaker_slot(provider_name)
+    if slot is None:
+        return False
+    try:
+        st = int(status or 0)
+    except (TypeError, ValueError):
+        return False
+    if st not in _QUARANTINE_STATUSES:
+        return False
+    slot["errors"] = int(slot.get("errors") or 0) + 1
+    if slot["errors"] >= QUARANTINE_THRESHOLD and not slot.get("quarantined"):
+        slot["quarantined"] = True
+        logger.warning(
+            "Provider %r quarantined: %d consecutive API/billing errors",
+            provider_name,
+            slot["errors"],
+        )
+        return True
+    return False
+
+
+def record_provider_success(provider_name: str | None) -> None:
+    """A successful HTTP round clears the failure streak (session scope)."""
+    slot = _breaker_slot(provider_name)
+    if slot is not None:
+        slot["errors"] = 0
+        slot["quarantined"] = False
+
+
+def provider_quarantined(provider_name: str | None) -> bool:
+    """True when *provider_name* is quarantined for this session."""
+    p = (provider_name or "").lower().strip()
+    slot = _PROVIDER_BREAKER.get(p)
+    return bool(slot and slot.get("quarantined"))
+
+
+def clear_provider_quarantine(provider_name: str | None = None) -> None:
+    """Reset the breaker for one provider (or all when None)."""
+    if provider_name:
+        _PROVIDER_BREAKER.pop((provider_name or "").lower().strip(), None)
+    else:
+        _PROVIDER_BREAKER.clear()
+
 
 def _thinking_nudge(level: str) -> str:
     return _THINKING_NUDGES.get((level or "medium").lower(), "")
