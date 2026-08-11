@@ -35,6 +35,18 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
 
         cfg = load_config()
         raw: str | None = None
+        # Explicit jail-root override wins over runtime/config: tests and
+        # headless callers pin the files browser to a temp root, and the
+        # escape check depends on it — if runtime's project path (e.g. drive
+        # root when unset) took precedence, ".." would silently stay inside.
+        env_root = os.environ.get("REMEDY_FILES_ROOT") or os.environ.get(
+            "REMEDY_PROJECT_PATH"
+        )
+        if env_root:
+            try:
+                return ensure_project_dir(resolve_project_path(env_root))
+            except Exception:
+                pass
         # Session override (async path sets this via query — sync helpers use config only
         # unless caller passes session path).
         if session_id and memory is not None:
@@ -45,12 +57,7 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
                 return ensure_project_dir(runtime.effective_project_path())
             except Exception:
                 pass
-        raw = (
-            cfg.get("project_path")
-            or os.environ.get("REMEDY_PROJECT_PATH")
-            or os.environ.get("REMEDY_FILES_ROOT")
-            or None
-        )
+        raw = cfg.get("project_path") or None
         try:
             return ensure_project_dir(resolve_project_path(raw))
         except Exception:

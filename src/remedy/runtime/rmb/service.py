@@ -1164,6 +1164,13 @@ def _engine_kwargs(state: dict[str, Any]) -> dict[str, Any]:
         ("yarn_factor", float),
         ("yarn_beta_fast", float),
         ("yarn_beta_slow", float),
+        # --- DRY + XTC samplers (KoboldCpp parity) ---
+        ("dry_multiplier", float),
+        ("dry_base", float),
+        ("dry_allowed_length", int),
+        ("dry_penalty_last_n", int),
+        ("xtc_probability", float),
+        ("xtc_threshold", float),
     ):
         val = state.get(key)
         if val is None:
@@ -1234,6 +1241,13 @@ def _build_cmd(
     yarn_beta_fast: float | None = None,
     yarn_beta_slow: float | None = None,
     no_kv_offload: bool = False,
+    # --- DRY + XTC samplers (KoboldCpp parity) ---
+    dry_multiplier: float | None = None,
+    dry_base: float | None = None,
+    dry_allowed_length: int | None = None,
+    dry_penalty_last_n: int | None = None,
+    xtc_probability: float | None = None,
+    xtc_threshold: float | None = None,
 ) -> list[str]:
     """Build llama-server argv. Auto-enables MTP speculative flags when the
     GGUF looks like MTP **and** the binary supports draft-mtp.
@@ -1304,18 +1318,35 @@ def _build_cmd(
         cmd.append("--no-kv-offload")
     if typical_p is not None and 0 < float(typical_p) <= 1:
         cmd.extend(["--typical", str(float(typical_p))])
-    if tfs_z is not None and float(tfs_z) >= 0:
+    if tfs_z is not None and 0 < float(tfs_z) <= 1:
         cmd.extend(["--tfs", str(float(tfs_z))])
-    if mirostat is not None and int(mirostat) in (0, 1, 2):
-        cmd.extend(["--mirostat", str(int(mirostat))])
-    if mirostat_tau is not None and float(mirostat_tau) >= 0:
-        cmd.extend(["--mirostat-tau", str(float(mirostat_tau))])
-    if mirostat_eta is not None and float(mirostat_eta) >= 0:
-        cmd.extend(["--mirostat-eta", str(float(mirostat_eta))])
-    if presence_penalty is not None and float(presence_penalty) >= 0:
+    miro_v = int(mirostat) if mirostat is not None else 0
+    if mirostat is not None and miro_v in (0, 1, 2):
+        cmd.extend(["--mirostat", str(miro_v)])
+    if miro_v in (1, 2):
+        if mirostat_tau is not None and float(mirostat_tau) > 0:
+            cmd.extend(["--mirostat-tau", str(float(mirostat_tau))])
+        if mirostat_eta is not None and float(mirostat_eta) > 0:
+            cmd.extend(["--mirostat-eta", str(float(mirostat_eta))])
+    # presence/frequency accept negative values too (KoboldCpp parity)
+    if presence_penalty is not None and float(presence_penalty) != 0:
         cmd.extend(["--presence-penalty", str(float(presence_penalty))])
-    if frequency_penalty is not None and float(frequency_penalty) >= 0:
+    if frequency_penalty is not None and float(frequency_penalty) != 0:
         cmd.extend(["--frequency-penalty", str(float(frequency_penalty))])
+    # DRY sampling (KoboldCpp parity; --dry-multiplier 0 = off)
+    if dry_multiplier is not None and float(dry_multiplier) != 0:
+        cmd.extend(["--dry-multiplier", str(float(dry_multiplier))])
+        if dry_base is not None and float(dry_base) > 0:
+            cmd.extend(["--dry-base", str(float(dry_base))])
+        if dry_allowed_length is not None and int(dry_allowed_length) > 0:
+            cmd.extend(["--dry-allowed-length", str(int(dry_allowed_length))])
+        if dry_penalty_last_n is not None and int(dry_penalty_last_n) != 0:
+            cmd.extend(["--dry-penalty-last-n", str(int(dry_penalty_last_n))])
+    # XTC (KoboldCpp parity; probability 0 = off)
+    if xtc_probability is not None and 0 < float(xtc_probability) <= 1:
+        cmd.extend(["--xtc-probability", str(float(xtc_probability))])
+        if xtc_threshold is not None and 0 < float(xtc_threshold) < 1:
+            cmd.extend(["--xtc-threshold", str(float(xtc_threshold))])
     if main_gpu is not None and int(main_gpu) >= 0:
         cmd.extend(["--main-gpu", str(int(main_gpu))])
     if threads_batch is not None and int(threads_batch) > 0:
@@ -2396,6 +2427,31 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
             "mlock": bool(state.get("mlock", False)),
             "no_mmap": bool(state.get("no_mmap", False)),
             "cache_type": state.get("cache_type") or "",
+            # KoboldCpp-class parity knobs
+            "typical_p": state.get("typical_p"),
+            "tfs_z": state.get("tfs_z"),
+            "mirostat": state.get("mirostat"),
+            "mirostat_tau": state.get("mirostat_tau"),
+            "mirostat_eta": state.get("mirostat_eta"),
+            "presence_penalty": state.get("presence_penalty"),
+            "frequency_penalty": state.get("frequency_penalty"),
+            "main_gpu": state.get("main_gpu"),
+            "threads_batch": state.get("threads_batch"),
+            "tensor_split": state.get("tensor_split") or "",
+            "samplers": state.get("samplers") or "",
+            "rope_scaling": state.get("rope_scaling") or "",
+            "yarn_orig_ctx": state.get("yarn_orig_ctx"),
+            "yarn_factor": state.get("yarn_factor"),
+            "yarn_beta_fast": state.get("yarn_beta_fast"),
+            "yarn_beta_slow": state.get("yarn_beta_slow"),
+            "no_kv_offload": bool(state.get("no_kv_offload", False)),
+            # DRY + XTC samplers
+            "dry_multiplier": state.get("dry_multiplier"),
+            "dry_base": state.get("dry_base"),
+            "dry_allowed_length": state.get("dry_allowed_length"),
+            "dry_penalty_last_n": state.get("dry_penalty_last_n"),
+            "xtc_probability": state.get("xtc_probability"),
+            "xtc_threshold": state.get("xtc_threshold"),
         },
         "nvidia": _nvidia_ok(),
         "catalog": catalog_public(),
@@ -2474,6 +2530,31 @@ _RMB_PROCESS_KEYS = frozenset(
         "mlock",
         "no_mmap",
         "cache_type",
+        # --- KoboldCpp-class parity knobs (all baked into argv) ---
+        "typical_p",
+        "tfs_z",
+        "mirostat",
+        "mirostat_tau",
+        "mirostat_eta",
+        "presence_penalty",
+        "frequency_penalty",
+        "main_gpu",
+        "threads_batch",
+        "tensor_split",
+        "samplers",
+        "rope_scaling",
+        "yarn_orig_ctx",
+        "yarn_factor",
+        "yarn_beta_fast",
+        "yarn_beta_slow",
+        "no_kv_offload",
+        # --- DRY + XTC samplers ---
+        "dry_multiplier",
+        "dry_base",
+        "dry_allowed_length",
+        "dry_penalty_last_n",
+        "xtc_probability",
+        "xtc_threshold",
     }
 )
 
@@ -2495,12 +2576,14 @@ def _norm_rmb_val(key: str, val: Any) -> Any:
         "main_gpu",
         "threads_batch",
         "yarn_orig_ctx",
+        "dry_allowed_length",
+        "dry_penalty_last_n",
     ):
         try:
             return int(val) if val is not None and str(val).strip() != "" else val
         except (TypeError, ValueError):
             return val
-    if key in ("temperature", "top_p", "min_p", "repeat_penalty", "rope_freq_scale", "rope_freq_base", "typical_p", "tfs_z", "mirostat_tau", "mirostat_eta", "presence_penalty", "frequency_penalty", "yarn_factor", "yarn_beta_fast", "yarn_beta_slow"):
+    if key in ("temperature", "top_p", "min_p", "repeat_penalty", "rope_freq_scale", "rope_freq_base", "typical_p", "tfs_z", "mirostat_tau", "mirostat_eta", "presence_penalty", "frequency_penalty", "yarn_factor", "yarn_beta_fast", "yarn_beta_slow", "dry_multiplier", "dry_base", "xtc_probability", "xtc_threshold"):
         try:
             return float(val) if val is not None and str(val).strip() != "" else val
         except (TypeError, ValueError):
@@ -2734,15 +2817,50 @@ def apply_rmb_settings(
         "mlock",
         "no_mmap",
         "cache_type",
+        # --- KoboldCpp-class parity knobs (baked into argv) ---
+        "typical_p",
+        "tfs_z",
+        "mirostat",
+        "mirostat_tau",
+        "mirostat_eta",
+        "presence_penalty",
+        "frequency_penalty",
+        "main_gpu",
+        "threads_batch",
+        "tensor_split",
+        "samplers",
+        "rope_scaling",
+        "yarn_orig_ctx",
+        "yarn_factor",
+        "yarn_beta_fast",
+        "yarn_beta_slow",
+        "no_kv_offload",
+        # --- DRY + XTC samplers (KoboldCpp parity) ---
+        "dry_multiplier",
+        "dry_base",
+        "dry_allowed_length",
+        "dry_penalty_last_n",
+        "xtc_probability",
+        "xtc_threshold",
     ):
         if key not in patch:
             continue
-        # Allow clearing path fields with ""
-        if patch[key] is None and key not in ("model_path", "runtime_binary", "mmproj", "chat_template", "cache_type"):
+        # Allow clearing path/string fields with ""
+        if patch[key] is None and key not in (
+            "model_path",
+            "runtime_binary",
+            "mmproj",
+            "chat_template",
+            "cache_type",
+            "tensor_split",
+            "samplers",
+            "rope_scaling",
+        ):
             continue
         if key == "ctx_size" and patch[key] is not None:
             try:
-                state[key] = max(2048, min(131072, int(patch[key])))
+                # No hard cap — llama.cpp handles model-limited ctx at load.
+                state[key] = max(2048, min(1048576, int(patch[key])))
             except (TypeError, ValueError):
                 continue
         elif key == "port" and patch[key] is not None:
@@ -2755,17 +2873,27 @@ def apply_rmb_settings(
                 state[key] = int(patch[key])
             except (TypeError, ValueError):
                 continue
-        elif key in ("temperature", "top_p", "min_p", "repeat_penalty", "rope_freq_scale", "rope_freq_base") and patch[key] is not None:
+        elif key == "mirostat" and patch[key] is not None:
+            try:
+                state[key] = max(0, min(2, int(patch[key])))
+            except (TypeError, ValueError):
+                continue
+        elif key == "dry_penalty_last_n" and patch[key] is not None:
+            try:
+                state[key] = max(-1, min(65536, int(patch[key])))
+            except (TypeError, ValueError):
+                continue
+        elif key in ("temperature", "top_p", "min_p", "repeat_penalty", "rope_freq_scale", "rope_freq_base", "typical_p", "tfs_z", "mirostat_tau", "mirostat_eta", "presence_penalty", "frequency_penalty", "yarn_factor", "yarn_beta_fast", "yarn_beta_slow", "dry_multiplier", "dry_base", "xtc_probability", "xtc_threshold") and patch[key] is not None:
             try:
                 state[key] = float(patch[key])
             except (TypeError, ValueError):
                 continue
-        elif key in ("top_k", "repeat_last_n", "seed", "batch_size", "ubatch_size") and patch[key] is not None:
+        elif key in ("top_k", "repeat_last_n", "seed", "batch_size", "ubatch_size", "main_gpu", "threads_batch", "yarn_orig_ctx", "dry_allowed_length") and patch[key] is not None:
             try:
                 state[key] = int(patch[key])
             except (TypeError, ValueError):
                 continue
-        elif key in ("use_jinja", "mlock", "no_mmap") and patch[key] is not None:
+        elif key in ("use_jinja", "mlock", "no_mmap", "no_kv_offload") and patch[key] is not None:
             state[key] = bool(patch[key])
         else:
             state[key] = patch[key] if patch[key] is not None else ""
@@ -2778,6 +2906,21 @@ def apply_rmb_settings(
         "repeat_penalty": (0.0, 2.0),
         "rope_freq_scale": (0.0, 10.0),
         "rope_freq_base": (0.0, 1_000_000.0),
+        # KoboldCpp-class parity knobs
+        "typical_p": (0.0, 1.0),
+        "tfs_z": (0.0, 1.0),
+        "mirostat_tau": (0.0, 100.0),
+        "mirostat_eta": (0.0, 100.0),
+        "presence_penalty": (-2.0, 10.0),
+        "frequency_penalty": (-2.0, 10.0),
+        "yarn_factor": (0.0, 100.0),
+        "yarn_beta_fast": (0.0, 100.0),
+        "yarn_beta_slow": (0.0, 100.0),
+        # DRY + XTC samplers
+        "dry_multiplier": (-2.0, 100.0),
+        "dry_base": (0.0, 100.0),
+        "xtc_probability": (0.0, 1.0),
+        "xtc_threshold": (0.0, 1.0),
     }
     for key, (lo, hi) in _ENGINE_FLOAT_RANGES.items():
         if key not in patch or patch[key] is None:
@@ -2788,18 +2931,18 @@ def apply_rmb_settings(
             continue
         if lo <= v <= hi:
             state[key] = v
-    for key in ("top_k", "repeat_last_n", "seed", "batch_size", "ubatch_size"):
+    for key in ("top_k", "repeat_last_n", "seed", "batch_size", "ubatch_size", "main_gpu", "threads_batch", "yarn_orig_ctx", "dry_allowed_length"):
         if key not in patch or patch[key] is None:
             continue
         try:
             state[key] = int(patch[key])
         except (TypeError, ValueError):
             continue
-    for key in ("use_jinja", "mlock", "no_mmap"):
+    for key in ("use_jinja", "mlock", "no_mmap", "no_kv_offload"):
         if key not in patch or patch[key] is None:
             continue
         state[key] = bool(patch[key])
-    for key in ("mmproj", "chat_template", "cache_type"):
+    for key in ("mmproj", "chat_template", "cache_type", "tensor_split", "samplers", "rope_scaling"):
         if key not in patch:
             continue
         state[key] = str(patch[key]).strip() if patch[key] else ""
