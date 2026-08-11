@@ -1132,6 +1132,59 @@ def binary_supports_draft_mtp(binary: Path | str | None) -> bool:
     return found
 
 
+def _engine_kwargs(state: dict[str, Any]) -> dict[str, Any]:
+    """Pull inference-engine knobs out of RMB state (skip unset/empty).
+
+    Returned dict is splatted into ``_build_cmd``; every key is optional there.
+    """
+    out: dict[str, Any] = {}
+    for key, cast in (
+        ("temperature", float),
+        ("top_p", float),
+        ("top_k", int),
+        ("min_p", float),
+        ("repeat_penalty", float),
+        ("repeat_last_n", int),
+        ("seed", int),
+        ("batch_size", int),
+        ("ubatch_size", int),
+        ("rope_freq_scale", float),
+        ("rope_freq_base", float),
+        # --- KoboldCpp-class parity knobs ---
+        ("typical_p", float),
+        ("tfs_z", float),
+        ("mirostat", int),
+        ("mirostat_tau", float),
+        ("mirostat_eta", float),
+        ("presence_penalty", float),
+        ("frequency_penalty", float),
+        ("main_gpu", int),
+        ("threads_batch", int),
+        ("yarn_orig_ctx", int),
+        ("yarn_factor", float),
+        ("yarn_beta_fast", float),
+        ("yarn_beta_slow", float),
+    ):
+        val = state.get(key)
+        if val is None:
+            continue
+        if isinstance(val, str) and not val.strip():
+            continue
+        try:
+            out[key] = cast(val)
+        except (TypeError, ValueError):
+            continue
+    for key in ("mmproj", "chat_template", "cache_type", "tensor_split", "samplers", "rope_scaling"):
+        val = str(state.get(key) or "").strip()
+        if val:
+            out[key] = val
+    out["use_jinja"] = bool(state.get("use_jinja", True))
+    out["mlock"] = bool(state.get("mlock", False))
+    out["no_mmap"] = bool(state.get("no_mmap", False))
+    out["no_kv_offload"] = bool(state.get("no_kv_offload", False))
+    return out
+
+
 def _build_cmd(
     binary: Path,
     model: Path,
@@ -1145,6 +1198,42 @@ def _build_cmd(
     flash_attn: bool,
     host_profile: dict[str, Any] | None = None,
     enable_mtp: bool | None = None,
+    # --- inference engine knobs (all optional; skipped when unset) ---
+    temperature: float | None = None,
+    top_p: float | None = None,
+    top_k: int | None = None,
+    min_p: float | None = None,
+    repeat_penalty: float | None = None,
+    repeat_last_n: int | None = None,
+    seed: int | None = None,
+    batch_size: int | None = None,
+    ubatch_size: int | None = None,
+    mmproj: str | None = None,
+    chat_template: str | None = None,
+    use_jinja: bool = True,
+    rope_freq_scale: float | None = None,
+    rope_freq_base: float | None = None,
+    mlock: bool = False,
+    no_mmap: bool = False,
+    cache_type: str | None = None,
+    # --- KoboldCpp-class parity knobs (all optional; skipped when unset) ---
+    typical_p: float | None = None,
+    tfs_z: float | None = None,
+    mirostat: int | None = None,
+    mirostat_tau: float | None = None,
+    mirostat_eta: float | None = None,
+    presence_penalty: float | None = None,
+    frequency_penalty: float | None = None,
+    main_gpu: int | None = None,
+    threads_batch: int | None = None,
+    tensor_split: str | None = None,
+    samplers: str | None = None,
+    rope_scaling: str | None = None,
+    yarn_orig_ctx: int | None = None,
+    yarn_factor: float | None = None,
+    yarn_beta_fast: float | None = None,
+    yarn_beta_slow: float | None = None,
+    no_kv_offload: bool = False,
 ) -> list[str]:
     """Build llama-server argv. Auto-enables MTP speculative flags when the
     GGUF looks like MTP **and** the binary supports draft-mtp.
@@ -1171,12 +1260,80 @@ def _build_cmd(
         "--parallel",
         str(max(1, use_parallel)),
         "--cont-batching",
-        "--jinja",
     ]
+    if use_jinja:
+        cmd.append("--jinja")
     if threads and int(threads) > 0:
         cmd.extend(["--threads", str(int(threads))])
     if flash_attn:
         cmd.extend(["-fa", "on"])
+    if batch_size and int(batch_size) > 0:
+        cmd.extend(["--batch-size", str(int(batch_size))])
+    if ubatch_size and int(ubatch_size) > 0:
+        cmd.extend(["--ubatch-size", str(int(ubatch_size))])
+    if mmproj and str(mmproj).strip():
+        cmd.extend(["--mmproj", str(mmproj).strip()])
+    if chat_template and str(chat_template).strip():
+        cmd.extend(["--chat-template", str(chat_template).strip()])
+    if temperature is not None and float(temperature) >= 0:
+        cmd.extend(["--temp", str(float(temperature))])
+    if top_k is not None and int(top_k) > 0:
+        cmd.extend(["--top-k", str(int(top_k))])
+    if top_p is not None and 0 < float(top_p) <= 1:
+        cmd.extend(["--top-p", str(float(top_p))])
+    if min_p is not None and 0 <= float(min_p) < 1:
+        cmd.extend(["--min-p", str(float(min_p))])
+    if repeat_penalty is not None and float(repeat_penalty) > 0:
+        cmd.extend(["--repeat-penalty", str(float(repeat_penalty))])
+    if repeat_last_n is not None and int(repeat_last_n) >= 0:
+        cmd.extend(["--repeat-last-n", str(int(repeat_last_n))])
+    if seed is not None and int(seed) >= 0:
+        cmd.extend(["--seed", str(int(seed))])
+    if rope_freq_scale is not None and float(rope_freq_scale) > 0:
+        cmd.extend(["--rope-freq-scale", str(float(rope_freq_scale))])
+    if rope_freq_base is not None and float(rope_freq_base) > 0:
+        cmd.extend(["--rope-freq-base", str(float(rope_freq_base))])
+    if mlock:
+        cmd.append("--mlock")
+    if no_mmap:
+        cmd.append("--no-mmap")
+    if cache_type and str(cache_type).strip():
+        ct = str(cache_type).strip()
+        cmd.extend(["--cache-type-k", ct, "--cache-type-v", ct])
+    if no_kv_offload:
+        cmd.append("--no-kv-offload")
+    if typical_p is not None and 0 < float(typical_p) <= 1:
+        cmd.extend(["--typical", str(float(typical_p))])
+    if tfs_z is not None and float(tfs_z) >= 0:
+        cmd.extend(["--tfs", str(float(tfs_z))])
+    if mirostat is not None and int(mirostat) in (0, 1, 2):
+        cmd.extend(["--mirostat", str(int(mirostat))])
+    if mirostat_tau is not None and float(mirostat_tau) >= 0:
+        cmd.extend(["--mirostat-tau", str(float(mirostat_tau))])
+    if mirostat_eta is not None and float(mirostat_eta) >= 0:
+        cmd.extend(["--mirostat-eta", str(float(mirostat_eta))])
+    if presence_penalty is not None and float(presence_penalty) >= 0:
+        cmd.extend(["--presence-penalty", str(float(presence_penalty))])
+    if frequency_penalty is not None and float(frequency_penalty) >= 0:
+        cmd.extend(["--frequency-penalty", str(float(frequency_penalty))])
+    if main_gpu is not None and int(main_gpu) >= 0:
+        cmd.extend(["--main-gpu", str(int(main_gpu))])
+    if threads_batch is not None and int(threads_batch) > 0:
+        cmd.extend(["--threads-batch", str(int(threads_batch))])
+    if tensor_split and str(tensor_split).strip():
+        cmd.extend(["--tensor-split", str(tensor_split).strip()])
+    if samplers and str(samplers).strip():
+        cmd.extend(["--samplers", str(samplers).strip()])
+    if rope_scaling and str(rope_scaling).strip().lower() in ("linear", "yarn"):
+        cmd.extend(["--rope-scaling", str(rope_scaling).strip().lower()])
+        if yarn_orig_ctx is not None and int(yarn_orig_ctx) > 0:
+            cmd.extend(["--yarn-orig-ctx", str(int(yarn_orig_ctx))])
+        if yarn_factor is not None and float(yarn_factor) > 0:
+            cmd.extend(["--yarn-factor", str(float(yarn_factor))])
+        if yarn_beta_fast is not None and float(yarn_beta_fast) > 0:
+            cmd.extend(["--yarn-beta-fast", str(float(yarn_beta_fast))])
+        if yarn_beta_slow is not None and float(yarn_beta_slow) > 0:
+            cmd.extend(["--yarn-beta-slow", str(float(yarn_beta_slow))])
 
     # MTP: baked-in multi-token heads — no separate draft GGUF
     want_mtp = bool(profile.get("mtp")) if enable_mtp is None else bool(enable_mtp)
@@ -1736,6 +1893,7 @@ def _start_rmb_server_impl(
             parallel=use_parallel,
             flash_attn=bool(state.get("flash_attn", True)),
             host_profile=host_profile,
+            **_engine_kwargs(state),
         )
         mtp_armed = (
             bool(host_profile.get("mtp"))
@@ -1807,6 +1965,7 @@ def _start_rmb_server_impl(
                     flash_attn=bool(state.get("flash_attn", True)),
                     host_profile=host_profile,
                     enable_mtp=False,
+                    **_engine_kwargs(state),
                 )
                 host_auto["mtp_armed"] = False
                 host_auto["mtp_soft_disabled"] = True
@@ -2216,6 +2375,28 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         "ctx_size": int(state.get("ctx_size") or 8192),
         "n_gpu_layers": state.get("n_gpu_layers"),
         "profile": state.get("profile") or "agent",
+        "engine": {
+            "threads": int(state.get("threads") or 0),
+            "parallel": int(state.get("parallel") or 1),
+            "flash_attn": bool(state.get("flash_attn", True)),
+            "temperature": state.get("temperature"),
+            "top_p": state.get("top_p"),
+            "top_k": state.get("top_k"),
+            "min_p": state.get("min_p"),
+            "repeat_penalty": state.get("repeat_penalty"),
+            "repeat_last_n": state.get("repeat_last_n"),
+            "seed": state.get("seed"),
+            "batch_size": state.get("batch_size"),
+            "ubatch_size": state.get("ubatch_size"),
+            "mmproj": state.get("mmproj") or "",
+            "chat_template": state.get("chat_template") or "",
+            "use_jinja": bool(state.get("use_jinja", True)),
+            "rope_freq_scale": state.get("rope_freq_scale"),
+            "rope_freq_base": state.get("rope_freq_base"),
+            "mlock": bool(state.get("mlock", False)),
+            "no_mmap": bool(state.get("no_mmap", False)),
+            "cache_type": state.get("cache_type") or "",
+        },
         "nvidia": _nvidia_ok(),
         "catalog": catalog_public(),
         "discovered_ggufs": discovered[:24],
@@ -2274,20 +2455,72 @@ _RMB_PROCESS_KEYS = frozenset(
         "threads",
         "parallel",
         "profile",
+        # inference-engine knobs are baked into the argv too — changing them on
+        # disk alone does nothing until llama-server restarts with new flags.
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "repeat_penalty",
+        "repeat_last_n",
+        "seed",
+        "batch_size",
+        "ubatch_size",
+        "mmproj",
+        "chat_template",
+        "use_jinja",
+        "rope_freq_scale",
+        "rope_freq_base",
+        "mlock",
+        "no_mmap",
+        "cache_type",
     }
 )
 
 
 def _norm_rmb_val(key: str, val: Any) -> Any:
     """Normalize for process-diff comparison."""
-    if key in ("ctx_size", "port", "threads", "parallel", "n_gpu_layers"):
+    if key in (
+        "ctx_size",
+        "port",
+        "threads",
+        "parallel",
+        "n_gpu_layers",
+        "top_k",
+        "repeat_last_n",
+        "seed",
+        "batch_size",
+        "ubatch_size",
+        "mirostat",
+        "main_gpu",
+        "threads_batch",
+        "yarn_orig_ctx",
+    ):
         try:
             return int(val) if val is not None and str(val).strip() != "" else val
         except (TypeError, ValueError):
             return val
-    if key == "flash_attn":
+    if key in ("temperature", "top_p", "min_p", "repeat_penalty", "rope_freq_scale", "rope_freq_base", "typical_p", "tfs_z", "mirostat_tau", "mirostat_eta", "presence_penalty", "frequency_penalty", "yarn_factor", "yarn_beta_fast", "yarn_beta_slow"):
+        try:
+            return float(val) if val is not None and str(val).strip() != "" else val
+        except (TypeError, ValueError):
+            return val
+    if key in ("flash_attn", "use_jinja", "mlock", "no_mmap", "no_kv_offload"):
         return bool(val)
-    if key in ("model_path", "runtime_binary", "host", "model_id", "runtime_id", "profile"):
+    if key in (
+        "model_path",
+        "runtime_binary",
+        "host",
+        "model_id",
+        "runtime_id",
+        "profile",
+        "mmproj",
+        "chat_template",
+        "cache_type",
+        "tensor_split",
+        "samplers",
+        "rope_scaling",
+    ):
         return str(val or "").strip()
     return val
 
@@ -2483,11 +2716,29 @@ def apply_rmb_settings(
         "parallel",
         "flash_attn",
         "profile",
+        # --- inference engine knobs (llama-server argv) ---
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "repeat_penalty",
+        "repeat_last_n",
+        "seed",
+        "batch_size",
+        "ubatch_size",
+        "mmproj",
+        "chat_template",
+        "use_jinja",
+        "rope_freq_scale",
+        "rope_freq_base",
+        "mlock",
+        "no_mmap",
+        "cache_type",
     ):
         if key not in patch:
             continue
         # Allow clearing path fields with ""
-        if patch[key] is None and key not in ("model_path", "runtime_binary"):
+        if patch[key] is None and key not in ("model_path", "runtime_binary", "mmproj", "chat_template", "cache_type"):
             continue
         if key == "ctx_size" and patch[key] is not None:
             try:
@@ -2504,8 +2755,54 @@ def apply_rmb_settings(
                 state[key] = int(patch[key])
             except (TypeError, ValueError):
                 continue
+        elif key in ("temperature", "top_p", "min_p", "repeat_penalty", "rope_freq_scale", "rope_freq_base") and patch[key] is not None:
+            try:
+                state[key] = float(patch[key])
+            except (TypeError, ValueError):
+                continue
+        elif key in ("top_k", "repeat_last_n", "seed", "batch_size", "ubatch_size") and patch[key] is not None:
+            try:
+                state[key] = int(patch[key])
+            except (TypeError, ValueError):
+                continue
+        elif key in ("use_jinja", "mlock", "no_mmap") and patch[key] is not None:
+            state[key] = bool(patch[key])
         else:
             state[key] = patch[key] if patch[key] is not None else ""
+
+    # --- inference-engine knobs (baked into llama-server argv) ---
+    _ENGINE_FLOAT_RANGES: dict[str, tuple[float, float]] = {
+        "temperature": (0.0, 2.0),
+        "top_p": (0.0, 1.0),
+        "min_p": (0.0, 1.0),
+        "repeat_penalty": (0.0, 2.0),
+        "rope_freq_scale": (0.0, 10.0),
+        "rope_freq_base": (0.0, 1_000_000.0),
+    }
+    for key, (lo, hi) in _ENGINE_FLOAT_RANGES.items():
+        if key not in patch or patch[key] is None:
+            continue
+        try:
+            v = float(patch[key])
+        except (TypeError, ValueError):
+            continue
+        if lo <= v <= hi:
+            state[key] = v
+    for key in ("top_k", "repeat_last_n", "seed", "batch_size", "ubatch_size"):
+        if key not in patch or patch[key] is None:
+            continue
+        try:
+            state[key] = int(patch[key])
+        except (TypeError, ValueError):
+            continue
+    for key in ("use_jinja", "mlock", "no_mmap"):
+        if key not in patch or patch[key] is None:
+            continue
+        state[key] = bool(patch[key])
+    for key in ("mmproj", "chat_template", "cache_type"):
+        if key not in patch:
+            continue
+        state[key] = str(patch[key]).strip() if patch[key] else ""
 
     # Normalize model_id (status-bar stems → catalog ids)
     if "model_id" in patch and state.get("model_id"):

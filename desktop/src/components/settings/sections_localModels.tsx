@@ -42,6 +42,47 @@ function emitRmbChatModel(r: RmbStatus | null | undefined, fallbackPath?: string
 }
 import { updateSettings } from '../../api/settings'
 
+/** Small numeric engine-knob input — free entry, no curated caps. */
+function RmbEngineNumber({
+  label,
+  value,
+  min,
+  step = 'any',
+  placeholder = 'default',
+  disabled,
+  onApply,
+}: {
+  label: string
+  value: number | string | null | undefined
+  min?: number
+  step?: string
+  placeholder?: string
+  disabled?: boolean
+  onApply: (v: number) => void
+}) {
+  return (
+    <div className="min-w-0">
+      <FormLabel>{label}</FormLabel>
+      <input
+        type="number"
+        className="ui-input ui-input-sm mb-1 w-full"
+        disabled={disabled}
+        defaultValue={value != null && value !== '' ? String(value) : ''}
+        key={`rmb-knob-${label}-${value ?? ''}`}
+        min={min}
+        step={step}
+        placeholder={placeholder}
+        onBlur={(e) => {
+          const raw = e.target.value.trim()
+          if (!raw) return
+          const n = Number(raw)
+          if (Number.isFinite(n)) onApply(n)
+        }}
+      />
+    </div>
+  )
+}
+
 export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
   const {
     sectionProps,
@@ -61,6 +102,24 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
     onSettingsSaved,
     onOpenHelp,
   } = p
+
+  /** One-shot knob save: patch, refresh, message. Shared by advanced knobs. */
+  const patchKnob = async (
+    patch: Record<string, unknown>,
+    msg: string,
+  ): Promise<void> => {
+    if (rmbBusy) return
+    setRmbBusy(true)
+    try {
+      await patchRmbSettings({ enabled: true, ...patch })
+      setRmbMsg(msg)
+      await refreshRmb()
+    } catch (err) {
+      setRmbMsg(String(err))
+    } finally {
+      setRmbBusy(false)
+    }
+  }
 
   return (
     <>
@@ -304,17 +363,17 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
         />
         <div className="flex gap-2 mt-2">
           <div className="flex-1 min-w-0">
-            <FormLabel>Context size</FormLabel>
-            <FormSelect
-              size="sm"
+            <FormLabel>Context size (no cap)</FormLabel>
+            <input
+              type="number"
+              className="ui-input ui-input-sm mb-1 w-full"
               disabled={rmbBusy}
-              value={String(rmb?.ctx_size ?? 8192)}
-              options={[4096, 8192, 12288, 16384, 32768].map((n) => ({
-                value: String(n),
-                label: String(n),
-              }))}
-              onChange={(v) => {
-                const ctx_size = parseInt(v, 10)
+              defaultValue={String(rmb?.ctx_size ?? 8192)}
+              key={`ctx-${rmb?.ctx_size ?? 8192}`}
+              min={2048}
+              step={1024}
+              onBlur={(e) => {
+                const ctx_size = parseInt(e.target.value, 10)
                 if (Number.isNaN(ctx_size) || rmbBusy) return
                 void (async () => {
                   setRmbBusy(true)
@@ -368,6 +427,526 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             />
           </div>
         </div>
+
+        <details className="mt-2 mb-1 rounded-md border border-[color:var(--border)] p-2">
+          <summary
+            className="cursor-pointer select-none text-[11px] font-medium"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            Advanced engine settings (llama-server)
+          </summary>
+          <div className="mt-2 space-y-1.5">
+            <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+              <RmbEngineNumber
+                label="Threads (0 = auto)"
+                value={rmb?.engine?.threads ?? 0}
+                min={0}
+                step={1}
+                disabled={rmbBusy}
+                onApply={(threads) =>
+                  void patchKnob(
+                    { threads: Math.max(0, Math.round(threads)) },
+                    `Threads: ${threads}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Parallel slots"
+                value={rmb?.engine?.parallel ?? 1}
+                min={1}
+                step={1}
+                disabled={rmbBusy}
+                onApply={(parallel) =>
+                  void patchKnob(
+                    { parallel: Math.max(1, Math.round(parallel)) },
+                    `Parallel: ${parallel}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Batch size (0 = auto)"
+                value={rmb?.engine?.batch_size ?? 0}
+                min={0}
+                step={1}
+                disabled={rmbBusy}
+                onApply={(batch_size) =>
+                  void patchKnob(
+                    { batch_size: Math.max(0, Math.round(batch_size)) },
+                    `Batch size: ${batch_size}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Ubatch size (0 = auto)"
+                value={rmb?.engine?.ubatch_size ?? 0}
+                min={0}
+                step={1}
+                disabled={rmbBusy}
+                onApply={(ubatch_size) =>
+                  void patchKnob(
+                    { ubatch_size: Math.max(0, Math.round(ubatch_size)) },
+                    `Ubatch size: ${ubatch_size}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Temperature"
+                value={rmb?.engine?.temperature ?? ''}
+                min={0}
+                step={0.05}
+                disabled={rmbBusy}
+                onApply={(temperature) =>
+                  void patchKnob({ temperature }, `Temperature: ${temperature}`)
+                }
+              />
+              <RmbEngineNumber
+                label="Top-P"
+                value={rmb?.engine?.top_p ?? ''}
+                min={0}
+                max={1}
+                step={0.05}
+                disabled={rmbBusy}
+                onApply={(top_p) =>
+                  void patchKnob({ top_p: Math.min(1, Math.max(0, top_p)) }, `Top-P: ${top_p}`)
+                }
+              />
+              <RmbEngineNumber
+                label="Top-K (0 = off)"
+                value={rmb?.engine?.top_k ?? ''}
+                min={0}
+                step={1}
+                disabled={rmbBusy}
+                onApply={(top_k) =>
+                  void patchKnob(
+                    { top_k: Math.max(0, Math.round(top_k)) },
+                    `Top-K: ${top_k}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Min-P"
+                value={rmb?.engine?.min_p ?? ''}
+                min={0}
+                max={1}
+                step={0.05}
+                disabled={rmbBusy}
+                onApply={(min_p) =>
+                  void patchKnob({ min_p: Math.min(1, Math.max(0, min_p)) }, `Min-P: ${min_p}`)
+                }
+              />
+              <RmbEngineNumber
+                label="Repeat penalty"
+                value={rmb?.engine?.repeat_penalty ?? ''}
+                min={0}
+                step={0.05}
+                disabled={rmbBusy}
+                onApply={(repeat_penalty) =>
+                  void patchKnob(
+                    { repeat_penalty: Math.max(0, repeat_penalty) },
+                    `Repeat penalty: ${repeat_penalty}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Repeat last N (0 = off)"
+                value={rmb?.engine?.repeat_last_n ?? ''}
+                min={0}
+                step={1}
+                disabled={rmbBusy}
+                onApply={(repeat_last_n) =>
+                  void patchKnob(
+                    { repeat_last_n: Math.max(0, Math.round(repeat_last_n)) },
+                    `Repeat last N: ${repeat_last_n}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Seed (−1 = random)"
+                value={rmb?.engine?.seed ?? ''}
+                step={1}
+                disabled={rmbBusy}
+                onApply={(seed) =>
+                  void patchKnob({ seed: Math.round(seed) }, `Seed: ${seed}`)
+                }
+              />
+              <RmbEngineNumber
+                label="RoPE freq scale (0 = off)"
+                value={rmb?.engine?.rope_freq_scale ?? ''}
+                min={0}
+                step={0.05}
+                disabled={rmbBusy}
+                onApply={(rope_freq_scale) =>
+                  void patchKnob(
+                    { rope_freq_scale: Math.max(0, rope_freq_scale) },
+                    `RoPE scale: ${rope_freq_scale}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="RoPE freq base (0 = off)"
+                value={rmb?.engine?.rope_freq_base ?? ''}
+                min={0}
+                step={100}
+                disabled={rmbBusy}
+                onApply={(rope_freq_base) =>
+                  void patchKnob(
+                    { rope_freq_base: Math.max(0, rope_freq_base) },
+                    `RoPE base: ${rope_freq_base}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Typical-P (0 = off)"
+                value={rmb?.engine?.typical_p ?? ''}
+                min={0}
+                step={0.05}
+                disabled={rmbBusy}
+                onApply={(typical_p) =>
+                  void patchKnob(
+                    { typical_p: Math.max(0, Math.min(1, typical_p)) },
+                    `Typical-P: ${typical_p}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="TFS-Z (0 = off)"
+                value={rmb?.engine?.tfs_z ?? ''}
+                min={0}
+                step={0.05}
+                disabled={rmbBusy}
+                onApply={(tfs_z) =>
+                  void patchKnob(
+                    { tfs_z: Math.max(0, tfs_z) },
+                    `TFS-Z: ${tfs_z}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Mirostat (0/1/2)"
+                value={rmb?.engine?.mirostat ?? ''}
+                min={0}
+                step={1}
+                disabled={rmbBusy}
+                onApply={(mirostat) =>
+                  void patchKnob(
+                    { mirostat: Math.max(0, Math.min(2, Math.round(mirostat))) },
+                    `Mirostat: ${mirostat}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Mirostat tau"
+                value={rmb?.engine?.mirostat_tau ?? ''}
+                min={0}
+                step={0.1}
+                disabled={rmbBusy}
+                onApply={(mirostat_tau) =>
+                  void patchKnob(
+                    { mirostat_tau: Math.max(0, mirostat_tau) },
+                    `Mirostat tau: ${mirostat_tau}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Mirostat eta"
+                value={rmb?.engine?.mirostat_eta ?? ''}
+                min={0}
+                step={0.01}
+                disabled={rmbBusy}
+                onApply={(mirostat_eta) =>
+                  void patchKnob(
+                    { mirostat_eta: Math.max(0, mirostat_eta) },
+                    `Mirostat eta: ${mirostat_eta}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Presence penalty"
+                value={rmb?.engine?.presence_penalty ?? ''}
+                min={0}
+                step={0.1}
+                disabled={rmbBusy}
+                onApply={(presence_penalty) =>
+                  void patchKnob(
+                    { presence_penalty: Math.max(0, presence_penalty) },
+                    `Presence: ${presence_penalty}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Frequency penalty"
+                value={rmb?.engine?.frequency_penalty ?? ''}
+                min={0}
+                step={0.1}
+                disabled={rmbBusy}
+                onApply={(frequency_penalty) =>
+                  void patchKnob(
+                    { frequency_penalty: Math.max(0, frequency_penalty) },
+                    `Frequency: ${frequency_penalty}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Main GPU (0 = first)"
+                value={rmb?.engine?.main_gpu ?? ''}
+                min={0}
+                step={1}
+                disabled={rmbBusy}
+                onApply={(main_gpu) =>
+                  void patchKnob(
+                    { main_gpu: Math.max(0, Math.round(main_gpu)) },
+                    `Main GPU: ${main_gpu}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Threads batch (0 = auto)"
+                value={rmb?.engine?.threads_batch ?? ''}
+                min={0}
+                step={1}
+                disabled={rmbBusy}
+                onApply={(threads_batch) =>
+                  void patchKnob(
+                    { threads_batch: Math.max(0, Math.round(threads_batch)) },
+                    `Threads batch: ${threads_batch}`,
+                  )
+                }
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+              <FormToggle
+                label="Flash attention"
+                description="-fa on (CUDA/Metal)"
+                checked={Boolean(rmb?.engine?.flash_attn ?? true)}
+                disabled={rmbBusy}
+                onChange={(flash_attn) =>
+                  void patchKnob({ flash_attn }, `Flash attention: ${flash_attn ? 'on' : 'off'}`)
+                }
+              />
+              <FormToggle
+                label="Use Jinja"
+                description="--jinja chat templates"
+                checked={Boolean(rmb?.engine?.use_jinja ?? true)}
+                disabled={rmbBusy}
+                onChange={(use_jinja) =>
+                  void patchKnob({ use_jinja }, `Jinja templates: ${use_jinja ? 'on' : 'off'}`)
+                }
+              />
+              <FormToggle
+                label="mlock"
+                description="Lock model in RAM"
+                checked={Boolean(rmb?.engine?.mlock)}
+                disabled={rmbBusy}
+                onChange={(mlock) => void patchKnob({ mlock }, `mlock: ${mlock ? 'on' : 'off'}`)}
+              />
+              <FormToggle
+                label="no-mmap"
+                description="Disable memory mapping"
+                checked={Boolean(rmb?.engine?.no_mmap)}
+                disabled={rmbBusy}
+                onChange={(no_mmap) =>
+                  void patchKnob({ no_mmap }, `no-mmap: ${no_mmap ? 'on' : 'off'}`)
+                }
+              />
+              <FormToggle
+                label="no-kv-offload"
+                description="Keep KV cache on CPU"
+                checked={Boolean(rmb?.engine?.no_kv_offload)}
+                disabled={rmbBusy}
+                onChange={(no_kv_offload) =>
+                  void patchKnob({ no_kv_offload }, `no-kv-offload: ${no_kv_offload ? 'on' : 'off'}`)
+                }
+              />
+            </div>
+
+            <div className="space-y-1">
+              <FormLabel>Sampler order (--samplers)</FormLabel>
+              <FormSelect
+                size="sm"
+                disabled={rmbBusy}
+                value={rmb?.engine?.samplers || ''}
+                options={[
+                  { value: '', label: 'llama.cpp default' },
+                  { value: 'top_k;top_p;min_p;temp', label: 'top_k;top_p;min_p;temp' },
+                  { value: 'top_k;top_p;min_p;typ;temp', label: 'top_k;top_p;min_p;typ;temp' },
+                  { value: 'top_k;top_p;min_p;rep_pen;temp', label: 'top_k;top_p;min_p;rep_pen;temp' },
+                  { value: 'mirostat_v2;top_k;top_p;min_p;temp', label: 'mirostat_v2;top_k;top_p;min_p;temp' },
+                ]}
+                onChange={(samplers) =>
+                  void patchKnob(
+                    { samplers },
+                    samplers ? `Samplers: ${samplers}` : 'Samplers: default',
+                  )
+                }
+              />
+            </div>
+
+            <div className="space-y-1">
+              <FormLabel>RoPE scaling (--rope-scaling)</FormLabel>
+              <FormSelect
+                size="sm"
+                disabled={rmbBusy}
+                value={rmb?.engine?.rope_scaling || ''}
+                options={[
+                  { value: '', label: 'None (default)' },
+                  { value: 'linear', label: 'Linear' },
+                  { value: 'yarn', label: 'YaRN (long-context)' },
+                ]}
+                onChange={(rope_scaling) =>
+                  void patchKnob(
+                    { rope_scaling },
+                    rope_scaling ? `RoPE scaling: ${rope_scaling}` : 'RoPE scaling: none',
+                  )
+                }
+              />
+              {rmb?.engine?.rope_scaling === 'yarn' ? (
+                <div className="grid grid-cols-2 gap-x-2 gap-y-1 mt-1">
+                  <RmbEngineNumber
+                    label="YaRN orig ctx"
+                    value={rmb?.engine?.yarn_orig_ctx ?? ''}
+                    min={0}
+                    step={1024}
+                    disabled={rmbBusy}
+                    onApply={(yarn_orig_ctx) =>
+                      void patchKnob(
+                        { yarn_orig_ctx: Math.max(0, Math.round(yarn_orig_ctx)) },
+                        `YaRN orig ctx: ${yarn_orig_ctx}`,
+                      )
+                    }
+                  />
+                  <RmbEngineNumber
+                    label="YaRN factor"
+                    value={rmb?.engine?.yarn_factor ?? ''}
+                    min={0}
+                    step={0.5}
+                    disabled={rmbBusy}
+                    onApply={(yarn_factor) =>
+                      void patchKnob(
+                        { yarn_factor: Math.max(0, yarn_factor) },
+                        `YaRN factor: ${yarn_factor}`,
+                      )
+                    }
+                  />
+                  <RmbEngineNumber
+                    label="YaRN beta fast"
+                    value={rmb?.engine?.yarn_beta_fast ?? ''}
+                    min={0}
+                    step={0.01}
+                    disabled={rmbBusy}
+                    onApply={(yarn_beta_fast) =>
+                      void patchKnob(
+                        { yarn_beta_fast: Math.max(0, yarn_beta_fast) },
+                        `YaRN beta fast: ${yarn_beta_fast}`,
+                      )
+                    }
+                  />
+                  <RmbEngineNumber
+                    label="YaRN beta slow"
+                    value={rmb?.engine?.yarn_beta_slow ?? ''}
+                    min={0}
+                    step={0.01}
+                    disabled={rmbBusy}
+                    onApply={(yarn_beta_slow) =>
+                      void patchKnob(
+                        { yarn_beta_slow: Math.max(0, yarn_beta_slow) },
+                        `YaRN beta slow: ${yarn_beta_slow}`,
+                      )
+                    }
+                  />
+                </div>
+              ) : null}
+            </div>
+
+            <div className="space-y-1">
+              <FormLabel>Tensor split (--tensor-split)</FormLabel>
+              <input
+                type="text"
+                className="ui-input ui-input-sm mb-1 font-mono w-full"
+                disabled={rmbBusy}
+                defaultValue={rmb?.engine?.tensor_split || ''}
+                key={`ts-${rmb?.engine?.tensor_split || ''}`}
+                placeholder="e.g. 0,512 (multi-GPU VRAM split)"
+                onBlur={(e) => {
+                  const tensor_split = e.target.value.trim()
+                  if (tensor_split === (rmb?.engine?.tensor_split || '')) return
+                  void patchKnob(
+                    { tensor_split },
+                    tensor_split ? `Tensor split: ${tensor_split}` : 'Tensor split cleared',
+                  )
+                }}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <FormLabel>KV cache type</FormLabel>
+              <FormSelect
+                size="sm"
+                disabled={rmbBusy}
+                value={rmb?.engine?.cache_type || ''}
+                options={[
+                  { value: '', label: 'Auto (default)' },
+                  { value: 'f16', label: 'f16 (default)' },
+                  { value: 'q8_0', label: 'q8_0 (less VRAM)' },
+                  { value: 'q4_0', label: 'q4_0 (least VRAM)' },
+                ]}
+                onChange={(cache_type) =>
+                  void patchKnob(
+                    { cache_type },
+                    cache_type ? `KV cache: ${cache_type}` : 'KV cache: auto',
+                  )
+                }
+              />
+            </div>
+
+            <div className="space-y-1">
+              <FormLabel>MMProj (vision) GGUF</FormLabel>
+              <input
+                type="text"
+                className="ui-input ui-input-sm mb-1 font-mono w-full"
+                disabled={rmbBusy}
+                defaultValue={rmb?.engine?.mmproj || ''}
+                key={`mmproj-${rmb?.engine?.mmproj || ''}`}
+                placeholder="C:\…\mmproj-model-f16.gguf"
+                onBlur={(e) => {
+                  const mmproj = e.target.value.trim()
+                  if (mmproj === (rmb?.engine?.mmproj || '')) return
+                  void patchKnob(
+                    { mmproj },
+                    mmproj ? `MMProj: ${mmproj.replace(/^.*[\\/]/, '')}` : 'MMProj cleared',
+                  )
+                }}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <FormLabel>Chat template (path)</FormLabel>
+              <input
+                type="text"
+                className="ui-input ui-input-sm mb-1 font-mono w-full"
+                disabled={rmbBusy}
+                defaultValue={rmb?.engine?.chat_template || ''}
+                key={`ct-${rmb?.engine?.chat_template || ''}`}
+                placeholder="C:\…\chat-template.jinja"
+                onBlur={(e) => {
+                  const chat_template = e.target.value.trim()
+                  if (chat_template === (rmb?.engine?.chat_template || '')) return
+                  void patchKnob(
+                    { chat_template },
+                    chat_template
+                      ? `Template: ${chat_template.replace(/^.*[\\/]/, '')}`
+                      : 'Template cleared',
+                  )
+                }}
+              />
+            </div>
+
+            <FormHint>
+              Changing any knob restarts llama-server with the new flags. Empty
+              numeric fields fall back to llama-server defaults.
+            </FormHint>
+          </div>
+        </details>
 
         <div className="flex flex-wrap gap-1.5 mt-1 mb-1">
           <FormActionButton

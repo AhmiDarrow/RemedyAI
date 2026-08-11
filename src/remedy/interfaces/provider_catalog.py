@@ -224,11 +224,10 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "badge": "Local",
         "limits_blurb": "Fully free on your machine. Install Ollama and pull a model.",
         "key_docs_url": "https://ollama.com/download",
-        "models": [
-            {"id": "llama3.2", "name": "Llama 3.2"},
-            {"id": "qwen2.5", "name": "Qwen 2.5"},
-            {"id": "codellama", "name": "Code Llama"},
-        ],
+        # No curated model list — Ollama models come ONLY from the live server
+        # (GET /api/models on the local Ollama endpoint). Curated guesses were
+        # almost never pulled by the user and produced dead chat sessions.
+        "models": [],
     },
     "rmb": {
         "label": "RMB (local agent)",
@@ -268,7 +267,10 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         # Display name is user-settable via `custom_llm_name` (shown in Settings +
         # status bar). Falls back to this label when unset.
         "label": "Custom / OpenAI-compatible",
-        "base_url": "http://127.0.0.1:5001/api/v1",
+        # KoboldCpp serves the OpenAI API at /v1 (not /api/v1). This is a
+        # placeholder default only — the UI keeps whatever the user types and
+        # never forces this value back once a custom URL is saved.
+        "base_url": "http://127.0.0.1:5001/v1",
         "auth": ["api_key"],
         "env_keys": [],
         "show_base_url": True,

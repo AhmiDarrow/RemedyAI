@@ -739,10 +739,17 @@ export function SettingsPanel({
   }
 
   const handleProviderChange = (p: string) => {
+    const prev = provider
     setProvider(p)
     const preset = catalog.find((x) => x.id === p)
     if (preset) {
-      setBaseUrl(preset.base_url)
+      const prevPreset = catalog.find((x) => x.id === prev)
+      // Adopt the preset URL only when the current value is untouched (empty or
+      // still the previous provider's default). Never clobber a base URL the
+      // user typed — e.g. custom → KoboldCpp kept resetting to 127.0.0.1:5001.
+      const baseIsUntouched =
+        !baseUrl || (prevPreset ? baseUrl === prevPreset.base_url : true)
+      if (baseIsUntouched) setBaseUrl(preset.base_url)
       setModel(preset.default_model)
     }
   }
