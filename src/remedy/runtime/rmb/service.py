@@ -2373,7 +2373,7 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         "ok": True,
         "brand": "RMB",
         "brand_full": "Remedy Muscle Bridge",
-        "engine": "llama.cpp",
+        "engine_brand": "llama.cpp",
         "enabled": bool(state.get("enabled")),
         "auto_start": bool(state.get("auto_start", False)),
         "installed": installed,

@@ -55,6 +55,11 @@ def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     and other non-public ranges are blocked even when ``is_private`` is False.
     Also keeps explicit private/loopback/link-local/reserved checks for clarity.
     """
+    # IPv4-mapped IPv6 (::ffff:127.0.0.1) is is_global and not is_loopback
+    # in Python — unwrap before the public/private checks.
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
     return bool(
         (not ip.is_global)
         or ip.is_private

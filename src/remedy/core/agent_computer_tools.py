@@ -185,7 +185,7 @@ def register_computer_tools(runtime: Any) -> None:
         type: str = "",
         key: str = "",
         goal: str = "",
-        target: str = "browser",
+        target: str = "auto",
         hint: str = "",
     ) -> str:
         """Multi-step computer action in ONE call (fast path).
@@ -193,19 +193,20 @@ def register_computer_tools(runtime: Any) -> None:
         Optional: navigate url → click label → type text → key.
         Prefer this for login/search flows instead of many tiny tool rounds.
         Example: url=https://mail.google.com click=\"Sign in\" type=\"user@gmail.com\" key=enter
+        Default target=auto: URL → rail; after computer_app → desktop.
         """
         # Do not put typed secrets in the approval banner; only lengths / labels.
         type_note = f"type_chars={len(type)}" if type else "type=-"
         summary = (
             f"act url={url!r} click={click!r} {type_note} key={key!r} "
-            f"goal={goal!r} target={target or 'browser'}"
+            f"goal={goal!r} target={target or 'auto'}"
         )
         blocked = _computer_approval_gate(runtime, "computer_act", summary)
         if blocked:
             return blocked
         return ex.run(
             ComputerAction.ACT,
-            target=target or "browser",
+            target=target or "auto",
             hint=hint or goal,
             runtime=runtime,
             url=url,
@@ -345,7 +346,8 @@ def register_computer_tools(runtime: Any) -> None:
 
     reg.register_builtin_handler(
         "computer_screenshot",
-        "Screenshot the in-app browser or full desktop. Optional monitor index for multi-display.",
+        "Screenshot browser or desktop. Built-in vision auto-decodes the PNG "
+        "(OCR + click targets). Use for games / UIs with no accessibility tree.",
         computer_screenshot,
         {
             "type": "object",
@@ -427,7 +429,7 @@ def register_computer_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "computer_app",
-        "Launch a Windows app: notepad, calc, explorer, chrome, edge, or path to .exe.",
+        "Launch a Windows app: notepad, calc, explorer, chrome, edge, or a project-relative .exe (game.exe, .\\hello.exe).",
         computer_app,
         {
             "type": "object",

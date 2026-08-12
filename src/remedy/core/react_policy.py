@@ -288,7 +288,9 @@ _TOOL_HINT_RE = re.compile(
     r"goto|go\s+to|navigate|browser|rail|webview|"
     r"bring\s+up|pull\s+up|fire\s+up|take\s+me\s+to|head\s+to|jump\s+to|"
     r"gmail|youtube|wikipedia|wiki|fandom|"
-    r"https?://|www\."
+    r"https?://|www\.|"
+    # Play-to-iterate (games / GUI) — "play it" must keep computer + shell tools
+    r"play|game|pygame|click|launch|compile|gcc|clang"
     r")\b|"
     r"(?:[A-Za-z]:)?[\\/][\w.\\/ -]+",
     re.IGNORECASE,
@@ -340,6 +342,10 @@ _ACTION_KICK_RE = re.compile(
     r"\bcan'?t\s+(?:finish|complete|provide)\b|"
     r"\bcomplete\s+this\b|"
     r"\bfinish\s+(?:it|this|the\s+task)\b|"
+    r"\bplay\s+it\b|"
+    r"\btry\s+it\b|"
+    r"\blaunch\s+it\b|"
+    r"\brun\s+it\b|"
     r"\bpick\s+up\b|"
     r"\bwhere\s+you\s+left\s+off\b|"
     r"\bleft\s+off\b|"

@@ -13,8 +13,8 @@ from remedy.core.computer.host_bridge import get_host_bridge
 from remedy.core.computer.router import (
     ComputerTarget,
     host_label,
+    infer_sticky_target,
     is_valid_navigate_url,
-    looks_like_url,
     normalize_url,
     resolve_target,
     wants_system_browser,
@@ -80,54 +80,70 @@ class ComputerExecutor:
         self._active_session_id = self._session_id(runtime)
         url = kwargs.get("url")
         hint = kwargs.get("hint") or kwargs.get("reason") or ""
-        # Ref-based click is browser a11y — force browser unless user set desktop
-        req_target = target
+        # computer_app: resolve game.exe / hello.exe against the project folder
+        if act is ComputerAction.APP and runtime is not None:
+            dirs: list[Any] = []
+            try:
+                p = runtime.effective_project_path()
+                if p is not None:
+                    dirs.append(p)
+            except Exception:
+                pass
+            if dirs:
+                kwargs = {**kwargs, "search_dirs": dirs}
+        goal = kwargs.get("goal") or ""
+        ref = str(kwargs.get("ref") or "").strip()
+        hint_blob = f"{hint} {goal}".strip()
         # Navigate defaults to in-app rail unless user asked for system/external browser
         if act is ComputerAction.NAVIGATE:
             req_target = "desktop" if wants_system_browser(str(hint), target) else "browser"
-        if act is ComputerAction.CLICK and (
-            str(kwargs.get("ref") or "").strip() or str(kwargs.get("text") or "").strip()
-        ):
-            if (target or "auto").strip().lower() in ("", "auto"):
-                # text= on web UI → browser; pure coords stay auto
-                if str(kwargs.get("ref") or "").strip() or str(kwargs.get("text") or "").strip():
-                    req_target = "browser"
-        if act is ComputerAction.FIND and (target or "auto").strip().lower() in (
-            "",
-            "auto",
-        ):
-            req_target = "browser" if self.bridge.host_connected() else "desktop"
-        if act is ComputerAction.PAGE_TEXT:
+        elif act is ComputerAction.PAGE_TEXT:
             req_target = "browser"
-        if act is ComputerAction.WAIT:
+        elif act is ComputerAction.WAIT:
             req_target = "desktop"  # pure sleep; target irrelevant
-        if act is ComputerAction.APP:
+        elif act is ComputerAction.APP:
             req_target = "desktop"
-        if act is ComputerAction.ACT:
-            # Compound browser/desktop recipe — default browser for web tasks
-            ht = str(hint) + " " + str(kwargs.get("goal") or "")
-            if wants_system_browser(ht, target):
-                req_target = "desktop"
-            elif self.bridge.host_connected() or looks_like_url(ht) or any(
-                w in ht.lower()
-                for w in ("http", "www.", "gmail", "google", "page", "site", "login", "sign")
+        else:
+            # Sticky last target + ref prefix (eN rail, wN/cN desktop).
+            # Do NOT force browser on text=/ref= clicks — that sent game/UI
+            # clicks into the Browser rail after computer_app.
+            last_t = ""
+            last_el_tgt = ""
+            try:
+                last_t = self.bridge.last_drive_target() or ""
+                last_el_tgt = str(
+                    (self.bridge.last_elements_info() or {}).get("target") or ""
+                )
+            except Exception:
+                last_t = ""
+                last_el_tgt = ""
+            req_target = infer_sticky_target(
+                target,
+                action=act.value,
+                ref=ref,
+                hint=hint_blob,
+                url=str(url or ""),
+                last_target=last_t,
+                last_elements_target=last_el_tgt,
+            )
+            # Prefer the rail only after a successful navigate (not merely
+            # because the Desktop poller is alive — that stole first desktop
+            # clicks onto WebView).
+            if (
+                req_target == "auto"
+                and act
+                in (
+                    ComputerAction.CLICK,
+                    ComputerAction.FIND,
+                    ComputerAction.ACT,
+                    ComputerAction.SNAPSHOT,
+                    ComputerAction.TYPE,
+                    ComputerAction.KEY,
+                    ComputerAction.SCROLL,
+                )
+                and last_t == "browser"
             ):
                 req_target = "browser"
-            else:
-                req_target = "desktop"
-        # Snapshot auto: browser if host connected / web hint, else desktop windows
-        if act is ComputerAction.SNAPSHOT and (target or "auto").strip().lower() in (
-            "",
-            "auto",
-        ):
-            hint_s = str(hint)
-            if self.bridge.host_connected() or looks_like_url(hint_s) or (
-                "browser" in hint_s.lower() or "web" in hint_s.lower() or "page" in hint_s.lower()
-                or "wiki" in hint_s.lower()
-            ):
-                req_target = "browser"
-            else:
-                req_target = "desktop"
         tgt = resolve_target(
             req_target,
             url=url,
@@ -150,6 +166,8 @@ class ComputerExecutor:
                 result = self._run_browser(act, **kwargs)
             else:
                 result = self._run_desktop(act, **kwargs)
+            if result.get("ok"):
+                result = self._see_if_needed(act, result, runtime=runtime, **kwargs)
 
             # If Stop fired mid-action, surface abort even if partial work finished
             if self._abort_check():
@@ -162,6 +180,18 @@ class ComputerExecutor:
                     extra={"partial": result} if result else None,
                 )
 
+            if result.get("ok") and act not in (
+                ComputerAction.WAIT,
+                ComputerAction.PAGE_TEXT,
+                ComputerAction.SNAPSHOT,
+                ComputerAction.FIND,
+                ComputerAction.MONITORS,
+                ComputerAction.SCREENSHOT,
+            ):
+                try:
+                    self.bridge.set_last_drive_target(host_label(tgt))
+                except Exception:
+                    pass
             log_computer_action(
                 action=act.value,
                 target=host_label(tgt),
@@ -187,6 +217,104 @@ class ComputerExecutor:
                 home_dir=self.home_dir,
             )
             return json.dumps(err, default=str)
+
+    def _see_if_needed(
+        self,
+        act: ComputerAction,
+        result: dict[str, Any],
+        *,
+        runtime: Any | None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Run built-in vision on screenshots and empty UIA snapshots."""
+        from remedy.core.computer.vision_observe import (
+            format_vision_block,
+            observe_screenshot,
+            snapshot_needs_vision,
+        )
+
+        hint = str(kwargs.get("hint") or kwargs.get("goal") or "")
+        path = str(result.get("path") or "")
+        origin = result.get("origin") if isinstance(result.get("origin"), dict) else {}
+        width = result.get("width")
+        height = result.get("height")
+
+        if act is ComputerAction.SCREENSHOT and path:
+            decoded = observe_screenshot(
+                path,
+                runtime=runtime,
+                origin=origin,
+                width=int(width) if width else None,
+                height=int(height) if height else None,
+                hint=hint,
+            )
+            block = format_vision_block(decoded, origin=origin, path=path)
+            result["vision_ok"] = bool(decoded.get("ok"))
+            result["message"] = f"{result.get('message') or ''}\n\n{block}".strip()
+            if decoded.get("text"):
+                result["vision"] = decoded["text"]
+            try:
+                self.bridge.set_last_shot(
+                    origin=origin,
+                    width=int(width) if width else None,
+                    height=int(height) if height else None,
+                    path=path,
+                )
+            except Exception:
+                pass
+            return result
+
+        last_t = ""
+        try:
+            last_t = self.bridge.last_drive_target()
+        except Exception:
+            last_t = ""
+        if act is ComputerAction.SNAPSHOT and snapshot_needs_vision(
+            list(result.get("elements") or []),
+            hint=hint,
+            last_target=last_t,
+            already_fallback=bool(result.get("fallback")),
+        ):
+            try:
+                from remedy.core.computer import desktop_win as win
+
+                hwnd = kwargs.get("hwnd")
+                if hwnd:
+                    info = win.print_window_png(int(hwnd))
+                else:
+                    info = win.screenshot_png()
+                path = str(info.get("path") or "")
+                origin = info.get("origin") if isinstance(info.get("origin"), dict) else {}
+                decoded = observe_screenshot(
+                    path,
+                    runtime=runtime,
+                    origin=origin,
+                    width=info.get("width"),
+                    height=info.get("height"),
+                    hint=hint,
+                )
+                block = format_vision_block(decoded, origin=origin, path=path)
+                result["fallback"] = result.get("fallback") or "vision"
+                result["path"] = path
+                result["width"] = info.get("width")
+                result["height"] = info.get("height")
+                result["origin"] = origin
+                result["vision_ok"] = bool(decoded.get("ok"))
+                if decoded.get("text"):
+                    result["vision"] = decoded["text"]
+                result["message"] = (
+                    f"{result.get('message') or ''}\n"
+                    "UIA/DOM had no clickable controls — captured the pixels "
+                    "and ran built-in vision.\n"
+                    f"{block}"
+                ).strip()
+            except Exception as e:
+                result["message"] = (
+                    f"{result.get('message') or ''}\n"
+                    f"Vision fallback failed ({e}). "
+                    "Retry computer_screenshot target=desktop."
+                ).strip()
+        return result
 
     def _run_desktop(self, act: ComputerAction, **kwargs: Any) -> dict[str, Any]:
         from remedy.core.computer import desktop_win as win
@@ -257,7 +385,13 @@ class ComputerExecutor:
             )
         if act is ComputerAction.APP:
             app = str(kwargs.get("app") or kwargs.get("name") or "")
-            info = win.open_app(app)
+            search_dirs = list(kwargs.get("search_dirs") or [])
+            info = win.open_app(app, search_dirs=search_dirs or None)
+            # New window — drop stale UIA refs from the previous app
+            try:
+                self.bridge.set_last_elements([], target="desktop")
+            except Exception:
+                pass
             time.sleep(0.4)
             return public_result(
                 ok=True,
@@ -289,7 +423,12 @@ class ComputerExecutor:
             ref = str(kwargs.get("ref") or "").strip()
             text_q = str(kwargs.get("text") or "").strip()
             if text_q and not ref:
-                elements = self.bridge._last_elements if self.bridge._last_elements_target == "desktop" else []
+                info = self.bridge.last_elements_info()
+                elements = (
+                    list(info.get("elements") or [])
+                    if str(info.get("target") or "") == "desktop"
+                    else []
+                )
                 if not elements:
                     elements = win.desktop_snapshot(limit=60, mode="auto")
                     self.bridge.set_last_elements(elements, target="desktop")
@@ -347,7 +486,24 @@ class ComputerExecutor:
                     message=f"Clicked ref={ref} ({el.get('name', '')[:40]})",
                     extra={"ref": ref, "x": el.get("x"), "y": el.get("y"), "hwnd": el.get("hwnd")},
                 )
-            x, y = int(kwargs.get("x", 0)), int(kwargs.get("y", 0))
+            x, y = int(kwargs.get("x") or 0), int(kwargs.get("y") or 0)
+            if x == 0 and y == 0:
+                return public_result(
+                    ok=False,
+                    target="desktop",
+                    action="click",
+                    message="Provide ref=, text=, or explicit x/y (refusing bare click at 0,0)",
+                )
+            try:
+                shot = self.bridge.last_shot()
+                ox = int((shot.get("origin") or {}).get("x") or 0)
+                oy = int((shot.get("origin") or {}).get("y") or 0)
+                sw = int(shot.get("width") or 0)
+                sh = int(shot.get("height") or 0)
+                if sw > 8 and sh > 8 and 0 <= x < sw and 0 <= y < sh:
+                    x, y = x + ox, y + oy
+            except Exception:
+                pass
             win.click(
                 x,
                 y,
@@ -532,16 +688,23 @@ class ComputerExecutor:
                 extra=info,
             )
         if act is ComputerAction.ACT:
-            # Prefer in-rail compound act when Desktop host is live
-            if self.bridge.host_connected():
+            url = str(kwargs.get("url") or "").strip()
+            # URL → rail compound. No URL → drive the focused desktop app
+            # (games, notepad, compiled programs). Never bounce to the rail
+            # just because the Desktop host happens to be polling.
+            if url and self.bridge.host_connected():
                 return self._computer_act(
                     dict(kwargs), hint=str(kwargs.get("hint") or ""), req_target="browser"
                 )
-            return public_result(
-                ok=False,
-                target="desktop",
-                action="act",
-                message="computer_act needs Browser rail host — open Remedy Desktop",
+            if url:
+                return public_result(
+                    ok=False,
+                    target="desktop",
+                    action="act",
+                    message="computer_act url= needs Browser rail host — open Remedy Desktop",
+                )
+            return self._computer_act_desktop(
+                dict(kwargs), hint=str(kwargs.get("hint") or "")
             )
         return public_result(
             ok=False,
@@ -1038,15 +1201,94 @@ class ComputerExecutor:
                         f"({str(el.get('name') or '')[:40]})"
                     )
                     return out
+        # Rail miss → desktop UIA (game / native window after computer_app)
+        try:
+            desk = self._run_desktop(ComputerAction.CLICK, text=text_q, **{
+                k: v for k, v in kwargs.items() if k not in ("text", "ref", "target")
+            })
+            if desk.get("ok"):
+                desk["note"] = (
+                    f"Browser rail click missed ({last_err}); "
+                    "clicked matching desktop control instead"
+                )
+                desk["fallback"] = "desktop"
+                return desk
+        except Exception:
+            pass
         return public_result(
             ok=False,
             target="browser",
             action="click",
             message=(
                 f"Could not click text={text_q!r} in Browser rail ({last_err}). "
-                "Run computer_snapshot, then computer_click ref=eN."
+                "If this is a desktop app/game, retry computer_click "
+                "target=desktop (or computer_snapshot target=desktop first)."
             ),
             extra={"text": text_q},
+        )
+
+    def _computer_act_desktop(
+        self,
+        payload: dict[str, Any],
+        *,
+        hint: str,
+    ) -> dict[str, Any]:
+        """Compound click/type/key on the focused OS window (games, native apps)."""
+        log: list[str] = []
+        click = str(payload.get("click") or payload.get("text") or "").strip()
+        type_text = str(payload.get("type") or payload.get("type_text") or "").strip()
+        key = str(payload.get("key") or "").strip()
+        if not (click or type_text or key):
+            return public_result(
+                ok=False,
+                target="desktop",
+                action="act",
+                message=(
+                    "computer_act on desktop needs click=, type=, or key=. "
+                    "For a URL, pass url= to use the Browser rail."
+                ),
+                extra={"hint": hint},
+            )
+        if click:
+            ck = self._run_desktop(ComputerAction.CLICK, text=click, hint=hint)
+            log.append(f"click:{ck.get('ok')} {click!r} → {str(ck.get('message') or '')[:60]}")
+            if not ck.get("ok"):
+                return public_result(
+                    ok=False,
+                    target="desktop",
+                    action="act",
+                    message=f"act: desktop click failed — {ck.get('message')}",
+                    extra={"steps": log, "detail": ck},
+                )
+            time.sleep(0.2)
+        if type_text:
+            ty = self._run_desktop(ComputerAction.TYPE, text=type_text, hint=hint)
+            log.append(f"type:{ty.get('ok')} chars={len(type_text)}")
+            if not ty.get("ok"):
+                return public_result(
+                    ok=False,
+                    target="desktop",
+                    action="act",
+                    message=f"act: desktop type failed — {ty.get('message')}",
+                    extra={"steps": log, "detail": ty},
+                )
+        if key:
+            ky = self._run_desktop(ComputerAction.KEY, key=key, hint=hint)
+            log.append(f"key:{ky.get('ok')} {key}")
+            if not ky.get("ok"):
+                return public_result(
+                    ok=False,
+                    target="desktop",
+                    action="act",
+                    message=f"act: desktop key failed — {ky.get('message')}",
+                    extra={"steps": log, "detail": ky},
+                )
+        return public_result(
+            ok=True,
+            target="desktop",
+            action="act",
+            message="SUCCESS: " + " | ".join(log),
+            extra={"steps": log, "click": click or None},
         )
 
     def _computer_act(

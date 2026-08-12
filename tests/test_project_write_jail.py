@@ -283,6 +283,45 @@ def test_workspace_context_mentions_write_jail(tmp_path: Path):
     assert "file_write" in block or "edit" in block.lower()
 
 
+def test_shell_write_jail_allows_runtime_bin_invoke(tmp_path: Path):
+    """Invoking python.exe / gcc.exe is not a write to that binary path."""
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    (sticky / "game.py").write_text("print(1)\n", encoding="utf-8")
+    (sticky / "hello.c").write_text("int main(){return 0;}\n", encoding="utf-8")
+    roots = [sticky.resolve()]
+
+    allowed = [
+        r"C:\Python312\python.exe game.py",
+        r'"C:\Program Files\Python312\python.exe" game.py',
+        r"C:\mingw64\bin\gcc.exe hello.c -o hello.exe",
+        r"C:\Program Files\nodejs\node.exe game.js",
+        r"py -3 game.py",
+        r"python game.py",
+        r".\hello.exe",
+        r"gcc hello.c -o hello.exe && .\hello.exe",
+    ]
+    for cmd in allowed:
+        hit = check_shell_write_jail(
+            cmd,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            access_scope="project",
+        )
+        assert hit is None, f"false jail for compile/run: {cmd!r} → {hit}"
+
+    # Running an outside *script* is still a jail (payload, not the runtime)
+    blocked = check_shell_write_jail(
+        r'C:\Python312\python.exe C:\Users\Public\evil.py',
+        write_roots=roots,
+        cwd=sticky,
+        project_bound=True,
+        access_scope="project",
+    )
+    assert blocked is not None
+
+
 def test_shell_write_jail_blocks_sibling_set_content(tmp_path: Path):
     """SecretSticky must not Set-Content into SecretFolder (sibling trees)."""
     sticky = tmp_path / "SecretSticky"

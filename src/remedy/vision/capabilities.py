@@ -54,6 +54,7 @@ _VISION_HINTS = (
     "grok-4",
     "grok-4.3",
     "grok-4.5",
+    "grok-4.6",
 )
 
 # Providers whose catalog models are vision-capable by default (when unknown).
