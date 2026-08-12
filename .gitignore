@@ -59,7 +59,11 @@ scripts/_test_*.py
 scripts/_verify_*.py
 desktop/tauri-dev-*.log
 desktop/tauri-local-build.json
+desktop/tauri-local-test.json
 *.log
+
+# E2E C scratch (hello.c + exe from e2e runs)
+_e2e_simple_c_pytest/
 
 # Ephemeral soak / red-team probe dumps (regenerated locally)
 docs/_soak*/

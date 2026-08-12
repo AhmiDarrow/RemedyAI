@@ -21,9 +21,16 @@ _DESKTOP_HINTS = re.compile(
     r"desktop|start\s*menu|taskbar|explorer|file\s*explorer|"
     r"installer|setup\.exe|msi\b|notepad|calculator|calc\.exe|"
     r"settings\s*app|control\s*panel|system\s*settings|"
-    r"discord\s*app|slack\s*app|steam|photoshop|word\b|excel\b|"
+    r"discord\s*app|slack\s*app|steam|photoshop|"
+    r"winword|word\.exe|ms\s*word|excel\.exe|excel\b|"
     r"native\s*app|other\s*window|outside\s*the\s*browser|"
-    r"whole\s*screen|primary\s*monitor|click\s*on\s*the\s*desktop"
+    r"whole\s*screen|primary\s*monitor|click\s*on\s*the\s*desktop|"
+    # Games / compiled apps — must not be driven through the Browser rail
+    r"pygame|godot|unity|sdl\b|win32|"
+    r"play\s+(it|the\s+game|the\s+app)|"
+    r"compiled\s+(game|app|program)|"
+    r"window\s+title|focus\s+(the\s+)?window|"
+    r"\w+\.exe"
     r")\b"
 )
 
@@ -235,3 +242,61 @@ def resolve_target(
 
 def host_label(target: ComputerTarget) -> str:
     return "browser" if target is ComputerTarget.BROWSER else "desktop"
+
+
+# Snapshot / click refs: e1… = browser DOM; w1… windows + c1… UIA controls.
+_REF_BROWSER_RE = re.compile(r"^e\d+$", re.IGNORECASE)
+_REF_DESKTOP_RE = re.compile(r"^[wc]\d+$", re.IGNORECASE)
+
+
+def infer_sticky_target(
+    requested: str | None = None,
+    *,
+    action: str | None = None,
+    ref: str | None = None,
+    hint: str | None = None,
+    url: str | None = None,
+    last_target: str | None = None,
+    last_elements_target: str | None = None,
+) -> str:
+    """Resolve ``auto`` using ref prefix + last successful drive target.
+
+    Explicit ``browser`` / ``desktop`` always wins. ``eN`` is rail DOM;
+    ``wN`` / ``cN`` are desktop UIA. After ``computer_app`` or a desktop
+    snapshot, auto stays on desktop until a URL/navigate. Desktop hints
+    (game / window / .exe) override a stale browser sticky so playing a
+    compiled app is not sent to the in-app rail.
+    """
+    req = (requested or "auto").strip().lower()
+    if req in ("browser", "web", "rail"):
+        return "browser"
+    if req in ("desktop", "os", "screen", "system", "external"):
+        return "desktop"
+
+    ref_s = (ref or "").strip()
+    if _REF_DESKTOP_RE.match(ref_s):
+        return "desktop"
+    if _REF_BROWSER_RE.match(ref_s):
+        return "browser"
+
+    act = (action or "").strip().lower()
+    if act in ("app", "windows", "monitors"):
+        return "desktop"
+    if act in ("navigate", "computer_navigate", "page_text"):
+        return "browser"
+
+    blob = " ".join(x for x in (hint or "", url or "", act) if x)
+    if looks_like_url(url) or looks_like_url((url or "").strip()):
+        return "browser"
+    if _DESKTOP_HINTS.search(blob) and not _BROWSER_HINTS.search(blob):
+        return "desktop"
+    if _BROWSER_HINTS.search(blob):
+        return "browser"
+
+    last = (last_target or last_elements_target or "").strip().lower()
+    if last in ("desktop", "os", "screen"):
+        return "desktop"
+    if last in ("browser", "web", "rail"):
+        return "browser"
+
+    return "auto"

@@ -227,6 +227,73 @@ def test_open_app_protocol_detector_drive_vs_handler():
             open_app(handler)
 
 
+def test_open_app_resolves_relative_in_search_dir(tmp_path: Path, monkeypatch):
+    """Just-built game.exe must launch from the project folder, not sidecar CWD."""
+    from remedy.core.computer.desktop_win import open_app
+
+    fake = tmp_path / "hello.exe"
+    fake.write_bytes(b"MZ")
+    launched: list[str] = []
+
+    def fake_popen(args, **_k):
+        launched.append(str(args[0]))
+
+        class P:
+            pid = 1
+
+        return P()
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    info = open_app("hello.exe", search_dirs=[tmp_path])
+    assert info.get("method") == "project_path"
+    assert launched and Path(launched[0]).name == "hello.exe"
+    info2 = open_app(".\\hello.exe", search_dirs=[tmp_path])
+    assert info2.get("method") == "project_path"
+
+
+def test_open_app_prefers_search_dirs_not_cwd(tmp_path: Path, monkeypatch):
+    import os
+
+    from remedy.core.computer.desktop_win import open_app
+
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / "hello.exe").write_bytes(b"MZ-cwd")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "hello.exe").write_bytes(b"MZ-proj")
+    launched: list[str] = []
+
+    def fake_popen(args, **_k):
+        launched.append(str(args[0]))
+
+        class P:
+            pid = 1
+
+        return P()
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    prev = os.getcwd()
+    try:
+        os.chdir(cwd)
+        info = open_app("hello.exe", search_dirs=[proj])
+    finally:
+        os.chdir(prev)
+    assert info.get("method") == "project_path"
+    assert Path(launched[0]).parent.resolve() == proj.resolve()
+
+
+def test_open_app_rejects_parent_escape(tmp_path: Path):
+    import pytest
+
+    from remedy.core.computer.desktop_win import open_app
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    with pytest.raises(ValueError, match="parent-directory|traversal"):
+        open_app("..\\Windows\\System32\\calc.exe", search_dirs=[proj])
+
+
 def test_open_url_refuses_userinfo_credentials():
     """https://user:pass@host must not open (credentials in address bar / OS)."""
     import pytest
@@ -337,6 +404,146 @@ def test_resolve_target_desktop_hints():
     )
     assert resolve_target("desktop", url="https://x.com") is ComputerTarget.DESKTOP
     assert resolve_target("browser", hint="installer") is ComputerTarget.BROWSER
+    from remedy.core.computer.router import _DESKTOP_HINTS
+
+    assert _DESKTOP_HINTS.search("in other words click Sign in") is None
+    assert _DESKTOP_HINTS.search("open word.exe") is not None
+
+
+def test_host_bridge_drive_target_is_session_scoped(tmp_path: Path, monkeypatch):
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+    from remedy.core import turn_context as tc
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    tok_a = tc._turn_session_id.set("sess-a")
+    tok_act = tc._turn_active.set(True)
+    try:
+        b.set_last_drive_target("desktop")
+        b.set_last_elements([{"ref": "c1", "name": "Play"}], target="desktop")
+        assert b.last_drive_target() == "desktop"
+        assert b.get_element_by_ref("c1") is not None
+    finally:
+        tc._turn_session_id.reset(tok_a)
+        tc._turn_active.reset(tok_act)
+
+    tok_b = tc._turn_session_id.set("sess-b")
+    tok_act2 = tc._turn_active.set(True)
+    try:
+        b.set_last_drive_target("browser")
+        assert b.last_drive_target() == "browser"
+        assert b.get_element_by_ref("c1") is None
+    finally:
+        tc._turn_session_id.reset(tok_b)
+        tc._turn_active.reset(tok_act2)
+
+
+def test_snapshot_needs_vision_only_for_empty_desktop_or_game():
+    from remedy.core.computer.vision_observe import snapshot_needs_vision
+
+    windows_only = [{"ref": "w1", "name": "Game"}]
+    with_controls = [{"ref": "w1"}, {"ref": "c1", "name": "OK"}]
+    assert snapshot_needs_vision(windows_only, last_target="desktop") is True
+    assert snapshot_needs_vision(windows_only, hint="play the pygame window") is True
+    assert snapshot_needs_vision(with_controls, last_target="desktop") is False
+    assert snapshot_needs_vision(windows_only, last_target="browser") is False
+    assert snapshot_needs_vision(windows_only, already_fallback=True, last_target="desktop") is False
+
+
+def test_flush_native_screenshots_for_grok(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+
+    from remedy.core.computer.vision_observe import (
+        flush_native_screenshots,
+        queue_native_screenshot,
+    )
+
+    png = tmp_path / "shot.png"
+    png.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+        b"\x00\x01\x01\x01\x00\x18\xdd\x8d\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    rt = SimpleNamespace()
+    monkeypatch.setattr(
+        "remedy.core.computer.vision_observe.chat_supports_native_vision",
+        lambda _rt=None: True,
+    )
+    queue_native_screenshot(rt, png, origin={"x": 0, "y": 0}, width=1, height=1)
+    msg = flush_native_screenshots(rt)
+    assert msg is not None
+    assert msg["role"] == "user"
+    kinds = [p.get("type") for p in msg["content"]]
+    assert "image_url" in kinds
+    assert "you can see this" in msg["content"][0]["text"].lower()
+    assert flush_native_screenshots(rt) is None  # consumed
+
+
+def test_flush_native_skipped_without_vision(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+
+    from remedy.core.computer.vision_observe import (
+        flush_native_screenshots,
+        queue_native_screenshot,
+    )
+
+    png = tmp_path / "shot.png"
+    png.write_bytes(b"not-a-png-but-exists")
+    rt = SimpleNamespace()
+    monkeypatch.setattr(
+        "remedy.core.computer.vision_observe.chat_supports_native_vision",
+        lambda _rt=None: False,
+    )
+    queue_native_screenshot(rt, png)
+    assert flush_native_screenshots(rt) is None
+
+
+def test_infer_sticky_target_game_and_refs():
+    from remedy.core.computer.router import infer_sticky_target
+
+    # Explicit always wins
+    assert infer_sticky_target("desktop", ref="e3") == "desktop"
+    assert infer_sticky_target("browser", ref="c1") == "browser"
+    # Ref prefixes
+    assert infer_sticky_target("auto", ref="e3") == "browser"
+    assert infer_sticky_target("auto", ref="w1") == "desktop"
+    assert infer_sticky_target("auto", ref="c12") == "desktop"
+    # After computer_app, auto click/find stay desktop
+    assert (
+        infer_sticky_target(
+            "auto", action="click", last_target="desktop", hint="Start"
+        )
+        == "desktop"
+    )
+    assert (
+        infer_sticky_target(
+            "auto", action="find", last_elements_target="desktop"
+        )
+        == "desktop"
+    )
+    # Game / exe hints override a stale browser sticky
+    assert (
+        infer_sticky_target(
+            "auto",
+            action="click",
+            hint="play the game",
+            last_target="browser",
+        )
+        == "desktop"
+    )
+    assert (
+        infer_sticky_target("auto", action="click", hint="launch snake.exe")
+        == "desktop"
+    )
+    # After navigate, auto click stays on rail
+    assert (
+        infer_sticky_target(
+            "auto", action="click", last_target="browser", hint="Sign in"
+        )
+        == "browser"
+    )
+    # App / windows always desktop
+    assert infer_sticky_target("auto", action="app") == "desktop"
+    assert infer_sticky_target("auto", action="windows") == "desktop"
 
 
 def test_resolve_target_navigate_defaults_browser():
@@ -801,6 +1008,8 @@ def test_computer_guidance_present():
     assert "computer_snapshot" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "computer_act" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "target" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "play" in COMPUTER_USE_SYSTEM_ADDENDUM.lower()
+    assert "target=desktop" in COMPUTER_USE_SYSTEM_ADDENDUM
 
 
 def test_hello_alone_not_host_connected(tmp_path: Path):
@@ -1034,6 +1243,61 @@ def test_offline_navigate_refuses_os_browser_snapshot_falls_back(
         str(e.get("ref", "")).startswith("w") for e in (snap.get("elements") or [])
     )
     assert "offline" in str(snap.get("note") or "").lower() or snap.get("fallback")
+
+
+def test_executor_click_text_stays_desktop_after_app(tmp_path: Path, monkeypatch):
+    """After computer_app, text= click must not enqueue a browser rail job."""
+    import json
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    import remedy.core.computer.desktop_win as win
+
+    monkeypatch.setattr(
+        win,
+        "open_app",
+        lambda app, search_dirs=None: {"ok": True, "app": app},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        win,
+        "desktop_snapshot",
+        lambda limit=60, mode="auto", hwnd=None: [
+            {"ref": "c1", "name": "Start", "tag": "button", "x": 10, "y": 10}
+        ],
+    )
+    clicked: list[str] = []
+
+    def fake_click_el(el, button="left", clicks=1):
+        clicked.append(str(el.get("name") or el.get("ref")))
+
+    monkeypatch.setattr(win, "click_element", fake_click_el, raising=False)
+
+    enqueued: list[str] = []
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    orig_enqueue = ex.bridge.enqueue
+
+    def track_enqueue(action, payload=None, session_id=None):
+        enqueued.append(str(action))
+        return orig_enqueue(action, payload, session_id=session_id)
+
+    monkeypatch.setattr(ex.bridge, "enqueue", track_enqueue)
+
+    app = json.loads(ex.run(ComputerAction.APP, app="notepad"))
+    assert app.get("ok") is True
+    assert ex.bridge.last_drive_target() == "desktop"
+
+    clk = json.loads(
+        ex.run(ComputerAction.CLICK, text="Start", target="auto")
+    )
+    assert clk.get("ok") is True, clk
+    assert clk.get("target") == "desktop"
+    assert clicked == ["Start"]
+    assert "click" not in enqueued
 
 
 def test_type_text_abort_mid_string(monkeypatch):

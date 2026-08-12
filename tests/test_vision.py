@@ -53,6 +53,7 @@ def test_supports_vision_heuristics():
     assert supports_vision("deepseek", "deepseek-chat") is False
     assert supports_vision("openai", "gpt-4o-mini") is True
     assert supports_vision("xai", "grok-2-vision-1212") is True
+    assert supports_vision("xai", "grok-4.6") is True
     assert supports_vision("mistral", "codestral-latest") is False
     assert supports_vision("ollama", "llama3.2") is False
     assert supports_vision("anthropic", "claude-3-5-sonnet-latest") is True

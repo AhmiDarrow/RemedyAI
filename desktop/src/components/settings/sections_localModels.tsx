@@ -47,6 +47,7 @@ function RmbEngineNumber({
   label,
   value,
   min,
+  max,
   step = 'any',
   placeholder = 'default',
   disabled,
@@ -55,7 +56,8 @@ function RmbEngineNumber({
   label: string
   value: number | string | null | undefined
   min?: number
-  step?: string
+  max?: number
+  step?: string | number
   placeholder?: string
   disabled?: boolean
   onApply: (v: number) => void
@@ -70,6 +72,7 @@ function RmbEngineNumber({
         defaultValue={value != null && value !== '' ? String(value) : ''}
         key={`rmb-knob-${label}-${value ?? ''}`}
         min={min}
+        max={max}
         step={step}
         placeholder={placeholder}
         onBlur={(e) => {

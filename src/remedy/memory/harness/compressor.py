@@ -7,9 +7,12 @@ from typing import Any
 
 from remedy.memory.harness.brief import SessionBrief
 
+# Bounded path segment (<=240 chars) — unbounded [\w.-]+ backtracks
+# quadratically on long uniform text (e.g. 50k-char tool dumps), hanging the
+# hot path. Fast-path guard in extract_paths_from_text skips scans entirely.
 _PATH_RE = re.compile(
     r"(?:[A-Za-z]:)?[\\/][\w.\\/ -]{3,}|"
-    r"[\w.-]+\.(?:py|ts|tsx|js|jsx|rs|go|md|toml|json|yml|yaml|css|html)\b"
+    r"[\w.-]{1,240}\.(?:py|ts|tsx|js|jsx|rs|go|md|toml|json|yml|yaml|css|html)\b"
 )
 
 
@@ -111,8 +114,17 @@ def compression_nudge_message(
 
 
 def extract_paths_from_text(text: str, *, limit: int = 20) -> list[str]:
+    text = text or ""
+    # Fast-path: no dot/slash at all means no paths — skip regex entirely.
+    # Avoids O(n^2) finditer on huge uniform strings ("x" * 50000 etc.).
+    if "." not in text and "/" not in text and "\\" not in text:
+        return []
+    # Cap scanned span: paths are found near message start; scanning hundreds
+    # of KB of noise per message is wasted work for a 20-hit heuristic.
+    if len(text) > 32_000:
+        text = text[:32_000]
     found: list[str] = []
-    for m in _PATH_RE.finditer(text or ""):
+    for m in _PATH_RE.finditer(text):
         p = m.group(0).strip().rstrip(".,;:)")
         if p and p not in found:
             found.append(p)

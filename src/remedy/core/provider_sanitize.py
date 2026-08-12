@@ -468,13 +468,21 @@ def coerce_tool_arguments_json(args: Any, *, tool_name: str = "") -> str:
             if tname in ("file_write", "file_edit", "file_edit_batch", "") and not repaired.get(
                 "_path_only"
             ):
-                try:
-                    return json.dumps(
-                        {k: v for k, v in repaired.items() if not str(k).startswith("_") or k in ("path", "content")},
-                        ensure_ascii=False,
-                    )
-                except Exception:
+                # Unclosed content string = mid-stream cut. Do not write a stump.
+                if tname == "file_write" and repaired.get("_repaired_closed") is False:
                     pass
+                else:
+                    try:
+                        return json.dumps(
+                            {
+                                k: v
+                                for k, v in repaired.items()
+                                if not str(k).startswith("_") or k in ("path", "content")
+                            },
+                            ensure_ascii=False,
+                        )
+                    except Exception:
+                        pass
             # file_write with path but truncated content still salvageable
             if tname == "file_write" and repaired.get("content"):
                 try:

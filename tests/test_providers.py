@@ -340,6 +340,26 @@ class TestAnthropicProvider:
         assert msgs[1]["content"][0]["type"] == "tool_result"
         assert msgs[1]["content"][0]["tool_use_id"] == "call_1"
 
+    def test_convert_messages_merges_adjacent_tool_results(self):
+        p = AnthropicProvider()
+        _, msgs = p._convert_messages([
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "c1", "function": {"name": "a", "arguments": "{}"}},
+                    {"id": "c2", "function": {"name": "b", "arguments": "{}"}},
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "one"},
+            {"role": "tool", "tool_call_id": "c2", "content": "two"},
+        ])
+        assert msgs[-1]["role"] == "user"
+        kinds = [b["type"] for b in msgs[-1]["content"]]
+        assert kinds == ["tool_result", "tool_result"]
+        assert [b["tool_use_id"] for b in msgs[-1]["content"]] == ["c1", "c2"]
+
     def test_convert_messages_empty_system_skipped(self):
         p = AnthropicProvider()
         system, msgs = p._convert_messages([

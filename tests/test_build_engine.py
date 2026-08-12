@@ -96,6 +96,92 @@ def test_verify_green_marks_done():
     assert st.phase == "done"
 
 
+def test_file_read_passed_does_not_false_green():
+    """Reading a test file that says '5 passed' must not mark verify green."""
+    st = BuildTurnState(active=True, write_steps=1, write_set=["app.py"])
+    observe_tool_batch(
+        st,
+        [{"function": {"name": "file_read", "arguments": '{"path":"test_app.py"}'}}],
+        [{"role": "tool", "content": "def test_ok():\n    assert 1\n# 5 passed\n"}],
+    )
+    assert st.last_verify_ok is not True
+
+
+def test_mkdir_exit_zero_does_not_false_green():
+    """Successful mkdir / echo is not a test run."""
+    st = BuildTurnState(active=True, write_steps=1, write_set=["app.py"])
+    observe_tool_batch(
+        st,
+        [{"function": {"name": "bash_exec", "arguments": '{"command":"mkdir src"}'}}],
+        [{"role": "tool", "content": "exit_code=0\ncwd=C:\\proj\n"}],
+    )
+    assert st.last_verify_ok is not True
+    assert st.write_set == ["app.py"]
+
+
+def test_cat_hello_c_is_not_verify():
+    from remedy.core.build_engine import _blob_is_verify_command
+
+    assert _blob_is_verify_command("gcc -o hello.exe hello.c && hello.exe")
+    assert _blob_is_verify_command("pytest -q")
+    assert not _blob_is_verify_command("cat hello.c")
+    assert not _blob_is_verify_command("type hello.c")
+    assert not _blob_is_verify_command("gcc --version")
+    assert not _blob_is_verify_command("mkdir src")
+
+
+def test_parallel_file_read_does_not_green_verify_batch():
+    """gcc/pytest in the same batch as file_read must only score the verify result."""
+    st = BuildTurnState(active=True, write_steps=1, write_set=["hello.c"])
+    observe_tool_batch(
+        st,
+        [
+            {
+                "id": "call_read",
+                "function": {
+                    "name": "file_read",
+                    "arguments": '{"path":"test_hello.py"}',
+                },
+            },
+            {
+                "id": "call_gcc",
+                "function": {
+                    "name": "bash_exec",
+                    "arguments": '{"command":"gcc -o hello.exe hello.c && hello.exe"}',
+                },
+            },
+        ],
+        [
+            {
+                "role": "tool",
+                "tool_call_id": "call_read",
+                "content": "def test_ok():\n    assert 1\n# 5 passed\n",
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_gcc",
+                "content": "exit_code=1\nstderr:\nundefined reference\n",
+            },
+        ],
+    )
+    assert st.last_verify_ok is False
+    assert st.phase == "repair"
+
+
+def test_keep_agency_after_green_play():
+    from remedy.core.build_engine import green_continue_message, keep_agency_after_green
+
+    st = BuildTurnState(active=True, goal="build a pygame snake and play it")
+    st.last_verify_ok = True
+    assert keep_agency_after_green(st) is True
+    msg = green_continue_message(st, command="python -m py_compile game.py")
+    assert "play" in msg["content"].lower()
+    assert "Tools stay on" in msg["content"]
+    assert keep_agency_after_green(
+        BuildTurnState(active=True, goal="add a helper function")
+    ) is False
+
+
 def test_monologue_block():
     st = BuildTurnState(active=True)
     n = monologue_block_nudge(st)

@@ -16,6 +16,46 @@ class EditResult:
     hunks_applied: int = 0
 
 
+def _find_flex_span(content: str, old: str) -> tuple[int, int] | None:
+    """Unique match of *old* in *content* ignoring CRLF and trailing spaces.
+
+    Returns ``(start, end)`` into the original *content*, or None when the
+    match is missing or not unique. Used so file_edit survives Windows
+    line-ending / trailing-whitespace drift instead of failing closed.
+    """
+    if not old:
+        return None
+    old_lines = [ln.rstrip() for ln in old.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    # Drop a trailing empty line from old if the snippet ended with a newline
+    if len(old_lines) > 1 and old_lines[-1] == "":
+        old_lines = old_lines[:-1]
+    if not old_lines:
+        return None
+    raw = content.splitlines(keepends=True)
+    stripped = [ln.rstrip("\r\n").rstrip() for ln in raw]
+    n = len(old_lines)
+    if n > len(stripped):
+        return None
+    hits: list[int] = []
+    for i in range(len(stripped) - n + 1):
+        if stripped[i : i + n] == old_lines:
+            hits.append(i)
+            if len(hits) > 1:
+                return None
+    if len(hits) != 1:
+        return None
+    i = hits[0]
+    start = sum(len(raw[j]) for j in range(i))
+    end = start + sum(len(raw[j]) for j in range(i, i + n))
+    # If the snippet did not include a trailing newline, do not consume the
+    # last matched line's keepends — that glued the next source line on.
+    if not old.endswith("\n") and not old.endswith("\r"):
+        last = raw[i + n - 1]
+        extra = len(last) - len(last.rstrip("\r\n"))
+        end -= extra
+    return start, end
+
+
 def apply_search_replace(
     content: str,
     old_string: str,
@@ -33,6 +73,26 @@ def apply_search_replace(
         return EditResult(ok=False, message="old_string and new_string are identical")
     count = content.count(old_string)
     if count == 0:
+        # CRLF / trailing-space mismatch is the usual Windows write failure.
+        flex = _find_flex_span(content, old_string)
+        if flex is not None:
+            start, end = flex
+            chunk = content[start:end]
+            ns = new_string
+            # Don't inject LF into a CRLF file (or the reverse).
+            if "\r\n" in chunk and "\n" in ns and "\r\n" not in ns:
+                ns = ns.replace("\n", "\r\n")
+            elif "\r\n" not in chunk and "\n" in chunk and "\r\n" in ns:
+                ns = ns.replace("\r\n", "\n")
+            new_content = content[:start] + ns + content[end:]
+            return EditResult(
+                ok=True,
+                message="Replaced 1 occurrence (whitespace-tolerant match).",
+                occurrences=1,
+                previous=content,
+                new_content=new_content,
+                hunks_applied=1,
+            )
         # Helpful near-miss hint: first 80 chars of old_string
         hint = old_string[:80].replace("\n", "\\n")
         return EditResult(

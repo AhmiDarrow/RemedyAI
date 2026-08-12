@@ -4,6 +4,46 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixes
+
+- **Computer use stays on the desktop after `computer_app`:** click/find/act
+  with `target=auto` no longer force the Browser rail. `eN` refs stay rail;
+  `wN`/`cN` stay desktop. Playing a compiled game no longer clicks the
+  in-app browser. `computer_act` without a URL drives the focused OS window.
+- **Write jail no longer blocks compile/run:** `C:\Python312\python.exe game.py`
+  / `gcc.exe hello.c` treat the interpreter/compiler path as an invoke, not a
+  write destination. Sibling-tree Set-Content / opaque downloads still fail closed.
+- **file_edit whitespace-tolerant match:** CRLF / trailing-space drift on
+  Windows no longer fails a unique hunk.
+- **Play-to-iterate:** `computer_app` resolves `game.exe` / `.\\hello.exe`
+  against the project folder. GUI/pygame launches auto-background so the
+  turn is not stuck waiting 60–300s. Auto-verify compiles GUI sources
+  instead of running the window. `bash_exec(background=true)` is first-class.
+  “play it” / “try it” keep tools armed.
+- **Builder stability:** verify green is only inferred from real test/compile
+  commands — `mkdir` / file_read of “5 passed” no longer false-greens and
+  strips tools. After a real green, play/ship goals keep tools on.
+  Ask-mode auto-verify is “blocked”, not a red repair loop.
+- **Computer vision:** screenshots and empty desktop UIA trees (pygame /
+  custom-drawn) queue the PNG for native chat vision (Grok/Claude/GPT) and
+  OCR via local SmolVLM when that server is already running. Click `x/y`
+  from the decode plus screen origin.
+- **Sweep:** verify green only from the verify tool in a mixed batch; setup
+  “automatic …” no longer flips approval to Auto; computer last-target /
+  screenshot queue is per session (tabs don’t steal refs); GUI background
+  uses a new console so pygame windows show; file_edit flex keeps CRLF.
+- **Session LLM switch 404:** `PUT /api/sessions/{id}/llm` was never decorated —
+  status-bar provider switches were silently dropped. Route is registered.
+  Anthropic parallel tool results merge into one user message (no HTTP 400).
+  `::ffff:127.0.0.1` SSRF unwrap; gcloud/AWS CLI env survives the shell scrub.
+- **Verify scoring:** `cat hello.c` / `gcc --version` are not tests; red verify
+  is not overwritten by a later “passed” string; auto-verify reads the official
+  `exit_code=` line only; unclosed `file_write` JSON is refused, not written.
+- **Computer clicks:** multi-monitor `MOUSEEVENTF_VIRTUALDESK`; wait/page_text
+  no longer steal sticky target; `computer_act` defaults to auto; image-click
+  adds screenshot origin; `open_app` prefers project over CWD and rejects `..`;
+  file_edit flex no longer glues the next line.
+
 ## [0.22.3] - 2026-08-09
 
 ### Fixes

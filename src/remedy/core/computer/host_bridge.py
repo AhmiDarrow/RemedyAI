@@ -285,6 +285,15 @@ class ComputerHostBridge:
         # Last a11y/desktop snapshot for click-by-ref resolution
         self._last_elements: list[dict[str, Any]] = []
         self._last_elements_target: str = ""
+        # Last successful drive target (browser | desktop). Sticky so a game
+        # launched with computer_app is not clicked in the Browser rail.
+        self._last_drive_target: str = ""
+        # Per-session copies — concurrent tabs must not steal each other's refs.
+        self._last_elements_by_session: dict[str, list[dict[str, Any]]] = {}
+        self._last_elements_target_by_session: dict[str, str] = {}
+        self._last_drive_by_session: dict[str, str] = {}
+        self._last_shot: dict[str, Any] = {}
+        self._last_shot_by_session: dict[str, dict[str, Any]] = {}
         self._last_navigate_at: float = 0.0
         self._last_navigate_url: str = ""
         # True when last navigate returned before host confirmed page load.
@@ -324,14 +333,79 @@ class ComputerHostBridge:
                 n += 1
         return n
 
+    def _session_key(self) -> str:
+        try:
+            from remedy.core.turn_context import current_session_id
+
+            return str(current_session_id() or "").strip()
+        except Exception:
+            return ""
+
     def set_last_elements(
         self,
         elements: list[dict[str, Any]],
         *,
         target: str = "browser",
     ) -> None:
-        self._last_elements = list(elements or [])[:120]
+        els = list(elements or [])[:120]
+        self._last_elements = els
         self._last_elements_target = target
+        # Snapshot/find update refs only — do not steal last_drive_target
+        sid = self._session_key()
+        if sid:
+            self._last_elements_by_session[sid] = els
+            self._last_elements_target_by_session[sid] = target
+            self._trim_session_maps()
+
+    def _trim_session_maps(self) -> None:
+        cap = 24
+        if len(self._last_drive_by_session) <= cap:
+            return
+        extra = len(self._last_drive_by_session) - cap
+        for k in list(self._last_drive_by_session.keys())[:extra]:
+            self._last_drive_by_session.pop(k, None)
+            self._last_elements_by_session.pop(k, None)
+            self._last_elements_target_by_session.pop(k, None)
+
+    def set_last_drive_target(self, target: str) -> None:
+        t = (target or "").strip().lower()
+        if t in ("browser", "desktop"):
+            self._last_drive_target = t
+            sid = self._session_key()
+            if sid:
+                self._last_drive_by_session[sid] = t
+
+    def set_last_shot(
+        self,
+        *,
+        origin: dict[str, Any] | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        path: str = "",
+    ) -> None:
+        info = {
+            "origin": dict(origin or {}),
+            "width": int(width or 0),
+            "height": int(height or 0),
+            "path": path or "",
+        }
+        self._last_shot = info
+        sid = self._session_key()
+        if sid:
+            self._last_shot_by_session[sid] = info
+
+    def last_shot(self) -> dict[str, Any]:
+        sid = self._session_key()
+        if sid and sid in self._last_shot_by_session:
+            return dict(self._last_shot_by_session[sid])
+        return dict(self._last_shot or {})
+
+    def last_drive_target(self) -> str:
+        sid = self._session_key()
+        if sid:
+            # Missing key = this tab has not driven yet (do not leak sibling).
+            return str(self._last_drive_by_session.get(sid) or "").strip().lower()
+        return str(self._last_drive_target or "").strip().lower()
 
     def mark_navigated(self, url: str = "", *, optimistic: bool = False) -> None:
         self._last_navigate_at = time.time()
@@ -366,16 +440,30 @@ class ComputerHostBridge:
         r = (ref or "").strip().lower()
         if not r:
             return None
-        for el in self._last_elements:
+        sid = self._session_key()
+        if sid:
+            if sid not in self._last_elements_by_session:
+                return None
+            els = self._last_elements_by_session[sid]
+        else:
+            els = self._last_elements
+        for el in els:
             if str(el.get("ref") or "").strip().lower() == r:
                 return el
         return None
 
     def last_elements_info(self) -> dict[str, Any]:
+        sid = self._session_key()
+        if sid:
+            els = self._last_elements_by_session.get(sid) or []
+            tgt = self._last_elements_target_by_session.get(sid, "")
+        else:
+            els = self._last_elements
+            tgt = self._last_elements_target
         return {
-            "target": self._last_elements_target,
-            "count": len(self._last_elements),
-            "elements": list(self._last_elements),
+            "target": tgt,
+            "count": len(els),
+            "elements": list(els),
         }
 
     def host_connected(self, *, max_age_s: float = 15.0) -> bool:

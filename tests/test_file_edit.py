@@ -18,6 +18,33 @@ def test_not_found():
     assert "not found" in r.message.lower()
 
 
+def test_flex_replace_does_not_glue_next_line():
+    disk = "int main() {\r\n    printf(\"hi\");  \r\n    return 0;\r\n}\r\n"
+    r = apply_search_replace(disk, '    printf("hi");', '    printf("ok");')
+    assert r.ok, r.message
+    assert "return 0;" in (r.new_content or "")
+    assert "printf(\"ok\");" in (r.new_content or "")
+    assert "printf(\"ok\");return" not in (r.new_content or "").replace("\r", "")
+
+
+def test_whitespace_tolerant_crlf_and_trailing_space():
+    """Windows files often have CRLF / trailing spaces; unique hunks must apply."""
+    disk = "int main() {\r\n    printf(\"hi\");  \r\n    return 0;\r\n}\r\n"
+    old = "int main() {\n    printf(\"hi\");\n    return 0;\n}"
+    r = apply_search_replace(disk, old, "int main() {\n    printf(\"ok\");\n    return 0;\n}")
+    assert r.ok, r.message
+    assert "printf(\"ok\")" in (r.new_content or "")
+    assert "whitespace-tolerant" in r.message.lower()
+
+
+def test_whitespace_tolerant_not_if_ambiguous():
+    src = "foo  \nbar\nfoo  \n"
+    r = apply_search_replace(src, "foo", "baz")
+    # exact 'foo' matches twice → still require replace_all (not flex)
+    assert not r.ok
+    assert "2 times" in r.message
+
+
 def test_multiple_requires_replace_all():
     r = apply_search_replace("aa aa", "aa", "b")
     assert not r.ok
