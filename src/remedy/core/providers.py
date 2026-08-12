@@ -523,14 +523,24 @@ class AnthropicProvider(ProviderAdapter):
                 anthropic.append({"role": "assistant", "content": content_blocks})
 
             elif role == "tool":
-                anthropic.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": msg.get("tool_call_id") or "",
-                        "content": str(msg.get("content") or ""),
-                    }],
-                })
+                block = {
+                    "type": "tool_result",
+                    "tool_use_id": msg.get("tool_call_id") or "",
+                    "content": str(msg.get("content") or ""),
+                }
+                # Anthropic requires one user message with ALL tool_result blocks.
+                if (
+                    anthropic
+                    and anthropic[-1].get("role") == "user"
+                    and isinstance(anthropic[-1].get("content"), list)
+                    and all(
+                        isinstance(b, dict) and b.get("type") == "tool_result"
+                        for b in anthropic[-1]["content"]
+                    )
+                ):
+                    anthropic[-1]["content"].append(block)
+                else:
+                    anthropic.append({"role": "user", "content": [block]})
 
         return "\n\n".join(system_texts), anthropic
 
@@ -629,14 +639,15 @@ class AnthropicProvider(ProviderAdapter):
 
     @staticmethod
     def _safe_json(value: Any) -> dict[str, Any]:
-        """Parse a value to JSON dict, returning {} on failure."""
+        """Parse a value to JSON dict. Keep a raw stub on failure (not empty {})."""
         if isinstance(value, dict):
             return value
         if isinstance(value, str):
             try:
-                return json.loads(value)
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, dict) else {"_value": parsed}
             except (json.JSONDecodeError, TypeError):
-                return {}
+                return {"_raw": value[:4000]}
         return {}
 
     async def parse_stream(

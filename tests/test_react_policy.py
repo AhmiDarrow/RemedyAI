@@ -171,6 +171,11 @@ def test_message_wants_tools_action_kicks() -> None:
         "go to youtube",
         "open gmail",
         "gta 5 wiki show me it",
+        "play it",
+        "try it",
+        "run it",
+        "play the game",
+        "launch the pygame window",
     ):
         assert message_wants_tools(msg) is True, msg
     # Still skip pure chit-chat

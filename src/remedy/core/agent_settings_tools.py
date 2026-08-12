@@ -12,6 +12,7 @@ Examples the model should handle via these tools (not only UI instructions):
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from remedy.core.errors import format_tool_error
@@ -115,8 +116,10 @@ def register_settings_tools(runtime: Any) -> None:
                 low = str(setup).strip().lower()
                 if "web" in low and ("tool" in low or "fetch" in low or "enable" in low):
                     patch["web_tools_enabled"] = "disable" not in low and "off" not in low
-                elif "approval" in low or "auto" in low and "ask" not in low:
-                    patch["approval_mode"] = "ask" if "ask" in low else "auto"
+                elif re.search(r"\bapproval\b", low) or re.search(
+                    r"\b(?:auto|ask)\s+mode\b", low
+                ):
+                    patch["approval_mode"] = "ask" if re.search(r"\bask\b", low) else "auto"
                 elif "vision" in low or "smol" in low:
                     patch["vision_enabled"] = "disable" not in low and "off" not in low
                     if patch.get("vision_enabled"):

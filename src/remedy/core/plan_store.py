@@ -474,7 +474,10 @@ request is actually done.
    Shell mutations outside the focus project are **WRITE_JAIL blocked** —
    do not write sibling trees (e.g. SecretFolder vs SecretSticky).
 4. **Verify:** after related edits, run a focused check (`pytest`, `tsc`,
-   `cargo check`, project script) — not a full release unless asked.
+   `gcc`/`clang`, `cargo check`, `run_python_file`, or the program itself).
+   For a game/GUI: compile/run, then **play it** with `computer_app` +
+   `computer_snapshot target=desktop` + click/type, then fix what you see.
+   Do not stop at "wrote the file".
 5. **Never** leave scaffold junk: no `_ref_*`, `_ex_*`, `_write_*.py`, `_patch_*.py`.
    Read reference code from its real path with `file_read` / `repo_search`.
 6. Do **not** work around limits by writing a Python script that writes the

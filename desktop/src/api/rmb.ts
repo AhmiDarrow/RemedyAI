@@ -17,7 +17,7 @@ export interface RmbStatus {
   ok?: boolean
   brand?: string
   brand_full?: string
-  engine?: string
+  engine_brand?: string
   enabled?: boolean
   auto_start?: boolean
   installed?: boolean

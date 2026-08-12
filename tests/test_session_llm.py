@@ -7,6 +7,15 @@ from types import SimpleNamespace
 from remedy.core.session_llm import resolve_session_llm_bind, session_llm_update_fields
 
 
+def test_put_session_llm_route_is_registered():
+    """Desktop PUT /sessions/{id}/llm must not 404 (handler was previously unregistered)."""
+    from remedy.interfaces.api import create_app
+
+    app = create_app(runtime=None, memory=None, api_key="")
+    paths = {getattr(r, "path", "") for r in app.routes}
+    assert "/api/sessions/{session_id}/llm" in paths
+
+
 def test_explicit_req_pair_wins():
     sess = SimpleNamespace(llm_provider="xai", model="grok-4.5")
     p, m = resolve_session_llm_bind(

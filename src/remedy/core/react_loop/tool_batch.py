@@ -163,14 +163,18 @@ async def apply_build_engine_after_batch(
                         av.get("scoped"),
                     )
                     # Mark turn green so the loop can short-summary without re-tooling
+                    # (play/ship goals keep agency — see keep_agency_after_green).
                     with suppress(Exception):
-                        runtime._build_verify_green = True  # type: ignore[attr-defined]
+                        from remedy.core.build_engine import keep_agency_after_green
+
+                        if not keep_agency_after_green(bst):
+                            runtime._build_verify_green = True  # type: ignore[attr-defined]
                     from remedy.core.build_engine import (
                         format_ship_report_line,
                         green_continue_message,
                     )
 
-                    # Ship goals: continue push/release; else short summary only
+                    # Ship / play: continue with tools; else short summary only
                     gmsg = green_continue_message(
                         bst, command=str(av.get("command") or "")
                     )
@@ -178,11 +182,25 @@ async def apply_build_engine_after_batch(
                     if bst.ship_required and not bst.ship_complete():
                         rearm_agency()
                         yield "@@status:Build green — continue ship\n"
+                    else:
+                        with suppress(Exception):
+                            from remedy.core.build_engine import keep_agency_after_green
+
+                            if keep_agency_after_green(bst):
+                                rearm_agency()
+                                yield "@@status:Build green — play/iterate\n"
                     ship_line = format_ship_report_line(bst)
                     if ship_line:
                         yield ship_line
                     # D: optional mutant kill sample after green (cheap) — skip on local
                     # to avoid another long tool wave after done.
+                elif av.get("blocked") or av.get("approval"):
+                    logger.info(
+                        "Build auto-verify blocked (approval/jail) cmd=%s",
+                        av.get("command"),
+                    )
+                    rearm_agency()
+                    yield "@@status:Build auto-verify blocked — needs approval\n"
                 else:
                     if "auto_verify_repair" not in bst.nudges_emitted:
                         bst.nudges_emitted.append("auto_verify_repair")
@@ -218,9 +236,21 @@ async def apply_build_engine_after_batch(
                     pass  # rearmed in red branch
                 elif av.get("capped") or av.get("oracle_missing"):
                     rearm_agency()
+                _av_label = (
+                    "green"
+                    if av.get("ok")
+                    else (
+                        "cap"
+                        if av.get("capped")
+                        else (
+                            "blocked"
+                            if av.get("blocked") or av.get("approval")
+                            else "red"
+                        )
+                    )
+                )
                 yield (
-                    f"@@status:Build auto-verify "
-                    f"{'green' if av.get('ok') else ('cap' if av.get('capped') else 'red')}"
+                    f"@@status:Build auto-verify {_av_label}"
                     f"{' scoped' if av.get('scoped') else ''}"
                     f"{' seeded' if av.get('seeded') else ''}"
                     f"{' (oracle missing)' if av.get('oracle_missing') else ''}\n"

@@ -272,6 +272,7 @@ MOUSEEVENTF_MIDDLEDOWN = 0x0020
 MOUSEEVENTF_MIDDLEUP = 0x0040
 MOUSEEVENTF_WHEEL = 0x0800
 MOUSEEVENTF_ABSOLUTE = 0x8000
+MOUSEEVENTF_VIRTUALDESK = 0x4000
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
 
@@ -337,7 +338,14 @@ def _abs_coords(x: int, y: int) -> tuple[int, int]:
 def move_mouse(x: int, y: int) -> None:
     _require_windows()
     ax, ay = _abs_coords(int(x), int(y))
-    mi = MOUSEINPUT(ax, ay, 0, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, 0, None)
+    mi = MOUSEINPUT(
+        ax,
+        ay,
+        0,
+        MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+        0,
+        None,
+    )
     _send_input(INPUT(INPUT_MOUSE, INPUT_UNION(mi=mi)))
 
 
@@ -777,11 +785,18 @@ def _open_app_is_protocol_or_url(raw: str) -> bool:
     return len(m.group(1)) != 1
 
 
-def open_app(app: str) -> dict[str, Any]:
+def open_app(
+    app: str,
+    *,
+    search_dirs: list[Path] | None = None,
+) -> dict[str, Any]:
     """Launch an application by name/path (notepad, calc, explorer, full path, …).
 
     Fail closed on URL/protocol handlers, UNC shares, and shell metacharacters.
     Web URLs belong in ``open_url`` / navigate — not ``cmd start`` via app launch.
+
+    *search_dirs*: project/work roots so ``game.exe`` / ``.\\hello.exe`` resolve
+    to the just-built binary instead of CWD (sidecar install folder).
     """
     import re
     import shutil
@@ -827,7 +842,32 @@ def open_app(app: str) -> dict[str, Any]:
         return {"app": raw, "method": "startfile", "target": target}
     # Absolute / existing path only when the file is present (no bare "C:…" probe)
     path_candidate = Path(target)
-    if path_candidate.is_file():
+    # Project roots first — sidecar CWD may have a leftover game.exe
+    if search_dirs and not path_candidate.is_absolute():
+        rel = Path(target)
+        if ".." in rel.parts:
+            raise ValueError("open_app refuses parent-directory traversal")
+        for d in search_dirs:
+            try:
+                root = Path(d).expanduser().resolve(strict=False)
+            except OSError:
+                continue
+            for cand in (root / rel, root / rel.name):
+                try:
+                    resolved = cand.resolve(strict=False)
+                    resolved.relative_to(root)
+                except (OSError, ValueError):
+                    continue
+                if resolved.is_file():
+                    subprocess.Popen(
+                        [str(resolved)], shell=False, close_fds=True
+                    )
+                    return {
+                        "app": raw,
+                        "method": "project_path",
+                        "target": str(resolved),
+                    }
+    if path_candidate.is_file() and path_candidate.is_absolute():
         subprocess.Popen([str(path_candidate)], shell=False, close_fds=True)
         return {"app": raw, "method": "path", "target": str(path_candidate)}
     # Drive-letter path that is not an existing file — fail closed (was Popen anyway)

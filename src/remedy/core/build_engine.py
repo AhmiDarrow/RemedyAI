@@ -42,7 +42,8 @@ _BUILD_RE = re.compile(
     r"migrate|upgrade|replace|prototype|design\s+(the\s+)?(system|api|feature)|"
     r"calculator|todo\s+app|cli\b|"
     # Simple C / compile tasks (partner e2e)
-    r"compile|gcc|clang|\.c\b|hello\.c|main\.c"
+    r"compile|gcc|clang|\.c\b|hello\.c|main\.c|"
+    r"pygame|play\s+(it|the\s+game)|try\s+it"
     r")\b"
 )
 
@@ -72,11 +73,41 @@ _SHIP_TOOLS = frozenset(
 )
 _VERIFY_HINT = re.compile(
     r"(?i)\b(pytest|npm\s+test|cargo\s+test|go\s+test|unittest|vitest|jest|"
+    r"gcc|clang|cl\.exe|rustc|cargo\s+(?:build|run|check)|go\s+(?:build|run)|"
+    r"dotnet\s+(?:build|test|run)|npx\s+tsc|tsc\b|"
     r"exit_code=0|passed|FAILED|ERROR|tests?\s+passed|ok\s+\d+\s+passed)\b"
 )
 _SHIP_CMD_HINT = re.compile(
     r"(?i)\b(git\s+push|gh\s+release|gh\s+pr\s+create|git\s+tag\b)\b"
 )
+
+# Real compile/test — not `cat hello.c` / `gcc --version` / filename chatter.
+_VERIFY_CMD_RE = re.compile(
+    r"(?ix)"
+    r"(?:"
+    r"\bpytest\b|"
+    r"\bnpm\s+test\b|"
+    r"\bcargo\s+(?:test|build|run|check)\b|"
+    r"\bgo\s+(?:test|build|run)\b|"
+    r"\bkind\s*=\s*verify\b|"
+    r"\bunittest\b|\bvitest\b|\bjest\b|"
+    r"\b(?:gcc|g\+\+|clang|clang\+\+)\b(?![^\n]*--version)[^\n]*\.(?:c|cpp|cc|cxx|h)\b|"
+    r"\brustc\b[^\n]*\.(?:rs)\b|"
+    r"\bcl\.exe\b|"
+    r"\bdotnet\s+(?:test|build|run)\b|"
+    r"\bpython\s+-m\s+(?:pytest|unittest|py_compile)\b"
+    r")"
+)
+_NOT_VERIFY_CMD_RE = re.compile(
+    r"(?ix)^\s*(?:cat|type|get-content|more|less|dir|ls|head|tail)\b"
+)
+
+
+def _blob_is_verify_command(blob: str) -> bool:
+    s = blob or ""
+    if _NOT_VERIFY_CMD_RE.search(s.strip()):
+        return False
+    return bool(_VERIFY_CMD_RE.search(s))
 
 PHASES = ("scout", "implement", "verify", "repair", "ship", "done")
 
@@ -407,12 +438,20 @@ def begin_build_turn(
         st.oracle_ok = bool(st.verify_command)
     with suppress(Exception):
         st.project_path = str(runtime.effective_project_path() or "")
-    # Resume mid-ship from disk ledger
+    # Resume mid-ship from disk ledger — only when a real project is bound.
+    # Unbound/home-dir runtimes (incl. unit-test fakes) must NOT inherit a
+    # stale cross-session ledger: that re-arms auto-verify with a real
+    # subprocess (e.g. `pytest -q`) on a bare runtime and hangs the turn.
+    _bound = False
+    with suppress(Exception):
+        from remedy.core.workspace import is_unset_project_path as _unset_pp
+
+        _bound = not _unset_pp(getattr(runtime, "_project_path_raw", None))
     with suppress(Exception):
         from remedy.core.build_ledger import load_ledger
 
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
-        led = load_ledger(st.project_path or None, home=home)
+        led = load_ledger(st.project_path or None, home=home) if _bound else None
         if led is not None:
             # Always carry oracle + green watermark (even when phase=done)
             if led.verify_command and not st.verify_command:
@@ -561,33 +600,28 @@ def observe_tool_batch(
     # bash_exec/job_run count as verify when args look like tests
     any_verify = False
     any_ship_cmd = False
+    verify_ids: set[str] = set()
     for tc in tcs:
         n = _tool_name(tc)
+        tid = str(tc.get("id") or tc.get("tool_call_id") or "")
         if n in ("mission_verify",):
             any_verify = True
+            if tid:
+                verify_ids.add(tid)
         elif n in ("bash_exec", "shell_exec", "job_run"):
             blob = (
                 _args_path(tc)
                 + " "
                 + str((tc.get("function") or {}).get("arguments") or "")
             ).lower()
-            if any(
-                k in blob
-                for k in (
-                    "pytest",
-                    "npm test",
-                    "cargo test",
-                    "go test",
-                    "kind=verify",
-                    'kind": "verify',
-                    "unittest",
-                    "vitest",
-                    "jest",
-                )
-            ):
+            if _blob_is_verify_command(blob):
                 any_verify = True
+                if tid:
+                    verify_ids.add(tid)
             elif n == "job_run" and "verify" in blob:
                 any_verify = True
+                if tid:
+                    verify_ids.add(tid)
             if _SHIP_CMD_HINT.search(blob):
                 any_ship_cmd = True
         elif n in _SHIP_TOOLS:
@@ -670,40 +704,54 @@ def observe_tool_batch(
             if state.ship_complete() and state.last_verify_ok is True:
                 state.phase = "done"
 
-    # Infer verify outcome from tool results
+    # Infer verify outcome ONLY from verify-class tool results.
+    # file_read of a test file ("5 passed") or bash_exec mkdir (exit_code=0)
+    # used to false-green the build and strip tools — that is not a test run.
+    if not any_verify:
+        return
+
+    saw_red = False
+    saw_green = False
+    last_summary = ""
     for msg in tool_messages or []:
         if not isinstance(msg, dict) or msg.get("role") != "tool":
+            continue
+        # Parallel file_read + gcc must not green from the read body.
+        cid = str(msg.get("tool_call_id") or msg.get("id") or "")
+        if verify_ids and (not cid or cid not in verify_ids):
             continue
         content = str(msg.get("content") or "")
         if not content:
             continue
         low = content[:800].lower()
-        if "exit_code=0" in low or re.search(r"\bpassed\b", low) and "failed" not in low:
-            # Don't treat ship tool chatter as verify green
-            if any_ship_tool and not any_verify and "passed" not in low:
-                continue
-            state.last_verify_ok = True
-            state.last_verify_summary = content[:2000]
-            state.clear_write_set_on_green()
-        elif (
-            "exit_code=" in low
-            and "exit_code=0" not in low
-            or "FAILED" in content
-            or "Error" in content[:40]
+        if "approval_required" in low or "write_jail" in low:
+            continue
+        if "started background" in low:
+            continue
+        last_summary = content[:2000]
+        # Official runner line only (ignore "exit_code=0" inside stdout)
+        m_exit = re.search(r"(?im)^(?:verify\s+)?exit_code=(\d+)", content)
+        if m_exit:
+            if m_exit.group(1) == "0":
+                saw_green = True
+            else:
+                saw_red = True
+            continue
+        if re.search(r"\b\d+\s+passed\b", low) and "failed" not in low:
+            saw_green = True
+        elif _VERIFY_HINT.search(content) and re.search(
+            r"\b(fail|failed|error)\b", low
         ):
-            if any_verify or any_write:
-                state.last_verify_ok = False
-                state.phase = "repair"
-                state.repair_steps += 1
-                state.last_verify_summary = content[:2000]
-        if _VERIFY_HINT.search(content):
-            if "fail" in low or "error" in low:
-                state.last_verify_ok = False
-                if state.phase not in ("done", "ship"):
-                    state.phase = "repair"
-            elif "pass" in low or "exit_code=0" in low:
-                state.last_verify_ok = True
-                state.clear_write_set_on_green()
+            saw_red = True
+    if saw_red:
+        state.last_verify_ok = False
+        state.phase = "repair"
+        state.repair_steps += 1
+        state.last_verify_summary = last_summary
+    elif saw_green:
+        state.last_verify_ok = True
+        state.last_verify_summary = last_summary
+        state.clear_write_set_on_green()
 
 
 def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
@@ -913,9 +961,45 @@ def unfinished_green_gate_message(state: BuildTurnState) -> dict[str, str]:
     }
 
 
+_PLAY_AFTER_GREEN_RE = re.compile(
+    r"(?i)\b("
+    r"play(\s+it)?|pygame|try\s+it|iterate|"
+    r"computer_app|desktop\s+game|video\s+game"
+    r")\b"
+)
+
+
+def keep_agency_after_green(
+    state: BuildTurnState | None,
+    user_message: str = "",
+) -> bool:
+    """True when green verify must NOT strip tools (ship / play / iterate)."""
+    if state is None or not state.active:
+        return False
+    if state.ship_required and not state.ship_complete():
+        return True
+    blob = f"{state.goal or ''} {user_message or ''}"
+    return bool(_PLAY_AFTER_GREEN_RE.search(blob))
+
+
 def green_continue_message(state: BuildTurnState, *, command: str = "") -> dict[str, str]:
-    """After machine green: short summary OR continue ship if required."""
+    """After machine green: short summary OR continue ship/play if required."""
     cmd = command or state.verify_command or ""
+    if keep_agency_after_green(state):
+        if not (state.ship_required and not state.ship_complete()):
+            return {
+                "role": "user",
+                "content": (
+                    "[Build engine · GREEN · play/iterate]\n"
+                    f"Machine verify passed: `{cmd}`.\n"
+                    "Do **not** rewrite working source just to re-verify.\n"
+                    "The program is built — **use it**: computer_app the exe "
+                    "(or run_python_file / bash_exec background), then "
+                    "computer_snapshot target=desktop, play it, file_edit only "
+                    "what you observe is wrong, rebuild, repeat.\n"
+                    "Tools stay on."
+                ),
+            }
     if state.ship_required and not state.ship_complete():
         return {
             "role": "user",

@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 def register_llm_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     """Register llm session routes."""
     _ = gateway  # may be unused in some modules
+
+    @app.put("/api/sessions/{session_id}/llm")
+    @app.post("/api/sessions/{session_id}/llm")
     async def set_session_llm(session_id: str, req: SessionLlmRequest):
         """Switch provider/model for this session (NanoToken remeasure on apply).
 

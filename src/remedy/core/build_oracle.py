@@ -237,18 +237,55 @@ async def run_auto_verify(
                 scoped = True
                 state.last_scoped_command = sc
 
-    if hasattr(state, "auto_verify_cycles"):
-        state.auto_verify_cycles = cycles + 1
+    # GUI / game sources: compile or py_compile only. Running pygame / a
+    # windowed .exe here hung the turn for up to 300s and killed the window.
+    verify_timeout = 300.0
+    with suppress(Exception):
+        from pathlib import Path as _P
 
-    result = await run_verify_job(runtime, command=run_cmd, timeout=300.0)
+        from remedy.core.interactive_launch import (
+            compile_only_verify_command,
+            write_set_looks_like_gui,
+        )
+
+        root_p = None
+        with suppress(Exception):
+            root_p = _P(runtime.effective_project_path())
+        writes = list(getattr(state, "write_set", None) or [])
+        if write_set_looks_like_gui(writes, cwd=root_p):
+            adapted = compile_only_verify_command(run_cmd)
+            if adapted and adapted != run_cmd:
+                run_cmd = adapted
+                scoped = True
+        # Console `gcc && hello.exe` should finish in seconds; don't wait 300s
+        if re.search(r"(?i)\.exe\b", run_cmd) and "pytest" not in run_cmd.lower():
+            verify_timeout = 20.0
+
+    result = await run_verify_job(runtime, command=run_cmd, timeout=verify_timeout)
     ok = bool(getattr(result, "ok", False))
     summary = str(getattr(result, "summary", "") or "")[:2000]
-    # Also parse exit_code from summary text
-    if "exit_code=0" in summary.lower() or re.search(
-        r"(?i)\b(passed|ok)\b", summary
-    ) and "fail" not in summary.lower()[:200]:
-        if getattr(result, "ok", None) is not False:
-            ok = ok or "exit_code=0" in summary.lower()
+    # Ask-mode / jail is not a test failure — do not enter repair
+    if "APPROVAL_REQUIRED" in summary or summary.startswith("WRITE_JAIL"):
+        return {
+            "ok": False,
+            "auto": True,
+            "blocked": True,
+            "approval": "APPROVAL_REQUIRED" in summary,
+            "oracle_missing": False,
+            "summary": summary,
+            "command": run_cmd,
+            "full_command": cmd,
+            "scoped": scoped,
+            "capped": False,
+            "seeded": bool(getattr(state, "oracle_seeded", False)),
+        }
+    # Count only real process results toward the auto-verify cap
+    if hasattr(state, "auto_verify_cycles"):
+        state.auto_verify_cycles = cycles + 1
+    # Official runner line only — stdout may mention other exit_code=0
+    m_exit = re.search(r"(?im)^(?:verify\s+)?exit_code=(\d+)", summary)
+    if m_exit:
+        ok = m_exit.group(1) == "0"
 
     if hasattr(state, "verify_steps"):
         state.verify_steps = int(state.verify_steps or 0) + 1
@@ -430,6 +467,16 @@ def format_auto_verify_message(
         }
     if ok:
         scope_note = " (scoped)" if scoped else ""
+        keep = False
+        with suppress(Exception):
+            from remedy.core.build_engine import keep_agency_after_green
+
+            keep = bool(state is not None and keep_agency_after_green(state))
+        done_line = (
+            "Verify passed. Tools stay on — play/ship/iterate if the goal needs it."
+            if keep
+            else "Verify passed. You may summarize DONE if the goal is met."
+        )
         return {
             "role": "user",
             "content": (
@@ -437,7 +484,7 @@ def format_auto_verify_message(
                 f"Machine ran: `{cmd}`\n"
                 + (f"Full suite available: `{full}`\n" if scoped and full != cmd else "")
                 + f"{summary}\n"
-                "Verify passed. You may summarize DONE if the goal is met."
+                + done_line
             ),
         }
     # RED → structured repair ticket (error vector)

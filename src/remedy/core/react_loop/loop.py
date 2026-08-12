@@ -809,15 +809,35 @@ async def call_llm_stream(runtime, message: str,
                         force_answer_sticky = True
 
                 is_final_step = step >= max_total - 1
-                # Machine green verify → summary-only (no more tools / write budget)
+                # Machine green verify → summary-only unless ship/play still needs tools
                 _verify_green = bool(
                     getattr(runtime, "_build_verify_green", False)
                 )
+                _keep_after_green = False
                 if _verify_green:
-                    force_answer_sticky = True
-                    tools = []
-                    turn.tools = []
-                    runtime._force_tool_choice = False
+                    with suppress(Exception):
+                        from remedy.core.build_engine import (
+                            get_build_state,
+                            keep_agency_after_green,
+                        )
+
+                        _keep_after_green = bool(
+                            keep_agency_after_green(
+                                get_build_state(runtime), message or ""
+                            )
+                        )
+                    if _keep_after_green:
+                        force_answer_sticky = False
+                        runtime._build_verify_green = False
+                        runtime._force_tool_choice = False
+                        if all_tools:
+                            tools = all_tools
+                            turn.tools = all_tools
+                    else:
+                        force_answer_sticky = True
+                        tools = []
+                        turn.tools = []
+                        runtime._force_tool_choice = False
                 # Absolute safety wall only — soft epochs never force-answer alone.
                 force_answer = (
                     is_final_step or not tools or force_answer_sticky
@@ -2640,6 +2660,18 @@ async def call_llm_stream(runtime, message: str,
                     if tool_msg:
                         messages.append(tool_msg)
                         batch_tool_msgs.append(tool_msg)
+
+                # Native-vision models (Grok/Claude/GPT): attach the screenshot
+                # so the next step can see pygame / custom-drawn pixels.
+                with suppress(Exception):
+                    from remedy.core.computer.vision_observe import (
+                        flush_native_screenshots,
+                    )
+
+                    vis_msg = flush_native_screenshots(runtime)
+                    if vis_msg:
+                        messages.append(vis_msg)
+                        yield "@@status:Computer vision — screenshot attached\n"
 
                 _bdelta, _pdelta = record_tool_batch_stats(
                     turn=turn,

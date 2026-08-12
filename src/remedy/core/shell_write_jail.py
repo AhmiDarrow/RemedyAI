@@ -139,6 +139,74 @@ _BARE_PS_VAR_PATH_RE = re.compile(
     r")"
 )
 
+# Interpreter / compiler / runtime binaries are *invoked*, not written.
+# Models often emit ``C:\Python312\python.exe game.py`` — the .exe is not a
+# write destination and must not trip the project write jail.
+_RUNTIME_BIN_NAMES = frozenset(
+    {
+        "python",
+        "python3",
+        "pythonw",
+        "py",
+        "pip",
+        "pip3",
+        "node",
+        "nodejs",
+        "npm",
+        "npx",
+        "yarn",
+        "pnpm",
+        "gcc",
+        "g++",
+        "c++",
+        "clang",
+        "clang++",
+        "cl",
+        "rustc",
+        "cargo",
+        "go",
+        "javac",
+        "java",
+        "cmake",
+        "ninja",
+        "make",
+        "nmake",
+        "msbuild",
+        "dotnet",
+        "pytest",
+        "uv",
+        "ruff",
+        "mypy",
+        "git",
+        "gh",
+        "pwsh",
+        "powershell",
+        "cmd",
+        "bash",
+        "sh",
+    }
+)
+
+
+def is_runtime_executable_path(path_str: str) -> bool:
+    """True when *path_str* is a known interpreter/compiler binary, not a write dest."""
+    raw = _clean_token(path_str)
+    if not raw:
+        return False
+    name = raw.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+    # strip version suffixes: python3.12.exe, gcc-14
+    base = name.lower()
+    if base.endswith(".exe"):
+        base = base[:-4]
+    stem = base.split(".", 1)[0]  # python3.12 → python3
+    if base in _RUNTIME_BIN_NAMES or stem in _RUNTIME_BIN_NAMES:
+        return True
+    # python3.12 / python312
+    if stem.startswith("python") or base.startswith("python"):
+        return True
+    return False
+
+
 # Absolute Windows / Unix path tokens in a command line.
 _ABS_PATH_RE = re.compile(
     r"(?:"
@@ -383,6 +451,9 @@ def check_shell_write_jail(
     candidates = extract_path_candidates(cmd)
     offenders: list[str] = []
     for token in candidates:
+        # Invoking python.exe / gcc.exe / node.exe is not a write to that path.
+        if is_runtime_executable_path(token):
+            continue
         outside = path_outside_write_roots(
             token, write_roots=roots, cwd=cwd
         )

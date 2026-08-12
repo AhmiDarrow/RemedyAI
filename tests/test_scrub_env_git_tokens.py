@@ -19,6 +19,20 @@ def test_gh_and_github_tokens_preserved(monkeypatch):
     assert "REMEDY_HOME" not in env
 
 
+def test_cloud_cli_credentials_preserved(monkeypatch):
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "C:\\keys\\adc.json")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "my-proj")
+    monkeypatch.setenv("AWS_PROFILE", "dev")
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("GOOGLE_API_KEY", "must_drop")
+    env = scrub_subprocess_env()
+    assert env.get("GOOGLE_APPLICATION_CREDENTIALS") == "C:\\keys\\adc.json"
+    assert env.get("GOOGLE_CLOUD_PROJECT") == "my-proj"
+    assert env.get("AWS_PROFILE") == "dev"
+    assert env.get("AWS_REGION") == "us-east-1"
+    assert "GOOGLE_API_KEY" not in env
+
+
 def test_ssh_agent_preserved(monkeypatch):
     monkeypatch.setenv("SSH_AUTH_SOCK", "/tmp/ssh.sock")
     monkeypatch.setenv("SSH_AGENT_PID", "1234")

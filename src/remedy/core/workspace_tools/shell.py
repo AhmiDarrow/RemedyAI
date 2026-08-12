@@ -20,6 +20,57 @@ from remedy.core.workspace_tools.guards import (
 )
 
 
+def _spawn_background(
+    argv: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str] | None,
+    command: str,
+    auto: bool = False,
+) -> str:
+    """Start a command and return immediately (GUI / server / game)."""
+    import os
+    import subprocess
+
+    kwargs: dict[str, Any] = {
+        "cwd": str(cwd) if cwd else None,
+        "env": env,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "stdin": subprocess.DEVNULL,
+        "close_fds": True,
+    }
+    if os.name == "nt":
+        # Visible console + GUI. DETACHED_PROCESS hides many pygame/SDL windows.
+        kwargs["creationflags"] = (
+            getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+        )
+    else:
+        kwargs["start_new_session"] = True
+    try:
+        proc = subprocess.Popen(argv, **kwargs)
+    except OSError as e:
+        return format_tool_error(
+            f"failed to start background command: {e}",
+            code="SPAWN_FAILED",
+            tool_name="bash_exec",
+            suggestion="Check the path exists and is executable.",
+        )
+    note = (
+        " (auto: looks like a GUI/game — not waiting for exit)"
+        if auto
+        else ""
+    )
+    return (
+        f"started background pid={proc.pid} cwd={cwd}{note}\n"
+        f"command={command}\n"
+        "The process is running. Use computer_app or computer_snapshot "
+        "target=desktop to play/inspect the window. Do not treat this as "
+        "exit_code=0 of a finished program — observe the UI next."
+    )
+
+
 def _normalize_shell_command_for_host(command: str) -> str:
     """Rewrite model-emitted bashisms for the host shell (esp. Windows cmd).
 
@@ -82,16 +133,19 @@ def register_shell_tools(runtime: Any) -> None:
 
     async def bash_exec(
         command: str = "",
-        timeout_seconds: float = 60.0,
+        timeout_seconds: float = 180.0,
         workdir: str = "",
         description: str = "",
+        background: bool = False,
     ) -> str:
         """Run a shell command through SubprocessSandbox (hidden console on Windows).
 
-        *timeout_seconds* default 60, clamped to 5–600. *workdir* optional
+        *timeout_seconds* default 180, clamped to 5–600. *workdir* optional
         absolute or relative path (defaults to focus/default cwd). Local
         venv/node_modules/.bin and repo-root tools are prepended to PATH.
         *description* is accepted (and ignored) when models pass a human note.
+        *background*: return immediately after spawn (games / servers). GUI
+        launches are auto-backgrounded so the turn can play the window.
         """
         _ = description
         from remedy.core.approvals import APPROVALS
@@ -188,9 +242,9 @@ def register_shell_tools(runtime: Any) -> None:
                     ),
                 )
         try:
-            timeout = float(timeout_seconds if timeout_seconds is not None else 60.0)
+            timeout = float(timeout_seconds if timeout_seconds is not None else 180.0)
         except (TypeError, ValueError):
-            timeout = 60.0
+            timeout = 180.0
         timeout = max(5.0, min(600.0, timeout))
 
         # Write roots only — never fall back to read roots (Desktop/Docs/Downloads).
@@ -255,6 +309,22 @@ def register_shell_tools(runtime: Any) -> None:
         argv = [*win_shell_prefix(), command]
         sandbox = SubprocessSandbox(allowed_paths=roots or [root, cwd])
         env = path_env_with_local_bins(cwd)
+
+        auto_bg = False
+        if not background:
+            with suppress(Exception):
+                from remedy.core.interactive_launch import command_looks_like_gui_launch
+
+                auto_bg = command_looks_like_gui_launch(command, cwd)
+        if background or auto_bg:
+            return _spawn_background(
+                argv,
+                cwd=cwd,
+                env=env,
+                command=command,
+                auto=auto_bg and not background,
+            )
+
         result = await sandbox.execute(
             argv, workdir=cwd, timeout_seconds=timeout, env=env
         )
@@ -357,6 +427,11 @@ def register_shell_tools(runtime: Any) -> None:
                 tool_name="run_python_file",
                 suggestion="Pass a .py path, or use bash_exec for other runners.",
             )
+        gui_py = False
+        with suppress(Exception):
+            from remedy.core.interactive_launch import path_looks_like_gui
+
+            gui_py = path_looks_like_gui(target)
         root = runtime.effective_project_path()
         cwd = root
         wd_raw = (workdir or "").strip()
@@ -393,6 +468,15 @@ def register_shell_tools(runtime: Any) -> None:
                 extra = args.split()
 
         argv = [sys.executable, str(target), *extra]
+        if gui_py:
+            env_bg = path_env_with_local_bins(cwd)
+            return _spawn_background(
+                argv,
+                cwd=cwd,
+                env=env_bg,
+                command=" ".join(argv),
+                auto=True,
+            )
         try:
             roots = list(runtime.write_roots() or [])
         except Exception:
@@ -429,7 +513,9 @@ def register_shell_tools(runtime: Any) -> None:
     runtime.tool_registry.register_builtin_handler(
         "bash_exec",
         "Run a shell command. Default cwd = focus folder (or home). "
-        "Optional workdir= absolute/relative path; timeout_seconds= 5–600 (default 60). "
+        "Optional workdir= absolute/relative path; timeout_seconds= 5–600 (default 180). "
+        "background=true returns immediately (games/servers). GUI/game launches "
+        "auto-background so you can computer_snapshot the window. "
         "Local .venv/node_modules/.bin and repo-root tools are on PATH. "
         "Prefer run_python_file for .py scripts; prefer file_write over echo redirects. "
         "Temp helper scripts → .remedy-build/tmp/ only.",
@@ -440,12 +526,19 @@ def register_shell_tools(runtime: Any) -> None:
                 "command": {"type": "string", "description": "Shell command to run"},
                 "timeout_seconds": {
                     "type": "number",
-                    "description": "Timeout seconds (default 60, max 600)",
-                    "default": 60,
+                    "description": "Timeout seconds (default 180, max 600)",
+                    "default": 180,
                 },
                 "workdir": {
                     "type": "string",
                     "description": "Optional working directory (absolute or relative)",
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, spawn and return immediately (pid). "
+                        "Use for games, GUIs, and long servers."
+                    ),
                 },
                 "description": {
                     "type": "string",
