@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 import time
 from pathlib import Path
@@ -217,6 +218,7 @@ def record_session_end(
                 "avg_quality": None,
                 "prefer_earlier_compress": False,
                 "pinned_constraints": [],
+                "chapter": {"notes": [], "decisions": [], "updated_at": 0},
                 "updated_at": 0,
             }
         proj["path"] = str(project_path or proj.get("path") or "")
@@ -289,4 +291,87 @@ def pinned_constraints_block(project_path: str | None) -> str:
     lines = ["[Project continuity notes]"]
     for p in pins[:5]:
         lines.append(f"- {p}")
+    return "\n".join(lines)
+
+
+def record_project_chapter(
+    project_path: str | None,
+    *,
+    note: str = "",
+    decision: str = "",
+) -> dict[str, Any]:
+    """Remember a durable note/decision for this work chapter (not a one-off task)."""
+    path = str(project_path or "").strip()
+    if not path:
+        return {}
+    text_n = " ".join((note or "").split())[:200]
+    text_d = " ".join((decision or "").split())[:200]
+    if not text_n and not text_d:
+        return {}
+    pid = project_id(path)
+    with _lock:
+        all_data = load_all()
+        projects = all_data.setdefault("projects", {})
+        proj = projects.get(pid) if isinstance(projects.get(pid), dict) else {}
+        if not proj:
+            proj = {
+                "id": pid,
+                "path": path,
+                "sessions": 0,
+                "turns": 0,
+                "pinned_constraints": [],
+                "chapter": {"notes": [], "decisions": [], "updated_at": 0},
+                "updated_at": 0,
+            }
+        chap = proj.get("chapter") if isinstance(proj.get("chapter"), dict) else {}
+        notes = [str(x) for x in (chap.get("notes") or []) if str(x).strip()]
+        decisions = [str(x) for x in (chap.get("decisions") or []) if str(x).strip()]
+        if text_n and text_n not in notes:
+            notes.append(text_n)
+        if text_d and text_d not in decisions:
+            decisions.append(text_d)
+        chap = {
+            "notes": notes[-12:],
+            "decisions": decisions[-12:],
+            "updated_at": time.time(),
+        }
+        proj["chapter"] = chap
+        proj["path"] = path
+        proj["updated_at"] = time.time()
+        projects[pid] = proj
+        save_all(all_data)
+        return dict(chap)
+
+
+def project_chapter_block(project_path: str | None, *, query: str = "") -> str:
+    """Short 'this chapter of work' inject — survives Session Brief compress."""
+    prof = load_project_profile(project_path)
+    chap = prof.get("chapter") if isinstance(prof.get("chapter"), dict) else {}
+    notes = [str(x).strip() for x in (chap.get("notes") or []) if str(x).strip()]
+    decisions = [str(x).strip() for x in (chap.get("decisions") or []) if str(x).strip()]
+    pins = [str(x).strip() for x in (prof.get("pinned_constraints") or []) if str(x).strip()]
+    if not notes and not decisions and not pins:
+        return ""
+    folder = str(prof.get("path") or project_path or "").replace("\\", "/").rstrip("/").split("/")[-1]
+    lines = [f"[This chapter{f' — {folder}' if folder else ''}]"]
+    qtok = set(re.findall(r"[a-z0-9]{3,}", (query or "").lower())) if query else set()
+
+    def _score(text: str) -> int:
+        if not qtok:
+            return 0
+        blob = text.lower()
+        return sum(1 for t in qtok if t in blob)
+
+    items: list[tuple[int, str, str]] = []
+    for d in decisions:
+        items.append((_score(d) + 1, "decided", d))
+    for n in notes:
+        items.append((_score(n), "note", n))
+    for p in pins:
+        items.append((_score(p), "pin", p))
+    items.sort(key=lambda x: x[0], reverse=True)
+    for _s, kind, text in items[:6]:
+        lines.append(f"- ({kind}) {text[:180]}")
+    if len(lines) == 1:
+        return ""
     return "\n".join(lines)

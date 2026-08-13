@@ -58,6 +58,7 @@ def soul_export_payload(home: str | Path | None = None) -> dict[str, Any]:
             "episodes": scrub_list(raw.get("episodes") or [])[-12:],
             "organism_lessons": scrub_list(raw.get("organism_lessons") or [])[-16:],
             "pledges": scrub_list(raw.get("pledges") or []),
+            "future_dreams": scrub_list(raw.get("future_dreams") or []),
             "updated_ts": raw.get("updated_ts"),
         },
     }
@@ -141,6 +142,9 @@ def import_soul_payload(
     for h in incoming.self_habits:
         if h not in current.self_habits:
             current.self_habits.append(h)
+    for d in getattr(incoming, "future_dreams", None) or []:
+        if d not in current.future_dreams:
+            current.future_dreams.append(d)
     for les in incoming.organism_lessons:
         current.organism_lessons.append(les)
     for ep in incoming.episodes:

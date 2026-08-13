@@ -62,7 +62,14 @@ def _disk_free_bytes(path: Path) -> int | None:
 
 
 def detect_nvidia() -> bool:
-    """Cheap GPU presence check (does not require CUDA toolkit)."""
+    """Cheap NVIDIA presence check (does not require CUDA toolkit)."""
+    try:
+        from remedy.runtime.gpu_probe import probe_gpus
+
+        snap = probe_gpus()
+        return any(d.vendor == "nvidia" for d in snap.devices)
+    except Exception:
+        pass
     if os.name == "nt":
         for name in (
             r"C:\Windows\System32\nvidia-smi.exe",
@@ -80,6 +87,31 @@ def detect_nvidia() -> bool:
         if Path("/usr/bin/nvidia-smi").is_file() or Path("/usr/local/bin/nvidia-smi").is_file():
             return True
     return False
+
+
+def detect_gpu() -> dict[str, Any]:
+    """Vendor-agnostic GPU snapshot for health / UI."""
+    try:
+        from remedy.runtime.gpu_probe import probe_gpus
+
+        snap = probe_gpus()
+        prim = snap.primary
+        return {
+            "nvidia_detected": any(d.vendor == "nvidia" for d in snap.devices),
+            "gpu_vendor": (prim.vendor if prim else ""),
+            "gpu_name": (prim.name if prim else ""),
+            "vram_total_mb": (prim.vram_total_mb if prim else 0),
+            "devices": [d.to_public() for d in snap.devices],
+        }
+    except Exception:
+        nvidia = detect_nvidia()
+        return {
+            "nvidia_detected": nvidia,
+            "gpu_vendor": "nvidia" if nvidia else "",
+            "gpu_name": "",
+            "vram_total_mb": 0,
+            "devices": [],
+        }
 
 
 def system_health(
@@ -108,7 +140,9 @@ def system_health(
     root = vision_root(home_dir)
     free = _disk_free_bytes(root)
     ram = _total_ram_bytes()
-    nvidia = detect_nvidia()
+    gpu = detect_gpu()
+    nvidia = bool(gpu.get("nvidia_detected"))
+    vendor = str(gpu.get("gpu_vendor") or "")
     is_cpu = "cpu" in runtime_platform.lower()
 
     warnings: list[str] = []
@@ -128,17 +162,18 @@ def system_health(
         )
     if is_cpu:
         warnings.append(
-            "CPU runtime selected — visual decode will be slower than a CUDA/GPU build. "
+            "CPU runtime selected — visual decode will be slower than a GPU build. "
             "Fine for occasional screenshots; GPU is better for heavy use."
         )
-        if nvidia:
+        if gpu.get("gpu_name") or vendor:
             warnings.append(
-                "NVIDIA GPU detected. You can reinstall with prefer_cuda=true for faster decode."
+                "A GPU is present on this PC. Use a runtime that matches this card "
+                "when you want faster decode."
             )
     elif not is_cpu and not nvidia:
         warnings.append(
-            "CUDA runtime selected but no NVIDIA GPU was detected. "
-            "If start fails, reinstall with the CPU runtime."
+            "This GPU runtime may not match the card on this PC. "
+            "If start fails, switch to the CPU runtime."
         )
 
     return {
@@ -150,6 +185,9 @@ def system_health(
         "install_need_gb": round(need_bytes / (1024**3), 2),
         "min_ram_gb": min_ram,
         "nvidia_detected": nvidia,
+        "gpu_vendor": vendor,
+        "gpu_name": gpu.get("gpu_name") or "",
+        "gpu_devices": gpu.get("devices") or [],
         "runtime_id": rid,
         "runtime_platform": runtime_platform,
         "cpu_runtime": is_cpu,

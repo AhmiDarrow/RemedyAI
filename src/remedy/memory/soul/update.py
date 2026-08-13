@@ -203,6 +203,23 @@ def update_soul_after_turn(
         if body and body not in sf.pledges and not looks_like_secret_soul(body):
             sf.pledges.append(body[:160])
 
+    # Living extractors: life/goal lines become soul pledges (same organism)
+    with suppress(Exception):
+        from remedy.memory.living import extract_living_facts
+
+        for fact in extract_living_facts(ut):
+            if fact.category not in ("life", "goal"):
+                continue
+            body = (fact.text or "").strip()
+            if (
+                body
+                and len(body) >= 8
+                and body not in sf.pledges
+                and not looks_like_secret_soul(body)
+            ):
+                sf.pledges.append(body[:160])
+                sf.pledges = sf.pledges[-16:]
+
     # Tension: user contradicts a pledge / prior fact shaped claim
     if re.search(r"(?i)\b(actually|never mind|forget that|not anymore|changed my mind)\b", ut):
         snippet = ut[:160]

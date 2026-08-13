@@ -35,6 +35,20 @@ export interface RmbStatus {
   ctx_size?: number
   n_gpu_layers?: number | null
   profile?: string
+  autofit?: {
+    enabled?: boolean
+    locked?: boolean
+    profile?: string
+    summary?: string
+    target?: string
+    ctx_size?: number
+    n_gpu_layers?: number
+    cache_type?: string
+    vram_total_mb?: number
+    last?: Record<string, unknown> | null
+    last_good?: Record<string, unknown> | null
+    planned?: Record<string, unknown>
+  }
   /** Live inference-engine knobs (llama-server argv). */
   engine?: {
     threads?: number

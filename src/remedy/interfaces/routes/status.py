@@ -164,6 +164,18 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         }
         return StatusResponse(**payload)
 
+    @app.get("/api/self-improve")
+    async def get_self_improve():
+        """Unattended self-improve clock + last tick (no user prompt required)."""
+        from remedy.core.self_inject import activity_snapshot
+
+        home = None
+        if runtime is not None:
+            home = getattr(runtime, "home_dir", None) or getattr(
+                getattr(runtime, "config", None), "home_dir", None
+            )
+        return activity_snapshot(home)
+
     @app.get("/api/diagnostics")
     async def get_diagnostics(
         probe_providers: bool = Query(

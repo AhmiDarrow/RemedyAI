@@ -31,11 +31,15 @@ def schedule_post_turn_prep(
             or ""
         )
         qsnap = get_session_quality(sid).snapshot()
-        project_path = str(
-            getattr(getattr(runtime, "config", None), "project_path", None)
-            or getattr(runtime, "_project_path", None)
-            or ""
-        ) or None
+        project_path = None
+        with suppress(Exception):
+            project_path = str(runtime.effective_project_path() or "") or None
+        if not project_path:
+            project_path = str(
+                getattr(getattr(runtime, "config", None), "project_path", None)
+                or getattr(runtime, "_project_path", None)
+                or ""
+            ) or None
         # Light touch each turn (not only true session end)
         if project_path and int(qsnap.get("turns") or 0) > 0:
             # Only merge full profile every few turns to limit disk IO
@@ -119,7 +123,12 @@ def schedule_post_turn_prep(
                     from remedy.memory.soul.field import load_soul_field
 
                     sf = load_soul_field(home)
-                    if len(sf.episodes) >= 4 and should_dream(home):
+                    ready = (
+                        len(sf.episodes) >= 3
+                        or bool(sf.pledges)
+                        or bool(sf.future_dreams)
+                    )
+                    if ready and should_dream(home):
                         dream_cycle(
                             home=home,
                             memory=getattr(runtime, "memory", None),
@@ -149,6 +158,12 @@ def schedule_post_turn_prep(
                     muscle_label=m.label,
                     muscle_provider=m.provider,
                 )
+            # Realtime skill lifecycle: promote/demote/prune from this turn's stats
+            with suppress(Exception):
+                getter = getattr(runtime, "_get_learning_loop", None)
+                ll = getter() if callable(getter) else None
+                if ll is not None and hasattr(ll, "tick_learned_skills"):
+                    ll.tick_learned_skills()
             runtime._last_assistant_text = ""
 
 

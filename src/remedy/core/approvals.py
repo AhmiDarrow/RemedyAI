@@ -71,13 +71,17 @@ class ApprovalQueue:
             prev = self._mode
             self._mode = m
             if m == "auto" and prev != "auto":
-                # Auto-approve anything still waiting so the banner disappears
-                # and in-flight tool retries can proceed without a click.
+                # Auto-approve ordinary pending prompts. Owner-lock tools
+                # (GitHub self-improve PR) stay pending — thumbs-up is not
+                # permission to push to the public repo.
                 for item in self._items.values():
-                    if item.status == "pending":
-                        item.status = "approved"
-                        sid = item.session_id or "default"
-                        self._add_session_fp(sid, item.fingerprint)
+                    if item.status != "pending":
+                        continue
+                    if item.tool_name in self.OWNER_LOCK_TOOLS:
+                        continue
+                    item.status = "approved"
+                    sid = item.session_id or "default"
+                    self._add_session_fp(sid, item.fingerprint)
             return self._mode
 
     def sync_from_config(self, cfg: dict[str, Any] | None = None) -> str:
@@ -141,6 +145,10 @@ class ApprovalQueue:
             "computer_act",
             "computer_app",
         }
+    )
+    # GitHub write for self-improve PRs — Auto / thumbs-up must never waive these.
+    OWNER_LOCK_TOOLS = frozenset(
+        {"self_improve_submit_issue", "self_improve_submit_pr"}
     )
 
     def needs_ask(self, command: str, *, tool_name: str = "") -> str | None:

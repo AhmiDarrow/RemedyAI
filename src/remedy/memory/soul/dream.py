@@ -148,7 +148,8 @@ def dream_cycle(
 
     sf = field if field is not None else load_soul_field(home)
     before_eps = len(sf.episodes)
-    if before_eps < 2 and not force:
+    has_goals = bool(sf.pledges or sf.future_dreams or sf.relational.open_threads)
+    if before_eps < 2 and not force and not has_goals:
         _last_dream_ts[_home_key(home)] = time.time()
         return {"ok": True, "skipped": True, "reason": "too_few_episodes", "episodes": before_eps}
 
@@ -203,6 +204,63 @@ def dream_cycle(
     if len(sf.episodes) > 10:
         # Keep newest 8; drop middle noise (oldest of the excess)
         sf.episodes = sf.episodes[-8:]
+
+    # Promote durable life/goal partner facts into soul pledges (organism densify)
+    if memory is not None:
+        with suppress(Exception):
+            import asyncio
+            import concurrent.futures
+
+            async def _life() -> int:
+                profile = await memory.get_or_create_profile()
+                from remedy.memory.living import life_goal_lines
+
+                n = 0
+                for line in life_goal_lines(profile, limit=6):
+                    if line not in sf.pledges and not looks_like_secret_soul(line):
+                        sf.pledges.append(line[:160])
+                        n += 1
+                sf.pledges = sf.pledges[-16:]
+                return n
+
+            try:
+                asyncio.get_running_loop()
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    pool.submit(lambda: asyncio.run(_life())).result(timeout=8)
+            except RuntimeError:
+                asyncio.run(_life())
+
+    # Dreams of the future: bind their goals to how I will partner better
+    dreams_n = 0
+    profile_for_dream: Any = None
+    if memory is not None:
+        with suppress(Exception):
+            import asyncio
+            import concurrent.futures
+
+            async def _prof() -> Any:
+                return await memory.get_or_create_profile()
+
+            try:
+                asyncio.get_running_loop()
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    profile_for_dream = pool.submit(lambda: asyncio.run(_prof())).result(
+                        timeout=8
+                    )
+            except RuntimeError:
+                profile_for_dream = asyncio.run(_prof())
+    with suppress(Exception):
+        from remedy.memory.soul.partner_dream import apply_partner_dreams, compose_partner_dreams
+
+        composed = compose_partner_dreams(sf, profile=profile_for_dream, limit=5)
+        dreams_n = apply_partner_dreams(sf, composed)
+        for d in sf.future_dreams[:3]:
+            if d not in sf.self_habits and d.startswith("Toward "):
+                # One self-habit from the hottest dream so "memory of myself" grows
+                move = d.split(":", 1)[-1].strip()
+                if move and move not in sf.self_habits:
+                    sf.self_habits.append(move[:120])
+                    break
 
     # Optional: push strongest open thread into Partner Memory if store given
     partner_added = 0
@@ -281,6 +339,8 @@ def dream_cycle(
         "crystal_admits": crystal_n,
         "local_enrich": local_enrich,
         "mission_arm": mission_arm,
+        "future_dreams": dreams_n,
+        "dreams": list(sf.future_dreams[:5]),
         "rapport": round(sf.relational.rapport, 3),
         "trust": round(sf.relational.trust, 3),
     }

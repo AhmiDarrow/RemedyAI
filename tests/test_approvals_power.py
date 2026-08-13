@@ -128,6 +128,45 @@ def test_sync_from_config_makes_auto_stick(monkeypatch):
     assert q.mode == "auto"
 
 
+def test_ship_gate_respects_auto(monkeypatch):
+    """Live 2026-08-13: Auto on, git_push still created a banner via `or fallback`."""
+    from remedy.core.agent_ship_tools import approval_required_for_ship
+    from remedy.core.approvals import APPROVALS
+
+    APPROVALS.set_mode("auto")
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"approval_mode": "auto", "access_scope": "full"},
+    )
+    assert (
+        approval_required_for_ship(
+            "git push -u origin HEAD", "sess", reason="git push (ship)"
+        )
+        is None
+    )
+    assert (
+        approval_required_for_ship(
+            "gh release create v1.0.8", "sess", reason="gh release create (ship)"
+        )
+        is None
+    )
+
+
+def test_ship_gate_still_asks_in_ask_mode(monkeypatch):
+    from remedy.core.agent_ship_tools import approval_required_for_ship
+    from remedy.core.approvals import APPROVALS
+
+    APPROVALS.set_mode("ask")
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"approval_mode": "ask", "access_scope": "full"},
+    )
+    blob = approval_required_for_ship(
+        "git push -u origin HEAD", "sess", reason="git push (ship)"
+    )
+    assert blob and blob.startswith("APPROVAL_REQUIRED")
+
+
 def test_config_to_agent_config_carries_approval_mode():
     from remedy.interfaces.config import config_to_agent_config
 

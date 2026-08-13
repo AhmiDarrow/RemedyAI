@@ -1,2 +1,13 @@
-# All changes require review from the repo owner (except their own PRs when self-approval is disabled via rules).
+# All changes require review from the repo owner.
+# Enable "require review from Code Owners" on master so random / self-improve
+# PRs cannot merge without @AhmiDarrow. Do not allow self-approval.
 * @AhmiDarrow
+
+# High-risk surfaces: signing, CI, security, ship.
+.github/ @AhmiDarrow
+desktop/src-tauri/ @AhmiDarrow
+src/remedy/core/security.py @AhmiDarrow
+src/remedy/core/approvals.py @AhmiDarrow
+src/remedy/core/self_inject_pr.py @AhmiDarrow
+src/remedy/core/self_inject_guard.py @AhmiDarrow
+scripts/set_tauri_signing_secrets.py @AhmiDarrow

@@ -233,7 +233,11 @@ def is_stable_fact_text(text: str, *, explicit: bool = False) -> bool:
     if len(words) < 3:
         if explicit and (
             "=" in t
-            or re.search(r"(?i)\b(prefer|typescript|python|rust|means|is)\b", t)
+            or re.search(
+                r"(?i)\b(prefer|typescript|python|rust|means|is|blunt|brief|"
+                r"direct|fluff|theater|verbose|kids?|goal)\b",
+                t,
+            )
             or re.fullmatch(r"[\w.\-]+", t)  # single token codes
         ):
             return True
@@ -298,6 +302,21 @@ def extract_heuristic_facts(user_text: str) -> list[ExtractedFact]:
             )
             if len(found) >= MAX_AUTO_FACTS_PER_PASS:
                 return found
+
+    # Living organism extractors — life, goals, corrections, craft, taste
+    try:
+        from remedy.memory.living import extract_living_facts
+
+        for extra in extract_living_facts(text):
+            key = normalize_fact_key(extra.text)
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(extra)
+            if len(found) >= MAX_AUTO_FACTS_PER_PASS:
+                return found
+    except Exception:
+        pass
 
     return found
 
@@ -541,8 +560,15 @@ def rank_injectable_facts(
             hits = sum(1 for t in q_tokens if t in blob)
             score += hits * 0.35
         # Explicit / heuristic prefs slightly preferred over vague
-        if (f.source or "") in ("explicit", "heuristic", "user"):
+        if (f.source or "") in ("explicit", "heuristic", "user", "living", "taste"):
             score += 0.25
+        # This-turn kind: a life question should surface kids before ruff config
+        try:
+            from remedy.memory.living import category_boost, turn_kind
+
+            score += category_boost(f.category, turn_kind(query))
+        except Exception:
+            pass
         scored.append((score, f))
 
     scored.sort(key=lambda x: x[0], reverse=True)
@@ -571,15 +597,24 @@ def build_partner_memory_block(
     if profile is None:
         return ""
 
-    lines: list[str] = []
     name = (profile.display_name or "").strip()
-    if name:
-        lines.append(f"- Call the user: {name}")
+    from remedy.memory.living import (
+        bucket_for,
+        format_living_sections,
+        project_label,
+    )
+
+    buckets: dict[str, list[str]] = {
+        "who": [],
+        "life": [],
+        "work": [],
+        "chapter": [],
+    }
 
     for key, trait in list(profile.traits.items())[:MAX_HOT_TRAITS]:
         if trait.confidence < 0.4:
             continue
-        lines.append(f"- {key}: {trait.value}")
+        buckets["who"].append(f"- {key}: {trait.value}")
 
     facts = rank_injectable_facts(
         profile,
@@ -592,32 +627,27 @@ def build_partner_memory_block(
         pin = "📌 " if f.pinned else ""
         scope = ""
         if f.project_path:
-            folder = f.project_path.replace("\\", "/").rstrip("/").split("/")[-1]
+            folder = project_label(f.project_path)
             scope = f" @{folder}" if folder else ""
-        lines.append(f"- {pin}({f.category}{scope}) {f.fact}")
+        line = f"- {pin}({f.category}{scope}) {f.fact}"
+        bucket = bucket_for(f.category, project_scoped=bool(f.project_path))
+        buckets.setdefault(bucket, []).append(line)
 
-    if not lines:
+    if not name and not any(buckets.values()):
         return ""
 
-    header = "Partner memory (durable — trust across sessions; user can /forget):"
-    body_lines = [header]
-    used = len(header)
-    for line in lines:
-        # +1 for newline
-        if used + len(line) + 1 > max_chars:
-            break
-        body_lines.append(line)
-        used += len(line) + 1
-
-    if len(body_lines) == 1:
-        return ""
-    if name:
-        body_lines.append(f"Address the user as {name} when natural.")
-    return "\n".join(body_lines)
+    return format_living_sections(
+        buckets,
+        name=name,
+        project_label=project_label(project_path),
+        max_chars=max_chars,
+    )
 
 
 def format_whoami(profile: UserProfile) -> str:
-    """Friendly transparency listing for /whoami."""
+    """Friendly transparency listing for /whoami — same organism map as inject."""
+    from remedy.memory.living import whoami_sections
+
     lines = ["**What I know about you**"]
     if profile.display_name:
         lines.append(f"- **Name:** {profile.display_name}")
@@ -626,10 +656,23 @@ def format_whoami(profile: UserProfile) -> str:
         for key, trait in list(profile.traits.items())[:24]:
             conf = f" ({trait.confidence:.0%})" if trait.confidence < 0.95 else ""
             lines.append(f"  · {key}: {trait.value}{conf}")
+
     injectable = rank_injectable_facts(profile, min_confidence=0.0, limit=40)
-    if injectable:
-        lines.append("- **Facts** (used when helpful):")
-        for f in injectable:
+    buckets = whoami_sections(injectable)
+    headings = {
+        "who": "**Who you are**",
+        "life": "**Life & goals**",
+        "work": "**How we work together**",
+        "chapter": "**This chapter**",
+    }
+    any_fact = False
+    for key in ("who", "life", "work", "chapter"):
+        items = buckets.get(key) or []
+        if not items:
+            continue
+        any_fact = True
+        lines.append(f"- {headings[key]}")
+        for f in items:
             conf = f"{f.confidence:.0%}"
             src = f.source or "unknown"
             pin = " pinned" if f.pinned else ""
@@ -638,6 +681,11 @@ def format_whoami(profile: UserProfile) -> str:
                 folder = f.project_path.replace("\\", "/").rstrip("/").split("/")[-1]
                 proj = f" · project:{folder}" if folder else ""
             lines.append(f"  · [{conf} · {f.category} · {src}{pin}{proj}] {f.fact}")
+    if injectable and not any_fact:
+        lines.append("- **Facts** (used when helpful):")
+        for f in injectable[:20]:
+            lines.append(f"  · [{f.confidence:.0%} · {f.category}] {f.fact}")
+
     low = [
         f
         for f in profile.facts
@@ -649,8 +697,8 @@ def format_whoami(profile: UserProfile) -> str:
             lines.append(f"  · [{f.confidence:.0%}] {f.fact}")
     if len(lines) == 1:
         lines.append(
-            "_Nothing stored yet. Tell me preferences in chat "
-            "(e.g. “I prefer TypeScript”) or use_ `/remember …`_."
+            "_Nothing stored yet. Tell me about your life, goals, or how you like "
+            "to work — or use_ `/remember …`_."
         )
     else:
         lines.append("")
@@ -727,7 +775,11 @@ async def distill_user_text(
             accept_conf = min(cand.confidence, MIN_INJECT_CONFIDENCE - 0.01)
 
         # Project-ish decisions/constraints get scoped when we have a project
-        use_proj = project_path if cand.category in ("constraint", "workflow", "preference") else None
+        use_proj = (
+            project_path
+            if cand.category in ("constraint", "workflow", "preference", "craft", "stack")
+            else None
+        )
         uf, action = upsert_profile_fact(
             profile,
             cand.text,
@@ -742,6 +794,15 @@ async def distill_user_text(
             continue
         if action == "added":
             result["added"] += 1
+            if use_proj and cand.category in ("constraint", "workflow", "craft", "stack"):
+                with __import__("contextlib").suppress(Exception):
+                    from remedy.core.project_learning import record_project_chapter
+
+                    record_project_chapter(
+                        use_proj,
+                        decision=cand.text if cand.category in ("constraint", "workflow") else "",
+                        note=cand.text if cand.category in ("craft", "stack") else "",
+                    )
             # Also land in entry store so memory_search FTS finds it
             if force or cand.source == "explicit":
                 with __import__("contextlib").suppress(Exception):

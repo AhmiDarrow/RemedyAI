@@ -25,7 +25,7 @@ Access scope (`project` / `home` / `full`) is a **security** control, separate f
 | **`file_read`** | Read text (optional line offset/limit) |
 | **`repo_search`** | Any text language; `symbol=` for definitions; `context_before`/`after`; absolute `path` for multi-tree |
 | **`file_glob`** | Find files by pattern (`*.py`, `src/**/*.ts`) — prefer over serial `list_dir` |
-| **`todo_write` / `todo_read`** | Short build checklist (pending → in_progress → completed). Do not claim done while open |
+| **`todo_write` / `todo_read`** | Short build checklist (pending → in_progress → completed). Shown in chat and crossed off as items finish. Do not claim done while open |
 | **`build_drive`** | Machine-owned loop: lock spec → write failing TDD tests → isolated hops → gate tower → review-fix |
 | **`build_parallel`** | Isolated overlays per unit; merge only if that unit’s oracle is green |
 | **`apply_patch`** | Unified diff / Begin-Patch block through the write jail |
@@ -37,7 +37,11 @@ Access scope (`project` / `home` / `full`) is a **security** control, separate f
 | **`companion_taste`** | Durable design taste (spacing, type, density) — honored every visual pass |
 | **`companion_inbox`** | New Desktop/Downloads drops (mocks, logs) since last look |
 | **`list_dir`** | Browse a directory (relative or absolute) |
-| **`bash_exec`** | Builds, tests, git (approval mode still applies; cwd defaults to focus/home) |
+| **`bash_exec`** | Host command (Windows = **cmd.exe**, not bash). POSIX strings are rewritten; PowerShell goes through a temp `.ps1` + `pwsh -File` |
+| **`host_run`** | Native argv — no shell, no quoting. Prefer this for git/pytest/python |
+| **`host_mkdir`** | Create directories under write roots (no shell) |
+| **`host_which`** | Resolve an executable on this PC’s PATH |
+| **`host_script`** | Write a scratch script under `.remedy-build/tmp/` and run it (`pwsh` / `cmd` / `python`) |
 | **`job_run`** | Silent **explore** or **verify** job — returns a summary, not a second chat persona |
 | **`spread_run`** | Silent **fan-out** of several jobs in parallel (cover more ground) — one merged digest |
 | **`mission_*`** | Durable checklist + verify for work-alone builds |
@@ -64,7 +68,8 @@ Shell mutations stay inside **write roots** (project / home scope); opaque paylo
 
 ### Shell and edits
 
-- **`bash_exec`:** optional `timeout_seconds` (up to 600) and `workdir` for long Godot/cargo builds; local `.venv` / `node_modules/.bin` / repo-root tools are on `PATH`.
+- **`bash_exec`:** optional `timeout_seconds` (up to 600) and `workdir` for long Godot/cargo builds; local `.venv` / `node_modules/.bin` / repo-root tools are on `PATH`. On Windows the host is **cmd.exe**. `session=true` keeps cwd/env in a persistent session; `conpty=true` attaches a real console when the program needs a TTY.
+- **Host Bridge:** prefer `host_run(argv=[…])`, `host_mkdir`, `host_script` over quoted bash/PowerShell. Failed commands return a `HOST_DIAG` code (dialect / quoting / not-found / interactive) plus a rewrite when one exists. This PC’s last-good dialect is remembered under `~/.remedy/host/dialect.json`.
 - **`file_edit`:** multi-hunk with `edits='[{"old_string":"…","new_string":"…"}]'` to cut round-trips. Unique hunks survive CRLF / trailing-space / leading-indent drift. The same failed hunk is refused a second time this turn — `file_read` and copy a real snippet.
 - **Windows:** paths named `nul` / other reserved device names are rejected with a clear error (do not open them).
 

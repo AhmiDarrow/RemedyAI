@@ -18,6 +18,17 @@ from pathlib import Path
 from typing import Any
 from urllib.request import Request
 
+from remedy.runtime.rmb.autofit import (
+    apply_plan_to_state,
+    classify_start_failure,
+    downgrade_plan,
+    last_good_payload,
+    plan_autofit,
+    plan_from_state,
+    probe_hardware,
+    probe_live_n_ctx,
+    should_autofit,
+)
 from remedy.runtime.rmb.catalog import (
     DEFAULT_RMB_MODEL_ID,
     RMB_MODELS,
@@ -932,15 +943,20 @@ def _resolve_model_path(
 
 
 def _nvidia_ok() -> bool:
+    """Compat: True when a CUDA-class card is present. Prefer probe_gpus()."""
     try:
-        r = subprocess.run(
-            ["nvidia-smi", "-L"],
-            capture_output=True,
-            text=True,
-            timeout=3,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        return r.returncode == 0 and bool((r.stdout or "").strip())
+        from remedy.runtime.gpu_probe import probe_gpus
+
+        return any(d.vendor == "nvidia" for d in probe_gpus().devices)
+    except Exception:
+        return False
+
+
+def _gpu_present() -> bool:
+    try:
+        from remedy.runtime.gpu_probe import probe_gpus
+
+        return bool(probe_gpus().devices)
     except Exception:
         return False
 
@@ -1016,6 +1032,7 @@ _QWEN3_NAME_RE = re.compile(r"qwen\s*3|qwopus|qwen3", re.IGNORECASE)
 
 # Cache binary capability probes (path + mtime → bool)
 _spec_cap_cache: dict[str, tuple[float, bool]] = {}
+_flag_cap_cache: dict[str, tuple[float, bool]] = {}
 
 
 def detect_gguf_host_profile(model: Path | str | None) -> dict[str, Any]:
@@ -1132,6 +1149,57 @@ def binary_supports_draft_mtp(binary: Path | str | None) -> bool:
     return found
 
 
+def binary_supports_cache_reuse(binary: Path | str | None) -> bool:
+    """True when this llama-server build knows ``--cache-reuse``."""
+    if not binary:
+        return False
+    b = Path(binary)
+    if not b.is_file():
+        return False
+    try:
+        mtime = b.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    key = f"cache-reuse|{b.resolve() if b.exists() else b}"
+    hit = _flag_cap_cache.get(key)
+    if hit is not None and hit[0] == mtime:
+        return hit[1]
+    found = False
+    needles = (b"--cache-reuse", b"cache-reuse", b"LLAMA_ARG_CACHE_REUSE")
+    candidates: list[Path] = [b]
+    parent = b.parent
+    for pattern in (
+        "llama-common*.dll",
+        "llama-server*.dll",
+        "llama-common.so*",
+        "libcommon*",
+        "llama-server",
+    ):
+        with contextlib.suppress(Exception):
+            candidates.extend(parent.glob(pattern))
+    seen: set[str] = set()
+    for c in candidates:
+        try:
+            ck = str(c.resolve())
+        except OSError:
+            ck = str(c)
+        if ck in seen or not c.is_file():
+            continue
+        seen.add(ck)
+        try:
+            size = c.stat().st_size
+            if size > 40 * 1024 * 1024:
+                continue
+            data = c.read_bytes()
+        except OSError:
+            continue
+        if any(n in data for n in needles):
+            found = True
+            break
+    _flag_cap_cache[key] = (mtime, found)
+    return found
+
+
 def _engine_kwargs(state: dict[str, Any]) -> dict[str, Any]:
     """Pull inference-engine knobs out of RMB state (skip unset/empty).
 
@@ -1171,6 +1239,7 @@ def _engine_kwargs(state: dict[str, Any]) -> dict[str, Any]:
         ("dry_penalty_last_n", int),
         ("xtc_probability", float),
         ("xtc_threshold", float),
+        ("cache_reuse", int),
     ):
         val = state.get(key)
         if val is None:
@@ -1248,6 +1317,7 @@ def _build_cmd(
     dry_penalty_last_n: int | None = None,
     xtc_probability: float | None = None,
     xtc_threshold: float | None = None,
+    cache_reuse: int | None = None,
 ) -> list[str]:
     """Build llama-server argv. Auto-enables MTP speculative flags when the
     GGUF looks like MTP **and** the binary supports draft-mtp.
@@ -1394,6 +1464,9 @@ def _build_cmd(
                 "Update the CUDA/CPU runtime to unlock ~2x decode.",
                 model.name,
             )
+    # Prefix cache: ReAct tool loops resubmit the same system head every step.
+    if cache_reuse is not None and int(cache_reuse) > 0 and binary_supports_cache_reuse(binary):
+        cmd.extend(["--cache-reuse", str(int(cache_reuse))])
     return cmd
 
 
@@ -1895,19 +1968,49 @@ def _start_rmb_server_impl(
                     }
                 )
 
-        profile = str(state.get("profile") or "agent")
-        prof = RMB_PROFILES.get(profile) or RMB_PROFILES["agent"]
-        ctx = int(state.get("ctx_size") or prof.get("ctx_size") or 8192)
-        ngl = int(
-            state.get("n_gpu_layers")
-            if state.get("n_gpu_layers") is not None
-            else -1
+        # Autofit (default): measure VRAM/RAM + GGUF and pick a window that
+        # actually loads. Locked / turbo / quality keep the user's knobs.
+        host_profile = detect_gguf_host_profile(model)
+        hw = probe_hardware()
+        last_good = (
+            state.get("last_good_fit")
+            if isinstance(state.get("last_good_fit"), dict)
+            else None
         )
-        if ngl < 0 and not _nvidia_ok():
-            ngl = 0
+        if should_autofit(state):
+            plan = plan_autofit(model, hardware=hw, last_good=last_good)
+            apply_plan_to_state(state, plan)
+            logger.info("RMB autofit: %s", plan.summary())
+        else:
+            plan = plan_from_state(state, model, hardware=hw)
+            if plan.n_gpu_layers < 0 and not hw.usable_gpu:
+                from dataclasses import replace as _replace
+
+                plan = _replace(plan, n_gpu_layers=0, flash_attn=False)
+            apply_plan_to_state(state, plan)
+        # Don't push GPU layers onto a runtime that cannot drive this card.
+        if plan.n_gpu_layers != 0:
+            try:
+                from dataclasses import replace as _replace
+
+                from remedy.runtime.gpu_probe import runtime_matches_gpu
+
+                vendor = hw.gpu_vendor or ("nvidia" if hw.nvidia else "")
+                rid = str(state.get("runtime_id") or "")
+                if vendor and not runtime_matches_gpu(
+                    vendor, runtime_id=rid, binary=binary
+                ):
+                    plan = _replace(plan, n_gpu_layers=0, flash_attn=False)
+                    apply_plan_to_state(state, plan)
+                    logger.info(
+                        "RMB: GPU present but this runtime cannot offload it — CPU layers"
+                    )
+            except Exception:
+                pass
+        ctx = int(plan.ctx_size)
+        ngl = int(plan.n_gpu_layers)
 
         # Autoconfig from GGUF name — MTP / coder / single-slot (no user knobs)
-        host_profile = detect_gguf_host_profile(model)
         use_parallel = int(state.get("parallel") or 1)
         if host_profile.get("force_parallel_1"):
             use_parallel = 1
@@ -2048,6 +2151,12 @@ def _start_rmb_server_impl(
         wait_vision = vision_suspend
         wait_mid = state.get("model_id")
         wait_host_auto = host_auto
+        wait_plan = plan
+        wait_hw = hw
+        wait_use_parallel = use_parallel
+        wait_host = host
+        wait_port = port
+        wait_home = home_dir
 
     # --- health wait OUTSIDE lock so Stop can run ---
     if wait_s <= 0:
@@ -2059,90 +2168,189 @@ def _start_rmb_server_impl(
             "vision_suspended": True,
             "vision": wait_vision,
             "host_auto": wait_host_auto,
+            "autofit": wait_plan.to_public() if wait_plan else None,
         }
 
-    deadline = time.time() + max(1.0, float(wait_s))
-    while time.time() < deadline:
-        if _user_stopped:
-            return {
-                "ok": False,
-                "error": "RMB start cancelled (stopped)",
-                "vision_suspended": False,
-            }
-        if wait_proc.poll() is not None:
-            code = wait_proc.returncode
+    def _finish_healthy() -> dict[str, Any]:
+        mark_used()
+        _clear_starting()
+        _note_loading_state(False)
+        live_ctx = wait_ctx
+        with contextlib.suppress(Exception):
+            probed = probe_live_n_ctx(wait_base)
+            if probed and probed >= 2048:
+                live_ctx = int(probed)
+        with contextlib.suppress(Exception):
+            from remedy.nanoswarm.token_nanobot import cache_context_window
+
+            cache_context_window(wait_base, wait_mid, live_ctx)
+            cache_context_window(wait_base, Path(wait_model).name, live_ctx)
+        with contextlib.suppress(Exception):
+            st_ok = merge_state(load_rmb_json(wait_home))
+            if wait_plan is not None:
+                st_ok["last_good_fit"] = last_good_payload(wait_plan, wait_model, wait_hw)
+                st_ok["ctx_size"] = live_ctx
+                apply_plan_to_state(st_ok, wait_plan)
+                st_ok["ctx_size"] = live_ctx
+                save_rmb_json(st_ok, wait_home)
+        return {
+            "ok": True,
+            "base_url": wait_base,
+            "pid": wait_pid,
+            "model_path": wait_model,
+            "binary": wait_binary,
+            "ctx_size": live_ctx,
+            "n_gpu_layers": wait_ngl,
+            "log": wait_log,
+            "vision_suspended": True,
+            "vision": wait_vision,
+            "host_auto": wait_host_auto,
+            "autofit": wait_plan.to_public() if wait_plan else None,
+        }
+
+    # The wait/retry loop — early-exit OOM walks the fit down instead of dying.
+    remaining = max(1.0, float(wait_s))
+    retries = 0
+    max_retries = 3
+    while True:
+        deadline = time.time() + remaining
+        early_code: int | None = None
+        timed_out = False
+        while time.time() < deadline:
+            if _user_stopped:
+                return {
+                    "ok": False,
+                    "error": "RMB start cancelled (stopped)",
+                    "vision_suspended": False,
+                }
+            if wait_proc.poll() is not None:
+                early_code = wait_proc.returncode
+                with _lock:
+                    if _proc is wait_proc:
+                        _proc = None
+                break
+            if is_running(home_dir, force=True, require_http=True):
+                return _finish_healthy()
+            _note_loading_state(True)
+            time.sleep(0.4)
+        else:
+            timed_out = True
             with _lock:
-                if _proc is wait_proc:
+                if _proc is wait_proc and wait_proc.poll() is None:
+                    with contextlib.suppress(Exception):
+                        wait_proc.terminate()
+                    try:
+                        wait_proc.wait(timeout=3)
+                    except Exception:
+                        with contextlib.suppress(Exception):
+                            wait_proc.kill()
                     _proc = None
+
+        tail = _tail_log(wait_log)
+        kind = classify_start_failure(
+            tail, exit_code=early_code, timed_out=timed_out
+        )
+        nxt = downgrade_plan(wait_plan, kind) if wait_plan is not None else None
+        can_retry = (
+            nxt is not None
+            and retries < max_retries
+            and not _user_stopped
+            and (not timed_out or retries == 0)
+        )
+        if not can_retry:
             _clear_starting()
             _set_vision_suspended(home_dir, False)
             if log_f is not subprocess.DEVNULL:
                 with contextlib.suppress(Exception):
                     log_f.close()
-            tail = _tail_log(wait_log)
-            _last_start_error = f"llama-server exited early (code {code})"
+            if timed_out:
+                _last_start_error = f"llama-server did not become healthy within {wait_s}s"
+                return {
+                    "ok": False,
+                    "error": _last_start_error,
+                    "log": wait_log,
+                    "log_tail": tail,
+                    "base_url": wait_base,
+                    "vision_suspended": False,
+                    "vision": wait_vision,
+                    "detail": _last_health_detail,
+                    "fail_kind": kind,
+                    "autofit": wait_plan.to_public() if wait_plan else None,
+                }
+            _last_start_error = f"llama-server exited early (code {early_code})"
             return {
                 "ok": False,
-                "error": f"llama-server exited early (code {code}). See {wait_log}",
+                "error": f"llama-server exited early (code {early_code}). See {wait_log}",
                 "log": wait_log,
                 "log_tail": tail,
                 "vision_suspended": False,
                 "vision": wait_vision,
+                "fail_kind": kind,
+                "autofit": wait_plan.to_public() if wait_plan else None,
             }
-        if is_running(home_dir, force=True, require_http=True):
-            mark_used()
-            _clear_starting()
-            _note_loading_state(False)
-            with contextlib.suppress(Exception):
-                from remedy.nanoswarm.token_nanobot import cache_context_window
 
-                cache_context_window(wait_base, wait_mid, wait_ctx)
-                cache_context_window(wait_base, Path(wait_model).name, wait_ctx)
-            return {
-                "ok": True,
-                "base_url": wait_base,
-                "pid": wait_pid,
-                "model_path": wait_model,
-                "binary": wait_binary,
-                "ctx_size": wait_ctx,
-                "n_gpu_layers": wait_ngl,
-                "log": wait_log,
-                "vision_suspended": True,
-                "vision": wait_vision,
-                "host_auto": wait_host_auto,
-            }
-        # Track loading while waiting for weights
-        _note_loading_state(True)
-        time.sleep(0.4)
-
-    # Timeout: kill orphan
-    with _lock:
-        if _proc is wait_proc and wait_proc.poll() is None:
-            with contextlib.suppress(Exception):
-                wait_proc.terminate()
+        retries += 1
+        wait_plan = nxt
+        logger.warning(
+            "RMB start %s — retry %s/%s with %s",
+            kind,
+            retries,
+            max_retries,
+            wait_plan.summary(),
+        )
+        remaining = 60.0 if timed_out else max(45.0, remaining * 0.7)
+        with _lock:
+            st_retry = merge_state(load_rmb_json(home_dir))
+            apply_plan_to_state(st_retry, wait_plan)
+            save_rmb_json(st_retry, home_dir)
+            ctx = int(wait_plan.ctx_size)
+            ngl = int(wait_plan.n_gpu_layers)
+            wait_ctx = ctx
+            wait_ngl = ngl
+            _mark_starting(remaining + 30)
+            enable_mtp = None
+            if kind == "unknown_flag":
+                enable_mtp = False
+            cmd = _build_cmd(
+                Path(wait_binary),
+                Path(wait_model),
+                host=wait_host,
+                port=wait_port,
+                ctx=ctx,
+                ngl=ngl,
+                threads=int(wait_plan.threads or 0),
+                parallel=wait_use_parallel,
+                flash_attn=bool(wait_plan.flash_attn),
+                host_profile=wait_host_auto,
+                enable_mtp=enable_mtp,
+                **_engine_kwargs(st_retry),
+            )
+            if kind == "unknown_flag" and "--cache-reuse" in cmd:
+                # Belt: strip even if probe was a false positive
+                try:
+                    i = cmd.index("--cache-reuse")
+                    del cmd[i : i + 2]
+                except ValueError:
+                    pass
             try:
-                wait_proc.wait(timeout=3)
-            except Exception:
-                with contextlib.suppress(Exception):
-                    wait_proc.kill()
-            _proc = None
-    _clear_starting()
-    _set_vision_suspended(home_dir, False)
-    if log_f is not subprocess.DEVNULL:
-        with contextlib.suppress(Exception):
-            log_f.close()
-    tail = _tail_log(wait_log)
-    _last_start_error = f"llama-server did not become healthy within {wait_s}s"
-    return {
-        "ok": False,
-        "error": f"llama-server did not become healthy within {wait_s}s",
-        "log": wait_log,
-        "log_tail": tail,
-        "base_url": wait_base,
-        "vision_suspended": False,
-        "vision": wait_vision,
-        "detail": _last_health_detail,
-    }
+                _proc = _spawn(cmd)
+            except Exception as e:
+                _clear_starting()
+                _set_vision_suspended(home_dir, False)
+                if log_f is not subprocess.DEVNULL:
+                    with contextlib.suppress(Exception):
+                        log_f.close()
+                return {
+                    "ok": False,
+                    "error": f"failed to respawn llama-server: {e}",
+                    "vision_suspended": False,
+                }
+            wait_proc = _proc
+            wait_pid = _proc.pid
+            st_retry["pid"] = wait_pid
+            st_retry["host_auto"] = wait_host_auto
+            save_rmb_json(st_retry, home_dir)
+            invalidate_cache()
 
 
 def stop_rmb_server(
@@ -2405,7 +2613,7 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         "runtime_present": binary is not None,
         "ctx_size": int(state.get("ctx_size") or 8192),
         "n_gpu_layers": state.get("n_gpu_layers"),
-        "profile": state.get("profile") or "agent",
+        "profile": state.get("profile") or "autofit",
         "engine": {
             "threads": int(state.get("threads") or 0),
             "parallel": int(state.get("parallel") or 1),
@@ -2452,8 +2660,10 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
             "dry_penalty_last_n": state.get("dry_penalty_last_n"),
             "xtc_probability": state.get("xtc_probability"),
             "xtc_threshold": state.get("xtc_threshold"),
+            "cache_reuse": state.get("cache_reuse"),
         },
         "nvidia": _nvidia_ok(),
+        "has_gpu": _gpu_present(),
         "catalog": catalog_public(),
         "discovered_ggufs": discovered[:24],
         "not_ready_hint": (
@@ -2492,7 +2702,60 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
                 "SmolVLM is unloaded while RMB is running."
             ),
         },
+        "autofit": _status_autofit(state, model_path, running=ready),
     }
+
+
+def _status_autofit(
+    state: dict[str, Any],
+    model_path: Path | None,
+    *,
+    running: bool,
+) -> dict[str, Any]:
+    """Public autofit card for Settings / status."""
+    enabled = should_autofit(state)
+    locked = bool(state.get("autofit_locked"))
+    last = state.get("last_autofit") if isinstance(state.get("last_autofit"), dict) else None
+    out: dict[str, Any] = {
+        "enabled": enabled,
+        "locked": locked,
+        "profile": state.get("profile") or "autofit",
+        "last": last,
+        "last_good": state.get("last_good_fit")
+        if isinstance(state.get("last_good_fit"), dict)
+        else None,
+    }
+    if last and running:
+        out["summary"] = last.get("summary") or ""
+        out["target"] = last.get("target")
+        out["ctx_size"] = last.get("ctx_size")
+        out["n_gpu_layers"] = last.get("n_gpu_layers")
+        out["cache_type"] = last.get("cache_type")
+        out["vram_total_mb"] = (last.get("hardware") or {}).get("vram_total_mb")
+        return out
+    if enabled and model_path is not None and not running:
+        try:
+            plan = plan_autofit(
+                model_path,
+                last_good=state.get("last_good_fit")
+                if isinstance(state.get("last_good_fit"), dict)
+                else None,
+            )
+            pub = plan.to_public()
+            out.update(
+                {
+                    "summary": pub.get("summary"),
+                    "target": pub.get("target"),
+                    "ctx_size": pub.get("ctx_size"),
+                    "n_gpu_layers": pub.get("n_gpu_layers"),
+                    "cache_type": pub.get("cache_type"),
+                    "vram_total_mb": (pub.get("hardware") or {}).get("vram_total_mb"),
+                    "planned": pub,
+                }
+            )
+        except Exception:
+            logger.debug("autofit preview failed", exc_info=True)
+    return out
 
 
 # Knobs that are baked into the llama-server process argv — changing them on
@@ -2555,6 +2818,7 @@ _RMB_PROCESS_KEYS = frozenset(
         "dry_penalty_last_n",
         "xtc_probability",
         "xtc_threshold",
+        "cache_reuse",
     }
 )
 
@@ -2578,6 +2842,7 @@ def _norm_rmb_val(key: str, val: Any) -> Any:
         "yarn_orig_ctx",
         "dry_allowed_length",
         "dry_penalty_last_n",
+        "cache_reuse",
     ):
         try:
             return int(val) if val is not None and str(val).strip() != "" else val
@@ -2842,6 +3107,7 @@ def apply_rmb_settings(
         "dry_penalty_last_n",
         "xtc_probability",
         "xtc_threshold",
+        "cache_reuse",
     ):
         if key not in patch:
             continue
@@ -2888,7 +3154,7 @@ def apply_rmb_settings(
                 state[key] = float(patch[key])
             except (TypeError, ValueError):
                 continue
-        elif key in ("top_k", "repeat_last_n", "seed", "batch_size", "ubatch_size", "main_gpu", "threads_batch", "yarn_orig_ctx", "dry_allowed_length") and patch[key] is not None:
+        elif key in ("top_k", "repeat_last_n", "seed", "batch_size", "ubatch_size", "main_gpu", "threads_batch", "yarn_orig_ctx", "dry_allowed_length", "cache_reuse") and patch[key] is not None:
             try:
                 state[key] = int(patch[key])
             except (TypeError, ValueError):
@@ -2931,7 +3197,7 @@ def apply_rmb_settings(
             continue
         if lo <= v <= hi:
             state[key] = v
-    for key in ("top_k", "repeat_last_n", "seed", "batch_size", "ubatch_size", "main_gpu", "threads_batch", "yarn_orig_ctx", "dry_allowed_length"):
+    for key in ("top_k", "repeat_last_n", "seed", "batch_size", "ubatch_size", "main_gpu", "threads_batch", "yarn_orig_ctx", "dry_allowed_length", "cache_reuse"):
         if key not in patch or patch[key] is None:
             continue
         try:
@@ -2971,11 +3237,24 @@ def apply_rmb_settings(
                 state["model_id"] = stem
 
     if "profile" in patch and patch["profile"] in RMB_PROFILES:
-        prof = RMB_PROFILES[str(patch["profile"])]
-        if "ctx_size" not in patch:
-            state["ctx_size"] = prof.get("ctx_size", state.get("ctx_size"))
-        if "n_gpu_layers" not in patch:
-            state["n_gpu_layers"] = prof.get("n_gpu_layers", state.get("n_gpu_layers"))
+        pid = str(patch["profile"])
+        if pid == "autofit":
+            state["autofit"] = True
+            state["autofit_locked"] = False
+            state["last_good_fit"] = None  # allow retrying the max fit
+        else:
+            state["autofit"] = False
+            state["autofit_locked"] = True
+            prof = RMB_PROFILES[pid]
+            if "ctx_size" not in patch and int(prof.get("ctx_size") or 0) > 0:
+                state["ctx_size"] = prof.get("ctx_size", state.get("ctx_size"))
+            if "n_gpu_layers" not in patch:
+                state["n_gpu_layers"] = prof.get("n_gpu_layers", state.get("n_gpu_layers"))
+
+    # Editing ctx / GPU layers / KV cache locks autofit so we don't overwrite
+    if any(k in patch for k in ("ctx_size", "n_gpu_layers", "cache_type")):
+        if "profile" not in patch or str(patch.get("profile")) != "autofit":
+            state["autofit_locked"] = True
 
     # Re-resolve path after model_id/path changes so disk + restart load the
     # correct GGUF (and config mirror gets the right llm_model stem).

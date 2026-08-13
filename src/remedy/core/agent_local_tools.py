@@ -26,6 +26,8 @@ def register_local_discover_tools(runtime: Any) -> None:
         action=scan   → all skill local: specs + built-ins (comfyui, ollama, …)
         action=status → same as scan (alias)
         action=one    → single target id (e.g. comfyui, ollama)
+        action=home   → last first-home stretch census
+        action=stretch → re-probe hardware/tools/rooms (same as /stretch)
         """
         from remedy.core.local_discover import (
             collect_skill_local_specs,
@@ -34,6 +36,34 @@ def register_local_discover_tools(runtime: Any) -> None:
         )
 
         act = (action or "scan").strip().lower()
+        if act in ("home", "census", "stretch", "map"):
+            from remedy.execution.host.stretch import (
+                load_census,
+                stretch_home,
+            )
+
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+            try:
+                census = (
+                    stretch_home(home, force=True)
+                    if act in ("stretch", "map")
+                    else load_census(home)
+                )
+            except Exception as e:
+                return format_tool_error(
+                    str(e),
+                    code="STRETCH_FAILED",
+                    tool_name="local_discover",
+                    suggestion="Retry /stretch or action=stretch.",
+                )
+            if census is None:
+                return format_tool_error(
+                    "This home has not been stretched yet.",
+                    code="NO_CENSUS",
+                    tool_name="local_discover",
+                    suggestion="Call local_discover action=stretch (or /stretch).",
+                )
+            return json.dumps(census.to_dict(), indent=2)
         specs = []
         with suppress(Exception):
             reg = getattr(runtime, "skills", None)
@@ -66,14 +96,15 @@ def register_local_discover_tools(runtime: Any) -> None:
         "Portable discovery of local services/binaries that skills need "
         "(ComfyUI, Ollama, anything declared in skill frontmatter local:). "
         "ALWAYS prefer this over list_dir/bash disk hunts. "
-        "action=scan (default) or action=one with target=comfyui|ollama|…",
+        "action=scan (default), action=one target=comfyui|ollama|…, "
+        "action=home (last census), action=stretch (re-map this PC).",
         local_discover,
         {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "description": "scan | one (default scan)",
+                    "description": "scan | one | home | stretch (default scan)",
                 },
                 "target": {
                     "type": "string",

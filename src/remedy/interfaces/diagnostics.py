@@ -211,7 +211,7 @@ def _hardware_stats() -> dict[str, Any]:
     if mem_total and mem_avail is not None and mem_total > 0:
         used_pct = round(100.0 * (mem_total - mem_avail) / mem_total, 1)
 
-    gpu = _nvidia_gpu_stats()
+    gpu = _gpu_stats()
     home = Path.home()
     disks = [
         _disk_for(home / ".remedy"),
@@ -252,54 +252,28 @@ def _hardware_stats() -> dict[str, Any]:
     return dict(payload)
 
 
-def _nvidia_gpu_stats() -> dict[str, Any]:
-    out: dict[str, Any] = {"nvidia": False, "gpus": []}
+def _gpu_stats() -> dict[str, Any]:
+    """All GPUs on this PC — not one vendor's tool."""
+    out: dict[str, Any] = {"has_gpu": False, "nvidia": False, "vendor": "", "gpus": []}
     try:
-        from remedy.vision.health import detect_nvidia
+        from remedy.runtime.gpu_probe import probe_gpus
 
-        out["nvidia"] = bool(detect_nvidia())
-    except Exception:
-        out["nvidia"] = False
-
-    if not out["nvidia"]:
-        return out
-
-    try:
-        creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        r = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=name,memory.total,memory.used,utilization.gpu,temperature.gpu",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=4,
-            creationflags=creation,
-        )
-        if r.returncode != 0:
-            out["error"] = ((r.stderr or r.stdout) or "nvidia-smi failed")[:200]
-            return out
-        gpus: list[dict[str, Any]] = []
-        for line in (r.stdout or "").splitlines():
-            parts = [p.strip() for p in line.split(",")]
-            if len(parts) < 5:
-                continue
-            try:
-                gpus.append(
-                    {
-                        "name": parts[0][:80],
-                        "memory_total_mb": float(parts[1]),
-                        "memory_used_mb": float(parts[2]),
-                        "util_pct": float(parts[3]),
-                        "temp_c": float(parts[4]),
-                    }
-                )
-            except (TypeError, ValueError):
-                continue
-        out["gpus"] = gpus
-    except FileNotFoundError:
-        out["error"] = "nvidia-smi not on PATH"
+        snap = probe_gpus()
+        prim = snap.primary
+        out["has_gpu"] = bool(snap.devices)
+        out["vendor"] = prim.vendor if prim else ""
+        out["nvidia"] = any(d.vendor == "nvidia" for d in snap.devices)
+        out["gpus"] = [
+            {
+                "name": d.name,
+                "vendor": d.vendor,
+                "memory_total_mb": float(d.vram_total_mb),
+                "memory_used_mb": float(max(0, d.vram_total_mb - d.vram_free_mb)),
+                "backend": d.backend,
+                "dedicated": d.dedicated,
+            }
+            for d in snap.devices
+        ]
     except Exception as exc:
         out["error"] = str(exc)[:200]
     return out
@@ -448,6 +422,7 @@ def _rmb_section(cfg: dict[str, Any]) -> dict[str, Any]:
             "port": st.get("port"),
             "base_url": base,
             "nvidia": bool(st.get("nvidia")),
+            "has_gpu": bool(st.get("has_gpu") or st.get("nvidia")),
             "latency_ms": latency,
             "not_ready_hint": st.get("not_ready_hint"),
             "vision_suspended": bool(st.get("vision_suspended")),

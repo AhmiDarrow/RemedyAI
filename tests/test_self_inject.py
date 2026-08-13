@@ -8,10 +8,16 @@ import pytest
 
 from remedy.core.self_inject import (
     SelfInjectRound,
+    activity_snapshot,
     append_ledger,
+    is_enabled,
+    last_tick_path,
     ledger_path,
+    note_user_activity,
+    read_last_tick,
     read_ledger,
     request_sidecar_restart,
+    should_run_now,
 )
 
 
@@ -136,3 +142,166 @@ async def test_git_restore_preserves_pre_round_dirty(tmp_path):
     assert "owner-wip" in text
     assert "round-bad" not in text
     assert not (repo / "round_noise.txt").exists()
+
+
+def _reset_clock(*, started: float | None = None) -> None:
+    import remedy.core.self_inject as si
+
+    now = started if started is not None else __import__("time").time()
+    si._last_user_activity = 0.0
+    si._process_started = now
+    si._last_unattended_code = 0.0
+
+
+def test_idle_clock_ignores_debug_log_mtime(tmp_path, monkeypatch):
+    """Status-bar / health writes to debug.log must not reset idle."""
+    import time
+
+    import remedy.core.self_inject as si
+
+    _reset_clock(started=time.time() - 120)
+    before = si._idle_seconds()
+    log = tmp_path / "debug.log"
+    log.write_text("status ping\n", encoding="utf-8")
+    # Touching a log is what the old clock used — new clock must ignore it.
+    log.write_text("status ping\nagain\n", encoding="utf-8")
+    after = si._idle_seconds()
+    assert after >= before - 0.5
+    assert after >= 100
+
+
+def test_note_user_activity_resets_idle(monkeypatch):
+    import time
+
+    import remedy.core.self_inject as si
+
+    _reset_clock(started=time.time() - 400)
+    assert si._idle_seconds() >= 300
+    note_user_activity()
+    assert si._idle_seconds() < 2
+
+
+def test_should_run_now_force_bypasses_idle(monkeypatch, tmp_path):
+    import time
+
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    _reset_clock(started=time.time())
+    monkeypatch.delenv("REMEDY_SELF_INJECT_FORCE", raising=False)
+    monkeypatch.setenv("REMEDY_SELF_INJECT", "1")
+    # Fresh process: not idle yet
+    assert should_run_now() is False
+    monkeypatch.setenv("REMEDY_SELF_INJECT_FORCE", "1")
+    assert should_run_now() is True
+
+
+def test_should_run_now_after_user_idle(monkeypatch, tmp_path):
+    import time
+
+    import remedy.core.self_inject as si
+
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    monkeypatch.delenv("REMEDY_SELF_INJECT_FORCE", raising=False)
+    monkeypatch.setenv("REMEDY_SELF_INJECT", "1")
+    _reset_clock(started=time.time() - 400)
+    assert should_run_now() is True
+    note_user_activity()
+    assert should_run_now() is False
+    si._last_user_activity = time.time() - 400
+    assert should_run_now() is True
+
+
+def test_is_enabled_respects_off_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    monkeypatch.setenv("REMEDY_SELF_INJECT", "0")
+    assert is_enabled() is False
+    monkeypatch.setenv("REMEDY_SELF_INJECT", "1")
+    assert is_enabled() is True
+
+
+def test_activity_snapshot_includes_last_tick(tmp_path, monkeypatch):
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    monkeypatch.setenv("REMEDY_SELF_INJECT", "1")
+    monkeypatch.delenv("REMEDY_SELF_INJECT_FORCE", raising=False)
+    _reset_clock()
+    snap = activity_snapshot(tmp_path)
+    assert snap["enabled"] is True
+    assert "idle_s" in snap
+    assert snap["last_tick"] is None
+    last_tick_path(tmp_path).write_text(
+        '{"kind":"unattended","ts":"2026-01-01T00:00:00+00:00"}',
+        encoding="utf-8",
+    )
+    snap2 = activity_snapshot(tmp_path)
+    assert snap2["last_tick"]["kind"] == "unattended"
+
+
+@pytest.mark.asyncio
+async def test_unattended_improve_fires_without_user_prompt(tmp_path, monkeypatch):
+    """Organism tick runs with no chat message and records last_tick."""
+    from remedy.core.self_inject import run_unattended_improve
+
+    monkeypatch.delenv("REMEDY_SELF_INJECT_FORCE", raising=False)
+    monkeypatch.setenv("REMEDY_SELF_INJECT", "1")
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    _reset_clock()
+
+    calls: list[str] = []
+
+    class _Loop:
+        def tick_learned_skills(self):
+            calls.append("tick")
+            return [{"name": "demo", "action": "promote", "from": "validated", "to": "active"}]
+
+    class _Rt:
+        home_dir = tmp_path
+        learning_loop = _Loop()
+
+        def _get_learning_loop(self):
+            return self.learning_loop
+
+    # No pyproject in tmp_path → code path skipped; organism still runs.
+    result = await run_unattended_improve(_Rt(), home=tmp_path, repo=tmp_path)
+    assert result["kind"] == "unattended"
+    assert result["organism"]["skills_refined"] == 1
+    assert calls == ["tick"]
+    saved = read_last_tick(tmp_path)
+    assert saved is not None
+    assert saved["organism"]["skills_refined"] == 1
+    # Fresh process is not idle, so no ruff attempt
+    assert (result.get("code") or {}).get("skipped") == "not_idle"
+
+
+@pytest.mark.asyncio
+async def test_ruff_self_heal_skips_dirty_tree(tmp_path):
+    import subprocess
+
+    from remedy.core.self_inject import _maybe_ruff_self_heal
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@example.com"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    (repo / "keep.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "keep.txt"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    (repo / "keep.txt").write_text("base\ndirty\n", encoding="utf-8")
+    (repo / "pyproject.toml").write_text('[project]\nname = "remedy-ai"\n', encoding="utf-8")
+    (repo / "src" / "remedy").mkdir(parents=True)
+    out = await _maybe_ruff_self_heal(repo, home=tmp_path)
+    assert out is None

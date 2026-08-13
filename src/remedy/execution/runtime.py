@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import shutil
 import sys
 import time
 from collections.abc import Callable
@@ -23,6 +22,8 @@ from remedy.models import ToolCall, ToolResult
 _SANDBOX_TOOL_ALLOWLIST = frozenset({
     "bash_exec",
     "shell_exec",
+    "host_run",
+    "host_script",
     "python_exec",
     "python_eval",
     "python_run",
@@ -257,6 +258,19 @@ class ToolRuntime:
             command = str(tool_call.arguments.get("command", ""))
             return self._shell_command(command)
 
+        if name == "host_run":
+            from remedy.execution.host.runner import coerce_argv
+
+            return coerce_argv(tool_call.arguments.get("argv"))
+
+        if name == "host_script":
+            from remedy.execution.host.ir import script_op
+            from remedy.execution.host.runner import prepare_host_op
+
+            lang = str(tool_call.arguments.get("lang") or "pwsh")
+            body = str(tool_call.arguments.get("body") or "")
+            return prepare_host_op(script_op(lang, body)).argv
+
         if name.startswith("python_") or name in ("python_exec", "python_eval", "python_run"):
             code = tool_call.arguments.get("code", tool_call.arguments.get("command", ""))
             return [sys.executable, "-c", str(code)]
@@ -265,15 +279,10 @@ class ToolRuntime:
 
     @staticmethod
     def _shell_command(command: str) -> list[str]:
-        """Resolve a portable shell argv for running a command string."""
-        if sys.platform == "win32":
-            pwsh = shutil.which("pwsh") or shutil.which("powershell")
-            if pwsh:
-                return [pwsh, "-NoProfile", "-NonInteractive", "-Command", command]
-            cmd = shutil.which("cmd") or "cmd.exe"
-            return [cmd, "/c", command]
-        sh = shutil.which("bash") or shutil.which("sh") or "/bin/sh"
-        return [sh, "-c", command]
+        """Resolve a portable shell argv — same host as bash_exec (cmd, not pwsh -Command)."""
+        from remedy.execution.host.runner import prepare_host_command
+
+        return prepare_host_command(command).argv
 
     # -- provenance ----------------------------------------------------------
 

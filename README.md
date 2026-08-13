@@ -268,7 +268,7 @@ No Remedy cloud account for core use. Chat goes to **your** provider (or local O
 | | |
 |--|--|
 | `/help` · `/new` · `/reset` · `/clear` · `/sessions` · `/models` · `/thinking` | Session & UI |
-| `/memory` · `/remember` · `/forget` · `/pin` · `/whoami` | Memory |
+| `/memory` · `/remember` · `/forget` · `/pin` · `/whoami` · `/stretch` · `/home` | Memory |
 | `/goals` · `/goal` · `/plans` · `/plan` … | Plans |
 | `/compact` · `/harness` | Harness |
 | `/approve` · `/deny` | Approvals |
@@ -318,7 +318,7 @@ WebUI is the **same SPA** as desktop (`desktop/dist`). After UI changes:
 ```bash
 git clone https://github.com/AhmiDarrow/RemedyAI.git && cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # 560+ tests; currently ~1857
+uv run pytest -q          # 560+ tests; currently ~1991
 cd desktop && npm test && npm run build
 python scripts/check_docs.py
 cd desktop && npm run tauri:dev   # full shell (set REMEDY_DEV_ROOT to repo)

@@ -76,10 +76,21 @@ def remember_taste(fact: str, runtime: Any = None) -> dict[str, str]:
     items.append(row)
     items = items[-40:]
     save_taste(items, runtime)
+    # Fold into Partner Memory so taste survives as organism fact, not only
+    # a design-pass sidecar file.
     with suppress(Exception):
         mem = getattr(runtime, "memory", None)
-        if mem is not None and getattr(mem, "profile", None) is not None:
-            mem.profile.add_fact(text[:240], category="design", confidence=0.9)
+        profile = getattr(mem, "profile", None) if mem is not None else None
+        if profile is not None:
+            from remedy.memory.partner_memory import upsert_profile_fact
+
+            upsert_profile_fact(
+                profile,
+                text[:240],
+                category="design",
+                confidence=0.9,
+                source="taste",
+            )
     return row
 
 

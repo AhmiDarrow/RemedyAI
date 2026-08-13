@@ -15,7 +15,8 @@ Type `/` in the composer for autocomplete. Commands also work via
 | `/remember` | `text` | Save a durable fact |
 | `/forget` | `text` | Remove a matching Partner Memory fact |
 | `/pin` | `text` | Pin a fact so it always injects |
-| `/whoami` | | Profile / known facts |
+| `/whoami` | | Profile / known facts + this-home census |
+| `/stretch` | alias `/home` | Re-map this PC (hardware, tools, rooms, local ports) |
 | `/goals` | | List open goals |
 | `/goal` | `title` | Add a goal |
 | `/plans` | | List structured task plans |

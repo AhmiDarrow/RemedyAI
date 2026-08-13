@@ -209,74 +209,60 @@ def create_app(
         except Exception:
             logger.debug("Local model auto-start schedule skipped", exc_info=True)
 
-        # Self-inject idle scheduler: when enabled + idle, auto-run improvement rounds.
-        # This is the auto-trigger; the on-command path (self_inject_round tool / skill)
-        # always works regardless. Runs independently of any single turn.
+        # Unattended self-improve: start whenever the feature is enabled, not
+        # only if the process is already idle at boot. Organism ticks (skill
+        # lifecycle, dream, persist) run every cycle; code self-heal waits for
+        # the user-idle window inside run_unattended_improve.
         _self_inject_task: Any = None
         try:
-            from remedy.core.self_inject import should_run_now
+            from remedy.core.self_inject import is_enabled as _si_enabled
 
-            _self_inject_enabled = bool(should_run_now()) if runtime is not None else False
+            _force = os.environ.get("REMEDY_SELF_INJECT_FORCE") == "1"
+            _self_inject_enabled = bool(
+                runtime is not None and (_si_enabled() or _force)
+            )
 
             async def _self_inject_idle_loop() -> None:
+                first = True
                 while True:
                     try:
-                        await asyncio.sleep(60)
+                        # First tick quickly after boot so learning starts without
+                        # a user prompt; then settle to a 60s cadence.
+                        await asyncio.sleep(5 if first else 60)
+                        first = False
                         if runtime is None:
                             continue
-                        if not should_run_now():
+                        if not _si_enabled() and os.environ.get(
+                            "REMEDY_SELF_INJECT_FORCE"
+                        ) != "1":
                             continue
-                        # Run one round on the python tree (live-source sidecar).
                         try:
-                            from remedy.core.self_inject import (
-                                SelfInjectRound,
-                                apply_or_rollback,
-                                git_capture,
-                                run_gate,
-                            )
+                            from remedy.core.self_inject import run_unattended_improve
 
-                            repo = _self_inject_repo()
-                            round_ = SelfInjectRound(tree="python")
-                            snap = await git_capture(repo)
-                            round_ = await run_gate(round_, repo)
-                            if round_.status == "green":
-                                round_ = await apply_or_rollback(
-                                    round_, repo, snap
-                                )
-                            else:
-                                await apply_or_rollback(round_, repo, snap)
-                            from remedy.core.self_inject import append_ledger
-
-                            append_ledger(
-                                round_, getattr(runtime, "home_dir", None)
+                            home = getattr(runtime, "home_dir", None) or getattr(
+                                getattr(runtime, "config", None), "home_dir", None
                             )
+                            result = await run_unattended_improve(runtime, home=home)
+                            org = result.get("organism") or {}
+                            code = result.get("code")
                             logger.info(
-                                "self-inject idle round %s status=%s outcome=%s",
-                                round_.round_id,
-                                round_.status,
-                                round_.outcome,
+                                "self-improve tick skills=%s dreamed=%s code=%s idle_s=%s",
+                                org.get("skills_refined", 0),
+                                org.get("dreamed", False),
+                                (code or {}).get("outcome")
+                                or (code or {}).get("skipped")
+                                or "none",
+                                result.get("idle_s"),
                             )
                         except Exception:
-                            logger.exception("self-inject idle round failed")
+                            logger.exception("self-improve tick failed")
                     except Exception:
                         logger.debug("self-inject idle loop error", exc_info=True)
 
-            def _self_inject_repo() -> Path:
-                from pathlib import Path
-
-                import remedy as _pkg
-
-                cand = Path(_pkg.__file__).resolve().parent.parent.parent
-                for _ in range(6):
-                    if (cand / "pyproject.toml").is_file():
-                        return cand
-                    cand = cand.parent
-                return Path.cwd()
-
-            if _self_inject_enabled and runtime is not None:
+            if _self_inject_enabled:
                 try:
                     _self_inject_task = asyncio.create_task(_self_inject_idle_loop())
-                    logger.info("self-inject idle scheduler started")
+                    logger.info("self-improve idle scheduler started")
                 except Exception:
                     logger.debug("self-inject idle scheduler start skipped", exc_info=True)
         except Exception:
@@ -389,6 +375,7 @@ def create_app(
         "/dashboard",
         "/api/status",
         "/api/ping",
+        "/api/self-improve",
         "/api/auth/local-bootstrap",
         # Google OAuth browser redirect (state is one-time secret; no bearer).
         "/api/assistant/google/callback",
@@ -538,6 +525,7 @@ def create_app(
         quiet = method == "OPTIONS" or path in (
             "/api/status",
             "/api/ping",
+            "/api/self-improve",
             "/api/partner/status",
             "/api/checkpoints/latest",
             "/api/plans/latest",
@@ -823,6 +811,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/skills</span> — list skills</div>
             <p class="section-header">Other</p>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/status</span> — system status</div>
+            <div class="endpoint"><span class="method">GET</span><span class="path">/api/self-improve</span> — unattended self-improve clock + last tick</div>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/diagnostics</span> — health diagnostics (Remedy, RMB, hardware, providers)</div>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/session-summaries</span> — legacy summaries</div>
             <div class="endpoint"><span class="method">GET</span><span class="path">/api/handoffs</span> — handoff notes</div>

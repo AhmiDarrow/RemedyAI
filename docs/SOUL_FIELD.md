@@ -81,12 +81,16 @@ Tiny/local models stay lean so they do not thrash.
 ## Dream cycle
 
 `dream_cycle` (tool `soul_dream` or automatic post-turn when ≥4 episodes and
-cooldown elapsed) consolidates residue into:
+cooldown elapsed) is how the organism *sleeps on it* — three streams:
 
-- Repeated open threads → relational + pledges  
-- Stance weather → habits  
-- Optional Partner Memory “Ongoing focus”  
-- Time Crystal life admits  
+| Stream | What it holds |
+|--------|----------------|
+| **Memory of them** | Life, goals, pledges, open threads |
+| **Memory of myself** | Help mode, corrections, habits, organism lessons |
+| **Dreams of the future** | `Toward {their goal}: {how I will partner}` |
+
+Those dreams inject every turn and can arm a mission. Heuristics always run;
+an optional local model may only refine episode labels.
 
 ## Tools
 

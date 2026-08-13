@@ -159,7 +159,9 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             </span>
           </FormStatusRow>
           <FormStatusRow label="Context">
-            {rmb?.ctx_size ?? 8192} tok · {rmb?.profile || 'agent'}
+            {rmb?.autofit?.summary
+              ? rmb.autofit.summary
+              : `${rmb?.ctx_size ?? 8192} tok · ${rmb?.profile || 'autofit'}`}
             {rmb?.nvidia ? ' · NVIDIA' : ' · CPU'}
           </FormStatusRow>
           <FormStatusRow label="Runtime">
@@ -342,8 +344,9 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
         </div>
 
         <FormSegmented
-          value={((rmb?.profile || 'agent') as 'agent' | 'turbo' | 'quality')}
+          value={((rmb?.profile || 'autofit') as 'autofit' | 'agent' | 'turbo' | 'quality')}
           options={[
+            { id: 'autofit', label: 'Autofit' },
             { id: 'agent', label: 'Agent' },
             { id: 'turbo', label: 'Turbo' },
             { id: 'quality', label: 'Quality' },
@@ -354,7 +357,11 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
               setRmbBusy(true)
               try {
                 await patchRmbSettings({ profile: pid, enabled: true })
-                setRmbMsg(`Profile: ${pid}`)
+                setRmbMsg(
+                  pid === 'autofit'
+                    ? 'Autofit: largest stable context for this GPU/RAM'
+                    : `Profile: ${pid}`,
+                )
                 await refreshRmb()
               } catch (e) {
                 setRmbMsg(String(e))
@@ -364,6 +371,11 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             })()
           }}
         />
+        <FormHint>
+          Autofit is the default — it sizes context, GPU layers, and KV cache
+          from VRAM/RAM so the GGUF actually loads. Edit context or GPU layers
+          below to lock a manual fit.
+        </FormHint>
         <div className="flex gap-2 mt-2">
           <div className="flex-1 min-w-0">
             <FormLabel>Context size (no cap)</FormLabel>

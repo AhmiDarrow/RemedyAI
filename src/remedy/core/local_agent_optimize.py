@@ -52,7 +52,7 @@ You run on a fixed on-device window. Tasks use RESEARCH → PLAN → BUILD **via
 1. Call tools immediately. First step must include tool_calls (not markdown).
 2. RESEARCH = list_dir / file_read / repo_search (small batches).
 3. PLAN = short mental checklist — never a long RESEARCH/PLAN/BUILD essay in chat.
-4. BUILD = file_write / file_edit / bash_exec. Code on disk, not in chat.
+4. BUILD = file_write / file_edit / host_run / bash_exec. Code on disk, not in chat.
 5. **Illegal:** tutorial monologue, "pip install …" guides, full source in ``` fences
    instead of file_write, "Step 1/2/3" how-to without tools.
 6. Prefer absolute paths under the **project workspace**. Desktop is often PATH_DENIED.
@@ -365,7 +365,7 @@ def continue_build_nudge(*, project_path: str | None = None) -> dict[str, str]:
             "function calls only (no architecture essay):\n"
             f"1) list_dir on the project root (or file_write `{example}` if empty)\n"
             "2) file_write / file_edit for real source files under the workspace\n"
-            "3) bash_exec only after files exist (verify, not plan)\n"
+            "3) host_run / bash_exec only after files exist (verify, not plan)\n"
             "Illegal: 'I'll build…', 'let me start by laying out…', RESEARCH/PLAN markdown.\n"
             "Start **now** with tool_calls."
         ),
@@ -398,29 +398,56 @@ def slim_system_for_local(
     base_url: str = "",
     max_steps: int = 256,
     user_message: str = "",
+    window: int | None = None,
 ) -> str:
-    """Build a tight system block that still carries workspace + local contract."""
+    """Build a tight system block that still carries workspace + local contract.
+
+    Head/context caps scale with the physical n_ctx (autofit 16–32k can keep
+    more workspace than the old hard 6k-char trim).
+    """
+    win = int(window or 0)
+    if win < 2048:
+        try:
+            from remedy.core.endless_context import resolve_local_window
+
+            win = int(
+                resolve_local_window(
+                    provider=provider, model=model, base_url=base_url
+                )
+                or 8192
+            )
+        except Exception:
+            win = 8192
+    if win >= 24_576:
+        head_cap, ctx_cap = 1400, 18_000
+    elif win >= 16_384:
+        head_cap, ctx_cap = 1100, 12_000
+    elif win >= 12_288:
+        head_cap, ctx_cap = 900, 8_000
+    else:
+        head_cap, ctx_cap = 700, 6_000
+
     # Keep identity line if present (first ~400 chars of product system)
     head = (system_prompt or "").strip()
-    if len(head) > 900:
+    if len(head) > head_cap + 200:
         # Drop the long tool-policy essay for local — contract replaces it
         first = head.split("\n\n", 1)[0]
-        head = first[:700] + (
+        head = first[:head_cap] + (
             "\nStyle: concise, tool-first. Prefer action over narration."
         )
 
     runtime_info = (
         f"Provider: {provider} · model: {model}\n"
-        f"Mode: local fixed-window agent · run until done "
+        f"Mode: local fixed-window agent · n_ctx={win} · run until done "
         f"(safety ceiling {max_steps} steps).\n"
         "Answer provider/model questions from this line — no tools needed."
     )
     parts = [head, runtime_info, local_system_contract()]
     ctx = (context or "").strip()
     if ctx:
-        # Context already head-trimmed for local; still hard-cap for safety
-        if len(ctx) > 6000:
-            ctx = ctx[:5500] + "\n…[context trimmed for local window]"
+        if len(ctx) > ctx_cap:
+            keep = max(2000, ctx_cap - 500)
+            ctx = ctx[:keep] + "\n…[context trimmed for local window]"
         parts.append(ctx)
     if message_wants_implement(user_message):
         parts.append(local_create_nudge())

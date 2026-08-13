@@ -681,6 +681,17 @@ async def apply_settings_update(
     cfg["llm_api_key"] = ""
     cfg.pop("provider_keys", None)
     _api_support._write_config(config_path, cfg)
+    if bool(cfg.get("setup_completed")):
+        try:
+            from remedy.execution.host.stretch import ensure_home_stretch
+
+            ensure_home_stretch(
+                home_path or config_path.parent,
+                force=False,
+                background=True,
+            )
+        except Exception:
+            pass
 
     # When chat is RMB, status-bar / settings model picks must reload the GGUF
     # host — llm_model alone only changes the reported name, not the weights.
