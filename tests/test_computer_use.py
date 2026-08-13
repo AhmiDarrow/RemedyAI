@@ -242,6 +242,12 @@ def test_open_app_protocol_detector_drive_vs_handler():
 
 def test_open_app_resolves_relative_in_search_dir(tmp_path: Path, monkeypatch):
     """Just-built game.exe must launch from the project folder, not sidecar CWD."""
+    import sys
+
+    import pytest
+
+    if sys.platform != "win32":
+        pytest.skip("Desktop computer use requires Windows")
     from remedy.core.computer.desktop_win import open_app
 
     fake = tmp_path / "hello.exe"
@@ -266,7 +272,12 @@ def test_open_app_resolves_relative_in_search_dir(tmp_path: Path, monkeypatch):
 
 def test_open_app_prefers_search_dirs_not_cwd(tmp_path: Path, monkeypatch):
     import os
+    import sys
 
+    import pytest
+
+    if sys.platform != "win32":
+        pytest.skip("Desktop computer use requires Windows")
     from remedy.core.computer.desktop_win import open_app
 
     cwd = tmp_path / "cwd"

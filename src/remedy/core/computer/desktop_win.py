@@ -817,6 +817,10 @@ def open_app(
             f"open_app refuses URL/protocol handler (got {raw[:48]!r}); "
             "use computer_navigate / open_url for web, or an app name/path"
         )
+    # Path-jail checks are OS-independent so Linux CI can still prove them.
+    rel_probe = Path(raw)
+    if search_dirs and not rel_probe.is_absolute() and ".." in rel_probe.parts:
+        raise ValueError("open_app refuses parent-directory traversal")
 
     _require_windows()
 
