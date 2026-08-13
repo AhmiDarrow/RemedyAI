@@ -462,6 +462,202 @@ def register_build_tools(runtime: Any) -> None:
         ]
         return "\n".join(lines)
 
+    async def todo_write(todos_json: str = "", merge: bool = True) -> str:
+        """Create or update the turn/project build checklist (Claude-class)."""
+        from remedy.core.build_todos import format_todos_block, load_todos, upsert_todos
+
+        raw = (todos_json or "").strip()
+        if not raw:
+            items = load_todos(runtime)
+            return format_todos_block(items) or "No todos yet. Pass todos_json=[{id,content,status}]."
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as e:
+            return f"todos_json parse error: {e}"
+        if isinstance(parsed, dict):
+            parsed = parsed.get("todos") or parsed.get("items") or [parsed]
+        if not isinstance(parsed, list):
+            return "todos_json must be a JSON array of {id,content,status}"
+        items = upsert_todos(runtime, parsed, merge=bool(merge))
+        block = format_todos_block(items)
+        return block or "Todos updated (empty)."
+
+    async def todo_read() -> str:
+        """Show the active build checklist."""
+        from remedy.core.build_todos import format_todos_block, load_todos
+
+        return format_todos_block(load_todos(runtime)) or "No todos."
+
+    async def build_drive(
+        goal: str = "",
+        use_llm: bool = False,
+        max_units: int = 8,
+        max_repairs: int = 3,
+    ) -> str:
+        """Machine-owned implement-verify-fix: spec → TDD → hops → gates → repair."""
+        from remedy.core.build_drive import drive_build
+
+        res = drive_build(
+            runtime,
+            goal=goal or "",
+            use_llm=bool(use_llm),
+            max_units=max_units,
+            max_repairs=max_repairs,
+        )
+        if res.get("error") and not res.get("tdd"):
+            return f"build_drive failed: {res.get('error')}"
+        lines = [res.get("message") or json.dumps({k: res.get(k) for k in ('ok', 'phase')})]
+        hops = res.get("hops") or []
+        for h in hops[:10]:
+            if isinstance(h, dict):
+                mark = "OK" if h.get("ok") else "RED"
+                lines.append(f"  [{mark}] {h.get('path')} {h.get('error') or ''}".rstrip())
+        review = res.get("review") or {}
+        if review.get("message"):
+            lines.append(str(review["message"]))
+        return "\n".join(lines)[:4000]
+
+    async def apply_patch(patch: str = "") -> str:
+        """Apply a unified diff or Begin-Patch block through the write jail."""
+        from remedy.core.build_apply_patch import apply_patch_text
+
+        raw = (patch or "").strip()
+        if not raw:
+            return "patch= required (unified diff or *** Begin Patch block)"
+        res = apply_patch_text(runtime, raw)
+        if not res.get("ok"):
+            return f"apply_patch RED: {res.get('error')}"
+        files = ", ".join(
+            f"{a.get('action')} {a.get('path')}" for a in (res.get("applied") or [])
+        )
+        return f"apply_patch OK files={res.get('files')} {files}"
+
+    async def build_parallel(units_json: str = "", use_llm: bool = False) -> str:
+        """Isolated parallel hops — merge a unit only if its oracle is green."""
+        from remedy.core.build_isolated import parallel_isolated_hops
+
+        raw = (units_json or "").strip()
+        if not raw:
+            return "units_json= required (JSON array of {path,symbol,behavior,...})"
+        try:
+            units = json.loads(raw)
+        except json.JSONDecodeError as e:
+            return f"units_json parse error: {e}"
+        if not isinstance(units, list):
+            return "units_json must be a JSON array"
+        hops = parallel_isolated_hops(runtime, units, use_llm=bool(use_llm))
+        ok_n = sum(1 for h in hops if h.get("ok"))
+        lines = [f"build_parallel hops={ok_n}/{len(hops)}"]
+        for h in hops[:12]:
+            mark = "OK" if h.get("ok") else "RED"
+            lines.append(
+                f"  [{mark}] {h.get('path')} merged={h.get('merged')} "
+                f"{h.get('error') or ''}".rstrip()
+            )
+        return "\n".join(lines)[:4000]
+
+    async def build_review_fix(use_llm: bool = False) -> str:
+        """Second pass over the write set: findings + isolated hops on errors."""
+        from remedy.core.build_engine import get_build_state
+        from remedy.core.build_review_fix import review_fix_pass
+
+        st = get_build_state(runtime)
+        ws = list(getattr(st, "write_set", None) or []) if st else []
+        res = review_fix_pass(runtime, ws, use_llm=bool(use_llm))
+        if st is not None:
+            st.review_fix_ran = True
+        lines = [str(res.get("message") or "review_fix")]
+        for f in (res.get("findings") or [])[:12]:
+            lines.append(f"  · {f.get('severity')} {f.get('kind')} {f.get('path')}: {f.get('detail')}")
+        return "\n".join(lines)[:4000]
+
+    runtime.tool_registry.register_builtin_handler(
+        "todo_write",
+        "Create or update a short build checklist (pending|in_progress|completed|"
+        "cancelled). todos_json=[{id,content,status}]. merge=true updates by id. "
+        "Use at the start of multi-step implement work; mark done as you go. "
+        "Do not claim finished while todos are still pending.",
+        todo_write,
+        {
+            "type": "object",
+            "properties": {
+                "todos_json": {
+                    "type": "string",
+                    "description": 'JSON array e.g. [{"id":"1","content":"add parser","status":"in_progress"}]',
+                },
+                "merge": {
+                    "type": "boolean",
+                    "description": "true=update by id (default); false=replace list",
+                    "default": True,
+                },
+            },
+            "required": [],
+        },
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "todo_read",
+        "Show the active build checklist (from .remedy-build/todos.json).",
+        todo_read,
+        {"type": "object", "properties": {}},
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "build_drive",
+        "Machine-owned implement-verify-fix loop: compile spec, write failing "
+        "TDD tests, hop units (use_llm=true fills/repairs via the turn model), "
+        "run gate tower, auto-repair. Prefer this over a long plan monologue "
+        "when the user asked to implement/build. Continue from the result.",
+        build_drive,
+        {
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string", "description": "Override active build-turn goal"},
+                "use_llm": {
+                    "type": "boolean",
+                    "description": "Stateless LLM hops (default false; live loop may auto-enable)",
+                },
+                "max_units": {"type": "integer"},
+                "max_repairs": {"type": "integer"},
+            },
+            "required": [],
+        },
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "apply_patch",
+        "Apply a unified diff or *** Begin Patch / *** Update File: block "
+        "through the write jail. Unique hunks only; refuses partial file applies.",
+        apply_patch,
+        {
+            "type": "object",
+            "properties": {"patch": {"type": "string"}},
+            "required": ["patch"],
+        },
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "build_parallel",
+        "Hop independent units in isolated overlays (parallel). Each unit merges "
+        "to the live tree only if its oracle is green — siblings cannot corrupt "
+        "each other. units_json=[{path,symbol,behavior,source?}].",
+        build_parallel,
+        {
+            "type": "object",
+            "properties": {
+                "units_json": {"type": "string"},
+                "use_llm": {"type": "boolean"},
+            },
+            "required": ["units_json"],
+        },
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "build_review_fix",
+        "Second pass over the write set: TODO/bare-except/syntax/missing-test "
+        "findings, then isolated hops on error-severity items.",
+        build_review_fix,
+        {
+            "type": "object",
+            "properties": {"use_llm": {"type": "boolean"}},
+            "required": [],
+        },
+    )
     runtime.tool_registry.register_builtin_handler(
         "build_status",
         "Show machine build engine + on-disk ledger (phase, oracle command, "

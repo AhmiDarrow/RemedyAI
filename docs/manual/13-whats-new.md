@@ -2,11 +2,29 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.22.3**.
+Current series: **v0.23.0**.
 
 ## Contents
 
-- [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+- [0.23.0](#0230---build-ability--companion) · [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+
+## 0.23.0 - Build ability + companion
+
+A Claude-class **machine build loop** plus a PC companion so Remedy can
+finish software and design work from *this* machine — not just chat about
+it. PyPI **`remedy-ai==0.23.0`** · tag **v0.23.0**.
+
+- **`build_drive` / `build_parallel` / `apply_patch`** — spec → TDD → isolated
+  hops → gate tower → review-fix. Overlays merge only when the oracle is
+  green. `file_glob` and `todo_write`/`todo_read` cut list-dir thrash.
+- **Companion** — clipboard, focused window, drop-a-file inbox, taste
+  memory, and visual observe after UI writes. “Look at this / I copied”
+  starts from the actual PC.
+- **Play-to-iterate** — compile/run stay on the desktop after `computer_app`;
+  write jail no longer mistakes `python.exe game.py` for a write.
+- **Ship harden** — patch/hop jail fail-closed; uninstall targets only
+  `remedy-ai`; messenger shares the desktop stream claim; Stop drains the
+  next queued send; Browser rail blocks IMDS / public IPs.
 
 ## 0.22.3 - Clear mid-turn stops
 

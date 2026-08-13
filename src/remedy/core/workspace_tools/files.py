@@ -485,13 +485,19 @@ def register_files_tools(runtime: Any) -> None:
                 replace_all=bool(replace_all),
             )
         if not result.ok or result.new_content is None:
+            extra = ""
+            with suppress(Exception):
+                from remedy.core.file_edit import note_failed_edit
+
+                extra = note_failed_edit(runtime, path, old_string or "")
             return format_tool_error(
-                result.message,
+                result.message + extra,
                 code="EDIT_FAILED",
                 tool_name="file_edit",
                 suggestion=(
                     "file_read the file, copy the exact old_string (including whitespace), "
                     "or set replace_all=true if multiple matches are intentional."
+                    " If this hunk already failed, do not resend it."
                 ),
             )
         try:

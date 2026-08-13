@@ -125,6 +125,49 @@ def append_plan_and_computer_addenda(
 
                 context = (context or "") + "\n\n" + BUILD_MODE_SYSTEM_ADDENDUM
         with suppress(Exception):
+            from remedy.core.build_todos import format_todos_block, load_todos
+
+            todo_block = format_todos_block(load_todos(runtime))
+            if todo_block:
+                context = (context or "") + "\n\n" + todo_block
+        with suppress(Exception):
+            from remedy.core.companion import (
+                format_companion_block,
+                gather_companion_snapshot,
+                looks_like_companion_request,
+            )
+
+            um = str(getattr(runtime, "_last_user_text", "") or "")
+            if looks_like_companion_request(um):
+                snap = gather_companion_snapshot(runtime)
+                block = format_companion_block(snap)
+                if block:
+                    context = (context or "") + "\n\n" + block
+                with suppress(Exception):
+                    from remedy.core.companion_taste import extract_taste, remember_taste
+
+                    for fact in extract_taste(um):
+                        remember_taste(fact, runtime)
+        with suppress(Exception):
+            from remedy.core.companion_taste import format_taste_block, load_taste
+
+            tblock = format_taste_block(load_taste(runtime))
+            if tblock:
+                context = (context or "") + "\n\n" + tblock
+        with suppress(Exception):
+            from remedy.core.away_mode import format_away_block, looks_like_away_request
+
+            um_a = str(getattr(runtime, "_last_user_text", "") or "")
+            if looks_like_away_request(um_a):
+                context = (context or "") + "\n\n" + format_away_block()
+        with suppress(Exception):
+            from remedy.core.companion_inbox import format_inbox_block, poll_new_drops
+
+            drops = poll_new_drops(runtime)
+            ib = format_inbox_block(drops)
+            if ib:
+                context = (context or "") + "\n\n" + ib
+        with suppress(Exception):
             from remedy.core.computer.guidance import COMPUTER_USE_SYSTEM_ADDENDUM
 
             context = (context or "") + "\n\n" + COMPUTER_USE_SYSTEM_ADDENDUM

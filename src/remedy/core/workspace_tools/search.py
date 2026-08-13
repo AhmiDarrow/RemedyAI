@@ -205,6 +205,56 @@ def register_search_tools(runtime: Any) -> None:
             footer = f"\n… showing {off + 1}-{shown} of {total}"
         return "\n".join(lines) + footer
 
+    async def file_glob(
+        pattern: str = "",
+        path: str = ".",
+        max_results: int = 80,
+    ) -> str:
+        """Find files by glob (recursive). Prefer this over serial list_dir."""
+        from remedy.core.file_glob import format_glob_hits, glob_files
+
+        pat = (pattern or "").strip()
+        if not pat:
+            return format_tool_error(
+                "pattern is required (e.g. *.py or src/**/*.ts)",
+                code="MISSING_PATTERN",
+                tool_name="file_glob",
+                suggestion='file_glob(pattern="*.py") or file_glob(pattern="**/*test*.py", path="src")',
+            )
+        bad = _reserved_guard(path or ".")
+        if bad:
+            return format_tool_error(
+                bad,
+                code="RESERVED_NAME",
+                tool_name="file_glob",
+                suggestion="Skip reserved device paths; glob under the project root.",
+            )
+        raw_path = (path or ".").strip() or "."
+        try:
+            target = runtime.resolve_tool_path(raw_path)
+        except Exception as e:
+            return format_tool_error(
+                f"path not allowed or unresolvable: {raw_path} ({e})",
+                code="PATH_DENIED",
+                tool_name="file_glob",
+                suggestion="Use a path under the project/access scope.",
+            )
+        if not target.exists():
+            return format_tool_error(
+                f"path not found: {raw_path}",
+                code="NOT_FOUND",
+                tool_name="file_glob",
+                suggestion="list_dir the parent, then retry file_glob.",
+            )
+        if target.is_file():
+            target = target.parent
+        try:
+            cap = max(1, min(400, int(max_results or 80)))
+        except (TypeError, ValueError):
+            cap = 80
+        hits = glob_files(target, pat, max_results=cap)
+        _note_path(target)
+        return format_glob_hits(hits, pattern=pat, truncated=len(hits) >= cap)
 
     runtime.tool_registry.register_builtin_handler(
         "repo_search",
@@ -253,6 +303,33 @@ def register_search_tools(runtime: Any) -> None:
                     "default": 0,
                 },
             },
+        },
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "file_glob",
+        "Find files by glob pattern (recursive, skip node_modules/.git/venv). "
+        "`*.py` matches any basename in the tree; `src/**/*.ts` is a path glob. "
+        "Prefer this over serial list_dir when looking for files by name/extension.",
+        file_glob,
+        {
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "Glob e.g. *.py, **/*test*.py, src/**/*.rs",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Root to walk (default: focus/cwd)",
+                    "default": ".",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Max paths (default 80, max 400)",
+                    "default": 80,
+                },
+            },
+            "required": ["pattern"],
         },
     )
     runtime.tool_registry.register_builtin_handler(

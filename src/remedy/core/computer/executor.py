@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 import time
@@ -188,10 +189,8 @@ class ComputerExecutor:
                 ComputerAction.MONITORS,
                 ComputerAction.SCREENSHOT,
             ):
-                try:
+                with contextlib.suppress(Exception):
                     self.bridge.set_last_drive_target(host_label(tgt))
-                except Exception:
-                    pass
             log_computer_action(
                 action=act.value,
                 target=host_label(tgt),
@@ -253,15 +252,13 @@ class ComputerExecutor:
             result["message"] = f"{result.get('message') or ''}\n\n{block}".strip()
             if decoded.get("text"):
                 result["vision"] = decoded["text"]
-            try:
+            with contextlib.suppress(Exception):
                 self.bridge.set_last_shot(
                     origin=origin,
                     width=int(width) if width else None,
                     height=int(height) if height else None,
                     path=path,
                 )
-            except Exception:
-                pass
             return result
 
         last_t = ""
@@ -279,10 +276,7 @@ class ComputerExecutor:
                 from remedy.core.computer import desktop_win as win
 
                 hwnd = kwargs.get("hwnd")
-                if hwnd:
-                    info = win.print_window_png(int(hwnd))
-                else:
-                    info = win.screenshot_png()
+                info = win.print_window_png(int(hwnd)) if hwnd else win.screenshot_png()
                 path = str(info.get("path") or "")
                 origin = info.get("origin") if isinstance(info.get("origin"), dict) else {}
                 decoded = observe_screenshot(
@@ -388,10 +382,8 @@ class ComputerExecutor:
             search_dirs = list(kwargs.get("search_dirs") or [])
             info = win.open_app(app, search_dirs=search_dirs or None)
             # New window — drop stale UIA refs from the previous app
-            try:
+            with contextlib.suppress(Exception):
                 self.bridge.set_last_elements([], target="desktop")
-            except Exception:
-                pass
             time.sleep(0.4)
             return public_result(
                 ok=True,

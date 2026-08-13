@@ -70,6 +70,36 @@ def test_wipe_config_removes_vision_tree(tmp_path: Path, monkeypatch):
     assert mem.exists()  # memory preserved on config wipe
 
 
+def test_pip_uninstall_targets_only_remedy_ai(monkeypatch):
+    """Never ``pip uninstall remedy`` — that name is an unrelated PyPI package."""
+    calls: list[list[str]] = []
+
+    class Fake:
+        returncode = 0
+        stdout = "Successfully uninstalled remedy-ai"
+        stderr = ""
+
+    def fake_run(cmd, **_kwargs):
+        calls.append(list(cmd))
+        return Fake()
+
+    monkeypatch.setattr("remedy.execution.process.run_hidden", fake_run)
+    assert uninst._pip_dists() == ("remedy-ai",)  # noqa: SLF001
+    assert uninst._pip_uninstall() is True  # noqa: SLF001
+    assert calls
+    dists = [c[-1] for c in calls]
+    assert dists == ["remedy-ai"]
+    assert all("uninstall" in c for c in calls)
+    assert all("remedy" not in c or "remedy-ai" in c for c in calls)
+
+
+def test_uninstaller_source_never_names_bare_remedy_dist():
+    src = Path(uninst.__file__).read_text(encoding="utf-8")
+    assert '"remedy-ai"' in src
+    assert '("remedy-ai", "remedy")' not in src
+    assert 'for dist in ("remedy-ai", "remedy")' not in src
+
+
 def test_assert_safe_wipe_root_refuses_non_remedy_paths(tmp_path: Path):
     """Wipe must refuse profile dirs, arbitrary trees, and misnamed homes."""
     import pytest

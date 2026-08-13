@@ -19,7 +19,7 @@ def test_grok_is_frontier():
     assert "build" in builder_system_addendum(p).lower()
 
 
-def test_claude_sonnet_frontier():
+def test_anthropic_sonnet_frontier():
     p = classify_muscle("anthropic", "claude-sonnet-4")
     assert p.is_frontier
     assert p.prefer_spread

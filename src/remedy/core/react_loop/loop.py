@@ -988,6 +988,8 @@ async def call_llm_stream(runtime, message: str,
                         with suppress(Exception):
                             from remedy.core.providers import (
                                 provider_quarantined as _pq,
+                            )
+                            from remedy.core.providers import (
                                 record_provider_error as _rpe,
                             )
 
