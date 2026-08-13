@@ -118,27 +118,27 @@ def test_format_auto_verify_green():
 
 
 @pytest.mark.asyncio
-async def test_run_auto_verify_oracle_missing():
+async def test_run_auto_verify_oracle_missing(tmp_path):
     from remedy.core.build_oracle import run_auto_verify
 
+    empty = tmp_path / "empty"
+    empty.mkdir()
     st = BuildTurnState(active=True, write_steps=2)
     rt = SimpleNamespace(
-        effective_project_path=lambda: Path("."),
-        resolve_tool_path=lambda p, **k: Path(p),
-        config=SimpleNamespace(home_dir=None),
-        write_roots=lambda: [],
+        effective_project_path=lambda: empty,
+        resolve_tool_path=lambda p, **k: empty / str(p),
+        config=SimpleNamespace(home_dir=tmp_path),
+        write_roots=lambda: [empty],
     )
-    # discover will try cwd; force empty
+    # discover must not walk the Remedy repo (Path(".") used to spawn pytest -q
+    # against this checkout and re-enter the full suite).
     st.verify_command = ""
-    # Mock discover to empty by using a path with no markers
     await run_auto_verify(rt, st, command="")
-    # May or may not find pytest in remedy repo when effective path is .
-    # Force missing:
     st2 = BuildTurnState(active=True)
     result2 = await run_auto_verify(
         SimpleNamespace(
-            effective_project_path=lambda: Path("/nonexistent/nope"),
-            resolve_tool_path=lambda p, **k: Path(p),
+            effective_project_path=lambda: tmp_path / "nope",
+            resolve_tool_path=lambda p, **k: tmp_path / "nope" / str(p),
             config=None,
         ),
         st2,

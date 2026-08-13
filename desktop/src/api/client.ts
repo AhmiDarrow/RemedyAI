@@ -40,12 +40,6 @@ export function getServerUrl(): string {
   return resolveServerUrl()
 }
 
-/**
- * @deprecated Prefer getServerUrl() — this snapshot is fixed at module load.
- * New call sites must use getServerUrl() for multi-port / late inject.
- */
-const SERVER_URL = resolveServerUrl()
-
 let _apiToken: string | null = null
 let _tokenPromise: Promise<string | null> | null = null
 
@@ -202,7 +196,7 @@ export function formatApiErrorBody(body: unknown, fallback = 'Request failed'): 
   }
 }
 
-export { getApiBase, SERVER_URL }
+export { getApiBase }
 
 /** Wait until /api/status answers (sidecar still booting on fresh install). */
 export async function waitForLocalApi(maxMs = 15000): Promise<boolean> {

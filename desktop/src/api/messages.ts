@@ -31,17 +31,6 @@ export async function listMessages(
   return data.messages
 }
 
-export async function sendMessage(
-  sessionId: string,
-  message: string,
-  model?: string,
-): Promise<{ response: string; request_id: string }> {
-  return apiFetch(`/sessions/${sessionId}/messages`, {
-    method: 'POST',
-    body: JSON.stringify({ message, model }),
-  })
-}
-
 export type UsagePayload = {
   prompt_tokens?: number
   completion_tokens?: number
@@ -152,7 +141,8 @@ export function streamMessage(
         await reAuth()
         res = await doFetch()
       }
-      // Same-session already streaming (double-submit / race) — abort prior, retry once.
+      // Same-session already streaming (Stop+send / double-submit). The dying
+      // turn keeps its claim until the generator finally runs — retry with backoff.
       if (res.status === 409 && !controller.signal.aborted) {
         try {
           await fetch(`${getApiBase()}/sessions/${sessionId}/abort`, {
@@ -162,9 +152,11 @@ export function streamMessage(
         } catch {
           /* best effort */
         }
-        await new Promise((r) => setTimeout(r, 80))
-        if (!controller.signal.aborted) {
+        for (const wait of [80, 160, 320]) {
+          await new Promise((r) => setTimeout(r, wait))
+          if (controller.signal.aborted) break
           res = await doFetch()
+          if (res.status !== 409) break
         }
       }
 
@@ -373,14 +365,6 @@ export async function editFromMessageApi(
   })
 }
 
-/** @deprecated use editFromMessageApi — kept for older call sites */
-export async function revertMessageApi(
-  sessionId: string,
-  msgId: string,
-): Promise<{ status: string; content?: string }> {
-  return editFromMessageApi(sessionId, msgId)
-}
-
 export async function exportSession(
   sessionId: string,
   format: 'txt' | 'md' = 'txt',
@@ -411,22 +395,6 @@ export async function importSession(params: {
     method: 'POST',
     body: JSON.stringify(params),
   })
-}
-
-export async function listCustomCommands(): Promise<{ commands: { name: string; description: string; file: string }[] }> {
-  return apiFetch('/commands/custom')
-}
-
-export async function listCustomAgents(): Promise<{ agents: { name: string; description: string; file: string }[] }> {
-  return apiFetch('/agents/custom')
-}
-
-export async function getCustomCommand(name: string): Promise<{ content: string }> {
-  return apiFetch(`/commands/custom/${encodeURIComponent(name)}`)
-}
-
-export async function getCustomAgent(name: string): Promise<{ content: string }> {
-  return apiFetch(`/agents/custom/${encodeURIComponent(name)}`)
 }
 
 export async function scanProject(path = '.'): Promise<{

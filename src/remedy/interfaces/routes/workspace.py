@@ -333,26 +333,46 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
         query = (query or q or "").strip()
         if not query:
             raise HTTPException(400, "query (or q) is required")
-        if path and str(path).strip():
-            try:
-                from remedy.core.workspace import ensure_project_dir, resolve_project_path
-
-                base = ensure_project_dir(resolve_project_path(str(path).strip()))
-            except Exception:
-                base = _files_base()
-        elif session_id and memory is not None:
+        # Jail to session/project base. Never mkdir a caller-supplied tree
+        # (GET must not create directories) and never walk an absolute escape.
+        base = _files_base()
+        if session_id and memory is not None:
             sess = await memory.get_chat_session(session_id)
             if sess and sess.project_path:
-                from remedy.core.workspace import ensure_project_dir, resolve_project_path
+                from remedy.core.workspace import resolve_project_path
 
                 try:
-                    base = ensure_project_dir(resolve_project_path(sess.project_path))
+                    base = resolve_project_path(sess.project_path)
                 except Exception:
-                    base = _files_base()
-            else:
-                base = _files_base()
-        else:
-            base = _files_base()
+                    pass
+        if path and str(path).strip():
+            try:
+                base = _resolve_jailed(str(path).strip(), base)
+            except (SecurityError, ValueError):
+                raise HTTPException(400, "path outside allowed directory")
+            if not base.exists() or not base.is_dir():
+                return {"query": query, "results": [], "root": str(base)}
+        try:
+            resolved = base.resolve()
+        except OSError:
+            resolved = base.absolute()
+        # Drive root only (C:\). Do not treat C:\Windows as a drive root —
+        # ``C:\``.parent is itself, so first-level folders must use the name list.
+        if resolved == resolved.parent:
+            raise HTTPException(
+                400,
+                "path is a drive root; pick a project folder before searching",
+            )
+        blocked = {
+            "windows",
+            "program files",
+            "program files (x86)",
+            "programdata",
+            "system32",
+            "syswow64",
+        }
+        if any(part.lower() in blocked for part in resolved.parts):
+            raise HTTPException(400, "path outside allowed directory")
         # Prevent glob injection / path escapes via query
         safe_query = query.replace("/", "").replace("\\", "").replace("..", "")
         if not safe_query:

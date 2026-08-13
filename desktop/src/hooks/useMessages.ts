@@ -30,7 +30,6 @@ import { promoteQueuedOptions, retrySendOptions } from '../sessions/retryPrompt'
 import type { ChatMessage } from '../types'
 import { toolLabel, type ProcessStep } from '../utils/toolLabels'
 import { emptyUsage, type UsageSnapshot } from '../utils/tokenCost'
-import { clearChatMediaCache } from '../utils/chatMedia'
 import type { LibrarySuggest } from '../api/skillsLibrary'
 
 /** Newest-window page size (matches server newest-first window). */
@@ -80,16 +79,22 @@ export function useMessages(sessionId: string | null) {
   const sendLockRef = useRef(false)
   /** Last token / tool / progress activity (ms) for stall detection. */
   const lastStreamActivityRef = useRef(0)
-  /** Prompt text of the in-flight turn — used by Stop & retry. */
-  const lastSentPromptRef = useRef<{
-    text: string
-    model?: string
-    /** Per-session provider (multi-tab multi-provider must survive retry). */
-    provider?: string
-    sid?: string
-    attachments?: QueuedSend['attachments']
-    planMode?: boolean
-  } | null>(null)
+  /** Prompt text of the in-flight turn — used by Stop & retry. Per session. */
+  const lastSentBySessionRef = useRef<
+    Map<
+      string,
+      {
+        text: string
+        model?: string
+        provider?: string
+        sid?: string
+        attachments?: QueuedSend['attachments']
+        planMode?: boolean
+      }
+    >
+  >(new Map())
+  /** Server-window message count (excludes optimistic rows) for loadOlder offset. */
+  const serverCountRef = useRef(0)
   const processStepsRef = useRef<ProcessStep[]>([])
   const queueRef = useRef<QueuedSend[]>([])
   const streamCtrlRef = useRef<AbortController | null>(null)
@@ -240,8 +245,10 @@ export function useMessages(sessionId: string | null) {
       const msgs = await listMessages(loadId, MESSAGE_PAGE, 0)
       // Ignore stale responses after a session switch.
       if (sessionIdRef.current !== loadId) return
-      setMessages(Array.isArray(msgs) ? msgs : [])
-      setHasOlder(Array.isArray(msgs) && msgs.length >= MESSAGE_PAGE)
+      const list = Array.isArray(msgs) ? msgs : []
+      serverCountRef.current = list.length
+      setMessages(list)
+      setHasOlder(list.length >= MESSAGE_PAGE)
     } catch (e: unknown) {
       if (sessionIdRef.current !== loadId) return
       const msg = e instanceof Error ? e.message : String(e)
@@ -262,8 +269,8 @@ export function useMessages(sessionId: string | null) {
     if (!loadId || loadingOlder || !hasOlder) return
     setLoadingOlder(true)
     try {
-      // Newest-window: offset skips that many newest messages → older page.
-      const offset = messages.length
+      // Newest-window: offset skips that many newest *server* messages.
+      const offset = serverCountRef.current
       const older = await listMessages(loadId, MESSAGE_PAGE, offset)
       if (sessionIdRef.current !== loadId) return
       const list = Array.isArray(older) ? older : []
@@ -272,6 +279,7 @@ export function useMessages(sessionId: string | null) {
         setMessages((prev) => {
           const seen = new Set(prev.map((m) => m.id))
           const fresh = list.filter((m) => !seen.has(m.id))
+          serverCountRef.current += fresh.length
           return [...fresh, ...prev]
         })
       }
@@ -316,8 +324,43 @@ export function useMessages(sessionId: string | null) {
     // Keep the send queue across tab switches so "after" / interrupt items with
     // a sid are not silently dropped when the user leaves mid-turn.
     setHasOlder(false)
-    clearChatMediaCache()
-    void load({ force: true })
+    // Do not revoke the blob cache here — the lightbox / still-mounted
+    // ChatImages hold those object URLs. LRU eviction in chatMedia is enough.
+    void load({ force: true }).then(() => {
+      if (!sessionId || sessionIdRef.current !== sessionId) return
+      const job = getStreamJob(sessionId)
+      const paint = getJobPaint(sessionId)
+      if (
+        job?.status === 'aborted'
+        && !isJobUiCommitted(sessionId)
+        && paint?.partialText?.trim()
+      ) {
+        markJobUiCommitted(sessionId)
+        const text = withStoppedMarker(paint.partialText)
+        setMessages((prev) => {
+          const last = prev[prev.length - 1]
+          if (last?.role === 'assistant' && String(last.content || '').includes('Stopped')) {
+            return prev
+          }
+          return [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: 'assistant',
+              content: text,
+              thinking: paint.partialThinking || null,
+              tool_calls: [],
+              tool_results: [],
+              model: null,
+              agent: null,
+              tokens: null,
+              created_at: new Date().toISOString(),
+              reverted: false,
+            },
+          ]
+        })
+      }
+    })
     // Re-bind UI if this session still has a live background job.
     // Restore paint buffers so concurrent multi-tab turns do not flash blank.
     if (sessionId) {
@@ -507,14 +550,14 @@ export function useMessages(sessionId: string | null) {
         setStallSeconds(0)
       }
       lastStreamActivityRef.current = Date.now()
-      lastSentPromptRef.current = {
+      lastSentBySessionRef.current.set(targetId, {
         text: text.trim() || '(see attached files)',
         model,
         provider,
         sid: targetId,
         attachments,
         planMode,
-      }
+      })
 
       let doneReceived = false
 
@@ -607,6 +650,9 @@ export function useMessages(sessionId: string | null) {
         }
         // Drop results if the user already switched sessions.
         if (sessionIdRef.current !== targetId) {
+          if (wasAborted && !alreadyCommitted && assistantText.trim()) {
+            markJobUiCommitted(targetId)
+          }
           // Drain that session's queue in the background (does not steal focus).
           window.setTimeout(() => {
             void drainQueue(targetId)
@@ -1090,8 +1136,8 @@ export function useMessages(sessionId: string | null) {
 
   /** Stop the stuck turn and re-send the same prompt (provider reconnect). */
   const stopAndRetry = useCallback(() => {
-    const pending = lastSentPromptRef.current
-    const sid = pending?.sid || sessionIdRef.current
+    const sid = sessionIdRef.current
+    const pending = sid ? lastSentBySessionRef.current.get(sid) : undefined
     void (async () => {
       try {
         if (sid) await stopStreamJob(sid)

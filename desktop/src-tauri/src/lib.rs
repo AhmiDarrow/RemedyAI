@@ -1309,14 +1309,56 @@ fn open_terminal(cwd: Option<String>) -> Result<String, String> {
     Err("open_terminal unsupported on this platform".into())
 }
 
+/// Reject URLs that would be unsafe even without `cmd /C start` (CRLF / quotes).
+fn url_safe_for_os_open(url: &str) -> bool {
+    if url.is_empty() {
+        return false;
+    }
+    if url.chars().any(|c| matches!(c, '\r' | '\n' | '"' | '|' | '<' | '>' | '^')) {
+        return false;
+    }
+    url.starts_with("http://") || url.starts_with("https://") || url.starts_with("about:")
+}
+
+#[cfg(target_os = "windows")]
+fn open_url_shell_execute(url: &str) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let wide: Vec<u16> = std::ffi::OsStr::new(url)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let verb: Vec<u16> = std::ffi::OsStr::new("open")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    // SAFETY: UTF-16 buffers are NUL-terminated; hwnd/params/dir are null.
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(verb.as_ptr()),
+            PCWSTR(wide.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    // ShellExecuteW returns a value > 32 on success.
+    if result.0 as isize > 32 {
+        Ok(())
+    } else {
+        Err(format!("ShellExecuteW failed ({})", result.0 as isize))
+    }
+}
+
 /// Open a URL in an external browser. Prefer Firefox when installed if `prefer_firefox`.
 #[tauri::command]
 fn open_external_url(url: String, prefer_firefox: Option<bool>) -> Result<String, String> {
     let url = url.trim().to_string();
-    if url.is_empty() {
-        return Err("empty url".into());
-    }
-    if !(url.starts_with("http://") || url.starts_with("https://") || url.starts_with("about:")) {
+    if !url_safe_for_os_open(&url) {
         return Err("only http(s) URLs allowed".into());
     }
     let want_ff = prefer_firefox.unwrap_or(true);
@@ -1341,14 +1383,8 @@ fn open_external_url(url: String, prefer_firefox: Option<bool>) -> Result<String
                 return Ok(format!("Opened in Firefox: {url}"));
             }
         }
-        let status = Command::new("cmd")
-            .args(["/C", "start", "", &url])
-            .status()
-            .map_err(|e| format!("open url failed: {e}"))?;
-        if status.success() {
-            return Ok(format!("Opened default browser: {url}"));
-        }
-        return Err(format!("open url exited {status}"));
+        open_url_shell_execute(&url)?;
+        return Ok(format!("Opened default browser: {url}"));
     }
 
     #[cfg(target_os = "macos")]

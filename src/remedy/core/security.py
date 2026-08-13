@@ -15,17 +15,30 @@ from typing import Any, cast
 from remedy.core.errors import SecurityError
 
 _HOME_DIR: Path | None = None
+_HOME_DIR_ENV: str | None = None
 # Resolved auth roots (no mkdir) — invalidated when REMEDY_HOME changes.
 _auth_roots_cache: list[Path] | None = None
 _auth_roots_env: str | None = None
 
 
 def get_home_dir() -> Path:
-    """Return ~/.remedy, creating it on first use (not at import time)."""
-    global _HOME_DIR
-    if _HOME_DIR is None:
-        _HOME_DIR = Path("~/.remedy").expanduser()
-        _HOME_DIR.mkdir(parents=True, exist_ok=True)
+    """Return the Remedy home (``REMEDY_HOME`` or ``~/.remedy``).
+
+    Cache is keyed by the env value so tests / portable homes do not leak
+    into the real user profile.
+    """
+    global _HOME_DIR, _HOME_DIR_ENV
+    env_home = (os.environ.get("REMEDY_HOME") or "").strip()
+    if _HOME_DIR is not None and _HOME_DIR_ENV == env_home:
+        return _HOME_DIR
+    base = Path(env_home or "~/.remedy").expanduser()
+    try:
+        base = base.resolve()
+    except OSError:
+        base = base.absolute()
+    base.mkdir(parents=True, exist_ok=True)
+    _HOME_DIR = base
+    _HOME_DIR_ENV = env_home
     return _HOME_DIR
 
 
@@ -77,9 +90,11 @@ def _resolved_auth_roots() -> list[Path]:
 
 def clear_protected_auth_roots_cache() -> None:
     """Test helper — drop cached auth roots (REMEDY_HOME changes mid-test)."""
-    global _auth_roots_cache, _auth_roots_env
+    global _auth_roots_cache, _auth_roots_env, _HOME_DIR, _HOME_DIR_ENV
     _auth_roots_cache = None
     _auth_roots_env = None
+    _HOME_DIR = None
+    _HOME_DIR_ENV = None
 
 
 def is_protected_secret_path(path: Path | str | None) -> bool:

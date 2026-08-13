@@ -111,6 +111,7 @@ export function useChatSendFlow(opts: {
     setOpenTabs,
   } = opts
 
+  const notifyArmRef = useRef<string | null>(null)
   const [editDraft, setEditDraft] = useState<{ text: string; key: number } | null>(
     null,
   )
@@ -358,6 +359,7 @@ export function useChatSendFlow(opts: {
           setSessionBind(sid, String(useProvider), String(useModel))
         }
         // While streaming, send() queues (after) or interrupts based on opts.mode.
+        if (sid) notifyArmRef.current = sid
         void send(text, useModel, sid, attachments, usePlan, {
           ...opts,
           provider: useProvider || undefined,
@@ -424,20 +426,30 @@ export function useChatSendFlow(opts: {
       // Strip attachment display block for resend text if present
       const clean = prompt.replace(/\n\n📎 Attachments:\n[\s\S]*$/, '').trim()
       await beginEdit(userMsg.id, clean)
-      if (clean) {
-        const sid = activeId
-        send(clean, model, sid)
-      }
+      const toSend = clean || prompt.trim() || '(see attached files)'
+      const sid = activeId
+      const bind = sessionLlmMap[sid]
+      notifyArmRef.current = sid
+      send(toSend, bind?.model || model, sid, undefined, planMode, {
+        provider: bind?.provider,
+      })
     },
-    [activeId, streaming, messages, beginEdit, send, model],
+    [activeId, streaming, messages, beginEdit, send, model, sessionLlmMap, planMode],
   )
 
-  // Notify only on streaming true→false edge for a turn we started (not history loads).
+  // Notify only when a turn we started on *this* session ends — not on tab switch.
   const wasStreamingRef = useRef(false)
   useEffect(() => {
     const was = wasStreamingRef.current
     wasStreamingRef.current = streaming
-    if (was && !streaming && messages.length > 0) {
+    if (
+      was
+      && !streaming
+      && notifyArmRef.current
+      && notifyArmRef.current === activeId
+      && messages.length > 0
+    ) {
+      notifyArmRef.current = null
       const last = messages[messages.length - 1]
       if (last && last.role === 'assistant' && last.content) {
         notify('Remedy', {
@@ -446,7 +458,7 @@ export function useChatSendFlow(opts: {
         })
       }
     }
-  }, [streaming, messages, notify])
+  }, [streaming, messages, notify, activeId])
 
 
   return {

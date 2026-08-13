@@ -123,24 +123,4 @@ export function liveRunEstimate(
   }
 }
 
-export function mergeUsage(a: UsageSnapshot, b: Partial<UsageSnapshot>): UsageSnapshot {
-  const prompt = (a.prompt_tokens || 0) + (b.prompt_tokens || 0)
-  const completion = (a.completion_tokens || 0) + (b.completion_tokens || 0)
-  const source =
-    b.source === 'provider' || a.source === 'provider' ? 'provider' : a.source || 'estimate'
-  const model = b.model ?? a.model
-  const provider = b.provider ?? a.provider
-  const total =
-    (b.total_tokens || 0) > 0
-      ? (a.total_tokens || 0) + (b.total_tokens || 0)
-      : prompt + completion
-  return {
-    prompt_tokens: prompt,
-    completion_tokens: completion,
-    total_tokens: total,
-    estimated_cost_usd: estimateCostUsd(prompt, completion, model, provider),
-    source,
-    model,
-    provider,
-  }
-}
+

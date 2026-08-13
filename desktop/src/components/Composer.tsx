@@ -245,6 +245,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const hasImageAttachments = attachments.some((a) => a.is_image)
   const modelHasVision = chatModelSupportsVision(llmProvider, llmModel)
+  const closePreview = useCallback(() => setPreviewImage(null), [])
 
   useEffect(() => {
     if (!hasImageAttachments) return
@@ -262,6 +263,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }, [hasImageAttachments, attachments.length])
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const attachFromPreview = useCallback(
+    async (file: File) => {
+      await addFiles([file])
+      setPreviewImage(null)
+      textareaRef.current?.focus()
+    },
+    [addFiles],
+  )
   const fileInputRef = useRef<HTMLInputElement>(null)
   const attachRailRef = useRef<HTMLDivElement>(null)
   const composerRootRef = useRef<HTMLDivElement>(null)
@@ -1438,12 +1447,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       <ImageLightbox
         src={previewImage?.src ?? null}
         alt={previewImage?.alt}
-        onClose={() => setPreviewImage(null)}
-        onAttachMarkup={async (file) => {
-          await addFiles([file])
-          setPreviewImage(null)
-          textareaRef.current?.focus()
-        }}
+        onClose={closePreview}
+        onAttachMarkup={attachFromPreview}
       />
     </div>
   )

@@ -810,9 +810,12 @@ async def call_llm_stream(runtime, message: str,
 
                 is_final_step = step >= max_total - 1
                 # Machine green verify → summary-only unless ship/play still needs tools
-                _verify_green = bool(
-                    getattr(runtime, "_build_verify_green", False)
+                from remedy.core.turn_context import (
+                    set_turn_build_verify_green,
+                    turn_build_verify_green,
                 )
+
+                _verify_green = bool(turn_build_verify_green(runtime))
                 _keep_after_green = False
                 if _verify_green:
                     with suppress(Exception):
@@ -828,7 +831,7 @@ async def call_llm_stream(runtime, message: str,
                         )
                     if _keep_after_green:
                         force_answer_sticky = False
-                        runtime._build_verify_green = False
+                        set_turn_build_verify_green(False, runtime)
                         runtime._force_tool_choice = False
                         if all_tools:
                             tools = all_tools
@@ -2315,9 +2318,9 @@ async def call_llm_stream(runtime, message: str,
                             continue
                         return
                     if not stream_live:
-                        _verify_green = bool(
-                            getattr(runtime, "_build_verify_green", False)
-                        )
+                        from remedy.core.turn_context import turn_build_verify_green as _tvg
+
+                        _verify_green = bool(_tvg(runtime))
                         # Frontier: no local end-block thrash — yield and finish
                         if (
                             not _harness_on
