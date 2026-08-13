@@ -1546,6 +1546,7 @@ export default function App() {
                 (activeId && sessions.find((s) => s.id === activeId)?.project_path)
                 || null
               }
+              sessionId={activeId}
             />
           </div>
 

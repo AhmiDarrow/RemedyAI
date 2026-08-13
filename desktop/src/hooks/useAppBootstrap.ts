@@ -4,7 +4,7 @@
  */
 
 import { useEffect, type Dispatch, type SetStateAction } from 'react'
-import { listAgents, listCommands } from '../api/messages'
+import { listAgents } from '../api/messages'
 import { listConnectedProviders, type ConnectedProvider } from '../api/providers'
 import { getSettings } from '../api/settings'
 import type { ThinkingLevel, ApprovalMode } from '../components/StatusBar'
@@ -166,7 +166,7 @@ export function useAppBootstrap(opts: {
         if (settings?.llm_model) {
           setModel(settings.llm_model)
         }
-        void listCommands().catch(() => null)
+        /* custom command catalog is unused on first paint */
       } catch (e: unknown) {
         console.warn('Secondary startup load failed:', e)
       }

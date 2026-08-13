@@ -19,6 +19,9 @@ from remedy.core.turn_context import (
     is_session_streaming,
     is_turn_aborted,
     register_turn_process,
+    release_session_stream_claim,
+    stream_claim_epoch,
+    try_claim_session_stream,
     turn_session_id,
     unregister_turn_process,
 )
@@ -43,6 +46,52 @@ async def test_abort_sets_event_and_clears_registry():
 @pytest.mark.asyncio
 async def test_abort_unknown_session_is_noop():
     assert abort_session("missing") == 0
+
+
+def test_try_claim_session_stream_is_atomic():
+    sid = "claim-race"
+    try:
+        assert try_claim_session_stream(sid) is True
+        assert is_session_streaming(sid) is True
+        assert try_claim_session_stream(sid) is False
+    finally:
+        release_session_stream_claim(sid)
+    assert is_session_streaming(sid) is False
+    assert try_claim_session_stream(sid) is True
+    release_session_stream_claim(sid)
+
+
+def test_abort_keeps_claim_until_release():
+    """Stop must not drop the claim — overlapping send would share the ReAct loop."""
+    sid = "claim-abort-setup"
+    assert try_claim_session_stream(sid) is True
+    epoch = stream_claim_epoch(sid)
+    assert is_session_streaming(sid) is True
+    assert abort_session(sid) == 0  # no registered turn yet
+    assert is_session_streaming(sid) is True
+    assert try_claim_session_stream(sid) is False
+    release_session_stream_claim(sid, epoch=epoch)
+    assert is_session_streaming(sid) is False
+    assert try_claim_session_stream(sid) is True
+    release_session_stream_claim(sid)
+
+
+def test_stale_epoch_abort_does_not_kill_newer_claim():
+    sid = "claim-epoch"
+    assert try_claim_session_stream(sid) is True
+    e1 = stream_claim_epoch(sid)
+    release_session_stream_claim(sid, epoch=e1)
+    assert try_claim_session_stream(sid) is True
+    e2 = stream_claim_epoch(sid)
+    assert e2 != e1
+    toks = begin_turn(sid, project_raw=None, active_path=".")
+    try:
+        assert abort_session(sid, epoch=e1) == 0
+        assert is_session_streaming(sid) is True
+        assert is_turn_aborted() is False
+    finally:
+        end_turn(sid, *toks)
+        release_session_stream_claim(sid, epoch=e2)
 
 
 @pytest.mark.asyncio

@@ -53,6 +53,13 @@ _turn_work_roots: ContextVar[list[str] | None] = ContextVar(
 )
 # True only between begin_turn / end_turn for this coroutine.
 _turn_active: ContextVar[bool] = ContextVar("remedy_turn_active", default=False)
+# Per-turn build flags (must not live on the process singleton).
+_turn_build_verify_green: ContextVar[bool] = ContextVar(
+    "remedy_turn_build_verify_green", default=False
+)
+_turn_last_auto_checkpoint_n: ContextVar[int] = ContextVar(
+    "remedy_turn_last_auto_checkpoint_n", default=0
+)
 
 # Ordered ContextVars set by begin_turn (end_turn resets by zip-order).
 _TURN_CONTEXT_VARS: tuple[ContextVar[Any], ...] = (
@@ -65,6 +72,8 @@ _TURN_CONTEXT_VARS: tuple[ContextVar[Any], ...] = (
     _turn_partner_state,
     _turn_work_roots,
     _turn_active,
+    _turn_build_verify_green,
+    _turn_last_auto_checkpoint_n,
 )
 
 
@@ -72,6 +81,10 @@ _TURN_CONTEXT_VARS: tuple[ContextVar[Any], ...] = (
 _registry: dict[str, list[asyncio.Event]] = {}
 # session_id -> live subprocesses for this turn (killed on abort)
 _session_procs: dict[str, list[Any]] = {}
+# Early 409 claim — taken before persist so two POSTs cannot both start.
+_stream_claims: set[str] = set()
+# sid → claim generation. Stale CancelledError must not abort a newer turn.
+_stream_epochs: dict[str, int] = {}
 _lock = threading.Lock()
 
 
@@ -211,6 +224,8 @@ def begin_turn(
         partner_state,
         roots,
         True,
+        False,
+        0,
     )
     tokens: list[Token] = []
     for var, val in zip(_TURN_CONTEXT_VARS, values, strict=True):
@@ -331,19 +346,22 @@ def kill_session_processes(session_id: str) -> int:
     return n
 
 
-def abort_session(session_id: str) -> int:
-    """Signal all in-flight turns and kill their shell children. Returns events notified.
+def abort_session(session_id: str, *, epoch: int | None = None) -> int:
+    """Signal in-flight turns and kill their shell children. Returns events notified.
 
-    Immediately drops the session from the live registry so a new stream is not
-    blocked with HTTP 409 after Stop (stuck LLM/tool turns may take a moment to
-    unwind ``end_turn``).
+    Keeps the stream *claim* until the dying generator releases it so Stop+send
+    cannot overlap a still-running ReAct loop. Pass ``epoch`` from the stream
+    that is dying — a stale CancelledError must not abort a newer claim.
     """
     sid = str(session_id or "").strip()
     if not sid:
         return 0
     with _lock:
-        # Pop so is_session_streaming is False right away (not only after end_turn).
+        cur = int(_stream_epochs.get(sid, 0) or 0)
+        if epoch is not None and cur != int(epoch):
+            return 0
         events = list(_registry.pop(sid, []) or [])
+        # Claim stays until release_session_stream_claim (stream finally).
     for ev in events:
         with contextlib.suppress(Exception):
             ev.set()
@@ -360,12 +378,85 @@ def abort_session(session_id: str) -> int:
     return len(events)
 
 
+def try_claim_session_stream(session_id: str) -> bool:
+    """Atomically claim a session for a new stream. False → 409.
+
+    Must run *before* persisting the user message so two concurrent POSTs
+    cannot both pass the busy check.
+    """
+    sid = str(session_id or "").strip()
+    if not sid:
+        return False
+    with _lock:
+        if sid in _stream_claims:
+            return False
+        events = list(_registry.get(sid) or [])
+        if any(not ev.is_set() for ev in events):
+            return False
+        _stream_claims.add(sid)
+        _stream_epochs[sid] = int(_stream_epochs.get(sid, 0) or 0) + 1
+        return True
+
+
+def stream_claim_epoch(session_id: str) -> int:
+    """Current claim generation for ``session_id`` (0 if none)."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return 0
+    with _lock:
+        return int(_stream_epochs.get(sid, 0) or 0)
+
+
+def release_session_stream_claim(session_id: str, *, epoch: int | None = None) -> None:
+    """Drop the early stream claim (call from stream finally / setup errors)."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return
+    with _lock:
+        if epoch is not None and int(_stream_epochs.get(sid, 0) or 0) != int(epoch):
+            return
+        _stream_claims.discard(sid)
+
+
 def is_session_streaming(session_id: str) -> bool:
     """True when a non-aborted turn is registered for this session."""
     sid = str(session_id or "").strip()
     if not sid:
         return False
     with _lock:
+        if sid in _stream_claims:
+            return True
         events = list(_registry.get(sid) or [])
     # Aborted events (is_set) must not block a new stream with 409.
     return any(not ev.is_set() for ev in events)
+
+
+def turn_build_verify_green(runtime: Any = None) -> bool:
+    """Per-turn green-verify flag (ContextVar first)."""
+    if in_active_turn() or _turn_session_id.get():
+        return bool(_turn_build_verify_green.get())
+    if runtime is not None:
+        return bool(getattr(runtime, "_build_verify_green", False))
+    return bool(_turn_build_verify_green.get())
+
+
+def set_turn_build_verify_green(value: bool, runtime: Any = None) -> None:
+    flag = bool(value)
+    _turn_build_verify_green.set(flag)
+    if runtime is not None:
+        runtime._build_verify_green = flag
+
+
+def turn_last_auto_checkpoint_n(runtime: Any = None) -> int:
+    if in_active_turn() or _turn_session_id.get():
+        return int(_turn_last_auto_checkpoint_n.get() or 0)
+    if runtime is not None:
+        return int(getattr(runtime, "_last_auto_checkpoint_n", 0) or 0)
+    return int(_turn_last_auto_checkpoint_n.get() or 0)
+
+
+def set_turn_last_auto_checkpoint_n(n: int, runtime: Any = None) -> None:
+    val = int(n or 0)
+    _turn_last_auto_checkpoint_n.set(val)
+    if runtime is not None:
+        runtime._last_auto_checkpoint_n = val

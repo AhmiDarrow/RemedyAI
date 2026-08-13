@@ -31,7 +31,7 @@ export function useSessions() {
       setSessions(page.sessions)
       setHasMore(page.has_more)
       setActiveId((cur) => {
-        if (cur) return cur
+        if (cur && page.sessions.some((s) => s.id === cur)) return cur
         return page.sessions.length > 0 ? page.sessions[0]!.id : null
       })
     } catch {

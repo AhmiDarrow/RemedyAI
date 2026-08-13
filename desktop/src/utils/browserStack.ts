@@ -10,24 +10,33 @@ import { isTauri, tauriInvoke } from '../api/tauri'
 const reasons = new Set<string>()
 let lastSent: boolean | null = null
 let lastErrorAt = 0
+let inflight: Promise<void> | null = null
 
 function sync() {
   if (!isTauri()) return
-  const suppressed = reasons.size > 0
-  if (lastSent === suppressed) return
-  lastSent = suppressed
-  void tauriInvoke('browser_set_stack_suppressed', { suppressed }).catch((err) => {
-    // Reset so a later call retries (e.g. after ACL rebuild / first open).
-    lastSent = null
-    const now = Date.now()
-    if (now - lastErrorAt > 4000) {
-      lastErrorAt = now
-      console.warn(
-        '[remedy] browser_set_stack_suppressed failed — embed may float over chrome:',
-        err instanceof Error ? err.message : err,
-      )
-    }
-  })
+  const desired = reasons.size > 0
+  if (inflight) return
+  if (lastSent === desired) return
+  const send = desired
+  inflight = tauriInvoke('browser_set_stack_suppressed', { suppressed: send })
+    .then(() => {
+      lastSent = send
+    })
+    .catch((err) => {
+      lastSent = null
+      const now = Date.now()
+      if (now - lastErrorAt > 4000) {
+        lastErrorAt = now
+        console.warn(
+          '[remedy] browser_set_stack_suppressed failed — embed may float over chrome:',
+          err instanceof Error ? err.message : err,
+        )
+      }
+    })
+    .finally(() => {
+      inflight = null
+      if (lastSent !== (reasons.size > 0)) sync()
+    })
 }
 
 /** Hold suppress for a named reason; returns release(). */

@@ -4,6 +4,8 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useContext,
+  createContext,
   memo,
   type ReactNode,
   Fragment,
@@ -75,6 +77,8 @@ interface MessageFeedProps {
   onLoadOlder?: () => void
   /** Active project path for empty-state context. */
   projectPath?: string | null
+  /** Focused session — close the image viewer on switch so a revoked/stale src cannot linger. */
+  sessionId?: string | null
 }
 
 /** Initials for avatar: "Alex" → A, "Mary Jane" → MJ */
@@ -128,6 +132,113 @@ function langFromClass(className?: string): string {
   if (!className) return 'code'
   const m = /language-([\w+-]+)/.exec(className)
   return m?.[1] || 'code'
+}
+
+type OpenImageFn = (src: string, alt?: string) => void
+
+const ChatMdCtx = createContext<{
+  onOpenImage?: OpenImageFn
+  isUser: boolean
+}>({ isUser: false })
+
+function MarkdownImg({ src, alt }: { src?: string; alt?: string }) {
+  const { onOpenImage } = useContext(ChatMdCtx)
+  if (!src) {
+    return (
+      <span
+        className="chat-img-chip inline-flex items-center gap-1.5 my-1 px-2.5 py-1 rounded-lg text-xs"
+        style={{
+          color: 'var(--text-secondary)',
+          background: 'var(--bg-tertiary)',
+          border: '1px solid var(--border)',
+        }}
+      >
+        <span aria-hidden>📎</span>
+        {alt || 'attachment'}
+        <span className="opacity-60">· not previewed</span>
+      </span>
+    )
+  }
+  return <ChatImage src={src} alt={alt} onOpen={onOpenImage} />
+}
+
+function MarkdownLink({ href, children }: { href?: string; children?: ReactNode }) {
+  const h = (href || '').trim()
+  if (!h || !/^(https?:|mailto:)/i.test(h)) {
+    return <span>{children}</span>
+  }
+  if (/^mailto:/i.test(h)) {
+    return (
+      <a href={h} rel="noopener noreferrer">
+        {children}
+      </a>
+    )
+  }
+  return (
+    <a
+      href={h}
+      className="chat-rail-link"
+      title="Double-click: open in Browser rail · Ctrl+click: system browser"
+      onClick={(e) => {
+        if (!e.ctrlKey && !e.metaKey) {
+          e.preventDefault()
+        }
+      }}
+      onDoubleClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        try {
+          window.dispatchEvent(
+            new CustomEvent('remedy:computer-ui', {
+              detail: { openBrowser: true },
+            }),
+          )
+          window.dispatchEvent(
+            new CustomEvent('remedy:browser-set-url', {
+              detail: { url: h, navigate: true },
+            }),
+          )
+        } catch {
+          window.open(h, '_blank', 'noopener,noreferrer')
+        }
+      }}
+    >
+      {children}
+    </a>
+  )
+}
+
+function MarkdownCode({
+  children,
+  className,
+}: {
+  children?: ReactNode
+  className?: string
+}) {
+  const { isUser } = useContext(ChatMdCtx)
+  const inline = !className
+  if (inline) {
+    return (
+      <code className={isUser ? 'chat-inline-code user' : 'chat-inline-code'}>
+        {children}
+      </code>
+    )
+  }
+  return (
+    <CodeBlock className={className} isUser={isUser}>
+      {children}
+    </CodeBlock>
+  )
+}
+
+/** Stable identities — a new `components` map remounts every <img> on each stream token. */
+const CHAT_MD_COMPONENTS = {
+  pre({ children }: { children?: ReactNode }) {
+    return <>{children}</>
+  },
+  a: MarkdownLink,
+  img: MarkdownImg,
+  code: MarkdownCode,
 }
 
 function CodeBlock({
@@ -267,6 +378,10 @@ const MessageBubble = memo(function MessageBubble({
       : text
   // Models often paste bare Windows paths — promote to markdown images for ChatImage.
   const displayText = linkifyBareImagePaths(rawDisplay)
+  const mdCtx = useMemo(
+    () => ({ onOpenImage, isUser }),
+    [onOpenImage, isUser],
+  )
 
   const bubbleBg = isUser
     ? 'var(--chat-user-bg)'
@@ -409,107 +524,15 @@ const MessageBubble = memo(function MessageBubble({
             {displayText ? (
               <>
                 {/* Live markdown while streaming for smoother final morph. */}
+                <ChatMdCtx.Provider value={mdCtx}>
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   urlTransform={chatMarkdownUrlTransform}
-                  components={{
-                    pre({ children }) {
-                      return <>{children}</>
-                    },
-                    a({ href, children }) {
-                      const h = (href || '').trim()
-                      if (!h || !/^(https?:|mailto:)/i.test(h)) {
-                        return <span>{children}</span>
-                      }
-                      if (/^mailto:/i.test(h)) {
-                        return (
-                          <a href={h} rel="noopener noreferrer">
-                            {children}
-                          </a>
-                        )
-                      }
-                      return (
-                        <a
-                          href={h}
-                          className="chat-rail-link"
-                          title="Double-click: open in Browser rail · Ctrl+click: system browser"
-                          onClick={(e) => {
-                            if (!e.ctrlKey && !e.metaKey) {
-                              e.preventDefault()
-                            }
-                          }}
-                          onDoubleClick={(e) => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            try {
-                              window.dispatchEvent(
-                                new CustomEvent('remedy:computer-ui', {
-                                  detail: { openBrowser: true },
-                                }),
-                              )
-                              window.dispatchEvent(
-                                new CustomEvent('remedy:browser-set-url', {
-                                  detail: { url: h, navigate: true },
-                                }),
-                              )
-                            } catch {
-                              window.open(h, '_blank', 'noopener,noreferrer')
-                            }
-                          }}
-                        >
-                          {children}
-                        </a>
-                      )
-                    },
-                    img({ src, alt }) {
-                      if (!src) {
-                        return (
-                          <span
-                            className="chat-img-chip inline-flex items-center gap-1.5 my-1 px-2.5 py-1 rounded-lg text-xs"
-                            style={{
-                              color: 'var(--text-secondary)',
-                              background: 'var(--bg-tertiary)',
-                              border: '1px solid var(--border)',
-                            }}
-                          >
-                            <span aria-hidden>📎</span>
-                            {alt || 'attachment'}
-                            <span className="opacity-60">· not previewed</span>
-                          </span>
-                        )
-                      }
-                      const imgKey =
-                        src.length > 96
-                          ? `img-${alt || 'x'}-${src.length}-${src.slice(0, 48)}`
-                          : `img-${src}`
-                      return (
-                        <ChatImage
-                          key={imgKey}
-                          src={src}
-                          alt={alt}
-                          onOpen={(url, a) => onOpenImage?.(url, a)}
-                        />
-                      )
-                    },
-                    code({ children, className }) {
-                      const inline = !className
-                      if (inline) {
-                        return (
-                          <code className={isUser ? 'chat-inline-code user' : 'chat-inline-code'}>
-                            {children}
-                          </code>
-                        )
-                      }
-                      return (
-                        <CodeBlock className={className} isUser={isUser}>
-                          {children}
-                        </CodeBlock>
-                      )
-                    },
-                  }}
+                  components={CHAT_MD_COMPONENTS}
                 >
                   {displayText}
                 </ReactMarkdown>
+                </ChatMdCtx.Provider>
                 {isStreamingPartial && !isUser && !isSystem ? (
                   <span className="stream-caret" aria-hidden>
                     ▍
@@ -615,8 +638,17 @@ export function MessageFeed({
   loadingOlder = false,
   onLoadOlder,
   projectPath = null,
+  sessionId = null,
 }: MessageFeedProps) {
   const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null)
+  const openLightbox = useCallback((src: string, alt?: string) => {
+    setLightbox({ src, alt })
+  }, [])
+  const closeLightbox = useCallback(() => setLightbox(null), [])
+
+  useEffect(() => {
+    setLightbox(null)
+  }, [sessionId])
 
   // Follow tokens, thinking, tools, process — unless user scrolls up.
   const processSig = processSteps
@@ -778,7 +810,7 @@ export function MessageFeed({
               streaming={streaming}
               toolProcessMode={toolProcessMode}
               hideAvatar={hideAvatar}
-              onOpenImage={(src, alt) => setLightbox({ src, alt })}
+              onOpenImage={openLightbox}
               onRegenerate={onRegenerate}
               userName={userName}
               partnerName={partnerName}
@@ -845,7 +877,7 @@ export function MessageFeed({
               partialThinking={partialThinking}
               toolProcessMode={toolProcessMode}
               isStreamingPartial
-              onOpenImage={(src, alt) => setLightbox({ src, alt })}
+              onOpenImage={openLightbox}
               partnerName={partnerName}
             />
           </div>
@@ -918,7 +950,7 @@ export function MessageFeed({
       <ImageLightbox
         src={lightbox?.src ?? null}
         alt={lightbox?.alt}
-        onClose={() => setLightbox(null)}
+        onClose={closeLightbox}
         onAttachMarkup={onAttachMarkup}
       />
     </div>

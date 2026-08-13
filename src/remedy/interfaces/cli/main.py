@@ -92,6 +92,7 @@ def main(args: list[str] | None = None) -> None:
             dry_run=parsed.dry_run,
             config=getattr(parsed, "config", False),
             skills=getattr(parsed, "skills", False),
+            home=getattr(parsed, "home", None),
         )
     else:
         parser.print_help()

@@ -1207,7 +1207,12 @@ class BasicRuntime(AgentRuntime):
         )
 
         n = len(steps)
-        last_n = int(getattr(self, "_last_auto_checkpoint_n", 0) or 0)
+        from remedy.core.turn_context import (
+            set_turn_last_auto_checkpoint_n,
+            turn_last_auto_checkpoint_n,
+        )
+
+        last_n = turn_last_auto_checkpoint_n(self)
         if not force:
             if n < AUTO_CHECKPOINT_EVERY_N_STEPS:
                 return None
@@ -1221,7 +1226,7 @@ class BasicRuntime(AgentRuntime):
         )
         store = CheckpointStore(getattr(self.config, "home_dir", None))
         store.save(cp)
-        self._last_auto_checkpoint_n = n
+        set_turn_last_auto_checkpoint_n(n, self)
         with suppress(Exception):
             from remedy.memory.harness.brief import SessionBrief
 

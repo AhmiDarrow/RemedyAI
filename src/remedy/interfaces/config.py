@@ -27,6 +27,20 @@ CONFIG_PATHS = [
     Path("remedy.yaml"),
 ]
 
+
+def get_home_dir() -> Path:
+    """Return the Remedy home: ``$REMEDY_HOME`` or ``~/.remedy``.
+
+    Same contract as ``remedy.core.security.get_home_dir`` so portable homes
+    and tests do not split state across two directories.
+    """
+    env_home = (os.environ.get("REMEDY_HOME") or "").strip()
+    base = Path(env_home or "~/.remedy").expanduser()
+    try:
+        return base.resolve()
+    except OSError:
+        return base.absolute()
+
 ENV_PREFIX = "REMEDY_"
 
 # Env vars that can supply a key for a given provider (checked after provider_keys).
@@ -223,13 +237,23 @@ def resolve_provider_api_key(
 
 
 def load_config(path: Path | None = None) -> dict[str, Any]:
-    """Load config from a file, auto-detecting format (TOML or YAML)."""
+    """Load config from a file, auto-detecting format (TOML or YAML).
+
+    When ``path`` is omitted, prefer ``$REMEDY_HOME/config.toml`` so tests and
+    portable homes never read the real ``~/.remedy`` file.
+    """
     if path is None:
-        for p in CONFIG_PATHS:
-            expanded = p.expanduser().resolve()
-            if expanded.exists():
-                path = expanded
-                break
+        home_cfg = get_home_dir() / "config.toml"
+        if home_cfg.exists():
+            path = home_cfg
+        else:
+            env_set = bool((os.environ.get("REMEDY_HOME") or "").strip())
+            if not env_set:
+                for p in CONFIG_PATHS:
+                    expanded = p.expanduser().resolve()
+                    if expanded.exists():
+                        path = expanded
+                        break
 
     if path is None:
         return {}

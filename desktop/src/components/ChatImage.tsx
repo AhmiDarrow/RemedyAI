@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import {
   isAuthenticatedApiUrl,
   isLocalMediaPath,
   isRemoteOrDataUrl,
+  peekChatMediaUrl,
   resolveChatMediaUrl,
 } from '../utils/chatMedia'
 
@@ -29,28 +30,26 @@ function needsAuthResolve(src: string): boolean {
  * Prefer home-relative ``attachments/…`` srcs (server embeds those now). Absolute
  * Windows paths still work via /api/media.
  */
-export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
+export const ChatImage = memo(function ChatImage({ src, alt, onOpen }: ChatImageProps) {
   const raw = (src || '').trim().replace(/^<|>$/g, '')
-  const [resolved, setResolved] = useState<string | null>(() => {
-    if (!raw) return null
-    if (needsAuthResolve(raw)) return null
-    if (isRemoteOrDataUrl(raw) && !isAuthenticatedApiUrl(raw)) return raw
-    return null
-  })
+  const [resolved, setResolved] = useState<string | null>(() => peekChatMediaUrl(raw))
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const retriedRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
-    setError(null)
+    retriedRef.current = false
     if (!raw) {
       setResolved(null)
+      setError(null)
       return
     }
 
     // Public http(s)/data/blob (not loopback API) — direct paint
     if (!needsAuthResolve(raw) && isRemoteOrDataUrl(raw)) {
       setResolved(raw)
+      setError(null)
       return
     }
 
@@ -60,6 +59,14 @@ export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
       return
     }
 
+    const peeked = peekChatMediaUrl(raw)
+    if (peeked) {
+      setResolved(peeked)
+      setError(null)
+      return
+    }
+
+    setError(null)
     void resolveChatMediaUrl(raw)
       .then((url) => {
         if (!cancelled && url) setResolved(url)
@@ -201,6 +208,17 @@ export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
             border: '1px solid color-mix(in srgb, var(--border) 70%, transparent)',
           }}
           onError={() => {
+            if (!retriedRef.current && raw && needsAuthResolve(raw)) {
+              retriedRef.current = true
+              setResolved(null)
+              void resolveChatMediaUrl(raw)
+                .then((url) => {
+                  if (url) setResolved(url)
+                  else setError('decode failed')
+                })
+                .catch(() => setError('decode failed'))
+              return
+            }
             setError('decode failed')
             setResolved(null)
           }}
@@ -253,4 +271,4 @@ export function ChatImage({ src, alt, onOpen }: ChatImageProps) {
       </div>
     </div>
   )
-}
+})
