@@ -278,7 +278,9 @@ _TOOL_HINT_RE = re.compile(
     # → model only wrote "Activating skill now" with zero skill_activate calls)
     r"skill_activate|skill_search|skill_run|skill_reload|activate|skill|"
     r"run|execute|shell|bash|command|terminal|install|build|test|"
-    r"implement|implemen\w*|refactor|debug|fix(?:es)?|bug|error|stack|trace|"
+    r"implement|implemen\w*|refactor|debug|fix(?:es)?|bug|bugsweep|bugfix|"
+    r"hotfix|triage|cleanup|dogfood|"
+    r"sweep|qa|error|stack|trace|"
     r"patch|apply|ship|deploy|"
     r"git|commit|diff|branch|src/|\\.[a-z]{1,5}\b|"
     # Asset / image work (session log 2026-07-25: logos on alpha without tools)
@@ -468,7 +470,7 @@ _PSEUDO_TOOL_RE = re.compile(
 # DeepSeek-class models often emit fullwidth pipes: ｜DSML｜tool_calls
 _DSML_TOOL_RE = re.compile(
     r"(tool[_\s-]?calls|function[_\s-]?calls|DSML|"
-    r"</?invoke\b|invoke_parameter|invoke_step|"
+    r"</?invoke\b|</?tool_invoke\b|invoke_parameter|invoke_step|"
     r"</?parameter\b|name\s*=\s*[\"']" + _TOOL_ID + r"[\"'])",
     re.IGNORECASE,
 )
@@ -810,10 +812,34 @@ def agency_rearm_nudge_message() -> dict[str, str]:
 _message_wants_tools = message_wants_tools
 
 
+_TOOL_MARKUP_PREFIX_RE = re.compile(
+    r"^\s*(?:<\s*)?(?:tool_c|tool_calls|function_c|function_calls|invoke\b|DSML|｜)"
+    r"|^\s*<(?:tool|function)\b"
+    r"|^\s*(?:tool|function|invoke)\s*$",
+    re.IGNORECASE,
+)
+
+
+def looks_like_tool_markup_prefix(text: str) -> bool:
+    """True when *text* is a short prefix of DSML / <tool_calls> (do not stream).
+
+    Live session 2026-08-13: DeepSeek Flash streamed ``tool_c`` then ``alls>``
+    and the bubble persisted as ``tool_c``. Must not match real prose
+    like ``Tools are disabled in plan mode.``
+    """
+    t = (text or "").strip()
+    if not t or len(t) > 48:
+        return False
+    return bool(_TOOL_MARKUP_PREFIX_RE.match(t))
+
+
 def looks_like_pseudo_tools(text: str) -> bool:
     """True when the model faked tool calls in natural language or DSML markup."""
     if not text:
         return False
+    # Truncated live prefix ("tool_c") must not persist as the answer.
+    if looks_like_tool_markup_prefix(text):
+        return True
     # Qwen/local: tool intent as JSON in content (```json {"name":"file_write"...})
     if re.search(
         r'(?is)(?:```\s*json\s*)?\{\s*"name"\s*:\s*"[a-z0-9_]+"\s*,\s*"arguments"\s*:',
@@ -851,11 +877,12 @@ def looks_like_pseudo_tools(text: str) -> bool:
     # Any leaked tool_calls / function_calls / invoke markup (incl. truncated)
     if re.search(
         r"(?i)(<\s*function_calls\b|</\s*function_calls\s*>|<\s*tool_call\b|"
-        r"<\s*function_c|get_settings\s*$)",
+        r"<\s*tool_calls\b|<\s*tool_invoke\b|<\s*function_c|<\s*tool_c|"
+        r"get_settings\s*$)",
         text,
     ):
         return True
-    if text.strip() in ("<", "<>", "<function_c"):
+    if text.strip() in ("<", "<>", "<function_c", "<tool_c", "tool_c"):
         return True
     if _DSML_TOOL_RE.search(text) and (
         _DSML_INVOKE_RE.search(text)
@@ -877,7 +904,9 @@ def strip_tool_markup(text: str) -> str:
     t = _DSML_NOISE_RE.sub(" ", t)
     # Full XML-ish function_calls / tool_call blocks (complete or truncated)
     t = re.sub(r"(?is)<\s*function_calls\b[^>]*>.*?(?:</\s*function_calls\s*>|$)", " ", t)
+    t = re.sub(r"(?is)<\s*tool_calls\b[^>]*>.*?(?:</\s*tool_calls\s*>|$)", " ", t)
     t = re.sub(r"(?is)<\s*tool_call\b[^>]*>.*?(?:</\s*tool_call\s*>|$)", " ", t)
+    t = re.sub(r"(?is)<\s*tool_invoke\b[^>]*/?>", " ", t)
     t = re.sub(r"(?is)<\s*function_c\w*[^>]*>.*?(?:>|$)", " ", t)
     # Remove tool_calls … blocks (greedy enough for multi-invoke dumps)
     t = re.sub(
@@ -885,7 +914,11 @@ def strip_tool_markup(text: str) -> str:
         " ",
         t,
     )
-    t = re.sub(r"(?is)</?(?:invoke|parameter|invoke_parameter|invoke_step|tool_call)[^>]*>", " ", t)
+    t = re.sub(
+        r"(?is)</?(?:invoke|tool_invoke|parameter|invoke_parameter|invoke_step|tool_call)[^>]*>",
+        " ",
+        t,
+    )
     t = re.sub(
         rf"""(?is)name\s*=\s*["']{_TOOL_ID}["'][^<\n]*""",
         " ",
@@ -900,7 +933,7 @@ def strip_tool_markup(text: str) -> str:
     t = re.sub(r"(?i)\bcomposing tool\b", " ", t)
     # Lone residual tokens after strip
     if re.fullmatch(
-        r"(?i)\s*(function|tool|invoke|tool_call|get_settings|composing tool)\s*",
+        r"(?i)\s*<?(function|tool|tool_c\w*|invoke|tool_call|get_settings|composing tool)>?\s*",
         t or "",
     ):
         return ""
@@ -1001,31 +1034,85 @@ def _parse_dsml_tool_calls(text: str) -> list[dict[str, Any]]:
         ]
 
     out: list[dict[str, Any]] = []
+    # DeepSeek Flash: <tool_invoke name="list_dir" path="C:\proj"/>
+    for i, m in enumerate(
+        re.finditer(
+            r"""<\s*tool_invoke\b([^>]*)/?>""",
+            text,
+            re.IGNORECASE,
+        )
+    ):
+        attrs = m.group(1) or ""
+        nm = re.search(r"""\bname\s*=\s*["']([^"']+)["']""", attrs, re.I)
+        if not nm:
+            continue
+        name = nm.group(1).strip().lower()
+        if name in ("true", "false", "string", "integer", "object", "array", "type"):
+            continue
+        attr_params: dict[str, str] = {}
+        for am in re.finditer(r"""\b([A-Za-z_]\w*)\s*=\s*["']([^"']*)["']""", attrs):
+            key = am.group(1).lower()
+            if key != "name":
+                attr_params[key] = am.group(2)
+        attr_args: dict[str, str]
+        if name == "list_dir":
+            attr_args = {
+                "path": attr_params.get("path") or attr_params.get("directory") or "."
+            }
+        elif name == "file_read":
+            attr_args = {
+                "path": attr_params.get("path") or attr_params.get("file") or ""
+            }
+            if not attr_args["path"]:
+                continue
+        elif name == "file_write":
+            attr_args = {
+                "path": attr_params.get("path") or "",
+                "content": attr_params.get("content") or "",
+            }
+        elif name == "bash_exec":
+            attr_args = {
+                "command": attr_params.get("command") or attr_params.get("cmd") or ""
+            }
+            if not attr_args["command"]:
+                continue
+        else:
+            attr_args = dict(attr_params)
+        out.append(
+            {
+                "id": f"dsml_attr_{i}_{uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(attr_args, ensure_ascii=False),
+                },
+            }
+        )
+        if len(out) >= MAX_PARALLEL_TOOLS:
+            return out
+
     # Split on invoke / function_calls boundaries when possible
     chunks = re.split(
         r"(?i)(?:invoke\b|tool_call\b|tool_calls\b|function_calls\b)", text
     )
     for i, chunk in enumerate(chunks):
-        m = _DSML_INVOKE_RE.search(chunk)
-        if not m:
-            m = re.search(
+        matched: re.Match[str] | None = _DSML_INVOKE_RE.search(chunk)
+        if matched is None:
+            matched = re.search(
                 rf"""["']({_TOOL_ID})["']""",
                 chunk,
                 re.IGNORECASE,
             )
-            if not m:
-                if "bash_exec" in chunk.lower() and (
-                    "curl" in chunk.lower() or "8188" in chunk or "comfy" in chunk.lower()
-                ):
-                    name = "bash_exec"
-                elif "list_dir" in chunk.lower() and _COMFY_HUNT_RE.search(chunk):
-                    name = "list_dir"
-                else:
-                    continue
-            else:
-                name = m.group(1).lower()
+        if matched is not None:
+            name = matched.group(1).lower()
+        elif "bash_exec" in chunk.lower() and (
+            "curl" in chunk.lower() or "8188" in chunk or "comfy" in chunk.lower()
+        ):
+            name = "bash_exec"
+        elif "list_dir" in chunk.lower() and _COMFY_HUNT_RE.search(chunk):
+            name = "list_dir"
         else:
-            name = m.group(1).lower()
+            continue
 
         # Skip non-tool XML attributes accidentally matched
         if name in ("true", "false", "string", "integer", "object", "array", "type"):
@@ -1097,15 +1184,16 @@ def _parse_dsml_tool_calls(text: str) -> list[dict[str, Any]]:
             }
         else:
             # Generic tools (get_settings, bill_upsert, mail_send, …): pass params through
-            args = dict(params)
+            coerced: dict[str, Any] = dict(params)
             # Coerce simple numerics when models put numbers as strings
-            for k, v in list(args.items()):
+            for k, v in list(coerced.items()):
                 if isinstance(v, str) and re.fullmatch(r"-?\d+", v.strip()):
                     with suppress(ValueError):
-                        args[k] = int(v.strip())
+                        coerced[k] = int(v.strip())
                 elif isinstance(v, str) and re.fullmatch(r"-?\d+\.\d+", v.strip()):
                     with suppress(ValueError):
-                        args[k] = float(v.strip())
+                        coerced[k] = float(v.strip())
+            args = coerced
 
         if name == "bash_exec" and not args.get("command"):
             continue

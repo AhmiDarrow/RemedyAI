@@ -15,6 +15,7 @@ from remedy.core.react_policy import (
     is_serial_explore_batch,
     looks_like_leaked_scratchpad,
     looks_like_pseudo_tools,
+    looks_like_tool_markup_prefix,
     message_wants_tools,
     parse_pseudo_tool_calls,
     post_tools_user_summary_nudge,
@@ -22,6 +23,7 @@ from remedy.core.react_policy import (
     recovery_nudge_message,
     speed_batch_nudge_message,
     strip_stream_status_noise,
+    strip_tool_markup,
     tool_call_fingerprint,
     tool_content_is_error,
 )
@@ -57,6 +59,12 @@ def test_message_wants_tools_chat_vs_code() -> None:
     assert message_wants_tools("proceed") is True
     assert message_wants_tools("continue") is True
     assert message_wants_tools("sounds good") is True
+    # Live 2026-08-13: "full bugsweep" was L1 pure-chat (bug ≠ bugsweep)
+    assert message_wants_tools("full bugsweep") is True
+    assert message_wants_tools("bugsweep") is True
+    assert message_wants_tools("bug sweep") is True
+    assert message_wants_tools("hotfix") is True
+    assert message_wants_tools("triage") is True
 
 
 def test_agency_tool_promise_claim_hard_and_soft() -> None:
@@ -328,6 +336,40 @@ def test_truncated_dsml_bash_not_recovered() -> None:
         },
     }
     assert recovered_tool_call_is_complete(complete) is True
+
+
+def test_deepseek_tool_invoke_attrs_recovered() -> None:
+    """Live dump: DeepSeek Flash wrote <tool_invoke name path/> not native calls."""
+    text = (
+        "<tool_calls>\n"
+        '<tool_invoke name="list_dir" path="C:\\\\Users\\\\Administrator\\\\Old-Remedy"/>\n'
+        '<tool_invoke name="file_read" path="C:\\\\Users\\\\Administrator\\\\Old-Remedy\\\\AGENTS.md"/>\n'
+        '<tool_invoke name="file_read" path="C:\\\\Users\\\\Administrator\\\\Old-Remedy\\\\README.md"/>\n'
+        '<tool_invoke name="git_status"/>\n'
+        "</tool_calls>"
+    )
+    assert looks_like_pseudo_tools(text)
+    calls = parse_pseudo_tool_calls(text)
+    names = [c["function"]["name"] for c in calls]
+    assert "list_dir" in names
+    assert names.count("file_read") >= 2
+    assert "git_status" in names
+    list_dir = next(c for c in calls if c["function"]["name"] == "list_dir")
+    args = json.loads(list_dir["function"]["arguments"])
+    assert "Old-Remedy" in args.get("path", "")
+    cleaned = strip_tool_markup(text)
+    assert "tool_invoke" not in cleaned.lower()
+    assert "tool_calls" not in cleaned.lower()
+
+
+def test_tool_c_prefix_is_markup_not_answer() -> None:
+    """Live persist: first tokens 'tool_c' became the whole assistant bubble."""
+    assert looks_like_tool_markup_prefix("tool_c") is True
+    assert looks_like_tool_markup_prefix("<tool") is True
+    assert looks_like_tool_markup_prefix("Hello there") is False
+    assert looks_like_tool_markup_prefix("Tools are disabled.") is False
+    assert looks_like_pseudo_tools("tool_c") is True
+    assert strip_tool_markup("tool_c") == ""
 
 
 def test_dsml_list_dir_comfy_hunt_collapses_to_locate() -> None:

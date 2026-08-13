@@ -1708,10 +1708,13 @@ async def call_llm_stream(runtime, message: str,
                     and _looks_like_pseudo_tools(raw_round)
                     and all_tools
                     and turn.allow_pseudo_recovery()
-                    and not force_answer
                 ):
                     recovered = _parse_pseudo_tool_calls(raw_round)
                     if recovered:
+                        # Model already tried to use tools as text. Do not honor
+                        # force_answer / l1_pure_chat — that left "tool_c" in chat.
+                        force_answer = False
+                        force_answer_sticky = False
                         turn.note_pseudo_recovery()
                         pseudo_recovery_done = turn.pseudo_recoveries >= 1
                         _rearm_agency_tools()  # schemas + long-task epoch policy
@@ -1934,15 +1937,18 @@ async def call_llm_stream(runtime, message: str,
                         )
                         continue
                     # Don't ship faux tool syntax as the final answer.
+                    # Live 2026-08-13: L1 force_answer + DeepSeek <tool_invoke>
+                    # dump was skipped here, leaving the bubble as "tool_c".
                     if (
                         raw_round
                         and _looks_like_pseudo_tools(raw_round)
                         and all_tools
-                        and not force_answer
                         and pseudo_nudge_count < 2
                         and not pseudo_recovery_done
                     ):
                         pseudo_nudge_count += 1
+                        force_answer = False
+                        force_answer_sticky = False
                         _rearm_agency_tools()
                         messages.append(
                             {
