@@ -89,6 +89,7 @@ def save_todos(
     """Persist todos. Also stamps runtime._build_todos."""
     if runtime is not None:
         runtime._build_todos = list(items)
+    mark_todos_dirty(runtime, items)
     base = Path(root) if root else _root_for(runtime)
     if base is None:
         return None
@@ -137,6 +138,41 @@ def upsert_todos(
         if st is not None:
             st.open_todo_count = open_todo_count(out)
     return out
+
+
+def todos_public(items: list[TodoItem] | None) -> list[dict[str, str]]:
+    """JSON-safe rows for SSE / HTTP."""
+    return [t.to_public() for t in (items or [])]
+
+
+def todos_event_token(items: list[TodoItem] | None) -> str:
+    """``@@todos:`` control token for the desktop live checklist."""
+    payload = {
+        "type": "todos",
+        "todos": todos_public(items),
+        "open": open_todo_count(items),
+    }
+    return "@@todos:" + json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+
+
+def mark_todos_dirty(runtime: Any, items: list[TodoItem] | None) -> None:
+    """Queue a live checklist event for the current ReAct stream."""
+    if runtime is None:
+        return
+    with suppress(Exception):
+        runtime._pending_todos_event = todos_event_token(items)
+
+
+def take_todos_event(runtime: Any) -> str | None:
+    """Pop the pending ``@@todos:`` token, if any."""
+    if runtime is None:
+        return None
+    tok = getattr(runtime, "_pending_todos_event", None)
+    with suppress(Exception):
+        runtime._pending_todos_event = None
+    if isinstance(tok, str) and tok.startswith("@@todos:"):
+        return tok
+    return None
 
 
 def open_todo_count(items: list[TodoItem] | None) -> int:

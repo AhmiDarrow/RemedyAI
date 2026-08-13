@@ -65,6 +65,10 @@ def recall_unified(
         s = _score(qtok, h) + 0.1
         if s > 0.15 or not qtok:
             hits.append((s, "habit", h))
+    for d in getattr(sf, "future_dreams", None) or []:
+        s = _score(qtok, d) + 0.22
+        if s > 0.15 or not qtok:
+            hits.append((s, "dream", d))
     for les in sf.organism_lessons[-8:]:
         line = les.line()
         s = _score(qtok, line) + 0.1

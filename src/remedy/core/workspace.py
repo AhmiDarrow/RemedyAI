@@ -7,6 +7,7 @@ tools, shell cwd, and @file UI jailing.
 from __future__ import annotations
 
 import os
+from contextlib import suppress
 from pathlib import Path
 
 from remedy.core.errors import SecurityError
@@ -400,6 +401,12 @@ def workspace_context_block(
         lines.append(f"Top-level: {listing}")
     else:
         lines.append("Top-level: (empty or unreadable)")
+    with suppress(Exception):
+        from remedy.execution.host.stretch import format_home_line
+
+        line = format_home_line()
+        if line:
+            lines.append(line)
     return "\n".join(lines)
 
 

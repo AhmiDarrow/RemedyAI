@@ -6,6 +6,10 @@ loopback with a coding/tool-oriented GGUF — not the retired spatial RMB4 forma
 
 from __future__ import annotations
 
+from remedy.runtime.rmb.autofit import (
+    plan_autofit,
+    should_autofit,
+)
 from remedy.runtime.rmb.config import (
     DEFAULT_CHAT_PORT,
     DEFAULT_HOST,
@@ -46,8 +50,10 @@ __all__ = [
     "is_rmb_base_url",
     "is_rmb_provider",
     "load_rmb_json",
+    "plan_autofit",
     "rmb_chat_base_url",
     "rmb_home",
+    "should_autofit",
     "rmb_server_running",
     "save_rmb_json",
     "should_skip_vision_stack",

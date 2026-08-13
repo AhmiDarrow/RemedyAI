@@ -13,6 +13,7 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as importlib_version
@@ -382,6 +383,22 @@ def run_update(check_only: bool = False) -> None:
 
     success = False
     if install_src in ("git-editable", "git-folder") and project_root:
+        # Official origin replaces local self-improve. Never merge LLM patches.
+        with contextlib.suppress(Exception):
+            from remedy.core.self_inject_draft import origin_wins_if_dirty
+
+            policy = origin_wins_if_dirty(project_root)
+            if policy.get("action") == "abort_dirty":
+                console.print(
+                    "\n[red]Local self-improve or WIP is dirty.[/red] "
+                    "Official update does not merge per-client patches."
+                )
+                console.print(
+                    "[dim]Post the draft to the GitHub inbox issue "
+                    "(`self_improve_submit_issue`) or discard it "
+                    "(`git reset --hard` + clean) then retry.[/dim]"
+                )
+                return
         console.print("\n[bold]Pulling from git + reinstalling...[/bold]")
         success = _git_pull_and_reinstall(project_root)
     else:

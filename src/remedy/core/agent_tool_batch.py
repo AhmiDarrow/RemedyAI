@@ -804,5 +804,11 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             "tool_call_id": call_id,
             "content": content_str,
         }
+        with suppress(Exception):
+            from remedy.core.build_todos import take_todos_event
+
+            todos_tok = take_todos_event(runtime)
+            if todos_tok:
+                yield todos_tok, {}
 
 

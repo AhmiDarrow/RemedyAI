@@ -105,6 +105,19 @@ def test_status_public(auth_on, tmp_path):
     assert r.status_code == 200
 
 
+def test_self_improve_public(auth_on, tmp_path, monkeypatch):
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    tok = ensure_local_api_token(tmp_path)
+    app = create_app(api_key=tok)
+    client = TestClient(app)
+    r = client.get("/api/self-improve")
+    assert r.status_code == 200
+    body = r.json()
+    assert "enabled" in body
+    assert "idle_s" in body
+    assert "last_tick" in body
+
+
 def test_bootstrap_loopback(auth_on, tmp_path, monkeypatch):
     # Bootstrap defaults off for desktop/sidecar; enable for this unit test.
     monkeypatch.setenv("REMEDY_HTTP_BOOTSTRAP", "1")

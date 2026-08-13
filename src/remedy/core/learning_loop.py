@@ -330,6 +330,76 @@ class LearningLoop:
                 self._write_skill_md(skill)
         return True
 
+    def tick_learned_skills(self, *, limit: int = 32) -> list[dict]:
+        """Unattended promote / demote / prune of auto-generated skills.
+
+        No LLM. Uses accumulated ``skill_stats`` + lifecycle policy. Safe to
+        call from the idle scheduler or after every turn.
+        """
+        changes: list[dict] = []
+        for skill in self._iter_learned_skills()[: max(1, int(limit))]:
+            name = skill.manifest.name
+            old = skill.manifest.status
+            old_val = old.value if hasattr(old, "value") else str(old)
+            try:
+                changed = bool(self.auto_refine_skill(skill))
+            except Exception:
+                continue
+            if not changed:
+                continue
+            dec = self._last_decision
+            new = skill.manifest.status
+            changes.append(
+                {
+                    "name": name,
+                    "action": getattr(dec, "action", "refine") if dec else "refine",
+                    "from": old_val,
+                    "to": new.value if hasattr(new, "value") else str(new),
+                    "reason": (getattr(dec, "reason", "") or "")[:240] if dec else "",
+                }
+            )
+        return changes
+
+    def _iter_learned_skills(self) -> list[Skill]:
+        """Auto-generated skills from the live registry, then disk."""
+        seen: set[str] = set()
+        out: list[Skill] = []
+
+        def _consider(skill: Skill) -> None:
+            try:
+                name = str(skill.manifest.name or "").strip()
+            except Exception:
+                return
+            if not name or name in seen:
+                return
+            meta = dict(skill.manifest.metadata or {})
+            if meta.get("source") == "library" or meta.get("library_id"):
+                return
+            if meta.get("trust") in ("imported", "library-install", "library-update"):
+                return
+            if not meta.get("auto_generated") and not meta.get("lifecycle"):
+                return
+            seen.add(name)
+            out.append(skill)
+
+        if self.registry is not None:
+            with contextlib.suppress(Exception):
+                for skill in list(getattr(self.registry, "skills", []) or []):
+                    _consider(skill)
+
+        with contextlib.suppress(Exception):
+            from remedy.skills.loader import load_skill_from_dir
+
+            for md in sorted(self.skills_dir.glob("*/SKILL.md")):
+                if md.parent.name in seen:
+                    continue
+                try:
+                    skill = load_skill_from_dir(md.parent)
+                except Exception:
+                    continue
+                _consider(skill)
+        return out
+
     def prune_skill(self, skill: Skill, *, remove_files: bool = False) -> bool:
         """Deprecate (and optionally delete) a hopeless skill."""
         name = skill.manifest.name

@@ -1064,6 +1064,13 @@ def mark_setup_completed(
     from remedy.interfaces.api_support import _write_config as api_write
 
     api_write(path, cfg)
+    # First arrival — stretch out and map this PC (hardware, tools, rooms).
+    try:
+        from remedy.execution.host.stretch import ensure_home_stretch
+
+        ensure_home_stretch(path.parent, force=True, background=True)
+    except Exception:
+        pass
     return path
 
 

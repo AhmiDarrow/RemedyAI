@@ -33,7 +33,6 @@ from remedy.core.project_fingerprint import (
     fingerprint_path,
     path_env_with_local_bins,
 )
-from remedy.execution.process import win_shell_prefix
 from remedy.execution.sandbox import SubprocessSandbox
 
 LEDGER_NAME = "self_inject_ledger.jsonl"
@@ -283,7 +282,10 @@ async def _run_one(cmd: str, workdir: Path, timeout: float) -> tuple[int, str, s
     scrubs secrets from the child env, so this is safe to run unattended.
     """
     sandbox = SubprocessSandbox(allowed_paths=[workdir])
-    argv = [*win_shell_prefix(), cmd]
+    from remedy.execution.host.runner import prepare_host_command
+
+    prepared = prepare_host_command(cmd, project_path=workdir)
+    argv = prepared.argv
     env = path_env_with_local_bins(workdir)
     res = await sandbox.execute(argv, workdir=workdir, timeout_seconds=timeout, env=env)
     return res.exit_code, (res.stdout or ""), (res.stderr or "")
@@ -443,8 +445,67 @@ def request_sidecar_restart(
 
 
 # ---------------------------------------------------------------------------
-# Idle trigger
+# Idle trigger + unattended improve
 # ---------------------------------------------------------------------------
+
+# Last *user* turn (chat/messenger), not health-check log mtime.
+# 0 = treat process start as the last activity (do not fire on boot).
+_last_user_activity: float = 0.0
+_process_started: float = time.time()
+_last_unattended_code: float = 0.0
+_CODE_DRAFT_COOLDOWN_S = 900.0
+
+
+def note_user_activity() -> None:
+    """Mark a real owner turn so idle self-improve waits for quiet."""
+    with suppress(Exception):
+        from remedy.core.self_inject_draft import in_internal_improve
+
+        if in_internal_improve():
+            return
+    global _last_user_activity
+    _last_user_activity = time.time()
+
+
+def last_tick_path(home: str | Path | None = None) -> Path:
+    return _home_dir(home) / "self_improve_last.json"
+
+
+def read_last_tick(home: str | Path | None = None) -> dict[str, Any] | None:
+    """Most recent unattended tick, or None if none has run."""
+    path = last_tick_path(home)
+    if not path.is_file():
+        return None
+    with suppress(Exception):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    return None
+
+
+def activity_snapshot(home: str | Path | None = None) -> dict[str, Any]:
+    """Idle-clock + last-tick view for status tools / API."""
+    update: dict[str, Any] = {}
+    pending = None
+    with suppress(Exception):
+        from remedy.core.self_inject_draft import (
+            client_update_policy,
+            read_pending_ship,
+        )
+
+        update = client_update_policy(_guess_repo(None))
+        pending = read_pending_ship(home)
+    return {
+        "enabled": is_enabled(home),
+        "idle_ready": should_run_now(home),
+        "idle_s": round(_idle_seconds(), 1),
+        "idle_threshold_s": _idle_threshold(home),
+        "last_user_activity": _last_user_activity,
+        "process_started": _process_started,
+        "last_tick": read_last_tick(home),
+        "update": update,
+        "pending_ship": pending,
+    }
 
 
 def is_enabled(home: str | Path | None = None) -> bool:
@@ -463,15 +524,14 @@ def should_run_now(home: str | Path | None = None) -> bool:
     """True if a round should run now: enabled AND (force flag or idle window).
 
     ``REMEDY_SELF_INJECT_FORCE`` bypasses idle detection. Otherwise the product
-    must be idle: no messenger traffic for ``idle_seconds`` (default 300).
+    must be idle of **user turns** for ``idle_seconds`` (default 300). Status
+    pings / debug.log writes do not count as activity.
     """
     if os.environ.get("REMEDY_SELF_INJECT_FORCE") == "1":
         return True
     if not is_enabled(home):
         return False
     idle_s = _idle_seconds()
-    if idle_s is None:
-        return False
     threshold = _idle_threshold(home)
     return idle_s >= threshold
 
@@ -489,24 +549,171 @@ def _idle_threshold(home: str | Path | None = None) -> float:
     return 300.0
 
 
-def _idle_seconds() -> float | None:
-    """Return seconds since the last messenger/API activity, or None if unknown.
+def _idle_seconds() -> float:
+    """Seconds since the last user turn (or process start if none yet)."""
+    mark = _last_user_activity if _last_user_activity > 0 else _process_started
+    return max(0.0, time.time() - mark)
 
-    Uses the serve request log's newest entry timestamp when available; otherwise
-    None (the caller treats unknown as 'not idle').
+
+def _record_tick(home: str | Path | None, payload: dict[str, Any]) -> None:
+    path = last_tick_path(home)
+    with suppress(Exception):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        blob = dict(payload)
+        blob["ts"] = _now_utc()
+        path.write_text(json.dumps(blob, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+async def run_unattended_improve(
+    runtime: Any = None,
+    *,
+    home: str | Path | None = None,
+    repo: str | Path | None = None,
+) -> dict[str, Any]:
+    """One unattended improve tick: learn/lifecycle + optional code self-heal.
+
+    Organism work (skill promote/prune, soul dream, persist) always runs.
+    Code drafts wait for the user-idle window (or ``REMEDY_SELF_INJECT_FORCE``),
+    a clean tree, and a cooldown. Does **not** run the full pytest suite.
     """
-    try:
+    home = home or getattr(runtime, "home_dir", None) or getattr(
+        getattr(runtime, "config", None), "home_dir", None
+    )
+    result: dict[str, Any] = {
+        "kind": "unattended",
+        "organism": {},
+        "code": None,
+        "idle_s": round(_idle_seconds(), 1),
+        "idle_ready": should_run_now(home),
+    }
+    result["organism"] = _organism_tick(runtime, home=home)
 
-        log_root = _home_dir(None) / "logs"
-        best = 0.0
-        for name in ("debug.log", "remedy.log"):
-            p = log_root / name
-            if not p.exists():
-                continue
-            mtime = p.stat().st_mtime
-            best = max(best, mtime)
-        if best <= 0:
+    if repo is None:
+        repo = _guess_repo(runtime)
+    repo_p = Path(repo) if repo else None
+    global _last_unattended_code
+    now = time.time()
+    code_due = should_run_now(home) and (
+        (now - _last_unattended_code) >= _CODE_DRAFT_COOLDOWN_S
+    )
+    if repo_p is not None and (repo_p / "pyproject.toml").is_file() and code_due:
+        # Count the attempt so a clean/no-op tree does not retry every tick.
+        _last_unattended_code = now
+        drafted = None
+        with suppress(Exception):
+            from remedy.core.self_inject_draft import run_unattended_draft
+
+            drafted = await run_unattended_draft(runtime, repo=repo_p, home=home)
+        if drafted and not drafted.get("skipped"):
+            result["code"] = drafted
+        elif drafted and drafted.get("skipped") in (
+            "not_source_checkout",
+            "user_streaming",
+            "red_cooldown",
+            "dirty_tree",
+        ):
+            result["code"] = drafted
+        else:
+            code = await _maybe_ruff_self_heal(repo_p, home=home)
+            if code is not None:
+                result["code"] = code
+            elif drafted:
+                result["code"] = drafted
+            else:
+                result["code"] = {"skipped": "clean_or_dirty"}
+    elif not should_run_now(home):
+        result["code"] = {"skipped": "not_idle"}
+    _record_tick(home, result)
+    return result
+
+
+def _organism_tick(runtime: Any, *, home: str | Path | None) -> dict[str, Any]:
+    """Cheap unattended learning: promote/prune skills, dream, persist organs."""
+    out: dict[str, Any] = {"skills_refined": 0, "dreamed": False}
+    with suppress(Exception):
+        loop = getattr(runtime, "_get_learning_loop", None)
+        ll = loop() if callable(loop) else getattr(runtime, "learning_loop", None)
+        if ll is not None and hasattr(ll, "tick_learned_skills"):
+            changed = ll.tick_learned_skills() or []
+            out["skills_refined"] = len(changed)
+            out["skill_changes"] = changed[:12]
+    with suppress(Exception):
+        from remedy.core.metabolism.cua_macros import get_cua_macros
+        from remedy.core.metabolism.skill_genome import get_skill_genome
+
+        get_cua_macros().persist(home)
+        get_skill_genome().persist(home)
+    with suppress(Exception):
+        from remedy.memory.soul.dream import dream_cycle, should_dream
+        from remedy.memory.soul.field import load_soul_field
+
+        if should_dream(home):
+            sf = load_soul_field(home)
+            if len(sf.episodes) >= 4:
+                dream_cycle(
+                    home=home,
+                    memory=getattr(runtime, "memory", None) if runtime else None,
+                    field=sf,
+                )
+                out["dreamed"] = True
+    return out
+
+
+def _guess_repo(runtime: Any) -> Path | None:
+    with suppress(Exception):
+        import remedy as _pkg
+
+        cand = Path(_pkg.__file__).resolve().parent.parent.parent
+        for _ in range(6):
+            if (cand / "pyproject.toml").is_file():
+                return cand
+            cand = cand.parent
+    with suppress(Exception):
+        raw = runtime.effective_project_path() if runtime is not None else None
+        if raw:
+            p = Path(str(raw))
+            if (p / "pyproject.toml").is_file():
+                return p
+    return None
+
+
+async def _maybe_ruff_self_heal(
+    repo: Path, *, home: str | Path | None
+) -> dict[str, Any] | None:
+    """If the Remedy tree is clean, apply ``ruff --fix`` and keep it only if still clean."""
+    with suppress(Exception):
+        from remedy.core.self_inject_draft import is_source_checkout
+
+        if not is_source_checkout(repo):
             return None
-        return time.time() - best
-    except Exception:
+    snap = await git_capture(repo)
+    if snap.get("changed") or snap.get("untracked"):
         return None
+    src = repo / "src" / "remedy"
+    if not src.is_dir():
+        return None
+    fix_cmd = "uv run ruff check --fix src/remedy"
+    gate_cmd = "uv run ruff check src/remedy"
+    code_fix, out_fix, err_fix = await _run_one(fix_cmd, repo, 120.0)
+    after = await git_capture(repo)
+    if not after.get("changed"):
+        return None
+    round_ = SelfInjectRound(
+        tree="python",
+        summary="unattended ruff --fix self-heal",
+    )
+    round_.gate_cmds = [gate_cmd]
+    code_gate, out_g, err_g = await _run_one(gate_cmd, repo, 120.0)
+    round_.gate_exit_codes[gate_cmd] = code_gate
+    round_.detail["gate_output"] = {gate_cmd: (out_g + err_g)[-1500:]}
+    round_.detail["ruff_fix_exit"] = code_fix
+    round_.detail["ruff_fix_tail"] = (out_fix + err_fix)[-400:]
+    round_.status = "green" if code_gate == 0 else "red"
+    round_ = await apply_or_rollback(round_, repo, snap, home=home)
+    append_ledger(round_, home)
+    return {
+        "round_id": round_.round_id,
+        "status": round_.status,
+        "outcome": round_.outcome,
+        "changed": after.get("changed") or [],
+    }

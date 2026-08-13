@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +12,8 @@ from remedy.core.build_todos import (
     load_todos,
     open_todo_count,
     seed_drive_todos,
+    take_todos_event,
+    todos_event_token,
     upsert_todos,
 )
 
@@ -76,6 +79,23 @@ def test_seed_drive_todos(tmp_path):
     ids = [t.id for t in items]
     assert "spec" in ids and "tdd" in ids and "verify" in ids
     assert any("greet" in t.content for t in items)
+
+
+def test_todos_event_token_and_take():
+    rt = SimpleNamespace(effective_project_path=lambda: None, config=None)
+    items = upsert_todos(
+        rt,
+        [{"id": "a", "content": "read AGENTS.md", "status": "in_progress"}],
+        merge=False,
+    )
+    tok = take_todos_event(rt)
+    assert tok and tok.startswith("@@todos:")
+    payload = json.loads(tok[len("@@todos:") :])
+    assert payload["open"] == 1
+    assert payload["todos"][0]["content"] == "read AGENTS.md"
+    assert take_todos_event(rt) is None
+    ev = todos_event_token(items)
+    assert '"in_progress"' in ev
 
 
 def test_open_todos_block_done_after_writes():

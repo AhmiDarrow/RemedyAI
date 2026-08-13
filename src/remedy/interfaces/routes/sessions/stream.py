@@ -372,6 +372,17 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                                 yield await _sse_stream_text(md, event="token")
                         elif token == "@@tool_calls":
                             pass
+                        elif isinstance(token, str) and token.startswith("@@todos:"):
+                            raw = token[len("@@todos:") :]
+                            try:
+                                payload = json.loads(raw) if raw else {}
+                            except Exception:
+                                payload = {}
+                            if isinstance(payload, dict):
+                                yield sse_event(
+                                    "todos",
+                                    {"type": "todos", **payload},
+                                )
                         elif isinstance(token, str) and token.startswith("@@"):
                             # Unknown control token — never leak into the bubble.
                             logger.debug(

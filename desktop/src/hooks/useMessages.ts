@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   listMessages,
+  listSessionTodos,
   streamMessage,
   executeCommand,
   editFromMessageApi,
   type StreamProgress,
   type UsagePayload,
 } from '../api/messages'
+import { parseTodosPayload, type BuildTodo } from '../components/BuildTodos'
 import {
   appendJobThinking,
   appendJobToken,
@@ -22,6 +24,7 @@ import {
   setJobProcessSteps,
   setJobRunUsage,
   setJobTaskProgress,
+  setJobBuildTodos,
   stopStreamJob,
   touchStreamJob,
   withStoppedMarker,
@@ -66,6 +69,7 @@ export function useMessages(sessionId: string | null) {
   const [activeTools, setActiveTools] = useState<ActiveTool[]>([])
   const [processSteps, setProcessSteps] = useState<ProcessStep[]>([])
   const [taskProgress, setTaskProgress] = useState<StreamProgress | null>(null)
+  const [buildTodos, setBuildTodos] = useState<BuildTodo[]>([])
   const [runUsage, setRunUsage] = useState<UsageSnapshot | null>(null)
   const [streamCtrl, setStreamCtrl] = useState<AbortController | null>(null)
   const [queue, setQueue] = useState<QueuedSend[]>([])
@@ -249,6 +253,14 @@ export function useMessages(sessionId: string | null) {
       serverCountRef.current = list.length
       setMessages(list)
       setHasOlder(list.length >= MESSAGE_PAGE)
+      try {
+        const td = await listSessionTodos(loadId)
+        if (sessionIdRef.current !== loadId) return
+        const parsed = parseTodosPayload(td)
+        if (parsed.length) setBuildTodos(parsed)
+      } catch {
+        /* checklist is optional */
+      }
     } catch (e: unknown) {
       if (sessionIdRef.current !== loadId) return
       const msg = e instanceof Error ? e.message : String(e)
@@ -319,6 +331,7 @@ export function useMessages(sessionId: string | null) {
     setProcessSteps([])
     processStepsRef.current = []
     setTaskProgress(null)
+    setBuildTodos([])
     setStreamCtrl(null)
     streamCtrlRef.current = null
     // Keep the send queue across tab switches so "after" / interrupt items with
@@ -381,6 +394,7 @@ export function useMessages(sessionId: string | null) {
         setProcessSteps(paint.processSteps || [])
         setActiveTools(paint.activeTools || [])
         setTaskProgress(paint.taskProgress || null)
+        setBuildTodos(paint.buildTodos || [])
         if (paint.runUsage) {
           setRunUsage({
             prompt_tokens: paint.runUsage.prompt_tokens ?? 0,
@@ -903,6 +917,12 @@ export function useMessages(sessionId: string | null) {
           })
         },
         provider,
+        (payload) => {
+          bumpActivity()
+          const parsed = parseTodosPayload(payload)
+          setJobBuildTodos(targetId, parsed)
+          if (isFocusedTurn()) setBuildTodos(parsed)
+        },
       )
 
       registerStreamJob(targetId, ctrl, model)
@@ -1244,6 +1264,7 @@ export function useMessages(sessionId: string | null) {
     setProcessSteps([])
     processStepsRef.current = []
     setTaskProgress(null)
+    setBuildTodos([])
     setRunUsage(null)
     setStreamStalled(false)
     setStallSeconds(0)
@@ -1321,6 +1342,7 @@ export function useMessages(sessionId: string | null) {
     activeTools,
     processSteps,
     taskProgress,
+    buildTodos,
     runUsage,
     queue: visibleQueue,
     librarySuggest,

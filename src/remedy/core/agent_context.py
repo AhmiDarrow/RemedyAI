@@ -142,11 +142,36 @@ async def build_turn_context(runtime: Any) -> str:
                     pass
             # Prefer query-aware ranking when last user message is known
             q = str(getattr(runtime, "_last_user_text", "") or "")
-            project_path = str(
-                getattr(runtime.config, "project_path", None)
-                or getattr(runtime, "_project_path", None)
-                or ""
-            ) or None
+            project_path = None
+            with suppress(Exception):
+                project_path = str(runtime.effective_project_path() or "") or None
+            if not project_path:
+                project_path = str(
+                    getattr(runtime.config, "project_path", None)
+                    or getattr(runtime, "_project_path", None)
+                    or ""
+                ) or None
+            # Taste.json is a facet of the organism — fold into Partner Memory
+            with suppress(Exception):
+                from remedy.core.companion_taste import load_taste
+                from remedy.memory.partner_memory import upsert_profile_fact
+
+                dirty = False
+                for row in load_taste(runtime)[:16]:
+                    fact = str(row.get("fact") or "").strip()
+                    if not fact:
+                        continue
+                    _uf, action = upsert_profile_fact(
+                        profile,
+                        fact,
+                        category="design",
+                        confidence=0.9,
+                        source="taste",
+                    )
+                    if action in ("added", "reinforced"):
+                        dirty = True
+                if dirty:
+                    await runtime.memory.save_user_profile(profile)
             # Light reinforce of matching facts (same session continuity)
             with suppress(Exception):
                 if q and reinforce_matching(profile, q):
@@ -156,6 +181,35 @@ async def build_turn_context(runtime: Any) -> str:
             )
             if block:
                 parts.append(block)
+            # Recalled for *this* turn — FTS + facts the hot block didn't keep
+            if q:
+                with suppress(Exception):
+                    from remedy.memory.living import format_turn_recall
+                    from remedy.memory.partner_memory import search_partner_and_entries
+
+                    hits = await search_partner_and_entries(
+                        runtime.memory,
+                        q,
+                        limit=6,
+                        project_path=project_path,
+                    )
+                    already = {
+                        ln.split(") ", 1)[-1]
+                        for ln in (block or "").splitlines()
+                        if ln.startswith("- (")
+                    }
+                    recalled = format_turn_recall(hits, already=already)
+                    if recalled:
+                        parts.append(
+                            "Recalled for this turn:\n" + "\n".join(recalled)
+                        )
+            # This-project chapter (decisions that survive session compress)
+            with suppress(Exception):
+                from remedy.core.project_learning import project_chapter_block
+
+                chap = project_chapter_block(project_path, query=q)
+                if chap:
+                    parts.append(chap)
             # Prefer profile display name on soul (already injected) — keep profile
             # as source of truth for durable facts; soul carries dyadic residue.
             # Full-scope / no-focus reminder — optional focus, not a cage

@@ -262,6 +262,23 @@ def resolve_tools(
         except Exception:
             return ToolsDecision(all_t, False, "plan_mode_fallback", pack="full")
 
+    with suppress(Exception):
+        from remedy.core.self_inject_draft import (
+            INTERNAL_IMPROVE_TOOLS,
+            in_internal_improve,
+        )
+
+        if in_internal_improve():
+            pack = [
+                t
+                for t in all_t
+                if ((t.get("function") or {}).get("name") or "")
+                in INTERNAL_IMPROVE_TOOLS
+            ]
+            return ToolsDecision(
+                pack or None, True, "internal_improve", pack="self_fix"
+            )
+
     # Page interaction / browse full agency
     if page_interaction:
         return ToolsDecision(all_t, True, "page_interaction", pack="full")

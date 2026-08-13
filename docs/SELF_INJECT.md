@@ -1,8 +1,8 @@
 # Hot-inject self-improvement loop (Remedy on Remedy)
 
-**Status:** Design (Draft) — supersedes the removed isolated-dogfood (`dogfood-isolated`)
-concept and the "dual instance" workflow. This document is the source of truth for the
-build that follows.
+**Status:** Implemented (runtime) — the unattended loop is live in the sidecar.
+On-command `self_inject_round` still exists for a full test-gated draft. This
+document is the source of truth for both paths.
 
 ## Problem
 
@@ -114,15 +114,100 @@ unless the marker (written only on green) is present.
   reach the WebUI (`find_webui_dir` / `_mount_web_ui`). Re-resolve + hard-refresh
   still applies on serve restart (see the AGENTS.md WebUI parity section).
 
-### 4. Idle trigger (5-minute)
+### 4. Idle trigger + unattended tick (live, no user prompt)
 
-- A lightweight scheduler in the sidecar that, when no user turn has arrived for `N`
-  seconds (default 300) and self-inject is enabled, invokes `SelfInjectRound`.
-  `self_inject.should_run_now()` gates on `REMEDY_SELF_INJECT` (or config
-  `self_inject.enabled`) + the idle window; `REMEDY_SELF_INJECT_FORCE=1` bypasses
-  the idle check.
-- On-command path: the `self_inject_round` / `self_inject_status` tools registered by
-  `agent_self_inject_tools.py`, and `skill_activate(skill="self-inject")`.
+The sidecar starts the scheduler on boot whenever self-inject is **enabled**
+(`REMEDY_SELF_INJECT` unset/not `0`, or config `self_inject.enabled=true`).
+It does **not** wait until the process is already idle at startup — that used
+to skip the loop entirely.
+
+Each cycle (first tick ~5s after boot, then every 60s):
+
+1. **Organism** (always): `LearningLoop.tick_learned_skills()` promote/demote/prune,
+   persist CUA macros + skill genome, soul dream if due.
+2. **Code** (only on a **git source checkout** of `remedy-ai`, idle of *user
+   turns* for `idle_seconds`, clean tree, 15-minute cooldown):
+   - Pick **one** evidenced target (pytest `lastfailed`, traceback in
+     `debug.log`, last red ledger gate, or a non-autofix ruff error).
+   - One internal LLM turn (max 8 steps, tools: read/edit/search +
+     pytest/ruff/py_compile only). Jail: at most 3 allowed files.
+   - Fast gate (ruff on changed files + mapped/failed test). Green → apply
+     locally + write `self_improve_pending_ship.json`. Red → rollback, 6h
+     cooldown on that target. **Never git-push from this path.**
+   - If there is no evidence / no LLM: fall back to `ruff --fix` only.
+
+Packaged / pip installs **never** rewrite their own code. They take official
+updates (replace). See § Client updates.
+
+## Client updates vs local self-improve
+
+Two loops. Do not mix them.
+
+| Install | Self-edit code? | How it updates |
+|---|---|---|
+| Git source checkout (`name = "remedy-ai"` + `.git`) | Yes, local only | Ship (`git_push` + `gh_release` + Desktop Release) then others pull the release |
+| Desktop installer / pip `remedy-ai` | **No** | Signed auto-update / `pip install -U` **replaces** the install |
+
+**If a machine already “updated itself” and an official update arrives:**
+
+- **Packaged client:** it should not have self-edited. The updater **replaces**
+  the binary/package. No merge.
+- **Source checkout with a dirty tree** (local draft or WIP): origin **wins**.
+  `remedy update` **aborts** rather than merging LLM patches. Either ship the
+  draft (then the release *is* the update) or discard it (`git reset --hard`
+  / clean tree) and pull. Per-client forks are not a supported update path.
+
+`GET /api/self-improve` exposes `update.mode` (`source_ship` | `replace`) and
+any `pending_ship` (local green draft waiting for a gated ship). Idle ticks
+never call `git_push` / `gh_release`.
+
+## Submit to GitHub (inbox comment — no branch, no release)
+
+A local-green draft is **not** in the product. If you want to look at it on
+GitHub, Remedy posts it as a **comment on one standing issue**
+(`Remedy self-improve inbox`). No new branch, no PR, no release — so the
+repo does not fill up with `remedy/self-improve/*` refs.
+
+1. Local draft already green + listed in `self_improve_pending_ship.json`.
+2. You call `self_improve_submit_issue` (or ask Remedy to).
+3. **Approve click** — Auto / thumbs-up does **not** count.
+4. Two local scanners must pass.
+5. `gh` must report viewerPermission WRITE/MAINTAIN/ADMIN. Random READ
+   users cannot use this tool to spam issues on the public repo.
+6. Comment (with the patch) on the inbox issue. **No `git push`. No PR.
+   No `gh release`.**
+
+You apply anything worthwhile yourself (or later land it in a normal
+human PR). Clients still only update from signed releases you cut on
+purpose.
+
+### Inbound bot (double-check)
+
+`.github/workflows/self-improve-bot.yml` runs on every PR to master/main:
+
+| Pass | What |
+|---|---|
+| 1 | Path jail + size + credential leak (`scripts/self_improve_pr_guard.py`) |
+| 2 | Independent malice/unsafe-API scan + security pytest (`scripts/self_improve_security_scan.py`) |
+
+- Uses `pull_request`, **never** `pull_request_target` (fork code must not see secrets).
+- Fork PRs get a stricter size cap. They still cannot merge without you.
+- `CODEOWNERS` requires `@AhmiDarrow` on `*` and on `.github/`, signing, and
+  the submit/guard modules.
+- The bot **never auto-merges**.
+
+Turn on GitHub branch protection for `master`: require the two bot jobs + CI,
+require Code Owner review, dismiss stale reviews, **disable** self-approval.
+
+Idle is **last chat/messenger turn** (`note_user_activity()` at the start of
+`stream_response`). Status-bar pings and `debug.log` writes do **not** count.
+`REMEDY_SELF_INJECT_FORCE=1` bypasses the idle check for code drafts.
+
+Inspect without prompting: `GET /api/self-improve` or the `self_inject_status`
+tool. Last tick is persisted at `~/.remedy/self_improve_last.json`.
+
+On-command path: `self_inject_round` / `self_inject_status` (full pytest/npm
+gate + apply/rollback) and `skill_activate(skill="self-inject")`.
 
 ### 5. `self-inject` skill (new, replaces `dogfood-isolated`)
 

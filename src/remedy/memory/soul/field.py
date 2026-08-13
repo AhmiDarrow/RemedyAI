@@ -19,6 +19,7 @@ MAX_TENSIONS = 16
 MAX_SELF_LESSONS = 24
 MAX_VOICE_MARKERS = 12
 MAX_OPEN_THREADS = 10
+MAX_FUTURE_DREAMS = 8
 DEFAULT_IDENTITY_VOW = (
     "I am one continuous partner on this machine — not a new instance per "
     "model, tab, or provider. Muscle changes; I stay."
@@ -140,6 +141,8 @@ class SoulField:
     organism_lessons: list[OrganismLesson] = field(default_factory=list)
     # Life-horizon pledges / shared commitments (short)
     pledges: list[str] = field(default_factory=list)
+    # Future-facing partner dreams: how I will help them reach their goals
+    future_dreams: list[str] = field(default_factory=list)
     updated_ts: float = field(default_factory=time.time)
 
     def touch(self) -> None:
@@ -149,6 +152,7 @@ class SoulField:
         self.organism_lessons = self.organism_lessons[-MAX_SELF_LESSONS:]
         self.self_habits = [h[:120] for h in self.self_habits if h][:16]
         self.pledges = [p[:160] for p in self.pledges if p][:12]
+        self.future_dreams = [d[:200] for d in self.future_dreams if d][:MAX_FUTURE_DREAMS]
 
     def to_dict(self) -> dict[str, Any]:
         self.touch()
@@ -162,6 +166,7 @@ class SoulField:
             "episodes": [asdict(e) for e in self.episodes],
             "organism_lessons": [asdict(x) for x in self.organism_lessons],
             "pledges": list(self.pledges),
+            "future_dreams": list(self.future_dreams),
             "updated_ts": self.updated_ts,
         }
 
@@ -227,6 +232,7 @@ class SoulField:
             episodes=episodes,
             organism_lessons=lessons,
             pledges=list(raw.get("pledges") or []),
+            future_dreams=list(raw.get("future_dreams") or []),
             updated_ts=float(raw.get("updated_ts") or time.time()),
         )
         sf.touch()

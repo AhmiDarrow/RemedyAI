@@ -73,6 +73,9 @@ def test_mission_short_id_prefix(tmp_path: Path) -> None:
 def test_plan_mode_tool_names_exclude_destructive() -> None:
     blocked = {
         "bash_exec",
+        "host_run",
+        "host_mkdir",
+        "host_script",
         "file_write",
         "file_edit",
         "job_run",
@@ -87,6 +90,7 @@ def test_plan_mode_tool_names_exclude_destructive() -> None:
     assert "file_read" in PLAN_MODE_TOOL_NAMES
     assert "web_fetch" in PLAN_MODE_TOOL_NAMES
     assert "file_glob" in PLAN_MODE_TOOL_NAMES
+    assert "host_which" in PLAN_MODE_TOOL_NAMES
     assert "todo_write" in PLAN_MODE_TOOL_NAMES
     assert "companion_context" in PLAN_MODE_TOOL_NAMES
     assert "clipboard_read" in PLAN_MODE_TOOL_NAMES

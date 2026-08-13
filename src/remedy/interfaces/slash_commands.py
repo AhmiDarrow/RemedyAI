@@ -38,6 +38,12 @@ _BUILTIN_COMMANDS: list[dict] = [
     {"name": "/forget", "description": "Remove a remembered fact: /forget <text>", "aliases": [], "arguments": "text"},
     {"name": "/pin", "description": "Pin a fact so it always injects: /pin <text>", "aliases": [], "arguments": "text"},
     {"name": "/whoami", "description": "Show what Remedy knows about you", "aliases": [], "arguments": None},
+    {
+        "name": "/stretch",
+        "description": "Map this PC (hardware, tools, rooms) — first-home census",
+        "aliases": ["/home"],
+        "arguments": None,
+    },
     {"name": "/goals", "description": "List open goals", "aliases": [], "arguments": None},
     {"name": "/goal", "description": "Add a goal: /goal <title>", "aliases": [], "arguments": "title"},
     {"name": "/plans", "description": "List structured task plans", "aliases": [], "arguments": None},
@@ -478,9 +484,38 @@ async def handle_slash_command(
             from remedy.memory.partner_memory import format_whoami
 
             profile = await memory.get_or_create_profile()
-            return {"text": format_whoami(profile)}
+            text = format_whoami(profile)
+            home = None
+            if runtime is not None:
+                home = getattr(getattr(runtime, "config", None), "home_dir", None)
+            with suppress(Exception):
+                from remedy.memory.soul.field import load_soul_field
+
+                sf = load_soul_field(home)
+                if sf.future_dreams:
+                    text += "\n\n**Dreams of the future** (how I will help):\n"
+                    text += "\n".join(f"- {d}" for d in sf.future_dreams[:5])
+            with suppress(Exception):
+                from remedy.execution.host.stretch import format_home_whoami
+
+                home_blk = format_home_whoami(home=home)
+                if home_blk:
+                    text += "\n\n" + home_blk
+            return {"text": text}
         except Exception as e:
             return {"text": f"Profile error: {e}"}
+
+    if stripped in ("/stretch", "/home"):
+        home = None
+        if runtime is not None:
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        try:
+            from remedy.execution.host.stretch import format_home_whoami, stretch_home
+
+            census = stretch_home(home, force=True)
+            return {"text": format_home_whoami(census, home=home)}
+        except Exception as e:
+            return {"text": f"Could not stretch this home: {e}"}
 
     if stripped in ("/goals", "/goal"):
         if stripped == "/goal" or stripped.startswith("/goal "):
@@ -489,7 +524,35 @@ async def handle_slash_command(
                 return {"text": "Usage: /goal <title>"}
             if runtime is not None and hasattr(runtime, "create_task"):
                 task = runtime.create_task(title, tags=["goal"])
-                return {"text": f"Goal added: **{task.title}** (`{task.id}`)"}
+                with suppress(Exception):
+                    if memory is not None:
+                        from remedy.memory.partner_memory import upsert_profile_fact
+
+                        profile = await memory.get_or_create_profile()
+                        upsert_profile_fact(
+                            profile,
+                            f"Goal: {title[:240]}",
+                            category="goal",
+                            confidence=0.9,
+                            source="slash_goal",
+                        )
+                        await memory.save_user_profile(profile)
+                dream_note = ""
+                with suppress(Exception):
+                    from remedy.memory.soul.partner_dream import refresh_partner_dreams
+
+                    home = getattr(getattr(runtime, "config", None), "home_dir", None)
+                    out = refresh_partner_dreams(
+                        home,
+                        memory=memory,
+                        extra_goals=[title],
+                    )
+                    dreams = out.get("dreams") or []
+                    if dreams:
+                        dream_note = "\nDream: " + str(dreams[0])
+                return {
+                    "text": f"Goal added: **{task.title}** (`{task.id}`){dream_note}"
+                }
             return {"text": "Runtime not available to store goals."}
         if runtime is not None and hasattr(runtime, "list_tasks"):
             tasks = runtime.list_tasks()

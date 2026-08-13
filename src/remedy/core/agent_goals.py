@@ -28,6 +28,35 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
                 runtime._session_brief.open_tasks.append(t)
                 runtime._session_brief.open_tasks = runtime._session_brief.open_tasks[-20:]
                 runtime._session_brief.touch()
+        # Organism: a stated goal is durable life memory, not only a session task
+        with suppress(Exception):
+            mem = getattr(runtime, "memory", None)
+            if mem is not None:
+                from remedy.memory.partner_memory import upsert_profile_fact
+
+                async def _remember() -> None:
+                    profile = await mem.get_or_create_profile()
+                    text = t if not description else f"{t} — {description.strip()[:160]}"
+                    upsert_profile_fact(
+                        profile,
+                        f"Goal: {text[:240]}",
+                        category="goal",
+                        confidence=0.9,
+                        source="goal_add",
+                    )
+                    await mem.save_user_profile(profile)
+
+                await _remember()
+        # Dream immediately: a new goal should shape how I partner *now*
+        with suppress(Exception):
+            from remedy.memory.soul.partner_dream import refresh_partner_dreams
+
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+            refresh_partner_dreams(
+                home,
+                memory=getattr(runtime, "memory", None),
+                extra_goals=[t],
+            )
         return f"Goal added id={task.id} title={t}"
 
     async def goal_list(status: str = "") -> str:

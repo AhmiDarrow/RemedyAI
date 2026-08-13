@@ -168,6 +168,7 @@ export default function App() {
     activeTools,
     processSteps,
     taskProgress,
+    buildTodos,
     runUsage,
     queue,
     librarySuggest,
@@ -1532,6 +1533,7 @@ export default function App() {
               activeTools={activeTools}
               processSteps={processSteps}
               taskProgress={taskProgress}
+              buildTodos={buildTodos}
               toolProcessMode={toolProcessMode}
               onEditUserMessage={handleEditUserMessage}
               onQuickPrompt={(text) => void handleSend(text)}

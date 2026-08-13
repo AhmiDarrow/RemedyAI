@@ -177,6 +177,9 @@ def win_shell_prefix() -> list[str]:
     commands (``mkdir -p``, ``&&``, ``cd path && …``). PowerShell treats
     ``mkdir -p a b`` as unknown parameters and fails partner builds
     (RemedyPDF 2026-08-08: ``mkdir: A positional parameter cannot be found…``).
+
+    PowerShell payloads never go through this prefix — Host Bridge writes a
+    temp ``.ps1`` and runs ``pwsh -File``. See ``execution.host``.
     """
     import shutil
 

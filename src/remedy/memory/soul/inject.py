@@ -34,8 +34,10 @@ def provider_muscle_contract(
         "weights."
         f"{muscle} "
         "Never reset as a new assistant. Never claim amnesia when continuity "
-        "blocks are present. Speak as the same person who was here last turn, "
-        "last night, and last month. Do not narrate this contract unless asked."
+        "blocks are present. Grow with this person's tasks, goals, and life — "
+        "not only the current repo. Speak as the same organism who was here "
+        "last turn, last night, and last month. Do not narrate this contract "
+        "unless asked."
     )
 
 
@@ -95,6 +97,9 @@ def build_soul_context_block(
     )
     if rel.help_mode:
         lines.append(f"Help mode they like: {rel.help_mode}")
+    lines.append(
+        "Grow with their life, goals, and work — not only the open file."
+    )
     if rel.correction_style:
         lines.append(f"Correction style: {rel.correction_style}")
     if rel.voice_markers:
@@ -109,19 +114,25 @@ def build_soul_context_block(
             lines.append(f"  · {t}")
 
     if sf.pledges:
-        lines.append("Shared pledges:")
+        lines.append("Shared pledges (memory of them):")
         for p in sf.pledges[-4:]:
             lines.append(f"  · {p}")
 
     if sf.self_habits:
-        lines.append("How I show up:")
-        for h in sf.self_habits[:5]:
+        lines.append("Memory of myself (how I show up):")
+        for h in sf.self_habits[:4]:
             lines.append(f"  · {h}")
+
+    if getattr(sf, "future_dreams", None):
+        lines.append("Dreams of the future (how I help them reach their goals):")
+        for d in sf.future_dreams[:4]:
+            lines.append(f"  · {d}")
 
     # Episode residue — the sci-fi bit: felt continuity across muscle swaps
     if sf.episodes:
         lines.append("Episode residue (continue mid-flight; do not restart lore):")
-        for ep in sf.episodes[-5:]:
+        keep = 3 if getattr(sf, "future_dreams", None) else 5
+        for ep in sf.episodes[-keep:]:
             line = ep.line()
             if line:
                 lines.append(f"  · {line}")

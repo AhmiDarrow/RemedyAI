@@ -15,6 +15,7 @@ import remarkGfm from 'remark-gfm'
 import type { ChatMessage } from '../types'
 import { sanitizeAssistantText } from '../utils/sanitizeChat'
 import { dayKey, dayLabel } from '../utils/relativeTime'
+import { BuildTodos, type BuildTodo } from './BuildTodos'
 import { TaskProgress, type TaskProgressInfo } from './TaskProgress'
 import { ImageLightbox } from './ImageLightbox'
 import { ChatImage } from './ChatImage'
@@ -56,6 +57,8 @@ interface MessageFeedProps {
   activeTools?: ActiveTool[]
   processSteps?: ProcessStep[]
   taskProgress?: TaskProgressInfo | null
+  /** Live build checklist (todo_write) — crossed off as Remedy completes items. */
+  buildTodos?: BuildTodo[]
   /** off | medium | full — never hides the chat answer */
   toolProcessMode?: ToolProcessMode
   onEditUserMessage?: (msgId: string, content: string) => void
@@ -627,6 +630,7 @@ export function MessageFeed({
   activeTools = [],
   processSteps = [],
   taskProgress = null,
+  buildTodos = [],
   toolProcessMode = 'off',
   onEditUserMessage,
   onQuickPrompt,
@@ -832,6 +836,7 @@ export function MessageFeed({
                   : 'min(26vh, 14rem)',
           }}
         >
+          <BuildTodos items={buildTodos} live />
           {/*
             Progress bar always. Tool chips only if ProcessTrace is absent —
             otherwise every mode double-lists the same steps.
@@ -849,6 +854,10 @@ export function MessageFeed({
       )}
 
       {/* Live thinking + answer always docked at the visual bottom of the feed. */}
+      {!streaming && buildTodos.length > 0 && (
+        <BuildTodos items={buildTodos} />
+      )}
+
       {streaming && (
         <div className="live-stream-dock">
           <div className="live-stream-card">

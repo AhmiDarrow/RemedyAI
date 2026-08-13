@@ -19,6 +19,14 @@ export function streamHttpErrorMessage(
   return formatApiErrorBody(body, statusText || `HTTP ${status}`)
 }
 
+export type SessionTodosPayload = {
+  todos: { id: string; content: string; status: string }[]
+}
+
+export async function listSessionTodos(sessionId: string): Promise<SessionTodosPayload> {
+  return apiFetch<SessionTodosPayload>(`/sessions/${sessionId}/todos`)
+}
+
 export async function listMessages(
   sessionId: string,
   /** Newest-window size (server returns latest N in chrono order). */
@@ -110,6 +118,7 @@ export function streamMessage(
   onLibrarySuggest?: (payload: Record<string, unknown>) => void,
   /** Per-session provider — must pair with model for multi-tab multi-provider. */
   provider?: string,
+  onTodos?: (payload: Record<string, unknown>) => void,
 ): AbortController {
   const controller = new AbortController()
 
@@ -242,6 +251,11 @@ export function streamMessage(
           case 'library_suggest':
             if (payload && typeof payload === 'object') {
               onLibrarySuggest?.(payload)
+            }
+            break
+          case 'todos':
+            if (payload && typeof payload === 'object') {
+              onTodos?.(payload)
             }
             break
           case 'done':

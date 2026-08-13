@@ -8,6 +8,7 @@
 
 import { abortSession } from '../api/sessions'
 import type { StreamProgress, UsagePayload } from '../api/messages'
+import type { BuildTodo } from '../components/BuildTodos'
 import type { ProcessStep } from '../utils/toolLabels'
 
 export type StreamJobStatus = 'running' | 'done' | 'error' | 'aborted'
@@ -21,6 +22,7 @@ export type StreamJobPaint = {
   processSteps: ProcessStep[]
   activeTools: StreamJobActiveTool[]
   taskProgress: StreamProgress | null
+  buildTodos: BuildTodo[]
   runUsage: {
     prompt_tokens: number
     completion_tokens: number
@@ -58,6 +60,7 @@ export function emptyStreamPaint(): StreamJobPaint {
     processSteps: [],
     activeTools: [],
     taskProgress: null,
+    buildTodos: [],
     runUsage: null,
   }
 }
@@ -193,6 +196,13 @@ export function setJobTaskProgress(sessionId: string, progress: StreamProgress |
   j.lastActivityAt = Date.now()
 }
 
+export function setJobBuildTodos(sessionId: string, todos: BuildTodo[]) {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return
+  j.paint.buildTodos = todos
+  j.lastActivityAt = Date.now()
+}
+
 export function setJobRunUsage(
   sessionId: string,
   usage: StreamJobPaint['runUsage'],
@@ -214,6 +224,7 @@ export function getJobPaint(sessionId: string): StreamJobPaint | null {
     processSteps: [...p.processSteps],
     activeTools: [...p.activeTools],
     taskProgress: p.taskProgress,
+    buildTodos: [...(p.buildTodos || [])],
     runUsage: p.runUsage ? { ...p.runUsage } : null,
   }
 }

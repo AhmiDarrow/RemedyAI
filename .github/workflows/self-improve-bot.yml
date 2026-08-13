@@ -1,0 +1,104 @@
+# Inbound self-improve / untrusted PR bot.
+#
+# Two independent scanners + existing security tests. Never merges.
+# Uses pull_request (NOT pull_request_target) so fork code cannot see secrets.
+# GITHUB_TOKEN is read + PR-comment only.
+
+name: Self-improve bot
+
+on:
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  path-jail:
+    name: Pass 1 — path jail + secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch base
+        run: git fetch origin "${{ github.base_ref }}" --depth=80
+
+      - name: Guard (stricter for forks)
+        env:
+          FROM_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          extra=""
+          if [ "$FROM_FORK" = "true" ]; then extra="--fork"; fi
+          uv run python scripts/self_improve_pr_guard.py --base "origin/${{ github.base_ref }}" $extra
+
+  behavior-scan:
+    name: Pass 2 — behavior / malice
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch base
+        run: git fetch origin "${{ github.base_ref }}" --depth=80
+
+      - name: Independent behavior scan
+        env:
+          FROM_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          extra=""
+          if [ "$FROM_FORK" = "true" ]; then extra="--fork"; fi
+          uv run python scripts/self_improve_security_scan.py --base "origin/${{ github.base_ref }}" $extra
+
+      - name: Security pytest subset
+        run: >
+          uv sync --dev &&
+          uv run pytest -q --tb=short
+          tests/test_web_fetch_ssrf.py
+          tests/test_secret_store.py
+          tests/test_approvals_power.py
+          tests/test_self_improve_pr.py
+          tests/test_self_inject_draft.py
+
+  comment:
+    name: Post review checklist
+    runs-on: ubuntu-latest
+    needs: [path-jail, behavior-scan]
+    if: always()
+    steps:
+      - name: Comment (same-repo PRs only)
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const p1 = '${{ needs.path-jail.result }}';
+            const p2 = '${{ needs.behavior-scan.result }}';
+            const fork = ${{ github.event.pull_request.head.repo.full_name != github.repository }};
+            const body = [
+              '## Self-improve bot',
+              '',
+              `- Pass 1 path/secrets: **${p1}**`,
+              `- Pass 2 behavior + security tests: **${p2}**`,
+              `- From fork: **${fork}**`,
+              '',
+              'This bot **does not merge**. Owner (`CODEOWNERS`) must review.',
+              'Clients only receive this after a signed release.',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
