@@ -19,11 +19,23 @@ Access scope (`project` / `home` / `full`) is a **security** control, separate f
 
 | Tool | Use |
 |------|-----|
-| **`file_edit`** | Precise search/replace; multi-hunk via `edits=` JSON; prefer over full rewrites |
+| **`file_edit`** | Precise search/replace; multi-hunk via `edits=` JSON; CRLF + indent-tolerant unique hunks; failed hunks are not retried blindly |
 | **`file_edit_batch`** | Multi-file search/replace in one call |
 | **`file_write`** | Create or fully overwrite a file |
 | **`file_read`** | Read text (optional line offset/limit) |
 | **`repo_search`** | Any text language; `symbol=` for definitions; `context_before`/`after`; absolute `path` for multi-tree |
+| **`file_glob`** | Find files by pattern (`*.py`, `src/**/*.ts`) — prefer over serial `list_dir` |
+| **`todo_write` / `todo_read`** | Short build checklist (pending → in_progress → completed). Do not claim done while open |
+| **`build_drive`** | Machine-owned loop: lock spec → write failing TDD tests → isolated hops → gate tower → review-fix |
+| **`build_parallel`** | Isolated overlays per unit; merge only if that unit’s oracle is green |
+| **`apply_patch`** | Unified diff / Begin-Patch block through the write jail |
+| **`build_review_fix`** | Second pass: TODO / bare except / syntax / missing tests → isolated hops |
+| **`companion_context`** | Focused window + clipboard + recent Desktop/Downloads — the rest of the PC |
+| **`clipboard_read` / `clipboard_write`** | Hold or hand back text, images, files. Do not ask what they copied |
+| **`companion_design`** | Design pass: gather visual evidence, seed critique → make → re-observe |
+| **`companion_observe`** | Screenshot focused window / desktop after a UI write |
+| **`companion_taste`** | Durable design taste (spacing, type, density) — honored every visual pass |
+| **`companion_inbox`** | New Desktop/Downloads drops (mocks, logs) since last look |
 | **`list_dir`** | Browse a directory (relative or absolute) |
 | **`bash_exec`** | Builds, tests, git (approval mode still applies; cwd defaults to focus/home) |
 | **`job_run`** | Silent **explore** or **verify** job — returns a summary, not a second chat persona |
@@ -53,7 +65,7 @@ Shell mutations stay inside **write roots** (project / home scope); opaque paylo
 ### Shell and edits
 
 - **`bash_exec`:** optional `timeout_seconds` (up to 600) and `workdir` for long Godot/cargo builds; local `.venv` / `node_modules/.bin` / repo-root tools are on `PATH`.
-- **`file_edit`:** multi-hunk with `edits='[{"old_string":"…","new_string":"…"}]'` to cut round-trips.
+- **`file_edit`:** multi-hunk with `edits='[{"old_string":"…","new_string":"…"}]'` to cut round-trips. Unique hunks survive CRLF / trailing-space / leading-indent drift. The same failed hunk is refused a second time this turn — `file_read` and copy a real snippet.
 - **Windows:** paths named `nul` / other reserved device names are rejected with a clear error (do not open them).
 
 ### Explore / verify jobs
@@ -96,6 +108,7 @@ using tools until the request is actually done — not until an arbitrary step c
 | **Soft epochs** | Every N model rounds: checkpoint + context compact, then **continue with tools** |
 | **Absolute ceiling** | Very high safety net for pathological loops only (not a task budget) |
 | **User abort** | Stop generation still ends the turn immediately |
+| **Machine drive** | After explore thrash, Remedy starts TDD + hops itself (`build_drive`). On red verify it auto-runs repair hops — the model continues from those results, it does not restart |
 
 Remedy does **not** force a final “tool limit” answer mid-mission. If the model
 loops the same tools, it is nudged to change approach; idle pauses only after

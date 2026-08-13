@@ -76,6 +76,33 @@ def test_live_unit_hop_structural(tmp_path):
     assert res.get("written") is True
 
 
+def test_live_unit_hop_refuses_jail(tmp_path):
+    from remedy.core.errors import SecurityError
+
+    root = tmp_path / "proj"
+    root.mkdir()
+    outside = tmp_path / "pwned.py"
+
+    def refuse(path, **_k):
+        raise SecurityError(f"Path outside allowed roots: {path}")
+
+    rt = SimpleNamespace(
+        effective_project_path=lambda: root,
+        resolve_tool_path=refuse,
+        config=SimpleNamespace(home_dir=tmp_path),
+    )
+    res = live_unit_hop(
+        rt,
+        path=str(outside),
+        symbol="helper",
+        source="def helper():\n    return 1\n",
+        use_llm=False,
+    )
+    assert res["ok"] is False
+    assert "jail" in str(res.get("error") or "").lower()
+    assert not outside.exists()
+
+
 def test_live_unit_hop_red_missing_symbol(tmp_path):
     root = tmp_path
     rt = SimpleNamespace(

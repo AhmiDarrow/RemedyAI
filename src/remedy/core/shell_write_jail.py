@@ -47,8 +47,12 @@ _MUTATION_HINT_RE = re.compile(
     r")"
 )
 
-# Redirection that writes a file (not just pipe).
-_REDIRECT_WRITE_RE = re.compile(r"(?<![0-9])>{1,2}\s*")
+# Redirection that writes a file. Include numbered forms (`1>` / `2>`) so
+# `dir 1> C:\Users\Public\pwn.txt` is a mutation. `2>&1` is a dup, not a dest.
+_REDIRECT_WRITE_RE = re.compile(r"(?<!&)\d*>{1,2}(?!&)\s*")
+_REDIRECT_DEVNULL_RE = re.compile(
+    r"(?ix)(?:\d*>{1,2})\s*(?:nul|null|/dev/null|con)\b"
+)
 
 # Path-like tokens that cannot be proven under write roots (obfuscation).
 _OPAQUE_PATH_HINT_RE = re.compile(
@@ -80,6 +84,7 @@ _INTERPRETER_ONESHOT_RE = re.compile(
     r"(?:"
     r"\b(?:python|python3|py)\s+(?:-\w+\s+)*-c\b"
     r"|\bnode\s+(?:-\w+\s+)*-e\b"
+    r"|\b(?:powershell|pwsh)(?:\.exe)?[^\n]*-(?:command|c)\b"
     r")"
 )
 
@@ -201,6 +206,26 @@ _RUNTIME_BIN_NAMES = frozenset(
 )
 
 
+def _invoke_path_tokens(command: str) -> list[str]:
+    """First token of each pipeline / statement (invoke position)."""
+    out: list[str] = []
+    for part in re.split(r"[|&;\n]+", command or ""):
+        tok = part.strip().split(None, 1)
+        if tok:
+            out.append(_clean_token(tok[0]))
+    return out
+
+
+def _token_is_invoke(token: str, invoke: list[str]) -> bool:
+    """True when *token* is an invoked runtime, not a dest that looks like one."""
+    t = _clean_token(token).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower()
+    for inv in invoke:
+        i = _clean_token(inv).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower()
+        if t and i and (t == i or t.startswith(i) or i.startswith(t)):
+            return True
+    return False
+
+
 def is_runtime_executable_path(path_str: str) -> bool:
     """True when *path_str* is a known interpreter/compiler binary, not a write dest."""
     raw = _clean_token(path_str)
@@ -220,9 +245,7 @@ def is_runtime_executable_path(path_str: str) -> bool:
         return True
     # python3.12 / python312 — whole token, not startswith (python_notes.txt)
     compact = stem.replace(".", "")
-    if re.fullmatch(r"python\d*", stem) or re.fullmatch(r"python\d*", compact):
-        return True
-    return False
+    return bool(re.fullmatch(r"python\d*", stem) or re.fullmatch(r"python\d*", compact))
 
 
 # Absolute Windows / Unix path tokens in a command line.
@@ -334,7 +357,11 @@ def looks_like_mutation(command: str) -> bool:
         return True
     if _SCRIPT_LAUNCH_RE.search(c):
         return True
-    return bool(_REDIRECT_WRITE_RE.search(c))
+    if _REDIRECT_WRITE_RE.search(c):
+        # `2>nul` / `2>/dev/null` alone is not a write dest we care about
+        stripped = _REDIRECT_DEVNULL_RE.sub("", c)
+        return bool(_REDIRECT_WRITE_RE.search(stripped))
+    return False
 
 
 def _is_windows_abs_path(raw: str) -> bool:
@@ -542,10 +569,13 @@ def check_shell_write_jail(
         )
 
     candidates = extract_path_candidates(cmd)
+    invoke = _invoke_path_tokens(cmd)
     offenders: list[str] = []
     for token in candidates:
         # Invoking python.exe / gcc.exe / node.exe is not a write to that path.
-        if is_runtime_executable_path(token):
+        # Destinations that merely *look* like a runtime (`copy x cmd.exe`,
+        # `del C:\Python312\python.exe`) must still be jailed.
+        if is_runtime_executable_path(token) and _token_is_invoke(token, invoke):
             continue
         outside = path_outside_write_roots(
             token, write_roots=roots, cwd=cwd

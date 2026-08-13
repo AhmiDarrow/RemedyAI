@@ -45,6 +45,12 @@ def register_workspace_tools(runtime: Any) -> None:
     except Exception:
         pass
     try:
+        from remedy.core.agent_companion_tools import register_companion_tools
+
+        register_companion_tools(runtime)
+    except Exception:
+        pass
+    try:
         from remedy.core.agent_self_inject_tools import register_self_inject_tools
 
         register_self_inject_tools(runtime)

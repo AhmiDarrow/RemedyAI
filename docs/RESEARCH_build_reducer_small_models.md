@@ -1,6 +1,7 @@
 # Build Reducer — machine-native builds for small local models
 
-**Status:** prototype + proven + **runnable demo** (not yet wired to the live loop).
+**Status:** prototype + proven + **wired to the live loop** via `build_drive`
+(auto-implement after explore thrash, auto-repair hops on red verify).
 **Date:** 2026-08-04
 **Scope:** how a low-context (4k–8k) local model can implement and create a whole
 project at near-frontier quality (just lower reasoning / fewer parameters).

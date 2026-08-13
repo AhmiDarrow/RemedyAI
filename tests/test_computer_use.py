@@ -424,8 +424,8 @@ def test_resolve_target_desktop_hints():
 
 
 def test_host_bridge_drive_target_is_session_scoped(tmp_path: Path, monkeypatch):
-    from remedy.core.computer.host_bridge import ComputerHostBridge
     from remedy.core import turn_context as tc
+    from remedy.core.computer.host_bridge import ComputerHostBridge
 
     b = ComputerHostBridge(home_dir=tmp_path)
     tok_a = tc._turn_session_id.set("sess-a")

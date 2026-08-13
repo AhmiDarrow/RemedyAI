@@ -35,15 +35,27 @@ def _project_root(runtime: Any) -> Path:
     return root
 
 
+def _clean_rel(path: str) -> str:
+    rel = (path or "").replace("\\", "/")
+    while rel.startswith("./"):
+        rel = rel[2:]
+    return rel
+
+
 def _resolve_write(runtime: Any, rel: str, root: Path) -> Path:
-    try:
-        return Path(runtime.resolve_tool_path(rel, for_write=True))
-    except Exception:
+    """Resolve *rel* through the write jail. Never fall open on refusal."""
+    if runtime is not None and hasattr(runtime, "resolve_tool_path"):
         try:
+            return Path(runtime.resolve_tool_path(rel, for_write=True))
+        except TypeError:
             return Path(runtime.resolve_tool_path(rel))
-        except Exception:
-            p = Path(rel)
-            return p if p.is_absolute() else (root / rel)
+    dest = (root / rel)
+    try:
+        dest_res = dest.resolve()
+        dest_res.relative_to(root.resolve())
+    except (OSError, ValueError) as exc:
+        raise PermissionError(f"hop path outside project: {rel}") from exc
+    return dest_res
 
 
 def disk_oracle(unit: UnitSpec, files: dict[str, str]) -> list[OracleError]:
@@ -56,10 +68,10 @@ def materialize_files(runtime: Any, files: dict[str, str], root: Path) -> list[s
     """Write files to disk via jail; return list of written rel paths."""
     written: list[str] = []
     for rel, body in (files or {}).items():
-        dest = _resolve_write(runtime, rel, root)
+        dest = _resolve_write(runtime, _clean_rel(rel), root)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(body or "", encoding="utf-8")
-        written.append(rel.replace("\\", "/"))
+        written.append(_clean_rel(rel))
     return written
 
 
@@ -207,7 +219,7 @@ def live_unit_hop(
     G: disk symbol index closure + optional AST-minimal patch via patch_symbol.
     """
     root = _project_root(runtime)
-    rel = path.replace("\\", "/").lstrip("./")
+    rel = _clean_rel(path)
     sym = (symbol or Path(rel).stem).strip()
     sig = Signature(symbol=sym, defines_path=rel)
 
@@ -247,13 +259,40 @@ def live_unit_hop(
             + closure
         )[:4000]
 
-    dest = _resolve_write(runtime, rel, root)
+    try:
+        dest = _resolve_write(runtime, rel, root)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "path": rel,
+            "written": False,
+            "error": f"write jail refused ({exc})",
+        }
     base_body = ""
     if dest.is_file():
         with suppress(Exception):
             base_body = dest.read_text(encoding="utf-8", errors="replace")
 
     body = (source or "").strip()
+    memo_hit = False
+    memo_root = Path(getattr(runtime, "_project", None) or root)
+    memo_k = ""
+    with suppress(Exception):
+        from remedy.core.build_hop_memo import memo_key, try_reuse
+
+        memo_k = memo_key(
+            path=rel,
+            symbol=sym,
+            behavior=unit.behavior or "",
+            tests=test_src,
+            closure=closure,
+            errors=[],
+        )
+        if not body and use_llm:
+            cached = try_reuse(memo_root, memo_k, oracle_fn=run_oracle, unit=unit)
+            if cached:
+                body = cached
+                memo_hit = True
     # G: AST-minimal patch when patch_symbol + source is a def fragment
     if body and (patch_symbol or "").strip() and base_body:
         with suppress(Exception):
@@ -315,9 +354,11 @@ def live_unit_hop(
                 continue
         break
 
-    # Materialize
+    # Materialize atomically (crash mid-write must not leave a half file)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(body, encoding="utf-8")
+    tmp = dest.with_name(dest.name + ".remedy-tmp")
+    tmp.write_text(body, encoding="utf-8")
+    tmp.replace(dest)
     written = True
 
     # A: behavioral oracle after disk write (uses tests on unit)
@@ -329,18 +370,20 @@ def live_unit_hop(
             if e.message not in {x.message for x in errors}:
                 errors.append(e)
 
-    # L2 import dry-run
+    # L2 import dry-run — skip inside isolated overlays (siblings are not
+    # copied; a missing neighbor must not false-red a good unit).
     import_result: dict[str, Any] = {}
-    with suppress(Exception):
-        from remedy.core.build_import_graph import dry_run_imports_for_paths
+    if getattr(runtime, "_overlay", None) is None:
+        with suppress(Exception):
+            from remedy.core.build_import_graph import dry_run_imports_for_paths
 
-        results = dry_run_imports_for_paths([str(dest)], root)
-        if results:
-            import_result = results[0]
-            if not import_result.get("ok"):
-                errors.append(
-                    OracleError(unit.id, f"import dry-run: {import_result.get('error')}")
-                )
+            results = dry_run_imports_for_paths([str(dest)], root)
+            if results:
+                import_result = results[0]
+                if not import_result.get("ok"):
+                    errors.append(
+                        OracleError(unit.id, f"import dry-run: {import_result.get('error')}")
+                    )
 
     # Behavioral LLM repair once if tests red
     if (
@@ -353,13 +396,21 @@ def live_unit_hop(
         nxt = model(unit, closure, errors)
         if nxt.strip():
             body = nxt
-            dest.write_text(body, encoding="utf-8")
+            tmp = dest.with_name(dest.name + ".remedy-tmp")
+            tmp.write_text(body, encoding="utf-8")
+            tmp.replace(dest)
             attempts += 1
             errors = run_oracle(unit, body)
             if not errors and (unit.tests or "").strip():
                 errors = _behavioral_oracle_errors(unit, body, root)
 
     ok = not errors
+    # Overlay hops must not cache until the live merge succeeds.
+    if ok and memo_k and (body or "").strip() and getattr(runtime, "_overlay", None) is None:
+        with suppress(Exception):
+            from remedy.core.build_hop_memo import store_hop
+
+            store_hop(memo_root, memo_k, body, ok=True, path=rel)
     with suppress(Exception):
         from remedy.core.build_snapshot import mark_snapshot_ok
 
@@ -408,6 +459,7 @@ def live_unit_hop(
         "phase": "done" if ok else "repair",
         "behavioral": bool(unit.tests),
         "snap_id": snap_meta.get("snap_id"),
+        "memo_hit": memo_hit,
     }
 
 

@@ -49,6 +49,16 @@ Prefer ONE tool:
 `computer_act(url=\"https://mail.google.com\", click=\"Sign in\", type=\"user@example.com\")`
 or after page open: click \"Email\" / \"Email or phone\" then type.
 
+### Clipboard & focus (personal companion)
+
+Repo-only agents cannot see the rest of the PC. You can:
+- **`companion_context`** — focused window + clipboard + recent Desktop/Downloads
+- **`clipboard_read` / `clipboard_write`** — hold or hand back text/images/files
+- **`companion_design`** — gather visual evidence and a critique→make→re-observe list
+
+If they say “look at this” / “I copied” / “design this”, call those first.
+Do not ask what is on the clipboard when a read already returned it.
+
 ### Full PC autonomy
 
 1. `computer_app` or `computer_windows mode=focus title=…`

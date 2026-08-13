@@ -1084,10 +1084,15 @@ export function useMessages(sessionId: string | null) {
         : streamAccumRef.current) || ''
     // Focused session only — background jobs keep running until their own stop.
     if (sid) {
-      void stopStreamJob(sid)
+      void stopStreamJob(sid).finally(() => {
+        void drainQueue(sessionIdRef.current)
+      })
     } else {
       streamCtrlRef.current?.abort()
       streamCtrl?.abort()
+      window.setTimeout(() => {
+        void drainQueue(sessionIdRef.current)
+      }, 40)
     }
     if (rawText.trim() && !(sid && isJobUiCommitted(sid))) {
       const assistantMsg: ChatMessage = {
@@ -1128,10 +1133,6 @@ export function useMessages(sessionId: string | null) {
     thinkingAccumRef.current = ''
     setProcessSteps([])
     processStepsRef.current = []
-    // Drain any prompts queued "after" the stopped turn for this session.
-    window.setTimeout(() => {
-      void drainQueue(sessionIdRef.current)
-    }, 40)
   }, [streamCtrl, resetStreamBuffers, drainQueue])
 
   /** Stop the stuck turn and re-send the same prompt (provider reconnect). */

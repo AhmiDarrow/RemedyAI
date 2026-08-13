@@ -68,6 +68,39 @@ def test_multi_hunk_ok():
     assert r.new_content == "ALPHA\nbeta\nGAMMA\n"
 
 
+def test_indent_tolerant_unique_block():
+    disk = "class A:\n    def foo():\n        return 1\n    def bar():\n        return 2\n"
+    old = "def foo():\n    return 1\n"
+    new = "def foo():\n    return 42\n"
+    r = apply_search_replace(disk, old, new)
+    assert r.ok, r.message
+    assert "indent-tolerant" in r.message.lower()
+    assert "return 42" in (r.new_content or "")
+    assert "def bar():" in (r.new_content or "")
+    # Re-indented to the class body (4 spaces), not left at column 0
+    assert "    def foo():" in (r.new_content or "")
+
+
+def test_indent_tolerant_ambiguous_refuses():
+    disk = "def foo():\n    return 1\n\ndef other():\n    return 1\n"
+    # two-line snippet whose stripped form matches twice
+    r = apply_search_replace(disk, "def foo():\n    return 1\n", "def foo():\n    return 9\n")
+    # exact match exists for def foo — that path wins (not indent flex)
+    assert r.ok
+
+
+def test_note_failed_edit_repeat_warns():
+    from types import SimpleNamespace
+
+    from remedy.core.file_edit import note_failed_edit
+
+    rt = SimpleNamespace()
+    first = note_failed_edit(rt, "a.py", "old hunk")
+    assert first == ""
+    second = note_failed_edit(rt, "a.py", "old hunk")
+    assert "already failed" in second.lower()
+
+
 def test_multi_hunk_stops_on_failure():
     r = apply_multi_hunk(
         "only once\n",

@@ -372,6 +372,53 @@ def test_shell_write_jail_blocks_sibling_set_content(tmp_path: Path):
     )
 
 
+def test_shell_write_jail_blocks_runtime_bin_as_destination(tmp_path: Path):
+    """copy/del/Set-Content onto python.exe / cmd.exe must not skip the dest."""
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    (sticky / "payload.exe").write_bytes(b"x")
+    roots = [sticky.resolve()]
+    cases = [
+        r'copy payload.exe C:\Windows\System32\cmd.exe',
+        r'del C:\Python312\python.exe',
+        r'Set-Content -Path C:\Python312\python.exe -Value pwned',
+        r'gcc hello.c -o C:\Windows\System32\cmd.exe',
+    ]
+    for cmd in cases:
+        hit = check_shell_write_jail(
+            cmd,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            access_scope="project",
+        )
+        assert hit is not None, f"expected jail for dest-is-runtime: {cmd}"
+
+
+def test_shell_write_jail_blocks_numbered_redirect(tmp_path: Path):
+    """`dir 1>` / `2>` to an outside file is a write, not a ignored redirect."""
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    roots = [sticky.resolve()]
+    cases = [
+        r"dir 1> C:\Users\Public\pwn.txt",
+        r"Get-Content readme.txt 2> C:\Users\Administrator\Desktop\leak.txt",
+    ]
+    for cmd in cases:
+        assert looks_like_mutation(cmd), cmd
+        hit = check_shell_write_jail(
+            cmd,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            access_scope="project",
+        )
+        assert hit is not None, f"expected jail for numbered redirect: {cmd}"
+    # Dev-null dups stay non-mutations
+    assert looks_like_mutation("dir 2>nul") is False
+    assert looks_like_mutation("dir 2>/dev/null") is False
+
+
 def test_runtime_executable_path_does_not_skip_data_files():
     assert is_runtime_executable_path(r"C:\Python312\python.exe") is True
     assert is_runtime_executable_path("python") is True

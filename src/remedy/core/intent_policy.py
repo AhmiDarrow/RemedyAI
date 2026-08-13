@@ -156,6 +156,8 @@ _PACKS: dict[str, dict[str, Any]] = {
             "(raise timeout_seconds for long builds).\n"
             "6) Run until finished — same class of agency as a long Build session. "
             "Soft epochs only compact context; never stop for a step/tool budget.\n"
+            "7) Prefer build_drive / isolated hops over plan essays. "
+            "companion_context if the work needs the screen or clipboard.\n"
             "Do not stop at a question when you can pick a reasonable default. "
             "Escalate only for secrets, paid APIs, or irreversible destroy. "
             "Summarize only when the work is actually done."
@@ -166,6 +168,7 @@ _PACKS: dict[str, dict[str, Any]] = {
             "mission_start",
             "mission_update",
             "mission_verify",
+            "build_drive",
             "file_edit",
             "repo_search",
             "job_run",

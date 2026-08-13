@@ -186,6 +186,9 @@ async def _run_one(runtime: Any, task: SpreadTask) -> WorkerResult:
         elif kind == "review":
             summary, ok, details = await _review_worker(runtime, task)
             model = details.get("model_used") or "local"
+        elif kind == "implement":
+            summary, ok, details = await _implement_worker(runtime, task)
+            model = "none"
         else:
             summary, ok, details = await _job(
                 runtime, "explore", query=task.query, path=task.path
@@ -308,6 +311,30 @@ async def _review_worker(
             model_used = "local"
             details = {**details, "model_used": "local"}
     return summary, ok, {**details, "model_used": model_used}
+
+
+async def _implement_worker(
+    runtime: Any, task: SpreadTask
+) -> tuple[str, bool, dict[str, Any]]:
+    """Isolated hop on task.path — merge only if the oracle is green."""
+    from remedy.core.build_isolated import isolated_unit_hop
+
+    path = (task.path or "").strip()
+    if not path or path in {".", "./"}:
+        return "implement worker needs path= (unit file)", False, {}
+    res = isolated_unit_hop(
+        runtime,
+        path=path,
+        behavior=(task.goal or task.query or "")[:400],
+        use_llm=False,
+        max_repairs=2,
+    )
+    ok = bool(res.get("ok"))
+    summary = (
+        f"isolated hop path={res.get('path')} ok={ok} merged={res.get('merged')} "
+        f"errors={res.get('errors') or res.get('error') or '—'}"
+    )
+    return summary, ok, res
 
 
 def _local_summarize(text: str, *, goal: str) -> str | None:

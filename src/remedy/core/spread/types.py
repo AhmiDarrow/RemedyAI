@@ -7,14 +7,14 @@ from typing import Any
 
 # Deterministic worker kinds (prefer these — cheap and parallelizable).
 SPREAD_KINDS = frozenset(
-    {"explore", "search", "verify", "diff", "read_map", "review"}
+    {"explore", "search", "verify", "diff", "read_map", "review", "implement"}
 )
 
 
 @dataclass
 class SpreadTask:
     id: str
-    kind: str  # explore | search | verify | diff | read_map | review
+    kind: str  # explore | search | verify | diff | read_map | review | implement
     goal: str = ""
     path: str = "."
     query: str = ""

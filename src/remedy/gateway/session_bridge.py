@@ -254,7 +254,25 @@ async def handle_messenger_event(
     # Prefer full stream_response path (history + tools + continuity stack)
     reply_parts: list[str] = []
     if session is not None and hasattr(runtime, "stream_response"):
+        claimed = False
+        claim_epoch = 0
         try:
+            from remedy.core.turn_context import (
+                release_session_stream_claim,
+                stream_claim_epoch,
+                try_claim_session_stream,
+            )
+
+            if not try_claim_session_stream(session.id):
+                busy = (
+                    "*(This chat is already generating a reply — "
+                    "try again in a moment.)*"
+                )
+                reply_parts.append(busy)
+                yield busy
+                return
+            claimed = True
+            claim_epoch = stream_claim_epoch(session.id)
             # Bind session provider/model (status-bar style) before the turn —
             # otherwise messenger always used whatever global config last set.
             with suppress(Exception):
@@ -288,6 +306,12 @@ async def handle_messenger_event(
                     text = str(chunk)
                     reply_parts.append(text)
                     yield text
+        finally:
+            if claimed:
+                with suppress(Exception):
+                    from remedy.core.turn_context import release_session_stream_claim
+
+                    release_session_stream_claim(session.id, epoch=claim_epoch)
     else:
         async for chunk in runtime.handle_event(event):
             if chunk is not None:

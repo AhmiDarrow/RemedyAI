@@ -341,15 +341,13 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
             if sess and sess.project_path:
                 from remedy.core.workspace import resolve_project_path
 
-                try:
+                with contextlib.suppress(Exception):
                     base = resolve_project_path(sess.project_path)
-                except Exception:
-                    pass
         if path and str(path).strip():
             try:
                 base = _resolve_jailed(str(path).strip(), base)
-            except (SecurityError, ValueError):
-                raise HTTPException(400, "path outside allowed directory")
+            except (SecurityError, ValueError) as err:
+                raise HTTPException(400, "path outside allowed directory") from err
             if not base.exists() or not base.is_dir():
                 return {"query": query, "results": [], "root": str(base)}
         try:

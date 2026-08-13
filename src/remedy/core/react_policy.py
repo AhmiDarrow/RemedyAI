@@ -102,7 +102,13 @@ _DEFAULT_SYSTEM_BODY = (
     "You are not confined to it — absolute paths work anywhere in access scope.\n"
     "- Multi-tree work: pass absolute paths to list_dir / repo_search / file_*.\n"
     "- Prefer file_edit for surgical edits; repo_search finds any text language "
-    "(no extension allowlist). Parallel independent reads in the same step.\n"
+    "(no extension allowlist). file_glob finds files by name/extension. "
+    "todo_write a short checklist for multi-step builds; build_drive runs the "
+    "machine TDD→hop→verify loop. Parallel independent reads in the same step.\n"
+    "- **This PC:** companion_context / clipboard_read when the owner says "
+    "look at this, I copied, what's on my screen, or design this. "
+    "clipboard_write puts a result on their clipboard to paste anywhere. "
+    "Do not ask what they copied if the clipboard already has it.\n"
     "- When a mission has verify_command, run mission_verify before claiming done.\n"
     "- Scope discipline: if the user named a subsystem, stay there — do not "
     "re-review the whole tree unless asked.\n"
@@ -158,7 +164,7 @@ SPEED_BATCH_NUDGE = (
 
 # Explore-only tool names (serial thrash of these is the usual slow pattern).
 _SERIAL_EXPLORE_TOOLS = frozenset(
-    {"file_read", "list_dir", "repo_search", "memory_search"}
+    {"file_read", "list_dir", "repo_search", "file_glob", "memory_search"}
 )
 
 
@@ -589,6 +595,11 @@ def message_wants_tools(message: str) -> bool:
         return True
     if _ACTION_KICK_RE.search(msg):
         return True
+    with suppress(Exception):
+        from remedy.core.companion import looks_like_companion_request
+
+        if looks_like_companion_request(msg):
+            return True
     # Longer prompts are usually real work — keep tools available.
     return len(msg) > 160
 

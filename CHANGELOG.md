@@ -4,6 +4,57 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-08-13
+
+### Build ability (Claude-class loop)
+
+- **Machine drive:** `build_drive` runs spec → TDD → unit hops → gate tower →
+  repair without waiting for the model to remember the tools. The live ReAct
+  loop auto-drives after explore thrash (zero writes) and auto-repairs on red
+  verify. `todo_write` / `todo_read` is a first-class checklist (persisted in
+  `.remedy-build/todos.json`). `file_glob` finds files by pattern so the agent
+  stops serial-`list_dir` hunting. Always-on — not behind `build_os_advanced`.
+- **Beyond a chat coding agent:** indent-tolerant `file_edit` (wrong leading
+  whitespace still applies a unique multi-line hunk); failed-hunk memory
+  refuses the same dead edit twice in one turn; open todos block DONE after
+  writes; post-write review injects mapped tests so verify stays scoped.
+  Auto-drive skips review-only asks.
+- **Isolated parallel hops:** `build_parallel` / spread `kind=implement` hop
+  each unit in a private overlay and merge only on green oracle — siblings
+  cannot corrupt each other.
+- **Multi-language oracles:** JS/TS (`node --check` / brace), Rust (`rustc`),
+  Go (`gofmt -e`), C/C++ (`gcc/g++ -fsyntax-only`) feed the syntax gate.
+- **Review-fix pass:** after green verify / `build_drive`, machine scans the
+  write set (TODO, bare except, syntax, missing tests) and hops errors.
+- **Hop memo:** content-addressed cache under `.remedy-build/hop-memo/` skips
+  regenerating identical units.
+- **`apply_patch`:** unified diff or `*** Begin Patch` blocks through the write
+  jail (unique hunks, all-or-nothing per file).
+- **PC companion:** `companion_context`, `clipboard_read` / `clipboard_write`,
+  `companion_design`. Foreground window, OS clipboard (text/image/files), and
+  recent Desktop/Downloads/Documents — so “look at this / I copied / design
+  this” starts from the actual PC, not a clarifying question. Design pass
+  seeds observe → critique → make → re-observe.
+- **Watch-the-app:** after UI writes, `companion_observe` / machine visual
+  observe captures the focused window. Green tests do not prove the pixels.
+- **Taste memory:** `companion_taste` + auto-extract (“I prefer 8px / Inter”).
+  Injected on every design pass.
+- **Away mode:** “stepping away / work alone / finish without me” stamps the
+  build turn — no clarifying questions, faster auto-drive, escalate only on
+  secrets/approval/destroy.
+- **Drop-a-file:** `companion_inbox` polls Desktop/Downloads for new mocks/logs
+  and injects them without the owner asking.
+- **Build stability:** isolated hops no longer write through to the live
+  runtime (parallel race); apply_patch / hops count as writes; machine
+  injects capped per turn so drive+review+observe cannot flood the context.
+- **Build stability (follow-through):** inject budget only consumes a slot
+  when a drive/observe actually ran (explore no-ops no longer starve repair);
+  syntax gate resolves write_set against the project and skips missing paths
+  instead of false-red blocking verify; isolated hops skip overlay imports
+  (siblings stay on the live tree) and atomically merge + live-import with
+  rollback; hop materialize uses temp+replace so a crash cannot leave a half
+  file.
+
 ### Fixes
 
 - **Computer use stays on the desktop after `computer_app`:** click/find/act
@@ -43,6 +94,19 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   no longer steal sticky target; `computer_act` defaults to auto; image-click
   adds screenshot origin; `open_app` prefers project over CWD and rejects `..`;
   file_edit flex no longer glues the next line.
+- **Ship sweep:** `apply_patch` / isolated hops fail closed on write-jail
+  refusal (no absolute-path fallthrough). Runtime binaries are skipped only
+  in invoke position — `copy`/`del`/`Set-Content` onto `cmd.exe`/`python.exe`
+  is jailed. Numbered redirects (`1>` / `2>`) count as writes. Overlay hops
+  cannot escape via `..`. `.env` / `.github` paths no longer get `lstrip("./")`
+  retargeted. `Add File` refuses an existing path. Hop memo is not stored
+  until a live merge. Snapshots no longer collide on Windows `time.time()`.
+- **Uninstaller:** `remedy uninstall` removes only `remedy-ai` — never the
+  unrelated PyPI package named `remedy`.
+- **Messenger + Stop:** messenger turns take the same stream claim as
+  desktop; Stop drains the queued next send after abort finishes; abort
+  notes persist once (not twice on Stop). Browser-rail Rust URL parser
+  mirrors Python IMDS / public-IP / metadata blocks.
 
 ## [0.22.3] - 2026-08-09
 

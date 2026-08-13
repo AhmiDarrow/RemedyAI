@@ -86,6 +86,12 @@ def test_plan_mode_tool_names_exclude_destructive() -> None:
     assert "plan_save" in PLAN_MODE_TOOL_NAMES
     assert "file_read" in PLAN_MODE_TOOL_NAMES
     assert "web_fetch" in PLAN_MODE_TOOL_NAMES
+    assert "file_glob" in PLAN_MODE_TOOL_NAMES
+    assert "todo_write" in PLAN_MODE_TOOL_NAMES
+    assert "companion_context" in PLAN_MODE_TOOL_NAMES
+    assert "clipboard_read" in PLAN_MODE_TOOL_NAMES
+    assert "clipboard_write" not in PLAN_MODE_TOOL_NAMES
+    assert "build_drive" not in PLAN_MODE_TOOL_NAMES
 
 
 def test_should_enable_tools_for_build_intent() -> None:
