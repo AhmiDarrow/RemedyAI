@@ -114,6 +114,14 @@ def test_tier_review_project_l2_with_tools():
     assert tier_policy(t).allow_tools is True
 
 
+def test_tier_full_bugsweep_is_agency():
+    """Live 2026-08-13: 'full bugsweep' was L1 → tools off → leaked tool_c."""
+    t = classify_turn_tier("full bugsweep")
+    assert t >= TurnTier.L2_AGENCY
+    assert tier_policy(t).allow_tools is True
+    assert classify_turn_tier("bugsweep") >= TurnTier.L2_AGENCY
+
+
 def test_tier_l2_common_agency_phrasing():
     """Everyday tool asks must not collapse to L1 (tools stripped on hot path)."""
     agency = [

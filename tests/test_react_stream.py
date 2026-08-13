@@ -42,6 +42,25 @@ def test_accumulate_tool_call_deltas() -> None:
     assert acc[0]["id"] == "c1"
 
 
+def test_sse_does_not_live_stream_tool_c_prefix() -> None:
+    """Live 2026-08-13: DeepSeek streamed 'tool_c' into the chat bubble."""
+    state = StreamRoundState()
+    live = apply_openai_sse_chunk(
+        state,
+        {"choices": [{"delta": {"content": "tool_c"}}]},
+        stream_live=True,
+    )
+    assert live is None
+    assert state.produced_user_text is False
+    assert state.suppressed_tool_markup is True
+    live2 = apply_openai_sse_chunk(
+        state,
+        {"choices": [{"delta": {"content": "alls>"}}]},
+        stream_live=True,
+    )
+    assert live2 is None
+
+
 def test_apply_openai_sse_chunk_live_and_tools() -> None:
     state = StreamRoundState()
     live = apply_openai_sse_chunk(

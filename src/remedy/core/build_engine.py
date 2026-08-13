@@ -39,6 +39,7 @@ _BUILD_RE = re.compile(
     r"end[- ]to[- ]end|from\s+scratch|green\s+tests|pytest|npm\s+test|"
     # Broader task verbs — default research → plan → build loop
     r"review|audit|investigate|research|debug|set\s*up|setup|"
+    r"sweep|bugsweep|bugfix|bug-hunt|hotfix|triage|cleanup|dogfood|"
     r"migrate|upgrade|replace|prototype|design\s+(the\s+)?(system|api|feature)|"
     r"calculator|todo\s+app|cli\b|"
     # Simple C / compile tasks (partner e2e)

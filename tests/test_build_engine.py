@@ -23,6 +23,9 @@ def test_detects_build_requests():
     assert looks_like_build_request("fix the pytest failures in tests/")
     assert looks_like_build_request("review the auth module and fix bugs")
     assert looks_like_build_request("please set up a calculator.py in the project")
+    assert looks_like_build_request("full bugsweep")
+    assert looks_like_build_request("bugsweep")
+    assert looks_like_build_request("hotfix")
     assert not looks_like_build_request("thanks")
     assert not looks_like_build_request("what is a monad?")
 

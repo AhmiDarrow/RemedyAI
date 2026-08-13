@@ -17,6 +17,7 @@ from remedy.core.react_policy import (
     _SOFT_AFFIRM_RE,
     history_suggests_open_work,
     looks_like_pseudo_tools,
+    looks_like_tool_markup_prefix,
     message_wants_tools,
     parse_pseudo_tool_calls,
     tool_call_fingerprint,
@@ -138,12 +139,17 @@ def apply_openai_sse_chunk(
         state.content_parts.append(content_delta)
         # Never live-stream DSML / fake tool markup — it becomes chat spam.
         acc = "".join(state.content_parts)
-        if stream_live and not looks_like_pseudo_tools(acc) and not looks_like_pseudo_tools(
-            str(content_delta)
+        if (
+            stream_live
+            and not looks_like_pseudo_tools(acc)
+            and not looks_like_pseudo_tools(str(content_delta))
+            and not looks_like_tool_markup_prefix(acc)
         ):
             state.produced_user_text = True
             live = content_delta
-        elif stream_live and looks_like_pseudo_tools(acc):
+        elif stream_live and (
+            looks_like_pseudo_tools(acc) or looks_like_tool_markup_prefix(acc)
+        ):
             # Mark so callers know we suppressed junk (recovery will run later).
             state.suppressed_tool_markup = True
     # DeepSeek thinking mode streams reasoning_content alongside (or before) content.

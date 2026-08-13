@@ -432,6 +432,20 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                     except Exception:
                         final_usage = None
 
+                    # Never persist leaked DSML / "tool_c" as the chat bubble.
+                    if full_response:
+                        with contextlib.suppress(Exception):
+                            from remedy.core.react_policy import (
+                                looks_like_pseudo_tools,
+                                looks_like_tool_markup_prefix,
+                                strip_tool_markup,
+                            )
+
+                            if looks_like_pseudo_tools(full_response) or looks_like_tool_markup_prefix(
+                                full_response
+                            ):
+                                full_response = strip_tool_markup(full_response)
+
                     # Always leave a durable assistant row when we have any text
                     # (including stop/disconnect explanations). Status-only turns
                     # used to vanish with no chat bubble.
@@ -441,14 +455,19 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                             "send **continue** to resume.)*"
                         )
 
-                    if full_response and memory:
+                    has_tools = bool(collected_tool_calls or collected_tool_results)
+                    persist_text = (full_response or "").strip()
+                    if not persist_text and has_tools:
+                        persist_text = "*(Used tools — see process.)*"
+
+                    if persist_text and memory:
                         tok = None
                         if isinstance(final_usage, dict):
                             tok = int(final_usage.get("total_tokens") or 0) or None
                         await memory.add_chat_message(ChatMessage(
                             session_id=session_id,
                             role=ChatMessageRole.ASSISTANT,
-                            content=full_response,
+                            content=persist_text,
                             thinking=full_thinking.strip() or None,
                             tool_calls=collected_tool_calls,
                             tool_results=collected_tool_results,
@@ -466,7 +485,7 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                             ex = await memory.get_chat_session(session_id)
                             if ex is not None:
                                 await mirror_desktop_reply_to_messenger(
-                                    gateway, ex, full_response
+                                    gateway, ex, persist_text
                                 )
                                 if getattr(ex, "origin_channel", None):
                                     await publish_session_event(
