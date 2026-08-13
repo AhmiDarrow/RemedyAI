@@ -133,6 +133,9 @@ _L2_AGENCY = re.compile(
     r"(security|code|project|repo|codebase)\s+audit\b|"
     r"walk (me |us )?(through )?(the )?(project|codebase|repo|code)\b|"
     r"give me (a |an )?(overview|tour of|status of) (the )?(project|codebase|repo)\b|"
+    # Live 2026-08-13: "full bugsweep" classified L1 → tools=[] → "tool_c"
+    r"bugsweep|bug.?sweep|bug.?hunt|bugfix|hotfix|"
+    r"full\s+(bug\s*)?sweep|triage|cleanup|dogfood|"
     # Explore / inspect phrasing that message_wants_tools already rescues
     r"(inspect|analyze|analyse|explore|scan)\s+(the |this |my |our )?"
     r"(project|codebase|repo|code|tree|structure)\b|"

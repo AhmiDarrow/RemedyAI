@@ -50,6 +50,19 @@ def test_resolve_tools_l1_strips_pure_chat():
     assert d.reason == "l1_pure_chat"
 
 
+def test_resolve_tools_full_bugsweep_not_l1():
+    """Live 2026-08-13: 'full bugsweep' disarmed as l1_pure_chat."""
+    all_t = [_tool("file_write"), _tool("list_dir"), _tool("file_read")]
+    d = resolve_tools(
+        message="full bugsweep",
+        all_tools=all_t,
+        turn_tier=1,
+    )
+    assert d.tools is not None
+    assert d.run_until_done is True
+    assert d.reason != "l1_pure_chat"
+
+
 def test_resolve_tools_plan_mode():
     all_t = [_tool("file_write"), _tool("plan_list")]
     d = resolve_tools(

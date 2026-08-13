@@ -4,6 +4,18 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-08-13
+
+### Fixes
+
+- **First-turn “full bugsweep” actually runs tools.** `bugsweep` / `hotfix` /
+  `triage` / `cleanup` / `dogfood` were classified as L1 chat (`bug` does not
+  match `bugsweep`), so DeepSeek Flash got `tools=[]`, dumped
+  `<tool_invoke …/>` as text, and the bubble persisted as `tool_c`. Those
+  kicks now arm the full tool pack; recovered XML/DSML dumps execute even
+  when `force_answer` was set; short `tool_c` prefixes are not streamed or
+  saved. Live-verified against DeepSeek Flash on this checkout.
+
 ## [0.23.0] - 2026-08-13
 
 ### Build ability (Claude-class loop)
