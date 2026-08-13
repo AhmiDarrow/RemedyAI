@@ -201,8 +201,11 @@ def register_settings_tools(runtime: Any) -> None:
             "messengers": messengers,
         }
         for k, v in flat.items():
-            if v is not None and v != "":
-                patch[k] = v
+            if v is None:
+                continue
+            if v == "" and k != "project_path":
+                continue
+            patch[k] = v
         # Absorb any extra known keys models invent
         for k, v in extra.items():
             if v is not None and k not in ("kwargs",):
@@ -297,6 +300,76 @@ def register_settings_tools(runtime: Any) -> None:
                             f"in the UI (or /approve {item.id}), then retry with "
                             "force_project_switch=true after they approve."
                         )
+            elif bound and is_unset_project_path(new_raw):
+                # Unset / "." drops the write jail to full profile — same as a switch.
+                from remedy.core.approvals import APPROVALS
+                from remedy.core.turn_context import turn_session_id
+
+                sid = turn_session_id(runtime)
+                cmd = "unset_project_path"
+                ask_reason = (
+                    APPROVALS.needs_ask(cmd, tool_name="update_settings")
+                    or "Clearing the project focus (write jail) requires approval"
+                )
+                if not force_switch or not APPROVALS.is_approved(
+                    "update_settings", cmd, session_id=sid
+                ):
+                    if not force_switch:
+                        return format_tool_error(
+                            (
+                                "refusing to clear project_path while a focus folder "
+                                "is bound (that would lift the write jail). "
+                                "Keep working under the current tree."
+                            ),
+                            code="PROJECT_JAIL",
+                            tool_name="update_settings",
+                            suggestion=(
+                                "If the user explicitly asked to detach the project, "
+                                "call update_settings(project_path='', "
+                                "force_project_switch=true) and wait for UI approval."
+                            ),
+                        )
+                    item = APPROVALS.create(
+                        tool_name="update_settings",
+                        command=cmd,
+                        reason=ask_reason,
+                        session_id=sid,
+                    )
+                    return (
+                        f"APPROVAL_REQUIRED id={item.id}\n"
+                        f"reason={ask_reason}\n"
+                        "Do not invent success. Tell the user this needs approval "
+                        f"in the UI (or /approve {item.id})."
+                    )
+
+        # Widening scope / auto-approval is owner power — model cannot self-grant.
+        widen_scope = str(patch.get("access_scope") or "").strip().lower()
+        widen_approval = str(patch.get("approval_mode") or "").strip().lower()
+        if widen_scope in ("home", "full") or widen_approval == "auto":
+            from remedy.core.approvals import APPROVALS
+            from remedy.core.turn_context import turn_session_id
+
+            sid = turn_session_id(runtime)
+            if widen_scope in ("home", "full"):
+                cmd = f"widen_access_scope:{widen_scope}"
+                reason = f"Raising access_scope to {widen_scope} requires approval"
+            else:
+                cmd = "widen_approval_mode:auto"
+                reason = "Switching approval_mode to auto requires approval"
+            ask_reason = APPROVALS.needs_ask(cmd, tool_name="update_settings") or reason
+            if not APPROVALS.is_approved("update_settings", cmd, session_id=sid):
+                item = APPROVALS.create(
+                    tool_name="update_settings",
+                    command=cmd,
+                    reason=ask_reason,
+                    session_id=sid,
+                )
+                return (
+                    f"APPROVAL_REQUIRED id={item.id}\n"
+                    f"reason={ask_reason}\n"
+                    "Do not invent success. Tell the user this needs approval "
+                    f"in the UI (or /approve {item.id}), then retry."
+                )
 
         try:
             result = await apply_settings_update(
@@ -347,8 +420,9 @@ def register_settings_tools(runtime: Any) -> None:
         "llm_model='deepseek-v4-flash'; vision_enabled=true; access_scope='full'. "
         "After enabling Sleev, note it only routes cloud providers (xAI/DeepSeek/…); "
         "Ollama/RMB stay direct. User needs `sleev` CLI installed + gateway running. "
-        "project_path changes while a focus folder is bound require "
-        "force_project_switch=true AND user approval (no silent retarget).",
+        "project_path changes or clearing the focus folder require "
+        "force_project_switch=true AND user approval. Raising access_scope "
+        "to home/full or approval_mode to auto also needs UI approval.",
         update_settings,
         {
             "type": "object",

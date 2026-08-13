@@ -168,7 +168,11 @@ async def apply_build_engine_after_batch(
                         from remedy.core.build_engine import keep_agency_after_green
 
                         if not keep_agency_after_green(bst):
-                            runtime._build_verify_green = True  # type: ignore[attr-defined]
+                            from remedy.core.turn_context import (
+                                set_turn_build_verify_green,
+                            )
+
+                            set_turn_build_verify_green(True, runtime)
                     from remedy.core.build_engine import (
                         format_ship_report_line,
                         green_continue_message,

@@ -46,6 +46,66 @@ def test_resolve_project_path_absolute(tmp_path):
     assert p == (tmp_path / "proj").resolve()
 
 
+def test_files_search_jails_and_does_not_mkdir(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from remedy.interfaces import api_support
+    from remedy.interfaces.api import create_app
+
+    proj = tmp_path / "proj"
+    (proj / "src").mkdir(parents=True)
+    (proj / "src" / "ok.py").write_text("x", encoding="utf-8")
+    outside = tmp_path / "secret"
+    outside.mkdir()
+    (outside / "leak.txt").write_text("nope", encoding="utf-8")
+    missing = tmp_path / "would_create"
+
+    home = tmp_path / ".remedy"
+    home.mkdir()
+    cfg = {
+        "project_path": str(proj),
+        "home_dir": str(home),
+        "access_scope": "project",
+    }
+    monkeypatch.setattr(api_support, "load_config", lambda: dict(cfg))
+    monkeypatch.setattr(
+        "remedy.interfaces.routes.workspace.load_config",
+        lambda: dict(cfg),
+    )
+    monkeypatch.setenv("REMEDY_FILES_ROOT", str(proj))
+
+    app = create_app()
+    client = TestClient(app)
+    # Escape via absolute path
+    res = client.get(
+        "/api/files/search",
+        params={"query": "leak", "path": str(outside)},
+    )
+    assert res.status_code == 400, res.text
+    # OS trees are never searchable even if the jail base is a drive root
+    res_win = client.get(
+        "/api/files/search",
+        params={"query": "x", "path": r"C:\Windows"},
+    )
+    assert res_win.status_code == 400, res_win.text
+    assert not list(outside.rglob("ok.py"))
+    # GET must not mkdir
+    res2 = client.get(
+        "/api/files/search",
+        params={"query": "x", "path": str(missing)},
+    )
+    assert res2.status_code == 400
+    assert not missing.exists()
+    # In-project relative search still works
+    res3 = client.get(
+        "/api/files/search",
+        params={"query": "ok", "path": "src"},
+    )
+    assert res3.status_code == 200, res3.text
+    names = [r.get("name") for r in (res3.json().get("results") or [])]
+    assert any(n == "ok.py" for n in names)
+
+
 def test_ensure_project_dir_creates(tmp_path):
     target = tmp_path / "new_proj"
     out = ensure_project_dir(target)
@@ -68,6 +128,37 @@ def test_jail_path_blocks_traversal(tmp_path):
 def test_jail_path_blocks_absolute_escape(tmp_path):
     with pytest.raises(SecurityError):
         jail_path(str(Path.cwd()), tmp_path)
+
+
+def test_get_home_dir_honors_remedy_home(tmp_path, monkeypatch):
+    from remedy.core.security import clear_protected_auth_roots_cache, get_home_dir
+    from remedy.interfaces.config import get_home_dir as cfg_home
+    from remedy.interfaces.config import load_config
+
+    alt = tmp_path / "portable"
+    alt.mkdir()
+    (alt / "config.toml").write_text("name = \"portable\"\n", encoding="utf-8")
+    monkeypatch.setenv("REMEDY_HOME", str(alt))
+    clear_protected_auth_roots_cache()
+    assert get_home_dir() == alt.resolve()
+    assert cfg_home() == alt.resolve()
+    cfg = load_config()
+    assert cfg.get("name") == "portable"
+
+
+def test_get_home_dir_tracks_env_without_manual_cache_clear(tmp_path, monkeypatch):
+    """Portable home / tests flip REMEDY_HOME; stale cache must not leak to ~/.remedy."""
+    from remedy.core.security import clear_protected_auth_roots_cache, get_home_dir
+
+    a = tmp_path / "home-a"
+    b = tmp_path / "home-b"
+    a.mkdir()
+    b.mkdir()
+    monkeypatch.setenv("REMEDY_HOME", str(a))
+    clear_protected_auth_roots_cache()
+    assert get_home_dir() == a.resolve()
+    monkeypatch.setenv("REMEDY_HOME", str(b))
+    assert get_home_dir() == b.resolve()
 
 
 def test_safe_path_blocks_dotdot(tmp_path):

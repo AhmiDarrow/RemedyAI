@@ -479,7 +479,7 @@ def _cmd_desktop(parsed: argparse.Namespace) -> None:
                 break
             cur = cur.parent
 
-    if not desktop_dir.exists():
+    if not desktop_dir or not desktop_dir.exists():
         console.print(f"[red]Desktop directory not found at {desktop_dir}[/red]")
         console.print("[dim]Run `git clone` again or ensure the desktop/ folder is present.[/dim]")
         return
@@ -493,7 +493,6 @@ def _cmd_desktop(parsed: argparse.Namespace) -> None:
         result = subprocess.run(
             [npm, "install"],
             cwd=str(desktop_dir),
-            shell=True,
         )
         if result.returncode == 0:
             console.print("[green]Desktop dependencies installed.[/green]")
@@ -510,7 +509,6 @@ def _cmd_desktop(parsed: argparse.Namespace) -> None:
         subprocess.run(
             [npm, "run", "dev"] + (["--", "--open"] if getattr(parsed, "open", False) else []),
             cwd=str(desktop_dir),
-            shell=True,
         )
 
     elif subcommand == "build":
@@ -519,7 +517,6 @@ def _cmd_desktop(parsed: argparse.Namespace) -> None:
         result = subprocess.run(
             [npm, "run", "build"],
             cwd=str(desktop_dir),
-            shell=True,
         )
         if result.returncode == 0:
             console.print(f"[green]Desktop built to {desktop_dir / 'dist'}[/green]")

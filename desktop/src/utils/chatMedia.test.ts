@@ -4,6 +4,7 @@ import {
   isLocalMediaPath,
   isRemoteOrDataUrl,
   normalizeLocalMediaPath,
+  peekChatMediaUrl,
   shouldUseCorsForImage,
 } from './chatMedia'
 
@@ -62,5 +63,22 @@ describe('chatMedia path helpers', () => {
     expect(shouldUseCorsForImage('data:image/png;base64,xx')).toBe(false)
     expect(shouldUseCorsForImage('/icon.png')).toBe(false)
     expect(shouldUseCorsForImage('https://cdn.example/x.png')).toBe(true)
+  })
+
+  it('peek returns displayable urls without a network hop', () => {
+    expect(peekChatMediaUrl('data:image/png;base64,xx')).toBe(
+      'data:image/png;base64,xx',
+    )
+    expect(peekChatMediaUrl('blob:http://127.0.0.1/uuid')).toBe(
+      'blob:http://127.0.0.1/uuid',
+    )
+    expect(peekChatMediaUrl('https://cdn.example/x.png')).toBe(
+      'https://cdn.example/x.png',
+    )
+    expect(peekChatMediaUrl('data:text/plain,hi')).toBe(null)
+    expect(peekChatMediaUrl('')).toBe(null)
+    // Local / authed paths need a cache fill — peek must not throw
+    expect(peekChatMediaUrl('assets/previews/hero.png')).toBe(null)
+    expect(peekChatMediaUrl('/api/sessions/s/attachments/a.png')).toBe(null)
   })
 })

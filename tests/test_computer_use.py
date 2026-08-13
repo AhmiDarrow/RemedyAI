@@ -148,6 +148,19 @@ def test_normalize_url_rejects_task_text_leak():
     assert normalize_url("gmail sign in please") == "https://mail.google.com"
     # URL userinfo blocked (credentials never land in rail address bar)
     assert is_valid_navigate_url("https://user:pass@example.com/") is False
+    # IPv4: loopback + RFC1918 only (not IMDS / public / 172.0.0.0/8)
+    assert is_valid_navigate_url("http://127.0.0.1:8188/") is True
+    assert is_valid_navigate_url("http://10.0.0.5/") is True
+    assert is_valid_navigate_url("http://192.168.1.1/") is True
+    assert is_valid_navigate_url("http://172.16.0.1/") is True
+    assert is_valid_navigate_url("http://172.31.255.1/") is True
+    assert is_valid_navigate_url("http://169.254.169.254/") is False
+    assert is_valid_navigate_url("http://172.0.0.1/") is False
+    assert is_valid_navigate_url("http://8.8.8.8/") is False
+    # Metadata hostnames / wildcard DNS → IMDS
+    assert is_valid_navigate_url("http://169.254.169.254.nip.io/latest/") is False
+    assert is_valid_navigate_url("http://metadata.google.internal/computeMetadata/v1/") is False
+    assert is_valid_navigate_url("http://metadata.nicob.net/") is False
 
 
 def test_open_url_refuses_non_http_schemes():

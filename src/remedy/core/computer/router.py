@@ -15,6 +15,34 @@ _URL_RE = re.compile(
     r"(?i)\b((?:https?://|www\.)[^\s<>\"']+|(?:[a-z0-9-]+\.)+(?:com|org|net|io|dev|ai|app|co|uk|edu|gov)(?:/[^\s<>\"']*)?)"
 )
 
+_METADATA_HOSTS = {
+    "metadata.google.internal",
+    "metadata.goog",
+    "metadata",
+    "instance-data",
+    "kubernetes.default.svc",
+}
+_WILDCARD_IP_DNS = (".nip.io", ".sslip.io", ".xip.io")
+
+
+def _is_blocked_metadata_host(host: str) -> bool:
+    """True for IMDS / link-local / wildcard-DNS hosts (not just 169.254.169.254)."""
+    h = (host or "").strip().lower().rstrip(".")
+    if not h:
+        return False
+    if h in _METADATA_HOSTS:
+        return True
+    if h.endswith(".internal") or h.endswith(".localhost"):
+        return True
+    labels = h.split(".")
+    if "metadata" in labels:
+        return True
+    if any(h.endswith(sfx) for sfx in _WILDCARD_IP_DNS):
+        return True
+    if h.startswith("169.254."):
+        return True
+    return False
+
 # Phrases that usually need OS control beyond the in-rail browser.
 _DESKTOP_HINTS = re.compile(
     r"(?i)\b("
@@ -128,17 +156,26 @@ def is_valid_navigate_url(url: str | None) -> bool:
         host = (p.hostname or "").strip().lower()
         if not host or " " in host or "," in host:
             return False
+        # Cloud metadata / wildcard-DNS-to-IMDS (not just the literal IP).
+        if _is_blocked_metadata_host(host):
+            return False
         # Reject single-label hosts like "gmail" without a TLD (except localhost)
         if host == "localhost":
             return True
         if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host):
-            # Allow only loopback IP literals in-rail (not arbitrary LAN by default)
+            # Loopback + RFC1918 only. Public / link-local / metadata IPs
+            # (169.254.169.254, 8.8.8.8, 172.0.0.1) stay out of the rail.
             if host.startswith("127.") or host == "0.0.0.0":
                 return True
-            # Private ranges: still allow for local dev tools (comfyui, etc.)
-            if host.startswith(("10.", "192.168.", "172.")):
+            if host.startswith("10.") or host.startswith("192.168."):
                 return True
-            return True  # keep prior behavior for other IPs
+            if host.startswith("172."):
+                try:
+                    second = int(host.split(".")[1])
+                except (IndexError, ValueError):
+                    return False
+                return 16 <= second <= 31
+            return False
         return bool(re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", host))
     except Exception:
         return False

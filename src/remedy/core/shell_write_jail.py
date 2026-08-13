@@ -30,7 +30,8 @@ _MUTATION_HINT_RE = re.compile(
     r"|\b\[(?:system\.)?io\.file\]::"
     r"|\b(?:xcopy|robocopy)\b"
     # Short aliases as whole tokens (not inside .md): include sc (Set-Content)
-    r"|(?:^|[\s;&|(])(?:sc|ni|cp|copy|mv|rm|rd|ren|del|erase|md|tee|xcopy|robocopy)"
+    # cmd `move` / PS `ac` `ri` `mi` `cpi` `si` are real write verbs.
+    r"|(?:^|[\s;&|(])(?:sc|ni|cp|copy|move|mv|rm|rd|ren|del|erase|md|tee|xcopy|robocopy|ac|ri|mi|cpi|si)"
     r"(?=[\s]|$)"
     r"|\becho\b(?=[^\n]*>)|\bprintf\b(?=[^\n]*>)|\bcat\b(?=[^\n]*>)"
     r"|\bgit\s+checkout\b|\bgit\s+restore\b|\bgit\s+clean\b|\bgit\s+reset\b"
@@ -79,6 +80,18 @@ _INTERPRETER_ONESHOT_RE = re.compile(
     r"(?:"
     r"\b(?:python|python3|py)\s+(?:-\w+\s+)*-c\b"
     r"|\bnode\s+(?:-\w+\s+)*-e\b"
+    r")"
+)
+
+# Read-only probes (print / console.log) — allowed under a project cwd.
+_READONLY_ONESHOT_RE = re.compile(
+    r"(?ix)"
+    r"(?:"
+    r"\b(?:python|python3|py)\s+(?:-\w+\s+)*-c\s+"
+    r"""['\"]\s*(?:print|help)\s*\([^'\"]*\)\s*['\"]"""
+    r"|"
+    r"\b(?:node|nodejs)\s+(?:-\w+\s+)*-e\s+"
+    r"""['\"]\s*console\.log\s*\([^'\"]*\)\s*['\"]"""
     r")"
 )
 
@@ -194,15 +207,20 @@ def is_runtime_executable_path(path_str: str) -> bool:
     if not raw:
         return False
     name = raw.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+    lower = name.lower()
+    # python_pwned.txt / notes.md are write destinations, not runtimes.
+    if "." in lower:
+        ext = lower.rsplit(".", 1)[-1]
+        if ext not in {"exe", "cmd", "bat", "com", "bin"}:
+            return False
     # strip version suffixes: python3.12.exe, gcc-14
-    base = name.lower()
-    if base.endswith(".exe"):
-        base = base[:-4]
+    base = lower[:-4] if lower.endswith(".exe") else lower
     stem = base.split(".", 1)[0]  # python3.12 → python3
     if base in _RUNTIME_BIN_NAMES or stem in _RUNTIME_BIN_NAMES:
         return True
-    # python3.12 / python312
-    if stem.startswith("python") or base.startswith("python"):
+    # python3.12 / python312 — whole token, not startswith (python_notes.txt)
+    compact = stem.replace(".", "")
+    if re.fullmatch(r"python\d*", stem) or re.fullmatch(r"python\d*", compact):
         return True
     return False
 
@@ -212,6 +230,8 @@ _ABS_PATH_RE = re.compile(
     r"(?:"
     r'(?:[A-Za-z]:\\|\\\\)[^\s\'"<>|;,&]+'  # C:\… or UNC
     r"|/(?:Users|home|tmp|var|etc|opt|mnt|media)/[^\s'\"<>|;,&]+"
+    # Windows root-relative: \Users\Public\x  (cwd-join becomes C:\Users\…)
+    r"|\\(?:Users|Windows|Program Files|ProgramData|System32)[^\s'\"<>|;,&]*"
     r")"
 )
 
@@ -398,6 +418,76 @@ def path_outside_write_roots(
     return cand
 
 
+_AUTH_HINT_RE = re.compile(
+    r"(?ix)"
+    r"(?:"
+    r"\.remedy[/\\]+auth\b"
+    r"|[/\\]auth[/\\](?:local_api_token|provider_keys|oauth)[^\s'\"<>|;,&]*"
+    r")"
+)
+
+
+def check_shell_secret_access(command: str) -> str | None:
+    """Block read or write of ``~/.remedy/auth`` even for ``type`` / Get-Content."""
+    cmd = command or ""
+    if not cmd.strip():
+        return None
+    if _AUTH_HINT_RE.search(cmd):
+        return (
+            "shell jail: refuse access to Remedy auth secrets "
+            "(~/.remedy/auth). Keys and tokens stay out of the shell."
+        )
+    for token in extract_path_candidates(cmd):
+        try:
+            from remedy.core.security import is_protected_secret_path
+
+            if is_protected_secret_path(token):
+                return (
+                    "shell jail: refuse access to Remedy auth secrets "
+                    f"({token}). Keys and tokens stay out of the shell."
+                )
+        except Exception:
+            continue
+    return None
+
+
+def scan_script_source_for_outside_writes(
+    script: Path,
+    *,
+    write_roots: list[Path],
+) -> str | None:
+    """Fail closed when a launched .py references auth or abs paths outside roots."""
+    try:
+        text = script.read_text(encoding="utf-8", errors="replace")[:200_000]
+    except OSError:
+        return None
+    if _AUTH_HINT_RE.search(text):
+        return (
+            "shell write jail: script references Remedy auth secrets "
+            f"({script.name}). Refuse to run."
+        )
+    roots = _norm_roots(write_roots)
+    for m in _ABS_PATH_RE.finditer(text):
+        tok = m.group(0)
+        try:
+            from remedy.core.security import is_protected_secret_path
+
+            if is_protected_secret_path(tok):
+                return (
+                    "shell write jail: script references Remedy auth secrets "
+                    f"({script.name}). Refuse to run."
+                )
+        except Exception:
+            pass
+        off = path_outside_write_roots(tok, write_roots=roots, cwd=script.parent)
+        if off is not None:
+            return (
+                f"shell write jail: script {script.name} references path "
+                f"outside write roots: {off}"
+            )
+    return None
+
+
 def check_shell_write_jail(
     command: str,
     *,
@@ -412,6 +502,10 @@ def check_shell_write_jail(
     already folded scope into *write_roots* (home expands roots to project+home).
     """
     _ = access_scope  # roots are authoritative; keep param for API stability
+    cmd = command or ""
+    secret_hit = check_shell_secret_access(cmd)
+    if secret_hit:
+        return secret_hit
     if not project_bound:
         return None
     if not write_roots:
@@ -420,7 +514,6 @@ def check_shell_write_jail(
             "(fail closed). Retry after project path is set."
         )
 
-    cmd = command or ""
     if not cmd.strip():
         return None
 
@@ -472,11 +565,10 @@ def check_shell_write_jail(
             "paths under the focus folder."
         )
 
-    # Project-cwd python -c / node -e: allow when cwd is inside write roots.
-    # Partner was blocked from dump/analyze one-shots mid-build (RemedyPDF log).
-    # Still fail closed if cwd is unknown/outside roots.
+    # Pathless python -c / node -e: fail closed (concatenated dests hide writes).
+    # Allow only clearly read-only print/console.log when cwd is in-root.
     if not offenders and not candidates and _INTERPRETER_ONESHOT_RE.search(cmd):
-        if cwd is not None:
+        if _READONLY_ONESHOT_RE.search(cmd) and cwd is not None:
             try:
                 from pathlib import Path as _P
 

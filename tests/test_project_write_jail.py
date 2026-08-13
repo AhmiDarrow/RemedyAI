@@ -11,6 +11,7 @@ from remedy.core.errors import SecurityError
 from remedy.core.shell_write_jail import (
     check_shell_write_jail,
     extract_path_candidates,
+    is_runtime_executable_path,
     looks_like_mutation,
 )
 from remedy.core.workspace import (
@@ -371,6 +372,13 @@ def test_shell_write_jail_blocks_sibling_set_content(tmp_path: Path):
     )
 
 
+def test_runtime_executable_path_does_not_skip_data_files():
+    assert is_runtime_executable_path(r"C:\Python312\python.exe") is True
+    assert is_runtime_executable_path("python") is True
+    assert is_runtime_executable_path(r"C:\proj\python_pwned.txt") is False
+    assert is_runtime_executable_path(r"C:\proj\notes.md") is False
+
+
 def test_shell_write_jail_blocks_sc_copy_python_and_opaque(tmp_path: Path):
     """Review P0: sc/copy/python -c/env path mutation must not slip past jail."""
     sticky = tmp_path / "SecretSticky"
@@ -384,9 +392,12 @@ def test_shell_write_jail_blocks_sc_copy_python_and_opaque(tmp_path: Path):
         f'sc "{target}" "hi"',
         f'copy a.txt "{target}"',
         f'xcopy a.txt "{target}"',
+        f'move a.txt "{target}"',
         f'python -c "open(r\'{target}\', \'w\').write(\'x\')"',
         r'Set-Content -Path $env:USERPROFILE\Desktop\leak.txt -Value z',
         r'Set-Content -Path (Join-Path $env:USERPROFILE "SecretFolder\x") -Value z',
+        r'Set-Content \Users\Public\pwn.txt pwned',
+        f'Set-Content "{folder / "python_pwned.txt"}" hi',
     ]
     for cmd in cases:
         assert looks_like_mutation(cmd), cmd
@@ -595,6 +606,31 @@ def test_shell_write_jail_blocks_interpreter_oneshot_without_paths(tmp_path: Pat
             access_scope="project",
         )
         assert hit is not None, f"expected jail for interpreter: {cmd}"
+    # Concatenated dest with no extractable path token — fail closed
+    concat = r'''python -c "open('C:'+'\\\\Users\\\\Public\\\\x','w').write('z')"'''
+    assert (
+        check_shell_write_jail(
+            concat,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            access_scope="project",
+        )
+        is not None
+    ), "pathless mutating python -c must fail closed"
+    # print + write in one -c string must NOT match the readonly allowlist
+    smuggle = r'''python -c "print(1); open(r'C:\\Users\\Public\\pwn.txt','w').write('x')"'''
+    assert (
+        check_shell_write_jail(
+            smuggle,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            access_scope="project",
+        )
+        is not None
+    ), "print+write python -c must stay jailed"
+
     # Pure print under project cwd is allowed (partner one-shots / probes)
     pure = r'''py -c "print(1)"'''
     assert (
@@ -843,4 +879,72 @@ async def test_update_settings_refuses_project_switch_without_force(tmp_path: Pa
         project_path=str(folder),
     )
     assert "PROJECT_JAIL" in out or "refusing to switch" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_update_settings_refuses_unset_project_and_home_scope(tmp_path: Path):
+    """Model must not lift the write jail via empty project_path or access_scope=home."""
+    from remedy.core.agent_settings_tools import register_settings_tools
+    from remedy.skills.tool_registry import ToolRegistry
+
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+
+    class RT:
+        def __init__(self) -> None:
+            self.tool_registry = ToolRegistry()
+            self._proj = sticky.resolve()
+
+        def project_path_is_unset(self) -> bool:
+            return False
+
+        def effective_project_path(self) -> Path:
+            return self._proj
+
+    rt = RT()
+    register_settings_tools(rt)
+    out = await rt.tool_registry.execute("update_settings", project_path="")
+    assert "PROJECT_JAIL" in out or "refusing to clear" in out.lower()
+    out2 = await rt.tool_registry.execute("update_settings", access_scope="home")
+    assert "APPROVAL_REQUIRED" in out2
+    out3 = await rt.tool_registry.execute("update_settings", approval_mode="auto")
+    assert "APPROVAL_REQUIRED" in out3
+
+
+def test_shell_blocks_auth_secret_reads(tmp_path: Path):
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    roots = [sticky.resolve()]
+    cases = [
+        r"type C:\Users\Administrator\.remedy\auth\local_api_token",
+        r"Get-Content $env:USERPROFILE\.remedy\auth\provider_keys.json",
+        r"type %USERPROFILE%\.remedy\auth\local_api_token",
+    ]
+    for cmd in cases:
+        hit = check_shell_write_jail(
+            cmd,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            access_scope="project",
+        )
+        assert hit is not None, f"expected auth jail for: {cmd}"
+        assert "auth" in hit.lower()
+
+
+def test_script_scan_blocks_outside_write(tmp_path: Path):
+    from remedy.core.shell_write_jail import scan_script_source_for_outside_writes
+
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    evil = sticky / "pwn.py"
+    evil.write_text(
+        "open(r'C:\\\\Users\\\\Public\\\\pwn.txt','w').write('x')\n",
+        encoding="utf-8",
+    )
+    hit = scan_script_source_for_outside_writes(evil, write_roots=[sticky.resolve()])
+    assert hit is not None
+    ok = sticky / "ok.py"
+    ok.write_text("print(1)\n", encoding="utf-8")
+    assert scan_script_source_for_outside_writes(ok, write_roots=[sticky.resolve()]) is None
 

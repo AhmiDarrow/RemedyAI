@@ -22,7 +22,16 @@ from rich.prompt import Confirm
 
 console = Console()
 
-REMEDY_HOME = Path("~/.remedy").expanduser()
+def _default_home() -> Path:
+    env = (os.environ.get("REMEDY_HOME") or "").strip()
+    p = Path(env or "~/.remedy").expanduser()
+    try:
+        return p.resolve()
+    except OSError:
+        return p.absolute()
+
+
+REMEDY_HOME = _default_home()
 
 
 def _assert_safe_wipe_root(home: Path | None = None) -> Path:
@@ -205,6 +214,7 @@ def run_uninstall(
     *,
     config: bool = False,
     skills: bool = False,
+    home: str | Path | None = None,
 ) -> None:
     """Run the uninstaller.
 
@@ -213,7 +223,18 @@ def run_uninstall(
         dry_run: Show what would be removed without touching anything.
         config: Remove configuration / auth only.
         skills: Remove ~/.remedy/skills only.
+        home: Optional ``--home`` override. Without this, ``remedy --home X
+            uninstall --purge`` wiped the import-time default profile.
     """
+    global REMEDY_HOME
+    if home:
+        override = Path(str(home)).expanduser()
+        try:
+            override = override.resolve()
+        except OSError:
+            override = override.absolute()
+        REMEDY_HOME = override
+        os.environ["REMEDY_HOME"] = str(override)
     if purge:
         config = True
         skills = True

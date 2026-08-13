@@ -9,6 +9,8 @@ import { ensureApiToken, getApiBase, authHeaders, getServerUrl } from '../api/cl
 /** LRU-ish blob URL cache (path → object URL). Cap avoids unbounded memory. */
 const BLOB_CACHE_MAX = 96
 const blobCache = new Map<string, string>()
+/** Dedupe concurrent fetches so the second cacheSet cannot revoke the first blob. */
+const inflightBlobs = new Map<string, Promise<string>>()
 
 function cacheSet(path: string, objectUrl: string): void {
   if (blobCache.has(path)) {
@@ -114,35 +116,119 @@ function cacheGet(key: string): string | null {
   return cached
 }
 
+function candidateCacheKeys(raw: string): string[] {
+  const keys: string[] = []
+  if (isAuthenticatedApiUrl(raw)) {
+    let absolute = raw
+    if (raw.startsWith('/api/')) {
+      const base = getApiBase().replace(/\/api\/?$/, '')
+      absolute = `${base || getServerUrl()}${raw}`
+    }
+    keys.push(`api:${absolute}`)
+    keys.push(`http:${raw}`)
+    const m = absolute.match(/\/api\/sessions\/([^/]+)\/attachments\/([^/?#]+)/i)
+    if (m) {
+      const sid = m[1]!
+      const name = decodeURIComponent(m[2]!)
+      keys.push(`media-rel:attachments/${sid}/${name}`)
+      keys.push(`media-name:${name}`)
+    }
+    return keys
+  }
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const u = new URL(raw)
+      const host = u.hostname.toLowerCase()
+      if (host === '127.0.0.1' || host === 'localhost' || host === '::1') {
+        keys.push(`http:${raw}`)
+      }
+    } catch {
+      /* ignore */
+    }
+    return keys
+  }
+  if (isLocalMediaPath(raw)) {
+    let path = normalizeLocalMediaPath(raw)
+    const att = path.match(/(?:^|[\\/])\.remedy[\\/]attachments[\\/](.+)$/i)
+    if (att) {
+      path = `attachments/${att[1]!.replace(/\\/g, '/')}`
+    }
+    if (path) keys.push(path)
+  }
+  return keys
+}
+
+/**
+ * Synchronous display URL if we already have it (data/https or blob cache).
+ * Lets ChatImage remounts paint immediately instead of flashing a spinner.
+ */
+export function peekChatMediaUrl(src: string): string | null {
+  const raw = (src || '').trim().replace(/^<|>$/g, '')
+  if (!raw) return null
+  if (/^(data:|blob:)/i.test(raw)) {
+    if (/^data:(?!image\/)/i.test(raw)) return null
+    return raw
+  }
+  if (/^https?:\/\//i.test(raw) && !isAuthenticatedApiUrl(raw)) {
+    try {
+      const u = new URL(raw)
+      const host = u.hostname.toLowerCase()
+      if (host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') {
+        return raw
+      }
+    } catch {
+      return null
+    }
+  }
+  for (const key of candidateCacheKeys(raw)) {
+    const hit = cacheGet(key)
+    if (hit) return hit
+  }
+  return null
+}
+
 async function fetchAuthedBlob(url: string, cacheKey: string): Promise<string> {
   const hit = cacheGet(cacheKey)
   if (hit) return hit
+  const pending = inflightBlobs.get(cacheKey)
+  if (pending) return pending
 
-  const tok = await ensureApiToken()
-  if (!tok) {
-    throw new Error('media auth: no API token (restart Desktop / check bootstrap)')
+  const work = (async () => {
+    const tok = await ensureApiToken()
+    if (!tok) {
+      throw new Error('media auth: no API token (restart Desktop / check bootstrap)')
+    }
+    const res = await fetch(url, {
+      headers: {
+        Accept: 'image/*,*/*',
+        ...authHeaders(),
+        // Belt-and-suspenders: authHeaders can race empty if token was just set
+        Authorization: `Bearer ${tok}`,
+      },
+    })
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '')
+      throw new Error(`media ${res.status}: ${detail || res.statusText}`)
+    }
+    const blob = await res.blob()
+    // Reject HTML error pages masquerading as images
+    const ct = (res.headers.get('content-type') || blob.type || '').toLowerCase()
+    if (ct.includes('text/html') || ct.includes('application/json')) {
+      throw new Error(`media not an image (${ct || 'unknown type'})`)
+    }
+    const cached = cacheGet(cacheKey)
+    if (cached) return cached
+    const objectUrl = URL.createObjectURL(blob)
+    cacheSet(cacheKey, objectUrl)
+    return objectUrl
+  })()
+
+  inflightBlobs.set(cacheKey, work)
+  try {
+    return await work
+  } finally {
+    inflightBlobs.delete(cacheKey)
   }
-  const res = await fetch(url, {
-    headers: {
-      Accept: 'image/*,*/*',
-      ...authHeaders(),
-      // Belt-and-suspenders: authHeaders can race empty if token was just set
-      Authorization: `Bearer ${tok}`,
-    },
-  })
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '')
-    throw new Error(`media ${res.status}: ${detail || res.statusText}`)
-  }
-  const blob = await res.blob()
-  // Reject HTML error pages masquerading as images
-  const ct = (res.headers.get('content-type') || blob.type || '').toLowerCase()
-  if (ct.includes('text/html') || ct.includes('application/json')) {
-    throw new Error(`media not an image (${ct || 'unknown type'})`)
-  }
-  const objectUrl = URL.createObjectURL(blob)
-  cacheSet(cacheKey, objectUrl)
-  return objectUrl
 }
 
 /**

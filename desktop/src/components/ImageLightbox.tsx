@@ -29,9 +29,13 @@ interface ImageLightboxProps {
 /**
  * Full-screen image viewer for chat / Comfy outputs with Snipping-Tool-style markup.
  * Annotated images export as PNG and become prompt attachments.
+ *
+ * Drawing is ref + rAF — never React state per pointer-move (that stuttered
+ * hard in WebView2, especially on large images).
  */
 export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightboxProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const stageRef = useRef<HTMLDivElement | null>(null)
   const imageRef = useRef<HTMLImageElement | null>(null)
   const [ready, setReady] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -41,13 +45,28 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
   const [color, setColor] = useState<string>(MARKUP_COLORS[0]!.value)
   const [width, setWidth] = useState<number>(MARKUP_WIDTHS[1]!)
   const [strokes, setStrokes] = useState<MarkupStroke[]>([])
-  const [draft, setDraft] = useState<MarkupStroke | null>(null)
-  const [drawing, setDrawing] = useState(false)
   const [attaching, setAttaching] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [textDraft, setTextDraft] = useState<string>('')
   const [showTextPrompt, setShowTextPrompt] = useState(false)
   const textAnchorRef = useRef<Point | null>(null)
+
+  const natRef = useRef(nat)
+  const zoomRef = useRef(zoom)
+  const toolRef = useRef(tool)
+  const colorRef = useRef(color)
+  const widthRef = useRef(width)
+  const strokesRef = useRef(strokes)
+  const draftRef = useRef<MarkupStroke | null>(null)
+  const drawingRef = useRef(false)
+  const rafRef = useRef(0)
+  const stageSizeRef = useRef({ w: 800, h: 600 })
+  natRef.current = nat
+  zoomRef.current = zoom
+  toolRef.current = tool
+  colorRef.current = color
+  widthRef.current = width
+  strokesRef.current = strokes
 
   // Full-screen overlay must sit above the native Browser embed HWND.
   useEffect(() => {
@@ -55,19 +74,58 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
     return browserStackHold('image-lightbox')
   }, [src])
 
+  const paintNow = useCallback(() => {
+    const canvas = canvasRef.current
+    const img = imageRef.current
+    const n = natRef.current
+    if (!canvas || !img || !n.w || !n.h) return
+    const { w: sw, h: sh } = stageSizeRef.current
+    const availW = Math.max(40, sw - 16)
+    const availH = Math.max(40, sh - 16)
+    const fit = Math.min(availW / n.w, availH / n.h, 1)
+    const viewScale = fit * zoomRef.current
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    const cssW = Math.max(1, n.w * viewScale)
+    const cssH = Math.max(1, n.h * viewScale)
+    const bufW = Math.max(1, Math.round(cssW * dpr))
+    const bufH = Math.max(1, Math.round(cssH * dpr))
+    if (canvas.width !== bufW || canvas.height !== bufH) {
+      canvas.width = bufW
+      canvas.height = bufH
+    }
+    const cssWpx = `${cssW}px`
+    const cssHpx = `${cssH}px`
+    if (canvas.style.width !== cssWpx) canvas.style.width = cssWpx
+    if (canvas.style.height !== cssHpx) canvas.style.height = cssHpx
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.setTransform(dpr * viewScale, 0, 0, dpr * viewScale, 0, 0)
+    paintScene(ctx, img, n.w, n.h, strokesRef.current, draftRef.current)
+  }, [])
+
+  const schedulePaint = useCallback(() => {
+    if (rafRef.current) return
+    rafRef.current = window.requestAnimationFrame(() => {
+      rafRef.current = 0
+      paintNow()
+    })
+  }, [paintNow])
+
   // Load image whenever src changes
   useEffect(() => {
     if (!src) {
       setReady(false)
       setLoadError(null)
       setStrokes([])
-      setDraft(null)
+      draftRef.current = null
+      drawingRef.current = false
       return
     }
     setReady(false)
     setLoadError(null)
     setStrokes([])
-    setDraft(null)
+    draftRef.current = null
+    drawingRef.current = false
     setZoom(1)
     setStatus(null)
 
@@ -89,7 +147,6 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
       img.onerror = () => {
         if (cancelled) return
         if (withCors && shouldUseCorsForImage(src)) {
-          // Retry without CORS (view works; export may be restricted)
           load(false)
           return
         }
@@ -104,20 +161,31 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
     }
   }, [src])
 
-  const redraw = useCallback(() => {
-    const canvas = canvasRef.current
-    const img = imageRef.current
-    if (!canvas || !img || !nat.w || !nat.h) return
-    canvas.width = nat.w
-    canvas.height = nat.h
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    paintScene(ctx, img, nat.w, nat.h, strokes, draft)
-  }, [nat, strokes, draft])
+  useEffect(() => {
+    if (ready) schedulePaint()
+  }, [ready, nat, zoom, strokes, schedulePaint])
 
   useEffect(() => {
-    if (ready) redraw()
-  }, [ready, redraw])
+    const el = stageRef.current
+    if (!el || !src) return
+    const apply = () => {
+      stageSizeRef.current = { w: el.clientWidth, h: el.clientHeight }
+      schedulePaint()
+    }
+    apply()
+    const ro = new ResizeObserver(apply)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [src, ready, schedulePaint])
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) {
+        window.cancelAnimationFrame(rafRef.current)
+        rafRef.current = 0
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (!src) return
@@ -132,14 +200,14 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault()
+        draftRef.current = null
+        drawingRef.current = false
         setStrokes((s) => s.slice(0, -1))
-        setDraft(null)
         return
       }
       if (e.key === '+' || e.key === '=') setZoom((z) => Math.min(4, z + 0.15))
       if (e.key === '-' || e.key === '_') setZoom((z) => Math.max(0.25, z - 0.15))
       if (e.key === '0') setZoom(1)
-      // Tool shortcuts
       if (!e.ctrlKey && !e.metaKey && !e.altKey) {
         if (e.key === 'p' || e.key === 'P') setTool('pen')
         if (e.key === 'h' || e.key === 'H') setTool('highlighter')
@@ -157,77 +225,94 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
     }
   }, [src, onClose, showTextPrompt])
 
-  const clientToImage = useCallback(
-    (clientX: number, clientY: number): Point | null => {
-      const canvas = canvasRef.current
-      if (!canvas || !nat.w) return null
-      const rect = canvas.getBoundingClientRect()
-      if (rect.width <= 0 || rect.height <= 0) return null
-      const x = ((clientX - rect.left) / rect.width) * nat.w
-      const y = ((clientY - rect.top) / rect.height) * nat.h
-      return {
-        x: Math.max(0, Math.min(nat.w, x)),
-        y: Math.max(0, Math.min(nat.h, y)),
-      }
-    },
-    [nat],
-  )
+  const clientToImage = useCallback((clientX: number, clientY: number): Point | null => {
+    const canvas = canvasRef.current
+    const n = natRef.current
+    if (!canvas || !n.w) return null
+    const rect = canvas.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return null
+    const x = ((clientX - rect.left) / rect.width) * n.w
+    const y = ((clientY - rect.top) / rect.height) * n.h
+    return {
+      x: Math.max(0, Math.min(n.w, x)),
+      y: Math.max(0, Math.min(n.h, y)),
+    }
+  }, [])
 
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!ready || showTextPrompt) return
     const p = clientToImage(e.clientX, e.clientY)
     if (!p) return
-    e.currentTarget.setPointerCapture(e.pointerId)
+    e.preventDefault()
 
-    if (tool === 'text') {
+    const t = toolRef.current
+    if (t === 'text') {
       textAnchorRef.current = p
       setTextDraft('')
       setShowTextPrompt(true)
       return
     }
 
-    setDrawing(true)
-    if (tool === 'pen' || tool === 'highlighter') {
-      setDraft({
-        kind: tool,
-        color,
-        width: tool === 'highlighter' ? width * 2 : width,
+    e.currentTarget.setPointerCapture(e.pointerId)
+    drawingRef.current = true
+    if (t === 'pen' || t === 'highlighter') {
+      draftRef.current = {
+        kind: t,
+        color: colorRef.current,
+        width: t === 'highlighter' ? widthRef.current * 2 : widthRef.current,
         points: [p],
-      })
+      }
     } else {
-      setDraft({
-        kind: tool,
-        color,
-        width,
+      draftRef.current = {
+        kind: t,
+        color: colorRef.current,
+        width: widthRef.current,
         from: p,
         to: p,
-      })
+      }
     }
+    schedulePaint()
   }
 
   const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (!drawing || !draft) return
+    if (!drawingRef.current || !draftRef.current) return
     const p = clientToImage(e.clientX, e.clientY)
     if (!p) return
+    const draft = draftRef.current
     if (draft.kind === 'pen' || draft.kind === 'highlighter') {
-      setDraft({ ...draft, points: [...draft.points, p] })
+      const last = draft.points[draft.points.length - 1]
+      // Skip sub-pixel jitter — fewer points, cheaper strokes.
+      if (last && Math.hypot(p.x - last.x, p.y - last.y) < 1.25) return
+      draft.points.push(p)
     } else if (draft.kind === 'arrow' || draft.kind === 'rect') {
-      setDraft({ ...draft, to: p })
+      draft.to = p
     }
+    schedulePaint()
   }
 
   const onPointerUp = (e: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (!drawing || !draft) {
-      setDrawing(false)
-      return
-    }
     try {
       e.currentTarget.releasePointerCapture(e.pointerId)
     } catch {
       /* */
     }
-    setDrawing(false)
-    // Commit draft
+    if (!drawingRef.current || !draftRef.current) {
+      drawingRef.current = false
+      return
+    }
+    const end = clientToImage(e.clientX, e.clientY)
+    if (end) {
+      const draft = draftRef.current
+      if (draft.kind === 'pen' || draft.kind === 'highlighter') {
+        const last = draft.points[draft.points.length - 1]
+        if (!last || last.x !== end.x || last.y !== end.y) draft.points.push(end)
+      } else if (draft.kind === 'arrow' || draft.kind === 'rect') {
+        draft.to = end
+      }
+    }
+    const draft = draftRef.current
+    drawingRef.current = false
+    draftRef.current = null
     let meaningful = false
     if (draft.kind === 'pen' || draft.kind === 'highlighter') {
       meaningful = draft.points.length >= 1
@@ -239,8 +324,9 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
     }
     if (meaningful) {
       setStrokes((s) => [...s, draft])
+    } else {
+      schedulePaint()
     }
-    setDraft(null)
   }
 
   const commitText = () => {
@@ -262,17 +348,28 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
     textAnchorRef.current = null
   }
 
+  const exportPngBlob = async (): Promise<Blob> => {
+    const img = imageRef.current
+    const n = natRef.current
+    if (!img || !n.w || !n.h) throw new Error('Image not ready')
+    const off = document.createElement('canvas')
+    off.width = n.w
+    off.height = n.h
+    const ctx = off.getContext('2d')
+    if (!ctx) throw new Error('Could not encode annotated image')
+    paintScene(ctx, img, n.w, n.h, strokesRef.current, null)
+    return canvasToPngBlob(off)
+  }
+
   const handleAttach = async () => {
-    if (!onAttachMarkup || !canvasRef.current || !ready) return
+    if (!onAttachMarkup || !ready) return
     setAttaching(true)
     setStatus(null)
     try {
-      // Ensure latest strokes are painted
-      redraw()
-      const blob = await canvasToPngBlob(canvasRef.current)
+      const blob = await exportPngBlob()
       const file = new File(
         [blob],
-        strokes.length ? stampMarkupFilename(alt) : stampMarkupFilename(alt || 'image'),
+        stampMarkupFilename(alt || 'image'),
         { type: 'image/png' },
       )
       await onAttachMarkup(file)
@@ -281,7 +378,6 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
           ? 'Saved — attached to your next message'
           : 'Attached to your next message',
       )
-      // Close editor after save so user lands on composer with attachment
       window.setTimeout(() => onClose(), 350)
     } catch (err: unknown) {
       setStatus(err instanceof Error ? err.message : 'Attach failed')
@@ -291,11 +387,9 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
   }
 
   const handleDownload = async () => {
-    const canvas = canvasRef.current
-    if (!canvas || !ready) return
+    if (!ready) return
     try {
-      redraw()
-      const blob = await canvasToPngBlob(canvas)
+      const blob = await exportPngBlob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -308,14 +402,6 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
   }
 
   if (!src) return null
-
-  const displayMaxW = Math.min(window.innerWidth * 0.92, 1100)
-  const displayMaxH = window.innerHeight * 0.72
-  const fitScale =
-    nat.w && nat.h
-      ? Math.min(displayMaxW / nat.w, displayMaxH / nat.h, 1)
-      : 1
-  const viewScale = fitScale * zoom
 
   const toolBtn = (id: MarkupTool, label: string, hint: string) => (
     <button
@@ -415,7 +501,7 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
           disabled={!strokes.length}
           onClick={() => {
             setStrokes([])
-            setDraft(null)
+            draftRef.current = null
           }}
         >
           Clear
@@ -495,13 +581,13 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
 
       {/* Canvas stage */}
       <div
+        ref={stageRef}
         className="flex-1 min-h-0 overflow-auto flex items-center justify-center p-4"
         onClick={(e) => e.stopPropagation()}
       >
         {loadError && (
           <div className="flex flex-col items-center gap-3">
             <div className="text-sm text-red-300">{loadError}</div>
-            {/* Fallback plain img — view-only if canvas path failed */}
             <img
               src={src}
               alt={alt || 'Preview'}
@@ -518,15 +604,8 @@ export function ImageLightbox({ src, alt, onClose, onAttachMarkup }: ImageLightb
           className="rounded-lg shadow-2xl"
           style={{
             display: ready ? 'block' : 'none',
-            width: nat.w ? nat.w * viewScale : undefined,
-            height: nat.h ? nat.h * viewScale : undefined,
             maxWidth: 'none',
-            cursor:
-              tool === 'text'
-                ? 'text'
-                : drawing
-                  ? 'crosshair'
-                  : 'crosshair',
+            cursor: tool === 'text' ? 'text' : 'crosshair',
             border: '1px solid rgba(255,255,255,0.12)',
             touchAction: 'none',
           }}

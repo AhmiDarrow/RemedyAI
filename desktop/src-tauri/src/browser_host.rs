@@ -543,6 +543,8 @@ pub struct BrowserState {
     desktop_site: AtomicBool,
     /// HTML/video fullscreen active — SPA rail bounds must not shrink the embed.
     page_fullscreen: AtomicBool,
+    /// Navigate job waiting for on_page_load (complete after the page is actually open).
+    pending_navigate: Mutex<Option<(String, String)>>,
 }
 
 impl Default for BrowserState {
@@ -554,6 +556,7 @@ impl Default for BrowserState {
             stack_suppressed: AtomicBool::new(false),
             desktop_site: AtomicBool::new(prefs.desktop_site),
             page_fullscreen: AtomicBool::new(false),
+            pending_navigate: Mutex::new(None),
         }
     }
 }
@@ -820,7 +823,9 @@ fn apply_page_fullscreen(app: &AppHandle, fullscreen: bool) {
         .and_then(|g| g.clone())
         .unwrap_or_else(|| default_rail_bounds(app));
     let b = clamp_bounds(&rail);
-    let may_show = embed_may_show(state.inner()) || fullscreen;
+    // Overlay suppress always wins — page fullscreen must not paint over
+    // Settings / Help / the image lightbox (native HWND sits above CSS).
+    let may_show = embed_may_show(state.inner());
     if let Err(e) = apply_bounds(&wv, &b, may_show) {
         log::warn!("browser rail fullscreen bounds failed: {e}");
     } else {
@@ -1080,42 +1085,11 @@ pub fn browser_set_bounds(
     if let Ok(mut g) = state.last_bounds.lock() {
         *g = Some(b.clone());
     }
-    let may_show =
-        embed_may_show(state.inner()) || state.page_fullscreen.load(Ordering::SeqCst);
+    let may_show = embed_may_show(state.inner());
     if let Some(wv) = app.get_webview(LABEL) {
         apply_bounds(&wv, &b, may_show)?;
     }
     Ok(())
-}
-
-fn schedule_reload(wv: tauri::Webview, url: String, delay_ms: u64, allow_show: bool) {
-    // Never force re-navigate auth/SSO pages — reloads wipe mid-login state.
-    if crate::privacy_shield::is_identity_provider_url(&url) || looks_like_auth_url_str(&url) {
-        log::info!("browser skip delayed reload on auth URL");
-        if allow_show {
-            let _ = wv.show();
-        }
-        return;
-    }
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-        if let Ok(u) = url.parse::<Url>() {
-            if let Err(e) = wv.navigate(u) {
-                log::warn!("browser delayed navigate failed: {e}");
-            }
-        }
-        if allow_show {
-            let _ = wv.show();
-        } else {
-            let _ = wv.hide();
-        }
-        // Force paint if WebView2 stayed white (known multiwebview glitch).
-        if allow_show {
-            let _ = wv.eval(
-                "try{if(!document.body||document.body.childElementCount===0){location.reload()}}catch(e){}",
-            );
-        }
-    });
 }
 
 /// Right-rail-ish bounds from main window size when SPA has not pushed host rect yet.
@@ -1188,7 +1162,6 @@ pub fn navigate_embed(
                 } else {
                     let _ = wv.hide();
                 }
-                schedule_reload(wv.clone(), url.clone(), 200, may_show);
                 log::info!("browser embed navigate {url} show={may_show}");
                 return Ok(url);
             }
@@ -1256,6 +1229,7 @@ pub fn navigate_embed(
                 }
             }
             let _ = app_for_load.emit("browser-url-changed", json!({ "url": u }));
+            complete_pending_navigate_if_any(&app_for_load, &u);
             // Same-window OAuth: window.open → location.assign (no popup surface).
             let _ = wv.eval(SAME_WINDOW_OAUTH_JS);
             // Scrollbars only (no zoom / chrome overrides)
@@ -1303,13 +1277,10 @@ pub fn navigate_embed(
     } else {
         let _ = wv.hide();
     }
-    // Immediate navigate to target
+    // Immediate navigate to target (no delayed re-navigate — that wiped SPAs).
     if let Err(e) = wv.navigate(parsed) {
         log::warn!("browser initial navigate failed: {e}");
     }
-    // Delayed re-navigate + paint (known multiwebview white-screen workaround)
-    schedule_reload(wv.clone(), url.clone(), 120, may_show);
-    schedule_reload(wv.clone(), url.clone(), 400, may_show);
 
     log::info!(
         "browser embed created {url} @ ({},{}) {}x{}",
@@ -1412,8 +1383,8 @@ fn computer_host_loop(app: AppHandle) {
     let mut last_completed_nav = String::new();
     let mut hello_tick: u32 = 0;
     loop {
-        // Tight poll — open-url must feel instant (≤50ms claim latency)
-        std::thread::sleep(Duration::from_millis(25));
+        // Navigate-only poll — 50ms is enough for open-url without dual-claiming DOM jobs.
+        std::thread::sleep(Duration::from_millis(50));
         hello_tick = hello_tick.wrapping_add(1);
         // Hello ~every 2s
         if hello_tick % 80 == 0 {
@@ -1452,7 +1423,7 @@ fn computer_host_loop(app: AppHandle) {
         // page_text/ready must be claimable by Rust — SPA alone is not enough when
         // the React host is busy or mid-bootstrap after navigate.
         if let Ok(resp) = auth_req(agent.get(
-            "http://127.0.0.1:7400/api/computer/jobs/next?only=navigate,snapshot,a11y,page_text,ready,click",
+            "http://127.0.0.1:7400/api/computer/jobs/next?only=navigate",
         ))
         .call()
         {
@@ -1542,34 +1513,12 @@ fn handle_ui_command(app: &AppHandle, agent: &ureq::Agent, cmd: &serde_json::Val
         return;
     }
 
-    // Lightning path: complete SUCCESS *before* waiting on WebView main-thread
-    // work. Opening a URL must never block the agent 8–14s; navigate runs
-    // fire-and-forget so the poller stays free for the next command.
     let final_url = url.clone();
     if !job_id.is_empty() {
-        complete_job(
-            agent,
-            &job_id,
-            true,
-            json!({
-                "ok": true,
-                "target": "browser",
-                "action": "navigate",
-                "message": format!(
-                    "SUCCESS: Page is open in the in-app Browser rail (right panel). \
-                     URL: {final_url}. The user can see it. \
-                     Do NOT say the rail failed. Do NOT open system browser. Do NOT web_fetch this page. \
-                     Reply briefly that the page is open in the Browser rail."
-                ),
-                "url": final_url,
-                "via": "rust-host",
-                "user_visible": true,
-            }),
-            None,
-        );
+        arm_pending_navigate(app, job_id.clone(), final_url.clone());
     }
     let _ = app.emit("computer-browser-url", json!({ "url": url }));
-    // Fire-and-forget embed navigate — do not block poller on main-thread recv
+    // Fire-and-forget embed navigate — complete from on_page_load (or 8s timeout).
     fire_navigate(app, &url);
 }
 
@@ -1596,25 +1545,7 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
             complete_job(agent, &id, false, json!({}), Some("url required".into()));
             return;
         }
-        // Complete first — never block agent on WebView
-        complete_job(
-            agent,
-            &id,
-            true,
-            json!({
-                "ok": true,
-                "target": "browser",
-                "action": "navigate",
-                "message": format!(
-                    "SUCCESS: Page is open in the in-app Browser rail. URL: {url}. \
-                     Do NOT web_fetch. Do NOT open system browser."
-                ),
-                "url": url,
-                "via": "rust-job",
-                "user_visible": true,
-            }),
-            None,
-        );
+        arm_pending_navigate(app, id.clone(), url.clone());
         let _ = app.emit("computer-browser-url", json!({ "url": url }));
         fire_navigate(app, &url);
         ack_ui_command(agent, &id);
@@ -1962,6 +1893,86 @@ fn run_resync_bounds_on_main(app: &AppHandle) -> Result<(), String> {
     .map_err(|e| format!("run_on_main_thread: {e}"))?;
     rx.recv_timeout(Duration::from_secs(5))
         .map_err(|_| "resync bounds timeout".to_string())?
+}
+
+fn arm_pending_navigate(app: &AppHandle, job_id: String, url: String) {
+    if let Some(st) = app.try_state::<BrowserState>() {
+        if let Ok(mut g) = st.pending_navigate.lock() {
+            *g = Some((job_id.clone(), url.clone()));
+        }
+    }
+    let app2 = app.clone();
+    let jid = job_id;
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(8));
+        if let Some(st) = app2.try_state::<BrowserState>() {
+            let leftover = if let Ok(mut g) = st.pending_navigate.lock() {
+                if g.as_ref().map(|(id, _)| id == &jid).unwrap_or(false) {
+                    g.take()
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            if let Some((id, dest)) = leftover {
+                let agent = ureq::AgentBuilder::new()
+                    .timeout_connect(Duration::from_secs(2))
+                    .timeout(Duration::from_secs(8))
+                    .build();
+                complete_job(
+                    &agent,
+                    &id,
+                    true,
+                    json!({
+                        "ok": true,
+                        "target": "browser",
+                        "action": "navigate",
+                        "message": format!(
+                            "SUCCESS: Navigation issued in the in-app Browser rail. URL: {dest}."
+                        ),
+                        "url": dest,
+                        "via": "rust-host-timeout",
+                        "user_visible": true,
+                    }),
+                    None,
+                );
+            }
+        }
+    });
+}
+
+fn complete_pending_navigate_if_any(app: &AppHandle, loaded_url: &str) {
+    let pending = if let Some(st) = app.try_state::<BrowserState>() {
+        st.pending_navigate.lock().ok().and_then(|mut g| g.take())
+    } else {
+        None
+    };
+    let Some((id, dest)) = pending else {
+        return;
+    };
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(2))
+        .timeout(Duration::from_secs(8))
+        .build();
+    complete_job(
+        &agent,
+        &id,
+        true,
+        json!({
+            "ok": true,
+            "target": "browser",
+            "action": "navigate",
+            "message": format!(
+                "SUCCESS: Page is open in the in-app Browser rail. URL: {loaded_url}."
+            ),
+            "url": loaded_url,
+            "requested_url": dest,
+            "via": "rust-host",
+            "user_visible": true,
+        }),
+        None,
+    );
 }
 
 fn complete_job(

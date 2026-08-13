@@ -303,6 +303,41 @@ def register_shell_tools(runtime: Any) -> None:
                     "To edit another tree, switch session project explicitly with the user."
                 ),
             )
+        import re as _re
+
+        from remedy.core.shell_write_jail import (
+            extract_path_candidates,
+            scan_script_source_for_outside_writes,
+        )
+
+        py_tokens = [
+            t
+            for t in extract_path_candidates(command)
+            if str(t).lower().endswith(".py")
+        ]
+        if not py_tokens:
+            py_tokens = [
+                m.group(0)
+                for m in _re.finditer(r"(?:\.?[/\\])?[\w./\\-]+\.py\b", command, _re.I)
+            ]
+        for tok in py_tokens:
+            try:
+                cand = Path(tok)
+                if not cand.is_absolute():
+                    cand = Path(cwd) / tok
+                if cand.is_file():
+                    src_hit = scan_script_source_for_outside_writes(
+                        cand, write_roots=list(roots)
+                    )
+                    if src_hit:
+                        return format_tool_error(
+                            src_hit,
+                            code="WRITE_JAIL",
+                            tool_name="bash_exec",
+                            suggestion="Keep launched script I/O under the project folder.",
+                        )
+            except Exception:
+                continue
 
         # Translate common bashisms so Windows cmd can run model commands
         command = _normalize_shell_command_for_host(command)
@@ -405,7 +440,7 @@ def register_shell_tools(runtime: Any) -> None:
                 suggestion="Use a normal .py path under the project.",
             )
         try:
-            target = runtime.resolve_tool_path(rel, for_write=False)
+            target = runtime.resolve_tool_path(rel, for_write=True)
         except Exception as e:
             return format_tool_error(
                 f"invalid path: {e}",
@@ -468,6 +503,54 @@ def register_shell_tools(runtime: Any) -> None:
                 extra = args.split()
 
         argv = [sys.executable, str(target), *extra]
+        try:
+            roots = list(runtime.write_roots() or [])
+        except Exception:
+            roots = [cwd]
+        if not roots:
+            roots = [cwd]
+        try:
+            bound = not bool(runtime.project_path_is_unset())
+        except Exception:
+            bound = True
+        try:
+            scope = str(runtime.access_scope() or "project")
+        except Exception:
+            scope = "project"
+        from remedy.core.shell_write_jail import check_shell_write_jail
+
+        try:
+            jail_hit = check_shell_write_jail(
+                " ".join(str(a) for a in argv),
+                write_roots=list(roots),
+                cwd=cwd,
+                project_bound=bound,
+                access_scope=scope,
+            )
+        except Exception as exc:
+            return format_tool_error(
+                f"shell write jail check failed (refused): {exc}",
+                code="WRITE_JAIL",
+                tool_name="run_python_file",
+                suggestion="Keep scripts under the project folder.",
+            )
+        if jail_hit:
+            return format_tool_error(
+                jail_hit,
+                code="WRITE_JAIL",
+                tool_name="run_python_file",
+                suggestion="Write and run scripts under the project folder.",
+            )
+        from remedy.core.shell_write_jail import scan_script_source_for_outside_writes
+
+        src_hit = scan_script_source_for_outside_writes(target, write_roots=list(roots))
+        if src_hit:
+            return format_tool_error(
+                src_hit,
+                code="WRITE_JAIL",
+                tool_name="run_python_file",
+                suggestion="Keep script I/O under the project folder.",
+            )
         if gui_py:
             env_bg = path_env_with_local_bins(cwd)
             return _spawn_background(
@@ -477,10 +560,6 @@ def register_shell_tools(runtime: Any) -> None:
                 command=" ".join(argv),
                 auto=True,
             )
-        try:
-            roots = list(runtime.write_roots() or [])
-        except Exception:
-            roots = [root]
         sandbox = SubprocessSandbox(allowed_paths=roots or [root, cwd])
         env = path_env_with_local_bins(cwd)
         result = await sandbox.execute(
