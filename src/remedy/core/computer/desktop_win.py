@@ -818,7 +818,9 @@ def open_app(
             "use computer_navigate / open_url for web, or an app name/path"
         )
     # Path-jail checks are OS-independent so Linux CI can still prove them.
-    rel_probe = Path(raw)
+    # Normalize Windows separators first — Path.parts on POSIX treats `\` as
+    # a filename character, so `..\Windows\…` would otherwise miss `..`.
+    rel_probe = Path(raw.replace("\\", "/"))
     if search_dirs and not rel_probe.is_absolute() and ".." in rel_probe.parts:
         raise ValueError("open_app refuses parent-directory traversal")
 
