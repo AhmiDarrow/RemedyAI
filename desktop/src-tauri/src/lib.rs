@@ -3644,18 +3644,21 @@ fn acquire_desktop_single_instance() -> bool {
                 CloseHandle(handle);
                 return false;
             }
-            // Mutex held but no window — zombie. Reclaim by killing orphan app.exe.
+            // Mutex held but no window — zombie. Reclaim by killing the UI exe.
+            // Pre-0.23.2 shipped as generic app.exe (Defender Execution.A!ml bait).
             log::warn!(
                 "Single-instance mutex held but no Remedy Desktop window; \
-                 reclaiming (killing orphan app.exe)"
+                 reclaiming (killing orphan UI process)"
             );
             CloseHandle(handle);
-            let _ = Command::new("taskkill")
-                .args(["/F", "/IM", "app.exe"])
-                .creation_flags(CREATE_NO_WINDOW)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+            for image in ["Remedy Desktop.exe", "app.exe"] {
+                let _ = Command::new("taskkill")
+                    .args(["/F", "/IM", image])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
+            }
             thread::sleep(Duration::from_millis(400));
             // Re-create mutex for this process.
             let handle2 = CreateMutexW(core::ptr::null(), 1, name.as_ptr());

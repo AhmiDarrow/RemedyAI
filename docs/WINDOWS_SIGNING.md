@@ -92,6 +92,7 @@ PyInstaller/Tauri builds as:
 
 - `Trojan:Win32/Wacatac.B!ml`
 - `Trojan:Win32/Bearfoos.A!ml`
+- `Behavior:Win32/Execution.A!ml` when the UI binary is generic `app.exe`
 - (legacy) `Behavior:Win32/Persistence.A!ml` when apps write `HKCU\…\Run`
 
 **Code mitigations already in-tree** (see also `docs/DESKTOP.md`):
@@ -99,6 +100,7 @@ PyInstaller/Tauri builds as:
 | Area | Mitigation |
 |------|------------|
 | Persistence | Startup folder `.lnk` only; never write Run; delete legacy Run names |
+| UI EXE name | `mainBinaryName` = `Remedy Desktop` (not generic `app.exe`) |
 | Scrub implementation | Rust `winreg` + NSIS `DeleteRegValue` (no hidden PowerShell Bypass on launch) |
 | Sidecar PE identity | PyInstaller `--version-file` + `--icon` (Company/Product/FileVersion filled) |
 | Packing | `--noupx` always |
