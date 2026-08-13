@@ -10,7 +10,7 @@ Current series: **v0.23.0**.
 
 ## 0.23.0 - Build ability + companion
 
-A Claude-class **machine build loop** plus a PC companion so Remedy can
+A world-class **machine build loop** plus a PC companion so Remedy can
 finish software and design work from *this* machine — not just chat about
 it. PyPI **`remedy-ai==0.23.0`** · tag **v0.23.0**.
 
