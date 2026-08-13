@@ -61,6 +61,8 @@ desktop/tauri-dev-*.log
 desktop/tauri-local-build.json
 desktop/tauri-local-test.json
 *.log
+collect.txt
+grep_loop.out
 
 # E2E C scratch (hello.c + exe from e2e runs)
 _e2e_simple_c_pytest/
@@ -72,6 +74,7 @@ docs/_*_probe*.json
 docs/_open_issues_final.json
 docs/_redteam_live_results.json
 docs/_full_product_soak_results.json
+docs/_bugsweep_review.md
 
 # Desktop build outputs (sidecar binaries, not source)
 desktop/bin/
