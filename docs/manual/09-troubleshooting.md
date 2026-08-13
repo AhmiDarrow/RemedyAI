@@ -206,6 +206,7 @@ old build), the install script may have been killed with the app process
 |-------|-----|
 | Stuck at “closing” | Update to **0.14.7+** (multi-path install schedule) |
 | Defender **Bearfoos** / **Wacatac** on update | ML false positive on unsigned installer/sidecar. **Allow on this device** if you installed from official GitHub Releases. Fixed PE identity since earlier 0.14.x; Authenticode still pending. |
+| Defender **Execution.A!ml** on first launch | ML false positive on unsigned generic **`app.exe`**. **Allow on this device**, then relaunch. **0.23.2+** ships as `Remedy Desktop.exe`. |
 | Taskbar shows old icon | Quit fully, then clear Windows icon cache (see DESKTOP.md). Rebuild embeds multi-size alpha ICO. |
 | Tray icon hard to see | **0.14.9+** uses a bold dark-plate tray glyph (`iconAsTemplate` off). |
 | `%TEMP%\RemedyDesktop-Update.log` has no `BOOT` / `Update script started` | Confirm **0.14.7+**; otherwise install the `.exe` from GitHub Releases |
@@ -229,6 +230,7 @@ Trojan. Known historical / ML labels and status:
 | `Behavior:Win32/Persistence.A!ml` | **Fixed** — old builds wrote `HKCU\…\Run`; current builds use **Startup folder** only and scrub legacy keys without PowerShell. |
 | `Trojan:Win32/Wacatac.B!ml` | **Mitigated** — sidecar PE now has product version/company/icon metadata; still improve further with Authenticode. |
 | `Trojan:Win32/Bearfoos.A!ml` | Same class of ML hit on unsigned PyInstaller-style binaries; same mitigations. |
+| `Behavior:Win32/Execution.A!ml` | **Mitigated in 0.23.2** — UI EXE is `Remedy Desktop.exe` instead of generic `app.exe`. If 0.23.1 already fired: **Allow on this device**. |
 
 **If Windows Security quarantines Remedy after install or first run:**
 

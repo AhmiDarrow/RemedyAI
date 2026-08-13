@@ -4,6 +4,16 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.23.2] - 2026-08-13
+
+### Fixes
+
+- **Defender `Behavior:Win32/Execution.A!ml` on first launch.** The Tauri UI
+  shipped as generic unsigned `app.exe` in `%LOCALAPPDATA%\Remedy Desktop`,
+  then spawned the sidecar — Defender ML treated that as an attacker payload.
+  The UI binary is now **`Remedy Desktop.exe`**. If 0.23.1 already fired:
+  Windows Security → Protection history → **Allow on this device**.
+
 ## [0.23.1] - 2026-08-13
 
 ### Fixes

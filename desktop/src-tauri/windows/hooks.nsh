@@ -1,6 +1,7 @@
 ; Auto-update pipeline + uninstall data options.
-; productName "Remedy Desktop" -> main binary is typically "Remedy Desktop.exe"
-; (some builds still ship as app.exe). Sidecar is remedy-desktop.exe.
+; productName + mainBinaryName "Remedy Desktop" -> Remedy Desktop.exe
+; (0.23.1 and earlier shipped generic app.exe — Defender Execution.A!ml bait).
+; Sidecar is remedy-desktop.exe.
 ;
 ; Uninstall UI: config / skills / full wipe checkboxes via PowerShell dialog
 ; (scripts bundled as resources under $INSTDIR\windows\ and run from %TEMP%).
