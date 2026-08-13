@@ -14,7 +14,7 @@
 
 > **SmartScreen / Windows Security**  
 > Solo builds may not be Authenticode-signed yet. If Windows says **Unknown publisher**, use **More info → Run anyway**.  
-> Rarely, Defender’s ML may mislabel a **new** install (e.g. generic “trojan” names used on many unsigned apps). That is a **false positive** — download **only** from this GitHub repo’s Releases, then **Protection history → Allow on this device** if needed. In-app updates are **minisign**-verified.
+> Rarely, Defender’s ML may mislabel a **new** install (generic “trojan” names, or **Execution.A!ml** on a first launch). That is a **false positive** — download **only** from this GitHub repo’s Releases, then **Protection history → Allow on this device** if needed. **0.23.2+** names the UI `Remedy Desktop.exe` (not generic `app.exe`). In-app updates are **minisign**-verified.
 
 ## Install steps
 
