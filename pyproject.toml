@@ -145,6 +145,7 @@ exclude = [
     # Win32-only ctypes/os.startfile — mypy on Linux CI has no windll/WINFUNCTYPE.
     "src/remedy/core/computer/desktop_win.py",
     "src/remedy/core/computer/desktop_uia.py",
+    "src/remedy/core/companion.py",
 ]
 
 [dependency-groups]
