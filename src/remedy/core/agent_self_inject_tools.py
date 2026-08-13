@@ -12,12 +12,12 @@ from typing import Any
 
 from remedy.core.self_inject import (
     SelfInjectRound,
+    activity_snapshot,
     append_ledger,
     apply_or_rollback,
     git_capture,
     read_ledger,
     run_gate,
-    should_run_now,
 )
 
 
@@ -64,12 +64,29 @@ def register_self_inject_tools(runtime: Any) -> None:
 
     async def tool_self_inject_status(limit: int = 20) -> str:
         """Return the self-inject audit ledger (recent rounds) + trigger state."""
-        home = getattr(runtime, "home_dir", None)
+        home = getattr(runtime, "home_dir", None) or getattr(
+            getattr(runtime, "config", None), "home_dir", None
+        )
+        snap = activity_snapshot(home)
         ledger = read_ledger(home)
         recent = ledger[-limit:] if limit else ledger
+        last = snap.get("last_tick") or {}
+        last_org = (last.get("organism") or {}) if isinstance(last, dict) else {}
+        last_code = (last.get("code") or {}) if isinstance(last, dict) else {}
         lines = [
-            f"self-inject enabled={should_run_now(home) or True} "
-            f"(ledger rounds={len(ledger)})",
+            (
+                f"self-inject enabled={snap.get('enabled')} "
+                f"idle_ready={snap.get('idle_ready')} "
+                f"idle_s={snap.get('idle_s')} "
+                f"threshold_s={snap.get('idle_threshold_s')} "
+                f"(ledger rounds={len(ledger)})"
+            ),
+            (
+                f"last unattended tick: ts={last.get('ts') or 'never'} "
+                f"skills_refined={last_org.get('skills_refined', 0)} "
+                f"dreamed={last_org.get('dreamed', False)} "
+                f"code={last_code.get('outcome') or last_code.get('skipped') or 'none'}"
+            ),
         ]
         for r in reversed(recent):
             lines.append(
@@ -190,4 +207,36 @@ def register_self_inject_tools(runtime: Any) -> None:
                 },
             },
         },
+    )
+
+    async def tool_self_improve_submit_issue() -> str:
+        """Post a scanned patch to the standing GitHub inbox issue.
+
+        Always asks (Auto cannot waive). No branch, no PR, no release.
+        Requires WRITE+ on the repo so random READ clients cannot spam issues.
+        """
+        from remedy.core.self_inject_pr import submit_self_improve_issue
+        from remedy.core.turn_context import turn_session_id
+
+        home = getattr(runtime, "home_dir", None) or getattr(
+            getattr(runtime, "config", None), "home_dir", None
+        )
+        result = await submit_self_improve_issue(
+            runtime,
+            home=home,
+            repo=_repo_root(runtime),
+            session_id=turn_session_id(runtime),
+        )
+        if result.get("banner"):
+            return str(result["banner"])
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    runtime.tool_registry.register_builtin_handler(
+        "self_improve_submit_issue",
+        "Post a local-green self-improve patch as a comment on the standing "
+        "GitHub inbox issue (one issue, many comments). Always requires Approve. "
+        "No new branch, no PR, no release. Only the repo owner/collaborator "
+        "can post. Use when the owner asked to send a pending draft to GitHub.",
+        tool_self_improve_submit_issue,
+        {"type": "object", "properties": {}},
     )

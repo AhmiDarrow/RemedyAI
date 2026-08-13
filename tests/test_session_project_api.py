@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 from remedy.core.agent import BasicRuntime
+from remedy.core.build_todos import upsert_todos
 from remedy.interfaces.api import create_app
 from remedy.memory.store import MemoryStore
 from remedy.models import AgentConfig, ChatSession
@@ -226,3 +228,31 @@ def test_bulk_set_session_project(client):
     for sid in ids:
         assert by_id[sid].get("project_path")
         assert "Bulk" in str(by_id[sid]["project_path"])
+
+
+def test_session_todos_endpoint(client):
+    c, tmp = client
+    proj = tmp / "TodoProj"
+    proj.mkdir()
+    r = c.post("/api/sessions", json={"title": "todos", "project_path": str(proj)})
+    assert r.status_code == 200
+    sid = r.json()["id"]
+    empty = c.get(f"/api/sessions/{sid}/todos")
+    assert empty.status_code == 200
+    assert empty.json()["todos"] == []
+    rt = SimpleNamespace(
+        effective_project_path=lambda: proj,
+        config=SimpleNamespace(home_dir=tmp),
+    )
+    upsert_todos(
+        rt,
+        [{"id": "1", "content": "list files", "status": "completed"}],
+        merge=False,
+        root=proj,
+    )
+    got = c.get(f"/api/sessions/{sid}/todos")
+    assert got.status_code == 200
+    rows = got.json()["todos"]
+    assert len(rows) == 1
+    assert rows[0]["content"] == "list files"
+    assert rows[0]["status"] == "completed"

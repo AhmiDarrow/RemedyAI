@@ -171,7 +171,6 @@ async def run_verify_job(
     """Run a verify/test command via sandbox (optional workdir path)."""
     from remedy.core.project_fingerprint import fingerprint_path, path_env_with_local_bins
     from remedy.core.security import check_dangerous_command
-    from remedy.execution.process import win_shell_prefix
     from remedy.execution.sandbox import SubprocessSandbox
 
     root = runtime.effective_project_path()
@@ -309,7 +308,10 @@ async def run_verify_job(
             details={"write_jail": jail_hit},
         )
     sandbox = SubprocessSandbox(allowed_paths=roots or [root, workdir])
-    argv = [*win_shell_prefix(), cmd]
+    from remedy.execution.host.runner import prepare_host_command
+
+    prepared = prepare_host_command(cmd, project_path=root)
+    argv = prepared.argv
     env = path_env_with_local_bins(workdir)
     timeout_s = max(5.0, min(600.0, float(timeout or 180)))
     result = await sandbox.execute(

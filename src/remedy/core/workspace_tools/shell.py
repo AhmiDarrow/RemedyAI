@@ -71,47 +71,103 @@ def _spawn_background(
     )
 
 
+def _join_argv_for_jail(argv: list[str]) -> str:
+    """Join argv for jail/approval text without losing spaces."""
+    bits: list[str] = []
+    for a in argv:
+        s = str(a)
+        if not s:
+            continue
+        if any(ch.isspace() for ch in s) or any(ch in s for ch in '&|<>^'):
+            bits.append('"' + s.replace('"', '""') + '"')
+        else:
+            bits.append(s)
+    return " ".join(bits)
+
+
 def _normalize_shell_command_for_host(command: str) -> str:
-    """Rewrite model-emitted bashisms for the host shell (esp. Windows cmd).
+    """Rewrite model-emitted bashisms for the host shell (Windows cmd).
 
-    Models often generate ``mkdir -p a/b c/d`` and ``cd X && mkdir -p …`` which
-    break under PowerShell/cmd without -p. Prefer file_write for files; shell
-    still needs mkdir for dirs when the model insists.
+    Thin wrapper over Host Bridge translate — kept so older call sites and
+    tests that import this symbol still work.
     """
-    import os
-    import re
+    from remedy.execution.host.translate import translate_posix_to_host
 
-    cmd = (command or "").strip()
-    if not cmd:
-        return cmd
-    if os.name != "nt":
-        return cmd
+    return translate_posix_to_host(command).text
 
-    def _mkdir_p_replacement(paths_blob: str) -> str:
-        # Split on whitespace but keep quoted segments
-        parts: list[str] = []
-        for m in re.finditer(r'"[^"]+"|\'[^\']+\'|\S+', paths_blob.strip()):
-            p = m.group(0).strip().strip("\"'")
-            if not p or p.startswith("-"):
-                continue
-            # Trailing \ required so IF NOT EXIST treats path as a directory
-            win_p = p.replace("/", "\\").rstrip("\\")
-            parts.append(f'if not exist "{win_p}\\" mkdir "{win_p}"')
-        return " & ".join(parts) if parts else "echo no_paths"
 
-    # Global replace of `mkdir -p PATH…` segments (including after &&)
-    def _sub_mkdir(m: re.Match[str]) -> str:
-        return _mkdir_p_replacement(m.group(1))
+async def _run_host_session(
+    *,
+    command: str,
+    cwd: Path,
+    timeout: float,
+    env: dict[str, str] | None,
+    roots: list[Path],
+    use_conpty: bool = False,
+    host: str | None = None,
+) -> str:
+    """Run *command* in the shared persistent host session (opt-in)."""
+    from remedy.core.errors import format_tool_error
+    from remedy.execution.host.diagnose import diagnose_host_failure
+    from remedy.execution.host.session import get_shared_session
 
-    cmd2 = re.sub(
-        r"\bmkdir\s+-p\s+((?:\"[^\"]+\"|'[^']+'|[^\s&|;]+(?:\s+(?!&&)[^\s&|;]+)*)+)",
-        _sub_mkdir,
-        cmd,
-        flags=re.IGNORECASE,
-    )
-    # `cd /d` is fine on cmd; bare unix `cd path &&` already works on cmd
-    # Normalize forward slashes in cd targets when simple: leave as-is (cmd accepts /)
-    return cmd2
+    try:
+        sess = await get_shared_session(
+            host=host, cwd=str(cwd), env=env, use_conpty=use_conpty
+        )
+        result = await sess.run(command, timeout=timeout)
+    except Exception as exc:
+        return format_tool_error(
+            f"host session failed: {exc}",
+            code="HOST_SESSION",
+            tool_name="bash_exec",
+            suggestion="Retry without session=true, or use host_run(argv).",
+        )
+    # After cd, refuse if the session walked outside write roots.
+    if result.cwd:
+        try:
+            here = Path(result.cwd).expanduser().resolve(strict=False)
+            allowed = False
+            for r in roots:
+                try:
+                    root = Path(r).expanduser().resolve(strict=False)
+                    if here == root or here.is_relative_to(root):
+                        allowed = True
+                        break
+                except (OSError, ValueError, TypeError):
+                    continue
+            if not allowed:
+                return format_tool_error(
+                    f"host session cwd left write roots: {result.cwd}",
+                    code="WRITE_JAIL",
+                    tool_name="bash_exec",
+                    suggestion="cd back into the project, or close the session.",
+                )
+        except OSError:
+            pass
+    parts = [
+        f"exit_code={result.exit_code}",
+        f"cwd={result.cwd or cwd}",
+        f"timeout_s={timeout}",
+        f"host=session:{result.host}",
+    ]
+    if result.used_conpty:
+        parts.append("conpty=1")
+    if result.stdout:
+        out = result.stdout
+        if len(out) > _HARD_SAFETY_CHARS:
+            out = out[:_HARD_SAFETY_CHARS] + f"\n…[stdout safety cap {_HARD_SAFETY_CHARS}]"
+        parts.append(out)
+    if result.exit_code != 0 or result.timed_out:
+        diag = diagnose_host_failure(
+            command,
+            stdout=result.stdout or "",
+            exit_code=result.exit_code,
+            timed_out=result.timed_out or result.interactive,
+            host=result.host,
+        )
+        parts.append(diag.format_block())
+    return "\n".join(parts)
 
 
 def register_shell_tools(runtime: Any) -> None:
@@ -137,6 +193,9 @@ def register_shell_tools(runtime: Any) -> None:
         workdir: str = "",
         description: str = "",
         background: bool = False,
+        session: bool = False,
+        conpty: bool = False,
+        _argv: list[str] | None = None,
     ) -> str:
         """Run a shell command through SubprocessSandbox (hidden console on Windows).
 
@@ -150,7 +209,6 @@ def register_shell_tools(runtime: Any) -> None:
         _ = description
         from remedy.core.approvals import APPROVALS
         from remedy.core.project_fingerprint import path_env_with_local_bins
-        from remedy.execution.process import win_shell_prefix
         from remedy.execution.sandbox import SubprocessSandbox
 
         if not command or not str(command).strip():
@@ -303,6 +361,19 @@ def register_shell_tools(runtime: Any) -> None:
                     "To edit another tree, switch session project explicitly with the user."
                 ),
             )
+        with suppress(Exception):
+            from remedy.core.self_inject_draft import (
+                in_internal_improve,
+                internal_improve_shell_ok,
+            )
+
+            if in_internal_improve() and not internal_improve_shell_ok(command):
+                return format_tool_error(
+                    "Unattended self-fix may only run pytest / ruff / py_compile.",
+                    code="WRITE_JAIL",
+                    tool_name="bash_exec",
+                    suggestion="Do not git push, publish, or run arbitrary shell.",
+                )
         import re as _re
 
         from remedy.core.shell_write_jail import (
@@ -339,9 +410,29 @@ def register_shell_tools(runtime: Any) -> None:
             except Exception:
                 continue
 
-        # Translate common bashisms so Windows cmd can run model commands
-        command = _normalize_shell_command_for_host(command)
-        argv = [*win_shell_prefix(), command]
+        from remedy.execution.host.diagnose import diagnose_host_failure
+        from remedy.execution.host.ir import HostOp
+        from remedy.execution.host.runner import PreparedCommand, prepare_host_command
+
+        try:
+            if _argv:
+                prepared = PreparedCommand(
+                    argv=list(_argv),
+                    display=" ".join(str(a) for a in _argv),
+                    kind="argv",
+                    ir=HostOp(kind="run", argv=list(_argv)),
+                    notes=["host_run argv"],
+                )
+            else:
+                prepared = prepare_host_command(command, project_path=root)
+        except ValueError as exc:
+            return format_tool_error(
+                str(exc),
+                code="HOST_PREPARE",
+                tool_name="bash_exec",
+                suggestion="Shrink the script or use file_write + run_python_file.",
+            )
+        argv = prepared.argv
         sandbox = SubprocessSandbox(allowed_paths=roots or [root, cwd])
         env = path_env_with_local_bins(cwd)
 
@@ -356,14 +447,38 @@ def register_shell_tools(runtime: Any) -> None:
                 argv,
                 cwd=cwd,
                 env=env,
-                command=command,
+                command=prepared.display or command,
                 auto=auto_bg and not background,
+            )
+
+        if session:
+            sess_cmd = (
+                _join_argv_for_jail(list(_argv))
+                if _argv
+                else (prepared.display or command)
+            )
+            return await _run_host_session(
+                command=sess_cmd,
+                cwd=cwd,
+                timeout=timeout,
+                env=env,
+                roots=list(roots),
+                use_conpty=bool(conpty),
             )
 
         result = await sandbox.execute(
             argv, workdir=cwd, timeout_seconds=timeout, env=env
         )
-        parts = [f"exit_code={result.exit_code}", f"cwd={cwd}", f"timeout_s={timeout}"]
+        parts = [
+            f"exit_code={result.exit_code}",
+            f"cwd={cwd}",
+            f"timeout_s={timeout}",
+            f"host={prepared.kind}",
+        ]
+        if prepared.notes:
+            parts.append("host_notes: " + "; ".join(prepared.notes[:6]))
+        if prepared.script_path:
+            parts.append(f"script={prepared.script_path}")
         # Full stdout/stderr — no quality truncation for the model.
         if result.stdout:
             out = result.stdout
@@ -375,13 +490,22 @@ def register_shell_tools(runtime: Any) -> None:
             if len(err) > _HARD_SAFETY_CHARS:
                 err = err[:_HARD_SAFETY_CHARS] + f"\n…[stderr safety cap {_HARD_SAFETY_CHARS}]"
             parts.append(f"stderr:\n{err}")
+        timed_out = result.exit_code == -1 and "timed out" in (result.stderr or "").lower()
         if result.exit_code != 0:
-            parts.append(
-                "Suggestion: Read stderr, fix flags/paths/cwd, raise timeout_seconds "
-                "for long builds, or try a different command; use list_dir/file_read "
-                "if you only need file contents."
+            diag = diagnose_host_failure(
+                command,
+                stdout=result.stdout or "",
+                stderr=result.stderr or "",
+                exit_code=result.exit_code,
+                translated=prepared.translated or prepared.display,
+                timed_out=timed_out,
+                host=prepared.host,
             )
-            # Best-effort path:line extraction for faster fix loops
+            parts.append(diag.format_block())
+            parts.append(
+                "Suggestion: Prefer host_run(argv=[...]) / host_mkdir / host_script. "
+                "Read stderr, fix flags/paths/cwd, or raise timeout_seconds."
+            )
             with suppress(Exception):
                 import re as _re
 
@@ -401,6 +525,11 @@ def register_shell_tools(runtime: Any) -> None:
                         "Likely locations (file_read these):\n"
                         + "\n".join(f"- {x}" for x in locs)
                     )
+        else:
+            with suppress(Exception):
+                from remedy.execution.host.dialect import record_success
+
+                record_success(command, note=prepared.kind)
         return "\n".join(parts)
 
     async def run_python_file(
@@ -591,18 +720,18 @@ def register_shell_tools(runtime: Any) -> None:
 
     runtime.tool_registry.register_builtin_handler(
         "bash_exec",
-        "Run a shell command. Default cwd = focus folder (or home). "
-        "Optional workdir= absolute/relative path; timeout_seconds= 5–600 (default 180). "
-        "background=true returns immediately (games/servers). GUI/game launches "
-        "auto-background so you can computer_snapshot the window. "
-        "Local .venv/node_modules/.bin and repo-root tools are on PATH. "
-        "Prefer run_python_file for .py scripts; prefer file_write over echo redirects. "
-        "Temp helper scripts → .remedy-build/tmp/ only.",
+        "Run a host command (Windows = cmd.exe, not bash). POSIX-ish strings "
+        "(mkdir -p, rm -rf, grep) are rewritten; PowerShell is written to a "
+        "temp .ps1 and run with pwsh -File (never -Command). "
+        "Prefer host_run(argv) / host_mkdir / host_script / file_write. "
+        "Default cwd = focus folder. timeout_seconds= 5–600 (default 180). "
+        "background=true for games/servers. session=true keeps cwd/env. "
+        "Temp scripts → .remedy-build/tmp/ only.",
         bash_exec,
         {
             "type": "object",
             "properties": {
-                "command": {"type": "string", "description": "Shell command to run"},
+                "command": {"type": "string", "description": "Host command to run"},
                 "timeout_seconds": {
                     "type": "number",
                     "description": "Timeout seconds (default 180, max 600)",
@@ -618,6 +747,16 @@ def register_shell_tools(runtime: Any) -> None:
                         "If true, spawn and return immediately (pid). "
                         "Use for games, GUIs, and long servers."
                     ),
+                },
+                "session": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, run in the persistent host session (cwd/env survive)."
+                    ),
+                },
+                "conpty": {
+                    "type": "boolean",
+                    "description": "Attach a Windows ConPTY when session=true (TTY apps).",
                 },
                 "description": {
                     "type": "string",
@@ -655,6 +794,221 @@ def register_shell_tools(runtime: Any) -> None:
                 },
             },
             "required": ["path"],
+        },
+    )
+
+    async def host_run(
+        argv: Any = None,
+        timeout_seconds: float = 180.0,
+        workdir: str = "",
+        session: bool = False,
+        conpty: bool = False,
+    ) -> str:
+        """Run a native argv (no shell). Accepts list or string."""
+        from remedy.execution.host.runner import coerce_argv
+
+        args = coerce_argv(argv)
+        if not args:
+            return format_tool_error(
+                "argv= required (list or string)",
+                code="EMPTY_COMMAND",
+                tool_name="host_run",
+                suggestion='Pass argv=["python","-m","py_compile","app.py"].',
+            )
+        # Jail/approval see a quoted string; execution uses the raw argv list.
+        return await bash_exec(
+            command=_join_argv_for_jail(args),
+            timeout_seconds=timeout_seconds,
+            workdir=workdir,
+            session=session,
+            conpty=conpty,
+            _argv=args,
+        )
+
+    async def host_mkdir(paths: Any = None, workdir: str = "") -> str:
+        """Create directories (parents=True) under write roots. No shell."""
+        from remedy.execution.host.runner import coerce_argv
+
+        items = coerce_argv(paths)
+        if not items:
+            return format_tool_error(
+                "paths= required",
+                code="EMPTY_PATH",
+                tool_name="host_mkdir",
+                suggestion='Pass paths=["src","tests"] or a single path string.',
+            )
+        made: list[str] = []
+        for raw in items:
+            bad = _reserved_guard(raw)
+            if bad:
+                return format_tool_error(
+                    bad, code="RESERVED_NAME", tool_name="host_mkdir"
+                )
+            try:
+                target = runtime.resolve_tool_path(raw, for_write=True)
+            except Exception as e:
+                return format_tool_error(
+                    f"invalid path: {e}",
+                    code="BAD_PATH",
+                    tool_name="host_mkdir",
+                    suggestion="Use a path under the project folder.",
+                )
+            try:
+                target.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                return format_tool_error(
+                    f"mkdir failed: {e}",
+                    code="MKDIR_FAILED",
+                    tool_name="host_mkdir",
+                )
+            _note_path(target)
+            made.append(str(target))
+        return "ok\n" + "\n".join(made)
+
+    async def host_which(name: str = "") -> str:
+        """Resolve an executable on PATH (and common Windows names)."""
+        from remedy.execution.host.runner import resolve_which
+
+        n = (name or "").strip()
+        if not n:
+            return format_tool_error(
+                "name= required",
+                code="EMPTY_NAME",
+                tool_name="host_which",
+                suggestion="Pass name=python or name=git.",
+            )
+        found = resolve_which(n)
+        if not found:
+            return format_tool_error(
+                f"not on PATH: {n}",
+                code="NOT_FOUND",
+                tool_name="host_which",
+                suggestion="Install the tool or pass a full path to host_run.",
+            )
+        return found
+
+    async def host_script(
+        lang: str = "pwsh",
+        body: str = "",
+        timeout_seconds: float = 180.0,
+        workdir: str = "",
+    ) -> str:
+        """Write a scratch script and run it with -File (never -Command)."""
+        from remedy.execution.host.scriptfile import launch_script
+
+        text = (body or "").strip()
+        if not text:
+            return format_tool_error(
+                "body= required",
+                code="EMPTY_COMMAND",
+                tool_name="host_script",
+                suggestion="Pass the script body; it is written under .remedy-build/tmp/.",
+            )
+        kind = (lang or "pwsh").strip().lower() or "pwsh"
+        if kind in ("powershell", "ps1"):
+            kind = "pwsh"
+        if kind not in ("pwsh", "cmd", "python"):
+            return format_tool_error(
+                f"unsupported lang={kind}",
+                code="BAD_LANG",
+                tool_name="host_script",
+                suggestion="lang=pwsh | cmd | python.",
+            )
+        if kind == "python":
+            root = runtime.effective_project_path()
+            try:
+                launch = launch_script("python", text, project_path=root)
+            except ValueError as exc:
+                return format_tool_error(
+                    str(exc),
+                    code="HOST_PREPARE",
+                    tool_name="host_script",
+                    suggestion="Shrink the script body.",
+                )
+            return await run_python_file(
+                path=str(launch.path),
+                timeout_seconds=timeout_seconds,
+                workdir=workdir,
+            )
+        # Jail the body, then let Host Bridge write .ps1/.cmd and run -File.
+        prefix = "pwsh -Command " if kind == "pwsh" else "cmd /c "
+        return await bash_exec(
+            command=prefix + text,
+            timeout_seconds=timeout_seconds,
+            workdir=workdir,
+        )
+
+    runtime.tool_registry.register_builtin_handler(
+        "host_run",
+        "Run a native process by argv (no shell, no quoting). "
+        'argv=["git","status"] or a string. Prefer this over bash_exec.',
+        host_run,
+        {
+            "type": "object",
+            "properties": {
+                "argv": {
+                    "description": "Argument vector (array or string)",
+                    "anyOf": [
+                        {"type": "array", "items": {"type": "string"}},
+                        {"type": "string"},
+                    ],
+                },
+                "timeout_seconds": {"type": "number", "default": 180},
+                "workdir": {"type": "string"},
+                "session": {"type": "boolean"},
+                "conpty": {"type": "boolean"},
+            },
+            "required": ["argv"],
+        },
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "host_mkdir",
+        "Create directories under write roots (parents=True). No shell. "
+        'paths=["src/foo","tests"] or a single path.',
+        host_mkdir,
+        {
+            "type": "object",
+            "properties": {
+                "paths": {
+                    "description": "Directories to create",
+                    "anyOf": [
+                        {"type": "array", "items": {"type": "string"}},
+                        {"type": "string"},
+                    ],
+                },
+                "workdir": {"type": "string"},
+            },
+            "required": ["paths"],
+        },
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "host_which",
+        "Resolve an executable on this machine's PATH (python, git, rg, …).",
+        host_which,
+        {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "host_script",
+        "Write a scratch script under .remedy-build/tmp/ and run it "
+        "(pwsh -File / cmd / python). Never use powershell -Command.",
+        host_script,
+        {
+            "type": "object",
+            "properties": {
+                "lang": {
+                    "type": "string",
+                    "enum": ["pwsh", "cmd", "python"],
+                    "default": "pwsh",
+                },
+                "body": {"type": "string", "description": "Script source"},
+                "timeout_seconds": {"type": "number", "default": 180},
+                "workdir": {"type": "string"},
+            },
+            "required": ["body"],
         },
     )
 

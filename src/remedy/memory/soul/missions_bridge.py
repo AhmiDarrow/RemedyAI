@@ -53,6 +53,11 @@ def collect_soul_mission_candidates(
 
     for p in sf.pledges[-8:]:
         _add(p, "pledge")
+    for d in getattr(sf, "future_dreams", None) or []:
+        # Prefer the goal half of "Toward X: move"
+        goal = d.split(":", 1)[0]
+        goal = re.sub(r"(?i)^toward\s+", "", goal).strip()
+        _add(goal or d, "dream")
     for t in sf.relational.open_threads[-8:]:
         _add(t, "open_thread")
     # Last episode open thread

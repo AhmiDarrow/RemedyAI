@@ -69,6 +69,11 @@ If the server fails or settings fail to load:
 - Empty chat shows starters and a pointer to `/help` and **F1**  
 - You may be asked for your name if it was left blank  
 - Secondary loads (models list) must not block the wizard  
+- Remedy **stretches out** in the background: hardware (RAM / GPU), tools on
+  PATH (`python`, `git`, `uv`, …), user folders (Desktop / Documents / …),
+  and a few local doors (Ollama, ComfyUI, RMB). No disk crawl. The map lives
+  in `~/.remedy/host/home.json` and injects as a **This home** line. Refresh
+  with `/stretch` (alias `/home`) after you install tools. `/whoami` shows it.
 
 ## Corrupt config recovery
 

@@ -267,6 +267,15 @@ def build_runtime_system_block(
         )
 
         if is_local_binding(provider, model, base_url):
+            win = None
+            try:
+                from remedy.core.endless_context import resolve_local_window
+
+                win = resolve_local_window(
+                    provider=provider, model=model, base_url=base_url
+                )
+            except Exception:
+                win = None
             return slim_system_for_local(
                 system_prompt,
                 context,
@@ -275,6 +284,7 @@ def build_runtime_system_block(
                 base_url=base_url,
                 max_steps=max_steps,
                 user_message=user_message or "",
+                window=win,
             )
     except Exception:
         pass

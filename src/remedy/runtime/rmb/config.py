@@ -127,7 +127,12 @@ def default_state() -> dict[str, Any]:
         "dry_penalty_last_n": -1,  # --dry-penalty-last-n (-1 = all tokens)
         "xtc_probability": 0.0,  # --xtc-probability (0 = off)
         "xtc_threshold": 0.1,  # --xtc-threshold
-        "profile": "agent",  # agent | turbo | quality
+        "cache_reuse": 256,  # --cache-reuse (prefix cache for ReAct tool loops)
+        "profile": "autofit",  # autofit | agent | turbo | quality
+        "autofit": True,
+        "autofit_locked": False,
+        "last_autofit": None,
+        "last_good_fit": None,
         "pid": None,
         # Set True while RMB owns GPU; cleared on stop / failed start
         "vision_suspended": False,

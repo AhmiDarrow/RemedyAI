@@ -79,6 +79,25 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             ]
         }
 
+    @app.get("/api/sessions/{session_id}/todos")
+    async def list_session_todos(session_id: str):
+        """Live build checklist for the session project (user-visible)."""
+        from pathlib import Path
+
+        from remedy.core.build_todos import load_todos, todos_public
+
+        root = None
+        if memory is not None:
+            sess = await memory.get_chat_session(session_id)
+            if sess is None:
+                raise HTTPException(404, "Session not found")
+            raw = getattr(sess, "project_path", None)
+            if raw:
+                p = Path(str(raw))
+                root = p.parent if p.is_file() else p
+        items = load_todos(runtime, root=root)
+        return {"todos": todos_public(items)}
+
     @app.post("/api/sessions/{session_id}/messages")
     async def send_message(session_id: str, req: SendMessageRequest):
         if runtime is None:

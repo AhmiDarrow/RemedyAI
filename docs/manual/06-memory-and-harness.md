@@ -31,7 +31,8 @@ Remedy keeps durable knowledge so it can remember facts, goals, and session cont
 | `/remember <fact>` | Store a durable fact |
 | `/forget <text>` | Remove a matching Partner Memory fact |
 | `/memory <query>` | Search memory |
-| `/whoami` | Show what Remedy knows about you |
+| `/whoami` | Show what Remedy knows about you (and this home) |
+| `/stretch` | Map this PC — hardware, tools, rooms (`/home`) |
 | `/goal <title>` | Add a goal |
 | `/goals` | List open goals |
 | `/compact [focus]` | Compress session into a Session Brief |
@@ -72,10 +73,32 @@ snapshot. Background continuity also:
 You should not need to manage this. For philosophy, see
 [How Remedy works (continuity)](16-continuity-philosophy).
 
-## Partner Memory (just works)
+## Living memory (the organism)
 
-Remedy quietly keeps a small **Partner Memory** block so it feels like the same
-partner next session:
+Remedy is not a session chatbot and not only a coder. Memory is how it *grows
+with you* — tasks, goals, and life, not just the repo in focus.
+
+Every turn it injects a small ranked block:
+
+| Section | What it holds |
+|---------|----------------|
+| **Who you are** | Name, identity, traits |
+| **Life & goals** | Family, rhythm, priorities, “don’t mention X” |
+| **How we work together** | Tone, craft, design taste, corrections |
+| **This chapter** | Decisions for the current project that survive compress |
+| **Recalled for this turn** | Query-relevant facts/notes (kids vs ruff vs a deadline) |
+
+Life facts stay **global**. Repo decisions stay **scoped** to that folder.
+Corrections (“too generic”, “be blunt”) become durable manners. Taste from
+design passes folds into the same Partner Memory so it is not a sidecar.
+
+You still `/forget` a mistake and `/remember` a hard pin. Nothing here is a
+second personality — it is the same local organism, denser.
+
+**Dreams.** When Remedy has enough recent residue, a dream pass binds *their*
+goals to *how I will show up* (`Toward ship 1.0: act first; verify before done`).
+That is memory of the user, memory of the self, and a dream of the future —
+not a transcript compress.
 
 - Prefer / always / never phrasing in chat is distilled automatically when safe
   (one-off “always run the tests now” chatter is ignored).  

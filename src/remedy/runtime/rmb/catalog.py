@@ -72,12 +72,19 @@ RMB_MODELS: dict[str, RmbModelSpec] = {
 DEFAULT_RMB_MODEL_ID = "qwen25-coder-7b"
 
 # Profiles → llama-server knobs (ctx / sampling hints for UI)
+# ctx_size 0 on autofit = compute from VRAM/RAM + GGUF at start.
 RMB_PROFILES: dict[str, dict[str, Any]] = {
+    "autofit": {
+        "label": "Autofit (recommended)",
+        "ctx_size": 0,
+        "n_gpu_layers": -1,
+        "blurb": "Largest stable context that fits this GPU/RAM. Default.",
+    },
     "agent": {
-        "label": "Agent (recommended)",
+        "label": "Agent",
         "ctx_size": 8192,
         "n_gpu_layers": -1,
-        "blurb": "Long tool chains + coding on 12GB class GPUs.",
+        "blurb": "Fixed 8k window — long tool chains on 12GB class GPUs.",
     },
     "turbo": {
         "label": "Turbo",
@@ -89,7 +96,7 @@ RMB_PROFILES: dict[str, dict[str, Any]] = {
         "label": "Quality",
         "ctx_size": 16384,
         "n_gpu_layers": -1,
-        "blurb": "Push context when free VRAM allows (may OOM on 12GB).",
+        "blurb": "Fixed 16k window (may OOM on small GPUs — prefer Autofit).",
     },
 }
 

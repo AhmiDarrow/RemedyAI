@@ -99,6 +99,19 @@ class TestNeverActiveFromSingleTrace:
         loop.auto_refine_skill(skill)
         assert skill.manifest.status == SkillStatus.ACTIVE
 
+    def test_tick_learned_skills_promotes_without_user(self, loop: LearningLoop):
+        """Unattended tick applies the same multi-session promote policy."""
+        skill = _skill("tick-promote", SkillStatus.VALIDATED, effort=0.2)
+        loop._write_skill_md(skill)
+        for sid in ("a", "b", "c"):
+            for _ in range(2):
+                loop.record_skill_feedback(skill.manifest.name, success=True, session_id=sid)
+        changes = loop.tick_learned_skills()
+        assert any(c["name"] == "tick-promote" and c["action"] == "promote" for c in changes)
+        reloaded = loop._find_existing_skill("tick-promote")
+        assert reloaded is not None
+        assert reloaded.manifest.status == SkillStatus.ACTIVE
+
 
 class TestFailedTracesDoNotCodify:
     def test_failed_overall_rejected(self, loop: LearningLoop):

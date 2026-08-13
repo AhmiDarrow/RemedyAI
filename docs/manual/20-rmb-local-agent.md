@@ -25,11 +25,17 @@ GPU memory stays exclusive to the agent host. Stop RMB to free vision again.
 Cloud providers remain first-class; RMB is an optional local muscle, not a
 second product personality.
 
+Local models emit bash. The **Host Bridge** (see [Agency](18-agency.md)) rewrites
+POSIX-ish `bash_exec` strings for Windows cmd, runs PowerShell via `pwsh -File`,
+and prefers `host_run(argv)` so quoting does not burn the small window.
+
 ## Setup (owner UI)
 
 1. Open **Settings → Remedy Muscle Bridge** (local models).
 2. Drop a GGUF into `~/.remedy/rmb/models/` or pick a catalog / path.
-3. Choose **profile** (agent / turbo / quality), context size, GPU layers.
+3. Leave **Autofit** on (default) — Remedy sizes context, GPU layers, and KV
+   cache from this PC’s VRAM/RAM so the GGUF actually loads. Or pick a fixed
+   profile (agent / turbo / quality) or type a context size to lock it.
 4. **Start RMB** (required — RMB does **not** auto-start when the API/serve
    process comes up). Optionally enable **auto-start** only if you want the host
    to load with every Remedy launch.
@@ -41,11 +47,16 @@ model, context, or GPU layer settings.
 
 ## Profiles (short)
 
-- **Agent** — balanced tool use and coding
-- **Turbo** — faster / shorter generations
-- **Quality** — slower, stronger answers when the model supports it
+- **Autofit** — default. Measures VRAM/RAM + the GGUF and starts the largest
+  stable window that fits (full GPU offload when possible, quantized KV or
+  fewer layers if not). If load OOMs, RMB walks the fit down and retries.
+- **Agent** — fixed 8k window
+- **Turbo** — fixed 4k, snappier turns
+- **Quality** — fixed 16k (can OOM on small GPUs; prefer Autofit)
 
-Exact sampling knobs live in RMB settings; profiles only pick a sensible preset.
+Exact sampling knobs live in RMB settings; Autofit / profiles only pick host
+size. Prefix cache (`--cache-reuse`) is on when the runtime supports it so
+tool loops do not re-process the system prompt every step.
 
 ## Safety and scope
 

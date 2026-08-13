@@ -209,6 +209,7 @@ def test_whoami_friendly():
     assert "Sam" in text
     assert "TypeScript" in text
     assert "/forget" in text
+    assert "How we work together" in text or "Facts" in text
 
 
 def test_project_scope_and_pin():

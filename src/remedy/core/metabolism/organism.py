@@ -71,8 +71,24 @@ def organism_pulse_block(
             )
             if open_hint:
                 lines.append(f"Open thread: {open_hint}")
+            if getattr(sf, "future_dreams", None):
+                lines.append("Dream: " + str(sf.future_dreams[0])[:140])
             if rel.help_mode:
                 lines.append(f"Help mode they like: {rel.help_mode}")
+            # Life/goal residue so pulse is not only repo stance
+            with suppress(Exception):
+                prof = None
+                if runtime is not None:
+                    prof = getattr(runtime, "_user_profile", None)
+                mem = getattr(runtime, "memory", None) if runtime is not None else None
+                if prof is None and mem is not None:
+                    prof = getattr(mem, "profile", None) or getattr(mem, "_profile", None)
+                if prof is not None:
+                    from remedy.memory.living import life_goal_lines
+
+                    lg = life_goal_lines(prof, limit=2)
+                    if lg:
+                        lines.append("Life: " + " · ".join(lg)[:200])
             # Stance-driven partner behavior (results, not theater)
             if mood == "strained" or stance == "frustrated":
                 lines.append(

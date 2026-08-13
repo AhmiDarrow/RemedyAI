@@ -12,6 +12,39 @@ import re
 from typing import Any
 
 
+def approval_required_for_ship(
+    command: str,
+    session_id: str | None,
+    *,
+    reason: str,
+) -> str | None:
+    """Return an APPROVAL_REQUIRED blob, or None when Auto / already approved.
+
+    ``git_push`` / ``gh_release`` used to force a prompt with
+    ``needs_ask(...) or "git push (ship)"`` — Auto returned None, then the
+    ``or`` fallback still created a banner. Full owner power must skip that.
+    """
+    from remedy.core.approvals import APPROVALS
+
+    ask = APPROVALS.needs_ask(command, tool_name="bash_exec")
+    if not ask:
+        return None
+    if APPROVALS.is_approved("bash_exec", command, session_id=session_id):
+        return None
+    item = APPROVALS.create(
+        tool_name="bash_exec",
+        command=command,
+        reason=ask or reason,
+        session_id=session_id,
+    )
+    return (
+        f"APPROVAL_REQUIRED id={item.id}\n"
+        f"reason={ask or reason}\n"
+        f"command={command}\n"
+        "Approve in UI then retry."
+    )
+
+
 def register_ship_tools(runtime: Any) -> None:
     """Register git_status / git_push / gh_release / ship_status."""
 
@@ -152,7 +185,6 @@ def register_ship_tools(runtime: Any) -> None:
         set_upstream: bool = True,
     ) -> str:
         """Push current branch to remote (uses sticky VCS approval family)."""
-        from remedy.core.approvals import APPROVALS
         from remedy.core.turn_context import turn_session_id
 
         rem = (remote or "origin").strip() or "origin"
@@ -163,26 +195,11 @@ def register_ship_tools(runtime: Any) -> None:
         args.extend([rem, rf])
         cmd_preview = "git " + " ".join(args)
         sid = turn_session_id(runtime)
-        ask = APPROVALS.needs_ask(cmd_preview, tool_name="bash_exec") or "git push (ship)"
-        if not APPROVALS.is_approved("bash_exec", cmd_preview, session_id=sid):
-            # Also accept prior sticky git_push family via is_approved on similar
-            if not APPROVALS.is_approved(
-                "bash_exec", f"git push -u {rem} HEAD", session_id=sid
-            ) and not APPROVALS.is_approved(
-                "bash_exec", f"git push {rem} main", session_id=sid
-            ):
-                item = APPROVALS.create(
-                    tool_name="bash_exec",
-                    command=cmd_preview,
-                    reason=str(ask),
-                    session_id=sid,
-                )
-                return (
-                    f"APPROVAL_REQUIRED id={item.id}\n"
-                    f"reason={ask}\n"
-                    f"command={cmd_preview}\n"
-                    "Approve in UI then retry git_push."
-                )
+        blocked = approval_required_for_ship(
+            cmd_preview, sid, reason="git push (ship)"
+        )
+        if blocked:
+            return blocked
         code, out, err = await _run_git(args, timeout=180.0)
         blob = (out + "\n" + err).strip()
         ok = code == 0
@@ -225,7 +242,6 @@ def register_ship_tools(runtime: Any) -> None:
         prerelease: bool = False,
     ) -> str:
         """Create a GitHub release via gh CLI (after green + push)."""
-        from remedy.core.approvals import APPROVALS
         from remedy.core.turn_context import turn_session_id
 
         tg = (tag or "").strip()
@@ -265,21 +281,11 @@ def register_ship_tools(runtime: Any) -> None:
 
         cmd_preview = "gh " + " ".join(args[:6])
         sid = turn_session_id(runtime)
-        if not APPROVALS.is_approved("bash_exec", cmd_preview, session_id=sid):
-            if not APPROVALS.is_approved(
-                "bash_exec", f"gh release create {tg}", session_id=sid
-            ):
-                item = APPROVALS.create(
-                    tool_name="bash_exec",
-                    command=cmd_preview,
-                    reason="gh release create (ship)",
-                    session_id=sid,
-                )
-                return (
-                    f"APPROVAL_REQUIRED id={item.id}\n"
-                    f"command={cmd_preview}\n"
-                    "Approve in UI then retry gh_release."
-                )
+        blocked = approval_required_for_ship(
+            cmd_preview, sid, reason="gh release create (ship)"
+        )
+        if blocked:
+            return blocked
 
         code, out, err = await _run_gh(args, timeout=180.0)
         blob = (out + "\n" + err).strip()

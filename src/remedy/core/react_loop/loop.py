@@ -343,6 +343,12 @@ async def call_llm_stream(runtime, message: str,
             )
 
         _resolve_and_apply(step_index=0)
+        with suppress(Exception):
+            from remedy.core.build_todos import load_todos, todos_event_token
+
+            _existing_todos = load_todos(runtime)
+            if _existing_todos:
+                yield todos_event_token(_existing_todos)
 
         def _rearm_agency_tools() -> None:
             """Re-enable tool schemas *and* long-task epoch policy."""

@@ -956,6 +956,8 @@ class BasicRuntime(AgentRuntime):
         *,
         plan_mode: bool = False,
         provider: str | None = None,
+        internal: bool = False,
+        project_override: str | None = None,
     ) -> AsyncIterator[str]:
         """Stream tokens from the LLM for real-time SSE delivery.
 
@@ -965,7 +967,14 @@ class BasicRuntime(AgentRuntime):
 
         *plan_mode*: restrict tools to planning helpers (plan_save, goals, memory search).
         *provider* / *model*: per-session bind via ContextVar (parallel multi-provider).
+        *internal*: unattended self-fix — does not count as a user turn.
+        *project_override*: bind the tool jail to this path after session workspace.
         """
+        if not internal:
+            with suppress(Exception):
+                from remedy.core.self_inject import note_user_activity
+
+                note_user_activity()
         from remedy.core.llm_binding import (
             LlmBinding,
             get_llm_binding,
@@ -988,6 +997,9 @@ class BasicRuntime(AgentRuntime):
 
         async with lock:
             await self._apply_session_workspace(session_id)
+            if project_override:
+                with suppress(Exception):
+                    self.set_project_path(str(project_override), as_default=False)
             # Capture under lock — concurrent set_project_path cannot race us.
             turn_project_raw = getattr(self, "_project_path_raw", None)
             turn_active_path = getattr(self, "_active_project_path", None) or ""
@@ -1127,7 +1139,7 @@ class BasicRuntime(AgentRuntime):
             self._plan_mode = False
             self._turn_tool_steps = []
             # Soft end-of-turn checkpoint if substantial tool work happened
-            if not plan_mode and not is_turn_aborted():
+            if not plan_mode and not internal and not is_turn_aborted():
                 with suppress(Exception):
                     if len(steps_snap) >= 4:
                         # Temporarily expose steps for checkpoint helper

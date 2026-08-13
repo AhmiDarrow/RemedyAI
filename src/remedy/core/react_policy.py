@@ -54,7 +54,8 @@ _DEFAULT_SYSTEM_BODY = (
     "- **Skills** are named procedure packs (how to review code, write tests, etc.). "
     "When asked \"what skills do you have?\", list them from the Skills block in context "
     "— do NOT shell out or invent names.\n"
-    "- **Tools** are executable actions: file_read, file_write, list_dir, bash_exec, "
+    "- **Tools** are executable actions: file_read, file_write, list_dir, host_run, "
+    "host_mkdir, host_script, bash_exec, "
     "local_discover, comfyui (and others when registered).\n\n"
     "Tool policy:\n"
     "- Simple chat (greetings, definitions, provider/model/skills questions): "
@@ -460,7 +461,8 @@ _META_NO_TOOLS_RE = re.compile(
 _TOOL_ID = r"[a-z][a-z0-9_]{1,64}"
 # Models sometimes emit tool syntax as plain text instead of function-calls.
 _PSEUDO_TOOL_RE = re.compile(
-    r"\b(file_read|file_write|list_dir|bash_exec|comfyui|local_discover|"
+    r"\b(file_read|file_write|list_dir|bash_exec|host_run|host_mkdir|host_which|"
+    r"host_script|comfyui|local_discover|"
     r"get_settings|update_settings|mail_list|mail_send|mail_create_draft|"
     r"calendar_list_events|calendar_create_event|budget_set|bill_upsert|"
     r"debt_upsert|assistant_brief)\s*\(",
@@ -1197,6 +1199,10 @@ def _parse_dsml_tool_calls(text: str) -> list[dict[str, Any]]:
 
         if name == "bash_exec" and not args.get("command"):
             continue
+        if name == "host_run" and not args.get("argv"):
+            continue
+        if name == "host_script" and not args.get("body"):
+            continue
         if name in ("file_read", "file_write") and not args.get("path"):
             continue
 
@@ -1439,6 +1445,20 @@ def recovered_tool_call_is_complete(tc: dict[str, Any]) -> bool:
     if name == "bash_exec":
         cmd = str(args.get("command") or args.get("code") or args.get("cmd") or "").strip()
         return len(cmd) >= 2
+    if name == "host_run":
+        argv = args.get("argv")
+        if isinstance(argv, list):
+            return len(argv) >= 1
+        return bool(str(argv or "").strip())
+    if name == "host_mkdir":
+        paths = args.get("paths")
+        if isinstance(paths, list):
+            return len(paths) >= 1
+        return bool(str(paths or args.get("path") or "").strip())
+    if name == "host_which":
+        return bool(str(args.get("name") or "").strip())
+    if name == "host_script":
+        return bool(str(args.get("body") or args.get("command") or "").strip())
     if name in ("file_read", "file_write", "list_dir"):
         return bool(str(args.get("path") or args.get("file") or "").strip())
     if name == "comfyui":

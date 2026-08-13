@@ -126,6 +126,14 @@ def _cmd_serve(args) -> None:
 
     runtime, gateway, memory, n_skills = asyncio.run(_start())
 
+    # First install / stale map: stretch out and census this PC in the background.
+    try:
+        from remedy.execution.host.stretch import ensure_home_stretch
+
+        ensure_home_stretch(home, force=False, background=True)
+    except Exception:
+        pass
+
     # Warm secret-store / ACL path once so the first Settings GET is not paying
     # Windows icacls (~100ms) on the critical UI path.
     try:

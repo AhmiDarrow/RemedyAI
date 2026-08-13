@@ -390,6 +390,7 @@ def _plan_mode_tool_names() -> frozenset[str]:
         "list_dir",
         "repo_search",
         "file_glob",
+        "host_which",
         "todo_write",
         "todo_read",
         "companion_context",

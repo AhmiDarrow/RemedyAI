@@ -38,8 +38,13 @@ def register_soul_tools(runtime: Any) -> None:
             f"Correction: {sf.relational.correction_style or '(none yet)'}",
             f"Episodes: {len(sf.episodes)} · pledges: {len(sf.pledges)} · "
             f"open threads: {len(sf.relational.open_threads)} · "
-            f"lessons: {len(sf.organism_lessons)}",
+            f"lessons: {len(sf.organism_lessons)} · "
+            f"dreams: {len(getattr(sf, 'future_dreams', None) or [])}",
         ]
+        if getattr(sf, "future_dreams", None):
+            lines.append("Dreams of the future:")
+            for d in sf.future_dreams[:4]:
+                lines.append(f"  · {d}")
         if sf.relational.open_threads:
             lines.append("Open threads:")
             for t in sf.relational.open_threads[-5:]:
@@ -69,7 +74,7 @@ def register_soul_tools(runtime: Any) -> None:
         )
 
     async def soul_dream(force: bool = False, use_local: bool = True) -> str:
-        """Run a dream cycle: consolidate episodes into durable soul tissue."""
+        """Dream: remember them, remember myself, aim at their goals."""
         import json
 
         from remedy.memory.soul.dream import dream_cycle
