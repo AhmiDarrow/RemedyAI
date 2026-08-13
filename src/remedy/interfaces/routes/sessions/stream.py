@@ -206,10 +206,6 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             )
 
             async def event_stream():
-                from remedy.core.metrics import default_registry
-
-                t0 = time.perf_counter()
-                status = "ok"
                 try:
                     async for _chunk in _event_stream_body():
                         yield _chunk
@@ -235,6 +231,7 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                     # whoami / status) works without a provider key. Non-L0 without a
                     # key still gets a clear notice from the agent (streamed as text).
                     aborted = False
+                    persist_done = False
 
                     async for token in runtime.stream_response(
                         user_text or "(see attached files)",
@@ -458,6 +455,7 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                             model=req.model or getattr(runtime, "_llm_model", None),
                             tokens=tok,
                         ))
+                        persist_done = True
                         # Desktop→messenger: mirror so Telegram users see desktop replies.
                         with contextlib.suppress(Exception):
                             from remedy.gateway.session_bridge import (
@@ -494,7 +492,8 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                     status = "cancelled"
                     # Persist whatever we already streamed. Fetch abort used to
                     # drop the assistant row so reload showed only the user turn.
-                    if memory is not None:
+                    # Skip if the cooperative @@aborted path already wrote a row.
+                    if memory is not None and not persist_done:
                         note = ""
                         thinking = None
                         calls: list = []

@@ -39,9 +39,7 @@ def _is_blocked_metadata_host(host: str) -> bool:
         return True
     if any(h.endswith(sfx) for sfx in _WILDCARD_IP_DNS):
         return True
-    if h.startswith("169.254."):
-        return True
-    return False
+    return bool(h.startswith("169.254."))
 
 # Phrases that usually need OS control beyond the in-rail browser.
 _DESKTOP_HINTS = re.compile(

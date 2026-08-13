@@ -62,6 +62,53 @@ def check_path_syntax(path: str | Path) -> dict[str, Any]:
     return out
 
 
+def resolve_write_paths(runtime: Any, paths: list[str] | None) -> list[str]:
+    """Turn write_set entries into existing files (project-relative or absolute).
+
+    Missing / stale entries are skipped — they must not false-red the syntax gate
+    and block auto-verify for the rest of the turn.
+    """
+    root: Path | None = None
+    with suppress(Exception):
+        raw = runtime.effective_project_path() if runtime is not None else None
+        if raw:
+            rp = Path(raw)
+            root = rp.parent if rp.is_file() else rp
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in paths or []:
+        p = str(raw or "").strip()
+        if not p or p in seen:
+            continue
+        if " " in p and not Path(p).exists():
+            continue
+        cand: Path | None = None
+        pp = Path(p)
+        if pp.is_file():
+            cand = pp
+        else:
+            with suppress(Exception):
+                if runtime is not None:
+                    rp = Path(runtime.resolve_tool_path(p))
+                    if rp.is_file():
+                        cand = rp
+            if cand is None and root is not None:
+                alt = root / p
+                if alt.is_file():
+                    cand = alt
+        if cand is None:
+            continue
+        key = str(cand)
+        if key in seen:
+            continue
+        seen.add(p)
+        seen.add(key)
+        out.append(key)
+        if len(out) >= 12:
+            break
+    return out
+
+
 def check_paths_syntax(paths: list[str]) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -72,10 +119,21 @@ def check_paths_syntax(paths: list[str]) -> list[dict[str, Any]]:
         # Skip shell commands mistaken for paths
         if " " in p and not Path(p).exists():
             continue
-        if not p.endswith((".py", ".json")):
+        target = Path(p)
+        if not target.is_file():
+            # Unresolved relative path — skip (do not false-red)
             continue
-        seen.add(p)
-        results.append(check_path_syntax(p))
+        suf = target.suffix.lower()
+        if suf in {".py", ".json"}:
+            seen.add(p)
+            results.append(check_path_syntax(p))
+        else:
+            from remedy.core.build_lang_oracle import LANG_SUFFIXES, check_lang_syntax
+
+            if suf not in LANG_SUFFIXES:
+                continue
+            seen.add(p)
+            results.append(check_lang_syntax(p))
         if len(results) >= 12:
             break
     return results

@@ -56,6 +56,129 @@ def _find_flex_span(content: str, old: str) -> tuple[int, int] | None:
     return start, end
 
 
+def _leading_ws(line: str) -> str:
+    i = 0
+    while i < len(line) and line[i] in " \t":
+        i += 1
+    return line[:i]
+
+
+def _ws_width(ws: str) -> int:
+    return sum(4 if ch == "\t" else 1 for ch in ws)
+
+
+def _find_indent_flex_span(content: str, old: str) -> tuple[int, int] | None:
+    """Unique match ignoring leading *and* trailing whitespace per line.
+
+    Claude-class agents often copy a snippet with the wrong indent (4 vs 8).
+    Require a unique sequence of stripped lines so ``return x`` alone cannot
+    smash every return in the file.
+    """
+    if not old or "\n" not in old:
+        # Single-line indent drift is too ambiguous (many `return` / `pass`).
+        return None
+    old_lines = list(old.replace("\r\n", "\n").replace("\r", "\n").split("\n"))
+    if len(old_lines) > 1 and old_lines[-1] == "":
+        old_lines = old_lines[:-1]
+    if len(old_lines) < 2:
+        return None
+    old_stripped = [ln.strip() for ln in old_lines]
+    if not any(old_stripped):
+        return None
+    raw = content.splitlines(keepends=True)
+    stripped = [ln.rstrip("\r\n").strip() for ln in raw]
+    n = len(old_stripped)
+    if n > len(stripped):
+        return None
+    hits: list[int] = []
+    for i in range(len(stripped) - n + 1):
+        if stripped[i : i + n] == old_stripped:
+            hits.append(i)
+            if len(hits) > 1:
+                return None
+    if len(hits) != 1:
+        return None
+    i = hits[0]
+    start = sum(len(raw[j]) for j in range(i))
+    end = start + sum(len(raw[j]) for j in range(i, i + n))
+    if not old.endswith("\n") and not old.endswith("\r"):
+        last = raw[i + n - 1]
+        extra = len(last) - len(last.rstrip("\r\n"))
+        end -= extra
+    return start, end
+
+
+def _reindent_new(new: str, old: str, file_span: str) -> str:
+    """Shift *new* so its first-line indent matches the file span, not *old*."""
+    file_first = file_span.replace("\r\n", "\n").replace("\r", "\n").split("\n", 1)[0]
+    old_first = old.replace("\r\n", "\n").replace("\r", "\n").split("\n", 1)[0]
+    delta = _ws_width(_leading_ws(file_first)) - _ws_width(_leading_ws(old_first))
+    if delta == 0:
+        return new
+    crlf = "\r\n" in file_span
+    nl = "\r\n" if crlf else "\n"
+    ends = new.endswith("\n") or new.endswith("\r")
+    lines = new.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    keep_end = bool(lines and lines[-1] == "" and ends)
+    if keep_end:
+        lines = lines[:-1]
+    out: list[str] = []
+    for ln in lines:
+        if not ln.strip():
+            out.append(ln)
+            continue
+        if delta > 0:
+            out.append((" " * delta) + ln)
+            continue
+        cut = -delta
+        i = 0
+        while cut > 0 and i < len(ln) and ln[i] == " ":
+            i += 1
+            cut -= 1
+        out.append(ln[i:])
+    body = nl.join(out)
+    if keep_end:
+        body += nl
+    return body
+
+
+def nearby_lines_hint(content: str, old: str, *, radius: int = 2) -> str:
+    """Show a small window around the first needle from *old* (repeat-fail help)."""
+    needle = ""
+    for ln in (old or "").splitlines():
+        if ln.strip():
+            needle = ln.strip()
+            break
+    if not needle or not content:
+        return ""
+    lines = content.splitlines()
+    for i, ln in enumerate(lines):
+        if needle in ln or ln.strip() == needle:
+            lo = max(0, i - radius)
+            hi = min(len(lines), i + radius + 1)
+            window = "\n".join(f"{j + 1}: {lines[j]}" for j in range(lo, hi))
+            return f" Nearby lines:\n{window}"
+    return ""
+
+
+def note_failed_edit(runtime: Any, path: str, old: str) -> str:
+    """Remember a failed hunk this turn. Repeat → do-not-resend warning."""
+    if runtime is None:
+        return ""
+    key = (str(path or "").replace("\\", "/").lower(), (old or "")[:160])
+    bag = getattr(runtime, "_failed_edit_keys", None)
+    if not isinstance(bag, set):
+        bag = set()
+        runtime._failed_edit_keys = bag
+    if key in bag:
+        return (
+            " This exact hunk already failed this turn — do NOT resend it. "
+            "file_read the current file and copy a unique contiguous snippet."
+        )
+    bag.add(key)
+    return ""
+
+
 def apply_search_replace(
     content: str,
     old_string: str,
@@ -93,13 +216,33 @@ def apply_search_replace(
                 new_content=new_content,
                 hunks_applied=1,
             )
+        indent = _find_indent_flex_span(content, old_string)
+        if indent is not None:
+            start, end = indent
+            chunk = content[start:end]
+            ns = _reindent_new(new_string, old_string, chunk)
+            if "\r\n" in chunk and "\n" in ns and "\r\n" not in ns:
+                ns = ns.replace("\n", "\r\n")
+            elif "\r\n" not in chunk and "\n" in chunk and "\r\n" in ns:
+                ns = ns.replace("\r\n", "\n")
+            new_content = content[:start] + ns + content[end:]
+            return EditResult(
+                ok=True,
+                message="Replaced 1 occurrence (indent-tolerant match).",
+                occurrences=1,
+                previous=content,
+                new_content=new_content,
+                hunks_applied=1,
+            )
         # Helpful near-miss hint: first 80 chars of old_string
         hint = old_string[:80].replace("\n", "\\n")
+        near = nearby_lines_hint(content, old_string)
         return EditResult(
             ok=False,
             message=(
                 f"old_string not found in file (0 matches). "
                 f"Re-read the file and copy the exact text. Snippet: {hint!r}"
+                f"{near}"
             ),
             occurrences=0,
             previous=content,

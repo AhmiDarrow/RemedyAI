@@ -99,11 +99,19 @@ def _get_data_files() -> list[tuple[str, Path]]:
     return entries
 
 
+def _pip_dists() -> tuple[str, ...]:
+    """Distributions this product may uninstall.
+
+    Only ``remedy-ai``. The PyPI name ``remedy`` is an unrelated package
+    (ancient Jinja2/begins) and must never be removed.
+    """
+    return ("remedy-ai",)
+
+
 def _pip_uninstall() -> bool:
-    """Run pip uninstall for both distribution names (remedy-ai and legacy remedy)."""
+    """Uninstall the remedy-ai distribution (never the unrelated PyPI ``remedy``)."""
     ok = True
-    # remedy-ai is the real PyPI name; also try "remedy" for editable/legacy installs
-    for dist in ("remedy-ai", "remedy"):
+    for dist in _pip_dists():
         try:
             from remedy.execution.process import run_hidden
 

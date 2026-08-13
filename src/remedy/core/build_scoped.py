@@ -42,7 +42,14 @@ def map_source_to_test_candidates(rel: str, root: Path) -> list[Path]:
     parent = str(Path(rel).parent).replace("\\", "/")
 
     # Already a test file
-    if re.search(r"(^|/)tests?/", rel) or name.startswith("test_") or name.endswith("_test.py"):
+    if (
+        re.search(r"(^|/)tests?/", rel)
+        or name.startswith("test_")
+        or name.endswith("_test.py")
+        or name.endswith("_test.go")
+        or ".test." in name
+        or ".spec." in name
+    ):
         p = root / rel
         if p.is_file():
             out.append(p)
@@ -55,6 +62,17 @@ def map_source_to_test_candidates(rel: str, root: Path) -> list[Path]:
         root / parent / f"{stem}_test.py",
         root / "tests" / parent / f"test_{stem}.py",
         root / "src" / "tests" / f"test_{stem}.py",
+        # JS/TS
+        root / parent / f"{stem}.test.ts",
+        root / parent / f"{stem}.spec.ts",
+        root / parent / f"{stem}.test.js",
+        root / parent / f"{stem}.spec.js",
+        root / "__tests__" / f"{stem}.test.ts",
+        root / "tests" / f"{stem}.test.ts",
+        # Go
+        root / parent / f"{stem}_test.go",
+        # Rust integration-style
+        root / "tests" / f"{stem}.rs",
     ]
     # package tests
     if parent and parent != ".":

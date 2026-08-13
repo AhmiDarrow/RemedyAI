@@ -686,6 +686,30 @@ fn normalize_url(raw: &str) -> Result<String, String> {
     if !ok_host {
         return Err(format!("invalid url host: {host}"));
     }
+    // Mirror Python is_valid_navigate_url: IMDS / public IPs stay out of the rail.
+    let host_lc = host.to_ascii_lowercase();
+    if host_lc == "metadata.google.internal"
+        || host_lc == "metadata.goog"
+        || host_lc == "metadata"
+        || host_lc == "instance-data"
+        || host_lc.ends_with(".internal")
+        || host_lc.ends_with(".nip.io")
+        || host_lc.ends_with(".sslip.io")
+        || host_lc.ends_with(".xip.io")
+        || host_lc.starts_with("169.254.")
+    {
+        return Err(format!("blocked metadata / link-local host: {host}"));
+    }
+    if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
+        let o = ip.octets();
+        let loopback = o[0] == 127 || ip.is_unspecified();
+        let rfc1918 = o[0] == 10
+            || (o[0] == 192 && o[1] == 168)
+            || (o[0] == 172 && (16..=31).contains(&o[1]));
+        if !loopback && !rfc1918 {
+            return Err(format!("blocked non-private IP: {host}"));
+        }
+    }
     Ok(candidate)
 }
 

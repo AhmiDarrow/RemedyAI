@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
-
 # ---------------------------------------------------------------------------
 # Provider circuit breaker (providers.py)
 # ---------------------------------------------------------------------------
@@ -99,7 +96,6 @@ def test_right_size_max_tokens_never_truncates() -> None:
 
 def test_compress_context_one_shot_and_no_rearm_note() -> None:
     from remedy.core.agent_memory_tools import register_memory_tools
-    from remedy.core.mission import MissionStore
 
     class FakeBrief:
         intent = ""

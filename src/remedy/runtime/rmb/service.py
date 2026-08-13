@@ -2899,7 +2899,7 @@ def apply_rmb_settings(
             state[key] = patch[key] if patch[key] is not None else ""
 
     # --- inference-engine knobs (baked into llama-server argv) ---
-    _ENGINE_FLOAT_RANGES: dict[str, tuple[float, float]] = {
+    _engine_float_ranges: dict[str, tuple[float, float]] = {
         "temperature": (0.0, 2.0),
         "top_p": (0.0, 1.0),
         "min_p": (0.0, 1.0),
@@ -2922,7 +2922,7 @@ def apply_rmb_settings(
         "xtc_probability": (0.0, 1.0),
         "xtc_threshold": (0.0, 1.0),
     }
-    for key, (lo, hi) in _ENGINE_FLOAT_RANGES.items():
+    for key, (lo, hi) in _engine_float_ranges.items():
         if key not in patch or patch[key] is None:
             continue
         try:

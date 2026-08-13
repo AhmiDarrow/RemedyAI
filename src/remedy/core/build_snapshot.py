@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import time
 from dataclasses import asdict, dataclass, field
@@ -70,12 +71,16 @@ def snapshot_paths(
     if project.is_file():
         project = project.parent
     root = _snap_root(project)
-    sid = hashlib.sha1(f"{time.time()}:{','.join(paths)}".encode()).hexdigest()[:12]
+    # time.time() on Windows can collide for two snaps in one test/turn.
+    blob = f"{time.time_ns()}:{note}:{','.join(paths)}:{os.urandom(8).hex()}"
+    sid = hashlib.sha1(blob.encode()).hexdigest()[:12]
     dest = root / sid
     dest.mkdir(parents=True, exist_ok=True)
     saved: list[str] = []
     for raw in paths or []:
-        rel = str(raw).replace("\\", "/").lstrip("./")
+        rel = str(raw).replace("\\", "/")
+        while rel.startswith("./"):
+            rel = rel[2:]
         src = project / rel if not Path(raw).is_absolute() else Path(raw)
         try:
             if not src.is_file():

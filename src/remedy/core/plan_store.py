@@ -389,6 +389,15 @@ def _plan_mode_tool_names() -> frozenset[str]:
         "file_read",
         "list_dir",
         "repo_search",
+        "file_glob",
+        "todo_write",
+        "todo_read",
+        "companion_context",
+        "clipboard_read",
+        "companion_design",
+        "companion_observe",
+        "companion_taste",
+        "companion_inbox",
         "web_fetch",
         "web_search",
         "media_read",
@@ -425,7 +434,8 @@ PLAN_MODE_SYSTEM_ADDENDUM = """
 You are in **Plan mode** — research and design only.
 
 **Allowed:**
-- Read files, list dirs, repo/web search, memory/skills lookup, `plan_save`
+- Read files, list dirs, `file_glob`, repo/web search, memory/skills lookup, `plan_save`
+- Checklist: `todo_write` / `todo_read` (planning only — no file writes)
 - F1 help: `help_list` / `help_read` (owner's manuals, soak checklists)
 - Computer **observe / navigate only**: `computer_monitors`, `computer_screenshot`,
   `computer_snapshot`, `computer_windows`, `computer_navigate`, `computer_page_text`,
@@ -464,8 +474,9 @@ request is actually done.
 
 ### Tool rhythm (speed + fidelity)
 1. **Explore in parallel:** in ONE tool_calls step, fire many independent
-   `file_read` / `list_dir` / `repo_search` (often 4–12). Do not re-read paths
-   already returned this turn.
+   `file_read` / `list_dir` / `repo_search` / `file_glob` (often 4–12). Do not
+   re-read paths already returned this turn. Use `file_glob(pattern="*.py")`
+   instead of serial `list_dir` when hunting by name or extension.
 2. **Edit surgically:** prefer `file_edit` / `file_edit_batch` with multi-hunk
    `edits=` for existing files. One honest edit batch beats five serial micro-steps.
 3. **`file_write` for new files** (or intentional full rewrites with
@@ -510,4 +521,16 @@ request is actually done.
     port **7400** / `remedy serve`. Remedy Desktop and many Tauri apps share
     `app.exe` — a bare kill suicides the agent. Restart a project app only by
     filtering Path/CommandLine to that project folder (e.g. `SecretFolder`).
+
+### Machine loop (do not skip)
+14. Multi-step implement: call **`todo_write`** first with 3–8 concrete steps
+    (explore → edit → verify). Mark `in_progress` / `completed` as you go.
+    Do not claim done with pending todos.
+15. The machine may auto-run **`build_drive`** (TDD → hops → gates) after
+    explore thrash, and auto-repair hops on red verify. Treat those results as
+    ground truth — continue from them, do not restart from scratch.
+16. Prefer **`build_drive`** / **`build_parallel`** over a long plan monologue
+    when the user asked to implement. Isolated hops merge only on green.
+    Use **`apply_patch`** for unified diffs. Then `file_edit` only units that
+    stayed red. `build_review_fix` is the second pass — do not skip it.
 """.strip()

@@ -15,6 +15,12 @@ from remedy.core.spread.runner import run_spread
 from remedy.core.spread.types import SpreadTask
 
 
+def test_spread_task_accepts_implement_kind():
+    t = SpreadTask.from_dict({"kind": "implement", "path": "a.py", "goal": "fill a"})
+    assert t.kind == "implement"
+    assert t.path == "a.py"
+
+
 def test_plan_spread_chat_no():
     p = plan_spread("hello there", intent="chat", use_local=False)
     assert p.spread is False

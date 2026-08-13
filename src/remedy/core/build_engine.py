@@ -53,10 +53,21 @@ _WRITE_TOOLS = frozenset(
         "file_write",
         "file_edit",
         "file_edit_batch",
+        "apply_patch",
+        "build_unit_hop",
+        "build_drive",
+        "build_parallel",
     }
 )
 _EXPLORE_TOOLS = frozenset(
-    {"file_read", "list_dir", "repo_search", "memory_search", "soul_recall"}
+    {
+        "file_read",
+        "list_dir",
+        "repo_search",
+        "file_glob",
+        "memory_search",
+        "soul_recall",
+    }
 )
 _VERIFY_TOOLS = frozenset(
     {"bash_exec", "shell_exec", "job_run", "mission_verify", "mission_update"}
@@ -250,6 +261,16 @@ class BuildTurnState:
     max_auto_verify_cycles: int = 6
     last_scoped_command: str = ""
     oracle_seeded: bool = False
+    # Machine-owned drive (implement / repair hops without waiting on the model)
+    auto_drive_ran: bool = False
+    auto_repair_cycles: int = 0
+    max_auto_repair_cycles: int = 3
+    last_drive: dict[str, Any] = field(default_factory=dict)
+    review_fix_ran: bool = False
+    visual_observe_ran: bool = False
+    away_mode: bool = False
+    machine_injects: int = 0
+    open_todo_count: int = 0
     # Auto-verify cooldown: only re-run after *source* writes past this watermark
     write_steps_at_last_green: int = 0
     # Ship phase (push / gh release)
@@ -369,6 +390,9 @@ class BuildTurnState:
             "ship_url": self.ship_url,
             "ship_release_url": self.ship_release_url,
             "write_steps_at_last_green": self.write_steps_at_last_green,
+            "auto_drive_ran": self.auto_drive_ran,
+            "auto_repair_cycles": self.auto_repair_cycles,
+            "open_todo_count": self.open_todo_count,
         }
 
 
@@ -407,7 +431,12 @@ def begin_build_turn(
     from remedy.core.muscle_profile import muscle_from_runtime
 
     muscle = muscle_from_runtime(runtime)
-    wants = force or looks_like_build_request(message)
+    away = False
+    with suppress(Exception):
+        from remedy.core.away_mode import looks_like_away_request
+
+        away = looks_like_away_request(message)
+    wants = force or looks_like_build_request(message) or away
     if not wants:
         # Still enable light supervision if open mission/tasks look like build
         with suppress(Exception):
@@ -424,11 +453,12 @@ def begin_build_turn(
         phase="scout",
         goal=goal_txt,
         muscle_tier=muscle.label,
-        max_serial_explore=2 if muscle.is_frontier else (3 if muscle.is_capable else 5),
+        max_serial_explore=1 if away else (2 if muscle.is_frontier else (3 if muscle.is_capable else 5)),
         # Partner: always auto-verify after the first write (C hello.c must compile
         # immediately; waiting for 2 writes left simple 1-file tasks unverified).
         require_verify_after_writes=1,
         ship_required=looks_like_ship_goal(goal_txt),
+        away_mode=away,
     )
     # Oracle-first: discover verify command up front
     with suppress(Exception):
@@ -548,8 +578,10 @@ def build_protocol_block(state: BuildTurnState) -> str:
         "changes; then VERIFY (bash_exec / job_run kind=verify / mission_verify); "
         "REPAIR until green → DONE."
         f"{ship}\n"
-        "Machine path: build_tdd / build_compile_spec → hops → build_gate_tower → "
-        "build_mutant_score. Never claim shipped without a verify signal. "
+        "Machine loop (Claude-class): todo_write a short checklist, file_glob to "
+        "discover, then build_drive (TDD → hops → gates). The machine auto-drives "
+        "after explore thrash and auto-repairs on red verify — continue from those "
+        "results, do not restart. Never claim shipped without a verify signal. "
         "Never monologue a plan without tool_calls. "
         "Never explore one file per step. "
         f"Serial explore cap before forced implement: {state.max_serial_explore}. "
@@ -912,11 +944,14 @@ def build_blocks_final_answer(state: BuildTurnState | None) -> bool:
     if state.ship_required and state.last_verify_ok is True and not state.ship_complete():
         return True
     if state.last_verify_ok is True and not state.write_set and state.ship_complete():
-        return False
+        # Still refuse DONE while the machine checklist is open
+        return int(getattr(state, "open_todo_count", 0) or 0) > 0
     # Wrote code or failed verify → cannot finish without green
     if state.write_steps > 0 and state.last_verify_ok is not True:
         return True
     if state.source_writes_pending() and state.last_verify_ok is not True:
+        return True
+    if int(getattr(state, "open_todo_count", 0) or 0) > 0 and state.write_steps > 0:
         return True
     return state.syntax_ok is False
 
@@ -937,6 +972,16 @@ def unfinished_green_gate_message(state: BuildTurnState) -> dict[str, str]:
                 "Next tools only (do NOT re-run pytest unless you changed source):\n"
                 "1) git_status  2) git_push  3) gh_release if tag/release was requested\n"
                 "Refactor-only: do not rewrite green code to thrash auto-verify."
+            ),
+        }
+    if int(getattr(state, "open_todo_count", 0) or 0) > 0 and state.last_verify_ok is True:
+        return {
+            "role": "user",
+            "content": (
+                "[Build engine · TODO GATE · refuse DONE]\n"
+                f"{state.open_todo_count} checklist item(s) still pending. "
+                "todo_write them completed (or cancelled with a reason), then summarize. "
+                "Do not claim finished with open todos."
             ),
         }
     if has_c:
@@ -969,6 +1014,27 @@ _PLAY_AFTER_GREEN_RE = re.compile(
 )
 
 
+def can_machine_inject(
+    state: BuildTurnState | None,
+    *,
+    cap: int = 4,
+    consume: bool = True,
+) -> bool:
+    """Bound stacked machine nudges so one batch cannot flood the turn.
+
+    Peek with ``consume=False`` so a no-op (auto-drive declined) does not
+    burn a slot and starve later repair/observe.
+    """
+    if state is None:
+        return False
+    n = int(getattr(state, "machine_injects", 0) or 0)
+    if n >= cap:
+        return False
+    if consume:
+        state.machine_injects = n + 1
+    return True
+
+
 def keep_agency_after_green(
     state: BuildTurnState | None,
     user_message: str = "",
@@ -978,6 +1044,14 @@ def keep_agency_after_green(
         return False
     if state.ship_required and not state.ship_complete():
         return True
+    if getattr(state, "away_mode", False) and int(getattr(state, "open_todo_count", 0) or 0) > 0:
+        return True
+    with suppress(Exception):
+        from remedy.core.companion_observe import write_set_looks_visual
+
+        if write_set_looks_visual(list(state.write_set or []), state.goal or ""):
+            if not getattr(state, "visual_observe_ran", False):
+                return True
     blob = f"{state.goal or ''} {user_message or ''}"
     return bool(_PLAY_AFTER_GREEN_RE.search(blob))
 

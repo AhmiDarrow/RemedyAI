@@ -14,6 +14,7 @@ from remedy.core.build_engine import (
     observe_tool_batch,
     should_force_tools_for_build,
 )
+from remedy.core.build_syntax import check_paths_syntax, resolve_write_paths
 
 
 def test_detects_build_requests():
@@ -180,6 +181,20 @@ def test_keep_agency_after_green_play():
     assert keep_agency_after_green(
         BuildTurnState(active=True, goal="add a helper function")
     ) is False
+
+
+def test_resolve_write_paths_skips_missing(tmp_path):
+    (tmp_path / "ok.py").write_text("x=1\n", encoding="utf-8")
+    rt = SimpleNamespace(
+        effective_project_path=lambda: tmp_path,
+        resolve_tool_path=lambda p, **k: tmp_path / p,
+    )
+    got = resolve_write_paths(rt, ["ok.py", "gone.py", "echo hello"])
+    assert len(got) == 1
+    assert got[0].endswith("ok.py")
+    # Missing path is skipped, not a syntax red
+    syn = check_paths_syntax(["nope.py"])
+    assert syn == []
 
 
 def test_monologue_block():

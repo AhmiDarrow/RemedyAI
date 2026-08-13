@@ -80,11 +80,87 @@ async def apply_build_engine_after_batch(
         bst = get_build_state(runtime)
         if bst is not None and bst.active:
             observe_tool_batch(bst, fresh_calls, batch_tool_msgs)
+            # Explore thrash + zero writes → machine starts TDD / hops
+            # instead of only injecting a FORCE IMPLEMENT essay.
+            with suppress(Exception):
+                from remedy.core.build_drive import (
+                    format_drive_message,
+                    maybe_auto_implement,
+                    should_use_live_llm,
+                )
+
+                driven = None
+                from remedy.core.build_engine import can_machine_inject
+
+                if can_machine_inject(bst, consume=False):
+                    driven = maybe_auto_implement(
+                        runtime, bst, use_llm=should_use_live_llm(runtime)
+                    )
+                if driven:
+                    can_machine_inject(bst, consume=True)
+                    dmsg = format_drive_message(driven)
+                    if dmsg is not None:
+                        messages.append(dmsg)
+                    rearm_agency()
+                    yield (
+                        "@@status:Build machine drive "
+                        f"{'ok' if driven.get('ok') else 'partial'}\n"
+                    )
+            # Post-write blast-radius digest (mapped tests / import cone)
+            # so the model verifies the right nodes instead of the whole suite.
+            with suppress(Exception):
+                from remedy.core.build_drive import review_write_set
+
+                wrote_now = any(
+                    (
+                        (t.get("function") or {}).get("name")
+                        if isinstance(t, dict)
+                        else ""
+                    )
+                    in {
+                        "file_write",
+                        "file_edit",
+                        "file_edit_batch",
+                        "apply_patch",
+                        "build_unit_hop",
+                        "build_drive",
+                        "build_parallel",
+                    }
+                    for t in (fresh_calls or [])
+                    if isinstance(t, dict)
+                )
+                if (
+                    wrote_now
+                    and bst.write_set
+                    and "write_review" not in bst.nudges_emitted
+                ):
+                    rev = review_write_set(runtime, list(bst.write_set))
+                    tests = rev.get("tests") or []
+                    if tests or rev.get("cone"):
+                        bst.nudges_emitted.append("write_review")
+                        mapped = ", ".join(str(t) for t in tests[:8]) or "(none yet)"
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "[Build engine · WRITE REVIEW]\n"
+                                    f"{rev.get('message')}\n"
+                                    f"Mapped tests: {mapped}\n"
+                                    "Prefer a scoped verify on those tests "
+                                    "(not a whole-repo suite, not a monologue)."
+                                ),
+                            }
+                        )
+                        yield "@@status:Build write review\n"
             # Post-write syntax gate (py/json) before full suite
             if bst.write_set:
-                syn = check_paths_syntax(list(bst.write_set)[-8:])
+                from remedy.core.build_syntax import resolve_write_paths
+
+                resolved = resolve_write_paths(runtime, list(bst.write_set)[-8:])
+                syn = check_paths_syntax(resolved) if resolved else []
                 bad = [r for r in syn if not r.get("ok")]
-                bst.syntax_ok = not bad
+                # Unresolved paths are skipped, not red — do not block verify
+                bst.syntax_ok = (not bad) if resolved else None
                 if bad:
                     sm = format_syntax_gate_message(syn)
                     if sm is not None:
@@ -103,7 +179,7 @@ async def apply_build_engine_after_batch(
                         root_p = runtime.effective_project_path()
                         py_paths = [
                             p
-                            for p in list(bst.write_set)[-8:]
+                            for p in resolved
                             if str(p).endswith(".py")
                         ]
                         if py_paths:
@@ -196,6 +272,46 @@ async def apply_build_engine_after_batch(
                     ship_line = format_ship_report_line(bst)
                     if ship_line:
                         yield ship_line
+                    # Second pass over the write set (todos, bare except, syntax)
+                    with suppress(Exception):
+                        from remedy.core.build_drive import should_use_live_llm
+                        from remedy.core.build_review_fix import (
+                            format_review_fix_message,
+                            maybe_review_fix,
+                        )
+
+                        rf = maybe_review_fix(
+                            runtime, bst, use_llm=should_use_live_llm(runtime)
+                        )
+                        if rf:
+                            rmsg = format_review_fix_message(rf)
+                            if rmsg is not None:
+                                messages.append(rmsg)
+                            yield (
+                                "@@status:Build review-fix "
+                                f"err={rf.get('errors')} warn={rf.get('warns')}\n"
+                            )
+                            if rf.get("errors") and not rf.get("ok"):
+                                rearm_agency()
+                    with suppress(Exception):
+                        from remedy.core.build_engine import can_machine_inject
+                        from remedy.core.companion_observe import (
+                            format_observe_message,
+                            maybe_visual_observe,
+                        )
+
+                        if can_machine_inject(bst, consume=False):
+                            vis = maybe_visual_observe(runtime, bst)
+                            if vis:
+                                can_machine_inject(bst, consume=True)
+                                vmsg = format_observe_message(vis)
+                                if vmsg is not None:
+                                    messages.append(vmsg)
+                                rearm_agency()
+                                yield (
+                                    "@@status:Build visual observe "
+                                    f"{'ok' if vis.get('ok') else 'miss'}\n"
+                                )
                     # D: optional mutant kill sample after green (cheap) — skip on local
                     # to avoid another long tool wave after done.
                 elif av.get("blocked") or av.get("approval"):
@@ -228,6 +344,28 @@ async def apply_build_engine_after_batch(
                             yield (
                                 "@@status:Build repair queue "
                                 f"{len(q.targets)} targets\n"
+                            )
+                    # Machine hops the queue — do not wait for the model
+                    # to remember build_repair_queue(run_hops=true).
+                    with suppress(Exception):
+                        from remedy.core.build_drive import (
+                            format_drive_message,
+                            maybe_auto_repair,
+                            should_use_live_llm,
+                        )
+
+                        hopped = maybe_auto_repair(
+                            runtime, bst, use_llm=should_use_live_llm(runtime)
+                        )
+                        if hopped:
+                            hmsg = format_drive_message(hopped)
+                            if hmsg is not None:
+                                messages.append(hmsg)
+                            yield (
+                                "@@status:Build auto-repair "
+                                f"ran={hopped.get('ran')} "
+                                f"{'ok' if hopped.get('ok') else 'red'}"
+                                f"{' cap' if hopped.get('capped') else ''}\n"
                             )
                     logger.info(
                         "Build auto-verify RED cmd=%s scoped=%s",

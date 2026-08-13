@@ -29,7 +29,7 @@ def get_home_dir() -> Path:
     """
     global _HOME_DIR, _HOME_DIR_ENV
     env_home = (os.environ.get("REMEDY_HOME") or "").strip()
-    if _HOME_DIR is not None and _HOME_DIR_ENV == env_home:
+    if _HOME_DIR is not None and env_home == _HOME_DIR_ENV:
         return _HOME_DIR
     base = Path(env_home or "~/.remedy").expanduser()
     try:
