@@ -77,6 +77,11 @@ Tools: `remedy_skill_list`, `remedy_skill_search`, `remedy_skill_get`, `remedy_s
 | GET | `/api/plans` · `/api/plans/latest` | Structured task plans |
 | GET | `/api/checkpoints` · `/latest` | Mid-task checkpoints |
 | GET | `/docs` | OpenAPI (Swagger) |
+| POST | `/api/rmb/hf/search` | Resolve a Hugging Face name / `owner/repo` / file URL (lists hosts when a name matches more than one) |
+| POST | `/api/rmb/hf/files` | List `.gguf` files in a Hugging Face repo |
+| POST | `/api/rmb/hf/pull` | Download a GGUF into `~/.remedy/rmb/models/` (background; optional load) |
+| GET | `/api/rmb/hf/progress` | Pull progress |
+| POST | `/api/rmb/hf/cancel` | Cancel an in-flight pull |
 
 Auth header when enabled:
 

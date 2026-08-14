@@ -98,6 +98,9 @@ def test_is_knowledge_question_class() -> None:
     assert is_knowledge_question("what provider are we connected to") is True
     assert is_knowledge_question("who is the president of france?") is True
     assert is_knowledge_question("what is 2+2?") is True
+    assert is_knowledge_question("1 + 1") is True
+    assert is_knowledge_question("2*2=") is True
+    assert is_knowledge_question("what's 9-3") is True
     # Polite request wrapper is work even with a question mark
     assert is_knowledge_question("can you add a dark mode toggle?") is False
     assert is_knowledge_question("could we shrink the about window?") is False

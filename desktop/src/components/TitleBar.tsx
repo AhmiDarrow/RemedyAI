@@ -136,10 +136,10 @@ export function TitleBar({
             <MenuItem label="Settings…" onClick={() => run('settings')} shortcut="Ctrl+," />
             <MenuItem label="Memory" onClick={() => run('memory')} />
             <MenuItem label="Skills" onClick={() => run('skills')} />
-            <MenuItem label="Health Diagnostics…" onClick={() => run('diagnostics')} />
-            <MenuItem label="Help / Owner's Manual…" onClick={() => run('help')} shortcut="F1" />
+            <MenuItem label="Diagnostics" onClick={() => run('diagnostics')} />
+            <MenuItem label="Help" onClick={() => run('help')} shortcut="F1" />
             {isTauri() && (
-              <MenuItem label="Switch to WebUI…" onClick={() => run('switch_web_ui')} />
+              <MenuItem label="Open in browser" onClick={() => run('switch_web_ui')} />
             )}
             <MenuSep />
             {updateAvailable ? (

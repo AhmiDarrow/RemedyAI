@@ -43,14 +43,14 @@ def register_vision_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
     """Register /api/vision/* routes."""
 
     @app.get("/api/vision/status")
-    async def vision_status() -> dict[str, Any]:
+    async def vision_status(full: bool = False) -> dict[str, Any]:
         import asyncio
 
         from remedy.vision.service import get_status
 
         cfg = load_config()
-        # Offload sync FS/port probes so concurrent /api/status stays responsive.
-        return await asyncio.to_thread(get_status, cfg)
+        # Default light: skip GPU/catalog on the 1.5–12s poll. ?full=1 for Settings.
+        return await asyncio.to_thread(get_status, cfg, light=not full)
 
     @app.get("/api/vision/catalog")
     async def vision_catalog() -> dict[str, Any]:

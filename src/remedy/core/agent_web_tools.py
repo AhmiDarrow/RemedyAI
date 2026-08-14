@@ -309,6 +309,42 @@ def parse_ddg_html_results(html: str, *, max_results: int = 5) -> list[dict[str,
     return results
 
 
+async def _rail_page_text(url: str) -> str:
+    """If the in-app browser can open *url*, return visible page text.
+
+    Used when HTTP HTML is an empty shell (JS apps / bot walls). Failures
+    return "" — web_fetch still has the HTTP extract.
+    """
+    import asyncio
+
+    def _run() -> str:
+        try:
+            from remedy.core.computer.executor import get_computer_executor
+            from remedy.core.computer.types import ComputerAction
+
+            ex = get_computer_executor()
+            nav = ex.run(ComputerAction.NAVIGATE, url=url, target="browser")
+            if not isinstance(nav, dict):
+                return ""
+            page = ex.run(ComputerAction.PAGE_TEXT, target="browser")
+            if not isinstance(page, dict):
+                return ""
+            text = str(page.get("text") or "").strip()
+            title = str(page.get("title") or "").strip()
+            if not text and page.get("ok") is False:
+                return ""
+            if title and text and title.lower() not in text[:200].lower():
+                return f"# {title}\n\n{text}"
+            return text or title
+        except Exception:
+            return ""
+
+    try:
+        return await asyncio.to_thread(_run)
+    except Exception:
+        return ""
+
+
 def register_web_tools(runtime: Any) -> None:
     """Register web_fetch + web_search (opt-in via runtime gate)."""
 
@@ -356,7 +392,7 @@ def register_web_tools(runtime: Any) -> None:
         return format_tool_error(str(e), code="FETCH_ERROR", tool_name=tool_name)
 
     async def web_fetch(url: str = "", max_chars: int = 50_000) -> str:
-        """Fetch a URL as text (opt-in web tools)."""
+        """Fetch a URL as readable text (opt-in web tools)."""
         if not _web_enabled(runtime):
             return _web_disabled_msg("web_fetch")
         u = (url or "").strip()
@@ -371,14 +407,37 @@ def register_web_tools(runtime: Any) -> None:
         except (TypeError, ValueError):
             cap = 50_000
         try:
-            final_url, raw, charset = _pinned_fetch(u, max_chars=cap, timeout=25.0)
+            final_url, raw, charset = _pinned_fetch(u, max_chars=max(cap * 4, 200_000), timeout=25.0)
         except Exception as e:
             return _map_fetch_error(e, tool_name="web_fetch")
 
-        text = raw.decode(charset or "utf-8", errors="replace")
-        if len(raw) > cap:
-            text = text[:cap] + f"\n…[truncated at {cap} chars]"
         shown = final_url if final_url != u else u
+        text = raw.decode(charset or "utf-8", errors="replace")
+        from remedy.core.html_extract import html_to_markdown, looks_like_html
+
+        if looks_like_html(raw):
+            extracted = html_to_markdown(text, max_chars=cap)
+            body = str(extracted.get("markdown") or "").strip()
+            if extracted.get("js_shell") or len(body) < 80:
+                rail = await _rail_page_text(u)
+                if rail:
+                    return (
+                        f"URL: {shown}\nSource: in-app browser (HTTP body was empty or script-only)\n\n"
+                        f"{rail[:cap]}"
+                    )
+            if body:
+                title = str(extracted.get("title") or "").strip()
+                head = f"URL: {shown}"
+                if title:
+                    head += f"\nTitle: {title}"
+                return f"{head}\n\n{body}"
+            rail = await _rail_page_text(u)
+            if rail:
+                return (
+                    f"URL: {shown}\nSource: in-app browser\n\n{rail[:cap]}"
+                )
+        if len(text) > cap:
+            text = text[:cap] + f"\n…[truncated at {cap} chars]"
         return f"URL: {shown}\n\n{text}"
 
     async def web_search(query: str = "", max_results: float = 5.0) -> str:
@@ -434,9 +493,9 @@ def register_web_tools(runtime: Any) -> None:
 
     runtime.tool_registry.register_builtin_handler(
         "web_fetch",
-        "Fetch an HTTP(S) URL as text (opt-in: config web_tools_enabled=true). "
-        "Use for docs/APIs when online research is needed. "
-        "Private/localhost hosts are blocked (SSRF); public web remains fully available.",
+        "Fetch an HTTP(S) URL as readable page text (opt-in: web_tools_enabled=true). "
+        "HTML is stripped to markdown. Script-only pages fall back to the in-app browser. "
+        "Private/localhost hosts are blocked (SSRF).",
         web_fetch,
         {
             "type": "object",

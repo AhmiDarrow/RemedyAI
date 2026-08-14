@@ -11,11 +11,22 @@ import {
 } from '../themes'
 import {
   type Density,
+  type FontScale,
   loadDensity,
   saveDensity,
   applyDensity,
   loadCustomAccent,
   saveCustomAccent,
+  loadFontScale,
+  saveFontScale,
+  applyFontScale,
+  stepFontScale,
+  loadReduceMotion,
+  saveReduceMotion,
+  applyReduceMotion,
+  loadHighContrast,
+  saveHighContrast,
+  applyHighContrast,
 } from '../utils/chatPrefs'
 
 const STORAGE_KEY = 'remedy-theme'
@@ -49,6 +60,9 @@ export function useTheme() {
   const [themeId, setThemeId] = useState<ThemeId>(loadTheme)
   const [density, setDensityState] = useState<Density>(loadDensity)
   const [customAccent, setCustomAccentState] = useState(loadCustomAccent)
+  const [fontScale, setFontScaleState] = useState<FontScale>(loadFontScale)
+  const [reduceMotion, setReduceMotionState] = useState(loadReduceMotion)
+  const [highContrast, setHighContrastState] = useState(loadHighContrast)
 
   const applyResolved = useCallback(
     (id: ThemeId, accent = customAccent) => {
@@ -64,6 +78,18 @@ export function useTheme() {
   useEffect(() => {
     applyDensity(density)
   }, [density])
+
+  useEffect(() => {
+    applyFontScale(fontScale)
+  }, [fontScale])
+
+  useEffect(() => {
+    applyReduceMotion(reduceMotion)
+  }, [reduceMotion])
+
+  useEffect(() => {
+    applyHighContrast(highContrast)
+  }, [highContrast])
 
   // Follow OS when theme is System
   useEffect(() => {
@@ -90,6 +116,33 @@ export function useTheme() {
     applyDensity(d)
   }, [])
 
+  const setFontScale = useCallback((s: FontScale) => {
+    setFontScaleState(s)
+    saveFontScale(s)
+    applyFontScale(s)
+  }, [])
+
+  const bumpFontScale = useCallback((dir: 1 | -1) => {
+    setFontScaleState((cur) => {
+      const next = stepFontScale(cur, dir)
+      saveFontScale(next)
+      applyFontScale(next)
+      return next
+    })
+  }, [])
+
+  const setReduceMotion = useCallback((on: boolean) => {
+    setReduceMotionState(on)
+    saveReduceMotion(on)
+    applyReduceMotion(on)
+  }, [])
+
+  const setHighContrast = useCallback((on: boolean) => {
+    setHighContrastState(on)
+    saveHighContrast(on)
+    applyHighContrast(on)
+  }, [])
+
   const setCustomAccent = useCallback(
     (hex: string) => {
       const v = hex.trim()
@@ -113,5 +166,12 @@ export function useTheme() {
     setDensity,
     customAccent,
     setCustomAccent,
+    fontScale,
+    setFontScale,
+    bumpFontScale,
+    reduceMotion,
+    setReduceMotion,
+    highContrast,
+    setHighContrast,
   }
 }

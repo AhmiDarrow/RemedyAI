@@ -284,6 +284,23 @@ def resolve_tools(
                 pack or None, True, "internal_improve", pack="self_fix"
             )
 
+    # Knowledge / verbal-only FIRST. Leftover build_active or implement
+    # keywords must not drag "1 + 1" into a local tool loop.
+    with suppress(Exception):
+        from remedy.core.react_policy import (
+            is_knowledge_question,
+            is_verbal_only_request,
+            looks_like_injected_tool_markup,
+        )
+
+        if (
+            is_verbal_only_request(message or "")
+            or is_knowledge_question(message or "")
+            or looks_like_injected_tool_markup(message or "")
+        ):
+            logger.info("react_tools disarm reason=non_work")
+            return ToolsDecision(None, False, "non_work", pack="none")
+
     # Page interaction / browse full agency
     if page_interaction:
         return ToolsDecision(all_t, True, "page_interaction", pack="full")

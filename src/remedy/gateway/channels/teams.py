@@ -102,8 +102,14 @@ def _jwt_claims_structurally_valid(
 
     iss = claims.get("iss")
     if iss is not None and str(iss).strip():
-        iss_l = str(iss).strip().lower()
-        if not any(s in iss_l for s in _BF_ISS_SUFFIXES):
+        from urllib.parse import urlparse
+
+        raw_iss = str(iss).strip()
+        host = (urlparse(raw_iss).hostname or "").lower()
+        if not host:
+            # Some tokens use issuer without a scheme — treat as hostname path.
+            host = raw_iss.lower().split("/")[0]
+        if not any(host == s or host.endswith("." + s) for s in _BF_ISS_SUFFIXES):
             return False
     return True
 

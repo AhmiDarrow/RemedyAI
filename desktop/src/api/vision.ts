@@ -95,8 +95,9 @@ export interface NanoSwarmStatus {
   }
 }
 
-export async function getVisionStatus(): Promise<VisionStatus> {
-  return apiFetch<VisionStatus>('/vision/status')
+export async function getVisionStatus(opts?: { full?: boolean }): Promise<VisionStatus> {
+  const q = opts?.full ? '?full=1' : ''
+  return apiFetch<VisionStatus>(`/vision/status${q}`)
 }
 
 export async function getVisionCatalog(): Promise<{

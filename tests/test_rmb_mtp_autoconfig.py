@@ -20,6 +20,8 @@ def test_detect_mtp_qwopus_name():
     assert prof["force_parallel_1"] is True
     assert prof["spec_type"] == "draft-mtp"
     assert int(prof["spec_draft_n_max"] or 0) >= 2
+    assert prof["use_jinja"] is True
+    assert prof["chat_template_kwargs"] == '{"enable_thinking": false}'
 
 
 def test_detect_non_mtp_coder():

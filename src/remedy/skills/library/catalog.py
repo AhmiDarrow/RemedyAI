@@ -18,6 +18,7 @@ from remedy.skills.library.keys import (
 )
 from remedy.skills.library.security import (
     is_allowed_catalog_url,
+    is_allowed_download_url,
     skills_dev_mode,
     verify_catalog_signature,
 )
@@ -101,6 +102,11 @@ async def _http_get(
     ) as resp:
         if resp.status != 200:
             raise RuntimeError(f"HTTP {resp.status} for {url}")
+        final = str(resp.url)
+        if not is_allowed_catalog_url(final) and not is_allowed_download_url(
+            final, allow_cdn_redirect=True
+        ):
+            raise RuntimeError(f"Catalog final URL not allowlisted: {final[:160]}")
         chunks: list[bytes] = []
         total = 0
         async for chunk in resp.content.iter_chunked(65536):

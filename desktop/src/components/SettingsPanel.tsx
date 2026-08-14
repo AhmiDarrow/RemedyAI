@@ -30,7 +30,7 @@ import {
 import type { ThemeId } from '../themes'
 import type { UpdateInfo } from '../api/updates'
 import type { ModelInfo } from '../App'
-import type { Density } from '../utils/chatPrefs'
+import type { Density, FontScale } from '../utils/chatPrefs'
 import {
   normalizeToolProcess,
 
@@ -56,6 +56,12 @@ interface SettingsPanelProps {
   onDensityChange?: (d: Density) => void
   customAccent?: string
   onCustomAccentChange?: (hex: string) => void
+  fontScale?: FontScale
+  onFontScaleChange?: (s: FontScale) => void
+  reduceMotion?: boolean
+  onReduceMotionChange?: (on: boolean) => void
+  highContrast?: boolean
+  onHighContrastChange?: (on: boolean) => void
   updateInfo: UpdateInfo | null
   checkingUpdates: boolean
   /** Live status line from the last check (e.g. "Up to date — v0.10.25"). */
@@ -82,6 +88,12 @@ export function SettingsPanel({
   onDensityChange,
   customAccent = '',
   onCustomAccentChange,
+  fontScale = 'md',
+  onFontScaleChange,
+  reduceMotion = false,
+  onReduceMotionChange,
+  highContrast = false,
+  onHighContrastChange,
   updateInfo,
   checkingUpdates,
   updateStatus = null,
@@ -269,7 +281,7 @@ export function SettingsPanel({
 
   const refreshVision = useCallback(async () => {
     try {
-      const vs = await getVisionStatus()
+      const vs = await getVisionStatus({ full: true })
       setVision(vs)
       return vs
     } catch {
@@ -746,7 +758,7 @@ export function SettingsPanel({
       const prevPreset = catalog.find((x) => x.id === prev)
       // Adopt the preset URL only when the current value is untouched (empty or
       // still the previous provider's default). Never clobber a base URL the
-      // user typed — e.g. custom → KoboldCpp kept resetting to 127.0.0.1:5001.
+      // user typed — switching providers must not reset a custom base URL.
       const baseIsUntouched =
         !baseUrl || (prevPreset ? baseUrl === prevPreset.base_url : true)
       if (baseIsUntouched) setBaseUrl(preset.base_url)
@@ -1068,6 +1080,12 @@ export function SettingsPanel({
               onDensityChange={onDensityChange}
               customAccent={customAccent}
               onCustomAccentChange={onCustomAccentChange}
+              fontScale={fontScale}
+              onFontScaleChange={onFontScaleChange}
+              reduceMotion={reduceMotion}
+              onReduceMotionChange={onReduceMotionChange}
+              highContrast={highContrast}
+              onHighContrastChange={onHighContrastChange}
               updateInfo={updateInfo}
               checkingUpdates={checkingUpdates}
               updateStatus={updateStatus}

@@ -201,6 +201,13 @@ export default function App() {
     setDensity,
     customAccent,
     setCustomAccent,
+    fontScale,
+    setFontScale,
+    bumpFontScale,
+    reduceMotion,
+    setReduceMotion,
+    highContrast,
+    setHighContrast,
   } = useTheme()
   const {
     model,
@@ -927,22 +934,22 @@ export default function App() {
         category: 'session',
         action: () => void handleImport(),
       },
-      { id: 'palette', label: 'Command Palette', description: 'Open this palette', category: 'general', action: () => setPaletteOpen(true) },
-      { id: 'plan', label: 'Toggle Plan Mode', description: 'Switch between plan and build', category: 'general', action: () => setPlanMode((p) => !p) },
-      { id: 'memory', label: 'Memory Panel', description: 'Toggle memory panel', category: 'panel', action: () => setPanel((p) => (p === 'memory' ? null : 'memory')) },
-      { id: 'skills', label: 'Skills Panel', description: 'Toggle skills panel', category: 'panel', action: () => setPanel((p) => (p === 'skills' ? null : 'skills')) },
-      { id: 'settings', label: 'Settings Panel', description: 'Open settings in the right rail', category: 'panel', action: () => openSettingsInRail() },
+      { id: 'palette', label: 'Command palette', description: 'Open this palette', category: 'general', action: () => setPaletteOpen(true) },
+      { id: 'plan', label: 'Toggle Plan / Build', description: 'Switch between plan and build', category: 'general', action: () => setPlanMode((p) => !p) },
+      { id: 'memory', label: 'Memory', description: 'Toggle memory panel', category: 'panel', action: () => setPanel((p) => (p === 'memory' ? null : 'memory')) },
+      { id: 'skills', label: 'Skills', description: 'Toggle skills panel', category: 'panel', action: () => setPanel((p) => (p === 'skills' ? null : 'skills')) },
+      { id: 'settings', label: 'Settings', description: 'Open Settings in the right rail', category: 'panel', action: () => openSettingsInRail() },
       {
         id: 'help',
-        label: "Help / Owner's Manual",
+        label: 'Help',
         description: 'Searchable offline wiki (F1 / Ctrl+/)',
         category: 'general',
         action: () => openHelp(),
       },
       {
         id: 'diagnostics',
-        label: 'Health Diagnostics',
-        description: 'Remedy server, RMB, hardware, cloud providers',
+        label: 'Diagnostics',
+        description: 'Server, local host, hardware, providers',
         category: 'panel',
         action: () => setDiagnosticsOpen(true),
       },
@@ -1008,6 +1015,9 @@ export default function App() {
       'Toggle plan mode': togglePlan,
       'Open settings': () => openSettingsInRail(),
       "Open Help wiki (owner's manual)": () => openHelp(),
+      'Larger text': () => bumpFontScale(1),
+      'Smaller text': () => bumpFontScale(-1),
+      'Reset text size': () => setFontScale('md'),
       'Close panels and command palette': () => {
         // HelpPanel also handles Esc while open; this covers palette / side panels.
         if (helpOpen) {
@@ -1030,6 +1040,7 @@ export default function App() {
         || h.match.key === 'Tab'
         || (h.match.key === 'b' && h.match.ctrl)
         || (h.match.key === '/' && h.match.ctrl)
+        || (h.match.ctrl && (h.match.key === '=' || h.match.key === '+' || h.match.key === '-' || h.match.key === '0'))
       out.push({
         key: h.match.key,
         ctrl: h.match.ctrl ?? false,
@@ -1040,7 +1051,7 @@ export default function App() {
       })
     }
     return out
-  }, [handleNewSession, openHelp, helpOpen, openSettingsInRail, setPlanMode])
+  }, [handleNewSession, openHelp, helpOpen, openSettingsInRail, setPlanMode, bumpFontScale, setFontScale])
 
   useKeyboardShortcuts(globalShortcuts)
 
@@ -1343,6 +1354,12 @@ export default function App() {
             onDensityChange={setDensity}
             customAccent={customAccent}
             onCustomAccentChange={setCustomAccent}
+            fontScale={fontScale}
+            onFontScaleChange={setFontScale}
+            reduceMotion={reduceMotion}
+            onReduceMotionChange={setReduceMotion}
+            highContrast={highContrast}
+            onHighContrastChange={setHighContrast}
             updateInfo={updateInfo}
             checkingUpdates={checkingUpdates}
             updateStatus={updateLastStatus}
