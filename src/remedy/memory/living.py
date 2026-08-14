@@ -425,12 +425,26 @@ def project_label(path: str | None) -> str:
     return path.replace("\\", "/").rstrip("/").split("/")[-1] or ""
 
 
-def life_goal_lines(profile: Any, *, limit: int = 4) -> list[str]:
+def life_goal_lines(profile: Any, *, limit: int = 4, home_dir: Any = None) -> list[str]:
     """Short life/goal facts for continuity / organism pulse (not the full dump)."""
-    if profile is None:
-        return []
-    facts = list(getattr(profile, "facts", None) or [])
     out: list[str] = []
+    try:
+        from remedy.memory.life_goals import LifeGoalStore
+
+        store = LifeGoalStore(home_dir)
+        for g in store.list()[:limit]:
+            line = g.title
+            if g.next_action:
+                line = f"{g.title} — next: {g.next_action}"
+            out.append(line[:160])
+        last = store.last_step()
+        if last and last.get("did") and len(out) < limit:
+            out.append(f"Last I did: {last['did']}"[:160])
+    except Exception:
+        pass
+    if profile is None:
+        return out[:limit]
+    facts = list(getattr(profile, "facts", None) or [])
     for f in facts:
         cat = str(getattr(f, "category", "") or "").lower()
         if cat not in ("life", "goal"):
@@ -446,7 +460,7 @@ def life_goal_lines(profile: Any, *, limit: int = 4) -> list[str]:
         out.append(text[:160])
         if len(out) >= limit:
             break
-    return out
+    return out[:limit]
 
 
 def whoami_sections(facts: list[Any]) -> dict[str, list[Any]]:

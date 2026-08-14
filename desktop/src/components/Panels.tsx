@@ -130,7 +130,22 @@ export function MemoryPanel({
   /** Active chat session — filters checkpoints/plans when possible */
   sessionId?: string | null
 }) {
-  const [tab, setTab] = useState<'memory' | 'checkpoint' | 'plan'>('memory')
+  const [tab, setTab] = useState<'memory' | 'life' | 'checkpoint' | 'plan'>('memory')
+  const [lifeGoals, setLifeGoals] = useState<
+    {
+      id: string
+      title: string
+      status?: string
+      horizon?: string
+      next_action?: string
+      next_by?: string
+    }[]
+  >([])
+  const [newGoal, setNewGoal] = useState('')
+  const [nextDraft, setNextDraft] = useState<Record<string, string>>({})
+  const [lifeFolder, setLifeFolder] = useState<string | null>(null)
+  const [lastStep, setLastStep] = useState<{ did?: string; path?: string } | null>(null)
+  const [lifeDigest, setLifeDigest] = useState<string | null>(null)
   const [entries, setEntries] = useState<{ id: string; title: string; content: string; type: string }[]>([])
   const [checkpointMd, setCheckpointMd] = useState<string | null>(null)
   const [checkpoint, setCheckpoint] = useState<{
@@ -162,7 +177,7 @@ export function MemoryPanel({
           .then((d) => setEntries(d.results || []))
           .catch(() => setEntries([])),
       ),
-      import('../api/partner').then(({ getLatestCheckpoint, getLatestPlan }) =>
+      import('../api/partner').then(({ getLatestCheckpoint, getLatestPlan, getLifeBoard }) =>
         Promise.all([
           getLatestCheckpoint(sessionId)
             .then((d) => {
@@ -172,6 +187,21 @@ export function MemoryPanel({
             .catch(() => {
               setCheckpoint(null)
               setCheckpointMd(null)
+            }),
+          getLifeBoard()
+            .then((board) => {
+              setLifeGoals(
+                board.goals.filter((x) => !['done', 'dropped'].includes(String(x.status || 'open'))),
+              )
+              setLifeFolder(board.life_folder || null)
+              setLastStep(board.last_step || null)
+              setLifeDigest(board.digest || null)
+            })
+            .catch(() => {
+              setLifeGoals([])
+              setLifeFolder(null)
+              setLastStep(null)
+              setLifeDigest(null)
             }),
           getLatestPlan(sessionId)
             .then((d) => {
@@ -238,6 +268,7 @@ export function MemoryPanel({
       aria-label="Memory views"
     >
       {tabBtn('memory', 'Memory')}
+      {tabBtn('life', 'Life')}
       {tabBtn('checkpoint', 'Progress')}
       {tabBtn('plan', 'Plan')}
     </div>
@@ -290,6 +321,155 @@ export function MemoryPanel({
             </div>
           ))
         )
+      ) : tab === 'life' ? (
+        <div className="space-y-2">
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', lineHeight: 1.45 }}>
+            What you want to finish — held across chats. One next move at a time. Notes land
+            in a folder you can open; say <strong>I did it</strong> when you finish a move, or{' '}
+            <strong>I&apos;m back</strong> to hear what Remedy already did.
+          </div>
+          {lifeFolder ? (
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => {
+                void import('../api/tauri').then(async ({ isTauri, tauriInvoke }) => {
+                  if (!isTauri()) return
+                  try {
+                    await tauriInvoke('open_path', { path: lifeFolder })
+                  } catch {
+                    /* ignore */
+                  }
+                })
+              }}
+            >
+              Open Life folder
+            </button>
+          ) : null}
+          {lastStep?.did ? (
+            <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', lineHeight: 1.45 }}>
+              Last I did: {lastStep.did}
+              {lastStep.path ? (
+                <span style={{ color: 'var(--text-muted)' }}>
+                  {' '}
+                  · {lastStep.path.replace(/\\/g, '/').split('/').pop()}
+                </span>
+              ) : null}
+            </div>
+          ) : lifeDigest ? (
+            <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', lineHeight: 1.45 }}>
+              {lifeDigest.split('\n')[0]}
+            </div>
+          ) : null}
+          <form
+            className="flex gap-1"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const title = newGoal.trim()
+              if (!title || busy) return
+              setBusy(true)
+              void import('../api/partner')
+                .then(({ createLifeGoal }) => createLifeGoal(title))
+                .then(() => {
+                  setNewGoal('')
+                  load()
+                })
+                .finally(() => setBusy(false))
+            }}
+          >
+            <input
+              className="ui-input ui-input-sm flex-1 min-w-0"
+              value={newGoal}
+              placeholder="Hold a life goal…"
+              aria-label="New life goal"
+              onChange={(e) => setNewGoal(e.target.value)}
+            />
+            <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !newGoal.trim()}>
+              Hold
+            </button>
+          </form>
+          {lifeGoals.length === 0 ? (
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+              None yet. Say what you want this year, or type it above.
+            </div>
+          ) : (
+            lifeGoals.map((g) => (
+              <div
+                key={g.id}
+                className="p-2 rounded space-y-1"
+                style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+              >
+                <div className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                  {g.title}
+                  <span className="ml-1 text-[9px] uppercase" style={{ color: 'var(--text-muted)' }}>
+                    {g.horizon || 'season'} · {g.status || 'open'}
+                  </span>
+                </div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
+                  Next: {g.next_action || '— none yet —'}
+                  {g.next_by ? ` · ${g.next_by}` : ''}
+                </div>
+                <form
+                  className="flex gap-1"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    const action = (nextDraft[g.id] || '').trim()
+                    if (!action) return
+                    setBusy(true)
+                    void import('../api/partner')
+                      .then(({ patchLifeGoal }) => patchLifeGoal(g.id, { next_action: action }))
+                      .then(() => {
+                        setNextDraft((d) => ({ ...d, [g.id]: '' }))
+                        load()
+                      })
+                      .finally(() => setBusy(false))
+                  }}
+                >
+                  <input
+                    className="ui-input ui-input-sm flex-1 min-w-0"
+                    value={nextDraft[g.id] || ''}
+                    placeholder="Set next action…"
+                    aria-label={`Next action for ${g.title}`}
+                    onChange={(e) => setNextDraft((d) => ({ ...d, [g.id]: e.target.value }))}
+                  />
+                  <button type="submit" className="btn btn-sm" disabled={busy}>
+                    Set
+                  </button>
+                </form>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={busy}
+                    onClick={() => {
+                      setBusy(true)
+                      void import('../api/partner')
+                        .then(({ patchLifeGoal }) => patchLifeGoal(g.id, { status: 'done', evidence: 'marked done in Life tab' }))
+                        .then(() => load())
+                        .finally(() => setBusy(false))
+                    }}
+                  >
+                    Done
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={busy}
+                    onClick={() => {
+                      setBusy(true)
+                      void import('../api/partner')
+                        .then(({ patchLifeGoal }) => patchLifeGoal(g.id, { status: 'paused' }))
+                        .then(() => load())
+                        .finally(() => setBusy(false))
+                    }}
+                  >
+                    Pause
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       ) : tab === 'checkpoint' ? (
         !checkpoint ? (
           <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', lineHeight: 1.45 }}>

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
@@ -20,6 +22,19 @@ class KnowledgeImportRequest(BaseModel):
 class GoalCreateRequest(BaseModel):
     title: str
     description: str = ""
+    why: str = ""
+    horizon: str = "season"
+    next_action: str = ""
+    done_looks_like: str = ""
+
+
+class GoalPatchRequest(BaseModel):
+    status: str | None = None
+    next_action: str | None = None
+    next_by: str | None = None
+    done_looks_like: str | None = None
+    why: str | None = None
+    evidence: str | None = None
 
 
 class PlanCreateRequest(BaseModel):
@@ -93,10 +108,35 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             ),
         }
 
+    def _life_home():
+        home = None
+        if runtime is not None:
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        if not home:
+            try:
+                from remedy.interfaces.config import load_config
+
+                home = load_config().get("home_dir")
+            except Exception:
+                home = None
+        return home
+
     @app.get("/api/goals")
     async def list_goals():
+        from remedy.memory.life_drive import drive_digest, visible_life_dir
+        from remedy.memory.life_goals import LifeGoalStore
+
+        store = LifeGoalStore(_life_home())
+        life = store.list(include_closed=True)
+        extra: dict = {}
+        with suppress(Exception):
+            extra["life_folder"] = str(visible_life_dir(_life_home()))
+            extra["last_step"] = store.last_step()
+            extra["digest"] = str(drive_digest(_life_home()).get("markdown") or "")
+        if life:
+            return {"goals": [g.to_public() for g in life], **extra}
         if runtime is None or not hasattr(runtime, "list_tasks"):
-            return {"goals": []}
+            return {"goals": [], **extra}
         tasks = runtime.list_tasks()
         goals = [t for t in tasks if "goal" in (t.tags or [])]
         if not goals:
@@ -112,23 +152,60 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                     "tags": t.tags,
                 }
                 for t in goals
-            ]
+            ],
+            **extra,
         }
 
     @app.post("/api/goals")
     async def create_goal(req: GoalCreateRequest):
-        if runtime is None or not hasattr(runtime, "create_task"):
-            raise HTTPException(503, "Runtime not available")
-        task = runtime.create_task(
-            req.title.strip(),
-            description=req.description or "",
-            tags=["goal"],
+        from remedy.memory.life_goals import LifeGoalStore
+
+        title = req.title.strip()
+        if not title:
+            raise HTTPException(400, "title required")
+        why = (req.why or req.description or "").strip()
+        store = LifeGoalStore(_life_home())
+        life = store.add(
+            title,
+            why=why,
+            horizon=req.horizon or "season",
+            next_action=req.next_action or "",
+            done_looks_like=req.done_looks_like or "",
+            source="api",
         )
-        return {
-            "id": str(task.id),
-            "title": task.title,
-            "status": task.status.value,
-        }
+        with suppress(Exception):
+            from remedy.memory.life_drive import invent_next, take_step
+
+            if life and not life.next_action:
+                store.set_next(life.title, invent_next(life))
+                life = store.find(life.title) or life
+            take_step(_life_home(), force=True)
+            life = store.find(life.title) or life
+        if runtime is not None and hasattr(runtime, "create_task"):
+            runtime.create_task(
+                title,
+                description=why,
+                tags=["goal"],
+            )
+        return life.to_public()
+
+    @app.patch("/api/goals/{goal_id}")
+    async def patch_goal(goal_id: str, req: GoalPatchRequest):
+        from remedy.memory.life_goals import LifeGoalStore
+
+        store = LifeGoalStore(_life_home())
+        fields = req.model_dump(exclude_none=True)
+        if not fields:
+            raise HTTPException(400, "nothing to patch")
+        if fields.get("status") == "done":
+            g = store.complete(goal_id, evidence=str(fields.get("evidence") or ""))
+        elif fields.get("status") == "paused":
+            g = store.pause(goal_id)
+        else:
+            g = store.patch(goal_id, **fields)
+        if g is None:
+            raise HTTPException(404, "goal not found")
+        return g.to_public()
 
     def _plan_store():
         from pathlib import Path
@@ -312,8 +389,14 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         harness = "auto"
         scope = "project"
         brief_intent = ""
+        try:
+            from remedy.memory.life_goals import LifeGoalStore
+
+            goals_open = LifeGoalStore(_life_home()).open_count()
+        except Exception:
+            goals_open = 0
         if runtime is not None:
-            if hasattr(runtime, "list_tasks"):
+            if goals_open == 0 and hasattr(runtime, "list_tasks"):
                 from remedy.models import TaskStatus
 
                 goals_open = len(
@@ -434,10 +517,29 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         except Exception:
             soma = {}
 
+        active_title = ""
+        next_action = ""
+        last_step = None
+        life_folder = ""
+        with suppress(Exception):
+            from remedy.memory.life_drive import visible_life_dir
+            from remedy.memory.life_goals import LifeGoalStore
+
+            st = LifeGoalStore(_life_home())
+            ag = st.active()
+            if ag is not None:
+                active_title = ag.title
+                next_action = ag.next_action
+            last_step = st.last_step()
+            life_folder = str(visible_life_dir(_life_home()))
         return {
             "pending_approvals": len(pending),
             "approval_mode": APPROVALS.mode,
             "open_goals": goals_open,
+            "active_goal": active_title or None,
+            "next_action": next_action or None,
+            "last_step": last_step,
+            "life_folder": life_folder or None,
             "access_scope": scope,
             "harness_mode": harness,
             "brief_intent": brief_intent[:200],

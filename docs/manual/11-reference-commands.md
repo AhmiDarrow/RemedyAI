@@ -17,8 +17,8 @@ Type `/` in the composer for autocomplete. Commands also work via
 | `/pin` | `text` | Pin a fact so it always injects |
 | `/whoami` | | Profile / known facts + this-home census |
 | `/stretch` | alias `/home` | Re-map this PC (hardware, tools, rooms, local ports) |
-| `/goals` | | List open goals |
-| `/goal` | `title` | Add a goal |
+| `/goals` | | List life goals and the next action |
+| `/goal` | `title` | Hold a life goal; takes one local step (Documents/Remedy Life) |
 | `/plans` | | List structured task plans |
 | `/plan` | `approve` · `new <title>` · (empty = show latest) | Show / create / approve a plan |
 | `/compact` | `focus?` | Memory Harness compress → Session Brief |
