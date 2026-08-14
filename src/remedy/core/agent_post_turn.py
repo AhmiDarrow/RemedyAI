@@ -86,6 +86,7 @@ def schedule_post_turn_prep(
                 action_ir=turn_action_ir(runtime),
                 status="done",
                 assistant_text=asst,
+                user_text=message or "",
                 recent_tool_texts=recent_tools,
                 allow_verify=bool(
                     turn_metabolism_allow_verify(runtime)

@@ -28,7 +28,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from remedy.memory.middleman import MemoryItem, content_key
+from remedy.memory.middleman import MemoryItem, content_key, tokenize
 
 _SCHEMA = """
 PRAGMA journal_mode = WAL;
@@ -246,7 +246,11 @@ class EternalCAS:
             q = sanitize_search_query(query or "", max_length=200)
         except Exception:
             q = " ".join((query or "").split())[:200]
-        if not q.strip():
+        toks = tokenize(q)
+        # OR: a turn about "outline" should hit a fact that also mentions it.
+        # AND of chat words misses; ranking below prefers overlap.
+        fts_q = " OR ".join(toks[:8]) if toks else q.strip()
+        if not fts_q:
             return []
         skip = {s for s in exclude if s}
         kind_set = {k for k in (kinds or []) if k}
@@ -263,27 +267,37 @@ class EternalCAS:
                     ORDER BY rank
                     LIMIT ?
                     """,
-                    (q, max(1, int(limit) + len(skip))),
+                    (fts_q, max(1, int(limit) + len(skip))),
                 ).fetchall()
-            if not rows:
-                token = next((t for t in q.split() if len(t) >= 3), q)
-                safe = token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-                like = f"%{safe}%"
+            if not rows and toks:
+                clauses = []
+                params: list[Any] = []
+                for tok in toks[:4]:
+                    safe = tok.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    clauses.append("body LIKE ? ESCAPE '\\'")
+                    params.append(f"%{safe}%")
+                params.append(max(1, int(limit) + len(skip)))
                 rows = db.execute(
-                    """
+                    f"""
                     SELECT * FROM objects
-                    WHERE tombstone = 0 AND body LIKE ? ESCAPE '\\'
+                    WHERE tombstone = 0 AND ({' OR '.join(clauses)})
                     ORDER BY ts DESC
                     LIMIT ?
                     """,
-                    (like, max(1, int(limit) + len(skip))),
+                    params,
                 ).fetchall()
+        scored: list[tuple[int, MemoryItem]] = []
         for row in rows:
             item = _row_item(row)
             if item.key in skip:
                 continue
             if kind_set and item.kind not in kind_set:
                 continue
+            low = (item.body or "").lower()
+            overlap = sum(1 for t in toks if t in low)
+            scored.append((overlap, item))
+        scored.sort(key=lambda p: p[0], reverse=True)
+        for _n, item in scored:
             items.append(item)
             if len(items) >= limit:
                 break

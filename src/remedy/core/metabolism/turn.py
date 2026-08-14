@@ -362,6 +362,7 @@ def end_turn_metabolism(
     action_ir: Any = None,
     status: str = "done",
     assistant_text: str = "",
+    user_text: str = "",
     recent_tool_texts: list[str] | None = None,
     allow_verify: bool = False,
     home: Any = None,
@@ -402,6 +403,17 @@ def end_turn_metabolism(
     ledger = get_evidence_ledger(sid)
     with suppress(Exception):
         ledger.persist_index(home)
+    with suppress(Exception):
+        from remedy.core.metabolism.organism import ingest_turn_residue
+
+        key = ingest_turn_residue(
+            home=home,
+            session_id=sid,
+            user_text=user_text or "",
+            assistant_text=assistant_text or "",
+        )
+        if key:
+            out["cas_residue"] = key[:16]
 
     # Lean counters only on end-turn hot path (full Advanced uses GET endpoint)
     out["metabolism"] = metabolism_public_snapshot(sid, lean=True)
