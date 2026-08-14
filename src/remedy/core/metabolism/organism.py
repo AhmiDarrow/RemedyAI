@@ -275,6 +275,24 @@ def status_pack(
     return v
 
 
+def soma_from_vitals(vitals: dict[str, Any] | None) -> dict[str, Any]:
+    """Tray/status soma packet from vitals. Empty if the body has no mood yet."""
+    v = vitals or {}
+    if not v.get("label") and not v.get("mood"):
+        return {}
+    return {
+        "mood": v.get("mood") or "",
+        "emoji": v.get("emoji") or "",
+        "label": v.get("label") or "",
+        "rapport": v.get("rapport") or 0,
+        "trust": v.get("trust") or 0,
+        "last_stance": v.get("stance") or "steady",
+        "open_threads": int(v.get("open_count") or 0),
+        "tray_tooltip": v.get("tray_tooltip") or "",
+        "ts": v.get("ts") or 0,
+    }
+
+
 def collect_vitals(
     home: Any = None,
     *,
@@ -308,6 +326,7 @@ def collect_vitals(
         "dream": "",
         "help_mode": "",
         "open_hint": "",
+        "tray_tooltip": "",
     }
     with suppress(Exception):
         from remedy.memory.life_goals import LifeGoalStore
@@ -322,10 +341,13 @@ def collect_vitals(
             v["last_did"] = str(last["did"])[:200]
         v["stalled"] = _life_is_stalled(store)
         v["open_count"] = store.open_count()
-    with suppress(Exception):
-        from remedy.memory.life_drive import resolve_life_notes_dir
+    if extras and extras.get("life_folder"):
+        v["life_folder"] = str(extras["life_folder"])
+    else:
+        with suppress(Exception):
+            from remedy.memory.life_drive import resolve_life_notes_dir
 
-        v["life_folder"] = str(resolve_life_notes_dir(home))
+            v["life_folder"] = str(resolve_life_notes_dir(home))
     with suppress(Exception):
         from remedy.memory.cas import ensure_cas
 
@@ -336,8 +358,10 @@ def collect_vitals(
             kinds = snap.get("kinds") or {}
             v["cas_durable"] = int(kinds.get("fact") or 0) + int(kinds.get("life") or 0)
     with suppress(Exception):
+        from remedy.memory.soul.field import load_soul_field
         from remedy.memory.soul.somatic import compute_soma
 
+        sf = load_soul_field(home)
         muscle_label = ""
         muscle_provider = ""
         if runtime is not None:
@@ -348,15 +372,15 @@ def collect_vitals(
                 muscle_label = m.label
                 muscle_provider = str(m.provider or "")
         soma = compute_soma(
-            home, muscle_label=muscle_label, muscle_provider=muscle_provider
+            home,
+            muscle_label=muscle_label,
+            muscle_provider=muscle_provider,
+            field=sf,
         )
         v["mood"] = soma.mood
         v["emoji"] = soma.emoji
         v["label"] = soma.label
-    with suppress(Exception):
-        from remedy.memory.soul.field import load_soul_field
-
-        sf = load_soul_field(home)
+        v["tray_tooltip"] = soma.tray_tooltip
         rel = sf.relational
         v["who"] = (sf.identity_name or "Remedy").strip() or "Remedy"
         v["rapport"] = float(rel.rapport or 0)
@@ -430,6 +454,8 @@ def organism_cycle(
     prev = load_vitals(home)
     extras["last_wake_at"] = float(prev.get("last_wake_at") or 0)
     extras["cycles"] = list(prev.get("cycles") or [])
+    if prev.get("life_folder"):
+        extras["life_folder"] = prev["life_folder"]
     with suppress(Exception):
         beat = organism_heartbeat(home, session_id=session_id)
         extras["recalled"] = int(beat.get("recalled") or 0)

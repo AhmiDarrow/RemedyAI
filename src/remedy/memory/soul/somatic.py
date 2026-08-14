@@ -64,9 +64,10 @@ def compute_soma(
     *,
     muscle_label: str = "",
     muscle_provider: str = "",
+    field: Any = None,
 ) -> SomaSnapshot:
     """Compute somatic snapshot from current Soul Field."""
-    sf = load_soul_field(home)
+    sf = field if field is not None else load_soul_field(home)
     rel = sf.relational
     last_stance = "steady"
     if sf.episodes:
