@@ -40,6 +40,49 @@ def test_wrong_model_for_host_is_fatal() -> None:
     assert _is_fatal_llm_api_error(400, body) is True
 
 
+def test_deepseek_force_tool_choice_stays_auto() -> None:
+    """DeepSeek thinking models 400 on tool_choice=required — never send it."""
+    from types import SimpleNamespace
+
+    from remedy.core.providers import DeepSeekProvider
+    from remedy.core.react_loop.build_request import build_step_request_body
+
+    bind = SimpleNamespace(
+        provider="deepseek",
+        model="deepseek-chat",
+        api_key="x",
+        base_url="https://api.deepseek.com",
+        adapter=lambda: DeepSeekProvider(),
+    )
+    runtime = SimpleNamespace(
+        _force_tool_choice=True,
+        _thinking_level="high",
+        _tool_choice_required_blocked=False,
+        _llm_max_output_tokens=256,
+        _local_step_index=0,
+    )
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "file_read",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+    body, _headers, _ep, _sse = build_step_request_body(
+        runtime=runtime,
+        bind=bind,
+        adapter=DeepSeekProvider(),
+        messages=[{"role": "user", "content": "read the file"}],
+        step_tools=tools,
+        step=0,
+        user_message="read the file",
+    )
+    assert body.get("tools")
+    assert body.get("tool_choice") == "auto"
+
+
 def test_thinking_tool_choice_mismatch_is_recoverable() -> None:
     body = (
         '{"error":{"message":"Thinking mode does not support this tool_choice",'

@@ -639,16 +639,49 @@ def is_knowledge_question(message: str) -> bool:
     return bool(msg.endswith("?") or _KNOWLEDGE_Q_START_RE.match(msg))
 
 
+# Short "reply only X" / "just say Y" — verbal token, not environment work.
+_VERBAL_ONLY_RE = re.compile(
+    r"(?is)^(?:turn\s+\d+\s*:\s*)?(?:please\s+)?"
+    r"(?:reply|say|respond|answer|print|output)\s+"
+    r"(?:only\s+|just\s+|with\s+)?\S"
+)
+
+
+def is_verbal_only_request(message: str) -> bool:
+    """True for short 'reply only STILLALIVE' style asks — no tools needed."""
+    msg = (message or "").strip()
+    if not msg or "\n" in msg or len(msg) > 120:
+        return False
+    if _TOOL_HINT_RE.search(msg) or _WORK_SHAPE_RE.search(msg):
+        return False
+    if _REQUEST_WORK_RE.search(msg) or _ACTION_KICK_RE.search(msg):
+        return False
+    return bool(_VERBAL_ONLY_RE.search(msg))
+
+
+def looks_like_injected_tool_markup(message: str) -> bool:
+    """True when the user pasted DSML/XML tool markup (not a real work ask)."""
+    msg = (message or "").strip()
+    if not msg:
+        return False
+    return bool(_DSML_TOOL_RE.search(msg) or _PSEUDO_TOOL_RE.search(msg))
+
+
 def message_wants_tools(message: str) -> bool:
     """Fail-open: tools on unless the message is proven chat or trivia.
 
-    Keyword-miss product asks must stay armed. Chat/meta and short world
-    questions stay one-shot. Action kicks ('proceed') are work.
+    Keyword-miss product asks must stay armed. Chat/meta, short world
+    questions, verbal-only tokens, and pasted tool markup stay one-shot.
+    Action kicks ('proceed') are work.
     """
     msg = (message or "").strip()
     if not msg:
         return False
     if is_chat_only_message(msg):
+        return False
+    if is_verbal_only_request(msg):
+        return False
+    if looks_like_injected_tool_markup(msg):
         return False
     if is_knowledge_question(msg):
         return False
@@ -658,6 +691,20 @@ def message_wants_tools(message: str) -> bool:
         if looks_like_companion_request(msg):
             return True
     return True
+
+
+_SAFETY_REFUSAL_RE = re.compile(
+    r"(?i)\b(?:i\s+(?:can(?:not|'t)|won'?t|will not|am not going to)|"
+    r"refus(?:e|ing)|too dangerous|not allowed|i'?m not (?:going to|able to))\b"
+)
+
+
+def looks_like_safety_refusal(text: str | None) -> bool:
+    """True when the model already refused — do not force tools on a no."""
+    t = (text or "").strip()
+    if len(t) < 8:
+        return False
+    return bool(_SAFETY_REFUSAL_RE.search(t))
 
 
 def unfinished_work_blocks_final(

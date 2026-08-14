@@ -40,6 +40,32 @@ def test_resolve_tools_never_strips_task():
     assert d.reason in ("task", "task_write_first", "message_wants_tools") or "task" in d.reason
 
 
+def test_resolve_tools_verbal_only_disarms_even_with_history():
+    """Continuity rebound must not arm tools for 'Reply only STILLALIVE'."""
+    all_t = [_tool("file_write"), _tool("file_read"), _tool("list_dir")]
+    history = [
+        {"role": "assistant", "tool_calls": [{"id": "1", "function": {"name": "file_read"}}]},
+        {"role": "tool", "content": "ok"},
+    ]
+    d = resolve_tools(
+        message="Reply only STILLALIVE",
+        all_tools=all_t,
+        turn_tier=1,
+        history=history,
+        open_tasks=["finish the settings dialog"],
+    )
+    assert d.tools is None
+    assert d.reason == "non_work"
+    d2 = resolve_tools(
+        message="Turn 0: say only T0OK",
+        all_tools=all_t,
+        turn_tier=1,
+        history=history,
+    )
+    assert d2.tools is None
+    assert d2.reason == "non_work"
+
+
 def test_resolve_tools_l1_strips_pure_chat():
     all_t = [_tool("file_write")]
     d = resolve_tools(
@@ -105,6 +131,35 @@ def test_resolve_tools_full_bugsweep_not_l1():
     assert d.tools is not None
     assert d.run_until_done is True
     assert d.reason != "l1_pure_chat"
+
+
+def test_mid_turn_keep_armed_does_not_override_non_work():
+    """Pseudo-tool rearm must not pin tools on a verbal-only turn."""
+    all_t = [_tool("file_write"), _tool("file_read"), _tool("list_dir")]
+    turn = TurnState(all_tools=all_t)
+    turn.rearm(reason="rearm_agency")
+
+    class _Rt:
+        _turn_tier = 1
+
+    tools, run = resolve_and_apply_tools(
+        runtime=_Rt(),
+        turn=turn,
+        message="Reply only STILLALIVE",
+        plan_mode=False,
+        history=[],
+        pure_action_kick=False,
+        clear_goals_only=False,
+        browse_pre_url=None,
+        page_interaction=False,
+        open_only_browse=False,
+        build_state=None,
+        open_tasks_for_wall=None,
+        step_index=2,
+    )
+    assert tools is None
+    assert run is False
+    assert turn.arm_reason == "non_work"
 
 
 def test_mid_turn_resolve_cannot_disarm_armed_turn():
