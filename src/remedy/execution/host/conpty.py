@@ -188,7 +188,7 @@ def _spawn_conpty_sync(
     if not k32.UpdateProcThreadAttribute(
         attr_buf,
         0,
-        _PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,  # type: ignore[arg-type]
+        _PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
         h_pc,
         ctypes.sizeof(ctypes.c_void_p),
         None,

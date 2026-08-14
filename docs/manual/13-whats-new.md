@@ -2,11 +2,27 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.23.2**.
+Current series: **v0.24.0**.
 
 ## Contents
 
-- [0.23.2](#0232---defender-execution-false-positive) · [0.23.1](#0231---first-turn-agency) · [0.23.0](#0230---build-ability--companion) · [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+- [0.24.0](#0240---host-bridge--first-home) · [0.23.2](#0232---defender-execution-false-positive) · [0.23.1](#0231---first-turn-agency) · [0.23.0](#0230---build-ability--companion) · [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+
+## 0.24.0 - Host Bridge + first home
+
+Remedy learns **this PC** instead of one vendor or one shell. Host Bridge
+rewrites POSIX to cmd, runs PowerShell via `-File`, and exposes
+`host_run` / `host_mkdir` / `host_which` / `host_script`. **`/stretch`**
+(alias `/home`) maps hardware, PATH tools, rooms, and local ports;
+**`/whoami`** includes that census. GPU probe is vendor-neutral (NVIDIA /
+AMD / Intel); RMB autofit uses VRAM.
+
+Work turns stay armed until tools actually run. Settings no longer steal
+the active chat’s model. Shell jail closes `C:/` dests and `$HOME`
+redirects; `/api/files` no longer lists `SAM` / `win.ini` / `hosts` as
+empty success. Packaged self-inject defaults **off**.
+
+PyPI **`remedy-ai==0.24.0`** · tag **v0.24.0**.
 
 ## 0.23.2 - Defender Execution false positive
 

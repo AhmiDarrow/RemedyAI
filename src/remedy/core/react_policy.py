@@ -591,9 +591,7 @@ def is_chat_only_message(message: str) -> bool:
     if _HARD_CHAT_ONLY_RE.match(msg) or _CHAT_ONLY_RE.match(msg):
         return True
     # Short meta only — "what tools should I use to implement X" stays work.
-    if len(msg) <= 80 and _META_NO_TOOLS_RE.search(msg):
-        return True
-    return False
+    return bool(len(msg) <= 80 and _META_NO_TOOLS_RE.search(msg))
 
 
 # Polite wrappers that look like questions but are work ("can you add…").

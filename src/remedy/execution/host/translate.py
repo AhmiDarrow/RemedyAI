@@ -286,7 +286,7 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
     if head == "grep":
         rg = _find_rg()
         pattern = ""
-        files: list[str] = []
+        grep_files: list[str] = []
         rest = [_unquote(t) for t in toks[1:]]
         # drop common flags
         cleaned: list[str] = []
@@ -298,10 +298,10 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
             cleaned.append(t)
         if cleaned:
             pattern = cleaned[0]
-            files = cleaned[1:]
+            grep_files = cleaned[1:]
         if rg and pattern:
             notes.append("grep → rg")
-            file_bits = " ".join(_q(f) for f in files)
+            file_bits = " ".join(_q(f) for f in grep_files)
             return f'"{rg}" -n {_q(pattern)} {file_bits}'.strip(), notes
 
     return s, notes

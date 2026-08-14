@@ -4,6 +4,52 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-08-14
+
+### Host / this PC
+
+- **Host Bridge:** POSIX-to-cmd rewrite, `pwsh -File` (never `-Command`),
+  `host_run` / `host_mkdir` / `host_which` / `host_script`, teach-back, and
+  optional session / ConPTY so shell work matches the Windows host.
+- **First-home stretch:** bounded census of hardware, PATH tools, rooms, and
+  local ports. `/stretch` (alias `/home`) remaps this PC; `/whoami` includes
+  the home census.
+- **Vendor-neutral GPU probe:** NVIDIA / AMD / Intel / sysfs. RMB autofit
+  uses VRAM, not a vendor logo.
+
+### Memory / partner
+
+- Living memory plus partner dreams (user / self / future).
+- Unattended self-inject idle clock and write jail. Packaged self-inject
+  defaults **off**.
+
+### Agency
+
+- Fail-open tools unless the message is proven chat or trivia — no verb lists.
+- A work turn with zero tool evidence cannot finish as a successful answer.
+- Verbal-only, trivia, and pasted tool markup stay tool-free after continuity
+  rebound. `keep_armed` no longer overrides a `non_work` disarm.
+- LLM binding is per-session; Settings save no longer retargets the active chat.
+- DeepSeek never gets `tool_choice=required` (thinking-mode 400). Recovery
+  rebuilds the request instead of re-POSTing the rejected body.
+- Concurrent turns keep ReAct flags, thinking level, and navigate settle on
+  turn/session state. Stop drains the stopped tab.
+
+### Security
+
+- Shell write jail extracts `C:/` dests and fail-closed PowerShell `$HOME`
+  redirects. `python.exe` / `node.exe` oneshots and constructed `Path` /
+  `os.path` dests count as writes.
+- `/api/files` no longer jails to the volume root; `SAM` / `win.ini` /
+  `hosts` return an error instead of a successful empty listing.
+- Single-instance reclaim never `taskkill`s `app.exe`. Computer tools run
+  off the event loop; messengers persist on cancel.
+
+### Fixes
+
+- Ruff / mypy clean on the new host, learning, and jail modules so Linux CI
+  lint and type gates stay green.
+
 ## [0.23.2] - 2026-08-13
 
 ### Fixes
