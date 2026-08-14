@@ -17,6 +17,7 @@ from remedy.runtime.rmb.config import (
     rmb_home,
     save_rmb_json,
 )
+from remedy.runtime.rmb.host_profile import detect_gguf_host_profile
 from remedy.runtime.rmb.mode import (
     force_path_only_images,
     harness_pcts_for_local_agent,
@@ -28,7 +29,6 @@ from remedy.runtime.rmb.mode import (
     should_skip_vision_stack,
     silent_context_for_local_agent,
 )
-from remedy.runtime.rmb.host_profile import detect_gguf_host_profile
 from remedy.runtime.rmb.service import (
     ensure_rmb_server,
     ensure_rmb_watchdog,

@@ -22,6 +22,9 @@ def test_blocks_localhost_and_private():
     assert _host_is_blocked("192.168.1.1")
     assert _host_is_blocked("169.254.169.254")
     assert _host_is_blocked("metadata.google.internal")
+    assert _host_is_blocked("metadata.nicob.net")
+    assert _host_is_blocked("instance-data")
+    assert _host_is_blocked("1.2.3.4.nip.io")
 
 
 def test_allows_public_literal_ip():

@@ -816,7 +816,6 @@ def _gguf_matches_model_id(path: Path, model_id: str) -> bool:
     Sticky model_path must not win when the user selected a different catalog
     size (e.g. 7B path still set after switching to 14B).
     """
-    import re
 
     from remedy.runtime.rmb.catalog import RMB_MODELS, catalog_id_from_hint
 
@@ -2720,7 +2719,8 @@ def _status_host_auto(state: dict[str, Any], model_path: Path | None) -> dict[st
     ha = state.get("host_auto") if isinstance(state.get("host_auto"), dict) else None
     if ha and ha.get("summary"):
         return ha
-    return detect_gguf_host_profile(model_path)
+    # Filename-only — do not walk GGUF KV on the 8s status poll.
+    return detect_gguf_host_profile(model_path, sniff_template=False)
 
 
 def _status_autofit(

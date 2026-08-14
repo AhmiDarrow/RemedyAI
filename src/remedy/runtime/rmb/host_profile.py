@@ -128,6 +128,7 @@ def detect_gguf_host_profile(
     model: Path | str | None,
     *,
     hardware: dict[str, Any] | None = None,
+    sniff_template: bool = True,
 ) -> dict[str, Any]:
     """Infer llama-server + Remedy chat knobs from a GGUF path/name.
 
@@ -163,7 +164,7 @@ def detect_gguf_host_profile(
     if base_model:
         reasons.append("filename_base")
 
-    signals = read_gguf_chat_signals(p)
+    signals = read_gguf_chat_signals(p) if sniff_template else {}
     qwen_toggle = bool(signals.get("enable_thinking_knob")) or qwen3
     always_think = False
     # Many instruct templates mention <think> as an optional block. Only treat

@@ -45,6 +45,22 @@ def test_detect_base_model_warns():
     assert any("base" in w.lower() for w in prof["warnings"])
 
 
+def test_status_path_skips_template_sniff(monkeypatch):
+    """Status poll must not open the GGUF (17GB files on an 8s timer)."""
+
+    def _boom(*_a, **_k):
+        raise AssertionError("status path must not sniff GGUF KV")
+
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.host_profile.read_gguf_chat_signals", _boom
+    )
+    prof = detect_gguf_host_profile(
+        Path("Qwen3.5-9B-Q4_K_M.gguf"), sniff_template=False
+    )
+    assert prof["qwen3_family"] is True
+    assert prof["chat_template_kwargs"] == '{"enable_thinking": false}'
+
+
 def test_detect_kanana_instruct_is_not_thinking():
     p = Path("kanana-2-1.3b-instruct-Q8_0.gguf")
     prof = detect_gguf_host_profile(p)

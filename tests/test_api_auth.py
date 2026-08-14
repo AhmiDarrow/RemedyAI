@@ -103,6 +103,12 @@ def test_status_public(auth_on, tmp_path):
     client = TestClient(app)
     r = client.get("/api/status")
     assert r.status_code == 200
+    body = r.json()
+    assert body.get("version")
+    # Unauthenticated liveness must not leak session / memory counts.
+    assert int(body.get("memory_entries") or 0) == 0
+    assert int(body.get("sessions_count") or 0) == 0
+    assert int(body.get("chat_sessions_count") or 0) == 0
 
 
 def test_self_improve_requires_bearer(auth_on, tmp_path, monkeypatch):

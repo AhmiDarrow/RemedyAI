@@ -74,8 +74,7 @@ def _normalize_browser_home_url(raw: object | None) -> str:
 def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     """Register routes (closes over runtime/gateway/memory)."""
     # -- settings -----------------------------------------------------------
-    @app.get("/api/settings")
-    async def get_settings():
+    def _settings_payload() -> dict:
         import time as _time
 
         t0 = _time.perf_counter()
@@ -332,6 +331,12 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         else:
             logger.debug("GET /api/settings (%.0fms) provider=%s", ms, provider)
         return out
+
+    @app.get("/api/settings")
+    async def get_settings():
+        import asyncio
+
+        return await asyncio.to_thread(_settings_payload)
 
     @app.put("/api/settings")
     async def update_settings(req: SettingsUpdateRequest):
