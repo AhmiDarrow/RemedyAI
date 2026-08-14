@@ -42,6 +42,16 @@ from remedy.interfaces.api_support import (
 
 logger = logging.getLogger(__name__)
 
+
+def _is_client_gone(exc: BaseException) -> bool:
+    """True when the HTTP client disconnected mid-request (not a server fault)."""
+    name = type(exc).__name__
+    if name in {"EndOfStream", "ClientDisconnect", "BrokenResourceError"}:
+        return True
+    low = name.lower()
+    return "endofstream" in low or "disconnect" in low
+
+
 # Re-export models for existing `from remedy.interfaces.api import ChatRequest` callers.
 __all__ = [
     "create_app",
@@ -141,9 +151,7 @@ def create_app(
                     from remedy.runtime.rmb.config import load_rmb_json, merge_state
                     from remedy.runtime.rmb.service import start_rmb_server
 
-                    home0 = (
-                        cfg0.get("home_dir") if isinstance(cfg0, dict) else None
-                    )
+                    home0 = cfg0.get("home_dir") if isinstance(cfg0, dict) else None
                     st = merge_state(load_rmb_json(home0))
                     from remedy.core.feature_maturity import rmb_enabled
 
@@ -165,25 +173,18 @@ def create_app(
                         rmb_ok = bool(rr.get("ok"))
                         if rmb_ok:
                             logger.info(
-                                "RMB local agent host auto-started "
-                                "(SmolVLM suspended) watchdog=on"
+                                "RMB local agent host auto-started (SmolVLM suspended) watchdog=on"
                             )
                         else:
-                            logger.info(
-                                "RMB auto-start: %s", rr.get("error") or rr
-                            )
+                            logger.info("RMB auto-start: %s", rr.get("error") or rr)
                 except Exception:
                     logger.exception("RMB auto-start background task failed")
                 # Vision only if RMB did not take the host (failed start may clear skip)
                 try:
                     from remedy.runtime.rmb.mode import should_skip_vision_stack
 
-                    if rmb_ok or should_skip_vision_stack(
-                        cfg0 if isinstance(cfg0, dict) else None
-                    ):
-                        logger.info(
-                            "Skipping SmolVLM autostart — RMB exclusive host"
-                        )
+                    if rmb_ok or should_skip_vision_stack(cfg0 if isinstance(cfg0, dict) else None):
+                        logger.info("Skipping SmolVLM autostart — RMB exclusive host")
                         return
                 except Exception:
                     if rmb_ok:
@@ -218,9 +219,7 @@ def create_app(
             from remedy.core.self_inject import is_enabled as _si_enabled
 
             _force = os.environ.get("REMEDY_SELF_INJECT_FORCE") == "1"
-            _self_inject_enabled = bool(
-                runtime is not None and (_si_enabled() or _force)
-            )
+            _self_inject_enabled = bool(runtime is not None and (_si_enabled() or _force))
 
             async def _self_inject_idle_loop() -> None:
                 first = True
@@ -232,9 +231,7 @@ def create_app(
                         first = False
                         if runtime is None:
                             continue
-                        if not _si_enabled() and os.environ.get(
-                            "REMEDY_SELF_INJECT_FORCE"
-                        ) != "1":
+                        if not _si_enabled() and os.environ.get("REMEDY_SELF_INJECT_FORCE") != "1":
                             continue
                         try:
                             from remedy.core.self_inject import run_unattended_improve
@@ -405,9 +402,7 @@ def create_app(
     #
     # a11y push stays loopback-only without Bearer: legacy in-page inject uses
     # job_id (≥16 chars) as the capability secret, not the API token.
-    _COMPUTER_A11Y_LOOPBACK_PREFIXES = (
-        "/api/computer/a11y/",
-    )
+    _COMPUTER_A11Y_LOOPBACK_PREFIXES = ("/api/computer/a11y/",)
 
     def _client_is_loopback(request: Request) -> bool:
         host = ""
@@ -432,9 +427,7 @@ def create_app(
             # Public docs / health / bootstrap
             if path in _AUTH_PUBLIC:
                 return await call_next(request)
-            if not _disable_api_docs and (
-                path.startswith("/docs") or path.startswith("/redoc")
-            ):
+            if not _disable_api_docs and (path.startswith("/docs") or path.startswith("/redoc")):
                 return await call_next(request)
             if any(path.startswith(p) for p in _AUTH_PUBLIC_PREFIXES):
                 return await call_next(request)
@@ -448,6 +441,7 @@ def create_app(
                 return await call_next(request)
             auth = request.headers.get("Authorization", "")
             expected = f"Bearer {api_key}"
+
             # Constant-time compare — never raise on length mismatch (→ always 401).
             def _ct_eq(a: str, b: str) -> bool:
                 ae, be = a.encode("utf-8"), b.encode("utf-8")
@@ -509,7 +503,17 @@ def create_app(
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
         start = time.time()
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            # BaseHTTPMiddleware turns client-abort / session-delete races into
+            # EndOfStream. That is not a 500 — the caller went away.
+            if _is_client_gone(exc):
+                return JSONResponse(
+                    status_code=404,
+                    content={"detail": "Request aborted"},
+                )
+            raise
         duration = (time.time() - start) * 1000
         path = request.url.path
         method = request.method.upper()
@@ -567,7 +571,6 @@ def create_app(
                 duration,
             )
         return response
-
 
     from remedy.interfaces.routes import register_all_routes
 
@@ -743,6 +746,7 @@ def yaml_schema(app: FastAPI) -> str:
     """Convert OpenAPI JSON to YAML."""
     data = app.openapi()
     import io
+
     out = io.StringIO()
     yaml.dump(data, out, default_flow_style=False, allow_unicode=True, sort_keys=False)
     return out.getvalue()

@@ -17,6 +17,15 @@ def auth_on(monkeypatch):
     monkeypatch.setenv("REMEDY_API_AUTH", "0")
 
 
+def test_client_gone_is_not_a_server_fault():
+    from anyio import EndOfStream
+
+    from remedy.interfaces.api import _is_client_gone
+
+    assert _is_client_gone(EndOfStream()) is True
+    assert _is_client_gone(RuntimeError("boom")) is False
+
+
 def test_ensure_token_generates_and_persists(tmp_path, auth_on):
     home = tmp_path / "home"
     home.mkdir()
@@ -217,9 +226,7 @@ def test_gateway_serve_api_enables_auth(auth_on, tmp_path, monkeypatch):
     def _fake_serve(args):
         called["args"] = args
 
-    monkeypatch.setattr(
-        "remedy.interfaces.cli.cmd_runtime._cmd_serve", _fake_serve
-    )
+    monkeypatch.setattr("remedy.interfaces.cli.cmd_runtime._cmd_serve", _fake_serve)
     gateway_cli._serve_api(db)  # noqa: SLF001
     ns = called.get("args")
     assert ns is not None
@@ -253,13 +260,9 @@ def test_api_docs_disabled_by_env(auth_on, tmp_path, monkeypatch):
     assert client.get("/redoc").status_code == 404
     assert client.get("/openapi.json").status_code == 404
     # Custom export routes not registered (auth middleware may 401 first).
-    r_export = client.get(
-        "/api/openapi.json", headers={"Authorization": f"Bearer {tok}"}
-    )
+    r_export = client.get("/api/openapi.json", headers={"Authorization": f"Bearer {tok}"})
     assert r_export.status_code == 404
-    r_yaml = client.get(
-        "/api/openapi.yaml", headers={"Authorization": f"Bearer {tok}"}
-    )
+    r_yaml = client.get("/api/openapi.yaml", headers={"Authorization": f"Bearer {tok}"})
     assert r_yaml.status_code == 404
 
 
