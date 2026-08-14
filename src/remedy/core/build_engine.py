@@ -967,11 +967,9 @@ def build_has_open_drive(state: BuildTurnState | None) -> bool:
     """Open checklist or unfinished ship — do not surrender at the reopen cap."""
     if state is None or not getattr(state, "active", False):
         return False
-    if int(getattr(state, "open_todo_count", 0) or 0) > 0:
-        return True
-    if bool(getattr(state, "ship_required", False)) and not state.ship_complete():
-        return True
-    return False
+    return int(getattr(state, "open_todo_count", 0) or 0) > 0 or (
+        bool(getattr(state, "ship_required", False)) and not state.ship_complete()
+    )
 
 
 def green_gate_cap_allows_final(

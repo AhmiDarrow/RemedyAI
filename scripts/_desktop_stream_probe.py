@@ -7,6 +7,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from contextlib import suppress
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -101,10 +102,8 @@ def main() -> int:
                 print("   ev", ev[:140])
         except Exception as e:
             print(f"STREAM FAIL {msg!r} after {time.time()-t0:.1f}s {e}")
-            try:
+            with suppress(Exception):
                 req_json("POST", f"/api/sessions/{sid}/abort", {})
-            except Exception:
-                pass
     return 0
 
 
