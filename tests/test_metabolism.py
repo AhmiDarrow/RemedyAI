@@ -888,6 +888,18 @@ def test_begin_and_after_tool_metabolism():
     assert "recent" in (pub.get("evidence") or {})
 
 
+def test_time_crystal_persist_skips_unchanged(tmp_path: Path):
+    reset_time_crystal("persist_skip")
+    c = get_time_crystal("persist_skip")
+    c.admit("decided we keep facts local", horizon="session")
+    p1 = c.persist(tmp_path)
+    assert p1 is not None and p1.is_file()
+    assert c.persist(tmp_path) is None
+    c.admit("chose sqlite for the ledger", horizon="session")
+    p2 = c.persist(tmp_path)
+    assert p2 is not None
+
+
 def test_metabolism_poll_snapshot_is_counters_only():
     sid = "test_meta_sess"
     get_evidence_ledger(sid).admit_tool_result(
