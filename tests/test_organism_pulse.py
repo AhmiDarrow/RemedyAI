@@ -219,6 +219,9 @@ def test_second_cycle_skips_life_resense(tmp_path: Path, monkeypatch) -> None:
             "open_count": 1,
             "stalled": False,
             "last_cycle_at": 1e18,
+            "mood": "calm",
+            "who": "Remedy",
+            "label": "Calm",
         },
         home,
     )
@@ -230,9 +233,14 @@ def test_second_cycle_skips_life_resense(tmp_path: Path, monkeypatch) -> None:
         raise AssertionError("life store should not be opened")
 
     monkeypatch.setattr("remedy.memory.life_goals.LifeGoalStore", _boom)
+    monkeypatch.setattr(
+        "remedy.memory.soul.field.load_soul_field",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("soul should not load")),
+    )
     out = organism_cycle(home, session_id="life")
     assert out["vitals"]["life_title"] == "Keep this title"
     assert out["vitals"]["next_action"] == "Stay put"
+    assert out["vitals"]["mood"] == "calm"
 
 
 def test_soma_from_vitals_and_tray(tmp_path: Path) -> None:

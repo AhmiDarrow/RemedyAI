@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  getPartnerStatus,
+  listApprovals,
   resolveApproval,
   type PendingApproval,
 } from '../api/partner'
@@ -28,8 +28,8 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
 
   const refresh = useCallback(async () => {
     try {
-      const st = await getPartnerStatus()
-      setItems(st.approvals || [])
+      const items = await listApprovals(sessionId)
+      setItems(items)
     } catch {
       // server down
     }

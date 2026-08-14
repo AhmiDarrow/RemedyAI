@@ -48,6 +48,7 @@ class TimeCrystal:
     blocked_secret: int = 0
     # Bumps on admit / hit / promote so hot_block cache cannot serve stale order.
     _rev: int = field(default=0, repr=False)
+    _persist_rev: int = field(default=-1, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def admit(
@@ -199,6 +200,10 @@ class TimeCrystal:
             ]
 
     def persist(self, home: Path | str | None = None) -> Path | None:
+        with self._lock:
+            if self._rev == self._persist_rev:
+                return None
+            rev = self._rev
         try:
             root = Path(home).expanduser() if home else Path.home() / ".remedy"
             d = root / "time_crystal"
@@ -211,6 +216,8 @@ class TimeCrystal:
                 json.dumps(self.snapshot(), indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
+            with self._lock:
+                self._persist_rev = rev
             return path
         except Exception:
             return None
