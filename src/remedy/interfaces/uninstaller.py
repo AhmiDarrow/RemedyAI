@@ -310,7 +310,7 @@ def run_uninstall(
 
     # Uninstall package
     console.print("\n[bold]Uninstalling package...[/bold]")
-    _pip_uninstall()
+    ok = _pip_uninstall()
 
     # Data wipe (path-safety guard before any rmtree)
     if purge and REMEDY_HOME.exists():
@@ -318,7 +318,7 @@ def run_uninstall(
             wipe_root = _assert_safe_wipe_root()
         except RuntimeError as e:
             console.print(f"[red]Wipe aborted: {e}[/red]")
-            return
+            raise SystemExit(1) from e
         console.print(f"\n[bold]Full wipe {wipe_root}...[/bold]")
         # Stop vision server before deleting weights/runtime
         with contextlib.suppress(Exception):
@@ -328,15 +328,24 @@ def run_uninstall(
             console.print("[green]Remedy data removed.[/green]")
         except Exception as e:
             console.print(f"[red]Failed to remove data: {e}[/red]")
+            ok = False
     else:
         if config or skills:
             console.print("\n[bold]Removing selected user data...[/bold]")
-        if config:
-            _wipe_config()
-            # Config wipe also drops vision runtime/models (large; re-download on reinstall)
-            _wipe_vision()
-        if skills:
-            _wipe_skills()
+        try:
+            if config:
+                _wipe_config()
+                # Config wipe also drops vision runtime/models (large; re-download on reinstall)
+                _wipe_vision()
+            if skills:
+                _wipe_skills()
+        except Exception as e:
+            console.print(f"[red]Failed to remove data: {e}[/red]")
+            ok = False
+
+    if not ok:
+        console.print("\n[red]Uninstall finished with errors.[/red]")
+        raise SystemExit(1)
 
     console.print()
     console.print("[green]Uninstall complete.[/green]")

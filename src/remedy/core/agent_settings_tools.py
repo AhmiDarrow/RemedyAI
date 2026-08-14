@@ -14,8 +14,172 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 from remedy.core.errors import format_tool_error
+
+_MESSENGER_ALLOWLIST_KEYS = ("allow_chat_ids", "allow_ids", "allow_from")
+
+
+def _truthy(v: Any) -> bool:
+    if isinstance(v, bool):
+        return v
+    return str(v or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+        "enable",
+        "enabled",
+    )
+
+
+def _saved_settings_cfg() -> dict[str, Any]:
+    try:
+        from remedy.interfaces.api_support import load_config
+
+        raw = load_config() or {}
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+def _url_host(url: str) -> str:
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+        return (parsed.hostname or "").lower().rstrip(".")
+    except Exception:
+        return ""
+
+
+def _is_loopback_host_url(url: str) -> bool:
+    from remedy.interfaces.config import is_loopback_hostname
+
+    return is_loopback_hostname(_url_host(url))
+
+
+def _hosts_equivalent(url_a: str, url_b: str) -> bool:
+    try:
+        pa = urlparse(url_a if "://" in url_a else f"https://{url_a}")
+        pb = urlparse(url_b if "://" in url_b else f"https://{url_b}")
+    except Exception:
+        return False
+    ha = (pa.hostname or "").lower().rstrip(".")
+    hb = (pb.hostname or "").lower().rstrip(".")
+    if not ha or not hb:
+        return False
+    return ha == hb or ha.endswith("." + hb) or hb.endswith("." + ha)
+
+
+def _approval_required(runtime: Any, cmd: str, reason: str) -> str:
+    from remedy.core.approvals import APPROVALS
+    from remedy.core.turn_context import turn_session_id
+
+    sid = turn_session_id(runtime)
+    ask_reason = APPROVALS.needs_ask(cmd, tool_name="update_settings") or reason
+    if APPROVALS.is_approved("update_settings", cmd, session_id=sid):
+        return ""
+    item = APPROVALS.create(
+        tool_name="update_settings",
+        command=cmd,
+        reason=ask_reason,
+        session_id=sid,
+    )
+    return (
+        f"APPROVAL_REQUIRED id={item.id}\n"
+        f"reason={ask_reason}\n"
+        "Do not invent success. Tell the user this needs approval "
+        f"in the UI (or /approve {item.id}), then retry."
+    )
+
+
+def _llm_base_url_needs_approval(new_url: str, patch: dict[str, Any], cfg: dict[str, Any]) -> bool:
+    """Foreign (non-catalog, non-loopback) base URL can steal the stored key."""
+    url = (new_url or "").strip()
+    if not url:
+        return False
+    current = str(cfg.get("llm_base_url") or "").strip()
+    if current and url.rstrip("/") == current.rstrip("/"):
+        return False
+    if _is_loopback_host_url(url):
+        return False
+    from remedy.interfaces.config import PROVIDER_CATALOG, infer_provider_from_base_url
+
+    owner = infer_provider_from_base_url(url)
+    target = str(patch.get("llm_provider") or cfg.get("llm_provider") or "").strip().lower()
+    if owner and (not target or owner == target):
+        return False
+    if target:
+        cat_url = str((PROVIDER_CATALOG.get(target) or {}).get("base_url") or "")
+        if cat_url and _hosts_equivalent(url, cat_url):
+            return False
+    return True
+
+
+def _allowlist_empty(val: Any) -> bool:
+    if val is None:
+        return False
+    if isinstance(val, (list, tuple, set)):
+        return not any(str(x).strip() for x in val)
+    s = str(val).strip()
+    return s in ("", "[]", "none", "null")
+
+
+def _messenger_widen(patch: dict[str, Any], cfg: dict[str, Any]) -> tuple[str, str] | None:
+    """Return ``(cmd, reason)`` for allow_all, emptied allowlists, or new channels."""
+    current_enabled = {
+        str(x).strip().lower()
+        for x in (cfg.get("enabled_channels") or [])
+        if str(x).strip()
+    }
+    raw_chs = patch.get("enabled_channels")
+    if raw_chs is not None:
+        if isinstance(raw_chs, str):
+            new_chs = {x.strip().lower() for x in raw_chs.split(",") if x.strip()}
+        elif isinstance(raw_chs, list):
+            new_chs = {str(x).strip().lower() for x in raw_chs if str(x).strip()}
+        else:
+            new_chs = set()
+        turning_on = new_chs - current_enabled - {"cli", "web", "api"}
+        if turning_on:
+            dest = ",".join(sorted(turning_on))
+            return (
+                f"widen_messengers:enable:{dest}",
+                f"Enabling messenger channel(s) {dest} requires approval",
+            )
+
+    messengers = patch.get("messengers")
+    if not isinstance(messengers, dict):
+        return None
+    for mid, body in messengers.items():
+        mid_s = str(mid or "").strip().lower()
+        if not mid_s or not isinstance(body, dict):
+            continue
+        if body.get("enabled") is True and mid_s not in current_enabled:
+            return (
+                f"widen_messengers:enable:{mid_s}",
+                f"Enabling messenger {mid_s} requires approval",
+            )
+        if "allow_all" in body and _truthy(body.get("allow_all")):
+            section = cfg.get(mid_s) if isinstance(cfg.get(mid_s), dict) else {}
+            if not _truthy(section.get("allow_all")):
+                return (
+                    f"widen_messengers:allow_all:{mid_s}",
+                    f"Setting {mid_s} allow_all=true requires approval",
+                )
+        section = cfg.get(mid_s) if isinstance(cfg.get(mid_s), dict) else {}
+        for key in _MESSENGER_ALLOWLIST_KEYS:
+            if key not in body:
+                continue
+            if _allowlist_empty(body.get(key)) and not _allowlist_empty(section.get(key)):
+                return (
+                    f"widen_messengers:empty:{mid_s}:{key}",
+                    f"Emptying {mid_s} {key} requires approval",
+                )
+    return None
 
 
 def register_settings_tools(runtime: Any) -> None:
@@ -346,30 +510,66 @@ def register_settings_tools(runtime: Any) -> None:
         widen_scope = str(patch.get("access_scope") or "").strip().lower()
         widen_approval = str(patch.get("approval_mode") or "").strip().lower()
         if widen_scope in ("home", "full") or widen_approval == "auto":
-            from remedy.core.approvals import APPROVALS
-            from remedy.core.turn_context import turn_session_id
-
-            sid = turn_session_id(runtime)
             if widen_scope in ("home", "full"):
                 cmd = f"widen_access_scope:{widen_scope}"
                 reason = f"Raising access_scope to {widen_scope} requires approval"
             else:
                 cmd = "widen_approval_mode:auto"
                 reason = "Switching approval_mode to auto requires approval"
-            ask_reason = APPROVALS.needs_ask(cmd, tool_name="update_settings") or reason
-            if not APPROVALS.is_approved("update_settings", cmd, session_id=sid):
-                item = APPROVALS.create(
-                    tool_name="update_settings",
-                    command=cmd,
-                    reason=ask_reason,
-                    session_id=sid,
+            locked = _approval_required(runtime, cmd, reason)
+            if locked:
+                return locked
+
+        saved_cfg = _saved_settings_cfg()
+
+        # Foreign llm_base_url would hot-reload the stored provider key to that host.
+        if "llm_base_url" in patch and _llm_base_url_needs_approval(
+            str(patch.get("llm_base_url") or ""), patch, saved_cfg
+        ):
+            dest = _url_host(str(patch.get("llm_base_url") or "")) or "unknown"
+            locked = _approval_required(
+                runtime,
+                f"widen_llm_base_url:{dest}",
+                "Changing llm_base_url to a non-catalog host requires approval",
+            )
+            if locked:
+                return locked
+
+        if "sleev_allow_remote_gateway" in patch and _truthy(
+            patch.get("sleev_allow_remote_gateway")
+        ):
+            if not _truthy(saved_cfg.get("sleev_allow_remote_gateway")):
+                locked = _approval_required(
+                    runtime,
+                    "widen_sleev_allow_remote",
+                    "Enabling sleev_allow_remote_gateway requires approval",
                 )
-                return (
-                    f"APPROVAL_REQUIRED id={item.id}\n"
-                    f"reason={ask_reason}\n"
-                    "Do not invent success. Tell the user this needs approval "
-                    f"in the UI (or /approve {item.id}), then retry."
+                if locked:
+                    return locked
+
+        if "sleev_gateway_url" in patch:
+            sleev_url = str(patch.get("sleev_gateway_url") or "").strip()
+            prev_sleev = str(saved_cfg.get("sleev_gateway_url") or "").strip()
+            if (
+                sleev_url
+                and sleev_url.rstrip("/") != prev_sleev.rstrip("/")
+                and not _is_loopback_host_url(sleev_url)
+            ):
+                dest = _url_host(sleev_url) or "unknown"
+                locked = _approval_required(
+                    runtime,
+                    f"widen_sleev_gateway_url:{dest}",
+                    "Setting a non-loopback sleev_gateway_url requires approval",
                 )
+                if locked:
+                    return locked
+
+        messenger_widen = _messenger_widen(patch, saved_cfg)
+        if messenger_widen:
+            cmd, messenger_reason = messenger_widen
+            locked = _approval_required(runtime, cmd, messenger_reason)
+            if locked:
+                return locked
 
         try:
             result = await apply_settings_update(
@@ -422,7 +622,9 @@ def register_settings_tools(runtime: Any) -> None:
         "Ollama/RMB stay direct. User needs `sleev` CLI installed + gateway running. "
         "project_path changes or clearing the focus folder require "
         "force_project_switch=true AND user approval. Raising access_scope "
-        "to home/full or approval_mode to auto also needs UI approval.",
+        "to home/full, approval_mode to auto, a foreign llm_base_url, "
+        "remote Sleev, messengers allow_all / emptied allowlists, or "
+        "enabling a channel also needs UI approval.",
         update_settings,
         {
             "type": "object",

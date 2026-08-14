@@ -481,7 +481,8 @@ remedy gateway status
 
 ### `remedy gateway serve`
 
-Start the REST API server (simpler alternative to `remedy serve` without config integration).
+Same API server as `remedy serve` (instance lock, config, messengers, bind policy).
+Prefer `remedy serve` when you need flags (`--host`, `--port`, `--skip-setup`).
 
 ```bash
 remedy gateway serve

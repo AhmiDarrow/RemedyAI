@@ -100,6 +100,22 @@ def test_uninstaller_source_never_names_bare_remedy_dist():
     assert 'for dist in ("remedy-ai", "remedy")' not in src
 
 
+def test_uninstall_pip_fail_exits_1_and_skips_complete(tmp_path: Path, monkeypatch, capsys):
+    import pytest
+    from rich.prompt import Confirm
+
+    home = tmp_path / ".remedy"
+    home.mkdir()
+    monkeypatch.setattr(uninst, "REMEDY_HOME", home)
+    monkeypatch.setattr(uninst, "_pip_uninstall", lambda: False)
+    monkeypatch.setattr(Confirm, "ask", lambda *_a, **_k: True)
+    with pytest.raises(SystemExit) as ei:
+        uninst.run_uninstall(purge=False, dry_run=False, home=home)
+    assert ei.value.code == 1
+    out = capsys.readouterr().out
+    assert "complete" not in out.lower()
+
+
 def test_assert_safe_wipe_root_refuses_non_remedy_paths(tmp_path: Path):
     """Wipe must refuse profile dirs, arbitrary trees, and misnamed homes."""
     import pytest

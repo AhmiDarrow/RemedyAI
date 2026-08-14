@@ -95,3 +95,27 @@ def test_distribution_helpers_prefer_remedy_ai():
     if ver is None:
         pytest.skip("no dist-info in this env")
     assert isinstance(ver, str) and ver
+
+
+def test_update_offline_exits_1_and_does_not_claim_current(monkeypatch, capsys):
+    monkeypatch.setattr(upd, "_get_latest_version", lambda: None)
+    monkeypatch.setattr(upd, "_detect_install_source", lambda: "pip")
+    monkeypatch.setattr(upd, "_find_project_root", lambda: None)
+    with pytest.raises(SystemExit) as ei:
+        upd.run_update(check_only=True)
+    assert ei.value.code == 1
+    out = capsys.readouterr().out
+    assert "up to date" not in out.lower()
+
+
+def test_update_apply_fail_exits_1(monkeypatch):
+    monkeypatch.setattr(upd, "_get_latest_version", lambda: "99.0.0")
+    monkeypatch.setattr(upd, "_get_installed_version", lambda: "0.1.0")
+    monkeypatch.setattr(upd, "_detect_install_source", lambda: "pip")
+    monkeypatch.setattr(upd, "_find_project_root", lambda: None)
+    monkeypatch.setattr(upd, "_pip_upgrade", lambda: False)
+    monkeypatch.setattr(upd.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(upd.Confirm, "ask", lambda *_a, **_k: True)
+    with pytest.raises(SystemExit) as ei:
+        upd.run_update(check_only=False)
+    assert ei.value.code == 1

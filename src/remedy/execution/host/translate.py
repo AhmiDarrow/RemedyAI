@@ -21,6 +21,8 @@ _UNTRANSLATABLE = re.compile(
 )
 
 # Strong PowerShell-only signals. Do not use POSIX `test -eq` or `start-server`.
+# powershell/pwsh are *not* listed here — a later-segment mention ("use powershell")
+# must not skip POSIX rewrite. Head match is _PS_HEAD.
 _PS_STRONG = re.compile(
     r"(?is)("
     r"\$_\b"
@@ -28,8 +30,11 @@ _PS_STRONG = re.compile(
     r"|\$env:[A-Za-z]"
     r"|\bparam\s*\("
     r"|@['\"]"
-    r"|\b(?:powershell|pwsh)(?:\.exe)?\b"
     r")"
+)
+# Same idea as scriptfile._PS_WRAPPER: optional path prefix, command head only.
+_PS_HEAD = re.compile(
+    r"(?is)^\s*(?:(?:[A-Za-z]:\\)?(?:[^\s\"']*[\\/])?)?(?:powershell|pwsh)(?:\.exe)?\b"
 )
 _PS_CMDLET = re.compile(
     r"(?i)\b(?:Get|Set|New|Remove|Invoke|Write|Select|Where|ForEach|Out|"
@@ -37,6 +42,7 @@ _PS_CMDLET = re.compile(
     r"-([A-Za-z][A-Za-z0-9]+)\b"
 )
 # Nouns that collide with POSIX / script names (start-server, start-dev).
+# "service" is a real PS noun (Get-Service / Start-Service) — do not denylist it.
 _PS_FILENAME_NOUNS = frozenset(
     {
         "server",
@@ -45,7 +51,6 @@ _PS_FILENAME_NOUNS = frozenset(
         "all",
         "here",
         "now",
-        "service",
         "script",
         "build",
         "web",
@@ -68,6 +73,8 @@ def looks_like_powershell(command: str) -> bool:
     cmd = (command or "").strip()
     if not cmd:
         return False
+    if _PS_HEAD.match(cmd):
+        return True
     if _PS_STRONG.search(cmd):
         return True
     for m in _PS_CMDLET.finditer(cmd):
@@ -349,7 +356,8 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
             file_bits = " ".join(_q(f) for f in grep_files)
             if file_bits:
                 return f"findstr /n /c:{_q(pattern)} {file_bits}".strip(), notes
-            return f"findstr /s /n /c:{_q(pattern)} *", notes
+            # No file operands = stdin (piped grep), not a recursive * walk.
+            return f"findstr /n /c:{_q(pattern)}", notes
 
     if head in ("head", "tail"):
         n = 10
@@ -431,7 +439,7 @@ def _find_rg() -> str:
     try:
         from remedy.core.rg_binary import find_rg
 
-        p = find_rg()
-        return str(p) if p else ""
+        path, _src = find_rg()
+        return str(path) if path else ""
     except Exception:
         return ""
