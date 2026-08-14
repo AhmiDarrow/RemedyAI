@@ -140,7 +140,7 @@ class EternalCAS:
         tags = json.dumps(list(item.tags)[:16], ensure_ascii=False)
         with self._lock:
             db = self._db_req()
-            db.execute(
+            cur = db.execute(
                 """
                 INSERT OR IGNORE INTO objects
                     (key, kind, body, path, tool, session_id, tags, ts, tombstone)
@@ -158,7 +158,8 @@ class EternalCAS:
                 ),
             )
             db.commit()
-            self._invalidate_snap()
+            if cur.rowcount:
+                self._invalidate_snap()
         return key
 
     def get(self, key: str) -> MemoryItem | None:
@@ -168,16 +169,24 @@ class EternalCAS:
         if len(k) < 64:
             # short handle prefix
             with self._lock:
-                row = self._db_req().execute(
-                    "SELECT * FROM objects WHERE key LIKE ? AND tombstone = 0 LIMIT 1",
-                    (k + "%",),
-                ).fetchone()
+                row = (
+                    self._db_req()
+                    .execute(
+                        "SELECT * FROM objects WHERE key LIKE ? AND tombstone = 0 LIMIT 1",
+                        (k + "%",),
+                    )
+                    .fetchone()
+                )
         else:
             with self._lock:
-                row = self._db_req().execute(
-                    "SELECT * FROM objects WHERE key = ? AND tombstone = 0",
-                    (k,),
-                ).fetchone()
+                row = (
+                    self._db_req()
+                    .execute(
+                        "SELECT * FROM objects WHERE key = ? AND tombstone = 0",
+                        (k,),
+                    )
+                    .fetchone()
+                )
         return _row_item(row) if row else None
 
     def tombstone(self, key: str) -> bool:
@@ -287,7 +296,7 @@ class EternalCAS:
                 rows = db.execute(
                     f"""
                     SELECT * FROM objects
-                    WHERE tombstone = 0 AND ({' OR '.join(clauses)})
+                    WHERE tombstone = 0 AND ({" OR ".join(clauses)})
                     ORDER BY ts DESC
                     LIMIT ?
                     """,
@@ -334,9 +343,7 @@ class EternalCAS:
 
     def _meta(self, key: str) -> str:
         with self._lock:
-            row = self._db_req().execute(
-                "SELECT v FROM meta WHERE k = ?", (key,)
-            ).fetchone()
+            row = self._db_req().execute("SELECT v FROM meta WHERE k = ?", (key,)).fetchone()
         return str(row["v"]) if row else ""
 
     def _set_meta(self, key: str, value: str) -> None:
@@ -528,6 +535,3 @@ def get_cas() -> EternalCAS | None:
             except OSError:
                 return None
         return _cas
-
-
-

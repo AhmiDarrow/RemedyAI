@@ -25,21 +25,20 @@ def schedule_post_turn_prep(
         from remedy.core.session_quality import get_session_quality
         from remedy.core.speculative import schedule_speculative_prep
 
-        sid = str(
-            session_id
-            or getattr(runtime, "_session_id", None)
-            or ""
-        )
+        sid = str(session_id or getattr(runtime, "_session_id", None) or "")
         qsnap = get_session_quality(sid).snapshot()
         project_path = None
         with suppress(Exception):
             project_path = str(runtime.effective_project_path() or "") or None
         if not project_path:
-            project_path = str(
-                getattr(getattr(runtime, "config", None), "project_path", None)
-                or getattr(runtime, "_project_path", None)
-                or ""
-            ) or None
+            project_path = (
+                str(
+                    getattr(getattr(runtime, "config", None), "project_path", None)
+                    or getattr(runtime, "_project_path", None)
+                    or ""
+                )
+                or None
+            )
         # Light touch each turn (not only true session end)
         if project_path and int(qsnap.get("turns") or 0) > 0:
             # Only merge full profile every few turns to limit disk IO
@@ -68,9 +67,7 @@ def schedule_post_turn_prep(
                     for s in steps[-12:]:
                         if isinstance(s, dict):
                             recent_tools.append(
-                                f"{s.get('tool')}: {s.get('result') or s.get('error') or ''}"[
-                                    :500
-                                ]
+                                f"{s.get('tool')}: {s.get('result') or s.get('error') or ''}"[:500]
                             )
             asst = str(getattr(runtime, "_last_assistant_text", "") or "")
             from remedy.core.turn_context import (
@@ -89,8 +86,7 @@ def schedule_post_turn_prep(
                 user_text=message or "",
                 recent_tool_texts=recent_tools,
                 allow_verify=bool(
-                    turn_metabolism_allow_verify(runtime)
-                    or int(turn_tier(runtime) or 1) >= 2
+                    turn_metabolism_allow_verify(runtime) or int(turn_tier(runtime) or 1) >= 2
                 ),
                 home=home,
             )
@@ -117,9 +113,7 @@ def schedule_post_turn_prep(
                     update_soul_after_turn(
                         user_text=message or "",
                         assistant_text=asst,
-                        session_id=str(
-                            turn_session_id(runtime) or sid or ""
-                        ),
+                        session_id=str(turn_session_id(runtime) or sid or ""),
                         provider=str(getattr(bind, "provider", "") or ""),
                         model=str(getattr(bind, "model", "") or ""),
                         brief=getattr(runtime, "_session_brief", None),
@@ -132,11 +126,7 @@ def schedule_post_turn_prep(
                     from remedy.memory.soul.field import load_soul_field
 
                     sf = load_soul_field(home)
-                    ready = (
-                        len(sf.episodes) >= 3
-                        or bool(sf.pledges)
-                        or bool(sf.future_dreams)
-                    )
+                    ready = len(sf.episodes) >= 3 or bool(sf.pledges) or bool(sf.future_dreams)
                     if ready and should_dream(home):
                         dream_cycle(
                             home=home,
@@ -149,36 +139,29 @@ def schedule_post_turn_prep(
                     from remedy.memory.soul.missions_bridge import arm_soul_missions
 
                     sf2 = load_soul_field(home)
-                    if (
-                        sf2.relational.turns_together > 0
-                        and sf2.relational.turns_together % 8 == 0
-                    ):
-                        arm_soul_missions(
-                            runtime, home=home, max_new=1, auto=True
-                        )
+                    if sf2.relational.turns_together > 0 and sf2.relational.turns_together % 8 == 0:
+                        arm_soul_missions(runtime, home=home, max_new=1, auto=True)
             # Always refresh somatic signal for tray / status bar (organism visible)
             with suppress(Exception):
-                from remedy.core.muscle_profile import muscle_from_runtime
-                from remedy.memory.soul.somatic import refresh_soma
-
-                m = muscle_from_runtime(runtime)
-                refresh_soma(
-                    home,
-                    muscle_label=m.label,
-                    muscle_provider=m.provider,
-                )
-            with suppress(Exception):
-                import time as _time
-
                 from remedy.core.metabolism.organism import (
+                    apply_soma_to_vitals,
                     collect_vitals,
                     load_vitals,
                     persist_vitals,
                 )
+                from remedy.core.muscle_profile import muscle_from_runtime
+                from remedy.memory.soul.somatic import refresh_soma
 
+                m = muscle_from_runtime(runtime)
+                pub = refresh_soma(
+                    home,
+                    muscle_label=m.label,
+                    muscle_provider=m.provider,
+                )
                 prev = load_vitals(home)
-                age = _time.time() - float(prev.get("ts") or 0)
-                if age > 45.0 or not prev.get("alive"):
+                if prev.get("alive"):
+                    apply_soma_to_vitals(pub, home)
+                else:
                     persist_vitals(collect_vitals(home, runtime=runtime), home)
             # Realtime skill lifecycle: promote/demote/prune from this turn's stats
             with suppress(Exception):
@@ -227,16 +210,15 @@ def distill_user_message_now(
         # by speculative prep. Force sync path when user asked to remember.
         if not is_explicit_remember_intent(text):
             return out
-        project_path = str(
-            getattr(getattr(runtime, "config", None), "project_path", None)
-            or getattr(runtime, "_project_path", None)
-            or ""
-        ) or None
-        sid = str(
-            session_id
-            or getattr(runtime, "_session_id", None)
-            or ""
+        project_path = (
+            str(
+                getattr(getattr(runtime, "config", None), "project_path", None)
+                or getattr(runtime, "_project_path", None)
+                or ""
+            )
+            or None
         )
+        sid = str(session_id or getattr(runtime, "_session_id", None) or "")
         result = distill_user_text_sync(
             mem,
             text,
@@ -319,16 +301,15 @@ def schedule_mid_turn_warm(
     with suppress(Exception):
         from remedy.core.speculative import schedule_speculative_prep
 
-        sid = str(
-            session_id
-            or getattr(runtime, "_session_id", None)
-            or ""
+        sid = str(session_id or getattr(runtime, "_session_id", None) or "")
+        project_path = (
+            str(
+                getattr(getattr(runtime, "config", None), "project_path", None)
+                or getattr(runtime, "_project_path", None)
+                or ""
+            )
+            or None
         )
-        project_path = str(
-            getattr(getattr(runtime, "config", None), "project_path", None)
-            or getattr(runtime, "_project_path", None)
-            or ""
-        ) or None
         schedule_speculative_prep(
             session_id=sid,
             brief=getattr(runtime, "_session_brief", None),

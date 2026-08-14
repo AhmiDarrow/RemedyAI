@@ -503,6 +503,172 @@ def test_begin_turn_includes_organism_inject(tmp_path: Path) -> None:
     # Organism pulse and/or governor/tier notes should land for L2
     assert injects
     assert any(
-        k in injects
-        for k in ("Organism", "Forge", "Governor", "Metabolism", "tier", "L2", "L3")
+        k in injects for k in ("Organism", "Forge", "Governor", "Metabolism", "tier", "L2", "L3")
     )
+
+
+def test_quiet_cycle_flips_stalled_from_clock(tmp_path: Path, monkeypatch) -> None:
+    import time
+
+    from remedy.core.metabolism import organism as org
+    from remedy.core.metabolism.organism import organism_cycle, persist_vitals
+
+    home = tmp_path / "stall"
+    home.mkdir()
+    persist_vitals(
+        {
+            "ts": 1,
+            "alive": True,
+            "life_title": "Finish the novel",
+            "next_action": "Outline",
+            "open_count": 1,
+            "stalled": False,
+            "mood": "calm",
+            "who": "Remedy",
+            "label": "Calm",
+            "last_drive_at": time.time() - 3 * 3600,
+            "life_updated_at": time.time() - 8 * 86400,
+            "last_pulse_at": 1e18,
+            "last_heartbeat_at": 1e18,
+            "cas_count": 0,
+            "cas_durable": 0,
+            "last_compact_at": time.time(),
+        },
+        home,
+    )
+    monkeypatch.setattr(org, "organism_heartbeat", lambda *a, **k: {"recalled": 0})
+    monkeypatch.setattr("remedy.memory.life_drive.drive_due", lambda *a, **k: False)
+    monkeypatch.setattr("remedy.memory.life_goals.pulse_due", lambda *a, **k: False)
+
+    def _no_collect(*_a, **_k):
+        raise AssertionError("collect_vitals should not run on a quiet stall flip")
+
+    def _no_cas(*_a, **_k):
+        raise AssertionError("CAS should stay closed when compact is fresh")
+
+    monkeypatch.setattr(org, "collect_vitals", _no_collect)
+    monkeypatch.setattr("remedy.memory.cas.ensure_cas", _no_cas)
+    out = organism_cycle(home, session_id="life")
+    assert out["vitals"]["stalled"] is True
+    assert out["vitals"]["life_title"] == "Finish the novel"
+
+
+def test_cycle_skips_cas_when_compact_fresh(tmp_path: Path, monkeypatch) -> None:
+    import time
+
+    from remedy.core.metabolism import organism as org
+    from remedy.core.metabolism.organism import organism_cycle, persist_vitals
+
+    home = tmp_path / "nocas"
+    home.mkdir()
+    persist_vitals(
+        {
+            "ts": 1,
+            "alive": True,
+            "life_title": "Keep this title",
+            "next_action": "Stay put",
+            "open_count": 1,
+            "stalled": False,
+            "mood": "calm",
+            "who": "Remedy",
+            "label": "Calm",
+            "last_drive_at": 1e18,
+            "last_pulse_at": 1e18,
+            "last_heartbeat_at": 1e18,
+            "cas_count": 4,
+            "cas_durable": 2,
+            "last_compact_at": time.time(),
+        },
+        home,
+    )
+    monkeypatch.setattr(org, "organism_heartbeat", lambda *a, **k: {"recalled": 0})
+    monkeypatch.setattr("remedy.memory.life_drive.drive_due", lambda *a, **k: False)
+    monkeypatch.setattr("remedy.memory.life_goals.pulse_due", lambda *a, **k: False)
+
+    def _no_cas(*_a, **_k):
+        raise AssertionError("ensure_cas should not open when compact is not due")
+
+    monkeypatch.setattr("remedy.memory.cas.ensure_cas", _no_cas)
+    out = organism_cycle(home, session_id="life")
+    assert out["vitals"]["cas_count"] == 4
+    assert out["vitals"]["cas_durable"] == 2
+
+
+def test_ingest_residue_bumps_vitals_cas_count(tmp_path: Path) -> None:
+    from remedy.core.metabolism.organism import (
+        ingest_turn_residue,
+        load_vitals,
+        organism_recall_line,
+        persist_vitals,
+    )
+    from remedy.memory.cas import configure_cas
+    from remedy.memory.middleman import reset_middleman_state
+
+    home = tmp_path / "bump"
+    home.mkdir()
+    reset_middleman_state()
+    configure_cas(home)
+    persist_vitals(
+        {"ts": 1, "alive": True, "cas_count": 0, "cas_durable": 0},
+        home,
+    )
+    key = ingest_turn_residue(
+        home=home,
+        session_id="life",
+        user_text="I want to finish the novel this year",
+        assistant_text="Decided the next move is a one-page outline.",
+    )
+    assert key
+    vitals = load_vitals(home)
+    assert int(vitals.get("cas_count") or 0) >= 1
+    assert int(vitals.get("cas_durable") or 0) >= 1
+    line = organism_recall_line(home, "one-page outline next move")
+    assert line.startswith("Recalled:")
+    again = ingest_turn_residue(
+        home=home,
+        session_id="life",
+        user_text="I want to finish the novel this year",
+        assistant_text="Decided the next move is a one-page outline.",
+    )
+    assert again == key
+    assert int(load_vitals(home).get("cas_count") or 0) == int(vitals["cas_count"])
+    configure_cas(None)
+    reset_middleman_state()
+
+
+def test_apply_soma_updates_mood_without_collect(tmp_path: Path) -> None:
+    import time
+
+    from remedy.core.metabolism.organism import apply_soma_to_vitals, load_vitals, persist_vitals
+
+    home = tmp_path / "mood"
+    home.mkdir()
+    persist_vitals(
+        {
+            "ts": time.time(),
+            "alive": True,
+            "mood": "calm",
+            "emoji": "●",
+            "label": "Calm",
+            "life_title": "Finish the novel",
+            "turns": 4,
+        },
+        home,
+    )
+    apply_soma_to_vitals(
+        {
+            "mood": "focused",
+            "emoji": "◆",
+            "label": "Focused",
+            "rapport": 0.8,
+            "trust": 0.7,
+            "last_stance": "focused",
+            "tray_tooltip": "Remedy ◆ Focused",
+        },
+        home,
+    )
+    vitals = load_vitals(home)
+    assert vitals["mood"] == "focused"
+    assert vitals["label"] == "Focused"
+    assert vitals["life_title"] == "Finish the novel"
+    assert int(vitals.get("turns") or 0) == 5
