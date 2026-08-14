@@ -323,7 +323,8 @@ def record_project_chapter(
                 "chapter": {"notes": [], "decisions": [], "updated_at": 0},
                 "updated_at": 0,
             }
-        chap = proj.get("chapter") if isinstance(proj.get("chapter"), dict) else {}
+        raw_chap = proj.get("chapter")
+        chap: dict[str, Any] = raw_chap if isinstance(raw_chap, dict) else {}
         notes = [str(x) for x in (chap.get("notes") or []) if str(x).strip()]
         decisions = [str(x) for x in (chap.get("decisions") or []) if str(x).strip()]
         if text_n and text_n not in notes:
@@ -346,7 +347,8 @@ def record_project_chapter(
 def project_chapter_block(project_path: str | None, *, query: str = "") -> str:
     """Short 'this chapter of work' inject — survives Session Brief compress."""
     prof = load_project_profile(project_path)
-    chap = prof.get("chapter") if isinstance(prof.get("chapter"), dict) else {}
+    raw_chap = prof.get("chapter")
+    chap: dict[str, Any] = raw_chap if isinstance(raw_chap, dict) else {}
     notes = [str(x).strip() for x in (chap.get("notes") or []) if str(x).strip()]
     decisions = [str(x).strip() for x in (chap.get("decisions") or []) if str(x).strip()]
     pins = [str(x).strip() for x in (prof.get("pinned_constraints") or []) if str(x).strip()]

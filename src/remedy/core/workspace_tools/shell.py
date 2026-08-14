@@ -1079,10 +1079,9 @@ def register_shell_tools(runtime: Any) -> None:
                 timeout_seconds=timeout_seconds,
                 workdir=workdir,
             )
-        if kind == "pwsh":
-            jail_cmd = f'pwsh -File "{launch.path}"'
-        else:
-            jail_cmd = f'cmd /c "{launch.path}"'
+        jail_cmd = (
+            f'pwsh -File "{launch.path}"' if kind == "pwsh" else f'cmd /c "{launch.path}"'
+        )
         return await bash_exec(
             command=jail_cmd,
             timeout_seconds=timeout_seconds,

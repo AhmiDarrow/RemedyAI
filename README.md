@@ -38,7 +38,7 @@
 | **Who it’s for** | Owners who want power without multi-agent theater — chat, files, shell, browser rail, computer use |
 | **What stays local** | Memory, Session Brief, skills, approvals, DPAPI secrets, optional SmolVLM2 vision |
 | **What you bring** | Your API keys / local Ollama — no Remedy cloud account for core use |
-| **Current** | **v0.23.2** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
+| **Current** | **v0.24.0** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
 
 From the creator: *My name is Ahmi, I hope you enjoy my Remedy.*  
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.
@@ -47,7 +47,7 @@ In-app: title-bar / tray → **About Remedy** · **Settings → About**.
 
 ## What’s new
 
-**Latest: [v0.23.2](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.23.2)** — Desktop UI is `Remedy Desktop.exe` (not generic `app.exe`) so Defender ML does not treat first launch as an attacker.
+**Latest: [v0.24.0](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.24.0)** — Host Bridge + first-home stretch so Remedy learns this PC (shell, GPU, PATH, rooms), with tighter write jails and per-session agency.
 
 <p align="center">
   <img src="docs/manual/assets/remedy-partner-architecture.jpg" alt="How Remedy fits together" width="640" />
@@ -56,9 +56,10 @@ In-app: title-bar / tray → **About Remedy** · **Settings → About**.
 | Highlight | Why it matters |
 |-----------|----------------|
 | **L0–L3 turn tiers** | Instant local answers for “what model / skills / version”; full tools only when work needs them |
-| **Agency that runs tools** | Review / implement keep tools on; false “activating skill” prose re-arms real function calls |
+| **Agency that runs tools** | Review / implement keep tools on; work turns cannot finish as chat; Settings no longer steal the active session model |
+| **Host Bridge + `/stretch`** | POSIX→cmd, `pwsh -File`, vendor-neutral GPU/VRAM autofit, home census via `/whoami` |
 | **✕ → tray always** | Title-bar close hides to tray; local API stays warm. **Tray Quit** for full stop |
-| **Write jail + security** | Project write roots, shell auth refuse, SSRF harden, Bearer computer host, opt-in **Privacy mode** |
+| **Write jail + security** | Project write roots, `C:/` + `$HOME` shell dests, files API refuse for `SAM`/`hosts`, opt-in **Privacy mode** |
 | **Browser rail polish** | Video fullscreen stays **in-rail**; mobile/desktop site toggle; chat images with Bearer media; same-window OAuth |
 
 **Also in 0.20–0.21:** evidence ledger, shadow rehearsal, Action IR, Time Crystal, skill genome, portable identity, multi-tab stream paint, messengers, signed Skills Library.
@@ -318,7 +319,7 @@ WebUI is the **same SPA** as desktop (`desktop/dist`). After UI changes:
 ```bash
 git clone https://github.com/AhmiDarrow/RemedyAI.git && cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # 560+ tests; currently ~1991
+uv run pytest -q          # 560+ tests; currently ~2039
 cd desktop && npm test && npm run build
 python scripts/check_docs.py
 cd desktop && npm run tauri:dev   # full shell (set REMEDY_DEV_ROOT to repo)

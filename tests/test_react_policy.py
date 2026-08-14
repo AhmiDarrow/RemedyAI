@@ -5,11 +5,6 @@ from __future__ import annotations
 import json
 
 from remedy.core.react_policy import (
-    is_chat_only_message,
-    is_knowledge_question,
-    is_verbal_only_request,
-    looks_like_injected_tool_markup,
-    looks_like_safety_refusal,
     _DEFAULT_SYSTEM_BODY,
     AGENCY_REARM_NUDGE,
     RECOVERY_NUDGE,
@@ -19,9 +14,14 @@ from remedy.core.react_policy import (
     agency_rearm_nudge_message,
     agency_tool_promise_claim,
     batch_has_tool_errors,
+    is_chat_only_message,
+    is_knowledge_question,
     is_serial_explore_batch,
+    is_verbal_only_request,
+    looks_like_injected_tool_markup,
     looks_like_leaked_scratchpad,
     looks_like_pseudo_tools,
+    looks_like_safety_refusal,
     looks_like_tool_markup_prefix,
     message_wants_tools,
     parse_pseudo_tool_calls,

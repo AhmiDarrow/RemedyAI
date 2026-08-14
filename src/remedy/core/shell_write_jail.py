@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Iterable
+from contextlib import suppress
 from pathlib import Path
 
 # Commands / cmdlets that mutate the filesystem (case-insensitive).
@@ -523,10 +524,8 @@ _SCRIPT_HOME_PATH_RE = re.compile(
 
 def _roots_cover_user_profile(roots: list[Path]) -> bool:
     homes: list[Path] = []
-    try:
+    with suppress(OSError):
         homes.append(Path.home())
-    except OSError:
-        pass
     for key in ("USERPROFILE", "HOME"):
         raw = os.environ.get(key)
         if raw:
