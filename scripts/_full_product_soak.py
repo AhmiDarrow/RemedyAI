@@ -154,7 +154,14 @@ def api_surface() -> None:
             method="POST",
             body={"client": "full-soak"},
         )
-        mark("POST computer host/hello", code == 200, str(body)[:100])
+        # Unauth 401 is the security hold. 200 means a connected host answered.
+        mark(
+            "POST computer host/hello",
+            code in (200, 401, 403),
+            f"code={code} {str(body)[:80]}",
+        )
+    except urllib.error.HTTPError as e:
+        mark("POST computer host/hello", e.code in (200, 401, 403), f"HTTP {e.code}")
     except Exception as e:
         mark("POST computer host/hello", False, str(e))
 
@@ -220,11 +227,15 @@ def computer_live() -> None:
         mark("computer_click eN", None, "no e refs")
 
     r = run("page_text", target="browser")
-    mark(
-        "computer_page_text",
-        bool(r.get("ok")) and len(str(r.get("text") or "")) > 5,
-        f"tlen={len(str(r.get('text') or ''))} title={r.get('title')!r}",
-    )
+    ptext = str(r.get("text") or "")
+    if not r.get("ok") and "not connected" in str(r.get("message") or "").lower():
+        mark("computer_page_text", None, "host not connected")
+    else:
+        mark(
+            "computer_page_text",
+            bool(r.get("ok")) and len(ptext) > 5,
+            f"tlen={len(ptext)} title={r.get('title')!r}",
+        )
 
     r = run("screenshot", target="browser")
     mark(
