@@ -66,8 +66,8 @@ async def test_simple_c_program_task_chain(tmp_path: Path):
 
     cfg = AgentConfig(
         name="E2E-C-pytest",
-        home_dir=str(Path.home() / ".remedy"),
-        memory_db_path=str(Path.home() / ".remedy" / "memory.db"),
+        home_dir=str(tmp_path / "remedy_home"),
+        memory_db_path=str(tmp_path / "remedy_home" / "memory.db"),
         llm_provider="rmb",
         llm_api_key="rmb",
         llm_model="Qwopus3.5-9B-Coder-MTP-Q4_K_M",

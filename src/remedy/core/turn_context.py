@@ -61,6 +61,26 @@ _turn_last_auto_checkpoint_n: ContextVar[int] = ContextVar(
     "remedy_turn_last_auto_checkpoint_n", default=0
 )
 
+
+@dataclass
+class TurnReactFlags:
+    """Live-turn ReAct flags — never stored on the shared BasicRuntime."""
+
+    force_tool_choice: bool = False
+    tool_choice_required_blocked: bool = False
+    turn_tier: int = 1
+    turn_tier_label: str = ""
+    action_ir: Any = None
+    shadow_strict: bool = False
+    force_spread: bool = False
+    metabolism_allow_verify: bool = False
+    thinking_level: str | None = None
+
+
+_turn_react_flags: ContextVar[TurnReactFlags | None] = ContextVar(
+    "remedy_turn_react_flags", default=None
+)
+
 # Ordered ContextVars set by begin_turn (end_turn resets by zip-order).
 _TURN_CONTEXT_VARS: tuple[ContextVar[Any], ...] = (
     _turn_session_id,
@@ -74,6 +94,7 @@ _TURN_CONTEXT_VARS: tuple[ContextVar[Any], ...] = (
     _turn_active,
     _turn_build_verify_green,
     _turn_last_auto_checkpoint_n,
+    _turn_react_flags,
 )
 
 
@@ -85,6 +106,10 @@ _session_procs: dict[str, list[Any]] = {}
 _stream_claims: set[str] = set()
 # sid → claim generation. Stale CancelledError must not abort a newer turn.
 _stream_epochs: dict[str, int] = {}
+# Next-turn injects keyed by session (never a process-global leftover).
+_pending_verify_by_session: dict[str, Any] = {}
+_build_protocol_by_session: dict[str, str] = {}
+_frontier_continue_by_session: dict[str, Any] = {}
 _lock = threading.Lock()
 
 
@@ -226,6 +251,7 @@ def begin_turn(
         True,
         False,
         0,
+        TurnReactFlags(),
     )
     tokens: list[Token] = []
     for var, val in zip(_TURN_CONTEXT_VARS, values, strict=True):
@@ -460,3 +486,215 @@ def set_turn_last_auto_checkpoint_n(n: int, runtime: Any = None) -> None:
     _turn_last_auto_checkpoint_n.set(val)
     if runtime is not None:
         runtime._last_auto_checkpoint_n = val
+
+
+def _react_flags() -> TurnReactFlags | None:
+    return _turn_react_flags.get()
+
+
+def turn_force_tool_choice(runtime: Any = None) -> bool:
+    flags = _react_flags()
+    if flags is not None:
+        return bool(flags.force_tool_choice)
+    if runtime is not None:
+        return bool(getattr(runtime, "_force_tool_choice", False))
+    return False
+
+
+def set_turn_force_tool_choice(value: bool, runtime: Any = None) -> None:
+    """Live-turn only — do not write the shared runtime singleton."""
+    del runtime  # callers may still pass runtime; ignore to stop cross-tab theft
+    flags = _react_flags()
+    if flags is not None:
+        flags.force_tool_choice = bool(value)
+
+
+def turn_tool_choice_required_blocked(runtime: Any = None) -> bool:
+    flags = _react_flags()
+    if flags is not None:
+        return bool(flags.tool_choice_required_blocked)
+    if runtime is not None:
+        return bool(getattr(runtime, "_tool_choice_required_blocked", False))
+    return False
+
+
+def set_turn_tool_choice_required_blocked(value: bool, runtime: Any = None) -> None:
+    del runtime
+    flags = _react_flags()
+    if flags is not None:
+        flags.tool_choice_required_blocked = bool(value)
+
+
+def turn_tier(runtime: Any = None, default: int = 1) -> int:
+    flags = _react_flags()
+    if flags is not None:
+        return int(flags.turn_tier or default)
+    if runtime is not None:
+        return int(getattr(runtime, "_turn_tier", default) or default)
+    return int(default)
+
+
+def set_turn_tier(
+    value: int,
+    runtime: Any = None,
+    *,
+    label: str | None = None,
+) -> None:
+    flags = _react_flags()
+    n = int(value or 0)
+    if flags is not None:
+        flags.turn_tier = n
+        if label is not None:
+            flags.turn_tier_label = str(label)
+    elif runtime is not None:
+        runtime._turn_tier = n
+        if label is not None:
+            runtime._turn_tier_label = str(label)
+
+
+def turn_action_ir(runtime: Any = None) -> Any:
+    flags = _react_flags()
+    if flags is not None:
+        return flags.action_ir
+    if runtime is not None:
+        return getattr(runtime, "_action_ir", None)
+    return None
+
+
+def set_turn_action_ir(value: Any, runtime: Any = None) -> None:
+    flags = _react_flags()
+    if flags is not None:
+        flags.action_ir = value
+    elif runtime is not None:
+        runtime._action_ir = value
+
+
+def turn_shadow_strict(runtime: Any = None) -> bool:
+    flags = _react_flags()
+    if flags is not None:
+        return bool(flags.shadow_strict)
+    if runtime is not None:
+        return bool(getattr(runtime, "_shadow_strict", False))
+    return False
+
+
+def set_turn_shadow_strict(value: bool, runtime: Any = None) -> None:
+    flags = _react_flags()
+    if flags is not None:
+        flags.shadow_strict = bool(value)
+    elif runtime is not None:
+        runtime._shadow_strict = bool(value)
+
+
+def turn_force_spread(runtime: Any = None) -> bool:
+    flags = _react_flags()
+    if flags is not None:
+        return bool(flags.force_spread)
+    if runtime is not None:
+        return bool(getattr(runtime, "_force_spread", False))
+    return False
+
+
+def turn_thinking_level(runtime: Any = None, default: str = "high") -> str:
+    flags = _react_flags()
+    if flags is not None and flags.thinking_level:
+        return str(flags.thinking_level)
+    if runtime is not None:
+        return str(getattr(runtime, "_thinking_level", default) or default)
+    return str(default)
+
+
+def set_turn_thinking_level(value: str, runtime: Any = None) -> None:
+    """Live-turn only — do not write the shared runtime singleton."""
+    del runtime
+    flags = _react_flags()
+    if flags is not None:
+        flags.thinking_level = str(value or "")
+
+
+def set_turn_force_spread(value: bool, runtime: Any = None) -> None:
+    flags = _react_flags()
+    if flags is not None:
+        flags.force_spread = bool(value)
+    elif runtime is not None:
+        runtime._force_spread = bool(value)
+
+
+def turn_metabolism_allow_verify(runtime: Any = None) -> bool:
+    flags = _react_flags()
+    if flags is not None:
+        return bool(flags.metabolism_allow_verify)
+    if runtime is not None:
+        return bool(getattr(runtime, "_metabolism_allow_verify", False))
+    return False
+
+
+def set_turn_metabolism_allow_verify(value: bool, runtime: Any = None) -> None:
+    flags = _react_flags()
+    if flags is not None:
+        flags.metabolism_allow_verify = bool(value)
+    elif runtime is not None:
+        runtime._metabolism_allow_verify = bool(value)
+
+
+def stash_pending_verify_remedy(session_id: str | None, text: Any) -> None:
+    sid = str(session_id or "").strip()
+    if not sid:
+        return
+    with _lock:
+        if text:
+            _pending_verify_by_session[sid] = text
+        else:
+            _pending_verify_by_session.pop(sid, None)
+
+
+def take_pending_verify_remedy(session_id: str | None) -> Any:
+    sid = str(session_id or "").strip()
+    if not sid:
+        return None
+    with _lock:
+        return _pending_verify_by_session.pop(sid, None)
+
+
+def stash_build_protocol(session_id: str | None, text: str | None) -> None:
+    sid = str(session_id or "").strip()
+    if not sid:
+        return
+    with _lock:
+        if text:
+            _build_protocol_by_session[sid] = str(text)
+        else:
+            _build_protocol_by_session.pop(sid, None)
+
+
+def take_build_protocol(session_id: str | None) -> str | None:
+    sid = str(session_id or "").strip()
+    if not sid:
+        return None
+    with _lock:
+        return _build_protocol_by_session.pop(sid, None)
+
+
+def stash_frontier_continue(session_id: str | None, payload: Any) -> None:
+    sid = str(session_id or "").strip()
+    if not sid:
+        return
+    with _lock:
+        if payload:
+            _frontier_continue_by_session[sid] = payload
+        else:
+            _frontier_continue_by_session.pop(sid, None)
+
+
+def take_frontier_continue(session_id: str | None) -> Any:
+    sid = str(session_id or "").strip()
+    if not sid:
+        return None
+    with _lock:
+        return _frontier_continue_by_session.pop(sid, None)
+
+
+def any_stream_claimed() -> bool:
+    """True when any session holds a stream claim (self-inject must skip)."""
+    with _lock:
+        return bool(_stream_claims)

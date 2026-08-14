@@ -218,6 +218,44 @@ def test_is_enabled_respects_off_env(monkeypatch, tmp_path):
     assert is_enabled() is True
 
 
+def test_is_enabled_packaged_default_off(monkeypatch, tmp_path):
+    """Packaged / desktop sidecar must not self-inject unless explicitly opted in."""
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    monkeypatch.delenv("REMEDY_SELF_INJECT", raising=False)
+    monkeypatch.setenv("REMEDY_DESKTOP_SIDECAR", "1")
+    monkeypatch.setattr(
+        "remedy.interfaces.config.load_config",
+        lambda: {},
+    )
+    assert is_enabled() is False
+    monkeypatch.setenv("REMEDY_SELF_INJECT", "1")
+    assert is_enabled() is True
+    monkeypatch.delenv("REMEDY_SELF_INJECT", raising=False)
+    monkeypatch.setattr(
+        "remedy.interfaces.config.load_config",
+        lambda: {"self_inject": {"enabled": True}},
+    )
+    assert is_enabled() is True
+    monkeypatch.setattr(
+        "remedy.interfaces.config.load_config",
+        lambda: {"self_inject": {"enabled": False}},
+    )
+    assert is_enabled() is False
+
+
+def test_is_enabled_source_checkout_default_on(monkeypatch, tmp_path):
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    monkeypatch.delenv("REMEDY_SELF_INJECT", raising=False)
+    monkeypatch.delenv("REMEDY_DESKTOP_SIDECAR", raising=False)
+    monkeypatch.delenv("REMEDY_DESKTOP", raising=False)
+    monkeypatch.setattr("remedy.core.self_inject.sys.frozen", False, raising=False)
+    monkeypatch.setattr(
+        "remedy.interfaces.config.load_config",
+        lambda: {},
+    )
+    assert is_enabled() is True
+
+
 def test_activity_snapshot_includes_last_tick(tmp_path, monkeypatch):
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
     monkeypatch.setenv("REMEDY_SELF_INJECT", "1")

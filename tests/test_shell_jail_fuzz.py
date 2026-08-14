@@ -57,10 +57,19 @@ FUZZ_VECTORS: list[tuple[str, bool]] = [
     ("python -c \"open(r'C:\\\\Users\\\\Public\\\\x','w').write('x')\"", True),
     ("python3 -c \"import pathlib; pathlib.Path.home().joinpath('Desktop','x').write_text('x')\"", True),
     ("node -e \"require('fs').writeFileSync('C:/Users/Public/x','x')\"", True),
+    ("python.exe -c \"open(r'C:/Users/Public/x','w').write('pwn')\"", True),
+    ("node.exe -e \"require('fs').writeFileSync('C:/Users/Public/x','x')\"", True),
+    ("python -c \"open(r'decoy.txt','w'); (Path('C:/')/'Users'/'Public'/'x').write_text('z')\"", True),
     # Env / opaque paths
     ("Set-Content $env:USERPROFILE\\Desktop\\leak.txt hi", True),
     ("echo hi > %USERPROFILE%\\Desktop\\leak.txt", True),
     ("Out-File (Join-Path $env:TEMP 'x.txt')", True),
+    # Forward-slash Windows abs + PowerShell automatic $HOME / $USERPROFILE
+    ("echo pwn > C:/Users/Public/pwn.txt", True),
+    ("Set-Content C:/Users/Public/pwn.txt pwned", True),
+    ("python -c \"open(r'decoy.txt','w').write('x'); open(r'C:/Users/Public/x','w')\"", True),
+    ("'pwn' > \"$HOME\\Desktop\\pwn.txt\"", True),
+    ("echo pwn > $USERPROFILE\\Desktop\\pwn.txt", True),
     # Privilege / schedule (nested scan may hit hard-block elsewhere; mutation class)
     ("schtasks /create /tn evil /tr calc.exe", True),
     ("net user pwned Password1 /add", True),

@@ -30,6 +30,8 @@ from remedy.core.react_loop.binding import (
 from remedy.core.react_loop.build_request import build_step_request_body
 from remedy.core.react_loop.errors import (
     is_fatal_llm_api_error as _is_fatal_llm_api_error,
+)
+from remedy.core.react_loop.errors import (
     is_thinking_tool_choice_error as _is_thinking_tool_choice_error,
 )
 from remedy.core.react_loop.recovery import (
@@ -59,6 +61,7 @@ from remedy.core.react_policy import (
     is_serial_explore_batch,
     looks_like_false_progress,
     looks_like_leaked_scratchpad,
+    looks_like_safety_refusal,
     message_asks_to_stop,
     mission_verify_gate_message,
     post_tools_user_summary_nudge,
@@ -70,7 +73,6 @@ from remedy.core.react_policy import (
     unfinished_work_blocks_final,
     unfinished_work_hard_stop_message,
     unfinished_work_nudge_message,
-    looks_like_safety_refusal,
 )
 from remedy.core.react_stream import (
     StreamRoundState,
@@ -82,6 +84,15 @@ from remedy.core.react_stream import (
     repair_reasoning_content_in_messages,
     repair_tool_arguments_in_messages,
     strip_broken_tool_call_turns,
+)
+from remedy.core.turn_context import (
+    set_turn_force_tool_choice,
+    set_turn_thinking_level,
+    set_turn_tool_choice_required_blocked,
+    turn_thinking_level,
+)
+from remedy.core.turn_context import (
+    turn_tier as _turn_tier_of,
 )
 
 logger = logging.getLogger(__name__)
@@ -289,7 +300,7 @@ async def call_llm_stream(runtime, message: str,
             zero_tool_drive_count += 1
             _rearm_agency_tools()
             force_answer_sticky = False
-            runtime._force_tool_choice = True
+            set_turn_force_tool_choice(True)
             messages.append(unfinished_work_nudge_message())
             logger.info(
                 "Unfinished work — zero-tool drive %d/%d (step %d)",
@@ -367,20 +378,23 @@ async def call_llm_stream(runtime, message: str,
         )
 
         # Machine build engine — supervise construction / task turns.
+        # Inject protocol into THIS turn's messages (never a process-global leftover).
         build_state = None
         with suppress(Exception):
             from remedy.core.build_engine import begin_build_turn, build_protocol_block
 
             build_state = begin_build_turn(runtime, message or "")
             if build_state is not None and build_state.active:
-                runtime._build_protocol_pending = build_protocol_block(build_state)
+                proto = build_protocol_block(build_state)
+                if proto:
+                    messages.append({"role": "system", "content": str(proto)})
         # Frontier continue: brief + ledger inject (no local harness thrash)
         with suppress(Exception):
             from remedy.core.build_engine import frontier_continue_inject
 
             _fc = frontier_continue_inject(runtime, message or "")
             if _fc is not None:
-                runtime._frontier_continue_pending = _fc  # type: ignore[attr-defined]
+                messages.append(_fc)
 
         def _provider_bits() -> tuple[str, str, str]:
             return _provider_bits_fn(runtime)
@@ -437,7 +451,7 @@ async def call_llm_stream(runtime, message: str,
             and not browse_pre_url
             and not page_interaction
             and not clear_goals_only
-            and int(getattr(runtime, "_turn_tier", 1) or 1) == 0
+            and int(_turn_tier_of(runtime) or 1) == 0
         ):
             with suppress(Exception):
                 from remedy.core.metabolism.l0 import try_l0_system_reply
@@ -908,7 +922,7 @@ async def call_llm_stream(runtime, message: str,
                     if _keep_after_green:
                         force_answer_sticky = False
                         set_turn_build_verify_green(False, runtime)
-                        runtime._force_tool_choice = False
+                        set_turn_force_tool_choice(False)
                         if all_tools:
                             tools = all_tools
                             turn.tools = all_tools
@@ -916,7 +930,7 @@ async def call_llm_stream(runtime, message: str,
                         force_answer_sticky = True
                         tools = []
                         turn.tools = []
-                        runtime._force_tool_choice = False
+                        set_turn_force_tool_choice(False)
                 # Absolute safety wall only — soft epochs never force-answer alone.
                 force_answer = (
                     is_final_step or not tools or force_answer_sticky
@@ -937,7 +951,7 @@ async def call_llm_stream(runtime, message: str,
                     force_answer_sticky = False
                     is_final_step = False
                     _rearm_agency_tools()
-                    runtime._force_tool_choice = True
+                    set_turn_force_tool_choice(True)
                 # Re-resolve pack each step (write-first → full after writes)
                 if not force_answer and turn.all_tools and not _verify_green:
                     _resolve_and_apply(step_index=int(step))
@@ -1018,7 +1032,7 @@ async def call_llm_stream(runtime, message: str,
                     from remedy.core.metabolism.turn import mark_model_call
 
                     if (
-                        int(getattr(runtime, "_turn_tier", 1) or 1) >= 2
+                        int(_turn_tier_of(runtime) or 1) >= 2
                         and tool_batches_this_turn > 0
                     ):
                         led = get_evidence_ledger(sid_mm)
@@ -1326,9 +1340,9 @@ async def call_llm_stream(runtime, message: str,
                             and _is_thinking_tool_choice_error(text)
                         ):
                             thinking_choice_repaired = True
-                            runtime._thinking_level = "off"
-                            runtime._tool_choice_required_blocked = True
-                            runtime._force_tool_choice = True
+                            set_turn_thinking_level("off")
+                            set_turn_tool_choice_required_blocked(True)
+                            set_turn_force_tool_choice(True)
                             logger.warning(
                                 "Provider rejected tool_choice under thinking; "
                                 "rebuilding without required tool_choice"
@@ -1460,7 +1474,7 @@ async def call_llm_stream(runtime, message: str,
                         if _soft_act == "retry_with_tools":
                             _rearm_agency_tools()
                             force_answer_sticky = False
-                            runtime._force_tool_choice = True
+                            set_turn_force_tool_choice(True)
                             logger.warning(
                                 "Soft API error HTTP %s — retrying with tools "
                                 "(%d/%d)",
@@ -1499,7 +1513,7 @@ async def call_llm_stream(runtime, message: str,
                                 }
                             )
                             try:
-                                _think_r = getattr(runtime, "_thinking_level", "high")
+                                _think_r = turn_thinking_level(runtime)
                                 with suppress(Exception):
                                     from remedy.core.local_agent_optimize import (
                                         is_local_binding as _ilb,
@@ -1906,7 +1920,7 @@ async def call_llm_stream(runtime, message: str,
                             if empty_wr:
                                 # Bump write budget + force write tools for the retry
                                 _rearm_agency_tools()
-                                runtime._force_tool_choice = True
+                                set_turn_force_tool_choice(True)
                                 with suppress(Exception):
                                     runtime._remedy_write_budget = max(
                                         int(
@@ -2043,7 +2057,7 @@ async def call_llm_stream(runtime, message: str,
                                     or all_tools
                                 )
                                 turn.tools = tools
-                            runtime._force_tool_choice = True
+                            set_turn_force_tool_choice(True)
                             _pr = ""
                             with suppress(Exception):
                                 _pr = str(runtime.effective_project_path() or "")
@@ -2136,7 +2150,7 @@ async def call_llm_stream(runtime, message: str,
                             agency_rearm_count += 1
                             _rearm_agency_tools()
                             force_answer_sticky = False
-                            runtime._force_tool_choice = True
+                            set_turn_force_tool_choice(True)
                             messages.append(agency_rearm_nudge_message())
                             logger.info(
                                 "Agency re-arm after tool-promise prose (step %d, %d/%d)",
@@ -2276,7 +2290,7 @@ async def call_llm_stream(runtime, message: str,
                                     step_index=0,
                                 ) or all_tools
                                 turn.tools = tools
-                            runtime._force_tool_choice = True
+                            set_turn_force_tool_choice(True)
                             # Never feed the monologue back into history (loop fuel)
                             # Inject live listing on first hit, hard write nudge after
                             if not mono_explore_injected:
@@ -2354,7 +2368,7 @@ async def call_llm_stream(runtime, message: str,
                         force_answer_sticky = False
                         # Force tool_choice only on local muscle
                         if _harness_on:
-                            runtime._force_tool_choice = True
+                            set_turn_force_tool_choice(True)
                             with suppress(Exception):
                                 from remedy.core.local_agent_optimize import (
                                     filter_tools_write_first,
@@ -2431,7 +2445,7 @@ async def call_llm_stream(runtime, message: str,
                                     or all_tools
                                 )
                                 turn.tools = tools
-                                runtime._force_tool_choice = True
+                                set_turn_force_tool_choice(True)
                                 _pr = ""
                                 with suppress(Exception):
                                     _pr = str(
@@ -2590,7 +2604,7 @@ async def call_llm_stream(runtime, message: str,
                                 scratchpad_nudge_count += 1
                                 _rearm_agency_tools()
                                 force_answer_sticky = False
-                                runtime._force_tool_choice = True
+                                set_turn_force_tool_choice(True)
                                 tools = (
                                     filter_tools_write_first(
                                         all_tools,
@@ -2682,7 +2696,7 @@ async def call_llm_stream(runtime, message: str,
                         agency_rearm_count += 1
                         _rearm_agency_tools()
                         force_answer_sticky = False
-                        runtime._force_tool_choice = True
+                        set_turn_force_tool_choice(True)
                         messages.append(agency_rearm_nudge_message())
                         logger.info(
                             "Agency re-arm after tool-promise prose (step %d, %d/%d)",
@@ -2772,7 +2786,7 @@ async def call_llm_stream(runtime, message: str,
                     tools_executed_this_turn += len(fresh_calls)
                     # Real tools landed — clear monologue force flag
                     with suppress(Exception):
-                        runtime._force_tool_choice = False
+                        set_turn_force_tool_choice(False)
                     mono_fp_hits = 0
                     mono_fp_last = ""
                 if not fresh_calls:
@@ -2950,7 +2964,7 @@ async def call_llm_stream(runtime, message: str,
                     )
                     if empty_wr:
                         _rearm_agency_tools()
-                        runtime._force_tool_choice = True
+                        set_turn_force_tool_choice(True)
                         with suppress(Exception):
                             runtime._remedy_write_budget = max(
                                 int(getattr(runtime, "_remedy_write_budget", 0) or 0),
@@ -3103,7 +3117,7 @@ async def call_llm_stream(runtime, message: str,
                 messages=messages,
                 tools=None,
                 stream=use_openai_sse,
-                thinking_level=getattr(runtime, "_thinking_level", "high"),
+                thinking_level=turn_thinking_level(runtime),
             )
             try:
                 _la = False

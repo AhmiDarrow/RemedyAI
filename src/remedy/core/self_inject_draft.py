@@ -484,10 +484,16 @@ def _has_llm(runtime: Any) -> bool:
 
 
 def _user_streaming(runtime: Any) -> bool:
+    """Skip drafts while any session is streaming (including self-improve)."""
+    try:
+        from remedy.core.turn_context import any_stream_claimed
+
+        if any_stream_claimed():
+            return True
+    except Exception:
+        pass
     sess = getattr(runtime, "_streaming_sessions", None)
-    if not sess:
-        return False
-    return any(s and s != "__self_improve__" for s in sess)
+    return bool(sess)
 
 
 def _draft_prompt(target: DraftTarget) -> str:

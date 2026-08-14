@@ -3621,12 +3621,22 @@ fn acquire_desktop_single_instance() -> bool {
             return true;
         }
         if GetLastError() == ERROR_ALREADY_EXISTS {
-            // Focus existing main window if we can find it.
+            // Focus existing main window if we can find it. Retry briefly —
+            // first launch holds the mutex before the window exists.
             let title: Vec<u16> = OsStr::new(&window_title())
                 .encode_wide()
                 .chain(std::iter::once(0))
                 .collect();
-            let hwnd = FindWindowW(core::ptr::null(), title.as_ptr());
+            let mut hwnd = FindWindowW(core::ptr::null(), title.as_ptr());
+            if hwnd == 0 {
+                for _ in 0..8 {
+                    thread::sleep(Duration::from_millis(150));
+                    hwnd = FindWindowW(core::ptr::null(), title.as_ptr());
+                    if hwnd != 0 {
+                        break;
+                    }
+                }
+            }
             if hwnd != 0 {
                 if IsIconic(hwnd) != 0 {
                     ShowWindow(hwnd, SW_RESTORE);
@@ -3636,38 +3646,113 @@ fn acquire_desktop_single_instance() -> bool {
                 CloseHandle(handle);
                 return false;
             }
-            // Mutex held but no window — zombie. Reclaim by killing the UI exe.
-            // Pre-0.23.2 shipped as generic app.exe (Defender Execution.A!ml bait).
+            // Mutex held but no window — zombie. Reclaim only OUR recorded PID
+            // or the known installed image. Never taskkill /IM app.exe (generic).
             log::warn!(
                 "Single-instance mutex held but no Remedy Desktop window; \
                  reclaiming (killing orphan UI process)"
             );
             CloseHandle(handle);
-            for image in ["Remedy Desktop.exe", "app.exe"] {
-                let _ = Command::new("taskkill")
-                    .args(["/F", "/IM", image])
-                    .creation_flags(CREATE_NO_WINDOW)
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status();
+            let reclaimed = reclaim_desktop_instance();
+            if !reclaimed {
+                log::warn!(
+                    "Single-instance mutex held, no window, and no identifiable \
+                     Remedy Desktop PID — failing closed (this launch exits)"
+                );
+                return false;
             }
             thread::sleep(Duration::from_millis(400));
-            // Re-create mutex for this process.
+            // Re-create mutex. A non-null handle is not ownership.
             let handle2 = CreateMutexW(core::ptr::null(), 1, name.as_ptr());
-            if handle2 == 0 {
-                return true;
+            if handle2 == 0 || GetLastError() == ERROR_ALREADY_EXISTS {
+                if handle2 != 0 {
+                    CloseHandle(handle2);
+                }
+                log::warn!(
+                    "Mutex still held after reclaim — failing closed (this launch exits)"
+                );
+                return false;
             }
             use std::sync::atomic::{AtomicIsize, Ordering};
             static DESKTOP_MUTEX: AtomicIsize = AtomicIsize::new(0);
             DESKTOP_MUTEX.store(handle2, Ordering::SeqCst);
+            record_desktop_instance_pid();
             return true;
         }
         // Keep mutex handle for process lifetime (must not CloseHandle).
         use std::sync::atomic::{AtomicIsize, Ordering};
         static DESKTOP_MUTEX: AtomicIsize = AtomicIsize::new(0);
         DESKTOP_MUTEX.store(handle, Ordering::SeqCst);
+        record_desktop_instance_pid();
         true
     }
+}
+
+/// PID sidecar next to the named mutex (Remedy home). Never taskkill /IM app.exe.
+#[cfg(target_os = "windows")]
+fn desktop_instance_pid_path() -> PathBuf {
+    remedy_home().join("desktop-instance.pid")
+}
+
+#[cfg(target_os = "windows")]
+fn record_desktop_instance_pid() {
+    let path = desktop_instance_pid_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, std::process::id().to_string());
+}
+
+/// True only when *pid* is the installed Remedy Desktop image.
+#[cfg(target_os = "windows")]
+fn pid_is_remedy_desktop_image(pid: u32) -> bool {
+    let out = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output();
+    let Ok(out) = out else {
+        return false;
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .to_ascii_lowercase()
+        .contains("remedy desktop.exe")
+}
+
+/// Kill the recorded owner PID (verified image), else the known installed image.
+/// Returns true when we issued a targeted reclaim (caller may re-acquire mutex).
+#[cfg(target_os = "windows")]
+fn reclaim_desktop_instance() -> bool {
+    let self_pid = std::process::id();
+    let path = desktop_instance_pid_path();
+    if let Ok(raw) = std::fs::read_to_string(&path) {
+        if let Ok(pid) = raw.trim().parse::<u32>() {
+            if pid != 0 && pid != self_pid && pid_is_remedy_desktop_image(pid) {
+                let killed = Command::new("taskkill")
+                    .args(["/F", "/PID", &pid.to_string()])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                let _ = std::fs::remove_file(&path);
+                if killed {
+                    return true;
+                }
+            }
+        }
+    }
+    // Installed product image only — never generic app.exe.
+    Command::new("taskkill")
+        .args(["/F", "/IM", "Remedy Desktop.exe"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 #[cfg(not(target_os = "windows"))]

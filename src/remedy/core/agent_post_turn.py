@@ -73,25 +73,33 @@ def schedule_post_turn_prep(
                                 ]
                             )
             asst = str(getattr(runtime, "_last_assistant_text", "") or "")
+            from remedy.core.turn_context import (
+                set_turn_action_ir,
+                stash_pending_verify_remedy,
+                turn_action_ir,
+                turn_metabolism_allow_verify,
+                turn_tier,
+            )
+
             end = end_turn_metabolism(
                 session_id=sid,
-                action_ir=getattr(runtime, "_action_ir", None),
+                action_ir=turn_action_ir(runtime),
                 status="done",
                 assistant_text=asst,
                 recent_tool_texts=recent_tools,
                 allow_verify=bool(
-                    getattr(runtime, "_metabolism_allow_verify", False)
-                    or int(getattr(runtime, "_turn_tier", 1) or 1) >= 2
+                    turn_metabolism_allow_verify(runtime)
+                    or int(turn_tier(runtime) or 1) >= 2
                 ),
                 home=home,
             )
-            # If verify failed, stash silent remedy for next turn inject
+            # If verify failed, stash silent remedy for next turn of THIS session
             if end.get("verify_remedy"):
-                runtime._pending_verify_remedy = end["verify_remedy"]
+                stash_pending_verify_remedy(sid, end["verify_remedy"])
             with suppress(Exception):
                 get_cua_macros().persist(home)
                 get_skill_genome().persist(home)
-            runtime._action_ir = None
+            set_turn_action_ir(None, runtime)
             # Soul Field micro-update — personhood residue across providers
             soul_on = True
             with suppress(Exception):

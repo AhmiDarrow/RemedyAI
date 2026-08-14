@@ -9,6 +9,7 @@ from remedy.core.react_turn import (
     apply_tools_decision,
     resolve_tools,
 )
+from remedy.core.turn_context import turn_tier
 
 
 def provider_bits(runtime: Any) -> tuple[str, str, str]:
@@ -46,7 +47,7 @@ def resolve_and_apply_tools(
         message=message or "",
         all_tools=turn.all_tools,
         plan_mode=plan_mode,
-        turn_tier=int(getattr(runtime, "_turn_tier", 1) or 1),
+        turn_tier=int(turn_tier(runtime) or 1),
         open_tasks=open_tasks_for_wall or None,
         history=history,
         pure_action_kick=bool(pure_action_kick),

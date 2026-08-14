@@ -401,6 +401,72 @@ def test_shell_write_jail_blocks_runtime_bin_as_destination(tmp_path: Path):
         assert hit is not None, f"expected jail for dest-is-runtime: {cmd}"
 
 
+def test_shell_write_jail_blocks_forward_slash_drive_and_ps_home(tmp_path: Path):
+    """C:/… is Windows-absolute; $HOME / $USERPROFILE dests must fail closed."""
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    (sticky / "decoy.txt").write_text("in-root", encoding="utf-8")
+    roots = [sticky.resolve()]
+    cases = [
+        "echo pwn > C:/Users/Public/pwn.txt",
+        "Set-Content C:/Users/Public/pwn.txt pwned",
+        "python -c \"open(r'decoy.txt','w').write('x'); open(r'C:/Users/Public/x','w')\"",
+        "'pwn' > \"$HOME\\Desktop\\pwn.txt\"",
+        "echo pwn > $USERPROFILE\\Desktop\\pwn.txt",
+    ]
+    for cmd in cases:
+        hit = check_shell_write_jail(
+            cmd,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            access_scope="project",
+        )
+        assert hit is not None, f"expected jail for: {cmd!r}"
+    exe_oneshots = [
+        "python.exe -c \"open(r'C:/Users/Public/x','w').write('pwn')\"",
+        "node.exe -e \"require('fs').writeFileSync('C:/Users/Public/x','x')\"",
+        (
+            "python -c \""
+            "open(r'C:/Users/Public/ok_decoy.txt','w').write('x'); "
+            "(Path('C:/')/'Users'/'Public'/'x').write_text('z')\""
+        ),
+    ]
+    # The decoy path above is outside roots too — also test an in-root abs decoy.
+    in_root = sticky / "ok.txt"
+    mixed = (
+        "python -c \""
+        f"open(r'{in_root.as_posix()}','w').write('x'); "
+        "(Path('C:/')/'Users'/'Public'/'hid').write_text('z')\""
+    )
+    for cmd in exe_oneshots + [mixed]:
+        hit = check_shell_write_jail(
+            cmd,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            access_scope="project",
+        )
+        assert hit is not None, f"expected jail for: {cmd!r}"
+
+    # Runtime-bin dests still block after the C:/ extraction fix.
+    runtime_dest = check_shell_write_jail(
+        r"copy payload.exe C:\Windows\System32\cmd.exe",
+        write_roots=roots,
+        cwd=sticky,
+        project_bound=True,
+        access_scope="project",
+    )
+    assert runtime_dest is not None
+
+
+def test_extract_forward_slash_drive_paths():
+    found = extract_path_candidates("echo pwn > C:/Users/Public/pwn.txt")
+    assert any("C:/Users/Public/pwn.txt" in t or "C:/Users/Public" in t for t in found)
+    found2 = extract_path_candidates('Set-Content "C:/Users/Public/pwn.txt" pwned')
+    assert any("C:/Users/Public/pwn.txt" in t for t in found2)
+
+
 def test_shell_write_jail_blocks_numbered_redirect(tmp_path: Path):
     """`dir 1>` / `2>` to an outside file is a write, not a ignored redirect."""
     sticky = tmp_path / "SecretSticky"
@@ -1000,6 +1066,39 @@ def test_script_scan_blocks_outside_write(tmp_path: Path):
     ok = sticky / "ok.py"
     ok.write_text("print(1)\n", encoding="utf-8")
     assert scan_script_source_for_outside_writes(ok, write_roots=[sticky.resolve()]) is None
+    constructed = sticky / "built.py"
+    constructed.write_text(
+        "from pathlib import Path\n(Path('C:/')/'Users'/'Public'/'x').write_text('z')\n",
+        encoding="utf-8",
+    )
+    assert scan_script_source_for_outside_writes(
+        constructed, write_roots=[sticky.resolve()]
+    ) is not None
+    nested = sticky / "nested_open.py"
+    nested.write_text(
+        "import os\n"
+        "open(os.path.join('C:', os.sep, 'Users', 'Public', 'x'), 'w')\n",
+        encoding="utf-8",
+    )
+    assert scan_script_source_for_outside_writes(
+        nested, write_roots=[sticky.resolve()]
+    ) is not None
+    chr_open = sticky / "chr_open.py"
+    chr_open.write_text(
+        "open(chr(67)+':/Users/Public/x', 'w')\n",
+        encoding="utf-8",
+    )
+    assert scan_script_source_for_outside_writes(
+        chr_open, write_roots=[sticky.resolve()]
+    ) is not None
+    env_open = sticky / "env_open.py"
+    env_open.write_text(
+        "import os\nopen(os.environ['USERPROFILE']+'\\\\Desktop\\\\x', 'w')\n",
+        encoding="utf-8",
+    )
+    assert scan_script_source_for_outside_writes(
+        env_open, write_roots=[sticky.resolve()]
+    ) is not None
 
 
 def test_script_scan_blocks_home_env_paths(tmp_path: Path):
@@ -1132,6 +1231,15 @@ async def test_host_script_refuses_outside_and_home_writes(
             body="from pathlib import Path\nPath.home().joinpath('Desktop','pwn.txt').write_text('x')\n",
         )
         assert "WRITE_JAIL" in py_home
+        py_nested = await reg.execute(
+            "host_script",
+            lang="python",
+            body=(
+                "import os\n"
+                "open(os.path.join('C:', os.sep, 'Users', 'Public', 'x'), 'w')\n"
+            ),
+        )
+        assert "WRITE_JAIL" in py_nested
     finally:
         await close_all_shared_sessions()
 

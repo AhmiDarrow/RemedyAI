@@ -265,3 +265,70 @@ async def test_sandbox_aborts_long_shell():
         assert "Abort" in (result.stderr or "") or "abort" in (result.stderr or "").lower()
     finally:
         end_turn("sand-abort", *tok)
+
+
+def test_react_flags_isolated_across_nested_turns():
+    """Sibling tabs must not steal force_tool_choice / tier / IR."""
+    from remedy.core.turn_context import (
+        set_turn_action_ir,
+        set_turn_force_tool_choice,
+        set_turn_thinking_level,
+        set_turn_tier,
+        stash_pending_verify_remedy,
+        take_pending_verify_remedy,
+        turn_action_ir,
+        turn_force_tool_choice,
+        turn_thinking_level,
+        turn_tier,
+    )
+
+    runtime = MagicMock()
+    runtime._force_tool_choice = False
+    runtime._turn_tier = 1
+    runtime._thinking_level = "high"
+    t_a = begin_turn("flag-a", project_raw=None, active_path=".")
+    try:
+        set_turn_force_tool_choice(True, runtime)
+        set_turn_tier(3, runtime)
+        set_turn_action_ir({"a": 1}, runtime)
+        set_turn_thinking_level("off", runtime)
+        assert turn_force_tool_choice(runtime) is True
+        assert turn_tier(runtime) == 3
+        assert turn_thinking_level(runtime) == "off"
+        t_b = begin_turn("flag-b", project_raw=None, active_path=".")
+        try:
+            assert turn_force_tool_choice(runtime) is False
+            assert turn_tier(runtime) == 1
+            assert turn_action_ir(runtime) is None
+            assert turn_thinking_level(runtime) == "high"
+            set_turn_force_tool_choice(True, runtime)
+            assert turn_force_tool_choice(runtime) is True
+        finally:
+            end_turn("flag-b", *t_b)
+        # A's flags restored — B must not have overwritten them.
+        assert turn_force_tool_choice(runtime) is True
+        assert turn_tier(runtime) == 3
+        assert turn_action_ir(runtime) == {"a": 1}
+        assert turn_thinking_level(runtime) == "off"
+    finally:
+        end_turn("flag-a", *t_a)
+    assert turn_force_tool_choice(runtime) is False
+
+    stash_pending_verify_remedy("flag-a", "fix A")
+    stash_pending_verify_remedy("flag-b", "fix B")
+    assert take_pending_verify_remedy("flag-a") == "fix A"
+    assert take_pending_verify_remedy("flag-a") is None
+    assert take_pending_verify_remedy("flag-b") == "fix B"
+
+
+def test_any_stream_claimed_sees_all_sessions():
+    from remedy.core.turn_context import any_stream_claimed
+
+    sid = "claim-any"
+    try:
+        assert any_stream_claimed() is False
+        assert try_claim_session_stream(sid) is True
+        assert any_stream_claimed() is True
+    finally:
+        release_session_stream_claim(sid)
+    assert any_stream_claimed() is False

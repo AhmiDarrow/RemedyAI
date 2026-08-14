@@ -67,6 +67,10 @@ grep_loop.out
 # E2E C scratch (hello.c + exe from e2e runs)
 _e2e_simple_c_pytest/
 
+# Accidental repo-root path dirs (agents / jail probes)
+/Users/
+/~/
+
 # Ephemeral soak / red-team probe dumps (regenerated locally)
 docs/_soak*/
 docs/_*_results.json

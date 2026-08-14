@@ -63,14 +63,15 @@ def build_step_request_body(
 
     # Local/RMB: always low thinking — UI "Think High" burns the budget on
     # monologue and starves tool JSON (partner build failure mode).
-    think = getattr(runtime, "_thinking_level", "high")
+    from remedy.core.turn_context import set_turn_thinking_level, turn_thinking_level
+
+    think = turn_thinking_level(runtime)
     with suppress(Exception):
         from remedy.core.local_agent_optimize import is_local_binding
 
         if is_local_binding(bind.provider, bind.model, bind.base_url):
             think = "low"
-            # Sticky for any later rebuilds in this process
-            runtime._thinking_level = "low"
+            set_turn_thinking_level("low")
 
     # Local: never stream tool rounds — stream disconnects kill the turn
     # (Server disconnected / WinError 64 pattern after every monologue nudge).
@@ -111,8 +112,13 @@ def build_step_request_body(
             step_index=int(step),
             history=messages if isinstance(messages, list) else None,
         )
-        # Monologue-loop breaker flag from ReAct
-        if getattr(runtime, "_force_tool_choice", False) and isinstance(body, dict):
+        # Monologue-loop breaker flag from ReAct (turn-local — not runtime singleton)
+        from remedy.core.turn_context import (
+            turn_force_tool_choice,
+            turn_tool_choice_required_blocked,
+        )
+
+        if turn_force_tool_choice(runtime) and isinstance(body, dict):
             if body.get("tools"):
                 body["temperature"] = 0.05
                 # DeepSeek thinking models 400 on tool_choice=required
@@ -121,7 +127,7 @@ def build_step_request_body(
                 # zero-tool finals. Other hosts can take required.
                 _prov = str(getattr(bind, "provider", "") or "").lower()
                 _required_blocked = bool(
-                    getattr(runtime, "_tool_choice_required_blocked", False)
+                    turn_tool_choice_required_blocked(runtime)
                 )
                 if _prov == "deepseek" or _required_blocked:
                     body["tool_choice"] = "auto"

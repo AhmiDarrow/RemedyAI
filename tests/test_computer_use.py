@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from remedy.core.computer.host_bridge import ComputerHostBridge, _scrub_job_result
@@ -981,7 +982,7 @@ def test_desktop_screenshot_roundtrip(tmp_path: Path):
     import sys
 
     if sys.platform != "win32":
-        return
+        pytest.skip("Windows only")
     from remedy.core.computer.desktop_win import screenshot_png, screenshot_region_png
 
     out = tmp_path / "shot.png"
@@ -1000,7 +1001,7 @@ def test_computer_capture_api(tmp_path: Path):
     import sys
 
     if sys.platform != "win32":
-        return
+        pytest.skip("Windows only")
 
     class Cfg:
         home_dir = str(tmp_path)
@@ -1107,7 +1108,7 @@ def test_list_monitors_windows():
     import sys
 
     if sys.platform != "win32":
-        return
+        pytest.skip("Windows only")
     from remedy.core.computer.desktop_win import list_monitors, screenshot_monitor_png
 
     mons = list_monitors()
@@ -1132,7 +1133,7 @@ def test_desktop_snapshot_and_ref_store(tmp_path: Path):
     import sys
 
     if sys.platform != "win32":
-        return
+        pytest.skip("Windows only")
     from remedy.core.computer.desktop_win import desktop_snapshot
     from remedy.core.computer.host_bridge import ComputerHostBridge
 
@@ -1167,7 +1168,7 @@ def test_print_window_foreground():
     import sys
 
     if sys.platform != "win32":
-        return
+        pytest.skip("Windows only")
     import ctypes
     from pathlib import Path
 
@@ -1175,7 +1176,7 @@ def test_print_window_foreground():
 
     hwnd = int(ctypes.windll.user32.GetForegroundWindow() or 0)
     if not hwnd:
-        return
+        pytest.skip("no foreground window")
     out = Path.home() / ".remedy" / "computer" / "shots" / "_test_print.png"
     try:
         info = print_window_png(hwnd, out)
@@ -1207,6 +1208,42 @@ def test_abort_session_cancels_computer_jobs(tmp_path: Path, monkeypatch):
     assert claimed.session_id == "sess-other-tab"
     # No more pending after claiming the sibling
     assert b.claim_next() is None
+
+
+def test_navigate_settle_is_per_session(tmp_path: Path):
+    """Tab B must not inherit Tab A's optimistic navigate settle."""
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+    from remedy.core.turn_context import begin_turn, end_turn
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    t_a = begin_turn("nav-a", project_raw=None, active_path=".")
+    try:
+        b.mark_navigated("https://example.com", optimistic=True)
+        assert b.navigate_needs_settle() is True
+    finally:
+        end_turn("nav-a", *t_a)
+    t_b = begin_turn("nav-b", project_raw=None, active_path=".")
+    try:
+        assert b.navigate_needs_settle() is False
+        assert b.settle_after_navigate() == 0.0
+    finally:
+        end_turn("nav-b", *t_b)
+
+
+def test_executor_session_id_prefers_turn_context():
+    """Concurrent tabs share one executor — sid must come from the turn, not runtime."""
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.turn_context import begin_turn, end_turn
+
+    class RT:
+        _session_id = "runtime-stale"
+
+    ex = ComputerExecutor()
+    toks = begin_turn("turn-sid", project_raw=None, active_path=".")
+    try:
+        assert ex._session_id(RT()) == "turn-sid"
+    finally:
+        end_turn("turn-sid", *toks)
 
 
 def test_offline_navigate_refuses_os_browser_snapshot_falls_back(
@@ -1329,7 +1366,7 @@ def test_type_text_abort_mid_string(monkeypatch):
     import sys
 
     if sys.platform != "win32":
-        return
+        pytest.skip("Windows only")
 
     from remedy.core.computer import desktop_win as win
 
