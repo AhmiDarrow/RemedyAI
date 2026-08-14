@@ -74,3 +74,30 @@ def test_binding_for_session_does_not_mutate_runtime():
     assert rt._llm_provider == "openai"
     assert rt._llm_model == "gpt-4o-mini"
     assert rt._llm_api_key == "sk-keep"
+
+
+def test_resolve_llm_slot_falls_back_to_runtime_key(monkeypatch):
+    """CI / clean home: Settings has no key; AgentConfig key must still bind."""
+    from remedy.interfaces import api_support
+
+    monkeypatch.setattr(api_support, "_load_config_cached", lambda: {})
+    monkeypatch.setattr(
+        "remedy.interfaces.config.resolve_provider_api_key",
+        lambda _cfg, _provider: "",
+    )
+    for key in ("REMEDY_LLM_API_KEY", "REMEDY_LLM_PROVIDER", "REMEDY_LLM_MODEL"):
+        monkeypatch.delenv(key, raising=False)
+    rt = SimpleNamespace(
+        _llm_provider="openai",
+        _llm_model="gpt-test",
+        _llm_base_url="http://127.0.0.1:9/v1",
+        _llm_api_key="sk-test-runtime",
+    )
+    _p, _m, _url, key = api_support.resolve_llm_slot(runtime=rt)
+    assert key == "sk-test-runtime"
+    _p, _m, _url, key = api_support.resolve_llm_slot(
+        provider_override="xai",
+        model_override="grok-4.5",
+        runtime=rt,
+    )
+    assert key == "sk-test-runtime"
