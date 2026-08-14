@@ -124,6 +124,17 @@ def test_snapshot_is_cached_until_write(tmp_path):
     _unbind()
 
 
+def test_dedup_put_keeps_snapshot_cache(tmp_path):
+    cas = _bind(tmp_path)
+    assert cas is not None
+    get_session_middleman("d1").put("same fact body xx", kind="fact", session_id="d1")
+    cas.snapshot()
+    cas._snap["count"] = 4242
+    get_session_middleman("d1").put("same fact body xx", kind="fact", session_id="d1")
+    assert cas.snapshot()["count"] == 4242
+    _unbind()
+
+
 def test_pytest_does_not_auto_open_real_cas():
     _unbind()
     assert get_cas() is None

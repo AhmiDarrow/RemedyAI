@@ -364,10 +364,7 @@ def notice_progress(
             "kind": "goal_done",
             "goal": g.title,
             "path": str(path),
-            "markdown": (
-                f"**Done:** {g.title}\n"
-                f"Logged in `{_friendly_path(path)}`.{extra}"
-            ),
+            "markdown": (f"**Done:** {g.title}\nLogged in `{_friendly_path(path)}`.{extra}"),
         }
     if not looks_like_step_done(msg):
         return {"ok": False, "skipped": "not_a_completion"}
@@ -385,7 +382,13 @@ def notice_progress(
         nxt = f"Take the next 15-minute step on {g.title}"
     store.patch(g.id, next_action=nxt, evidence=ev)
     store.record_drive(
-        {"goal": g.title, "did": f"you finished: {did}", "next": nxt, "path": str(path), "kind": "noticed"}
+        {
+            "goal": g.title,
+            "did": f"you finished: {did}",
+            "next": nxt,
+            "path": str(path),
+            "kind": "noticed",
+        }
     )
     return {
         "ok": True,
@@ -412,11 +415,7 @@ def drive_digest(
     store = LifeGoalStore(home_dir)
     store._load()
     since = float(store.last_digest_at or 0)
-    unseen = [
-        s
-        for s in store.last_steps
-        if float(s.get("ts") or 0) > since + 0.01
-    ]
+    unseen = [s for s in store.last_steps if float(s.get("ts") or 0) > since + 0.01]
     steps = unseen[-limit:] if unseen else []
     active = store.active()
     nxt = (active.next_action if active else "") or ""
@@ -536,15 +535,22 @@ def take_step(
         }
     )
     with suppress(Exception):
-        from remedy.memory.middleman import get_session_middleman
+        from remedy.memory.middleman import content_key, get_session_middleman
 
-        get_session_middleman("life").put(
-            f"Toward {g.title}: did {action}. Next: {nxt}",
+        life_body = f"Toward {g.title}: did {action}. Next: {nxt}"
+        mm = get_session_middleman("life")
+        fresh = mm.item(content_key(life_body)) is None
+        key = mm.put(
+            life_body,
             kind="life",
             path=str(path),
             session_id="life",
             body_cap=400,
         )
+        if key and fresh:
+            from remedy.core.metabolism.organism import note_cas_write
+
+            note_cas_write(home_dir, kind="life")
     with suppress(Exception):
         from remedy.core.metabolism.time_crystal import get_time_crystal
 
@@ -574,11 +580,7 @@ def take_step(
         "path": str(path),
         "evidence": ev,
         "opened": opened,
-        "markdown": (
-            f"**Did:** {action}\n"
-            f"{opened_line}\n"
-            f"**Next I'll take:** {nxt}"
-        ),
+        "markdown": (f"**Did:** {action}\n{opened_line}\n**Next I'll take:** {nxt}"),
     }
 
 
