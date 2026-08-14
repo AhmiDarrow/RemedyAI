@@ -24,6 +24,7 @@ from remedy.core.metabolism.turn import (
     after_tool_batch,
     begin_turn_metabolism,
     end_turn_metabolism,
+    metabolism_poll_snapshot,
     metabolism_public_snapshot,
 )
 from remedy.core.metabolism.verify import verify_critical
@@ -885,6 +886,21 @@ def test_begin_and_after_tool_metabolism():
     assert "evidence" in pub and "governor" in pub
     assert pub.get("lean") is False
     assert "recent" in (pub.get("evidence") or {})
+
+
+def test_metabolism_poll_snapshot_is_counters_only():
+    sid = "test_meta_sess"
+    get_evidence_ledger(sid).admit_tool_result(
+        tool_name="file_read",
+        content="ok",
+        success=True,
+    )
+    poll = metabolism_poll_snapshot(sid)
+    assert poll.get("lean") is True
+    assert int(poll.get("evidence_units") or 0) >= 1
+    assert "evidence" not in poll
+    assert "skill_genome" not in poll
+    assert "time_crystal" not in poll
 
 
 def test_metabolism_public_snapshot_lean_skips_list_thrash():
