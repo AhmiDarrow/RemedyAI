@@ -146,6 +146,7 @@ exclude = [
     "src/remedy/core/computer/desktop_win.py",
     "src/remedy/core/computer/desktop_uia.py",
     "src/remedy/core/companion.py",
+    "src/remedy/execution/host/conpty.py",
 ]
 
 [dependency-groups]
