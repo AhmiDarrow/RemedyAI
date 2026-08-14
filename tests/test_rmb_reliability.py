@@ -22,11 +22,13 @@ def _reset_reliability_state():
     svc._start_flight_active = False
     svc._start_flight_result = None
     svc._start_flight_event.set()
+    svc._user_stopped = False
     svc.invalidate_cache()
     yield
     svc._loading_since = 0.0
     svc._watchdog_restart_times = []
     svc._start_flight_active = False
+    svc._user_stopped = False
 
 
 def test_note_loading_state_tracks_duration():
@@ -88,39 +90,22 @@ def test_resolve_occupied_port_already_healthy():
 
 
 def test_resolve_occupied_port_waits_then_healthy():
-    calls = {"n": 0}
-
-    def health(_base, timeout=0.9):  # noqa: ARG001
-        calls["n"] += 1
-        return calls["n"] >= 3
-
+    """Occupied llama mid-load → wait, then become healthy. Never touch a real port."""
     with (
         patch.object(svc, "_port_open", return_value=True),
-        patch.object(svc, "_health", side_effect=health),
+        patch.object(svc, "_health", return_value=False),
         patch.object(svc, "_find_pid_on_port", return_value=12345),
         patch.object(svc, "_looks_like_llama_server", return_value=True),
-        patch.object(svc, "time") as mock_time,
-    ):
-        # Control sleep so test is instant
-        mock_time.time.side_effect = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0]
-        mock_time.sleep = lambda _s: None
-        # Also patch module-level time used in wait loop — service uses time.time/sleep
-        # from the imported module; re-patch at svc.time level is wrong if imported as
-        # `import time`. Patch time.sleep / use real short wait instead.
-
-    # Prefer real short wait with mocked health
-    with (
-        patch.object(svc, "_port_open", return_value=True),
-        patch.object(svc, "_health", side_effect=health),
-        patch.object(svc, "_find_pid_on_port", return_value=12345),
-        patch.object(svc, "_looks_like_llama_server", return_value=True),
+        patch.object(svc, "_wait_for_port_healthy", return_value=True) as wait,
+        patch.object(svc, "_kill_pid", return_value=True) as kill,
+        patch.object(svc, "_kill_listeners_on_port", return_value=0),
         patch("remedy.runtime.rmb.service.time.sleep", return_value=None),
     ):
-        r = svc._resolve_occupied_port(
-            "127.0.0.1", 8787, "http://127.0.0.1:8787/v1", wait_s=5.0
-        )
+        r = svc._resolve_occupied_port("127.0.0.1", 8787, "http://127.0.0.1:8787/v1", wait_s=5.0)
     assert r["ok"] is True
     assert r.get("became_healthy") is True
+    wait.assert_called_once()
+    kill.assert_not_called()
 
 
 def test_resolve_occupied_port_clears_wedged_llama():
@@ -134,9 +119,7 @@ def test_resolve_occupied_port_clears_wedged_llama():
         patch.object(svc, "_kill_listeners_on_port", return_value=1),
         patch("remedy.runtime.rmb.service.time.sleep", return_value=None),
     ):
-        r = svc._resolve_occupied_port(
-            "127.0.0.1", 8787, "http://127.0.0.1:8787/v1", wait_s=2.0
-        )
+        r = svc._resolve_occupied_port("127.0.0.1", 8787, "http://127.0.0.1:8787/v1", wait_s=2.0)
     assert r["ok"] is True
     assert r.get("cleared") is True
     kill.assert_called()
@@ -171,7 +154,11 @@ def test_dead_child_invalidates_running_cache():
         patch.object(
             svc,
             "merge_state",
-            return_value={"host": "127.0.0.1", "port": 8787, "base_url": "http://127.0.0.1:8787/v1"},
+            return_value={
+                "host": "127.0.0.1",
+                "port": 8787,
+                "base_url": "http://127.0.0.1:8787/v1",
+            },
         ),
     ):
         assert svc.is_running(force=False, require_http=True) is False
