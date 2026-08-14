@@ -231,7 +231,9 @@ def register_spread_tools(runtime: Any) -> None:
         except Exception:
             pass
 
-        force_spread = bool(getattr(runtime, "_force_spread", False))
+        from remedy.core.turn_context import turn_force_spread
+
+        force_spread = bool(turn_force_spread(runtime))
         if not force_spread:
             try:
                 from remedy.core.metabolism.governor import get_governor

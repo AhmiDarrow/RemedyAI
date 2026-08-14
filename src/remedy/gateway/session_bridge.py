@@ -7,6 +7,7 @@ for SSE subscribers.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -286,6 +287,27 @@ async def handle_messenger_event(
                         continue
                     reply_parts.append(text)
                     yield text
+        except asyncio.CancelledError:
+            # Mirror desktop SSE persist-on-cancel — user row already saved.
+            note = "".join(reply_parts).strip()
+            if not note:
+                note = (
+                    "*(Generation stopped. History is intact — "
+                    "send **continue** to resume.)*"
+                )
+            if memory is not None:
+                with suppress(Exception):
+                    model = getattr(getattr(runtime, "config", None), "llm_model", None)
+                    agent = getattr(getattr(runtime, "config", None), "name", None)
+                    await persist_assistant_message(
+                        memory, session, note, model=model, agent=agent
+                    )
+                    reply_parts = [note]
+            with suppress(Exception):
+                from remedy.core.turn_context import abort_session as _abort_turn
+
+                _abort_turn(session.id, epoch=claim_epoch)
+            raise
         except Exception:
             logger.exception("messenger stream_response failed; falling back")
             async for chunk in runtime.handle_event(event):

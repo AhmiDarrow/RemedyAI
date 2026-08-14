@@ -67,6 +67,12 @@ jobs:
           tests/test_hidden_process.py
           tests/test_react_stream.py
           tests/test_react_policy.py
+          tests/test_project_write_jail.py
+          tests/test_shell_jail_fuzz.py
+          tests/test_win_paths.py
+          tests/test_uninstall_wipe_paths.py
+          tests/test_computer_use.py
+          tests/test_host_bridge.py
 
   desktop:
     runs-on: ubuntu-latest

@@ -27,20 +27,26 @@ class ComputerExecutor:
     def __init__(self, home_dir: Path | str | None = None) -> None:
         self.home_dir = home_dir
         self.bridge = get_host_bridge(home_dir)
-        # Bound for the current run() so browser enqueue/cancel are session-scoped.
-        self._active_session_id: str | None = None
+        # Per-thread sid for the current run() — never a process-wide overwrite.
+        self._run_tls = threading.local()
 
     def _session_id(self, runtime: Any | None) -> str | None:
+        try:
+            from remedy.core.turn_context import turn_session_id
+
+            sid = turn_session_id(runtime)
+            if sid:
+                return sid
+        except Exception:
+            pass
         if runtime is not None:
             raw = str(getattr(runtime, "_session_id", None) or "").strip()
             if raw:
                 return raw
-        try:
-            from remedy.core.turn_context import current_session_id
+        return None
 
-            return current_session_id()
-        except Exception:
-            return None
+    def _run_session_id(self) -> str | None:
+        return getattr(self._run_tls, "session_id", None)
 
     def _abort_check(self) -> bool:
         try:
@@ -54,13 +60,19 @@ class ComputerExecutor:
         """Cancel open host jobs for this turn's session only (multi-tab safe)."""
         return self.bridge.cancel_pending_and_running(
             reason=reason,
-            session_id=self._active_session_id,
+            session_id=self._run_session_id(),
         )
 
-    def _enqueue(self, action: str, payload: dict[str, Any] | None = None) -> Any:
+    def _enqueue(
+        self,
+        action: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        session_id: str | None = None,
+    ) -> Any:
         """Enqueue a host job stamped with the active session id."""
         pl = dict(payload or {})
-        sid = self._active_session_id
+        sid = session_id if session_id is not None else self._run_session_id()
         if sid:
             pl.setdefault("session_id", sid)
         return self.bridge.enqueue(action, pl, session_id=sid)
@@ -78,7 +90,29 @@ class ComputerExecutor:
             if isinstance(action, ComputerAction)
             else ComputerAction(str(action).lower())
         )
-        self._active_session_id = self._session_id(runtime)
+        session_id = self._session_id(runtime)
+        self._run_tls.session_id = session_id
+        try:
+            return self._run_body(
+                act,
+                runtime=runtime,
+                session_id=session_id,
+                target=target,
+                **kwargs,
+            )
+        finally:
+            self._run_tls.session_id = None
+
+    def _run_body(
+        self,
+        act: ComputerAction,
+        *,
+        runtime: Any | None,
+        session_id: str | None,
+        target: str = "auto",
+        **kwargs: Any,
+    ) -> str:
+        _ = session_id
         url = kwargs.get("url")
         hint = kwargs.get("hint") or kwargs.get("reason") or ""
         # computer_app: resolve game.exe / hello.exe against the project folder

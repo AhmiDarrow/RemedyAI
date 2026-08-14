@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -26,6 +27,44 @@ def _sse_idle_timeout_s() -> float:
     return max(60.0, min(sse_idle_timeout, 900.0))
 
 
+def _close_http_response(resp: Any) -> None:
+    for name in ("close", "release"):
+        fn = getattr(resp, name, None)
+        if callable(fn):
+            with contextlib.suppress(Exception):
+                fn()
+
+
+async def _await_or_abort(awaitable: Any, abort_ev: asyncio.Event | None) -> Any:
+    """Race an awaitable against the turn abort Event; cancel HTTP on abort."""
+    if abort_ev is None:
+        return await awaitable
+    if abort_ev.is_set():
+        raise asyncio.CancelledError()
+    wait_task = asyncio.ensure_future(awaitable)
+    abort_task = asyncio.ensure_future(abort_ev.wait())
+    try:
+        done, pending = await asyncio.wait(
+            {wait_task, abort_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for t in pending:
+            t.cancel()
+        if abort_ev.is_set():
+            wait_task.cancel()
+            raise asyncio.CancelledError()
+        return wait_task.result()
+    except asyncio.CancelledError:
+        wait_task.cancel()
+        abort_task.cancel()
+        raise
+    finally:
+        if not wait_task.done():
+            wait_task.cancel()
+        if not abort_task.done():
+            abort_task.cancel()
+
+
 async def consume_llm_http_response(
     resp: Any,
     *,
@@ -46,6 +85,19 @@ async def consume_llm_http_response(
         headers_map.get("Content-Type") or headers_map.get("content-type") or ""
     ).lower()
 
+    abort_ev = None
+    try:
+        from remedy.core.turn_context import current_abort_event, is_turn_aborted
+
+        abort_ev = current_abort_event()
+        if is_turn_aborted():
+            _close_http_response(resp)
+            raise asyncio.CancelledError()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        abort_ev = None
+
     if want_sse_stream_parse(
         body if isinstance(body, dict) else None,
         use_openai_sse=use_openai_sse,
@@ -56,11 +108,14 @@ async def consume_llm_http_response(
         while True:
             try:
                 line = await asyncio.wait_for(
-                    content_iter.__anext__(),
+                    _await_or_abort(content_iter.__anext__(), abort_ev),
                     timeout=sse_idle_timeout,
                 )
             except StopAsyncIteration:
                 break
+            except asyncio.CancelledError:
+                _close_http_response(resp)
+                raise
             except TimeoutError:
                 logger.warning(
                     "SSE stream idle >%.0fs; ending this model round "
@@ -107,7 +162,11 @@ async def consume_llm_http_response(
             if live:
                 yield live, True
     else:
-        data = await resp.json()
+        try:
+            data = await _await_or_abort(resp.json(), abort_ev)
+        except asyncio.CancelledError:
+            _close_http_response(resp)
+            raise
         try:
             from remedy.core.usage import usage_from_provider_payload
 

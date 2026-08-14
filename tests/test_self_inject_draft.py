@@ -223,6 +223,25 @@ async def test_draft_skips_dirty_and_packaged(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_draft_skips_when_any_stream_claimed(tmp_path):
+    """Any stream claim (including __self_improve__) must skip drafts."""
+    from remedy.core.self_inject_draft import run_unattended_draft
+    from remedy.core.turn_context import (
+        release_session_stream_claim,
+        try_claim_session_stream,
+    )
+
+    repo = _git_repo(tmp_path)
+    sid = "__self_improve__"
+    assert try_claim_session_stream(sid) is True
+    try:
+        out = await run_unattended_draft(None, repo=repo, home=tmp_path)
+        assert out.get("skipped") == "user_streaming"
+    finally:
+        release_session_stream_claim(sid)
+
+
+@pytest.mark.asyncio
 async def test_draft_jail_rolls_back(tmp_path):
     from remedy.core.self_inject_draft import run_unattended_draft
 

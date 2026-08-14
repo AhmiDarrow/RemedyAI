@@ -646,7 +646,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         if (streaming && (e.ctrlKey || e.metaKey)) {
           handleSubmit('interrupt')
         } else {
-          handleSubmit(streaming ? 'after' : 'after')
+          handleSubmit('after')
         }
       }
     },
@@ -1371,7 +1371,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
         <button
           type="button"
-          onClick={() => handleSubmit(streaming ? 'after' : 'after')}
+          onClick={() => handleSubmit('after')}
           onContextMenu={(e) => {
             if (!streaming || !canSend) return
             e.preventDefault()

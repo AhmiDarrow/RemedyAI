@@ -28,6 +28,7 @@ from remedy.core.react_policy import (
     _tool_call_fingerprint,
 )
 from remedy.core.react_stream import normalize_tool_calls
+from remedy.core.turn_context import turn_action_ir, turn_shadow_strict, turn_tier
 from remedy.models import ToolCall
 
 logger = logging.getLogger(__name__)
@@ -387,8 +388,8 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             from remedy.core.metabolism.shadow import rehearse, should_shadow
             from remedy.core.turn_context import turn_session_id
 
-            tier = int(getattr(runtime, "_turn_tier", 2) or 2)
-            strict = bool(getattr(runtime, "_shadow_strict", False))
+            tier = int(turn_tier(runtime, default=2) or 2)
+            strict = bool(turn_shadow_strict(runtime))
             if not strict:
                 with suppress(Exception):
                     from remedy.core.metabolism.governor import get_governor
@@ -450,7 +451,7 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                             ),
                             success=False,
                             tier=tier,
-                            action_ir=getattr(runtime, "_action_ir", None),
+                            action_ir=turn_action_ir(runtime),
                             shadow_outcome=shadow_outcome,
                         )
                     return content_str
@@ -473,7 +474,7 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
         with suppress(Exception):
             from remedy.core.metabolism.tier import tier_policy
 
-            tpol = tier_policy(int(getattr(runtime, "_turn_tier", 2) or 2))
+            tpol = tier_policy(int(turn_tier(runtime, default=2) or 2))
             tcap = int(getattr(tpol, "max_tool_result_chars", 0) or 0)
             # tcap==0 means unlimited at tier; only tighten when tier sets a positive cap
             # AND global soft cap is also positive (local tight mode).
@@ -538,8 +539,8 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                 content=content_str or "",
                 tool_call_id=tc_id,
                 success=bool(effective_ok),
-                tier=int(getattr(runtime, "_turn_tier", 2) or 2),
-                action_ir=getattr(runtime, "_action_ir", None),
+                tier=int(turn_tier(runtime, default=2) or 2),
+                action_ir=turn_action_ir(runtime),
                 shadow_outcome=shadow_outcome,
             )
         # Background continuity: pattern observation + stuck signals
@@ -710,8 +711,8 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                             tc_ex.get("id") or tc_ex.get("tool_call_id") or ""
                         ),
                         success=False,
-                        tier=int(getattr(runtime, "_turn_tier", 2) or 2),
-                        action_ir=getattr(runtime, "_action_ir", None),
+                        tier=int(turn_tier(runtime, default=2) or 2),
+                        action_ir=turn_action_ir(runtime),
                         shadow_outcome="pass",
                     )
             # Success path already wrote result_cache inside _run_one.

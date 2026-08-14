@@ -109,6 +109,8 @@ export function useMessages(sessionId: string | null) {
   /** Latest active session — finishOk must not paint onto a switched session. */
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
+  /** Bumped at the start of every load / finishOk history replace; ignore stale. */
+  const loadGenRef = useRef(0)
   /** Avoid re-entrant auto-drain while finishing a turn. */
   const drainingRef = useRef(false)
   /** RAF-batched stream text (avoids re-render every token). */
@@ -247,26 +249,27 @@ export function useMessages(sessionId: string | null) {
     // for the same session — previously a stuck stream blocked all session switches.
     if (streamingRef.current && !opts?.force) return
     const loadId = sessionId
+    const gen = ++loadGenRef.current
     setLoading(true)
     setLoadError(null)
     try {
       const msgs = await listMessages(loadId, MESSAGE_PAGE, 0)
-      // Ignore stale responses after a session switch.
-      if (sessionIdRef.current !== loadId) return
+      // Ignore stale responses after a session switch or a newer load/finishOk.
+      if (loadGenRef.current !== gen || sessionIdRef.current !== loadId) return
       const list = Array.isArray(msgs) ? msgs : []
       serverCountRef.current = list.length
       setMessages(list)
       setHasOlder(list.length >= MESSAGE_PAGE)
       try {
         const td = await listSessionTodos(loadId)
-        if (sessionIdRef.current !== loadId) return
+        if (loadGenRef.current !== gen || sessionIdRef.current !== loadId) return
         const parsed = parseTodosPayload(td)
         setBuildTodos(todosHaveOpen(parsed) ? parsed : [])
       } catch {
         /* checklist is optional */
       }
     } catch (e: unknown) {
-      if (sessionIdRef.current !== loadId) return
+      if (loadGenRef.current !== gen || sessionIdRef.current !== loadId) return
       const msg = e instanceof Error ? e.message : String(e)
       console.warn('[remedy] listMessages failed', loadId, msg)
       setLoadError(msg || 'Failed to load messages')
@@ -274,7 +277,7 @@ export function useMessages(sessionId: string | null) {
       setMessages([])
       setHasOlder(false)
     } finally {
-      if (sessionIdRef.current === loadId) {
+      if (loadGenRef.current === gen && sessionIdRef.current === loadId) {
         setLoading(false)
       }
     }
@@ -688,8 +691,9 @@ export function useMessages(sessionId: string | null) {
           return
         }
         try {
+          const gen = ++loadGenRef.current
           const msgs = await listMessages(targetId)
-          if (sessionIdRef.current !== targetId) return
+          if (loadGenRef.current !== gen || sessionIdRef.current !== targetId) return
           if (stepsSnapshot.length && msgs.length) {
             const last = msgs[msgs.length - 1]
             if (last && last.role === 'assistant') {
@@ -1109,15 +1113,16 @@ export function useMessages(sessionId: string | null) {
         ? paint.partialText
         : streamAccumRef.current) || ''
     // Focused session only — background jobs keep running until their own stop.
-    if (sid) {
-      void stopStreamJob(sid).finally(() => {
-        void drainQueue(sessionIdRef.current)
+    const stoppedSid = sid
+    if (stoppedSid) {
+      void stopStreamJob(stoppedSid).finally(() => {
+        void drainQueue(stoppedSid)
       })
     } else {
       streamCtrlRef.current?.abort()
       streamCtrl?.abort()
       window.setTimeout(() => {
-        void drainQueue(sessionIdRef.current)
+        void drainQueue(stoppedSid)
       }, 40)
     }
     if (rawText.trim() && !(sid && isJobUiCommitted(sid))) {
