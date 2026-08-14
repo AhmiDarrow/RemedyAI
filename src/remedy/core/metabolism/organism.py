@@ -103,8 +103,9 @@ def organism_recall_line(
     query: str,
     *,
     exclude: str = "",
+    session_id: str = "",
 ) -> str:
-    """One query-keyed CAS hit for the current turn. Empty if nothing fits."""
+    """One query-keyed hit. RAM middleman first; CAS FTS only on miss."""
     q = (query or "").strip()
     if len(q) < 8:
         return ""
@@ -116,17 +117,29 @@ def organism_recall_line(
     memo = _recall_memo
     if memo is not None and memo[0] == qkey and (time.time() - memo[2]) < 20.0:
         return memo[1]
-    from remedy.memory.cas import ensure_cas
-
-    cas = ensure_cas(home)
-    if cas is None:
-        return ""
-    hits = cas.search_fts(q, limit=2, kinds=("fact", "life"))
     skip = " ".join((exclude or "").lower().split())[:80]
-    for item in hits:
-        body = " ".join((item.body or "").split())
-        if not body:
-            continue
+    bodies: list[str] = []
+    if session_id:
+        with suppress(Exception):
+            from remedy.memory.middleman import get_session_middleman
+
+            for h in get_session_middleman(session_id).search(
+                q, kinds=("fact", "life"), top_k=2
+            ):
+                body = " ".join((h.item.body or h.snippet or "").split())
+                if body:
+                    bodies.append(body)
+    if not bodies:
+        with suppress(Exception):
+            from remedy.memory.cas import ensure_cas
+
+            cas = ensure_cas(home)
+            if cas is not None:
+                for item in cas.search_fts(q, limit=2, kinds=("fact", "life")):
+                    body = " ".join((item.body or "").split())
+                    if body:
+                        bodies.append(body)
+    for body in bodies:
         if skip and skip in body.lower():
             continue
         line = f"Recalled: {body[:140]}"
@@ -842,7 +855,7 @@ def organism_pulse_block(
     if not any(x.startswith("Life:") or x.startswith("Memory:") for x in lines):
         lines.extend(_life_memory_lines(home, sid, runtime))
     with suppress(Exception):
-        recalled = organism_recall_line(home, user_text)
+        recalled = organism_recall_line(home, user_text, session_id=sid)
         if recalled:
             lines.append(recalled)
     with suppress(Exception):
