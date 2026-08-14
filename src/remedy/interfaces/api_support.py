@@ -204,32 +204,20 @@ def _load_config_cached() -> dict[str, Any]:
     return dict(data)
 
 
-def _sync_runtime_llm_from_config(
-    runtime: Any,
+def resolve_llm_slot(
     *,
-    model_override: str | None = None,
     provider_override: str | None = None,
-    llm_only: bool = False,
-) -> str:
-    """Reload provider/model/url/key from disk into the live runtime.
+    model_override: str | None = None,
+    runtime: Any = None,
+) -> tuple[str, str, str, str]:
+    """Resolve (provider, model, base_url, api_key) for one turn.
 
-    Returns the effective API key (may be empty). Re-reads config when the file
-    changes (or first call) so settings saved after server start apply without
-    a restart, without paying for a full disk parse on every message.
-
-    *provider_override* / *model_override*: per-session picks (status-bar switch).
-    Without these, a session on Grok while global config is still DeepSeek would
-    send ``model=grok-4.5`` to the DeepSeek base URL every turn.
-
-    *llm_only*: when True (chat turns), only bind provider/model/url/key — do not
-    thrash project_path / harness / approval_mode mid concurrent streams.
+    Does **not** write the process-wide runtime. Session A on Grok and session B
+    on DeepSeek (or both on Grok) each get their own slot.
     """
-    if runtime is None:
-        return ""
     cfg = _load_config_cached()
     cfg_provider = str(
         cfg.get("llm_provider")
-        or getattr(runtime, "_llm_provider", None)
         or os.environ.get("REMEDY_LLM_PROVIDER")
         or "openai"
     ).strip().lower()
@@ -241,23 +229,18 @@ def _sync_runtime_llm_from_config(
     model = str(
         (model_override or "").strip()
         or cfg.get("llm_model")
-        or getattr(runtime, "_llm_model", None)
         or os.environ.get("REMEDY_LLM_MODEL")
         or ""
     )
-    # Only reuse global base_url when still on the same provider; otherwise
-    # normalize_llm_settings must pick the provider's default API host.
+    # Only reuse Settings base_url when this session is still on that provider.
     if provider == cfg_provider:
         base_url = str(
             cfg.get("llm_base_url")
-            or getattr(runtime, "_llm_base_url", None)
             or os.environ.get("REMEDY_LLM_BASE_URL")
             or ""
         )
     else:
         base_url = ""
-    # Migrate retired model ids (deepseek-chat → v4, old grok-3 → current, …)
-    # and align base_url with provider so chat works without a settings re-save.
     try:
         from remedy.interfaces.config import normalize_llm_settings
 
@@ -265,8 +248,7 @@ def _sync_runtime_llm_from_config(
             provider, model, base_url or None
         )
     except Exception as exc:
-        logger.debug("normalize_llm_settings in runtime sync failed: %s", exc)
-    # Per-provider only — never reuse DeepSeek sk-… for xAI, etc.
+        logger.debug("normalize_llm_settings in slot resolve failed: %s", exc)
     try:
         from remedy.interfaces.config import resolve_provider_api_key
 
@@ -276,15 +258,52 @@ def _sync_runtime_llm_from_config(
         api_key = str(
             cfg.get("llm_api_key")
             or os.environ.get("REMEDY_LLM_API_KEY")
-            or getattr(runtime, "_llm_api_key", "")
             or ""
         )
-    # Local providers: ensure a dummy key so stream path does not fall back.
     if not api_key and (
         provider.lower() in ("ollama", "rmb", "llamacpp", "local")
         or (base_url and _is_local_url(base_url))
     ):
         api_key = "local" if provider.lower() != "rmb" else "rmb"
+    return provider, model, base_url, api_key or ""
+
+
+def binding_for_session(
+    provider: str | None,
+    model: str | None,
+    *,
+    runtime: Any = None,
+) -> Any:
+    """Per-session LlmBinding. Never mutates runtime._llm_*."""
+    from remedy.core.llm_binding import LlmBinding
+
+    p, m, url, key = resolve_llm_slot(
+        provider_override=provider,
+        model_override=model,
+        runtime=runtime,
+    )
+    return LlmBinding(provider=p, model=m, base_url=url, api_key=key)
+
+
+def _sync_runtime_llm_from_config(
+    runtime: Any,
+    *,
+    model_override: str | None = None,
+    provider_override: str | None = None,
+    llm_only: bool = False,
+) -> str:
+    """Reload provider/model/url/key from disk into the live runtime.
+
+    Settings / wizard / cold start. Chat turns must use ``binding_for_session``
+    instead — writing the singleton mid-stream cross-wires concurrent tabs.
+    """
+    if runtime is None:
+        return ""
+    provider, model, base_url, api_key = resolve_llm_slot(
+        provider_override=provider_override,
+        model_override=model_override,
+        runtime=runtime,
+    )
 
     if llm_only:
         # Chat/messenger turn: only LLM binding (safe under _llm_turn_lock).
@@ -298,6 +317,7 @@ def _sync_runtime_llm_from_config(
         return str(getattr(runtime, "_llm_api_key", "") or api_key or "")
 
     # Full sync (settings save / cold start): partner trust + project + harness.
+    cfg = _load_config_cached()
     am = str(cfg.get("approval_mode") or "ask").strip().lower()
     if am not in ("ask", "auto"):
         am = "ask"

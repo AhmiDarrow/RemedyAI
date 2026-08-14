@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from remedy.core.agent_react_loop import _is_fatal_llm_api_error
+from remedy.core.react_loop.errors import is_thinking_tool_choice_error
 
 
 def test_404_model_not_found_is_fatal() -> None:
@@ -37,6 +38,16 @@ def test_wrong_model_for_host_is_fatal() -> None:
         'or deepseek-v4-flash, but you passed grok-4.5."}}'
     )
     assert _is_fatal_llm_api_error(400, body) is True
+
+
+def test_thinking_tool_choice_mismatch_is_recoverable() -> None:
+    body = (
+        '{"error":{"message":"Thinking mode does not support this tool_choice",'
+        '"type":"invalid_request_error"}}'
+    )
+    assert is_thinking_tool_choice_error(body) is True
+    assert _is_fatal_llm_api_error(400, body) is False
+    assert is_thinking_tool_choice_error("invalid tools schema") is False
 
 
 def test_generic_invalid_request_400_not_fatal() -> None:

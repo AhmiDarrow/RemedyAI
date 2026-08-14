@@ -13,6 +13,7 @@ import shutil
 import sys
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 _SENTINEL_PREFIX = "REMEDY_HOST_DONE_"
@@ -119,7 +120,7 @@ class HostSession:
 
     async def current_cwd(self) -> str:
         if not self._alive():
-            return self.cwd or ""
+            return ""
         token = uuid.uuid4().hex[:8]
         sentinel = f"{_SENTINEL_PREFIX}cwd_{token}"
         cmd = "cd" if self.host == "cmd" else "(Get-Location).Path"
@@ -131,11 +132,11 @@ class HostSession:
                 sentinel.encode("ascii"), timeout=8.0
             )
         if timed_out:
-            return self.cwd or ""
+            return ""
         _code, body = _split_sentinel(raw.decode("utf-8", errors="replace"), sentinel)
         del _code
         lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
-        return lines[-1] if lines else (self.cwd or "")
+        return lines[-1] if lines else ""
 
     async def close(self) -> None:
         proc = self._proc
@@ -287,8 +288,27 @@ async def _try_conpty_exec(
         return None
 
 
-# Process-wide optional session (opt-in tools only).
-_GLOBAL: HostSession | None = None
+# Per-chat-session host shells. Do not reuse across session_id or start cwd.
+_SESSIONS: dict[str, HostSession] = {}
+
+
+def _session_key(session_id: str | None) -> str:
+    sid = (session_id or "").strip()
+    return sid if sid else "_GLOBAL"
+
+
+def _norm_cwd_key(cwd: str | None) -> str:
+    if not cwd:
+        return ""
+    try:
+        return (
+            str(Path(cwd).expanduser().resolve(strict=False))
+            .replace("\\", "/")
+            .rstrip("/")
+            .lower()
+        )
+    except OSError:
+        return cwd.replace("\\", "/").rstrip("/").lower()
 
 
 async def get_shared_session(
@@ -297,20 +317,36 @@ async def get_shared_session(
     cwd: str | None = None,
     env: dict[str, str] | None = None,
     use_conpty: bool = False,
+    session_id: str | None = None,
 ) -> HostSession:
-    global _GLOBAL
     want = host or ("cmd" if os.name == "nt" else "posix")
-    if _GLOBAL is not None and _GLOBAL.host == want and _GLOBAL._alive():
-        return _GLOBAL
-    if _GLOBAL is not None:
-        await _GLOBAL.close()
-    _GLOBAL = HostSession(host=want, cwd=cwd, env=env, use_conpty=use_conpty)
-    await _GLOBAL.start()
-    return _GLOBAL
+    key = _session_key(session_id)
+    existing = _SESSIONS.get(key)
+    if existing is not None and existing.host == want and existing._alive():
+        if cwd and existing.cwd and _norm_cwd_key(cwd) != _norm_cwd_key(existing.cwd):
+            await existing.close()
+            _SESSIONS.pop(key, None)
+        else:
+            return existing
+    elif existing is not None:
+        await existing.close()
+        _SESSIONS.pop(key, None)
+    sess = HostSession(host=want, cwd=cwd, env=env, use_conpty=use_conpty)
+    await sess.start()
+    _SESSIONS[key] = sess
+    return sess
 
 
-async def close_shared_session() -> None:
-    global _GLOBAL
-    if _GLOBAL is not None:
-        await _GLOBAL.close()
-        _GLOBAL = None
+async def close_shared_session(session_id: str | None = None) -> None:
+    """Close the keyed session. None/empty closes only the default ``_GLOBAL`` session."""
+    sess = _SESSIONS.pop(_session_key(session_id), None)
+    if sess is not None:
+        await sess.close()
+
+
+async def close_all_shared_sessions() -> None:
+    keys = list(_SESSIONS)
+    for key in keys:
+        sess = _SESSIONS.pop(key, None)
+        if sess is not None:
+            await sess.close()

@@ -63,6 +63,12 @@ def resolve_and_apply_tools(
         base_url=url,
         writes_done=turn.write_batches,
     )
+    # Mid-turn re-resolve may narrow a pack. It must never disarm a turn
+    # that was already armed (rearm / open work / first-step tools).
+    prev_armed = bool(getattr(turn, "tools", None))
+    if int(step_index or 0) > 0 and prev_armed and decision.tools is None:
+        turn.rearm(reason="keep_armed")
+        return turn.tools, turn.run_until_done
     apply_tools_decision(turn, decision)
     return turn.tools, turn.run_until_done
 

@@ -79,7 +79,7 @@ import { getStreamJob, subscribeStreamJobs } from './sessions/streamJobs'
 import { exportSession, importSession } from './api/messages'
 import { getServerUrl } from './api/client'
 import { getSettings, updateSettings } from './api/settings'
-import { setSessionLlm as applySessionLlm } from './api/providers'
+
 import { tauriInvoke, tauriListen } from './api/tauri'
 import { normalizeToolProcess, type ToolProcessMode } from './utils/toolLabels'
 import { HOTKEYS } from './hotkeys'
@@ -1366,23 +1366,11 @@ export default function App() {
             onSettingsSaved={() => {
               void getSettings()
                 .then((s) => {
-                  if (s.llm_provider && s.llm_model) {
-                    if (activeId) {
-                      setSessionBind(
-                        activeId,
-                        String(s.llm_provider),
-                        String(s.llm_model),
-                      )
-                      void applySessionLlm(
-                        activeId,
-                        String(s.llm_provider),
-                        String(s.llm_model),
-                        true,
-                      ).catch(() => {})
-                    } else {
-                      setLlmProvider(String(s.llm_provider))
-                      setModel(String(s.llm_model))
-                    }
+                  // Settings is the default for *new* sessions only.
+                  // Never rewrite the open chat's provider bind.
+                  if (s.llm_provider && s.llm_model && !activeId) {
+                    setLlmProvider(String(s.llm_provider))
+                    setModel(String(s.llm_model))
                   }
                   setUserName((s.user_name || '').trim())
                   setToolProcessMode(normalizeToolProcess(s.tool_process))
@@ -1756,24 +1744,10 @@ export default function App() {
         onSettingsSaved={() => {
           void getSettings()
             .then((s) => {
-              // Settings Save = global default + active session only.
-              if (s.llm_provider && s.llm_model) {
-                if (activeId) {
-                  setSessionBind(
-                    activeId,
-                    String(s.llm_provider),
-                    String(s.llm_model),
-                  )
-                  void applySessionLlm(
-                    activeId,
-                    String(s.llm_provider),
-                    String(s.llm_model),
-                    true,
-                  ).catch(() => {})
-                } else {
-                  setLlmProvider(String(s.llm_provider))
-                  setModel(String(s.llm_model))
-                }
+              // Settings is the default for *new* sessions only.
+              if (s.llm_provider && s.llm_model && !activeId) {
+                setLlmProvider(String(s.llm_provider))
+                setModel(String(s.llm_model))
               }
               setUserName((s.user_name || '').trim())
               setToolProcessMode(normalizeToolProcess(s.tool_process))

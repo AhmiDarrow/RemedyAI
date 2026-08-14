@@ -323,3 +323,49 @@ def test_runtime_host_run_mapping() -> None:
     )
     argv = rt._build_command(tc)
     assert argv == ["git", "status"]
+
+
+@pytest.mark.asyncio
+async def test_shared_session_scoped_by_id_and_start_cwd(tmp_path: Path) -> None:
+    from remedy.execution.host.session import (
+        close_all_shared_sessions,
+        close_shared_session,
+        get_shared_session,
+    )
+
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    try:
+        s1 = await get_shared_session(cwd=str(a), session_id="chat-1")
+        s2 = await get_shared_session(cwd=str(a), session_id="chat-1")
+        assert s1 is s2
+        s3 = await get_shared_session(cwd=str(a), session_id="chat-2")
+        assert s3 is not s1
+        s4 = await get_shared_session(cwd=str(b), session_id="chat-1")
+        assert s4 is not s1
+        g = await get_shared_session(cwd=str(a), session_id=None)
+        await close_shared_session(None)
+        assert not g._alive()
+        s3b = await get_shared_session(cwd=str(a), session_id="chat-2")
+        assert s3b is s3
+        assert s3._alive()
+    finally:
+        await close_all_shared_sessions()
+
+
+@pytest.mark.asyncio
+async def test_current_cwd_empty_when_closed() -> None:
+    from remedy.execution.host.session import HostSession
+
+    host = "cmd" if os.name == "nt" else "posix"
+    sess = HostSession(host=host, cwd=".")
+    assert await sess.current_cwd() == ""
+    try:
+        await sess.start()
+        here = await sess.current_cwd()
+        assert here
+    finally:
+        await sess.close()
+    assert await sess.current_cwd() == ""

@@ -575,37 +575,113 @@ def message_asks_to_stop(message: str) -> bool:
     return any(h in msg for h in hard)
 
 
-def message_wants_tools(message: str) -> bool:
-    """Return False for chit-chat / simple Qs so models answer in one shot.
+def is_chat_only_message(message: str) -> bool:
+    """True only for greets, acks, and short meta questions.
 
-    Critical: short *action kicks* (proceed / continue / go ahead / do it)
-    must return True. Otherwise the agent loop sets tools=[] and force_answer
-    on the first step — the model only streams thinking + a status line and
-    never calls list_dir / file_read / file_write (looks "stuck").
+    L1 must never strip tools unless this is True. Work requests are the
+    default — never require a verb/noun hit to stay armed.
+    """
+    msg = (message or "").strip()
+    if not msg:
+        return True
+    if len(msg) <= 24 and "\n" not in msg:
+        low = msg.lower().rstrip("!.?")
+        if low in _CHAT_SHORT_SET or msg.lower() in _CHAT_SHORT_SET:
+            return True
+    if _HARD_CHAT_ONLY_RE.match(msg) or _CHAT_ONLY_RE.match(msg):
+        return True
+    # Short meta only — "what tools should I use to implement X" stays work.
+    if len(msg) <= 80 and _META_NO_TOOLS_RE.search(msg):
+        return True
+    return False
+
+
+# Polite wrappers that look like questions but are work ("can you add…").
+_REQUEST_WORK_RE = re.compile(
+    r"(?i)\b(?:can you|could you|would you|will you|please|"
+    r"can we|could we|we need|i need you to|i want you to|"
+    r"make sure|be sure to)\b"
+)
+# World/agent trivia openers — only a knowledge question when nothing
+# locates the request in this machine / project / UI.
+_KNOWLEDGE_Q_START_RE = re.compile(
+    r"(?i)^(?:what|who|when|where|why|how|which|is|are|does|do|did|was|were)\b"
+)
+# Structural work shape (paths, UI chrome, code tokens) — not product nouns.
+_WORK_SHAPE_RE = re.compile(
+    r"(?i)(?:[A-Za-z]:)?[\\/][\w.\\/ -]+|"
+    r"\.\w{1,8}\b|"
+    r"\b(?:src|app|ui|ux|dialog|panel|window|modal|page|screen|"
+    r"config|settings|preference|preferences|about|"
+    r"module|package|class|function|handler|component|"
+    r"test|tests|spec|bug|build|compile|"
+    r"lock|timeout|auth|login)\b"
+)
+
+
+def is_knowledge_question(message: str) -> bool:
+    """True for short world/agent questions that do not require tools.
+
+    Sentence class, not a noun list. Multi-line briefs, polite requests
+    ('can you add…'), action kicks, and anything with a tool/path/UI
+    shape stay work. The model may still answer from knowledge; the loop
+    must not *require* a tool call to finish these.
+    """
+    msg = (message or "").strip()
+    if not msg or "\n" in msg or len(msg) > 160:
+        return False
+    if is_chat_only_message(msg):
+        return False
+    if _ACTION_KICK_RE.search(msg) or _REQUEST_WORK_RE.search(msg):
+        return False
+    if _TOOL_HINT_RE.search(msg) or _WORK_SHAPE_RE.search(msg):
+        return False
+    return bool(msg.endswith("?") or _KNOWLEDGE_Q_START_RE.match(msg))
+
+
+def message_wants_tools(message: str) -> bool:
+    """Fail-open: tools on unless the message is proven chat or trivia.
+
+    Keyword-miss product asks must stay armed. Chat/meta and short world
+    questions stay one-shot. Action kicks ('proceed') are work.
     """
     msg = (message or "").strip()
     if not msg:
         return False
-    # Cheap social early-out (skip 4 compiled regexes on greets/acks)
-    if len(msg) <= 24 and "\n" not in msg:
-        low = msg.lower().rstrip("!.?")
-        if low in _CHAT_SHORT_SET or msg.lower() in _CHAT_SHORT_SET:
-            return False
-    if _META_NO_TOOLS_RE.search(msg):
+    if is_chat_only_message(msg):
         return False
-    if _CHAT_ONLY_RE.match(msg):
+    if is_knowledge_question(msg):
         return False
-    if _TOOL_HINT_RE.search(msg):
-        return True
-    if _ACTION_KICK_RE.search(msg):
-        return True
     with suppress(Exception):
         from remedy.core.companion import looks_like_companion_request
 
         if looks_like_companion_request(msg):
             return True
-    # Longer prompts are usually real work — keep tools available.
-    return len(msg) > 160
+    return True
+
+
+def unfinished_work_blocks_final(
+    message: str,
+    *,
+    tools_executed: int = 0,
+    user_stopped: bool = False,
+    build_active: bool = False,
+) -> bool:
+    """Work request with zero tool evidence cannot be accepted as done.
+
+    Standing rule: a normal user asked for work. A prose stub (any length,
+    any phrasing) is not completion. Chat, trivia, and explicit stop
+    requests may finish without tools.
+    """
+    if user_stopped:
+        return False
+    if int(tools_executed or 0) > 0:
+        return False
+    if is_chat_only_message(message or ""):
+        return False
+    if message_wants_tools(message or ""):
+        return True
+    return bool(build_active)
 
 
 def history_suggests_open_work(
@@ -782,6 +858,28 @@ AGENCY_REARM_NUDGE = (
     "file_read). Start the real review/work immediately."
 )
 
+# Class-level unfinished-work drive (not a per-incident phrase).
+UNFINISHED_WORK_NUDGE = (
+    "The user asked for real work. A reply with no function calls is not done. "
+    "Call tools now via the function-calling API "
+    "(list_dir, file_read, file_edit, file_write, bash_exec, repo_search). "
+    "Do not narrate what you will do — execute."
+)
+
+UNFINISHED_WORK_HARD_STOP = (
+    "I could not start this task — no tools ran. "
+    "Say **continue** and I will try again, or switch models in Settings."
+)
+
+
+# Class of "I'll / let me <do work>" stubs — not a per-incident phrase list.
+_WORK_PROMISE_RE = re.compile(
+    r"(?is)\b(?:i(?:'ll| will)|let me|i am going to|i'm going to)\s+"
+    r"(?:find|look|check|read|open|search|inspect|scan|review|"
+    r"implement|fix|add|resize|change|wire|edit|build|debug|"
+    r"tighten|shrink|update|set up|make|do|research)\b"
+)
+
 
 def agency_tool_promise_claim(
     text_out: str | None,
@@ -802,12 +900,26 @@ def agency_tool_promise_claim(
     if any(p in claim for p in _AGENCY_TOOL_PROMISE_HARD):
         return True
     stub = len(text) < max(1, int(stub_char_limit))
-    return bool(stub and any(p in claim for p in _AGENCY_TOOL_PROMISE_SOFT))
+    if not stub:
+        return False
+    if any(p in claim for p in _AGENCY_TOOL_PROMISE_SOFT):
+        return True
+    return bool(_WORK_PROMISE_RE.search(claim))
 
 
 def agency_rearm_nudge_message() -> dict[str, str]:
     """User-role message that demands real function calls after a prose promise."""
     return {"role": "user", "content": AGENCY_REARM_NUDGE}
+
+
+def unfinished_work_nudge_message() -> dict[str, str]:
+    """User-role message that refuses a zero-tool work 'final'."""
+    return {"role": "user", "content": UNFINISHED_WORK_NUDGE}
+
+
+def unfinished_work_hard_stop_message() -> str:
+    """User-visible copy when a work turn ends with zero tool evidence."""
+    return UNFINISHED_WORK_HARD_STOP
 
 
 # Back-compat alias used by older tests / imports.

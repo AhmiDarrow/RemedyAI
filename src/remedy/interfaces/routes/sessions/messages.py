@@ -12,7 +12,6 @@ from remedy.interfaces.api_models import (
     SendMessageRequest,
 )
 from remedy.interfaces.api_support import (
-    _sync_runtime_llm_from_config,
     load_config,
 )
 from remedy.models import (
@@ -84,7 +83,7 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         """Live build checklist for the session project (user-visible)."""
         from pathlib import Path
 
-        from remedy.core.build_todos import load_todos, todos_public
+        from remedy.core.build_todos import load_todos, open_todo_count, todos_public
 
         root = None
         if memory is not None:
@@ -96,6 +95,8 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 p = Path(str(raw))
                 root = p.parent if p.is_file() else p
         items = load_todos(runtime, root=root)
+        if open_todo_count(items) == 0:
+            return {"todos": []}
         return {"todos": todos_public(items)}
 
     @app.post("/api/sessions/{session_id}/messages")
@@ -191,14 +192,6 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                     req_provider=getattr(req, "provider", None),
                     req_model=req.model,
                 )
-
-        # Always re-sync credentials from disk (wizard/settings may have just saved).
-        _sync_runtime_llm_from_config(
-            runtime,
-            model_override=sess_model,
-            provider_override=sess_provider,
-            llm_only=True,
-        )
 
         from remedy.core.metrics import default_registry
 

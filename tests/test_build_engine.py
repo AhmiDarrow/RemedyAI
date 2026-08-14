@@ -8,6 +8,7 @@ from remedy.core.build_engine import (
     BuildTurnState,
     begin_build_turn,
     build_protocol_block,
+    get_build_state,
     looks_like_build_request,
     monologue_block_nudge,
     next_machine_nudge,
@@ -45,6 +46,39 @@ def test_begin_build_turn_stamps_runtime():
     assert "RESEARCH" in proto
     assert "PLAN" in proto
     assert "BUILD" in proto
+
+
+def test_build_state_isolated_per_session():
+    from remedy.core.turn_context import begin_turn, end_turn
+
+    rt = SimpleNamespace(
+        _llm_provider="xai",
+        _llm_model="grok-4",
+        _llm_base_url="",
+        _session_brief=None,
+    )
+    t_a = begin_turn("sess-a", project_raw=None, active_path=".")
+    try:
+        a = begin_build_turn(rt, "review the pdf viewer")
+        assert a is not None
+        assert get_build_state(rt) is a
+    finally:
+        end_turn("sess-a", *t_a)
+    t_b = begin_turn("sess-b", project_raw=None, active_path=".")
+    try:
+        assert begin_build_turn(rt, "thanks") is None
+        assert get_build_state(rt) is None
+        b = begin_build_turn(rt, "review another tree")
+        assert b is not None
+        assert b is not a
+        assert get_build_state(rt) is b
+    finally:
+        end_turn("sess-b", *t_b)
+    t_a2 = begin_turn("sess-a", project_raw=None, active_path=".")
+    try:
+        assert get_build_state(rt) is a
+    finally:
+        end_turn("sess-a", *t_a2)
 
 
 def test_serial_explore_forces_implement():

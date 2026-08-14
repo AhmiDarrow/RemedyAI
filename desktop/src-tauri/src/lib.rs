@@ -2136,18 +2136,10 @@ fn dpapi_unprotect_user(_cipher: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 /// Read the local API bearer token written by the Python sidecar
-/// (`~/.remedy/auth/local_api_token`) so the webview can authenticate.
+/// (`$REMEDY_HOME/auth/local_api_token`, default `~/.remedy/auth/...`).
 #[tauri::command]
 fn get_local_api_token() -> Result<String, String> {
-    let home = if cfg!(target_os = "windows") {
-        env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string())
-    } else {
-        env::var("HOME").unwrap_or_else(|_| ".".to_string())
-    };
-    let path = PathBuf::from(home)
-        .join(".remedy")
-        .join("auth")
-        .join("local_api_token");
+    let path = remedy_home().join("auth").join("local_api_token");
     if !path.is_file() {
         return Err("local API token not found - is the sidecar running?".into());
     }

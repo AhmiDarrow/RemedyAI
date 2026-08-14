@@ -44,7 +44,11 @@ _BUILD_RE = re.compile(
     r"calculator|todo\s+app|cli\b|"
     # Simple C / compile tasks (partner e2e)
     r"compile|gcc|clang|\.c\b|hello\.c|main\.c|"
-    r"pygame|play\s+(it|the\s+game)|try\s+it"
+    r"pygame|play\s+(it|the\s+game)|try\s+it|"
+    r"we need (a |an |to )|"
+    r"can we (add|resize|change|shrink|tighten)|"
+    r"resize|autolock|auto[- ]?lock|"
+    r"settings (and |/ )?(about )?(ui|dialog|panel|window)"
     r")\b"
 )
 
@@ -525,6 +529,17 @@ def begin_build_turn(
                 st.last_verify_summary = led.last_verify_summary
     with suppress(Exception):
         runtime._build_turn = st
+    with suppress(Exception):
+        key = _session_build_key(runtime)
+        m = _build_turns_map(runtime)
+        if m is None:
+            m = {}
+            runtime._build_turns = m
+        m[key] = st
+        if len(m) > 48:
+            for old in list(m.keys())[: len(m) - 48]:
+                if old != key:
+                    m.pop(old, None)
     # Durable mission bound to this build (goal + verify stickiness)
     with suppress(Exception):
         from remedy.core.build_mission import ensure_build_mission
@@ -900,7 +915,34 @@ def monologue_block_nudge(state: BuildTurnState | None) -> dict[str, str] | None
     }
 
 
+def _session_build_key(runtime: Any) -> str:
+    """Current turn's session id — never another tab's."""
+    try:
+        from remedy.core.turn_context import turn_session_id
+
+        sid = str(turn_session_id(runtime) or "").strip()
+        if sid:
+            return sid
+    except Exception:
+        pass
+    return "_anon"
+
+
+def _build_turns_map(runtime: Any) -> dict[str, BuildTurnState] | None:
+    m = getattr(runtime, "_build_turns", None)
+    return m if isinstance(m, dict) else None
+
+
 def get_build_state(runtime: Any) -> BuildTurnState | None:
+    """This turn's machine state only (not a sibling session)."""
+    if runtime is None:
+        return None
+    key = _session_build_key(runtime)
+    m = _build_turns_map(runtime)
+    if m is not None:
+        st = m.get(key)
+        return st if isinstance(st, BuildTurnState) else None
+    # Legacy tests / pre-map runtimes stamp a single slot.
     st = getattr(runtime, "_build_turn", None)
     return st if isinstance(st, BuildTurnState) else None
 
@@ -919,6 +961,29 @@ def should_force_tools_for_build(runtime: Any, message: str) -> bool:
         if m.builder_contract and looks_like_build_request(message):
             return True
     return False
+
+
+def build_has_open_drive(state: BuildTurnState | None) -> bool:
+    """Open checklist or unfinished ship — do not surrender at the reopen cap."""
+    if state is None or not getattr(state, "active", False):
+        return False
+    if int(getattr(state, "open_todo_count", 0) or 0) > 0:
+        return True
+    if bool(getattr(state, "ship_required", False)) and not state.ship_complete():
+        return True
+    return False
+
+
+def green_gate_cap_allows_final(
+    state: BuildTurnState | None,
+    *,
+    reopen_count: int,
+    max_reopens: int,
+) -> bool:
+    """Cap may end a stuck verify loop; open todos/ship keep injecting."""
+    if int(reopen_count) < int(max_reopens or 0):
+        return False
+    return not build_has_open_drive(state)
 
 
 def build_blocks_final_answer(state: BuildTurnState | None) -> bool:

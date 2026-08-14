@@ -87,15 +87,24 @@ def save_todos(
     root: Path | str | None = None,
 ) -> Path | None:
     """Persist todos. Also stamps runtime._build_todos."""
+    stored = list(items)
+    # Closed lists are not a live checklist — drop so the next turn starts clean.
+    if stored and open_todo_count(stored) == 0:
+        stored = []
     if runtime is not None:
-        runtime._build_todos = list(items)
-    mark_todos_dirty(runtime, items)
+        runtime._build_todos = list(stored)
+    mark_todos_dirty(runtime, stored)
     base = Path(root) if root else _root_for(runtime)
     if base is None:
         return None
     fp = _path(base)
+    if not stored:
+        with suppress(OSError):
+            if fp.is_file():
+                fp.unlink()
+        return fp
     fp.parent.mkdir(parents=True, exist_ok=True)
-    payload = [t.to_public() for t in items]
+    payload = [t.to_public() for t in stored]
     fp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return fp
 
@@ -186,7 +195,7 @@ def open_todo_count(items: list[TodoItem] | None) -> int:
 
 def format_todos_block(items: list[TodoItem] | None) -> str:
     """Context inject. Empty string when there is nothing to show."""
-    if not items:
+    if not items or open_todo_count(items) == 0:
         return ""
     lines = ["## Active build todos (machine-owned — update with todo_write)"]
     open_n = 0
@@ -200,12 +209,9 @@ def format_todos_block(items: list[TodoItem] | None) -> str:
         if t.status in {"pending", "in_progress"}:
             open_n += 1
         lines.append(f"- {mark} `{t.id}` {t.content}")
-    if open_n:
-        lines.append(
-            f"{open_n} open. Do not claim done until these are completed or cancelled."
-        )
-    else:
-        lines.append("All todos closed.")
+    lines.append(
+        f"{open_n} open. Do not claim done until these are completed or cancelled."
+    )
     return "\n".join(lines)
 
 

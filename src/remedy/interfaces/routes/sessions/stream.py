@@ -16,7 +16,6 @@ from remedy.interfaces.api_models import (
 )
 from remedy.interfaces.api_support import (
     _sse_stream_text,
-    _sync_runtime_llm_from_config,
     load_config,
     sse_headers,
 )
@@ -197,13 +196,16 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                         req_model=req.model,
                     )
 
-            # Always re-sync credentials from disk (first-run wizard / settings).
-            api_key = _sync_runtime_llm_from_config(
-                runtime,
-                model_override=sess_model,
-                provider_override=sess_provider,
-                llm_only=True,
-            )
+            # Credentials stay on the per-turn binding — do not write the
+            # process-wide runtime (sibling sessions keep their own provider).
+            api_key = ""
+            with contextlib.suppress(Exception):
+                from remedy.interfaces.api_support import resolve_llm_slot
+
+                _p, _m, _u, api_key = resolve_llm_slot(
+                    provider_override=sess_provider,
+                    model_override=sess_model,
+                )
 
             async def event_stream():
                 try:
@@ -423,8 +425,8 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                             user_text=user_text or "",
                             assistant_text=full_response or "",
                             thinking_text=full_thinking or "",
-                            model=req.model or getattr(runtime, "_llm_model", None),
-                            provider=getattr(runtime, "_llm_provider", None),
+                            model=sess_model or req.model,
+                            provider=sess_provider,
                         )
                         if usage_acc and usage_acc.get("source") == "provider":
                             # Provider totals already sum each LLM round; never add
