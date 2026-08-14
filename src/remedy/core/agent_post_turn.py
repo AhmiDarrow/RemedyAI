@@ -167,6 +167,10 @@ def schedule_post_turn_prep(
                     muscle_label=m.label,
                     muscle_provider=m.provider,
                 )
+            with suppress(Exception):
+                from remedy.core.metabolism.organism import collect_vitals, persist_vitals
+
+                persist_vitals(collect_vitals(home, runtime=runtime), home)
             # Realtime skill lifecycle: promote/demote/prune from this turn's stats
             with suppress(Exception):
                 getter = getattr(runtime, "_get_learning_loop", None)

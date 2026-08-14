@@ -162,6 +162,44 @@ def test_ingest_residue_and_heartbeat(tmp_path: Path) -> None:
     reset_middleman_state()
 
 
+def test_organism_cycle_writes_vitals(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from remedy.core.metabolism.l0 import try_l0_system_reply
+    from remedy.core.metabolism.organism import (
+        format_vitals_markdown,
+        load_vitals,
+        organism_cycle,
+    )
+    from remedy.core.metabolism.tier import TurnTier, classify_turn_tier
+    from remedy.memory.cas import configure_cas
+    from remedy.memory.life_goals import LifeGoalStore
+    from remedy.memory.middleman import reset_middleman_state
+
+    home = tmp_path / "body"
+    home.mkdir()
+    reset_middleman_state()
+    configure_cas(home)
+    LifeGoalStore(home).add("Finish the novel", next_action="Outline chapter 3")
+    out = organism_cycle(home, session_id="life")
+    assert (home / "organism.json").is_file()
+    vitals = load_vitals(home)
+    assert vitals.get("alive") is True
+    assert vitals.get("life_title") == "Finish the novel"
+    assert vitals.get("next_action")
+    md = format_vitals_markdown(vitals)
+    assert "alive" in md.lower()
+    assert "Finish the novel" in md
+    assert classify_turn_tier("how are you") == TurnTier.L0_INSTANT
+    assert classify_turn_tier("are you alive?") == TurnTier.L0_INSTANT
+    rt = SimpleNamespace(config=SimpleNamespace(home_dir=str(home)))
+    reply = try_l0_system_reply(rt, "how are you", preclassified=True)
+    assert reply and "alive" in reply.lower()
+    assert out.get("vitals")
+    configure_cas(None)
+    reset_middleman_state()
+
+
 def test_begin_turn_includes_organism_inject(tmp_path: Path) -> None:
     home = tmp_path / "h2"
     home.mkdir()

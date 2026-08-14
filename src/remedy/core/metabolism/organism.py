@@ -7,9 +7,14 @@ actually steers the next turn — not a status dashboard for humans.
 
 from __future__ import annotations
 
+import json
 import re
+import time
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
+
+_VITALS_NAME = "organism.json"
 
 _DURABLE_RE = re.compile(
     r"(?i)\b("
@@ -189,6 +194,184 @@ def organism_heartbeat(home: Any, *, session_id: str = "life") -> dict[str, Any]
         if home:
             crystal.persist(home)
         out["recalled"] = len(hits)
+    return out
+
+
+def _home_path(home: Any) -> Path:
+    if home:
+        return Path(home).expanduser()
+    return Path.home() / ".remedy"
+
+
+def load_vitals(home: Any = None) -> dict[str, Any]:
+    path = _home_path(home) / _VITALS_NAME
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def persist_vitals(vitals: dict[str, Any], home: Any = None) -> Path | None:
+    try:
+        root = _home_path(home)
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / _VITALS_NAME
+        path.write_text(
+            json.dumps(vitals, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return path
+    except OSError:
+        return None
+
+
+def collect_vitals(
+    home: Any = None,
+    *,
+    extras: dict[str, Any] | None = None,
+    runtime: Any = None,
+) -> dict[str, Any]:
+    """Sense the body. Cheap. No network. No model."""
+    v: dict[str, Any] = {
+        "ts": time.time(),
+        "alive": True,
+        "mood": "",
+        "emoji": "",
+        "label": "",
+        "life_title": "",
+        "next_action": "",
+        "last_did": "",
+        "cas_count": 0,
+        "cas_durable": 0,
+        "recalled": 0,
+    }
+    with suppress(Exception):
+        from remedy.memory.life_goals import LifeGoalStore
+
+        store = LifeGoalStore(home)
+        g = store.active()
+        if g is not None:
+            v["life_title"] = g.title
+            v["next_action"] = g.next_action
+        last = store.last_step()
+        if last and last.get("did"):
+            v["last_did"] = str(last["did"])[:200]
+    with suppress(Exception):
+        from remedy.memory.cas import ensure_cas
+
+        cas = ensure_cas(home)
+        if cas is not None:
+            snap = cas.snapshot()
+            v["cas_count"] = int(snap.get("count") or 0)
+            kinds = snap.get("kinds") or {}
+            v["cas_durable"] = int(kinds.get("fact") or 0) + int(kinds.get("life") or 0)
+    with suppress(Exception):
+        from remedy.memory.soul.somatic import compute_soma
+
+        muscle_label = ""
+        muscle_provider = ""
+        if runtime is not None:
+            with suppress(Exception):
+                from remedy.core.muscle_profile import muscle_from_runtime
+
+                m = muscle_from_runtime(runtime)
+                muscle_label = m.label
+                muscle_provider = str(m.provider or "")
+        soma = compute_soma(
+            home, muscle_label=muscle_label, muscle_provider=muscle_provider
+        )
+        v["mood"] = soma.mood
+        v["emoji"] = soma.emoji
+        v["label"] = soma.label
+    if extras:
+        for k, val in extras.items():
+            if val is not None and k in v:
+                v[k] = val
+    return v
+
+
+def format_vitals_markdown(vitals: dict[str, Any] | None = None) -> str:
+    v = vitals or {}
+    lines = ["**Remedy is alive on this machine.**"]
+    label = str(v.get("label") or "").strip()
+    emoji = str(v.get("emoji") or "").strip()
+    if label:
+        lines.append(f"Mood: {emoji + ' ' if emoji else ''}{label}")
+    title = str(v.get("life_title") or "").strip()
+    if title:
+        lines.append(f"Holding: {title}")
+        nxt = str(v.get("next_action") or "").strip()
+        if nxt:
+            lines.append(f"Next: {nxt}")
+    did = str(v.get("last_did") or "").strip()
+    if did:
+        lines.append(f"Last I did: {did}")
+    n = int(v.get("cas_count") or 0)
+    if n:
+        dur = int(v.get("cas_durable") or 0)
+        bit = f"Memory: {n} eternal objects"
+        if dur:
+            bit += f" ({dur} durable)"
+        lines.append(bit)
+    return "\n".join(lines)
+
+
+def organism_cycle(
+    home: Any = None,
+    *,
+    runtime: Any = None,
+    session_id: str = "life",
+) -> dict[str, Any]:
+    """One heartbeat: recall → drive if due → compact → persist vitals."""
+    out: dict[str, Any] = {}
+    extras: dict[str, Any] = {}
+    with suppress(Exception):
+        beat = organism_heartbeat(home, session_id=session_id)
+        extras["recalled"] = int(beat.get("recalled") or 0)
+        out["recalled"] = extras["recalled"]
+    with suppress(Exception):
+        from remedy.memory.life_drive import drive_due, take_step
+
+        if drive_due(home, hours=4.0):
+            step = take_step(home)
+            if step.get("ok"):
+                out["life_step"] = {
+                    "goal": step.get("goal"),
+                    "did": step.get("did"),
+                    "next": step.get("next"),
+                }
+                extras["last_did"] = str(step.get("did") or "")[:200]
+    with suppress(Exception):
+        from remedy.memory.cas import ensure_cas
+
+        cas = ensure_cas(home)
+        if cas is not None:
+            if cas.due_compact():
+                out["cas_compact"] = cas.compact()
+            out["cas"] = {k: val for k, val in cas.snapshot().items() if k != "path"}
+    with suppress(Exception):
+        from remedy.core.metabolism.time_crystal import get_time_crystal
+
+        crystal = get_time_crystal(session_id)
+        if home:
+            crystal.persist(home)
+    with suppress(Exception):
+        from remedy.memory.life_goals import LifeGoalStore, pulse_due, weekly_pulse
+
+        if pulse_due(home):
+            pulse = weekly_pulse(home)
+            LifeGoalStore(home).record_pulse()
+            out["life_pulse"] = {
+                "open": pulse.get("open"),
+                "stalled": len(pulse.get("stalled") or []),
+                "moved": len(pulse.get("moved") or []),
+            }
+    vitals = collect_vitals(home, extras=extras, runtime=runtime)
+    persist_vitals(vitals, home)
+    out["vitals"] = vitals
     return out
 
 

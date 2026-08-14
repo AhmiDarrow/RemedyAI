@@ -543,6 +543,19 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                     "count": snap.get("count") or 0,
                     "kinds": snap.get("kinds") or {},
                 }
+        organism: dict = {}
+        with suppress(Exception):
+            import time as _time
+
+            from remedy.core.metabolism.organism import collect_vitals, load_vitals, persist_vitals
+
+            cached_v = load_vitals(_life_home())
+            age_v = _time.time() - float(cached_v.get("ts") or 0)
+            if cached_v.get("alive") and age_v < 60.0:
+                organism = cached_v
+            else:
+                organism = collect_vitals(_life_home(), runtime=runtime)
+                persist_vitals(organism, _life_home())
         return {
             "pending_approvals": len(pending),
             "approval_mode": APPROVALS.mode,
@@ -552,6 +565,7 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             "last_step": last_step,
             "life_folder": life_folder or None,
             "cas": cas_pub or None,
+            "organism": organism or None,
             "access_scope": scope,
             "harness_mode": harness,
             "brief_intent": brief_intent[:200],

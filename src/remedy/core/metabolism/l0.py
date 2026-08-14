@@ -23,6 +23,7 @@ def try_l0_system_reply(
         _L0_LIFE_NOTICE,
         _L0_LIFE_PULSE,
         _L0_MODEL,
+        _L0_ORGANISM,
         _L0_SKILLS,
         _L0_STATUS,
         _L0_VERSION,
@@ -115,6 +116,30 @@ def try_l0_system_reply(
             "No open life goal yet. Tell me what you want to finish this season, "
             "or `/goal <title>`."
         )
+
+    if _L0_ORGANISM.match(msg):
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        with suppress(Exception):
+            from remedy.core.metabolism.organism import (
+                collect_vitals,
+                format_vitals_markdown,
+                load_vitals,
+                persist_vitals,
+            )
+
+            vitals = load_vitals(home)
+            age = 0.0
+            try:
+                import time as _time
+
+                age = _time.time() - float(vitals.get("ts") or 0)
+            except (TypeError, ValueError):
+                age = 1e9
+            if not vitals or age > 120.0:
+                vitals = collect_vitals(home, runtime=runtime)
+                persist_vitals(vitals, home)
+            return format_vitals_markdown(vitals)
+        return "**Remedy is alive on this machine.**"
 
     if _L0_LIFE_PULSE.match(msg):
         with suppress(Exception):
