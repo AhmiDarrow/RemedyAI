@@ -252,20 +252,35 @@ def load_vitals(home: Any = None) -> dict[str, Any]:
     return dict(raw)
 
 
+_VITALS_EPHEMERAL = frozenset({"ts", "last_cycle_at"})
+
+
+def _stable_vitals(v: dict[str, Any]) -> dict[str, Any]:
+    return {k: val for k, val in v.items() if k not in _VITALS_EPHEMERAL}
+
+
 def persist_vitals(vitals: dict[str, Any], home: Any = None) -> Path | None:
     try:
         root = _home_path(home)
         root.mkdir(parents=True, exist_ok=True)
         path = root / _VITALS_NAME
+        key = str(path)
+        prev = load_vitals(home)
+        payload = dict(vitals)
+        if prev and path.is_file() and _stable_vitals(prev) == _stable_vitals(payload):
+            hit = _vitals_cache.get(key)
+            mtime = hit[0] if hit is not None else path.stat().st_mtime
+            _vitals_cache[key] = (mtime, payload)
+            return path
         path.write_text(
-            json.dumps(vitals, indent=2, ensure_ascii=False),
+            json.dumps(payload, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
         try:
             mtime = path.stat().st_mtime
         except OSError:
             mtime = time.time()
-        _vitals_cache[str(path)] = (mtime, dict(vitals))
+        _vitals_cache[key] = (mtime, payload)
         return path
     except OSError:
         return None
@@ -332,6 +347,9 @@ def collect_vitals(
         "cycles": [],
         "open_count": 0,
         "life_folder": "",
+        "last_drive_at": 0.0,
+        "last_pulse_at": 0.0,
+        "last_heartbeat_at": 0.0,
         "who": "Remedy",
         "stance": "steady",
         "rapport": 0.0,
@@ -365,15 +383,18 @@ def collect_vitals(
             from remedy.memory.life_drive import resolve_life_notes_dir
 
             v["life_folder"] = str(resolve_life_notes_dir(home))
-    with suppress(Exception):
-        from remedy.memory.cas import ensure_cas
+    if extras and extras.get("_skip_cas"):
+        pass
+    else:
+        with suppress(Exception):
+            from remedy.memory.cas import ensure_cas
 
-        cas = ensure_cas(home)
-        if cas is not None:
-            snap = cas.snapshot()
-            v["cas_count"] = int(snap.get("count") or 0)
-            kinds = snap.get("kinds") or {}
-            v["cas_durable"] = int(kinds.get("fact") or 0) + int(kinds.get("life") or 0)
+            cas = ensure_cas(home)
+            if cas is not None:
+                snap = cas.snapshot()
+                v["cas_count"] = int(snap.get("count") or 0)
+                kinds = snap.get("kinds") or {}
+                v["cas_durable"] = int(kinds.get("fact") or 0) + int(kinds.get("life") or 0)
     if not skip_soul:
         with suppress(Exception):
             from remedy.memory.soul.field import load_soul_field
@@ -476,15 +497,30 @@ def organism_cycle(
     extras["cycles"] = list(prev.get("cycles") or [])
     if prev.get("life_folder"):
         extras["life_folder"] = prev["life_folder"]
-    with suppress(Exception):
-        beat = organism_heartbeat(home, session_id=session_id)
-        extras["recalled"] = int(beat.get("recalled") or 0)
-        out["recalled"] = extras["recalled"]
+    now = time.time()
+    last_hb = float(prev.get("last_heartbeat_at") or 0)
+    if last_hb <= 0 or (now - last_hb) >= 2700.0:
+        with suppress(Exception):
+            beat = organism_heartbeat(home, session_id=session_id)
+            extras["recalled"] = int(beat.get("recalled") or 0)
+            out["recalled"] = extras["recalled"]
+        extras["last_heartbeat_at"] = now
+    else:
+        extras["last_heartbeat_at"] = last_hb
+        extras["recalled"] = 0
+        out["recalled"] = 0
     with suppress(Exception):
         from remedy.memory.life_drive import drive_due, take_step
 
         hours = 2.0 if prev.get("stalled") else 4.0
-        if drive_due(home, hours=hours):
+        last_drive = float(prev.get("last_drive_at") or 0)
+        if "last_drive_at" in prev:
+            due = int(prev.get("open_count") or 0) > 0 and (
+                last_drive <= 0 or (now - last_drive) >= hours * 3600.0
+            )
+        else:
+            due = drive_due(home, hours=hours)
+        if due:
             step = take_step(home)
             if step.get("ok"):
                 out["life_step"] = {
@@ -493,14 +529,24 @@ def organism_cycle(
                     "next": step.get("next"),
                 }
                 extras["last_did"] = str(step.get("did") or "")[:200]
+                extras["last_drive_at"] = now
+        elif "last_drive_at" in prev:
+            extras["last_drive_at"] = last_drive
+        else:
+            extras["last_drive_at"] = now
+    compacted = False
     with suppress(Exception):
         from remedy.memory.cas import ensure_cas
 
         cas = ensure_cas(home)
-        if cas is not None:
-            if cas.due_compact():
-                out["cas_compact"] = cas.compact()
+        if cas is not None and cas.due_compact():
+            out["cas_compact"] = cas.compact()
+            compacted = True
             out["cas"] = {k: val for k, val in cas.snapshot().items() if k != "path"}
+    if not compacted and prev.get("cas_count") is not None:
+        extras["_skip_cas"] = True
+        extras["cas_count"] = prev.get("cas_count") or 0
+        extras["cas_durable"] = prev.get("cas_durable") or 0
     with suppress(Exception):
         from remedy.core.metabolism.time_crystal import get_time_crystal
 
@@ -510,15 +556,26 @@ def organism_cycle(
     with suppress(Exception):
         from remedy.memory.life_goals import LifeGoalStore, pulse_due, weekly_pulse
 
-        if pulse_due(home):
+        last_pulse = float(prev.get("last_pulse_at") or 0)
+        if "last_pulse_at" in prev:
+            p_due = int(prev.get("open_count") or 0) > 0 and (
+                last_pulse <= 0 or (now - last_pulse) >= 7 * 86400.0
+            )
+        else:
+            p_due = pulse_due(home)
+        if p_due:
             pulse = weekly_pulse(home)
             LifeGoalStore(home).record_pulse()
+            extras["last_pulse_at"] = now
             out["life_pulse"] = {
                 "open": pulse.get("open"),
                 "stalled": len(pulse.get("stalled") or []),
                 "moved": len(pulse.get("moved") or []),
             }
-    now = time.time()
+        elif "last_pulse_at" in prev:
+            extras["last_pulse_at"] = last_pulse
+        else:
+            extras["last_pulse_at"] = now
     row = {
         "ts": now,
         "recalled": int(extras.get("recalled") or 0),

@@ -222,6 +222,10 @@ def test_second_cycle_skips_life_resense(tmp_path: Path, monkeypatch) -> None:
             "mood": "calm",
             "who": "Remedy",
             "label": "Calm",
+            "last_drive_at": 1e18,
+            "last_pulse_at": 1e18,
+            "last_heartbeat_at": 1e18,
+            "cas_count": 0,
         },
         home,
     )
@@ -241,6 +245,25 @@ def test_second_cycle_skips_life_resense(tmp_path: Path, monkeypatch) -> None:
     assert out["vitals"]["life_title"] == "Keep this title"
     assert out["vitals"]["next_action"] == "Stay put"
     assert out["vitals"]["mood"] == "calm"
+
+
+def test_persist_vitals_skips_disk_when_stable(tmp_path: Path) -> None:
+    from remedy.core.metabolism.organism import persist_vitals
+
+    home = tmp_path / "stable"
+    home.mkdir()
+    body = {
+        "ts": 10,
+        "alive": True,
+        "life_title": "A",
+        "next_action": "B",
+        "last_cycle_at": 10,
+    }
+    p = persist_vitals(body, home)
+    assert p is not None
+    m1 = p.stat().st_mtime
+    persist_vitals({**body, "ts": 99, "last_cycle_at": 99}, home)
+    assert p.stat().st_mtime == m1
 
 
 def test_soma_from_vitals_and_tray(tmp_path: Path) -> None:
