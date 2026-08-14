@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import time
 from contextlib import suppress
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+
+# Status-bar poll extras (swarm/health + approval config). Not session-scoped.
+_SWARM_POLL_TTL = 12.0
+_CFG_SYNC_TTL = 30.0
+_poll_swarm: dict = {"ts": 0.0, "swarm": {}, "health": {}}
+_cfg_sync_at = 0.0
 
 
 class ApprovalResolveRequest(BaseModel):
@@ -374,13 +381,17 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         """
         from remedy.core.approvals import APPROVALS
 
-        # Keep thumbs-up (auto) in sync with config.toml every poll.
-        try:
-            from remedy.interfaces.api_support import load_config
+        # Config sync is not per-tab — do it a few times a minute, not every poll.
+        global _cfg_sync_at
+        now_poll = time.time()
+        if now_poll - _cfg_sync_at >= _CFG_SYNC_TTL:
+            try:
+                from remedy.interfaces.api_support import load_config
 
-            APPROVALS.sync_from_config(load_config() or {})
-        except Exception:
-            pass
+                APPROVALS.sync_from_config(load_config() or {})
+                _cfg_sync_at = now_poll
+            except Exception:
+                pass
         # Approvals stay global (missed approve on another tab still surfaces).
         # session_id only scopes quality/metabolism to the focused chat.
         sid_q = (session_id or "").strip() or None
@@ -420,48 +431,54 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                 brief_intent = getattr(brief, "intent", "") or ""
         swarm: dict = {}
         health_pub: dict = {}
-        try:
-            from remedy.nanoswarm import get_swarm
-
-            st = get_swarm().status()
-            swarm = {
-                "active": True,
-                "event_count": st.get("event_count"),
-                "local_model_id": st.get("local_model_id"),
-                "last_event": st.get("last_event"),
-                "fill_pct": (st.get("bots") or {}).get("memory", {}).get("last_fill_pct"),
-                "token_method": (st.get("bots") or {}).get("token", {}).get("last_method"),
-            }
-            # Proactive failover signal for status bar
-            prov = getattr(runtime, "_llm_provider", None) if runtime is not None else None
-            mod = getattr(runtime, "_llm_model", None) if runtime is not None else None
-            connected: list[str] = []
+        cached_sw = _poll_swarm
+        if now_poll - float(cached_sw.get("ts") or 0) < _SWARM_POLL_TTL and cached_sw.get("swarm"):
+            swarm = dict(cached_sw.get("swarm") or {})
+            health_pub = dict(cached_sw.get("health") or {})
+        else:
             try:
-                from remedy.interfaces.api_support import load_config
-                from remedy.interfaces.config import get_provider_keys
-                from remedy.interfaces.secret_store import public_secret_status
+                from remedy.nanoswarm import get_swarm
 
-                cfg = load_config()
-                keys = get_provider_keys(cfg)
-                connected = list(keys.keys())
-                pub = public_secret_status()
-                for k in (pub.get("provider_keys_set") or {}):
-                    if k not in connected:
-                        connected.append(k)
-                # Always allow demo/ollama as soft fallbacks when flaky
-                for extra in ("demo", "ollama"):
-                    if extra not in connected:
-                        connected.append(extra)
+                st = get_swarm().status()
+                swarm = {
+                    "active": True,
+                    "event_count": st.get("event_count"),
+                    "local_model_id": st.get("local_model_id"),
+                    "last_event": st.get("last_event"),
+                    "fill_pct": (st.get("bots") or {}).get("memory", {}).get("last_fill_pct"),
+                    "token_method": (st.get("bots") or {}).get("token", {}).get("last_method"),
+                }
+                prov = getattr(runtime, "_llm_provider", None) if runtime is not None else None
+                mod = getattr(runtime, "_llm_model", None) if runtime is not None else None
+                connected: list[str] = []
+                try:
+                    from remedy.interfaces.api_support import load_config
+                    from remedy.interfaces.config import get_provider_keys
+                    from remedy.interfaces.secret_store import public_secret_status
+
+                    cfg = load_config()
+                    keys = get_provider_keys(cfg)
+                    connected = list(keys.keys())
+                    pub = public_secret_status()
+                    for k in (pub.get("provider_keys_set") or {}):
+                        if k not in connected:
+                            connected.append(k)
+                    for extra in ("demo", "ollama"):
+                        if extra not in connected:
+                            connected.append(extra)
+                except Exception:
+                    connected = ["demo", "ollama"]
+                health_pub = get_swarm().health.failover_suggestion(
+                    provider=str(prov) if prov else None,
+                    model=str(mod) if mod else None,
+                    connected_providers=connected,
+                )
+                _poll_swarm["ts"] = now_poll
+                _poll_swarm["swarm"] = dict(swarm)
+                _poll_swarm["health"] = dict(health_pub)
             except Exception:
-                connected = ["demo", "ollama"]
-            health_pub = get_swarm().health.failover_suggestion(
-                provider=str(prov) if prov else None,
-                model=str(mod) if mod else None,
-                connected_providers=connected,
-            )
-        except Exception:
-            swarm = {"active": False}
-            health_pub = {}
+                swarm = {"active": False}
+                health_pub = {}
 
         # Focused tab wins; else runtime last-touch session (gateway / single chat).
         sid_meta = sid_q
@@ -480,11 +497,10 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
 
         metabolism: dict = {}
         try:
-            from remedy.core.metabolism.turn import metabolism_public_snapshot
+            from remedy.core.metabolism.turn import metabolism_poll_snapshot
 
-            # Partner status is polled — lean counters only (no recent lists / sorts).
-            # Full Advanced detail lives on GET /api/partner/metabolism.
-            metabolism = metabolism_public_snapshot(str(sid_key), lean=True)
+            # Poll: EU/DU only. Full organs stay on GET /api/partner/metabolism.
+            metabolism = metabolism_poll_snapshot(str(sid_key))
         except Exception:
             metabolism = {}
 

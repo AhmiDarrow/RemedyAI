@@ -203,6 +203,38 @@ def test_organism_cycle_writes_vitals(tmp_path: Path) -> None:
     reset_middleman_state()
 
 
+def test_second_cycle_skips_life_resense(tmp_path: Path, monkeypatch) -> None:
+    from remedy.core.metabolism import organism as org
+    from remedy.core.metabolism.organism import organism_cycle, persist_vitals
+
+    home = tmp_path / "skip"
+    home.mkdir()
+    persist_vitals(
+        {
+            "ts": 1,
+            "alive": True,
+            "life_title": "Keep this title",
+            "next_action": "Stay put",
+            "last_did": "Already did",
+            "open_count": 1,
+            "stalled": False,
+            "last_cycle_at": 1e18,
+        },
+        home,
+    )
+    monkeypatch.setattr(org, "organism_heartbeat", lambda *a, **k: {"recalled": 0})
+    monkeypatch.setattr("remedy.memory.life_drive.drive_due", lambda *a, **k: False)
+    monkeypatch.setattr("remedy.memory.life_goals.pulse_due", lambda *a, **k: False)
+
+    def _boom(*_a, **_k):
+        raise AssertionError("life store should not be opened")
+
+    monkeypatch.setattr("remedy.memory.life_goals.LifeGoalStore", _boom)
+    out = organism_cycle(home, session_id="life")
+    assert out["vitals"]["life_title"] == "Keep this title"
+    assert out["vitals"]["next_action"] == "Stay put"
+
+
 def test_soma_from_vitals_and_tray(tmp_path: Path) -> None:
     from remedy.core.metabolism.organism import (
         collect_vitals,
