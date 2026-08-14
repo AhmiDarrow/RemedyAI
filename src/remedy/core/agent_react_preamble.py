@@ -160,6 +160,13 @@ def append_plan_and_computer_addenda(
             um_a = str(getattr(runtime, "_last_user_text", "") or "")
             if looks_like_away_request(um_a):
                 context = (context or "") + "\n\n" + format_away_block()
+                with suppress(Exception):
+                    from remedy.core.build_engine import looks_like_build_request
+                    from remedy.memory.life_drive import take_step
+
+                    if not looks_like_build_request(um_a):
+                        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+                        take_step(home)
         with suppress(Exception):
             from remedy.core.companion_inbox import format_inbox_block, poll_new_drops
 

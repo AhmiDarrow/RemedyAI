@@ -211,6 +211,13 @@ def test_parse_ddg_html_results():
     assert "guide" in rows[1]["title"].lower()
 
 
+def test_search_public_web_disabled(monkeypatch):
+    from remedy.core import agent_web_tools as w
+
+    monkeypatch.setattr(w, "_web_enabled", lambda runtime=None: False)
+    assert w.search_public_web("spanish beginner") == []
+
+
 @pytest.mark.asyncio
 async def test_web_search_disabled_soft_error(monkeypatch):
     from unittest.mock import MagicMock

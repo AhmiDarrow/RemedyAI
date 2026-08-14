@@ -143,8 +143,9 @@ writable from the tool boundary and read from context assembly.
    windows; prefer projection for small ones.
 3. **Resolve tool:** expose `memory_resolve(handle)` and teach the system prompt to
    emit handles instead of pasting bodies.
-4. **Cold store:** back the in-memory maps with SQLite (mirroring `store.py`) so the
-   middleman is durable and survives restarts; FTS5 can power the inverted index.
+4. **Cold store (landed):** `memory/cas.py` — WAL SQLite CAS at `{home}/cas/objects.db`.
+   Write-through on put, hydrate on session open, FTS only on RAM miss. Same SHA is
+   the same object after restart. Compaction drops old *tool* rows; facts/life stay.
 5. **Optional offline summarization:** run the existing `local_brief`/quality jobs as
    a *background compaction* of the event log into higher-level units — never as the
    primary context feed.

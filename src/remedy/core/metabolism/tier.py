@@ -50,6 +50,60 @@ _L0_VERSION = re.compile(
     r"/version"
     r")\s*[.?!]?\s*$"
 )
+_L0_LIFE_DRIVE = re.compile(
+    r"(?is)^\s*("
+    r"what should i (do|work on|focus on)|"
+    r"what('?s| is) next|"
+    r"what now|"
+    r"next (step|action|move)|"
+    r"work on my goals?|"
+    r"handle my goals?|"
+    r"keep going on my (life )?goals?|"
+    r"make progress on my goals?|"
+    r"do the next (life )?step|"
+    r"take the next step"
+    r")\s*[.?!]?\s*$"
+)
+_L0_LIFE_PULSE = re.compile(
+    r"(?is)^\s*("
+    r"how am i doing|"
+    r"how('?s| is) (my )?(year|life|week|goals?)|"
+    r"weekly review|"
+    r"review my goals"
+    r")\s*[.?!]?\s*$"
+)
+_L0_LIFE_NOTICE = re.compile(
+    r"(?is)^\s*("
+    r"i did it|"
+    r"i('?ve| have) (done|finished) (it|that)|"
+    r"that('?s| is) done|"
+    r"done with that|"
+    r"finished that|"
+    r"i finished (it|that)|"
+    r"checked (it|that) off|"
+    r"mark (it|that|the next (step|action)) done|"
+    r"next (step|action) (is )?done|"
+    r"did that|"
+    r"got it done|"
+    r"that's finished|"
+    r"i finished (my |the )?(life )?goal|"
+    r"(the |my )?(life )?goal is (done|complete|finished)|"
+    r"mark (the |my )?(life )?goal (as )?(done|complete)|"
+    r"goal (is )?(complete|completed|done)|"
+    r"i completed (my |the )?(life )?goal"
+    r")\s*[.?!]?\s*$"
+)
+_L0_LIFE_DIGEST = re.compile(
+    r"(?is)^\s*("
+    r"i('?m| am) back|"
+    r"what did you do|"
+    r"what('?s| is) new|"
+    r"catch me up|"
+    r"what happened|"
+    r"what have you (been )?doing|"
+    r"show (me )?(the )?digest"
+    r")\s*[.?!]?\s*$"
+)
 
 _L3_AUTONOMOUS = re.compile(
     r"(?is)\b("
@@ -373,6 +427,10 @@ def classify_turn_tier(
             or _L0_SKILLS.match(ut)
             or _L0_STATUS.match(ut)
             or _L0_VERSION.match(ut)
+            or _L0_LIFE_DRIVE.match(ut)
+            or _L0_LIFE_PULSE.match(ut)
+            or _L0_LIFE_NOTICE.match(ut)
+            or _L0_LIFE_DIGEST.match(ut)
         ):
             return TurnTier.L0_INSTANT
 
