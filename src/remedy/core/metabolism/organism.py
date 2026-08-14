@@ -7,8 +7,17 @@ actually steers the next turn — not a status dashboard for humans.
 
 from __future__ import annotations
 
+import re
 from contextlib import suppress
 from typing import Any
+
+_DURABLE_RE = re.compile(
+    r"(?i)\b("
+    r"decided|chose|will use|from now on|always|"
+    r"i want to|my goal is|remember that|"
+    r"next (step|action|move) is"
+    r")\b"
+)
 
 
 def _life_memory_lines(home: Any, session_id: str, runtime: Any) -> list[str]:
@@ -68,6 +77,119 @@ def _life_memory_lines(home: Any, session_id: str, runtime: Any) -> list[str]:
                 if lg:
                     out.append("Life: " + " · ".join(lg)[:200])
     return out[:3]
+
+
+def organism_recall_line(
+    home: Any,
+    query: str,
+    *,
+    exclude: str = "",
+) -> str:
+    """One query-keyed CAS hit for the current turn. Empty if nothing fits."""
+    q = (query or "").strip()
+    if len(q) < 8:
+        return ""
+    from remedy.memory.cas import ensure_cas
+
+    cas = ensure_cas(home)
+    if cas is None:
+        return ""
+    hits = cas.search_fts(q, limit=2, kinds=("fact", "life"))
+    skip = " ".join((exclude or "").lower().split())[:80]
+    for item in hits:
+        body = " ".join((item.body or "").split())
+        if not body:
+            continue
+        if skip and skip in body.lower():
+            continue
+        return f"Recalled: {body[:140]}"
+    return ""
+
+
+def ingest_turn_residue(
+    *,
+    home: Any = None,
+    session_id: str = "",
+    user_text: str = "",
+    assistant_text: str = "",
+) -> str:
+    """Write one eternal object if this turn produced a durable fact.
+
+    Not a journal. Chat, thanks, and tool dumps stay out. Same SHA dedups.
+    """
+    from remedy.core.metabolism.redact import looks_like_secret_text
+
+    candidates: list[str] = []
+    for raw in (user_text, assistant_text):
+        text = (raw or "").strip()
+        if len(text) < 12 or len(text) > 800:
+            continue
+        if not _DURABLE_RE.search(text):
+            continue
+        if looks_like_secret_text(text):
+            continue
+        # First matching sentence, else the head.
+        sent = text
+        for part in re.split(r"(?<=[.!?])\s+", text):
+            if _DURABLE_RE.search(part) and len(part.strip()) >= 12:
+                sent = part.strip()
+                break
+        candidates.append(sent[:400])
+    if not candidates:
+        return ""
+    body = candidates[-1]
+    from remedy.memory.middleman import get_session_middleman
+
+    sid = (session_id or "").strip() or "eternal"
+    key = get_session_middleman(sid).put(
+        body,
+        kind="fact",
+        session_id=sid,
+        body_cap=400,
+    )
+    if key:
+        with suppress(Exception):
+            from remedy.core.metabolism.time_crystal import get_time_crystal
+
+            get_time_crystal(sid).admit(body[:280], horizon="session", source="residue")
+    return key
+
+
+def organism_heartbeat(home: Any, *, session_id: str = "life") -> dict[str, Any]:
+    """Idle sense: recall eternal facts into the crystal. Does not take steps."""
+    out: dict[str, Any] = {"recalled": 0, "query": ""}
+    query = ""
+    with suppress(Exception):
+        from remedy.memory.life_goals import LifeGoalStore
+
+        g = LifeGoalStore(home).active()
+        if g is not None:
+            query = f"{g.title} {g.next_action or ''}".strip()
+    out["query"] = query[:80]
+    if len(query) < 6:
+        return out
+    with suppress(Exception):
+        from remedy.memory.cas import ensure_cas
+
+        cas = ensure_cas(home)
+        if cas is None:
+            return out
+        hits = cas.search_fts(query, limit=3, kinds=("fact", "life"))
+        if not hits:
+            return out
+        from remedy.core.metabolism.time_crystal import get_time_crystal
+
+        crystal = get_time_crystal(session_id)
+        for item in hits:
+            crystal.admit(
+                (item.body or "")[:280],
+                horizon="life",
+                source="heartbeat",
+            )
+        if home:
+            crystal.persist(home)
+        out["recalled"] = len(hits)
+    return out
 
 
 def organism_pulse_block(
@@ -198,6 +320,10 @@ def organism_pulse_block(
     # Nervous system — even when Soul Field is off, life + CAS still pulse.
     if not any(x.startswith("Life:") or x.startswith("Memory:") for x in lines):
         lines.extend(_life_memory_lines(home, sid, runtime))
+    with suppress(Exception):
+        recalled = organism_recall_line(home, user_text)
+        if recalled:
+            lines.append(recalled)
 
     if not lines:
         return ""

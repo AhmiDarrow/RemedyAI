@@ -94,6 +94,74 @@ def test_organism_pulse_includes_life_and_cas(tmp_path: Path) -> None:
     reset_middleman_state()
 
 
+def test_pulse_recalls_cas_fact_for_query(tmp_path: Path) -> None:
+    from remedy.core.metabolism.organism import organism_recall_line
+    from remedy.memory.cas import configure_cas
+    from remedy.memory.middleman import get_session_middleman, reset_middleman_state
+
+    home = tmp_path / "recall"
+    home.mkdir()
+    reset_middleman_state()
+    configure_cas(home)
+    get_session_middleman("r1").put(
+        "decided the novel outline lives in Documents/Remedy Life",
+        kind="fact",
+        session_id="r1",
+    )
+    line = organism_recall_line(home, "where is the novel outline")
+    assert line.startswith("Recalled:")
+    assert "outline" in line.lower()
+    block = organism_pulse_block(
+        session_id="r1",
+        tier=1,
+        home=home,
+        user_text="where is the novel outline I decided on",
+        max_chars=900,
+    )
+    assert "Recalled:" in block
+    configure_cas(None)
+    reset_middleman_state()
+
+
+def test_ingest_residue_and_heartbeat(tmp_path: Path) -> None:
+    from remedy.core.metabolism.organism import ingest_turn_residue, organism_heartbeat
+    from remedy.core.metabolism.time_crystal import get_time_crystal, reset_time_crystal
+    from remedy.memory.cas import configure_cas
+    from remedy.memory.life_goals import LifeGoalStore
+    from remedy.memory.middleman import reset_middleman_state
+
+    home = tmp_path / "beat"
+    home.mkdir()
+    reset_middleman_state()
+    reset_time_crystal("life")
+    configure_cas(home)
+    key = ingest_turn_residue(
+        home=home,
+        session_id="life",
+        user_text="I want to finish the novel this year",
+        assistant_text="Decided the next move is a one-page outline.",
+    )
+    assert key
+    LifeGoalStore(home).add("Finish the novel", next_action="Draft a one-page outline")
+    beat = organism_heartbeat(home, session_id="life")
+    assert beat["recalled"] >= 1
+    crystal = get_time_crystal("life")
+    texts = " ".join(f.text for f in crystal.facts)
+    assert "outline" in texts.lower() or "novel" in texts.lower()
+    # chatter does not persist
+    assert (
+        ingest_turn_residue(
+            home=home,
+            session_id="life",
+            user_text="ok thanks",
+            assistant_text="You're welcome.",
+        )
+        == ""
+    )
+    configure_cas(None)
+    reset_middleman_state()
+
+
 def test_begin_turn_includes_organism_inject(tmp_path: Path) -> None:
     home = tmp_path / "h2"
     home.mkdir()

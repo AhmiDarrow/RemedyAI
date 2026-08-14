@@ -59,6 +59,7 @@ _STOP = frozenset(
         "from", "as", "we", "you", "i", "he", "she", "they", "do", "does",
         "did", "have", "has", "had", "not", "but", "so", "if", "then", "else",
         "its", "it's", "about", "into", "over", "after", "before", "there",
+        "where", "what", "when", "who", "how", "why", "which",
     }
 )
 
