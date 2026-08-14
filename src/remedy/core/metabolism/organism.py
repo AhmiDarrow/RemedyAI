@@ -40,6 +40,8 @@ _DURABLE_RE = re.compile(
     r"next (step|action|move) is"
     r")\b"
 )
+_STALL_AFTER_S = 7 * 86400.0
+_COMPACT_EVERY_S = 86_400.0
 
 
 def _lines_from_vitals(v: dict[str, Any]) -> list[str]:
@@ -123,9 +125,7 @@ def organism_recall_line(
         with suppress(Exception):
             from remedy.memory.middleman import get_session_middleman
 
-            for h in get_session_middleman(session_id).search(
-                q, kinds=("fact", "life"), top_k=2
-            ):
+            for h in get_session_middleman(session_id).search(q, kinds=("fact", "life"), top_k=2):
                 body = " ".join((h.item.body or h.snippet or "").split())
                 if body:
                     bodies.append(body)
@@ -181,10 +181,12 @@ def ingest_turn_residue(
     if not candidates:
         return ""
     body = candidates[-1]
-    from remedy.memory.middleman import get_session_middleman
+    from remedy.memory.middleman import content_key, get_session_middleman
 
     sid = (session_id or "").strip() or "eternal"
-    key = get_session_middleman(sid).put(
+    mm = get_session_middleman(sid)
+    fresh = mm.item(content_key(body)) is None
+    key = mm.put(
         body,
         kind="fact",
         session_id=sid,
@@ -195,6 +197,8 @@ def ingest_turn_residue(
             from remedy.core.metabolism.time_crystal import get_time_crystal
 
             get_time_crystal(sid).admit(body[:280], horizon="session", source="residue")
+        if fresh:
+            note_cas_write(home, kind="fact")
     return key
 
 
@@ -335,6 +339,55 @@ def soma_from_vitals(vitals: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def note_cas_write(home: Any = None, *, kind: str = "fact") -> None:
+    """Hot increment after a write-through. No SQLite. Dedup is the caller's job."""
+    v = load_vitals(home)
+    now = time.time()
+    if not v:
+        v = {"ts": now, "alive": True, "cas_count": 0, "cas_durable": 0}
+    v["ts"] = now
+    v["alive"] = True
+    v["cas_count"] = int(v.get("cas_count") or 0) + 1
+    if kind in {"fact", "life"}:
+        v["cas_durable"] = int(v.get("cas_durable") or 0) + 1
+    persist_vitals(v, home)
+
+
+def apply_soma_to_vitals(
+    soma: Any,
+    home: Any = None,
+    *,
+    bump_turns: bool = True,
+) -> dict[str, Any]:
+    """Merge a soma packet into the body. No store / CAS / soul walk."""
+    s = soma.to_public() if hasattr(soma, "to_public") else dict(soma or {})
+    v = load_vitals(home)
+    now = time.time()
+    if not v:
+        v = {"ts": now, "alive": True}
+    v["ts"] = now
+    v["alive"] = True
+    if s.get("mood"):
+        v["mood"] = s["mood"]
+    if s.get("emoji"):
+        v["emoji"] = s["emoji"]
+    if s.get("label"):
+        v["label"] = s["label"]
+    if s.get("rapport") is not None:
+        v["rapport"] = s["rapport"]
+    if s.get("trust") is not None:
+        v["trust"] = s["trust"]
+    stance = s.get("last_stance") or s.get("stance")
+    if stance:
+        v["stance"] = stance
+    if s.get("tray_tooltip"):
+        v["tray_tooltip"] = s["tray_tooltip"]
+    if bump_turns:
+        v["turns"] = int(v.get("turns") or 0) + 1
+    persist_vitals(v, home)
+    return v
+
+
 def collect_vitals(
     home: Any = None,
     *,
@@ -363,6 +416,8 @@ def collect_vitals(
         "last_drive_at": 0.0,
         "last_pulse_at": 0.0,
         "last_heartbeat_at": 0.0,
+        "last_compact_at": 0.0,
+        "life_updated_at": 0.0,
         "who": "Remedy",
         "stance": "steady",
         "rapport": 0.0,
@@ -388,7 +443,18 @@ def collect_vitals(
             if last and last.get("did"):
                 v["last_did"] = str(last["did"])[:200]
             v["stalled"] = _life_is_stalled(store)
+            v["life_updated_at"] = _life_updated_ts(store)
             v["open_count"] = store.open_count()
+    else:
+        clock = 0.0
+        oc = 0
+        if extras:
+            with suppress(TypeError, ValueError):
+                clock = float(extras.get("life_updated_at") or extras.get("last_drive_at") or 0)
+            with suppress(TypeError, ValueError):
+                oc = int(extras.get("open_count") or 0)
+        if clock > 0:
+            v["stalled"] = _stalled_from_clock(clock, open_count=oc)
     if extras and extras.get("life_folder"):
         v["life_folder"] = str(extras["life_folder"])
     else:
@@ -454,18 +520,44 @@ def collect_vitals(
     return v
 
 
-def _life_is_stalled(store: Any) -> bool:
+def _stalled_from_clock(
+    ts: float,
+    *,
+    open_count: int = 0,
+    now: float | None = None,
+) -> bool:
+    """Stalled if an open goal's clock is at least 7 days old. No store I/O."""
+    if int(open_count or 0) <= 0:
+        return False
+    try:
+        stamp = float(ts or 0)
+    except (TypeError, ValueError):
+        return False
+    if stamp <= 0:
+        return False
+    return ((now if now is not None else time.time()) - stamp) >= _STALL_AFTER_S
+
+
+def _life_updated_ts(store: Any) -> float:
     g = store.active() if store is not None else None
     if g is None:
-        return False
+        return 0.0
     from datetime import UTC, datetime
 
     try:
         updated = datetime.fromisoformat(str(g.updated_at).replace("Z", "+00:00"))
-        age_days = (datetime.now(UTC) - updated).total_seconds() / 86400.0
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=UTC)
+        return updated.timestamp()
     except (TypeError, ValueError):
+        return 0.0
+
+
+def _life_is_stalled(store: Any) -> bool:
+    g = store.active() if store is not None else None
+    if g is None:
         return False
-    return age_days >= 7.0
+    return _stalled_from_clock(_life_updated_ts(store), open_count=1)
 
 
 def format_vitals_markdown(vitals: dict[str, Any] | None = None) -> str:
@@ -535,6 +627,7 @@ def organism_cycle(
             due = drive_due(home, hours=hours)
         if due:
             step = take_step(home)
+            extras["last_drive_at"] = now
             if step.get("ok"):
                 out["life_step"] = {
                     "goal": step.get("goal"),
@@ -542,9 +635,8 @@ def organism_cycle(
                     "next": step.get("next"),
                 }
                 extras["last_did"] = str(step.get("did") or "")[:200]
-                extras["last_drive_at"] = now
-            elif "last_drive_at" in prev:
-                extras["last_drive_at"] = last_drive
+                extras["life_updated_at"] = now
+                extras["stalled"] = False
         elif "last_drive_at" in prev:
             extras["last_drive_at"] = last_drive
         else:
@@ -555,20 +647,37 @@ def organism_cycle(
                 st = LifeGoalStore(home)
                 st._load()
                 stamp = float(st.last_drive_at or 0)
-            extras["last_drive_at"] = stamp or now
+            extras["last_drive_at"] = stamp
     compacted = False
-    with suppress(Exception):
-        from remedy.memory.cas import ensure_cas
+    last_compact = 0.0
+    with suppress(TypeError, ValueError):
+        last_compact = float(prev.get("last_compact_at") or 0)
+    cas_known = prev.get("cas_count") is not None
+    compact_due = (now - last_compact) >= _COMPACT_EVERY_S if last_compact > 0 else (not cas_known)
+    if compact_due:
+        with suppress(Exception):
+            from remedy.memory.cas import ensure_cas
 
-        cas = ensure_cas(home)
-        if cas is not None and cas.due_compact():
-            out["cas_compact"] = cas.compact()
-            compacted = True
-            out["cas"] = {k: val for k, val in cas.snapshot().items() if k != "path"}
-    if not compacted and prev.get("cas_count") is not None:
+            cas = ensure_cas(home)
+            if cas is not None and cas.due_compact():
+                out["cas_compact"] = cas.compact()
+                compacted = True
+                snap = cas.snapshot()
+                out["cas"] = {k: val for k, val in snap.items() if k != "path"}
+                extras["cas_count"] = int(snap.get("count") or 0)
+                kinds = snap.get("kinds") or {}
+                extras["cas_durable"] = int(kinds.get("fact") or 0) + int(kinds.get("life") or 0)
+                extras["_skip_cas"] = True
+        extras["last_compact_at"] = now
+        if not compacted and cas_known:
+            extras["_skip_cas"] = True
+            extras["cas_count"] = prev.get("cas_count") or 0
+            extras["cas_durable"] = prev.get("cas_durable") or 0
+    else:
         extras["_skip_cas"] = True
         extras["cas_count"] = prev.get("cas_count") or 0
         extras["cas_durable"] = prev.get("cas_durable") or 0
+        extras["last_compact_at"] = last_compact or now
     with suppress(Exception):
         from remedy.core.metabolism.time_crystal import get_time_crystal
 
@@ -602,7 +711,7 @@ def organism_cycle(
                 st = LifeGoalStore(home)
                 st._load()
                 stamp = float(st.last_pulse_at or 0)
-            extras["last_pulse_at"] = stamp or now
+            extras["last_pulse_at"] = stamp
     row = {
         "ts": now,
         "recalled": int(extras.get("recalled") or 0),
@@ -619,20 +728,28 @@ def organism_cycle(
     extras["last_cycle_at"] = now
     if not out.get("life_step") and prev.get("life_title"):
         extras["_skip_life"] = True
-        for k in ("life_title", "next_action", "last_did", "stalled", "open_count"):
+        for k in ("life_title", "next_action", "last_did", "open_count", "life_updated_at"):
             if k not in extras and prev.get(k) is not None:
                 extras[k] = prev[k]
+        clock = 0.0
+        oc = 0
+        with suppress(TypeError, ValueError):
+            clock = float(
+                extras.get("life_updated_at")
+                or extras.get("last_drive_at")
+                or prev.get("life_updated_at")
+                or prev.get("last_drive_at")
+                or 0
+            )
+        with suppress(TypeError, ValueError):
+            oc = int(extras.get("open_count") or prev.get("open_count") or 0)
+        extras["stalled"] = _stalled_from_clock(clock, open_count=oc, now=now)
     if prev.get("mood") or prev.get("who"):
         extras["_skip_soul"] = True
         for k in _SOUL_KEYS:
             if k not in extras and prev.get(k) is not None:
                 extras[k] = prev[k]
-    if (
-        prev
-        and extras.get("_skip_life")
-        and extras.get("_skip_soul")
-        and extras.get("_skip_cas")
-    ):
+    if prev and extras.get("_skip_life") and extras.get("_skip_soul") and extras.get("_skip_cas"):
         vitals = dict(prev)
         for k, val in extras.items():
             if str(k).startswith("_") or val is None:
@@ -725,8 +842,7 @@ def _header_from_vitals(v: dict[str, Any]) -> list[str]:
     lines = [
         f"[Organism · {who} · alive] mood={emoji} {show} · "
         f"stance={stance} · rapport≈{rapport:.2f} trust≈{trust:.2f} · "
-        f"turns={turns}"
-        + (f" · open={open_n}" if open_n else "")
+        f"turns={turns}" + (f" · open={open_n}" if open_n else "")
     ]
     hint = str(v.get("open_hint") or "").strip()
     if hint:
@@ -811,8 +927,7 @@ def organism_pulse_block(
                 lines.append(
                     f"[Organism · {who} · alive] mood={soma.emoji} {soma.label} · "
                     f"stance={stance} · rapport≈{rapport:.2f} trust≈{trust:.2f} · "
-                    f"turns={rel.turns_together}"
-                    + (f" · open={open_n}" if open_n else "")
+                    f"turns={rel.turns_together}" + (f" · open={open_n}" if open_n else "")
                 )
                 if open_hint:
                     lines.append(f"Open thread: {open_hint}")
@@ -829,9 +944,7 @@ def organism_pulse_block(
                 elif mood == "playful":
                     lines.append("Stance: light energy ok; still finish the work.")
                 elif mood == "focused" or stance == "focused":
-                    lines.append(
-                        "Stance: deep work — RESEARCH→PLAN→BUILD, verify before done."
-                    )
+                    lines.append("Stance: deep work — RESEARCH→PLAN→BUILD, verify before done.")
 
     # --- Metabolism counters ---
     with suppress(Exception):
@@ -963,9 +1076,7 @@ def forge_pulse(
                 + crystal_hint
             )
     if buildish and not muscle_ok and int(tier) >= 2:
-        return (
-            "[Forge · lean] Prefer tools and small verified steps over long plans."
-        )
+        return "[Forge · lean] Prefer tools and small verified steps over long plans."
     return ""
 
 
@@ -981,9 +1092,7 @@ def immune_pulse(
     acts = list(gov_actions or [])
     bits: list[str] = []
     if "critical_verify" in acts or "recovery_remedy" in acts:
-        bits.append(
-            "Do not claim done/green/shipped without a fresh verify signal from tools."
-        )
+        bits.append("Do not claim done/green/shipped without a fresh verify signal from tools.")
     if "shadow_strict" in acts:
         bits.append("High-blast tools: prefer file_edit paths; opaque shell stays blocked.")
     if not bits:
@@ -992,9 +1101,7 @@ def immune_pulse(
 
             g = get_governor(session_id)
             if g.verify_next:
-                bits.append(
-                    "Judgment point — verify tests/plan claims before asserting success."
-                )
+                bits.append("Judgment point — verify tests/plan claims before asserting success.")
     if not bits:
         return ""
     return "[Immune] " + " ".join(bits)
