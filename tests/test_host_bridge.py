@@ -30,7 +30,7 @@ from remedy.execution.host.scriptfile import (
     is_encoded_powershell,
     launch_script,
 )
-from remedy.execution.host.session import conpty_available
+from remedy.execution.host.session import _cwd_command, conpty_available
 from remedy.execution.host.translate import looks_like_powershell, translate_posix_to_host
 from remedy.execution.process import win_shell_prefix
 from remedy.execution.runtime import ToolRuntime
@@ -353,6 +353,13 @@ async def test_shared_session_scoped_by_id_and_start_cwd(tmp_path: Path) -> None
         assert s3._alive()
     finally:
         await close_all_shared_sessions()
+
+
+def test_cwd_command_matches_host_dialect() -> None:
+    assert _cwd_command("cmd") == "cd"
+    assert _cwd_command("pwsh") == "(Get-Location).Path"
+    assert _cwd_command("posix") == "pwd"
+    assert _cwd_command("bash") == "pwd"
 
 
 @pytest.mark.asyncio
