@@ -42,6 +42,7 @@ export function normalizeBrowserUrl(raw: string): string {
     // Empty userinfo (https://@host): URL API clears username but '@' remains in authority.
     const authMatch = u.match(/^https?:\/\/([^/?#]*)/i)
     if (authMatch && authMatch[1]!.includes('@')) return ''
+    if (_isBlockedBrowserHost(parsed.hostname)) return ''
   } catch {
     return ''
   }
@@ -108,6 +109,27 @@ export function resolveBrowserHome(raw?: string | null): string {
     return DEFAULT_BROWSER_HOME
   }
   return n
+}
+
+const _WILDCARD_IP_DNS = ['.nip.io', '.sslip.io', '.xip.io']
+
+/** IMDS / metadata / wildcard-IP hosts — parity with native rail + web_fetch. */
+function _isBlockedBrowserHost(hostname: string): boolean {
+  const host = (hostname || '').trim().toLowerCase().replace(/\.$/, '')
+  if (!host) return true
+  if (
+    host === 'metadata'
+    || host === 'metadata.google.internal'
+    || host === 'metadata.goog'
+    || host === 'instance-data'
+  ) {
+    return true
+  }
+  if (host.split('.').includes('metadata')) return true
+  if (host.endsWith('.internal')) return true
+  if (_WILDCARD_IP_DNS.some((sfx) => host.endsWith(sfx))) return true
+  if (host.startsWith('169.254.')) return true
+  return false
 }
 
 /** True when the URL is safe to open externally (matches Rust open_external_url). */
