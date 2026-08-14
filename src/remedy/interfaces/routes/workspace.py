@@ -63,6 +63,22 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
         except Exception:
             return default_project_from_config(cfg)
 
+    def _clamp_files_base(base: Path) -> Path:
+        """Never jail @file listing to a volume root (C:\\)."""
+        try:
+            resolved = Path(base).resolve()
+        except OSError:
+            resolved = Path(base).absolute()
+        if resolved.parent == resolved:
+            return Path.home().resolve()
+        return resolved
+
+    def _files_jail_base(session_id: str | None = None) -> Path:
+        """@file listing root. Never the volume root (C:\\) — that made
+        Windows system paths look 'inside' the jail and return HTTP 200.
+        """
+        return _clamp_files_base(_files_base(session_id))
+
     def _resolve_jailed(path: str, base: Path) -> Path:
         """Resolve path under base; reject traversal.
 
@@ -284,20 +300,34 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
                 from remedy.core.workspace import ensure_project_dir, resolve_project_path
 
                 try:
-                    base = ensure_project_dir(resolve_project_path(sess.project_path))
+                    base = _clamp_files_base(
+                        ensure_project_dir(resolve_project_path(sess.project_path))
+                    )
                 except Exception:
-                    base = _files_base()
+                    base = _files_jail_base()
             else:
-                base = _files_base()
+                base = _files_jail_base()
         else:
-            base = _files_base()
+            base = _files_jail_base()
         try:
             root = _resolve_jailed(path, base)
         except (SecurityError, ValueError):
             return {"files": [], "path": path, "error": "path outside allowed directory", "root": str(base)}
         try:
             if not root.exists():
-                return {"files": [], "path": path, "root": str(base)}
+                return {
+                    "files": [],
+                    "path": path,
+                    "root": str(base),
+                    "error": "not found",
+                }
+            if not root.is_dir():
+                return {
+                    "files": [],
+                    "path": path,
+                    "root": str(base),
+                    "error": "not a directory",
+                }
             entries = []
             for p in sorted(root.iterdir()):
                 if p.name.startswith(".") and p.name != ".":
@@ -335,14 +365,14 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
             raise HTTPException(400, "query (or q) is required")
         # Jail to session/project base. Never mkdir a caller-supplied tree
         # (GET must not create directories) and never walk an absolute escape.
-        base = _files_base()
+        base = _files_jail_base()
         if session_id and memory is not None:
             sess = await memory.get_chat_session(session_id)
             if sess and sess.project_path:
                 from remedy.core.workspace import resolve_project_path
 
                 with contextlib.suppress(Exception):
-                    base = resolve_project_path(sess.project_path)
+                    base = _clamp_files_base(resolve_project_path(sess.project_path))
         if path and str(path).strip():
             try:
                 base = _resolve_jailed(str(path).strip(), base)
