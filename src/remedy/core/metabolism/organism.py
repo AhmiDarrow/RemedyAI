@@ -112,7 +112,7 @@ def organism_recall_line(
     v = load_vitals(home)
     if v and int(v.get("cas_durable") or 0) == 0 and int(v.get("cas_count") or 0) == 0:
         return ""
-    qkey = q.lower()[:80]
+    qkey = f"{_home_path(home)}|{q.lower()[:80]}"
     global _recall_memo
     memo = _recall_memo
     if memo is not None and memo[0] == qkey and (time.time() - memo[2]) < 20.0:
@@ -543,10 +543,19 @@ def organism_cycle(
                 }
                 extras["last_did"] = str(step.get("did") or "")[:200]
                 extras["last_drive_at"] = now
+            elif "last_drive_at" in prev:
+                extras["last_drive_at"] = last_drive
         elif "last_drive_at" in prev:
             extras["last_drive_at"] = last_drive
         else:
-            extras["last_drive_at"] = now
+            stamp = 0.0
+            with suppress(Exception):
+                from remedy.memory.life_goals import LifeGoalStore
+
+                st = LifeGoalStore(home)
+                st._load()
+                stamp = float(st.last_drive_at or 0)
+            extras["last_drive_at"] = stamp or now
     compacted = False
     with suppress(Exception):
         from remedy.memory.cas import ensure_cas
@@ -588,7 +597,12 @@ def organism_cycle(
         elif "last_pulse_at" in prev:
             extras["last_pulse_at"] = last_pulse
         else:
-            extras["last_pulse_at"] = now
+            stamp = 0.0
+            with suppress(Exception):
+                st = LifeGoalStore(home)
+                st._load()
+                stamp = float(st.last_pulse_at or 0)
+            extras["last_pulse_at"] = stamp or now
     row = {
         "ts": now,
         "recalled": int(extras.get("recalled") or 0),
@@ -613,7 +627,22 @@ def organism_cycle(
         for k in _SOUL_KEYS:
             if k not in extras and prev.get(k) is not None:
                 extras[k] = prev[k]
-    vitals = collect_vitals(home, extras=extras, runtime=runtime)
+    if (
+        prev
+        and extras.get("_skip_life")
+        and extras.get("_skip_soul")
+        and extras.get("_skip_cas")
+    ):
+        vitals = dict(prev)
+        for k, val in extras.items():
+            if str(k).startswith("_") or val is None:
+                continue
+            vitals[k] = val
+        vitals["ts"] = now
+        vitals["last_cycle_at"] = now
+        vitals["alive"] = True
+    else:
+        vitals = collect_vitals(home, extras=extras, runtime=runtime)
     persist_vitals(vitals, home)
     out["vitals"] = vitals
     return out
