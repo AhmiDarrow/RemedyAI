@@ -176,7 +176,6 @@ class CuaMacroStore:
                     "version": 1,
                     "macros": {k: v.to_public() for k, v in self.macros.items()},
                 }
-                self._persist_sig = sig
             payload = json.dumps(data, indent=2)
             fd, tmp_name = tempfile.mkstemp(prefix=".macros.", suffix=".tmp", dir=str(d))
             try:
@@ -189,6 +188,7 @@ class CuaMacroStore:
                 with contextlib.suppress(Exception):
                     Path(tmp_name).unlink(missing_ok=True)
                 raise
+            self._persist_sig = sig
             return path
         except Exception:
             return None

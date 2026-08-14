@@ -247,6 +247,74 @@ def test_second_cycle_skips_life_resense(tmp_path: Path, monkeypatch) -> None:
     assert out["vitals"]["mood"] == "calm"
 
 
+def test_first_cycle_keeps_store_drive_stamp(tmp_path: Path, monkeypatch) -> None:
+    from remedy.core.metabolism import organism as org
+    from remedy.core.metabolism.organism import organism_cycle, persist_vitals
+    from remedy.memory.life_goals import LifeGoalStore
+
+    home = tmp_path / "stamp"
+    home.mkdir()
+    store = LifeGoalStore(home)
+    store.add("Finish the novel", next_action="Outline")
+    store.record_drive()
+    stamp = store.last_drive_at
+    persist_vitals(
+        {
+            "ts": 1,
+            "alive": True,
+            "life_title": "Finish the novel",
+            "open_count": 1,
+            "mood": "calm",
+            "who": "Remedy",
+            "cas_count": 0,
+        },
+        home,
+    )
+    monkeypatch.setattr(org, "organism_heartbeat", lambda *a, **k: {"recalled": 0})
+    monkeypatch.setattr("remedy.memory.life_drive.drive_due", lambda *a, **k: False)
+    monkeypatch.setattr("remedy.memory.life_goals.pulse_due", lambda *a, **k: False)
+    out = organism_cycle(home, session_id="life")
+    assert abs(float(out["vitals"]["last_drive_at"]) - stamp) < 1.0
+
+
+def test_quiet_cycle_skips_collect(tmp_path: Path, monkeypatch) -> None:
+    from remedy.core.metabolism import organism as org
+    from remedy.core.metabolism.organism import organism_cycle, persist_vitals
+
+    home = tmp_path / "quiet"
+    home.mkdir()
+    persist_vitals(
+        {
+            "ts": 1,
+            "alive": True,
+            "life_title": "Keep this title",
+            "next_action": "Stay put",
+            "last_did": "Already did",
+            "open_count": 1,
+            "stalled": False,
+            "mood": "calm",
+            "who": "Remedy",
+            "label": "Calm",
+            "last_drive_at": 1e18,
+            "last_pulse_at": 1e18,
+            "last_heartbeat_at": 1e18,
+            "cas_count": 0,
+            "cas_durable": 0,
+        },
+        home,
+    )
+    monkeypatch.setattr(org, "organism_heartbeat", lambda *a, **k: {"recalled": 0})
+    monkeypatch.setattr("remedy.memory.life_drive.drive_due", lambda *a, **k: False)
+    monkeypatch.setattr("remedy.memory.life_goals.pulse_due", lambda *a, **k: False)
+
+    def _boom(*_a, **_k):
+        raise AssertionError("collect_vitals should not run on a quiet cycle")
+
+    monkeypatch.setattr(org, "collect_vitals", _boom)
+    out = organism_cycle(home, session_id="life")
+    assert out["vitals"]["life_title"] == "Keep this title"
+
+
 def test_recall_prefers_session_ram(tmp_path: Path, monkeypatch) -> None:
     from remedy.core.metabolism.organism import organism_recall_line, persist_vitals
     from remedy.memory.cas import configure_cas
