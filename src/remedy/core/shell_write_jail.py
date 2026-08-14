@@ -206,24 +206,50 @@ _RUNTIME_BIN_NAMES = frozenset(
 )
 
 
-def _invoke_path_tokens(command: str) -> list[str]:
-    """First token of each pipeline / statement (invoke position)."""
+_FIRST_TOKEN_RE = re.compile(r"""^\s*(?:"([^"]*)"|'([^']*)'|(\S+))""")
+
+
+def _split_statements(command: str) -> list[str]:
+    """Split on | & ; / newlines, ignoring separators inside quotes."""
     out: list[str] = []
-    for part in re.split(r"[|&;\n]+", command or ""):
-        tok = part.strip().split(None, 1)
-        if tok:
-            out.append(_clean_token(tok[0]))
+    buf: list[str] = []
+    quote = ""
+    i = 0
+    s = command or ""
+    while i < len(s):
+        ch = s[i]
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+            buf.append(ch)
+            i += 1
+            continue
+        if ch in "|&;\n":
+            part = "".join(buf)
+            if part.strip():
+                out.append(part)
+            buf = []
+            while i < len(s) and s[i] in "|&;\n":
+                i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    part = "".join(buf)
+    if part.strip():
+        out.append(part)
     return out
 
 
-def _token_is_invoke(token: str, invoke: list[str]) -> bool:
-    """True when *token* is an invoked runtime, not a dest that looks like one."""
-    t = _clean_token(token).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower()
-    for inv in invoke:
-        i = _clean_token(inv).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower()
-        if t and i and (t == i or t.startswith(i) or i.startswith(t)):
-            return True
-    return False
+def _rest_after_first_token(part: str) -> str:
+    m = _FIRST_TOKEN_RE.match(part or "")
+    if not m:
+        return part or ""
+    return (part or "")[m.end() :]
 
 
 def is_runtime_executable_path(path_str: str) -> bool:
@@ -445,6 +471,32 @@ def path_outside_write_roots(
     return cand
 
 
+# Home/profile construction in launched script text.
+_SCRIPT_HOME_PATH_RE = re.compile(
+    r"(?ix)"
+    r"(?:"
+    r"\bpath\.home\b"
+    r"|\bexpanduser\b"
+    r"|\$env:(?:USERPROFILE|HOME|HOMEPATH)\b"
+    r"|\$\{env:(?:USERPROFILE|HOME|HOMEPATH)\}"
+    r"|%(?:USERPROFILE|HOME|HOMEPATH)%"
+    r")"
+)
+
+
+def _roots_cover_user_profile(roots: list[Path]) -> bool:
+    homes: list[Path] = []
+    try:
+        homes.append(Path.home())
+    except OSError:
+        pass
+    for key in ("USERPROFILE", "HOME"):
+        raw = os.environ.get(key)
+        if raw:
+            homes.append(Path(raw))
+    return any(_under_any(h, roots) for h in homes)
+
+
 _AUTH_HINT_RE = re.compile(
     r"(?ix)"
     r"(?:"
@@ -482,8 +534,9 @@ def scan_script_source_for_outside_writes(
     script: Path,
     *,
     write_roots: list[Path],
+    project_bound: bool = True,
 ) -> str | None:
-    """Fail closed when a launched .py references auth or abs paths outside roots."""
+    """Fail closed when a launched script references auth, home/profile, or outside paths."""
     try:
         text = script.read_text(encoding="utf-8", errors="replace")[:200_000]
     except OSError:
@@ -493,7 +546,18 @@ def scan_script_source_for_outside_writes(
             "shell write jail: script references Remedy auth secrets "
             f"({script.name}). Refuse to run."
         )
+    if not project_bound:
+        return None
     roots = _norm_roots(write_roots)
+    code = "\n".join(
+        "" if line.lstrip().startswith("#") else line for line in text.splitlines()
+    )
+    if _SCRIPT_HOME_PATH_RE.search(code) and not _roots_cover_user_profile(roots):
+        return (
+            "shell write jail: script uses home/profile path construction "
+            f"(Path.home/expanduser/$env:USERPROFILE/%USERPROFILE%) ({script.name}). "
+            "Refuse to run."
+        )
     for m in _ABS_PATH_RE.finditer(text):
         tok = m.group(0)
         try:
@@ -569,19 +633,19 @@ def check_shell_write_jail(
         )
 
     candidates = extract_path_candidates(cmd)
-    invoke = _invoke_path_tokens(cmd)
     offenders: list[str] = []
-    for token in candidates:
-        # Invoking python.exe / gcc.exe / node.exe is not a write to that path.
-        # Destinations that merely *look* like a runtime (`copy x cmd.exe`,
-        # `del C:\Python312\python.exe`) must still be jailed.
-        if is_runtime_executable_path(token) and _token_is_invoke(token, invoke):
+    # Dest checks use each statement *after* argv[0], so invoking
+    # python.exe is not a write, but copy … python.exe still is.
+    for part in _split_statements(cmd):
+        rest = _rest_after_first_token(part)
+        if not rest.strip():
             continue
-        outside = path_outside_write_roots(
-            token, write_roots=roots, cwd=cwd
-        )
-        if outside is not None:
-            offenders.append(str(outside))
+        for token in extract_path_candidates(rest):
+            outside = path_outside_write_roots(
+                token, write_roots=roots, cwd=cwd
+            )
+            if outside is not None:
+                offenders.append(str(outside))
 
     # Mutation + opaque path construction → deny even if another candidate is
     # in-root (e.g. `copy C:\proj\a $env:USERPROFILE\Desktop\b`). Opaque dests

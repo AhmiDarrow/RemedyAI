@@ -246,7 +246,7 @@ def test_session_todos_endpoint(client):
     )
     upsert_todos(
         rt,
-        [{"id": "1", "content": "list files", "status": "completed"}],
+        [{"id": "1", "content": "list files", "status": "in_progress"}],
         merge=False,
         root=proj,
     )
@@ -255,4 +255,13 @@ def test_session_todos_endpoint(client):
     rows = got.json()["todos"]
     assert len(rows) == 1
     assert rows[0]["content"] == "list files"
-    assert rows[0]["status"] == "completed"
+    assert rows[0]["status"] == "in_progress"
+    upsert_todos(
+        rt,
+        [{"id": "1", "content": "list files", "status": "completed"}],
+        merge=False,
+        root=proj,
+    )
+    done = c.get(f"/api/sessions/{sid}/todos")
+    assert done.status_code == 200
+    assert done.json()["todos"] == []

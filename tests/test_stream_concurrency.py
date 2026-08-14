@@ -85,8 +85,6 @@ async def test_binding_isolated_per_turn(runtime: BasicRuntime) -> None:
 
     runtime._call_llm_stream = fake_stream  # type: ignore[method-assign]
 
-    # Bypass credential resolve; inject distinct binds via short-circuited stream path
-    # by temporarily patching the lock section: pass provider/model and mock sync.
     async def run(sid: str, prov: str, mod: str) -> None:
         async for _ in runtime.stream_response(
             f"msg-{sid}",
@@ -96,31 +94,16 @@ async def test_binding_isolated_per_turn(runtime: BasicRuntime) -> None:
         ):
             pass
 
-    # Avoid real config sync overwriting keys — set attrs under lock is fine;
-    # stream_response freezes LlmBinding after _sync which may no-op without config.
-    from unittest.mock import patch
-
-    def fake_sync(rt, model_override=None, provider_override=None, llm_only=True):
-        if provider_override:
-            rt._llm_provider = provider_override
-            rt._provider = type(rt._provider)  # keep object; adapter resolved via get_provider
-            from remedy.core.providers import get_provider
-
-            rt._provider = get_provider(provider_override)
-        if model_override:
-            rt._llm_model = model_override
-
-    with patch(
-        "remedy.interfaces.api_support._sync_runtime_llm_from_config",
-        side_effect=fake_sync,
-    ):
-        await asyncio.gather(
-            run("sess-xai", "xai", "grok-4.5"),
-            run("sess-ds", "deepseek", "deepseek-chat"),
-        )
+    before = (runtime._llm_provider, runtime._llm_model)
+    await asyncio.gather(
+        run("sess-xai", "xai", "grok-4.5"),
+        run("sess-ds", "deepseek", "deepseek-v4-flash"),
+    )
 
     assert seen.get("sess-xai") == ("xai", "grok-4.5")
-    assert seen.get("sess-ds") == ("deepseek", "deepseek-chat")
+    assert seen.get("sess-ds") == ("deepseek", "deepseek-v4-flash")
+    # Process-wide runtime must stay the default — binds are per turn.
+    assert (runtime._llm_provider, runtime._llm_model) == before
 
 
 def test_llm_binding_contextvar_stack() -> None:

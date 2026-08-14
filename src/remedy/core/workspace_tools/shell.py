@@ -96,6 +96,21 @@ def _normalize_shell_command_for_host(command: str) -> str:
     return translate_posix_to_host(command).text
 
 
+def _cwd_in_write_roots(here: Path | str, roots: list[Path]) -> bool:
+    try:
+        cand = Path(here).expanduser().resolve(strict=False)
+    except OSError:
+        return False
+    for r in roots:
+        try:
+            root = Path(r).expanduser().resolve(strict=False)
+            if cand == root or cand.is_relative_to(root):
+                return True
+        except (OSError, ValueError, TypeError):
+            continue
+    return False
+
+
 async def _run_host_session(
     *,
     command: str,
@@ -105,16 +120,82 @@ async def _run_host_session(
     roots: list[Path],
     use_conpty: bool = False,
     host: str | None = None,
+    session_id: str | None = None,
+    project_bound: bool = True,
+    access_scope: str = "project",
 ) -> str:
     """Run *command* in the shared persistent host session (opt-in)."""
     from remedy.core.errors import format_tool_error
+    from remedy.core.shell_write_jail import check_shell_write_jail
     from remedy.execution.host.diagnose import diagnose_host_failure
-    from remedy.execution.host.session import get_shared_session
+    from remedy.execution.host.session import close_shared_session, get_shared_session
 
     try:
         sess = await get_shared_session(
-            host=host, cwd=str(cwd), env=env, use_conpty=use_conpty
+            host=host,
+            cwd=str(cwd),
+            env=env,
+            use_conpty=use_conpty,
+            session_id=session_id,
         )
+    except Exception as exc:
+        return format_tool_error(
+            f"host session failed: {exc}",
+            code="HOST_SESSION",
+            tool_name="bash_exec",
+            suggestion="Retry without session=true, or use host_run(argv).",
+        )
+
+    try:
+        here = await sess.current_cwd()
+    except Exception:
+        here = ""
+    if not here:
+        await close_shared_session(session_id=session_id)
+        return format_tool_error(
+            "host session cwd could not be proven",
+            code="WRITE_JAIL",
+            tool_name="bash_exec",
+            suggestion="Retry without session=true, or close the session.",
+        )
+    jail_cwd = Path(here)
+    if not _cwd_in_write_roots(jail_cwd, roots):
+        await close_shared_session(session_id=session_id)
+        return format_tool_error(
+            f"host session cwd left write roots: {jail_cwd}",
+            code="WRITE_JAIL",
+            tool_name="bash_exec",
+            suggestion="cd back into the project, or close the session.",
+        )
+
+    try:
+        jail_hit = check_shell_write_jail(
+            command,
+            write_roots=list(roots),
+            cwd=jail_cwd,
+            project_bound=project_bound,
+            access_scope=access_scope,
+        )
+    except Exception as exc:
+        await close_shared_session(session_id=session_id)
+        return format_tool_error(
+            f"shell write jail check failed (refused): {exc}",
+            code="WRITE_JAIL",
+            tool_name="bash_exec",
+            suggestion="Stay inside the focus project with file_write/file_edit.",
+        )
+    if jail_hit:
+        return format_tool_error(
+            jail_hit,
+            code="WRITE_JAIL",
+            tool_name="bash_exec",
+            suggestion=(
+                "Stay inside the focus project. Prefer file_write/file_edit. "
+                "Do not retarget sibling folders from this session."
+            ),
+        )
+
+    try:
         result = await sess.run(command, timeout=timeout)
     except Exception as exc:
         return format_tool_error(
@@ -123,28 +204,24 @@ async def _run_host_session(
             tool_name="bash_exec",
             suggestion="Retry without session=true, or use host_run(argv).",
         )
-    # After cd, refuse if the session walked outside write roots.
-    if result.cwd:
-        try:
-            here = Path(result.cwd).expanduser().resolve(strict=False)
-            allowed = False
-            for r in roots:
-                try:
-                    root = Path(r).expanduser().resolve(strict=False)
-                    if here == root or here.is_relative_to(root):
-                        allowed = True
-                        break
-                except (OSError, ValueError, TypeError):
-                    continue
-            if not allowed:
-                return format_tool_error(
-                    f"host session cwd left write roots: {result.cwd}",
-                    code="WRITE_JAIL",
-                    tool_name="bash_exec",
-                    suggestion="cd back into the project, or close the session.",
-                )
-        except OSError:
-            pass
+    if result.timed_out:
+        await close_shared_session(session_id=session_id)
+    elif not result.cwd:
+        await close_shared_session(session_id=session_id)
+        return format_tool_error(
+            "host session cwd could not be proven",
+            code="WRITE_JAIL",
+            tool_name="bash_exec",
+            suggestion="Retry without session=true, or close the session.",
+        )
+    elif not _cwd_in_write_roots(result.cwd, roots):
+        await close_shared_session(session_id=session_id)
+        return format_tool_error(
+            f"host session cwd left write roots: {result.cwd}",
+            code="WRITE_JAIL",
+            tool_name="bash_exec",
+            suggestion="cd back into the project, or close the session.",
+        )
     parts = [
         f"exit_code={result.exit_code}",
         f"cwd={result.cwd or cwd}",
@@ -398,7 +475,7 @@ def register_shell_tools(runtime: Any) -> None:
                     cand = Path(cwd) / tok
                 if cand.is_file():
                     src_hit = scan_script_source_for_outside_writes(
-                        cand, write_roots=list(roots)
+                        cand, write_roots=list(roots), project_bound=bound
                     )
                     if src_hit:
                         return format_tool_error(
@@ -452,6 +529,8 @@ def register_shell_tools(runtime: Any) -> None:
             )
 
         if session:
+            from remedy.core.turn_context import turn_session_id
+
             sess_cmd = (
                 _join_argv_for_jail(list(_argv))
                 if _argv
@@ -464,6 +543,9 @@ def register_shell_tools(runtime: Any) -> None:
                 env=env,
                 roots=list(roots),
                 use_conpty=bool(conpty),
+                session_id=turn_session_id(runtime),
+                project_bound=bound,
+                access_scope=scope,
             )
 
         result = await sandbox.execute(
@@ -672,7 +754,9 @@ def register_shell_tools(runtime: Any) -> None:
             )
         from remedy.core.shell_write_jail import scan_script_source_for_outside_writes
 
-        src_hit = scan_script_source_for_outside_writes(target, write_roots=list(roots))
+        src_hit = scan_script_source_for_outside_writes(
+            target, write_roots=list(roots), project_bound=bound
+        )
         if src_hit:
             return format_tool_error(
                 src_hit,
@@ -914,28 +998,96 @@ def register_shell_tools(runtime: Any) -> None:
                 tool_name="host_script",
                 suggestion="lang=pwsh | cmd | python.",
             )
-        if kind == "python":
-            root = runtime.effective_project_path()
+        root = runtime.effective_project_path()
+        cwd = root
+        wd_raw = (workdir or "").strip()
+        if wd_raw:
             try:
-                launch = launch_script("python", text, project_path=root)
-            except ValueError as exc:
+                cwd = runtime.resolve_tool_path(wd_raw, for_write=True)
+                if cwd.is_file():
+                    cwd = cwd.parent
+            except Exception as e:
                 return format_tool_error(
-                    str(exc),
-                    code="HOST_PREPARE",
+                    f"invalid workdir: {e}",
+                    code="BAD_WORKDIR",
                     tool_name="host_script",
-                    suggestion="Shrink the script body.",
+                    suggestion="Pass workdir under the project folder.",
                 )
+        try:
+            roots = list(runtime.write_roots() or [])
+        except Exception:
+            roots = [root]
+        if not roots:
+            roots = [root]
+        try:
+            bound = not bool(runtime.project_path_is_unset())
+        except Exception:
+            bound = True
+        try:
+            scope = str(runtime.access_scope() or "project")
+        except Exception:
+            scope = "project"
+        from remedy.core.shell_write_jail import (
+            check_shell_write_jail,
+            scan_script_source_for_outside_writes,
+        )
+
+        try:
+            jail_hit = check_shell_write_jail(
+                text,
+                write_roots=list(roots),
+                cwd=cwd,
+                project_bound=bound,
+                access_scope=scope,
+            )
+        except Exception as exc:
+            return format_tool_error(
+                f"shell write jail check failed (refused): {exc}",
+                code="WRITE_JAIL",
+                tool_name="host_script",
+                suggestion="Keep script I/O under the project folder.",
+            )
+        if jail_hit:
+            return format_tool_error(
+                jail_hit,
+                code="WRITE_JAIL",
+                tool_name="host_script",
+                suggestion="Keep script I/O under the project folder.",
+            )
+        try:
+            launch = launch_script(kind, text, project_path=root)
+        except ValueError as exc:
+            return format_tool_error(
+                str(exc),
+                code="HOST_PREPARE",
+                tool_name="host_script",
+                suggestion="Shrink the script body.",
+            )
+        src_hit = scan_script_source_for_outside_writes(
+            launch.path, write_roots=list(roots), project_bound=bound
+        )
+        if src_hit:
+            return format_tool_error(
+                src_hit,
+                code="WRITE_JAIL",
+                tool_name="host_script",
+                suggestion="Keep script I/O under the project folder.",
+            )
+        if kind == "python":
             return await run_python_file(
                 path=str(launch.path),
                 timeout_seconds=timeout_seconds,
                 workdir=workdir,
             )
-        # Jail the body, then let Host Bridge write .ps1/.cmd and run -File.
-        prefix = "pwsh -Command " if kind == "pwsh" else "cmd /c "
+        if kind == "pwsh":
+            jail_cmd = f'pwsh -File "{launch.path}"'
+        else:
+            jail_cmd = f'cmd /c "{launch.path}"'
         return await bash_exec(
-            command=prefix + text,
+            command=jail_cmd,
             timeout_seconds=timeout_seconds,
             workdir=workdir,
+            _argv=launch.argv,
         )
 
     runtime.tool_registry.register_builtin_handler(

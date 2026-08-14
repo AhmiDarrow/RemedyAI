@@ -55,3 +55,22 @@ def test_session_llm_update_fields_pairs():
     f = session_llm_update_fields(provider=None, model="grok-4.5")
     assert f["llm_provider"] == "xai"
     assert f["model"] == "grok-4.5"
+
+
+def test_binding_for_session_does_not_mutate_runtime():
+    from types import SimpleNamespace
+
+    from remedy.interfaces.api_support import binding_for_session
+
+    rt = SimpleNamespace(
+        _llm_provider="openai",
+        _llm_model="gpt-4o-mini",
+        _llm_base_url="https://api.openai.com/v1",
+        _llm_api_key="sk-keep",
+    )
+    bind = binding_for_session("xai", "grok-4.5", runtime=rt)
+    assert bind.provider == "xai"
+    assert "grok" in (bind.model or "").lower()
+    assert rt._llm_provider == "openai"
+    assert rt._llm_model == "gpt-4o-mini"
+    assert rt._llm_api_key == "sk-keep"

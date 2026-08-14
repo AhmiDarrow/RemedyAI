@@ -67,6 +67,34 @@ def test_open_count_and_format():
     block = format_todos_block(items)
     assert "[ ]" in block and "[x]" in block and "[>]" in block
     assert "2 open" in block
+    closed = upsert_todos(
+        rt,
+        [
+            {"id": "a", "content": "one", "status": "completed"},
+            {"id": "b", "content": "two", "status": "cancelled"},
+        ],
+        merge=False,
+    )
+    assert open_todo_count(closed) == 0
+    assert format_todos_block(closed) == ""
+
+
+def test_closed_checklist_clears_disk(tmp_path):
+    rt = _rt(tmp_path)
+    upsert_todos(
+        rt,
+        [{"id": "1", "content": "explore", "status": "pending"}],
+        merge=False,
+    )
+    fp = tmp_path / ".remedy-build" / "todos.json"
+    assert fp.is_file()
+    upsert_todos(
+        rt,
+        [{"id": "1", "content": "explore", "status": "completed"}],
+        merge=False,
+    )
+    assert not fp.is_file()
+    assert load_todos(rt) == []
 
 
 def test_seed_drive_todos(tmp_path):

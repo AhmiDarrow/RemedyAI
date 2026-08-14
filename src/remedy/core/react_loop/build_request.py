@@ -115,8 +115,13 @@ def build_step_request_body(
         if getattr(runtime, "_force_tool_choice", False) and isinstance(body, dict):
             if body.get("tools"):
                 body["tool_choice"] = "required"
-                body["stream"] = False
                 body["temperature"] = 0.05
+                # llama.cpp streaming + required is flaky; cloud hosts are fine.
+                with suppress(Exception):
+                    from remedy.core.local_agent_optimize import is_local_binding
+
+                    if is_local_binding(bind.provider, bind.model, bind.base_url):
+                        body["stream"] = False
 
     try:
         local_agent = False

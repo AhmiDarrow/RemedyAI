@@ -27,6 +27,7 @@ from remedy.execution.host.runner import (
 from remedy.execution.host.session import (
     HostSession,
     SessionResult,
+    close_all_shared_sessions,
     close_shared_session,
     conpty_available,
     get_shared_session,
@@ -50,6 +51,7 @@ __all__ = [
     "HostSession",
     "PreparedCommand",
     "SessionResult",
+    "close_all_shared_sessions",
     "close_shared_session",
     "coerce_argv",
     "conpty_available",

@@ -8,9 +8,11 @@ from remedy.core.build_engine import (
     BuildTurnState,
     begin_build_turn,
     build_blocks_final_answer,
+    build_has_open_drive,
     format_ship_report_line,
     frontier_continue_inject,
     green_continue_message,
+    green_gate_cap_allows_final,
     looks_like_ship_goal,
     observe_tool_batch,
     unfinished_green_gate_message,
@@ -132,6 +134,26 @@ def test_ship_gate_blocks_final_until_push():
     st.goal = "push to origin"
     assert st.ship_complete() is True
     assert build_blocks_final_answer(st) is False
+
+
+def test_green_gate_cap_holds_when_ship_unfinished():
+    st = BuildTurnState(
+        active=True,
+        ship_required=True,
+        last_verify_ok=True,
+        write_steps=2,
+        write_set=[],
+        ship_pushed=False,
+        require_green_to_finish=True,
+    )
+    assert build_blocks_final_answer(st) is True
+    assert build_has_open_drive(st) is True
+    assert green_gate_cap_allows_final(st, reopen_count=6, max_reopens=6) is False
+    st.ship_pushed = True
+    st.goal = "push to origin"
+    assert st.ship_complete() is True
+    assert build_has_open_drive(st) is False
+    assert green_gate_cap_allows_final(st, reopen_count=6, max_reopens=6) is True
 
 
 def test_green_continue_ship_message():

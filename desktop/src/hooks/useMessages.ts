@@ -8,7 +8,11 @@ import {
   type StreamProgress,
   type UsagePayload,
 } from '../api/messages'
-import { parseTodosPayload, type BuildTodo } from '../components/BuildTodos'
+import {
+  parseTodosPayload,
+  todosHaveOpen,
+  type BuildTodo,
+} from '../components/BuildTodos'
 import {
   appendJobThinking,
   appendJobToken,
@@ -257,7 +261,7 @@ export function useMessages(sessionId: string | null) {
         const td = await listSessionTodos(loadId)
         if (sessionIdRef.current !== loadId) return
         const parsed = parseTodosPayload(td)
-        if (parsed.length) setBuildTodos(parsed)
+        setBuildTodos(todosHaveOpen(parsed) ? parsed : [])
       } catch {
         /* checklist is optional */
       }
@@ -648,6 +652,7 @@ export function useMessages(sessionId: string | null) {
         // Always clear focused chrome locks when the focused job ends; if this
         // was a background job, leave focused locks alone (other tab may stream).
         if (isFocusedTurn()) {
+          setBuildTodos((prev) => (todosHaveOpen(prev) ? prev : []))
           setStreaming(false)
           setStreamStalled(false)
           setStallSeconds(0)
@@ -920,8 +925,9 @@ export function useMessages(sessionId: string | null) {
         (payload) => {
           bumpActivity()
           const parsed = parseTodosPayload(payload)
-          setJobBuildTodos(targetId, parsed)
-          if (isFocusedTurn()) setBuildTodos(parsed)
+          const live = todosHaveOpen(parsed) ? parsed : []
+          setJobBuildTodos(targetId, live)
+          if (isFocusedTurn()) setBuildTodos(live)
         },
       )
 

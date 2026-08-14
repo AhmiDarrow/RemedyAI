@@ -15,7 +15,7 @@ import remarkGfm from 'remark-gfm'
 import type { ChatMessage } from '../types'
 import { sanitizeAssistantText } from '../utils/sanitizeChat'
 import { dayKey, dayLabel } from '../utils/relativeTime'
-import { BuildTodos, type BuildTodo } from './BuildTodos'
+import { BuildTodos, todosHaveOpen, type BuildTodo } from './BuildTodos'
 import { TaskProgress, type TaskProgressInfo } from './TaskProgress'
 import { ImageLightbox } from './ImageLightbox'
 import { ChatImage } from './ChatImage'
@@ -823,41 +823,7 @@ export function MessageFeed({
         )
       })}
 
-      {streaming && (
-        <div
-          className="px-3 overflow-y-auto"
-          style={{
-            // Room for Process depth without eating the whole feed
-            maxHeight:
-              toolProcessMode === 'full'
-                ? 'min(42vh, 26rem)'
-                : toolProcessMode === 'medium'
-                  ? 'min(34vh, 20rem)'
-                  : 'min(26vh, 14rem)',
-          }}
-        >
-          <BuildTodos items={buildTodos} live />
-          {/*
-            Progress bar always. Tool chips only if ProcessTrace is absent —
-            otherwise every mode double-lists the same steps.
-          */}
-          <TaskProgress
-            streaming={streaming}
-            activeTools={activeTools}
-            progress={taskProgress}
-            showToolDetails={processSteps.length === 0}
-          />
-          {processSteps.length > 0 && (
-            <ProcessTrace mode={toolProcessMode} steps={processSteps} live />
-          )}
-        </div>
-      )}
-
-      {/* Live thinking + answer always docked at the visual bottom of the feed. */}
-      {!streaming && buildTodos.length > 0 && (
-        <BuildTodos items={buildTodos} />
-      )}
-
+      {/* Reply first; checklist/tools attach under it so long thoughts do not bury them. */}
       {streaming && (
         <div className="live-stream-dock">
           <div className="live-stream-card">
@@ -890,7 +856,39 @@ export function MessageFeed({
               partnerName={partnerName}
             />
           </div>
+          <div
+            className="px-3 overflow-y-auto"
+            data-live-work="below-reply"
+            style={{
+              // Room for Process depth without eating the whole feed
+              maxHeight:
+                toolProcessMode === 'full'
+                  ? 'min(42vh, 26rem)'
+                  : toolProcessMode === 'medium'
+                    ? 'min(34vh, 20rem)'
+                    : 'min(26vh, 14rem)',
+            }}
+          >
+            <BuildTodos items={buildTodos} live />
+            {/*
+              Progress bar always. Tool chips only if ProcessTrace is absent —
+              otherwise every mode double-lists the same steps.
+            */}
+            <TaskProgress
+              streaming={streaming}
+              activeTools={activeTools}
+              progress={taskProgress}
+              showToolDetails={processSteps.length === 0}
+            />
+            {processSteps.length > 0 && (
+              <ProcessTrace mode={toolProcessMode} steps={processSteps} live />
+            )}
+          </div>
         </div>
+      )}
+
+      {!streaming && todosHaveOpen(buildTodos) && (
+        <BuildTodos items={buildTodos} />
       )}
 
       {!loading && visible.length === 0 && !streaming && (

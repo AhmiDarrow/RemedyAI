@@ -5,10 +5,14 @@ from __future__ import annotations
 import json
 
 from remedy.core.react_policy import (
+    is_chat_only_message,
+    is_knowledge_question,
     _DEFAULT_SYSTEM_BODY,
     AGENCY_REARM_NUDGE,
     RECOVERY_NUDGE,
     SPEED_BATCH_NUDGE,
+    UNFINISHED_WORK_HARD_STOP,
+    UNFINISHED_WORK_NUDGE,
     agency_rearm_nudge_message,
     agency_tool_promise_claim,
     batch_has_tool_errors,
@@ -26,6 +30,9 @@ from remedy.core.react_policy import (
     strip_tool_markup,
     tool_call_fingerprint,
     tool_content_is_error,
+    unfinished_work_blocks_final,
+    unfinished_work_hard_stop_message,
+    unfinished_work_nudge_message,
 )
 
 
@@ -65,6 +72,79 @@ def test_message_wants_tools_chat_vs_code() -> None:
     assert message_wants_tools("bug sweep") is True
     assert message_wants_tools("hotfix") is True
     assert message_wants_tools("triage") is True
+    assert message_wants_tools(
+        "we need a 15minute autolock timeout and as well can we resize "
+        "the settings and about ui they require scrolling to see and "
+        "don't need to be that large"
+    ) is True
+
+
+def test_is_chat_only_message() -> None:
+    assert is_chat_only_message("thanks") is True
+    assert is_chat_only_message("hi") is True
+    assert is_chat_only_message("what skills do you have?") is True
+    assert is_chat_only_message("add a dark mode toggle to the about window") is False
+    assert is_chat_only_message(
+        "we need a 15minute autolock timeout and resize settings"
+    ) is False
+
+
+def test_is_knowledge_question_class() -> None:
+    """Trivia stays optional-tools; requests and project/UI shape stay work."""
+    assert is_knowledge_question("what time is it in paris") is True
+    assert is_knowledge_question("what provider are we connected to") is True
+    assert is_knowledge_question("who is the president of france?") is True
+    assert is_knowledge_question("what is 2+2?") is True
+    # Polite request wrapper is work even with a question mark
+    assert is_knowledge_question("can you add a dark mode toggle?") is False
+    assert is_knowledge_question("could we shrink the about window?") is False
+    # Project / UI shape is work
+    assert is_knowledge_question("is there a lock timeout in settings") is False
+    assert is_knowledge_question("what files are in src/") is False
+    # Multi-line briefs are never trivia
+    assert is_knowledge_question("what should we do?\nadd idle lock") is False
+    # Chat is not a knowledge question
+    assert is_knowledge_question("hi") is False
+
+
+def test_message_wants_tools_fail_open_without_verb_list() -> None:
+    """Standing rule: tools on unless proven chat/trivia. No product nouns."""
+    # Imperative product change with none of the old special-case verbs
+    assert message_wants_tools(
+        "the idle lock should be fifteen minutes and the about window "
+        "must not require scrolling"
+    ) is True
+    assert message_wants_tools(
+        "add a 15 minute idle lock to the preferences window"
+    ) is True
+    assert message_wants_tools("tighten the about dialog so it doesn't scroll") is True
+    # Trivia / social stay off
+    assert message_wants_tools("what time is it in paris") is False
+    assert message_wants_tools("thanks") is False
+
+
+def test_unfinished_work_blocks_final_class() -> None:
+    """Zero tool evidence cannot complete a work request — any phrasing."""
+    work = "add a 15 minute idle lock to the preferences window"
+    assert unfinished_work_blocks_final(work, tools_executed=0) is True
+    assert unfinished_work_blocks_final(work, tools_executed=1) is False
+    assert unfinished_work_blocks_final("thanks", tools_executed=0) is False
+    assert unfinished_work_blocks_final(
+        "what time is it in paris", tools_executed=0
+    ) is False
+    assert unfinished_work_blocks_final(
+        work, tools_executed=0, user_stopped=True
+    ) is False
+    assert unfinished_work_blocks_final(
+        "hi", tools_executed=0, build_active=True
+    ) is False
+    # Length of the model's prose is irrelevant — user asked for work.
+    assert unfinished_work_blocks_final(work, tools_executed=0) is True
+    nudge = unfinished_work_nudge_message()
+    assert nudge["role"] == "user"
+    assert UNFINISHED_WORK_NUDGE in nudge["content"]
+    assert "function-calling" in nudge["content"].lower()
+    assert unfinished_work_hard_stop_message() == UNFINISHED_WORK_HARD_STOP
 
 
 def test_agency_tool_promise_claim_hard_and_soft() -> None:
@@ -92,6 +172,11 @@ def test_agency_tool_promise_claim_hard_and_soft() -> None:
     assert agency_tool_promise_claim("", "") is False
     assert agency_tool_promise_claim(None, None) is False
     # Coding / long-task stubs must re-arm (not only review/skill phrases)
+    # Class of I'll/let-me + work verb — not a per-incident phrase
+    assert agency_tool_promise_claim(
+        "I'll find the autolock timeout and the Settings/About dialog sizing next, then tighten both."
+    ) is True
+    assert agency_tool_promise_claim("Let me look at how lock timeout is wired.") is True
     assert agency_tool_promise_claim("I will implement the fix now.") is True
     assert agency_tool_promise_claim("I'll apply the patch next.") is True
     assert agency_tool_promise_claim("Let me fix that.") is True

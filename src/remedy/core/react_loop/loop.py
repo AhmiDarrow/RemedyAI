@@ -30,6 +30,7 @@ from remedy.core.react_loop.binding import (
 from remedy.core.react_loop.build_request import build_step_request_body
 from remedy.core.react_loop.errors import (
     is_fatal_llm_api_error as _is_fatal_llm_api_error,
+    is_thinking_tool_choice_error as _is_thinking_tool_choice_error,
 )
 from remedy.core.react_loop.recovery import (
     fatal_model_error_message,
@@ -66,6 +67,9 @@ from remedy.core.react_policy import (
     strip_stream_status_noise,
     strip_tool_markup,
     turn_has_unfinished_work,
+    unfinished_work_blocks_final,
+    unfinished_work_hard_stop_message,
+    unfinished_work_nudge_message,
 )
 from remedy.core.react_stream import (
     StreamRoundState,
@@ -233,10 +237,67 @@ async def call_llm_stream(runtime, message: str,
         empty_answer_retries = 0
         max_empty_answer_retries = 8
         # Cap agency re-arms / green-gate re-opens (token burn safety).
+        # Open todos / unfinished ship ignore these caps (max_total is the net).
         agency_rearm_count = 0
         max_agency_rearms = 6
+        # Zero-tool work drives are a different class from promise re-arms:
+        # never accept a work turn that never called a tool. Cap is only a
+        # token-burn wall — then an honest stop, never a fake "I'll find…".
+        zero_tool_drive_count = 0
+        max_zero_tool_drives = 8
+        thinking_choice_repaired = False
         green_gate_reopen_count = 0
         max_green_gate_reopens = 6
+
+        def _open_drive_keeps_going() -> bool:
+            with suppress(Exception):
+                from remedy.core.build_engine import (
+                    build_has_open_drive,
+                    get_build_state,
+                )
+
+                return build_has_open_drive(get_build_state(runtime))
+            return False
+
+        def _build_active() -> bool:
+            with suppress(Exception):
+                from remedy.core.build_engine import get_build_state
+
+                bst = get_build_state(runtime)
+                return bool(bst is not None and getattr(bst, "active", False))
+            return False
+
+        def _work_unfinished() -> bool:
+            return unfinished_work_blocks_final(
+                message or "",
+                tools_executed=tools_executed_this_turn,
+                user_stopped=message_asks_to_stop(message or ""),
+                build_active=_build_active(),
+            )
+
+        def _drive_zero_tool_work() -> bool:
+            """Re-arm + force a native tool call. True → caller must continue."""
+            nonlocal zero_tool_drive_count, force_answer_sticky
+            if not _work_unfinished():
+                return False
+            if (
+                zero_tool_drive_count >= max_zero_tool_drives
+                and not _open_drive_keeps_going()
+            ):
+                return False
+            zero_tool_drive_count += 1
+            _rearm_agency_tools()
+            force_answer_sticky = False
+            runtime._force_tool_choice = True
+            messages.append(unfinished_work_nudge_message())
+            logger.info(
+                "Unfinished work — zero-tool drive %d/%d (step %d)",
+                zero_tool_drive_count,
+                max_zero_tool_drives,
+                step + 1,
+            )
+            return True
+
         # One OAuth/API re-auth attempt per turn (xAI 401 → refresh token).
         auth_refresh_done = False
         # Multi-epoch: soft walls compact; absolute total is safety only.
@@ -851,6 +912,23 @@ async def call_llm_stream(runtime, message: str,
                 force_answer = (
                     is_final_step or not tools or force_answer_sticky
                 )
+                # Work request + zero tool evidence is never a successful final.
+                # Keep tools on and require a native call instead of summarizing.
+                if (
+                    force_answer
+                    and _work_unfinished()
+                    and all_tools
+                    and not message_asks_to_stop(message or "")
+                    and (
+                        zero_tool_drive_count < max_zero_tool_drives
+                        or _open_drive_keeps_going()
+                    )
+                ):
+                    force_answer = False
+                    force_answer_sticky = False
+                    is_final_step = False
+                    _rearm_agency_tools()
+                    runtime._force_tool_choice = True
                 # Re-resolve pack each step (write-first → full after writes)
                 if not force_answer and turn.all_tools and not _verify_green:
                     _resolve_and_apply(step_index=int(step))
@@ -1230,6 +1308,25 @@ async def call_llm_stream(runtime, message: str,
                                 logger.debug(
                                     "tool-args strip failed: %s", strip_exc
                                 )
+                        # Thinking/reasoning mode + tool_choice=required is a
+                        # provider class mismatch. Drop thinking, keep tools.
+                        if (
+                            resp.status == 400
+                            and not thinking_choice_repaired
+                            and _is_thinking_tool_choice_error(text)
+                        ):
+                            thinking_choice_repaired = True
+                            runtime._thinking_level = "off"
+                            runtime._force_tool_choice = True
+                            logger.warning(
+                                "Provider rejected tool_choice under thinking; "
+                                "retrying with thinking off"
+                            )
+                            yield (
+                                "@@status:Model cannot mix thinking with required "
+                                "tools — retrying with tools…\n"
+                            )
+                            continue
                         # Fatal: wrong/missing model — do not soft-retry 16× (looks stuck).
                         if _is_fatal_llm_api_error(resp.status, text):
                             model_name = str(_bind.model or "unknown")
@@ -1322,6 +1419,10 @@ async def call_llm_stream(runtime, message: str,
                             force_answer_sticky=force_answer_sticky,
                             api_soft_failures=api_soft_failures,
                             max_api_soft_failures=max_api_soft_failures,
+                            keep_tools=(
+                                _work_unfinished()
+                                or tools_executed_this_turn > 0
+                            ),
                         )
                         if _soft_act == "stop":
                             if force_answer_sticky and not force_answer_api_fail_once:
@@ -1332,6 +1433,23 @@ async def call_llm_stream(runtime, message: str,
                             )
                             return
                         api_soft_failures += 1
+                        if _soft_act == "retry_with_tools":
+                            _rearm_agency_tools()
+                            force_answer_sticky = False
+                            runtime._force_tool_choice = True
+                            logger.warning(
+                                "Soft API error HTTP %s — retrying with tools "
+                                "(%d/%d)",
+                                resp.status,
+                                api_soft_failures,
+                                max_api_soft_failures,
+                            )
+                            yield (
+                                f"@@status:Provider error HTTP {resp.status} — "
+                                f"retrying with tools "
+                                f"({api_soft_failures}/{max_api_soft_failures})…\n"
+                            )
+                            continue
                         # Transient path: rebuild no-tool body and POST force-answer.
                         # Skip for local keep-tools (handled above).
                         if _soft_act == "force_answer_rebuild" and not _local_keep_tools:
@@ -1968,28 +2086,38 @@ async def call_llm_stream(runtime, message: str,
                             }
                         )
                         continue
-                    # Agency fail-open (content path): "Activating skill now" etc.
-                    # Must run *before* build monologue / false-progress acceptance —
-                    # skill/tool promise claims get a dedicated re-arm nudge.
+                    # Agency fail-open (content path): unfinished work or a
+                    # tool-promise stub. Class rule — not a phrase/length gate.
                     if (
                         not tool_calls_list
                         and all_tools
                         and not force_answer_sticky
                         and not is_final_step
-                        and agency_tool_promise_claim(text_out, reasoning_out)
-                        and agency_rearm_count < max_agency_rearms
                     ):
-                        agency_rearm_count += 1
-                        _rearm_agency_tools()
-                        force_answer_sticky = False
-                        messages.append(agency_rearm_nudge_message())
-                        logger.info(
-                            "Agency re-arm after tool-promise prose (step %d, %d/%d)",
-                            step + 1,
-                            agency_rearm_count,
-                            max_agency_rearms,
-                        )
-                        continue
+                        if _drive_zero_tool_work():
+                            continue
+                        if _work_unfinished():
+                            yield unfinished_work_hard_stop_message()
+                            return
+                        if (
+                            agency_tool_promise_claim(text_out, reasoning_out)
+                            and (
+                                agency_rearm_count < max_agency_rearms
+                                or _open_drive_keeps_going()
+                            )
+                        ):
+                            agency_rearm_count += 1
+                            _rearm_agency_tools()
+                            force_answer_sticky = False
+                            runtime._force_tool_choice = True
+                            messages.append(agency_rearm_nudge_message())
+                            logger.info(
+                                "Agency re-arm after tool-promise prose (step %d, %d/%d)",
+                                step + 1,
+                                agency_rearm_count,
+                                max_agency_rearms,
+                            )
+                            continue
                     # Build engine: monologue without tools is illegal mid-build —
                     # but after tools already ran, a plain-language summary is OK
                     # (do not re-block legitimate finals as monologue).
@@ -2030,12 +2158,17 @@ async def call_llm_stream(runtime, message: str,
                                 build_blocks_final_answer,
                                 format_ship_report_line,
                                 get_build_state,
+                                green_gate_cap_allows_final,
                                 unfinished_green_gate_message,
                             )
 
                             bst_g = get_build_state(runtime)
                             if build_blocks_final_answer(bst_g) and bst_g is not None:
-                                if green_gate_reopen_count >= max_green_gate_reopens:
+                                if green_gate_cap_allows_final(
+                                    bst_g,
+                                    reopen_count=green_gate_reopen_count,
+                                    max_reopens=max_green_gate_reopens,
+                                ):
                                     logger.warning(
                                         "Build green-gate cap (%d) — allowing final",
                                         max_green_gate_reopens,
@@ -2496,28 +2629,38 @@ async def call_llm_stream(runtime, message: str,
                             continue
                     return
 
-                # Agency fail-open (reasoning / empty-content path): model
-                # narrated skill/tool intent only in reasoning_content, or
-                # content was stripped — re-arm tools instead of ending.
+                # Agency fail-open (reasoning / empty-content path): unfinished
+                # work or a tool-promise stub — never end with zero evidence.
                 if (
                     not tool_calls_list
                     and all_tools
                     and not force_answer_sticky
                     and not is_final_step
-                    and agency_tool_promise_claim(text_out, reasoning_out)
-                    and agency_rearm_count < max_agency_rearms
                 ):
-                    agency_rearm_count += 1
-                    _rearm_agency_tools()
-                    force_answer_sticky = False
-                    messages.append(agency_rearm_nudge_message())
-                    logger.info(
-                        "Agency re-arm after tool-promise prose (step %d, %d/%d)",
-                        step + 1,
-                        agency_rearm_count,
-                        max_agency_rearms,
-                    )
-                    continue
+                    if _drive_zero_tool_work():
+                        continue
+                    if _work_unfinished():
+                        yield unfinished_work_hard_stop_message()
+                        return
+                    if (
+                        agency_tool_promise_claim(text_out, reasoning_out)
+                        and (
+                            agency_rearm_count < max_agency_rearms
+                            or _open_drive_keeps_going()
+                        )
+                    ):
+                        agency_rearm_count += 1
+                        _rearm_agency_tools()
+                        force_answer_sticky = False
+                        runtime._force_tool_choice = True
+                        messages.append(agency_rearm_nudge_message())
+                        logger.info(
+                            "Agency re-arm after tool-promise prose (step %d, %d/%d)",
+                            step + 1,
+                            agency_rearm_count,
+                            max_agency_rearms,
+                        )
+                        continue
 
                 if not tool_calls_list or force_answer:
                     # Empty content after tools/thinking: never soft-give-up while

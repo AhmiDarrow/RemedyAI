@@ -152,7 +152,14 @@ _L2_AGENCY = re.compile(
     r"\bload\s+(the |a |this )?[\w.-]{2,48}\s+skill\b|"
     r"\b(use|follow|run)\s+(the |a |this )?[\w.-]{2,48}\s+skill\b|"
     r"\b(use|load|enable)\s+(the |a )?skill\b|"
-    r"\bactivate\s+skill\b"
+    r"\bactivate\s+skill\b|"
+    # Live 2026-08-14: product change without implement/fix verbs → L1 strip
+    r"we need (a |an |to )|"
+    r"can we (add|resize|change|shrink|tighten|fix)|"
+    r"resize|shrink|"
+    r"autolock|auto[- ]?lock|"
+    r"settings (and |/ )?(about )?(ui|dialog|panel|window)|"
+    r"about (ui|dialog|panel|window)"
     r")\b"
 )
 # Paths + bare filenames that imply workspace tools
