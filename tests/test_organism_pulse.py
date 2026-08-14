@@ -203,6 +203,41 @@ def test_organism_cycle_writes_vitals(tmp_path: Path) -> None:
     reset_middleman_state()
 
 
+def test_soma_from_vitals_and_tray(tmp_path: Path) -> None:
+    from remedy.core.metabolism.organism import (
+        collect_vitals,
+        load_vitals,
+        persist_vitals,
+        soma_from_vitals,
+        status_pack,
+    )
+
+    home = tmp_path / "soma"
+    home.mkdir()
+    persist_vitals(
+        {
+            "ts": 1,
+            "alive": True,
+            "mood": "focused",
+            "emoji": "◆",
+            "label": "Focused",
+            "rapport": 0.7,
+            "trust": 0.6,
+            "stance": "focused",
+            "tray_tooltip": "Remedy ◆ Focused",
+            "open_count": 1,
+        },
+        home,
+    )
+    packet = soma_from_vitals(load_vitals(home))
+    assert packet["label"] == "Focused"
+    assert packet["tray_tooltip"].startswith("Remedy")
+    v = collect_vitals(home)
+    assert "tray_tooltip" in v
+    pack = status_pack(home, max_age=1e9)
+    assert pack.get("alive") is True
+
+
 def test_pulse_reads_cached_vitals_not_store(tmp_path: Path) -> None:
     import time
 
