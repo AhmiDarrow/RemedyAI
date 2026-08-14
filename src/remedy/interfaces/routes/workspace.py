@@ -138,7 +138,7 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
                 if (
                     candidate is None or not candidate.is_file()
                 ) and "/" not in raw.replace("\\", "/") and raw.lower().endswith(
-                    (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".svg")
+                    (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico")
                 ):
                     with contextlib.suppress(Exception):
                         home = Path(
@@ -201,13 +201,16 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
             raise HTTPException(403, "path outside allowed roots")
 
         suffix = candidate.suffix.lower()
+        if suffix == ".svg":
+            raise HTTPException(
+                415, "SVG is not served as chat media (scriptable)"
+            )
         media_types = {
             ".png": "image/png",
             ".jpg": "image/jpeg",
             ".jpeg": "image/jpeg",
             ".gif": "image/gif",
             ".webp": "image/webp",
-            ".svg": "image/svg+xml",
             ".bmp": "image/bmp",
             ".ico": "image/x-icon",
         }
