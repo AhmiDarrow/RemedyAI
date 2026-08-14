@@ -570,6 +570,20 @@ def _idle_seconds() -> float:
 
 
 def _record_tick(home: str | Path | None, payload: dict[str, Any]) -> None:
+    org = payload.get("organism") if isinstance(payload, dict) else None
+    code = payload.get("code") if isinstance(payload, dict) else None
+    quiet = isinstance(org, dict) and not (
+        org.get("life_step")
+        or org.get("recalled")
+        or org.get("dreamed")
+        or org.get("skills_refined")
+        or org.get("cas_compact")
+    )
+    skipped = isinstance(code, dict) and bool(code.get("skipped"))
+    if quiet and (code is None or skipped):
+        prev = read_last_tick(home)
+        if prev:
+            return
     path = last_tick_path(home)
     with suppress(Exception):
         path.parent.mkdir(parents=True, exist_ok=True)

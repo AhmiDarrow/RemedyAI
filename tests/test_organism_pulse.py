@@ -247,6 +247,33 @@ def test_second_cycle_skips_life_resense(tmp_path: Path, monkeypatch) -> None:
     assert out["vitals"]["mood"] == "calm"
 
 
+def test_recall_prefers_session_ram(tmp_path: Path, monkeypatch) -> None:
+    from remedy.core.metabolism.organism import organism_recall_line, persist_vitals
+    from remedy.memory.cas import configure_cas
+    from remedy.memory.middleman import get_session_middleman, reset_middleman_state
+
+    home = tmp_path / "ram"
+    home.mkdir()
+    reset_middleman_state()
+    configure_cas(home)
+    persist_vitals({"ts": 1, "alive": True, "cas_count": 3, "cas_durable": 1}, home)
+    get_session_middleman("ram1").put(
+        "decided the piano exam is in March",
+        kind="fact",
+        session_id="ram1",
+    )
+
+    def _boom(*_a, **_k):
+        raise AssertionError("CAS FTS should not run when RAM hits")
+
+    monkeypatch.setattr("remedy.memory.cas.EternalCAS.search_fts", _boom)
+    line = organism_recall_line(home, "when is the piano exam", session_id="ram1")
+    assert line.startswith("Recalled:")
+    assert "March" in line
+    configure_cas(None)
+    reset_middleman_state()
+
+
 def test_persist_vitals_skips_disk_when_stable(tmp_path: Path) -> None:
     from remedy.core.metabolism.organism import persist_vitals
 
