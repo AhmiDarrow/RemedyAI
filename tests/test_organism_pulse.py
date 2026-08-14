@@ -204,14 +204,23 @@ def test_organism_cycle_writes_vitals(tmp_path: Path) -> None:
 
 
 def test_pulse_reads_cached_vitals_not_store(tmp_path: Path) -> None:
+    import time
+
     from remedy.core.metabolism.organism import organism_pulse_block, persist_vitals
 
     home = tmp_path / "fast"
     home.mkdir()
     persist_vitals(
         {
-            "ts": 1,
+            "ts": time.time(),
             "alive": True,
+            "who": "Remedy",
+            "mood": "focused",
+            "emoji": "◆",
+            "label": "Focused",
+            "stance": "steady",
+            "rapport": 0.6,
+            "trust": 0.6,
             "life_title": "Cached goal",
             "next_action": "Do the cached move",
             "last_did": "Wrote the brief",
@@ -221,6 +230,7 @@ def test_pulse_reads_cached_vitals_not_store(tmp_path: Path) -> None:
         home,
     )
     block = organism_pulse_block(session_id="f", tier=1, home=home, max_chars=900)
+    assert "Organism" in block
     assert "Life: Cached goal" in block
     assert "Memory: 7 objects" in block
     assert "Wrote the brief" in block

@@ -138,7 +138,7 @@ def begin_turn_metabolism(
         sq = get_session_quality(sid)
 
     # Session horizon: admit short intent line (no secrets path)
-    if user_text and len(user_text) < 240:
+    if user_text and 12 <= len(user_text) < 240:
         crystal.admit(user_text[:200], horizon="session", source="user")
 
     # Quality + metabolism for governor (L1+ only) — reuse sq handle
