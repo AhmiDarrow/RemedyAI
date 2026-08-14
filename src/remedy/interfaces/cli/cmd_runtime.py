@@ -10,7 +10,12 @@ from pathlib import Path
 from rich.panel import Panel
 
 from remedy import __version__
-from remedy.interfaces.cli.util import console
+from remedy.interfaces.cli.util import (
+    UnsafeHomeError,
+    console,
+    evaluate_serve_bind,
+    resolve_cli_home,
+)
 from remedy.interfaces.config import (
     config_to_agent_config,
     create_default_config,
@@ -35,8 +40,11 @@ def _cmd_serve(args) -> None:
         try_acquire_serve_lock,
     )
 
-    home = Path(args.home).expanduser()
-    home.mkdir(parents=True, exist_ok=True)
+    try:
+        home = resolve_cli_home(args.home)
+    except UnsafeHomeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(2) from exc
 
     # Only one API/serve stack at a time (Desktop sidecar or CLI).
     ok_lock, lock_msg = try_acquire_serve_lock(home)
@@ -150,16 +158,9 @@ def _cmd_serve(args) -> None:
         explicit=os.environ.get("REMEDY_API_KEY") or config.get("api_key") or None,
     )
     host = str(getattr(args, "host", "127.0.0.1") or "127.0.0.1")
-    non_loopback = host not in ("127.0.0.1", "localhost", "::1", "0.0.0.0")
     # 0.0.0.0 / non-loopback: owner power preserved only with explicit danger flag.
-    bind_all = host in ("0.0.0.0", "::", "[::]")
-    insecure_ok = str(os.environ.get("REMEDY_ALLOW_INSECURE_BIND", "")).strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-    if (bind_all or non_loopback) and not api_key and not insecure_ok:
+    bind_verdict = evaluate_serve_bind(host, has_auth=bool(api_key))
+    if bind_verdict == "refuse":
         console.print(
             "[bold red]Refusing to serve without auth on a non-loopback bind.[/bold red]\n"
             f"  host={host!r} and API auth is disabled.\n"
@@ -167,7 +168,7 @@ def _cmd_serve(args) -> None:
             "  REMEDY_ALLOW_INSECURE_BIND=1 if you really want an open LAN agent."
         )
         raise SystemExit(2)
-    if (bind_all or non_loopback) and not insecure_ok:
+    if bind_verdict == "warn":
         console.print(
             f"[bold yellow]WARNING:[/yellow] Binding {host!r} exposes the agent on the network.\n"
             "  Only processes with your API token can call tools — keep the token secret.\n"
@@ -293,8 +294,11 @@ def _cmd_chat(args) -> None:
     from remedy.gateway.router import Gateway
     from remedy.models import ChannelKind, EventKind, GatewayEvent
 
-    home = Path(args.home).expanduser()
-    home.mkdir(parents=True, exist_ok=True)
+    try:
+        home = resolve_cli_home(args.home)
+    except UnsafeHomeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(2) from exc
 
     # Always gate interactive chat on first-run setup (or --skip-setup).
     ok = ensure_setup_before_launch(
@@ -490,7 +494,7 @@ def _cmd_desktop(parsed: argparse.Namespace) -> None:
     if not desktop_dir or not desktop_dir.exists():
         console.print(f"[red]Desktop directory not found at {desktop_dir}[/red]")
         console.print("[dim]Run `git clone` again or ensure the desktop/ folder is present.[/dim]")
-        return
+        raise SystemExit(1)
 
     npm = _find_npm()
     subcommand = parsed.desktop_cmd or "install"
@@ -507,6 +511,7 @@ def _cmd_desktop(parsed: argparse.Namespace) -> None:
             console.print("[dim]Run 'remedy desktop dev' to start, then open http://localhost:5173[/dim]")
         else:
             console.print("[red]npm install failed. Is Node.js installed?[/red]")
+            raise SystemExit(result.returncode or 1)
 
     elif subcommand == "dev":
         console.print("[bold]Starting desktop dev server...[/bold]")
@@ -530,6 +535,7 @@ def _cmd_desktop(parsed: argparse.Namespace) -> None:
             console.print(f"[green]Desktop built to {desktop_dir / 'dist'}[/green]")
         else:
             console.print("[red]Build failed.[/red]")
+            raise SystemExit(result.returncode or 1)
 
     elif subcommand == "launch":
         _desktop_launch()

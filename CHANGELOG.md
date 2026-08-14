@@ -4,6 +4,26 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Docs / PyPI
+
+- README links used as the PyPI long description are now absolute GitHub
+  (`blob` / `tree` / `raw`) URLs so owner-manual and image links resolve on
+  pypi.org. `[project.urls]` adds Documentation, Changelog, and Issues.
+- `docs/USAGE.md` no longer claims a stale `remedy --version` string.
+- `check_docs.py` gates PyPI-safe README URLs and required project.urls.
+
+### CLI
+
+- `remedy serve` bind policy is shared/testable: refuse non-loopback without
+  auth unless `REMEDY_ALLOW_INSECURE_BIND=1`.
+- `--home` refuses drive roots and OS system prefixes.
+- `remedy exec` exits **2** when blocked or missing a command, and propagates
+  the subprocess exit code. Leading `--` is stripped.
+- `remedy config show` redacts API keys and tokens. Gateway CLI prefers env
+  tokens and warns if `--*-token` is passed on argv.
+- Missing skills/tools, bad `--args` JSON, desktop npm failures, and a bare
+  `remedy` with no subcommand now return non-zero exit codes.
+
 ## [0.24.0] - 2026-08-14
 
 ### Host / this PC

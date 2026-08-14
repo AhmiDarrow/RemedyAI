@@ -7,13 +7,17 @@ import contextlib
 import json
 import os
 import time
-from pathlib import Path
 from typing import Any
 
 from rich.panel import Panel
 from rich.table import Table
 
-from remedy.interfaces.cli.util import console
+from remedy.interfaces.cli.util import (
+    UnsafeHomeError,
+    console,
+    redact_cli_mapping,
+    resolve_cli_home,
+)
 from remedy.interfaces.config import (
     create_default_config,
     resolve_config,
@@ -24,10 +28,13 @@ def _cmd_auth(args) -> None:
     """Provider auth: login / logout / status / apikey (xAI device-code OAuth)."""
     import time
     import webbrowser
-    from pathlib import Path as _Path
 
     provider = str(getattr(args, "provider", None) or "xai").strip().lower()
-    home = _Path(args.home).expanduser()
+    try:
+        home = resolve_cli_home(args.home)
+    except UnsafeHomeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(2) from exc
     cmd = getattr(args, "auth_cmd", None)
 
     if provider != "xai":
@@ -109,9 +116,11 @@ def _cmd_auth(args) -> None:
 
 
 async def _cmd_config(args) -> None:
-    from pathlib import Path as _Path
-    home = _Path(args.home).expanduser()
-    home.mkdir(parents=True, exist_ok=True)
+    try:
+        home = resolve_cli_home(args.home)
+    except UnsafeHomeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(2) from exc
 
     if args.config_cmd == "init":
         cfg_path = create_default_config(home)
@@ -120,7 +129,7 @@ async def _cmd_config(args) -> None:
         resolved = resolve_config(
             home_dir=str(home),
         )
-        console.print_json(data=resolved)
+        console.print_json(data=redact_cli_mapping(resolved))
     elif args.config_cmd == "path":
         cfg_path = home / "config.toml"
         if cfg_path.exists():
@@ -168,8 +177,11 @@ def _cmd_settings(args) -> None:
         public_settings_snapshot,
     )
 
-    home = Path(args.home).expanduser()
-    home.mkdir(parents=True, exist_ok=True)
+    try:
+        home = resolve_cli_home(args.home)
+    except UnsafeHomeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(2) from exc
     # Ensure resolve_config/home is consistent for load_config paths
     os.environ.setdefault("REMEDY_HOME", str(home))
 
@@ -255,8 +267,11 @@ def _cmd_settings(args) -> None:
 
 def _cmd_computer(args) -> None:
     """``remedy computer status|host`` — computer-use host control for CLI."""
-    home = Path(args.home).expanduser()
-    home.mkdir(parents=True, exist_ok=True)
+    try:
+        home = resolve_cli_home(args.home)
+    except UnsafeHomeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(2) from exc
     os.environ.setdefault("REMEDY_HOME", str(home))
 
     sub = getattr(args, "computer_cmd", None) or "status"

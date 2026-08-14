@@ -1,7 +1,7 @@
 # Remedy
 
 <p align="center">
-  <img src="assets/previews/hero_logo_color_on_dark.png" alt="Remedy" width="420" />
+  <img src="https://raw.githubusercontent.com/AhmiDarrow/RemedyAI/master/assets/previews/hero_logo_color_on_dark.png" alt="Remedy" width="420" />
 </p>
 
 <p align="center">
@@ -13,9 +13,9 @@
 <p align="center">
   <a href="https://github.com/AhmiDarrow/RemedyAI/releases/latest"><strong>Download for Windows</strong></a>
   ·
-  <a href="docs/manual/00-overview.md">Owner’s manual</a>
+  <a href="https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/00-overview.md">Owner’s manual</a>
   ·
-  <a href="docs/manual/13-whats-new.md">What’s new</a>
+  <a href="https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/13-whats-new.md">What’s new</a>
   ·
   <code>pip install remedy-ai</code>
 </p>
@@ -28,7 +28,7 @@
 ## About
 
 <p align="center">
-  <img src="assets/previews/hero_icon_color_on_dark.png" alt="Remedy icon" width="96" />
+  <img src="https://raw.githubusercontent.com/AhmiDarrow/RemedyAI/master/assets/previews/hero_icon_color_on_dark.png" alt="Remedy icon" width="96" />
 </p>
 
 **Remedy** is a Windows-first desktop partner (Tauri + local FastAPI) that keeps **continuity on disk** under `~/.remedy` while **you** pick the chat model (xAI, OpenAI, Anthropic, Google, DeepSeek, Groq, Mistral, OpenRouter, Ollama, Custom).
@@ -50,7 +50,7 @@ In-app: title-bar / tray → **About Remedy** · **Settings → About**.
 **Latest: [v0.24.0](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.24.0)** — Host Bridge + first-home stretch so Remedy learns this PC (shell, GPU, PATH, rooms), with tighter write jails and per-session agency.
 
 <p align="center">
-  <img src="docs/manual/assets/remedy-partner-architecture.jpg" alt="How Remedy fits together" width="640" />
+  <img src="https://raw.githubusercontent.com/AhmiDarrow/RemedyAI/master/docs/manual/assets/remedy-partner-architecture.jpg" alt="How Remedy fits together" width="640" />
 </p>
 
 | Highlight | Why it matters |
@@ -64,8 +64,8 @@ In-app: title-bar / tray → **About Remedy** · **Settings → About**.
 
 **Also in 0.20–0.23:** L0–L3 tiers, `build_drive` + companion, Soul Field, evidence ledger, Time Crystal, messengers, signed Skills Library, `Remedy Desktop.exe` (not generic `app.exe`).
 
-Full owner notes → **[docs/manual/13-whats-new.md](docs/manual/13-whats-new.md)** · engineering detail → **[CHANGELOG.md](CHANGELOG.md)**  
-Earlier: [0.19.0 parallel multi-provider](docs/manual/13-whats-new.md#0190---parallel-multi-provider--background-turns) · [0.18.x](docs/manual/13-whats-new.md)
+Full owner notes → **[docs/manual/13-whats-new.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/13-whats-new.md)** · engineering detail → **[CHANGELOG.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/CHANGELOG.md)**  
+Earlier: [0.19.0 parallel multi-provider](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/13-whats-new.md#0190---parallel-multi-provider--background-turns) · [0.18.x](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/13-whats-new.md)
 
 ---
 
@@ -92,16 +92,16 @@ Earlier: [0.19.0 parallel multi-provider](docs/manual/13-whats-new.md#0190---par
 
 | | |
 |--|--|
-| **Start here** | [Overview](docs/manual/00-overview.md) |
-| **What’s new** | [13-whats-new](docs/manual/13-whats-new.md) |
-| **All chapters** | [docs/manual/](docs/manual/) · [index](docs/manual/README.md) |
-| **Continuity** | [How Remedy works](docs/manual/16-continuity-philosophy.md) |
-| **Local SmolVLM2** | [Vision decoder](docs/manual/14-visual-decoder.md) |
-| **This PC / Host** | [Coding agency](docs/manual/18-agency.md) · [RMB](docs/manual/20-rmb-local-agent.md) |
-| **Metabolism** | [Partner metabolism](docs/manual/19-metabolism.md) |
-| **Security** | [Security & data](docs/manual/04-security-and-data.md) |
+| **Start here** | [Overview](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/00-overview.md) |
+| **What’s new** | [13-whats-new](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/13-whats-new.md) |
+| **All chapters** | [docs/manual/](https://github.com/AhmiDarrow/RemedyAI/tree/master/docs/manual/) · [index](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/README.md) |
+| **Continuity** | [How Remedy works](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/16-continuity-philosophy.md) |
+| **Local SmolVLM2** | [Vision decoder](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/14-visual-decoder.md) |
+| **This PC / Host** | [Coding agency](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/18-agency.md) · [RMB](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/20-rmb-local-agent.md) |
+| **Metabolism** | [Partner metabolism](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/19-metabolism.md) |
+| **Security** | [Security & data](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/04-security-and-data.md) |
 
-Also: [CHANGELOG.md](CHANGELOG.md) · [AGENTS.md](AGENTS.md)
+Also: [CHANGELOG.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/CHANGELOG.md) · [AGENTS.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/AGENTS.md)
 
 ---
 
@@ -116,7 +116,7 @@ One desktop app. One local API. Your data under `~/.remedy`.
 | **This PC** | **Host Bridge** (POSIX→cmd, `host_run`) · `/stretch` home census · vendor-neutral GPU/VRAM |
 | **Local brain** | **SmolVLM2 2.2B** visual decoder · optional **RMB** llama.cpp host (autofit from this PC) |
 | **Continuity** | Session Brief, partner memory, skills, context budget — silent workers, one voice |
-| **Metabolism** | **0.22.0+** Soul Field + organism pulse, L0–L3 tiers, evidence, governor ([manual](docs/manual/19-metabolism.md)) |
+| **Metabolism** | **0.22.0+** Soul Field + organism pulse, L0–L3 tiers, evidence, governor ([manual](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/19-metabolism.md)) |
 | **Messengers** | Telegram, Discord, Slack, Mattermost, Matrix, WhatsApp, Teams, Google Chat, Signal (Settings) |
 | **Skills** | Progressive disclosure · Installed \| Library · signed community catalog |
 | **Memory** | Durable facts · this-home census · Progress snapshots · plans — calm UI, not scare-logs |
@@ -142,7 +142,7 @@ You  →  Continuity (brief · memory · skills · budget · local SmolVLM2)  �
 | **Cheaper** | Less tool sludge re-sent; local SmolVLM2 where it saves paid calls |
 | **Same partner** | Switch providers anytime — identity is local |
 
-Deep dive: [Continuity philosophy](docs/manual/16-continuity-philosophy.md) · In-app **F1**.
+Deep dive: [Continuity philosophy](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/16-continuity-philosophy.md) · In-app **F1**.
 
 ---
 
@@ -159,7 +159,7 @@ Remedy is a **workbench**, not only a chat box. Icon rails open real tools next 
 | **Computer use** | Click / type / screenshot this desktop when you enable it |
 
 Left · chat · right layout; popout / fullscreen for Terminal, Browser, Scratch.  
-Manual: [Chat & sessions](docs/manual/05-chat-and-sessions.md) · [Desktop notes](docs/DESKTOP.md)
+Manual: [Chat & sessions](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/05-chat-and-sessions.md) · [Desktop notes](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/DESKTOP.md)
 
 ---
 
@@ -178,7 +178,7 @@ Manual: [Chat & sessions](docs/manual/05-chat-and-sessions.md) · [Desktop notes
 
 Optional **RMB** (Remedy Muscle Bridge) is a separate on-device llama.cpp chat host — Settings → local models. Autofit sizes context and GPU layers from this PC’s VRAM (NVIDIA / AMD / Intel), not a vendor logo.
 
-Manual: [Local vision & on-device SmolVLM2](docs/manual/14-visual-decoder.md) · [RMB](docs/manual/20-rmb-local-agent.md)
+Manual: [Local vision & on-device SmolVLM2](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/14-visual-decoder.md) · [RMB](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/20-rmb-local-agent.md)
 
 ---
 
@@ -195,7 +195,7 @@ Silent local workers (sometimes called the **nano swarm** in code). They measure
 | Skill | Ranking and feedback for procedures |
 
 Heuristics first; local SmolVLM2 only when already running and useful.  
-Operators: [Continuity workers](docs/manual/17-nanoswarm.md) · `/harness`
+Operators: [Continuity workers](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/17-nanoswarm.md) · `/harness`
 
 ---
 
@@ -222,7 +222,7 @@ Security defaults stay local-first: no public doorway by accident.
 | **Installed** | Bundled + learned + trusted library packs on this machine |
 | **Library** | Signed community catalog ([remedy-skills](https://github.com/AhmiDarrow/remedy-skills)) — install → quarantine → **Trust** |
 
-Format: [agentskills.io](https://agentskills.io) · Lifecycle: [SKILL_LIFECYCLE.md](docs/SKILL_LIFECYCLE.md) · Manual: [Skills](docs/manual/07-skills.md)
+Format: [agentskills.io](https://agentskills.io) · Lifecycle: [SKILL_LIFECYCLE.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/SKILL_LIFECYCLE.md) · Manual: [Skills](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/07-skills.md)
 
 ---
 
@@ -235,7 +235,7 @@ Format: [agentskills.io](https://agentskills.io) · Lifecycle: [SKILL_LIFECYCLE.
 - **Plans** — Plan mode outlines; Build executes with approvals  
 - **Time travel** — restore chat (+ best-effort files) to an earlier step  
 
-`/compact` · `/harness` · `/stretch` · `/whoami` · [Memory manual](docs/manual/06-memory-and-harness.md)
+`/compact` · `/harness` · `/stretch` · `/whoami` · [Memory manual](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/06-memory-and-harness.md)
 
 ---
 
@@ -267,7 +267,7 @@ Local API: **127.0.0.1:7400** (sidecar).
 | Messengers | Allowlist-first |
 
 No Remedy cloud account for core use. Chat goes to **your** provider (or local Ollama).  
-[Security & data](docs/manual/04-security-and-data.md)
+[Security & data](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/04-security-and-data.md)
 
 ---
 
@@ -283,14 +283,14 @@ No Remedy cloud account for core use. Chat goes to **your** provider (or local O
 | `/export` · `/import` · `/import-session` | I/O |
 | `/skills` · `/handoff` · `/security-status` · `/init` · `/helper` · `/tip` | Skills & tips |
 
-Full list: [Commands](docs/manual/11-reference-commands.md)
+Full list: [Commands](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/11-reference-commands.md)
 
 ---
 
 ## Architecture
 
 <p align="center">
-  <img src="docs/manual/assets/remedy-partner-architecture.jpg" alt="Remedy partner architecture" width="560" />
+  <img src="https://raw.githubusercontent.com/AhmiDarrow/RemedyAI/master/docs/manual/assets/remedy-partner-architecture.jpg" alt="Remedy partner architecture" width="560" />
 </p>
 
 ```text
@@ -317,7 +317,7 @@ remedy serve --host 127.0.0.1 --port 7400 --skip-setup
 ```
 
 WebUI is the **same SPA** as desktop (`desktop/dist`). After UI changes:  
-`cd desktop && npm run build`, then restart serve if needed — see [AGENTS.md](AGENTS.md) (*Desktop SPA vs WebUI*).
+`cd desktop && npm run build`, then restart serve if needed — see [AGENTS.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/AGENTS.md) (*Desktop SPA vs WebUI*).
 
 ---
 
@@ -326,14 +326,14 @@ WebUI is the **same SPA** as desktop (`desktop/dist`). After UI changes:
 ```bash
 git clone https://github.com/AhmiDarrow/RemedyAI.git && cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # 560+ tests; currently ~2039
+uv run pytest -q          # 560+ tests; currently ~2077
 cd desktop && npm test && npm run build
 python scripts/check_docs.py
 cd desktop && npm run tauri:dev   # full shell (set REMEDY_DEV_ROOT to repo)
 ```
 
 Release: `python scripts/sync_version.py X.Y.Z` · `python scripts/sync_help_manual.py` · `python scripts/check_docs.py` · tag `vX.Y.Z` · GitHub Actions.  
-Signing: [AGENTS.md](AGENTS.md) · [WINDOWS_SIGNING.md](docs/WINDOWS_SIGNING.md)
+Signing: [AGENTS.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/AGENTS.md) · [WINDOWS_SIGNING.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/WINDOWS_SIGNING.md)
 
 ---
 
@@ -345,7 +345,7 @@ Signing: [AGENTS.md](AGENTS.md) · [WINDOWS_SIGNING.md](docs/WINDOWS_SIGNING.md)
 
 ## License
 
-**Source-available** — [LICENSE](./LICENSE) · [COMMERCIAL.md](./COMMERCIAL.md)
+**Source-available** — [LICENSE](https://github.com/AhmiDarrow/RemedyAI/blob/master/LICENSE) · [COMMERCIAL.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/COMMERCIAL.md)
 
 | Who | Terms |
 |-----|--------|

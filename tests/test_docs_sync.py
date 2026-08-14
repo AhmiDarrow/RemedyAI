@@ -57,6 +57,14 @@ def test_parse_catalog_ids() -> None:
     assert "11-reference-commands" in ids
 
 
+def test_check_pypi_readme_and_project_urls() -> None:
+    mod = _load_check_docs()
+    pypi = mod.check_pypi_readme_urls()
+    assert pypi.ok, pypi.messages
+    urls = mod.check_project_urls()
+    assert urls.ok, urls.messages
+
+
 def test_check_docs_full_passes() -> None:
     """Full aggregator must exit 0 on a clean tree (same gate as CI)."""
     import os
