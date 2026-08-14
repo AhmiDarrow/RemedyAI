@@ -109,6 +109,21 @@ def test_compact_drops_old_tools_keeps_facts(tmp_path):
     _unbind()
 
 
+def test_snapshot_is_cached_until_write(tmp_path):
+    cas = _bind(tmp_path)
+    assert cas is not None
+    get_session_middleman("c1").put("alpha fact body", kind="fact", session_id="c1")
+    s1 = cas.snapshot()
+    assert s1["count"] >= 1
+    cas._snap["count"] = 4242
+    s2 = cas.snapshot()
+    assert s2["count"] == 4242
+    get_session_middleman("c1").put("beta fact body unique", kind="fact", session_id="c1")
+    s3 = cas.snapshot()
+    assert s3["count"] != 4242
+    _unbind()
+
+
 def test_pytest_does_not_auto_open_real_cas():
     _unbind()
     assert get_cas() is None
