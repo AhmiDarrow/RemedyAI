@@ -15,7 +15,7 @@ Usage:
   python scripts/check_docs.py check        # same
   python scripts/check_docs.py sync         # auto-fix help copies only
   python scripts/check_docs.py --list       # print check inventory
-  python scripts/check_docs.py help|version|commands|hotkeys|catalog|tests|readme
+  python scripts/check_docs.py help|version|commands|hotkeys|catalog|tests|readme|pypi|urls
                                             # run a single surface
 """
 
@@ -411,6 +411,122 @@ def check_test_count_claim() -> CheckResult:
     )
 
 
+_GH_REPO = "https://github.com/AhmiDarrow/RemedyAI"
+_GH_RAW = "https://raw.githubusercontent.com/AhmiDarrow/RemedyAI/master"
+_ALLOWED_LINK_HOSTS = (
+    "https://github.com/AhmiDarrow/",
+    "https://raw.githubusercontent.com/AhmiDarrow/",
+    "https://pypi.org/",
+    "https://www.patreon.com/",
+    "https://agentskills.io",
+)
+
+
+def _readme_link_targets(text: str) -> list[tuple[str, str]]:
+    """Return (kind, url) for href/src/markdown links in README."""
+    found: list[tuple[str, str]] = []
+    for m in re.finditer(r"""(?:href|src)=["']([^"']+)["']""", text, re.I):
+        kind = "src" if "src=" in m.group(0).lower() else "href"
+        found.append((kind, m.group(1)))
+    for m in re.finditer(r"\[[^\]]*\]\(([^)]+)\)", text):
+        found.append(("md", m.group(1)))
+    return found
+
+
+def check_pypi_readme_urls() -> CheckResult:
+    """README is the PyPI long_description — relative repo links 404 there."""
+    msgs: list[str] = []
+    if not README.is_file():
+        return CheckResult("pypi-readme", False, ["README.md missing"])
+    text = README.read_text(encoding="utf-8")
+    bad = 0
+    seen: set[str] = set()
+    for kind, raw in _readme_link_targets(text):
+        url = raw.strip()
+        if not url or url.startswith(("#", "mailto:")):
+            continue
+        if url in seen:
+            continue
+        seen.add(url)
+        if url.startswith(("http://", "https://")):
+            if kind == "src" and not url.startswith(_GH_RAW + "/"):
+                msgs.append(f"image must use raw.githubusercontent.com: {url}")
+                bad += 1
+                continue
+            if not url.startswith(_ALLOWED_LINK_HOSTS):
+                msgs.append(f"unexpected host: {url}")
+                bad += 1
+                continue
+            # Resolve GitHub blob/tree/raw paths back to the working tree.
+            rel = ""
+            for prefix, _kind in (
+                (_GH_RAW + "/", "raw"),
+                (_GH_REPO + "/blob/master/", "blob"),
+                (_GH_REPO + "/tree/master/", "tree"),
+            ):
+                if url.startswith(prefix):
+                    rel = url[len(prefix) :].split("#", 1)[0].rstrip("/")
+                    break
+            if rel:
+                target = ROOT / rel
+                if not target.exists():
+                    msgs.append(f"dead GitHub path (not in repo): {rel}")
+                    bad += 1
+                else:
+                    msgs.append(f"ok {kind}: {rel or url}")
+            else:
+                msgs.append(f"ok {kind}: {url}")
+            continue
+        # Relative path — PyPI will 404
+        if re.match(r"^(?:\./)?(?:docs/|assets/|CHANGELOG|AGENTS|LICENSE|COMMERCIAL)", url):
+            msgs.append(f"relative link breaks on PyPI: {url}")
+            bad += 1
+        else:
+            msgs.append(f"relative link breaks on PyPI: {url}")
+            bad += 1
+    return CheckResult(
+        "pypi-readme",
+        bad == 0,
+        msgs or ["no links found"],
+        "Use https://github.com/AhmiDarrow/RemedyAI/blob|tree|raw/master/... in README",
+    )
+
+
+def check_project_urls() -> CheckResult:
+    """pyproject [project.urls] must expose docs/changelog/issues for PyPI sidebar."""
+    msgs: list[str] = []
+    pyproject = ROOT / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8") if pyproject.is_file() else ""
+    required = {
+        "Homepage": _GH_REPO,
+        "Repository": _GH_REPO,
+        "Documentation": f"{_GH_REPO}/blob/master/docs/manual/00-overview.md",
+        "Changelog": f"{_GH_REPO}/blob/master/CHANGELOG.md",
+        "Issues": f"{_GH_REPO}/issues",
+    }
+    bad = 0
+    for key, expected in required.items():
+        pat = re.compile(rf'^{re.escape(key)}\s*=\s*"([^"]+)"', re.M)
+        m = pat.search(text)
+        if not m:
+            msgs.append(f"missing project.urls.{key}")
+            bad += 1
+            continue
+        got = m.group(1).rstrip("/")
+        exp = expected.rstrip("/")
+        if got != exp:
+            msgs.append(f"project.urls.{key}={got!r} expected {exp!r}")
+            bad += 1
+        else:
+            msgs.append(f"ok {key}")
+    return CheckResult(
+        "project-urls",
+        bad == 0,
+        msgs,
+        "Set [project.urls] Homepage/Repository/Documentation/Changelog/Issues",
+    )
+
+
 def check_readme_sync_pointers() -> CheckResult:
     """README maintainer section should mention the doc-sync tools."""
     msgs: list[str] = []
@@ -447,10 +563,22 @@ CHECKS: dict[str, Callable[[], CheckResult]] = {
     "catalog": check_catalog,
     "tests": check_test_count_claim,
     "readme": check_readme_sync_pointers,
+    "pypi": check_pypi_readme_urls,
+    "urls": check_project_urls,
 }
 
 # Default order for full suite
-DEFAULT_ORDER = ("help", "version", "catalog", "commands", "hotkeys", "tests", "readme")
+DEFAULT_ORDER = (
+    "help",
+    "version",
+    "catalog",
+    "commands",
+    "hotkeys",
+    "tests",
+    "readme",
+    "pypi",
+    "urls",
+)
 
 
 def run_checks(names: list[str] | None = None, *, quiet: bool = False) -> int:
@@ -522,6 +650,8 @@ def main() -> None:
         print("  hotkeys   hotkeys.ts ↔ manual/12-reference-shortcuts")
         print("  tests     README 'N+ tests; currently ~M' vs live collection")
         print("  readme    README mentions sync/check scripts")
+        print("  pypi      README links are absolute (PyPI long_description)")
+        print("  urls      pyproject [project.urls] Documentation/Changelog/Issues")
         print("\nCommands:")
         print("  python scripts/check_docs.py            # full check (CI)")
         print("  python scripts/check_docs.py sync       # copy help bodies")

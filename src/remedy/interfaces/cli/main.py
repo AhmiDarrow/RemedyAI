@@ -21,7 +21,7 @@ from remedy.interfaces.cli.cmd_store import (
     _cmd_user,
 )
 from remedy.interfaces.cli.parser import build_parser
-from remedy.interfaces.cli.util import _get_db_path, console
+from remedy.interfaces.cli.util import UnsafeHomeError, _get_db_path, console
 from remedy.interfaces.uninstaller import run_uninstall
 from remedy.interfaces.updater import run_update
 from remedy.interfaces.wizard import run_wizard
@@ -33,9 +33,13 @@ def main(args: list[str] | None = None) -> None:
 
     if parsed.command is None:
         parser.print_help()
-        return
+        raise SystemExit(2)
 
-    db_path = _get_db_path(parsed.home)
+    try:
+        db_path = _get_db_path(parsed.home)
+    except UnsafeHomeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(2) from exc
 
     if parsed.command == "memory":
         asyncio.run(_cmd_memory(parsed, db_path))
@@ -75,6 +79,7 @@ def main(args: list[str] | None = None) -> None:
 
             raise SystemExit(run_stdio_server())
         console.print("[dim]Usage: remedy mcp serve[/dim]")
+        raise SystemExit(2)
     elif parsed.command == "desktop":
         _cmd_desktop(parsed)
     elif parsed.command == "setup":

@@ -50,6 +50,9 @@ desktop-build = [
 [project.urls]
 Homepage = "https://github.com/AhmiDarrow/RemedyAI"
 Repository = "https://github.com/AhmiDarrow/RemedyAI"
+Documentation = "https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/00-overview.md"
+Changelog = "https://github.com/AhmiDarrow/RemedyAI/blob/master/CHANGELOG.md"
+Issues = "https://github.com/AhmiDarrow/RemedyAI/issues"
 
 [project.scripts]
 remedy = "remedy.interfaces.cli:main"

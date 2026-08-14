@@ -82,7 +82,7 @@ async def _cmd_skill(args) -> None:
         if skill is None:
             console.print(f"[red]Skill not found: {args.name}[/red]")
             console.print("Run 'remedy skill discover <path>' first.")
-            return
+            raise SystemExit(1)
         m = skill.manifest
         console.print(Panel(
             f"[bold]{m.name}[/bold] v{m.version}\n"
@@ -103,42 +103,50 @@ async def _cmd_skill(args) -> None:
         skill = registry.get(args.name)
         if skill is None:
             console.print(f"[red]Skill not found: {args.name}[/red]")
-            return
+            raise SystemExit(1)
         executor = SkillExecutor()
+        failed = False
         if args.script and skill.source_skill_dir:
             script_path = Path(skill.source_skill_dir) / args.script
             if not script_path.is_file():
                 console.print(f"[red]Script not found: {args.script}[/red]")
-                return
+                raise SystemExit(1)
             result = await executor.run_script(script_path)
             _print_exec_result(result)
+            failed = not bool(getattr(result, "success", result.exit_code == 0))
         elif skill.scripts and skill.source_skill_dir:
             results = await executor.run_all_scripts(skill.scripts, Path(skill.source_skill_dir))
             for name, res in results.items():
                 console.print(f"\n[bold]Script: {name}[/bold]")
                 _print_exec_result(res)
+                if not bool(getattr(res, "success", getattr(res, "exit_code", 1) == 0)):
+                    failed = True
         else:
             console.print("[yellow]No scripts to run. Running instruction code blocks...[/yellow]")
-            results = await executor.run_instructions(skill.instructions)
-            for i, res in enumerate(results):
+            blocks = await executor.run_instructions(skill.instructions)
+            for i, res in enumerate(blocks):
                 console.print(f"\n[bold]Block {i+1}[/bold]")
                 _print_exec_result(res)
+                if not bool(getattr(res, "success", getattr(res, "exit_code", 1) == 0)):
+                    failed = True
+        if failed:
+            raise SystemExit(1)
 
     elif args.skill_cmd == "test":
         skill = registry.get(args.name)
         if skill is None:
             console.print(f"[red]Skill not found: {args.name}[/red]")
-            return
+            raise SystemExit(1)
         validator = SkillValidator()
-        results = [
+        checks = [
             validator.validate_metadata(skill),
             validator.validate_dependencies(skill),
             validator.validate_scripts(skill),
         ]
         test_result = await validator.run_tests(skill)
-        results.append(test_result)
+        checks.append(test_result)
 
-        for r in results:
+        for r in checks:
             status = "[green]PASS[/green]" if r.is_valid else "[red]FAIL[/red]"
             console.print(f"\n{status} {r.skill_name}:")
             for err in r.errors:
@@ -149,14 +157,16 @@ async def _cmd_skill(args) -> None:
                 res = "[green]PASS[/green]" if tr["success"] else "[red]FAIL[/red]"
                 console.print(f"  Test {tr['file']}: {res}")
 
-        score = validator.compute_score(results)
+        score = validator.compute_score(checks)
         console.print(f"\n[bold]Compliance Score: {score:.0%}[/bold]")
+        if any(not r.is_valid for r in checks):
+            raise SystemExit(1)
 
     elif args.skill_cmd == "export":
         skill = registry.get(args.name)
         if skill is None:
             console.print(f"[red]Skill not found: {args.name}[/red]")
-            return
+            raise SystemExit(1)
         exporter = SkillExporter(Path(args.output))
         if args.fmt == "native":
             dest = exporter.export_native(skill)
@@ -179,8 +189,13 @@ async def _cmd_skill(args) -> None:
 async def _cmd_tool(args) -> None:
     """Tool CLI — uses BasicRuntime so file/shell tools stay workspace-jailed."""
     from remedy.core.agent import BasicRuntime
+    from remedy.interfaces.cli.util import UnsafeHomeError, resolve_cli_home
 
-    home = Path(getattr(args, "home", None) or "~/.remedy").expanduser()
+    try:
+        home = resolve_cli_home(getattr(args, "home", None) or "~/.remedy")
+    except UnsafeHomeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(2) from exc
     cfg = config_to_agent_config(resolve_config(home_dir=str(home)))
     if not getattr(cfg, "home_dir", None):
         cfg.home_dir = str(home)
@@ -224,7 +239,14 @@ async def _cmd_tool(args) -> None:
         console.print(Panel(body, title="Tool Stats"))
 
     elif args.tool_cmd == "run":
-        tool_args = json.loads(args.tool_args)
+        try:
+            tool_args = json.loads(args.tool_args)
+        except json.JSONDecodeError as exc:
+            console.print(f"[red]Invalid --args JSON:[/red] {exc}")
+            raise SystemExit(2) from exc
+        if not isinstance(tool_args, dict):
+            console.print("[red]--args must be a JSON object[/red]")
+            raise SystemExit(2)
         tool_call = ToolCall(
             tool_name=args.name,
             arguments=tool_args,
@@ -242,6 +264,7 @@ async def _cmd_tool(args) -> None:
                     console.print(json.dumps(result.data, indent=2, default=str))
         else:
             console.print(f"[red]Failed:[/red] {result.error}")
+            raise SystemExit(1)
 
 
 
@@ -339,23 +362,22 @@ async def _cmd_learn(args, db_path: Path) -> None:
 
 
 async def _cmd_exec(args) -> None:
-    import json as _json
-
     from remedy.core.security import check_dangerous_command
 
     command = list(args.cmdline) if args.cmdline else []
+    if command and command[0] == "--":
+        command = command[1:]
     if not command:
         console.print("[red]No command specified[/red]")
-        return
+        raise SystemExit(2)
 
     danger = check_dangerous_command(command)
     if danger:
         console.print(f"[bold red]WARNING: {danger}[/bold red]")
-        result = _json.dumps({"warning": danger, "command": " ".join(command)})
         console.print("[yellow]Execution blocked by security policy[/yellow]")
-        return
+        raise SystemExit(2)
 
-    sandbox = SubprocessSandbox()
+    sandbox = SubprocessSandbox(shell=getattr(args, "shell", None))
     console.print(f"[bold]Executing:[/bold] {' '.join(command)}")
 
     result = await sandbox.execute(
@@ -370,6 +392,8 @@ async def _cmd_exec(args) -> None:
         console.print(f"[red]{result.stderr}[/red]")
 
     console.print(f"[dim]Exit code: {result.exit_code} ({result.duration_ms:.0f}ms)[/dim]")
+    if result.exit_code not in (0, None):
+        raise SystemExit(int(result.exit_code) if result.exit_code > 0 else 1)
 
 
 

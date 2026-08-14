@@ -186,17 +186,36 @@ async def gateway_status(db_path: Path) -> None:
 
 
 def main_gateway(args) -> None:
-    db_path = Path(args.home).expanduser().resolve()
-    db_path.mkdir(parents=True, exist_ok=True)
+    import os
+
+    from remedy.interfaces.cli.util import UnsafeHomeError, resolve_cli_home
+
+    try:
+        db_path = resolve_cli_home(args.home)
+    except UnsafeHomeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(2) from exc
     db_file = db_path / "memory.db"
 
     if args.gateway_cmd == "start":
+        cli_tg = getattr(args, "telegram_token", "") or ""
+        cli_dc = getattr(args, "discord_token", "") or ""
+        cli_sl = getattr(args, "slack_token", "") or ""
+        if cli_tg or cli_dc or cli_sl:
+            console.print(
+                "[yellow]Passing messenger tokens on the command line exposes them "
+                "in process lists. Prefer TELEGRAM_BOT_TOKEN / DISCORD_BOT_TOKEN / "
+                "SLACK_BOT_TOKEN.[/yellow]"
+            )
+        token_telegram = cli_tg or os.environ.get("TELEGRAM_BOT_TOKEN", "") or ""
+        token_discord = cli_dc or os.environ.get("DISCORD_BOT_TOKEN", "") or ""
+        token_slack = cli_sl or os.environ.get("SLACK_BOT_TOKEN", "") or ""
         asyncio.run(
             run_gateway(
                 db_file,
-                token_telegram=getattr(args, "telegram_token", "") or "",
-                token_discord=getattr(args, "discord_token", "") or "",
-                token_slack=getattr(args, "slack_token", "") or "",
+                token_telegram=token_telegram,
+                token_discord=token_discord,
+                token_slack=token_slack,
                 heartbeat=getattr(args, "heartbeat", 60.0),
             )
         )
