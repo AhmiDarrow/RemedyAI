@@ -88,9 +88,20 @@ Authorization: Bearer <local_api_token>
 
 `token`, `thinking`, `tool_call`, `tool_result`, `done`, `error`
 
+## CLI safety
+
+| Rule | Default |
+|------|---------|
+| Bind | `remedy serve` loopback only. Non-loopback / `0.0.0.0` without a Bearer token is **refused** unless `REMEDY_ALLOW_INSECURE_BIND=1`. |
+| `--home` | Refuses drive roots and OS trees (`C:\Windows`, `/etc`, …). |
+| `remedy exec` | Dangerous commands are blocked (exit **2**). Failed commands propagate the process exit code. |
+| `remedy config show` | Secret keys (`api_key`, tokens, passwords) are redacted. |
+| Gateway tokens | Prefer `TELEGRAM_BOT_TOKEN` / `DISCORD_BOT_TOKEN` / `SLACK_BOT_TOKEN`. CLI `--*-token` flags are visible in process lists. |
+| Exit codes | No subcommand → **2**. Unknown / invalid input → **2**. Not found / tool failure → **1**. |
+
 ## Channels & plugins
 
-CLI can enable Telegram / Discord / Slack gateways and load plugins — see repo `docs/USAGE.md` for full flags. Desktop chat does not require those channels.
+CLI can enable Telegram / Discord / Slack gateways and load plugins — see repo `docs/USAGE.md` for full flags. Desktop chat does not require those channels. Prefer env vars for bot tokens (do not pass `--telegram-token` on shared machines).
 
 ## Related
 

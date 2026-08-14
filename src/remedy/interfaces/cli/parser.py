@@ -169,9 +169,21 @@ def build_parser() -> argparse.ArgumentParser:
     gw = sub.add_parser("gateway", help="Gateway operations")
     gw_sub = gw.add_subparsers(dest="gateway_cmd", required=True)
     gw_start = gw_sub.add_parser("start", help="Start the gateway daemon")
-    gw_start.add_argument("--telegram-token", default="")
-    gw_start.add_argument("--discord-token", default="")
-    gw_start.add_argument("--slack-token", default="")
+    gw_start.add_argument(
+        "--telegram-token",
+        default="",
+        help="Telegram bot token (prefer TELEGRAM_BOT_TOKEN env; argv is visible in process lists)",
+    )
+    gw_start.add_argument(
+        "--discord-token",
+        default="",
+        help="Discord bot token (prefer DISCORD_BOT_TOKEN env; argv is visible in process lists)",
+    )
+    gw_start.add_argument(
+        "--slack-token",
+        default="",
+        help="Slack bot token (prefer SLACK_BOT_TOKEN env; argv is visible in process lists)",
+    )
     gw_start.add_argument("--heartbeat", type=float, default=60.0)
     gw_sub.add_parser("status", help="Show gateway status")
     gw_sub.add_parser("serve", help="Start the REST API server")
