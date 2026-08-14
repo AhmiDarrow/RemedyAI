@@ -488,36 +488,40 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         except Exception:
             metabolism = {}
 
-        # Somatic signals — organism mood for status bar / tray tooltip.
-        # Partner status is polled often: reuse soma.json if fresh (<20s)
-        # so we do not rewrite disk every tick.
+        # Somatic signals — prefer the organism body (already on this poll).
+        # Fall back to soma.json / refresh only when vitals have no mood yet.
         soma: dict = {}
-        try:
-            import time as _time
+        with suppress(Exception):
+            from remedy.core.metabolism.organism import soma_from_vitals
 
-            from remedy.core.muscle_profile import muscle_from_runtime
-            from remedy.memory.soul.somatic import load_soma_file, refresh_soma
+            soma = soma_from_vitals(organism)
+        if not soma.get("label"):
+            try:
+                import time as _time
 
-            home = None
-            if runtime is not None:
-                home = getattr(getattr(runtime, "config", None), "home_dir", None)
-            cached = load_soma_file(home)
-            age = (
-                _time.time() - float(cached.get("ts") or 0)
-                if isinstance(cached, dict)
-                else 1e9
-            )
-            if isinstance(cached, dict) and age < 20.0 and cached.get("label"):
-                soma = cached
-            else:
-                muscle = muscle_from_runtime(runtime)
-                soma = refresh_soma(
-                    home,
-                    muscle_label=muscle.label,
-                    muscle_provider=muscle.provider,
+                from remedy.core.muscle_profile import muscle_from_runtime
+                from remedy.memory.soul.somatic import load_soma_file, refresh_soma
+
+                home = None
+                if runtime is not None:
+                    home = getattr(getattr(runtime, "config", None), "home_dir", None)
+                cached = load_soma_file(home)
+                age = (
+                    _time.time() - float(cached.get("ts") or 0)
+                    if isinstance(cached, dict)
+                    else 1e9
                 )
-        except Exception:
-            soma = {}
+                if isinstance(cached, dict) and age < 20.0 and cached.get("label"):
+                    soma = cached
+                else:
+                    muscle = muscle_from_runtime(runtime)
+                    soma = refresh_soma(
+                        home,
+                        muscle_label=muscle.label,
+                        muscle_provider=muscle.provider,
+                    )
+            except Exception:
+                soma = {}
 
         active_title = str(organism.get("life_title") or "")
         next_action = str(organism.get("next_action") or "")
