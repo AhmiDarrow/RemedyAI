@@ -168,9 +168,18 @@ def schedule_post_turn_prep(
                     muscle_provider=m.provider,
                 )
             with suppress(Exception):
-                from remedy.core.metabolism.organism import collect_vitals, persist_vitals
+                import time as _time
 
-                persist_vitals(collect_vitals(home, runtime=runtime), home)
+                from remedy.core.metabolism.organism import (
+                    collect_vitals,
+                    load_vitals,
+                    persist_vitals,
+                )
+
+                prev = load_vitals(home)
+                age = _time.time() - float(prev.get("ts") or 0)
+                if age > 45.0 or not prev.get("alive"):
+                    persist_vitals(collect_vitals(home, runtime=runtime), home)
             # Realtime skill lifecycle: promote/demote/prune from this turn's stats
             with suppress(Exception):
                 getter = getattr(runtime, "_get_learning_loop", None)
