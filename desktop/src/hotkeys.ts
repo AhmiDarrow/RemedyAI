@@ -78,6 +78,30 @@ export const HOTKEYS: HotkeyDef[] = [
     match: { key: ',', ctrl: true },
   },
   {
+    keys: 'Ctrl+=',
+    scope: 'global',
+    action: 'Larger text',
+    match: { key: '=', ctrl: true },
+  },
+  {
+    keys: 'Ctrl++',
+    scope: 'global',
+    action: 'Larger text',
+    match: { key: '+', ctrl: true, shift: true },
+  },
+  {
+    keys: 'Ctrl+-',
+    scope: 'global',
+    action: 'Smaller text',
+    match: { key: '-', ctrl: true },
+  },
+  {
+    keys: 'Ctrl+0',
+    scope: 'global',
+    action: 'Reset text size',
+    match: { key: '0', ctrl: true },
+  },
+  {
     keys: 'Ctrl+/',
     scope: 'global',
     action: "Open Help wiki (owner's manual)",
@@ -104,6 +128,9 @@ export const GLOBAL_HOTKEY_ACTIONS = [
   'Toggle plan mode',
   'Open settings',
   "Open Help wiki (owner's manual)",
+  'Larger text',
+  'Smaller text',
+  'Reset text size',
   'Close panels and command palette',
 ] as const
 

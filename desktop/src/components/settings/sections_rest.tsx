@@ -1,7 +1,7 @@
 /** Settings form sections — rest. */
 import type { ReactNode } from 'react'
 import type { SettingsFormProps } from './formTypes'
-import type { Density } from '../../utils/chatPrefs'
+import { FONT_SCALE_OPTIONS, type Density } from '../../utils/chatPrefs'
 import { SettingsSection } from '../SettingsSection'
 import {
   FormActionButton,
@@ -43,6 +43,12 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
     onDensityChange,
     customAccent,
     onCustomAccentChange,
+    fontScale = 'md',
+    onFontScaleChange,
+    reduceMotion = false,
+    onReduceMotionChange,
+    highContrast = false,
+    onHighContrastChange,
     updateInfo,
     checkingUpdates,
     updateStatus,
@@ -244,6 +250,26 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
         </div>
 
         <div className="mt-3 space-y-2">
+          <FormLabel>Text size</FormLabel>
+          <FormSegmented
+            value={fontScale}
+            onChange={(s) => onFontScaleChange?.(s)}
+            options={FONT_SCALE_OPTIONS.map((o) => ({
+              id: o.id,
+              label: o.label,
+              title:
+                o.id === 'sm'
+                  ? 'Smaller text'
+                  : o.id === 'md'
+                    ? 'Default text'
+                    : o.id === 'lg'
+                      ? 'Larger text'
+                      : 'Largest text',
+            }))}
+          />
+          <FormHint>
+            Scales chat, Settings, and menus. Shortcuts: Ctrl + / Ctrl − / Ctrl 0.
+          </FormHint>
           <FormLabel>Density</FormLabel>
           <FormSegmented
             value={(density === 'compact' ? 'compact' : 'cozy') as Density}
@@ -252,6 +278,16 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
               { id: 'cozy', label: 'Cozy' },
               { id: 'compact', label: 'Compact' },
             ]}
+          />
+          <FormToggle
+            checked={highContrast}
+            onChange={(on) => onHighContrastChange?.(on)}
+            label="Higher contrast"
+          />
+          <FormToggle
+            checked={reduceMotion}
+            onChange={(on) => onReduceMotionChange?.(on)}
+            label="Reduce motion"
           />
           <FormLabel className="mt-2">Custom accent (optional)</FormLabel>
           <div className="flex items-center gap-2 mb-2">
@@ -283,7 +319,7 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
         {...sectionProps('help')}
       >
         <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
-          Enter sends · Shift+Enter new line · /help for the command card · F1 full manual
+          Enter sends · Shift+Enter new line · F1 opens Help
         </div>
         {onOpenHelp && (
           <div className="flex flex-col gap-1.5 mb-2">
@@ -292,7 +328,7 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
               onClick={() => onOpenHelp()}
               className="w-full"
             >
-              Open Help wiki (owner&apos;s manual)
+              Open Help
             </FormActionButton>
             <div className="flex flex-wrap gap-1">
               {(

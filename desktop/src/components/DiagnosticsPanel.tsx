@@ -295,7 +295,7 @@ export function DiagnosticsPanel({ open, onClose }: DiagnosticsPanelProps) {
         >
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <div className="text-sm font-semibold tracking-tight">Health Diagnostics</div>
+              <div className="text-sm font-semibold tracking-tight">Diagnostics</div>
               {data ? (
                 <span
                   className="text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"

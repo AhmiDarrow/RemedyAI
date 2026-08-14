@@ -20,13 +20,16 @@ Canonical list for Remedy Desktop. Also shown under **Settings → Help & shortc
 | **Ctrl+P** / **Ctrl+K** | Command palette |
 | **Ctrl+B** | Toggle Plan / Build mode |
 | **Ctrl+,** | Open Settings |
-| **Ctrl+/** | Open Help wiki |
-| **F1** | Open Help wiki |
+| **Ctrl+=** / **Ctrl++** | Larger text |
+| **Ctrl+-** | Smaller text |
+| **Ctrl+0** | Reset text size |
+| **Ctrl+/** | Open Help |
+| **F1** | Open Help |
 | **Escape** | Close panels, Help, and command palette |
 
 ## Logo menu
 
-Open from the title-bar wordmark: New session, Settings, Memory, Skills, Updates, Help, About, Quit.
+Open from the title-bar wordmark: New session, Settings, Memory, Skills, Diagnostics, Updates, Help, About, Quit.
 
 ## Related
 

@@ -193,11 +193,25 @@ export function useSessionLlm(opts: {
       const d = (ev as CustomEvent<{ stem?: string; path?: string }>).detail
       const stem = (d?.stem || '').trim()
       if (!stem) return
+      if (streaming) {
+        showSwitchToast(`Loaded ${stem} — apply after this turn`)
+        return
+      }
+      const onRmbAlready =
+        (barProvider || llmProvider || '').toLowerCase() === 'rmb'
+      if (activeId && !onRmbAlready) {
+        void updateSettings({
+          llm_provider: 'rmb',
+          llm_model: stem,
+          llm_base_url: 'http://127.0.0.1:8787/v1',
+        }).catch(() => {})
+        showSwitchToast(`RMB loaded ${stem} — switch provider to use it`)
+        return
+      }
       setLlmProvider('rmb')
       setModel(stem)
       if (activeId) {
         setSessionBind(activeId, 'rmb', stem)
-        // Persist session bind so reloads stay on this GGUF
         void applySessionLlm(activeId, 'rmb', stem, false).catch(() => {})
       } else {
         void updateSettings({
@@ -212,13 +226,23 @@ export function useSessionLlm(opts: {
     }
     window.addEventListener('remedy:rmb-model-changed', onRmb)
     return () => window.removeEventListener('remedy:rmb-model-changed', onRmb)
-  }, [activeId, setSessionBind, refreshModels, refreshConnected, showSwitchToast])
+  }, [
+    activeId,
+    streaming,
+    barProvider,
+    llmProvider,
+    setSessionBind,
+    refreshModels,
+    refreshConnected,
+    showSwitchToast,
+  ])
 
   // While on RMB, periodically adopt the host's Loaded GGUF (no user action)
   useEffect(() => {
     if ((barProvider || llmProvider) !== 'rmb') return
     let cancelled = false
     const tick = async () => {
+      if (streaming) return
       try {
         const { getRmbStatus } = await import('../api/rmb')
         const st = await getRmbStatus()
@@ -251,6 +275,7 @@ export function useSessionLlm(opts: {
     barModel,
     model,
     activeId,
+    streaming,
     setSessionBind,
     refreshConnected,
   ])

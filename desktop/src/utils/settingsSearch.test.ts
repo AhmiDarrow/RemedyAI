@@ -21,6 +21,19 @@ describe('settings search', () => {
     expect(sectionMatchesSearch('xyzzy-nope', m.title, m.summary, m.keywords)).toBe(false)
   })
 
+  it('matches local models section by huggingface keyword', () => {
+    const m = SETTINGS_SECTION_META.rmb
+    expect(sectionMatchesSearch('hugging face', m.title, m.summary, m.keywords)).toBe(true)
+    expect(sectionMatchesSearch('gguf', m.title, m.summary, m.keywords)).toBe(true)
+  })
+
+  it('matches appearance section by accessibility keywords', () => {
+    const m = SETTINGS_SECTION_META.theme
+    expect(sectionMatchesSearch('font size', m.title, m.summary, m.keywords)).toBe(true)
+    expect(sectionMatchesSearch('contrast', m.title, m.summary, m.keywords)).toBe(true)
+    expect(sectionMatchesSearch('appearance', m.title, m.summary, m.keywords)).toBe(true)
+  })
+
   it('matches privacy section by keyword', () => {
     const m = SETTINGS_SECTION_META.privacy
     expect(sectionMatchesSearch('email', m.title, m.summary, m.keywords)).toBe(true)

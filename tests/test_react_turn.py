@@ -66,6 +66,19 @@ def test_resolve_tools_verbal_only_disarms_even_with_history():
     assert d2.reason == "non_work"
 
 
+def test_resolve_tools_arith_trivia_disarms_even_if_build_active():
+    all_t = [_tool("file_write"), _tool("file_read")]
+    d = resolve_tools(
+        message="1 + 1",
+        all_tools=all_t,
+        turn_tier=1,
+        build_active=True,
+        open_tasks=["ship the calculator"],
+    )
+    assert d.tools is None
+    assert d.reason == "non_work"
+
+
 def test_resolve_tools_l1_strips_pure_chat():
     all_t = [_tool("file_write")]
     d = resolve_tools(

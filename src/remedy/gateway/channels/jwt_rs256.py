@@ -131,15 +131,44 @@ def decode_jwt_payload_unverified(token: str) -> dict[str, Any] | None:
         return None
 
 
+_JWKS_HOSTS = frozenset(
+    {
+        "login.botframework.com",
+        "login.microsoftonline.com",
+        "login.microsoft.com",
+        "login.windows.net",
+    }
+)
+
+
+def _jwks_url_allowed(url: str) -> bool:
+    from urllib.parse import urlparse
+
+    parsed = urlparse((url or "").strip())
+    if parsed.scheme != "https":
+        return False
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    if host in _JWKS_HOSTS:
+        return True
+    return host.endswith(".microsoftonline.com") or host.endswith(".windows.net")
+
+
 def _http_get_json(url: str, *, timeout: float = 4.0) -> dict[str, Any] | None:
+    if not _jwks_url_allowed(url):
+        logger.warning("JWKS URL refused (host not allowlisted): %s", (url or "")[:80])
+        return None
     try:
+        from remedy.core.security import urlopen_no_redirect
+
         req = urllib.request.Request(
             url,
             headers={"Accept": "application/json", "User-Agent": "RemedyAI-TeamsJWT/1"},
             method="GET",
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
+        with urlopen_no_redirect(req, timeout=timeout) as resp:
+            raw = resp.read(2 * 1024 * 1024)
         data = json.loads(raw.decode("utf-8"))
         return data if isinstance(data, dict) else None
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
@@ -194,7 +223,7 @@ def refresh_jwks(*, force: bool = False, openid_urls: tuple[str, ...] | None = N
         if not meta:
             continue
         juri = str(meta.get("jwks_uri") or "").strip()
-        if juri.startswith("https://"):
+        if _jwks_url_allowed(juri):
             jwks_uris.append(juri)
     # Also try well-known keys endpoints directly (fast path when meta is slow)
     jwks_uris.extend(

@@ -733,7 +733,7 @@ export function StatusBar({
           <SegButton
             active={panel === 'settings'}
             onClick={() => onTogglePanel('settings')}
-            title="Settings — provider, project, theme, account"
+            title="Settings — provider, project, appearance"
           >
             Settings
           </SegButton>

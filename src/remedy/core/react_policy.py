@@ -605,6 +605,12 @@ _REQUEST_WORK_RE = re.compile(
 _KNOWLEDGE_Q_START_RE = re.compile(
     r"(?i)^(?:what|who|when|where|why|how|which|is|are|does|do|did|was|were)\b"
 )
+_ARITH_ONLY_RE = re.compile(
+    r"(?ix)^\s*"
+    r"(?:what(?:'s|\s+is)\s+)?"
+    r"\d+(?:\.\d+)?\s*[\+\-\*\/x×÷]\s*\d+(?:\.\d+)?"
+    r"(?:\s*=\s*)?\s*\??\s*$"
+)
 # Structural work shape (paths, UI chrome, code tokens) — not product nouns.
 _WORK_SHAPE_RE = re.compile(
     r"(?i)(?:[A-Za-z]:)?[\\/][\w.\\/ -]+|"
@@ -634,7 +640,10 @@ def is_knowledge_question(message: str) -> bool:
         return False
     if _TOOL_HINT_RE.search(msg) or _WORK_SHAPE_RE.search(msg):
         return False
-    return bool(msg.endswith("?") or _KNOWLEDGE_Q_START_RE.match(msg))
+    if msg.endswith("?") or _KNOWLEDGE_Q_START_RE.match(msg):
+        return True
+    # Bare arithmetic ("1 + 1", "2*2=") is trivia, not a build ask.
+    return bool(_ARITH_ONLY_RE.match(msg))
 
 
 # Short "reply only X" / "just say Y" — verbal token, not environment work.

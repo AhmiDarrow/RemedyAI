@@ -9,7 +9,7 @@ you want muscle without a cloud provider.
 | Piece | Role |
 |-------|------|
 | **Engine** | llama.cpp (OpenAI-compatible HTTP API) |
-| **Models** | Any GGUF you place under `~/.remedy/rmb/models/` (or a path you set) |
+| **Models** | Any GGUF you place under `~/.remedy/rmb/models/`, a path you set, or a file pulled from Hugging Face |
 | **Endpoint** | Default `http://127.0.0.1:8787/v1` |
 | **Chat** | Settings → **Use as chat provider** switches the active provider to RMB |
 
@@ -32,10 +32,22 @@ and prefers `host_run(argv)` so quoting does not burn the small window.
 ## Setup (owner UI)
 
 1. Open **Settings → Remedy Muscle Bridge** (local models).
-2. Drop a GGUF into `~/.remedy/rmb/models/` or pick a catalog / path.
+2. Drop a GGUF into `~/.remedy/rmb/models/`, pick a catalog / path, or
+   **Pull from Hugging Face**:
+   - Paste a **file URL** (`…/resolve/main/….gguf`) to download that file.
+   - Paste **`owner/repo`** to list every `.gguf` in that repo, then pick one.
+   - Type a **model name**. The same weights are often hosted by more than one
+     account — Remedy lists the matching repos (sorted by downloads). Pick the
+     host, then the quant file. Remedy does not guess.
+   Files land in `~/.remedy/rmb/models/` (resumable). **Pull and load** then
+   starts RMB on that file. Gated repos need `HF_TOKEN` (or
+   `HUGGING_FACE_HUB_TOKEN`) in the environment.
 3. Leave **Autofit** on (default) — Remedy sizes context, GPU layers, and KV
    cache from this PC’s VRAM/RAM so the GGUF actually loads. Or pick a fixed
    profile (agent / turbo / quality) or type a context size to lock it.
+   Switching GGUFs **re-fits** automatically. Remedy also auto-loads host
+   knobs from the file (Jinja chat template, thinking off for Qwen3/R1,
+   mmap, MTP single-slot). You should not need to set those.
 4. **Start RMB** (required — RMB does **not** auto-start when the API/serve
    process comes up). Optionally enable **auto-start** only if you want the host
    to load with every Remedy launch.

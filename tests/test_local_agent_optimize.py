@@ -59,6 +59,20 @@ def test_slim_system_includes_local_contract():
     assert len(out) < len(big) + 2000
 
 
+def test_slim_system_trivia_is_tiny():
+    out = slim_system_for_local(
+        "Personhood: " + ("x" * 5000),
+        "Project workspace: C:/proj\n" + ("ctx " * 4000),
+        provider="rmb",
+        model="LFM2.5-2.6B",
+        user_message="1 + 1",
+    )
+    assert "[Local agent mode" not in out
+    assert "file_write" not in out
+    assert "one short sentence" in out.lower()
+    assert len(out) < 400
+
+
 def test_build_runtime_system_block_local_slims():
     out = build_runtime_system_block(
         system_prompt="You are Remedy.\n\n" + ("policy " * 2000),
@@ -105,6 +119,34 @@ def test_apply_local_body_sets_required_tools():
     assert int(out["max_tokens"]) >= 1024
     assert int(out["max_tokens"]) <= 32_768
     assert float(out["temperature"]) <= 0.15
+    assert (out.get("chat_template_kwargs") or {}).get("enable_thinking") is False
+    assert out.get("reasoning_budget") == 0
+
+
+def test_apply_local_body_strips_tools_on_trivia():
+    body = {
+        "messages": [{"role": "user", "content": "1 + 1"}],
+        "tools": [
+            {
+                "type": "function",
+                "function": {"name": "file_write", "parameters": {}},
+            }
+        ],
+        "max_tokens": 8000,
+        "tool_choice": "required",
+    }
+    out = apply_local_body_optimize(
+        body,
+        provider="rmb",
+        model="Qwen3.5-4B",
+        base_url="http://127.0.0.1:8787/v1",
+        user_message="1 + 1",
+        step_index=0,
+    )
+    assert "tools" not in out
+    assert "tool_choice" not in out
+    assert int(out["max_tokens"]) <= 256
+    assert (out.get("chat_template_kwargs") or {}).get("enable_thinking") is False
 
 
 def test_looks_like_tutorial_monologue_from_export():

@@ -192,9 +192,9 @@ Default **New Session** still uses Settings → default project folder when set.
 - Edit a prior user message (when available) to branch the conversation.  
 - Regenerate an assistant reply when the UI offers refresh.  
 
-## Themes & density
+## Appearance
 
-Settings → Appearance: system/dark/light themes, density, custom accent. Does not change provider or data.
+Settings → **Appearance**: theme, text size (S–XL), density, higher contrast, reduce motion, optional accent. Ctrl+= / Ctrl+- / Ctrl+0 resize text. Does not change provider or data.
 
 ## Related
 

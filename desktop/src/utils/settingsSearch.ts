@@ -80,7 +80,7 @@ export const SETTINGS_SECTION_META: Record<
     title: 'RMB',
     summary: 'Local agent · coding + tools',
     keywords:
-      'rmb remedy muscle bridge local agent llama coding tools gguf qwen coder offline private',
+      'rmb remedy muscle bridge local agent llama coding tools gguf qwen coder offline private huggingface hugging face pull download',
   },
   'memory-harness': {
     title: 'Memory harness',
@@ -88,9 +88,10 @@ export const SETTINGS_SECTION_META: Record<
     keywords: 'harness compact prune context percent budget',
   },
   theme: {
-    title: 'Theme',
-    summary: 'Appearance',
-    keywords: 'theme density accent dark light color',
+    title: 'Appearance',
+    summary: 'Theme, text size, motion',
+    keywords:
+      'theme density accent dark light color appearance font size text large accessibility contrast motion reduce a11y',
   },
   advanced: {
     title: 'Advanced',
