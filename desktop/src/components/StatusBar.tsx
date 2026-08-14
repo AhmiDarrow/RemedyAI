@@ -363,6 +363,8 @@ export function StatusBar({
             } else if (p.open_goals > 0) {
               bits.push(`${p.open_goals} life`)
             }
+            const casN = Number(p.organism?.cas_count || p.cas?.count || 0)
+            if (casN > 0) bits.push(`${casN} mem`)
             // Somatic / organism mood (Soul Field) + lean metabolism
             const soma = p.soma
             if (soma?.label) {

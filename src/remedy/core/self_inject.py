@@ -671,47 +671,10 @@ def _organism_tick(runtime: Any, *, home: str | Path | None) -> dict[str, Any]:
                 )
                 out["dreamed"] = True
     with suppress(Exception):
-        from remedy.memory.life_goals import LifeGoalStore, pulse_due, weekly_pulse
+        from remedy.core.metabolism.organism import organism_cycle
 
-        if pulse_due(home):
-            pulse = weekly_pulse(home)
-            LifeGoalStore(home).record_pulse()
-            out["life_pulse"] = {
-                "open": pulse.get("open"),
-                "stalled": len(pulse.get("stalled") or []),
-                "moved": len(pulse.get("moved") or []),
-            }
-    with suppress(Exception):
-        from remedy.memory.life_drive import drive_due, take_step
-
-        if drive_due(home, hours=4.0):
-            step = take_step(home)
-            if step.get("ok"):
-                out["life_step"] = {
-                    "goal": step.get("goal"),
-                    "did": step.get("did"),
-                    "next": step.get("next"),
-                }
-    with suppress(Exception):
-        from remedy.memory.cas import ensure_cas
-
-        cas = ensure_cas(home)
-        if cas is not None:
-            if cas.due_compact():
-                out["cas_compact"] = cas.compact()
-            out["cas"] = {k: v for k, v in cas.snapshot().items() if k != "path"}
-    with suppress(Exception):
-        from remedy.core.metabolism.time_crystal import get_time_crystal
-
-        crystal = get_time_crystal("life")
-        if home:
-            crystal.persist(home)
-    with suppress(Exception):
-        from remedy.core.metabolism.organism import organism_heartbeat
-
-        beat = organism_heartbeat(home, session_id="life")
-        if beat.get("recalled"):
-            out["recalled"] = beat.get("recalled")
+        cycle = organism_cycle(home, runtime=runtime, session_id="life")
+        out.update(cycle)
     return out
 
 
