@@ -18,6 +18,20 @@ _VITALS_NAME = "organism.json"
 # path -> (mtime, payload). Pulse/status polls hit RAM, not disk.
 _vitals_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _VITALS_CACHE_MAX = 8
+_SOUL_KEYS = (
+    "who",
+    "mood",
+    "emoji",
+    "label",
+    "rapport",
+    "trust",
+    "turns",
+    "dream",
+    "help_mode",
+    "stance",
+    "tray_tooltip",
+    "open_hint",
+)
 
 _DURABLE_RE = re.compile(
     r"(?i)\b("
@@ -329,6 +343,7 @@ def collect_vitals(
         "tray_tooltip": "",
     }
     skip_life = bool(extras and extras.get("_skip_life"))
+    skip_soul = bool(extras and extras.get("_skip_soul"))
     if not skip_life:
         with suppress(Exception):
             from remedy.memory.life_goals import LifeGoalStore
@@ -359,42 +374,43 @@ def collect_vitals(
             v["cas_count"] = int(snap.get("count") or 0)
             kinds = snap.get("kinds") or {}
             v["cas_durable"] = int(kinds.get("fact") or 0) + int(kinds.get("life") or 0)
-    with suppress(Exception):
-        from remedy.memory.soul.field import load_soul_field
-        from remedy.memory.soul.somatic import compute_soma
+    if not skip_soul:
+        with suppress(Exception):
+            from remedy.memory.soul.field import load_soul_field
+            from remedy.memory.soul.somatic import compute_soma
 
-        sf = load_soul_field(home)
-        muscle_label = ""
-        muscle_provider = ""
-        if runtime is not None:
-            with suppress(Exception):
-                from remedy.core.muscle_profile import muscle_from_runtime
+            sf = load_soul_field(home)
+            muscle_label = ""
+            muscle_provider = ""
+            if runtime is not None:
+                with suppress(Exception):
+                    from remedy.core.muscle_profile import muscle_from_runtime
 
-                m = muscle_from_runtime(runtime)
-                muscle_label = m.label
-                muscle_provider = str(m.provider or "")
-        soma = compute_soma(
-            home,
-            muscle_label=muscle_label,
-            muscle_provider=muscle_provider,
-            field=sf,
-        )
-        v["mood"] = soma.mood
-        v["emoji"] = soma.emoji
-        v["label"] = soma.label
-        v["tray_tooltip"] = soma.tray_tooltip
-        rel = sf.relational
-        v["who"] = (sf.identity_name or "Remedy").strip() or "Remedy"
-        v["rapport"] = float(rel.rapport or 0)
-        v["trust"] = float(rel.trust or 0)
-        v["turns"] = int(rel.turns_together or 0)
-        v["help_mode"] = str(rel.help_mode or "")
-        if rel.open_threads:
-            v["open_hint"] = str(rel.open_threads[-1])[:80]
-        if sf.episodes:
-            v["stance"] = str(sf.episodes[-1].user_stance or "steady")
-        if getattr(sf, "future_dreams", None):
-            v["dream"] = str(sf.future_dreams[0])[:140]
+                    m = muscle_from_runtime(runtime)
+                    muscle_label = m.label
+                    muscle_provider = str(m.provider or "")
+            soma = compute_soma(
+                home,
+                muscle_label=muscle_label,
+                muscle_provider=muscle_provider,
+                field=sf,
+            )
+            v["mood"] = soma.mood
+            v["emoji"] = soma.emoji
+            v["label"] = soma.label
+            v["tray_tooltip"] = soma.tray_tooltip
+            rel = sf.relational
+            v["who"] = (sf.identity_name or "Remedy").strip() or "Remedy"
+            v["rapport"] = float(rel.rapport or 0)
+            v["trust"] = float(rel.trust or 0)
+            v["turns"] = int(rel.turns_together or 0)
+            v["help_mode"] = str(rel.help_mode or "")
+            if rel.open_threads:
+                v["open_hint"] = str(rel.open_threads[-1])[:80]
+            if sf.episodes:
+                v["stance"] = str(sf.episodes[-1].user_stance or "steady")
+            if getattr(sf, "future_dreams", None):
+                v["dream"] = str(sf.future_dreams[0])[:140]
     if extras:
         for k, val in extras.items():
             if str(k).startswith("_"):
@@ -520,6 +536,11 @@ def organism_cycle(
     if not out.get("life_step") and prev.get("life_title"):
         extras["_skip_life"] = True
         for k in ("life_title", "next_action", "last_did", "stalled", "open_count"):
+            if k not in extras and prev.get(k) is not None:
+                extras[k] = prev[k]
+    if prev.get("mood") or prev.get("who"):
+        extras["_skip_soul"] = True
+        for k in _SOUL_KEYS:
             if k not in extras and prev.get(k) is not None:
                 extras[k] = prev[k]
     vitals = collect_vitals(home, extras=extras, runtime=runtime)
