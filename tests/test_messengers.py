@@ -23,7 +23,7 @@ from remedy.interfaces.messenger_settings import (
     apply_messengers_update,
     normalize_enabled_channels,
 )
-from remedy.models import ChannelKind
+from remedy.models import ChannelKind, EventKind
 
 
 def test_catalog_includes_major_messengers():
@@ -294,4 +294,131 @@ def test_public_fields_unknown_channel_strips_secret_suffixes():
         },
     )
     assert fields == {"channel_id": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_messenger_cancelled_error_persists_streamed_text(monkeypatch):
+    """Cancel after tokens: persist assistant streamed text and abort the claim epoch."""
+    import asyncio
+
+    from remedy.gateway.session_bridge import handle_messenger_event
+    from remedy.models import ChatMessageRole, ChatSession, GatewayEvent
+
+    persisted: list[tuple[str, str]] = []
+    aborts: list[tuple[str, int | None]] = []
+
+    class _Mem:
+        async def add_chat_message(self, msg):
+            persisted.append((str(msg.role), msg.content))
+            return msg
+
+    class _Rt:
+        memory = _Mem()
+        config = type("C", (), {"llm_model": "t", "name": "t"})()
+
+        async def stream_response(self, *a, **k):
+            yield "hello"
+            raise asyncio.CancelledError()
+
+        async def handle_event(self, event):
+            if False:
+                yield ""
+
+    def _abort(sid, epoch=None):
+        aborts.append((str(sid), epoch))
+        return 0
+
+    monkeypatch.setattr("remedy.core.turn_context.abort_session", _abort)
+    event = GatewayEvent(
+        kind=EventKind.MESSAGE,
+        channel=ChannelKind.TELEGRAM,
+        payload={"message": "hi"},
+        session_id="msg-cancel-1",
+    )
+    session = ChatSession(id="msg-cancel-1", title="t", origin_channel="telegram")
+
+    async def _ensure(*a, **k):
+        return session
+
+    import remedy.gateway.session_bridge as sb
+
+    orig = sb.ensure_session_for_event
+    sb.ensure_session_for_event = _ensure  # type: ignore[assignment]
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            async for _ in handle_messenger_event(_Rt(), event):
+                pass
+    finally:
+        sb.ensure_session_for_event = orig
+    roles = [r for r, _ in persisted]
+    assert ChatMessageRole.USER in roles or "user" in roles
+    asst = [c for r, c in persisted if r in (ChatMessageRole.ASSISTANT, "assistant")]
+    assert asst == ["hello"]
+    assert aborts
+    assert aborts[0][0] == "msg-cancel-1"
+    assert aborts[0][1] is not None
+
+
+@pytest.mark.asyncio
+async def test_messenger_cancelled_error_persists_stopped_note(monkeypatch):
+    """Cancel with no tokens: persist continue/stopped note and abort the epoch."""
+    import asyncio
+
+    from remedy.gateway.session_bridge import handle_messenger_event
+    from remedy.models import ChatMessageRole, ChatSession, GatewayEvent
+
+    persisted: list[tuple[str, str]] = []
+    aborts: list[tuple[str, int | None]] = []
+
+    class _Mem:
+        async def add_chat_message(self, msg):
+            persisted.append((str(msg.role), msg.content))
+            return msg
+
+    class _Rt:
+        memory = _Mem()
+        config = type("C", (), {"llm_model": "t", "name": "t"})()
+
+        async def stream_response(self, *a, **k):
+            if False:
+                yield ""
+            raise asyncio.CancelledError()
+
+        async def handle_event(self, event):
+            if False:
+                yield ""
+
+    def _abort(sid, epoch=None):
+        aborts.append((str(sid), epoch))
+        return 0
+
+    monkeypatch.setattr("remedy.core.turn_context.abort_session", _abort)
+    event = GatewayEvent(
+        kind=EventKind.MESSAGE,
+        channel=ChannelKind.TELEGRAM,
+        payload={"message": "hi"},
+        session_id="msg-cancel-empty",
+    )
+    session = ChatSession(id="msg-cancel-empty", title="t", origin_channel="telegram")
+
+    async def _ensure(*a, **k):
+        return session
+
+    import remedy.gateway.session_bridge as sb
+
+    orig = sb.ensure_session_for_event
+    sb.ensure_session_for_event = _ensure  # type: ignore[assignment]
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            async for _ in handle_messenger_event(_Rt(), event):
+                pass
+    finally:
+        sb.ensure_session_for_event = orig
+    asst = [c for r, c in persisted if r in (ChatMessageRole.ASSISTANT, "assistant")]
+    assert asst
+    note = asst[-1].lower()
+    assert "stopped" in note or "continue" in note
+    assert aborts
+    assert aborts[0][0] == "msg-cancel-empty"
+    assert aborts[0][1] is not None
 

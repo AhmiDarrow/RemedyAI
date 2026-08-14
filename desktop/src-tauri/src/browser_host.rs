@@ -673,21 +673,39 @@ fn normalize_url(raw: &str) -> Result<String, String> {
     if scheme != "http" && scheme != "https" {
         return Err(format!("unsupported url scheme: {scheme}"));
     }
+    // Reject userinfo (user:pass@host or empty @host) — credentials must not
+    // land in the rail address bar.
+    if let Some(after) = candidate.splitn(2, "://").nth(1) {
+        let authority = after.split(['/', '?', '#']).next().unwrap_or(after);
+        if authority.contains('@') {
+            return Err("blocked url userinfo".into());
+        }
+    }
     let host = parsed
         .host_str()
         .ok_or_else(|| "invalid url: missing host".to_string())?;
     if host.contains(' ') || host.is_empty() {
         return Err("invalid url: bad host".into());
     }
-    // Require a real domain (has a dot) or localhost / IPv4
+    // Unwrap IPv4-mapped IPv6 before private-IP / metadata checks.
+    let host_for_ip = if let Ok(v6) = host.parse::<std::net::Ipv6Addr>() {
+        v6.to_ipv4_mapped()
+            .map(|v4| v4.to_string())
+            .unwrap_or_else(|| host.to_string())
+    } else {
+        host.to_string()
+    };
+    // Require a real domain (has a dot) or localhost / IPv4 / mapped IPv4
     let ok_host = host == "localhost"
         || host.parse::<std::net::Ipv4Addr>().is_ok()
+        || host_for_ip.parse::<std::net::Ipv4Addr>().is_ok()
         || host.contains('.');
     if !ok_host {
         return Err(format!("invalid url host: {host}"));
     }
     // Mirror Python is_valid_navigate_url: IMDS / public IPs stay out of the rail.
     let host_lc = host.to_ascii_lowercase();
+    let ip_lc = host_for_ip.to_ascii_lowercase();
     if host_lc == "metadata.google.internal"
         || host_lc == "metadata.goog"
         || host_lc == "metadata"
@@ -697,10 +715,11 @@ fn normalize_url(raw: &str) -> Result<String, String> {
         || host_lc.ends_with(".sslip.io")
         || host_lc.ends_with(".xip.io")
         || host_lc.starts_with("169.254.")
+        || ip_lc.starts_with("169.254.")
     {
         return Err(format!("blocked metadata / link-local host: {host}"));
     }
-    if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
+    if let Ok(ip) = host_for_ip.parse::<std::net::Ipv4Addr>() {
         let o = ip.octets();
         let loopback = o[0] == 127 || ip.is_unspecified();
         let rfc1918 = o[0] == 10
@@ -711,6 +730,28 @@ fn normalize_url(raw: &str) -> Result<String, String> {
         }
     }
     Ok(candidate)
+}
+
+#[cfg(test)]
+mod normalize_url_tests {
+    use super::normalize_url;
+
+    #[test]
+    fn rejects_userinfo() {
+        assert!(normalize_url("https://user:pass@example.com/").is_err());
+        assert!(normalize_url("https://@mail.google.com/").is_err());
+    }
+
+    #[test]
+    fn unwraps_ipv4_mapped_link_local() {
+        assert!(normalize_url("http://[::ffff:169.254.169.254]/").is_err());
+        assert!(normalize_url("http://169.254.169.254/").is_err());
+    }
+
+    #[test]
+    fn allows_https_public_host() {
+        assert!(normalize_url("https://mail.google.com").is_ok());
+    }
 }
 
 fn main_window(app: &AppHandle) -> Result<tauri::Window, String> {

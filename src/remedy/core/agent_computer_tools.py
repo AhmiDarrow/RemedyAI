@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from remedy.core.computer.executor import get_computer_executor
 from remedy.core.computer.types import ComputerAction
+
+
+async def _run_computer(ex: Any, action: Any, **kwargs: Any) -> str:
+    """Run the sync executor off the event loop (run() uses time.sleep)."""
+    return await asyncio.to_thread(ex.run, action, **kwargs)
 
 
 def _computer_approval_gate(runtime: Any, tool_name: str, summary: str) -> str | None:
@@ -51,7 +57,7 @@ def register_computer_tools(runtime: Any) -> None:
 
         monitor: empty = full virtual screen / rail; integer index for one display.
         """
-        return ex.run(
+        return await _run_computer(ex,
             ComputerAction.SCREENSHOT,
             target=target or "auto",
             hint=hint,
@@ -70,7 +76,7 @@ def register_computer_tools(runtime: Any) -> None:
 
         Browser: e1… (DOM). Desktop: w1… windows + c1… UIA controls (mode=auto|windows|controls).
         """
-        return ex.run(
+        return await _run_computer(ex,
             ComputerAction.SNAPSHOT,
             target=target or "auto",
             hint=hint,
@@ -82,7 +88,7 @@ def register_computer_tools(runtime: Any) -> None:
 
     async def computer_monitors(hint: str = "") -> str:
         """List displays (index, size, primary) for multi-monitor screenshots."""
-        return ex.run(
+        return await _run_computer(ex,
             ComputerAction.MONITORS,
             target="desktop",
             hint=hint,
@@ -110,7 +116,7 @@ def register_computer_tools(runtime: Any) -> None:
         blocked = _computer_approval_gate(runtime, "computer_click", summary)
         if blocked:
             return blocked
-        return ex.run(
+        return await _run_computer(ex,
             ComputerAction.CLICK,
             target=target or "auto",
             hint=hint,
@@ -125,7 +131,7 @@ def register_computer_tools(runtime: Any) -> None:
 
     async def computer_wait(seconds: float = 0.5, hint: str = "") -> str:
         """Pause briefly (page paint, app launch). Prefer 0.3–1.5s, max 30s."""
-        return ex.run(
+        return await _run_computer(ex,
             ComputerAction.WAIT,
             target="desktop",
             hint=hint,
@@ -139,7 +145,7 @@ def register_computer_tools(runtime: Any) -> None:
         blocked = _computer_approval_gate(runtime, "computer_app", summary)
         if blocked:
             return blocked
-        return ex.run(
+        return await _run_computer(ex,
             ComputerAction.APP,
             target="desktop",
             hint=hint,
@@ -154,7 +160,7 @@ def register_computer_tools(runtime: Any) -> None:
         text is always read from the in-app Browser rail (not full desktop).
         """
         _ = target  # browser-rail only; ignore desktop/auto extras from the model
-        return ex.run(
+        return await _run_computer(ex,
             ComputerAction.PAGE_TEXT,
             target="browser",
             hint=hint,
@@ -169,7 +175,7 @@ def register_computer_tools(runtime: Any) -> None:
         limit: int = 8,
     ) -> str:
         """Find controls matching text/name on browser or desktop (ranked matches)."""
-        return ex.run(
+        return await _run_computer(ex,
             ComputerAction.FIND,
             target=target or "auto",
             hint=hint or text or query,
@@ -204,7 +210,7 @@ def register_computer_tools(runtime: Any) -> None:
         blocked = _computer_approval_gate(runtime, "computer_act", summary)
         if blocked:
             return blocked
-        return ex.run(
+        return await _run_computer(ex,
             ComputerAction.ACT,
             target=target or "auto",
             hint=hint or goal,
@@ -228,7 +234,7 @@ def register_computer_tools(runtime: Any) -> None:
         blocked = _computer_approval_gate(runtime, "computer_type", summary)
         if blocked:
             return blocked
-        return ex.run(
+        return await _run_computer(ex,
             ComputerAction.TYPE,
             target=target or "auto",
             hint=hint,
@@ -246,7 +252,7 @@ def register_computer_tools(runtime: Any) -> None:
         blocked = _computer_approval_gate(runtime, "computer_key", summary)
         if blocked:
             return blocked
-        return ex.run(
+        return await _run_computer(ex,
             ComputerAction.KEY,
             target=target or "auto",
             hint=hint,
@@ -262,7 +268,7 @@ def register_computer_tools(runtime: Any) -> None:
         hint: str = "",
     ) -> str:
         """Scroll at a point. dy>0 scrolls up, dy<0 scrolls down (notches)."""
-        return ex.run(
+        return await _run_computer(ex,
             ComputerAction.SCROLL,
             target=target or "auto",
             hint=hint,
@@ -282,7 +288,7 @@ def register_computer_tools(runtime: Any) -> None:
         Use target=desktop / hint about system/external browser only when the
         user asks to open outside Remedy.
         """
-        return ex.run(
+        return await _run_computer(ex,
             ComputerAction.NAVIGATE,
             target=target or "browser",
             hint=hint,
@@ -299,7 +305,7 @@ def register_computer_tools(runtime: Any) -> None:
         hint: str = "",
     ) -> str:
         """List visible windows or focus by hwnd / title substring (desktop)."""
-        return ex.run(
+        return await _run_computer(ex,
             ComputerAction.WINDOWS,
             target=target or "desktop",
             hint=hint or title,
@@ -323,7 +329,7 @@ def register_computer_tools(runtime: Any) -> None:
         blocked = _computer_approval_gate(runtime, "computer_drag", summary)
         if blocked:
             return blocked
-        return ex.run(
+        return await _run_computer(ex,
             ComputerAction.DRAG,
             target=target or "auto",
             hint=hint,

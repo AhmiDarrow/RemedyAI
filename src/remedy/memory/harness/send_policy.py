@@ -299,6 +299,7 @@ def apply_auto_harness_send_policy(
     pre_tier: int | None = None
     with suppress(Exception):
         from remedy.core.metabolism.tier import TurnTier, classify_turn_tier
+        from remedy.core.turn_context import current_plan_mode
 
         t0 = classify_turn_tier(
             user_text or "",
@@ -306,11 +307,13 @@ def apply_auto_harness_send_policy(
             browse=bool(getattr(runtime, "_turn_browse", False)),
             pure_action=bool(getattr(runtime, "_turn_pure_action", False)),
             has_attachments=bool(getattr(runtime, "_turn_has_attachments", False)),
-            plan_mode=bool(getattr(runtime, "_plan_mode", False)),
+            plan_mode=bool(current_plan_mode(runtime)),
         )
         pre_tier = int(t0)
         full_snap = t0 >= TurnTier.L2_AGENCY
-        runtime._turn_tier = int(getattr(runtime, "_turn_tier", None) or pre_tier)
+        from remedy.core.turn_context import set_turn_tier, turn_tier
+
+        set_turn_tier(int(turn_tier(runtime, default=pre_tier) or pre_tier), runtime)
         runtime._turn_tier_preclassified = pre_tier
     snap = build_context_snapshot(
         messages=messages,
@@ -695,7 +698,9 @@ def slim_messages_mid_turn(
     if len(messages) < 6:
         return messages
     # L0/L1 lean: skip mid-turn slim entirely
-    if int(getattr(runtime, "_turn_tier", 2) or 2) < 2:
+    from remedy.core.turn_context import turn_tier as _tt
+
+    if int(_tt(runtime, default=2) or 2) < 2:
         return messages
 
     from remedy.memory.harness.compressor import estimate_tokens
@@ -738,8 +743,9 @@ def slim_messages_mid_turn(
         # Inject evidence delta only when new EUs since last inject (no spam)
         with suppress(Exception):
             from remedy.core.metabolism.evidence import get_evidence_ledger
+            from remedy.core.turn_context import turn_tier as _tt2
 
-            if int(getattr(runtime, "_turn_tier", 1) or 1) >= 2:
+            if int(_tt2(runtime) or 1) >= 2:
                 led = get_evidence_ledger(sid)
                 last_eu = _evidence_eu_for_session(runtime, sid)
                 if led.evidence_units > last_eu:
@@ -791,8 +797,9 @@ def slim_messages_mid_turn(
     # Evidence delta after slim — only if new EUs (deduped)
     with suppress(Exception):
         from remedy.core.metabolism.evidence import get_evidence_ledger
+        from remedy.core.turn_context import turn_tier as _tt3
 
-        if int(getattr(runtime, "_turn_tier", 1) or 1) >= 2:
+        if int(_tt3(runtime) or 1) >= 2:
             led = get_evidence_ledger(sid)
             last_eu = _evidence_eu_for_session(runtime, sid)
             if led.evidence_units > last_eu:

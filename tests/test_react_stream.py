@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from remedy.core.react_stream import (
     StreamRoundState,
     accumulate_tool_call_delta,
@@ -156,3 +158,59 @@ def test_finish_reason_length_stream_live_false() -> None:
         stream_live=False,
     )
     assert state.hit_length_limit is True
+
+
+@pytest.mark.asyncio
+async def test_consume_http_cancels_when_turn_aborted() -> None:
+    """Stop mid-SSE must cancel the HTTP wait, not only the next ReAct step."""
+    import asyncio
+
+    from remedy.core.react_loop.stream_consume import consume_llm_http_response
+    from remedy.core.react_stream import StreamRoundState
+    from remedy.core.turn_context import abort_session, begin_turn, end_turn
+
+    class _SlowContent:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            await asyncio.sleep(30)
+            return b'data: {"choices":[{"delta":{"content":"x"}}]}\n'
+
+    class _Resp:
+        headers = {"Content-Type": "text/event-stream"}
+        content = _SlowContent()
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    class _Bind:
+        model = "t"
+        provider = "t"
+
+    toks = begin_turn("sse-abort", project_raw=None, active_path=".")
+    resp = _Resp()
+    try:
+
+        async def _abort_soon():
+            await asyncio.sleep(0.05)
+            abort_session("sse-abort")
+
+        t = asyncio.create_task(_abort_soon())
+        with pytest.raises(asyncio.CancelledError):
+            async for _ in consume_llm_http_response(
+                resp,
+                round_state=StreamRoundState(),
+                collected={},
+                adapter=None,
+                bind=_Bind(),
+                body={"stream": True},
+                use_openai_sse=True,
+                stream_live=True,
+            ):
+                pass
+        await t
+        assert resp.closed is True
+    finally:
+        end_turn("sse-abort", *toks)

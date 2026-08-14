@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 import time
 import uuid
 from contextlib import suppress
@@ -508,16 +509,29 @@ def activity_snapshot(home: str | Path | None = None) -> dict[str, Any]:
     }
 
 
+def _is_packaged_runtime() -> bool:
+    """Desktop sidecar / frozen install — do not mutate the source tree by default."""
+    if os.environ.get("REMEDY_DESKTOP_SIDECAR") or os.environ.get("REMEDY_DESKTOP"):
+        return True
+    return bool(getattr(sys, "frozen", False))
+
+
 def is_enabled(home: str | Path | None = None) -> bool:
     """True when self-inject auto-triggering is enabled (env or config)."""
+    _ = home
     if os.environ.get("REMEDY_SELF_INJECT") == "0":
         return False
+    if os.environ.get("REMEDY_SELF_INJECT") == "1":
+        return True
+    packaged = _is_packaged_runtime()
     with suppress(Exception):
         from remedy.interfaces.config import load_config
 
         cfg = load_config()
-        return bool(cfg.get("self_inject", {}).get("enabled", True))
-    return True
+        si = cfg.get("self_inject")
+        if isinstance(si, dict) and "enabled" in si:
+            return bool(si["enabled"])
+    return not packaged
 
 
 def should_run_now(home: str | Path | None = None) -> bool:

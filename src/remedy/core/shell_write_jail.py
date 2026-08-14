@@ -39,9 +39,9 @@ _MUTATION_HINT_RE = re.compile(
     # Download / fetch to file
     r"|\binvoke-webrequest\b|\biwr\b"
     r"|\bcurl\b|\bwget\b"
-    # Interpreter one-shot writes
-    r"|\b(?:python|python3|py)\s+(?:-\w+\s+)*-c\b"
-    r"|\bnode\s+(?:-\w+\s+)*-e\b"
+    # Interpreter one-shot writes (python.exe / node.exe are the Windows default)
+    r"|\b(?:pythonw|python3|python|py|nodejs|node)(?:\.exe)?\s+(?:-\w+\s+)*-c\b"
+    r"|\b(?:nodejs|node)(?:\.exe)?\s+(?:-\w+\s+)*-e\b"
     # Windows FS utilities that create/mutate without cmdlets above
     r"|\bfsutil\b|\bmklink\b"
     r")"
@@ -60,6 +60,8 @@ _OPAQUE_PATH_HINT_RE = re.compile(
     r"(?:"
     r"\$env:[A-Za-z_][\w]*"
     r"|\$\{env:[A-Za-z_][\w]*\}"
+    # PowerShell automatic variables (not only $env:USERPROFILE)
+    r"|\$\{?(?:HOME|USERPROFILE|HOMEPATH)\}?\b"
     # cmd.exe / delayed-expansion env vars used as path roots
     r"|%[A-Za-z_][\w]*%"
     r"|![A-Za-z_][\w]*!"
@@ -70,6 +72,10 @@ _OPAQUE_PATH_HINT_RE = re.compile(
     r"|\bos\.homedir\b"
     r"|\bexpanduser\b"
     r"|\bpath\.home\b"
+    r"|\bos\.path\b"
+    r"|\bos\.sep\b"
+    r"|Path\s*\(\s*['\"][A-Za-z]:[\\/]"
+    r"|Path\s*\(\s*['\"]/"
     r"|\bgetfolderpath\b"
     r"|\binvoke-webrequest\b.*-outfile\b"
     r"|\biwr\b[^\n]*-outfile\b"
@@ -82,8 +88,8 @@ _OPAQUE_PATH_HINT_RE = re.compile(
 _INTERPRETER_ONESHOT_RE = re.compile(
     r"(?ix)"
     r"(?:"
-    r"\b(?:python|python3|py)\s+(?:-\w+\s+)*-c\b"
-    r"|\bnode\s+(?:-\w+\s+)*-e\b"
+    r"\b(?:pythonw|python3|python|py)(?:\.exe)?\s+(?:-\w+\s+)*-c\b"
+    r"|\b(?:nodejs|node)(?:\.exe)?\s+(?:-\w+\s+)*-e\b"
     r"|\b(?:powershell|pwsh)(?:\.exe)?[^\n]*-(?:command|c)\b"
     r")"
 )
@@ -92,11 +98,37 @@ _INTERPRETER_ONESHOT_RE = re.compile(
 _READONLY_ONESHOT_RE = re.compile(
     r"(?ix)"
     r"(?:"
-    r"\b(?:python|python3|py)\s+(?:-\w+\s+)*-c\s+"
+    r"\b(?:pythonw|python3|python|py)(?:\.exe)?\s+(?:-\w+\s+)*-c\s+"
     r"""['\"]\s*(?:print|help)\s*\([^'\"]*\)\s*['\"]"""
     r"|"
-    r"\b(?:node|nodejs)\s+(?:-\w+\s+)*-e\s+"
+    r"\b(?:node|nodejs)(?:\.exe)?\s+(?:-\w+\s+)*-e\s+"
     r"""['\"]\s*console\.log\s*\([^'\"]*\)\s*['\"]"""
+    r")"
+)
+
+# Python dest construction that hides an absolute write (host_script / -c).
+_PY_CONSTRUCTED_DEST_RE = re.compile(
+    r"(?ix)"
+    r"(?:"
+    r"\bos\.path\b"
+    r"|\bos\.sep\b"
+    r"|\bos\.environ\b"
+    r"|Path\s*\(\s*['\"][A-Za-z]:[\\/]"
+    r"|Path\s*\(\s*['\"]/"
+    r"|\bchr\s*\("
+    r")"
+)
+
+# Nested open(os.path.join(…), 'w') — do not require a same-depth 'w'.
+_PY_WRITE_API_RE = re.compile(
+    r"(?ix)"
+    r"(?:"
+    r"\.write_text\b|\.write_bytes\b|\.write\b"
+    r"|open\s*\("
+    r"|\.touch\b|\.mkdir\b|\.unlink\b|\.rmdir\b"
+    r"|os\.remove\b|os\.unlink\b"
+    r"|shutil\.(?:copy|move|rmtree)"
+    r"|writefilesync\b"
     r")"
 )
 
@@ -275,9 +307,10 @@ def is_runtime_executable_path(path_str: str) -> bool:
 
 
 # Absolute Windows / Unix path tokens in a command line.
+# Drive-letter must accept C:/ as well as C:\ — POSIX slashes are absolute on Windows.
 _ABS_PATH_RE = re.compile(
     r"(?:"
-    r'(?:[A-Za-z]:\\|\\\\)[^\s\'"<>|;,&]+'  # C:\… or UNC
+    r'(?:[A-Za-z]:[\\/]|\\\\)[^\s\'"<>|;,&]+'  # C:\… C:/… or UNC
     r"|/(?:Users|home|tmp|var|etc|opt|mnt|media)/[^\s'\"<>|;,&]+"
     # Windows root-relative: \Users\Public\x  (cwd-join becomes C:\Users\…)
     r"|\\(?:Users|Windows|Program Files|ProgramData|System32)[^\s'\"<>|;,&]*"
@@ -295,11 +328,14 @@ _REL_ESCAPE_RE = re.compile(
 _QUOTED_PATH_RE = re.compile(
     r"""(?x)
     (?:
-        "((?:[A-Za-z]:\\|\\\\|//|\.\.|~/|\$)[^"]+)"
-      | '((?:[A-Za-z]:\\|\\\\|//|\.\.|~/|\$)[^']+)'
+        "((?:[A-Za-z]:[\\/]|\\\\|//|\.\.|~/|\$)[^"]+)"
+      | '((?:[A-Za-z]:[\\/]|\\\\|//|\.\.|~/|\$)[^']+)'
     )
     """
 )
+
+# `> $HOME\…` / `>> "$USERPROFILE\…"` — dest is an unproven variable.
+_REDIRECT_DOLLAR_DEST_RE = re.compile(r"(?<!&)\d*>{1,2}(?!&)\s*['\"]?\$")
 
 
 def _norm_roots(roots: Iterable[Path]) -> list[Path]:
@@ -366,12 +402,12 @@ def extract_path_candidates(command: str) -> list[str]:
 _SCRIPT_LAUNCH_RE = re.compile(
     r"(?ix)"
     r"(?:"
-    r"\b(?:python|python3|py)\s+(?!-c\b)[^\n|&;]+"
-    r"|\b(?:node|nodejs)\s+(?!-e\b)[^\n|&;]+"
+    r"\b(?:pythonw|python3|python|py)(?:\.exe)?\s+(?!-c\b)[^\n|&;]+"
+    r"|\b(?:nodejs|node)(?:\.exe)?\s+(?!-e\b)[^\n|&;]+"
     r"|\b(?:ruby|perl|php|lua|bash|sh|zsh|pwsh|powershell)(?:\.exe)?\s+"
     r"(?:-[Ff]ile\s+|[^\n|&;-][^\n|&;]*)"
     r"|\b(?:cmd)(?:\.exe)?\s+/[Cc]\s+"
-    r"|(?:^|[\s;&|(])(?:\.\\|\./|/|[A-Za-z]:\\)[^\s|&;]+\.(?:py|js|mjs|cjs|ps1|bat|cmd|exe|vbs)\b"
+    r"|(?:^|[\s;&|(])(?:\.\\|\./|/|[A-Za-z]:[\\/])[^\s|&;]+\.(?:py|js|mjs|cjs|ps1|bat|cmd|exe|vbs)\b"
     r")"
 )
 
@@ -479,6 +515,7 @@ _SCRIPT_HOME_PATH_RE = re.compile(
     r"|\bexpanduser\b"
     r"|\$env:(?:USERPROFILE|HOME|HOMEPATH)\b"
     r"|\$\{env:(?:USERPROFILE|HOME|HOMEPATH)\}"
+    r"|\$\{?(?:HOME|USERPROFILE|HOMEPATH)\}?\b"
     r"|%(?:USERPROFILE|HOME|HOMEPATH)%"
     r")"
 )
@@ -558,6 +595,13 @@ def scan_script_source_for_outside_writes(
             f"(Path.home/expanduser/$env:USERPROFILE/%USERPROFILE%) ({script.name}). "
             "Refuse to run."
         )
+    # Constructed dests (Path('C:/')/'Users'/…, os.path/os.sep) hide writes.
+    if _PY_WRITE_API_RE.search(code) and _PY_CONSTRUCTED_DEST_RE.search(code):
+        return (
+            "shell write jail: script uses constructed path I/O "
+            f"(Path(drive)/os.path/os.sep) ({script.name}). "
+            "Refuse to run. Prefer file_write under the focus folder."
+        )
     for m in _ABS_PATH_RE.finditer(text):
         tok = m.group(0)
         try:
@@ -624,6 +668,26 @@ def check_shell_write_jail(
     if not looks_like_mutation(cmd):
         return None
 
+    def _cwd_in_roots() -> bool:
+        if cwd is None:
+            return False
+        try:
+            from pathlib import Path as _P
+
+            return _under_any(_P(cwd).expanduser().resolve(), roots)
+        except Exception:
+            return False
+
+    readonly_oneshot = bool(_READONLY_ONESHOT_RE.search(cmd) and _cwd_in_roots())
+
+    # `echo pwn > $HOME\…` / `'pwn' > "$USERPROFILE\…"` — dest is opaque.
+    if _REDIRECT_DOLLAR_DEST_RE.search(cmd):
+        return (
+            "shell write jail: mutation redirects to a $-variable destination "
+            f"(cannot prove under write roots [{roots_s}]). Use a literal path "
+            "under the focus folder with file_write/file_edit."
+        )
+
     # Set-Content -Path $dest  (bare PS var) — cannot prove destination
     if _BARE_PS_VAR_PATH_RE.search(cmd):
         return (
@@ -650,7 +714,7 @@ def check_shell_write_jail(
     # Mutation + opaque path construction → deny even if another candidate is
     # in-root (e.g. `copy C:\proj\a $env:USERPROFILE\Desktop\b`). Opaque dests
     # are not extractable as path tokens, so mixed forms must fail closed.
-    if not offenders and _OPAQUE_PATH_HINT_RE.search(cmd):
+    if not offenders and _OPAQUE_PATH_HINT_RE.search(cmd) and not readonly_oneshot:
         return (
             "shell write jail: mutation uses opaque path construction "
             "($env:/%VAR%/Join-Path/process.env/curl -o/etc.) that cannot be "
@@ -659,23 +723,24 @@ def check_shell_write_jail(
             "paths under the focus folder."
         )
 
-    # Pathless python -c / node -e: fail closed (concatenated dests hide writes).
-    # Allow only clearly read-only print/console.log when cwd is in-root.
-    if not offenders and not candidates and _INTERPRETER_ONESHOT_RE.search(cmd):
-        if _READONLY_ONESHOT_RE.search(cmd) and cwd is not None:
-            try:
-                from pathlib import Path as _P
-
-                c = _P(cwd).expanduser().resolve()
-                if _under_any(c, roots):
-                    return None
-            except Exception:
-                pass
-        return (
-            "shell write jail: interpreter -c/-e cannot be proven under "
-            f"write roots [{roots_s}]. Prefer file_write/file_edit, run with "
-            "project workdir=, or pass a literal path under the focus folder."
+    # Oneshot: fail closed when payload remains after subtracting in-root dests
+    # (in-root decoy + Path('C:/')/'Users'/… must not slip).
+    if not offenders and _INTERPRETER_ONESHOT_RE.search(cmd) and not readonly_oneshot:
+        remaining = cmd
+        for tok in candidates:
+            if path_outside_write_roots(tok, write_roots=roots, cwd=cwd) is None:
+                remaining = remaining.replace(tok, "")
+        leftover = bool(
+            extract_path_candidates(remaining)
+            or _OPAQUE_PATH_HINT_RE.search(remaining)
+            or _PY_CONSTRUCTED_DEST_RE.search(remaining)
         )
+        if leftover or not candidates:
+            return (
+                "shell write jail: interpreter -c/-e cannot be proven under "
+                f"write roots [{roots_s}]. Prefer file_write/file_edit, run with "
+                "project workdir=, or pass a literal path under the focus folder."
+            )
 
     # Mutation with zero extractable path tokens: allow only if cwd is under
     # write roots (npm install / git write inside project). Else fail closed.

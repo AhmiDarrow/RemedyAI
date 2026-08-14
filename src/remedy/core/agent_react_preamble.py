@@ -323,9 +323,11 @@ def apply_metabolism_injects(
             roots_m = list(getattr(runtime, "_work_roots", None) or [])
         pre_tier_m = None
         with suppress(Exception):
+            from remedy.core.turn_context import turn_tier as _tt_pre
+
             raw_pt = getattr(runtime, "_turn_tier_preclassified", None)
             if raw_pt is None:
-                raw_pt = getattr(runtime, "_turn_tier", None)
+                raw_pt = _tt_pre(runtime, default=0) or None
             if raw_pt is not None:
                 pre_tier_m = int(raw_pt)
         home_m = None
@@ -347,26 +349,46 @@ def apply_metabolism_injects(
             runtime=runtime,
             home=home_m,
         )
-        runtime._turn_tier = int(meta.get("tier") or 1)
-        runtime._turn_tier_label = str(meta.get("tier_label") or "")
-        runtime._force_spread = bool(meta.get("force_spread"))
-        runtime._action_ir = meta.get("action_ir")
-        runtime._metabolism_allow_verify = bool(meta.get("allow_critical_verify"))
-        runtime._shadow_strict = bool(
-            (meta.get("policy") or {}).get("shadow_high_blast")
-            and int(meta.get("tier") or 0) >= 2
+        from remedy.core.turn_context import (
+            set_turn_action_ir,
+            set_turn_force_spread,
+            set_turn_metabolism_allow_verify,
+            set_turn_shadow_strict,
+            set_turn_tier,
+            take_pending_verify_remedy,
+        )
+
+        set_turn_tier(
+            int(meta.get("tier") or 1),
+            runtime,
+            label=str(meta.get("tier_label") or ""),
+        )
+        set_turn_force_spread(bool(meta.get("force_spread")), runtime)
+        set_turn_action_ir(meta.get("action_ir"), runtime)
+        set_turn_metabolism_allow_verify(
+            bool(meta.get("allow_critical_verify")), runtime
+        )
+        set_turn_shadow_strict(
+            bool(
+                (meta.get("policy") or {}).get("shadow_high_blast")
+                and int(meta.get("tier") or 0) >= 2
+            ),
+            runtime,
         )
         with suppress(Exception):
             from remedy.core.metabolism.governor import get_governor
 
             if get_governor(sid_m).shadow_strict:
-                runtime._shadow_strict = True
+                set_turn_shadow_strict(True, runtime)
         injects = list(meta.get("injects") or [])
         with suppress(Exception):
-            pending = getattr(runtime, "_pending_verify_remedy", None)
+            pending = take_pending_verify_remedy(sid_m)
+            if pending is None:
+                pending = getattr(runtime, "_pending_verify_remedy", None)
+                if pending:
+                    runtime._pending_verify_remedy = None
             if pending:
                 injects.append(str(pending))
-                runtime._pending_verify_remedy = None
         if injects:
             messages.insert(
                 -1,
@@ -474,7 +496,9 @@ async def prepare_turn_preamble(
             # mid-file_write on thumbs-down mode or High thinking monologues.
             ensure_local_power_approvals()
             with suppress(Exception):
-                runtime._thinking_level = "low"
+                from remedy.core.turn_context import set_turn_thinking_level
+
+                set_turn_thinking_level("low")
             _proj = ""
             with suppress(Exception):
                 _proj = str(runtime.effective_project_path() or "")
@@ -508,16 +532,24 @@ async def prepare_turn_preamble(
                     }
                 )
     with suppress(Exception):
-        proto = getattr(runtime, "_build_protocol_pending", None)
+        from remedy.core.turn_context import take_build_protocol, take_frontier_continue
+
+        proto = take_build_protocol(session_id)
+        if proto is None:
+            proto = getattr(runtime, "_build_protocol_pending", None)
+            if proto:
+                runtime._build_protocol_pending = None
         if proto:
             messages.append({"role": "system", "content": str(proto)})
-            runtime._build_protocol_pending = None
-    # Frontier continue inject (brief + ledger) — light rails only
-    with suppress(Exception):
-        fc = getattr(runtime, "_frontier_continue_pending", None)
+        fc = take_frontier_continue(session_id)
+        if fc is None:
+            fc = getattr(runtime, "_frontier_continue_pending", None)
+            if isinstance(fc, dict) and fc.get("content"):
+                runtime._frontier_continue_pending = None
+            else:
+                fc = None
         if isinstance(fc, dict) and fc.get("content"):
             messages.append(fc)
-            runtime._frontier_continue_pending = None
 
     library_suggest_json: str | None = None
     with suppress(Exception):

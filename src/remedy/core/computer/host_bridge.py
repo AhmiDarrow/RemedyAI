@@ -298,6 +298,9 @@ class ComputerHostBridge:
         self._last_navigate_url: str = ""
         # True when last navigate returned before host confirmed page load.
         self._last_navigate_optimistic: bool = False
+        self._last_navigate_at_by_session: dict[str, float] = {}
+        self._last_navigate_url_by_session: dict[str, str] = {}
+        self._last_navigate_optimistic_by_session: dict[str, bool] = {}
         # Desktop UI command (open Browser rail like Settings) — memory + disk
         self._ui_command: dict[str, Any] | None = None
         # Same resolved home as jobs/ so ui_command and job JSON never diverge
@@ -366,6 +369,9 @@ class ComputerHostBridge:
             self._last_drive_by_session.pop(k, None)
             self._last_elements_by_session.pop(k, None)
             self._last_elements_target_by_session.pop(k, None)
+            self._last_navigate_at_by_session.pop(k, None)
+            self._last_navigate_url_by_session.pop(k, None)
+            self._last_navigate_optimistic_by_session.pop(k, None)
 
     def set_last_drive_target(self, target: str) -> None:
         t = (target or "").strip().lower()
@@ -408,27 +414,53 @@ class ComputerHostBridge:
         return str(self._last_drive_target or "").strip().lower()
 
     def mark_navigated(self, url: str = "", *, optimistic: bool = False) -> None:
-        self._last_navigate_at = time.time()
+        now = time.time()
+        self._last_navigate_at = now
         if url:
             self._last_navigate_url = str(url)
         self._last_navigate_optimistic = bool(optimistic)
+        sid = self._session_key()
+        if sid:
+            self._last_navigate_at_by_session[sid] = now
+            if url:
+                self._last_navigate_url_by_session[sid] = str(url)
+            self._last_navigate_optimistic_by_session[sid] = bool(optimistic)
+            self._trim_session_maps()
 
     def clear_navigate_optimistic(self) -> None:
         self._last_navigate_optimistic = False
+        sid = self._session_key()
+        if sid:
+            self._last_navigate_optimistic_by_session[sid] = False
+
+    def _nav_at(self) -> float:
+        sid = self._session_key()
+        if sid:
+            # Missing key = this tab has not navigated (do not leak sibling).
+            return float(self._last_navigate_at_by_session.get(sid) or 0.0)
+        return float(self._last_navigate_at or 0.0)
+
+    def _nav_optimistic(self) -> bool:
+        sid = self._session_key()
+        if sid:
+            return bool(self._last_navigate_optimistic_by_session.get(sid))
+        return bool(self._last_navigate_optimistic)
 
     def navigate_needs_settle(self, *, max_age_s: float = 8.0) -> bool:
         """True if last open was optimistic and still recent (type/click should wait)."""
-        if not self._last_navigate_optimistic:
+        if not self._nav_optimistic():
             return False
-        if self._last_navigate_at <= 0:
+        at = self._nav_at()
+        if at <= 0:
             return False
-        return (time.time() - self._last_navigate_at) < float(max_age_s)
+        return (time.time() - at) < float(max_age_s)
 
     def settle_after_navigate(self, *, min_s: float = 0.35, max_s: float = 1.2) -> float:
         """Sleep remaining settle time if a navigate just happened. Returns slept seconds."""
-        if self._last_navigate_at <= 0:
+        at = self._nav_at()
+        if at <= 0:
             return 0.0
-        elapsed = time.time() - self._last_navigate_at
+        elapsed = time.time() - at
         need = max(0.0, float(min_s) - elapsed)
         need = min(need, float(max_s))
         if need > 0.02:
