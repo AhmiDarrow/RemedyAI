@@ -68,6 +68,7 @@ class SkillPhenotype:
 class SkillGenome:
     phenotypes: dict[str, SkillPhenotype] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _persist_sig: tuple[int, int, int] | None = field(default=None, repr=False)
 
     def _prune_locked(self) -> None:
         """Drop lowest-score unprotected phenotypes when over MAX_PHENOTYPES."""
@@ -131,6 +132,14 @@ class SkillGenome:
             import os
             import tempfile
 
+            with self._lock:
+                sig = (
+                    len(self.phenotypes),
+                    sum(p.uses for p in self.phenotypes.values()),
+                    sum(p.success for p in self.phenotypes.values()),
+                )
+                if sig == self._persist_sig:
+                    return None
             root = Path(home).expanduser() if home else Path.home() / ".remedy"
             d = root / "skill_genome"
             d.mkdir(parents=True, exist_ok=True)
@@ -140,6 +149,7 @@ class SkillGenome:
                     "version": 1,
                     "skills": {k: v.to_public() for k, v in self.phenotypes.items()},
                 }
+                self._persist_sig = sig
             payload = json.dumps(data, indent=2)
             # Atomic replace so concurrent readers never see a half-written file
             fd, tmp_name = tempfile.mkstemp(prefix=".phenotypes.", suffix=".tmp", dir=str(d))

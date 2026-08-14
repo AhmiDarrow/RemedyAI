@@ -77,6 +77,7 @@ class CuaMacro:
 class CuaMacroStore:
     macros: dict[str, CuaMacro] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _persist_sig: tuple[int, int] | None = field(default=None, repr=False)
 
     def observe_chain(
         self,
@@ -159,6 +160,13 @@ class CuaMacroStore:
 
     def persist(self, home: Path | str | None = None) -> Path | None:
         try:
+            with self._lock:
+                sig = (
+                    len(self.macros),
+                    sum(int(m.hits) for m in self.macros.values()),
+                )
+                if sig == self._persist_sig:
+                    return None
             root = Path(home).expanduser() if home else Path.home() / ".remedy"
             d = root / "cua_macros"
             d.mkdir(parents=True, exist_ok=True)
@@ -168,6 +176,7 @@ class CuaMacroStore:
                     "version": 1,
                     "macros": {k: v.to_public() for k, v in self.macros.items()},
                 }
+                self._persist_sig = sig
             payload = json.dumps(data, indent=2)
             fd, tmp_name = tempfile.mkstemp(prefix=".macros.", suffix=".tmp", dir=str(d))
             try:
