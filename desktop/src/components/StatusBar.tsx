@@ -312,48 +312,33 @@ export function StatusBar({
     let failStreak = 0
     async function check() {
       try {
-        // Prefer /api/ping (sub-ms). Fall back to /api/status for version + older builds.
-        let ok = false
-        let ver = ''
+        let p: Awaited<ReturnType<typeof getPartnerStatus>> | null = null
         try {
-          const ping = await fetch(getServerUrl() + '/api/ping', {
-            signal: AbortSignal.timeout(2500),
-            headers: { Accept: 'application/json' },
-          })
-          if (ping.ok) {
-            ok = true
-            try {
-              const data = (await ping.json()) as { version?: string }
-              if (data?.version) ver = String(data.version)
-            } catch {
-              /* */
-            }
-          }
+          p = await getPartnerStatus(sessionId)
         } catch {
-          /* try status */
-        }
-        if (!ok) {
-          const res = await fetch(getServerUrl() + '/api/status', {
-            signal: AbortSignal.timeout(4000),
-          })
-          ok = res.ok
-          if (res.ok) {
-            try {
-              const data = await res.json()
-              if (data?.version) ver = String(data.version)
-            } catch {
-              /* */
-            }
-          }
+          p = null
         }
         if (cancelled) return
-        if (ok) {
+        if (!p) {
+          try {
+            const ping = await fetch(getServerUrl() + '/api/ping', {
+              signal: AbortSignal.timeout(2500),
+              headers: { Accept: 'application/json' },
+            })
+            if (ping.ok) {
+              failStreak = 0
+              setStatus('connected')
+              return
+            }
+          } catch {
+            /* offline */
+          }
+        }
+        if (p) {
           failStreak = 0
           setStatus('connected')
-          if (ver) setVersion(ver)
+          if (p.version) setVersion(String(p.version))
           try {
-            // Scope quality/metabolism + session approvals to the focused chat tab.
-            const p = await getPartnerStatus(sessionId)
             if (cancelled) return
             const bits: string[] = []
             if (p.pending_approvals > 0) bits.push(`${p.pending_approvals} approve`)

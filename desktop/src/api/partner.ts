@@ -101,6 +101,7 @@ export async function patchLifeGoal(
 }
 
 export interface PartnerStatus {
+  version?: string
   pending_approvals: number
   open_goals: number
   active_goal?: string | null
