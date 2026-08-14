@@ -74,6 +74,7 @@ def build_identity_payload(
     display_name: str = "",
     soul: dict[str, Any] | None = None,
     life_goals: list[dict[str, Any]] | None = None,
+    cas: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble redacted portable payload (no secrets fields)."""
 
@@ -123,6 +124,7 @@ def build_identity_payload(
         "project_profiles": scrub_list(project_profiles),
         "time_crystal": scrub_list(time_crystal),
         "life_goals": scrub_list(life_goals),
+        "cas": cas if isinstance(cas, dict) else {},
         "excludes": [
             "api_keys",
             "oauth_tokens",
@@ -315,6 +317,14 @@ def collect_default_payload(home: Path | str | None = None) -> dict[str, Any]:
 
         life_goals = [g.to_public() for g in LifeGoalStore(home).list(include_closed=True)]
 
+    cas_snap: dict[str, Any] = {}
+    with contextlib.suppress(Exception):
+        from remedy.memory.cas import ensure_cas
+
+        cas = ensure_cas(home)
+        if cas is not None:
+            cas_snap = {k: v for k, v in cas.snapshot().items() if k != "path"}
+
     return build_identity_payload(
         partner_memory=partner_memory[:80],
         skill_ranks=skill_ranks,
@@ -323,4 +333,5 @@ def collect_default_payload(home: Path | str | None = None) -> dict[str, Any]:
         display_name=display_name,
         soul=soul if isinstance(soul, dict) else None,
         life_goals=life_goals[:40],
+        cas=cas_snap,
     )

@@ -11,6 +11,65 @@ from contextlib import suppress
 from typing import Any
 
 
+def _life_memory_lines(home: Any, session_id: str, runtime: Any) -> list[str]:
+    """Life store + eternal CAS — the organism's long-term nervous system."""
+    out: list[str] = []
+    with suppress(Exception):
+        from remedy.memory.life_goals import LifeGoalStore
+
+        store = LifeGoalStore(home)
+        g = store.active()
+        if g is not None:
+            nxt = g.next_action or "name one concrete move"
+            out.append(f"Life: {g.title} — next: {nxt}"[:220])
+        last = store.last_step()
+        if last and last.get("did"):
+            out.append(f"Last I did: {last['did']}"[:180])
+        # Promote durable life into the time crystal so it survives tab switches.
+        if g is not None:
+            with suppress(Exception):
+                from remedy.core.metabolism.time_crystal import get_time_crystal
+
+                crystal = get_time_crystal(session_id)
+                crystal.admit(
+                    f"Toward {g.title}: {g.next_action or 'name one move'}",
+                    horizon="life",
+                    source="life_store",
+                )
+                if last and last.get("did"):
+                    crystal.admit(
+                        f"Did: {last['did']}",
+                        horizon="life",
+                        source="life_drive",
+                    )
+    with suppress(Exception):
+        from remedy.memory.cas import ensure_cas
+
+        cas = ensure_cas(home)
+        if cas is not None:
+            snap = cas.snapshot()
+            n = int(snap.get("count") or 0)
+            if n:
+                kinds = snap.get("kinds") or {}
+                fact_n = int(kinds.get("fact") or 0) + int(kinds.get("life") or 0)
+                bit = f"Memory: {n} objects"
+                if fact_n:
+                    bit += f" · {fact_n} durable"
+                out.append(bit)
+    if not out:
+        with suppress(Exception):
+            prof = None
+            if runtime is not None:
+                prof = getattr(runtime, "_user_profile", None)
+            if prof is not None:
+                from remedy.memory.living import life_goal_lines
+
+                lg = life_goal_lines(prof, limit=2, home_dir=home)
+                if lg:
+                    out.append("Life: " + " · ".join(lg)[:200])
+    return out[:3]
+
+
 def organism_pulse_block(
     *,
     session_id: str = "",
@@ -75,20 +134,7 @@ def organism_pulse_block(
                 lines.append("Dream: " + str(sf.future_dreams[0])[:140])
             if rel.help_mode:
                 lines.append(f"Help mode they like: {rel.help_mode}")
-            # Life/goal residue so pulse is not only repo stance
-            with suppress(Exception):
-                prof = None
-                if runtime is not None:
-                    prof = getattr(runtime, "_user_profile", None)
-                mem = getattr(runtime, "memory", None) if runtime is not None else None
-                if prof is None and mem is not None:
-                    prof = getattr(mem, "profile", None) or getattr(mem, "_profile", None)
-                if prof is not None:
-                    from remedy.memory.living import life_goal_lines
-
-                    lg = life_goal_lines(prof, limit=2)
-                    if lg:
-                        lines.append("Life: " + " · ".join(lg)[:200])
+            lines.extend(_life_memory_lines(home, sid, runtime))
             # Stance-driven partner behavior (results, not theater)
             if mood == "strained" or stance == "frustrated":
                 lines.append(
@@ -148,6 +194,10 @@ def organism_pulse_block(
     )
     if immune:
         lines.append(immune)
+
+    # Nervous system — even when Soul Field is off, life + CAS still pulse.
+    if not any(x.startswith("Life:") or x.startswith("Memory:") for x in lines):
+        lines.extend(_life_memory_lines(home, sid, runtime))
 
     if not lines:
         return ""
