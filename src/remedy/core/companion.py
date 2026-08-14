@@ -430,7 +430,7 @@ def format_companion_block(snap: dict[str, Any] | None) -> str:
         extra = "…" if clip.get("truncated") else ""
         lines.append(f"- Clipboard: text {clip.get('chars')} chars — {prev}{extra}")
     elif kind == "image":
-        lines.append(f"- Clipboard: image → `{clip.get('path')}` (file_read / vision)")
+        lines.append(f"- Clipboard: image → `{clip.get('path')}`")
     elif kind == "files":
         paths = ", ".join(f"`{p}`" for p in (clip.get("paths") or [])[:4])
         lines.append(f"- Clipboard: files {paths}")

@@ -4,7 +4,8 @@ User attachments already go through SmolVLM / native chat vision. Tool-taken
 screenshots did not — pygame and other custom-drawn UIs came back as a path
 and an empty UIA tree. This module:
 
-1. Decodes the PNG with the local visual decoder (CUA prompt + click coords).
+1. Decodes the PNG with the local visual decoder (CUA click coords, or
+   design critique when kind=design).
 2. Queues the same PNG for native-vision chat models (Grok/Claude/GPT) so the
    next LLM step actually sees the pixels.
 """
@@ -12,6 +13,7 @@ and an empty UIA tree. This module:
 from __future__ import annotations
 
 import logging
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +32,42 @@ CUA_FOCUS_QUESTION = (
     "One sentence the agent should do next (computer_click x= y= / computer_key / …)."
 )
 
+# Design observe: pixels only — no click-coordinate section.
+DESIGN_FOCUS_QUESTION = (
+    "This is a design-observe screenshot of a live UI. Critique only pixels "
+    "you can actually see. Never invent a layout you cannot see.\n"
+    "### Hierarchy\n"
+    "What is primary vs secondary vs chrome? What draws the eye first?\n"
+    "### Spacing / alignment / overflow\n"
+    "Gaps, ragged edges, clipped or overflowing content, uneven columns.\n"
+    "### Contrast / type vs taste\n"
+    "Readability, type scale, contrast failures — not taste adjectives.\n"
+    "### Empty / error / half-render chrome\n"
+    "Blank panes, missing images, error toasts, loading skeletons stuck.\n"
+    "### Top 3 pixel-backed fixes\n"
+    "Three concrete file_edit-scale defects grounded in what is visible.\n"
+    "### Cannot see\n"
+    "Explicitly list anything you cannot see (off-screen, occluded, unreadably small).\n"
+    "Do not invent a layout. Do not list click coordinates."
+)
+
 _MAX_QUEUED_SHOTS = 2
+
+
+def _normalize_observe_kind(kind: str | None) -> str:
+    k = (kind or "cua").strip().lower()
+    return k if k == "design" else "cua"
+
+
+def focus_question_for_kind(kind: str = "cua", hint: str = "") -> str:
+    base = (
+        DESIGN_FOCUS_QUESTION
+        if _normalize_observe_kind(kind) == "design"
+        else CUA_FOCUS_QUESTION
+    )
+    if (hint or "").strip():
+        return f"{base}\n\nTask hint: {hint.strip()[:400]}"
+    return base
 
 
 def queue_native_screenshot(
@@ -40,6 +77,7 @@ def queue_native_screenshot(
     origin: dict[str, Any] | None = None,
     width: int | None = None,
     height: int | None = None,
+    kind: str = "cua",
 ) -> None:
     """Remember a shot so a native-vision chat model can see it next step."""
     if runtime is None:
@@ -67,6 +105,7 @@ def queue_native_screenshot(
             "origin": dict(origin or {}),
             "width": width,
             "height": height,
+            "kind": _normalize_observe_kind(kind),
         }
     )
     if len(lst) > _MAX_QUEUED_SHOTS:
@@ -112,6 +151,7 @@ def flush_native_screenshots(runtime: Any) -> dict[str, Any] | None:
 
     parts: list[dict[str, Any]] = []
     notes: list[str] = []
+    used_kinds: list[str] = []
     for shot in shots[-_MAX_QUEUED_SHOTS:]:
         p = Path(str(shot.get("path") or ""))
         if not p.is_file():
@@ -124,16 +164,26 @@ def flush_native_screenshots(runtime: Any) -> dict[str, Any] | None:
             f"{p.name} {shot.get('width') or '?'}x{shot.get('height') or '?'} "
             f"origin=({origin.get('x', 0)},{origin.get('y', 0)})"
         )
+        used_kinds.append(_normalize_observe_kind(str(shot.get("kind") or "cua")))
         parts.append({"type": "image_url", "image_url": {"url": data_url}})
     if not parts:
         return None
-    header = (
-        "[Computer screenshot — you can see this image.]\n"
-        "Click with computer_click x= y= using pixels from the **top-left of "
-        "this image**, then add origin offset if origin ≠ (0,0).\n"
-        "Prefer these pixels over guessing. "
-        + " | ".join(notes)
-    )
+    note_s = " | ".join(notes)
+    if used_kinds and all(k == "design" for k in used_kinds):
+        header = (
+            "[Design screenshot — you can see this image.]\n"
+            "Critique visible pixels. file_edit only listed defects. "
+            "Do not computer_click. Never invent a layout you cannot see. "
+            + note_s
+        )
+    else:
+        header = (
+            "[Computer screenshot — you can see this image.]\n"
+            "Click with computer_click x= y= using pixels from the **top-left of "
+            "this image**, then add origin offset if origin ≠ (0,0).\n"
+            "Prefer these pixels over guessing. "
+            + note_s
+        )
     return {
         "role": "user",
         "content": [{"type": "text", "text": header}, *parts],
@@ -145,6 +195,7 @@ def decode_screenshot_brief(
     *,
     extra_question: str | None = None,
     timeout_s: float = 25.0,
+    allow_cpu_wake: bool = False,
 ) -> dict[str, Any]:
     """Run the local visual decoder. Never raises. ok=False if unavailable."""
     p = Path(path)
@@ -158,9 +209,14 @@ def decode_screenshot_brief(
 
         cfg = load_config() or {}
         st = get_status(cfg, light=True)
-        # Do not cold-start llama-server on the click path (can take minutes).
-        # Desktop auto-start keeps it warm; otherwise native chat vision still sees
-        # the PNG. vision_decode action=decode remains the explicit start path.
+        # Click path must not cold-start (minutes). Design observe may wake a
+        # CPU-only decoder so RMB can keep the GPU.
+        if not st.get("running") and allow_cpu_wake:
+            with suppress(Exception):
+                from remedy.vision.runtime import start_server
+
+                start_server(n_gpu_layers=0, ignore_rmb=True, wait_s=20.0)
+                st = get_status(cfg, light=True)
         if not st.get("running"):
             out["error"] = (
                 "local decoder idle (not running). Native chat vision still "
@@ -201,14 +257,16 @@ def observe_screenshot(
     width: int | None = None,
     height: int | None = None,
     hint: str = "",
+    kind: str = "cua",
 ) -> dict[str, Any]:
     """Decode + queue native. Safe to call on the tool thread."""
-    q = CUA_FOCUS_QUESTION
-    if (hint or "").strip():
-        q = f"{CUA_FOCUS_QUESTION}\n\nTask hint: {hint.strip()[:400]}"
-    decoded = decode_screenshot_brief(path, extra_question=q)
+    k = _normalize_observe_kind(kind)
+    q = focus_question_for_kind(k, hint)
+    decoded = decode_screenshot_brief(
+        path, extra_question=q, allow_cpu_wake=(k == "design")
+    )
     queue_native_screenshot(
-        runtime, path, origin=origin, width=width, height=height
+        runtime, path, origin=origin, width=width, height=height, kind=k
     )
     return decoded
 

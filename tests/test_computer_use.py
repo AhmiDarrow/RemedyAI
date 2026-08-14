@@ -499,7 +499,10 @@ def test_flush_native_screenshots_for_grok(tmp_path: Path, monkeypatch):
     assert msg["role"] == "user"
     kinds = [p.get("type") for p in msg["content"]]
     assert "image_url" in kinds
-    assert "you can see this" in msg["content"][0]["text"].lower()
+    header = msg["content"][0]["text"].lower()
+    assert "you can see this" in header
+    assert "computer_click" in header
+    assert "do not computer_click" not in header
     assert flush_native_screenshots(rt) is None  # consumed
 
 
@@ -520,6 +523,119 @@ def test_flush_native_skipped_without_vision(tmp_path: Path, monkeypatch):
     )
     queue_native_screenshot(rt, png)
     assert flush_native_screenshots(rt) is None
+
+
+def test_observe_screenshot_kind_selects_prompt(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+
+    from remedy.core.computer.vision_observe import (
+        CUA_FOCUS_QUESTION,
+        DESIGN_FOCUS_QUESTION,
+        observe_screenshot,
+    )
+
+    png = tmp_path / "shot.png"
+    png.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+        b"\x00\x01\x01\x01\x00\x18\xdd\x8d\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    captured: dict[str, str] = {}
+
+    def fake_decode(path, extra_question=None, timeout_s=25.0, **_k):
+        captured["q"] = extra_question or ""
+        return {"ok": True, "text": "ok", "error": ""}
+
+    monkeypatch.setattr(
+        "remedy.core.computer.vision_observe.decode_screenshot_brief",
+        fake_decode,
+    )
+    rt = SimpleNamespace()
+    observe_screenshot(png, runtime=rt, kind="design", hint="landing")
+    q = captured["q"]
+    assert DESIGN_FOCUS_QUESTION in q
+    assert "landing" in q
+    assert "Click targets" not in q
+    assert "computer_click" not in q
+    assert rt._pending_cua_shots[-1]["kind"] == "design"
+
+    observe_screenshot(png, runtime=rt)
+    q = captured["q"]
+    assert CUA_FOCUS_QUESTION in q
+    assert "Click targets" in q
+    assert rt._pending_cua_shots[-1]["kind"] == "cua"
+
+    for bad in ("", "nope"):
+        observe_screenshot(png, runtime=rt, kind=bad)
+        q = captured["q"]
+        assert CUA_FOCUS_QUESTION in q
+        assert DESIGN_FOCUS_QUESTION not in q
+        assert rt._pending_cua_shots[-1]["kind"] == "cua"
+
+
+def test_observe_screenshot_idle_decoder_still_queues(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+
+    from remedy.core.computer.vision_observe import observe_screenshot
+
+    png = tmp_path / "shot.png"
+    png.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+        b"\x00\x01\x01\x01\x00\x18\xdd\x8d\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    monkeypatch.setattr(
+        "remedy.vision.service.get_status",
+        lambda cfg=None, light=True: {"running": False},
+    )
+    called = {"decode": False}
+
+    def _boom(*_a, **_k):
+        called["decode"] = True
+        raise AssertionError("must not cold-start decoder")
+
+    monkeypatch.setattr("remedy.vision.decoder.decode_image", _boom)
+    monkeypatch.setattr(
+        "remedy.vision.runtime.start_server",
+        lambda **_k: {"ok": False, "skipped": True},
+    )
+    rt = SimpleNamespace()
+    out = observe_screenshot(png, runtime=rt, kind="design")
+    assert out["ok"] is False
+    assert "idle" in (out.get("error") or "").lower()
+    assert called["decode"] is False
+    assert rt._pending_cua_shots[-1]["kind"] == "design"
+
+
+def test_flush_native_design_header(tmp_path: Path, monkeypatch):
+    from types import SimpleNamespace
+
+    from remedy.core.computer.vision_observe import (
+        flush_native_screenshots,
+        queue_native_screenshot,
+    )
+
+    png = tmp_path / "shot.png"
+    png.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+        b"\x00\x01\x01\x01\x00\x18\xdd\x8d\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    rt = SimpleNamespace()
+    monkeypatch.setattr(
+        "remedy.core.computer.vision_observe.chat_supports_native_vision",
+        lambda _rt=None: True,
+    )
+    queue_native_screenshot(rt, png, kind="design")
+    msg = flush_native_screenshots(rt)
+    assert msg is not None
+    text = msg["content"][0]["text"]
+    low = text.lower()
+    assert "you can see this" in low
+    assert "critique" in low
+    assert "file_edit" in low
+    assert "do not computer_click" in low
+    assert "click with computer_click" not in low
 
 
 def test_infer_sticky_target_game_and_refs():

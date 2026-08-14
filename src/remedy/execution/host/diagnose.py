@@ -71,7 +71,7 @@ def diagnose_host_failure(
     ):
         missing = _extract_missing(blob, cmd)
         hint = "Use host_which to resolve the binary, or host_run with a full path."
-        if missing in {"grep", "head", "tail", "cat", "ls", "rm", "mkdir"}:
+        if missing in {"grep", "head", "tail", "cat", "ls", "rm", "mkdir", "find", "test"}:
             hint = (
                 f"'{missing}' is POSIX. Prefer host_mkdir / host_run / repo_search, "
                 "or let the host bridge rewrite the command."

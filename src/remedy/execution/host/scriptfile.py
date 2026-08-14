@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -87,6 +88,57 @@ def scratch_script_path(
 
 
 _MAX_SCRIPT_CHARS = 1_000_000
+_HOST_SCRIPT_PREFIX = "host_"
+_HOST_SCRIPT_MAX_AGE_S = 3600.0
+
+
+def cleanup_host_script(path: Path | None) -> None:
+    """Delete a scratch host_* script after it has run."""
+    if path is None:
+        return
+    p = Path(path)
+    if not p.is_file() or not p.name.startswith(_HOST_SCRIPT_PREFIX):
+        return
+    with suppress(OSError):
+        p.unlink()
+
+
+def age_out_host_scripts(
+    scratch_dir: Path | None = None,
+    *,
+    max_age_s: float = _HOST_SCRIPT_MAX_AGE_S,
+) -> int:
+    """Remove leftover host_* scratch files older than *max_age_s*."""
+    import time
+
+    roots: list[Path] = []
+    if scratch_dir is not None:
+        roots.append(Path(scratch_dir))
+    else:
+        for envk in ("TEMP", "TMP"):
+            raw = os.environ.get(envk)
+            if raw:
+                roots.append(Path(raw) / "remedy-host")
+        roots.append(Path(".remedy-build") / "tmp")
+    removed = 0
+    now = time.time()
+    for root in roots:
+        if not root.is_dir():
+            continue
+        try:
+            kids = list(root.iterdir())
+        except OSError:
+            continue
+        for kid in kids:
+            if not kid.is_file() or not kid.name.startswith(_HOST_SCRIPT_PREFIX):
+                continue
+            try:
+                if now - kid.stat().st_mtime > max_age_s:
+                    kid.unlink()
+                    removed += 1
+            except OSError:
+                continue
+    return removed
 
 
 def write_script(lang: str, body: str, path: Path) -> Path:
@@ -116,6 +168,7 @@ def launch_script(
     kind = (lang or "pwsh").lower()
     path = scratch_script_path(kind, scratch_dir=scratch_dir, project_path=project_path)
     write_script(kind, body, path)
+    age_out_host_scripts(path.parent)
     if kind in ("pwsh", "powershell", "ps1"):
         exe = shutil.which("pwsh") or shutil.which("powershell") or "pwsh"
         argv = [

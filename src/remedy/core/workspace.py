@@ -407,6 +407,12 @@ def workspace_context_block(
         line = format_home_line()
         if line:
             lines.append(line)
+    with suppress(Exception):
+        from remedy.execution.host.dialect import format_dialect_line
+
+        dline = format_dialect_line()
+        if dline and dline not in "\n".join(lines):
+            lines.append(dline)
     return "\n".join(lines)
 
 

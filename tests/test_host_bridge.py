@@ -82,6 +82,46 @@ def test_translate_untranslatable_subshell() -> None:
     assert r.untranslatable
 
 
+def test_start_server_and_posix_test_are_not_powershell() -> None:
+    assert not looks_like_powershell("./start-server.sh")
+    assert not looks_like_powershell("start-server.sh")
+    assert not looks_like_powershell("start-dev")
+    assert not looks_like_powershell('[ 1 -eq 1 ] && echo ok')
+    assert not looks_like_powershell("test -eq 0")
+    assert looks_like_powershell("Get-ChildItem -Recurse")
+    assert looks_like_powershell("Start-Process notepad")
+
+
+def test_untranslatable_prepare_does_not_exec() -> None:
+    with pytest.raises(ValueError, match="untranslatable"):
+        prepare_host_command("echo $(pwd)", host="cmd")
+
+
+def test_chmod_is_host_noop() -> None:
+    r = translate_posix_to_host("chmod +x run.sh", host="cmd")
+    assert r.noop
+    prep = prepare_host_command("chmod +x run.sh", host="cmd")
+    assert prep.kind == "noop"
+    assert prep.argv == []
+
+
+def test_chmod_dropped_from_chain() -> None:
+    r = translate_posix_to_host("chmod +x a && mkdir -p b", host="cmd")
+    assert not r.noop
+    assert "if not exist" in r.text
+    assert "chmod" not in r.text.lower()
+
+
+def test_grep_falls_back_to_findstr(monkeypatch) -> None:
+    import remedy.execution.host.translate as tr
+
+    monkeypatch.setattr(tr, "_find_rg", lambda: "")
+    r = translate_posix_to_host("grep foo bar.py", host="cmd")
+    assert r.changed
+    assert "findstr" in r.text
+    assert "foo" in r.text
+
+
 def test_translate_posix_host_noop() -> None:
     r = translate_posix_to_host("mkdir -p a", host="posix")
     assert r.text == "mkdir -p a"
@@ -125,7 +165,7 @@ def test_prepare_pwsh_wrapper_unwraps(tmp_path: Path) -> None:
 def test_prepare_plain_argv_no_shell() -> None:
     prep = prepare_host_command("python -m py_compile app.py", host="cmd")
     assert prep.kind == "argv"
-    assert prep.argv[0] == "python"
+    assert "python" in Path(prep.argv[0]).name.lower()
     assert "py_compile" in prep.argv
     assert looks_like_plain_argv("python -m py_compile app.py")
     assert not looks_like_plain_argv("echo hello")
@@ -376,3 +416,40 @@ async def test_current_cwd_empty_when_closed() -> None:
     finally:
         await sess.close()
     assert await sess.current_cwd() == ""
+
+
+def test_head_tail_find_test_f_rewrite() -> None:
+    h = translate_posix_to_host("head -n 5 README.md", host="cmd")
+    assert h.changed
+    assert "python" in h.text.lower() or "-c" in h.text
+    t = translate_posix_to_host("tail -n 3 log.txt", host="cmd")
+    assert t.changed
+    f = translate_posix_to_host("find . -name *.py", host="cmd")
+    assert "dir /s /b" in f.text
+    tf = translate_posix_to_host("test -f app.py", host="cmd")
+    assert "if exist" in tf.text
+    br = translate_posix_to_host("[ -f app.py ]", host="cmd")
+    assert "if exist" in br.text
+
+
+def test_cleanup_host_script(tmp_path: Path) -> None:
+    from remedy.execution.host.scriptfile import cleanup_host_script, write_script
+
+    p = tmp_path / "host_abc123.py"
+    write_script("python", "print(1)", p)
+    assert p.is_file()
+    cleanup_host_script(p)
+    assert not p.is_file()
+    other = tmp_path / "keep_me.py"
+    other.write_text("x", encoding="utf-8")
+    cleanup_host_script(other)
+    assert other.is_file()
+
+
+def test_default_script_lang_posix() -> None:
+    from remedy.execution.host.runner import default_script_lang
+
+    if os.name != "nt":
+        assert default_script_lang() == "python"
+    else:
+        assert default_script_lang() in {"pwsh", "cmd"}

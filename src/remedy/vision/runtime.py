@@ -288,13 +288,15 @@ def start_server(
     home_dir: str | Path | None = None,
     n_gpu_layers: int = -1,
     wait_s: float = 60.0,
+    ignore_rmb: bool = False,
 ) -> dict[str, Any]:
     """Start llama-server if not already healthy.
 
     Auto-activates the prebundled pinned SmolVLM2 stack when
     ``vision.json`` is missing or points at missing files — no network.
 
-    Hard skip when RMB owns the local host (running or vision_suspended).
+    Hard skip when RMB owns the local host (running or vision_suspended),
+    unless *ignore_rmb* (CPU-only observe wake, n_gpu_layers=0).
     """
     global _proc
     # Exclusive with RMB: never load SmolVLM while RMB chat server is up
@@ -304,7 +306,7 @@ def start_server(
         cfg_hint: dict[str, Any] | None = None
         if home_dir is not None:
             cfg_hint = {"home_dir": str(home_dir)}
-        if should_skip_vision_stack(cfg_hint):
+        if (not ignore_rmb) and should_skip_vision_stack(cfg_hint):
             logger.info(
                 "Skipping SmolVLM start_server — RMB exclusive host "
                 "(running or vision_suspended)"
@@ -435,7 +437,7 @@ def start_server(
         cfg_hint2: dict[str, Any] | None = None
         if home_dir is not None:
             cfg_hint2 = {"home_dir": str(home_dir)}
-        if should_skip_vision_stack(cfg_hint2):
+        if (not ignore_rmb) and should_skip_vision_stack(cfg_hint2):
             logger.info("Aborting SmolVLM spawn — RMB exclusive host re-check")
             return {
                 "ok": False,
