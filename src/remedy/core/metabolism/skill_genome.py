@@ -149,7 +149,6 @@ class SkillGenome:
                     "version": 1,
                     "skills": {k: v.to_public() for k, v in self.phenotypes.items()},
                 }
-                self._persist_sig = sig
             payload = json.dumps(data, indent=2)
             # Atomic replace so concurrent readers never see a half-written file
             fd, tmp_name = tempfile.mkstemp(prefix=".phenotypes.", suffix=".tmp", dir=str(d))
@@ -163,6 +162,7 @@ class SkillGenome:
                 with contextlib.suppress(Exception):
                     Path(tmp_name).unlink(missing_ok=True)
                 raise
+            self._persist_sig = sig
             return path
         except Exception:
             return None
