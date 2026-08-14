@@ -18,6 +18,38 @@ from remedy.interfaces.api_support import (
 logger = logging.getLogger(__name__)
 
 
+async def _publish_session(kind: str, session: object) -> None:
+    sid = str(getattr(session, "id", "") or "")
+    if not sid:
+        return
+    await _publish_session_id(
+        kind,
+        sid,
+        title=getattr(session, "title", None),
+        message_count=getattr(session, "message_count", None),
+        origin_channel=getattr(session, "origin_channel", None),
+    )
+
+
+async def _publish_session_id(
+    kind: str,
+    session_id: str,
+    *,
+    title: str | None = None,
+    message_count: int | None = None,
+    origin_channel: str | None = None,
+) -> None:
+    with contextlib.suppress(Exception):
+        from remedy.interfaces.session_events import publish_session_event
+
+        await publish_session_event(
+            kind,
+            session_id,
+            title=title,
+            message_count=message_count,
+            origin_channel=origin_channel,
+        )
+
 
 def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     """Register crud session routes."""
@@ -100,6 +132,7 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             llm_provider=sess_provider,
         )
         saved = await memory.create_chat_session(session)
+        await _publish_session("session_created", saved)
         return {
             "id": saved.id,
             "title": saved.title,
@@ -167,6 +200,7 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         session = await memory.update_chat_session(session_id, **fields)
         if session is None:
             raise HTTPException(404, "Session not found")
+        await _publish_session("session_updated", session)
         return {
             "id": session.id,
             "title": session.title,
@@ -211,6 +245,7 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                 missing.append(sid)
             else:
                 updated.append(sid)
+                await _publish_session("session_updated", sess)
         return {
             "status": "ok",
             "project_path": project_path,
@@ -237,6 +272,7 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         deleted = await memory.delete_chat_session(sid)
         if not deleted:
             raise HTTPException(404, "Session not found")
+        await _publish_session_id("session_deleted", sid)
         # Cascade session-scoped disk artifacts (attachments / plans / undo)
         cascade: dict = {}
         with contextlib.suppress(Exception):

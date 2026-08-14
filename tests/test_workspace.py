@@ -24,6 +24,10 @@ def test_unset_project_path_helpers():
     assert is_unset_project_path("")
     assert is_unset_project_path(".")
     assert is_unset_project_path("./")
+    assert is_unset_project_path("C:\\")
+    assert is_unset_project_path("C:/")
+    assert is_unset_project_path("C:")
+    assert is_unset_project_path("/")
     assert not is_unset_project_path("C:/proj")
     assert not is_unset_project_path("/tmp/x")
     # Empty project → full access

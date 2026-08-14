@@ -52,7 +52,22 @@ describe('sessionProjects', () => {
     expect(isNoProjectPath(null)).toBe(true)
     expect(isNoProjectPath('')).toBe(true)
     expect(isNoProjectPath('.')).toBe(true)
+    expect(isNoProjectPath('C:\\')).toBe(true)
+    expect(isNoProjectPath('C:')).toBe(true)
+    expect(isNoProjectPath('/')).toBe(true)
     expect(isNoProjectPath('C:\\Work\\App')).toBe(false)
+  })
+
+  it('does not grow a volume-root project bucket', () => {
+    const groups = groupSessionsByProject(
+      [sess('rooty', 'C:\\'), sess('real', 'C:\\Work\\App')],
+      [],
+    )
+    expect(groups.find((g) => g.key === 'C:' || g.label === 'C:')).toBeUndefined()
+    expect(groups[0]!.sessions.map((s) => s.id)).toContain('rooty')
+    expect(groups.find((g) => g.label === 'App')?.sessions.map((s) => s.id)).toEqual([
+      'real',
+    ])
   })
 
   it('normalizes keys and display names', () => {

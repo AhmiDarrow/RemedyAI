@@ -35,6 +35,7 @@ def test_default_project_from_config_unset_is_home_not_new_project(
     assert is_unset_project_path(None)
     assert is_unset_project_path("")
     assert is_unset_project_path(".")
+    assert is_unset_project_path("C:\\")
 
 
 def test_create_default_config_seeds_new_project_once(tmp_path, monkeypatch):

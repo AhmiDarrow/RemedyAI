@@ -29,16 +29,33 @@ class TodoItem:
         return asdict(self)
 
 
+def _disk_root(raw: Path | str | None) -> Path | None:
+    """Project folder that may hold ``.remedy-build/todos.json``.
+
+    Volume roots are not projects — writing ``C:\\.remedy-build`` leaked the
+    last turn's checklist onto every other tab.
+    """
+    if raw is None:
+        return None
+    p = Path(raw)
+    with suppress(Exception):
+        p = p.resolve()
+    from remedy.core.workspace import is_volume_root_path
+
+    if is_volume_root_path(p):
+        return None
+    return p.parent if p.is_file() else p
+
+
 def _root_for(runtime: Any) -> Path | None:
     with suppress(Exception):
         raw = runtime.effective_project_path()
         if raw:
-            p = Path(raw)
-            return p.parent if p.is_file() else p
+            return _disk_root(raw)
     with suppress(Exception):
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
         if home:
-            return Path(home)
+            return _disk_root(home)
     return None
 
 
@@ -47,13 +64,22 @@ def _path(root: Path) -> Path:
 
 
 def load_todos(runtime: Any = None, *, root: Path | str | None = None) -> list[TodoItem]:
-    """Load todos from disk (empty list if none)."""
-    base = Path(root) if root else _root_for(runtime)
+    """Load todos from disk (empty list if none).
+
+    When *root* is passed (session GET /todos), never fall back to the
+    in-memory cache from another tab's turn.
+    """
+    explicit = root is not None
+    base = _disk_root(root) if explicit else _root_for(runtime)
     if base is None:
+        if explicit:
+            return []
         cached = getattr(runtime, "_build_todos", None) if runtime is not None else None
         return list(cached) if isinstance(cached, list) else []
     fp = _path(base)
     if not fp.is_file():
+        if explicit:
+            return []
         cached = getattr(runtime, "_build_todos", None) if runtime is not None else None
         return list(cached) if isinstance(cached, list) else []
     try:
