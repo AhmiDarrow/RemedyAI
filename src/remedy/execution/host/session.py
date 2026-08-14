@@ -123,7 +123,7 @@ class HostSession:
             return ""
         token = uuid.uuid4().hex[:8]
         sentinel = f"{_SENTINEL_PREFIX}cwd_{token}"
-        cmd = "cd" if self.host == "cmd" else "(Get-Location).Path"
+        cmd = _cwd_command(self.host)
         wrapped = _wrap_with_sentinel(self.host, cmd, sentinel)
         assert self._lock is not None
         async with self._lock:
@@ -202,6 +202,15 @@ class HostSession:
                 return bytes(buf), True, True
             if marker in buf:
                 return bytes(buf), False, interactive
+
+
+def _cwd_command(host: str) -> str:
+    """Print working directory for the session host dialect."""
+    if host == "cmd":
+        return "cd"
+    if host == "pwsh":
+        return "(Get-Location).Path"
+    return "pwd"
 
 
 def _session_argv(host: str) -> list[str]:

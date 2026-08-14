@@ -255,11 +255,21 @@ def resolve_llm_slot(
         api_key = resolve_provider_api_key(cfg, provider)
     except Exception as exc:
         logger.debug("resolve_provider_api_key failed: %s", exc)
+        api_key = ""
+    if not api_key:
         api_key = str(
             cfg.get("llm_api_key")
             or os.environ.get("REMEDY_LLM_API_KEY")
             or ""
         )
+    # Tests / embedded AgentConfig: Settings may be empty on CI.
+    if not api_key and runtime is not None:
+        api_key = str(getattr(runtime, "_llm_api_key", None) or "")
+    if not base_url and runtime is not None:
+        rt_prov = str(getattr(runtime, "_llm_provider", None) or "").strip().lower()
+        rt_url = str(getattr(runtime, "_llm_base_url", None) or "")
+        if rt_url and (not rt_prov or rt_prov == provider):
+            base_url = rt_url
     if not api_key and (
         provider.lower() in ("ollama", "rmb", "llamacpp", "local")
         or (base_url and _is_local_url(base_url))
