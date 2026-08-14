@@ -155,7 +155,11 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         life = store.list(include_closed=True)
         extra: dict = {}
         with suppress(Exception):
-            extra["life_folder"] = str(visible_life_dir(_life_home()))
+            from remedy.core.metabolism.organism import load_vitals
+
+            v = load_vitals(_life_home())
+            folder = str(v.get("life_folder") or "")
+            extra["life_folder"] = folder or str(visible_life_dir(_life_home()))
             extra["last_step"] = store.last_step()
             extra["digest"] = str(drive_digest(_life_home()).get("markdown") or "")
         if life:
