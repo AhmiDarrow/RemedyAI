@@ -247,11 +247,13 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                             and str(m.get("id") or "") != "default"
                         ]
                         models = disc_models + catalog_rest
-                    # Mark connected when runtime or models exist on disk
+                    # Mark connected when a runtime path, loaded GGUF, or
+                    # discovered file exists. Do not call get_rmb_status here
+                    # (that path is too heavy for the models list).
                     if not connected and (
-                        st.get("runtime_present")
-                        or st.get("model_present")
-                        or disc_models
+                        bool(str(rstate.get("runtime_binary") or "").strip())
+                        or bool(mp)
+                        or bool(disc_models)
                     ):
                         connected = True
                         reason = "rmb_local"

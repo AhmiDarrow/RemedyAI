@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import hmac
 import logging
 import time
 from typing import Any
@@ -111,13 +112,33 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             "lines": default_registry.describe(),
         }
 
+    def _status_authed(request: Request) -> bool:
+        expected = str(getattr(request.app.state, "api_key", "") or "")
+        if not expected:
+            return True
+        auth = request.headers.get("Authorization") or ""
+        want = f"Bearer {expected}"
+        if len(auth.encode("utf-8")) != len(want.encode("utf-8")):
+            hmac.compare_digest(want.encode("utf-8"), want.encode("utf-8"))
+            return False
+        return hmac.compare_digest(auth.encode("utf-8"), want.encode("utf-8"))
+
     @app.get("/api/status", response_model=StatusResponse)
-    async def get_status():
+    async def get_status(request: Request):
         now = time.time()
+        gw_stats = gateway.stats() if gateway else {"running": False}
+        # Unauthenticated liveness (splash / status bar fallback) must not
+        # open SQLite or report session/memory counts.
+        if not _status_authed(request):
+            return StatusResponse(
+                version=_remedy_version,
+                uptime=gw_stats.get("uptime", "N/A"),
+                gateway={"running": bool(gw_stats.get("running"))},
+            )
+
         cached = _status_cache.get("payload")
         if cached is not None and (now - float(_status_cache.get("ts") or 0)) < 2.0:
             # Refresh only volatile uptime fields.
-            gw_stats = gateway.stats() if gateway else {"running": False}
             return StatusResponse(
                 **{
                     **cached,
@@ -126,7 +147,6 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                 }
             )
 
-        gw_stats = gateway.stats() if gateway else {"running": False}
         mem_count = 0
         skills_count = 0
         summary_sessions = 0

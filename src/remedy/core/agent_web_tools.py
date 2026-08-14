@@ -76,9 +76,22 @@ def _host_is_blocked(hostname: str) -> bool:
     host = (hostname or "").strip().lower().rstrip(".")
     if not host:
         return True
-    if host in ("localhost", "metadata.google.internal", "metadata"):
+    if host in (
+        "localhost",
+        "metadata.google.internal",
+        "metadata.goog",
+        "metadata",
+        "instance-data",
+    ):
         return True
     if host.endswith(".local") or host.endswith(".internal"):
+        return True
+    # IMDS-style DNS labels and wildcard-IP hosts (parity with computer router).
+    if "metadata" in host.split("."):
+        return True
+    if host.endswith((".nip.io", ".sslip.io", ".xip.io")):
+        return True
+    if host.startswith("169.254."):
         return True
     # Literal IPs
     try:

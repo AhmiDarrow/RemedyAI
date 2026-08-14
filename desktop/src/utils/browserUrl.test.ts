@@ -27,6 +27,14 @@ describe('browserUrl', () => {
     expect(normalizeBrowserUrl('')).toBe('')
   })
 
+  it('rejects metadata / IMDS / wildcard-IP hosts', () => {
+    expect(normalizeBrowserUrl('http://metadata.nicob.net/')).toBe('')
+    expect(normalizeBrowserUrl('http://metadata.google.internal/')).toBe('')
+    expect(normalizeBrowserUrl('http://169.254.169.254/')).toBe('')
+    expect(normalizeBrowserUrl('https://1.2.3.4.nip.io/')).toBe('')
+    expect(isOpenableBrowserUrl('http://metadata.nicob.net/')).toBe(false)
+  })
+
   it('rejects URLs with embedded credentials (userinfo)', () => {
     expect(normalizeBrowserUrl('https://user:token@example.com/path')).toBe('')
     expect(normalizeBrowserUrl('https://user@example.com')).toBe('')
