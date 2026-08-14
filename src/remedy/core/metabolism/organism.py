@@ -300,6 +300,14 @@ def collect_vitals(
         "cycles": [],
         "open_count": 0,
         "life_folder": "",
+        "who": "Remedy",
+        "stance": "steady",
+        "rapport": 0.0,
+        "trust": 0.0,
+        "turns": 0,
+        "dream": "",
+        "help_mode": "",
+        "open_hint": "",
     }
     with suppress(Exception):
         from remedy.memory.life_goals import LifeGoalStore
@@ -345,6 +353,22 @@ def collect_vitals(
         v["mood"] = soma.mood
         v["emoji"] = soma.emoji
         v["label"] = soma.label
+    with suppress(Exception):
+        from remedy.memory.soul.field import load_soul_field
+
+        sf = load_soul_field(home)
+        rel = sf.relational
+        v["who"] = (sf.identity_name or "Remedy").strip() or "Remedy"
+        v["rapport"] = float(rel.rapport or 0)
+        v["trust"] = float(rel.trust or 0)
+        v["turns"] = int(rel.turns_together or 0)
+        v["help_mode"] = str(rel.help_mode or "")
+        if rel.open_threads:
+            v["open_hint"] = str(rel.open_threads[-1])[:80]
+        if sf.episodes:
+            v["stance"] = str(sf.episodes[-1].user_stance or "steady")
+        if getattr(sf, "future_dreams", None):
+            v["dream"] = str(sf.future_dreams[0])[:140]
     if extras:
         for k, val in extras.items():
             if val is not None and k in v:
@@ -524,6 +548,53 @@ def organism_wake(home: Any = None, *, runtime: Any = None) -> str:
     return format_wake_digest(home, mark_seen=True)
 
 
+def _header_from_vitals(v: dict[str, Any]) -> list[str]:
+    """Pulse chrome from cached body. Empty if vitals are too thin."""
+    if not v.get("alive"):
+        return []
+    mood = str(v.get("mood") or "")
+    label = str(v.get("label") or "")
+    if not mood and not label and not v.get("life_title"):
+        return []
+    who = str(v.get("who") or "Remedy").strip() or "Remedy"
+    emoji = str(v.get("emoji") or "")
+    stance = str(v.get("stance") or "steady")
+    try:
+        rapport = float(v.get("rapport") or 0)
+        trust = float(v.get("trust") or 0)
+    except (TypeError, ValueError):
+        rapport = trust = 0.0
+    turns = int(v.get("turns") or 0)
+    open_n = int(v.get("open_count") or 0)
+    show = label or mood
+    lines = [
+        f"[Organism · {who} · alive] mood={emoji} {show} · "
+        f"stance={stance} · rapport≈{rapport:.2f} trust≈{trust:.2f} · "
+        f"turns={turns}"
+        + (f" · open={open_n}" if open_n else "")
+    ]
+    hint = str(v.get("open_hint") or "").strip()
+    if hint:
+        lines.append(f"Open thread: {hint}")
+    dream = str(v.get("dream") or "").strip()
+    if dream:
+        lines.append("Dream: " + dream[:140])
+    help_mode = str(v.get("help_mode") or "").strip()
+    if help_mode:
+        lines.append(f"Help mode they like: {help_mode}")
+    lines.extend(_lines_from_vitals(v))
+    if mood == "strained" or stance == "frustrated":
+        lines.append(
+            "Stance: fix first — short, concrete, tool-backed. "
+            "No lecture; show the path or the patch."
+        )
+    elif mood == "playful":
+        lines.append("Stance: light energy ok; still finish the work.")
+    elif mood == "focused" or stance == "focused":
+        lines.append("Stance: deep work — RESEARCH→PLAN→BUILD, verify before done.")
+    return lines
+
+
 def organism_pulse_block(
     *,
     session_id: str = "",
@@ -539,68 +610,73 @@ def organism_pulse_block(
     lines: list[str] = []
     mood = ""
     stance = "steady"
-    rapport = trust = 0.0
-    open_n = 0
-    open_hint = ""
     muscle_label = ""
-    eu = du = 0
     gov_acts: list[str] = []
+    vitals = load_vitals(home)
+    try:
+        v_age = time.time() - float(vitals.get("ts") or 0)
+    except (TypeError, ValueError):
+        v_age = 1e9
+    # Fresh body → skip Soul Field + soma + life-store on the turn hot path.
+    if vitals.get("alive") and v_age < 90.0:
+        lines.extend(_header_from_vitals(vitals))
+        mood = str(vitals.get("mood") or "")
+        stance = str(vitals.get("stance") or "steady")
 
-    # --- Soul / soma ---
-    with suppress(Exception):
-        from remedy.core.feature_maturity import soul_field_enabled
-        from remedy.memory.soul.field import load_soul_field
-        from remedy.memory.soul.somatic import compute_soma
+    # --- Soul / soma (cold: no fresh vitals) ---
+    if not lines:
+        with suppress(Exception):
+            from remedy.core.feature_maturity import soul_field_enabled
+            from remedy.memory.soul.field import load_soul_field
+            from remedy.memory.soul.somatic import compute_soma
 
-        if soul_field_enabled():
-            sf = load_soul_field(home)
-            rel = sf.relational
-            rapport = float(rel.rapport or 0)
-            trust = float(rel.trust or 0)
-            open_n = len(rel.open_threads or [])
-            if rel.open_threads:
-                open_hint = str(rel.open_threads[-1])[:80]
-            if sf.episodes:
-                stance = str(sf.episodes[-1].user_stance or "steady")
-            muscle_label = ""
-            with suppress(Exception):
-                from remedy.core.muscle_profile import muscle_from_runtime
+            if soul_field_enabled():
+                sf = load_soul_field(home)
+                rel = sf.relational
+                rapport = float(rel.rapport or 0)
+                trust = float(rel.trust or 0)
+                open_n = len(rel.open_threads or [])
+                open_hint = ""
+                if rel.open_threads:
+                    open_hint = str(rel.open_threads[-1])[:80]
+                if sf.episodes:
+                    stance = str(sf.episodes[-1].user_stance or "steady")
+                with suppress(Exception):
+                    from remedy.core.muscle_profile import muscle_from_runtime
 
-                m = muscle_from_runtime(runtime)
-                muscle_label = m.label
-            soma = compute_soma(
-                home,
-                muscle_label=muscle_label,
-                muscle_provider=str(getattr(runtime, "_llm_provider", "") or ""),
-            )
-            mood = str(soma.mood or "")
-            # Soft identity name
-            who = (sf.identity_name or "Remedy").strip() or "Remedy"
-            lines.append(
-                f"[Organism · {who} · alive] mood={soma.emoji} {soma.label} · "
-                f"stance={stance} · rapport≈{rapport:.2f} trust≈{trust:.2f} · "
-                f"turns={rel.turns_together}"
-                + (f" · open={open_n}" if open_n else "")
-            )
-            if open_hint:
-                lines.append(f"Open thread: {open_hint}")
-            if getattr(sf, "future_dreams", None):
-                lines.append("Dream: " + str(sf.future_dreams[0])[:140])
-            if rel.help_mode:
-                lines.append(f"Help mode they like: {rel.help_mode}")
-            lines.extend(_life_memory_lines(home, sid, runtime))
-            # Stance-driven partner behavior (results, not theater)
-            if mood == "strained" or stance == "frustrated":
-                lines.append(
-                    "Stance: fix first — short, concrete, tool-backed. "
-                    "No lecture; show the path or the patch."
+                    m = muscle_from_runtime(runtime)
+                    muscle_label = m.label
+                soma = compute_soma(
+                    home,
+                    muscle_label=muscle_label,
+                    muscle_provider=str(getattr(runtime, "_llm_provider", "") or ""),
                 )
-            elif mood == "playful":
-                lines.append("Stance: light energy ok; still finish the work.")
-            elif mood == "focused" or stance == "focused":
+                mood = str(soma.mood or "")
+                who = (sf.identity_name or "Remedy").strip() or "Remedy"
                 lines.append(
-                    "Stance: deep work — RESEARCH→PLAN→BUILD, verify before done."
+                    f"[Organism · {who} · alive] mood={soma.emoji} {soma.label} · "
+                    f"stance={stance} · rapport≈{rapport:.2f} trust≈{trust:.2f} · "
+                    f"turns={rel.turns_together}"
+                    + (f" · open={open_n}" if open_n else "")
                 )
+                if open_hint:
+                    lines.append(f"Open thread: {open_hint}")
+                if getattr(sf, "future_dreams", None):
+                    lines.append("Dream: " + str(sf.future_dreams[0])[:140])
+                if rel.help_mode:
+                    lines.append(f"Help mode they like: {rel.help_mode}")
+                lines.extend(_life_memory_lines(home, sid, runtime))
+                if mood == "strained" or stance == "frustrated":
+                    lines.append(
+                        "Stance: fix first — short, concrete, tool-backed. "
+                        "No lecture; show the path or the patch."
+                    )
+                elif mood == "playful":
+                    lines.append("Stance: light energy ok; still finish the work.")
+                elif mood == "focused" or stance == "focused":
+                    lines.append(
+                        "Stance: deep work — RESEARCH→PLAN→BUILD, verify before done."
+                    )
 
     # --- Metabolism counters ---
     with suppress(Exception):

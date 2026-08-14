@@ -74,16 +74,23 @@ def compute_soma(
     life_title = ""
     life_open = 0
     with suppress(Exception):
-        from remedy.memory.life_goals import LifeGoalStore
+        from remedy.core.metabolism.organism import load_vitals
 
-        store = LifeGoalStore(home)
-        life_open = store.open_count()
-        ag = store.active()
-        if ag is not None:
-            life_title = ag.title
-        # A live goal is an open thread the organism is holding.
-        if life_open and last_stance == "steady":
-            last_stance = "focused"
+        v = load_vitals(home)
+        if v.get("life_title") or v.get("open_count"):
+            life_title = str(v.get("life_title") or "")
+            life_open = int(v.get("open_count") or 0)
+    if not life_title and not life_open:
+        with suppress(Exception):
+            from remedy.memory.life_goals import LifeGoalStore
+
+            store = LifeGoalStore(home)
+            life_open = store.open_count()
+            ag = store.active()
+            if ag is not None:
+                life_title = ag.title
+    if life_open and last_stance == "steady":
+        last_stance = "focused"
     mood, emoji, label = _mood_from_field(
         rapport=float(rel.rapport),
         trust=float(rel.trust),
