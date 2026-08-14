@@ -71,12 +71,25 @@ def compute_soma(
     last_stance = "steady"
     if sf.episodes:
         last_stance = sf.episodes[-1].user_stance or "steady"
+    life_title = ""
+    life_open = 0
+    with suppress(Exception):
+        from remedy.memory.life_goals import LifeGoalStore
+
+        store = LifeGoalStore(home)
+        life_open = store.open_count()
+        ag = store.active()
+        if ag is not None:
+            life_title = ag.title
+        # A live goal is an open thread the organism is holding.
+        if life_open and last_stance == "steady":
+            last_stance = "focused"
     mood, emoji, label = _mood_from_field(
         rapport=float(rel.rapport),
         trust=float(rel.trust),
         last_stance=last_stance,
-        turns=int(rel.turns_together),
-        open_threads=len(rel.open_threads),
+        turns=int(rel.turns_together) + (1 if life_open else 0),
+        open_threads=len(rel.open_threads) + life_open,
     )
     muscle_hint = ""
     if muscle_label or muscle_provider:
@@ -84,7 +97,9 @@ def compute_soma(
         if muscle_provider:
             muscle_hint += f" · {muscle_provider}"
     thread_bit = ""
-    if rel.open_threads:
+    if life_title:
+        thread_bit = f" · {life_title[:40]}"
+    elif rel.open_threads:
         thread_bit = f" · {rel.open_threads[-1][:40]}"
     tooltip = (
         f"Remedy {emoji} {label} · rapport {rel.rapport:.0%} · trust {rel.trust:.0%}"

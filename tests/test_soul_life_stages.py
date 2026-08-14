@@ -32,6 +32,16 @@ def test_soma_mood_from_bond(tmp_path):
     assert (tmp_path / "soul" / "soma.json").is_file()
 
 
+def test_soma_tooltip_holds_active_life_goal(tmp_path):
+    from remedy.memory.life_goals import LifeGoalStore
+
+    clear_soul_cache()
+    LifeGoalStore(tmp_path).add("Land the job", next_action="Rewrite the resume")
+    snap = compute_soma(tmp_path)
+    assert "Land the job" in snap.tray_tooltip
+    assert snap.mood != "dormant"
+
+
 def test_mission_candidates_from_pledges(tmp_path):
     clear_soul_cache()
     update_soul_after_turn(

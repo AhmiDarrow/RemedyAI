@@ -545,6 +545,17 @@ def take_step(
             session_id="life",
             body_cap=400,
         )
+    with suppress(Exception):
+        from remedy.core.metabolism.time_crystal import get_time_crystal
+
+        crystal = get_time_crystal("life")
+        crystal.admit(
+            f"Toward {g.title}: did {action}. Next: {nxt}",
+            horizon="life",
+            source="life_drive",
+        )
+        if home_dir:
+            crystal.persist(home_dir)
     opened = False
     if do_reveal:
         opened = reveal_artifact(path)
