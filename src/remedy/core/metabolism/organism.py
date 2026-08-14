@@ -247,6 +247,10 @@ def collect_vitals(
         "cas_count": 0,
         "cas_durable": 0,
         "recalled": 0,
+        "stalled": False,
+        "last_cycle_at": 0.0,
+        "last_wake_at": 0.0,
+        "cycles": [],
     }
     with suppress(Exception):
         from remedy.memory.life_goals import LifeGoalStore
@@ -259,6 +263,7 @@ def collect_vitals(
         last = store.last_step()
         if last and last.get("did"):
             v["last_did"] = str(last["did"])[:200]
+        v["stalled"] = _life_is_stalled(store)
     with suppress(Exception):
         from remedy.memory.cas import ensure_cas
 
@@ -293,6 +298,20 @@ def collect_vitals(
     return v
 
 
+def _life_is_stalled(store: Any) -> bool:
+    g = store.active() if store is not None else None
+    if g is None:
+        return False
+    from datetime import UTC, datetime
+
+    try:
+        updated = datetime.fromisoformat(str(g.updated_at).replace("Z", "+00:00"))
+        age_days = (datetime.now(UTC) - updated).total_seconds() / 86400.0
+    except (TypeError, ValueError):
+        return False
+    return age_days >= 7.0
+
+
 def format_vitals_markdown(vitals: dict[str, Any] | None = None) -> str:
     v = vitals or {}
     lines = ["**Remedy is alive on this machine.**"]
@@ -316,6 +335,8 @@ def format_vitals_markdown(vitals: dict[str, Any] | None = None) -> str:
         if dur:
             bit += f" ({dur} durable)"
         lines.append(bit)
+    if v.get("stalled") and title:
+        lines.append("This goal has gone quiet. I will take the next local step sooner.")
     return "\n".join(lines)
 
 
@@ -328,6 +349,9 @@ def organism_cycle(
     """One heartbeat: recall → drive if due → compact → persist vitals."""
     out: dict[str, Any] = {}
     extras: dict[str, Any] = {}
+    prev = load_vitals(home)
+    extras["last_wake_at"] = float(prev.get("last_wake_at") or 0)
+    extras["cycles"] = list(prev.get("cycles") or [])
     with suppress(Exception):
         beat = organism_heartbeat(home, session_id=session_id)
         extras["recalled"] = int(beat.get("recalled") or 0)
@@ -335,7 +359,8 @@ def organism_cycle(
     with suppress(Exception):
         from remedy.memory.life_drive import drive_due, take_step
 
-        if drive_due(home, hours=4.0):
+        hours = 2.0 if (prev.get("stalled") or _peek_stalled(home)) else 4.0
+        if drive_due(home, hours=hours):
             step = take_step(home)
             if step.get("ok"):
                 out["life_step"] = {
@@ -369,10 +394,80 @@ def organism_cycle(
                 "stalled": len(pulse.get("stalled") or []),
                 "moved": len(pulse.get("moved") or []),
             }
+    now = time.time()
+    row = {
+        "ts": now,
+        "recalled": int(extras.get("recalled") or 0),
+    }
+    if out.get("life_step"):
+        row["did"] = str(out["life_step"].get("did") or "")[:200]
+        row["goal"] = str(out["life_step"].get("goal") or "")[:160]
+    if out.get("cas_compact"):
+        row["compacted"] = True
+    if out.get("life_pulse"):
+        row["pulse"] = True
+    if row.get("recalled") or row.get("did") or row.get("compacted") or row.get("pulse"):
+        extras["cycles"] = (list(extras.get("cycles") or []) + [row])[-8:]
+    extras["last_cycle_at"] = now
     vitals = collect_vitals(home, extras=extras, runtime=runtime)
     persist_vitals(vitals, home)
     out["vitals"] = vitals
     return out
+
+
+def _peek_stalled(home: Any) -> bool:
+    with suppress(Exception):
+        from remedy.memory.life_goals import LifeGoalStore
+
+        return _life_is_stalled(LifeGoalStore(home))
+    return False
+
+
+def format_wake_digest(home: Any = None, *, mark_seen: bool = True) -> str:
+    """Life steps plus what the organism did on its own."""
+    parts: list[str] = []
+    with suppress(Exception):
+        from remedy.memory.life_drive import drive_digest
+
+        parts.append(str(drive_digest(home, mark_seen=mark_seen).get("markdown") or "").strip())
+    v = load_vitals(home)
+    since = float(v.get("last_wake_at") or 0)
+    rows = [
+        c
+        for c in (v.get("cycles") or [])
+        if isinstance(c, dict) and float(c.get("ts") or 0) > since + 0.01
+    ]
+    own: list[str] = []
+    for c in rows[-6:]:
+        bits: list[str] = []
+        if c.get("did"):
+            bits.append(f"took a step: {c['did']}")
+        elif int(c.get("recalled") or 0):
+            bits.append(f"recalled {c['recalled']} fact(s)")
+        if c.get("compacted"):
+            bits.append("compacted memory")
+        if bits:
+            own.append("- " + "; ".join(bits))
+    if own:
+        parts.append("**While I was on my own**")
+        parts.extend(own)
+    if mark_seen:
+        v = load_vitals(home) or v
+        v["last_wake_at"] = time.time()
+        persist_vitals(v, home)
+    return "\n".join(p for p in parts if p) or "Nothing new since we last talked."
+
+
+def organism_wake(home: Any = None, *, runtime: Any = None) -> str:
+    """Owner returned. Cycle if we have been idle, then report."""
+    v = load_vitals(home)
+    try:
+        age = time.time() - float(v.get("last_cycle_at") or 0)
+    except (TypeError, ValueError):
+        age = 1e9
+    if age > 1800.0 or not v.get("alive"):
+        organism_cycle(home, runtime=runtime, session_id="life")
+    return format_wake_digest(home, mark_seen=True)
 
 
 def organism_pulse_block(
@@ -507,6 +602,13 @@ def organism_pulse_block(
         recalled = organism_recall_line(home, user_text)
         if recalled:
             lines.append(recalled)
+    with suppress(Exception):
+        vitals = load_vitals(home)
+        if vitals.get("stalled") and vitals.get("life_title"):
+            lines.append(
+                "Homeostasis: this life goal has gone quiet — "
+                "take the next local step without waiting."
+            )
 
     if not lines:
         return ""
