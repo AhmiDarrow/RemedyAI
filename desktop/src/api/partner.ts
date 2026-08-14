@@ -38,9 +38,75 @@ export interface SomaStatus {
   ts?: number
 }
 
+export type LifeGoal = {
+  id: string
+  title: string
+  why?: string
+  horizon?: string
+  done_looks_like?: string
+  next_action?: string
+  next_by?: string
+  status?: string
+  evidence?: string[]
+}
+
+export type LifeLastStep = {
+  ts?: number
+  goal?: string
+  did?: string
+  next?: string
+  path?: string
+  kind?: string
+}
+
+export type LifeBoard = {
+  goals: LifeGoal[]
+  life_folder?: string | null
+  last_step?: LifeLastStep | null
+  digest?: string | null
+}
+
+export async function getLifeBoard(): Promise<LifeBoard> {
+  const data = await apiFetch<LifeBoard & { goals?: LifeGoal[] }>('/goals')
+  return {
+    goals: data.goals || [],
+    life_folder: data.life_folder || null,
+    last_step: data.last_step || null,
+    digest: data.digest || null,
+  }
+}
+
+export async function listLifeGoals(): Promise<LifeGoal[]> {
+  const board = await getLifeBoard()
+  return board.goals
+}
+
+export async function createLifeGoal(title: string): Promise<LifeGoal> {
+  return apiFetch<LifeGoal>('/goals', {
+    method: 'POST',
+    body: JSON.stringify({ title }),
+  })
+}
+
+export async function patchLifeGoal(
+  id: string,
+  fields: Partial<Pick<LifeGoal, 'status' | 'next_action' | 'next_by' | 'done_looks_like' | 'why'>> & {
+    evidence?: string
+  },
+): Promise<LifeGoal> {
+  return apiFetch<LifeGoal>(`/goals/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(fields),
+  })
+}
+
 export interface PartnerStatus {
   pending_approvals: number
   open_goals: number
+  active_goal?: string | null
+  next_action?: string | null
+  last_step?: LifeLastStep | null
+  life_folder?: string | null
   access_scope: string
   harness_mode: string
   brief_intent: string

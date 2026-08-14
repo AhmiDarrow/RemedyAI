@@ -73,6 +73,7 @@ def build_identity_payload(
     time_crystal: list[dict[str, Any]] | None = None,
     display_name: str = "",
     soul: dict[str, Any] | None = None,
+    life_goals: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Assemble redacted portable payload (no secrets fields)."""
 
@@ -121,6 +122,7 @@ def build_identity_payload(
         "skill_ranks": scrub_list(skill_ranks),
         "project_profiles": scrub_list(project_profiles),
         "time_crystal": scrub_list(time_crystal),
+        "life_goals": scrub_list(life_goals),
         "excludes": [
             "api_keys",
             "oauth_tokens",
@@ -307,6 +309,12 @@ def collect_default_payload(home: Path | str | None = None) -> dict[str, Any]:
     except Exception:
         soul = None
 
+    life_goals: list[dict[str, Any]] = []
+    with contextlib.suppress(Exception):
+        from remedy.memory.life_goals import LifeGoalStore
+
+        life_goals = [g.to_public() for g in LifeGoalStore(home).list(include_closed=True)]
+
     return build_identity_payload(
         partner_memory=partner_memory[:80],
         skill_ranks=skill_ranks,
@@ -314,4 +322,5 @@ def collect_default_payload(home: Path | str | None = None) -> dict[str, Any]:
         time_crystal=time_crystal,
         display_name=display_name,
         soul=soul if isinstance(soul, dict) else None,
+        life_goals=life_goals[:40],
     )

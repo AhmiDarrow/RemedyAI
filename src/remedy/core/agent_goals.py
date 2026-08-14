@@ -14,10 +14,33 @@ from typing import Any
 def register_goal_and_plan_tools(runtime: Any) -> None:
     """Register goal_* and plan_* builtin tools on *runtime*."""
 
+    def _life_store():
+        from remedy.memory.life_goals import LifeGoalStore
+
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        return LifeGoalStore(home)
+
     async def goal_add(title: str = "", description: str = "") -> str:
         t = (title or "").strip()
         if not t:
             return "Provide a goal title."
+        life = None
+        drove = None
+        with suppress(Exception):
+            from remedy.memory.life_drive import invent_next, take_step
+
+            store = _life_store()
+            life = store.add(
+                t,
+                why=description or "",
+                source="goal_add",
+            )
+            if life and not life.next_action:
+                store.set_next(life.title, invent_next(life))
+            drove = take_step(
+                getattr(getattr(runtime, "config", None), "home_dir", None),
+                force=True,
+            )
         task = runtime.create_task(t, description=description or "", tags=["goal"])
         with suppress(Exception):
             from remedy.memory.harness.brief import SessionBrief
@@ -57,9 +80,26 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
                 memory=getattr(runtime, "memory", None),
                 extra_goals=[t],
             )
-        return f"Goal added id={task.id} title={t}"
+        extra = ""
+        if life is not None:
+            extra = f" life_id={life.id} horizon={life.horizon}"
+            if life.next_action:
+                extra += f" next={life.next_action}"
+        if isinstance(drove, dict) and drove.get("ok"):
+            extra += "\n" + str(drove.get("markdown") or "")
+        return f"Goal added id={task.id} title={t}{extra}"
 
     async def goal_list(status: str = "") -> str:
+        with suppress(Exception):
+            from remedy.memory.life_goals import format_goals_markdown
+
+            st = (status or "").strip().lower()
+            include = st in ("done", "dropped", "all", "completed")
+            goals = _life_store().list(include_closed=include)
+            if st in ("done", "completed"):
+                goals = [g for g in goals if g.status == "done"]
+            if goals:
+                return format_goals_markdown(goals)
         from remedy.models import TaskStatus
 
         st = (status or "").strip().lower()
@@ -73,7 +113,7 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
         tagged = [t for t in tasks if "goal" in (t.tags or [])]
         use = tagged if tagged else list(tasks)
         if not use:
-            return "No goals yet. Use goal_add to create one."
+            return "No life goals yet. Use goal_add or /goal <title>."
         lines = []
         for t in use[:30]:
             lines.append(
@@ -106,8 +146,15 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
             if runtime._session_brief is not None:
                 runtime._session_brief.open_tasks = []
                 runtime._session_brief.touch()
+        with suppress(Exception):
+            store = _life_store()
+            for g in store.list():
+                store.complete(g.title, evidence="cleared by user")
         if n == 0:
-            return "No open goals — already clear."
+            with suppress(Exception):
+                if _life_store().open_count() == 0:
+                    return "No open goals — already clear."
+            return "Cleared open life goals."
         return f"Cleared {n} open goal(s). Session open tasks wiped."
 
     async def goal_complete(title: str = "", evidence: str = "") -> str:
@@ -124,6 +171,12 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
             if needle in t.title.lower() and t.status != TaskStatus.COMPLETED
         ]
         if not matches:
+            with suppress(Exception):
+                life = _life_store().complete(title, evidence=evidence or "")
+                if life is not None:
+                    return f"Goal completed: {life.title}" + (
+                        f" evidence={evidence[:200]}" if evidence else ""
+                    )
             return f"No open goal matching: {title}"
         task = matches[0]
         task.status = TaskStatus.COMPLETED
@@ -163,9 +216,50 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
                         importance=0.7,
                     )
                 )
+        with suppress(Exception):
+            _life_store().complete(task.title, evidence=evidence or "")
         return f"Goal completed: {task.title}" + (
             f" evidence={evidence[:200]}" if evidence else ""
         )
+
+    async def goal_set_next(
+        title: str = "", action: str = "", next_by: str = ""
+    ) -> str:
+        t = (title or "").strip()
+        a = (action or "").strip()
+        if not t or not a:
+            return "Provide title and next action."
+        g = None
+        with suppress(Exception):
+            g = _life_store().set_next(t, a, next_by=next_by or "")
+        if g is None:
+            return f"No open life goal matching: {title}"
+        due = f" by {g.next_by}" if g.next_by else ""
+        drove = None
+        with suppress(Exception):
+            from remedy.memory.life_drive import take_step
+
+            drove = take_step(
+                getattr(getattr(runtime, "config", None), "home_dir", None),
+                force=True,
+            )
+        extra = ""
+        if isinstance(drove, dict) and drove.get("markdown"):
+            extra = "\n" + str(drove.get("markdown"))
+        return f"Next for **{g.title}**: {g.next_action}{due}{extra}"
+
+    async def goal_drive() -> str:
+        from remedy.memory.life_drive import take_step
+
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        out = take_step(home, force=True)
+        if out.get("ok"):
+            return str(out.get("markdown") or "Took a local step.")
+        if out.get("skipped") == "needs_you":
+            return str(out.get("markdown") or "That next step needs you.")
+        if out.get("skipped") == "no_open_goal":
+            return "No open life goal. Use goal_add or /goal first."
+        return str(out.get("markdown") or out.get("skipped") or "Nothing to do.")
 
     async def goal_verify(title: str = "", evidence: str = "") -> str:
         if not (evidence or "").strip():
@@ -432,6 +526,27 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
         "Clear all open goals and session open-tasks. Use when the user says clear goals / we have none.",
         goal_clear_all,
         {"type": "object", "properties": {}},
+    )
+    reg.register_builtin_handler(
+        "goal_drive",
+        "Take one local step toward the active life goal without asking. "
+        "Writes notes under ~/.remedy/life. Will not send, pay, or publish.",
+        goal_drive,
+        {"type": "object", "properties": {}},
+    )
+    reg.register_builtin_handler(
+        "goal_set_next",
+        "Set the one next action for a life goal (this week / this season).",
+        goal_set_next,
+        {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "action": {"type": "string"},
+                "next_by": {"type": "string", "description": "Optional date or weekday"},
+            },
+            "required": ["title", "action"],
+        },
     )
     reg.register_builtin_handler(
         "goal_complete",

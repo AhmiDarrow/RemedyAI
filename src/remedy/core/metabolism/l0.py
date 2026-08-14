@@ -18,6 +18,10 @@ def try_l0_system_reply(
     skip a redundant ``classify_turn_tier`` walk on the hot path.
     """
     from remedy.core.metabolism.tier import (
+        _L0_LIFE_DIGEST,
+        _L0_LIFE_DRIVE,
+        _L0_LIFE_NOTICE,
+        _L0_LIFE_PULSE,
         _L0_MODEL,
         _L0_SKILLS,
         _L0_STATUS,
@@ -74,6 +78,51 @@ def try_l0_system_reply(
             f"**Model:** {model}\n\n"
             "Continuity (memory, brief, skills) stays on this PC when you switch models."
         )
+
+    if _L0_LIFE_NOTICE.match(msg):
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        with suppress(Exception):
+            from remedy.memory.life_drive import notice_progress
+
+            out = notice_progress(home, msg)
+            if out.get("ok"):
+                return str(out.get("markdown") or "")
+        return None
+
+    if _L0_LIFE_DIGEST.match(msg):
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        with suppress(Exception):
+            from remedy.memory.life_drive import drive_digest
+
+            return str(drive_digest(home, mark_seen=True).get("markdown") or "")
+        return "Nothing new on life goals."
+
+    if _L0_LIFE_DRIVE.match(msg):
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        with suppress(Exception):
+            from remedy.memory.life_drive import take_step
+
+            out = take_step(home, force=True)
+            if out.get("ok") or out.get("skipped") == "needs_you":
+                return str(out.get("markdown") or "")
+        with suppress(Exception):
+            from remedy.memory.life_goals import drive_markdown
+
+            text = drive_markdown(home)
+            if text:
+                return text
+        return (
+            "No open life goal yet. Tell me what you want to finish this season, "
+            "or `/goal <title>`."
+        )
+
+    if _L0_LIFE_PULSE.match(msg):
+        with suppress(Exception):
+            from remedy.memory.life_goals import weekly_pulse
+
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+            return str(weekly_pulse(home).get("markdown") or "")
+        return "No life-goal review yet."
 
     if _L0_STATUS.match(msg):
         return (

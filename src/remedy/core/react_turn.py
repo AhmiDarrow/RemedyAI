@@ -301,6 +301,27 @@ def resolve_tools(
             logger.info("react_tools disarm reason=non_work")
             return ToolsDecision(None, False, "non_work", pack="none")
 
+    # Life / durable-goal turns: partner tools only — never coding write pack.
+    with suppress(Exception):
+        from remedy.memory.life_goals import LIFE_GOAL_TOOL_NAMES, looks_like_life_goal_statement
+        from remedy.memory.living import turn_kind
+
+        kind = turn_kind(message or "")
+        if kind in ("life", "goal") or looks_like_life_goal_statement(message or ""):
+            from remedy.core.local_agent_optimize import message_wants_implement
+            from remedy.core.build_engine import looks_like_build_request
+
+            if not message_wants_implement(message or "") and not looks_like_build_request(
+                message or ""
+            ):
+                def _tool_name(t: dict) -> str:
+                    fn = t.get("function") if isinstance(t.get("function"), dict) else {}
+                    return str(fn.get("name") or t.get("name") or "")
+
+                pack = [t for t in all_t if _tool_name(t) in LIFE_GOAL_TOOL_NAMES]
+                logger.info("react_tools arm reason=life_goal pack=life count=%d", len(pack))
+                return ToolsDecision(pack or None, False, "life_goal", pack="life")
+
     # Page interaction / browse full agency
     if page_interaction:
         return ToolsDecision(all_t, True, "page_interaction", pack="full")

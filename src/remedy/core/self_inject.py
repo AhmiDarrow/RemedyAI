@@ -670,6 +670,37 @@ def _organism_tick(runtime: Any, *, home: str | Path | None) -> dict[str, Any]:
                     field=sf,
                 )
                 out["dreamed"] = True
+    with suppress(Exception):
+        from remedy.memory.life_goals import LifeGoalStore, pulse_due, weekly_pulse
+
+        if pulse_due(home):
+            pulse = weekly_pulse(home)
+            LifeGoalStore(home).record_pulse()
+            out["life_pulse"] = {
+                "open": pulse.get("open"),
+                "stalled": len(pulse.get("stalled") or []),
+                "moved": len(pulse.get("moved") or []),
+            }
+    with suppress(Exception):
+        from remedy.memory.life_drive import drive_due, take_step
+
+        if drive_due(home, hours=4.0):
+            step = take_step(home)
+            if step.get("ok"):
+                out["life_step"] = {
+                    "goal": step.get("goal"),
+                    "did": step.get("did"),
+                    "next": step.get("next"),
+                }
+    with suppress(Exception):
+        from remedy.memory.cas import configure_cas, get_cas
+
+        cas = get_cas()
+        if cas is None and home:
+            cas = configure_cas(home)
+        if cas is not None and cas.due_compact():
+            out["cas_compact"] = cas.compact()
+            out["cas"] = cas.snapshot()
     return out
 
 

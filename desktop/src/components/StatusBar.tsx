@@ -357,7 +357,12 @@ export function StatusBar({
             if (cancelled) return
             const bits: string[] = []
             if (p.pending_approvals > 0) bits.push(`${p.pending_approvals} approve`)
-            if (p.open_goals > 0) bits.push(`${p.open_goals} goals`)
+            if (p.active_goal) {
+              const t = String(p.active_goal)
+              bits.push(t.length > 28 ? `${t.slice(0, 26)}…` : t)
+            } else if (p.open_goals > 0) {
+              bits.push(`${p.open_goals} life`)
+            }
             // Somatic / organism mood (Soul Field) + lean metabolism
             const soma = p.soma
             if (soma?.label) {

@@ -11,12 +11,14 @@ Remedy keeps durable knowledge so it can remember facts, goals, and session cont
 | **User profile** | Display name, traits, and facts that back Partner Memory |
 | **Handoff notes** | Structured “what was done / next” |
 | **Session Brief** | Compressed summary of the current chat (Harness) |
-| **Goals** | Lightweight checklist (`/goal`, `/goals`) |
+| **Goals** | Durable **life goals** (`/goal`, `/goals`) — horizon, next action, evidence. Session tasks stay a chapter checklist. |
+| **CAS** | Machine memory: content-addressed objects under `~/.remedy/cas`. Survives restart. Query-keyed, not a journal. |
 
 ## In the desktop app
 
-- **Memory** panel (status bar) — three tabs:
+- **Memory** panel (status bar) — tabs:
   - **Memory** — browse / search stored items  
+  - **Life** — durable life goals, next action, mark done  
   - **Checkpoint** — latest mid-task progress (auto-saved on long Build runs)  
   - **Plan** — latest structured plan; **Approve** before Build  
 - Status bar shows **Memory · CP** when a checkpoint exists  
@@ -33,8 +35,11 @@ Remedy keeps durable knowledge so it can remember facts, goals, and session cont
 | `/memory <query>` | Search memory |
 | `/whoami` | Show what Remedy knows about you (and this home) |
 | `/stretch` | Map this PC — hardware, tools, rooms (`/home`) |
-| `/goal <title>` | Add a goal |
-| `/goals` | List open goals |
+| `/goal <title>` | Hold a life goal; Remedy takes one local step (notes in **Documents/Remedy Life**) |
+| `/goals` | List life goals and the next action |
+| `what should I do?` / `work on my goals` | Take the next local step and open the note |
+| `I did it` | Notice you finished the current move and invent the next one |
+| `I'm back` / `what did you do?` | Digest of Life steps Remedy already took |
 | `/compact [focus]` | Compress session into a Session Brief |
 | `/harness` | Show Session Brief / harness stats |
 | `/import <folder>` | Import `.md`/`.txt` notes into memory |

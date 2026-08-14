@@ -26,9 +26,11 @@ Machine-native primitives (deliberately no human-memory metaphors):
 - **Handle resolution**: a handle in context (``remedy-mm://<sha>``) is cheap; the
   real body is fetched lazily when the model asks for it.
 
-This module is self-contained and swappable (pure Python, in-memory store that can
-be backed by SQLite later). It is the reference implementation for the middleman
-architecture in ``docs/RESEARCH_memory_middleman.md``.
+RAM is the hot index. ``remedy.memory.cas`` is the eternal plane: write-through
+on put, hydrate on session open, FTS only on a RAM miss. Same SHA is the same
+object after restart. The process is not the memory.
+
+This is the reference implementation for ``docs/RESEARCH_memory_middleman.md``.
 """
 
 from __future__ import annotations
@@ -131,6 +133,43 @@ class MiddlemanMemory:
         self._token_postings: dict[str, dict[str, int]] = {}
         # document frequency per token (for IDF)
         self._df: dict[str, int] = {}
+        self._lock = threading.Lock()
+        self._hydrated = False
+
+    def load_item(self, item: MemoryItem) -> bool:
+        """Index an existing object (hydrate). Does not persist. False if dup."""
+        if not item or not item.key or item.key in self._by_key:
+            return False
+        with self._lock:
+            return self._index_item(item)
+
+    def _index_item(self, item: MemoryItem) -> bool:
+        if item.key in self._by_key:
+            return False
+        self._by_key[item.key] = item
+        for token, freq in _counts(item.body).items():
+            self._token_postings.setdefault(item.key, {})[token] = freq
+            self._df[token] = self._df.get(token, 0) + 1
+        if item.path:
+            self._path_index.setdefault(item.path, set()).add(item.key)
+        if item.tool:
+            self._tool_index.setdefault(item.tool, set()).add(item.key)
+        if item.session_id:
+            self._session_index.setdefault(item.session_id, set()).add(item.key)
+        return True
+
+    def ensure_hydrated(self, session_id: str = "") -> None:
+        if self._hydrated:
+            return
+        self._hydrated = True
+        try:
+            from remedy.memory.cas import get_cas
+
+            cas = get_cas()
+            if cas is not None:
+                cas.hydrate(self, session_id=session_id)
+        except Exception:
+            pass
 
     # ---- ingestion ---------------------------------------------------------
 
@@ -156,8 +195,6 @@ class MiddlemanMemory:
         if body_cap and len(body) > body_cap:
             body = body[:body_cap] + "\n…[middleman cap]"
         key = content_key(body)
-        if key in self._by_key:
-            return key
         item = MemoryItem(
             key=key,
             kind=kind,
@@ -167,20 +204,23 @@ class MiddlemanMemory:
             session_id=(session_id or "").strip(),
             tags=tuple(t for t in tags if t),
         )
-        self._by_key[key] = item
-        for token, freq in _counts(body).items():
-            self._token_postings.setdefault(key, {})[token] = freq
-            self._df[token] = self._df.get(token, 0) + 1
-        if item.path:
-            self._path_index.setdefault(item.path, set()).add(key)
-        if item.tool:
-            self._tool_index.setdefault(item.tool, set()).add(key)
-        if item.session_id:
-            self._session_index.setdefault(item.session_id, set()).add(key)
+        with self._lock:
+            if key not in self._by_key:
+                self._index_item(item)
+        try:
+            from remedy.memory.cas import get_cas
+
+            cas = get_cas()
+            if cas is not None:
+                cas.put_item(item)
+        except Exception:
+            pass
         return key
 
     def put_many(self, items: Iterable[dict[str, Any]]) -> list[str]:
-        return [self.put(**it) for it in items]    # ---- retrieval ---------------------------------------------------------
+        return [self.put(**it) for it in items]
+
+    # ---- retrieval ---------------------------------------------------------
 
     def get(self, key: str) -> str | None:
         """Resolve a content address (or handle) to its full body."""
@@ -192,9 +232,22 @@ class MiddlemanMemory:
             for k in self._by_key:
                 if k.startswith(short):
                     return self._by_key[k].body
-            return None
+            key = short
         item = self._by_key.get(key)
-        return item.body if item else None
+        if item is not None:
+            return item.body
+        try:
+            from remedy.memory.cas import get_cas
+
+            cas = get_cas()
+            if cas is not None:
+                cold = cas.get(key)
+                if cold is not None:
+                    self.load_item(cold)
+                    return cold.body
+        except Exception:
+            pass
+        return None
 
     def item(self, key: str) -> MemoryItem | None:
         return self._by_key.get(key)
@@ -266,6 +319,31 @@ class MiddlemanMemory:
                     snippet=_snippet(self._by_key[key].body),
                 )
             )
+        scored.sort(key=lambda h: h.score, reverse=True)
+        if len(scored) >= top_k:
+            return scored[:top_k]
+        # Eternal plane: RAM miss → FTS on disk, then stay hot.
+        try:
+            from remedy.memory.cas import get_cas
+
+            cas = get_cas()
+        except Exception:
+            cas = None
+        if cas is None:
+            return scored[:top_k]
+        have = {h.item.key for h in scored}
+        try:
+            extra = cas.search_fts(
+                query,
+                limit=max(1, top_k - len(scored)),
+                exclude=have,
+                kinds=kinds,
+            )
+        except Exception:
+            extra = []
+        for item in extra:
+            self.load_item(item)
+            scored.append(Hit(item=item, score=_MIN_SCORE + 0.01, snippet=_snippet(item.body)))
         scored.sort(key=lambda h: h.score, reverse=True)
         return scored[:top_k]
 
@@ -383,14 +461,21 @@ def get_session_middleman(session_id: str) -> MiddlemanMemory:
         if mm is None:
             mm = MiddlemanMemory()
             _session_registry[sid] = mm
-        return mm
+    mm.ensure_hydrated(sid)
+    return mm
 
 
 def forget_session_middleman(session_id: str) -> None:
-    """Drop a session's middleman (session teardown / reset)."""
+    """Drop a session's RAM index. The eternal CAS is not deleted."""
     sid = (session_id or "").strip() or "anon"
     with _session_registry_lock:
         _session_registry.pop(sid, None)
+
+
+def reset_middleman_state() -> None:
+    """Tests: drop every RAM index. Does not wipe the CAS file."""
+    with _session_registry_lock:
+        _session_registry.clear()
 
 
 def ingest_tool_result(

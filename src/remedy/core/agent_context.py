@@ -644,11 +644,13 @@ def _middleman_context_block(
     sid = str(getattr(runtime, "_session_id", None) or "")
     if not sid:
         return ""
+    # Do not filter by session_id: this store is already the session hot set
+    # plus eternal facts/life hydrated from CAS. A session filter would drop
+    # the cross-session objects the machine is supposed to recall.
     proj = get_session_middleman(sid).project(
         query,
         budget_tokens=budget,
         paths=paths or None,
-        session_id=sid,
     )
     if not proj:
         return ""

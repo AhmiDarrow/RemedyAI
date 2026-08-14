@@ -29,6 +29,8 @@ You are finishing this request without check-ins.
 - Escalate ONLY for: secrets, paid APIs, irreversible destroy, APPROVAL_REQUIRED.
 - When verify is green and todos are closed, write a short summary and stop.
 - If you are blocked on approval, say what is waiting — once — then idle.
+- Open life goals: take one local Life note (never send, pay, publish, delete).
+- When they return they can say "I'm back" for a digest of what you already did.
 """.strip()
 
 

@@ -524,6 +524,19 @@ async def handle_slash_command(
                 return {"text": "Usage: /goal <title>"}
             if runtime is not None and hasattr(runtime, "create_task"):
                 task = runtime.create_task(title, tags=["goal"])
+                drive_note = ""
+                with suppress(Exception):
+                    from remedy.memory.life_drive import invent_next, take_step
+                    from remedy.memory.life_goals import LifeGoalStore
+
+                    home = getattr(getattr(runtime, "config", None), "home_dir", None)
+                    store = LifeGoalStore(home)
+                    g = store.add(title, source="slash_goal")
+                    if g and not g.next_action:
+                        store.set_next(g.title, invent_next(g))
+                    drove = take_step(home, force=True)
+                    if isinstance(drove, dict) and drove.get("markdown"):
+                        drive_note = "\n" + str(drove.get("markdown"))
                 with suppress(Exception):
                     if memory is not None:
                         from remedy.memory.partner_memory import upsert_profile_fact
@@ -551,14 +564,29 @@ async def handle_slash_command(
                     if dreams:
                         dream_note = "\nDream: " + str(dreams[0])
                 return {
-                    "text": f"Goal added: **{task.title}** (`{task.id}`){dream_note}"
+                    "text": (
+                        f"Goal added: **{task.title}** (`{task.id}`)"
+                        f"{dream_note}{drive_note}"
+                    )
                 }
             return {"text": "Runtime not available to store goals."}
         if runtime is not None and hasattr(runtime, "list_tasks"):
+            with suppress(Exception):
+                from remedy.memory.life_drive import drive_digest
+                from remedy.memory.life_goals import LifeGoalStore, format_goals_markdown
+
+                home = getattr(getattr(runtime, "config", None), "home_dir", None)
+                life = LifeGoalStore(home).list()
+                if life:
+                    text = format_goals_markdown(life)
+                    digest = str(drive_digest(home).get("markdown") or "")
+                    if digest and "No new Life steps" not in digest:
+                        text = text + "\n\n" + digest
+                    return {"text": text}
             tasks = runtime.list_tasks()
             goals = [t for t in tasks if "goal" in (t.tags or [])] or list(tasks)
             if not goals:
-                return {"text": "No goals yet. `/goal <title>` to add one."}
+                return {"text": "No life goals yet. `/goal <title>` to add one."}
             lines = [
                 f"- [{t.status.value}] {t.title}"
                 + (f" — {t.result_summary}" if t.result_summary else "")

@@ -36,7 +36,7 @@ _DDG_RESULT_SNIP = re.compile(
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
-def _web_enabled(runtime: Any) -> bool:
+def _web_enabled(runtime: Any = None) -> bool:
     try:
         from remedy.interfaces.config import load_config
 
@@ -45,7 +45,44 @@ def _web_enabled(runtime: Any) -> bool:
             return True
     except Exception:
         pass
+    if runtime is None:
+        return False
     return bool(getattr(getattr(runtime, "config", None), "web_tools_enabled", False))
+
+
+def web_tools_enabled(runtime: Any = None) -> bool:
+    """Public gate — Life research and tools share this opt-in."""
+    return _web_enabled(runtime)
+
+
+def search_public_web(
+    query: str,
+    *,
+    max_results: int = 3,
+    timeout: float = 12.0,
+) -> list[dict[str, str]]:
+    """Sync DuckDuckGo search. Empty if web tools are off or the net fails.
+
+    Never raises. Does not fetch full pages. Same SSRF pin as web_search.
+    """
+    if not _web_enabled(None):
+        return []
+    q = (query or "").strip()[:400]
+    if not q:
+        return []
+    try:
+        n = max(1, min(5, int(max_results or 3)))
+    except (TypeError, ValueError):
+        n = 3
+    search_url = "https://html.duckduckgo.com/html/?" + urlencode({"q": q})
+    try:
+        _final, raw, charset = _pinned_fetch(
+            search_url, max_chars=200_000, timeout=timeout
+        )
+        html = raw.decode(charset or "utf-8", errors="replace")
+        return parse_ddg_html_results(html, max_results=n)
+    except Exception:
+        return []
 
 
 def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
