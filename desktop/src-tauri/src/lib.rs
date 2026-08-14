@@ -2541,6 +2541,32 @@ fn canonical_installer_name(version: &str) -> String {
     format!("Remedy.Desktop_{ver}_x64-setup.exe")
 }
 
+/// Tauri updater pubkey (same blob as tauri.conf.json plugins.updater.pubkey).
+const UPDATER_MINISIGN_PUBKEY_B64: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ2MDEwQzVERTNBQ0JDRTAKUldUZ3ZLempYUXdCMWdRNWl0UzlpSDVUamJQZXRvREFpNE9Mb2xJeGpQck5ubVJ5ZDNxSko0dTYK";
+
+fn verify_installer_minisign(exe: &Path, sig: &str) -> Result<(), String> {
+    use base64::Engine;
+    use minisign_verify::{PublicKey, Signature};
+
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(UPDATER_MINISIGN_PUBKEY_B64)
+        .map_err(|e| format!("updater pubkey decode: {e}"))?;
+    let pk_text = String::from_utf8_lossy(&decoded);
+    let pk_line = pk_text
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("RW"))
+        .ok_or_else(|| "updater pubkey missing RW line".to_string())?;
+    let pk = PublicKey::from_base64(pk_line)
+        .map_err(|e| format!("updater pubkey parse: {e}"))?;
+    let signature =
+        Signature::decode(sig.trim()).map_err(|e| format!("updater signature parse: {e}"))?;
+    let data = std::fs::read(exe).map_err(|e| format!("read installer for verify: {e}"))?;
+    pk.verify(&data, &signature, false)
+        .map_err(|e| format!("installer signature mismatch: {e}"))?;
+    Ok(())
+}
+
 /// Only this repository's release assets (not arbitrary GitHub releases).
 /// Fetch signed asset URL + minisign signature from published latest.json.
 /// Callers should **download the returned URL** (not a stale UI-held URL) so a
@@ -2800,8 +2826,9 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
             let sig_path = temp.with_extension("exe.sig");
             std::fs::write(&sig_path, format!("{sig}\n"))
                 .map_err(|e| format!("Cannot write signature file: {e}"))?;
+            verify_installer_minisign(&temp, &sig)?;
             log::info!(
-                "Update signature present ({} chars) for trusted GitHub asset {}",
+                "Update signature verified ({} chars) for trusted GitHub asset {}",
                 sig.len(),
                 download_url
             );

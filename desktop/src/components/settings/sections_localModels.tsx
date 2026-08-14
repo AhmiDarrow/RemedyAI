@@ -1,5 +1,5 @@
 /** Settings form sections — localModels. */
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { SettingsFormProps } from './formTypes'
 import { SettingsSection } from '../SettingsSection'
 import {
@@ -29,6 +29,14 @@ import {
   applyRmbAsProvider,
   getRmbStatus,
   notifyRmbModelChanged,
+  searchHfModels,
+  listHfFiles,
+  pullHfModel,
+  getHfProgress,
+  cancelHfPull,
+  type HfFileOption,
+  type HfProgress,
+  type HfRepoOption,
   type RmbStatus,
 } from '../../api/rmb'
 
@@ -82,6 +90,326 @@ function RmbEngineNumber({
           if (Number.isFinite(n)) onApply(n)
         }}
       />
+    </div>
+  )
+}
+
+function formatDownloads(n?: number): string {
+  if (n == null || n <= 0) return ''
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M dl`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k dl`
+  return `${n} dl`
+}
+
+function HfPullPanel({
+  disabled,
+  onBusy,
+  onMsg,
+  onLoaded,
+}: {
+  disabled: boolean
+  onBusy: (v: boolean) => void
+  onMsg: (m: string) => void
+  onLoaded: (path?: string) => void
+}): ReactNode {
+  const [query, setQuery] = useState('')
+  const [repos, setRepos] = useState<HfRepoOption[]>([])
+  const [files, setFiles] = useState<HfFileOption[]>([])
+  const [repo, setRepo] = useState('')
+  const [filePath, setFilePath] = useState('')
+  const [progress, setProgress] = useState<HfProgress | null>(null)
+  const [searching, setSearching] = useState(false)
+  const onMsgRef = useRef(onMsg)
+  const onLoadedRef = useRef(onLoaded)
+  const onBusyRef = useRef(onBusy)
+  onMsgRef.current = onMsg
+  onLoadedRef.current = onLoaded
+  onBusyRef.current = onBusy
+
+  const pulling =
+    progress?.phase === 'downloading' || progress?.phase === 'loading'
+  const pct = Math.max(0, Math.min(100, Number(progress?.pct || 0)))
+  const selected = files.find((f) => f.path === filePath)
+
+  useEffect(() => {
+    let stop = false
+    void getHfProgress()
+      .then((r) => {
+        if (stop) return
+        const p = r.progress
+        if (p?.phase === 'downloading' || p?.phase === 'loading') {
+          setProgress(p)
+          onBusyRef.current(true)
+          onMsgRef.current(p.message || `Downloading ${p.filename || 'GGUF'}…`)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      stop = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!pulling) return
+    let stop = false
+    const tick = async () => {
+      try {
+        const r = await getHfProgress()
+        if (stop) return
+        const p = r.progress || null
+        setProgress(p)
+        if (p?.phase === 'ready') {
+          onMsgRef.current(p.message || `Saved ${p.filename || 'GGUF'}`)
+          onBusyRef.current(false)
+          onLoadedRef.current(p.path || undefined)
+        } else if (p?.phase === 'error') {
+          onBusyRef.current(false)
+          onMsgRef.current(p.error || p.message || 'Download failed')
+        } else if (p?.phase === 'cancelled') {
+          onBusyRef.current(false)
+          onMsgRef.current('Download cancelled')
+        }
+      } catch (err) {
+        if (!stop) onMsgRef.current(String(err))
+      }
+    }
+    void tick()
+    const id = window.setInterval(() => void tick(), 800)
+    return () => {
+      stop = true
+      window.clearInterval(id)
+    }
+  }, [pulling])
+
+  const runSearch = async () => {
+    const q = query.trim()
+    if (!q || disabled || searching || pulling) return
+    setSearching(true)
+    onBusy(true)
+    setRepos([])
+    setFiles([])
+    setRepo('')
+    setFilePath('')
+    onMsg(`Searching Hugging Face for ${q}…`)
+    try {
+      const r = await searchHfModels(q)
+      if (!r.ok && r.error) {
+        onMsg(r.error)
+        return
+      }
+      const nextRepos = r.repos || []
+      const nextFiles = r.files || []
+      setRepos(nextRepos)
+      if (nextRepos.length > 1) {
+        onMsg(`${nextRepos.length} Hugging Face repos — pick a host`)
+      } else if (nextRepos.length === 1) {
+        const only = nextRepos[0].id
+        setRepo(only)
+        onMsg(`Repo ${only} — pick a GGUF`)
+        const listed = await listHfFiles(only, r.hint?.revision || undefined)
+        const got = listed.files || []
+        setFiles(got)
+        const rec = got.find((f) => f.recommended) || got[0]
+        if (rec) setFilePath(rec.path)
+        onMsg(
+          got.length
+            ? `${got.length} GGUF file${got.length === 1 ? '' : 's'} in ${only}`
+            : listed.error || `No GGUF files in ${only}`,
+        )
+      } else if (nextFiles.length) {
+        setFiles(nextFiles)
+        if (r.hint?.repo) setRepo(r.hint.repo)
+        const rec = nextFiles.find((f) => f.recommended) || nextFiles[0]
+        if (rec) setFilePath(rec.path)
+        onMsg(
+          r.hint?.filename
+            ? `Ready to pull ${r.hint.filename}`
+            : `${nextFiles.length} GGUF file${nextFiles.length === 1 ? '' : 's'}`,
+        )
+      } else {
+        onMsg(r.error || 'No GGUF repos matched')
+      }
+    } catch (err) {
+      onMsg(String(err))
+    } finally {
+      setSearching(false)
+      onBusy(false)
+    }
+  }
+
+  const pickRepo = async (id: string) => {
+    setRepo(id)
+    setFiles([])
+    setFilePath('')
+    if (!id || disabled || pulling) return
+    setSearching(true)
+    onBusy(true)
+    onMsg(`Listing GGUF files in ${id}…`)
+    try {
+      const listed = await listHfFiles(id)
+      const got = listed.files || []
+      setFiles(got)
+      const rec = got.find((f) => f.recommended) || got[0]
+      if (rec) setFilePath(rec.path)
+      onMsg(
+        got.length
+          ? `${got.length} GGUF file${got.length === 1 ? '' : 's'} in ${id}`
+          : listed.error || `No GGUF files in ${id}`,
+      )
+    } catch (err) {
+      onMsg(String(err))
+    } finally {
+      setSearching(false)
+      onBusy(false)
+    }
+  }
+
+  const runPull = async () => {
+    if (disabled || pulling || searching) return
+    const filename = selected?.path || filePath
+    if (!filename || !repo) {
+      onMsg('Pick a Hugging Face repo and GGUF first')
+      return
+    }
+    onBusy(true)
+    onMsg(`Pulling ${selected?.name || filename}…`)
+    try {
+      const r = await pullHfModel({
+        repo,
+        filename,
+        url: selected?.url,
+        expected_size: selected?.size,
+        load: true,
+      })
+      if (!r.ok) {
+        onMsg(r.error || 'Pull failed')
+        onBusy(false)
+        return
+      }
+      setProgress(r.progress || { phase: 'downloading' })
+    } catch (err) {
+      onMsg(String(err))
+      onBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-3 mb-2 space-y-1.5">
+      <FormLabel>Pull from Hugging Face</FormLabel>
+      <FormHint>
+        Name, <code className="text-[9px]">owner/repo</code>, or a file URL.
+        A name can match more than one account — pick the repo, then the GGUF.
+      </FormHint>
+      <div className="flex gap-1.5">
+        <input
+          type="text"
+          className="ui-input ui-input-sm mb-1 font-mono w-full"
+          disabled={disabled || searching || pulling}
+          value={query}
+          placeholder="qwen2.5-coder-7b  or  Qwen/Qwen2.5-Coder-7B-Instruct-GGUF"
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              void runSearch()
+            }
+          }}
+        />
+        <FormActionButton
+          disabled={disabled || searching || pulling || !query.trim()}
+          onClick={() => void runSearch()}
+        >
+          Search
+        </FormActionButton>
+      </div>
+      {repos.length > 0 ? (
+        <>
+          <FormLabel>
+            Hugging Face repo
+            {repos.length > 1 ? ` (${repos.length} hosts)` : ''}
+          </FormLabel>
+          <FormSelect
+            size="sm"
+            disabled={disabled || searching || pulling}
+            value={repo}
+            options={[
+              { value: '', label: '— pick a repo —' },
+              ...repos.map((r) => ({
+                value: r.id,
+                label: `${r.id}${formatDownloads(r.downloads) ? ` · ${formatDownloads(r.downloads)}` : ''}`,
+              })),
+            ]}
+            onChange={(id) => {
+              void pickRepo(id)
+            }}
+          />
+        </>
+      ) : null}
+      {files.length > 0 ? (
+        <>
+          <FormLabel>GGUF file</FormLabel>
+          <FormSelect
+            size="sm"
+            disabled={disabled || searching || pulling}
+            value={filePath}
+            options={[
+              { value: '', label: '— pick a GGUF —' },
+              ...files.map((f) => ({
+                value: f.path,
+                label: `${f.recommended ? '★ ' : ''}${f.name}${
+                  f.size_gb ? ` (${f.size_gb} GB)` : ''
+                }${f.role === 'mmproj' ? ' · mmproj' : ''}`,
+              })),
+            ]}
+            onChange={setFilePath}
+          />
+          <FormActionButton
+            variant="primary"
+            disabled={disabled || searching || pulling || !repo || !filePath}
+            onClick={() => void runPull()}
+          >
+            Pull and load
+          </FormActionButton>
+        </>
+      ) : null}
+      {pulling ? (
+        <div className="mt-1">
+          <div
+            className="h-1 rounded overflow-hidden"
+            style={{ background: 'var(--bg-primary)' }}
+          >
+            <div
+              className="h-full"
+              style={{
+                width: `${pct}%`,
+                background: 'var(--accent)',
+              }}
+            />
+          </div>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>
+              {progress?.message || `Downloading ${progress?.filename || 'GGUF'}…`}
+              {progress?.bytes_total
+                ? ` · ${pct}%`
+                : ''}
+            </span>
+            {progress?.phase === 'downloading' ? (
+              <FormActionButton
+                variant="ghost"
+                disabled={false}
+                onClick={() => {
+                  void cancelHfPull().then((r) => {
+                    if (r.error) onMsg(r.error)
+                    else onMsg('Cancelling download…')
+                  })
+                }}
+              >
+                Cancel
+              </FormActionButton>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -164,6 +492,9 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
               : `${rmb?.ctx_size ?? 8192} tok · ${rmb?.profile || 'autofit'}`}
             {rmb?.nvidia ? ' · NVIDIA' : ' · CPU'}
           </FormStatusRow>
+          <FormStatusRow label="Auto-load">
+            {rmb?.host_auto?.summary || 'Remedy sets Jinja, thinking, and slots from the GGUF'}
+          </FormStatusRow>
           <FormStatusRow label="Runtime">
             {rmb?.runtime_present
               ? (rmb.runtime_binary || 'llama-server').replace(/^.*[\\/]/, '')
@@ -178,6 +509,11 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
         {rmbMsg ? (
           <FormNotice tone={/fail|error|not found|missing/i.test(rmbMsg) ? 'warn' : undefined}>
             {rmbMsg}
+          </FormNotice>
+        ) : null}
+        {(rmb?.host_auto?.warnings || []).length > 0 ? (
+          <FormNotice tone="warn">
+            {(rmb?.host_auto?.warnings || []).join(' ')}
           </FormNotice>
         ) : null}
 
@@ -342,6 +678,19 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             }}
           />
         </div>
+
+        <HfPullPanel
+          disabled={rmbBusy}
+          onBusy={setRmbBusy}
+          onMsg={setRmbMsg}
+          onLoaded={(path) => {
+            void (async () => {
+              const st = await refreshRmb()
+              emitRmbChatModel(st, path)
+              onSettingsSaved?.()
+            })()
+          }}
+        />
 
         <FormSegmented
           value={((rmb?.profile || 'autofit') as 'autofit' | 'agent' | 'turbo' | 'quality')}

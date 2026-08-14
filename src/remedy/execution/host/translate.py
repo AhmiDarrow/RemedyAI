@@ -244,7 +244,9 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
         parts = []
         for p in paths:
             win_p = p.replace("/", "\\").rstrip("\\")
-            parts.append(f'if not exist "{win_p}\\" mkdir "{win_p}"')
+            # Parens so `mkdir -p dest && gcc` still runs gcc when dest exists.
+            # Bare `if not exist … && gcc` skips gcc (IF consumes the line).
+            parts.append(f'(if not exist "{win_p}\\" mkdir "{win_p}")')
         notes.append("mkdir -p → if not exist mkdir")
         return " & ".join(parts), notes
 

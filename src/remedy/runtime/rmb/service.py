@@ -44,6 +44,11 @@ from remedy.runtime.rmb.config import (
     models_dir,
     save_rmb_json,
 )
+from remedy.runtime.rmb.host_profile import (
+    apply_host_profile_to_state,
+    detect_gguf_host_profile,
+    model_switch_should_refit,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +61,7 @@ _user_stopped: bool = False
 
 _running_cache: dict[str, Any] = {"ts": 0.0, "value": False, "key": ""}
 _RUNNING_CACHE_TTL_S = 1.5
-_HEALTH_TIMEOUT_S = 0.9
+_HEALTH_TIMEOUT_S = 0.4
 # Rock-solid host: background watchdog restarts RMB if it dies mid-session.
 _watchdog_thread: threading.Thread | None = None
 _watchdog_stop = threading.Event()
@@ -91,7 +96,8 @@ def _port_open(host: str, port: int, timeout: float = 0.15) -> bool:
 def _health(base_url: str, timeout: float = _HEALTH_TIMEOUT_S) -> bool:
     """True when llama-server is accepting model queries (not mid-load).
 
-    Checks ``/health`` and ``/v1/models``. HTTP 503 Loading model → not ready.
+    Probes ``/health`` first. ``/v1/models`` only if ``/health`` is 404.
+    HTTP 503 Loading model → not ready.
     """
     global _last_health_detail
     from urllib.error import HTTPError, URLError
@@ -106,29 +112,19 @@ def _health(base_url: str, timeout: float = _HEALTH_TIMEOUT_S) -> bool:
     root = base
     if root.endswith("/v1"):
         root = root[:-3]
-    paths_try = (
-        root + "/health",
-        base + "/models" if base.endswith("/v1") else base + "/v1/models",
-        base + "/models" if not base.endswith("/models") else base,
-    )
-    # Deduplicate URLs
-    seen: set[str] = set()
-    saw_loading = False
+    # One URL on the happy path. /v1/models only if /health is missing (404).
+    health_url = root + "/health"
+    models_url = base + "/models" if base.endswith("/v1") else base + "/v1/models"
     last_err = ""
-    for url in paths_try:
-        if url in seen:
-            continue
-        seen.add(url)
+    for url in (health_url, models_url):
         try:
             req = Request(url, headers={"User-Agent": "RemedyAI-RMB/1.0"})
             with urlopen_no_redirect(req, timeout=timeout) as resp:  # type: ignore[union-attr]
                 status = int(getattr(resp, "status", 200) or 200)
                 if status == 503:
-                    saw_loading = True
-                    last_err = "503"
-                    continue
+                    _last_health_detail = "loading"
+                    return False
                 if 200 <= status < 300:
-                    # Prefer body that says ok when present (llama /health JSON)
                     try:
                         body = resp.read(256).decode("utf-8", errors="ignore").lower()
                     except Exception:
@@ -138,33 +134,34 @@ def _health(base_url: str, timeout: float = _HEALTH_TIMEOUT_S) -> bool:
                         or '"error"' in body[:40]
                     ):
                         last_err = "health_error_body"
-                        continue
+                        if url == health_url:
+                            continue
+                        break
                     if "loading" in body and "ok" not in body:
-                        saw_loading = True
-                        last_err = "loading_body"
-                        continue
+                        _last_health_detail = "loading"
+                        return False
                     _last_health_detail = "ok"
                     return True
         except HTTPError as exc:
             code = int(getattr(exc, "code", 0) or 0)
             if code == 503:
-                saw_loading = True
-                last_err = "503"
-                continue
+                _last_health_detail = "loading"
+                return False
             last_err = f"http_{code}"
-            continue
+            if url == health_url and code == 404:
+                continue
+            break
         except URLError as exc:
             last_err = f"urlerr:{exc.reason!s}"[:80]
-            continue
+            break
         except Exception as exc:
             err = str(exc).lower()
             if "503" in err or "loading" in err:
-                saw_loading = True
-                last_err = "503"
-                continue
+                _last_health_detail = "loading"
+                return False
             last_err = type(exc).__name__
-            continue
-    _last_health_detail = "loading" if saw_loading else (last_err or "unreachable")
+            break
+    _last_health_detail = last_err or "unreachable"
     return False
 
 
@@ -227,9 +224,11 @@ def managed_process_alive() -> bool:
 
 def is_starting() -> bool:
     """True during spawn → healthy window (blocks vision heal/race)."""
-    if managed_process_alive() and not is_running(force=True, require_http=True):
+    if time.time() < float(_starting_until or 0):
         return True
-    return time.time() < float(_starting_until or 0)
+    if managed_process_alive() and not is_running(force=False, require_http=True):
+        return True
+    return False
 
 
 def is_running(
@@ -1020,74 +1019,13 @@ def _live_process_has_mtp_flags(state: dict[str, Any] | None = None) -> bool:
     return False
 
 
-# --- GGUF host autoconfig (MTP / coding / template) ---
+# --- GGUF host autoconfig (MTP / coding / template / thinking) ---
 # Partner rule: user loads a GGUF; Remedy wires llama-server correctly.
-# No Settings knobs for --spec-type, draft length, or parallel slots.
-
-_MTP_NAME_RE = re.compile(r"(?:^|[-_.\s])mtp(?:[-_.\s]|$)", re.IGNORECASE)
-_CODER_NAME_RE = re.compile(
-    r"(?:^|[-_.\s])(coder|coding|code)(?:[-_.\s]|$)", re.IGNORECASE
-)
-_QWEN3_NAME_RE = re.compile(r"qwen\s*3|qwopus|qwen3", re.IGNORECASE)
+# detect_gguf_host_profile / apply_host_profile_to_state live in host_profile.py.
 
 # Cache binary capability probes (path + mtime → bool)
 _spec_cap_cache: dict[str, tuple[float, bool]] = {}
 _flag_cap_cache: dict[str, tuple[float, bool]] = {}
-
-
-def detect_gguf_host_profile(model: Path | str | None) -> dict[str, Any]:
-    """Infer llama-server host knobs from GGUF path/name.
-
-    Returns a stable dict used by ``_build_cmd`` and status:
-    - mtp: Multi-Token Prediction heads present (filename signal)
-    - coder: coding-tuned model
-    - qwen3_family: Jinja/system-first sensitive family
-    - force_parallel_1: MTP needs single slot
-    - spec_type / spec_draft_n_max: when MTP + capable binary
-    """
-    if model is None:
-        return {
-            "mtp": False,
-            "coder": False,
-            "qwen3_family": False,
-            "force_parallel_1": False,
-            "spec_type": None,
-            "spec_draft_n_max": None,
-            "reasons": [],
-        }
-    p = Path(model)
-    name = f"{p.name} {p.stem}".lower()
-    reasons: list[str] = []
-    mtp = bool(_MTP_NAME_RE.search(name)) or "multi-token" in name or "multitoken" in name
-    if mtp:
-        reasons.append("filename_mtp")
-    coder = bool(_CODER_NAME_RE.search(name))
-    if coder:
-        reasons.append("filename_coder")
-    qwen3 = bool(_QWEN3_NAME_RE.search(name))
-    if qwen3:
-        reasons.append("filename_qwen3_family")
-
-    # Conservative draft length: Unsloth default 2; slightly higher for larger coders
-    draft_n = 2
-    if mtp:
-        try:
-            size_gb = p.stat().st_size / (1024**3) if p.is_file() else 0.0
-        except OSError:
-            size_gb = 0.0
-        if size_gb >= 12 or re.search(r"\b(14b|27b|32b|35b|70b)\b", name):
-            draft_n = 3
-
-    return {
-        "mtp": mtp,
-        "coder": coder,
-        "qwen3_family": qwen3,
-        "force_parallel_1": mtp,  # llama.cpp MTP is single-slot
-        "spec_type": "draft-mtp" if mtp else None,
-        "spec_draft_n_max": draft_n if mtp else None,
-        "reasons": reasons,
-        "model_stem": p.stem,
-    }
 
 
 def binary_supports_draft_mtp(binary: Path | str | None) -> bool:
@@ -1166,6 +1104,75 @@ def binary_supports_cache_reuse(binary: Path | str | None) -> bool:
         return hit[1]
     found = False
     needles = (b"--cache-reuse", b"cache-reuse", b"LLAMA_ARG_CACHE_REUSE")
+    candidates: list[Path] = [b]
+    parent = b.parent
+    for pattern in (
+        "llama-common*.dll",
+        "llama-server*.dll",
+        "llama-common.so*",
+        "libcommon*",
+        "llama-server",
+    ):
+        with contextlib.suppress(Exception):
+            candidates.extend(parent.glob(pattern))
+    seen: set[str] = set()
+    for c in candidates:
+        try:
+            ck = str(c.resolve())
+        except OSError:
+            ck = str(c)
+        if ck in seen or not c.is_file():
+            continue
+        seen.add(ck)
+        try:
+            size = c.stat().st_size
+            if size > 40 * 1024 * 1024:
+                continue
+            data = c.read_bytes()
+        except OSError:
+            continue
+        if any(n in data for n in needles):
+            found = True
+            break
+    _flag_cap_cache[key] = (mtime, found)
+    return found
+
+
+def binary_supports_chat_template_kwargs(binary: Path | str | None) -> bool:
+    """True when this llama-server build knows ``--chat-template-kwargs``."""
+    return _binary_has_needles(
+        binary,
+        "chat-template-kwargs",
+        (b"--chat-template-kwargs", b"chat-template-kwargs", b"LLAMA_ARG_CHAT_TEMPLATE_KWARGS"),
+    )
+
+
+def binary_supports_reasoning_budget(binary: Path | str | None) -> bool:
+    """True when this llama-server build knows ``--reasoning-budget``."""
+    return _binary_has_needles(
+        binary,
+        "reasoning-budget",
+        (b"--reasoning-budget", b"reasoning-budget", b"LLAMA_ARG_REASONING_BUDGET"),
+    )
+
+
+def _binary_has_needles(
+    binary: Path | str | None, cache_key: str, needles: tuple[bytes, ...]
+) -> bool:
+    if not binary:
+        return False
+    b = Path(binary)
+    if not b.is_file():
+        return False
+    try:
+        mtime = b.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    key = f"{cache_key}|{b.resolve() if b.exists() else b}"
+    hit = _flag_cap_cache.get(key)
+    if hit is not None and hit[0] == mtime:
+        return hit[1]
+    found = False
     candidates: list[Path] = [b]
     parent = b.parent
     for pattern in (
@@ -1345,8 +1352,19 @@ def _build_cmd(
         str(max(1, use_parallel)),
         "--cont-batching",
     ]
-    if use_jinja:
+    if use_jinja or profile.get("use_jinja"):
         cmd.append("--jinja")
+    kwargs_json = str(profile.get("chat_template_kwargs") or "").strip()
+    if kwargs_json and binary_supports_chat_template_kwargs(binary):
+        cmd.extend(["--chat-template-kwargs", kwargs_json])
+    if profile.get("reasoning_budget") is not None and binary_supports_reasoning_budget(
+        binary
+    ):
+        try:
+            budget = int(profile.get("reasoning_budget"))
+        except (TypeError, ValueError):
+            budget = 0
+        cmd.extend(["--reasoning-budget", str(budget)])
     if threads and int(threads) > 0:
         cmd.extend(["--threads", str(int(threads))])
     if flash_attn:
@@ -1970,8 +1988,11 @@ def _start_rmb_server_impl(
 
         # Autofit (default): measure VRAM/RAM + GGUF and pick a window that
         # actually loads. Locked / turbo / quality keep the user's knobs.
-        host_profile = detect_gguf_host_profile(model)
         hw = probe_hardware()
+        host_profile = detect_gguf_host_profile(
+            model, hardware=hw.to_public() if hw is not None else None
+        )
+        apply_host_profile_to_state(state, host_profile)
         last_good = (
             state.get("last_good_fit")
             if isinstance(state.get("last_good_fit"), dict)
@@ -2010,7 +2031,7 @@ def _start_rmb_server_impl(
         ctx = int(plan.ctx_size)
         ngl = int(plan.n_gpu_layers)
 
-        # Autoconfig from GGUF name — MTP / coder / single-slot (no user knobs)
+        # Autoconfig from GGUF — jinja / thinking-off / mmap / MTP (no user knobs)
         use_parallel = int(state.get("parallel") or 1)
         if host_profile.get("force_parallel_1"):
             use_parallel = 1
@@ -2479,14 +2500,14 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     state = merge_state({**rmb_cfg, **disk})
     # Soft auto-heal: only when auto_start is explicitly on (never default on)
     ensure_rmb_watchdog(home)
-    running = is_running(home, force=True, require_http=True)
+    # UI polls this every ~8s — honor the running cache. Heal only if auto_start.
+    running = is_running(home, force=False, require_http=True)
     if (
-        not _user_stopped
+        not running
+        and not _user_stopped
         and state.get("enabled", True)
         and state.get("auto_start", False)
-        and not running
         and not is_starting()
-        and not is_loading(home)
     ):
         with contextlib.suppress(Exception):
             adopt_existing_host(home)
@@ -2497,8 +2518,8 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     model_path = _resolve_model_path(state, home)
     binary = _find_llama_binary(state, home)
     ready = running
-    loading_now = bool(is_loading(home)) and not ready
-    starting = is_starting() or loading_now
+    loading_now = False if ready else bool(is_loading(home))
+    starting = (not ready) and (is_starting() or loading_now)
     load_for = loading_for_s(home) if loading_now else 0.0
 
     # Keep pid accurate for stop/UI even after API recycle (orphan adopt)
@@ -2559,18 +2580,6 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
             "name": chat_stem,
             "path": str(model_path),
         }
-    # Heal config drift automatically (no user action)
-    if model_path is not None and ready:
-        with contextlib.suppress(Exception):
-            sync_rmb_chat_identity(
-                {
-                    **state,
-                    "model_path": str(model_path),
-                    "base_url": state.get("base_url"),
-                },
-                home_dir=home,
-                force_provider=True,
-            )
     restarts_recent = len(
         [
             t
@@ -2687,11 +2696,7 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         "local_agent_mode": local_agent or running,
         "skips_vision_stack": skip_vision or vision_suspended,
         "vision_suspended": vision_suspended,
-        "host_auto": (
-            state.get("host_auto")
-            if isinstance(state.get("host_auto"), dict)
-            else detect_gguf_host_profile(model_path)
-        ),
+        "host_auto": _status_host_auto(state, model_path),
         "endless_session": {
             "harness_min_pct": 0.55,
             "harness_max_pct": 0.78,
@@ -2705,6 +2710,17 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         },
         "autofit": _status_autofit(state, model_path, running=ready),
     }
+
+
+def _status_host_auto(state: dict[str, Any], model_path: Path | None) -> dict[str, Any]:
+    """Public auto-load card. Refresh when disk cache predates richer profiles.
+
+    No GPU probe here — status is polled often; unfit is computed at start.
+    """
+    ha = state.get("host_auto") if isinstance(state.get("host_auto"), dict) else None
+    if ha and ha.get("summary"):
+        return ha
+    return detect_gguf_host_profile(model_path)
 
 
 def _status_autofit(
@@ -3008,14 +3024,26 @@ def sync_rmb_chat_identity(
         if not isinstance(disk, dict):
             return out
         last_by = dict(disk.get("last_model_by_provider") or {})
-        last_by["rmb"] = stem
-        disk["last_model_by_provider"] = last_by
+        want_last = dict(last_by)
+        want_last["rmb"] = stem
         prov = str(disk.get("llm_provider") or "").strip().lower()
-        if force_provider or prov == "rmb":
+        steal = bool(force_provider or prov == "rmb")
+        changed = want_last != last_by
+        if steal:
+            changed = changed or (
+                prov != "rmb"
+                or str(disk.get("llm_model") or "") != stem
+                or str(disk.get("llm_base_url") or "") != base
+            )
+        if not changed:
+            out["synced"] = True
+            out["stem"] = stem
+            return out
+        disk["last_model_by_provider"] = want_last
+        if steal:
             disk["llm_provider"] = "rmb"
             disk["llm_model"] = stem
             disk["llm_base_url"] = base
-            # Local agent defaults when chat is on RMB
             disk["harness_mode"] = disk.get("harness_mode") or "auto"
             disk["harness_min_context_pct"] = 0.55
             disk["harness_max_context_pct"] = 0.78
@@ -3273,6 +3301,39 @@ def apply_rmb_settings(
             # Leave empty — start will fail with a clear "GGUF not found" rather
             # than silently reusing a mismatched sticky path.
             state["model_path"] = ""
+
+    # New GGUF (user changed path/id) → auto-load profile and forget the
+    # previous file's last-good window. Do not treat auto-resolve of an
+    # empty path during a ctx-only patch as a switch.
+    user_switched = "model_path" in patch or "model_id" in patch
+    new_path = str(state.get("model_path") or "").strip()
+    old_path = str(before.get("model_path") or "").strip()
+    path_changed = False
+    if user_switched and new_path:
+        try:
+            path_changed = Path(new_path).name.lower() != (
+                Path(old_path).name.lower() if old_path else ""
+            )
+        except OSError:
+            path_changed = new_path.lower() != old_path.lower()
+    elif user_switched and old_path and not new_path:
+        path_changed = True
+    if user_switched and new_path:
+        hw_pub: dict[str, Any] | None = None
+        with contextlib.suppress(Exception):
+            hw_pub = probe_hardware().to_public()
+        auto = detect_gguf_host_profile(new_path, hardware=hw_pub)
+        preserve: set[str] = set()
+        if "use_jinja" in patch:
+            preserve.add("use_jinja")
+        if "no_mmap" in patch:
+            preserve.add("no_mmap")
+        apply_host_profile_to_state(state, auto, preserve=preserve)
+        if path_changed:
+            state["last_good_fit"] = None
+            if model_switch_should_refit(state):
+                state["autofit"] = True
+                state["autofit_locked"] = False
 
     # Keep base_url in sync with host/port
     host = str(state.get("host") or DEFAULT_HOST)

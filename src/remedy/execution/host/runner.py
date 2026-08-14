@@ -65,7 +65,7 @@ _CMD_BUILTINS = frozenset(
     }
 )
 
-_SHELL_META = re.compile(r"[|<>&^%]|&&|\|\|")
+_SHELL_META = re.compile(r"[|<>&^%()]|&&|\|\|")
 
 
 @dataclass

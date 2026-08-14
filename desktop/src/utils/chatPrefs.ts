@@ -1,9 +1,22 @@
-/** UI prefs for density + custom accent (local). */
+/** UI prefs for density, accent, and accessibility (local). */
 
 export type Density = 'cozy' | 'compact'
+export type FontScale = 'sm' | 'md' | 'lg' | 'xl'
+
+export const FONT_SCALE_OPTIONS: { id: FontScale; label: string; factor: number }[] = [
+  { id: 'sm', label: 'S', factor: 0.9 },
+  { id: 'md', label: 'M', factor: 1 },
+  { id: 'lg', label: 'L', factor: 1.15 },
+  { id: 'xl', label: 'XL', factor: 1.3 },
+]
+
+const FONT_ORDER: FontScale[] = ['sm', 'md', 'lg', 'xl']
 
 const DENSITY_KEY = 'remedy-density'
 const ACCENT_KEY = 'remedy-custom-accent'
+const FONT_KEY = 'remedy-font-scale'
+const MOTION_KEY = 'remedy-reduce-motion'
+const CONTRAST_KEY = 'remedy-high-contrast'
 
 export function loadDensity(): Density {
   try {
@@ -79,4 +92,97 @@ export function applyCustomAccent(hex: string) {
   root.style.setProperty('--chat-user-bg', hex)
   root.style.setProperty('--chat-user-border', hex)
   root.style.setProperty('--custom-accent', hex)
+}
+
+export function isFontScale(v: string | null | undefined): v is FontScale {
+  return v === 'sm' || v === 'md' || v === 'lg' || v === 'xl'
+}
+
+export function loadFontScale(): FontScale {
+  try {
+    const v = localStorage.getItem(FONT_KEY)
+    if (isFontScale(v)) return v
+  } catch {
+    /* */
+  }
+  return 'md'
+}
+
+export function saveFontScale(s: FontScale) {
+  try {
+    localStorage.setItem(FONT_KEY, s)
+  } catch {
+    /* */
+  }
+}
+
+export function applyFontScale(s: FontScale) {
+  const root = document.documentElement
+  root.setAttribute('data-font-scale', s)
+  const factor = FONT_SCALE_OPTIONS.find((o) => o.id === s)?.factor ?? 1
+  root.style.setProperty('--ui-font-scale', String(factor))
+}
+
+export function stepFontScale(current: FontScale, dir: 1 | -1): FontScale {
+  const i = FONT_ORDER.indexOf(current)
+  const next = Math.max(0, Math.min(FONT_ORDER.length - 1, i + dir))
+  return FONT_ORDER[next]
+}
+
+export function loadReduceMotion(): boolean {
+  try {
+    const v = localStorage.getItem(MOTION_KEY)
+    if (v === '1') return true
+    if (v === '0') return false
+  } catch {
+    /* */
+  }
+  try {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  } catch {
+    return false
+  }
+}
+
+export function saveReduceMotion(on: boolean) {
+  try {
+    localStorage.setItem(MOTION_KEY, on ? '1' : '0')
+  } catch {
+    /* */
+  }
+}
+
+export function applyReduceMotion(on: boolean) {
+  document.documentElement.setAttribute('data-reduce-motion', on ? '1' : '0')
+}
+
+export function loadHighContrast(): boolean {
+  try {
+    return localStorage.getItem(CONTRAST_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function saveHighContrast(on: boolean) {
+  try {
+    if (on) localStorage.setItem(CONTRAST_KEY, '1')
+    else localStorage.removeItem(CONTRAST_KEY)
+  } catch {
+    /* */
+  }
+}
+
+export function applyHighContrast(on: boolean) {
+  document.documentElement.setAttribute('data-contrast', on ? 'high' : 'normal')
+}
+
+/** Apply stored chrome prefs before first paint (and after loads). */
+export function applyStoredUiPrefs() {
+  applyDensity(loadDensity())
+  applyFontScale(loadFontScale())
+  applyReduceMotion(loadReduceMotion())
+  applyHighContrast(loadHighContrast())
+  const accent = loadCustomAccent()
+  if (accent) applyCustomAccent(accent)
 }

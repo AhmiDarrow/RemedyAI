@@ -429,7 +429,14 @@ export function useMessages(sessionId: string | null) {
    * Busy state is per-session (job registry) — not global sendLock/streaming.
    */
   const drainQueue = useCallback(async (forSid?: string | null) => {
-    if (drainingRef.current) return
+    if (drainingRef.current) {
+      if (forSid) {
+        window.setTimeout(() => {
+          void drainQueue(forSid)
+        }, 40)
+      }
+      return
+    }
     const preferred = forSid || sessionIdRef.current
     // Session-scoped busy: only block drain for a sid that still has a live job.
     if (preferred && getStreamJob(preferred)?.status === 'running') return

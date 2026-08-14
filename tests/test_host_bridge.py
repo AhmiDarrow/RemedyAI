@@ -67,6 +67,10 @@ def test_translate_ls_cat_pwd_which() -> None:
 def test_translate_chain_mkdir_and_true() -> None:
     r = translate_posix_to_host("mkdir -p a && true", host="cmd")
     assert "if not exist" in r.text
+    # Parens so `&& true` still runs when `a` already exists (cmd IF line-eat).
+    assert r.text.strip().startswith("(")
+    assert "&&" in r.text
+    assert r.text.index(")") < r.text.index("&&")
     assert "cd ." in r.text
 
 

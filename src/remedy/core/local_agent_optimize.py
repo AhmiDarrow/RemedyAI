@@ -405,6 +405,19 @@ def slim_system_for_local(
     Head/context caps scale with the physical n_ctx (autofit 16–32k can keep
     more workspace than the old hard 6k-char trim).
     """
+    # Trivia / math / world-knowledge: tiny prompt. The agent contract
+    # ("call tools immediately") makes reasoners and base models ramble.
+    try:
+        from remedy.core.react_policy import is_knowledge_question
+
+        if is_knowledge_question(user_message):
+            return (
+                f"You are a local assistant on this PC (model: {model or 'local'}).\n"
+                "Answer in one short sentence. No tools. No essays. No chain-of-thought."
+            )
+    except Exception:
+        pass
+
     win = int(window or 0)
     if win < 2048:
         try:
@@ -549,8 +562,9 @@ def local_completion_cap(
         # 32k ctx → 12k; hard floor 4k so mid-stream file_edit does not die
         return max(4096, min(12288, win // 3))
     if tools_present:
-        return max(2048, min(6144, win // 5))
-    return max(512, min(2048, win // 10))
+        # Was 6k at 32k ctx — R1/Qwen3 fill that with hidden thinking (minutes).
+        return max(768, min(2048, win // 12))
+    return max(256, min(768, win // 24))
 
 
 def apply_local_body_optimize(
@@ -633,12 +647,28 @@ def apply_local_body_optimize(
         force = False
         writes = False
 
+    trivia = False
+    try:
+        from remedy.core.react_policy import is_knowledge_question
+
+        trivia = is_knowledge_question(user_message or "")
+    except Exception:
+        trivia = False
+    if trivia:
+        tools = None
+        out.pop("tools", None)
+        out.pop("tool_choice", None)
+        force = False
+        writes = False
+
     cap = local_completion_cap(
         win,
-        tools_present=bool(tools),
-        force_tools=force,
-        write_tools=writes,
+        tools_present=bool(tools) and not trivia,
+        force_tools=force and not trivia,
+        write_tools=writes and not trivia,
     )
+    if trivia:
+        cap = min(cap, 256)
     if green_summary:
         cap = min(cap, 512)
     if sticky > cap and not green_summary:
@@ -666,9 +696,16 @@ def apply_local_body_optimize(
     elif green_summary:
         out["stream"] = False
         out["temperature"] = 0.1
-    # Local models: never send cloud thinking knobs
+    # Local models: never send cloud thinking knobs. Qwen3/R1 otherwise
+    # spend thousands of tokens in <think> before "1 + 1" → 2. Request
+    # body covers hosts that ignore argv; unknown field is ignored.
     out.pop("reasoning_effort", None)
     out.pop("thinking", None)
+    prev_kw = out.get("chat_template_kwargs")
+    merged_kw: dict[str, Any] = dict(prev_kw) if isinstance(prev_kw, dict) else {}
+    merged_kw.setdefault("enable_thinking", False)
+    out["chat_template_kwargs"] = merged_kw
+    out.setdefault("reasoning_budget", 0)
     return out
 
 

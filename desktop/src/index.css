@@ -279,11 +279,19 @@ html, body, #root {
   overflow: hidden;
 }
 
+:root {
+  --ui-font-scale: 1;
+}
+
+html {
+  font-size: calc(14px * var(--ui-font-scale, 1));
+}
+
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 1rem;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -320,6 +328,24 @@ html.theme-animating body * {
   --composer-pad: 0.45rem;
   --sidebar-row-py: 0.3rem;
   --chat-max-width: min(48rem, 96%);
+}
+
+:root[data-contrast="high"] {
+  --text-muted: var(--text-secondary);
+  --border: color-mix(in srgb, var(--text-primary) 32%, var(--border));
+}
+:root[data-contrast="high"] :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+:root[data-reduce-motion="1"],
+:root[data-reduce-motion="1"] *,
+:root[data-reduce-motion="1"] *::before,
+:root[data-reduce-motion="1"] *::after {
+  transition: none !important;
+  animation: none !important;
+  scroll-behavior: auto !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

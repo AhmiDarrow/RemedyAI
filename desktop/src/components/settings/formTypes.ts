@@ -8,7 +8,7 @@ import type { ProviderInfo, ConnectedProvider } from '../../api/providers'
 import type { ThemeId } from '../../themes'
 import type { UpdateInfo } from '../../api/updates'
 import type { ModelInfo } from '../../App'
-import type { Density } from '../../utils/chatPrefs'
+import type { Density, FontScale } from '../../utils/chatPrefs'
 import type { SettingsMode } from '../../utils/settingsMode'
 import type { ToolProcessMode } from '../../utils/toolLabels'
 import type { SettingsSectionId } from '../../utils/settingsSearch'
@@ -161,6 +161,12 @@ export interface SettingsFormProps {
   onDensityChange?: (d: Density) => void
   customAccent: string
   onCustomAccentChange?: (hex: string) => void
+  fontScale?: FontScale
+  onFontScaleChange?: (s: FontScale) => void
+  reduceMotion?: boolean
+  onReduceMotionChange?: (on: boolean) => void
+  highContrast?: boolean
+  onHighContrastChange?: (on: boolean) => void
   updateInfo: UpdateInfo | null
   checkingUpdates: boolean
   updateStatus?: string | null

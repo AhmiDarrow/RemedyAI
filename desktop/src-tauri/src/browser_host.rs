@@ -709,6 +709,7 @@ fn normalize_url(raw: &str) -> Result<String, String> {
     if host_lc == "metadata.google.internal"
         || host_lc == "metadata.goog"
         || host_lc == "metadata"
+        || host_lc.split('.').any(|label| label == "metadata")
         || host_lc == "instance-data"
         || host_lc.ends_with(".internal")
         || host_lc.ends_with(".nip.io")
@@ -746,6 +747,11 @@ mod normalize_url_tests {
     fn unwraps_ipv4_mapped_link_local() {
         assert!(normalize_url("http://[::ffff:169.254.169.254]/").is_err());
         assert!(normalize_url("http://169.254.169.254/").is_err());
+    }
+
+    #[test]
+    fn rejects_metadata_dns_label() {
+        assert!(normalize_url("http://metadata.nicob.net/").is_err());
     }
 
     #[test]

@@ -622,9 +622,20 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         ).expanduser()
         dest_root = home / "skills"
         tmp = Path(tempfile.mkdtemp(prefix="remedy-skill-import-"))
-        data = await upload.read()  # type: ignore[union-attr]
+        from remedy.skills.library.install import MAX_SKILL_ZIP_BYTES
+
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            block = await upload.read(65536)  # type: ignore[union-attr]
+            if not block:
+                break
+            total += len(block)
+            if total > MAX_SKILL_ZIP_BYTES:
+                raise HTTPException(413, f"Skill pack exceeds {MAX_SKILL_ZIP_BYTES} bytes")
+            chunks.append(block)
         zip_path = tmp / "pack.zip"
-        zip_path.write_bytes(data)
+        zip_path.write_bytes(b"".join(chunks))
         exp = SkillExporter(tmp)
         imported = exp.import_pack_quarantine(zip_path, dest_root)
         n = 0

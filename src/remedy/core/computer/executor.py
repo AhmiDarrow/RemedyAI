@@ -56,6 +56,15 @@ class ComputerExecutor:
         except Exception:
             return False
 
+    def _sleep_abortable(self, sec: float) -> bool:
+        """Sleep in short slices. True if the turn was aborted."""
+        deadline = time.time() + max(0.0, float(sec))
+        while time.time() < deadline:
+            if self._abort_check():
+                return True
+            time.sleep(min(0.1, max(0.02, deadline - time.time())))
+        return False
+
     def _cancel_open_jobs(self, reason: str = "aborted") -> int:
         """Cancel open host jobs for this turn's session only (multi-tab safe)."""
         return self.bridge.cancel_pending_and_running(
@@ -403,7 +412,14 @@ class ComputerExecutor:
             raw_sec = kwargs.get("seconds")
             sec = float(raw_sec) if raw_sec is not None else 0.5
             sec = max(0.05, min(sec, 30.0))
-            time.sleep(sec)
+            if self._sleep_abortable(sec):
+                return public_result(
+                    ok=False,
+                    target="desktop",
+                    action="wait",
+                    message="Aborted by user",
+                    extra={"seconds": sec, "aborted": True},
+                )
             return public_result(
                 ok=True,
                 target="desktop",
@@ -952,7 +968,14 @@ class ComputerExecutor:
             raw_sec = kwargs.get("seconds")
             sec = float(raw_sec) if raw_sec is not None else 0.5
             sec = max(0.05, min(sec, 30.0))
-            time.sleep(sec)
+            if self._sleep_abortable(sec):
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="wait",
+                    message="Aborted by user",
+                    extra={"seconds": sec, "aborted": True},
+                )
             return public_result(
                 ok=True,
                 target="browser",

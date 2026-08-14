@@ -21,12 +21,11 @@ pytestmark = pytest.mark.live
 
 
 def _rmb_ready() -> bool:
+    """Collection-safe: TCP/cache only — never spawn or wait 30s here."""
     try:
-        from remedy.runtime.rmb.service import is_running, wait_rmb_ready
+        from remedy.runtime.rmb.service import is_running
 
-        if is_running(force=True, require_http=True):
-            return True
-        return bool(wait_rmb_ready(timeout_s=30).get("ok"))
+        return bool(is_running(force=False, require_http=False))
     except Exception:
         return False
 

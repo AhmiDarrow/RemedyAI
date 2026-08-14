@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -125,8 +126,27 @@ def classify_backend(vendor: str) -> str:
     return ""
 
 
-def probe_gpus() -> GpuSnapshot:
+_GPU_TTL_S = 30.0
+_gpu_cache: GpuSnapshot | None = None
+_gpu_cache_ts = 0.0
+
+
+def invalidate_gpu_cache() -> None:
+    global _gpu_cache, _gpu_cache_ts
+    _gpu_cache = None
+    _gpu_cache_ts = 0.0
+
+
+def probe_gpus(*, force: bool = False) -> GpuSnapshot:
     """Collect GPUs from every cheap sensor. First success per vendor is enough."""
+    global _gpu_cache, _gpu_cache_ts
+    now = time.time()
+    if (
+        not force
+        and _gpu_cache is not None
+        and (now - _gpu_cache_ts) < _GPU_TTL_S
+    ):
+        return _gpu_cache
     found: list[GpuDevice] = []
     seen: set[str] = set()
 
@@ -143,11 +163,16 @@ def probe_gpus() -> GpuSnapshot:
         _add(d)
     for d in _probe_amd_smi():
         _add(d)
-    for d in _probe_windows_cim():
-        _add(d)
+    # CIM is slow; skip when a vendor tool already found a dedicated card.
+    if not any(d.dedicated and d.vram_total_mb > 0 for d in found):
+        for d in _probe_windows_cim():
+            _add(d)
     for d in _probe_linux_sysfs():
         _add(d)
-    return GpuSnapshot(devices=found)
+    snap = GpuSnapshot(devices=found)
+    _gpu_cache = snap
+    _gpu_cache_ts = now
+    return snap
 
 
 def probe_primary_vram() -> tuple[bool, int, int, str, str]:

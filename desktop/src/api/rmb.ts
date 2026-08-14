@@ -114,6 +114,21 @@ export interface RmbStatus {
     silent_context?: boolean
     note?: string
   }
+  /** Auto-load knobs Remedy inferred from the GGUF (no user setup). */
+  host_auto?: {
+    summary?: string
+    thinking?: boolean
+    coder?: boolean
+    qwen3_family?: boolean
+    mtp?: boolean
+    vision?: boolean
+    base_model?: boolean
+    use_jinja?: boolean
+    unfit?: boolean
+    chat_style?: string
+    warnings?: string[]
+    reasons?: string[]
+  }
   /** Present after PATCH /rmb/settings — confirms live process apply */
   live_apply?: {
     live?: boolean
@@ -181,3 +196,94 @@ export async function applyRmbAsProvider(): Promise<Record<string, unknown>> {
 
 /** @deprecated Prefer applyRmbAsProvider — name looked like a React hook to linters. */
 export const useRmbAsProvider = applyRmbAsProvider
+
+export interface HfRepoOption {
+  id: string
+  downloads?: number
+  likes?: number
+  tags?: string[]
+  pipeline_tag?: string | null
+  private?: boolean
+}
+
+export interface HfFileOption {
+  path: string
+  name: string
+  size?: number
+  size_gb?: number
+  role?: string
+  recommended?: boolean
+  url?: string
+}
+
+export interface HfSearchResult {
+  ok?: boolean
+  error?: string
+  need?: string
+  hint?: {
+    kind?: string
+    query?: string
+    repo?: string | null
+    revision?: string | null
+    filename?: string | null
+    url?: string | null
+  }
+  repos?: HfRepoOption[]
+  files?: HfFileOption[]
+}
+
+export interface HfProgress {
+  phase?: string
+  query?: string
+  repo?: string
+  filename?: string
+  bytes_done?: number
+  bytes_total?: number
+  pct?: number
+  error?: string | null
+  path?: string | null
+  message?: string
+}
+
+export async function searchHfModels(query: string): Promise<HfSearchResult> {
+  return apiFetch('/rmb/hf/search', {
+    method: 'POST',
+    body: JSON.stringify({ query }),
+    timeout: 45_000,
+  })
+}
+
+export async function listHfFiles(
+  repo: string,
+  revision?: string,
+): Promise<{ ok?: boolean; error?: string; repo?: string; files?: HfFileOption[] }> {
+  return apiFetch('/rmb/hf/files', {
+    method: 'POST',
+    body: JSON.stringify({ repo, revision: revision || undefined }),
+    timeout: 45_000,
+  })
+}
+
+export async function pullHfModel(body: {
+  query?: string
+  repo?: string
+  filename?: string
+  revision?: string
+  url?: string
+  expected_size?: number
+  load?: boolean
+}): Promise<{ ok?: boolean; error?: string; started?: boolean; progress?: HfProgress }> {
+  return apiFetch('/rmb/hf/pull', {
+    method: 'POST',
+    body: JSON.stringify(body),
+    timeout: 30_000,
+  })
+}
+
+export async function getHfProgress(): Promise<{ ok?: boolean; progress?: HfProgress }> {
+  return apiFetch('/rmb/hf/progress')
+}
+
+export async function cancelHfPull(): Promise<{ ok?: boolean; error?: string; progress?: HfProgress }> {
+  return apiFetch('/rmb/hf/cancel', { method: 'POST' })
+}

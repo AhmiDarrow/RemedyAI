@@ -196,12 +196,15 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                 try:
                     from pathlib import Path as _Path
 
-                    from remedy.runtime.rmb.service import get_rmb_status
+                    from remedy.runtime.rmb.config import load_rmb_json, merge_state
+                    from remedy.runtime.rmb.service import discover_ggufs
 
-                    st = get_rmb_status(cfg if isinstance(cfg, dict) else None)
+                    home = cfg.get("home_dir") if isinstance(cfg, dict) else None
+                    discovered = discover_ggufs(home)
+                    rstate = merge_state(load_rmb_json(home))
                     seen_ids: set[str] = set()
                     disc_models: list[dict[str, Any]] = []
-                    for g in st.get("discovered_ggufs") or []:
+                    for g in discovered:
                         if not isinstance(g, dict):
                             continue
                         path = str(g.get("path") or "").strip()
@@ -216,7 +219,7 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                             label = f"{label} ({sz} GB)"
                         disc_models.append({"id": mid, "name": label})
                     # Currently loaded weights first
-                    mp = str(st.get("model_path") or "").strip()
+                    mp = str(rstate.get("model_path") or "").strip()
                     if mp:
                         stem = _Path(mp).stem
                         if stem and stem not in seen_ids:

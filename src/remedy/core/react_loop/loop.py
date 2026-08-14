@@ -228,7 +228,9 @@ async def call_llm_stream(runtime, message: str,
 
             _b0 = _glb(runtime)
             if is_local_binding(_b0.provider, _b0.model, _b0.base_url):
-                max_length_continuations = 2
+                # Extra length rounds dump more hidden thinking (R1/Qwen3).
+                # Write tools still get one resume; chat/trivia do not.
+                max_length_continuations = 0
         length_continuations = 0
         # Retry once after repairing DeepSeek reasoning_content on tool turns.
         reasoning_repair_done = False
@@ -248,6 +250,13 @@ async def call_llm_stream(runtime, message: str,
         # Empty-answer recovery (model thought but sent no content).
         empty_answer_retries = 0
         max_empty_answer_retries = 8
+        with suppress(Exception):
+            from remedy.core.llm_binding import get_llm_binding as _glb2
+            from remedy.core.local_agent_optimize import is_local_binding as _ilb2
+
+            _b1 = _glb2(runtime)
+            if _ilb2(_b1.provider, _b1.model, _b1.base_url):
+                max_empty_answer_retries = 1
         # Cap agency re-arms / green-gate re-opens (token burn safety).
         # Open todos / unfinished ship ignore these caps (max_total is the net).
         agency_rearm_count = 0
@@ -1840,12 +1849,18 @@ async def call_llm_stream(runtime, message: str,
                 if text_out and not tool_calls_list:
                     with suppress(Exception):
                         assistant_text_acc.append(str(text_out)[:8000])
-                # Never treat DSML / text-tool dumps as user-visible answer text.
+                # Never treat DSML / text-tool dumps as user-visible answer text
+                # *when tools are armed*. Trivia / disarmed turns keep the text
+                # so "1 + 1" is not swallowed as fake tool markup.
                 if text_out and _looks_like_pseudo_tools(text_out):
                     recovered_preview = _parse_pseudo_tool_calls(text_out)
                     clean = strip_tool_markup(text_out)
-                    # Keep only non-markup prose (if any) for the bubble.
-                    text_out = clean if clean and not _looks_like_pseudo_tools(clean) else ""
+                    if tools:
+                        text_out = (
+                            clean if clean and not _looks_like_pseudo_tools(clean) else ""
+                        )
+                    else:
+                        text_out = clean or text_out
                     if not tool_calls_list and recovered_preview:
                         # Force recovery path below even if tools were off this round.
                         pass
@@ -1859,6 +1874,16 @@ async def call_llm_stream(runtime, message: str,
                 ):
                     yield text_out
                     produced_user_text = True
+                # Non-stream JSON + no tools: consume() did not live-yield.
+                if (
+                    text_out
+                    and stream_live
+                    and not produced_user_text
+                    and not tool_calls_list
+                    and not tools
+                ):
+                    yield text_out
+                    produced_user_text = True
                 if text_out:
                     collected["content"] = text_out
 
@@ -1868,7 +1893,7 @@ async def call_llm_stream(runtime, message: str,
                     not tool_calls_list
                     and raw_round
                     and _looks_like_pseudo_tools(raw_round)
-                    and all_tools
+                    and tools
                     and turn.allow_pseudo_recovery()
                 ):
                     recovered = _parse_pseudo_tool_calls(raw_round)
@@ -1985,7 +2010,8 @@ async def call_llm_stream(runtime, message: str,
                         continue
                     # DSML/text tools detected but incomplete (truncated stream) —
                     # nudge for real function-calling instead of hanging on junk.
-                    if pseudo_nudge_count < 2:
+                    # Trivia / disarmed turns: treat the text as the answer.
+                    if pseudo_nudge_count < 2 and tools:
                         pseudo_nudge_count += 1
                         _rearm_agency_tools()
                         messages.append(
@@ -2104,7 +2130,7 @@ async def call_llm_stream(runtime, message: str,
                     if (
                         raw_round
                         and _looks_like_pseudo_tools(raw_round)
-                        and all_tools
+                        and tools
                         and pseudo_nudge_count < 2
                         and not pseudo_recovery_done
                     ):
@@ -2249,7 +2275,7 @@ async def call_llm_stream(runtime, message: str,
                     if (
                         _harness_on
                         and not tool_calls_list
-                        and all_tools
+                        and tools
                         and tools_executed_this_turn <= 0
                         and _mono_text
                         and not force_answer_sticky
@@ -2630,8 +2656,11 @@ async def call_llm_stream(runtime, message: str,
                                 )
                         if _block_local_end:
                             continue
-                        # Final safety: never yield markup-only blobs.
-                        if text_out and not _looks_like_pseudo_tools(text_out):
+                        # Final safety: never yield markup-only blobs *on work
+                        # turns*. Trivia / disarmed turns must still show the reply.
+                        if text_out and (
+                            not _looks_like_pseudo_tools(text_out) or not tools
+                        ):
                             yield text_out
                             produced_user_text = True
                         if (
