@@ -200,6 +200,53 @@ def test_organism_cycle_writes_vitals(tmp_path: Path) -> None:
     reset_middleman_state()
 
 
+def test_wake_digest_reports_solo_cycle(tmp_path: Path) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from remedy.core.metabolism.organism import (
+        _life_is_stalled,
+        format_wake_digest,
+        organism_cycle,
+        organism_wake,
+    )
+    from remedy.memory.cas import configure_cas
+    from remedy.memory.life_goals import LifeGoalStore
+    from remedy.memory.middleman import reset_middleman_state
+
+    home = tmp_path / "wake"
+    home.mkdir()
+    reset_middleman_state()
+    configure_cas(home)
+    store = LifeGoalStore(home)
+    store.add("Finish the novel", next_action="Outline chapter 3")
+    organism_cycle(home, session_id="life")
+    digest = format_wake_digest(home, mark_seen=True)
+    assert "While I was on my own" in digest or "took a step" in digest or "Did" in digest
+    # second wake should not repeat unseen cycles
+    again = format_wake_digest(home, mark_seen=True)
+    assert "While I was on my own" not in again
+
+    g = store.active()
+    assert g is not None
+    g.updated_at = (datetime.now(UTC) - timedelta(days=10)).isoformat()
+    store.patch(g.id, next_action=g.next_action)
+    # patch refreshes updated_at — write stale stamp through JSON
+    raw = store.path.read_text(encoding="utf-8")
+    import json
+
+    data = json.loads(raw)
+    for row in data.get("goals") or []:
+        row["updated_at"] = (datetime.now(UTC) - timedelta(days=10)).isoformat()
+    store.path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    store2 = LifeGoalStore(home)
+    assert _life_is_stalled(store2) is True
+
+    text = organism_wake(home)
+    assert text
+    configure_cas(None)
+    reset_middleman_state()
+
+
 def test_begin_turn_includes_organism_inject(tmp_path: Path) -> None:
     home = tmp_path / "h2"
     home.mkdir()
