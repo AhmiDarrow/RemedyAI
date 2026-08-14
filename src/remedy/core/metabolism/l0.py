@@ -93,6 +93,10 @@ def try_l0_system_reply(
     if _L0_LIFE_DIGEST.match(msg):
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
         with suppress(Exception):
+            from remedy.core.metabolism.organism import organism_wake
+
+            return organism_wake(home, runtime=runtime)
+        with suppress(Exception):
             from remedy.memory.life_drive import drive_digest
 
             return str(drive_digest(home, mark_seen=True).get("markdown") or "")
