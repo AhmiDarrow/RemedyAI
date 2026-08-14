@@ -75,6 +75,7 @@ def build_identity_payload(
     soul: dict[str, Any] | None = None,
     life_goals: list[dict[str, Any]] | None = None,
     cas: dict[str, Any] | None = None,
+    organism: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble redacted portable payload (no secrets fields)."""
 
@@ -125,6 +126,7 @@ def build_identity_payload(
         "time_crystal": scrub_list(time_crystal),
         "life_goals": scrub_list(life_goals),
         "cas": cas if isinstance(cas, dict) else {},
+        "organism": organism if isinstance(organism, dict) else {},
         "excludes": [
             "api_keys",
             "oauth_tokens",
@@ -325,6 +327,12 @@ def collect_default_payload(home: Path | str | None = None) -> dict[str, Any]:
         if cas is not None:
             cas_snap = {k: v for k, v in cas.snapshot().items() if k != "path"}
 
+    organism_v: dict[str, Any] = {}
+    with contextlib.suppress(Exception):
+        from remedy.core.metabolism.organism import collect_vitals, load_vitals
+
+        organism_v = load_vitals(home) or collect_vitals(home)
+
     return build_identity_payload(
         partner_memory=partner_memory[:80],
         skill_ranks=skill_ranks,
@@ -334,4 +342,5 @@ def collect_default_payload(home: Path | str | None = None) -> dict[str, Any]:
         soul=soul if isinstance(soul, dict) else None,
         life_goals=life_goals[:40],
         cas=cas_snap,
+        organism=organism_v,
     )

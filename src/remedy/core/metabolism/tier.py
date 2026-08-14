@@ -93,6 +93,15 @@ _L0_LIFE_NOTICE = re.compile(
     r"i completed (my |the )?(life )?goal"
     r")\s*[.?!]?\s*$"
 )
+_L0_ORGANISM = re.compile(
+    r"(?is)^\s*("
+    r"how are you|"
+    r"how('?re| are) you (doing|feeling)|"
+    r"are you (alive|ok|okay|well)|"
+    r"what('?s| is) your (state|mood)|"
+    r"organism status"
+    r")\s*[.?!]?\s*$"
+)
 _L0_LIFE_DIGEST = re.compile(
     r"(?is)^\s*("
     r"i('?m| am) back|"
@@ -431,6 +440,7 @@ def classify_turn_tier(
             or _L0_LIFE_PULSE.match(ut)
             or _L0_LIFE_NOTICE.match(ut)
             or _L0_LIFE_DIGEST.match(ut)
+            or _L0_ORGANISM.match(ut)
         ):
             return TurnTier.L0_INSTANT
 

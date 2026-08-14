@@ -197,7 +197,6 @@ def test_tier_l2_common_agency_phrasing():
     for chat in (
         "tell me about quantum physics",
         "explain recursion simply",
-        "how are you",
         "walk me through the architecture",
         "can you summarize this conversation",
         "load balancer design tradeoffs",
