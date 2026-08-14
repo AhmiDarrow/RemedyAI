@@ -353,6 +353,24 @@ def resolve_tools(
             pack="full",
         )
 
+    # Proven non-work (verbal token / trivia / pasted tool markup) never
+    # inherits tools from continuity rebound. "Reply only STILLALIVE" was
+    # falling through to default_armed → local RMB tool-looped for minutes.
+    with suppress(Exception):
+        from remedy.core.react_policy import (
+            is_knowledge_question,
+            is_verbal_only_request,
+            looks_like_injected_tool_markup,
+        )
+
+        if (
+            is_verbal_only_request(message or "")
+            or is_knowledge_question(message or "")
+            or looks_like_injected_tool_markup(message or "")
+        ):
+            logger.info("react_tools disarm reason=non_work")
+            return ToolsDecision(None, False, "non_work", pack="none")
+
     # L1 may strip *only* proven social/meta chat. Any other ask stays armed.
     if int(turn_tier or 1) == 1 and not browse_pre_url and not page_interaction:
         chat_only = False

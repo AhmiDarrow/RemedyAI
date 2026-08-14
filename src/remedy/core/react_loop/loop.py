@@ -70,6 +70,7 @@ from remedy.core.react_policy import (
     unfinished_work_blocks_final,
     unfinished_work_hard_stop_message,
     unfinished_work_nudge_message,
+    looks_like_safety_refusal,
 )
 from remedy.core.react_stream import (
     StreamRoundState,
@@ -414,6 +415,14 @@ async def call_llm_stream(runtime, message: str,
         def _rearm_agency_tools() -> None:
             """Re-enable tool schemas *and* long-task epoch policy."""
             nonlocal tools, run_until_done
+            # Verbal-only / trivia / inject must stay tool-free. Pseudo-tool
+            # recovery used to re-arm 24 schemas and pin keep_armed.
+            with suppress(Exception):
+                from remedy.core.react_policy import message_wants_tools as _wants
+
+                if not _wants(message or ""):
+                    logger.info("skip rearm — user message is non-work")
+                    return
             tools, run_until_done = _rearm_agency_tools_fn(turn)
 
         # Accumulated assistant text for critical verify at end
@@ -1309,7 +1318,8 @@ async def call_llm_stream(runtime, message: str,
                                     "tool-args strip failed: %s", strip_exc
                                 )
                         # Thinking/reasoning mode + tool_choice=required is a
-                        # provider class mismatch. Drop thinking, keep tools.
+                        # provider class mismatch. Rebuild the body — a bare
+                        # continue re-POSTs the same rejected payload.
                         if (
                             resp.status == 400
                             and not thinking_choice_repaired
@@ -1317,15 +1327,29 @@ async def call_llm_stream(runtime, message: str,
                         ):
                             thinking_choice_repaired = True
                             runtime._thinking_level = "off"
+                            runtime._tool_choice_required_blocked = True
                             runtime._force_tool_choice = True
                             logger.warning(
                                 "Provider rejected tool_choice under thinking; "
-                                "retrying with thinking off"
+                                "rebuilding without required tool_choice"
                             )
                             yield (
                                 "@@status:Model cannot mix thinking with required "
                                 "tools — retrying with tools…\n"
                             )
+                            body, headers, endpoint, use_openai_sse = (
+                                build_step_request_body(
+                                    runtime=runtime,
+                                    bind=_bind,
+                                    adapter=_adapter,
+                                    messages=messages,
+                                    step_tools=step_tools,
+                                    step=int(step),
+                                    user_message=str(message or ""),
+                                )
+                            )
+                            if isinstance(body, dict):
+                                body["tool_choice"] = "auto"
                             continue
                         # Fatal: wrong/missing model — do not soft-retry 16× (looks stuck).
                         if _is_fatal_llm_api_error(resp.status, text):
@@ -2094,9 +2118,12 @@ async def call_llm_stream(runtime, message: str,
                         and not force_answer_sticky
                         and not is_final_step
                     ):
-                        if _drive_zero_tool_work():
+                        _refused = looks_like_safety_refusal(text_out) or (
+                            looks_like_safety_refusal(reasoning_out)
+                        )
+                        if not _refused and _drive_zero_tool_work():
                             continue
-                        if _work_unfinished():
+                        if _work_unfinished() and not _refused:
                             yield unfinished_work_hard_stop_message()
                             return
                         if (
@@ -2637,9 +2664,12 @@ async def call_llm_stream(runtime, message: str,
                     and not force_answer_sticky
                     and not is_final_step
                 ):
-                    if _drive_zero_tool_work():
+                    _refused = looks_like_safety_refusal(text_out) or (
+                        looks_like_safety_refusal(reasoning_out)
+                    )
+                    if not _refused and _drive_zero_tool_work():
                         continue
-                    if _work_unfinished():
+                    if _work_unfinished() and not _refused:
                         yield unfinished_work_hard_stop_message()
                         return
                     if (

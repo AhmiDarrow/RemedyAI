@@ -260,3 +260,20 @@ class TestApiFilesJail:
         good = client.get("/api/files", params={"path": "."})
         assert good.status_code == 200
         assert "error" not in good.json() or not good.json().get("error")
+
+    def test_files_endpoint_rejects_windows_system_paths(self, tmp_path, monkeypatch):
+        """Volume-root / SAM / win.ini must not look like a successful listing."""
+        monkeypatch.setenv("REMEDY_FILES_ROOT", str(tmp_path))
+        app = create_app()
+        client = TestClient(app)
+        for p in (
+            r"C:\Windows\System32\config\SAM",
+            r"C:\Users\Administrator\Desktop\..\..\Windows\win.ini",
+            r"C:\Users\Administrator\NTUSER.DAT",
+            "../../../Windows/System32/drivers/etc/hosts",
+        ):
+            resp = client.get("/api/files", params={"path": p})
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body.get("error"), p
+            assert body.get("files") == []

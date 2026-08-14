@@ -114,9 +114,19 @@ def build_step_request_body(
         # Monologue-loop breaker flag from ReAct
         if getattr(runtime, "_force_tool_choice", False) and isinstance(body, dict):
             if body.get("tools"):
-                body["tool_choice"] = "required"
                 body["temperature"] = 0.05
-                # llama.cpp streaming + required is flaky; cloud hosts are fine.
+                # DeepSeek thinking models 400 on tool_choice=required
+                # ("Thinking mode does not support this tool_choice").
+                # Keep tools + auto; unfinished-work drive still refuses
+                # zero-tool finals. Other hosts can take required.
+                _prov = str(getattr(bind, "provider", "") or "").lower()
+                _required_blocked = bool(
+                    getattr(runtime, "_tool_choice_required_blocked", False)
+                )
+                if _prov == "deepseek" or _required_blocked:
+                    body["tool_choice"] = "auto"
+                else:
+                    body["tool_choice"] = "required"
                 with suppress(Exception):
                     from remedy.core.local_agent_optimize import is_local_binding
 
