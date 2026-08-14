@@ -324,17 +324,19 @@ class RemedyMCPServer:
             if skill_dir is None:
                 return f"Skill '{nm}' has no on-disk path for scripts."
             script_name = script or (scripts[0] if scripts else "")
-            script_path = skill_dir / "scripts" / script_name
+            if not script_name:
+                return f"Skill '{nm}' has no scripts/ to run."
+            try:
+                from remedy.skills.script_path import (
+                    SkillScriptJailError,
+                    resolve_jailed_skill_script,
+                )
+
+                script_path = resolve_jailed_skill_script(skill_dir, script_name)
+            except SkillScriptJailError:
+                return "Script path escapes skill scripts/ directory"
             if not script_path.is_file():
-                # allow bare name in scripts list
-                candidates = list((skill_dir / "scripts").glob("*")) if (skill_dir / "scripts").is_dir() else []
-                match = next((p for p in candidates if p.name == script_name), None)
-                if match is None and candidates and not script:
-                    script_path = candidates[0]
-                elif match is not None:
-                    script_path = match
-                else:
-                    return f"Script not found: {script_name}"
+                return f"Script not found: {script_name}"
             try:
                 import asyncio
                 import shlex

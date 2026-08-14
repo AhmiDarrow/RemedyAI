@@ -7,9 +7,11 @@ merged config for all subsystems.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 
@@ -403,33 +405,83 @@ def infer_provider_from_model(model_id: str) -> str | None:
     return None
 
 
-def infer_provider_from_base_url(base_url: str) -> str | None:
-    """Map a known host to a provider id."""
-    u = (base_url or "").lower()
-    if not u:
+_LOOPBACK_LLM_HOSTS = frozenset({"localhost", "0.0.0.0"})
+# Loopback catalog ids — never remap a custom/local URL onto a closed cloud.
+_LOCAL_LLM_PROVIDERS = frozenset({"custom", "ollama", "llamacpp", "rmb"})
+
+
+def is_loopback_hostname(host: str | None) -> bool:
+    """True for localhost, unspecified bind, or an IP with ``is_loopback``.
+
+    DNS names such as ``127.evil.com`` are not loopback.
+    """
+    h = (host or "").lower().rstrip(".").strip("[]")
+    if not h:
+        return False
+    if h in _LOOPBACK_LLM_HOSTS:
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
+def _parsed_llm_url(base_url: str):
+    raw = (base_url or "").strip()
+    if not raw:
         return None
-    if "anthropic.com" in u:
-        return "anthropic"
-    if "openai.com" in u:
-        return "openai"
-    if "deepseek.com" in u:
-        return "deepseek"
-    if "api.x.ai" in u or "x.ai" in u:
-        return "xai"
-    if "api.groq.com" in u or "groq.com" in u:
-        return "groq"
-    if "mistral.ai" in u:
-        return "mistral"
-    if "openrouter.ai" in u:
-        return "openrouter"
-    if "api.poe.com" in u or "poe.com" in u:
-        return "poe"
-    if "generativelanguage.googleapis.com" in u or "googleapis.com" in u:
-        return "google"
-    if "11434" in u or "ollama" in u:
-        return "ollama"
-    if ":8787" in u or u.rstrip("/").endswith(":8787") or "/rmb" in u:
-        return "rmb"
+    return urlparse(raw if "://" in raw else f"https://{raw}")
+
+
+def _hostname_matches_catalog(host: str, catalog_host: str) -> bool:
+    """True when *host* is *catalog_host* or a subdomain (dot-boundary only)."""
+    host = (host or "").lower().rstrip(".")
+    catalog_host = (catalog_host or "").lower().rstrip(".")
+    if not host or not catalog_host:
+        return False
+    if host == catalog_host or host.endswith("." + catalog_host):
+        return True
+    parts = catalog_host.split(".")
+    # api.x.ai → also accept x.ai / *.x.ai (not x.ai.attacker.tld)
+    if len(parts) >= 3:
+        parent = ".".join(parts[1:])
+        if host == parent or host.endswith("." + parent):
+            return True
+    return False
+
+
+def infer_provider_from_base_url(base_url: str) -> str | None:
+    """Map a known catalog hostname to a provider id.
+
+    Uses parsed hostname, not substring — ``https://x.ai.attacker.tld/v1``
+    must not infer xAI (confused deputy / key steal).
+    """
+    parsed = _parsed_llm_url(base_url)
+    if parsed is None:
+        return None
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if not host:
+        return None
+    if is_loopback_hostname(host):
+        port = parsed.port
+        path = (parsed.path or "").lower()
+        if port == 11434:
+            return "ollama"
+        if port == 8787 or "/rmb" in path:
+            return "rmb"
+        return None
+    for pid, meta in PROVIDER_CATALOG.items():
+        if pid in _LOCAL_LLM_PROVIDERS:
+            continue
+        cat_host = ""
+        try:
+            cat_host = (
+                urlparse(str((meta or {}).get("base_url") or "")).hostname or ""
+            ).lower().rstrip(".")
+        except Exception:
+            cat_host = ""
+        if cat_host and _hostname_matches_catalog(host, cat_host):
+            return pid
     return None
 
 

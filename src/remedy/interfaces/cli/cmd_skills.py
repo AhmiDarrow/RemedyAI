@@ -107,7 +107,20 @@ async def _cmd_skill(args) -> None:
         executor = SkillExecutor()
         failed = False
         if args.script and skill.source_skill_dir:
-            script_path = Path(skill.source_skill_dir) / args.script
+            from remedy.skills.script_path import (
+                SkillScriptJailError,
+                resolve_jailed_skill_script,
+            )
+
+            try:
+                script_path = resolve_jailed_skill_script(
+                    skill.source_skill_dir, args.script
+                )
+            except SkillScriptJailError as exc:
+                console.print(
+                    f"[red]Script path escapes skill scripts/: {args.script}[/red]"
+                )
+                raise SystemExit(1) from exc
             if not script_path.is_file():
                 console.print(f"[red]Script not found: {args.script}[/red]")
                 raise SystemExit(1)
@@ -281,8 +294,9 @@ async def _cmd_learn(args, db_path: Path) -> None:
             trace_steps = []
             try:
                 raw_steps = json.loads(args.steps_json)
-            except json.JSONDecodeError:
-                raw_steps = []
+            except json.JSONDecodeError as exc:
+                console.print(f"[red]Invalid --steps JSON:[/red] {exc}")
+                raise SystemExit(2) from exc
 
             if raw_steps:
                 trace_steps = [

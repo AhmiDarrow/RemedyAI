@@ -135,3 +135,53 @@ def test_unsafe_home_via_main(tmp_path: Path):
     with pytest.raises(SystemExit) as ei:
         main(["--home", "C:\\Windows", "config", "path"])
     assert ei.value.code == 2
+
+
+def test_auth_unknown_provider_exits_2(tmp_path: Path):
+    from remedy.interfaces.cli.cmd_settings import _cmd_auth
+
+    args = SimpleNamespace(home=str(tmp_path), provider="openai", auth_cmd="login")
+    with pytest.raises(SystemExit) as ei:
+        _cmd_auth(args)
+    assert ei.value.code == 2
+
+
+def test_learn_invalid_steps_json_exits_2(tmp_path: Path):
+    from remedy.interfaces.cli.cmd_skills import _cmd_learn
+
+    args = SimpleNamespace(
+        learn_cmd="reflect",
+        steps_json="not-json",
+        task_title="t",
+    )
+    with pytest.raises(SystemExit) as ei:
+        asyncio.run(_cmd_learn(args, tmp_path / "memory.db"))
+    assert ei.value.code == 2
+
+
+def test_handoff_show_missing_exits_1(tmp_path: Path):
+    from remedy.interfaces.cli.cmd_store import _cmd_handoff
+
+    args = SimpleNamespace(handoff_cmd="show", id="missing-id")
+    with pytest.raises(SystemExit) as ei:
+        asyncio.run(_cmd_handoff(args, tmp_path / "memory.db"))
+    assert ei.value.code == 1
+
+
+def test_skill_script_jail_rejects_absolute_and_dotdot(tmp_path: Path):
+    from remedy.skills.script_path import (
+        SkillScriptJailError,
+        resolve_jailed_skill_script,
+    )
+
+    skill = tmp_path / "skill"
+    (skill / "scripts").mkdir(parents=True)
+    (skill / "scripts" / "ok.py").write_text("print(1)\n", encoding="utf-8")
+    with pytest.raises(SkillScriptJailError):
+        resolve_jailed_skill_script(skill, r"C:\evil.py")
+    with pytest.raises(SkillScriptJailError):
+        resolve_jailed_skill_script(skill, "../evil.py")
+    with pytest.raises(SkillScriptJailError):
+        resolve_jailed_skill_script(skill, "scripts/../../evil.py")
+    got = resolve_jailed_skill_script(skill, "scripts/ok.py")
+    assert got == (skill / "scripts" / "ok.py").resolve()

@@ -122,6 +122,61 @@ def test_grep_falls_back_to_findstr(monkeypatch) -> None:
     assert "foo" in r.text
 
 
+def test_find_rg_returns_path_string_not_tuple() -> None:
+    import remedy.execution.host.translate as tr
+
+    got = tr._find_rg()
+    assert isinstance(got, str)
+    assert "WindowsPath" not in got
+    assert "bundled" not in got
+    if got:
+        assert Path(got).name.lower().startswith("rg")
+
+
+def test_grep_no_files_is_stdin_not_star(monkeypatch) -> None:
+    import remedy.execution.host.translate as tr
+
+    monkeypatch.setattr(tr, "_find_rg", lambda: "")
+    r = translate_posix_to_host("grep foo", host="cmd")
+    assert "findstr" in r.text
+    assert "*" not in r.text
+    assert "/s" not in r.text
+    monkeypatch.setattr(tr, "_find_rg", lambda: r"C:\tools\rg.exe")
+    rg = translate_posix_to_host("grep foo", host="cmd")
+    assert "*" not in rg.text
+    assert "WindowsPath" not in rg.text
+    assert "bundled" not in rg.text
+
+
+def test_piped_grep_does_not_embed_tuple_repr(monkeypatch) -> None:
+    import remedy.execution.host.translate as tr
+
+    monkeypatch.setattr(tr, "_find_rg", lambda: r"C:\tools\rg.exe")
+    r = translate_posix_to_host("dir | grep foo", host="cmd")
+    assert "WindowsPath" not in r.text
+    assert "bundled" not in r.text
+    assert "foo" in r.text
+
+
+def test_powershell_word_in_args_does_not_skip_posix() -> None:
+    src = "mkdir -p docs && echo use powershell"
+    assert looks_like_powershell(src) is False
+    r = translate_posix_to_host(src, host="cmd")
+    assert "if not exist" in r.text
+    assert looks_like_powershell("where powershell") is False
+    assert looks_like_powershell("pwsh -File x.ps1") is True
+    assert looks_like_powershell("powershell -File x.ps1") is True
+    assert looks_like_powershell("$_") is True
+    assert looks_like_powershell("Get-ChildItem") is True
+
+
+def test_service_cmdlets_are_powershell_not_filenames() -> None:
+    assert looks_like_powershell("Get-Service") is True
+    assert looks_like_powershell("Start-Service wuauserv") is True
+    assert looks_like_powershell("start-server") is False
+    assert looks_like_powershell("start-dev") is False
+
+
 def test_translate_posix_host_noop() -> None:
     r = translate_posix_to_host("mkdir -p a", host="posix")
     assert r.text == "mkdir -p a"

@@ -42,7 +42,7 @@ def _cmd_auth(args) -> None:
             f"[yellow]Auth for '{provider}' is not implemented yet. "
             "Currently supported: xai[/yellow]"
         )
-        return
+        raise SystemExit(2)
 
     from remedy.interfaces import xai_auth
 
@@ -72,7 +72,7 @@ def _cmd_auth(args) -> None:
             creds = xai_auth.save_api_key(str(key), home=home)
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
-            return
+            raise SystemExit(1) from exc
         console.print(
             f"[green]Saved xAI API key.[/green] connected={creds.connected}"
         )
@@ -84,7 +84,7 @@ def _cmd_auth(args) -> None:
             start = xai_auth.start_device_login(home=home)
         except Exception as exc:
             console.print(f"[red]Failed to start OAuth: {exc}[/red]")
-            return
+            raise SystemExit(1) from exc
         uri = start.get("verification_uri_complete") or start.get("verification_uri")
         code = start.get("user_code")
         console.print(f"User code: [bold cyan]{code}[/bold cyan]")
@@ -108,9 +108,9 @@ def _cmd_auth(args) -> None:
                     console.print(
                         f"[red]Login failed: {sess.get('error') or 'unknown'}[/red]"
                     )
-                    return
+                    raise SystemExit(1)
         console.print("[red]Login timed out. Run `remedy auth login xai` again.[/red]")
-        return
+        raise SystemExit(1)
 
     console.print("[dim]Usage: remedy auth login|logout|status|apikey xai[/dim]")
 

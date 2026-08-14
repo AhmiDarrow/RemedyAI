@@ -284,12 +284,14 @@ def register_skill_tools(runtime: Any) -> None:
                 tool_name="skill_run",
                 suggestion="Re-install or re-seed the skill pack.",
             )
-        script_path = (base / chosen_norm).resolve()
-        # Jail: must stay under skill dir (and under scripts/)
         try:
-            script_path.relative_to(base)
-            script_path.relative_to((base / "scripts").resolve())
-        except Exception:
+            from remedy.skills.script_path import (
+                SkillScriptJailError,
+                resolve_jailed_skill_script,
+            )
+
+            script_path = resolve_jailed_skill_script(base, chosen_norm)
+        except SkillScriptJailError:
             return format_tool_error(
                 "Script path escapes skill scripts/ directory",
                 code="PATH_JAIL",

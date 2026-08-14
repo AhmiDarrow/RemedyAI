@@ -362,7 +362,11 @@ def run_update(check_only: bool = False) -> None:
     elif latest and latest != installed:
         console.print(f"\n[dim]PyPI has {latest} (installed: {installed} is newer or different)[/dim]")
     elif git_behind:
+        updatable = True
         console.print(f"\n[bold yellow]Git update available ({installed})[/bold yellow]")
+    elif latest is None:
+        console.print("\n[red]Could not reach PyPI; update status unknown (offline?).[/red]")
+        raise SystemExit(1)
     else:
         console.print("\n[green]Remedy is up to date.[/green]")
 
@@ -398,7 +402,7 @@ def run_update(check_only: bool = False) -> None:
                     "(`self_improve_submit_issue`) or discard it "
                     "(`git reset --hard` + clean) then retry.[/dim]"
                 )
-                return
+                raise SystemExit(1)
         console.print("\n[bold]Pulling from git + reinstalling...[/bold]")
         success = _git_pull_and_reinstall(project_root)
     else:
@@ -417,3 +421,4 @@ def run_update(check_only: bool = False) -> None:
         )
         console.print("  pip install -e .")
         console.print("  # or: pip install --upgrade remedy-ai")
+        raise SystemExit(1)

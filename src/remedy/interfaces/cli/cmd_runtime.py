@@ -78,7 +78,7 @@ def _cmd_serve(args) -> None:
             non_interactive=False,
         )
         if not ok:
-            return
+            raise SystemExit(1)
     elif skip and not force:
         # Desktop / headless: ensure a minimal config exists so settings API works,
         # but do NOT mark setup_completed — UI wizard still runs on first open.
@@ -307,7 +307,7 @@ def _cmd_chat(args) -> None:
         force=bool(getattr(args, "force_setup", False)),
     )
     if not ok:
-        return
+        raise SystemExit(1)
 
     config = resolve_config(
         config_path=Path(args.config_file) if args.config_file else None,
@@ -519,10 +519,12 @@ def _cmd_desktop(parsed: argparse.Namespace) -> None:
         console.print("[dim]Open http://localhost:5173 in your browser.[/dim]")
         console.print()
         import subprocess
-        subprocess.run(
+        result = subprocess.run(
             [npm, "run", "dev"] + (["--", "--open"] if getattr(parsed, "open", False) else []),
             cwd=str(desktop_dir),
         )
+        if result.returncode not in (0, None):
+            raise SystemExit(result.returncode or 1)
 
     elif subcommand == "build":
         console.print("[bold]Building desktop for production...[/bold]")
@@ -575,7 +577,7 @@ def _desktop_launch() -> None:
         console.print(
             "[dim]Installer downloads: https://github.com/AhmiDarrow/RemedyAI/releases[/dim]"
         )
-        return
+        raise SystemExit(1)
 
     candidate_paths: list[Path] = []
     local = Path.home() / "AppData" / "Local"
@@ -605,6 +607,7 @@ def _desktop_launch() -> None:
 
     console.print("[yellow]Installed desktop app not found.[/yellow]")
     console.print("[dim]Download the installer: https://github.com/AhmiDarrow/RemedyAI/releases[/dim]")
+    raise SystemExit(1)
 
 
 def _desktop_status() -> None:

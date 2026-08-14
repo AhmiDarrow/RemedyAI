@@ -463,13 +463,9 @@ async def apply_settings_update(
 
     if "sleev_gateway_url" in patch and patch["sleev_gateway_url"] is not None:
         url = str(patch["sleev_gateway_url"] or "").strip()
-        # Empty = auto-discover from Sleev install / default port.
-        allow_remote = bool(
-            patch.get(
-                "sleev_allow_remote_gateway",
-                cfg.get("sleev_allow_remote_gateway", False),
-            )
-        )
+        # Empty = auto-discover. Do not honor allow_remote from this same
+        # patch — a prompt-injected flag+URL pair must not redirect keys.
+        allow_remote = bool(cfg.get("sleev_allow_remote_gateway", False))
         if url:
             from remedy.core.sleev import validate_sleev_gateway_url
 

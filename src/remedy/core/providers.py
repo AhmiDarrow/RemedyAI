@@ -1140,14 +1140,19 @@ def get_provider(provider_name: str) -> ProviderAdapter:
 
 
 def _is_loopback_base_url(url: str) -> bool:
-    """True for local endpoints (localhost / 127.x / [::1]) and KoboldCpp."""
+    """True for local endpoints (localhost / 127/8 / [::1]) and KoboldCpp."""
     try:
         host = (urlsplit(url).hostname or "").lower()
     except ValueError:
         host = ""
     if "kobold" in url.lower():
         return True
-    return host in ("localhost", "0.0.0.0", "::1") or host.startswith("127.")
+    try:
+        from remedy.interfaces.config import is_loopback_hostname
+
+        return is_loopback_hostname(host)
+    except Exception:
+        return host in ("localhost", "0.0.0.0", "::1")
 
 
 def _is_rmb_base_url(url: str) -> bool:
@@ -1194,30 +1199,15 @@ def select_provider(provider_name: str | None, base_url: str = "") -> ProviderAd
 
 
 def get_provider_for_base_url(base_url: str) -> ProviderAdapter:
-    """Heuristically detect the provider from the base URL."""
-    url_lower = base_url.lower()
-    if _is_rmb_base_url(url_lower):
-        return get_provider("rmb")
-    if _is_loopback_base_url(url_lower):
+    """Detect the provider from a catalog hostname (not a substring)."""
+    try:
+        from remedy.interfaces.config import infer_provider_from_base_url
+
+        owner = infer_provider_from_base_url(base_url)
+    except Exception:
+        owner = None
+    if owner:
+        return get_provider(owner)
+    if _is_loopback_base_url((base_url or "").lower()):
         return get_provider("llamacpp")
-    if "anthropic" in url_lower:
-        return get_provider("anthropic")
-    if "deepseek" in url_lower:
-        return get_provider("deepseek")
-    if "api.x.ai" in url_lower or "x.ai/" in url_lower:
-        return get_provider("xai")
-    if "groq.com" in url_lower:
-        return get_provider("groq")
-    if "mistral.ai" in url_lower:
-        return get_provider("mistral")
-    if "openrouter" in url_lower:
-        return get_provider("openrouter")
-    if "api.poe.com" in url_lower or "poe.com" in url_lower:
-        return get_provider("poe")
-    if "generativelanguage.googleapis.com" in url_lower or "googleapis.com" in url_lower:
-        return get_provider("google")
-    if "11434" in url_lower or "ollama" in url_lower:
-        return get_provider("ollama")
-    if "openai.com" in url_lower:
-        return get_provider("openai")
     return get_provider("openai")

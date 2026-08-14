@@ -105,14 +105,16 @@ def test_status_public(auth_on, tmp_path):
     assert r.status_code == 200
 
 
-def test_self_improve_public(auth_on, tmp_path, monkeypatch):
+def test_self_improve_requires_bearer(auth_on, tmp_path, monkeypatch):
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
     tok = ensure_local_api_token(tmp_path)
     app = create_app(api_key=tok)
     client = TestClient(app)
     r = client.get("/api/self-improve")
-    assert r.status_code == 200
-    body = r.json()
+    assert r.status_code == 401
+    ok = client.get("/api/self-improve", headers={"Authorization": f"Bearer {tok}"})
+    assert ok.status_code == 200
+    body = ok.json()
     assert "enabled" in body
     assert "idle_s" in body
     assert "last_tick" in body
@@ -195,35 +197,33 @@ def test_cors_allows_tauri_https_origin(auth_on, tmp_path):
 
 
 def test_gateway_serve_api_enables_auth(auth_on, tmp_path, monkeypatch):
-    """``remedy gateway serve`` must not open the loopback API without Bearer."""
-    import types
+    """``remedy gateway serve`` delegates to ``remedy serve`` (lock + auth)."""
+    from types import SimpleNamespace
 
-    import remedy.interfaces.api as api_mod
     from remedy.gateway import cli as gateway_cli
 
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
     db = tmp_path / "memory.db"
     db.write_bytes(b"")
 
-    captured: dict = {}
+    called: dict = {}
 
-    def _fake_create_app(*_a, **kwargs):
-        captured.update(kwargs)
+    def _fake_serve(args):
+        called["args"] = args
 
-        class _App:
-            pass
-
-        return _App()
-
-    monkeypatch.setattr(api_mod, "create_app", _fake_create_app)
-
-    fake_uv = types.ModuleType("uvicorn")
-    fake_uv.run = lambda *a, **k: None  # type: ignore[attr-defined]
-    monkeypatch.setitem(__import__("sys").modules, "uvicorn", fake_uv)
-
+    monkeypatch.setattr(
+        "remedy.interfaces.cli.cmd_runtime._cmd_serve", _fake_serve
+    )
     gateway_cli._serve_api(db)  # noqa: SLF001
-    assert captured.get("api_key")
-    assert len(str(captured["api_key"])) >= 16
+    ns = called.get("args")
+    assert ns is not None
+    assert getattr(ns, "skip_setup", False) is True
+    assert getattr(ns, "host", "") == "127.0.0.1"
+    assert int(getattr(ns, "port", 0)) == 7400
+    # Real argparse namespace is also accepted (same defaults filled).
+    called.clear()
+    gateway_cli._serve_api(db, args=SimpleNamespace(home=str(tmp_path)))
+    assert called.get("args") is not None
 
 
 def test_auth_length_mismatch_is_401_not_500(auth_on, tmp_path):
