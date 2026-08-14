@@ -7,10 +7,18 @@ const COLLAPSE_KEY = 'remedy.projectCollapse.v1'
 /** Project folder keys the user locked (no reorder / remove from sidebar). */
 const LOCKED_KEY = 'remedy.projectLocked.v1'
 
+/** Drive / FS root — not a project folder (sidebar used to grow a ``C:`` bucket). */
+export function isVolumeRootPath(raw: string | null | undefined): boolean {
+  const t = (raw || '').trim()
+  if (!t) return false
+  if (t === '/' || t === '\\') return true
+  return /^[a-zA-Z]:[\\/]*$/.test(t)
+}
+
 /** True when session has no real project folder. */
 export function isNoProjectPath(raw: string | null | undefined): boolean {
   const t = (raw || '').trim()
-  return !t || t === '.' || t === './'
+  return !t || t === '.' || t === './' || isVolumeRootPath(t)
 }
 
 /** Stable key for grouping (normalized absolute-ish path). */
