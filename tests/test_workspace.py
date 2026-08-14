@@ -11,6 +11,7 @@ from remedy.core.security import check_dangerous_command, safe_path
 from remedy.core.workspace import (
     effective_access_scope,
     ensure_project_dir,
+    is_forbidden_project_path,
     is_unset_project_path,
     jail_path,
     list_workspace_entries,
@@ -48,6 +49,17 @@ def test_resolve_project_path_defaults(tmp_path, monkeypatch):
 def test_resolve_project_path_absolute(tmp_path):
     p = resolve_project_path(str(tmp_path / "proj"))
     assert p == (tmp_path / "proj").resolve()
+
+
+def test_forbidden_os_project_paths(tmp_path):
+    assert is_forbidden_project_path(r"C:\Windows\System32")
+    assert is_forbidden_project_path(r"C:\Windows")
+    assert is_forbidden_project_path(r"C:\Program Files\Remedy")
+    assert is_forbidden_project_path("/etc/passwd")
+    assert is_forbidden_project_path("/usr/bin")
+    assert not is_forbidden_project_path(tmp_path)
+    assert not is_forbidden_project_path(tmp_path / "proj")
+    assert not is_forbidden_project_path(r"C:\Users\Administrator\Old-Remedy")
 
 
 def test_files_search_jails_and_does_not_mkdir(tmp_path, monkeypatch):
@@ -141,7 +153,7 @@ def test_get_home_dir_honors_remedy_home(tmp_path, monkeypatch):
 
     alt = tmp_path / "portable"
     alt.mkdir()
-    (alt / "config.toml").write_text("name = \"portable\"\n", encoding="utf-8")
+    (alt / "config.toml").write_text('name = "portable"\n', encoding="utf-8")
     monkeypatch.setenv("REMEDY_HOME", str(alt))
     clear_protected_auth_roots_cache()
     assert get_home_dir() == alt.resolve()
@@ -181,11 +193,7 @@ def test_workspace_context_block_shape(tmp_path):
 def test_workspace_context_unset_project_warns_full(tmp_path):
     block = workspace_context_block(tmp_path, project_unset=True)
     # Focus is optional; copy must allow full access without requiring a project cage.
-    assert (
-        "No focus folder" in block
-        or "No project folder" in block
-        or "full" in block.lower()
-    )
+    assert "No focus folder" in block or "No project folder" in block or "full" in block.lower()
     assert "Access scope: full" in block
     assert "optional" in block.lower() or "absolute" in block.lower()
 
@@ -281,11 +289,9 @@ async def test_bash_exec_dangerous_still_blocked_with_tools_on(tmp_path, monkeyp
     for cmd in dangerous:
         out = await reg.execute("bash_exec", command=cmd)
         low = (out or "").lower()
-        assert (
-            "security" in low
-            or "blocked" in low
-            or "SECURITY_BLOCK" in (out or "")
-        ), f"expected hard block for {cmd!r}, got: {out!r}"
+        assert "security" in low or "blocked" in low or "SECURITY_BLOCK" in (out or ""), (
+            f"expected hard block for {cmd!r}, got: {out!r}"
+        )
         # Must not look like a successful shell run
         assert "exit_code=0" not in low
         assert "APPROVAL_REQUIRED" not in (out or "")
@@ -300,7 +306,8 @@ async def test_bash_exec_dangerous_still_blocked_with_tools_on(tmp_path, monkeyp
 def test_dev_stderr_redirect_not_flagged_alone():
     # Bare 2>/dev/null is normal in scripts — must not block.
     assert check_dangerous_command(["make", "2>/dev/null"]) is None or (
-        "Error output suppression" not in (check_dangerous_command(["sh", "-c", "x 2>/dev/null"]) or "")
+        "Error output suppression"
+        not in (check_dangerous_command(["sh", "-c", "x 2>/dev/null"]) or "")
     )
     # Explicit: our removal means no "Error output suppression" reason.
     warn = check_dangerous_command(["true", "2>/dev/null"])

@@ -57,6 +57,57 @@ def is_volume_root_path(raw: str | Path | None) -> bool:
     return path.parent == path
 
 
+_OS_PROJECT_ROOTS = {
+    "windows",
+    "program files",
+    "program files (x86)",
+    "programdata",
+    "$recycle.bin",
+    "recovery",
+    "system volume information",
+}
+_POSIX_PROJECT_PREFIXES = (
+    "/etc",
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/boot",
+    "/sys",
+    "/proc",
+    "/dev",
+    "/root",
+)
+
+
+def is_forbidden_project_path(raw: str | Path | None) -> bool:
+    """True for OS / secrets trees that must never become the project root.
+
+    Same-user owner can still pick them on disk; the agent jail must not.
+    """
+    if raw is None:
+        return False
+    text = str(raw).strip()
+    if not text:
+        return False
+    try:
+        path = Path(text).expanduser().resolve()
+    except OSError:
+        try:
+            path = Path(text).expanduser().absolute()
+        except OSError:
+            return False
+    parts = [p.lower() for p in path.parts]
+    if len(parts) >= 2 and parts[1] in _OS_PROJECT_ROOTS:
+        return True
+    posix = path.as_posix().lower()
+    raw_posix = text.replace("\\", "/").lower()
+    return any(
+        candidate == prefix or candidate.startswith(prefix + "/")
+        for candidate in (posix, raw_posix)
+        for prefix in _POSIX_PROJECT_PREFIXES
+    )
+
+
 def is_unset_project_path(raw: str | Path | None) -> bool:
     """True when the user has not chosen a real project folder.
 
@@ -422,9 +473,7 @@ def workspace_context_block(
         )
     entries = list_workspace_entries(root)
     if entries:
-        listing = ", ".join(
-            f"{e['name']}/" if e["type"] == "dir" else e["name"] for e in entries
-        )
+        listing = ", ".join(f"{e['name']}/" if e["type"] == "dir" else e["name"] for e in entries)
         lines.append(f"Top-level: {listing}")
     else:
         lines.append("Top-level: (empty or unreadable)")

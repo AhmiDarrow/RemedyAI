@@ -48,6 +48,7 @@ def _memory_encrypt_status_public(raw: dict[str, Any]) -> str:
         pass
     return "unavailable"
 
+
 # Flat keys the agent may set (mirrors SettingsUpdateRequest; no nested bags here).
 SETTABLE_KEYS = frozenset(
     {
@@ -175,8 +176,7 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "name": raw.get("name", "Remedy"),
         "user_name": str(raw.get("user_name") or "").strip(),
         "agent_gender": str(raw.get("agent_gender") or "female").strip().lower()
-        if str(raw.get("agent_gender") or "female").strip().lower()
-        in ("female", "male", "neutral")
+        if str(raw.get("agent_gender") or "female").strip().lower() in ("female", "male", "neutral")
         else "female",
         "persona": raw.get("persona", "default"),
         "project_path": raw.get("project_path") or "",
@@ -197,9 +197,7 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "sleev_gateway_url": str(raw.get("sleev_gateway_url") or "").strip(),
         "sleev_allow_remote_gateway": bool(raw.get("sleev_allow_remote_gateway", False)),
         "soul_field_enabled": bool(
-            raw.get("soul_field_enabled")
-            if "soul_field_enabled" in raw
-            else True
+            raw.get("soul_field_enabled") if "soul_field_enabled" in raw else True
         ),
         "build_os_advanced": bool(raw.get("build_os_advanced", False)),
         "rmb_enabled": bool(raw.get("rmb_enabled", True)),
@@ -313,8 +311,7 @@ async def apply_settings_update(
     # Only snap/write LLM fields when the client touched them (or API key).
     # Unrelated patches (project_path, harness, …) must not re-normalize models.
     llm_touched = any(
-        k in clean_in
-        for k in ("llm_provider", "llm_model", "llm_base_url", "llm_api_key")
+        k in clean_in for k in ("llm_provider", "llm_model", "llm_base_url", "llm_api_key")
     )
     if llm_touched:
         merged = {**cfg, **patch}
@@ -330,9 +327,7 @@ async def apply_settings_update(
 
                 model = validate_provider_model(provider, model)
             except ValueError:
-                provider, model, base_url = normalize_llm_settings(
-                    provider, None, base_url
-                )
+                provider, model, base_url = normalize_llm_settings(provider, None, base_url)
         patch["llm_provider"] = provider
         patch["llm_model"] = model
         patch["llm_base_url"] = base_url
@@ -348,16 +343,24 @@ async def apply_settings_update(
         patch["custom_llm_name"] = name
 
     if "project_path" in patch and patch["project_path"] is not None:
-        from remedy.core.workspace import ensure_project_dir, resolve_project_path
+        from remedy.core.workspace import (
+            ensure_project_dir,
+            is_forbidden_project_path,
+            resolve_project_path,
+        )
 
         raw_pp = str(patch["project_path"]).strip()
         if raw_pp and raw_pp not in (".", "./"):
-            try:
-                patch["project_path"] = str(
-                    ensure_project_dir(resolve_project_path(raw_pp))
+            resolved = resolve_project_path(raw_pp)
+            if is_forbidden_project_path(resolved):
+                raise ValueError(
+                    f"Project path is not allowed: {resolved}. "
+                    "Pick a user folder, not an OS or program directory."
                 )
+            try:
+                patch["project_path"] = str(ensure_project_dir(resolved))
             except Exception:
-                patch["project_path"] = str(resolve_project_path(raw_pp))
+                patch["project_path"] = str(resolved)
         else:
             patch["project_path"] = ""
 
@@ -373,13 +376,9 @@ async def apply_settings_update(
     if "enabled_providers" in patch and patch["enabled_providers"] is not None:
         raw_ep = patch["enabled_providers"]
         if isinstance(raw_ep, list):
-            patch["enabled_providers"] = [
-                str(x).strip().lower() for x in raw_ep if str(x).strip()
-            ]
+            patch["enabled_providers"] = [str(x).strip().lower() for x in raw_ep if str(x).strip()]
         elif isinstance(raw_ep, str) and raw_ep.strip():
-            patch["enabled_providers"] = [
-                x.strip().lower() for x in raw_ep.split(",") if x.strip()
-            ]
+            patch["enabled_providers"] = [x.strip().lower() for x in raw_ep.split(",") if x.strip()]
         else:
             patch["enabled_providers"] = []
         # Never drop zero-setup demo from the taskbar/settings picker list.
@@ -455,10 +454,7 @@ async def apply_settings_update(
     if "sleev_enabled" in patch and patch["sleev_enabled"] is not None:
         patch["sleev_enabled"] = _as_bool(patch["sleev_enabled"])
 
-    if (
-        "sleev_allow_remote_gateway" in patch
-        and patch["sleev_allow_remote_gateway"] is not None
-    ):
+    if "sleev_allow_remote_gateway" in patch and patch["sleev_allow_remote_gateway"] is not None:
         patch["sleev_allow_remote_gateway"] = _as_bool(patch["sleev_allow_remote_gateway"])
 
     if "sleev_gateway_url" in patch and patch["sleev_gateway_url"] is not None:
@@ -541,14 +537,8 @@ async def apply_settings_update(
     vision_enabled = patch.pop("vision_enabled", None)
     vision_model_id = patch.pop("vision_model_id", None)
     vision_force_decode = patch.pop("vision_force_decode", None)
-    if (
-        vision_enabled is not None
-        or vision_model_id is not None
-        or vision_force_decode is not None
-    ):
-        vision_tbl = (
-            dict(cfg.get("vision") or {}) if isinstance(cfg.get("vision"), dict) else {}
-        )
+    if vision_enabled is not None or vision_model_id is not None or vision_force_decode is not None:
+        vision_tbl = dict(cfg.get("vision") or {}) if isinstance(cfg.get("vision"), dict) else {}
         if vision_enabled is not None:
             vision_tbl["enabled"] = _as_bool(vision_enabled)
         if vision_model_id is not None and str(vision_model_id).strip():
@@ -759,9 +749,7 @@ async def apply_settings_update(
         with contextlib.suppress(Exception):
             runtime._sleev_enabled = bool(cfg.get("sleev_enabled", False))
             runtime._sleev_gateway_url = str(cfg.get("sleev_gateway_url") or "").strip()
-            runtime._sleev_allow_remote_gateway = bool(
-                cfg.get("sleev_allow_remote_gateway", False)
-            )
+            runtime._sleev_allow_remote_gateway = bool(cfg.get("sleev_allow_remote_gateway", False))
 
     changes = list(patch.keys())
     if vision_enabled is not None or vision_model_id is not None or vision_force_decode is not None:
