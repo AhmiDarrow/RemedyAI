@@ -5,6 +5,8 @@ from __future__ import annotations
 from remedy.core.build_engine import (
     BuildTurnState,
     build_blocks_final_answer,
+    build_has_open_drive,
+    green_gate_cap_allows_final,
     observe_tool_batch,
 )
 from remedy.core.build_error_vector import (
@@ -80,6 +82,39 @@ def test_write_set_and_green_gate():
     )
     assert st.last_verify_ok is True
     assert build_blocks_final_answer(st) is False
+
+
+def test_green_gate_cap_holds_when_todos_open():
+    st = BuildTurnState(
+        active=True,
+        write_steps=2,
+        last_verify_ok=True,
+        write_set=[],
+        open_todo_count=3,
+        require_green_to_finish=True,
+    )
+    assert build_blocks_final_answer(st) is True
+    assert build_has_open_drive(st) is True
+    assert green_gate_cap_allows_final(st, reopen_count=6, max_reopens=6) is False
+    st.open_todo_count = 0
+    assert build_has_open_drive(st) is False
+    assert green_gate_cap_allows_final(st, reopen_count=6, max_reopens=6) is True
+
+
+def test_green_gate_cap_still_ends_verify_loop_without_open_work():
+    st = BuildTurnState(
+        active=True,
+        write_steps=1,
+        last_verify_ok=False,
+        write_set=["app.py"],
+        open_todo_count=0,
+        ship_required=False,
+        require_green_to_finish=True,
+    )
+    assert build_blocks_final_answer(st) is True
+    assert build_has_open_drive(st) is False
+    assert green_gate_cap_allows_final(st, reopen_count=5, max_reopens=6) is False
+    assert green_gate_cap_allows_final(st, reopen_count=6, max_reopens=6) is True
 
 
 def test_file_edit_batch_counts_as_write():

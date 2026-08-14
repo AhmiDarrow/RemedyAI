@@ -198,7 +198,7 @@ export function useSessionLlm(opts: {
       if (activeId) {
         setSessionBind(activeId, 'rmb', stem)
         // Persist session bind so reloads stay on this GGUF
-        void applySessionLlm(activeId, 'rmb', stem, true).catch(() => {})
+        void applySessionLlm(activeId, 'rmb', stem, false).catch(() => {})
       } else {
         void updateSettings({
           llm_provider: 'rmb',

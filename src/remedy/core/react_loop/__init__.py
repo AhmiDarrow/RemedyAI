@@ -16,6 +16,7 @@ from remedy.core.react_loop.binding import (
 from remedy.core.react_loop.build_request import build_step_request_body
 from remedy.core.react_loop.errors import (
     is_fatal_llm_api_error,
+    is_thinking_tool_choice_error,
 )
 from remedy.core.react_loop.errors import (
     is_fatal_llm_api_error as _is_fatal_llm_api_error,
@@ -36,6 +37,7 @@ from remedy.core.react_loop.tool_batch import (
 __all__ = [
     "call_llm_stream",
     "is_fatal_llm_api_error",
+    "is_thinking_tool_choice_error",
     "_is_fatal_llm_api_error",
     "provider_bits",
     "resolve_and_apply_tools",

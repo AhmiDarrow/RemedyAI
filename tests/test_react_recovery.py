@@ -82,6 +82,20 @@ def test_soft_fail_still_allows_second_budget_slot() -> None:
     )
 
 
+def test_soft_fail_unfinished_work_retries_with_tools() -> None:
+    """Work still open: repair the request, do not invent a no-tool final."""
+    assert (
+        soft_api_recovery_action(
+            force_answer_api_fail_once=False,
+            force_answer_sticky=False,
+            api_soft_failures=0,
+            max_api_soft_failures=3,
+            keep_tools=True,
+        )
+        == "retry_with_tools"
+    )
+
+
 # -- SSE vs non-stream parse -------------------------------------------------
 
 

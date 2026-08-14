@@ -383,6 +383,12 @@ def test_shell_write_jail_blocks_runtime_bin_as_destination(tmp_path: Path):
         r'del C:\Python312\python.exe',
         r'Set-Content -Path C:\Python312\python.exe -Value pwned',
         r'gcc hello.c -o C:\Windows\System32\cmd.exe',
+        r'cmd /c copy payload.exe C:\Windows\System32\cmd.exe',
+        r'cmd /c echo pwn > C:\Users\Public\cmd.exe',
+        r"Set-Content C:\Users\Public\pwsh.exe pwned",
+        r'C:\Python312\python.exe game.py & copy payload.exe C:\Python312\python.exe',
+        r'C:\Windows\System32\cmd.exe /c echo hi & copy pwn C:\Windows\System32\cmd.exe',
+        r'C:\Windows\System32\cmd.exe /c copy payload.exe C:\Windows\System32\cmd.exe',
     ]
     for cmd in cases:
         hit = check_shell_write_jail(
@@ -994,4 +1000,185 @@ def test_script_scan_blocks_outside_write(tmp_path: Path):
     ok = sticky / "ok.py"
     ok.write_text("print(1)\n", encoding="utf-8")
     assert scan_script_source_for_outside_writes(ok, write_roots=[sticky.resolve()]) is None
+
+
+def test_script_scan_blocks_home_env_paths(tmp_path: Path):
+    """Project-bound helpers that write via Path.home / expanduser / env must fail closed."""
+    from remedy.core.shell_write_jail import scan_script_source_for_outside_writes
+
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    roots = [sticky.resolve()]
+    cases = [
+        "from pathlib import Path\nPath.home().joinpath('Desktop','pwn.txt').write_text('x')\n",
+        "import os\nopen(os.path.expanduser('~/Desktop/pwn.txt'),'w').write('x')\n",
+        r'Set-Content -Path $env:USERPROFILE\Desktop\pwn.txt -Value x',
+        r"echo pwn > %USERPROFILE%\Desktop\pwn.txt",
+        'url = "https://example.com/#x"; Path.home().joinpath("Desktop","pwn.txt").write_text("x")\n',
+        'print(f"{1:#x}"); Path.home().joinpath("Desktop","pwn.txt").write_text("x")\n',
+    ]
+    for i, src in enumerate(cases):
+        helper = sticky / f"pwn_{i}.py"
+        helper.write_text(src, encoding="utf-8")
+        hit = scan_script_source_for_outside_writes(helper, write_roots=roots)
+        assert hit is not None, f"expected jail for home/env helper: {src!r}"
+
+    ok_env = sticky / "env_ok.py"
+    ok_env.write_text('import os\nprint(os.environ.get("PATH"))\n', encoding="utf-8")
+    assert scan_script_source_for_outside_writes(ok_env, write_roots=roots) is None
+    ok_join = sticky / "join_ok.ps1"
+    ok_join.write_text(
+        "Write-Host (Join-Path $PSScriptRoot 'out.txt')\n", encoding="utf-8"
+    )
+    assert scan_script_source_for_outside_writes(ok_join, write_roots=roots) is None
+    ok_comment = sticky / "comment_ok.py"
+    ok_comment.write_text("# Path.home()\nprint(1)\n", encoding="utf-8")
+    assert scan_script_source_for_outside_writes(ok_comment, write_roots=roots) is None
+
+    # Profile-covering write roots: Path.home is not automatically illegal.
+    home_ok = sticky / "home_ok.py"
+    home_ok.write_text(
+        "from pathlib import Path\nprint(Path.home())\n", encoding="utf-8"
+    )
+    assert (
+        scan_script_source_for_outside_writes(
+            home_ok, write_roots=[sticky.resolve(), Path.home().resolve()]
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_python_file_allows_environ_path(tmp_path: Path, monkeypatch):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    helper = proj / "env_ok.py"
+    helper.write_text(
+        "import os\nprint(os.environ.get('PATH', ''))\n", encoding="utf-8"
+    )
+    _rt, reg = _register_shell_runtime(tmp_path, proj, monkeypatch)
+    out = await reg.execute("run_python_file", path=str(helper))
+    assert "WRITE_JAIL" not in out, out
+    assert "exit_code=0" in out
+
+
+def _register_shell_runtime(tmp_path: Path, proj: Path, monkeypatch):
+    from remedy.core.agent_workspace_tools import register_workspace_tools
+    from remedy.core.approvals import APPROVALS
+    from remedy.skills.tool_registry import ToolRegistry
+
+    monkeypatch.setattr(APPROVALS, "needs_ask", lambda *a, **k: None)
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    rt = _make_runtime(proj, scope="project", home=home)
+    reg = ToolRegistry()
+    rt.tool_registry = reg  # type: ignore[attr-defined]
+    rt.config = SimpleNamespace(home_dir=str(tmp_path / "remedy_home"))  # type: ignore[attr-defined]
+    rt._session_id = "jail-session"  # type: ignore[attr-defined]
+    register_workspace_tools(rt)
+    return rt, reg
+
+
+@pytest.mark.asyncio
+async def test_host_script_write_host_allowed_when_project_bound(
+    tmp_path: Path, monkeypatch
+):
+    """Pathless Write-Host / Get-Date must not hit pwsh -Command oneshot jail."""
+    import os
+
+    from remedy.execution.host.session import close_all_shared_sessions
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _rt, reg = _register_shell_runtime(tmp_path, proj, monkeypatch)
+    try:
+        out = await reg.execute("host_script", lang="pwsh", body="Write-Host hi")
+        assert "WRITE_JAIL" not in out, out
+        if "not recognized" not in out.lower() and "not found" not in out.lower():
+            assert "exit_code=0" in out or "hi" in out.lower()
+        cmd_out = await reg.execute("host_script", lang="cmd", body="echo hi")
+        assert "WRITE_JAIL" not in cmd_out, cmd_out
+        if os.name == "nt":
+            assert "exit_code=0" in cmd_out or "hi" in cmd_out.lower()
+    finally:
+        await close_all_shared_sessions()
+
+
+@pytest.mark.asyncio
+async def test_host_script_refuses_outside_and_home_writes(
+    tmp_path: Path, monkeypatch
+):
+    from remedy.execution.host.session import close_all_shared_sessions
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _rt, reg = _register_shell_runtime(tmp_path, proj, monkeypatch)
+    try:
+        outside = await reg.execute(
+            "host_script",
+            lang="pwsh",
+            body=r'Set-Content C:\Users\Public\pwn.txt pwned',
+        )
+        assert "WRITE_JAIL" in outside
+        home = await reg.execute(
+            "host_script",
+            lang="pwsh",
+            body=r'Set-Content -Path $env:USERPROFILE\Desktop\pwn.txt -Value x',
+        )
+        assert "WRITE_JAIL" in home
+        py_home = await reg.execute(
+            "host_script",
+            lang="python",
+            body="from pathlib import Path\nPath.home().joinpath('Desktop','pwn.txt').write_text('x')\n",
+        )
+        assert "WRITE_JAIL" in py_home
+    finally:
+        await close_all_shared_sessions()
+
+
+@pytest.mark.asyncio
+async def test_host_session_cd_outside_resets_and_jails_relative(
+    tmp_path: Path, monkeypatch
+):
+    """session=true leftover cwd must not allow relative writes outside roots."""
+    import os
+
+    from remedy.execution.host.session import close_all_shared_sessions, get_shared_session
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _rt, reg = _register_shell_runtime(tmp_path, proj, monkeypatch)
+    marker = f"remedy_jail_leak_{os.getpid()}.txt"
+    if os.name == "nt":
+        outside = Path(r"C:\Users\Public")
+        cd_cmd = r"cd /d C:\Users\Public"
+    else:
+        outside = Path("/tmp")
+        cd_cmd = "cd /tmp"
+    leak = outside / marker
+    if leak.exists():
+        leak.unlink()
+    try:
+        out = await reg.execute("bash_exec", command=cd_cmd, session=True)
+        assert "WRITE_JAIL" in out
+
+        out2 = await reg.execute(
+            "bash_exec", command=f"echo pwn > {marker}", session=True
+        )
+        assert not leak.exists(), f"relative write leaked to leftover cwd: {out2}"
+
+        # Leftover session cwd (without going through the close-on-cd path).
+        sess = await get_shared_session(cwd=str(proj), session_id="jail-session")
+        await sess.run(cd_cmd, timeout=15)
+        leftover = await sess.current_cwd()
+        assert leftover, leftover
+        out3 = await reg.execute(
+            "bash_exec", command=f"echo pwn > {marker}", session=True
+        )
+        assert "WRITE_JAIL" in out3
+        assert not leak.exists(), f"relative write used leftover session cwd: {out3}"
+    finally:
+        if leak.exists():
+            leak.unlink()
+        await close_all_shared_sessions()
 

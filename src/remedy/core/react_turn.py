@@ -205,12 +205,17 @@ def soft_api_recovery_action(
     force_answer_sticky: bool,
     api_soft_failures: int,
     max_api_soft_failures: int = 3,
+    keep_tools: bool = False,
 ) -> str:
     """Decide next step after a non-fatal LLM HTTP error.
 
     Returns:
       ``stop`` — hard stop with user-facing error
+      ``retry_with_tools`` — same request shape, tools stay on
       ``force_answer_rebuild`` — rebuild no-tool body and POST again
+
+    Unfinished work must retry with tools. Inventing an answer from
+    context after a 400 is a silent drop, not recovery.
     """
     if force_answer_api_fail_once:
         return "stop"
@@ -218,7 +223,7 @@ def soft_api_recovery_action(
     if force_answer_sticky:
         return "stop"
     if int(api_soft_failures) < int(max_api_soft_failures):
-        return "force_answer_rebuild"
+        return "retry_with_tools" if keep_tools else "force_answer_rebuild"
     return "stop"
 
 
@@ -348,19 +353,25 @@ def resolve_tools(
             pack="full",
         )
 
-    # L1 lean strip for pure chat only
+    # L1 may strip *only* proven social/meta chat. Any other ask stays armed.
     if int(turn_tier or 1) == 1 and not browse_pre_url and not page_interaction:
-        open_work = bool(open_tasks)
-        if not open_work and history:
-            with suppress(Exception):
-                from remedy.core.react_policy import history_suggests_open_work
+        chat_only = False
+        with suppress(Exception):
+            from remedy.core.react_policy import is_chat_only_message
 
-                open_work = history_suggests_open_work(
-                    history, open_tasks=open_tasks or None
-                )
-        if not open_work:
-            logger.info("react_tools disarm reason=l1_pure_chat tier=%s", turn_tier)
-            return ToolsDecision(None, False, "l1_pure_chat", pack="none")
+            chat_only = bool(is_chat_only_message(message or ""))
+        if chat_only:
+            open_work = bool(open_tasks)
+            if not open_work and history:
+                with suppress(Exception):
+                    from remedy.core.react_policy import history_suggests_open_work
+
+                    open_work = history_suggests_open_work(
+                        history, open_tasks=open_tasks or None
+                    )
+            if not open_work:
+                logger.info("react_tools disarm reason=l1_pure_chat tier=%s", turn_tier)
+                return ToolsDecision(None, False, "l1_pure_chat", pack="none")
 
     return ToolsDecision(all_t, bool(all_t), "default_armed", pack="full")
 

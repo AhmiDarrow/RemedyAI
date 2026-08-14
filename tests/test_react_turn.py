@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from remedy.core.react_loop.binding import resolve_and_apply_tools
 from remedy.core.react_policy import REACT_MAX_STALE_EPOCHS
 from remedy.core.react_turn import (
     LOCAL_MAX_TOOLS_PER_STEP,
@@ -50,6 +51,49 @@ def test_resolve_tools_l1_strips_pure_chat():
     assert d.reason == "l1_pure_chat"
 
 
+def test_resolve_tools_keyword_miss_product_ask_stays_armed():
+    """Any non-social ask must keep tools — do not depend on verb lists."""
+    all_t = [_tool("file_write"), _tool("file_read"), _tool("list_dir")]
+    d = resolve_tools(
+        message="add a dark mode toggle to the about window",
+        all_tools=all_t,
+        turn_tier=1,
+    )
+    assert d.tools is not None
+    assert d.run_until_done is True
+    assert d.reason != "l1_pure_chat"
+
+
+def test_resolve_tools_noun_free_product_ask_stays_armed():
+    """Fail-open: a product change with no special-case verbs stays armed."""
+    all_t = [_tool("file_write"), _tool("file_read"), _tool("list_dir")]
+    d = resolve_tools(
+        message=(
+            "the idle lock should be fifteen minutes and the about window "
+            "must not require scrolling"
+        ),
+        all_tools=all_t,
+        turn_tier=1,
+    )
+    assert d.tools is not None
+    assert d.run_until_done is True
+    assert d.reason != "l1_pure_chat"
+
+
+def test_resolve_tools_secretfolder_autolock_not_l1():
+    """Live 2026-08-14: product-change prompt disarmed as l1_pure_chat."""
+    all_t = [_tool("file_write"), _tool("file_read"), _tool("list_dir")]
+    msg = (
+        "we need a 15minute autolock timeout and as well can we resize the "
+        "settings and about ui they require scrolling to see and don't need "
+        "to be that large"
+    )
+    d = resolve_tools(message=msg, all_tools=all_t, turn_tier=1)
+    assert d.tools is not None
+    assert d.run_until_done is True
+    assert d.reason != "l1_pure_chat"
+
+
 def test_resolve_tools_full_bugsweep_not_l1():
     """Live 2026-08-13: 'full bugsweep' disarmed as l1_pure_chat."""
     all_t = [_tool("file_write"), _tool("list_dir"), _tool("file_read")]
@@ -61,6 +105,36 @@ def test_resolve_tools_full_bugsweep_not_l1():
     assert d.tools is not None
     assert d.run_until_done is True
     assert d.reason != "l1_pure_chat"
+
+
+def test_mid_turn_resolve_cannot_disarm_armed_turn():
+    """Per-step re-resolve may narrow a pack; it must not strip tools."""
+    all_t = [_tool("file_write"), _tool("file_read"), _tool("list_dir")]
+    turn = TurnState(all_tools=all_t)
+    turn.rearm(reason="rearm_agency")
+    assert turn.tools
+
+    class _Rt:
+        _turn_tier = 1
+
+    tools, run = resolve_and_apply_tools(
+        runtime=_Rt(),
+        turn=turn,
+        message="thanks",
+        plan_mode=False,
+        history=[],
+        pure_action_kick=False,
+        clear_goals_only=False,
+        browse_pre_url=None,
+        page_interaction=False,
+        open_only_browse=False,
+        build_state=None,
+        open_tasks_for_wall=None,
+        step_index=2,
+    )
+    assert tools is not None
+    assert run is True
+    assert turn.arm_reason == "keep_armed"
 
 
 def test_resolve_tools_plan_mode():

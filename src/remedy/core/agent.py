@@ -976,7 +976,6 @@ class BasicRuntime(AgentRuntime):
 
                 note_user_activity()
         from remedy.core.llm_binding import (
-            LlmBinding,
             get_llm_binding,
             reset_llm_binding,
             set_llm_binding,
@@ -1022,27 +1021,14 @@ class BasicRuntime(AgentRuntime):
                             mod = (getattr(sess, "model", None) or None)
                             if mod:
                                 mod = str(mod).strip() or None
-            if prov or mod:
-                with suppress(Exception):
-                    from remedy.interfaces.api_support import (
-                        _sync_runtime_llm_from_config,
-                    )
+            if not prov and not mod:
+                # Unbound session: copy Settings default into this turn only.
+                from remedy.interfaces.api_support import resolve_llm_slot
 
-                    _sync_runtime_llm_from_config(
-                        self,
-                        model_override=mod,
-                        provider_override=prov,
-                        llm_only=True,
-                    )
-            elif mod:
-                self._llm_model = mod
+                prov, mod, _, _ = resolve_llm_slot(runtime=self)
+            from remedy.interfaces.api_support import binding_for_session
 
-            bind = LlmBinding(
-                provider=str(getattr(self, "_llm_provider", None) or "openai"),
-                model=str(getattr(self, "_llm_model", None) or ""),
-                base_url=str(getattr(self, "_llm_base_url", None) or ""),
-                api_key=str(getattr(self, "_llm_api_key", None) or ""),
-            )
+            bind = binding_for_session(prov, mod, runtime=self)
 
         llm_tok = set_llm_binding(bind)
         self._last_auto_checkpoint_n = 0

@@ -13,7 +13,6 @@ from fastapi.responses import StreamingResponse
 from remedy.interfaces.api_models import ChatRequest
 from remedy.interfaces.api_support import (
     _sse_stream_text,
-    _sync_runtime_llm_from_config,
     sse_headers,
 )
 
@@ -52,12 +51,6 @@ def register_legacy_chat_stream_routes(
                             sess_provider = getattr(ex, "llm_provider", None)
                             if not sess_model:
                                 sess_model = getattr(ex, "model", None)
-                _sync_runtime_llm_from_config(
-                    runtime,
-                    model_override=sess_model,
-                    provider_override=sess_provider,
-                    llm_only=True,
-                )
                 async for token in runtime.stream_response(
                     req.message,
                     session_id=session_id,

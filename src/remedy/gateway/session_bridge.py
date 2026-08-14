@@ -273,19 +273,6 @@ async def handle_messenger_event(
                 return
             claimed = True
             claim_epoch = stream_claim_epoch(session.id)
-            # Bind session provider/model (status-bar style) before the turn —
-            # otherwise messenger always used whatever global config last set.
-            with suppress(Exception):
-                from remedy.interfaces.api_support import (
-                    _sync_runtime_llm_from_config,
-                )
-
-                _sync_runtime_llm_from_config(
-                    runtime,
-                    model_override=getattr(session, "model", None),
-                    provider_override=getattr(session, "llm_provider", None),
-                    llm_only=True,
-                )
             async for chunk in runtime.stream_response(
                 message,
                 session_id=session.id,

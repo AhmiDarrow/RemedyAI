@@ -24,11 +24,20 @@ function mark(status: BuildTodoStatus): string {
   return ''
 }
 
+/** True while any row is still pending / in progress. */
+export function todosHaveOpen(items: BuildTodo[] | undefined | null): boolean {
+  if (!items?.length) return false
+  return items.some((t) => {
+    const s = statusOf(t.status)
+    return s === 'pending' || s === 'in_progress'
+  })
+}
+
 /**
  * User-facing build checklist. Items strike through as Remedy marks them done.
  */
 export function BuildTodos({ items, live = false }: BuildTodosProps) {
-  if (!items.length) return null
+  if (!todosHaveOpen(items)) return null
   const open = items.filter((t) => {
     const s = statusOf(t.status)
     return s === 'pending' || s === 'in_progress'
