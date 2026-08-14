@@ -706,6 +706,12 @@ def _organism_tick(runtime: Any, *, home: str | Path | None) -> dict[str, Any]:
         crystal = get_time_crystal("life")
         if home:
             crystal.persist(home)
+    with suppress(Exception):
+        from remedy.core.metabolism.organism import organism_heartbeat
+
+        beat = organism_heartbeat(home, session_id="life")
+        if beat.get("recalled"):
+            out["recalled"] = beat.get("recalled")
     return out
 
 
