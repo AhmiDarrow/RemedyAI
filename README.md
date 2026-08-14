@@ -35,7 +35,7 @@
 
 | | |
 |--|--|
-| **Who it’s for** | Owners who want power without multi-agent theater — chat, files, shell, browser rail, computer use |
+| **Who it’s for** | Owners who want power without multi-agent theater — chat, files, this-PC shell, browser rail, computer use |
 | **What stays local** | Memory, Session Brief, skills, approvals, DPAPI secrets, optional SmolVLM2 vision |
 | **What you bring** | Your API keys / local Ollama — no Remedy cloud account for core use |
 | **Current** | **v0.24.0** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
@@ -55,14 +55,14 @@ In-app: title-bar / tray → **About Remedy** · **Settings → About**.
 
 | Highlight | Why it matters |
 |-----------|----------------|
-| **L0–L3 turn tiers** | Instant local answers for “what model / skills / version”; full tools only when work needs them |
+| **Host Bridge + `/stretch`** | POSIX→cmd, `pwsh -File`, `host_run` / `host_which`; `/stretch` maps this PC; `/whoami` includes the census |
 | **Agency that runs tools** | Review / implement keep tools on; work turns cannot finish as chat; Settings no longer steal the active session model |
-| **Host Bridge + `/stretch`** | POSIX→cmd, `pwsh -File`, vendor-neutral GPU/VRAM autofit, home census via `/whoami` |
+| **Vendor-neutral GPU** | NVIDIA / AMD / Intel probe; RMB autofit sizes context from **VRAM**, not a logo |
 | **✕ → tray always** | Title-bar close hides to tray; local API stays warm. **Tray Quit** for full stop |
-| **Write jail + security** | Project write roots, `C:/` + `$HOME` shell dests, files API refuse for `SAM`/`hosts`, opt-in **Privacy mode** |
+| **Write jail + security** | Project write roots, `C:/` + `$HOME` shell dests, files API refuse for `SAM`/`hosts`, packaged self-inject **off** |
 | **Browser rail polish** | Video fullscreen stays **in-rail**; mobile/desktop site toggle; chat images with Bearer media; same-window OAuth |
 
-**Also in 0.20–0.21:** evidence ledger, shadow rehearsal, Action IR, Time Crystal, skill genome, portable identity, multi-tab stream paint, messengers, signed Skills Library.
+**Also in 0.20–0.23:** L0–L3 tiers, `build_drive` + companion, Soul Field, evidence ledger, Time Crystal, messengers, signed Skills Library, `Remedy Desktop.exe` (not generic `app.exe`).
 
 Full owner notes → **[docs/manual/13-whats-new.md](docs/manual/13-whats-new.md)** · engineering detail → **[CHANGELOG.md](CHANGELOG.md)**  
 Earlier: [0.19.0 parallel multi-provider](docs/manual/13-whats-new.md#0190---parallel-multi-provider--background-turns) · [0.18.x](docs/manual/13-whats-new.md)
@@ -97,6 +97,7 @@ Earlier: [0.19.0 parallel multi-provider](docs/manual/13-whats-new.md#0190---par
 | **All chapters** | [docs/manual/](docs/manual/) · [index](docs/manual/README.md) |
 | **Continuity** | [How Remedy works](docs/manual/16-continuity-philosophy.md) |
 | **Local SmolVLM2** | [Vision decoder](docs/manual/14-visual-decoder.md) |
+| **This PC / Host** | [Coding agency](docs/manual/18-agency.md) · [RMB](docs/manual/20-rmb-local-agent.md) |
 | **Metabolism** | [Partner metabolism](docs/manual/19-metabolism.md) |
 | **Security** | [Security & data](docs/manual/04-security-and-data.md) |
 
@@ -112,13 +113,14 @@ One desktop app. One local API. Your data under `~/.remedy`.
 |--|------------|
 | **Chat partner** | Streaming markdown, Plan/Build, multi-provider parallel tabs, attachments, image markup |
 | **Workspace** | **Files** · **Terminal** · **Browser** · **Scratch** · **Computer use** — rails beside chat |
-| **Local brain** | **SmolVLM2 2.2B** on this PC — visual decoder + harness assist (optional download) |
+| **This PC** | **Host Bridge** (POSIX→cmd, `host_run`) · `/stretch` home census · vendor-neutral GPU/VRAM |
+| **Local brain** | **SmolVLM2 2.2B** visual decoder · optional **RMB** llama.cpp host (autofit from this PC) |
 | **Continuity** | Session Brief, partner memory, skills, context budget — silent workers, one voice |
 | **Metabolism** | **0.22.0+** Soul Field + organism pulse, L0–L3 tiers, evidence, governor ([manual](docs/manual/19-metabolism.md)) |
 | **Messengers** | Telegram, Discord, Slack, Mattermost, Matrix, WhatsApp, Teams, Google Chat, Signal (Settings) |
 | **Skills** | Progressive disclosure · Installed \| Library · signed community catalog |
-| **Memory** | Durable facts · Progress snapshots · plans — calm UI, not scare-logs |
-| **Agency** | `file_edit`, repo search, shell write jail, missions, `spread_run`, `web_search` / `web_fetch`, approvals |
+| **Memory** | Durable facts · this-home census · Progress snapshots · plans — calm UI, not scare-logs |
+| **Agency** | `file_edit`, `build_drive`, companion, Host Bridge, write jail, `spread_run`, web tools, approvals |
 | **Always ready** | **0.20.0+** title-bar **✕ → tray** (API stays up); **tray Quit** for full stop |
 | **Web UI** | Same SPA at `http://127.0.0.1:7400/` (Switch to WebUI → tray) |
 | **Updates** | Minisign-signed auto-update from GitHub Releases |
@@ -151,9 +153,10 @@ Remedy is a **workbench**, not only a chat box. Icon rails open real tools next 
 | Tool | What it is |
 |------|------------|
 | **Files** | Project / session file browser — open, copy path, drag into chat |
-| **Terminal** | In-app **PowerShell** (ConPTY) — same machine the agent can work on |
+| **Terminal** | In-app **PowerShell** (ConPTY). Agent shell uses **Host Bridge** — POSIX rewritten to cmd, PowerShell via `pwsh -File` |
 | **Browser** | Embedded **WebView2** (Chromium) research pane; **↗** opens system browser when you need full Chrome |
 | **Scratch** | Quick notes pad bound to the session |
+| **Computer use** | Click / type / screenshot this desktop when you enable it |
 
 Left · chat · right layout; popout / fullscreen for Terminal, Browser, Scratch.  
 Manual: [Chat & sessions](docs/manual/05-chat-and-sessions.md) · [Desktop notes](docs/DESKTOP.md)
@@ -173,7 +176,9 @@ Manual: [Chat & sessions](docs/manual/05-chat-and-sessions.md) · [Desktop notes
 
 **How it ships:** not in the installer → one first-run download → `~/.remedy/vision/` → **llama-server** on **127.0.0.1** → auto-starts with Remedy. CPU by default; CUDA when NVIDIA is available.
 
-Manual: [Local vision & on-device SmolVLM2](docs/manual/14-visual-decoder.md)
+Optional **RMB** (Remedy Muscle Bridge) is a separate on-device llama.cpp chat host — Settings → local models. Autofit sizes context and GPU layers from this PC’s VRAM (NVIDIA / AMD / Intel), not a vendor logo.
+
+Manual: [Local vision & on-device SmolVLM2](docs/manual/14-visual-decoder.md) · [RMB](docs/manual/20-rmb-local-agent.md)
 
 ---
 
@@ -223,13 +228,14 @@ Format: [agentskills.io](https://agentskills.io) · Lifecycle: [SKILL_LIFECYCLE.
 
 ## Memory & long work
 
-- **Durable memory** — SQLite + FTS5, profile, handoffs  
+- **Durable memory** — SQLite + FTS5, profile, handoffs, living partner facts  
+- **This home** — `/stretch` (alias `/home`) maps hardware, PATH tools, rooms, local ports; `/whoami` includes the census  
 - **Memory Harness** — lean *send-view* for the model; full transcript kept  
 - **Progress** — mid-task snapshots (calm wording: progress, not “the app crashed”)  
 - **Plans** — Plan mode outlines; Build executes with approvals  
 - **Time travel** — restore chat (+ best-effort files) to an earlier step  
 
-`/compact` · `/harness` · [Memory manual](docs/manual/06-memory-and-harness.md)
+`/compact` · `/harness` · `/stretch` · `/whoami` · [Memory manual](docs/manual/06-memory-and-harness.md)
 
 ---
 
@@ -255,6 +261,7 @@ Local API: **127.0.0.1:7400** (sidecar).
 | CORS | No wildcard while auth is on |
 | Secrets | `~/.remedy/auth/` (DPAPI on Windows when available) |
 | Scope | Project / home / full machine (opt-in) |
+| Write jail | Shell dests stay in write roots (`C:/`, `$HOME`, python/node oneshots) |
 | Approvals | **Ask** default |
 | Skills | Quarantine until Trust |
 | Messengers | Allowlist-first |
@@ -291,7 +298,7 @@ Full list: [Commands](docs/manual/11-reference-commands.md)
 │  React SPA · tray · updates · Files/Terminal/Browser   │
 │              │                                           │
 │  remedy serve · FastAPI :7400                            │
-│    gateway · core · memory · skills · vision (SmolVLM2)  │
+│    gateway · core · host bridge · memory · skills · vision │
 └──────────────────────────────────────────────────────────┘
      CLI · WebUI · Telegram · Discord · Slack · …
 ```
