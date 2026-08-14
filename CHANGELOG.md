@@ -4,6 +4,30 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Security
+
+- Agent `update_settings` requires approval for a foreign `llm_base_url`,
+  remote Sleev gateway, messenger `allow_all` / emptied allowlists / newly
+  enabled channels. Approval fingerprints include the destination host or
+  channel so one approve does not unlock the next attacker URL.
+- Provider infer from base URL matches catalog hostnames (dot boundary), not
+  substrings — `https://x.ai.attacker.tld/v1` is not xAI. Loopback is
+  `ipaddress.is_loopback` plus exact `localhost` (not `127.` prefix).
+- Sleev remote URL validity uses the **saved** `sleev_allow_remote_gateway`
+  flag only — same-patch `flag=true` + remote URL is rejected.
+- MCP and CLI `skill_run` use the same `scripts/` jail as the agent tool
+  (no absolute / `..` escape).
+- `GET /api/self-improve` requires Bearer (no longer on the public allowlist).
+
+### Host / this PC
+
+- `grep → rg` no longer interpolates the `(Path, source)` tuple. Stdin grep
+  is `findstr` without `/s *`.
+- `powershell` / `pwsh` are PowerShell only as the command head — `echo use
+  powershell` no longer skips POSIX rewrite.
+- `Get-Service` / `Start-Service` classify as PowerShell (`service` dropped
+  from the filename-noun denylist).
+
 ### Docs / PyPI
 
 - README links used as the PyPI long description are now absolute GitHub

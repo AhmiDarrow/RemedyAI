@@ -111,8 +111,13 @@ def _capture_virtual_screen() -> tuple[bytes, int, int, int, int, int]:
     return bytes(buf), stride, width, height, left, top
 
 
+def _remedy_home() -> Path:
+    env = (os.environ.get("REMEDY_HOME") or "").strip()
+    return Path(env).expanduser() if env else Path.home() / ".remedy"
+
+
 def _default_shot_path(prefix: str = "desk") -> Path:
-    out_dir = Path.home() / ".remedy" / "computer" / "shots"
+    out_dir = _remedy_home() / "computer" / "shots"
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir / f"{prefix}_{int(time.time() * 1000)}.png"
 
@@ -163,7 +168,7 @@ def screenshot_png(path: Path | None = None) -> dict[str, Any]:
     _write_png_bgr(out, width, height, raw, stride)
     # Opportunistic TTL so desktop captures do not accumulate forever.
     with contextlib.suppress(Exception):
-        purge_old_shots(max_age_s=900.0)
+        purge_old_shots(max_age_s=900.0, home_dir=_remedy_home())
     return {
         "path": str(out),
         "width": width,

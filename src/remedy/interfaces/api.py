@@ -375,7 +375,6 @@ def create_app(
         "/dashboard",
         "/api/status",
         "/api/ping",
-        "/api/self-improve",
         "/api/auth/local-bootstrap",
         # Google OAuth browser redirect (state is one-time secret; no bearer).
         "/api/assistant/google/callback",

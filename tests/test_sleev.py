@@ -295,11 +295,18 @@ def test_settings_rejects_remote_gateway_without_allow(
             await apply_settings_update(
                 {"sleev_gateway_url": "http://10.0.0.5:17321"}
             )
+        # Same-patch flag+URL must not honor the unsaved flag.
+        with pytest.raises(ValueError, match="loopback"):
+            await apply_settings_update(
+                {
+                    "sleev_allow_remote_gateway": True,
+                    "sleev_gateway_url": "http://10.0.0.5:17321",
+                }
+            )
+        flag = await apply_settings_update({"sleev_allow_remote_gateway": True})
+        assert flag.get("status") == "saved"
         out = await apply_settings_update(
-            {
-                "sleev_allow_remote_gateway": True,
-                "sleev_gateway_url": "http://10.0.0.5:17321",
-            }
+            {"sleev_gateway_url": "http://10.0.0.5:17321"}
         )
         assert out.get("status") == "saved"
         assert "sleev_gateway_url" in (out.get("changes") or [])

@@ -110,3 +110,47 @@ def test_pyproject_declares_remedy_mcp_script():
     text = (root / "pyproject.toml").read_text(encoding="utf-8")
     assert "remedy-mcp" in text
     assert "remedy.tools.mcp_server:main" in text
+
+
+def test_mcp_skill_run_rejects_jailbreak(tmp_path: Path, monkeypatch):
+    from remedy.models import Skill, SkillManifest, SkillStatus
+    from remedy.skills.registry import SkillRegistry
+
+    monkeypatch.setenv("REMEDY_MCP_ALLOW_RUN", "1")
+    skill_dir = tmp_path / "jail-skill"
+    (skill_dir / "scripts").mkdir(parents=True)
+    (skill_dir / "scripts" / "ok.py").write_text("print('ok')\n", encoding="utf-8")
+    (skill_dir / "SKILL.md").write_text("---\nname: jail-skill\n---\n", encoding="utf-8")
+
+    reg = SkillRegistry()
+    reg.register(
+        Skill(
+            manifest=SkillManifest(
+                name="jail-skill",
+                description="jail test",
+                status=SkillStatus.ACTIVE,
+                path=str(skill_dir / "SKILL.md"),
+            ),
+            instructions="# jail",
+            scripts=["scripts/ok.py"],
+            source_skill_dir=str(skill_dir),
+        )
+    )
+    srv = RemedyMCPServer()
+    srv._reg = reg
+
+    for bad in (r"C:\evil.py", r"..\evil.py", "scripts/../../evil.py"):
+        out = srv.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "tools/call",
+                "params": {
+                    "name": "remedy_skill_run",
+                    "arguments": {"name": "jail-skill", "script": bad},
+                },
+            }
+        )
+        text = out["result"]["content"][0]["text"]
+        assert "escapes" in text.lower() or "not found" in text.lower()
+        assert "pwn" not in text.lower()
