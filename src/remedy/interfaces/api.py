@@ -45,11 +45,20 @@ logger = logging.getLogger(__name__)
 
 def _is_client_gone(exc: BaseException) -> bool:
     """True when the HTTP client disconnected mid-request (not a server fault)."""
-    name = type(exc).__name__
-    if name in {"EndOfStream", "ClientDisconnect", "BrokenResourceError"}:
-        return True
-    low = name.lower()
-    return "endofstream" in low or "disconnect" in low
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        name = type(cur).__name__
+        if name in {"EndOfStream", "ClientDisconnect", "BrokenResourceError"}:
+            return True
+        if "no response returned" in str(cur).lower():
+            return True
+        low = name.lower()
+        if "endofstream" in low or "disconnect" in low:
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
 
 
 # Re-export models for existing `from remedy.interfaces.api import ChatRequest` callers.
@@ -463,7 +472,15 @@ def create_app(
                         "Desktop loads it automatically; CLI: REMEDY_API_KEY.",
                     },
                 )
-            return await call_next(request)
+            try:
+                return await call_next(request)
+            except Exception as exc:
+                if _is_client_gone(exc):
+                    return JSONResponse(
+                        status_code=404,
+                        content={"detail": "Request aborted"},
+                    )
+                raise
 
         @app.get("/api/auth/local-bootstrap")
         async def local_bootstrap(request: Request):

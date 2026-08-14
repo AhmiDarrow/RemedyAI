@@ -23,6 +23,9 @@ def test_client_gone_is_not_a_server_fault():
     from remedy.interfaces.api import _is_client_gone
 
     assert _is_client_gone(EndOfStream()) is True
+    wrapped = RuntimeError("No response returned.")
+    wrapped.__cause__ = EndOfStream()
+    assert _is_client_gone(wrapped) is True
     assert _is_client_gone(RuntimeError("boom")) is False
 
 
