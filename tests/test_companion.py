@@ -62,6 +62,43 @@ def test_snapshot_image_saved(tmp_path: Path):
     assert Path(snap["clipboard"]["path"]).is_file()
 
 
+def test_clipboard_read_image_no_file_read(tmp_path: Path, monkeypatch):
+    import asyncio
+
+    from remedy.core.agent_companion_tools import register_companion_tools
+
+    png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00"
+        b"\x00\x01\x01\x01\x00\x18\xdd\x8d\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    be = FakeCompanionBackend(image_png=png)
+    set_companion_backend(be)
+    monkeypatch.setattr(
+        "remedy.core.computer.vision_observe.decode_screenshot_brief",
+        lambda path, extra_question=None, timeout_s=25.0, **k: {
+            "ok": True,
+            "text": "A copied mockup.",
+            "error": "",
+        },
+    )
+    handlers: dict[str, object] = {}
+
+    class _Reg:
+        def register_builtin_handler(self, name, desc, fn, schema):
+            handlers[name] = fn
+
+    rt = SimpleNamespace(
+        tool_registry=_Reg(),
+        config=SimpleNamespace(home_dir=tmp_path),
+    )
+    register_companion_tools(rt)
+    text = asyncio.run(handlers["clipboard_read"]())
+    assert "file_read" not in text.lower()
+    assert "A copied mockup." in text
+    assert "do not ask" in text.lower()
+
+
 def test_clipboard_write_roundtrip():
     be = FakeCompanionBackend()
     set_companion_backend(be)

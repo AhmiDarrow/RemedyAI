@@ -493,21 +493,41 @@ def register_shell_tools(runtime: Any) -> None:
 
         try:
             if _argv:
+                from remedy.execution.host.runner import resolve_which
+
+                argv_use = [str(a) for a in _argv]
+                resolved_head = resolve_which(argv_use[0]) if argv_use else None
+                if resolved_head:
+                    argv_use[0] = resolved_head
                 prepared = PreparedCommand(
-                    argv=list(_argv),
-                    display=" ".join(str(a) for a in _argv),
+                    argv=argv_use,
+                    display=" ".join(argv_use),
                     kind="argv",
-                    ir=HostOp(kind="run", argv=list(_argv)),
+                    ir=HostOp(kind="run", argv=argv_use),
                     notes=["host_run argv"],
                 )
             else:
                 prepared = prepare_host_command(command, project_path=root)
         except ValueError as exc:
+            msg = str(exc)
+            untrans = "untranslatable" in msg.lower()
             return format_tool_error(
-                str(exc),
-                code="HOST_PREPARE",
+                msg,
+                code="HOST_UNTRANSLATABLE" if untrans else "HOST_PREPARE",
                 tool_name="bash_exec",
-                suggestion="Shrink the script or use file_write + run_python_file.",
+                suggestion=(
+                    "Use host_script for $(…) / backticks / ${} — do not exec that string."
+                    if untrans
+                    else "Shrink the script or use file_write + run_python_file."
+                ),
+            )
+        if prepared.kind == "noop":
+            note = "; ".join(prepared.notes[:4]) or "no-op on this host"
+            return (
+                "HOST_DIAG HOST_NOOP\n"
+                f"{note}\n"
+                "hint: chmod is ignored on Windows cmd. Skip it or use host_script "
+                "on a real POSIX host."
             )
         argv = prepared.argv
         sandbox = SubprocessSandbox(allowed_paths=roots or [root, cwd])
@@ -548,9 +568,15 @@ def register_shell_tools(runtime: Any) -> None:
                 access_scope=scope,
             )
 
-        result = await sandbox.execute(
-            argv, workdir=cwd, timeout_seconds=timeout, env=env
-        )
+        try:
+            result = await sandbox.execute(
+                argv, workdir=cwd, timeout_seconds=timeout, env=env
+            )
+        finally:
+            with suppress(Exception):
+                from remedy.execution.host.scriptfile import cleanup_host_script
+
+                cleanup_host_script(getattr(prepared, "script_path", None))
         parts = [
             f"exit_code={result.exit_code}",
             f"cwd={cwd}",
@@ -583,6 +609,15 @@ def register_shell_tools(runtime: Any) -> None:
                 timed_out=timed_out,
                 host=prepared.host,
             )
+            if diag.code == "HOST_NOT_FOUND":
+                with suppress(Exception):
+                    from remedy.execution.host.runner import resolve_which
+
+                    missing = (diag.message or "").rsplit(":", 1)[-1].strip().rstrip(".")
+                    alt = resolve_which(missing) if missing else None
+                    if alt:
+                        diag.rewritten = alt
+                        diag.hint = f"Retry host_run with {alt}"
             parts.append(diag.format_block())
             parts.append(
                 "Suggestion: Prefer host_run(argv=[...]) / host_mkdir / host_script. "
@@ -972,12 +1007,13 @@ def register_shell_tools(runtime: Any) -> None:
         return found
 
     async def host_script(
-        lang: str = "pwsh",
+        lang: str = "",
         body: str = "",
         timeout_seconds: float = 180.0,
         workdir: str = "",
     ) -> str:
         """Write a scratch script and run it with -File (never -Command)."""
+        from remedy.execution.host.runner import default_script_lang
         from remedy.execution.host.scriptfile import launch_script
 
         text = (body or "").strip()
@@ -988,7 +1024,7 @@ def register_shell_tools(runtime: Any) -> None:
                 tool_name="host_script",
                 suggestion="Pass the script body; it is written under .remedy-build/tmp/.",
             )
-        kind = (lang or "pwsh").strip().lower() or "pwsh"
+        kind = (lang or "").strip().lower() or default_script_lang()
         if kind in ("powershell", "ps1"):
             kind = "pwsh"
         if kind not in ("pwsh", "cmd", "python"):
@@ -1153,7 +1189,7 @@ def register_shell_tools(runtime: Any) -> None:
                 "lang": {
                     "type": "string",
                     "enum": ["pwsh", "cmd", "python"],
-                    "default": "pwsh",
+                    "description": "Interpreter. Default: pwsh if installed, else python/cmd.",
                 },
                 "body": {"type": "string", "description": "Script source"},
                 "timeout_seconds": {"type": "number", "default": 180},

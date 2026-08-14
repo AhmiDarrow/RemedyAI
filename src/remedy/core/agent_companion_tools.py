@@ -27,9 +27,18 @@ def register_companion_tools(runtime: Any) -> None:
             note = "\n…[truncated]" if clip.get("truncated") else ""
             return f"clipboard text ({clip.get('chars')} chars)\n{body}{note}"
         if kind == "image":
+            path = str(clip.get("path") or "")
+            from remedy.core.companion_observe import design_observe_path
+
+            res = design_observe_path(
+                runtime, path, hint="clipboard image", via="clipboard"
+            )
+            md = str(res.get("image_md") or "")
+            extra = f"\n{md}" if md else ""
             return (
-                f"clipboard image saved to {clip.get('path')}\n"
-                "file_read that path or attach it; do not ask what they copied."
+                f"clipboard image saved to {path}\n"
+                f"{res.get('message')}{extra}\n"
+                "Do not ask what they copied."
             )
         if kind == "files":
             paths = "\n".join(f"- {p}" for p in (clip.get("paths") or []))
@@ -51,13 +60,27 @@ def register_companion_tools(runtime: Any) -> None:
     async def companion_design(goal: str = "") -> str:
         """Design pass: gather screen/clipboard evidence + seed a critique checklist."""
         from remedy.core.companion import design_pass, format_companion_block
+        from remedy.core.companion_observe import design_observe_paths
 
         res = design_pass(runtime, goal=goal)
         block = format_companion_block(res.get("snapshot") or {})
         ev = res.get("evidence") or []
         ev_s = "\n".join(f"- {e}" for e in ev) or "- (no image/file yet — computer_screenshot if needed)"
+        seen = design_observe_paths(runtime, ev, hint=goal)
+        briefs = "\n\n".join(
+            "\n".join(
+                x
+                for x in (
+                    s.get("message") or "",
+                    s.get("image_md") or "",
+                )
+                if x
+            )
+            for s in seen
+        )
+        extra = f"\n\n{briefs}" if briefs else ""
         return (
-            f"{res.get('message')}\n\n{block}\n\nEvidence:\n{ev_s}\n\n"
+            f"{res.get('message')}\n\n{block}\n\nEvidence:\n{ev_s}{extra}\n\n"
             "Next: structured critique (goal, hierarchy, usability, top 3), "
             "then implement in real files and re-observe."
         )
@@ -102,15 +125,28 @@ def register_companion_tools(runtime: Any) -> None:
 
     async def companion_observe() -> str:
         """Screenshot the focused window / desktop after a UI change."""
-        from remedy.core.companion_observe import capture_foreground_png
+        from remedy.core.companion_observe import (
+            capture_foreground_png,
+            design_observe_path,
+        )
 
         cap = capture_foreground_png(runtime)
-        if cap.get("ok"):
+        if not cap.get("ok"):
             return (
-                f"observe OK via={cap.get('via')} path={cap.get('path')}\n"
-                "file_read the PNG or use vision. Fix only what you see."
+                f"observe MISS via={cap.get('via')}: {cap.get('error')}\n"
+                "You cannot see the UI yet. Do not draw ASCII or box layouts."
             )
-        return f"observe MISS via={cap.get('via')}: {cap.get('error')}"
+        res = design_observe_path(
+            runtime,
+            str(cap.get("path") or ""),
+            via=str(cap.get("via") or ""),
+        )
+        md = str(res.get("image_md") or "")
+        extra = f"\n{md}" if md else ""
+        return (
+            f"observe OK via={res.get('via')} path={res.get('path')}\n"
+            f"{res.get('message')}{extra}"
+        )
 
     async def companion_taste(fact: str = "") -> str:
         """Show or remember durable design taste (spacing, type, density)."""

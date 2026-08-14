@@ -296,7 +296,7 @@ async def apply_build_engine_after_batch(
                     with suppress(Exception):
                         from remedy.core.build_engine import can_machine_inject
                         from remedy.core.companion_observe import (
-                            format_observe_message,
+                            append_observe_messages,
                             maybe_visual_observe,
                         )
 
@@ -304,9 +304,9 @@ async def apply_build_engine_after_batch(
                             vis = maybe_visual_observe(runtime, bst)
                             if vis:
                                 can_machine_inject(bst, consume=True)
-                                vmsg = format_observe_message(vis)
-                                if vmsg is not None:
-                                    messages.append(vmsg)
+                                # Flush here: loop.py already flushed CUA shots
+                                # before this after-batch hook.
+                                append_observe_messages(runtime, vis, messages)
                                 rearm_agency()
                                 yield (
                                     "@@status:Build visual observe "

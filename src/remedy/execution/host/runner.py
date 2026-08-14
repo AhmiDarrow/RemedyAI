@@ -172,10 +172,26 @@ def prepare_host_command(
     tr = translate_posix_to_host(raw, host="cmd" if resolved_host != "posix" else "posix")
     text = tr.text
     notes = list(tr.notes)
+    if tr.untranslatable:
+        raise ValueError(
+            "untranslatable substitution $(…) / backticks / ${} — use host_script"
+        )
+    if tr.noop:
+        return PreparedCommand(
+            argv=[],
+            display=raw,
+            kind="noop",
+            ir=HostOp(kind="raw", text=raw, host=resolved_host),
+            notes=notes or ["chmod ignored on Windows host"],
+            host=resolved_host,
+        )
 
     if resolved_host != "posix" and looks_like_plain_argv(text):
         argv = coerce_argv(text)
         if argv:
+            resolved = resolve_which(argv[0])
+            if resolved:
+                argv[0] = resolved
             notes.append("plain argv — no shell")
             return PreparedCommand(
                 argv=argv,
@@ -253,14 +269,53 @@ def resolve_which(name: str) -> str | None:
     n = (name or "").strip()
     if not n:
         return None
+    key = n.lower().rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
+    if key.endswith(".exe"):
+        key = key[:-4]
+    try:
+        from remedy.execution.host.dialect import load_dialect
+
+        d = load_dialect()
+        mapped = {
+            "python": d.python_cmd,
+            "python3": d.python_cmd,
+            "py": d.python_cmd,
+            "git": d.git_cmd,
+            "rg": d.rg_cmd,
+            "pwsh": d.pwsh_cmd,
+        }
+        hit = (mapped.get(key) or "").strip()
+        if hit and Path(hit).is_file():
+            return hit
+    except Exception:
+        pass
     found = shutil.which(n)
     if found:
         return found
     if os.name == "nt" and not n.lower().endswith(".exe"):
-        return shutil.which(n + ".exe")
-    if n in {"python", "python3"}:
+        found = shutil.which(n + ".exe")
+        if found:
+            return found
+    if key in {"python", "python3"}:
         return sys.executable
     return None
+
+
+def default_script_lang(home: str | Path | None = None) -> str:
+    """pwsh when this PC has it; otherwise python (POSIX) or cmd."""
+    if os.name != "nt":
+        return "python"
+    try:
+        from remedy.execution.host.dialect import load_dialect
+
+        d = load_dialect(home)
+        if (d.pwsh_cmd or "").strip() and Path(d.pwsh_cmd).is_file():
+            return "pwsh"
+    except Exception:
+        pass
+    if shutil.which("pwsh") or shutil.which("powershell"):
+        return "pwsh"
+    return "cmd"
 
 
 def _is_ps_wrapper(command: str) -> bool:

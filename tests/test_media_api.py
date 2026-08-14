@@ -240,3 +240,39 @@ def test_media_refuses_auth_secret_paths(tmp_path: Path, monkeypatch):
         assert res.status_code in (403, 400), res.text
         body = (res.text or "").lower()
         assert "protected" in body or "secret" in body or "not allowed" in body or res.status_code == 403
+
+
+def test_media_rejects_svg(tmp_path: Path, monkeypatch):
+    from remedy.interfaces import api_support
+    from remedy.interfaces.api import create_app
+
+    svg = tmp_path / "icon.svg"
+    svg.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+        encoding="utf-8",
+    )
+    home = tmp_path / ".remedy"
+    home.mkdir()
+    cfg = {
+        "project_path": str(tmp_path),
+        "home_dir": str(home),
+        "access_scope": "project",
+        "approval_mode": "auto",
+    }
+    monkeypatch.setattr(api_support, "load_config", lambda: dict(cfg))
+    monkeypatch.setattr(
+        "remedy.interfaces.routes.workspace.load_config",
+        lambda: dict(cfg),
+    )
+    app = create_app()
+    client = TestClient(app)
+    token = None
+    try:
+        r = client.get("/api/auth/local-bootstrap")
+        if r.status_code == 200:
+            token = (r.json() or {}).get("token")
+    except Exception:
+        token = None
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    res = client.get("/api/media", params={"path": str(svg)}, headers=headers)
+    assert res.status_code in (415, 403), res.text

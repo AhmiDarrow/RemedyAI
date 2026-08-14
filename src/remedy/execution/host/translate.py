@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import os
 import re
+import sys
+from contextlib import suppress
 from dataclasses import dataclass, field
 
 # Operators we split on at top level (longest first).
@@ -18,19 +20,37 @@ _UNTRANSLATABLE = re.compile(
     r"(?<!\$)\$\([^)]+\)|`[^`]+`|\$\{[^}]+\}",
 )
 
-# PowerShell-shaped — do not POSIX-rewrite.
-_PS_HINT = re.compile(
+# Strong PowerShell-only signals. Do not use POSIX `test -eq` or `start-server`.
+_PS_STRONG = re.compile(
     r"(?is)("
-    r"\b(?:Get|Set|New|Remove|Invoke|Write|Select|Where|ForEach|Out|Add|Clear|"
-    r"ConvertTo|ConvertFrom|Import|Export|Start|Stop|Test|Measure)-[A-Za-z]"
-    r"|\$_\b"
+    r"\$_\b"
     r"|\$PSVersionTable"
     r"|\$env:[A-Za-z]"
     r"|\bparam\s*\("
     r"|@['\"]"
     r"|\b(?:powershell|pwsh)(?:\.exe)?\b"
-    r"|\s-(?:eq|ne|gt|lt|ge|le|match|like|contains|notmatch)\b"
     r")"
+)
+_PS_CMDLET = re.compile(
+    r"(?i)\b(?:Get|Set|New|Remove|Invoke|Write|Select|Where|ForEach|Out|"
+    r"Add|Clear|ConvertTo|ConvertFrom|Import|Export|Start|Stop|Test|Measure)"
+    r"-([A-Za-z][A-Za-z0-9]+)\b"
+)
+# Nouns that collide with POSIX / script names (start-server, start-dev).
+_PS_FILENAME_NOUNS = frozenset(
+    {
+        "server",
+        "dev",
+        "app",
+        "all",
+        "here",
+        "now",
+        "service",
+        "script",
+        "build",
+        "web",
+        "api",
+    }
 )
 
 
@@ -40,14 +60,25 @@ class TranslateResult:
     changed: bool = False
     notes: list[str] = field(default_factory=list)
     untranslatable: bool = False
+    noop: bool = False
 
 
 def looks_like_powershell(command: str) -> bool:
-    """True when the string is PowerShell, not POSIX/cmd."""
+    """True when the string is PowerShell, not POSIX/cmd or a script name."""
     cmd = (command or "").strip()
     if not cmd:
         return False
-    return bool(_PS_HINT.search(cmd))
+    if _PS_STRONG.search(cmd):
+        return True
+    for m in _PS_CMDLET.finditer(cmd):
+        if m.group(1).lower() in _PS_FILENAME_NOUNS:
+            continue
+        end = m.end()
+        trail = cmd[end : end + 8]
+        if re.match(r"\.(sh|bash|zsh|py|js|ts|exe|bat|cmd)\b", trail, re.I):
+            continue
+        return True
+    return False
 
 
 def translate_posix_to_host(
@@ -86,22 +117,33 @@ def translate_posix_to_host(
         )
 
     parts = _split_top_level(rewritten)
-    out_segs: list[str] = []
+    kept: list[tuple[str, str]] = []
     changed = rewritten != raw
     for seg, op in parts:
         new_seg, seg_notes = _rewrite_segment(seg)
+        notes.extend(seg_notes)
+        dropped_chmod = (not new_seg) and any(
+            n.startswith("chmod ignored") for n in seg_notes
+        )
+        if dropped_chmod:
+            changed = True
+            continue
         if new_seg != seg:
             changed = True
-        notes.extend(seg_notes)
-        out_segs.append(new_seg)
-        if op:
-            # Keep cmd-supported && || | ;  — map bash &> already handled
+        kept.append((new_seg, op))
+    if not kept:
+        if any(n.startswith("chmod ignored") for n in notes):
+            return TranslateResult(text=raw, changed=True, notes=notes, noop=True)
+        return TranslateResult(text="", changed=changed, notes=notes)
+    out_segs: list[str] = []
+    for i, (seg, op) in enumerate(kept):
+        out_segs.append(seg)
+        if op and i < len(kept) - 1:
             if op == ";":
                 out_segs.append(" & ")
             else:
                 out_segs.append(f" {op} " if op in ("&&", "||", "|", "&") else f" {op} ")
     text = "".join(out_segs).strip()
-    # Collapse leftover doubled spaces around ops
     text = re.sub(r"[ \t]{2,}", " ", text)
     return TranslateResult(text=text, changed=changed, notes=notes)
 
@@ -279,16 +321,14 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
         return f"where {name}", notes
 
     if head == "chmod":
-        # No-op on Windows for +x style agent noise
         notes.append("chmod ignored on Windows host")
-        return "cd .", notes
+        return "", notes
 
     if head == "grep":
         rg = _find_rg()
         pattern = ""
         grep_files: list[str] = []
         rest = [_unquote(t) for t in toks[1:]]
-        # drop common flags
         cleaned: list[str] = []
         for t in rest:
             if t.startswith("-") and t not in ("-e",):
@@ -299,12 +339,92 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
         if cleaned:
             pattern = cleaned[0]
             grep_files = cleaned[1:]
-        if rg and pattern:
+        if pattern and rg:
             notes.append("grep → rg")
             file_bits = " ".join(_q(f) for f in grep_files)
             return f'"{rg}" -n {_q(pattern)} {file_bits}'.strip(), notes
+        if pattern:
+            # Literal only — grep regex is not findstr.
+            notes.append("grep → findstr (literal)")
+            file_bits = " ".join(_q(f) for f in grep_files)
+            if file_bits:
+                return f"findstr /n /c:{_q(pattern)} {file_bits}".strip(), notes
+            return f"findstr /s /n /c:{_q(pattern)} *", notes
+
+    if head in ("head", "tail"):
+        n = 10
+        files: list[str] = []
+        i = 1
+        while i < len(toks):
+            t = toks[i]
+            if t in ("-n", "--lines") and i + 1 < len(toks):
+                with suppress(ValueError):
+                    n = max(1, int(_unquote(toks[i + 1])))
+                i += 2
+                continue
+            if t.startswith("-") and t[1:].isdigit():
+                n = max(1, int(t[1:]))
+                i += 1
+                continue
+            if not t.startswith("-"):
+                files.append(_unquote(t))
+            i += 1
+        if files:
+            notes.append(f"{head} → python slice")
+            return _python_line_slice(files[0], n, tail=(head == "tail")), notes
+
+    if head == "find":
+        name_pat = ""
+        start = "."
+        rest = [_unquote(t) for t in toks[1:]]
+        i = 0
+        while i < len(rest):
+            if rest[i] == "-name" and i + 1 < len(rest):
+                name_pat = rest[i + 1]
+                i += 2
+                continue
+            if not rest[i].startswith("-") and start == ".":
+                start = rest[i]
+            i += 1
+        if name_pat:
+            notes.append("find -name → dir /s /b")
+            win_start = start.replace("/", "\\").rstrip("\\") or "."
+            return f"dir /s /b {_q(win_start + '\\' + name_pat)}", notes
+
+    if head == "test" and len(toks) >= 3 and toks[1] in ("-f", "-e"):
+        notes.append("test -f → if exist")
+        return (
+            f"if exist {_q(_unquote(toks[2]))} (echo exists) else (exit /b 1)",
+            notes,
+        )
+    if head == "[" and "-f" in toks:
+        path_tok = ""
+        for i, t in enumerate(toks):
+            if t == "-f" and i + 1 < len(toks):
+                path_tok = _unquote(toks[i + 1]).rstrip("]")
+                break
+        if path_tok:
+            notes.append("[ -f → if exist")
+            return (
+                f"if exist {_q(path_tok)} (echo exists) else (exit /b 1)",
+                notes,
+            )
 
     return s, notes
+
+
+def _python_line_slice(path: str, n: int, *, tail: bool) -> str:
+    exe = sys.executable or "python"
+    win_p = path.replace("/", "\\") if ("/" in path or os.name == "nt") else path
+    # Keep the one-liner free of nested double quotes.
+    op = f"p[-{int(n)}:]" if tail else f"p[:{int(n)}]"
+    code = (
+        "p=open(r'''"
+        + win_p.replace("'''", "")
+        + "''',encoding='utf-8',errors='replace').read().splitlines(True);"
+        + f"print(''.join({op}),end='')"
+    )
+    return f"{_q(exe)} -c {_q(code)}"
 
 
 def _find_rg() -> str:
