@@ -15,6 +15,9 @@ from pathlib import Path
 from typing import Any
 
 _VITALS_NAME = "organism.json"
+# path -> (mtime, payload). Pulse/status polls hit RAM, not disk.
+_vitals_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_VITALS_CACHE_MAX = 8
 
 _DURABLE_RE = re.compile(
     r"(?i)\b("
@@ -25,8 +28,33 @@ _DURABLE_RE = re.compile(
 )
 
 
+def _lines_from_vitals(v: dict[str, Any]) -> list[str]:
+    out: list[str] = []
+    title = str(v.get("life_title") or "").strip()
+    if title:
+        nxt = str(v.get("next_action") or "").strip() or "name one concrete move"
+        out.append(f"Life: {title} — next: {nxt}"[:220])
+    did = str(v.get("last_did") or "").strip()
+    if did:
+        out.append(f"Last I did: {did}"[:180])
+    n = int(v.get("cas_count") or 0)
+    if n:
+        fact_n = int(v.get("cas_durable") or 0)
+        bit = f"Memory: {n} objects"
+        if fact_n:
+            bit += f" · {fact_n} durable"
+        out.append(bit)
+    return out[:3]
+
+
 def _life_memory_lines(home: Any, session_id: str, runtime: Any) -> list[str]:
-    """Life store + eternal CAS — the organism's long-term nervous system."""
+    """Life + CAS from vitals (hot). Store is a cold fallback only."""
+    _ = session_id
+    v = load_vitals(home)
+    if v.get("alive") or v.get("life_title") or v.get("cas_count"):
+        lined = _lines_from_vitals(v)
+        if lined:
+            return lined
     out: list[str] = []
     with suppress(Exception):
         from remedy.memory.life_goals import LifeGoalStore
@@ -39,37 +67,6 @@ def _life_memory_lines(home: Any, session_id: str, runtime: Any) -> list[str]:
         last = store.last_step()
         if last and last.get("did"):
             out.append(f"Last I did: {last['did']}"[:180])
-        # Promote durable life into the time crystal so it survives tab switches.
-        if g is not None:
-            with suppress(Exception):
-                from remedy.core.metabolism.time_crystal import get_time_crystal
-
-                crystal = get_time_crystal(session_id)
-                crystal.admit(
-                    f"Toward {g.title}: {g.next_action or 'name one move'}",
-                    horizon="life",
-                    source="life_store",
-                )
-                if last and last.get("did"):
-                    crystal.admit(
-                        f"Did: {last['did']}",
-                        horizon="life",
-                        source="life_drive",
-                    )
-    with suppress(Exception):
-        from remedy.memory.cas import ensure_cas
-
-        cas = ensure_cas(home)
-        if cas is not None:
-            snap = cas.snapshot()
-            n = int(snap.get("count") or 0)
-            if n:
-                kinds = snap.get("kinds") or {}
-                fact_n = int(kinds.get("fact") or 0) + int(kinds.get("life") or 0)
-                bit = f"Memory: {n} objects"
-                if fact_n:
-                    bit += f" · {fact_n} durable"
-                out.append(bit)
     if not out:
         with suppress(Exception):
             prof = None
@@ -84,6 +81,9 @@ def _life_memory_lines(home: Any, session_id: str, runtime: Any) -> list[str]:
     return out[:3]
 
 
+_recall_memo: tuple[str, str, float] | None = None
+
+
 def organism_recall_line(
     home: Any,
     query: str,
@@ -94,6 +94,14 @@ def organism_recall_line(
     q = (query or "").strip()
     if len(q) < 8:
         return ""
+    v = load_vitals(home)
+    if v and int(v.get("cas_durable") or 0) == 0 and int(v.get("cas_count") or 0) == 0:
+        return ""
+    qkey = q.lower()[:80]
+    global _recall_memo
+    memo = _recall_memo
+    if memo is not None and memo[0] == qkey and (time.time() - memo[2]) < 20.0:
+        return memo[1]
     from remedy.memory.cas import ensure_cas
 
     cas = ensure_cas(home)
@@ -107,7 +115,10 @@ def organism_recall_line(
             continue
         if skip and skip in body.lower():
             continue
-        return f"Recalled: {body[:140]}"
+        line = f"Recalled: {body[:140]}"
+        _recall_memo = (qkey, line, time.time())
+        return line
+    _recall_memo = (qkey, "", time.time())
     return ""
 
 
@@ -205,13 +216,26 @@ def _home_path(home: Any) -> Path:
 
 def load_vitals(home: Any = None) -> dict[str, Any]:
     path = _home_path(home) / _VITALS_NAME
-    if not path.is_file():
+    key = str(path)
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        _vitals_cache.pop(key, None)
         return {}
+    hit = _vitals_cache.get(key)
+    if hit is not None and hit[0] == mtime:
+        return dict(hit[1])
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        _vitals_cache.pop(key, None)
         return {}
-    return raw if isinstance(raw, dict) else {}
+    if not isinstance(raw, dict):
+        return {}
+    if len(_vitals_cache) >= _VITALS_CACHE_MAX and key not in _vitals_cache:
+        _vitals_cache.pop(next(iter(_vitals_cache)), None)
+    _vitals_cache[key] = (mtime, raw)
+    return dict(raw)
 
 
 def persist_vitals(vitals: dict[str, Any], home: Any = None) -> Path | None:
@@ -223,9 +247,32 @@ def persist_vitals(vitals: dict[str, Any], home: Any = None) -> Path | None:
             json.dumps(vitals, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = time.time()
+        _vitals_cache[str(path)] = (mtime, dict(vitals))
         return path
     except OSError:
         return None
+
+
+def status_pack(
+    home: Any = None,
+    runtime: Any = None,
+    *,
+    max_age: float = 60.0,
+) -> dict[str, Any]:
+    """Hot status: cached vitals, or one collect if stale. No extra store walks."""
+    v = load_vitals(home)
+    try:
+        age = time.time() - float(v.get("ts") or 0)
+    except (TypeError, ValueError):
+        age = 1e9
+    if not v.get("alive") or age > max_age:
+        v = collect_vitals(home, runtime=runtime)
+        persist_vitals(v, home)
+    return v
 
 
 def collect_vitals(
@@ -251,6 +298,8 @@ def collect_vitals(
         "last_cycle_at": 0.0,
         "last_wake_at": 0.0,
         "cycles": [],
+        "open_count": 0,
+        "life_folder": "",
     }
     with suppress(Exception):
         from remedy.memory.life_goals import LifeGoalStore
@@ -264,6 +313,11 @@ def collect_vitals(
         if last and last.get("did"):
             v["last_did"] = str(last["did"])[:200]
         v["stalled"] = _life_is_stalled(store)
+        v["open_count"] = store.open_count()
+    with suppress(Exception):
+        from remedy.memory.life_drive import resolve_life_notes_dir
+
+        v["life_folder"] = str(resolve_life_notes_dir(home))
     with suppress(Exception):
         from remedy.memory.cas import ensure_cas
 

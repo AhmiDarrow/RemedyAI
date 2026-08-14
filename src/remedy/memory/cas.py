@@ -104,6 +104,7 @@ class EternalCAS:
         self.path = self.dir / "objects.db"
         self._db: sqlite3.Connection | None = None
         self._lock = threading.RLock()
+        self._snap: dict[str, Any] | None = None
         self._open()
 
     def _open(self) -> None:
@@ -120,6 +121,9 @@ class EternalCAS:
                 with suppress(sqlite3.Error):
                     self._db.close()
                 self._db = None
+
+    def _invalidate_snap(self) -> None:
+        self._snap = None
 
     def _db_req(self) -> sqlite3.Connection:
         if self._db is None:
@@ -154,6 +158,7 @@ class EternalCAS:
                 ),
             )
             db.commit()
+            self._invalidate_snap()
         return key
 
     def get(self, key: str) -> MemoryItem | None:
@@ -185,6 +190,8 @@ class EternalCAS:
                 (k,),
             )
             self._db_req().commit()
+            if cur.rowcount:
+                self._invalidate_snap()
             return cur.rowcount > 0
 
     def fetch_hot(
@@ -313,6 +320,8 @@ class EternalCAS:
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
+            if self._snap is not None:
+                return dict(self._snap)
             db = self._db_req()
             n = int(db.execute("SELECT COUNT(*) FROM objects WHERE tombstone = 0").fetchone()[0])
             kinds: dict[str, int] = {}
@@ -320,7 +329,8 @@ class EternalCAS:
                 "SELECT kind, COUNT(*) AS c FROM objects WHERE tombstone = 0 GROUP BY kind"
             ):
                 kinds[str(row["kind"])] = int(row["c"])
-        return {"count": n, "kinds": kinds, "path": str(self.path)}
+            self._snap = {"count": n, "kinds": kinds, "path": str(self.path)}
+            return dict(self._snap)
 
     def _meta(self, key: str) -> str:
         with self._lock:
@@ -421,6 +431,7 @@ class EternalCAS:
             cur = db.execute("DELETE FROM objects WHERE tombstone = 1")
             purged = int(cur.rowcount or 0)
             db.commit()
+            self._invalidate_snap()
         self._set_meta("last_compact_at", str(now))
         return {"tombstoned": dropped, "purged": purged}
 

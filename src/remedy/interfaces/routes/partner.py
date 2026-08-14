@@ -389,12 +389,14 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         harness = "auto"
         scope = "project"
         brief_intent = ""
-        try:
-            from remedy.memory.life_goals import LifeGoalStore
+        organism: dict = {}
+        with suppress(Exception):
+            from remedy.core.metabolism.organism import status_pack
 
-            goals_open = LifeGoalStore(_life_home()).open_count()
-        except Exception:
-            goals_open = 0
+            organism = status_pack(_life_home(), runtime)
+            goals_open = int(organism.get("open_count") or 0)
+            if not goals_open and organism.get("life_title"):
+                goals_open = 1
         if runtime is not None:
             if goals_open == 0 and hasattr(runtime, "list_tasks"):
                 from remedy.models import TaskStatus
@@ -517,45 +519,13 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         except Exception:
             soma = {}
 
-        active_title = ""
-        next_action = ""
-        last_step = None
-        life_folder = ""
-        with suppress(Exception):
-            from remedy.memory.life_drive import visible_life_dir
-            from remedy.memory.life_goals import LifeGoalStore
-
-            st = LifeGoalStore(_life_home())
-            ag = st.active()
-            if ag is not None:
-                active_title = ag.title
-                next_action = ag.next_action
-            last_step = st.last_step()
-            life_folder = str(visible_life_dir(_life_home()))
-        cas_pub: dict = {}
-        with suppress(Exception):
-            from remedy.memory.cas import ensure_cas
-
-            cas = ensure_cas(_life_home())
-            if cas is not None:
-                snap = cas.snapshot()
-                cas_pub = {
-                    "count": snap.get("count") or 0,
-                    "kinds": snap.get("kinds") or {},
-                }
-        organism: dict = {}
-        with suppress(Exception):
-            import time as _time
-
-            from remedy.core.metabolism.organism import collect_vitals, load_vitals, persist_vitals
-
-            cached_v = load_vitals(_life_home())
-            age_v = _time.time() - float(cached_v.get("ts") or 0)
-            if cached_v.get("alive") and age_v < 60.0:
-                organism = cached_v
-            else:
-                organism = collect_vitals(_life_home(), runtime=runtime)
-                persist_vitals(organism, _life_home())
+        active_title = str(organism.get("life_title") or "")
+        next_action = str(organism.get("next_action") or "")
+        last_did = str(organism.get("last_did") or "")
+        last_step = {"did": last_did} if last_did else None
+        life_folder = str(organism.get("life_folder") or "")
+        cas_n = int(organism.get("cas_count") or 0)
+        cas_pub = {"count": cas_n} if cas_n else {}
         return {
             "pending_approvals": len(pending),
             "approval_mode": APPROVALS.mode,

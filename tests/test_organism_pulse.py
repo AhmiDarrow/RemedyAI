@@ -81,6 +81,9 @@ def test_organism_pulse_includes_life_and_cas(tmp_path: Path) -> None:
     configure_cas(home)
     LifeGoalStore(home).add("Finish the novel", next_action="Outline chapter 3")
     take_step(home)
+    from remedy.core.metabolism.organism import collect_vitals, persist_vitals
+
+    persist_vitals(collect_vitals(home), home)
     block = organism_pulse_block(
         session_id="life-org",
         tier=1,
@@ -198,6 +201,29 @@ def test_organism_cycle_writes_vitals(tmp_path: Path) -> None:
     assert out.get("vitals")
     configure_cas(None)
     reset_middleman_state()
+
+
+def test_pulse_reads_cached_vitals_not_store(tmp_path: Path) -> None:
+    from remedy.core.metabolism.organism import organism_pulse_block, persist_vitals
+
+    home = tmp_path / "fast"
+    home.mkdir()
+    persist_vitals(
+        {
+            "ts": 1,
+            "alive": True,
+            "life_title": "Cached goal",
+            "next_action": "Do the cached move",
+            "last_did": "Wrote the brief",
+            "cas_count": 7,
+            "cas_durable": 2,
+        },
+        home,
+    )
+    block = organism_pulse_block(session_id="f", tier=1, home=home, max_chars=900)
+    assert "Life: Cached goal" in block
+    assert "Memory: 7 objects" in block
+    assert "Wrote the brief" in block
 
 
 def test_wake_digest_reports_solo_cycle(tmp_path: Path) -> None:
