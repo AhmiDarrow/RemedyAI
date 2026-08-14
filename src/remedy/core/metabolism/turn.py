@@ -420,6 +420,18 @@ def end_turn_metabolism(
     return out
 
 
+def metabolism_poll_snapshot(session_id: str | None = None) -> dict[str, Any]:
+    """Status-bar counters only. No organ snapshots, no genome sorts."""
+    sid = (session_id or "").strip() or "_default"
+    ev = get_evidence_ledger(sid)
+    dec = get_decision_tracker(sid)
+    return {
+        "lean": True,
+        "evidence_units": int(getattr(ev, "evidence_units", 0) or 0),
+        "decision_units": int(getattr(dec, "decision_units", 0) or 0),
+    }
+
+
 def metabolism_public_snapshot(
     session_id: str | None = None,
     *,

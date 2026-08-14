@@ -328,19 +328,21 @@ def collect_vitals(
         "open_hint": "",
         "tray_tooltip": "",
     }
-    with suppress(Exception):
-        from remedy.memory.life_goals import LifeGoalStore
+    skip_life = bool(extras and extras.get("_skip_life"))
+    if not skip_life:
+        with suppress(Exception):
+            from remedy.memory.life_goals import LifeGoalStore
 
-        store = LifeGoalStore(home)
-        g = store.active()
-        if g is not None:
-            v["life_title"] = g.title
-            v["next_action"] = g.next_action
-        last = store.last_step()
-        if last and last.get("did"):
-            v["last_did"] = str(last["did"])[:200]
-        v["stalled"] = _life_is_stalled(store)
-        v["open_count"] = store.open_count()
+            store = LifeGoalStore(home)
+            g = store.active()
+            if g is not None:
+                v["life_title"] = g.title
+                v["next_action"] = g.next_action
+            last = store.last_step()
+            if last and last.get("did"):
+                v["last_did"] = str(last["did"])[:200]
+            v["stalled"] = _life_is_stalled(store)
+            v["open_count"] = store.open_count()
     if extras and extras.get("life_folder"):
         v["life_folder"] = str(extras["life_folder"])
     else:
@@ -395,6 +397,8 @@ def collect_vitals(
             v["dream"] = str(sf.future_dreams[0])[:140]
     if extras:
         for k, val in extras.items():
+            if str(k).startswith("_"):
+                continue
             if val is not None and k in v:
                 v[k] = val
     return v
@@ -463,7 +467,7 @@ def organism_cycle(
     with suppress(Exception):
         from remedy.memory.life_drive import drive_due, take_step
 
-        hours = 2.0 if (prev.get("stalled") or _peek_stalled(home)) else 4.0
+        hours = 2.0 if prev.get("stalled") else 4.0
         if drive_due(home, hours=hours):
             step = take_step(home)
             if step.get("ok"):
@@ -513,6 +517,11 @@ def organism_cycle(
     if row.get("recalled") or row.get("did") or row.get("compacted") or row.get("pulse"):
         extras["cycles"] = (list(extras.get("cycles") or []) + [row])[-8:]
     extras["last_cycle_at"] = now
+    if not out.get("life_step") and prev.get("life_title"):
+        extras["_skip_life"] = True
+        for k in ("life_title", "next_action", "last_did", "stalled", "open_count"):
+            if k not in extras and prev.get(k) is not None:
+                extras[k] = prev[k]
     vitals = collect_vitals(home, extras=extras, runtime=runtime)
     persist_vitals(vitals, home)
     out["vitals"] = vitals
