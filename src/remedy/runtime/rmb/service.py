@@ -2479,22 +2479,23 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     state = merge_state({**rmb_cfg, **disk})
     # Soft auto-heal: only when auto_start is explicitly on (never default on)
     ensure_rmb_watchdog(home)
+    running = is_running(home, force=True, require_http=True)
     if (
         not _user_stopped
         and state.get("enabled", True)
         and state.get("auto_start", False)
-        and not is_running(home, force=True, require_http=True)
+        and not running
         and not is_starting()
         and not is_loading(home)
     ):
         with contextlib.suppress(Exception):
             adopt_existing_host(home)
-        if not is_running(home, force=True, require_http=True):
+        running = is_running(home, force=True, require_http=True)
+        if not running:
             with contextlib.suppress(Exception):
                 wake_rmb_async(home)
     model_path = _resolve_model_path(state, home)
     binary = _find_llama_binary(state, home)
-    running = is_running(home, force=True, require_http=True)
     ready = running
     loading_now = bool(is_loading(home)) and not ready
     starting = is_starting() or loading_now

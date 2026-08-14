@@ -4,6 +4,19 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Desktop / live
+
+- Session create / update / delete now publish SSE so the sidebar can refresh
+  without a messenger event.
+- Volume-root `project_path` (`C:\\`, `/`) is treated as no project — no more
+  `C:` bucket in the session list; new sessions cannot bind the drive root.
+- Idle composer no longer shows a disabled Stop next to Send (Send is the
+  rightmost control).
+- Build checklist GET no longer falls back to another tab’s in-memory todos
+  when the session has no project / a volume-root project.
+- `GET /api/rmb/status` probes the host once per call instead of three HTTP
+  health checks (still slow if llama-server is mid-timeout).
+
 ### Security
 
 - Agent `update_settings` requires approval for a foreign `llm_base_url`,

@@ -49,6 +49,29 @@ def test_create_explicit_no_project_does_not_inherit(client):
     assert body.get("project_path") in (None, "", ".")
 
 
+def test_create_volume_root_is_no_project(client):
+    c, _ = client
+    r = c.post("/api/sessions", json={"title": "Drive", "project_path": "C:\\"})
+    assert r.status_code == 200
+    assert r.json().get("project_path") in (None, "", ".")
+
+
+def test_create_publishes_session_created(client):
+    from remedy.interfaces.session_events import get_session_event_hub, reset_session_event_hub
+
+    reset_session_event_hub()
+    hub = get_session_event_hub()
+    q = asyncio.run(hub.subscribe())
+    c, _ = client
+    r = c.post("/api/sessions", json={"title": "Ping", "project_path": ""})
+    assert r.status_code == 200
+    ev = asyncio.run(asyncio.wait_for(q.get(), timeout=2))
+    assert ev is not None
+    assert ev.type == "session_created"
+    assert ev.session_id == r.json()["id"]
+    asyncio.run(hub.unsubscribe(q))
+
+
 def test_create_empty_project_stays_root_even_with_global_default(
     store: MemoryStore, tmp_path: Path, monkeypatch
 ):
@@ -265,3 +288,31 @@ def test_session_todos_endpoint(client):
     done = c.get(f"/api/sessions/{sid}/todos")
     assert done.status_code == 200
     assert done.json()["todos"] == []
+
+
+def test_session_todos_do_not_leak_from_runtime_cache(client):
+    """Another tab with no project must not inherit the last turn's checklist."""
+    c, tmp = client
+    proj = tmp / "OwnerProj"
+    proj.mkdir()
+    owner = c.post("/api/sessions", json={"title": "owner", "project_path": str(proj)})
+    other = c.post("/api/sessions", json={"title": "other", "project_path": "C:\\"})
+    assert owner.status_code == 200 and other.status_code == 200
+    rt = SimpleNamespace(
+        effective_project_path=lambda: proj,
+        config=SimpleNamespace(home_dir=tmp),
+        _build_todos=[
+            type("T", (), {"id": "x", "content": "secret checklist", "status": "in_progress"})()
+        ],
+    )
+    upsert_todos(
+        rt,
+        [{"id": "x", "content": "secret checklist", "status": "in_progress"}],
+        merge=False,
+        root=proj,
+    )
+    leaked = c.get(f"/api/sessions/{other.json()['id']}/todos")
+    assert leaked.status_code == 200
+    assert leaked.json()["todos"] == []
+    mine = c.get(f"/api/sessions/{owner.json()['id']}/todos")
+    assert any(t.get("content") == "secret checklist" for t in mine.json()["todos"])

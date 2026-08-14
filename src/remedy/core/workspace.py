@@ -30,15 +30,42 @@ _SKIP_DIR_NAMES = {
 }
 
 
+def is_volume_root_path(raw: str | Path | None) -> bool:
+    """True for drive / filesystem roots (``C:\\``, ``C:``, ``/``).
+
+    Those are not project folders — treating them as one made the sidebar
+    grow a ``C:`` bucket and the files jail clamp to home anyway.
+    """
+    if raw is None:
+        return False
+    text = str(raw).strip()
+    if not text:
+        return False
+    if text in ("/", "\\"):
+        return True
+    if len(text) <= 3 and text[0].isalpha() and text[1:2] == ":":
+        rest = text[2:].strip("\\/")
+        if not rest:
+            return True
+    try:
+        path = Path(text).expanduser().resolve()
+    except OSError:
+        try:
+            path = Path(text).expanduser().absolute()
+        except OSError:
+            return False
+    return path.parent == path
+
+
 def is_unset_project_path(raw: str | Path | None) -> bool:
     """True when the user has not chosen a real project folder.
 
-    Empty / missing / ``.`` means “no project” — not “current process cwd”.
+    Empty / missing / ``.`` / a volume root means “no project” — not cwd.
     """
     if raw is None:
         return True
     text = str(raw).strip()
-    return not text or text in (".", "./")
+    return not text or text in (".", "./") or is_volume_root_path(text)
 
 
 def resolve_project_path(raw: str | None, *, fallback: Path | None = None) -> Path:

@@ -1400,25 +1400,25 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         >
           <IconSend size={16} />
         </button>
+        {streaming ? (
         <button
           type="button"
           onClick={onStop}
-          disabled={!streaming}
-          title={streaming ? 'Stop generation' : 'Stop'}
+          title="Stop generation"
           aria-label="Stop"
           className="flex items-center justify-center rounded-xl flex-shrink-0 transition-colors"
           style={{
             width: 40,
             height: 40,
-            background: streaming ? 'var(--error)' : 'var(--bg-tertiary)',
-            color: streaming ? '#fff' : 'var(--text-muted)',
-            border: streaming ? 'none' : '1px solid var(--border)',
-            cursor: streaming ? 'pointer' : 'not-allowed',
-            opacity: streaming ? 1 : 0.55,
+            background: 'var(--error)',
+            color: '#fff',
+            border: 'none',
+            cursor: 'pointer',
           }}
         >
           <IconStop size={14} />
         </button>
+        ) : null}
       </div>
       <div className="composer-hint-row">
         <span className="truncate min-w-0">
