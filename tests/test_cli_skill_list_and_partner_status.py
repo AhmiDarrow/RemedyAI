@@ -177,6 +177,7 @@ def test_partner_status_session_id_scopes_metabolism(tmp_path):
         assert r.status_code == 200
         data = r.json()
         assert data.get("session_id") == sid_a
+        assert data.get("version")
         meta = data.get("metabolism") or {}
         assert meta.get("lean") is True
         q = data.get("session_quality") or {}

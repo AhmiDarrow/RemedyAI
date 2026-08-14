@@ -13,6 +13,24 @@ _SWARM_POLL_TTL = 12.0
 _CFG_SYNC_TTL = 30.0
 _poll_swarm: dict = {"ts": 0.0, "swarm": {}, "health": {}}
 _cfg_sync_at = 0.0
+_REMEDY_VERSION = ""
+
+
+def _remedy_version() -> str:
+    global _REMEDY_VERSION
+    if _REMEDY_VERSION:
+        return _REMEDY_VERSION
+    ver = "0.24.0"
+    with suppress(Exception):
+        from importlib.metadata import version
+
+        ver = version("remedy-ai")
+    with suppress(Exception):
+        import remedy
+
+        ver = str(getattr(remedy, "__version__", ver) or ver)
+    _REMEDY_VERSION = ver
+    return ver
 
 
 class ApprovalResolveRequest(BaseModel):
@@ -409,7 +427,11 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             if not goals_open and organism.get("life_title"):
                 goals_open = 1
         if runtime is not None:
-            if goals_open == 0 and hasattr(runtime, "list_tasks"):
+            if (
+                goals_open == 0
+                and not organism.get("alive")
+                and hasattr(runtime, "list_tasks")
+            ):
                 from remedy.models import TaskStatus
 
                 goals_open = len(
@@ -501,6 +523,10 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
 
             # Poll: EU/DU only. Full organs stay on GET /api/partner/metabolism.
             metabolism = metabolism_poll_snapshot(str(sid_key))
+            qmeta = (quality or {}).get("metabolism") if isinstance(quality, dict) else None
+            if isinstance(qmeta, dict) and qmeta.get("last_tier") is not None:
+                metabolism["tier"] = qmeta.get("last_tier")
+                metabolism["tier_label"] = f"L{qmeta.get('last_tier')}"
         except Exception:
             metabolism = {}
 
@@ -547,6 +573,7 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         cas_n = int(organism.get("cas_count") or 0)
         cas_pub = {"count": cas_n} if cas_n else {}
         return {
+            "version": _remedy_version(),
             "pending_approvals": len(pending),
             "approval_mode": APPROVALS.mode,
             "open_goals": goals_open,

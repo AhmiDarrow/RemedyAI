@@ -641,16 +641,24 @@ async def run_unattended_improve(
     return result
 
 
+_last_skill_tick = 0.0
+_SKILL_TICK_TTL = 600.0
+
+
 def _organism_tick(runtime: Any, *, home: str | Path | None) -> dict[str, Any]:
     """Cheap unattended learning: promote/prune skills, dream, persist organs."""
     out: dict[str, Any] = {"skills_refined": 0, "dreamed": False}
-    with suppress(Exception):
-        loop = getattr(runtime, "_get_learning_loop", None)
-        ll = loop() if callable(loop) else getattr(runtime, "learning_loop", None)
-        if ll is not None and hasattr(ll, "tick_learned_skills"):
-            changed = ll.tick_learned_skills() or []
-            out["skills_refined"] = len(changed)
-            out["skill_changes"] = changed[:12]
+    global _last_skill_tick
+    now_sk = time.time()
+    if now_sk - _last_skill_tick >= _SKILL_TICK_TTL:
+        with suppress(Exception):
+            loop = getattr(runtime, "_get_learning_loop", None)
+            ll = loop() if callable(loop) else getattr(runtime, "learning_loop", None)
+            if ll is not None and hasattr(ll, "tick_learned_skills"):
+                changed = ll.tick_learned_skills() or []
+                out["skills_refined"] = len(changed)
+                out["skill_changes"] = changed[:12]
+                _last_skill_tick = now_sk
     with suppress(Exception):
         from remedy.core.metabolism.cua_macros import get_cua_macros
         from remedy.core.metabolism.skill_genome import get_skill_genome
