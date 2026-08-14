@@ -472,6 +472,22 @@ def configure_cas(home: str | Path | None) -> EternalCAS | None:
         return _cas
 
 
+def ensure_cas(home: str | Path | None = None) -> EternalCAS | None:
+    """Return the bound CAS. Opens *home* only outside pytest.
+
+    Tests must call :func:`configure_cas` explicitly so they never touch
+    the real ``~/.remedy/cas``.
+    """
+    existing = get_cas()
+    if existing is not None:
+        return existing
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
+    if home:
+        return configure_cas(home)
+    return get_cas()
+
+
 def get_cas() -> EternalCAS | None:
     """Process-wide CAS. None in pytest unless :func:`configure_cas` was called."""
     global _cas

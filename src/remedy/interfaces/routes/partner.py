@@ -532,6 +532,17 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                 next_action = ag.next_action
             last_step = st.last_step()
             life_folder = str(visible_life_dir(_life_home()))
+        cas_pub: dict = {}
+        with suppress(Exception):
+            from remedy.memory.cas import ensure_cas
+
+            cas = ensure_cas(_life_home())
+            if cas is not None:
+                snap = cas.snapshot()
+                cas_pub = {
+                    "count": snap.get("count") or 0,
+                    "kinds": snap.get("kinds") or {},
+                }
         return {
             "pending_approvals": len(pending),
             "approval_mode": APPROVALS.mode,
@@ -540,6 +551,7 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             "next_action": next_action or None,
             "last_step": last_step,
             "life_folder": life_folder or None,
+            "cas": cas_pub or None,
             "access_scope": scope,
             "harness_mode": harness,
             "brief_intent": brief_intent[:200],

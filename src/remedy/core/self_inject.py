@@ -693,14 +693,19 @@ def _organism_tick(runtime: Any, *, home: str | Path | None) -> dict[str, Any]:
                     "next": step.get("next"),
                 }
     with suppress(Exception):
-        from remedy.memory.cas import configure_cas, get_cas
+        from remedy.memory.cas import ensure_cas
 
-        cas = get_cas()
-        if cas is None and home:
-            cas = configure_cas(home)
-        if cas is not None and cas.due_compact():
-            out["cas_compact"] = cas.compact()
-            out["cas"] = cas.snapshot()
+        cas = ensure_cas(home)
+        if cas is not None:
+            if cas.due_compact():
+                out["cas_compact"] = cas.compact()
+            out["cas"] = {k: v for k, v in cas.snapshot().items() if k != "path"}
+    with suppress(Exception):
+        from remedy.core.metabolism.time_crystal import get_time_crystal
+
+        crystal = get_time_crystal("life")
+        if home:
+            crystal.persist(home)
     return out
 
 

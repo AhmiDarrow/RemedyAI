@@ -69,6 +69,31 @@ def test_immune_pulse_when_verify_flagged() -> None:
     assert "Immune" in out
 
 
+def test_organism_pulse_includes_life_and_cas(tmp_path: Path) -> None:
+    from remedy.memory.cas import configure_cas
+    from remedy.memory.life_drive import take_step
+    from remedy.memory.life_goals import LifeGoalStore
+    from remedy.memory.middleman import reset_middleman_state
+
+    home = tmp_path / "org"
+    home.mkdir()
+    reset_middleman_state()
+    configure_cas(home)
+    LifeGoalStore(home).add("Finish the novel", next_action="Outline chapter 3")
+    take_step(home)
+    block = organism_pulse_block(
+        session_id="life-org",
+        tier=1,
+        home=home,
+        max_chars=1200,
+    )
+    assert "Life: Finish the novel" in block
+    assert "Outline" in block or "Last I did" in block
+    assert "Memory:" in block
+    configure_cas(None)
+    reset_middleman_state()
+
+
 def test_begin_turn_includes_organism_inject(tmp_path: Path) -> None:
     home = tmp_path / "h2"
     home.mkdir()

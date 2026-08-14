@@ -107,6 +107,7 @@ export interface PartnerStatus {
   next_action?: string | null
   last_step?: LifeLastStep | null
   life_folder?: string | null
+  cas?: { count?: number; kinds?: Record<string, number> } | null
   access_scope: string
   harness_mode: string
   brief_intent: string
