@@ -90,9 +90,8 @@ async def apply_build_engine_after_batch(
                 )
 
                 driven = None
-                from remedy.core.build_engine import can_machine_inject
-
                 from remedy.core.build_delta import allow_background_drive
+                from remedy.core.build_engine import can_machine_inject
 
                 if allow_background_drive(bst) and can_machine_inject(
                     bst, consume=False
@@ -337,7 +336,6 @@ async def apply_build_engine_after_batch(
                     # C: schedule repair queue from error vector
                     with suppress(Exception):
                         from remedy.core.build_repair_queue import (
-                            format_repair_queue_message,
                             queue_from_error_vector,
                         )
 

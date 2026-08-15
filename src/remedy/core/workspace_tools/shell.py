@@ -457,15 +457,14 @@ def register_shell_tools(runtime: Any) -> None:
                     tool_name="bash_exec",
                     suggestion="Do not git push, publish, or run arbitrary shell.",
                 )
-        from remedy.core.shell_write_jail import (
-            extract_script_launch_targets,
-            scan_script_source_for_outside_writes,
-        )
-
         # Scan bodies of scripts that are *launched* (node/pwsh/bat/.py), not
         # every .py path mentioned as an arg (pytest tests/foo.py must run).
         # Full: auth-only (project_bound=False) — skip dest/home regex walk.
         from remedy.core.approvals import is_full_approval
+        from remedy.core.shell_write_jail import (
+            extract_script_launch_targets,
+            scan_script_source_for_outside_writes,
+        )
 
         _scan_bound = bound and not is_full_approval()
         _launch_argv = [str(a) for a in _argv] if _argv else None
@@ -833,9 +832,8 @@ def register_shell_tools(runtime: Any) -> None:
                 tool_name="run_python_file",
                 suggestion="Write and run scripts under the project folder.",
             )
-        from remedy.core.shell_write_jail import scan_script_source_for_outside_writes
-
         from remedy.core.approvals import is_full_approval
+        from remedy.core.shell_write_jail import scan_script_source_for_outside_writes
 
         src_hit = scan_script_source_for_outside_writes(
             target,
