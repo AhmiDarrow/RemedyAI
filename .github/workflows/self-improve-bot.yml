@@ -62,16 +62,6 @@ jobs:
           if [ "$FROM_FORK" = "true" ]; then extra="--fork"; fi
           uv run python scripts/self_improve_security_scan.py --base "origin/${{ github.base_ref }}" $extra
 
-      - name: Security pytest subset
-        run: >
-          uv sync --dev &&
-          uv run pytest -q --tb=short
-          tests/test_web_fetch_ssrf.py
-          tests/test_secret_store.py
-          tests/test_approvals_power.py
-          tests/test_self_improve_pr.py
-          tests/test_self_inject_draft.py
-
   comment:
     name: Post review checklist
     runs-on: ubuntu-latest
@@ -90,7 +80,7 @@ jobs:
               '## Self-improve bot',
               '',
               `- Pass 1 path/secrets: **${p1}**`,
-              `- Pass 2 behavior + security tests: **${p2}**`,
+              `- Pass 2 behavior scan: **${p2}**`,
               `- From fork: **${fork}**`,
               '',
               'This bot **does not merge**. Owner (`CODEOWNERS`) must review.',

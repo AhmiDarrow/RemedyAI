@@ -351,11 +351,13 @@ WebUI is the **same SPA** as desktop (`desktop/dist`). After UI changes:
 ```bash
 git clone https://github.com/AhmiDarrow/RemedyAI.git && cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # 560+ tests; currently ~2318
-cd desktop && npm test && npm run build
 python scripts/check_docs.py
+cd desktop && npm ci && npm run build
 cd desktop && npm run tauri:dev   # full shell (set REMEDY_DEV_ROOT to repo)
 ```
+
+The public tree is the compile/release set. `tests/`, live/soak scripts, and
+desktop `*.test.ts` stay on the maintainer clone (gitignored), not on GitHub.
 
 Release: `python scripts/sync_version.py X.Y.Z` · `python scripts/sync_help_manual.py` · `python scripts/check_docs.py` · tag `vX.Y.Z` · GitHub Actions.  
 Signing: [AGENTS.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/AGENTS.md) · [WINDOWS_SIGNING.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/WINDOWS_SIGNING.md)

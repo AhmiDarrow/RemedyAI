@@ -333,6 +333,10 @@ def _collect_pytest_count() -> int | None:
 def check_test_count_claim() -> CheckResult:
     """README test-count claim must stay near live pytest collection count.
 
+    Public tree does not ship tests/. Skip when the suite is absent or the
+    README no longer claims a count. Local clones that keep tests/ still
+    validate the claim when present.
+
     Accepts either:
       (560+ tests; currently ~561)
       (560+ tests)
@@ -340,6 +344,12 @@ def check_test_count_claim() -> CheckResult:
     (forces a README bump after large suite growth/shrink).
     """
     msgs: list[str] = []
+    if not (ROOT / "tests").is_dir():
+        return CheckResult(
+            "test-count",
+            True,
+            ["skipped: tests/ not in this tree (local-only)"],
+        )
     if not README.is_file():
         return CheckResult("test-count", False, ["README.md missing"])
 
@@ -353,12 +363,8 @@ def check_test_count_claim() -> CheckResult:
     if not floor_m:
         return CheckResult(
             "test-count",
-            False,
-            [
-                "README has no 'N+ tests' claim (expected near `uv run pytest` "
-                "in Development section)"
-            ],
-            'Add e.g. "560+ tests; currently ~561" next to the pytest command',
+            True,
+            ["skipped: README has no public test-count claim"],
         )
 
     floor = int(floor_m.group(1))
