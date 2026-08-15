@@ -299,9 +299,8 @@ def apply_auto_harness_send_policy(
     pre_tier: int | None = None
     with suppress(Exception):
         from remedy.core.metabolism.tier import TurnTier, classify_turn_tier
-        from remedy.core.turn_context import current_plan_mode
-
         from remedy.core.turn_context import (
+            current_plan_mode,
             turn_browse,
             turn_has_attachments,
             turn_pure_action,
