@@ -8,6 +8,31 @@ Durable facts for coding agents working in this repo. Prefer this file + `docs/`
 - **`C:\Users\Administrator\Remedy` is a different product** (machine-only / RDNA). Not a branch of this tree; different bios home (`~/.remedyai` vs `~/.remedy` here). Do not treat one as the archive/replacement of the other.
 - See `ARCHIVE.md` for the sibling-path note (filename is historical; content is status, not “frozen archive”).
 
+## Platforms (Windows + Linux)
+
+One product, one `~/.remedy` home, one local API (`127.0.0.1:7400`). **v0.26.0+**
+is the first true Windows **and** Linux desktop (including **WSLg**). Do not
+treat Linux as “CLI only” or assume every chrome rule is Windows.
+
+| | **Windows** | **Linux** (native + WSLg) |
+|--|-------------|---------------------------|
+| **Packaged app** | NSIS `Remedy.Desktop_{ver}_x64-setup.exe` | `.deb` `Remedy.Desktop_{ver}_amd64.deb` + AppImage `Remedy.Desktop_{ver}_amd64.AppImage` |
+| **Sidecar binary** | `desktop/bin/remedy-desktop.exe` | `desktop/bin/remedy-desktop` (no `.exe`; do not list the Windows sidecar as a Linux resource) |
+| **Tauri overlay** | `desktop/src-tauri/tauri.windows.conf.json` | `desktop/src-tauri/tauri.linux.conf.json` (deb Depends: WebKitGTK / GTK / AppIndicator / Vulkan / OpenMP) |
+| **Close ✕** | Hide to **tray** (API stays warm). Quit only from tray | **Minimize to taskbar** (WSLg has no tray). No “Start with Windows” |
+| **Maximize** | OS work area | Work area of **the monitor the window is on** (WSLg must not use the Windows display as the Linux work area) |
+| **Webview** | WebView2 | WebKitGTK 4.1 |
+| **First-run llama.cpp** | Windows zip (`win-*` runtime id) | Ubuntu `tar.gz` (`ubuntu-x64` / `ubuntu-vulkan-x64`); `chmod` `llama-server`. Shared homes remap leftover `win-*` ids |
+| **In-app auto-update** | minisign `latest.json` `platforms.windows-x86_64` | Packaged releases exist; **do not** assume the Windows updater URL applies |
+
+Owner install notes: `docs/manual/01-install-windows.md` · `docs/manual/01-install-linux.md`.
+
+**When you touch desktop / sidecar / first-run / release:** reason about **both**
+OS jobs in `desktop-release.yml` (`build-sidecar` + `build-tauri` **and**
+`build-sidecar-linux` + `build-tauri-linux`). A Windows-only resource path
+(`../bin/remedy-desktop.exe` on Linux) or a Windows-only llama zip on Linux
+is a ship-blocker.
+
 ## Product feel (UI / UX bar)
 
 Every desktop and settings change should feel:
@@ -90,8 +115,8 @@ One sentence: *what user-visible or API-visible behavior changes?*
 |---------|---------------|---------------------|
 | **Chat / ReAct / tools** | `src/remedy/core/`, tools, sessions routes | Concurrent streams, session LLM bind, messenger turns |
 | **Messengers / gateway** | `src/remedy/gateway/` | Dual pollers, desktop SSE, outbound mirror, allowlists |
-| **Desktop shell / chrome** | `desktop/src/components/TitleBar*`, `App.tsx`, Tauri `lib.rs`, `tauri.conf` | Window controls, tray, close-to-tray, drag/hit-test |
-| **Workspace rails** | slides, Browser, Terminal, Files | Popout/fullscreen z-index, WebView2 child bounds |
+| **Desktop shell / chrome** | `desktop/src/components/TitleBar*`, `App.tsx`, Tauri `lib.rs`, `tauri.conf` + `tauri.windows.conf.json` / `tauri.linux.conf.json` | Window controls, **Windows tray vs Linux taskbar**, drag/hit-test |
+| **Workspace rails** | slides, Browser, Terminal, Files | Popout/fullscreen z-index, WebView2 **or** WebKitGTK child bounds |
 | **Settings / secrets** | settings routes, secret store, providers | Provider switch mid-session, keys, setup gate |
 | **Docs / help only** | `docs/manual/`, help articles | Version bump **not** required; still sync help copies |
 | **Release / packaging** | `scripts/sync_version.py`, CI, installers | All version surfaces + `latest.json` naming |
@@ -101,8 +126,8 @@ One sentence: *what user-visible or API-visible behavior changes?*
 1. **Same SPA?** Desktop + WebUI share `desktop/src/` — UI change may need `npm run build` + **serve restart** for WebUI.  
 2. **Two processes?** Sidecar + UI, or dual `serve` / Telegram pollers — avoid dual ownership of bot tokens or ports.  
 3. **Cross-path behavior?** Messenger turn vs desktop stream vs legacy chat stream — session model/provider must match.  
-4. **Windows-only?** Paths, hidden processes, DPAPI secrets, WebView2, NSIS — run or reason about Windows CI subset.  
-5. **Hard to unit-test?** Title bar, tray, embedded browser, native drag — schedule a **manual smoke** (below).  
+4. **OS-specific?** Windows: paths, hidden processes, DPAPI, WebView2, NSIS. Linux: WebKitGTK/GTK deps, AppImage/deb, no tray, llama `tar.gz` + chmod, no `.exe` sidecar resource. Run or reason about **both** CI subsets.  
+5. **Hard to unit-test?** Title bar, tray/taskbar, embedded browser, native drag — schedule a **manual smoke** (below) on the OS you changed.  
 6. **Architecture traps?** Prefer durable design over band-aids for known failure classes (e.g. OS decorations for window buttons, not WebView fake chrome).
 
 ### 4. Required checks by surface (minimum)
@@ -114,7 +139,7 @@ Always when shipping runtime/UI: full `pytest` + when desktop touched: `cd deskt
 | Gateway / Telegram | Poll lock acquire in logs; single instance; inbound + desktop→outbound; no 409 spam |
 | Session stream / LLM bind | Provider switch on one tab doesn’t poison another; messenger session uses session provider |
 | `App.tsx` / SSE / messages | Streaming not force-reloaded mid-turn; session list still refreshes |
-| Title bar / `decorations` / window cmds | **OS** min/max/close still work; tray + close-to-tray + quit warning |
+| Title bar / `decorations` / window cmds | **OS** min/max/close still work. Windows: tray + close-to-tray + quit. Linux: ✕ minimizes to taskbar |
 | Browser slide / `browser_host` | Auto-load or Go works; ↗ external open; popout chrome still clickable |
 | Settings / secrets | Save settings, reconnect, no plaintext tokens in config |
 | Manuals | `sync_help_manual.py` + `check_docs.py` |
@@ -128,7 +153,7 @@ Run when the change touches shell, chrome, messengers, or browser. **One** clean
 |---|-------|------|
 | 1 | Launch → server ready | Status connected |
 | 2 | New chat → short reply | Stream completes |
-| 3 | Min / max / restore / **✕ → tray** (Quit only from tray) | Always-ready chrome works every time |
+| 3 | Min / max / restore / close | **Windows:** ✕ → tray (Quit only from tray). **Linux / WSLg:** ✕ → taskbar; maximize stays on that monitor |
 | 4 | Open Browser rail | Page loads (or clear error + ↗ works) |
 | 5 | If messengers enabled | Telegram in → desktop; desktop reply → Telegram |
 | 6 | Quit fully → relaunch | No dual serve / dual poller |
@@ -143,31 +168,35 @@ add a targeted test or a one-line note in the commit body (`Risk: … / Smoke: �
 
 ### 7. What CI does *not* prove
 
-CI does not click the title bar, drive Telegram, or exercise WebView2 multiwebview
-on a real GPU. Treat green CI as necessary, not sufficient, for those zones.
+CI does not click the title bar, drive Telegram, or exercise WebView2 / WebKitGTK
+multiwebview on a real GPU. Treat green CI as necessary, not sufficient, for
+those zones. Desktop-release **does** build Windows NSIS **and** Linux `.deb` +
+AppImage — a red Linux job is a failed release even if Windows is green.
 
 ## Desktop installer / auto-update naming
 
-**Critical for in-app updates.** The signed `latest.json` URL must match the GitHub Release asset name **exactly**.
+**Critical for in-app updates (Windows).** The signed `latest.json` URL must match the GitHub Release asset name **exactly**. Linux packages ship on the **same** tag; they are not in `latest.json` today.
 
 | Item | Canonical form |
 |------|----------------|
-| Git tag | `v{X.Y.Z}` (e.g. `v0.14.4`) |
+| Git tag | `v{X.Y.Z}` (e.g. `v0.26.2`) |
 | Release title | `Remedy Desktop v{X.Y.Z}` |
-| Installer asset name | **`Remedy.Desktop_{X.Y.Z}_x64-setup.exe`** |
-| Metadata asset | `latest.json` (same release) |
-| Installer URL | `https://github.com/AhmiDarrow/RemedyAI/releases/download/v{X.Y.Z}/Remedy.Desktop_{X.Y.Z}_x64-setup.exe` |
+| Windows installer | **`Remedy.Desktop_{X.Y.Z}_x64-setup.exe`** |
+| Linux deb | **`Remedy.Desktop_{X.Y.Z}_amd64.deb`** |
+| Linux AppImage | **`Remedy.Desktop_{X.Y.Z}_amd64.AppImage`** |
+| Metadata asset | `latest.json` (same release; Windows updater) |
+| Windows installer URL | `https://github.com/AhmiDarrow/RemedyAI/releases/download/v{X.Y.Z}/Remedy.Desktop_{X.Y.Z}_x64-setup.exe` |
 
 ### Rules
 
 1. **Dots, not underscores**, between product words: `Remedy.Desktop_*` — never `Remedy_Desktop_*`.
-2. Tauri/NSIS may emit a **space** (`Remedy Desktop_…`); CI renames spaces → dots before upload (`.github/workflows/desktop-release.yml`).
-3. `scripts/sync_version.py` stamps `scripts/latest.json` with the same `Remedy.Desktop_*` URL.
-4. `platforms.windows-x86_64.url` in published `latest.json` must equal the asset’s `browser_download_url`.
+2. Tauri may emit a **space** (`Remedy Desktop_…`); CI renames spaces → dots before upload for **Windows and Linux** (`.github/workflows/desktop-release.yml`).
+3. `scripts/sync_version.py` stamps `scripts/latest.json` with the Windows `Remedy.Desktop_*_x64-setup.exe` URL. Linux `.deb` / AppImage are extra files on the same tag, not updater platforms yet.
+4. `platforms.windows-x86_64.url` in published `latest.json` must equal the Windows asset’s `browser_download_url`. Signature must be **raw minisign** (`untrusted comment:`), not Tauri’s base64 wrapper.
 5. **Easy ops fix** when update fails with  
    `Download URL does not match signed latest.json asset`:  
    **rename the GitHub Release asset** to `Remedy.Desktop_{ver}_x64-setup.exe` (and ensure `latest.json` points at that name). Do not disable the URL match check.
-6. Install path in `desktop/src-tauri/src/lib.rs` **re-reads** signed `latest.json` at download time so a stale UI-held URL cannot fail after a multi-MB pull.
+6. Install path in `desktop/src-tauri/src/lib.rs` **re-reads** signed `latest.json` at download time so a stale UI-held URL cannot fail after a multi-MB pull. Dual-decode (raw or base64) is on master for older clients.
 
 ### Related docs
 
