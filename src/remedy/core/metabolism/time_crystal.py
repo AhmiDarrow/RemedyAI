@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -317,14 +318,10 @@ def _hydrate_crystal(crystal: TimeCrystal, home: Path | str | None = None) -> No
         if crystal.facts:
             return
         crystal.facts = loaded[:MAX_CRYSTAL_FACTS]
-        try:
+        with suppress(TypeError, ValueError):
             crystal.promotions = int(data.get("promotions") or 0)
-        except (TypeError, ValueError):
-            pass
-        try:
+        with suppress(TypeError, ValueError):
             crystal.blocked_secret = int(data.get("blocked_secret") or 0)
-        except (TypeError, ValueError):
-            pass
         crystal._rev += 1
         crystal._persist_rev = crystal._rev
 

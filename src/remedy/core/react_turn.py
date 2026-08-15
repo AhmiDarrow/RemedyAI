@@ -308,8 +308,8 @@ def resolve_tools(
 
         kind = turn_kind(message or "")
         if kind in ("life", "goal") or looks_like_life_goal_statement(message or ""):
-            from remedy.core.local_agent_optimize import message_wants_implement
             from remedy.core.build_engine import looks_like_build_request
+            from remedy.core.local_agent_optimize import message_wants_implement
 
             if not message_wants_implement(message or "") and not looks_like_build_request(
                 message or ""

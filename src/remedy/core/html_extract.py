@@ -222,6 +222,4 @@ def _looks_js_shell(extracted: str, html: str) -> bool:
     if any(h in (html or "").lower()[:4000] for h in _JS_HINTS):
         if len(body) < 400:
             return True
-    if len(html or "") >= 4000 and len(body) < 240:
-        return True
-    return False
+    return bool(len(html or "") >= 4000 and len(body) < 240)
