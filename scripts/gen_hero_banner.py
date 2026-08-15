@@ -45,7 +45,7 @@ def font(size: int, name: str = "seguisb.ttf") -> ImageFont.FreeTypeFont:
 def blend(fg: tuple[int, int, int], bg: tuple[int, int, int], a: float) -> tuple[int, int, int]:
     """Alpha-blend fg over bg, returned as an opaque RGB (ImageDraw ignores
     the alpha channel on RGB canvases, so pre-blend here)."""
-    return tuple(int(f * a + b * (1 - a)) for f, b in zip(fg, bg))
+    return tuple(int(f * a + b * (1 - a)) for f, b in zip(fg, bg, strict=True))
 
 
 def rounded_chip(
@@ -151,7 +151,7 @@ def main() -> None:
     total += (len(chips) - 1) * 18 * SCALE
     cx = TX + total // 2
     cy = 322 * SCALE
-    for (label, border, fill), w in zip(chips, widths):
+    for (label, border, fill), w in zip(chips, widths, strict=True):
         rounded_chip(d, cx, cy, label, chip, border, fill)
         cx += w + 18 * SCALE
 
