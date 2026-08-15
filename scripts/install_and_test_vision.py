@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from remedy.vision import progress as prog  # noqa: E402
-from remedy.vision.catalog import DEFAULT_MODEL_ID  # noqa: E402
+from remedy.vision.catalog import DEFAULT_MODEL_ID, default_runtime_id  # noqa: E402
 from remedy.vision.decoder import decode_image  # noqa: E402
 from remedy.vision.install import is_installed, start_install  # noqa: E402
 from remedy.vision.service import ensure_server, get_status  # noqa: E402
@@ -106,7 +106,7 @@ def main() -> int:
         print("Starting install (CPU llama-server + SmolVLM2 2.2B)...", flush=True)
         r = start_install(
             model_id=DEFAULT_MODEL_ID,
-            runtime_id="win-cpu-x64",
+            runtime_id=default_runtime_id(),
             enable=True,
             prefer_cuda=False,
         )

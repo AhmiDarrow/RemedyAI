@@ -14,7 +14,10 @@ Remedy is one partner on **Windows and Linux** (including WSLg). Maximize
 uses the work area of the monitor the window is on. Close on Linux
 minimizes to the taskbar. Plan mode cannot write. `/reset` and Stop leave
 a clean session. Settings no longer stall the Windows API. Write jail and
-host rewrite cover Combine / `which` metacharacters.
+host rewrite cover Combine / `which` metacharacters. Linux first-run
+downloads the same pinned llama.cpp runtime as Windows (Ubuntu CPU /
+Vulkan). The `.deb` pulls WebKitGTK / GTK; the AppImage is more
+self-contained.
 
 PyPI **`remedy-ai==0.26.0`** · tag **v0.26.0**.
 

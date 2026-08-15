@@ -22,7 +22,7 @@ This is Remedy’s **local efficiency stack** — not a second chat partner.
 | Piece | Detail |
 |-------|--------|
 | **Model** | **SmolVLM2 2.2B** (quantized GGUF) — pinned id `smolvlm2-2.2b` · **Apache 2.0** |
-| **Runtime** | **llama.cpp** `llama-server` · loopback only · CPU default · GPU build when this PC has a matching card |
+| **Runtime** | **llama.cpp** `llama-server` · loopback only · CPU default · GPU build when this PC has a matching card (Windows CUDA / Linux Vulkan) |
 | **Visual decoder** | Each image → structured **text brief** so any chat model can reason about it |
 | **Same weights** | Vision decode and nano/helper roles share **one** local server |
 
@@ -43,7 +43,7 @@ It does **not** replace your configured Grok / Claude / GPT / Ollama chat model.
 
 ## Delivery (not in the installer)
 
-Weights download on first setup or from **Settings → Advanced → Local model** (~1.6 GB). Same files on every PC for a given Remedy release.
+Weights download on first setup or from **Settings → Advanced → Local model** (~1.6 GB). Same model files on every PC for a given Remedy release. The **llama-server** binary is OS-specific: Windows downloads the pinned CPU/CUDA zip; Linux downloads the pinned Ubuntu CPU/Vulkan `tar.gz` and marks it executable.
 
 ---
 

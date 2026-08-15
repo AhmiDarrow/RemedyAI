@@ -99,7 +99,9 @@ def register_vision_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                 if body.runtime_id:
                     vision["runtime_id"] = body.runtime_id
                 elif body.prefer_cuda:
-                    vision["runtime_id"] = "win-cuda-12.4-x64"
+                    from remedy.runtime.catalog import default_runtime_id
+
+                    vision["runtime_id"] = default_runtime_id(prefer_gpu=True)
                 cfg["vision"] = vision
                 _write_config(path, cfg)
         except Exception:

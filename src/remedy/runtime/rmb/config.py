@@ -78,7 +78,7 @@ def default_state() -> dict[str, Any]:
         "model_id": "qwen25-coder-7b",
         "model_path": "",
         "runtime_binary": "",
-        "runtime_id": "",  # win-cuda-12.4-x64 | win-cpu-x64 | external
+        "runtime_id": "",  # host catalog id (win-*/linux-*) or external
         "n_gpu_layers": DEFAULT_N_GPU_LAYERS,
         "ctx_size": DEFAULT_CTX,
         "threads": DEFAULT_THREADS,

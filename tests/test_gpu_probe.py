@@ -64,6 +64,9 @@ def test_runtime_matches_gpu_is_capability_not_brand() -> None:
     assert runtime_matches_gpu("amd", runtime_id="win-vulkan-x64") is True
     assert runtime_matches_gpu("intel", binary="llama-server-vulkan.exe") is True
     assert runtime_matches_gpu("amd", runtime_id="win-cpu-x64") is False
+    assert runtime_matches_gpu("amd", runtime_id="linux-vulkan-x64") is True
+    assert runtime_matches_gpu("nvidia", runtime_id="linux-vulkan-x64") is True
+    assert runtime_matches_gpu("amd", runtime_id="linux-cpu-x64") is False
 
 
 def _hw(**kw: object) -> HardwareProbe:

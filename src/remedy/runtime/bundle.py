@@ -22,8 +22,9 @@ from remedy.runtime.catalog import (
     DEFAULT_HOST,
     DEFAULT_LOCAL_MODEL_ID,
     DEFAULT_PORT,
-    DEFAULT_RUNTIME_ID,
+    default_runtime_id,
     get_model_spec,
+    normalize_runtime_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -155,8 +156,13 @@ def runtime_binary_from_bundle(
     runtime_id: str | None = None,
     bundle_root: Path | None = None,
 ) -> Path | None:
-    rid = (runtime_id or DEFAULT_RUNTIME_ID).strip()
-    flavor = "cuda" if "cuda" in rid else "cpu"
+    rid = normalize_runtime_id(runtime_id)
+    if "cuda" in rid:
+        flavor = "cuda"
+    elif "vulkan" in rid:
+        flavor = "vulkan"
+    else:
+        flavor = "cpu"
     root = bundle_root or find_bundle_root()
     roots: list[Path] = []
     if root is not None:
@@ -183,24 +189,24 @@ def runtime_binary_from_bundle(
 
 
 def prefer_runtime_id(*, nvidia_detected: bool) -> str:
-    """Option B: CUDA when NVIDIA present, else CPU."""
-    if nvidia_detected:
-        return "win-cuda-12.4-x64"
-    return "win-cpu-x64"
+    """GPU runtime when a card is present, else CPU — OS-correct catalog id."""
+    return default_runtime_id(prefer_gpu=nvidia_detected)
 
 
 def bundle_available() -> dict[str, Any]:
     """Diagnostic: what the host can see without writing state."""
     paths = model_paths_from_bundle()
-    rid_cpu = DEFAULT_RUNTIME_ID
-    rid_cuda = "win-cuda-12.4-x64"
+    rid_cpu = default_runtime_id(prefer_gpu=False)
+    rid_gpu = default_runtime_id(prefer_gpu=True)
+    gpu_bin = str(runtime_binary_from_bundle(rid_gpu) or "") or None
     return {
         "model_present": paths is not None,
         "model_path": str(paths["model_path"]) if paths else None,
         "mmproj_path": str(paths["mmproj_path"]) if paths else None,
         "bundle_root": str(paths["bundle_root"]) if paths else None,
         "cpu_binary": str(runtime_binary_from_bundle(rid_cpu)) if True else None,
-        "cuda_binary": str(runtime_binary_from_bundle(rid_cuda) or "") or None,
+        "cuda_binary": gpu_bin,
+        "gpu_binary": gpu_bin,
         "searched_roots": [str(r) for r in bundle_roots()[:12]],
     }
 
@@ -260,7 +266,7 @@ def activate_local_bundle(
     rid = prefer_runtime_id(nvidia_detected=bool(nvidia_detected))
     bin_path = runtime_binary_from_bundle(rid, paths.get("bundle_root"))  # type: ignore[arg-type]
     if bin_path is None:
-        rid = DEFAULT_RUNTIME_ID
+        rid = default_runtime_id(prefer_gpu=False)
         bin_path = runtime_binary_from_bundle(rid, paths.get("bundle_root"))  # type: ignore[arg-type]
     if bin_path is None:
         # Legacy flat runtime under this home

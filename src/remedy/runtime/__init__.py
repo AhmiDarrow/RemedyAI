@@ -22,8 +22,11 @@ from remedy.runtime.catalog import (
     LocalModelSpec,
     VisionModelSpec,
     catalog_public,
+    default_runtime_id,
     get_model_spec,
     get_runtime_spec,
+    host_runtime_ids,
+    normalize_runtime_id,
     total_install_bytes,
 )
 from remedy.runtime.roles import LocalRole, role_uses_mmproj
@@ -45,8 +48,11 @@ __all__ = [
     "LocalRole",
     "VisionModelSpec",
     "catalog_public",
+    "default_runtime_id",
     "get_model_spec",
     "get_runtime_spec",
+    "host_runtime_ids",
+    "normalize_runtime_id",
     "role_uses_mmproj",
     "total_install_bytes",
 ]
