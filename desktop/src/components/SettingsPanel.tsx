@@ -20,9 +20,11 @@ import {
   openExternalUrl,
   type XaiAuthStatus,
 } from '../api/auth'
+import { apiFetch } from '../api/client'
 import {
   listProviders,
   listConnectedProviders,
+  probeProvider,
   FALLBACK_PROVIDERS,
   type ProviderInfo,
   type ConnectedProvider,
@@ -154,7 +156,7 @@ export function SettingsPanel({
   const [sleevStatus, setSleevStatus] = useState<Settings['sleev'] | null>(null)
   /** Soul Field personhood — default on (matches server maturity default). */
   const [soulFieldEnabled, setSoulFieldEnabled] = useState(true)
-  const [approvalMode, setApprovalMode] = useState<'ask' | 'auto'>('ask')
+  const [approvalMode, setApprovalMode] = useState<'ask' | 'auto' | 'full'>('ask')
   const [harnessMode, setHarnessMode] = useState('auto')
   const [harnessMinPct, setHarnessMinPct] = useState(0.75)
   const [harnessMaxPct, setHarnessMaxPct] = useState(0.92)
@@ -184,6 +186,13 @@ export function SettingsPanel({
   const [rmbBusy, setRmbBusy] = useState(false)
   const [rmbMsg, setRmbMsg] = useState('')
   const [connectedList, setConnectedList] = useState<ConnectedProvider[]>([])
+  const [providerKeysSet, setProviderKeysSet] = useState<Record<string, boolean>>({})
+  const [testBusy, setTestBusy] = useState(false)
+  const [testMsg, setTestMsg] = useState<string | null>(null)
+  const [testOk, setTestOk] = useState<boolean | null>(null)
+  const [liveModelsByProvider, setLiveModelsByProvider] = useState<
+    Record<string, Array<{ id: string; name: string; provider?: string }>>
+  >({})
   const [providerSearch, setProviderSearch] = useState('')
   const [enabledProviders, setEnabledProviders] = useState<string[] | null>(null)
   const [enabledModels, setEnabledModels] = useState<Record<string, string[]>>({})
@@ -224,12 +233,10 @@ export function SettingsPanel({
         provider: 'demo' as const,
       }))
     }
+    const live = liveModelsByProvider[provider]
+    if (live && live.length > 0) return live
     const fromApi = models.filter(
-      (m) =>
-        !m.provider
-        || m.provider === provider
-        || provider === 'openrouter'
-        || provider === 'custom',
+      (m) => m.provider === provider,
     )
     if (fromApi.length > 0) return fromApi
     return (activeMeta?.models || []).map((m) => ({
@@ -237,7 +244,7 @@ export function SettingsPanel({
       name: m.name,
       provider,
     }))
-  }, [models, provider, activeMeta])
+  }, [models, provider, activeMeta, liveModelsByProvider])
 
   // Snap invalid Demo selection once (seedance/deepseek junk) — never fight user picks.
   useEffect(() => {
@@ -330,6 +337,9 @@ export function SettingsPanel({
       if (gen !== loadGenRef.current) return
       setCatalog(providers)
       if (connected?.providers) setConnectedList(connected.providers)
+      if (s.provider_keys_set && typeof s.provider_keys_set === 'object') {
+        setProviderKeysSet(s.provider_keys_set)
+      }
       if (s.enabled_providers !== undefined) {
         setEnabledProviders(s.enabled_providers)
       }
@@ -427,7 +437,7 @@ export function SettingsPanel({
       setAssistantDraft({})
       {
         const am = String(s.approval_mode || 'ask').toLowerCase()
-        setApprovalMode(am === 'auto' ? 'auto' : 'ask')
+        setApprovalMode(am === 'auto' || am === 'full' ? am : 'ask')
       }
       {
         const tp = normalizeToolProcess(s.tool_process)
@@ -682,11 +692,13 @@ export function SettingsPanel({
       sarcasm_mode: sarcasmMode,
     }
     if (enabledProviders !== null) {
-      // Demo must stay available for zero-setup; never save a list that drops it.
+      const allIds = catalog.map((p) => p.id)
       const ep = enabledProviders.includes('demo')
         ? enabledProviders
         : ['demo', ...enabledProviders]
-      updates.enabled_providers = ep
+      const coversAll = allIds.every((id) => ep.includes(id))
+      // null = all on (clears a frozen connected-only list from older builds)
+      updates.enabled_providers = coversAll ? null : ep
     }
     // Always send — empty object clears a prior per-provider allowlist so
     // re-enabling all models actually persists (not only when non-empty).
@@ -762,10 +774,37 @@ export function SettingsPanel({
     }
   }
 
+  useEffect(() => {
+    const pid = provider
+    if (!pid || pid === 'demo') return
+    let cancelled = false
+    void apiFetch<{ models?: Array<{ id: string; name?: string; provider?: string }> }>(
+      `/models?provider=${encodeURIComponent(pid)}`,
+    )
+      .then((data) => {
+        if (cancelled) return
+        const rows = (data.models || [])
+          .filter((m) => m.id)
+          .map((m) => ({
+            id: m.id,
+            name: m.name || m.id,
+            provider: m.provider || pid,
+          }))
+        if (rows.length) {
+          setLiveModelsByProvider((prev) => ({ ...prev, [pid]: rows }))
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [provider])
+
   const handleProviderChange = (p: string) => {
     const prev = provider
     setProvider(p)
     const preset = catalog.find((x) => x.id === p)
+    const conn = connectedList.find((x) => x.id === p)
     if (preset) {
       const prevPreset = catalog.find((x) => x.id === prev)
       // Adopt the preset URL only when the current value is untouched (empty or
@@ -774,7 +813,48 @@ export function SettingsPanel({
       const baseIsUntouched =
         !baseUrl || (prevPreset ? baseUrl === prevPreset.base_url : true)
       if (baseIsUntouched) setBaseUrl(preset.base_url)
-      setModel(preset.default_model)
+      setModel(conn?.last_model || preset.default_model)
+    }
+    const stored = Boolean(providerKeysSet[p] || conn?.connected)
+    if (p === 'xai') {
+      setApiKeySet(Boolean(xaiAuth?.connected || stored))
+    } else if (p === 'demo' || p === 'ollama' || p === 'rmb') {
+      setApiKeySet(false)
+    } else {
+      setApiKeySet(stored)
+    }
+    setApiKey('')
+    setTestMsg(null)
+    setTestOk(null)
+  }
+
+  const handleTestConnection = async () => {
+    setTestBusy(true)
+    setTestMsg(null)
+    setTestOk(null)
+    try {
+      const res = await probeProvider({
+        provider,
+        api_key: apiKey.trim() || undefined,
+        base_url: baseUrl.trim() || undefined,
+      })
+      setTestOk(Boolean(res.ok))
+      if (res.ok) {
+        const n = Number(res.models || 0)
+        const ms = res.latency_ms != null ? ` · ${res.latency_ms} ms` : ''
+        setTestMsg(
+          n > 0
+            ? `Connected — ${n} model${n === 1 ? '' : 's'}${ms}`
+            : `Connected${ms}`,
+        )
+      } else {
+        setTestMsg(res.error || 'Connection failed')
+      }
+    } catch (e: unknown) {
+      setTestOk(false)
+      setTestMsg(e instanceof Error ? e.message : 'Connection failed')
+    } finally {
+      setTestBusy(false)
     }
   }
 
@@ -894,6 +974,11 @@ export function SettingsPanel({
               apiKey={apiKey}
               setApiKey={setApiKey}
               apiKeySet={apiKeySet}
+              providerKeysSet={providerKeysSet}
+              onTestConnection={() => { void handleTestConnection() }}
+              testBusy={testBusy}
+              testMsg={testMsg}
+              testOk={testOk}
               projectPath={projectPath}
               setProjectPath={setProjectPath}
               browserHomeUrl={browserHomeUrl}

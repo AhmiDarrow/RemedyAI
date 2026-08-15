@@ -77,6 +77,12 @@ class TurnReactFlags:
     thinking_level: str | None = None
     context_snapshot: Any = None
     rmb_load_waits: int = 0
+    turn_browse: bool = False
+    turn_pure_action: bool = False
+    turn_has_attachments: bool = False
+    write_budget: int = 0
+    sleev_force_direct: bool = False
+    skip_ask: bool = False
 
 
 _turn_react_flags: ContextVar[TurnReactFlags | None] = ContextVar(
@@ -664,6 +670,111 @@ def set_turn_metabolism_allow_verify(value: bool, runtime: Any = None) -> None:
         flags.metabolism_allow_verify = bool(value)
     elif runtime is not None:
         runtime._metabolism_allow_verify = bool(value)
+
+
+def turn_skip_ask(runtime: Any = None) -> bool:
+    flags = _react_flags()
+    if flags is not None:
+        return bool(flags.skip_ask)
+    if runtime is not None:
+        return bool(getattr(runtime, "_turn_skip_ask", False))
+    return False
+
+
+def set_turn_skip_ask(value: bool, runtime: Any = None) -> None:
+    """Turn-local Ask skip — do not write process-global APPROVALS.mode."""
+    del runtime
+    flags = _react_flags()
+    if flags is not None:
+        flags.skip_ask = bool(value)
+
+
+def turn_browse(runtime: Any = None) -> bool:
+    flags = _react_flags()
+    if flags is not None:
+        return bool(flags.turn_browse)
+    if runtime is not None:
+        return bool(getattr(runtime, "_turn_browse", False))
+    return False
+
+
+def set_turn_browse(value: bool, runtime: Any = None) -> None:
+    flags = _react_flags()
+    if flags is not None:
+        flags.turn_browse = bool(value)
+    elif runtime is not None and not in_active_turn():
+        runtime._turn_browse = bool(value)
+
+
+def turn_pure_action(runtime: Any = None) -> bool:
+    flags = _react_flags()
+    if flags is not None:
+        return bool(flags.turn_pure_action)
+    if runtime is not None:
+        return bool(getattr(runtime, "_turn_pure_action", False))
+    return False
+
+
+def set_turn_pure_action(value: bool, runtime: Any = None) -> None:
+    flags = _react_flags()
+    if flags is not None:
+        flags.turn_pure_action = bool(value)
+    elif runtime is not None and not in_active_turn():
+        runtime._turn_pure_action = bool(value)
+
+
+def turn_has_attachments(runtime: Any = None) -> bool:
+    flags = _react_flags()
+    if flags is not None:
+        return bool(flags.turn_has_attachments)
+    if runtime is not None:
+        return bool(getattr(runtime, "_turn_has_attachments", False))
+    return False
+
+
+def set_turn_has_attachments(value: bool, runtime: Any = None) -> None:
+    flags = _react_flags()
+    if flags is not None:
+        flags.turn_has_attachments = bool(value)
+    elif runtime is not None and not in_active_turn():
+        runtime._turn_has_attachments = bool(value)
+
+
+def turn_write_budget(runtime: Any = None) -> int:
+    flags = _react_flags()
+    if flags is not None:
+        return int(flags.write_budget or 0)
+    if runtime is not None:
+        return int(getattr(runtime, "_remedy_write_budget", 0) or 0)
+    return 0
+
+
+def set_turn_write_budget(value: int, runtime: Any = None) -> None:
+    n = max(0, int(value or 0))
+    flags = _react_flags()
+    if flags is not None:
+        flags.write_budget = max(int(flags.write_budget or 0), n)
+    elif runtime is not None and not in_active_turn():
+        runtime._remedy_write_budget = max(
+            int(getattr(runtime, "_remedy_write_budget", 0) or 0), n
+        )
+
+
+def turn_sleev_force_direct(runtime: Any = None) -> bool:
+    flags = _react_flags()
+    if flags is not None:
+        return bool(flags.sleev_force_direct)
+    if runtime is not None:
+        return bool(getattr(runtime, "_sleev_force_direct", False))
+    return False
+
+
+def set_turn_sleev_force_direct(value: bool, runtime: Any = None) -> None:
+    flags = _react_flags()
+    if flags is not None:
+        flags.sleev_force_direct = bool(value)
+    elif runtime is not None and not in_active_turn():
+        runtime._sleev_force_direct = bool(value)
 
 
 def stash_pending_verify_remedy(session_id: str | None, text: Any) -> None:

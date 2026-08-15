@@ -328,9 +328,9 @@ def _sync_runtime_llm_from_config(
 
     # Full sync (settings save / cold start): partner trust + project + harness.
     cfg = _load_config_cached()
-    am = str(cfg.get("approval_mode") or "ask").strip().lower()
-    if am not in ("ask", "auto"):
-        am = "ask"
+    from remedy.core.approvals import normalize_approval_mode
+
+    am = normalize_approval_mode(str(cfg.get("approval_mode") or "auto"))
     scope = cfg.get("access_scope")
     _hm = cfg.get("harness_min_context_pct")
     _hx = cfg.get("harness_max_context_pct")

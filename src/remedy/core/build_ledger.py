@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from contextlib import suppress
 from dataclasses import asdict, dataclass, field
@@ -36,6 +37,10 @@ class BuildLedgerEntry:
     updated_ts: float = field(default_factory=time.time)
     created_ts: float = field(default_factory=time.time)
     hops: list[dict[str, Any]] = field(default_factory=list)  # reducer hops
+    # Body memory — what just failed / what is still unverified
+    write_set: list[str] = field(default_factory=list)
+    last_error_vector: dict[str, Any] | None = None
+    last_scoped_command: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -43,6 +48,8 @@ class BuildLedgerEntry:
     @classmethod
     def from_dict(cls, raw: dict[str, Any] | None) -> BuildLedgerEntry:
         raw = raw or {}
+        vec_raw = raw.get("last_error_vector")
+        vec = vec_raw if isinstance(vec_raw, dict) and vec_raw else None
         return cls(
             goal=str(raw.get("goal") or "")[:400],
             phase=str(raw.get("phase") or "scout"),
@@ -61,7 +68,47 @@ class BuildLedgerEntry:
             updated_ts=float(raw.get("updated_ts") or time.time()),
             created_ts=float(raw.get("created_ts") or time.time()),
             hops=list(raw.get("hops") or [])[-40:],
+            write_set=_clean_path_list(raw.get("write_set") or []),
+            last_error_vector=_compact_error_vector(vec) if vec else None,
+            last_scoped_command=str(raw.get("last_scoped_command") or "")[:400],
         )
+
+
+def _clean_path_list(raw: Any, *, limit: int = 40) -> list[str]:
+    """Filesystem paths only — drop shell blobs leftover from older ledgers."""
+    out: list[str] = []
+    for item in raw or []:
+        p = str(item or "").strip()
+        if not p:
+            continue
+        if p.startswith(("git ", "gh ", "pytest", "python ")):
+            continue
+        if " && " in p or "\n" in p:
+            continue
+        if p not in out:
+            out.append(p)
+    return out[-limit:]
+
+
+def _compact_error_vector(raw: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Keep only the fields the next wake needs to act."""
+    if not isinstance(raw, dict) or not raw:
+        return None
+    nodes = [str(x) for x in (raw.get("failing_nodes") or []) if x][:16]
+    path_lines = [str(x) for x in (raw.get("path_lines") or []) if x][:20]
+    snippets = [str(s)[:200] for s in (raw.get("snippets") or []) if s][:8]
+    repair = str(raw.get("repair_command") or "")[:400]
+    if not nodes and not path_lines and not repair and not snippets:
+        return None
+    return {
+        "ok": bool(raw.get("ok")),
+        "command": str(raw.get("command") or "")[:400],
+        "exit_hint": str(raw.get("exit_hint") or "")[:80],
+        "failing_nodes": nodes,
+        "path_lines": path_lines,
+        "snippets": snippets,
+        "repair_command": repair,
+    }
 
 
 def _home(home: str | Path | None = None) -> Path:
@@ -219,8 +266,43 @@ def merge_turn_into_ledger(
         entry.muscle_tier = mt
     if session_id:
         entry.session_id = session_id
+    # Body: unverified writes + last red ticket (or clear on green)
+    if entry.last_verify_ok is True:
+        entry.write_set = []
+        entry.last_error_vector = None
+        entry.last_scoped_command = ""
+    else:
+        writes = _clean_path_list(getattr(state, "write_set", None) or [])
+        if writes:
+            entry.write_set = writes
+        vec = _compact_error_vector(getattr(state, "last_error_vector", None))
+        if vec is not None:
+            entry.last_error_vector = vec
+        scoped = str(getattr(state, "last_scoped_command", "") or "")
+        if scoped:
+            entry.last_scoped_command = scoped[:400]
+        elif vec and vec.get("repair_command"):
+            entry.last_scoped_command = str(vec["repair_command"])[:400]
     save_ledger(entry, home=home)
+    _note_body_did(entry, home=home)
     return entry
+
+
+def _note_body_did(entry: BuildLedgerEntry, *, home: str | Path | None = None) -> None:
+    """Tell the organism what this body just did. Best-effort; never raise."""
+    did = ""
+    if entry.last_verify_ok is False:
+        vec = entry.last_error_vector if isinstance(entry.last_error_vector, dict) else {}
+        nodes = [str(x) for x in (vec.get("failing_nodes") or []) if x]
+        did = f"verify red: {nodes[0]}" if nodes else "verify red"
+    elif entry.last_verify_ok is True:
+        did = "verify green"
+    if not did:
+        return
+    with suppress(Exception):
+        from remedy.core.metabolism.organism import note_last_did
+
+        note_last_did(did, home)
 
 
 def append_hop(
@@ -241,6 +323,56 @@ def append_hop(
     return entry
 
 
+def body_next_lines(entry: BuildLedgerEntry) -> list[str]:
+    """Concrete next action from persisted body. Empty if nothing to act on."""
+    vec = entry.last_error_vector if isinstance(entry.last_error_vector, dict) else {}
+    nodes = [str(x) for x in (vec.get("failing_nodes") or []) if x]
+    path_lines = [str(x) for x in (vec.get("path_lines") or []) if x]
+    repair = str(
+        entry.last_scoped_command or vec.get("repair_command") or ""
+    ).strip()
+    writes = list(entry.write_set or [])
+    lines: list[str] = []
+
+    if entry.last_verify_ok is False:
+        if nodes:
+            lines.append("last_red: " + ", ".join(nodes[:4]))
+        read_first = ""
+        if path_lines:
+            raw_pl = str(path_lines[0])
+            read_first = (
+                raw_pl.split("::", 1)[0] if "::" in raw_pl else re.sub(r":\d+$", "", raw_pl)
+            )
+        elif nodes:
+            read_first = nodes[0].split("::", 1)[0]
+        elif writes:
+            read_first = writes[-1]
+        if read_first:
+            lines.append(f"READ FIRST: `{read_first}`")
+        next_cmd = repair or (entry.verify_command or "").strip()
+        if next_cmd:
+            lines.append(f"NEXT VERIFY: `{next_cmd}`")
+        lines.append(
+            "Next: file_read READ FIRST → file_edit the fail → re-run NEXT VERIFY. "
+            "Do not restart the build."
+        )
+        return lines
+
+    if writes and entry.last_verify_ok is not True:
+        lines.append("unverified: " + ", ".join(writes[-6:]))
+        vcmd = repair or (entry.verify_command or "").strip()
+        if vcmd:
+            lines.append(f"Next: VERIFY `{vcmd}` — do not claim done.")
+        else:
+            lines.append("Next: run or discover verify, then finish remaining writes.")
+        return lines
+    return lines
+
+
+def body_next_line(entry: BuildLedgerEntry) -> str:
+    return " ".join(body_next_lines(entry))
+
+
 def resume_hint(project_path: str | Path | None = None, *, home: str | Path | None = None) -> str:
     """Human/machine inject line for continuing a mid-ship build."""
     entry = load_ledger(project_path, home=home)
@@ -252,24 +384,22 @@ def resume_hint(project_path: str | Path | None = None, *, home: str | Path | No
     age_h = (time.time() - float(entry.updated_ts or 0)) / 3600.0
     if age_h > 72 and int(entry.write_steps or 0) <= 0:
         return ""
+    body = body_next_lines(entry)
     lines = [
         "[Build ledger — resume mid-ship]",
         f"phase={entry.phase} goal={entry.goal[:160] or '—'}",
-        f"verify_command={entry.verify_command or '(none discovered)'}",
-        f"write_steps={entry.write_steps} verify_steps={entry.verify_steps} "
-        f"last_verify_ok={entry.last_verify_ok}",
     ]
-    if entry.paths_touched:
-        lines.append("paths: " + ", ".join(entry.paths_touched[-8:]))
-    if entry.last_verify_summary:
-        lines.append("last_verify: " + entry.last_verify_summary[:300])
-    if entry.hops:
-        last = entry.hops[-1]
+    if not body:
         lines.append(
-            f"last_hop: unit={last.get('unit_id') or last.get('path')} "
-            f"ok={last.get('ok')}"
+            f"verify_command={entry.verify_command or '(none discovered)'} "
+            f"write_steps={entry.write_steps} last_verify_ok={entry.last_verify_ok}"
         )
-    # Explicit next action by phase
+        if entry.paths_touched:
+            lines.append("paths: " + ", ".join(entry.paths_touched[-8:]))
+    else:
+        lines.extend(body)
+        return "\n".join(lines)
+    # Phase fallback only when the body has no ticket
     phase = (entry.phase or "").lower()
     if phase in ("scout", "explore", "research"):
         lines.append(

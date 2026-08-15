@@ -58,6 +58,35 @@ _lock = threading.Lock()
 _atexit_registered = False
 _starting_until: float = 0.0
 _user_stopped: bool = False
+_discover_ggufs_cache: dict[str, Any] = {"ts": 0.0, "key": "", "value": []}
+_DISCOVER_GGUFS_TTL_S = 5.0
+
+
+def _refresh_user_stopped(home_dir: str | Path | None = None) -> bool:
+    """Honor persisted rmb.json user_stopped after API recycle."""
+    global _user_stopped
+    if _user_stopped:
+        return True
+    try:
+        if bool(load_rmb_json(home_dir).get("user_stopped")):
+            _user_stopped = True
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _persist_user_stopped(
+    home_dir: str | Path | None, stopped: bool
+) -> None:
+    global _user_stopped
+    _user_stopped = bool(stopped)
+    try:
+        st = merge_state(load_rmb_json(home_dir))
+        st["user_stopped"] = bool(stopped)
+        save_rmb_json(st, home_dir)
+    except Exception:
+        logger.debug("persist user_stopped failed", exc_info=True)
 
 _running_cache: dict[str, Any] = {"ts": 0.0, "value": False, "key": ""}
 _RUNNING_CACHE_TTL_S = 1.5
@@ -463,7 +492,7 @@ def ensure_rmb_watchdog(home_dir: str | Path | None = None) -> None:
         global _watchdog_fail_streak, _last_start_error
         while not _watchdog_stop.wait(_WATCHDOG_INTERVAL_S):
             try:
-                if _user_stopped:
+                if _refresh_user_stopped(_watchdog_home):
                     _watchdog_fail_streak = 0
                     continue
                 st = merge_state(load_rmb_json(_watchdog_home))
@@ -760,6 +789,15 @@ def _find_llama_binary(state: dict[str, Any], home_dir: str | Path | None) -> Pa
 
 def discover_ggufs(home_dir: str | Path | None = None) -> list[dict[str, Any]]:
     """List GGUF files Remedy can load into RMB (any model, not catalog-only)."""
+    cache_key = str(home_dir or "")
+    now = time.time()
+    if (
+        _discover_ggufs_cache.get("key") == cache_key
+        and (now - float(_discover_ggufs_cache.get("ts") or 0)) < _DISCOVER_GGUFS_TTL_S
+    ):
+        cached = _discover_ggufs_cache.get("value")
+        if isinstance(cached, list):
+            return list(cached)
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
 
@@ -807,6 +845,9 @@ def discover_ggufs(home_dir: str | Path | None = None) -> list[dict[str, Any]]:
             continue
     # Prefer larger / more recently used first for UI (size desc, then name)
     out.sort(key=lambda g: (-float(g.get("size_gb") or 0), str(g.get("name") or "").lower()))
+    _discover_ggufs_cache["ts"] = now
+    _discover_ggufs_cache["key"] = cache_key
+    _discover_ggufs_cache["value"] = list(out)
     return out
 
 
@@ -1591,7 +1632,7 @@ def wait_rmb_ready(
         if is_running(home_dir, force=True, require_http=True):
             mark_used()
             return {"ok": True, "ready": True}
-        if _user_stopped:
+        if _refresh_user_stopped(home_dir):
             return {
                 "ok": False,
                 "ready": False,
@@ -1660,7 +1701,7 @@ def wake_rmb_async(home_dir: str | Path | None = None) -> dict[str, Any]:
         return {"ok": True, "starting": True}
     if is_loading(home_dir):
         return {"ok": True, "starting": True, "loading": True}
-    if _user_stopped:
+    if _refresh_user_stopped(home_dir):
         return {"ok": False, "error": "RMB was stopped by user; Start RMB to load again"}
 
     def _run() -> None:
@@ -1678,6 +1719,7 @@ def start_rmb_server(
     *,
     home_dir: str | Path | None = None,
     wait_s: float = 90.0,
+    clear_user_stopped: bool = False,
 ) -> dict[str, Any]:
     """Start RMB chat llama-server if not healthy.
 
@@ -1688,9 +1730,17 @@ def start_rmb_server(
     what we would spawn — callers that changed GGUF must get a real restart.
 
     Concurrent callers single-flight: one spawn, others wait for the same result.
+
+    ``clear_user_stopped`` is only for explicit user Start / settings apply.
+    Lifespan, watchdog, and wake must not wipe the persisted stay-off bit.
     """
     global _proc, _atexit_registered, _user_stopped
     global _start_flight_active, _start_flight_result, _last_start_error
+
+    if clear_user_stopped:
+        _persist_user_stopped(home_dir, False)
+    elif _refresh_user_stopped(home_dir):
+        return {"ok": False, "error": "RMB stopped by user"}
 
     ensure_rmb_watchdog(home_dir)
 
@@ -1823,7 +1873,7 @@ def _start_rmb_server_impl(
                     sync_context_window_cache(st_probe)
                 # Always re-align chat identity to the live GGUF (status bar / settings)
                 chat_sync = sync_rmb_chat_identity(
-                    st_probe, home_dir=home_dir, force_provider=True
+                    st_probe, home_dir=home_dir, force_provider=False
                 )
                 return {
                     "ok": True,
@@ -1873,7 +1923,7 @@ def _start_rmb_server_impl(
                 chat_sync = sync_rmb_chat_identity(
                     merge_state(load_rmb_json(home_dir)),
                     home_dir=home_dir,
-                    force_provider=True,
+                    force_provider=False,
                 )
             return {
                 "ok": True,
@@ -2151,7 +2201,7 @@ def _start_rmb_server_impl(
         invalidate_cache()
         # Auto chat identity: Provider + status bar follow this GGUF
         with contextlib.suppress(Exception):
-            sync_rmb_chat_identity(state, home_dir=home_dir, force_provider=True)
+            sync_rmb_chat_identity(state, home_dir=home_dir, force_provider=False)
 
         if not _atexit_registered:
             atexit.register(
@@ -2428,6 +2478,8 @@ def stop_rmb_server(
             killed = True
         state["pid"] = None
         state["vision_suspended"] = False
+        if user_intent:
+            state["user_stopped"] = True
         save_rmb_json(state, home_dir)
         invalidate_cache()
 
@@ -2477,7 +2529,7 @@ def ensure_rmb_server(
                 "adopted": True,
                 "base_url": state.get("base_url"),
             }
-    if _user_stopped and not force:
+    if _refresh_user_stopped(home_dir) and not force:
         return {"ok": False, "error": "RMB stopped by user"}
     if not state.get("enabled") and not force:
         return {"ok": False, "error": "RMB not enabled"}
@@ -2497,6 +2549,7 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     # only fills gaps — never re-force auto_start on after the user disabled it.
     disk = load_rmb_json(home)
     state = merge_state({**rmb_cfg, **disk})
+    _refresh_user_stopped(home)
     # Soft auto-heal: only when auto_start is explicitly on (never default on)
     ensure_rmb_watchdog(home)
     # UI polls this every ~8s — honor the running cache. Heal only if auto_start.
@@ -2517,9 +2570,15 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     model_path = _resolve_model_path(state, home)
     binary = _find_llama_binary(state, home)
     ready = running
+    # One loading probe per status call (is_loading + loading_for + stalled
+    # used to stack 3 HTTP health checks on the 8s bar poll).
     loading_now = False if ready else bool(is_loading(home))
     starting = (not ready) and (is_starting() or loading_now)
-    load_for = loading_for_s(home) if loading_now else 0.0
+    load_for = 0.0
+    stalled = False
+    if loading_now and _loading_since > 0:
+        load_for = max(0.0, time.time() - _loading_since)
+        stalled = load_for >= max(30.0, float(_LOADING_STALL_S))
 
     # Keep pid accurate for stop/UI even after API recycle (orphan adopt)
     pid_val: int | None = None
@@ -2599,7 +2658,7 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         "starting": starting,
         "loading": loading_now,
         "loading_for_s": round(load_for, 1) if load_for else 0,
-        "loading_stalled": bool(loading_stalled(home)) if loading_now else False,
+        "loading_stalled": bool(stalled),
         "pid": pid_val,
         "managed_child": managed_process_alive(),
         "watchdog": bool(
@@ -2750,28 +2809,14 @@ def _status_autofit(
         out["cache_type"] = last.get("cache_type")
         out["vram_total_mb"] = (last.get("hardware") or {}).get("vram_total_mb")
         return out
-    if enabled and model_path is not None and not running:
-        try:
-            plan = plan_autofit(
-                model_path,
-                last_good=state.get("last_good_fit")
-                if isinstance(state.get("last_good_fit"), dict)
-                else None,
-            )
-            pub = plan.to_public()
-            out.update(
-                {
-                    "summary": pub.get("summary"),
-                    "target": pub.get("target"),
-                    "ctx_size": pub.get("ctx_size"),
-                    "n_gpu_layers": pub.get("n_gpu_layers"),
-                    "cache_type": pub.get("cache_type"),
-                    "vram_total_mb": (pub.get("hardware") or {}).get("vram_total_mb"),
-                    "planned": pub,
-                }
-            )
-        except Exception:
-            logger.debug("autofit preview failed", exc_info=True)
+    if enabled and model_path is not None and not running and last:
+        # Do not plan_autofit on GET — start / settings apply persist last_autofit.
+        out["summary"] = last.get("summary") or ""
+        out["target"] = last.get("target")
+        out["ctx_size"] = last.get("ctx_size")
+        out["n_gpu_layers"] = last.get("n_gpu_layers")
+        out["cache_type"] = last.get("cache_type")
+        out["vram_total_mb"] = (last.get("hardware") or {}).get("vram_total_mb")
     return out
 
 
@@ -3498,7 +3543,11 @@ def apply_rmb_settings(
                 )
                 _user_stopped = False  # intentional restart, not user "stay off"
                 live_meta["stopped"] = True
-                start = start_rmb_server(home_dir=home_dir, wait_s=float(wait_s))
+                start = start_rmb_server(
+                    home_dir=home_dir,
+                    wait_s=float(wait_s),
+                    clear_user_stopped=True,
+                )
                 live_meta["started"] = bool(
                     start.get("ok") or start.get("starting")
                 )
@@ -3525,7 +3574,11 @@ def apply_rmb_settings(
                     _kill_listeners_on_port(port)
                     time.sleep(0.3)
                     _user_stopped = False
-                    start2 = start_rmb_server(home_dir=home_dir, wait_s=float(wait_s))
+                    start2 = start_rmb_server(
+                        home_dir=home_dir,
+                        wait_s=float(wait_s),
+                        clear_user_stopped=True,
+                    )
                     live_meta["started"] = bool(start2.get("ok") or start2.get("starting"))
                     if not start2.get("ok"):
                         live_meta["live_error"] = (
@@ -3540,7 +3593,11 @@ def apply_rmb_settings(
                 or patch.get("use_as_chat_provider")
             ):
                 _user_stopped = False
-                start = start_rmb_server(home_dir=home_dir, wait_s=float(wait_s))
+                start = start_rmb_server(
+                    home_dir=home_dir,
+                    wait_s=float(wait_s),
+                    clear_user_stopped=True,
+                )
                 live_meta["started"] = bool(start.get("ok") or start.get("starting"))
                 if start.get("ok"):
                     live_meta["ctx_size_live"] = start.get("ctx_size")

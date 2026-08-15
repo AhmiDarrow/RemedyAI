@@ -99,7 +99,9 @@ def build_step_request_body(
 
         body = body if isinstance(body, dict) else {}
         with suppress(Exception):
-            sticky = int(getattr(runtime, "_remedy_write_budget", 0) or 0)
+            from remedy.core.turn_context import turn_write_budget
+
+            sticky = int(turn_write_budget(runtime) or 0)
             if sticky > 0:
                 body = dict(body)
                 body["_remedy_write_budget"] = sticky

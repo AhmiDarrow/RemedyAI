@@ -135,7 +135,12 @@ def register_rmb_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
         await asyncio.to_thread(
             apply_rmb_settings, {"enabled": True}, home_dir=home, cfg=cfg
         )
-        return await asyncio.to_thread(start_rmb_server, home_dir=home, wait_s=120.0)
+        return await asyncio.to_thread(
+            start_rmb_server,
+            home_dir=home,
+            wait_s=120.0,
+            clear_user_stopped=True,
+        )
 
     @app.post("/api/rmb/stop")
     async def rmb_stop() -> dict[str, Any]:
@@ -255,7 +260,12 @@ def register_rmb_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
             home_dir=home,
             cfg=cfg,
         )
-        start = await asyncio.to_thread(start_rmb_server, home_dir=home, wait_s=120.0)
+        start = await asyncio.to_thread(
+            start_rmb_server,
+            home_dir=home,
+            wait_s=120.0,
+            clear_user_stopped=True,
+        )
         # Hot-apply so the next message uses RMB without restart
         try:
             from pathlib import Path as _P

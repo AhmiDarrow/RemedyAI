@@ -92,7 +92,11 @@ async def apply_build_engine_after_batch(
                 driven = None
                 from remedy.core.build_engine import can_machine_inject
 
-                if can_machine_inject(bst, consume=False):
+                from remedy.core.build_delta import allow_background_drive
+
+                if allow_background_drive(bst) and can_machine_inject(
+                    bst, consume=False
+                ):
                     driven = maybe_auto_implement(
                         runtime, bst, use_llm=should_use_live_llm(runtime)
                     )
@@ -136,6 +140,7 @@ async def apply_build_engine_after_batch(
                     wrote_now
                     and bst.write_set
                     and "write_review" not in bst.nudges_emitted
+                    and not should_auto_verify(bst)
                 ):
                     rev = review_write_set(runtime, list(bst.write_set))
                     tests = rev.get("tests") or []
@@ -343,7 +348,6 @@ async def apply_build_engine_after_batch(
                         )
                         bst.repair_queue = q.to_public()  # type: ignore[attr-defined]
                         if q.targets:
-                            messages.append(format_repair_queue_message(q))
                             yield (
                                 "@@status:Build repair queue "
                                 f"{len(q.targets)} targets\n"
@@ -401,9 +405,10 @@ async def apply_build_engine_after_batch(
                     f"{' (oracle missing)' if av.get('oracle_missing') else ''}\n"
                 )
             elif bst.syntax_ok is not False:
+                from remedy.core.build_delta import collapse_to_one_card
+
                 mnudge = next_machine_nudge(bst)
-                if mnudge is not None:
-                    messages.append(mnudge)
+                if mnudge is not None and collapse_to_one_card(messages, mnudge):
                     rearm_agency()
                     logger.info(
                         "Build engine nudge phase=%s explore=%d write=%d verify=%d",

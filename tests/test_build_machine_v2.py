@@ -14,6 +14,7 @@ from remedy.core.build_engine import (
 )
 from remedy.core.build_ledger import (
     BuildLedgerEntry,
+    body_next_line,
     load_ledger,
     merge_turn_into_ledger,
     resume_hint,
@@ -170,9 +171,98 @@ def test_begin_resumes_ledger(tmp_path):
         _llm_base_url="",
         _session_brief=None,
         config=SimpleNamespace(home_dir=tmp_path),
+        _project_path_raw=str(proj),
         effective_project_path=lambda: proj,
     )
     st = begin_build_turn(rt, "continue", force=True)
     assert st is not None
-    assert st.resumed is True or st.phase in ("repair", "implement", "verify", "scout")
-    assert st.verify_command == "pytest -q" or st.write_steps >= 0
+    assert st.resumed is True
+    assert st.verify_command == "pytest -q"
+
+
+def test_ledger_persists_body_and_resume_speaks_it(tmp_path):
+    proj = tmp_path / "body"
+    proj.mkdir()
+    (proj / "src").mkdir()
+    (proj / "src" / "calc.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+    st = BuildTurnState(
+        active=True,
+        goal="fix add",
+        phase="repair",
+        write_steps=2,
+        verify_steps=1,
+        last_verify_ok=False,
+        last_verify_summary="FAILED tests/test_calc.py::test_add - assert 1 == 2",
+        verify_command="pytest -q",
+        write_set=["src/calc.py"],
+        last_error_vector={
+            "ok": False,
+            "command": "pytest -q",
+            "failing_nodes": ["tests/test_calc.py::test_add"],
+            "path_lines": ["src/calc.py:2"],
+            "snippets": ["assert 1 == 2"],
+            "repair_command": "pytest -q tests/test_calc.py::test_add",
+        },
+        last_scoped_command="pytest -q tests/test_calc.py::test_add",
+        project_path=str(proj),
+    )
+    merge_turn_into_ledger(st, project_path=str(proj), session_id="s", home=tmp_path)
+    from remedy.core.metabolism.organism import load_vitals
+
+    assert "test_add" in str(load_vitals(tmp_path).get("last_did") or "")
+    led = load_ledger(str(proj), home=tmp_path)
+    assert led is not None
+    assert "src/calc.py" in led.write_set
+    assert led.last_error_vector is not None
+    assert "tests/test_calc.py::test_add" in led.last_error_vector["failing_nodes"]
+    assert "test_add" in led.last_scoped_command
+    hint = resume_hint(str(proj), home=tmp_path)
+    assert "last_red" in hint
+    assert "test_add" in hint
+    assert "READ FIRST" in hint
+    assert "src/calc.py" in hint
+    assert "NEXT VERIFY" in hint
+    line = body_next_line(led)
+    assert "test_add" in line
+    assert "src/calc.py" in line
+
+    rt = SimpleNamespace(
+        _llm_provider="xai",
+        _llm_model="grok-4",
+        _llm_base_url="",
+        _session_brief=None,
+        config=SimpleNamespace(home_dir=tmp_path),
+        _project_path_raw=str(proj),
+        effective_project_path=lambda: proj,
+    )
+    resumed = begin_build_turn(rt, "continue the fix", force=True)
+    assert resumed is not None
+    assert resumed.last_verify_ok is False
+    assert resumed.phase == "repair"
+    assert resumed.last_error_vector
+    assert "tests/test_calc.py::test_add" in (resumed.last_error_vector.get("failing_nodes") or [])
+    assert "src/calc.py" in resumed.write_set
+    assert "test_add" in (resumed.last_scoped_command or "")
+
+
+def test_ledger_clears_body_on_green(tmp_path):
+    proj = tmp_path / "green"
+    proj.mkdir()
+    st = BuildTurnState(
+        active=True,
+        goal="fix add",
+        phase="done",
+        last_verify_ok=True,
+        last_verify_summary="2 passed",
+        write_set=["src/calc.py"],
+        last_error_vector={"failing_nodes": ["tests/test_calc.py::test_add"]},
+        last_scoped_command="pytest -q tests/test_calc.py::test_add",
+        project_path=str(proj),
+    )
+    merge_turn_into_ledger(st, project_path=str(proj), session_id="s", home=tmp_path)
+    led = load_ledger(str(proj), home=tmp_path)
+    assert led is not None
+    assert led.write_set == []
+    assert led.last_error_vector is None
+    assert led.last_scoped_command == ""
+    assert resume_hint(str(proj), home=tmp_path) == ""

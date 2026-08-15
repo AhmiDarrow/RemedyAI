@@ -162,6 +162,7 @@ def test_cat_hello_c_is_not_verify():
 
     assert _blob_is_verify_command("gcc -o hello.exe hello.c && hello.exe")
     assert _blob_is_verify_command("pytest -q")
+    assert _blob_is_verify_command("uv run pytest -q tests/test_foo.py")
     assert not _blob_is_verify_command("cat hello.c")
     assert not _blob_is_verify_command("type hello.c")
     assert not _blob_is_verify_command("gcc --version")
@@ -204,6 +205,64 @@ def test_parallel_file_read_does_not_green_verify_batch():
     )
     assert st.last_verify_ok is False
     assert st.phase == "repair"
+
+
+def test_git_status_sibling_does_not_false_green_ship():
+    """git_status + a file_read ' -> ' / github URL must not mark ship complete."""
+    st = BuildTurnState(active=True, write_steps=1)
+    observe_tool_batch(
+        st,
+        [
+            {
+                "id": "call_st",
+                "function": {"name": "git_status", "arguments": "{}"},
+            },
+            {
+                "id": "call_rd",
+                "function": {
+                    "name": "file_read",
+                    "arguments": '{"path":"README.md"}',
+                },
+            },
+        ],
+        [
+            {
+                "role": "tool",
+                "tool_call_id": "call_st",
+                "content": "On branch main\n nothing to commit\n",
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_rd",
+                "content": "diff --git a/x b/x\n+foo -> bar\neverything up-to-date\n"
+                "release https://github.com/owner/repo/releases/1\nerror: not really\n",
+            },
+        ],
+    )
+    assert st.ship_pushed is False
+    assert st.ship_released is False
+    assert not st.ship_url
+
+
+def test_git_push_ok_marks_ship_pushed():
+    st = BuildTurnState(active=True, write_steps=1)
+    observe_tool_batch(
+        st,
+        [
+            {
+                "id": "call_push",
+                "function": {"name": "git_push", "arguments": "{}"},
+            },
+        ],
+        [
+            {
+                "role": "tool",
+                "tool_call_id": "call_push",
+                "content": "git_push ok\nremote: https://github.com/o/r.git\n",
+            },
+        ],
+    )
+    assert st.ship_pushed is True
 
 
 def test_keep_agency_after_green_play():

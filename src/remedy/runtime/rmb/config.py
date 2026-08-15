@@ -136,6 +136,8 @@ def default_state() -> dict[str, Any]:
         "pid": None,
         # Set True while RMB owns GPU; cleared on stop / failed start
         "vision_suspended": False,
+        # Persist user Stop so API recycle / watchdog does not auto-wake.
+        "user_stopped": False,
     }
 
 

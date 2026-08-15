@@ -307,7 +307,9 @@ async def run_verify_job(
             ),
             details={"write_jail": jail_hit},
         )
-    sandbox = SubprocessSandbox(allowed_paths=roots or [root, workdir])
+    from remedy.execution.sandbox import allowed_paths_for_shell
+
+    sandbox = SubprocessSandbox(allowed_paths=allowed_paths_for_shell(roots, workdir))
     from remedy.execution.host.runner import prepare_host_command
 
     prepared = prepare_host_command(cmd, project_path=root)
@@ -358,9 +360,13 @@ async def run_diff_job(runtime: Any, *, path: str = ".") -> JobResult:
         )
     if workdir.is_file():
         workdir = workdir.parent
+    from remedy.execution.sandbox import allowed_paths_for_shell
+
     roots = runtime.allowed_roots()
     sandbox = SubprocessSandbox(
-        allowed_paths=roots or [runtime.effective_project_path(), workdir]
+        allowed_paths=allowed_paths_for_shell(
+            roots or [runtime.effective_project_path()], workdir
+        )
     )
     chunks: list[str] = []
     last_code = 0

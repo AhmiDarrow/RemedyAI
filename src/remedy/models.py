@@ -431,6 +431,11 @@ class AgentConfig(BaseModel):
         description="Deliberation level: off | low | medium | high",
     )
     approval_mode: str = Field(
-        default="ask",
-        description="High-impact shell: ask | auto",
+        default="auto",
+        description=(
+            "Approvals: ask | auto | full. "
+            "ask = confirm high-impact tools; "
+            "auto = in-project builds/writes without prompts (jail stays outside); "
+            "full = no write jail (auth still closed), warn when leaving the project."
+        ),
     )

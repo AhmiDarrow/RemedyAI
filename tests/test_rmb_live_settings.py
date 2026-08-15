@@ -183,3 +183,45 @@ def test_apply_rmb_does_not_steal_provider_or_approval(tmp_path, monkeypatch):
     assert str(cfg.get("llm_provider") or "").lower() == "openai"
     assert str(cfg.get("approval_mode") or "ask").lower() == "ask"
     assert modes == []
+
+
+def test_start_rmb_honors_persisted_user_stopped(tmp_path, monkeypatch):
+    """Lifespan / heal must not wipe disk stay-off (Issue 7 recycle)."""
+    from remedy.runtime.rmb import service as svc
+
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    home = str(tmp_path)
+    save_rmb_json(
+        merge_state(
+            {
+                "enabled": True,
+                "auto_start": True,
+                "user_stopped": True,
+            }
+        ),
+        home,
+    )
+    svc._user_stopped = False
+    monkeypatch.setattr(svc, "is_running", lambda *a, **k: False)
+    monkeypatch.setattr(svc, "managed_process_alive", lambda: False)
+    monkeypatch.setattr(svc, "is_starting", lambda: False)
+    monkeypatch.setattr(svc, "is_loading", lambda *a, **k: False)
+    spawned: list[int] = []
+
+    def _no_spawn(*a, **k):
+        spawned.append(1)
+        raise AssertionError("must not spawn after user Stop")
+
+    monkeypatch.setattr(svc, "_start_rmb_server_impl", _no_spawn)
+
+    out = svc.start_rmb_server(home_dir=home, wait_s=1.0)
+    assert out.get("ok") is False
+    assert "stopped" in str(out.get("error") or "").lower()
+    assert not spawned
+    disk = load_rmb_json(home)
+    assert disk.get("user_stopped") is True
+
+    ensured = svc.ensure_rmb_server(home_dir=home, wait_s=1.0)
+    assert ensured.get("ok") is False
+    assert "stopped" in str(ensured.get("error") or "").lower()
+    assert load_rmb_json(home).get("user_stopped") is True

@@ -7,6 +7,7 @@ Fatal-error helpers live in ``react_loop.errors``. Prefer importing from
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -38,7 +39,10 @@ from remedy.core.react_loop.recovery import (
     fatal_model_error_message,
     repeated_provider_error_message,
 )
-from remedy.core.react_loop.stream_consume import consume_llm_http_response
+from remedy.core.react_loop.stream_consume import (
+    _await_or_abort,
+    consume_llm_http_response,
+)
 from remedy.core.react_loop.tool_batch import (
     apply_build_engine_after_batch,
     inject_phase_nudge,
@@ -89,6 +93,7 @@ from remedy.core.turn_context import (
     set_turn_force_tool_choice,
     set_turn_thinking_level,
     set_turn_tool_choice_required_blocked,
+    turn_sleev_force_direct,
     turn_thinking_level,
 )
 from remedy.core.turn_context import (
@@ -96,6 +101,33 @@ from remedy.core.turn_context import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _stopped_note(tools_ran: bool) -> str:
+    if tools_ran:
+        return (
+            "\n*(Stopped.) Tools already ran this turn are kept "
+            "in history. Send **continue** to resume.*\n"
+        )
+    return (
+        "\n*(Generation stopped before a final answer. "
+        "History is intact — send a new message or "
+        "**continue**.)*\n"
+    )
+
+
+async def _wait_rmb_ready_abortable(timeout_s: float) -> dict[str, Any]:
+    import asyncio as _aio
+
+    from remedy.core.turn_context import current_abort_event, is_turn_aborted
+    from remedy.runtime.rmb.service import wait_rmb_ready
+
+    if is_turn_aborted():
+        raise _aio.CancelledError()
+    return await _await_or_abort(
+        _aio.to_thread(wait_rmb_ready, None, timeout_s=timeout_s),
+        current_abort_event(),
+    )
 
 
 
@@ -140,12 +172,6 @@ async def call_llm_stream(runtime, message: str,
             boot = await maybe_bootstrap_local_create(runtime, message or "")
             if boot:
                 yield boot
-                with suppress(Exception):
-                    from remedy.core.agent_post_turn import schedule_post_turn_prep
-
-                    schedule_post_turn_prep(
-                        runtime, message=message or "", session_id=session_id
-                    )
                 return
         async for _pev in yield_preamble_events(prep):
             yield _pev
@@ -750,17 +776,9 @@ async def call_llm_stream(runtime, message: str,
 
                     if is_turn_aborted():
                         # Durable note — @@aborted alone never lands in the chat bubble.
-                        if tools_executed_this_turn > 0 or tool_batches_this_turn > 0:
-                            yield (
-                                "\n*(Stopped.) Tools already ran this turn are kept "
-                                "in history. Send **continue** to resume.*\n"
-                            )
-                        else:
-                            yield (
-                                "\n*(Generation stopped before a final answer. "
-                                "History is intact — send a new message or "
-                                "**continue**.)*\n"
-                            )
+                        yield _stopped_note(
+                            tools_executed_this_turn > 0 or tool_batches_this_turn > 0
+                        )
                         yield "@@aborted\n"
                         return
 
@@ -1421,19 +1439,20 @@ async def call_llm_stream(runtime, message: str,
                                     "waiting for RMB to become ready…\n"
                                 )
                                 ready = False
-                                with suppress(Exception):
-                                    import asyncio as _aio
-
-                                    from remedy.runtime.rmb.service import (
-                                        wait_rmb_ready,
-                                    )
-
+                                try:
                                     # Poll off the event loop so we don't block
                                     # other requests for 2 minutes.
-                                    _wr = await _aio.to_thread(
-                                        wait_rmb_ready, None, timeout_s=90.0
-                                    )
+                                    _wr = await _wait_rmb_ready_abortable(90.0)
                                     ready = bool(_wr.get("ok") and _wr.get("ready"))
+                                except asyncio.CancelledError:
+                                    yield _stopped_note(
+                                        tools_executed_this_turn > 0
+                                        or tool_batches_this_turn > 0
+                                    )
+                                    yield "@@aborted\n"
+                                    return
+                                except Exception:
+                                    pass
                                 if ready:
                                     yield "@@status:Model ready — retrying…\n"
                                     continue  # same body, next HTTP attempt
@@ -1464,14 +1483,17 @@ async def call_llm_stream(runtime, message: str,
                                 f"waiting and retrying with tools "
                                 f"({api_soft_failures}/6)…\n"
                             )
-                            with suppress(Exception):
-                                import asyncio as _aio
-
-                                from remedy.runtime.rmb.service import wait_rmb_ready
-
-                                await _aio.to_thread(
-                                    wait_rmb_ready, None, timeout_s=45.0
+                            try:
+                                await _wait_rmb_ready_abortable(45.0)
+                            except asyncio.CancelledError:
+                                yield _stopped_note(
+                                    tools_executed_this_turn > 0
+                                    or tool_batches_this_turn > 0
                                 )
+                                yield "@@aborted\n"
+                                return
+                            except Exception:
+                                pass
                             body = dict(body) if isinstance(body, dict) else {}
                             body["stream"] = False
                             continue
@@ -1559,10 +1581,11 @@ async def call_llm_stream(runtime, message: str,
                                     )
                                     _body_lo = body if isinstance(body, dict) else {}
                                     with suppress(Exception):
-                                        _sticky = int(
-                                            getattr(runtime, "_remedy_write_budget", 0)
-                                            or 0
+                                        from remedy.core.turn_context import (
+                                            turn_write_budget as _twb,
                                         )
+
+                                        _sticky = int(_twb(runtime) or 0)
                                         if _sticky > 0:
                                             _body_lo = dict(_body_lo)
                                             _body_lo["_remedy_write_budget"] = _sticky
@@ -1627,19 +1650,36 @@ async def call_llm_stream(runtime, message: str,
                     # Buffer when tools are enabled — DeepSeek-class models
                     # often dump DSML tool markup as content if we stream live.
                     stream_live = step_tools is None
-                    async for _tok, _user_flag in consume_llm_http_response(
-                        resp,
-                        round_state=round_state,
-                        collected=collected,
-                        adapter=_adapter,
-                        bind=_bind,
-                        body=body if isinstance(body, dict) else None,
-                        use_openai_sse=use_openai_sse,
-                        stream_live=stream_live,
-                    ):
-                        if _user_flag:
-                            produced_user_text = True
-                        yield _tok
+                    try:
+                        async for _tok, _user_flag in consume_llm_http_response(
+                            resp,
+                            round_state=round_state,
+                            collected=collected,
+                            adapter=_adapter,
+                            bind=_bind,
+                            body=body if isinstance(body, dict) else None,
+                            use_openai_sse=use_openai_sse,
+                            stream_live=stream_live,
+                        ):
+                            if _user_flag:
+                                produced_user_text = True
+                            yield _tok
+                    except asyncio.CancelledError:
+                        yield _stopped_note(
+                            tools_executed_this_turn > 0
+                            or tool_batches_this_turn > 0
+                        )
+                        yield "@@aborted\n"
+                        return
+                    from remedy.core.turn_context import is_turn_aborted as _ab_mid
+
+                    if _ab_mid():
+                        yield _stopped_note(
+                            tools_executed_this_turn > 0
+                            or tool_batches_this_turn > 0
+                        )
+                        yield "@@aborted\n"
+                        return
 
                     content_parts = round_state.content_parts
                     reasoning_parts = round_state.reasoning_parts
@@ -1659,6 +1699,12 @@ async def call_llm_stream(runtime, message: str,
                         "\n[LLM ERROR] Provider request failed after retries.\n"
                         "Check model/API key in Settings and try again.\n"
                     )
+                    return
+                 except asyncio.CancelledError:
+                    yield _stopped_note(
+                        tools_executed_this_turn > 0 or tool_batches_this_turn > 0
+                    )
+                    yield "@@aborted\n"
                     return
                  except Exception as _stream_exc:
                   if (
@@ -1692,7 +1738,11 @@ async def call_llm_stream(runtime, message: str,
                         )
                     ):
                         with suppress(Exception):
-                            runtime._sleev_force_direct = True
+                            from remedy.core.turn_context import (
+                                set_turn_sleev_force_direct,
+                            )
+
+                            set_turn_sleev_force_direct(True, runtime)
                         with suppress(Exception):
                             from remedy.core.sleev import prepare_llm_http
 
@@ -1726,14 +1776,17 @@ async def call_llm_stream(runtime, message: str,
                                 "model, then retrying (no user action needed)…\n"
                             )
                             # Partner: wait for RMB if mid-load only when local.
-                            with suppress(Exception):
-                                import asyncio as _aio
-
-                                from remedy.runtime.rmb.service import wait_rmb_ready
-
-                                await _aio.to_thread(
-                                    wait_rmb_ready, None, timeout_s=60.0
+                            try:
+                                await _wait_rmb_ready_abortable(60.0)
+                            except asyncio.CancelledError:
+                                yield _stopped_note(
+                                    tools_executed_this_turn > 0
+                                    or tool_batches_this_turn > 0
                                 )
+                                yield "@@aborted\n"
+                                return
+                            except Exception:
+                                pass
                         else:
                             yield (
                                 "@@status:Connection dropped — retrying "
@@ -1744,9 +1797,9 @@ async def call_llm_stream(runtime, message: str,
                     with suppress(Exception):
                         # Keep write-capable budget (old path forced ≤768 and
                         # caused follow-on TOOL_ARGS_TRUNCATED / empty turns).
-                        sticky = int(
-                            getattr(runtime, "_remedy_write_budget", 0) or 0
-                        )
+                        from remedy.core.turn_context import turn_write_budget
+
+                        sticky = int(turn_write_budget(runtime) or 0)
                         cur = int(body.get("max_tokens") or 2048)
                         body["max_tokens"] = max(cur, sticky, 2048)
                         body["max_tokens"] = min(int(body["max_tokens"]), 8192)
@@ -1773,7 +1826,7 @@ async def call_llm_stream(runtime, message: str,
                   if (
                     "17321" in _why
                     or "sleev" in _why.lower()
-                    or bool(getattr(runtime, "_sleev_force_direct", False))
+                    or bool(turn_sleev_force_direct(runtime))
                   ):
                     _sleev_hint = (
                         " The Sleev proxy looked unreachable; turn **Sleev** off "
@@ -1962,15 +2015,11 @@ async def call_llm_stream(runtime, message: str,
                                 _rearm_agency_tools()
                                 set_turn_force_tool_choice(True)
                                 with suppress(Exception):
-                                    runtime._remedy_write_budget = max(
-                                        int(
-                                            getattr(
-                                                runtime, "_remedy_write_budget", 0
-                                            )
-                                            or 0
-                                        ),
-                                        8192,
+                                    from remedy.core.turn_context import (
+                                        set_turn_write_budget,
                                     )
+
+                                    set_turn_write_budget(8192, runtime)
                                 with suppress(Exception):
                                     from remedy.core.local_agent_optimize import (
                                         filter_tools_write_first,
@@ -3010,10 +3059,9 @@ async def call_llm_stream(runtime, message: str,
                         _rearm_agency_tools()
                         set_turn_force_tool_choice(True)
                         with suppress(Exception):
-                            runtime._remedy_write_budget = max(
-                                int(getattr(runtime, "_remedy_write_budget", 0) or 0),
-                                8192,
-                            )
+                            from remedy.core.turn_context import set_turn_write_budget
+
+                            set_turn_write_budget(8192, runtime)
                         with suppress(Exception):
                             from remedy.core.local_agent_optimize import (
                                 filter_tools_write_first,
@@ -3195,19 +3243,27 @@ async def call_llm_stream(runtime, message: str,
                     if resp.status == 200:
                         rs = StreamRoundState()
                         collected: dict[str, Any] = {}
-                        async for _tok, _user_flag in consume_llm_http_response(
-                            resp,
-                            round_state=rs,
-                            collected=collected,
-                            adapter=_adapter,
-                            bind=_bind,
-                            body=body if isinstance(body, dict) else None,
-                            use_openai_sse=use_openai_sse,
-                            stream_live=True,
-                        ):
-                            if _user_flag:
-                                produced_user_text = True
-                            yield _tok
+                        try:
+                            async for _tok, _user_flag in consume_llm_http_response(
+                                resp,
+                                round_state=rs,
+                                collected=collected,
+                                adapter=_adapter,
+                                bind=_bind,
+                                body=body if isinstance(body, dict) else None,
+                                use_openai_sse=use_openai_sse,
+                                stream_live=True,
+                            ):
+                                if _user_flag:
+                                    produced_user_text = True
+                                yield _tok
+                        except asyncio.CancelledError:
+                            yield _stopped_note(
+                                tools_executed_this_turn > 0
+                                or tool_batches_this_turn > 0
+                            )
+                            yield "@@aborted\n"
+                            return
                         if not produced_user_text:
                             leftover = rs.text_out or rs.reasoning_out
                             if leftover:
@@ -3230,6 +3286,13 @@ async def call_llm_stream(runtime, message: str,
                     "Ask me to **continue** or restate the request and I will resume "
                     "from the context already gathered."
                 )
+    except asyncio.CancelledError:
+        yield _stopped_note(
+            bool(locals().get("tools_executed_this_turn"))
+            or bool(locals().get("tool_batches_this_turn"))
+        )
+        yield "@@aborted\n"
+        return
     except Exception as e:
         logger.exception("LLM stream failed")
         # After tools: prefer synthesis over raw exception as the main answer (#4/#8)
@@ -3334,7 +3397,7 @@ async def call_llm_stream(runtime, message: str,
                                     adapter=_ad2,
                                     runtime=runtime,
                                     force_direct=bool(
-                                        getattr(runtime, "_sleev_force_direct", False)
+                                        turn_sleev_force_direct(runtime)
                                     )
                                     or (
                                         "17321" in str(e)
@@ -3408,18 +3471,22 @@ async def call_llm_stream(runtime, message: str,
                     _ilb_x(_bx.provider, _bx.model, _bx.base_url)
                 )
             if _is_local:
-                with suppress(Exception):
-                    import asyncio as _aio
-
-                    from remedy.runtime.rmb.service import wait_rmb_ready
-
+                try:
                     yield "@@status:Model connection lost — checking local host…\n"
-                    await _aio.to_thread(wait_rmb_ready, None, timeout_s=90.0)
+                    await _wait_rmb_ready_abortable(90.0)
+                except asyncio.CancelledError:
+                    yield _stopped_note(
+                        tools_executed_this_turn > 0 or tool_batches_this_turn > 0
+                    )
+                    yield "@@aborted\n"
+                    return
+                except Exception:
+                    pass
             _sleev_note = ""
             if (
                 "17321" in _why
                 or "sleev" in _why.lower()
-                or bool(getattr(runtime, "_sleev_force_direct", False))
+                or bool(turn_sleev_force_direct(runtime))
             ):
                 _sleev_note = (
                     " If you enabled Sleev, turn it **off** in Settings until "

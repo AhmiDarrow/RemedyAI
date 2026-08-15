@@ -33,7 +33,7 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
     } catch {
       // server down
     }
-  }, [])
+  }, [sessionId])
 
   useEffect(() => {
     void refresh()

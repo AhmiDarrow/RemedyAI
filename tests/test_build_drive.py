@@ -86,6 +86,10 @@ def test_maybe_auto_implement_after_explore_thrash(tmp_path):
     assert st is not None
     st.serial_explore_streak = st.max_serial_explore
     st.write_steps = 0
+    # Live model: do not plant TDD/hops just because explore ran.
+    assert maybe_auto_implement(rt, st, use_llm=False) is None
+    assert st.auto_drive_ran is False
+    st.away_mode = True
     driven = maybe_auto_implement(rt, st, use_llm=False)
     assert driven is not None
     assert st.auto_drive_ran is True
@@ -118,6 +122,9 @@ def test_maybe_auto_repair_hops_existing_file(tmp_path):
     st.last_verify_ok = False
     st.write_set = ["widget.py"]
     st.last_error_vector = {"path_lines": ["widget.py:1"], "failing_nodes": []}
+    # Live model repairs itself; isolated hops only when unattended.
+    assert maybe_auto_repair(rt, st, use_llm=False) is None
+    st.away_mode = True
     hopped = maybe_auto_repair(rt, st, use_llm=False)
     assert hopped is not None
     assert hopped.get("ran", 0) >= 1

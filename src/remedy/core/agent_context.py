@@ -220,6 +220,23 @@ async def build_turn_context(runtime: Any) -> str:
                     "A focus folder is optional convenience for relative paths — "
                     "not required. Prefer reversible writes; confirm destructive ops."
                 )
+            with suppress(Exception):
+                from remedy.core.approvals import APPROVALS, normalize_approval_mode
+
+                am = normalize_approval_mode(APPROVALS.mode)
+                if am == "full":
+                    parts.append(
+                        "Approvals: Full (warn). Write and run anywhere this account "
+                        "can. Auth secrets (~/.remedy/auth) stay closed. Do not stop "
+                        "to ask permission for project or sibling-folder work — build."
+                    )
+                elif am == "auto":
+                    parts.append(
+                        "Approvals: Auto (in-project). file_write / file_edit / pytest "
+                        "/ uv / ruff inside the focus folder run without prompts. "
+                        "OS, home, and sibling trees stay jailed unless the user "
+                        "clicks Full."
+                    )
 
     # Partner State dual streams (Phase D) — separate partner vs project budgets
     with suppress(Exception):

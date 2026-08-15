@@ -48,10 +48,18 @@ describe('streamJobs', () => {
   })
 
   it('stopStreamJob aborts', async () => {
+    const { abortSession } = await import('../api/sessions')
+    const order: string[] = []
+    vi.mocked(abortSession).mockImplementation(async () => {
+      order.push('abort')
+    })
     const c = new AbortController()
+    c.signal.addEventListener('abort', () => order.push('controller'))
     registerStreamJob('s3', c)
     await stopStreamJob('s3')
     expect(c.signal.aborted).toBe(true)
+    expect(order[0]).toBe('abort')
+    expect(order).toContain('controller')
   })
 
   it('completeStreamJob does not revive terminal status', async () => {

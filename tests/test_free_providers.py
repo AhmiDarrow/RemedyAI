@@ -8,6 +8,7 @@ from remedy.interfaces.config import (
     DEMO_DUMMY_API_KEY,
     PROVIDER_CATALOG,
     apply_env_provider_bootstrap,
+    classify_provider_connection,
     normalize_llm_settings,
     provider_credentials_ready,
     public_provider_catalog,
@@ -15,6 +16,54 @@ from remedy.interfaces.config import (
     validate_provider_model,
 )
 from remedy.interfaces.provider_catalog import free_options_public
+
+
+def test_frozen_connected_allowlist_is_ignored():
+    from remedy.interfaces.config import effective_provider_allowlist
+
+    catalog = {"demo", "xai", "anthropic", "openai", "deepseek", "google"}
+    # Buggy save: only what was connected that day
+    frozen = {"demo", "xai"}
+    assert (
+        effective_provider_allowlist(
+            list(frozen),
+            catalog_ids=catalog,
+            connected_ids={"demo", "xai"},
+        )
+        is None
+    )
+    # Explicit hide (user unchecked several, list is still large) is honored
+    hidden = {"demo", "xai", "anthropic", "openai"}
+    got = effective_provider_allowlist(
+        list(hidden),
+        catalog_ids=catalog,
+        connected_ids={"demo", "xai", "anthropic"},
+    )
+    assert got == hidden
+
+
+def test_anthropic_models_payload_and_url():
+    from remedy.interfaces.config import (
+        anthropic_auth_headers,
+        anthropic_models_url,
+        parse_anthropic_models_payload,
+    )
+
+    assert anthropic_models_url("https://api.anthropic.com/v1").endswith("/v1/models")
+    headers = anthropic_auth_headers("sk-ant-test")
+    assert headers["x-api-key"] == "sk-ant-test"
+    assert headers["anthropic-version"]
+    rows = parse_anthropic_models_payload(
+        {
+            "data": [
+                {"id": "claude-sonnet-4-0", "display_name": "Claude Sonnet 4"},
+                {"id": "claude-opus-4-1", "display_name": "Claude Opus 4.1"},
+                {"id": "", "display_name": "skip"},
+            ]
+        }
+    )
+    assert [r["id"] for r in rows] == ["claude-sonnet-4-0", "claude-opus-4-1"]
+    assert rows[0]["source"] == "endpoint"
 
 
 def test_demo_in_catalog():
@@ -102,6 +151,86 @@ def test_demo_credentials_ready():
     assert provider_credentials_ready({"llm_provider": "demo"}) is True
     assert provider_credentials_ready({"llm_provider": "ollama"}) is True
     assert provider_credentials_ready({"llm_provider": "openai"}) is False
+
+
+def test_custom_placeholder_is_not_connected():
+    """Unused custom/RMB catalog defaults must not appear in the picker."""
+    ok, reason = classify_provider_connection(
+        "custom",
+        cfg={"llm_provider": "deepseek", "llm_base_url": "https://api.deepseek.com/v1"},
+        keys={},
+        keys_set={},
+        ollama_available=False,
+    )
+    assert ok is False
+    assert reason == "no_credentials"
+    ok_rmb, reason_rmb = classify_provider_connection(
+        "rmb",
+        cfg={"llm_provider": "demo"},
+        keys={},
+        keys_set={},
+        ollama_available=False,
+    )
+    assert ok_rmb is False
+    assert reason_rmb == "no_credentials"
+
+
+def test_custom_active_local_is_connected():
+    ok, reason = classify_provider_connection(
+        "custom",
+        cfg={
+            "llm_provider": "custom",
+            "llm_base_url": "http://127.0.0.1:5001/v1",
+        },
+        keys={},
+        keys_set={},
+        ollama_available=False,
+    )
+    assert ok is True
+    assert reason == "active_local"
+
+
+def test_probe_demo_and_missing_key(monkeypatch):
+    import asyncio
+
+    from fastapi import FastAPI
+
+    from remedy.interfaces.routes.auth import ProviderProbeRequest, register_auth_routes
+
+    monkeypatch.setattr(
+        "remedy.interfaces.config.resolve_provider_api_key",
+        lambda *a, **k: "",
+    )
+    monkeypatch.setattr(
+        "remedy.interfaces.routes.auth.load_config",
+        lambda: {"llm_provider": "demo"},
+    )
+    app = FastAPI()
+    register_auth_routes(app)
+
+    probe = None
+    for route in app.routes:
+        if getattr(route, "path", "") == "/api/providers/probe":
+            probe = route.endpoint
+            break
+    assert probe is not None
+    demo = asyncio.run(probe(ProviderProbeRequest(provider="demo")))
+    assert demo["ok"] is True
+    missing = asyncio.run(probe(ProviderProbeRequest(provider="openai")))
+    assert missing["ok"] is False
+    assert "key" in (missing.get("error") or "").lower()
+
+
+def test_stored_key_marks_provider_connected():
+    ok, reason = classify_provider_connection(
+        "deepseek",
+        cfg={"llm_provider": "demo"},
+        keys={"deepseek": "sk-test"},
+        keys_set={},
+        ollama_available=False,
+    )
+    assert ok is True
+    assert reason == "api_key"
 
 
 def test_demo_disabled_via_env(monkeypatch):

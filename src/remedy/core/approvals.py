@@ -9,6 +9,31 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
+APPROVAL_MODES = ("ask", "auto", "full")
+
+
+def normalize_approval_mode(raw: str | None) -> str:
+    """ask | auto | full. Unknown values fall back to ask."""
+    m = (raw or "ask").strip().lower()
+    if m in ("full", "warn", "owner", "yolo", "unrestricted"):
+        return "full"
+    if m in ("auto", "auto-approve", "thumbs-up", "trust"):
+        return "auto"
+    if m in APPROVAL_MODES:
+        return m
+    return "ask"
+
+
+def is_full_approval(raw: str | None = None) -> bool:
+    """True when the owner chose Full (warn) — write jail must not block."""
+    if raw:
+        return normalize_approval_mode(raw) == "full"
+    try:
+        return APPROVALS.mode == "full"
+    except Exception:
+        return False
+
+
 # Soft-ask (not hard-block): user can approve once / session / always-pattern
 _ASK_PATTERNS = re.compile(
     r"(?is)"
@@ -51,7 +76,7 @@ class ApprovalQueue:
         # Session-scoped approvals
         self._session_fps: dict[str, set[str]] = {}
         self._session_order: list[str] = []
-        # ask (default) | auto — status-bar thumbs toggle
+        # ask | auto | full — status-bar cycle
         self._mode: str = "ask"
 
     @property
@@ -60,17 +85,15 @@ class ApprovalQueue:
             return self._mode
 
     def set_mode(self, mode: str) -> str:
-        """Set approval mode: ``ask`` (thumbs down) or ``auto`` (thumbs up).
+        """Set approval mode: ``ask``, ``auto`` (in-project), or ``full`` (warn).
 
-        Switching to **auto** also clears any pending prompts (full owner power).
+        Switching to **auto** or **full** clears ordinary pending prompts.
         """
-        m = (mode or "ask").strip().lower()
-        if m not in ("ask", "auto"):
-            m = "ask"
+        m = normalize_approval_mode(mode)
         with self._lock:
             prev = self._mode
             self._mode = m
-            if m == "auto" and prev != "auto":
+            if m in ("auto", "full") and prev not in ("auto", "full"):
                 # Auto-approve ordinary pending prompts. Owner-lock tools
                 # (GitHub self-improve PR) stay pending — thumbs-up is not
                 # permission to push to the public repo.
@@ -105,10 +128,7 @@ class ApprovalQueue:
         if not isinstance(cfg, dict) or "approval_mode" not in cfg:
             with self._lock:
                 return self._mode
-        am = str(cfg.get("approval_mode") or "ask").strip().lower()
-        if am not in ("ask", "auto"):
-            am = "ask"
-        return self.set_mode(am)
+        return self.set_mode(str(cfg.get("approval_mode") or "ask"))
 
     @staticmethod
     def fingerprint(tool_name: str, command: str) -> str:
@@ -156,9 +176,11 @@ class ApprovalQueue:
 
         **Power model (never stripped for the owner):**
         - ``ask`` (default, safe): high-impact tools + risk patterns prompt.
-        - ``auto`` (status-bar thumbs-up / work-until-done): no prompts on a
-          normal trusted scope — Remedy runs shell/write/skills to finish.
-        - ``untrusted`` access scope still always asks (downloaded folders).
+        - ``auto`` (in-project): no prompts on a trusted scope — build/write
+          inside the focus folder. Write jail still blocks OS/home/siblings.
+        - ``full`` (warn): no prompts; write jail does not block (auth stays
+          closed). Tool output warns when a path would have been jailed.
+        - ``untrusted`` access scope still always asks unless mode is ``full``.
         Hard security blocks (wipe/privilege) live in ``check_dangerous_command``
         and are separate from this partner-trust queue.
         """
@@ -175,7 +197,18 @@ class ApprovalQueue:
             untrusted = scope in ("untrusted", "sandbox", "strict", "download")
         except Exception:
             untrusted = False
+        # Local/RMB turn may skip Ask for this turn only (never persist Settings).
+        if not untrusted:
+            try:
+                from remedy.core.turn_context import turn_skip_ask
+
+                if turn_skip_ask():
+                    return None
+            except Exception:
+                pass
         with self._lock:
+            if self._mode == "full":
+                return None
             if self._mode == "auto" and not untrusted:
                 return None
         tool = (tool_name or "").strip()
@@ -231,20 +264,14 @@ class ApprovalQueue:
                 return True
             if session_id and fp in self._session_fps.get(session_id, set()):
                 return True
-            # Session: any approved bash_exec that is the same *git/gh verb family*
-            # counts (agent retries with slightly different flags after Approve).
+            # Session only: same *git/gh verb family* counts for retries with
+            # slightly different flags after Approve. Never expand process-wide
+            # Always (_approved_fps) via family — that would let one Always on
+            # `git status` cover `git commit` across sessions.
             if session_id and (tool_name or "").strip() == "bash_exec":
                 fam = self._vcs_family(command)
                 if fam:
                     for prev in self._session_fps.get(session_id, set()):
-                        if not prev.startswith("bash_exec::"):
-                            continue
-                        if self._vcs_family(prev.split("::", 1)[-1]) == fam:
-                            return True
-            if (tool_name or "").strip() == "bash_exec":
-                fam = self._vcs_family(command)
-                if fam:
-                    for prev in self._approved_fps:
                         if not prev.startswith("bash_exec::"):
                             continue
                         if self._vcs_family(prev.split("::", 1)[-1]) == fam:
@@ -340,8 +367,9 @@ class ApprovalQueue:
             "status": item.status,
             "created_at": item.created_at,
             "approval_mode_hint": (
-                "Approve for this session, or set Approvals → Auto to let Remedy "
-                "finish work without prompts (full owner power on trusted scope)."
+                "Approve for this session, or set Approvals → Auto (in-project) "
+                "to finish work without prompts. Full (warn) turns the write jail "
+                "into a warning only — auth secrets stay closed."
             ),
         }
 

@@ -363,6 +363,61 @@ def test_context_snapshot_lives_on_turn_flags():
         end_turn("snap-a", *t_a)
 
 
+def test_skip_ask_is_turn_local(monkeypatch):
+    from remedy.core.approvals import APPROVALS
+    from remedy.core.turn_context import set_turn_skip_ask, turn_skip_ask
+
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"approval_mode": "ask", "access_scope": "project"},
+    )
+    prev = APPROVALS.mode
+    try:
+        APPROVALS.set_mode("ask")
+        t = begin_turn("skip-ask", project_raw=None, active_path=".")
+        try:
+            set_turn_skip_ask(True)
+            assert turn_skip_ask() is True
+            assert APPROVALS.needs_ask("echo hi", tool_name="file_write") is None
+            assert APPROVALS.mode == "ask"
+        finally:
+            end_turn("skip-ask", *t)
+        assert turn_skip_ask() is False
+        assert APPROVALS.mode == "ask"
+    finally:
+        APPROVALS.set_mode(prev)
+
+
+def test_write_budget_zero_does_not_inherit_runtime():
+    from remedy.core.turn_context import (
+        set_turn_sleev_force_direct,
+        set_turn_write_budget,
+        turn_write_budget,
+    )
+
+    runtime = MagicMock()
+    runtime._remedy_write_budget = 8192
+    runtime._sleev_force_direct = False
+    t = begin_turn("wb-zero", project_raw=None, active_path=".")
+    try:
+        assert turn_write_budget(runtime) == 0
+        set_turn_write_budget(4096, runtime)
+        assert turn_write_budget(runtime) == 4096
+        assert runtime._remedy_write_budget == 8192
+        set_turn_sleev_force_direct(True, runtime)
+        assert runtime._sleev_force_direct is False
+        from remedy.core.turn_context import turn_sleev_force_direct
+
+        assert turn_sleev_force_direct(runtime) is True
+    finally:
+        end_turn("wb-zero", *t)
+    t2 = begin_turn("wb-sib", project_raw=None, active_path=".")
+    try:
+        assert turn_write_budget(runtime) == 0
+    finally:
+        end_turn("wb-sib", *t2)
+
+
 def test_any_stream_claimed_sees_all_sessions():
     from remedy.core.turn_context import any_stream_claimed
 

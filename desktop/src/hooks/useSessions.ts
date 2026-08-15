@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
+import { ApiError } from '../api/client'
 import {
   listSessions,
   getSession,
@@ -38,8 +39,14 @@ export function useSessions() {
     setLoading(true)
     try {
       const page = await listSessions(PAGE_SIZE, 0)
-      offsetRef.current = page.sessions.length
-      setSessions(page.sessions)
+      if (offsetRef.current < page.sessions.length) {
+        offsetRef.current = page.sessions.length
+      }
+      setSessions((prev) => {
+        const fresh = new Map(page.sessions.map((s) => [s.id, s]))
+        const extras = prev.filter((s) => !fresh.has(s.id))
+        return [...page.sessions, ...extras]
+      })
       setHasMore(page.has_more)
       const pageIds = page.sessions.map((s) => s.id)
       let focused: string | null = null
@@ -56,8 +63,13 @@ export function useSessions() {
           setSessions((prev) =>
             prev.some((s) => s.id === one.id) ? prev : [one, ...prev],
           )
-        } catch {
-          setActiveId(page.sessions.length > 0 ? page.sessions[0]!.id : null)
+        } catch (e: unknown) {
+          const gone =
+            (e instanceof ApiError && e.status === 404) ||
+            (e instanceof Error && /404|not found|deleted/i.test(e.message))
+          if (gone) {
+            setActiveId(page.sessions.length > 0 ? page.sessions[0]!.id : null)
+          }
         }
       }
     } catch {

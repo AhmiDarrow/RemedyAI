@@ -179,7 +179,7 @@ class SettingsUpdateRequest(BaseModel):
     harness_max_context_pct: float | None = None
     # Status-bar controls
     thinking_level: str | None = None  # off | low | medium | high
-    approval_mode: str | None = None  # ask | auto (auto = full owner power / work-until-done)
+    approval_mode: str | None = None  # ask | auto (in-project) | full (warn)
     show_tool_calls: bool | None = None  # legacy → maps to tool_process
     # off = minimal progress only; medium = labels+status; full = near-raw process
     tool_process: str | None = None

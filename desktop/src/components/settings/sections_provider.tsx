@@ -1,6 +1,6 @@
 /** Settings form sections — provider. */
 import type { ReactNode } from 'react'
-import type { ConnectedProvider } from '../../api/providers'
+import { connectReasonLabel, type ConnectedProvider } from '../../api/providers'
 import type { SettingsFormProps } from './formTypes'
 import { SettingsSection } from '../SettingsSection'
 import {
@@ -55,6 +55,10 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
     customName = '',
     setCustomName,
     handleProviderChange,
+    onTestConnection,
+    testBusy = false,
+    testMsg = null,
+    testOk = null,
     sleevEnabled = false,
     setSleevEnabled,
     sleevGatewayUrl = '',
@@ -145,6 +149,11 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
         <FormHint>
           Models for <strong>{activeMeta?.name || provider}</strong>
           {showBaseUrl ? ' · custom base URL enabled' : ''}.
+          {(() => {
+            const row = connectedList.find((x) => x.id === provider)
+            if (!row) return ''
+            return ` · ${connectReasonLabel(row.connect_reason, row.connected)}`
+          })()}
         </FormHint>
 
         {provider === 'xai' && (
@@ -199,29 +208,86 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
           </div>
         )}
 
-        <Field
-          label={
-            provider === 'xai'
-              ? apiKeySet
-                ? 'API key (optional — change?)'
-                : 'API key (optional)'
-              : apiKeySet
-                ? 'API Key (set - change?)'
-                : 'API Key'
-          }
-          value={apiKey}
-          onChange={setApiKey}
-          placeholder={
-            provider === 'xai'
-              ? apiKeySet
-                ? '(leave blank to keep current)'
-                : 'xai-… from console.x.ai'
-              : apiKeySet
-                ? '(leave blank to keep current)'
-                : 'sk-...'
-          }
-          password
-        />
+        {provider !== 'demo' && provider !== 'ollama' && provider !== 'rmb' && (
+          <>
+            <Field
+              label={
+                provider === 'xai'
+                  ? apiKeySet
+                    ? 'API key (optional — change?)'
+                    : 'API key (optional)'
+                  : apiKeySet
+                    ? 'API Key (set — change?)'
+                    : 'API Key'
+              }
+              value={apiKey}
+              onChange={setApiKey}
+              placeholder={
+                provider === 'xai'
+                  ? apiKeySet
+                    ? '(leave blank to keep current)'
+                    : 'xai-… from console.x.ai'
+                  : apiKeySet
+                    ? '(leave blank to keep current)'
+                    : provider === 'deepseek'
+                      ? 'sk-… from platform.deepseek.com'
+                      : 'sk-…'
+              }
+              password
+            />
+            {!apiKeySet && !apiKey.trim() && provider !== 'xai' && (
+              <FormNotice>
+                This provider needs an API key before chat will work. Paste it,
+                Test, then Save.
+              </FormNotice>
+            )}
+            {onTestConnection && (
+              <div className="flex items-center gap-2 mb-2">
+                <FormActionButton
+                  variant="primary"
+                  disabled={testBusy}
+                  onClick={() => onTestConnection()}
+                >
+                  {testBusy ? 'Testing…' : 'Test connection'}
+                </FormActionButton>
+                {testMsg && (
+                  <span
+                    className="text-[11px]"
+                    style={{
+                      color: testOk
+                        ? 'var(--success)'
+                        : testOk === false
+                          ? 'var(--error, #ef4444)'
+                          : 'var(--text-secondary)',
+                    }}
+                  >
+                    {testMsg}
+                  </span>
+                )}
+              </div>
+            )}
+          </>
+        )}
+        {provider === 'ollama' && (
+          <div className="flex items-center gap-2 mb-2">
+            {onTestConnection && (
+              <FormActionButton
+                disabled={testBusy}
+                onClick={() => onTestConnection()}
+              >
+                {testBusy ? 'Checking…' : 'Check Ollama'}
+              </FormActionButton>
+            )}
+            {testMsg && (
+              <span
+                className="text-[11px]"
+                style={{ color: testOk ? 'var(--success)' : 'var(--text-secondary)' }}
+              >
+                {testMsg}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Sleev — local context-compression gateway (saves provider tokens) */}
         <div
@@ -300,8 +366,9 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
         {...sectionProps('provider-catalog')}
       >
         <FormHint>
-          Connected providers with a key, OAuth, Demo, or local Ollama appear in the
-          main status bar. Disable to hide without deleting credentials.
+          Connected providers with a key, OAuth, Demo, or a live local host appear
+          in the status bar. Click a row to switch Type and add a key. Disable to
+          hide without deleting credentials.
         </FormHint>
         <input
           type="search"
@@ -338,7 +405,9 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
                   className="rounded px-2 py-1.5"
                   style={{
                     background: 'var(--bg-secondary)',
-                    border: '1px solid var(--border)',
+                    border: `1px solid ${
+                      p.id === provider ? 'var(--accent)' : 'var(--border)'
+                    }`,
                     opacity: conn ? 1 : 0.65,
                   }}
                 >
@@ -349,11 +418,7 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
                       onChange={(e) => {
                         const on = e.target.checked
                         setEnabledProviders((prev) => {
-                          const base =
-                            prev
-                            ?? (connectedList.length
-                              ? connectedList.map((x) => x.id)
-                              : catalog.map((x) => x.id))
+                          const base = prev ?? catalog.map((x) => x.id)
                           if (on) return [...new Set([...base, p.id])]
                           return base.filter((id) => id !== p.id)
                         })
@@ -362,13 +427,19 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
                     <button
                       type="button"
                       className="flex-1 min-w-0 text-left"
-                      onClick={() =>
+                      onClick={() => {
+                        if (p.id !== provider) handleProviderChange(p.id)
                         setCatalogExpand((cur) => (cur === p.id ? null : p.id))
-                      }
+                      }}
                     >
                       <span className="font-medium">{p.name}</span>
                       <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                        {conn ? 'connected' : 'not connected'}
+                        {connectReasonLabel(
+                          'connect_reason' in p
+                            ? (p as ConnectedProvider).connect_reason
+                            : undefined,
+                          conn,
+                        )}
                         {' · '}
                         {models.length} models
                         {modelAllow ? ` · ${modelAllow.length} enabled` : ''}

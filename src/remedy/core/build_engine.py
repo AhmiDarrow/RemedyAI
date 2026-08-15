@@ -79,7 +79,6 @@ _VERIFY_TOOLS = frozenset(
 )
 _SHIP_TOOLS = frozenset(
     {
-        "git_status",
         "git_push",
         "gh_release",
         "ship_status",
@@ -111,7 +110,8 @@ _VERIFY_CMD_RE = re.compile(
     r"\brustc\b[^\n]*\.(?:rs)\b|"
     r"\bcl\.exe\b|"
     r"\bdotnet\s+(?:test|build|run)\b|"
-    r"\bpython\s+-m\s+(?:pytest|unittest|py_compile)\b"
+    r"\bpython\s+-m\s+(?:pytest|unittest|py_compile)\b|"
+    r"\buv\s+run\s+pytest\b"
     r")"
 )
 _NOT_VERIFY_CMD_RE = re.compile(
@@ -536,6 +536,17 @@ def begin_build_turn(
                 st.phase = "repair"
             if led.last_verify_summary:
                 st.last_verify_summary = led.last_verify_summary
+            # Restore body: last fail + unverified writes so the next wake acts
+            if led.last_verify_ok is not True:
+                if isinstance(led.last_error_vector, dict) and led.last_error_vector:
+                    st.last_error_vector = dict(led.last_error_vector)
+                if led.last_scoped_command:
+                    st.last_scoped_command = str(led.last_scoped_command)
+                writes = [
+                    p for p in list(led.write_set or []) if _is_filesystem_path(str(p))
+                ]
+                if writes:
+                    st.write_set = writes[-40:]
     with suppress(Exception):
         runtime._build_turn = st
     with suppress(Exception):
@@ -658,6 +669,7 @@ def observe_tool_batch(
     any_verify = False
     any_ship_cmd = False
     verify_ids: set[str] = set()
+    ship_ids: set[str] = set()
     for tc in tcs:
         n = _tool_name(tc)
         tid = str(tc.get("id") or tc.get("tool_call_id") or "")
@@ -681,8 +693,12 @@ def observe_tool_batch(
                     verify_ids.add(tid)
             if _SHIP_CMD_HINT.search(blob):
                 any_ship_cmd = True
+                if tid:
+                    ship_ids.add(tid)
         elif n in _SHIP_TOOLS:
             any_ship_cmd = True
+            if tid:
+                ship_ids.add(tid)
 
     if only_explore and len(names) == 1:
         state.serial_explore_streak += 1
@@ -737,29 +753,30 @@ def observe_tool_batch(
         ):
             state.wasted_auth_probes += 1
         if any_ship_tool or any_ship_cmd:
+            cid = str(msg.get("tool_call_id") or msg.get("id") or "")
+            if ship_ids and (not cid or cid not in ship_ids):
+                continue
             fail = any(
                 tok in low
                 for tok in ("rejected", "error:", "fatal:", "not pushed", "permission denied")
             )
-            if not fail and (
+            if fail:
+                continue
+            if (
                 "git_push ok" in low
+                or "ship_pushed=true" in low
+                or "ship_push ok" in low
                 or "everything up-to-date" in low
-                or re.search(r"\s->\s", content)
             ):
                 state.ship_pushed = True
                 state.phase = "ship"
-            if "release" in low and (
-                "created" in low or "https://github.com/" in low or "url:" in low
-            ):
-                if "error" not in low[:80]:
-                    state.ship_released = True
-                    m = re.search(r"https://github\.com/[^\s\)\"']+", content)
-                    if m:
-                        state.ship_release_url = m.group(0)[:300]
-            if "git_push ok" in low or "ship_pushed=true" in low:
-                state.ship_pushed = True
             if "gh_release ok" in low or "ship_released=true" in low:
                 state.ship_released = True
+            if "release" in low and ("created" in low or "url:" in low):
+                state.ship_released = True
+                m = re.search(r"(?i)(?:remote|push|url)[=:\s]+(https?://\S+)", content)
+                if m:
+                    state.ship_release_url = m.group(1)[:300]
             url_m = re.search(r"(?i)(?:remote|push|url)[=:\s]+(https?://\S+)", content)
             if url_m and not state.ship_url:
                 state.ship_url = url_m.group(1)[:300]
@@ -811,6 +828,14 @@ def observe_tool_batch(
         state.phase = "repair"
         state.repair_steps += 1
         state.last_verify_summary = last_summary
+        with suppress(Exception):
+            from remedy.core.build_error_vector import parse_verify_output
+
+            cmd = state.verify_command or ""
+            vec = parse_verify_output(last_summary, command=cmd, ok=False)
+            state.last_error_vector = vec.to_public()
+            if vec.repair_command:
+                state.last_scoped_command = vec.repair_command
     elif saw_green:
         state.last_verify_ok = True
         state.last_verify_summary = last_summary
@@ -875,13 +900,33 @@ def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
             ),
         }
 
-    # Repair loop
+    # Repair loop — structured ticket beats a vague "read the error"
     if (
         state.last_verify_ok is False
         and state.repair_steps >= 1
         and "force_repair" not in state.nudges_emitted
     ):
         state.nudges_emitted.append("force_repair")
+        with suppress(Exception):
+            from remedy.core.build_error_vector import (
+                ErrorVector,
+                parse_verify_output,
+                repair_ticket_message,
+            )
+
+            vec = None
+            if isinstance(state.last_error_vector, dict):
+                vec = ErrorVector.from_public(state.last_error_vector)
+                if not vec.failing_nodes and not vec.path_lines:
+                    vec = None
+            if vec is None and state.last_verify_summary:
+                vec = parse_verify_output(
+                    state.last_verify_summary,
+                    command=state.verify_command or "",
+                    ok=False,
+                )
+            if vec is not None and not vec.ok:
+                return repair_ticket_message(vec)
         return {
             "role": "user",
             "content": (
