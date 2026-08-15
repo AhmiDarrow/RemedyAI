@@ -174,7 +174,7 @@ def test_message_wants_tools_fail_open_without_verb_list() -> None:
         "add a 15 minute idle lock to the preferences window"
     ) is True
     assert message_wants_tools("tighten the about dialog so it doesn't scroll") is True
-    # Trivia / social stay off
+    # Knowledge does not *force* a tool loop. resolve_tools still offers schemas.
     assert message_wants_tools("what time is it in paris") is False
     assert message_wants_tools("thanks") is False
 

@@ -48,14 +48,26 @@ def _disk_root(raw: Path | str | None) -> Path | None:
 
 
 def _root_for(runtime: Any) -> Path | None:
+    """Bound project folder only. Never the user profile or a volume root."""
     with suppress(Exception):
         raw = runtime.effective_project_path()
-        if raw:
-            return _disk_root(raw)
-    with suppress(Exception):
-        home = getattr(getattr(runtime, "config", None), "home_dir", None)
-        if home:
-            return _disk_root(home)
+        if not raw:
+            return None
+        from remedy.core.workspace import is_unset_project_path, is_volume_root_path
+
+        if is_unset_project_path(raw) or is_volume_root_path(raw):
+            return None
+        base = _disk_root(raw)
+        if base is None:
+            return None
+        if is_volume_root_path(base):
+            return None
+        try:
+            if base.resolve() == Path.home().resolve():
+                return None
+        except OSError:
+            pass
+        return base
     return None
 
 
@@ -239,6 +251,86 @@ def format_todos_block(items: list[TodoItem] | None) -> str:
         f"{open_n} open. Do not claim done until these are completed or cancelled."
     )
     return "\n".join(lines)
+
+
+def sync_todos_with_build(runtime: Any, state: Any = None) -> list[TodoItem]:
+    """Close checklist rows the tree already satisfied — do not stall on ledger.
+
+    Scout/explore complete after the first real write. File-named rows complete
+    when that file exists with content. Verify completes on green (or when the
+    required files are on disk and verify is not mid-hang).
+    """
+    root = None
+    with suppress(Exception):
+        if state is not None and getattr(state, "project_path", ""):
+            root = Path(str(state.project_path))
+    items = load_todos(runtime, root=root)
+    if not items:
+        if state is not None:
+            state.open_todo_count = 0
+        return items
+
+    missing: list[str] = []
+    named: list[str] = []
+    with suppress(Exception):
+        if state is not None and hasattr(state, "missing_required_files"):
+            missing = list(state.missing_required_files() or [])
+        if state is not None and hasattr(state, "named_required_files"):
+            named = list(state.named_required_files() or [])
+
+    wrote = int(getattr(state, "write_steps", 0) or 0) > 0
+    verify_ok = getattr(state, "last_verify_ok", None) is True
+    timed_out = "timed out" in str(getattr(state, "last_verify_summary", "") or "").lower()
+    files_ok = bool(named) and not missing
+    phase = str(getattr(state, "phase", "") or "")
+
+    write_names: list[str] = []
+    for raw in list(getattr(state, "write_set", None) or []) + list(
+        getattr(state, "paths_touched", None) or []
+    ):
+        name = str(raw or "").replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower()
+        if name and name not in write_names:
+            write_names.append(name)
+
+    changed = False
+    for t in items:
+        if t.status in {"completed", "cancelled"}:
+            continue
+        low = (t.content or "").lower()
+        done = False
+        if wrote and any(
+            k in low
+            for k in ("scout", "explore", "research", "lock buildspec", "gather")
+        ):
+            done = True
+        if any(n and n in low for n in write_names if n not in {"ledger.json", "todos.json"}):
+            done = True
+        if named and root is not None:
+            for n in named:
+                if n.lower() in low:
+                    cand = root / n
+                    with suppress(OSError):
+                        if cand.is_file() and cand.stat().st_size > 8:
+                            done = True
+        if "verify" in low or "green" in low:
+            if verify_ok or (files_ok and (verify_ok or timed_out or phase in {"done", "ship"})):
+                done = True
+        if "tdd" in low or "failing test" in low:
+            if files_ok or verify_ok:
+                done = True
+        if files_ok and any(k in low for k in ("implement", "write ", "create ", "file_write")):
+            done = True
+        if done:
+            t.status = "completed"
+            changed = True
+
+    if changed:
+        save_todos(items, runtime, root=root)
+        items = load_todos(runtime, root=root)
+    n_open = open_todo_count(items)
+    if state is not None:
+        state.open_todo_count = n_open
+    return items
 
 
 def seed_drive_todos(

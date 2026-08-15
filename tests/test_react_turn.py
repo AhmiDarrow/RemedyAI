@@ -98,7 +98,8 @@ def test_resolve_tools_frustrated_why_keeps_build_armed():
         turn_tier=1,
         build_active=False,
     )
-    assert idle.reason == "non_work"
+    assert idle.tools is not None
+    assert idle.reason != "non_work"
 
 
 def test_resolve_tools_l1_strips_pure_chat():
