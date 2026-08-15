@@ -129,19 +129,20 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         if runtime is not None:
             # Do not treat runtime key material as something we echo — only bool.
             runtime_key = str(getattr(runtime, "_llm_api_key", "") or "")
+            if runtime_key.strip().lower() in ("local", "rmb", "unused"):
+                runtime_key = ""
         effective_key = resolve_provider_api_key(cfg, provider, home=home_path)
         key_set = bool(effective_key or runtime_key)
         xai_auth: dict | None = None
-        if provider == "xai":
-            try:
-                from remedy.interfaces.xai_auth import load_credentials
+        try:
+            from remedy.interfaces.xai_auth import load_credentials
 
-                creds = load_credentials(home_path)
-                xai_auth = creds.to_public_dict(home=home_path)
-                if creds.connected:
-                    key_set = True
-            except Exception:
-                xai_auth = None
+            creds = load_credentials(home_path)
+            xai_auth = creds.to_public_dict(home=home_path)
+            if provider == "xai" and creds.connected:
+                key_set = True
+        except Exception:
+            xai_auth = None
 
         out = {
             "llm_provider": provider,
@@ -154,7 +155,7 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "secrets_encoding": secret_status.get("encoding"),
             "secrets_encoding_warning": secret_status.get("encoding_warning"),
             "llm_ready": provider_credentials_ready(cfg) or bool(runtime_key) or bool(
-                xai_auth and xai_auth.get("connected")
+                provider == "xai" and xai_auth and xai_auth.get("connected")
             ),
             "name": cfg.get("name", "Remedy"),
             "user_name": str(cfg.get("user_name") or "").strip(),
@@ -400,7 +401,7 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "vision_force_decode": bool(result.get("vision_force_decode")),
             "name": result.get("name"),
             "web_tools_enabled": bool(result.get("web_tools_enabled")),
-            "http_bootstrap": bool(result.get("http_bootstrap", True)),
+            "http_bootstrap": bool(result.get("http_bootstrap", False)),
             "custom_llm_name": str(result.get("custom_llm_name") or "").strip(),
         }
 

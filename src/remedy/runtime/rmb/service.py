@@ -3392,16 +3392,12 @@ def apply_rmb_settings(
     state = merge_state(state)
     save_rmb_json(state, home_dir)
 
-    # Steal chat provider only when the user asked, or the loaded GGUF changed.
-    model_changed = (
-        "model_path" in patch
-        or "model_id" in patch
-        or bool(patch.get("use_as_chat_provider"))
-    )
+    # Steal chat provider only when the user asked. A model_id/path patch
+    # must not yank OpenAI/xAI onto RMB.
     chat_sync = sync_rmb_chat_identity(
         state,
         home_dir=home_dir,
-        force_provider=model_changed,
+        force_provider=bool(patch.get("use_as_chat_provider")),
     )
 
     # Which process knobs actually differ after merge (includes profile side-effects)?

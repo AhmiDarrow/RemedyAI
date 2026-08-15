@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import re
 import threading
 import time
@@ -25,6 +26,32 @@ _SECRET_FIELD_TOKEN_RE = re.compile(
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _same_or_child_url(got: str, want: str) -> bool:
+    """True when *got* is *want* or a same-host child path (redirect).
+
+    Raw ``startswith`` on the full URL treats ``https://github.com`` as
+    success for ``https://github.com/foo`` (and the reverse).
+    """
+    if not got or not want:
+        return False
+    if got == want:
+        return True
+    from urllib.parse import urlsplit
+
+    a = urlsplit(got)
+    b = urlsplit(want)
+    host_a = (a.hostname or "").lower()
+    host_b = (b.hostname or "").lower()
+    if not host_a or host_a != host_b:
+        return False
+    pa = (a.path or "/").rstrip("/") or "/"
+    pb = (b.path or "/").rstrip("/") or "/"
+    if pa == pb:
+        return True
+    # Landed on a child of the requested path (common after trailing-slash redirect).
+    return pa.startswith(pb.rstrip("/") + "/")
 
 
 # Max characters of page text / large strings kept in on-disk job JSON.
@@ -226,7 +253,12 @@ def canonical_home(home_dir: Path | str | None = None) -> Path:
     """Single resolved home so tool wait + API complete always share one jobs dir."""
     if home_dir is not None and str(home_dir).strip():
         return Path(home_dir).expanduser().resolve()
-    return (Path.home() / ".remedy").resolve()
+    try:
+        from remedy.core.security import get_home_dir
+
+        return get_home_dir().resolve()
+    except Exception:
+        return (Path.home() / ".remedy").resolve()
 
 
 def _root(home_dir: Path | str | None = None) -> Path:
@@ -547,7 +579,22 @@ class ComputerHostBridge:
         # Atomic-ish write so wait() never reads a half-written file
         tmp = path.with_suffix(".tmp")
         tmp.write_text(data, encoding="utf-8")
-        tmp.replace(path)
+        last: OSError | None = None
+        for i in range(16):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError as e:
+                # Windows: dest can be briefly locked by wait() read_text / AV.
+                last = e
+                time.sleep(0.015 * (i + 1))
+            except OSError as e:
+                last = e
+                if getattr(e, "winerror", None) not in (5, 32):
+                    raise
+                time.sleep(0.015 * (i + 1))
+        if last is not None:
+            raise last
 
     def _read(self, job_id: str) -> ComputerJob | None:
         path = self._path(job_id)
@@ -812,7 +859,7 @@ class ComputerHostBridge:
             got = str(
                 res.get("url") or (job.payload or {}).get("url") or ""
             ).strip().rstrip("/")
-            if got == want or got.startswith(want) or want.startswith(got):
+            if _same_or_child_url(got, want):
                 if best is None or (job.updated_at or "") > (best.updated_at or ""):
                     best = job
         return best
@@ -917,15 +964,17 @@ class ComputerHostBridge:
         url = str(pl.get("url") or "")
         if not url:
             return
-        self.set_ui_command(
-            {
-                "action": "open_browser",
-                "url": url,
-                "job_id": job.id,
-                "job_action": job.action,
-                "renudge": True,
-            }
-        )
+        cmd: dict[str, Any] = {
+            "action": "open_browser",
+            "url": url,
+            "job_id": job.id,
+            "job_action": job.action,
+            "renudge": True,
+        }
+        sid = str(job.session_id or (job.payload or {}).get("session_id") or "").strip()
+        if sid:
+            cmd["session_id"] = sid
+        self.set_ui_command(cmd)
 
     def wait(
         self,
@@ -1130,14 +1179,9 @@ class ComputerHostBridge:
         """
         home = canonical_home(self.home_dir)
         shots = home / "computer" / "shots"
-        # Also clean default ~/.remedy/computer/shots when home_dir is custom
+        # Only this process's home. A custom REMEDY_HOME / test tmp must
+        # never delete the owner's default ~/.remedy/computer/shots.
         roots = [shots]
-        default_shots = (Path.home() / ".remedy" / "computer" / "shots").resolve()
-        try:
-            if default_shots != shots.resolve():
-                roots.append(default_shots)
-        except OSError:
-            roots.append(default_shots)
         cutoff = time.time() - float(max_age_s)
         n = 0
         for root in roots:

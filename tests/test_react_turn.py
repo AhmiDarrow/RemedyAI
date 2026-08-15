@@ -90,6 +90,29 @@ def test_resolve_tools_l1_strips_pure_chat():
     assert d.reason == "l1_pure_chat"
 
 
+def test_resolve_tools_greeting_disarms_leftover_build():
+    """Bare Hi must not inherit a previous coding turn's tools."""
+    all_t = [_tool("file_write"), _tool("bash_exec")]
+    d = resolve_tools(
+        message="Hi",
+        all_tools=all_t,
+        turn_tier=1,
+        build_active=True,
+        open_tasks=["finish the installer"],
+        history=[{"role": "user", "content": "implement the installer"}],
+    )
+    assert d.tools is None
+    assert d.reason == "l1_pure_chat"
+    keep = resolve_tools(
+        message="Hi keep going",
+        all_tools=all_t,
+        turn_tier=1,
+        build_active=True,
+    )
+    assert keep.tools
+    assert keep.reason != "l1_pure_chat"
+
+
 def test_resolve_tools_keyword_miss_product_ask_stays_armed():
     """Any non-social ask must keep tools — do not depend on verb lists."""
     all_t = [_tool("file_write"), _tool("file_read"), _tool("list_dir")]
@@ -213,6 +236,22 @@ def test_resolve_tools_plan_mode():
         plan_mode=True,
     )
     assert d.pack == "plan" or d.reason.startswith("plan")
+
+
+def test_rearm_stays_plan_pack():
+    st = TurnState(
+        message="plan a calculator",
+        plan_mode=True,
+        all_tools=[_tool("file_write"), _tool("plan_list")],
+        tools=[_tool("plan_list")],
+    )
+    st.rearm(reason="keep_armed")
+    names = {
+        ((t.get("function") or {}).get("name") or "")
+        for t in (st.tools or [])
+    }
+    assert "file_write" not in names
+    assert st.run_until_done is False
 
 
 def test_stale_epochs_default_is_policy_constant():

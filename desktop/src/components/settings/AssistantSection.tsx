@@ -129,6 +129,13 @@ async function openOAuthPopup(url: string): Promise<void> {
   const trimmed = (url || '').trim()
   if (!trimmed) return
   try {
+    const { openUrlInBrowserRail } = await import('../../api/computer')
+    const dest = await openUrlInBrowserRail(trimmed, { keepSettings: true })
+    if (dest === 'rail') return
+  } catch {
+    /* fall through */
+  }
+  try {
     await openExternalUrl(trimmed)
   } catch {
     if (typeof window !== 'undefined') {
@@ -214,7 +221,7 @@ export function AssistantSection({
         void (async () => {
           try {
             const poll = await pollGoogleOAuth(state)
-            if (poll.status === 'connected' || poll.credentials?.connected) {
+            if (poll.status === 'connected') {
               stopPoll()
               setBusy(false)
               const email = poll.email || poll.credentials?.email

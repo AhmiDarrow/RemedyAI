@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   coerceRailMode,
   coerceSlideId,
+  layoutOpenBrowserBesideSettings,
+  layoutOpenBrowserInRail,
   loadWorkspaceLayout,
   saveWorkspaceLayout,
 } from './layoutPrefs'
@@ -101,5 +103,52 @@ describe('workspace layoutPrefs v3', () => {
     expect(L.leftRail).toBe('open')
     expect(L.rightRail).toBe('thin')
     expect(localStorage.getItem('remedy.workspaceLayout.v3')).toBeTruthy()
+  })
+
+  it('opens Browser on the right and does not leave two browsers', () => {
+    const next = layoutOpenBrowserInRail({
+      left: 'sessions',
+      right: 'settings',
+      leftWidth: 280,
+      rightWidth: 300,
+      leftOpen: true,
+      rightOpen: true,
+      leftRail: 'open',
+      rightRail: 'open',
+    })
+    expect(next.right).toBe('browser')
+    expect(next.left).toBe('sessions')
+    expect(next.rightRail).toBe('open')
+  })
+
+  it('keeps Settings mounted when opening Browser for OAuth', () => {
+    const fromRight = layoutOpenBrowserBesideSettings({
+      left: 'sessions',
+      right: 'settings',
+      leftWidth: 280,
+      rightWidth: 320,
+      leftOpen: true,
+      rightOpen: true,
+      leftRail: 'open',
+      rightRail: 'open',
+    })
+    expect(fromRight.right).toBe('settings')
+    expect(fromRight.left).toBe('browser')
+    expect(fromRight.leftRail).toBe('open')
+    expect(fromRight.rightRail).toBe('open')
+
+    const fromLeft = layoutOpenBrowserBesideSettings({
+      left: 'settings',
+      right: 'terminal',
+      leftWidth: 300,
+      rightWidth: 320,
+      leftOpen: true,
+      rightOpen: false,
+      leftRail: 'open',
+      rightRail: 'thin',
+    })
+    expect(fromLeft.left).toBe('settings')
+    expect(fromLeft.right).toBe('browser')
+    expect(fromLeft.rightRail).toBe('open')
   })
 })

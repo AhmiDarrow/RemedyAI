@@ -4,6 +4,9 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { apiFetch } from '../../api/client'
 import { isTauri, tauriInvoke } from '../../api/tauri'
+import { isLinuxDesktop } from '../../utils/platform'
+
+const SHELL_LABEL = isLinuxDesktop() ? 'Terminal' : 'PowerShell'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 /** Read app theme tokens so xterm matches light/dark forest/etc. */
@@ -42,7 +45,7 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
   const startedRef = useRef(false)
   /** Bumped on each start/restart so a slow open cannot clobber a newer shell. */
   const ptyGenRef = useRef(0)
-  const [status, setStatus] = useState('Starting PowerShell…')
+  const [status, setStatus] = useState(`Starting ${SHELL_LABEL}…`)
   const [cwd, setCwd] = useState('')
   const [hostBg, setHostBg] = useState(() => {
     try {
@@ -77,7 +80,7 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
 
   const startPty = useCallback(async (term: Terminal, fit: FitAddon, workdir: string) => {
     if (!isTauri()) {
-      term.writeln('\r\nDesktop app required for in-app PowerShell.\r\n')
+      term.writeln(`\r\nDesktop app required for in-app ${SHELL_LABEL}.\r\n`)
       setStatus('Not available outside desktop')
       return
     }
@@ -102,7 +105,7 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
         cols = Math.max(term.cols, 80)
         rows = Math.max(term.rows, 24)
       }
-      setStatus('Launching PowerShell…')
+      setStatus(`Launching ${SHELL_LABEL}…`)
       const id = await tauriInvoke<string>('pty_open', {
         cwd: workdir.trim() || null,
         cols,
@@ -114,12 +117,12 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
         return
       }
       ptyIdRef.current = id
-      setStatus(workdir ? `PowerShell · ${workdir}` : 'PowerShell')
+      setStatus(workdir ? `${SHELL_LABEL} · ${workdir}` : SHELL_LABEL)
       term.focus()
     } catch (e: unknown) {
       if (gen !== ptyGenRef.current) return
       const msg = e instanceof Error ? e.message : String(e)
-      term.writeln(`\r\nFailed to start PowerShell: ${msg}\r\n`)
+      term.writeln(`\r\nFailed to start ${SHELL_LABEL}: ${msg}\r\n`)
       setStatus(`Error: ${msg}`)
     }
   }, [])
@@ -132,12 +135,15 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
     const theme = readTerminalTheme()
     setHostBg(theme.background)
 
+    const isLinux = /Linux|X11|Wayland/i.test(navigator.userAgent || '')
     const term = new Terminal({
       cursorBlink: true,
-      cursorStyle: 'block',
-      cursorWidth: 2,
+      cursorStyle: isLinux ? 'bar' : 'block',
+      cursorWidth: isLinux ? 1 : 2,
       fontSize: 13,
-      fontFamily: 'Consolas, "Cascadia Mono", "Courier New", monospace',
+      fontFamily: isLinux
+        ? '"DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono", monospace'
+        : 'Consolas, "Cascadia Mono", "Courier New", monospace',
       theme,
       allowProposedApi: true,
       rightClickSelectsWord: false,
@@ -273,7 +279,7 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
 
     void (async () => {
       if (!isTauri()) {
-        term.writeln('Desktop app required for in-app PowerShell.')
+        term.writeln(`Desktop app required for in-app ${SHELL_LABEL}.`)
         setStatus('Web UI — use desktop for terminal')
         return
       }
@@ -378,7 +384,7 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
     const fit = fitRef.current
     if (!term || !fit) return
     term.clear()
-    term.writeln('Restarting PowerShell…\r\n')
+    term.writeln(`Restarting ${SHELL_LABEL}…\r\n`)
     await startPty(term, fit, cwd || cwdRef.current)
   }
 
@@ -396,7 +402,7 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
       await navigator.clipboard.writeText(p)
       setStatus(`Copied · ${p}`)
       window.setTimeout(() => {
-        setStatus(p ? `PowerShell · ${p}` : 'PowerShell')
+        setStatus(p ? `${SHELL_LABEL} · ${p}` : SHELL_LABEL)
       }, 1800)
     } catch {
       /* ignore */
@@ -440,7 +446,7 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
             color: 'var(--text-secondary)',
           }}
           onClick={() => void restart()}
-          title="Restart PowerShell in session project folder"
+          title={`Restart ${SHELL_LABEL} in session project folder`}
         >
           Restart
         </button>

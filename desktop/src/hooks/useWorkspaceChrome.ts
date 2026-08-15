@@ -5,6 +5,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import {
+  layoutOpenBrowserBesideSettings,
+  layoutOpenBrowserInRail,
   loadWorkspaceLayout,
   saveWorkspaceLayout,
   type WorkspaceLayout,
@@ -39,39 +41,41 @@ export function useWorkspaceChrome(opts: {
     })
   }, [])
 
-  const openBrowserInRail = useCallback(() => {
-    setPanel(null)
-    setWsLayout((prev) => {
-      const next: WorkspaceLayout = {
-        ...prev,
-        left: prev.left === 'browser' ? prev.left : prev.left,
-        right: 'browser',
-        rightOpen: true,
-        rightRail: 'open',
-        rightWidth: Math.max(prev.rightWidth || 0, 440),
-        leftOpen: prev.leftRail === 'open' || prev.leftOpen,
-      }
-      if (next.left === 'browser') {
-        next.left = 'sessions'
-        next.leftRail = 'open'
-        next.leftOpen = true
-      }
-      saveWorkspaceLayout(next)
-      return next
-    })
+  const resyncBrowserBounds = useCallback(() => {
     window.setTimeout(() => {
       window.dispatchEvent(new CustomEvent('remedy:browser-resync-bounds'))
     }, 80)
     window.setTimeout(() => {
       window.dispatchEvent(new CustomEvent('remedy:browser-resync-bounds'))
     }, 320)
-  }, [setPanel])
+  }, [])
+
+  const openBrowserInRail = useCallback(() => {
+    setPanel(null)
+    setWsLayout((prev) => {
+      const next = layoutOpenBrowserInRail(prev)
+      saveWorkspaceLayout(next)
+      return next
+    })
+    resyncBrowserBounds()
+  }, [resyncBrowserBounds, setPanel])
+
+  const openBrowserBesideSettings = useCallback(() => {
+    setPanel(null)
+    setWsLayout((prev) => {
+      const next = layoutOpenBrowserBesideSettings(prev)
+      saveWorkspaceLayout(next)
+      return next
+    })
+    resyncBrowserBounds()
+  }, [resyncBrowserBounds, setPanel])
 
   useEffect(() => {
     const onComputerUi = (ev: Event) => {
-      const detail = (ev as CustomEvent<{ openBrowser?: boolean }>).detail
+      const detail = (ev as CustomEvent<{ openBrowser?: boolean; keepSettings?: boolean }>).detail
       if (!detail?.openBrowser) return
-      openBrowserInRail()
+      if (detail.keepSettings) openBrowserBesideSettings()
+      else openBrowserInRail()
     }
     window.addEventListener('remedy:computer-ui', onComputerUi)
     let cancelled = false
@@ -120,7 +124,7 @@ export function useWorkspaceChrome(opts: {
       window.removeEventListener('remedy:computer-ui', onComputerUi)
       unlisten?.()
     }
-  }, [openBrowserInRail])
+  }, [openBrowserBesideSettings, openBrowserInRail])
 
   const swapSides = useCallback(() => {
     setWsLayout((prev) => {

@@ -18,6 +18,12 @@ def continuity_steering_block(
     max_chars: int = 900,
 ) -> str:
     """Return a system inject block, or empty if nothing open."""
+    with suppress(Exception):
+        from remedy.core.react_policy import runtime_turn_is_chat_only
+
+        if runtime_turn_is_chat_only(runtime):
+            return ""
+
     lines: list[str] = []
     open_tasks: list[str] = []
     next_steps: list[str] = []

@@ -38,6 +38,16 @@ def test_legacy_deepseek_reasoner_migrates() -> None:
     assert m == "deepseek-v4-flash"
 
 
+def test_legacy_anthropic_catalog_ids_migrate() -> None:
+    _, m, u = normalize_llm_settings(
+        "anthropic", "claude-sonnet-4-0", "https://api.anthropic.com/v1"
+    )
+    assert m == "claude-sonnet-5"
+    assert u.rstrip("/").endswith("anthropic.com/v1")
+    _, m2, _ = normalize_llm_settings("anthropic", "claude-opus-4-1", None)
+    assert m2 == "claude-opus-5"
+
+
 def test_legacy_grok3_migrates() -> None:
     p, m, u = normalize_llm_settings("xai", "grok-3-mini", "https://api.x.ai/v1")
     assert p == "xai"

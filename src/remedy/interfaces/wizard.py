@@ -337,8 +337,8 @@ LLM_PROVIDERS: dict[str, dict[str, str]] = {
     },
     "anthropic": {
         "label": "Anthropic",
-        "model": "claude-sonnet-4-20250514",
-        "base_url": "https://api.anthropic.com",
+        "model": "claude-sonnet-5",
+        "base_url": "https://api.anthropic.com/v1",
     },
     "google": {
         "label": "Google Gemini",

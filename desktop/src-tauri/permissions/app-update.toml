@@ -1,7 +1,12 @@
 [[permission]]
 identifier = "allow-app-update"
 description = "Allow checking for and installing desktop updates (download installer + relaunch)."
-commands.allow = ["check_desktop_update", "start_desktop_update", "get_local_api_token"]
+commands.allow = [
+  "check_desktop_update",
+  "start_desktop_update",
+  "get_local_api_token",
+  "get_api_origin",
+]
 
 [[permission]]
 identifier = "allow-read-dropped-files"

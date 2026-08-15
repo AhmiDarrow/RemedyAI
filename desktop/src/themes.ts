@@ -480,6 +480,18 @@ async function syncNativeWindowTheme(kind: 'dark' | 'light'): Promise<void> {
     if (!w.__TAURI__ && !w.__TAURI_INTERNALS__) return
     const { getCurrentWindow } = await import('@tauri-apps/api/window')
     await getCurrentWindow().setTheme(kind)
+    try {
+      const { tauriInvoke } = await import('./api/tauri')
+      const cs = getComputedStyle(document.documentElement)
+      await tauriInvoke('apply_linux_chrome_theme', {
+        bg: (cs.getPropertyValue('--bg-primary') || '#0a0e0b').trim(),
+        fg: (cs.getPropertyValue('--text-primary') || '#e6ebe7').trim(),
+        border: (cs.getPropertyValue('--border') || '#2a352c').trim(),
+        dark: kind === 'dark',
+      })
+    } catch {
+      // Windows / older runtime — ignore
+    }
   } catch {
     // Browser / older runtime — ignore
   }

@@ -371,3 +371,44 @@ async def test_slash_reset_stays_on_session(store: MemoryStore):
     r2 = await handle_slash_command("/clear", sid, store)
     assert r2.get("action") == "reset_session"
     assert await store.get_chat_messages(sid) == []
+
+
+@pytest.mark.asyncio
+async def test_reset_aborts_before_wipe_and_drops_stale_claim(
+    store: MemoryStore, tmp_path: Path
+):
+    """Dying-stream persist must not refill the wiped session."""
+    from remedy.core.turn_context import (
+        is_session_streaming,
+        session_reset_epoch,
+        try_claim_session_stream,
+    )
+
+    sid = str(uuid4())
+    home = tmp_path / "home"
+    home.mkdir()
+    await store.create_chat_session(
+        ChatSession(
+            id=sid,
+            title="Live",
+            message_count=0,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+    )
+    await store.add_chat_message(
+        ChatMessage(
+            id=str(uuid4()),
+            session_id=sid,
+            role=ChatMessageRole.USER,
+            content="in flight",
+            created_at=datetime.now(UTC),
+        )
+    )
+    assert try_claim_session_stream(sid) is True
+    before = session_reset_epoch(sid)
+    stats = await full_reset_session(sid, store, home_dir=home)
+    assert stats["ok"] is True
+    assert session_reset_epoch(sid) == before + 1
+    assert is_session_streaming(sid) is False
+    assert await store.get_chat_messages(sid) == []

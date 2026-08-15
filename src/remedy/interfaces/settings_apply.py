@@ -6,6 +6,7 @@ the live runtime, and optionally messenger adapters.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 from pathlib import Path
@@ -22,6 +23,20 @@ from remedy.interfaces.config import normalize_llm_settings
 logger = logging.getLogger(__name__)
 
 DEFAULT_BROWSER_HOME_URL = "https://github.com/AhmiDarrow/RemedyAI"
+
+
+def _http_bootstrap_default() -> bool:
+    """Omitted-key default: sidecar/desktop off, plain serve on.
+
+    Must not read config.toml — that is how a missing key became True
+    on desktop after Save.
+    """
+    try:
+        from remedy.interfaces.local_auth import _desktop_sidecar_context
+
+        return not bool(_desktop_sidecar_context())
+    except Exception:
+        return False
 
 
 def _memory_encrypt_status_public(raw: dict[str, Any]) -> str:
@@ -171,8 +186,15 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "llm_model": model,
         "llm_base_url": base_url,
         "custom_llm_name": str(raw.get("custom_llm_name") or "").strip(),
-        "llm_api_key_set": bool(key),
-        "llm_ready": bool(provider_credentials_ready(raw) or key),
+        "llm_api_key_set": bool(
+            key and str(key).strip().lower() not in ("local", "rmb", "unused")
+        ),
+        "llm_ready": bool(
+            provider_credentials_ready(raw)
+            or (
+                key and str(key).strip().lower() not in ("local", "rmb", "unused")
+            )
+        ),
         "name": raw.get("name", "Remedy"),
         "user_name": str(raw.get("user_name") or "").strip(),
         "agent_gender": str(raw.get("agent_gender") or "female").strip().lower()
@@ -191,7 +213,11 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "approval_mode": str(raw.get("approval_mode") or "auto").lower(),
         "tool_process": normalize_tool_process(raw),
         "web_tools_enabled": bool(raw.get("web_tools_enabled", False)),
-        "http_bootstrap": bool(raw.get("http_bootstrap", True)),
+        "http_bootstrap": (
+            bool(raw["http_bootstrap"])
+            if "http_bootstrap" in raw
+            else _http_bootstrap_default()
+        ),
         "privacy_mode": bool(raw.get("privacy_mode", False)),
         "sleev_enabled": bool(raw.get("sleev_enabled", False)),
         "sleev_gateway_url": str(raw.get("sleev_gateway_url") or "").strip(),
@@ -356,7 +382,9 @@ async def apply_settings_update(
         raw_pp = str(patch["project_path"]).strip()
         if raw_pp and raw_pp not in (".", "./"):
             resolved = resolve_project_path(raw_pp)
-            if is_forbidden_project_path(resolved):
+            # Check the raw string too — POSIX resolve of C:\Windows\… becomes
+            # a junk relative path and would otherwise pass.
+            if is_forbidden_project_path(raw_pp) or is_forbidden_project_path(resolved):
                 raise ValueError(
                     f"Project path is not allowed: {resolved}. "
                     "Pick a user folder, not an OS or program directory."
@@ -699,7 +727,8 @@ async def apply_settings_update(
             from remedy.runtime.rmb.service import apply_rmb_chat_model
 
             live = not any_stream_claimed()
-            rmb_live = apply_rmb_chat_model(
+            rmb_live = await asyncio.to_thread(
+                apply_rmb_chat_model,
                 str(model),
                 home_dir=cfg.get("home_dir") if isinstance(cfg, dict) else None,
                 cfg=cfg if isinstance(cfg, dict) else None,

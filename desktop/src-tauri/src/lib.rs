@@ -35,7 +35,7 @@ fn remedy_home() -> PathBuf {
 }
 
 /// Local API port (default 7400).
-fn api_port() -> u16 {
+pub(crate) fn api_port() -> u16 {
     env::var("REMEDY_API_PORT")
         .ok()
         .and_then(|s| s.trim().parse::<u16>().ok())
@@ -47,8 +47,13 @@ fn status_addr() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], api_port()))
 }
 
-fn api_base_url() -> String {
+pub(crate) fn api_base_url() -> String {
     format!("http://127.0.0.1:{}", api_port())
+}
+
+#[tauri::command]
+fn get_api_origin() -> String {
+    api_base_url()
 }
 
 fn window_title() -> String {
@@ -207,11 +212,63 @@ fn current_exe_dir() -> Option<std::path::PathBuf> {
     env::current_exe().ok()?.parent().map(|p| p.to_path_buf())
 }
 
+/// True when this path is a native sidecar for the current OS.
+/// Linux/WSL must never launch a Windows PE or a `C:\...` shebang via interop —
+/// those sleep and never bind :7400.
+fn sidecar_is_native(p: &Path) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = p;
+        true
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name.ends_with(".exe") {
+            return false;
+        }
+        match std::fs::read(p) {
+            Ok(bytes) if bytes.len() >= 2 && bytes[0] == b'M' && bytes[1] == b'Z' => false,
+            Ok(bytes) if bytes.starts_with(b"#!") => {
+                let line = bytes
+                    .split(|&b| b == b'\n' || b == b'\r')
+                    .next()
+                    .unwrap_or(&[]);
+                let s = String::from_utf8_lossy(line);
+                // Windows interpreter in shebang (uv tool on the NT PATH, or
+                // /mnt/c/.../python.exe via WSL interop — those never bind :7400).
+                let low = s.to_ascii_lowercase();
+                !low.contains(":\\")
+                    && !low.contains("scripts/python")
+                    && !low.contains(".exe")
+                    && !low.contains("/mnt/")
+                    && !low.contains("//wsl")
+            }
+            Ok(bytes) if bytes.starts_with(b"\x7fELF") => true,
+            Ok(_) => p.is_file(),
+            Err(_) => false,
+        }
+    }
+}
+
 /// Reject tiny stub EXEs (e.g. 46KB wrappers that only print CLI help and exit).
+/// On Unix, venv `remedy` and `uv run` launchers are tiny shebang scripts and
+/// are the correct live-source sidecars — size is not a signal there.
 fn is_plausible_sidecar(p: &Path) -> bool {
     match std::fs::metadata(p) {
-        Ok(m) => m.is_file() && m.len() > 1_000_000,
-        Err(_) => false,
+        Ok(m) if m.is_file() => {}
+        _ => return false,
+    }
+    if !sidecar_is_native(p) {
+        return false;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::fs::metadata(p).map(|m| m.len() > 1_000_000).unwrap_or(false)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        true
     }
 }
 
@@ -243,14 +300,36 @@ fn find_remedy() -> (String, String) {
     // stale frozen build that predates provider/LLM fixes.  Prefer the venv
     // when it exists (checked relative to cwd, then the repo root).
     if cfg!(debug_assertions) {
+        // WSL/Linux: honor the isolated venv first. The repo `.venv` on /mnt/c
+        // is often a Windows environment (or a half-synced mix) and must not
+        // win over UV_PROJECT_ENVIRONMENT.
+        #[cfg(not(target_os = "windows"))]
+        if let Ok(uv_env) = env::var("UV_PROJECT_ENVIRONMENT") {
+            let cand = PathBuf::from(uv_env).join("bin").join("remedy");
+            if cand.is_file() && sidecar_is_native(&cand) {
+                log::info!(
+                    "Dev build: using UV_PROJECT_ENVIRONMENT remedy: {}",
+                    cand.display()
+                );
+                return (cand.to_string_lossy().to_string(), String::new());
+            }
+        }
         if let Ok(cwd) = env::current_dir() {
-            for venv_rel in [
+            #[cfg(target_os = "windows")]
+            let venv_rels: &[&str] = &[
                 ".venv/Scripts/remedy.exe",
                 "../.venv/Scripts/remedy.exe",
                 "../../.venv/Scripts/remedy.exe",
-            ] {
+            ];
+            #[cfg(not(target_os = "windows"))]
+            let venv_rels: &[&str] = &[
+                ".venv/bin/remedy",
+                "../.venv/bin/remedy",
+                "../../.venv/bin/remedy",
+            ];
+            for venv_rel in venv_rels {
                 let cand = cwd.join(venv_rel);
-                if cand.is_file() {
+                if cand.is_file() && sidecar_is_native(&cand) {
                     log::info!(
                         "Dev build: using repo venv remedy (live source): {}",
                         cand.display()
@@ -276,25 +355,41 @@ fn find_remedy() -> (String, String) {
     }
 
     if let Some(dir) = current_exe_dir() {
-        if let Some(path) = searched(
-            "triple",
-            &dir.join("remedy-desktop-x86_64-pc-windows-msvc.exe"),
-        ) {
-            return (path, String::new());
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(path) = searched(
+                "triple",
+                &dir.join("remedy-desktop-x86_64-pc-windows-msvc.exe"),
+            ) {
+                return (path, String::new());
+            }
+            if let Some(path) = searched(
+                "triple-amd64",
+                &dir.join("remedy-desktop-amd64-pc-windows-msvc.exe"),
+            ) {
+                return (path, String::new());
+            }
+            if let Some(path) = searched("plain", &dir.join("remedy-desktop.exe")) {
+                return (path, String::new());
+            }
         }
-        if let Some(path) = searched(
-            "triple-amd64",
-            &dir.join("remedy-desktop-amd64-pc-windows-msvc.exe"),
-        ) {
-            return (path, String::new());
-        }
-        if let Some(path) = searched("plain", &dir.join("remedy-desktop.exe")) {
-            return (path, String::new());
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Some(path) = searched(
+                "triple",
+                &dir.join("remedy-desktop-x86_64-unknown-linux-gnu"),
+            ) {
+                return (path, String::new());
+            }
+            if let Some(path) = searched("plain", &dir.join("remedy-desktop")) {
+                return (path, String::new());
+            }
         }
     }
 
     if let Ok(cwd) = env::current_dir() {
-        for (label, p) in [
+        #[cfg(target_os = "windows")]
+        let cwd_cands: [(&str, PathBuf); 4] = [
             (
                 "dev-bin-triple",
                 cwd.join("bin")
@@ -311,7 +406,27 @@ fn find_remedy() -> (String, String) {
                 "dev-desktop",
                 cwd.join("desktop").join("bin").join("remedy-desktop.exe"),
             ),
-        ] {
+        ];
+        #[cfg(not(target_os = "windows"))]
+        let cwd_cands: [(&str, PathBuf); 4] = [
+            (
+                "dev-bin-triple",
+                cwd.join("bin")
+                    .join("remedy-desktop-x86_64-unknown-linux-gnu"),
+            ),
+            ("dev-bin", cwd.join("bin").join("remedy-desktop")),
+            (
+                "dev-desktop-triple",
+                cwd.join("desktop")
+                    .join("bin")
+                    .join("remedy-desktop-x86_64-unknown-linux-gnu"),
+            ),
+            (
+                "dev-desktop",
+                cwd.join("desktop").join("bin").join("remedy-desktop"),
+            ),
+        ];
+        for (label, p) in cwd_cands {
             if let Some(path) = searched(label, &p) {
                 return (path, String::new());
             }
@@ -326,25 +441,37 @@ fn find_remedy() -> (String, String) {
 
     let msg = format!(
         "Sidecar not found - checked exe dir {:?}, cwd/bin/, and PATH (remedy). \
-         Tiny stub EXEs (<1MB) are ignored.",
+         Tiny stub EXEs (<1MB) are ignored on Windows; PE/.exe is ignored on Linux.",
         current_exe_dir()
     );
     log::error!("{}", msg);
-    ("remedy-desktop.exe".to_string(), msg)
+    #[cfg(target_os = "windows")]
+    {
+        ("remedy-desktop.exe".to_string(), msg)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        ("remedy-desktop".to_string(), msg)
+    }
 }
 
 /// Resolve `remedy` / `remedy.exe` from PATH when present.
 fn which_remedy_on_path() -> Result<String, ()> {
     let path_var = env::var_os("PATH").ok_or(())?;
+    #[cfg(target_os = "windows")]
+    let names: &[&str] = &["remedy.exe", "remedy"];
+    #[cfg(not(target_os = "windows"))]
+    let names: &[&str] = &["remedy"];
     for dir in env::split_paths(&path_var) {
-        for name in ["remedy.exe", "remedy"] {
+        for name in names {
             let cand = dir.join(name);
-            if is_plausible_sidecar(&cand) || (cand.is_file() && name == "remedy.exe") {
+            if !cand.is_file() || !sidecar_is_native(&cand) {
+                continue;
+            }
+            if is_plausible_sidecar(&cand) || cfg!(target_os = "windows") {
                 // Scripts/remedy.exe can be a small launcher — allow if it exists
                 // and is executable; size check relaxed for PATH entry points.
-                if cand.is_file() {
-                    return Ok(cand.to_string_lossy().to_string());
-                }
+                return Ok(cand.to_string_lossy().to_string());
             }
         }
     }
@@ -375,6 +502,15 @@ enum ForeignServeChoice {
 /// Blocking native dialog when :7400 is already healthy.
 fn ask_foreign_serve_dialog() -> ForeignServeChoice {
     use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
+
+    // Unattended / WSLg relaunch: attach to the already-healthy API.
+    let attach = std::env::var("REMEDY_DESKTOP_ATTACH")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if matches!(attach.as_str(), "1" | "true" | "yes" | "existing") {
+        log::info!("REMEDY_DESKTOP_ATTACH: use existing server on :{}", api_port());
+        return ForeignServeChoice::UseExisting;
+    }
 
     // Three clear actions (TaskDialog custom buttons on Windows).
     let result = MessageDialog::new()
@@ -524,6 +660,8 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
         let mut c = Command::new(cmd);
         c.args(args)
             .env("REMEDY_DESKTOP_SIDECAR", "1")
+            .env("PYTHONUNBUFFERED", "1")
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         if let Some(ref dir) = webui {
@@ -788,23 +926,30 @@ fn kill_port_7400_windows() {
 /// Kill ``remedy.exe serve`` and ``python … remedy … serve`` process trees.
 #[cfg(target_os = "windows")]
 fn kill_cli_serve_windows() {
-    // WMI query: CommandLine contains serve + remedy (covers Scripts\remedy.exe and -c serve)
-    let ps = r#"
+    // Only this instance's API port — never murder an isolated :7411 serve.
+    let port = api_port();
+    let ps = format!(
+        r#"
+$port = {port}
 Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='remedy.exe' OR Name='pythonw.exe'" -ErrorAction SilentlyContinue |
-  Where-Object {
+  Where-Object {{
     $_.CommandLine -and (
       $_.CommandLine -match 'remedy(\.exe)?["\s].*serve' -or
       $_.CommandLine -match 'Scripts\\remedy\.exe' -or
       $_.CommandLine -match '_start_serve\.py' -or
       $_.CommandLine -match 'remedy\.interfaces\.cli'
+    ) -and (
+      $_.CommandLine -match "--port\s+$port" -or
+      ($port -eq 7400 -and $_.CommandLine -notmatch '--port\s+\d+')
     )
-  } |
-  ForEach-Object {
+  }} |
+  ForEach-Object {{
     taskkill /F /T /PID $_.ProcessId 2>$null | Out-Null
-  }
-"#;
+  }}
+"#
+    );
     let _ = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", ps])
+        .args(["-NoProfile", "-NonInteractive", "-Command", &ps])
         .creation_flags(CREATE_NO_WINDOW)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -813,14 +958,11 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='remedy.exe' OR
 
 #[cfg(not(target_os = "windows"))]
 fn force_stop_remedy_processes() {
-    // Best-effort: free :7400 and kill remedy serve
+    // Sidecar argv is `remedy --home <dir> serve --host 127.0.0.1 --port N`.
+    // A literal `remedy serve` never matches.
+    let port = api_port();
     let _ = Command::new("pkill")
-        .args(["-f", "remedy serve"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    let _ = Command::new("pkill")
-        .args(["-f", "_start_serve"])
+        .args(["-f", &format!("serve --host 127.0.0.1 --port {port}")])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
@@ -844,8 +986,12 @@ fn start_sidecar(
         .lock()
         .map_err(|_| "server state lock poisoned".to_string())?;
 
-    // Already managed by this Desktop process and healthy — nothing to do.
-    if guard.is_some() && check_health(Duration::from_millis(400)) {
+    // Already managed and healthy — skip unless this is an explicit restart
+    // (Retry / self-inject must recycle a pingable-but-wedged process).
+    if mode != SidecarStartMode::ForceRestart
+        && guard.is_some()
+        && check_health(Duration::from_millis(400))
+    {
         log::info!("Managed sidecar already healthy; skipping re-spawn");
         return Ok(());
     }
@@ -1293,13 +1439,62 @@ fn open_terminal(cwd: Option<String>) -> Result<String, String> {
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        for term in ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"] {
-            let r = Command::new(term)
-                .arg("--working-directory")
-                .arg(&dir_s)
-                .spawn();
-            if r.is_ok() {
+        fn sh_single_quote(s: &str) -> String {
+            format!("'{}'", s.replace('\'', "'\\''"))
+        }
+        let gnome = ["--working-directory", dir_s.as_str()];
+        let konsole = ["--workdir", dir_s.as_str()];
+        // Match in-app PTY: never exec a WSL-interop $SHELL (/mnt/c/…/powershell.exe).
+        let safe_shell = {
+            let raw = env::var("SHELL").unwrap_or_default();
+            let s = raw.trim();
+            let low = s.to_ascii_lowercase();
+            let interop = low.ends_with(".exe")
+                || low.contains("/mnt/")
+                || low.contains(":\\")
+                || low.contains("//wsl");
+            if !s.is_empty() && Path::new(s).is_file() && !interop {
+                s.to_string()
+            } else {
+                "/bin/bash".to_string()
+            }
+        };
+        let xterm_cmd = format!(
+            "cd {} && exec {} -l",
+            sh_single_quote(&dir_s),
+            sh_single_quote(&safe_shell)
+        );
+        let xterm = ["-e", "sh", "-lc", xterm_cmd.as_str()];
+        let terms: &[(&str, &[&str])] = &[
+            ("gnome-terminal", &gnome),
+            ("xfce4-terminal", &gnome),
+            ("konsole", &konsole),
+            ("xterm", &xterm),
+        ];
+        for (term, args) in terms {
+            if Command::new(term).args(*args).spawn().is_ok() {
                 return Ok(format!("Opened {term} in {dir_s}"));
+            }
+        }
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        ))]
+        if linux_env_is_wslg() {
+            if let Some(ps) = wslg_powershell_exe() {
+                let win = wslg_windows_path(Path::new(&dir_s));
+                let loc = win.to_string_lossy().replace('\'', "''");
+                let cmd = format!("Set-Location -LiteralPath '{loc}'");
+                if Command::new(&ps)
+                    .args(["-NoLogo", "-NoExit", "-Command", &cmd])
+                    .spawn()
+                    .is_ok()
+                {
+                    return Ok(format!("Opened Windows PowerShell in {dir_s}"));
+                }
             }
         }
         return Err("No terminal emulator found".into());
@@ -1690,6 +1885,21 @@ fn show_main_window(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn is_main_window_maximized(app: AppHandle) -> Result<bool, String> {
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
+    {
+        if linux_snap_state()
+            .0
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Ok(true);
+        }
+    }
     let w = primary_window(&app).ok_or_else(|| "no main window".to_string())?;
     w.is_maximized()
         .map_err(|e| format!("is_maximized failed: {e}"))
@@ -1731,10 +1941,10 @@ fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
         thread::sleep(Duration::from_millis(200));
     }
 
-    // Hide to tray (keep sidecar alive) - same as close-to-tray.
+    // Same stay-ready path as title-bar Close (WSLg minimizes; others hide).
     if let Some(w) = primary_window(&app) {
-        w.hide().map_err(|e| format!("hide to tray failed: {e}"))?;
-        log::info!("switch_to_web_ui: desktop hidden to tray");
+        stay_ready_after_close(&w)?;
+        log::info!("switch_to_web_ui: desktop stay-ready (sidecar alive)");
     }
 
     // Open default browser (Windows: start; shell plugin as secondary).
@@ -1751,14 +1961,23 @@ fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let status = Command::new("xdg-open")
+        // Spawn and return — .status() waits until some desktops close the browser.
+        let spawned = Command::new("xdg-open")
             .arg(&url)
-            .status()
-            .or_else(|_| Command::new("open").arg(&url).status())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .or_else(|_| {
+                Command::new("open")
+                    .arg(&url)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+            })
             .map_err(|e| format!("open browser failed: {e}"))?;
-        if !status.success() {
-            return Err(format!("open browser exited with {status}"));
-        }
+        drop(spawned);
     }
 
     Ok(url)
@@ -1768,18 +1987,453 @@ fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 fn toggle_maximize_main_window(app: AppHandle) -> Result<bool, String> {
     let w = primary_window(&app).ok_or_else(|| "no main window".to_string())?;
-    let max = w
-        .is_maximized()
-        .map_err(|e| format!("is_maximized failed: {e}"))?;
-    if max {
-        w.unmaximize()
-            .map_err(|e| format!("unmaximize failed: {e}"))?;
-    } else {
-        w.maximize()
-            .map_err(|e| format!("maximize failed: {e}"))?;
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
+    {
+        return linux_toggle_workarea(&w);
     }
-    w.is_maximized()
-        .map_err(|e| format!("is_maximized failed: {e}"))
+
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    )))]
+    {
+        let max = w
+            .is_maximized()
+            .map_err(|e| format!("is_maximized failed: {e}"))?;
+        if max {
+            w.unmaximize()
+                .map_err(|e| format!("unmaximize failed: {e}"))?;
+        } else {
+            w.maximize()
+                .map_err(|e| format!("maximize failed: {e}"))?;
+        }
+        return w
+            .is_maximized()
+            .map_err(|e| format!("is_maximized failed: {e}"));
+    }
+}
+
+/// WSLg + GTK CSD: `maximize()` covers the whole output (under the Windows
+/// taskbar) and keeps a ~32px shadow inset, which clips Close and the status
+/// bar. Snap to the monitor work area instead.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_snap_state() -> &'static (
+    std::sync::atomic::AtomicBool,
+    Mutex<Option<(i32, i32, u32, u32)>>,
+) {
+    static STATE: std::sync::OnceLock<(
+        std::sync::atomic::AtomicBool,
+        Mutex<Option<(i32, i32, u32, u32)>>,
+    )> = std::sync::OnceLock::new();
+    STATE.get_or_init(|| {
+        (
+            std::sync::atomic::AtomicBool::new(false),
+            Mutex::new(None),
+        )
+    })
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+/// WSLg maps the GTK window onto a Windows HWND. GDK's current monitor is
+/// often the wrong display; the Windows working area of *that* HWND is truth.
+/// `hint` is the current window rect so we pick the monitor the window is on
+/// (3-display setups) instead of primary / a sibling Remedy window.
+fn wslg_windows_workarea(hint: Option<(i32, i32, u32, u32)>) -> Option<(i32, i32, u32, u32)> {
+    if !linux_env_is_wslg() {
+        return None;
+    }
+    {
+        let cache = wslg_workarea_cache()
+            .lock()
+            .ok()
+            .and_then(|g| g.clone());
+        if let Some((at, cached_hint, wa)) = cache {
+            if at.elapsed() < Duration::from_millis(750) && cached_hint == hint {
+                return Some(wa);
+            }
+            // Same monitor / nearby drag: reuse without spawning PowerShell.
+            if at.elapsed() < Duration::from_millis(750) {
+                if let (Some(h), Some(ch)) = (hint, cached_hint) {
+                    let dx = (h.0 - ch.0).unsigned_abs();
+                    let dy = (h.1 - ch.1).unsigned_abs();
+                    if dx < 80 && dy < 80 {
+                        return Some(wa);
+                    }
+                } else if hint.is_none() {
+                    return Some(wa);
+                }
+            }
+        }
+    }
+    let script = wslg_workarea_script()?;
+    let ps = wslg_powershell_exe()?;
+    let script_arg = wslg_windows_path(&script);
+    let mut cmd = Command::new(ps);
+    cmd.args(["-NoProfile", "-NonInteractive", "-File"])
+        .arg(&script_arg);
+    if let Some((x, y, w, h)) = hint {
+        cmd.env("REMEDY_HINT_RECT", format!("{x},{y},{w},{h}"));
+    }
+    let out = cmd.output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    for line in text.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("work=") else {
+            continue;
+        };
+        let parts: Vec<&str> = rest.split(',').collect();
+        if parts.len() != 4 {
+            continue;
+        }
+        let x = parts[0].parse().ok()?;
+        let y = parts[1].parse().ok()?;
+        let w = parts[2].parse().ok()?;
+        let h = parts[3].parse().ok()?;
+        log::info!("linux workarea from Windows: {w}x{h} @ ({x},{y})");
+        let wa = (x, y, w, h);
+        if let Ok(mut g) = wslg_workarea_cache().lock() {
+            *g = Some((Instant::now(), hint, wa));
+        }
+        return Some(wa);
+    }
+    None
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn wslg_workarea_cache() -> &'static Mutex<
+    Option<(Instant, Option<(i32, i32, u32, u32)>, (i32, i32, u32, u32))>,
+> {
+    static CACHE: Mutex<
+        Option<(Instant, Option<(i32, i32, u32, u32)>, (i32, i32, u32, u32))>,
+    > = Mutex::new(None);
+    &CACHE
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_env_is_wslg() -> bool {
+    env::var_os("WSL_DISTRO_NAME").is_some()
+        || env::var_os("WSL_INTEROP").is_some()
+        || Path::new("/mnt/wslg").exists()
+}
+
+fn wslg_powershell_exe() -> Option<PathBuf> {
+    let mut cands: Vec<PathBuf> = Vec::new();
+    if let Ok(root) = env::var("SYSTEMROOT") {
+        cands.push(PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe"));
+    }
+    for letter in b'c'..=b'z' {
+        cands.push(PathBuf::from(format!(
+            "/mnt/{}/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            letter as char
+        )));
+    }
+    cands.into_iter().find(|p| p.is_file())
+}
+
+fn wslg_windows_path(p: &Path) -> PathBuf {
+    if let Ok(out) = Command::new("wslpath").args(["-w"]).arg(p).output() {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !s.is_empty() {
+                return PathBuf::from(s);
+            }
+        }
+    }
+    p.to_path_buf()
+}
+
+fn wslg_workarea_script() -> Option<PathBuf> {
+    let mut cands: Vec<PathBuf> = Vec::new();
+    cands.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("windows/wslg_workarea.ps1"),
+    );
+    if let Ok(root) = env::var("REMEDY_DEV_ROOT") {
+        cands.push(PathBuf::from(root).join("desktop/src-tauri/windows/wslg_workarea.ps1"));
+    }
+    if let Ok(res) = env::var("REMEDY_RESOURCES") {
+        let r = PathBuf::from(res);
+        cands.push(r.join("windows/wslg_workarea.ps1"));
+        cands.push(r.join("wslg_workarea.ps1"));
+    }
+    if let Ok(exe) = env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            cands.push(dir.join("windows/wslg_workarea.ps1"));
+            cands.push(dir.join("resources/windows/wslg_workarea.ps1"));
+            cands.push(dir.join("../../windows/wslg_workarea.ps1"));
+        }
+    }
+    cands.into_iter().find(|p| p.is_file())
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn wslg_place_host_on_workarea(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    hint: Option<(i32, i32, u32, u32)>,
+) {
+    if !linux_env_is_wslg() {
+        return;
+    }
+    let Some(script) = wslg_workarea_script() else {
+        return;
+    };
+    let Some(ps) = wslg_powershell_exe() else {
+        return;
+    };
+    let script_arg = wslg_windows_path(&script);
+    let place = format!("{x},{y},{width},{height}");
+    let mut cmd = Command::new(ps);
+    cmd.args(["-NoProfile", "-NonInteractive", "-File"])
+        .arg(&script_arg)
+        .env("REMEDY_PLACE_HOST", &place);
+    if let Some((hx, hy, hw, hh)) = hint {
+        cmd.env("REMEDY_HINT_RECT", format!("{hx},{hy},{hw},{hh}"));
+    }
+    let _ = cmd.status();
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_toggle_workarea(w: &tauri::WebviewWindow) -> Result<bool, String> {
+    use std::sync::atomic::Ordering;
+    let (snapped, restore) = linux_snap_state();
+    if snapped.load(Ordering::SeqCst) {
+        let prev = restore.lock().map_err(|e| e.to_string())?.take();
+        snapped.store(false, Ordering::SeqCst);
+        let _ = w.unmaximize();
+        if let Some((x, y, width, height)) = prev {
+            let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
+            let _ = w.set_size(tauri::PhysicalSize::new(width, height));
+        }
+        return Ok(false);
+    }
+
+    let pos = w
+        .outer_position()
+        .unwrap_or(tauri::PhysicalPosition::new(80, 80));
+    let size = w.outer_size().unwrap_or(tauri::PhysicalSize::new(1280, 800));
+    if let Ok(mut g) = restore.lock() {
+        *g = Some((pos.x, pos.y, size.width, size.height));
+    }
+
+    let hint = Some((pos.x, pos.y, size.width, size.height));
+    let (x, y, width, height) = if let Some(wa) = wslg_windows_workarea(hint) {
+        wa
+    } else {
+        let mon = w
+            .current_monitor()
+            .map_err(|e| format!("current_monitor: {e}"))?
+            .ok_or_else(|| "no current monitor".to_string())?;
+        let wa = mon.work_area();
+        let mut width = wa.size.width.max(800);
+        let mut height = wa.size.height.max(500);
+        let full = mon.size();
+        // GDK on WSLg often reports workarea == full output and ignores the
+        // Windows taskbar (~48px).
+        if width >= full.width && height >= full.height {
+            height = full.height.saturating_sub(48).max(500);
+        }
+        (wa.position.x, wa.position.y, width, height)
+    };
+
+    // Fill *this* monitor's Windows working area. Do not inset for a RAIL
+    // frame — GTK_CSD is off, and a 64px shrink left a gap on 2nd/3rd screens.
+    let _ = w.unmaximize();
+    if let Ok(gtk_win) = w.gtk_window() {
+        use gtk::prelude::*;
+        gtk_win.set_decorated(false);
+        gtk_win.move_(x, y);
+        gtk_win.resize(width as i32, height as i32);
+    }
+    w.set_position(tauri::PhysicalPosition::new(x, y))
+        .map_err(|e| format!("set_position: {e}"))?;
+    w.set_size(tauri::PhysicalSize::new(width, height))
+        .map_err(|e| format!("set_size: {e}"))?;
+
+    snapped.store(true, Ordering::SeqCst);
+    linux_snap_busy().store(true, Ordering::SeqCst);
+    wslg_place_host_on_workarea(x, y, width, height, hint);
+    thread::spawn(|| {
+        thread::sleep(Duration::from_millis(800));
+        linux_snap_busy().store(false, Ordering::SeqCst);
+    });
+    log::info!("linux workarea snap {width}x{height} @ ({x},{y}) (monitor the window is on)");
+    Ok(true)
+}
+
+/// Windows/WSLg may maximize the RAIL *host* (native title-bar). GTK then
+/// grows to the full output and Close / the status bar clip. Re-snap.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_snap_busy() -> &'static std::sync::atomic::AtomicBool {
+    static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    &BUSY
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_on_host_resized(window: &tauri::Window, size: tauri::PhysicalSize<u32>) {
+    use std::sync::atomic::Ordering;
+    if linux_snap_busy().load(Ordering::SeqCst) {
+        return;
+    }
+    let pos = window.outer_position().ok();
+    let hint = pos.map(|p| (p.x, p.y, size.width, size.height));
+    // Cheap gate from cache — do not spawn PowerShell for ordinary drags.
+    if let Ok(g) = wslg_workarea_cache().lock() {
+        if let Some((at, _, wa)) = *g {
+            if at.elapsed() < Duration::from_millis(750) {
+                let (_, _, ww, wh) = wa;
+                let huge = size.width + 24 >= ww && size.height + 24 >= wh;
+                let overshoot =
+                    size.width > ww.saturating_add(16) || size.height > wh.saturating_add(16);
+                if !huge && !overshoot {
+                    if linux_snap_state().0.load(Ordering::SeqCst) {
+                        linux_snap_state().0.store(false, Ordering::SeqCst);
+                    }
+                    return;
+                }
+            }
+        }
+    }
+    let Some((_, _, ww, wh)) = wslg_windows_workarea(hint) else {
+        return;
+    };
+    let already = size.width + 16 >= ww
+        && size.height + 16 >= wh
+        && size.width <= ww.saturating_add(16)
+        && size.height <= wh.saturating_add(16);
+    let overshoot = size.width > ww.saturating_add(16) || size.height > wh.saturating_add(16);
+    let huge = size.width + 24 >= ww && size.height + 24 >= wh;
+    let (snapped, _) = linux_snap_state();
+    if already && snapped.load(Ordering::SeqCst) {
+        return;
+    }
+    if overshoot {
+        // Native / RAIL maximize grew past the Windows workarea — snap to it.
+        let Some(w) = window.app_handle().get_webview_window("main") else {
+            return;
+        };
+        snapped.store(false, Ordering::SeqCst);
+        if let Err(e) = linux_toggle_workarea(&w) {
+            log::warn!("linux resize snap: {e}");
+        }
+        return;
+    }
+    if snapped.load(Ordering::SeqCst) && !huge {
+        // User restored or shrank — do not re-snap.
+        snapped.store(false, Ordering::SeqCst);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_is_wslg() -> bool {
+    std::env::var_os("WSL_DISTRO_NAME").is_some()
+        || std::env::var_os("WSL_INTEROP").is_some()
+        || std::path::Path::new("/mnt/wslg").exists()
+}
+
+/// Close chrome: stay running. Windows tray hide; WSLg / no-tray minimize.
+fn stay_ready_after_close(w: &tauri::WebviewWindow) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        if linux_is_wslg() {
+            // hide() tears down the WSLg RAIL host HWND — the Windows taskbar
+            // button vanishes and there is no Linux tray on the host. Minimize
+            // keeps the window recoverable from the Windows taskbar.
+            let _ = w.unmaximize();
+            w.minimize()
+                .map_err(|e| format!("minimize failed: {e}"))?;
+            log::info!("request_close: WSLg minimize to Windows taskbar");
+            return Ok(());
+        }
+    }
+    let has_tray = w.app_handle().tray_by_id("main").is_some();
+    if !has_tray {
+        let _ = w.unmaximize();
+        w.minimize()
+            .map_err(|e| format!("minimize failed: {e}"))?;
+        log::info!("request_close: no tray — minimized");
+        return Ok(());
+    }
+    w.hide().map_err(|e| format!("hide failed: {e}"))?;
+    log::info!("request_close: hidden to tray");
+    Ok(())
+}
+
+/// Last-resort stay-ready. Never hide() on WSLg (RAIL HWND teardown).
+fn stay_ready_fallback(w: &tauri::WebviewWindow) {
+    #[cfg(target_os = "linux")]
+    {
+        if linux_is_wslg() {
+            let _ = w.unmaximize();
+            let _ = w.minimize();
+            return;
+        }
+    }
+    if w.app_handle().tray_by_id("main").is_none() {
+        let _ = w.unmaximize();
+        let _ = w.minimize();
+        return;
+    }
+    let _ = w.hide();
 }
 
 /// Close button / chrome: always hide to tray (always-ready partner).
@@ -1805,9 +2459,7 @@ fn request_close_main_window(
         });
     }
     let w = primary_window(&app).ok_or_else(|| "no main window".to_string())?;
-    w.hide().map_err(|e| format!("hide failed: {e}"))?;
-    log::info!("request_close_main_window: hidden to tray");
-    Ok(())
+    stay_ready_after_close(&w)
 }
 
 /// Apply the current branding PNG as the window icon (taskbar / Alt-Tab).
@@ -2139,12 +2791,31 @@ fn dpapi_unprotect_user(_cipher: &[u8]) -> Result<Vec<u8>, String> {
 /// (`$REMEDY_HOME/auth/local_api_token`, default `~/.remedy/auth/...`).
 #[tauri::command]
 fn get_local_api_token() -> Result<String, String> {
-    let path = remedy_home().join("auth").join("local_api_token");
-    if !path.is_file() {
-        return Err("local API token not found - is the sidecar running?".into());
+    let dir = remedy_home().join("auth");
+    let primary = dir.join("local_api_token");
+    if primary.is_file() {
+        let raw = std::fs::read(&primary).map_err(|e| format!("read token: {e}"))?;
+        match decode_local_api_token_bytes(&raw) {
+            Ok(tok) => return Ok(tok),
+            Err(e) => {
+                // Windows DPAPI envelope is unreadable on Linux — try the
+                // sidecar-local file instead of treating JSON as a bearer.
+                let alt = dir.join("local_api_token.posix");
+                if alt.is_file() {
+                    let raw2 =
+                        std::fs::read(&alt).map_err(|e2| format!("read posix token: {e2}"))?;
+                    return decode_local_api_token_bytes(&raw2);
+                }
+                return Err(e);
+            }
+        }
     }
-    let raw = std::fs::read(&path).map_err(|e| format!("read token: {e}"))?;
-    decode_local_api_token_bytes(&raw)
+    let alt = dir.join("local_api_token.posix");
+    if alt.is_file() {
+        let raw = std::fs::read(&alt).map_err(|e| format!("read posix token: {e}"))?;
+        return decode_local_api_token_bytes(&raw);
+    }
+    Err("local API token not found - is the sidecar running?".into())
 }
 
 /// Non-blocking update check (network I/O off the UI thread).
@@ -3581,7 +4252,7 @@ fn set_tray_tooltip(app: AppHandle, tooltip: String) -> Result<(), String> {
 
 /// Kill and respawn the sidecar, wait for health, emit server-ready / server-error.
 #[tauri::command]
-fn restart_server(app: AppHandle, state: State<'_, ServerState>) -> Result<String, String> {
+async fn restart_server(app: AppHandle, state: State<'_, ServerState>) -> Result<String, String> {
     let cmd = {
         let guard = state
             .sidecar_cmd
@@ -3594,19 +4265,23 @@ fn restart_server(app: AppHandle, state: State<'_, ServerState>) -> Result<Strin
 
     log::info!("Restarting remedy sidecar: {}", cmd);
     let _ = app.emit("server-starting", ());
-
-    start_sidecar(&state.process, &cmd, SidecarStartMode::ForceRestart)?;
-
-    if wait_for_health(Duration::from_secs(30)) {
-        log::info!("Remedy server ready after restart");
-        let _ = app.emit("server-ready", ());
-        Ok("ready".into())
-    } else {
-        log::error!("Server failed to become ready after restart");
-        let msg = "Server failed to start after 30s";
-        let _ = app.emit("server-error", msg);
-        Err(msg.into())
-    }
+    let process = state.process.clone();
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        start_sidecar(&process, &cmd, SidecarStartMode::ForceRestart)?;
+        if wait_for_health(Duration::from_secs(30)) {
+            log::info!("Remedy server ready after restart");
+            let _ = handle.emit("server-ready", ());
+            Ok("ready".into())
+        } else {
+            log::error!("Server failed to become ready after restart");
+            let msg = "Server failed to start after 30s";
+            let _ = handle.emit("server-error", msg);
+            Err(msg.into())
+        }
+    })
+    .await
+    .map_err(|e| format!("restart task failed: {e}"))?
 }
 
 /// Windows: only one Remedy Desktop process at a time.
@@ -3656,8 +4331,10 @@ fn acquire_desktop_single_instance() -> bool {
                 .collect();
             let mut hwnd = FindWindowW(core::ptr::null(), title.as_ptr());
             if hwnd == 0 {
-                for _ in 0..8 {
-                    thread::sleep(Duration::from_millis(150));
+                // First launch holds the mutex before the HWND exists (AV / cold
+                // start). Wait up to 5s — never kill a live recorded PID.
+                for _ in 0..20 {
+                    thread::sleep(Duration::from_millis(250));
                     hwnd = FindWindowW(core::ptr::null(), title.as_ptr());
                     if hwnd != 0 {
                         break;
@@ -3673,13 +4350,22 @@ fn acquire_desktop_single_instance() -> bool {
                 CloseHandle(handle);
                 return false;
             }
-            // Mutex held but no window — zombie. Reclaim only OUR recorded PID
-            // or the known installed image. Never taskkill /IM app.exe (generic).
-            log::warn!(
-                "Single-instance mutex held but no Remedy Desktop window; \
-                 reclaiming (killing orphan UI process)"
-            );
+            // Mutex held, no window after 5s. If the recorded owner is still
+            // alive it is still starting — do not taskkill it.
             CloseHandle(handle);
+            let path = desktop_instance_pid_path();
+            if let Ok(raw) = std::fs::read_to_string(&path) {
+                if let Ok(pid) = raw.trim().parse::<u32>() {
+                    if pid != 0 && pid != std::process::id() && pid_is_remedy_desktop_image(pid)
+                    {
+                        log::warn!(
+                            "Single-instance mutex held by live pid={pid} with no \
+                             window yet — this launch exits"
+                        );
+                        return false;
+                    }
+                }
+            }
             let reclaimed = reclaim_desktop_instance();
             if !reclaimed {
                 log::warn!(
@@ -3771,15 +4457,8 @@ fn reclaim_desktop_instance() -> bool {
             }
         }
     }
-    // Installed product image only — never generic app.exe.
-    Command::new("taskkill")
-        .args(["/F", "/IM", "Remedy Desktop.exe"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    // No recorded live owner — do not taskkill /IM (kills this start too).
+    false
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -3789,8 +4468,121 @@ fn acquire_desktop_single_instance() -> bool {
     true
 }
 
+/// Must run before GTK/WebKit init. WSLg + WebKitGTK otherwise inflate the
+/// pointer (scale-factor 0 / double-scale cursor theme).
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_pre_gtk_env() {
+    if std::env::var_os("XCURSOR_SIZE").is_none() {
+        std::env::set_var("XCURSOR_SIZE", "24");
+    }
+    if std::env::var_os("GDK_SCALE").is_none() {
+        std::env::set_var("GDK_SCALE", "1");
+    }
+    if std::env::var_os("GDK_DPI_SCALE").is_none() {
+        std::env::set_var("GDK_DPI_SCALE", "1");
+    }
+    // CSD shadow reserves ~32px on WSLg and clips Close + the status bar
+    // when the window is "maximized".
+    if std::env::var_os("GTK_CSD").is_none() {
+        std::env::set_var("GTK_CSD", "0");
+    }
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_apply_gtk_chrome(bg: &str, fg: &str, border: &str, dark: bool) {
+    use gtk::prelude::*;
+    if let Some(settings) = gtk::Settings::default() {
+        settings.set_gtk_application_prefer_dark_theme(dark);
+        settings.set_gtk_cursor_theme_size(24);
+    }
+    let css = format!(
+        r#"
+        window, decoration, decoration:backdrop, headerbar, .titlebar {{
+          background-color: {bg};
+          color: {fg};
+          border-color: {border};
+          box-shadow: none;
+          margin: 0;
+          padding: 0;
+          border-radius: 0;
+        }}
+        .csd decoration, window.csd, window.solid-csd, window.ssd,
+        window.maximized, window.tiled, window.tiled-left, window.tiled-right,
+        window.tiled-top, window.tiled-bottom {{
+          box-shadow: none;
+          margin: 0;
+          padding: 0;
+          border-radius: 0;
+        }}
+        "#
+    );
+    let provider = gtk::CssProvider::new();
+    if let Err(e) = provider.load_from_data(css.as_bytes()) {
+        log::warn!("linux chrome css: {e}");
+        return;
+    }
+    if let Some(screen) = gtk::gdk::Screen::default() {
+        gtk::StyleContext::add_provider_for_screen(
+            &screen,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
+}
+
+/// Paint GTK window chrome (undecorated border / CSD leftovers) with the
+/// active Remedy theme. No-op on Windows (OS decorations stay native).
+#[tauri::command]
+fn apply_linux_chrome_theme(
+    bg: String,
+    fg: String,
+    border: String,
+    dark: bool,
+) -> Result<(), String> {
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
+    {
+        let bg = bg.clone();
+        let fg = fg.clone();
+        let border = border.clone();
+        // GTK CSS must run on the GTK thread.
+        let _ = gtk::glib::idle_add(move || {
+            linux_apply_gtk_chrome(&bg, &fg, &border, dark);
+            gtk::glib::ControlFlow::Break
+        });
+    }
+    let _ = (bg, fg, border, dark);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
+    linux_pre_gtk_env();
+
     if !acquire_desktop_single_instance() {
         // Second launch: existing instance focused (Windows); exit this process.
         return;
@@ -3826,6 +4618,7 @@ pub fn run() {
             start_dragging_main_window,
             toggle_maximize_main_window,
             request_close_main_window,
+            apply_linux_chrome_theme,
             switch_to_web_ui,
             quit_app,
             request_quit_app,
@@ -3834,6 +4627,7 @@ pub fn run() {
             check_desktop_update,
             start_desktop_update,
             get_local_api_token,
+            get_api_origin,
             read_dropped_files,
             take_pending_file_drops,
             pick_attach_files,
@@ -3861,8 +4655,14 @@ pub fn run() {
             privacy_shield::privacy_shield_refresh_lists,
         ])
         .setup(|app| {
+            if let Ok(resource) = app.path().resource_dir() {
+                env::set_var("REMEDY_RESOURCES", &resource);
+            }
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title(&window_title());
+                if let Ok(js_origin) = serde_json::to_string(&api_base_url()) {
+                    let _ = w.eval(&format!("window.__REMEDY_API_ORIGIN__={js_origin};"));
+                }
             }
             log::info!(
                 "profile home={} api_port={}",
@@ -3985,6 +4785,18 @@ pub fn run() {
                 remove_legacy_run_key();
             }
 
+            // Default Dark Forest chrome so the undecorated Linux frame is not Adwaita.
+            #[cfg(any(
+                target_os = "linux",
+                target_os = "dragonfly",
+                target_os = "freebsd",
+                target_os = "netbsd",
+                target_os = "openbsd"
+            ))]
+            {
+                linux_apply_gtk_chrome("#0a0e0b", "#e6ebe7", "#2a352c", true);
+            }
+
             // Start hidden only when start_in_tray is explicitly true in desktop.json
             // (or in-memory prefs). Re-load from disk so a Settings save before restart
             // cannot be ignored by a stale in-memory default.
@@ -4006,8 +4818,11 @@ pub fn run() {
                 );
                 if start_hidden {
                     if let Some(w) = app.get_webview_window("main") {
-                        let _ = w.hide();
-                        log::info!("start_in_tray: main window hidden");
+                        if let Err(e) = stay_ready_after_close(&w) {
+                            log::warn!("start_in_tray stay-ready failed: {e}");
+                            stay_ready_fallback(&w);
+                        }
+                        log::info!("start_in_tray: main window stay-ready");
                     }
                 } else {
                     // Ensure we are not stuck minimized/hidden from a prior tray session.
@@ -4058,21 +4873,20 @@ pub fn run() {
                     SidecarStartMode::InteractiveLaunch,
                 ) {
                     Ok(()) => {
-                        // First run seeds skills into ~/.remedy - allow extra time.
-                        if wait_for_health(Duration::from_secs(90)) {
-                            log::info!("Remedy server ready");
-                            let _ = app_handle.emit("server-ready", ());
-                            // Start computer-host poller only after API is healthy
-                            // (avoids 401/refused spam and races during startup).
-                            browser_host::start_computer_host_poller(app_handle.clone());
-                            // Self-inject apply poller: applies test-gated changes
-                            // (sidecar restart) with a rollback failsafe on crash.
-                            self_inject_apply_poller(app_handle.clone());
-                        } else {
-                            log::error!("Server failed to start within 90s");
-                            let _ = app_handle
-                                .emit("server-error", "Server failed to start after 90s");
-                        }
+                        // Do not block GTK/WebView setup for up to 90s.
+                        let handle = app_handle.clone();
+                        thread::spawn(move || {
+                            if wait_for_health(Duration::from_secs(90)) {
+                                log::info!("Remedy server ready");
+                                let _ = handle.emit("server-ready", ());
+                                browser_host::start_computer_host_poller(handle.clone());
+                                self_inject_apply_poller(handle.clone());
+                            } else {
+                                log::error!("Server failed to start within 90s");
+                                let _ = handle
+                                    .emit("server-error", "Server failed to start after 90s");
+                            }
+                        });
                     }
                     Err(e) if e == "cancelled" => {
                         // User chose Exit Desktop — leave CLI serve running.
@@ -4118,6 +4932,18 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             match event {
+                #[cfg(any(
+                    target_os = "linux",
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "netbsd",
+                    target_os = "openbsd"
+                ))]
+                tauri::WindowEvent::Resized(size) => {
+                    if window.label() == "main" {
+                        linux_on_host_resized(window, *size);
+                    }
+                }
                 // Title-bar X / Alt+F4: always hide to tray (always-ready partner).
                 // Full quit only via tray "Quit" / request_quit_app — never kill
                 // sidecar from the window chrome alone.
@@ -4146,8 +4972,15 @@ pub fn run() {
                         );
                     }
                     api.prevent_close();
-                    let _ = window.hide();
-                    log::info!("window close → tray (sidecar stays up; Quit from tray to stop server)");
+                    if let Some(w) = window.app_handle().get_webview_window(window.label()) {
+                        if let Err(e) = stay_ready_after_close(&w) {
+                            log::warn!("close stay-ready failed: {e}");
+                            stay_ready_fallback(&w);
+                        }
+                    } else if let Some(w) = primary_window(&window.app_handle()) {
+                        stay_ready_fallback(&w);
+                    }
+                    log::info!("window close → stay ready (sidecar stays up; Quit from tray to stop server)");
                 }
                 tauri::WindowEvent::Destroyed => {
                     // Only runs on real process teardown (tray Quit), not hide-to-tray.

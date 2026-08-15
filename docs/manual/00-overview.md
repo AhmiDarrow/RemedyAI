@@ -18,11 +18,11 @@ project access scope).
 
 | | |
 |--|--|
-| **Product** | Windows desktop partner + local API (`127.0.0.1:7400`) |
-| **Data home** | `~/.remedy` (config, memory, skills, DPAPI secrets) |
-| **Models** | *Your* provider keys or Ollama — continuity stays on disk |
-| **Current** | **v0.21.1** — continuity isolation, self-inject safety, person-like memory, metabolism |
-| **Install** | [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · PyPI `remedy-ai` |
+| **Product** | Windows + Linux desktop partner + local API (`127.0.0.1:7400`) |
+| **Data home** | `~/.remedy` (config, memory, skills; DPAPI on Windows) |
+| **Models** | *Your* provider keys or Ollama / RMB — continuity stays on disk |
+| **Current** | **v0.26.0** — first true Windows + Linux desktop |
+| **Install** | [Windows](01-install-windows.md) · [Linux](01-install-linux.md) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · PyPI `remedy-ai` |
 
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.  
 Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
@@ -30,6 +30,12 @@ Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
 ---
 
 ## What’s new (start here)
+
+**v0.26.0** highlights:
+
+- Linux / WSLg desktop (work-area maximize, taskbar close, no fake Start-with-Windows)
+- Plan mode cannot write; `/reset` and Stop leave a clean session
+- Windows host rewrite + write jail; Settings no longer stall the API
 
 **v0.21.1** highlights:
 

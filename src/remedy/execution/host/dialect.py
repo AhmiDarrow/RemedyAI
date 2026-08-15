@@ -69,7 +69,8 @@ def load_dialect(home: str | Path | None = None) -> HostDialect:
         d.python_cmd = probed.python_cmd
     if not d.git_cmd:
         d.git_cmd = probed.git_cmd
-    if not d.rg_cmd:
+    if not d.rg_cmd or d.rg_cmd.startswith("("):
+        # Heal a leftover `str((Path, source))` tuple from older probes.
         d.rg_cmd = probed.rg_cmd
     if not d.curl_kind:
         d.curl_kind = probed.curl_kind
@@ -103,8 +104,14 @@ def probe_host_dialect(
     try:
         from remedy.core.rg_binary import find_rg
 
-        found = find_rg(home_dir=home)
-        rg = str(found) if found else (shutil.which("rg") or "")
+        path, _src = find_rg(home_dir=home)
+        if path:
+            raw = str(path)
+            posix = Path(path).as_posix()
+            # Keep Unix probe paths as POSIX (`/usr/bin/rg`), not `\usr\bin\rg` on NT.
+            rg = posix if posix.startswith("/") else raw
+        else:
+            rg = shutil.which("rg") or ""
     except Exception:
         rg = shutil.which("rg") or ""
     d = HostDialect(

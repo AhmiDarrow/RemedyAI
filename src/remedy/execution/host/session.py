@@ -121,7 +121,16 @@ class HostSession:
         text = raw.decode("utf-8", errors="replace")
         code, body = _split_sentinel(text, sentinel)
         cwd = ""
-        if not timed_out:
+        if timed_out:
+            # Do not leave the timed-out command running in the shared shell.
+            with suppress(Exception):
+                from remedy.execution.process import kill_process_tree
+
+                kill_process_tree(self._proc)
+            self._proc = None
+            self.started = False
+            self._stdout_pending = None
+        elif not timed_out:
             cwd = await self.current_cwd()
         return SessionResult(
             exit_code=code if not timed_out else -1,
@@ -147,6 +156,14 @@ class HostSession:
                 sentinel.encode("ascii"), timeout=8.0
             )
         if timed_out:
+            # Same as run(): a wedged cwd probe must not leave ReadFile pending.
+            with suppress(Exception):
+                from remedy.execution.process import kill_process_tree
+
+                kill_process_tree(self._proc)
+            self._proc = None
+            self.started = False
+            self._stdout_pending = None
             return ""
         _code, body = _split_sentinel(raw.decode("utf-8", errors="replace"), sentinel)
         del _code
@@ -364,33 +381,45 @@ async def get_shared_session(
 ) -> HostSession:
     want = host or ("cmd" if os.name == "nt" else "posix")
     key = _session_key(session_id)
+    to_close: HostSession | None = None
     async with _SESSIONS_GUARD:
         existing = _SESSIONS.get(key)
         if existing is not None and existing.host == want and existing._alive():
             if cwd and existing.cwd and _norm_cwd_key(cwd) != _norm_cwd_key(existing.cwd):
-                await existing.close()
-                _SESSIONS.pop(key, None)
+                to_close = _SESSIONS.pop(key, None)
             else:
                 return existing
         elif existing is not None:
-            await existing.close()
-            _SESSIONS.pop(key, None)
-        sess = HostSession(host=want, cwd=cwd, env=env, use_conpty=use_conpty)
-        await sess.start()
-        _SESSIONS[key] = sess
-        return sess
+            to_close = _SESSIONS.pop(key, None)
+    if to_close is not None:
+        await to_close.close()
+    sess = HostSession(host=want, cwd=cwd, env=env, use_conpty=use_conpty)
+    await sess.start()
+    extra_close: HostSession | None = None
+    async with _SESSIONS_GUARD:
+        other = _SESSIONS.get(key)
+        if other is not None and other.host == want and other._alive():
+            extra_close = sess
+            sess = other
+        else:
+            _SESSIONS[key] = sess
+    if extra_close is not None:
+        await extra_close.close()
+    return sess
 
 
 async def close_shared_session(session_id: str | None = None) -> None:
     """Close the keyed session. None/empty closes only the default ``_GLOBAL`` session."""
-    sess = _SESSIONS.pop(_session_key(session_id), None)
+    async with _SESSIONS_GUARD:
+        sess = _SESSIONS.pop(_session_key(session_id), None)
     if sess is not None:
         await sess.close()
 
 
 async def close_all_shared_sessions() -> None:
-    keys = list(_SESSIONS)
-    for key in keys:
-        sess = _SESSIONS.pop(key, None)
+    async with _SESSIONS_GUARD:
+        items = list(_SESSIONS.items())
+        _SESSIONS.clear()
+    for _key, sess in items:
         if sess is not None:
             await sess.close()

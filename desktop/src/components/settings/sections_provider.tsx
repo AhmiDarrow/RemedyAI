@@ -121,8 +121,15 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
             accent
             onClick={() => void openExternalUrl(String(activeMeta.key_docs_url))}
           >
-            {provider === 'ollama' ? 'Download Ollama…' : 'Get free API key / docs…'}
+            {provider === 'ollama'
+              ? 'Download Ollama…'
+              : provider === 'anthropic'
+                ? 'Get Console API key…'
+                : 'Get free API key / docs…'}
           </FormLinkButton>
+        )}
+        {activeMeta?.limits_blurb && provider !== 'demo' && (
+          <FormNotice>{activeMeta.limits_blurb}</FormNotice>
         )}
 
         {provider === 'custom' && (
@@ -193,7 +200,11 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
                     type="button"
                     className="underline text-left"
                     style={{ color: 'var(--accent)' }}
-                    onClick={() => void openExternalUrl(xaiVerifyUrl)}
+                    onClick={() => {
+                      void import('../../api/computer').then(({ openUrlInBrowserRail }) =>
+                        openUrlInBrowserRail(xaiVerifyUrl, { keepSettings: true }),
+                      )
+                    }}
                   >
                     Open verification page
                   </button>

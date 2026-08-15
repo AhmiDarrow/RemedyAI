@@ -10,8 +10,16 @@ from remedy.core.computer.types import ComputerAction
 
 
 async def _run_computer(ex: Any, action: Any, **kwargs: Any) -> str:
-    """Run the sync executor off the event loop (run() uses time.sleep)."""
-    return await asyncio.to_thread(ex.run, action, **kwargs)
+    """Run the sync executor off the event loop (run() uses time.sleep).
+
+    Stamp the turn session id on this task *before* to_thread so a worker
+    without the ContextVar cannot inherit a sibling tab's runtime._session_id.
+    """
+    from remedy.core.turn_context import turn_session_id
+
+    runtime = kwargs.get("runtime")
+    sid = turn_session_id(runtime)
+    return await asyncio.to_thread(ex.run, action, session_id=sid, **kwargs)
 
 
 def _computer_approval_gate(runtime: Any, tool_name: str, summary: str) -> str | None:

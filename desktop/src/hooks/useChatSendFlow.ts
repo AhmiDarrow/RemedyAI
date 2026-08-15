@@ -298,13 +298,13 @@ export function useChatSendFlow(opts: {
       } else {
         let sid = activeId
         if (!sid) {
-          // Prompt was typed on the empty shell — keep it on the new session
-          // even if the user selected another chat during create().
+          // Prompt was typed on the empty shell — post + focus that new
+          // session even if the user clicked another chat during create().
           const created = await create(undefined, undefined, { focus: false })
           sid = created?.id ?? null
-          if (sid && !activeIdRef.current) setActiveId(sid)
           if (sid) {
             const opened = sid
+            setActiveId(opened)
             setOpenTabs((prev) => new Set([...prev, opened]))
           }
         }

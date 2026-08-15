@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from contextlib import suppress
 
@@ -151,17 +152,21 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         from remedy.memory.life_drive import drive_digest, visible_life_dir
         from remedy.memory.life_goals import LifeGoalStore
 
-        store = LifeGoalStore(_life_home())
-        life = store.list(include_closed=True)
-        extra: dict = {}
-        with suppress(Exception):
-            from remedy.core.metabolism.organism import load_vitals
+        def _list():
+            store = LifeGoalStore(_life_home())
+            rows = store.list(include_closed=True)
+            extra: dict = {}
+            with suppress(Exception):
+                from remedy.core.metabolism.organism import load_vitals
 
-            v = load_vitals(_life_home())
-            folder = str(v.get("life_folder") or "")
-            extra["life_folder"] = folder or str(visible_life_dir(_life_home()))
-            extra["last_step"] = store.last_step()
-            extra["digest"] = str(drive_digest(_life_home()).get("markdown") or "")
+                v = load_vitals(_life_home())
+                folder = str(v.get("life_folder") or "")
+                extra["life_folder"] = folder or str(visible_life_dir(_life_home()))
+                extra["last_step"] = store.last_step()
+                extra["digest"] = str(drive_digest(_life_home()).get("markdown") or "")
+            return rows, extra
+
+        life, extra = await asyncio.to_thread(_list)
         if life:
             return {"goals": [g.to_public() for g in life], **extra}
         if runtime is None or not hasattr(runtime, "list_tasks"):
@@ -187,29 +192,25 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
 
     @app.post("/api/goals")
     async def create_goal(req: GoalCreateRequest):
-        from remedy.memory.life_goals import LifeGoalStore
+        from remedy.memory.life_drive import add_and_step
 
         title = req.title.strip()
         if not title:
             raise HTTPException(400, "title required")
         why = (req.why or req.description or "").strip()
-        store = LifeGoalStore(_life_home())
-        life = store.add(
+        # Off the event loop: JSON replace + take_step must not stall Windows
+        # Proactor. Never force-reveal/web from the HTTP create path.
+        life = await asyncio.to_thread(
+            add_and_step,
+            _life_home(),
             title,
             why=why,
             horizon=req.horizon or "season",
             next_action=req.next_action or "",
             done_looks_like=req.done_looks_like or "",
             source="api",
+            force=False,
         )
-        with suppress(Exception):
-            from remedy.memory.life_drive import invent_next, take_step
-
-            if life and not life.next_action:
-                store.set_next(life.title, invent_next(life))
-                life = store.find(life.title) or life
-            take_step(_life_home(), force=True)
-            life = store.find(life.title) or life
         if runtime is not None and hasattr(runtime, "create_task"):
             runtime.create_task(
                 title,
@@ -426,7 +427,7 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         with suppress(Exception):
             from remedy.core.metabolism.organism import status_pack
 
-            organism = status_pack(_life_home(), runtime)
+            organism = await asyncio.to_thread(status_pack, _life_home(), runtime)
             goals_open = int(organism.get("open_count") or 0)
             if not goals_open and organism.get("life_title"):
                 goals_open = 1

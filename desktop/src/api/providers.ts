@@ -91,17 +91,21 @@ export const FALLBACK_PROVIDERS: ProviderInfo[] = [
     name: 'Anthropic',
     base_url: 'https://api.anthropic.com/v1',
     models: [
-      { id: 'claude-opus-4-1', name: 'Claude Opus 4.1' },
-      { id: 'claude-sonnet-4-0', name: 'Claude Sonnet 4' },
-      { id: 'claude-3-7-sonnet-latest', name: 'Claude 3.7 Sonnet' },
-      { id: 'claude-3-5-haiku-latest', name: 'Claude 3.5 Haiku' },
+      { id: 'claude-opus-5', name: 'Claude Opus 5' },
+      { id: 'claude-sonnet-5', name: 'Claude Sonnet 5' },
+      { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
+      { id: 'claude-opus-4-8', name: 'Claude Opus 4.8' },
+      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
     ],
-    default_model: 'claude-sonnet-4-0',
+    default_model: 'claude-sonnet-5',
     auth: ['api_key'],
     oauth: false,
     env_keys: ['ANTHROPIC_API_KEY'],
     show_base_url: false,
     advanced: false,
+    key_docs_url: 'https://console.anthropic.com/settings/keys',
+    limits_blurb:
+      'Uses prepaid Anthropic API credits (console.anthropic.com), not your Claude Pro / Max weekly limit.',
   },
   {
     id: 'google',
@@ -384,6 +388,8 @@ export function connectReasonLabel(reason: string | undefined, connected: boolea
       return 'Local endpoint'
     case 'local_url':
       return 'Local URL'
+    case 'max_token_not_api':
+      return 'Max token is not an API key'
     case 'no_credentials':
       return connected ? 'Connected' : 'Needs API key'
     default:

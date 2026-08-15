@@ -241,12 +241,23 @@ function PortalSelect({
     const r = el.getBoundingClientRect()
     const spaceBelow = window.innerHeight - r.bottom - 8
     const spaceAbove = r.top - 8
-    const openUp = spaceBelow < 180 && spaceAbove > spaceBelow
+    const itemH = size === 'sm' ? 26 : 28
+    const needed = Math.min(320, Math.max(120, options.length * itemH + 16))
+    const inStatusBar = Boolean(el.closest('[data-remedy-status-bar]'))
+    const inBottomBand = r.bottom > window.innerHeight * 0.58
+    // Status-bar / fullscreen: native <select> lists fall under the OS taskbar.
+    // Always flip up when the trigger sits in the lower band or will not fit.
+    const openUp =
+      inStatusBar
+      || inBottomBand
+      || (spaceBelow < needed && spaceAbove >= spaceBelow)
     const maxH = Math.max(120, Math.min(320, openUp ? spaceAbove : spaceBelow))
+    const width = Math.max(r.width, 160)
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8))
     setPos({
       top: openUp ? r.top : r.bottom + 4,
-      left: r.left,
-      width: Math.max(r.width, 160),
+      left,
+      width,
       maxH,
       openUp,
     })
@@ -291,7 +302,7 @@ function PortalSelect({
             className="settings-portal-select-menu"
             style={{
               position: 'fixed',
-              zIndex: 600,
+              zIndex: 800,
               left: pos.left,
               width: pos.width,
               maxHeight: pos.maxH,
@@ -361,7 +372,11 @@ function PortalSelect({
       : null
 
   return (
-    <div className={`relative w-full ${className}`.trim()}>
+    <div
+      className={`relative ${
+        /\bw-|\bmax-w-|\bmin-w-/.test(className) ? '' : 'w-full'
+      } ${className}`.trim()}
+    >
       <button
         ref={btnRef}
         id={id}

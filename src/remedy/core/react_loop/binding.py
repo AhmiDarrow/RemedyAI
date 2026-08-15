@@ -83,5 +83,8 @@ def resolve_and_apply_tools(
 
 def rearm_agency_tools(turn: Any) -> tuple[Any, bool]:
     """Re-enable tool schemas *and* long-task epoch policy."""
+    if getattr(turn, "plan_mode", False):
+        turn.rearm(reason="rearm_agency_plan")
+        return turn.tools, turn.run_until_done
     turn.rearm(reason="rearm_agency")
     return turn.tools, turn.run_until_done

@@ -4,6 +4,7 @@ import { getLatestCheckpoint, getPartnerStatus } from '../api/partner'
 import { getVisionStatus, type VisionStatus } from '../api/vision'
 import type { ConnectedProvider } from '../api/providers'
 import { ThemeSwitcher } from './ThemeSwitcher'
+import { FormSelect } from './settings/formUi'
 import type { ThemeId, Theme } from '../themes'
 import type { ModelInfo } from '../App'
 import {
@@ -99,9 +100,9 @@ const PROVIDER_FALLBACK_MODELS: Record<string, { id: string; name: string }[]> =
   google: [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' }],
   groq: [{ id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B' }],
   anthropic: [
-    { id: 'claude-sonnet-4-0', name: 'Claude Sonnet 4' },
-    { id: 'claude-opus-4-1', name: 'Claude Opus 4.1' },
-    { id: 'claude-3-5-haiku-latest', name: 'Claude 3.5 Haiku' },
+    { id: 'claude-sonnet-5', name: 'Claude Sonnet 5' },
+    { id: 'claude-opus-5', name: 'Claude Opus 5' },
+    { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
   ],
   mistral: [{ id: 'mistral-small-latest', name: 'Mistral Small' }],
   ollama: [{ id: 'llama3.2', name: 'Llama 3.2' }],
@@ -542,20 +543,14 @@ export function StatusBar({
   return (
     <div
       data-remedy-status-bar
-      className="flex flex-col"
+      className="status-ctrl-row flex items-center px-3 gap-2 text-xs"
       style={{
         color: 'var(--text-muted)',
       }}
     >
-      {/* Status dock — vision progress, server, alerts */}
-      <div
-        className="flex items-center gap-3 px-3 py-1.5 text-xs border-b"
-        style={{
-          borderColor: 'color-mix(in srgb, var(--border) 80%, transparent)',
-          background: 'color-mix(in srgb, var(--bg-tertiary) 70%, transparent)',
-          minHeight: 32,
-        }}
-      >
+      {/* Server / vision / alerts — same row as the action buttons so
+          maximize on WSLg does not hide the control strip under the taskbar. */}
+      <div className="flex items-center gap-2 flex-shrink-0 min-w-0">
         <div
           className="flex items-center gap-1.5 flex-shrink-0"
           title={status === 'connected' ? `Remedy ${version || ''}`.trim() : 'Server offline'}
@@ -696,9 +691,7 @@ export function StatusBar({
               </div>
             ) : null}
           </div>
-        ) : (
-          <div className="flex-1 min-w-0" />
-        )}
+        ) : null}
 
         {status === 'disconnected' && (
           <button
@@ -711,9 +704,8 @@ export function StatusBar({
         )}
       </div>
 
-      {/* Controls row */}
-      <div className="flex items-center justify-between px-3 py-1 text-xs gap-2">
-        <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+      <div className="flex items-center justify-between gap-2 min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 min-w-0 flex-nowrap overflow-x-auto">
           <SegButton active={planMode} onClick={onTogglePlanMode} title="Plan mode (Ctrl+B)">
             {planMode ? 'Plan' : 'Build'}
           </SegButton>
@@ -790,7 +782,7 @@ export function StatusBar({
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 flex-shrink-0">
+        <div className="flex items-center gap-1.5 flex-shrink-0 flex-nowrap">
           {onUiModeChange && (
             <button
               type="button"
@@ -817,7 +809,11 @@ export function StatusBar({
           )}
           {connectedProviders.length > 0 && onProviderModelChange ? (
             <>
-              <select
+              <FormSelect
+                size="sm"
+                className="mb-0 max-w-[110px]"
+                disabled={streaming}
+                title={streaming ? 'Stop generation to switch provider' : 'Active provider'}
                 value={
                   // Prefer exact provider; only fall back if missing from list (keep label stable).
                   connectedProviders.some((p) => p.id === effectiveProvider)
@@ -826,9 +822,7 @@ export function StatusBar({
                       ? (provider || '')
                       : effectiveProvider || connectedProviders[0]?.id || ''
                 }
-                disabled={streaming}
-                onChange={(e) => {
-                  const pid = e.target.value
+                onChange={(pid) => {
                   const p = connectedProviders.find((x) => x.id === pid)
                   // Never keep a demo model when switching to DeepSeek/xAI (etc.).
                   const preferred =
@@ -846,85 +840,49 @@ export function StatusBar({
                     nextModel || (pid === 'demo' ? DEMO_DEFAULT_MODEL : ''),
                   )
                 }}
-                className="ui-select"
-                title={streaming ? 'Stop generation to switch provider' : 'Active provider'}
-                style={{
-                  background: 'var(--bg-tertiary)',
-                  color: 'var(--text-primary)',
-                  border: '1px solid var(--border)',
-                  maxWidth: 110,
-                  opacity: streaming ? 0.6 : 1,
-                }}
-              >
-                {/* Ensure Demo appears even if connected list lagged */}
-                {effectiveProvider === 'demo'
-                  && !connectedProviders.some((p) => p.id === 'demo') && (
-                    <option value="demo">Demo (Free)</option>
-                  )}
-                {connectedProviders.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={safeModel || model}
+                options={[
+                  ...(effectiveProvider === 'demo'
+                    && !connectedProviders.some((p) => p.id === 'demo')
+                    ? [{ value: 'demo', label: 'Demo (Free)' }]
+                    : []),
+                  ...connectedProviders.map((p) => ({ value: p.id, label: p.name })),
+                ]}
+              />
+              <FormSelect
+                size="sm"
+                className="mb-0 max-w-[200px]"
                 disabled={streaming}
-                onChange={(e) =>
-                  onProviderModelChange(effectiveProvider || provider || '', e.target.value)
-                }
-                className="ui-select"
                 title={streaming ? 'Stop generation to switch model' : 'Active model'}
-                style={{
-                  background: 'var(--bg-tertiary)',
-                  color: 'var(--text-primary)',
-                  border: '1px solid var(--border)',
-                  maxWidth: 200,
-                  opacity: streaming ? 0.6 : 1,
-                }}
-              >
-                {/* Keep current selection visible even if list is still loading */}
-                {safeModel
-                  && !modelOpts.some((m) => m.id === safeModel)
-                  && (
-                    <option value={safeModel}>{safeModel}</option>
-                  )}
-                {modelOpts.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
+                value={safeModel || model}
+                onChange={(id) =>
+                  onProviderModelChange(effectiveProvider || provider || '', id)
+                }
+                options={[
+                  ...(safeModel && !modelOpts.some((m) => m.id === safeModel)
+                    ? [{ value: safeModel, label: safeModel }]
+                    : []),
+                  ...modelOpts.map((m) => ({ value: m.id, label: m.name })),
+                ]}
+              />
             </>
           ) : models.length > 0 && onModelChange ? (
-            <select
+            <FormSelect
+              size="sm"
+              className="mb-0 max-w-[140px]"
+              disabled={streaming}
+              title={streaming ? 'Stop generation to switch model' : 'Active model'}
               value={
                 provider === 'demo' && !isDemoModelAllowed(model)
                   ? DEMO_DEFAULT_MODEL
                   : model
               }
-              disabled={streaming}
-              onChange={(e) => onModelChange(
-                provider === 'demo' ? coerceDemoModel(e.target.value) : e.target.value,
+              onChange={(id) => onModelChange(
+                provider === 'demo' ? coerceDemoModel(id) : id,
               )}
-              className="ui-select"
-              title={streaming ? 'Stop generation to switch model' : 'Active model'}
-              style={{
-                background: 'var(--bg-tertiary)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border)',
-                maxWidth: 140,
-                opacity: streaming ? 0.6 : 1,
-              }}
-            >
-              {models
+              options={models
                 .filter((m) => provider !== 'demo' || isDemoModelAllowed(m.id))
-                .map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
+                .map((m) => ({ value: m.id, label: m.name }))}
+            />
           ) : (
             <span className="truncate max-w-[8rem]" title={model}>
               {model}
@@ -933,28 +891,22 @@ export function StatusBar({
 
           {advanced && (
             <>
-              <select
-                value={thinkingLevel}
-                onChange={(e) => onThinkingLevelChange?.(e.target.value as ThinkingLevel)}
-                className="ui-select"
+              <FormSelect
+                size="sm"
+                className="mb-0 max-w-[7.5rem]"
                 title="Thinking level"
-                style={{
-                  background: 'var(--bg-tertiary)',
-                  color: 'var(--text-primary)',
-                  border: '1px solid var(--border)',
-                }}
-              >
-                {THINKING_OPTIONS.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    Think {o.label}
-                  </option>
-                ))}
-              </select>
+                value={thinkingLevel}
+                onChange={(id) => onThinkingLevelChange?.(id as ThinkingLevel)}
+                options={THINKING_OPTIONS.map((o) => ({
+                  value: o.id,
+                  label: `Think ${o.label}`,
+                }))}
+              />
 
               <button
                 type="button"
                 onClick={() => onApprovalModeChange?.(nextApprovalMode(approvalMode))}
-                className="flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors"
+                className="status-chip flex items-center justify-center rounded px-1.5 text-[10px] font-semibold uppercase tracking-wide transition-colors"
                 title={
                   fullControl
                     ? 'Full (warn) — write jail off except auth. Click for Ask.'
@@ -1002,7 +954,7 @@ export function StatusBar({
                     TOOL_PROCESS_CYCLE[(i >= 0 ? i + 1 : 0) % TOOL_PROCESS_CYCLE.length]!
                   onToolProcessChange?.(next)
                 }}
-                className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide"
+                className="status-chip px-1.5 rounded text-[10px] font-semibold uppercase tracking-wide"
                 title={
                   toolProcessMode === 'off'
                     ? 'Min — step names only (click → Med)'

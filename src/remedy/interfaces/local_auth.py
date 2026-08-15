@@ -207,6 +207,20 @@ def ensure_local_api_token(
                     except Exception:
                         pass
                 return existing
+            # Windows DPAPI envelope we cannot unwrap (Linux/WSL sharing
+            # ~/.remedy). Never overwrite the owner file — use a sidecar.
+            if token_encoding(home) == "dpapi":
+                alt = path.with_name("local_api_token.posix")
+                if alt.is_file():
+                    alt_tok = _decode_token_bytes(alt.read_bytes())
+                    if len(alt_tok) >= MIN_TOKEN_LEN:
+                        return alt_tok
+                tok = secrets.token_urlsafe(32)
+                _persist(tok, home, dest=alt)
+                logger.info(
+                    "Windows DPAPI token unreadable here; wrote %s", alt
+                )
+                return tok
         except OSError as exc:
             logger.warning("Could not read local API token: %s", exc)
 
@@ -216,10 +230,15 @@ def ensure_local_api_token(
     return tok
 
 
-def _persist(token: str, home: Path | str | None) -> None:
+def _persist(
+    token: str,
+    home: Path | str | None,
+    *,
+    dest: Path | None = None,
+) -> None:
     if not token or len(token) < MIN_TOKEN_LEN:
         return
-    path = token_path(home)
+    path = dest if dest is not None else token_path(home)
     try:
         # Atomic-ish write so a crash cannot leave an empty/half token file.
         tmp = path.with_suffix(path.suffix + ".tmp")

@@ -111,14 +111,20 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         }
 
     @app.get("/api/computer/ui/command")
-    async def computer_ui_command(take: bool = False):
+    async def computer_ui_command(take: bool = False, session_id: str = ""):
         """Desktop polls this to open Browser rail (like Settings) without user action.
 
         *take*=1 atomically clears the command so hosts do not re-navigate the same URL.
         """
         b = _bridge()
         b.mark_host_alive(poller=True)
-        cmd = b.take_ui_command() if take else b.peek_ui_command()
+        if session_id.strip():
+            b.set_focused_session(session_id)
+        cmd = (
+            b.take_ui_command(session_id=session_id or None)
+            if take
+            else b.peek_ui_command()
+        )
         return {"command": cmd}
 
     @app.post("/api/computer/ui/command/ack")
