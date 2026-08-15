@@ -188,7 +188,9 @@ def register_spread_tools(runtime: Any) -> None:
             )
         intent = "tool"
         try:
-            snap = getattr(runtime, "_last_context_snapshot", None)
+            from remedy.core.turn_context import turn_context_snapshot
+
+            snap = turn_context_snapshot(runtime)
             if snap is not None and getattr(snap, "intent", None):
                 intent = str(snap.intent)
         except Exception:
@@ -201,7 +203,9 @@ def register_spread_tools(runtime: Any) -> None:
             proj = "."
         # Prefer fresh snapshot plan (already computed on the turn — free).
         try:
-            snap = getattr(runtime, "_last_context_snapshot", None)
+            from remedy.core.turn_context import turn_context_snapshot
+
+            snap = turn_context_snapshot(runtime)
             sig = getattr(snap, "signals", None) or {}
             sp_pub = sig.get("spread") if isinstance(sig, dict) else None
             if (

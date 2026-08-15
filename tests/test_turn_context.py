@@ -321,6 +321,48 @@ def test_react_flags_isolated_across_nested_turns():
     assert take_pending_verify_remedy("flag-b") == "fix B"
 
 
+def test_set_turn_flags_ignore_runtime_outside_turn():
+    from remedy.core.turn_context import (
+        set_turn_action_ir,
+        set_turn_shadow_strict,
+        set_turn_tier,
+    )
+
+    runtime = MagicMock()
+    runtime._turn_tier = 1
+    runtime._action_ir = None
+    runtime._shadow_strict = False
+    set_turn_tier(3, runtime)
+    set_turn_action_ir({"x": 1}, runtime)
+    set_turn_shadow_strict(True, runtime)
+    assert runtime._turn_tier == 1
+    assert runtime._action_ir is None
+    assert runtime._shadow_strict is False
+
+
+def test_context_snapshot_lives_on_turn_flags():
+    from remedy.core.turn_context import (
+        set_turn_context_snapshot,
+        turn_context_snapshot,
+    )
+
+    runtime = MagicMock()
+    runtime._last_context_snapshot = "global"
+    t_a = begin_turn("snap-a", project_raw=None, active_path=".")
+    try:
+        set_turn_context_snapshot("a", runtime)
+        assert turn_context_snapshot(runtime) == "a"
+        t_b = begin_turn("snap-b", project_raw=None, active_path=".")
+        try:
+            set_turn_context_snapshot("b", runtime)
+            assert turn_context_snapshot(runtime) == "b"
+        finally:
+            end_turn("snap-b", *t_b)
+        assert turn_context_snapshot(runtime) == "a"
+    finally:
+        end_turn("snap-a", *t_a)
+
+
 def test_any_stream_claimed_sees_all_sessions():
     from remedy.core.turn_context import any_stream_claimed
 

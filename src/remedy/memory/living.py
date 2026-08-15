@@ -428,23 +428,18 @@ def project_label(path: str | None) -> str:
 def life_goal_lines(profile: Any, *, limit: int = 4, home_dir: Any = None) -> list[str]:
     """Short life/goal facts for continuity / organism pulse (not the full dump)."""
     out: list[str] = []
-    try:
-        from remedy.memory.life_goals import LifeGoalStore
+    seen: set[str] = set()
 
-        store = LifeGoalStore(home_dir)
-        for g in store.list()[:limit]:
-            line = g.title
-            if g.next_action:
-                line = f"{g.title} — next: {g.next_action}"
-            out.append(line[:160])
-        last = store.last_step()
-        if last and last.get("did") and len(out) < limit:
-            out.append(f"Last I did: {last['did']}"[:160])
-    except Exception:
-        pass
-    if profile is None:
-        return out[:limit]
-    facts = list(getattr(profile, "facts", None) or [])
+    def _add(text: str) -> None:
+        line = (text or "").strip()[:160]
+        key = line.lower()
+        if len(line) < 6 or key in seen:
+            return
+        seen.add(key)
+        out.append(line)
+
+    # Person first — store goals must not starve profile life facts.
+    facts = list(getattr(profile, "facts", None) or []) if profile is not None else []
     for f in facts:
         cat = str(getattr(f, "category", "") or "").lower()
         if cat not in ("life", "goal"):
@@ -457,9 +452,25 @@ def life_goal_lines(profile: Any, *, limit: int = 4, home_dir: Any = None) -> li
                 continue
         except (TypeError, ValueError):
             continue
-        out.append(text[:160])
+        _add(text)
         if len(out) >= limit:
-            break
+            return out[:limit]
+    try:
+        from remedy.memory.life_goals import LifeGoalStore
+
+        store = LifeGoalStore(home_dir)
+        for g in store.list()[:limit]:
+            line = g.title
+            if g.next_action:
+                line = f"{g.title} — next: {g.next_action}"
+            _add(line)
+            if len(out) >= limit:
+                return out[:limit]
+        last = store.last_step()
+        if last and last.get("did"):
+            _add(f"Last I did: {last['did']}")
+    except Exception:
+        pass
     return out[:limit]
 
 

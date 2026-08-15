@@ -209,6 +209,7 @@ export default function App() {
     highContrast,
     setHighContrast,
   } = useTheme()
+  const { busyIds, runningCount } = useSessionStreamJobs()
   const {
     model,
     setModel,
@@ -225,7 +226,7 @@ export default function App() {
     refreshModels,
     onProviderModelChange,
     onModelChange,
-  } = useSessionLlm({ activeId, sessions, streaming })
+  } = useSessionLlm({ activeId, sessions, streaming, runningCount })
 
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('high')
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>('ask')
@@ -257,7 +258,7 @@ export default function App() {
     openBrowserInRail,
     swapSides,
   } = useWorkspaceChrome({ setPanel })
-  useComputerHost(true, openBrowserInRail)
+  useComputerHost(true, openBrowserInRail, activeId)
 
   /**
    * Settings always open in the **right** workspace rail.
@@ -296,7 +297,6 @@ export default function App() {
   const [serverError, setServerError] = useState('')
   const [agentDefs, setAgentDefs] = useState<{ name: string; description: string }[]>([])
   const { notify } = useNotifications()
-  const { busyIds, runningCount } = useSessionStreamJobs()
   // Toast when a background (detached) turn finishes.
   useEffect(() => {
     return subscribeStreamJobs((ev) => {
@@ -1646,17 +1646,18 @@ export default function App() {
               agents={agentDefs}
               editDraft={editDraft}
               sessionId={activeId}
-              llmProvider={llmProvider}
-              llmModel={model}
+              llmProvider={barProvider || llmProvider}
+              llmModel={barModel || model}
               onOpenSettings={openSettingsInRail}
               ensureSession={async () => {
-                if (activeId) return activeId
-                const s = await create()
+                if (activeIdRef.current) return activeIdRef.current
+                const s = await create(undefined, undefined, { focus: false })
+                if (activeIdRef.current) return activeIdRef.current
                 if (s?.id) {
                   setActiveId(s.id)
                   setOpenTabs((prev) => new Set([...prev, s.id]))
                 }
-                return s?.id ?? null
+                return s?.id ?? activeIdRef.current ?? null
               }}
             />
           </div>

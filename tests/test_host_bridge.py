@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from pathlib import Path
@@ -55,6 +56,16 @@ def test_translate_export_and_dev_null() -> None:
     assert "set FOO=bar" in r.text
     assert "NUL" in r.text
     assert "/dev/null" not in r.text
+
+
+def test_translate_q_escapes_quote_amp() -> None:
+    from remedy.execution.host.translate import _q, translate_posix_to_host
+
+    assert '&' not in _q('foo"&calc') or '""' in _q('foo"&calc')
+    assert _q('foo"&calc') == '"foo""&calc"'
+    text = translate_posix_to_host('cat foo"&calc', host="cmd").text
+    assert "type" in text
+    assert '"foo""&calc"' in text
 
 
 def test_translate_ls_cat_pwd_which() -> None:
@@ -368,6 +379,67 @@ async def test_host_session_echo() -> None:
 
 
 @pytest.mark.asyncio
+async def test_read_until_poll_timeout_does_not_end_command() -> None:
+    """0.4s wait_for slices must not mark a still-running command timed out."""
+    from remedy.execution.host.session import HostSession
+
+    class _Stdout:
+        def __init__(self) -> None:
+            self.t0 = asyncio.get_running_loop().time()
+
+        async def read(self, _n: int) -> bytes:
+            while asyncio.get_running_loop().time() - self.t0 < 0.7:
+                await asyncio.sleep(0.05)
+            return b"MARK:0\n"
+
+    class _Proc:
+        stdout = None
+        returncode = None
+
+        def __init__(self) -> None:
+            self.stdout = _Stdout()
+
+    sess = HostSession(host="posix")
+    sess._proc = _Proc()
+    raw, timed_out, _ = await sess._read_until(b"MARK", timeout=3.0)
+    assert timed_out is False
+    assert b"MARK" in raw
+
+
+@pytest.mark.asyncio
+async def test_read_until_real_deadline_still_times_out() -> None:
+    from remedy.execution.host.session import HostSession
+
+    cancelled = {"n": 0}
+
+    class _Stdout:
+        async def read(self, _n: int) -> bytes:
+            try:
+                await asyncio.sleep(10)
+                return b"MARK:0\n"
+            except asyncio.CancelledError:
+                cancelled["n"] += 1
+                raise
+
+    class _Proc:
+        returncode = None
+
+        def __init__(self) -> None:
+            self.stdout = _Stdout()
+
+    sess = HostSession(host="posix")
+    sess._proc = _Proc()
+    _raw, timed_out, _ = await sess._read_until(b"MARK", timeout=0.7)
+    assert timed_out is True
+    # ConPTY ReadFile cannot be cancelled; one outstanding read must survive
+    # the poll timeout (wait_for-cancel used to leak the overlapped I/O).
+    assert cancelled["n"] == 0
+    assert sess._stdout_pending is not None
+    assert not sess._stdout_pending.done()
+    sess._stdout_pending.cancel()
+
+
+@pytest.mark.asyncio
 async def test_host_session_cd_persists(tmp_path: Path) -> None:
     from remedy.execution.host.session import HostSession
 
@@ -451,6 +523,26 @@ async def test_shared_session_scoped_by_id_and_start_cwd(tmp_path: Path) -> None
         assert s3b is s3
         assert s3._alive()
     finally:
+        await close_all_shared_sessions()
+
+
+@pytest.mark.asyncio
+async def test_abort_session_closes_shared_host_shell() -> None:
+    from remedy.core.turn_context import abort_session, begin_turn, end_turn
+    from remedy.execution.host.session import (
+        close_all_shared_sessions,
+        get_shared_session,
+    )
+
+    toks = begin_turn("host-abort", project_raw=None, active_path=".")
+    try:
+        sess = await get_shared_session(session_id="host-abort")
+        assert sess._alive()
+        abort_session("host-abort")
+        await asyncio.sleep(0.05)
+        assert not sess._alive()
+    finally:
+        end_turn("host-abort", *toks)
         await close_all_shared_sessions()
 
 

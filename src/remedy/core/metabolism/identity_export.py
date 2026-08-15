@@ -271,10 +271,9 @@ def collect_default_payload(home: Path | str | None = None) -> dict[str, Any]:
         pass
 
     try:
-        from remedy.core.metabolism.time_crystal import get_time_crystal
+        from remedy.core.metabolism.time_crystal import merge_export_durable
 
-        tc = get_time_crystal("_export")
-        time_crystal = tc.export_durable()
+        time_crystal = merge_export_durable(home=home)
     except Exception:
         pass
 

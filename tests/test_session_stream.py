@@ -214,3 +214,91 @@ def test_stream_aborted_event_not_error(tmp_path: Path, monkeypatch):
         # Tolerate metrics-only; generation-stopped must not be under error
         err_idx = body.find("event: error")
         assert "Generation stopped" not in body[err_idx : err_idx + 200]
+
+
+def test_stream_missing_session_is_404(tmp_path: Path):
+    store = _make_store(tmp_path)
+    rt = _StreamRuntime()
+    app = create_app(runtime=rt, memory=store, api_key="")
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/sessions/does-not-exist/messages/stream",
+            json={"message": "hi"},
+        )
+        assert r.status_code == 404
+
+
+def test_sync_send_missing_session_is_404(tmp_path: Path):
+    store = _make_store(tmp_path)
+    rt = _StreamRuntime()
+    app = create_app(runtime=rt, memory=store, api_key="")
+    with TestClient(app) as client:
+        r = client.post(
+            "/api/sessions/does-not-exist/messages",
+            json={"message": "hi"},
+        )
+        assert r.status_code == 404
+
+
+def test_list_messages_missing_session_is_404(tmp_path: Path):
+    store = _make_store(tmp_path)
+    rt = _StreamRuntime()
+    app = create_app(runtime=rt, memory=store, api_key="")
+    with TestClient(app) as client:
+        r = client.get("/api/sessions/does-not-exist/messages")
+        assert r.status_code == 404
+
+
+def test_put_session_llm_missing_is_404(tmp_path: Path):
+    store = _make_store(tmp_path)
+    rt = _StreamRuntime()
+    app = create_app(runtime=rt, memory=store, api_key="")
+    with TestClient(app) as client:
+        r = client.put(
+            "/api/sessions/does-not-exist/llm",
+            json={"provider": "demo", "model": "demo"},
+        )
+        assert r.status_code == 404
+
+
+def test_sync_send_409_when_stream_claimed(tmp_path: Path):
+    from remedy.core.turn_context import (
+        release_session_stream_claim,
+        try_claim_session_stream,
+    )
+
+    store = _make_store(tmp_path)
+    rt = _StreamRuntime()
+    app = create_app(runtime=rt, memory=store, api_key="")
+    with TestClient(app) as client:
+        sid = _create_session(client)
+        assert try_claim_session_stream(sid) is True
+        try:
+            r = client.post(
+                f"/api/sessions/{sid}/messages",
+                json={"message": "hi"},
+            )
+            assert r.status_code == 409
+        finally:
+            release_session_stream_claim(sid)
+
+
+def test_delete_releases_stream_claim(tmp_path: Path):
+    from remedy.core.turn_context import (
+        is_session_streaming,
+        try_claim_session_stream,
+    )
+
+    store = _make_store(tmp_path)
+    rt = _StreamRuntime()
+    app = create_app(runtime=rt, memory=store, api_key="")
+    with TestClient(app) as client:
+        sid = _create_session(client)
+        assert try_claim_session_stream(sid) is True
+        r = client.delete(f"/api/sessions/{sid}")
+        assert r.status_code == 200
+        assert is_session_streaming(sid) is False
+        assert try_claim_session_stream(sid) is True
+        from remedy.core.turn_context import release_session_stream_claim
+
+        release_session_stream_claim(sid)

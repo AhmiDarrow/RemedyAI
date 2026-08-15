@@ -244,11 +244,6 @@ async def handle_messenger_event(
             if session is not None:
                 event.session_id = session.id
                 runtime._session_id = session.id  # type: ignore[attr-defined]
-                model = getattr(getattr(runtime, "config", None), "llm_model", None)
-                agent = getattr(getattr(runtime, "config", None), "name", None)
-                await persist_user_message(
-                    memory, session, message, model=model, agent=agent
-                )
         except Exception:
             logger.exception("messenger session bridge failed")
 
@@ -274,6 +269,12 @@ async def handle_messenger_event(
                 return
             claimed = True
             claim_epoch = stream_claim_epoch(session.id)
+            if memory is not None:
+                model = getattr(getattr(runtime, "config", None), "llm_model", None)
+                agent = getattr(getattr(runtime, "config", None), "name", None)
+                await persist_user_message(
+                    memory, session, message, model=model, agent=agent
+                )
             async for chunk in runtime.stream_response(
                 message,
                 session_id=session.id,
@@ -322,6 +323,13 @@ async def handle_messenger_event(
 
                     release_session_stream_claim(session.id, epoch=claim_epoch)
     else:
+        if memory is not None and session is not None:
+            with suppress(Exception):
+                model = getattr(getattr(runtime, "config", None), "llm_model", None)
+                agent = getattr(getattr(runtime, "config", None), "name", None)
+                await persist_user_message(
+                    memory, session, message, model=model, agent=agent
+                )
         async for chunk in runtime.handle_event(event):
             if chunk is not None:
                 text = str(chunk)

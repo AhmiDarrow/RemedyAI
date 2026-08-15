@@ -29,8 +29,10 @@ export function useSessionLlm(opts: {
   activeId: string | null
   sessions: ChatSession[]
   streaming: boolean
+  /** Any tab streaming (not only the focused one). */
+  runningCount?: number
 }) {
-  const { activeId, sessions, streaming } = opts
+  const { activeId, sessions, streaming, runningCount = 0 } = opts
 
   const [model, setModel] = useState('gpt-4o-mini')
   const [llmProvider, setLlmProvider] = useState('openai')
@@ -193,18 +195,14 @@ export function useSessionLlm(opts: {
       const d = (ev as CustomEvent<{ stem?: string; path?: string }>).detail
       const stem = (d?.stem || '').trim()
       if (!stem) return
-      if (streaming) {
+      if (streaming || runningCount > 0) {
         showSwitchToast(`Loaded ${stem} — apply after this turn`)
         return
       }
       const onRmbAlready =
         (barProvider || llmProvider || '').toLowerCase() === 'rmb'
       if (activeId && !onRmbAlready) {
-        void updateSettings({
-          llm_provider: 'rmb',
-          llm_model: stem,
-          llm_base_url: 'http://127.0.0.1:8787/v1',
-        }).catch(() => {})
+        // Do not PUT global llm_* — that steals new chats / Settings default.
         showSwitchToast(`RMB loaded ${stem} — switch provider to use it`)
         return
       }
@@ -229,6 +227,7 @@ export function useSessionLlm(opts: {
   }, [
     activeId,
     streaming,
+    runningCount,
     barProvider,
     llmProvider,
     setSessionBind,
@@ -317,6 +316,7 @@ export function useSessionLlm(opts: {
 
   const onModelChange = useCallback(
     (id: string) => {
+      if (streaming) return
       if (!activeId) {
         setModel(id)
         void updateSettings({ llm_model: id }).catch(() => {})
@@ -328,7 +328,7 @@ export function useSessionLlm(opts: {
         .then((r) => showSwitchToast(r.toast))
         .catch(() => {})
     },
-    [activeId, barProvider, llmProvider, setSessionBind, showSwitchToast],
+    [streaming, activeId, barProvider, llmProvider, setSessionBind, showSwitchToast],
   )
 
   return {

@@ -29,6 +29,7 @@ import {
   setJobRunUsage,
   setJobTaskProgress,
   setJobBuildTodos,
+  shouldRestoreStoppedPartial,
   stopStreamJob,
   touchStreamJob,
   withStoppedMarker,
@@ -305,7 +306,7 @@ export function useMessages(sessionId: string | null) {
     } catch (e: unknown) {
       console.warn('[remedy] loadOlder failed', e instanceof Error ? e.message : e)
     } finally {
-      if (sessionIdRef.current === loadId) setLoadingOlder(false)
+      setLoadingOlder(false)
     }
   }, [hasOlder, loadingOlder, messages.length])
 
@@ -350,24 +351,15 @@ export function useMessages(sessionId: string | null) {
       if (!sessionId || sessionIdRef.current !== sessionId) return
       const job = getStreamJob(sessionId)
       const paint = getJobPaint(sessionId)
-      if (
-        job?.status === 'aborted'
-        && !isJobUiCommitted(sessionId)
-        && paint?.partialText?.trim()
-      ) {
-        markJobUiCommitted(sessionId)
-        const text = withStoppedMarker(paint.partialText)
+      if (job?.status === 'aborted' && paint?.partialText?.trim()) {
         setMessages((prev) => {
-          const last = prev[prev.length - 1]
-          if (last?.role === 'assistant' && String(last.content || '').includes('Stopped')) {
-            return prev
-          }
+          if (!shouldRestoreStoppedPartial(prev, paint.partialText)) return prev
           return [
             ...prev,
             {
               id: crypto.randomUUID(),
               role: 'assistant',
-              content: text,
+              content: withStoppedMarker(paint.partialText),
               thinking: paint.partialThinking || null,
               tool_calls: [],
               tool_results: [],
@@ -379,6 +371,7 @@ export function useMessages(sessionId: string | null) {
             },
           ]
         })
+        markJobUiCommitted(sessionId)
       }
     })
     // Re-bind UI if this session still has a live background job.
@@ -1018,43 +1011,48 @@ export function useMessages(sessionId: string | null) {
           } else {
             streamCtrlRef.current?.abort()
           }
+          const stillFocused = Boolean(sidAbort) && sessionIdRef.current === sidAbort
           if (rawText.trim() && !isJobUiCommitted(sidAbort || '')) {
-            const assistantMsg: ChatMessage = {
-              id: crypto.randomUUID(),
-              role: 'assistant',
-              content: withStoppedMarker(rawText),
-              thinking: null,
-              tool_calls: steps.map((s) => ({
-                name: s.name,
-                args: s.argsText ? safeParseArgs(s.argsText) : {},
-              })),
-              tool_results: steps.map((s) => ({
-                name: s.name,
-                output: s.resultText || '',
-                error: s.error,
-              })),
-              model: null,
-              agent: null,
-              tokens: null,
-              created_at: new Date().toISOString(),
-              reverted: false,
-            }
-            setMessages((prev) => [...prev, assistantMsg])
             if (sidAbort) markJobUiCommitted(sidAbort)
+            if (stillFocused) {
+              const assistantMsg: ChatMessage = {
+                id: crypto.randomUUID(),
+                role: 'assistant',
+                content: withStoppedMarker(rawText),
+                thinking: null,
+                tool_calls: steps.map((s) => ({
+                  name: s.name,
+                  args: s.argsText ? safeParseArgs(s.argsText) : {},
+                })),
+                tool_results: steps.map((s) => ({
+                  name: s.name,
+                  output: s.resultText || '',
+                  error: s.error,
+                })),
+                model: null,
+                agent: null,
+                tokens: null,
+                created_at: new Date().toISOString(),
+                reverted: false,
+              }
+              setMessages((prev) => [...prev, assistantMsg])
+            }
           }
-          setStreaming(false)
-          setStreamCtrl(null)
-          streamCtrlRef.current = null
-          setActiveTools([])
-          setTaskProgress(null)
-          streamingRef.current = false
-          sendLockRef.current = false
-          setPartialThinking('')
-          setPartialText('')
-          streamAccumRef.current = ''
-          thinkingAccumRef.current = ''
-          setProcessSteps([])
-          processStepsRef.current = []
+          if (stillFocused || !sidAbort) {
+            setStreaming(false)
+            setStreamCtrl(null)
+            streamCtrlRef.current = null
+            setActiveTools([])
+            setTaskProgress(null)
+            streamingRef.current = false
+            sendLockRef.current = false
+            setPartialThinking('')
+            setPartialText('')
+            streamAccumRef.current = ''
+            thinkingAccumRef.current = ''
+            setProcessSteps([])
+            processStepsRef.current = []
+          }
           // Put interrupt item at front
           setQueue((q) => [item, ...q.filter((x) => x.id !== item.id)])
           queueRef.current = [item, ...queueRef.current.filter((x) => x.id !== item.id)]
@@ -1177,13 +1175,66 @@ export function useMessages(sessionId: string | null) {
   const stopAndRetry = useCallback(() => {
     const sid = sessionIdRef.current
     const pending = sid ? lastSentBySessionRef.current.get(sid) : undefined
+    resetStreamBuffers()
+    const paint = sid ? getJobPaint(sid) : null
+    const steps =
+      paint?.processSteps?.length
+        ? paint.processSteps
+        : processStepsRef.current
+    const rawText =
+      (paint?.partialText && paint.partialText.length
+        ? paint.partialText
+        : streamAccumRef.current) || ''
     void (async () => {
       try {
         if (sid) await stopStreamJob(sid)
       } catch {
         /* */
       }
-      stop()
+      // Commit the captured sid only — do not re-read sessionIdRef via stop().
+      if (sid && sessionIdRef.current === sid) {
+        if (rawText.trim() && !isJobUiCommitted(sid)) {
+          const assistantMsg: ChatMessage = {
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: withStoppedMarker(rawText),
+            thinking: null,
+            tool_calls: steps.map((s) => ({
+              name: s.name,
+              args: s.argsText ? safeParseArgs(s.argsText) : {},
+            })),
+            tool_results: steps.map((s) => ({
+              name: s.name,
+              output: s.resultText || '',
+              error: s.error,
+            })),
+            model: null,
+            agent: null,
+            tokens: null,
+            created_at: new Date().toISOString(),
+            reverted: false,
+          }
+          setMessages((prev) => [...prev, assistantMsg])
+          markJobUiCommitted(sid)
+        }
+        setStreaming(false)
+        setStreamStalled(false)
+        setStallSeconds(0)
+        setStreamCtrl(null)
+        streamCtrlRef.current = null
+        setActiveTools([])
+        setTaskProgress(null)
+        streamingRef.current = false
+        sendLockRef.current = false
+        setPartialThinking('')
+        setPartialText('')
+        streamAccumRef.current = ''
+        thinkingAccumRef.current = ''
+        setProcessSteps([])
+        processStepsRef.current = []
+      } else if (sid && rawText.trim() && !isJobUiCommitted(sid)) {
+        markJobUiCommitted(sid)
+      }
       if (!pending?.text?.trim() && !pending?.attachments?.length) return
       await send(
         pending.text,
@@ -1195,7 +1246,7 @@ export function useMessages(sessionId: string | null) {
         retrySendOptions(pending),
       )
     })()
-  }, [stop, send])
+  }, [send, resetStreamBuffers])
 
   const cancelQueued = useCallback((id: string) => {
     setQueue((q) => q.filter((x) => x.id !== id))

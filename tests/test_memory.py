@@ -211,6 +211,20 @@ async def test_list_sessions(store):
 
 
 @pytest.mark.asyncio
+async def test_list_and_find_chat_sessions_use_lock(store):
+    from remedy.models import ChatSession
+
+    a = await store.create_chat_session(
+        ChatSession(title="listed", origin_channel="telegram", external_chat_id="tg-1")
+    )
+    listed = await store.list_chat_sessions(limit=10, offset=0)
+    assert any(s.id == a.id for s in listed)
+    found = await store.find_session_by_external("telegram", "tg-1")
+    assert found is not None
+    assert found.id == a.id
+
+
+@pytest.mark.asyncio
 async def test_context_manager(tmp_path):
     db = tmp_path / "ctx.db"
     async with MemoryStore(db) as s:

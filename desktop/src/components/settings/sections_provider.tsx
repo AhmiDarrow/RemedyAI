@@ -148,10 +148,7 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
         </FormHint>
 
         {provider === 'xai' && (
-          <div
-            className="mb-2 p-2 rounded space-y-2"
-            style={{ border: '1px solid var(--border)', background: 'var(--bg-tertiary)' }}
-          >
+          <div className="mb-2 p-2.5 rounded-lg space-y-2 ui-surface" style={{ boxShadow: 'none' }}>
             <div className="font-medium" style={{ color: 'var(--text-primary)' }}>
               Sign in with xAI
             </div>

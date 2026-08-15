@@ -56,6 +56,56 @@ def test_create_volume_root_is_no_project(client):
     assert r.json().get("project_path") in (None, "", ".")
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [r"C:\Windows", r"C:\Windows\System32", r"C:\Program Files\Remedy", "/etc", "/usr/bin"],
+)
+def test_create_forbidden_os_path_is_400(client, bad):
+    c, _ = client
+    r = c.post("/api/sessions", json={"title": "OS", "project_path": bad})
+    assert r.status_code == 400, r.text
+    assert "not allowed" in (r.json().get("detail") or r.text).lower() or "not allowed" in r.text.lower()
+
+
+def test_patch_forbidden_os_path_is_400(client):
+    c, tmp = client
+    r = c.post("/api/sessions", json={"title": "ok", "project_path": ""})
+    sid = r.json()["id"]
+    r2 = c.patch(f"/api/sessions/{sid}", json={"project_path": r"C:\Windows"})
+    assert r2.status_code == 400, r2.text
+    still = c.get(f"/api/sessions/{sid}").json()
+    assert still.get("project_path") in (None, "", ".")
+
+
+def test_bulk_forbidden_os_path_is_400(client):
+    c, _ = client
+    r = c.post("/api/sessions", json={"title": "b", "project_path": ""})
+    sid = r.json()["id"]
+    r2 = c.post(
+        "/api/sessions/bulk-project",
+        json={"session_ids": [sid], "project_path": r"C:\Program Files"},
+    )
+    assert r2.status_code == 400, r2.text
+
+
+def test_set_project_path_refuses_forbidden(tmp_path):
+    from remedy.core.errors import SecurityError
+
+    cfg = AgentConfig(
+        name="t",
+        project_path=str(tmp_path),
+        access_scope="project",
+        llm_provider="openai",
+        llm_model="m",
+        llm_api_key="k",
+    )
+    rt = BasicRuntime(cfg)
+    rt.set_project_path(str(tmp_path), as_default=True)
+    with pytest.raises(SecurityError):
+        rt.set_project_path(r"C:\Windows", as_default=False)
+    assert "Windows" not in str(rt.effective_project_path())
+
+
 def test_create_publishes_session_created(client):
     from remedy.interfaces.session_events import get_session_event_hub, reset_session_event_hub
 
@@ -228,6 +278,42 @@ async def test_apply_session_workspace_binds_project(store: MemoryStore, tmp_pat
     await rt._apply_session_workspace(snone.id)
     assert rt.project_path_is_unset() is True
     assert rt.access_scope() == "full"
+
+
+@pytest.mark.asyncio
+async def test_forbidden_leftover_session_is_not_full(store: MemoryStore, tmp_path: Path):
+    """Leftover C:\\Windows must not become access_scope=full."""
+    from remedy.core.errors import SecurityError
+
+    home = tmp_path / "remedy-home"
+    home.mkdir()
+    safe = tmp_path / "safe"
+    safe.mkdir()
+    sess = ChatSession(title="poison", project_path=r"C:\Windows")
+    sess = await store.create_chat_session(sess)
+    cfg = AgentConfig(
+        name="t",
+        project_path=str(safe),
+        access_scope="project",
+        llm_provider="openai",
+        llm_model="m",
+        llm_api_key="k",
+        home_dir=str(home),
+    )
+    rt = BasicRuntime(cfg, memory=store)
+    with pytest.raises(SecurityError):
+        await rt._apply_session_workspace(sess.id)
+    assert rt.access_scope() != "full"
+    assert "Windows" not in str(rt.effective_project_path())
+    cleared = await store.get_chat_session(sess.id)
+    assert cleared is not None
+    jail = str((home / "refused-project").resolve())
+    stored = str(cleared.project_path or "")
+    assert stored
+    assert stored.replace("\\", "/").rstrip("/") == jail.replace("\\", "/").rstrip("/")
+    await rt._apply_session_workspace(sess.id)
+    assert rt.access_scope() != "full"
+    assert "Windows" not in str(rt.effective_project_path())
 
 
 def test_bulk_set_session_project(client):

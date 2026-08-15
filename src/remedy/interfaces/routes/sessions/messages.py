@@ -33,6 +33,8 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
     ):
         if memory is None:
             raise HTTPException(503, "Memory store not available")
+        if await memory.get_chat_session(session_id) is None:
+            raise HTTPException(404, "Session not found")
         msgs = await memory.get_chat_messages(session_id, limit=limit, offset=offset)
         # Cap payload size for list views (stream/export keep full bodies).
         _CONTENT_CAP = 32_000
@@ -111,6 +113,19 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         if not str(req.message or "").strip() and not has_atts:
             raise HTTPException(400, "Message is empty")
 
+        from remedy.core.turn_context import (
+            release_session_stream_claim,
+            stream_claim_epoch,
+            try_claim_session_stream,
+        )
+
+        if not try_claim_session_stream(session_id):
+            raise HTTPException(
+                409,
+                "Session already has a generation in progress. "
+                "Stop the current turn first, then send again.",
+            )
+        claim_epoch = stream_claim_epoch(session_id)
         try:
             return await _send_message_body(
                 session_id=session_id,
@@ -136,6 +151,8 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                         raise HTTPException(404, "Session not found") from exc
             logger.exception("send_message failed session=%s", session_id)
             raise HTTPException(500, "Internal Server Error") from exc
+        finally:
+            release_session_stream_claim(session_id, epoch=claim_epoch)
 
     async def _send_message_body(
         *,
@@ -151,32 +168,53 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 resolve_session_llm_bind,
                 session_llm_update_fields,
             )
-            from remedy.models import ChatMessage, ChatSession
+            from remedy.models import ChatMessage
 
             existing = await memory.get_chat_session(session_id)
             sp, sm = resolve_session_llm_bind(
                 session=existing,
                 req_provider=getattr(req, "provider", None),
                 req_model=req.model,
+                use_live_rmb=False,
             )
             fields = session_llm_update_fields(provider=sp, model=sm)
             if existing is None:
-                default_proj = load_config().get("project_path")
-                await memory.create_chat_session(ChatSession(
-                    id=session_id,
-                    title=req.message[:60],
-                    model=fields.get("model") or req.model,
-                    llm_provider=fields.get("llm_provider"),
-                    agent=req.agent,
-                    project_path=default_proj,
-                ))
+                raise HTTPException(404, "Session not found")
             elif fields:
                 await memory.update_chat_session(session_id, **fields)
+
+        att_dicts = [a.model_dump() if hasattr(a, "model_dump") else dict(a)
+                     for a in (getattr(req, "attachments", None) or [])]
+        home_att = None
+        with contextlib.suppress(Exception):
+            home_att = load_config().get("home_dir")
+        with contextlib.suppress(Exception):
+            from remedy.interfaces.attachments import filter_jailed_attachments
+
+            att_dicts = filter_jailed_attachments(
+                att_dicts, home_dir=home_att, session_id=session_id
+            )
+        user_text = (req.message or "").strip()
+        display_content = user_text
+        if att_dicts:
+            with contextlib.suppress(Exception):
+                from remedy.interfaces.attachments import (
+                    build_attachment_prompt_block,
+                    inject_text_file_snippets,
+                )
+
+                display_content = (user_text + build_attachment_prompt_block(att_dicts)).strip()
+                display_content = display_content + inject_text_file_snippets(
+                    att_dicts, home_dir=home_att, session_id=session_id
+                )
+
+        if memory:
+            from remedy.models import ChatMessage
 
             await memory.add_chat_message(ChatMessage(
                 session_id=session_id,
                 role=ChatMessageRole.USER,
-                content=req.message,
+                content=display_content or user_text or "(see attached files)",
             ))
 
         # Sticky per-session provider+model (never model-only against another host).
@@ -198,9 +236,10 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         start = time.perf_counter()
         response_text = ""
         async for token in runtime.stream_response(
-            req.message,
+            user_text or "(see attached files)",
             session_id=session_id,
             model=sess_model,
+            attachments=att_dicts,
             plan_mode=bool(getattr(req, "plan_mode", False)),
             provider=sess_provider,
         ):

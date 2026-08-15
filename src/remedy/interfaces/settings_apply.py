@@ -684,15 +684,20 @@ async def apply_settings_update(
     rmb_live: dict[str, Any] | None = None
     if llm_touched and str(provider or "").lower() == "rmb" and model:
         try:
+            from remedy.core.turn_context import any_stream_claimed
             from remedy.runtime.rmb.service import apply_rmb_chat_model
 
+            live = not any_stream_claimed()
             rmb_live = apply_rmb_chat_model(
                 str(model),
                 home_dir=cfg.get("home_dir") if isinstance(cfg, dict) else None,
                 cfg=cfg if isinstance(cfg, dict) else None,
-                live=True,
+                live=live,
                 wait_s=120.0,
             )
+            if not live and isinstance(rmb_live, dict):
+                rmb_live["deferred"] = True
+                rmb_live["live"] = False
             # Prefer resolved stem for runtime if host reloaded a different file
             live_path = (rmb_live or {}).get("model_path")
             if live_path:

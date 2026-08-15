@@ -33,6 +33,7 @@ export function useChatSendFlow(opts: {
   create: (
     title?: string,
     bind?: { provider?: string; model?: string },
+    opts?: { focus?: boolean },
   ) => Promise<
     | { id: string; llm_provider?: string | null; model?: string | null }
     | null
@@ -112,6 +113,8 @@ export function useChatSendFlow(opts: {
   } = opts
 
   const notifyArmRef = useRef<string | null>(null)
+  const activeIdRef = useRef(activeId)
+  activeIdRef.current = activeId
   const [editDraft, setEditDraft] = useState<{ text: string; key: number } | null>(
     null,
   )
@@ -179,7 +182,8 @@ export function useChatSendFlow(opts: {
         // Quiet the stream first so abort does not race the wipe.
         stop()
         clearQueue()
-        const result = await runCommand(command, activeId)
+        const resetSid = activeId
+        const result = await runCommand(command, resetSid)
         const ok =
           result.action === 'reset_session'
           || (typeof result.cleared === 'number' && result.cleared >= 0
@@ -188,6 +192,10 @@ export function useChatSendFlow(opts: {
             && !String(result.text || '').toLowerCase().includes('unknown command'))
 
         if (ok) {
+          const stillHere = activeIdRef.current === resetSid
+          if (!stillHere) {
+            return { ...result, text: result.text || 'Session reset.', action: result.action || 'reset_session' }
+          }
           // Instant empty feed — stay on this session id (no jump to /new).
           clearLocalHistory()
           try {
@@ -290,9 +298,15 @@ export function useChatSendFlow(opts: {
       } else {
         let sid = activeId
         if (!sid) {
-          const created = await create()
+          // Prompt was typed on the empty shell — keep it on the new session
+          // even if the user selected another chat during create().
+          const created = await create(undefined, undefined, { focus: false })
           sid = created?.id ?? null
-          if (sid) setOpenTabs((prev) => new Set([...prev, sid!]))
+          if (sid && !activeIdRef.current) setActiveId(sid)
+          if (sid) {
+            const opened = sid
+            setOpenTabs((prev) => new Set([...prev, opened]))
+          }
         }
         if (!sid) {
           notify('Chat not ready', {
@@ -374,6 +388,7 @@ export function useChatSendFlow(opts: {
       model,
       handleCommand,
       activeId,
+      setActiveId,
       create,
       sessions,
       rename,
@@ -394,11 +409,14 @@ export function useChatSendFlow(opts: {
   const handleEditUserMessage = useCallback(
     async (msgId: string, content: string) => {
       if (!activeId || streaming) return
+      const sid = activeId
       // Immediately put the full original prompt in the chat bar (don't wait on API).
       const localText = content ?? ''
       setEditDraft({ text: localText, key: Date.now() })
       // Soft-delete this message + later ones on the server; refresh history.
       const serverText = await beginEdit(msgId, localText)
+      // Tab switch already cleared editDraft via the activeId effect.
+      if (activeIdRef.current !== sid) return
       // Prefer server content if it differs (authoritative), re-apply with new key.
       if (serverText != null && serverText !== localText) {
         setEditDraft({ text: serverText, key: Date.now() })

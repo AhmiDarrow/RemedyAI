@@ -777,6 +777,27 @@ def test_shell_write_jail_blocks_interpreter_oneshot_without_paths(tmp_path: Pat
     )
 
 
+def test_shell_write_jail_blocks_constructed_dest_and_stdin(tmp_path: Path):
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    roots = [sticky.resolve()]
+    cases = [
+        r"echo pwn > %CD:~0,1%:\Temp\x.txt",
+        r"Set-Content -Path ([char]67+':\Temp\x.txt') pwn",
+        r"echo open(chr(67)+':\\Temp\\x','w').write('pwn') | python -",
+        r"Set-Content -Value pwn ('{0}:\Temp\x.txt' -f 67)",
+    ]
+    for cmd in cases:
+        hit = check_shell_write_jail(
+            cmd,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            access_scope="project",
+        )
+        assert hit is not None, f"expected jail for constructed dest: {cmd}"
+
+
 def test_shell_write_jail_blocks_relative_escape(tmp_path: Path):
     proj = tmp_path / "SecretSticky"
     sibling = tmp_path / "SecretFolder"
@@ -1024,6 +1045,10 @@ async def test_update_settings_refuses_unset_project_and_home_scope(tmp_path: Pa
     register_settings_tools(rt)
     out = await rt.tool_registry.execute("update_settings", project_path="")
     assert "PROJECT_JAIL" in out or "refusing to clear" in out.lower()
+    out_os = await rt.tool_registry.execute(
+        "update_settings", project_path=r"C:\Windows"
+    )
+    assert "PROJECT_FORBIDDEN" in out_os or "not allowed" in out_os.lower()
     out2 = await rt.tool_registry.execute("update_settings", access_scope="home")
     assert "APPROVAL_REQUIRED" in out2
     out3 = await rt.tool_registry.execute("update_settings", approval_mode="auto")

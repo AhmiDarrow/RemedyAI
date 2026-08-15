@@ -822,6 +822,43 @@ def test_wait_honors_ui_command_without_claim(tmp_path: Path):
     assert finished.status == "done"
 
 
+def test_claim_next_skips_other_session(tmp_path: Path):
+    """One WebView rail: do not claim a background tab's pending job."""
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    focused = b.enqueue("click", {"x": 1}, session_id="sess-a")
+    other = b.enqueue("click", {"x": 2}, session_id="sess-b")
+    b.set_focused_session("sess-a")
+    claimed = b.claim_next()
+    assert claimed is not None
+    assert claimed.id == focused.id
+    assert b.claim_next() is None
+    claimed_b = b.claim_next(session_id="sess-b")
+    assert claimed_b is not None
+    assert claimed_b.id == other.id
+
+
+def test_take_ui_command_skips_other_session(tmp_path: Path):
+    """Focused-session take must leave another tab's open_browser command."""
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    job = b.enqueue("navigate", {"url": "https://example.com/b"}, session_id="sess-b")
+    assert job.session_id == "sess-b"
+    cmd = b.peek_ui_command()
+    assert cmd is not None
+    assert cmd.get("session_id") == "sess-b"
+    b.set_focused_session("sess-a")
+    assert b.take_ui_command() is None
+    assert b.peek_ui_command() is not None
+    b.set_focused_session("sess-b")
+    taken = b.take_ui_command()
+    assert taken is not None
+    assert taken.get("job_id") == job.id
+    assert taken.get("session_id") == "sess-b"
+
+
 def test_claim_next_exclude_and_only(tmp_path: Path):
     from remedy.core.computer.host_bridge import ComputerHostBridge
 

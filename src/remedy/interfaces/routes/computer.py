@@ -19,6 +19,7 @@ class HostHelloRequest(BaseModel):
     # Optional CSS bounds of the browser rail (from getBoundingClientRect)
     bounds: dict[str, float] | None = None
     scale: float | None = Field(default=None, description="devicePixelRatio")
+    session_id: str | None = None
 
 
 class CaptureRequest(BaseModel):
@@ -86,6 +87,8 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         b = _bridge()
         # Soft touch only — real poller marks via jobs/ui routes.
         b.mark_host_alive(poller=False)
+        if req and req.session_id:
+            b.set_focused_session(req.session_id)
         if req and req.bounds:
             b.set_browser_bounds(req.bounds, scale=req.scale)
         return {
@@ -154,7 +157,9 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         return {"ok": True, "capture": info}
 
     @app.get("/api/computer/jobs/next")
-    async def computer_job_next(exclude: str = "", only: str = ""):
+    async def computer_job_next(
+        exclude: str = "", only: str = "", session_id: str = ""
+    ):
         """Desktop host claims the next pending browser job (or null).
 
         *exclude*: comma-separated actions to leave pending (SPA should pass
@@ -169,7 +174,13 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             skip = {p.strip().lower() for p in str(exclude).split(",") if p.strip()}
         if only and str(only).strip():
             only_set = {p.strip().lower() for p in str(only).split(",") if p.strip()}
-        job = b.claim_next(exclude_actions=skip, only_actions=only_set)
+        if session_id.strip():
+            b.set_focused_session(session_id)
+        job = b.claim_next(
+            exclude_actions=skip,
+            only_actions=only_set,
+            session_id=session_id or None,
+        )
         if job is None:
             return {"job": None}
         return {"job": job.to_dict()}

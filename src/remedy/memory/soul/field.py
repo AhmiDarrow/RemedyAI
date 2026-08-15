@@ -144,6 +144,7 @@ class SoulField:
     # Future-facing partner dreams: how I will help them reach their goals
     future_dreams: list[str] = field(default_factory=list)
     updated_ts: float = field(default_factory=time.time)
+    persist_blocked: bool = False
 
     def touch(self) -> None:
         self.updated_ts = time.time()
@@ -251,18 +252,25 @@ def load_soul_field(home: str | Path | None = None) -> SoulField:
             return _cache[key]
         path = field_path(home)
         raw: dict[str, Any] = {}
+        persist_blocked = False
         if path.is_file():
-            with suppress(Exception):
-                raw = json.loads(path.read_text(encoding="utf-8"))
-                if not isinstance(raw, dict):
-                    raw = {}
+            try:
+                parsed = json.loads(path.read_text(encoding="utf-8"))
+                raw = parsed if isinstance(parsed, dict) else {}
+            except json.JSONDecodeError:
+                persist_blocked = True
+            except OSError:
+                raw = {}
         sf = SoulField.from_dict(raw)
+        sf.persist_blocked = persist_blocked
         _cache[key] = sf
         return sf
 
 
 def save_soul_field(field: SoulField, home: str | Path | None = None) -> Path:
     """Persist soul field atomically-ish (write temp + replace)."""
+    if getattr(field, "persist_blocked", False):
+        return field_path(home)
     field.touch()
     path = field_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)

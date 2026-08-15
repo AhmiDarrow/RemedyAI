@@ -106,8 +106,7 @@ export function SlideFrame({
           {meta.popout && onPopout && (
             <button
               type="button"
-              className="px-1.5 py-0.5 rounded opacity-70 hover:opacity-100"
-              style={{ color: 'var(--text-secondary)' }}
+              className="workspace-chrome-btn"
               title="Pop out to floating window"
               aria-label={`Pop out ${meta.label}`}
               onClick={onPopout}
@@ -118,8 +117,7 @@ export function SlideFrame({
           {meta.popout && onFullscreen && (
             <button
               type="button"
-              className="px-1.5 py-0.5 rounded opacity-70 hover:opacity-100"
-              style={{ color: 'var(--text-secondary)' }}
+              className="workspace-chrome-btn"
               title="Fullscreen panel"
               aria-label={`Fullscreen ${meta.label}`}
               onClick={onFullscreen}
@@ -130,8 +128,7 @@ export function SlideFrame({
           {onClose && (
             <button
               type="button"
-              className="px-1.5 py-0.5 rounded opacity-70 hover:opacity-100"
-              style={{ color: 'var(--text-secondary)' }}
+              className="workspace-chrome-btn"
               title="Hide panel"
               aria-label={`Hide ${meta.label}`}
               onClick={onClose}

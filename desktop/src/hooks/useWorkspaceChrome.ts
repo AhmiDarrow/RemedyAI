@@ -74,11 +74,12 @@ export function useWorkspaceChrome(opts: {
       openBrowserInRail()
     }
     window.addEventListener('remedy:computer-ui', onComputerUi)
+    let cancelled = false
     let unlisten: (() => void) | undefined
     void (async () => {
       if (!isTauri()) return
       try {
-        unlisten = await tauriListen('computer-open-browser', (ev) => {
+        const unlistenOpen = await tauriListen('computer-open-browser', (ev) => {
           openBrowserInRail()
           const payload = (ev as { payload?: { url?: string } })?.payload
           const u = payload?.url
@@ -88,6 +89,10 @@ export function useWorkspaceChrome(opts: {
             )
           }
         })
+        if (cancelled) {
+          unlistenOpen?.()
+          return
+        }
         const unlistenUrl = await tauriListen('computer-browser-url', (ev) => {
           const payload = (ev as { payload?: { url?: string } })?.payload
           const u = payload?.url
@@ -97,9 +102,13 @@ export function useWorkspaceChrome(opts: {
             )
           }
         })
-        const prev = unlisten
+        if (cancelled) {
+          unlistenOpen?.()
+          unlistenUrl?.()
+          return
+        }
         unlisten = () => {
-          prev?.()
+          unlistenOpen?.()
           unlistenUrl?.()
         }
       } catch {
@@ -107,6 +116,7 @@ export function useWorkspaceChrome(opts: {
       }
     })()
     return () => {
+      cancelled = true
       window.removeEventListener('remedy:computer-ui', onComputerUi)
       unlisten?.()
     }
