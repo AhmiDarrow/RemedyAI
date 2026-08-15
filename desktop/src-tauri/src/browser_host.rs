@@ -17,6 +17,10 @@ use url::Url;
 
 const LABEL: &str = "remedy-browser-embed";
 
+fn api_url(path: &str) -> String {
+    format!("{}{}", crate::api_base_url(), path)
+}
+
 /// Force OAuth / SSO into the same rail WebView (no popup window).
 /// Brand-agnostic: path/query heuristics, not site-specific hosts.
 const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
@@ -811,6 +815,145 @@ fn apply_bounds(wv: &tauri::Webview, b: &BrowserBounds, allow_show: bool) -> Res
     } else {
         let _ = wv.hide();
     }
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
+    linux_place_embed(&wv.window(), b, allow_show);
+    Ok(())
+}
+
+/// Tauri Linux `add_child` packs the child into the default `gtk::Box`, which
+/// splits the window (main webview + browser stacked). Reparent the Browser
+/// child onto a `gtk::Overlay` so it floats in the rail slot.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_place_embed(window: &tauri::Window, bounds: &BrowserBounds, allow_show: bool) {
+    let b = bounds.clone();
+    let win = window.clone();
+    if let Err(e) = window.run_on_main_thread(move || {
+        if let Err(err) = linux_place_embed_gtk(&win, &b, allow_show) {
+            log::warn!("linux browser overlay: {err}");
+        }
+    }) {
+        log::warn!("linux browser overlay schedule: {e}");
+    }
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_widget_is_webkit(w: &gtk::Widget) -> bool {
+    use gtk::glib::prelude::ObjectExt;
+    w.type_().name().contains("WebKitWebView")
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_place_embed_gtk(
+    window: &tauri::Window,
+    bounds: &BrowserBounds,
+    allow_show: bool,
+) -> Result<(), String> {
+    use gtk::prelude::*;
+    use gtk::{Align, Overlay};
+
+    let vbox = window
+        .default_vbox()
+        .map_err(|e| format!("default_vbox: {e}"))?;
+
+    const OVERLAY_NAME: &str = "remedy-rail-overlay";
+    const EMBED_NAME: &str = "remedy-browser-embed";
+
+    let overlay = if let Some(existing) = vbox
+        .children()
+        .into_iter()
+        .find(|c| c.widget_name() == OVERLAY_NAME)
+        .and_then(|c| c.downcast::<Overlay>().ok())
+    {
+        existing
+    } else {
+        let overlay = Overlay::new();
+        overlay.set_widget_name(OVERLAY_NAME);
+        overlay.set_hexpand(true);
+        overlay.set_vexpand(true);
+        overlay.set_halign(Align::Fill);
+        overlay.set_valign(Align::Fill);
+
+        let main_wv = vbox.children().into_iter().find(linux_widget_is_webkit);
+        if let Some(mw) = main_wv {
+            vbox.remove(&mw);
+            mw.set_hexpand(true);
+            mw.set_vexpand(true);
+            mw.set_halign(Align::Fill);
+            mw.set_valign(Align::Fill);
+            overlay.add(&mw);
+            mw.show();
+        }
+        vbox.pack_start(&overlay, true, true, 0);
+        vbox.reorder_child(&overlay, 0);
+        overlay.show();
+        overlay.queue_resize();
+        overlay
+    };
+
+    // add_child packs a new WebKitWebView into the vbox — steal it onto the overlay.
+    let extras: Vec<gtk::Widget> = vbox
+        .children()
+        .into_iter()
+        .filter(linux_widget_is_webkit)
+        .collect();
+    for extra in extras {
+        vbox.remove(&extra);
+        extra.set_widget_name(EMBED_NAME);
+        extra.set_halign(Align::Start);
+        extra.set_valign(Align::Start);
+        extra.set_hexpand(false);
+        extra.set_vexpand(false);
+        overlay.add_overlay(&extra);
+    }
+
+    let base = overlay.child();
+    for child in overlay.children() {
+        if base.as_ref() == Some(&child) {
+            continue;
+        }
+        if !(linux_widget_is_webkit(&child) || child.widget_name() == EMBED_NAME) {
+            continue;
+        }
+        child.set_halign(Align::Start);
+        child.set_valign(Align::Start);
+        child.set_hexpand(false);
+        child.set_vexpand(false);
+        child.set_margin_start(bounds.x.round().max(0.0) as i32);
+        child.set_margin_top(bounds.y.round().max(0.0) as i32);
+        child.set_size_request(
+            bounds.width.round().max(80.0) as i32,
+            bounds.height.round().max(80.0) as i32,
+        );
+        if allow_show {
+            child.show();
+        } else {
+            child.hide();
+        }
+    }
     Ok(())
 }
 
@@ -1095,9 +1238,15 @@ pub fn browser_is_open(app: AppHandle) -> bool {
 }
 
 #[tauri::command]
-pub fn browser_hide(app: AppHandle) -> Result<(), String> {
+pub fn browser_hide(app: AppHandle, state: State<'_, BrowserState>) -> Result<(), String> {
     if let Some(wv) = app.get_webview(LABEL) {
-        wv.hide().map_err(|e| format!("hide: {e}"))?;
+        let b = state
+            .last_bounds
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+            .unwrap_or_else(|| default_rail_bounds(&app));
+        apply_bounds(&wv, &clamp_bounds(&b), false)?;
     }
     Ok(())
 }
@@ -1108,7 +1257,13 @@ pub fn browser_show(app: AppHandle, state: State<'_, BrowserState>) -> Result<()
         return Ok(());
     }
     if let Some(wv) = app.get_webview(LABEL) {
-        wv.show().map_err(|e| format!("show: {e}"))?;
+        let b = state
+            .last_bounds
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+            .unwrap_or_else(|| default_rail_bounds(&app));
+        apply_bounds(&wv, &clamp_bounds(&b), true)?;
     }
     Ok(())
 }
@@ -1126,7 +1281,13 @@ pub fn browser_set_stack_suppressed(
         .store(suppressed, Ordering::SeqCst);
     if suppressed {
         if let Some(wv) = app.get_webview(LABEL) {
-            let _ = wv.hide();
+            let b = state
+                .last_bounds
+                .lock()
+                .ok()
+                .and_then(|g| g.clone())
+                .unwrap_or_else(|| default_rail_bounds(&app));
+            let _ = apply_bounds(&wv, &clamp_bounds(&b), false);
         }
         log::debug!("browser embed stack suppressed");
     } else if let Some(wv) = app.get_webview(LABEL) {
@@ -1339,6 +1500,14 @@ pub fn navigate_embed(
                 "embed browser failed: {e}. Try ↗ system browser, or reinstall WebView2 Runtime."
             )
         })?;
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
+    linux_place_embed(&window, &b, may_show);
 
     // Video fullscreen: expand child WebView2 to the app window on request.
     attach_fullscreen_handler(app.clone(), wv.clone());
@@ -1436,7 +1605,7 @@ fn computer_host_loop(app: AppHandle) {
         .build();
     // Wait for sidecar API
     for _ in 0..60 {
-        if agent.get("http://127.0.0.1:7400/api/ping").call().is_ok() {
+        if agent.get(&api_url("/api/ping")).call().is_ok() {
             break;
         }
         std::thread::sleep(Duration::from_millis(500));
@@ -1461,7 +1630,7 @@ fn computer_host_loop(app: AppHandle) {
         if hello_tick % 80 == 0 {
             let _ = auth_req(
                 agent
-                    .post("http://127.0.0.1:7400/api/computer/host/hello")
+                    .post(&api_url("/api/computer/host/hello"))
                     .set("Content-Type", "application/json"),
             )
             .send_string(r#"{"client":"desktop-rust"}"#);
@@ -1469,7 +1638,7 @@ fn computer_host_loop(app: AppHandle) {
 
         // take=1 clears command atomically — prevents reloading the same wiki forever
         if let Ok(resp) = auth_req(
-            agent.get("http://127.0.0.1:7400/api/computer/ui/command?take=1"),
+            agent.get(&api_url("/api/computer/ui/command?take=1")),
         )
         .call()
         {
@@ -1494,7 +1663,7 @@ fn computer_host_loop(app: AppHandle) {
         // page_text/ready must be claimable by Rust — SPA alone is not enough when
         // the React host is busy or mid-bootstrap after navigate.
         if let Ok(resp) = auth_req(agent.get(
-            "http://127.0.0.1:7400/api/computer/jobs/next?only=navigate",
+            &api_url("/api/computer/jobs/next?only=navigate"),
         ))
         .call()
         {
@@ -1991,22 +2160,24 @@ fn arm_pending_navigate(app: &AppHandle, job_id: String, url: String) {
                     .timeout_connect(Duration::from_secs(2))
                     .timeout(Duration::from_secs(8))
                     .build();
+                // Do not fake SUCCESS — the page never fired on_page_load.
+                // The agent must see a failed navigate, not continue as if ready.
                 complete_job(
                     &agent,
                     &id,
-                    true,
+                    false,
                     json!({
-                        "ok": true,
+                        "ok": false,
                         "target": "browser",
                         "action": "navigate",
                         "message": format!(
-                            "SUCCESS: Navigation issued in the in-app Browser rail. URL: {dest}."
+                            "Navigation timed out — the in-app Browser rail did not finish loading {dest}."
                         ),
                         "url": dest,
                         "via": "rust-host-timeout",
                         "user_visible": true,
                     }),
-                    None,
+                    Some("navigation timed out".into()),
                 );
             }
         }
@@ -2058,7 +2229,7 @@ fn complete_job(
         "result": result,
         "error": error,
     });
-    let url = format!("http://127.0.0.1:7400/api/computer/jobs/{job_id}/complete");
+    let url = api_url(&format!("/api/computer/jobs/{job_id}/complete"));
     if let Err(e) = auth_req(
         agent
             .post(&url)
@@ -2073,7 +2244,7 @@ fn complete_job(
 }
 
 fn ack_ui_command(agent: &ureq::Agent, job_id: &str) {
-    let url = format!("http://127.0.0.1:7400/api/computer/ui/command/ack?job_id={job_id}");
+    let url = api_url(&format!("/api/computer/ui/command/ack?job_id={job_id}"));
     let _ = auth_req(agent.post(&url)).call();
 }
 
@@ -2534,7 +2705,7 @@ pub fn browser_agent_action(
                 .timeout(Duration::from_secs(3))
                 .build();
             let push_ok = agent
-                .post("http://127.0.0.1:7400/api/computer/a11y/push")
+                .post(&api_url("/api/computer/a11y/push"))
                 .set("Content-Type", "application/json")
                 .send_json(json!({
                     "job_id": jid_owned,

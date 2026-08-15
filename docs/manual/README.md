@@ -17,6 +17,7 @@ Open **Help** ( **F1** or **Ctrl+/** ) for a searchable wiki UI that loads these
 | [14-visual-decoder.md](14-visual-decoder.md) | Local vision & on-device SmolVLM2 |
 | [17-nanoswarm.md](17-nanoswarm.md) | Continuity workers (operators) |
 | [01-install-windows.md](01-install-windows.md) | Install (Windows) |
+| [01-install-linux.md](01-install-linux.md) | Install (Linux / WSLg) |
 | [02-first-run.md](02-first-run.md) | First run & setup |
 | [03-providers-and-auth.md](03-providers-and-auth.md) | Providers & auth |
 | [04-security-and-data.md](04-security-and-data.md) | Security & data (✕→tray, SSRF, jails) |

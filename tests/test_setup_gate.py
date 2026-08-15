@@ -155,6 +155,49 @@ class TestProviderCredentialsReady:
             {"llm_base_url": "http://127.0.0.1:11434/v1", "llm_api_key": ""}
         ) is True
 
+    def test_leftover_loopback_not_ready_for_cloud(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+        monkeypatch.delenv("XAI_API_KEY", raising=False)
+        monkeypatch.delenv("REMEDY_XAI_API_KEY", raising=False)
+        monkeypatch.delenv("REMEDY_LLM_API_KEY", raising=False)
+        monkeypatch.setattr(
+            "remedy.interfaces.xai_auth.resolve_bearer",
+            lambda *a, **k: None,
+        )
+        monkeypatch.setattr(
+            "remedy.interfaces.secret_store.get_provider_secret",
+            lambda *a, **k: None,
+        )
+        assert provider_credentials_ready(
+            {
+                "llm_provider": "openai",
+                "llm_base_url": "http://127.0.0.1:8787/v1",
+                "llm_api_key": "",
+                "home_dir": str(tmp_path),
+            }
+        ) is False
+        assert provider_credentials_ready(
+            {
+                "llm_provider": "xai",
+                "llm_base_url": "http://127.0.0.1:8787/v1",
+                "llm_api_key": "",
+                "home_dir": str(tmp_path),
+            }
+        ) is False
+        assert provider_credentials_ready(
+            {
+                "llm_provider": "rmb",
+                "llm_base_url": "http://127.0.0.1:8787/v1",
+            }
+        ) is True
+        assert provider_credentials_ready(
+            {
+                "llm_provider": "openai",
+                "llm_base_url": "https://api.openai.com/v1",
+                "llm_api_key": "rmb",
+            }
+        ) is False
+
     def test_ollama_provider(self):
         assert provider_credentials_ready({"llm_provider": "ollama"}) is True
 

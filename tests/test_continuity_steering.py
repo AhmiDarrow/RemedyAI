@@ -36,6 +36,44 @@ def test_continuity_steering_includes_open_tasks() -> None:
     assert "Do not claim done" in block or "verify" in block.lower()
 
 
+def test_continuity_keeps_work_after_hi_keep_going() -> None:
+    brief = SessionBrief(
+        session_id="s-go",
+        intent="ship login",
+        open_tasks=["wire OAuth"],
+        next_steps=["file_edit routes"],
+    )
+
+    class R:
+        _session_brief = brief
+        _last_user_text = "Hi keep going"
+
+        def effective_project_path(self):
+            return ""
+
+    block = continuity_steering_block(R(), home=Path("/no/such/soul/home"), max_chars=1200)
+    assert "Continuity" in block
+    assert "ship login" in block
+
+
+def test_continuity_skips_greeting_turns() -> None:
+    brief = SessionBrief(
+        session_id="s-hi",
+        intent="ship login",
+        open_tasks=["wire OAuth"],
+        next_steps=["file_edit routes"],
+    )
+
+    class R:
+        _session_brief = brief
+        _last_user_text = "Hi"
+
+        def effective_project_path(self):
+            return ""
+
+    assert continuity_steering_block(R()) == ""
+
+
 def test_continuity_empty_without_open_work(tmp_path: Path) -> None:
     class R:
         _session_brief = SessionBrief(session_id="empty")

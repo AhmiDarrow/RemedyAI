@@ -104,6 +104,39 @@ def classify_action(text: str) -> str:
     return "draft"
 
 
+def add_and_step(
+    home_dir: str | Path | None,
+    title: str,
+    *,
+    why: str = "",
+    horizon: str = "season",
+    next_action: str = "",
+    done_looks_like: str = "",
+    source: str = "api",
+    force: bool = False,
+) -> LifeGoal:
+    """Create (or refresh) a life goal and take one local step.
+
+    HTTP / slash handlers must run this off the event loop. ``force`` opens
+    the note and may hit the web — only for an explicit human /goal, never
+    the status-bar poll or a bulk API create.
+    """
+    store = LifeGoalStore(home_dir)
+    life = store.add(
+        title,
+        why=why,
+        horizon=horizon or "season",
+        next_action=next_action or "",
+        done_looks_like=done_looks_like or "",
+        source=source,
+    )
+    if life and not life.next_action:
+        store.set_next(life.title, invent_next(life))
+    with suppress(Exception):
+        take_step(home_dir, force=force)
+    return store.find(life.title) or life
+
+
 def invent_next(goal: LifeGoal) -> str:
     title = (goal.title or "this").strip()
     low = title.lower()

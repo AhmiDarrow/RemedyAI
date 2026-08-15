@@ -418,7 +418,16 @@ class AnthropicProvider(ProviderAdapter):
         }
 
     def chat_endpoint(self, base_url: str) -> str:
-        return f"{base_url.rstrip('/')}/v1/messages"
+        # Catalog / Settings store ``https://api.anthropic.com/v1``. The
+        # adapter default is the origin without ``/v1``. Either must land
+        # on ``/v1/messages`` — a doubled ``/v1/v1/messages`` is HTTP 404
+        # ``not_found_error`` (looks like a missing model).
+        root = (base_url or self.default_base_url).rstrip("/")
+        if root.endswith("/messages"):
+            return root
+        if root.endswith("/v1"):
+            return f"{root}/messages"
+        return f"{root}/v1/messages"
 
     MAX_TOKENS_TOOLS = MAX_OUTPUT_TOKENS
     MAX_TOKENS_ANSWER = MAX_OUTPUT_TOKENS
@@ -1185,7 +1194,22 @@ def select_provider(provider_name: str | None, base_url: str = "") -> ProviderAd
         if base_url.strip():
             return get_provider_for_base_url(base_url)
         return get_provider(name)
-    # Any named provider on loopback → local adapter (avoid cloud max_tokens)
+    # Named cloud providers keep their adapter even if llm_base_url is a
+    # leftover RMB/llama.cpp loopback (Settings still shows OpenAI/xAI).
+    _cloud = (
+        "openai",
+        "anthropic",
+        "xai",
+        "google",
+        "deepseek",
+        "groq",
+        "mistral",
+        "openrouter",
+        "poe",
+    )
+    if name in _cloud:
+        return get_provider(name)
+    # Local named providers on loopback stay on the local adapter.
     if base_url.strip() and _is_loopback_base_url(base_url.lower()):
         if _is_rmb_base_url(base_url):
             return get_provider("rmb")

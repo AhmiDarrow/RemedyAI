@@ -352,12 +352,22 @@ class BasicRuntime(AgentRuntime):
             scope = self.access_scope()
             from remedy.core.approvals import APPROVALS, normalize_approval_mode
 
-            # Status-bar Full is the live queue; don't trust a stale field.
-            approval = normalize_approval_mode(APPROVALS.mode)
-            if approval != "full":
-                approval = normalize_approval_mode(
-                    getattr(self, "_approval_mode", None)
-                )
+            # In-flight turns keep the mode from begin_turn. A mid-turn
+            # Settings switch to Full must not lift this turn's jail.
+            try:
+                from remedy.core.turn_context import current_turn_approval_mode
+
+                snapped = current_turn_approval_mode()
+            except Exception:
+                snapped = None
+            if snapped:
+                approval = normalize_approval_mode(snapped)
+            else:
+                approval = normalize_approval_mode(APPROVALS.mode)
+                if approval != "full":
+                    approval = normalize_approval_mode(
+                        getattr(self, "_approval_mode", None)
+                    )
             # Full (warn): owner granted machine-wide control — do not jail
             # writes to the focus folder. Auth secrets still refuse below.
             if approval == "full":
@@ -524,11 +534,13 @@ class BasicRuntime(AgentRuntime):
         if harness_max_context_pct is not None:
             self._harness_max_pct = float(harness_max_context_pct)
         _prov_changed = False
+        _provider_switched = False
         old_provider = getattr(self, "_llm_provider", None)
         old_model = getattr(self, "_llm_model", None)
         if provider is not None and provider.strip():
             new_p = provider.strip().lower()
-            _prov_changed = new_p != old_provider
+            _provider_switched = new_p != old_provider
+            _prov_changed = _provider_switched
             self._llm_provider = new_p
             self._provider = select_provider(self._llm_provider, self._llm_base_url)
             if hasattr(self, "config") and self.config is not None:
@@ -606,6 +618,20 @@ class BasicRuntime(AgentRuntime):
                 if hasattr(self, "config") and self.config is not None:
                     with suppress(Exception):
                         self.config.llm_api_key = self._llm_api_key
+        if _provider_switched:
+            leftover = str(getattr(self, "_llm_api_key", "") or "").strip().lower()
+            new_p = str(getattr(self, "_llm_provider", "") or "").strip().lower()
+            if leftover in ("local", "rmb", "unused") and new_p not in (
+                "ollama",
+                "rmb",
+                "llamacpp",
+                "custom",
+                "local",
+            ):
+                self._llm_api_key = ""
+                if hasattr(self, "config") and self.config is not None:
+                    with suppress(Exception):
+                        self.config.llm_api_key = ""
         if persona is not None:
             p = persona.strip().lower() if persona.strip() else "default"
             if hasattr(self, "config") and self.config is not None:

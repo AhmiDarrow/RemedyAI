@@ -6,6 +6,7 @@ tables can grow without bloating the shared API support module.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 from typing import Any
@@ -526,17 +527,16 @@ async def handle_slash_command(
                 task = runtime.create_task(title, tags=["goal"])
                 drive_note = ""
                 with suppress(Exception):
-                    from remedy.memory.life_drive import invent_next, take_step
-                    from remedy.memory.life_goals import LifeGoalStore
+                    from remedy.memory.life_drive import add_and_step
 
                     home = getattr(getattr(runtime, "config", None), "home_dir", None)
-                    store = LifeGoalStore(home)
-                    g = store.add(title, source="slash_goal")
-                    if g and not g.next_action:
-                        store.set_next(g.title, invent_next(g))
-                    drove = take_step(home, force=True)
-                    if isinstance(drove, dict) and drove.get("markdown"):
-                        drive_note = "\n" + str(drove.get("markdown"))
+                    g = await asyncio.to_thread(
+                        add_and_step, home, title, source="slash_goal", force=True
+                    )
+                    if g is not None:
+                        nxt = str(getattr(g, "next_action", "") or "").strip()
+                        if nxt:
+                            drive_note = f"\nToward **{g.title}**. Next: {nxt}"
                 with suppress(Exception):
                     if memory is not None:
                         from remedy.memory.partner_memory import upsert_profile_fact

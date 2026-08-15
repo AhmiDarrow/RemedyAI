@@ -50,6 +50,7 @@ def build_soul_context_block(
     provider: str = "",
     model: str = "",
     user_name: str = "",
+    work_threads: bool = True,
 ) -> str:
     """Markdown soul inject. Empty only if field truly blank and no contract."""
     sf = field if field is not None else load_soul_field(home)
@@ -104,32 +105,32 @@ def build_soul_context_block(
         lines.append(f"Correction style: {rel.correction_style}")
     if rel.voice_markers:
         lines.append("Shared voice: " + "; ".join(rel.voice_markers[:6]))
-    if rel.open_threads:
+    if work_threads and rel.open_threads:
         lines.append("Relational open threads:")
         for t in rel.open_threads[-4:]:
             lines.append(f"  · {t}")
-    if rel.tensions:
+    if work_threads and rel.tensions:
         lines.append("Tensions (resolve carefully — do not silent-overwrite):")
         for t in rel.tensions[-3:]:
             lines.append(f"  · {t}")
 
-    if sf.pledges:
+    if work_threads and sf.pledges:
         lines.append("Shared pledges (memory of them):")
         for p in sf.pledges[-4:]:
             lines.append(f"  · {p}")
 
-    if sf.self_habits:
+    if work_threads and sf.self_habits:
         lines.append("Memory of myself (how I show up):")
         for h in sf.self_habits[:4]:
             lines.append(f"  · {h}")
 
-    if getattr(sf, "future_dreams", None):
+    if work_threads and getattr(sf, "future_dreams", None):
         lines.append("Dreams of the future (how I help them reach their goals):")
         for d in sf.future_dreams[:4]:
             lines.append(f"  · {d}")
 
     # Episode residue — the sci-fi bit: felt continuity across muscle swaps
-    if sf.episodes:
+    if work_threads and sf.episodes:
         lines.append("Episode residue (continue mid-flight; do not restart lore):")
         keep = 3 if getattr(sf, "future_dreams", None) else 5
         for ep in sf.episodes[-keep:]:
@@ -137,7 +138,7 @@ def build_soul_context_block(
             if line:
                 lines.append(f"  · {line}")
 
-    if sf.organism_lessons:
+    if work_threads and sf.organism_lessons:
         recent = [x for x in sf.organism_lessons[-4:] if x.lesson or x.summary]
         if recent:
             lines.append("Organism self-lessons (self-improve carefully):")

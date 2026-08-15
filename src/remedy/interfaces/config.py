@@ -197,6 +197,10 @@ def set_provider_key(
     owner = infer_key_owner(api_key)
     if owner:
         provider = owner
+    if provider == "anthropic" or (api_key or "").strip().lower().startswith("sk-ant-"):
+        from remedy.interfaces.anthropic_auth import reject_if_subscription_token
+
+        reject_if_subscription_token(api_key)
     home_path = _home_from_cfg(cfg, home)
     set_provider_secret(provider, api_key, home=home_path)
     # Never keep secrets in the config dict destined for disk.
@@ -258,9 +262,18 @@ def resolve_provider_api_key(
     from remedy.interfaces.secret_store import get_provider_secret
 
     mapped = (get_provider_secret(provider, home=home_path) or "").strip()
+    if mapped.lower() in ("local", "rmb", "unused"):
+        mapped = ""
     if mapped:
         if provider == "xai" and not looks_like_xai_credential(mapped):
             mapped = ""
+        elif provider == "anthropic":
+            from remedy.interfaces.anthropic_auth import is_subscription_oauth_token
+
+            if is_subscription_oauth_token(mapped):
+                mapped = ""
+            else:
+                return mapped
         else:
             return mapped
 
@@ -277,6 +290,11 @@ def resolve_provider_api_key(
     for env_name in _PROVIDER_ENV_KEYS.get(provider, ()):
         val = os.environ.get(env_name, "").strip()
         if val:
+            if provider == "anthropic":
+                from remedy.interfaces.anthropic_auth import is_subscription_oauth_token
+
+                if is_subscription_oauth_token(val):
+                    continue
             if provider == "xai" and env_name in ("XAI_API_KEY", "REMEDY_XAI_API_KEY"):
                 return val
             if provider != "xai":
@@ -288,12 +306,19 @@ def resolve_provider_api_key(
     global_key = str(
         cfg.get("llm_api_key") or os.environ.get("REMEDY_LLM_API_KEY") or ""
     ).strip()
+    if global_key.lower() in ("local", "rmb", "unused"):
+        global_key = ""
     if not global_key:
         return ""
     if provider == "xai":
         return global_key if looks_like_xai_credential(global_key) else ""
     if looks_like_xai_credential(global_key):
         return ""
+    if provider == "anthropic":
+        from remedy.interfaces.anthropic_auth import is_subscription_oauth_token
+
+        if is_subscription_oauth_token(global_key):
+            return ""
     return global_key
 
 
@@ -562,6 +587,17 @@ _LEGACY_MODEL_ALIASES: dict[str, str] = {
     "grok-2-vision": "grok-4.5",
     "grok-beta": "grok-4.5",
     "grok-vision-beta": "grok-4.5",
+    # Anthropic: dated 4.x snapshots retired mid-2026.
+    "claude-sonnet-4-20250514": "claude-sonnet-5",
+    "claude-opus-4-20250514": "claude-opus-5",
+    "claude-3-7-sonnet-latest": "claude-sonnet-5",
+    "claude-3-5-sonnet-latest": "claude-sonnet-5",
+    "claude-3-5-haiku-latest": "claude-haiku-4-5",
+    # Prior Settings catalog ids (0.25.x) — avoid 404 after the 5.x rename.
+    "claude-opus-4-1": "claude-opus-5",
+    "claude-opus-4-0": "claude-opus-5",
+    "claude-sonnet-4-0": "claude-sonnet-5",
+    "claude-sonnet-4-1": "claude-sonnet-5",
 }
 
 
@@ -578,6 +614,11 @@ def normalize_llm_settings(
     - provider=deepseek, model=deepseek-chat → deepseek-v4-flash (retired id)
     """
     prov = (provider or "openai").strip().lower() or "openai"
+    # Retired: spawning `claude -p` as a provider. Fall back to the API slot.
+    if prov == "claude_code":
+        prov = "anthropic"
+        if (base_url or "").strip().lower().startswith("claude-code:"):
+            base_url = None
     if prov not in PROVIDER_CATALOG:
         # Unknown label → treat as custom OpenAI-compatible
         if prov not in ("custom",):
@@ -1307,6 +1348,16 @@ def classify_provider_connection(
         return False, "ollama_down"
     if pid == "xai" and xai_connected:
         return True, "oauth_or_key"
+    if pid == "anthropic":
+        try:
+            from remedy.interfaces.anthropic_auth import classify_anthropic_secret
+            from remedy.interfaces.secret_store import get_provider_secret
+
+            kind = classify_anthropic_secret(get_provider_secret("anthropic"))
+            if kind in ("oauth_subscription", "session"):
+                return False, "max_token_not_api"
+        except Exception:
+            pass
     if keys.get(pid) or keys_set.get(pid):
         return True, "api_key"
     resolved = ""
@@ -1335,8 +1386,11 @@ def provider_credentials_ready(config: dict[str, Any] | None = None) -> bool:
         or os.environ.get("REMEDY_LLM_BASE_URL")
         or ""
     ).strip()
+    # Loopback is ready only for local providers. A leftover RMB/Ollama URL
+    # after switching to OpenAI/xAI must not mark the cloud row ready.
     if base and _is_local_url(base):
-        return True
+        if provider in ("", "ollama", "rmb", "llamacpp", "custom"):
+            return True
     if provider == "ollama":
         return True
     if provider == "demo":
@@ -1349,6 +1403,8 @@ def provider_credentials_ready(config: dict[str, Any] | None = None) -> bool:
     plain = str(raw.get("llm_api_key") or "").strip()
     if not plain and config is None:
         plain = str(os.environ.get("REMEDY_LLM_API_KEY") or "").strip()
+    if plain.lower() in ("local", "rmb", "unused"):
+        plain = ""
     if plain:
         if provider == "xai":
             return looks_like_xai_credential(plain) or plain.startswith("xai-")

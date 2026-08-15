@@ -29,16 +29,48 @@ describe('swapSessionStash', () => {
     expect(stash.get('b')).toBe('draft-b')
   })
 
-  it('carries empty-shell draft onto the first created session', () => {
+  it('carries empty-shell draft only onto the session just created', () => {
     const stash = new Map<string, string>()
-    const out = swapSessionStash(
+    const stolen = swapSessionStash(
+      stash,
+      NONE_SESSION_KEY,
+      'existing',
+      'hello',
+      '',
+    )
+    expect(stolen).toEqual({ key: 'existing', value: '', carried: false })
+    expect(stash.get(NONE_SESSION_KEY)).toBe('hello')
+
+    const created = swapSessionStash(
       stash,
       NONE_SESSION_KEY,
       'sess-1',
       'hello',
       '',
+      'sess-1',
     )
-    expect(out).toEqual({ key: 'sess-1', value: 'hello', carried: true })
+    expect(created).toEqual({ key: 'sess-1', value: 'hello', carried: true })
+    expect(stash.has(NONE_SESSION_KEY)).toBe(false)
+    expect(stash.get('sess-1')).toBe('hello')
+  })
+
+  it('carries the live draft, not a stale _none park', () => {
+    const stash = new Map<string, string>()
+    stash.set(NONE_SESSION_KEY, 'old parked')
+    const created = swapSessionStash(
+      stash,
+      NONE_SESSION_KEY,
+      'sess-1',
+      'edited after park',
+      '',
+      'sess-1',
+    )
+    expect(created).toEqual({
+      key: 'sess-1',
+      value: 'edited after park',
+      carried: true,
+    })
+    expect(stash.get('sess-1')).toBe('edited after park')
     expect(stash.has(NONE_SESSION_KEY)).toBe(false)
   })
 

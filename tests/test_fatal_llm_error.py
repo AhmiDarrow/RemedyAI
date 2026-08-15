@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from remedy.core.agent_react_loop import _is_fatal_llm_api_error
-from remedy.core.react_loop.errors import is_thinking_tool_choice_error
+from remedy.core.react_loop.errors import (
+    is_billing_llm_api_error,
+    is_thinking_tool_choice_error,
+)
+from remedy.core.react_loop.recovery import fatal_billing_error_message
 
 
 def test_404_model_not_found_is_fatal() -> None:
@@ -107,3 +111,48 @@ def test_generic_invalid_request_400_not_fatal() -> None:
         )
         is False
     )
+
+
+_ANTHROPIC_CREDIT_BODY = (
+    '{"type":"error","error":{"type":"invalid_request_error","message":'
+    '"Your credit balance is too low to access the Anthropic API. '
+    'Please go to Plans & Billing to upgrade or purchase credits."}}'
+)
+
+
+def test_anthropic_credit_balance_400_is_fatal() -> None:
+    """Billing 400 must hard-stop — do not soft-retry 3× as a generic 400."""
+    assert is_billing_llm_api_error(400, _ANTHROPIC_CREDIT_BODY) is True
+    assert _is_fatal_llm_api_error(400, _ANTHROPIC_CREDIT_BODY) is True
+
+
+def test_openai_insufficient_quota_is_fatal() -> None:
+    body = '{"error":{"type":"insufficient_quota","message":"You exceeded your current quota."}}'
+    assert is_billing_llm_api_error(429, body) is True
+    assert _is_fatal_llm_api_error(429, body) is True
+
+
+def test_http_402_is_billing_fatal() -> None:
+    assert is_billing_llm_api_error(402, "payment required") is True
+    assert _is_fatal_llm_api_error(402, "") is True
+
+
+def test_billing_message_says_credits_not_api_key() -> None:
+    msg = fatal_billing_error_message(
+        status=400,
+        safe_err="Your credit balance is too low",
+        model_name="claude-opus-5",
+        provider="anthropic",
+    )
+    low = msg.lower()
+    assert "credits" in low
+    assert "claude" in low and "max" in low
+    assert "console.anthropic.com" in low
+    assert "check model/api key" not in low
+    generic = fatal_billing_error_message(
+        status=429,
+        safe_err="insufficient_quota",
+        model_name="gpt-4o",
+        provider="openai",
+    )
+    assert "console.anthropic.com" not in generic.lower()

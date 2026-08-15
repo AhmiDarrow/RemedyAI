@@ -93,11 +93,29 @@ class TurnState:
         return bool(self.all_tools)
 
     def rearm(self, *, reason: str = "rearm") -> None:
-        if self.all_tools:
-            self.tools = list(self.all_tools)
-            self.run_until_done = True
+        if not self.all_tools:
+            return
+        if self.plan_mode:
+            # Never restore file_write / bash_exec into a Plan turn.
+            try:
+                from remedy.core.plan_store import PLAN_MODE_TOOL_NAMES
+
+                self.tools = [
+                    t
+                    for t in self.all_tools
+                    if ((t.get("function") or {}).get("name") or "")
+                    in PLAN_MODE_TOOL_NAMES
+                ] or None
+            except Exception:
+                self.tools = None
+            self.run_until_done = False
             self.arm_reason = reason
-            logger.info("react_tools rearm reason=%s count=%d", reason, len(self.tools))
+            logger.info("react_tools rearm plan_mode reason=%s", reason)
+            return
+        self.tools = list(self.all_tools)
+        self.run_until_done = True
+        self.arm_reason = reason
+        logger.info("react_tools rearm reason=%s count=%d", reason, len(self.tools))
 
     def disarm(self, *, reason: str = "disarm") -> None:
         self.tools = None
@@ -325,6 +343,15 @@ def resolve_tools(
     # Page interaction / browse full agency
     if page_interaction:
         return ToolsDecision(all_t, True, "page_interaction", pack="full")
+
+    # Bare greetings/acks never inherit leftover build_active or open_tasks.
+    # "Hi keep going" is not chat-only (action-kick) and stays armed below.
+    with suppress(Exception):
+        from remedy.core.react_policy import is_chat_only_message
+
+        if is_chat_only_message(message or ""):
+            logger.info("react_tools disarm reason=l1_pure_chat")
+            return ToolsDecision(None, False, "l1_pure_chat", pack="none")
 
     msg_wants = False
     task_like = False

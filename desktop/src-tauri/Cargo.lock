@@ -101,10 +101,11 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "0.25.1"
+version = "0.26.0"
 dependencies = [
  "adblock",
  "base64 0.22.1",
+ "gtk",
  "log",
  "minisign-verify",
  "portable-pty",

@@ -8,8 +8,10 @@ No secrets. Local ``~/.remedy/life_goals.json`` only.
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -191,7 +193,22 @@ class LifeGoalStore:
         }
         tmp = self.path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        tmp.replace(self.path)
+        last: OSError | None = None
+        for i in range(16):
+            try:
+                os.replace(tmp, self.path)
+                return
+            except PermissionError as e:
+                # Windows: dest briefly locked by a concurrent read / indexer.
+                last = e
+                time.sleep(0.015 * (i + 1))
+            except OSError as e:
+                last = e
+                if getattr(e, "winerror", None) not in (5, 32):
+                    raise
+                time.sleep(0.015 * (i + 1))
+        if last is not None:
+            raise last
 
     def list(self, *, include_closed: bool = False) -> list[LifeGoal]:
         with _lock:

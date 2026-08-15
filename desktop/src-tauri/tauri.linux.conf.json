@@ -1,0 +1,20 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "decorations": false,
+        "shadow": false,
+        "theme": "Dark"
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["deb", "appimage"],
+    "externalBin": ["../bin/remedy-desktop"],
+    "resources": {
+      "../dist": "webui",
+      "windows/wslg_workarea.ps1": "windows/wslg_workarea.ps1"
+    }
+  }
+}

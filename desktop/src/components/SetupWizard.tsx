@@ -1,11 +1,13 @@
 import { getServerUrl } from '../api/client'
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { getSettings, updateSettings } from '../api/settings'
+import { openExternalUrl } from '../api/auth'
 import {
-  startXaiLogin,
-  pollXaiLogin,
-  openExternalUrl,
-} from '../api/auth'
+  beginXaiOAuth,
+  resumeXaiOAuthPoll,
+  stopXaiOAuthPoll,
+  subscribeXaiOAuth,
+} from '../api/xaiOAuth'
 import {
   listProviders,
   listFreeProviders,
@@ -23,6 +25,7 @@ import {
 import type { MessengerInfo } from '../api/settings'
 import { MessengersWizardStep } from './setup/MessengersWizardStep'
 import { demoModelOptions } from '../utils/demoModels'
+import { isLinuxDesktop } from '../utils/platform'
 
 const PERSONAS = [
   { id: 'balanced', name: 'Balanced', description: 'Helpful and adaptable to the task' },
@@ -72,7 +75,6 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [xaiUserCode, setXaiUserCode] = useState('')
   const [xaiVerifyUrl, setXaiVerifyUrl] = useState('')
   const [xaiLoginMsg, setXaiLoginMsg] = useState('')
-  const xaiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [enableVision, setEnableVision] = useState(true)
   const [visionStatus, setVisionStatus] = useState<VisionStatus | null>(null)
   const [visionInstallMsg, setVisionInstallMsg] = useState('')
@@ -106,14 +108,25 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         ? ollamaModels
         : (activeMeta?.models || []).map((m) => m.id)
 
-  const stopXaiPoll = useCallback(() => {
-    if (xaiPollRef.current) {
-      clearInterval(xaiPollRef.current)
-      xaiPollRef.current = null
-    }
+  useEffect(() => {
+    resumeXaiOAuthPoll()
+    return subscribeXaiOAuth((e) => {
+      if (e.phase === 'started') {
+        setXaiLoginBusy(true)
+        setXaiUserCode(e.userCode || '')
+        setXaiVerifyUrl(e.verifyUrl || '')
+        setXaiLoginMsg(e.message || '')
+      } else if (e.phase === 'connected') {
+        setXaiLoginBusy(false)
+        setXaiConnected(true)
+        setXaiLoginMsg(e.message || 'Signed in with xAI')
+        setXaiUserCode('')
+      } else if (e.phase === 'error') {
+        setXaiLoginBusy(false)
+        setXaiLoginMsg(e.error || 'Sign-in failed or expired')
+      }
+    })
   }, [])
-
-  useEffect(() => () => stopXaiPoll(), [stopXaiPoll])
 
   useEffect(() => {
     // Capture the ref value for cleanup — reading .current in the cleanup alone
@@ -227,18 +240,17 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       setXaiUserCode('')
       if (p !== 'xai') {
         setXaiConnected(false)
-        stopXaiPoll()
+        stopXaiOAuthPoll()
         setXaiLoginBusy(false)
       }
     },
-    [stopXaiPoll, catalog, baseUrl, ollamaModels, provider],
+    [catalog, baseUrl, ollamaModels, provider],
   )
 
   const handleXaiSignIn = useCallback(async () => {
     setXaiLoginBusy(true)
     setXaiLoginMsg('')
     setError('')
-    stopXaiPoll()
     try {
       // Ensure local API + Bearer are ready (first-run race with sidecar).
       try {
@@ -262,38 +274,13 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         }
         /* apiFetch will retry token */
       }
-      const start = await startXaiLogin()
-      setXaiUserCode(start.user_code)
-      setXaiVerifyUrl(start.verification_uri_complete || start.verification_uri)
-      setXaiLoginMsg(start.message || `Approve access with code ${start.user_code}`)
-      void openExternalUrl(start.verification_uri_complete || start.verification_uri)
-      const sessionId = start.session_id
-      const intervalMs = Math.max(3, start.interval || 5) * 1000
-      xaiPollRef.current = setInterval(async () => {
-        try {
-          const poll = await pollXaiLogin(sessionId)
-          const st = poll.session?.status
-          if (st === 'connected') {
-            stopXaiPoll()
-            setXaiLoginBusy(false)
-            setXaiConnected(true)
-            setXaiLoginMsg('Signed in with xAI')
-            setXaiUserCode('')
-          } else if (st === 'error') {
-            stopXaiPoll()
-            setXaiLoginBusy(false)
-            setXaiLoginMsg(poll.session?.error || 'Sign-in failed or expired')
-          }
-        } catch {
-          // keep polling
-        }
-      }, intervalMs)
+      await beginXaiOAuth({ keepSettings: true, llmModel: model })
     } catch (e: unknown) {
       setXaiLoginBusy(false)
       const msg = e instanceof Error ? e.message : String(e)
       setError(msg || 'Could not start xAI sign-in')
     }
-  }, [stopXaiPoll])
+  }, [model])
 
   const handleNext = useCallback(() => {
     if (step === 'provider') {
@@ -331,12 +318,22 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const saveSetupCore = useCallback(async () => {
     try {
       const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('set_launch_at_login', { enabled: launchAtLogin })
-      await invoke('set_desktop_prefs', {
-        close_to_tray: true,
-        start_in_tray: false,
-        skip_quit_server_warning: false,
-      })
+      if (!isLinuxDesktop()) {
+        try {
+          await invoke('set_launch_at_login', { enabled: launchAtLogin })
+        } catch {
+          /* Linux / missing command */
+        }
+      }
+      try {
+        await invoke('set_desktop_prefs', {
+          close_to_tray: true,
+          start_in_tray: false,
+          skip_quit_server_warning: false,
+        })
+      } catch {
+        /* browser or missing command */
+      }
     } catch {
       /* browser or missing command */
     }
@@ -810,7 +807,11 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                           type="button"
                           className="block mt-1 underline"
                           style={{ color: 'var(--accent)' }}
-                          onClick={() => void openExternalUrl(xaiVerifyUrl)}
+                          onClick={() => {
+                            void import('../api/computer').then(({ openUrlInBrowserRail }) =>
+                              openUrlInBrowserRail(xaiVerifyUrl, { keepSettings: true }),
+                            )
+                          }}
                         >
                           Open verification page
                         </button>
@@ -1179,6 +1180,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                       {visionInstallMsg}
                     </p>
                   ) : null}
+                  {!isLinuxDesktop() ? (
                   <label
                     className="flex items-start gap-3 px-4 py-3 rounded-lg cursor-pointer text-left"
                     style={{
@@ -1202,6 +1204,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                       </span>
                     </span>
                   </label>
+                  ) : null}
                   <div className="remedy-shell-actions flex-col">
                     <button
                       type="button"

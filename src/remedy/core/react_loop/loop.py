@@ -30,12 +30,16 @@ from remedy.core.react_loop.binding import (
 )
 from remedy.core.react_loop.build_request import build_step_request_body
 from remedy.core.react_loop.errors import (
+    is_billing_llm_api_error as _is_billing_llm_api_error,
+)
+from remedy.core.react_loop.errors import (
     is_fatal_llm_api_error as _is_fatal_llm_api_error,
 )
 from remedy.core.react_loop.errors import (
     is_thinking_tool_choice_error as _is_thinking_tool_choice_error,
 )
 from remedy.core.react_loop.recovery import (
+    fatal_billing_error_message,
     fatal_model_error_message,
     repeated_provider_error_message,
 )
@@ -166,13 +170,15 @@ async def call_llm_stream(runtime, message: str,
 
         # Local agent bootstrap: finish clear create-jobs without waiting on
         # a 7B model that monologues instead of calling file_write.
-        with suppress(Exception):
-            from remedy.core.local_agent_optimize import maybe_bootstrap_local_create
+        # Never write in Plan mode — that path skips call_tool's PLAN_MODE_BLOCKED.
+        if not plan_mode:
+            with suppress(Exception):
+                from remedy.core.local_agent_optimize import maybe_bootstrap_local_create
 
-            boot = await maybe_bootstrap_local_create(runtime, message or "")
-            if boot:
-                yield boot
-                return
+                boot = await maybe_bootstrap_local_create(runtime, message or "")
+                if boot:
+                    yield boot
+                    return
         async for _pev in yield_preamble_events(prep):
             yield _pev
         messages = prep.messages
@@ -418,7 +424,11 @@ async def call_llm_stream(runtime, message: str,
         with suppress(Exception):
             from remedy.core.build_engine import begin_build_turn, build_protocol_block
 
-            build_state = begin_build_turn(runtime, message or "")
+            build_state = (
+                None
+                if plan_mode
+                else begin_build_turn(runtime, message or "")
+            )
             if build_state is not None and build_state.active:
                 proto = build_protocol_block(build_state)
                 if proto:
@@ -464,6 +474,9 @@ async def call_llm_stream(runtime, message: str,
         def _rearm_agency_tools() -> None:
             """Re-enable tool schemas *and* long-task epoch policy."""
             nonlocal tools, run_until_done
+            if turn.plan_mode or plan_mode:
+                logger.info("skip rearm — plan mode")
+                return
             # Verbal-only / trivia / inject must stay tool-free. Pseudo-tool
             # recovery used to re-arm 24 schemas and pin keep_armed.
             with suppress(Exception):
@@ -1392,16 +1405,24 @@ async def call_llm_stream(runtime, message: str,
                             if isinstance(body, dict):
                                 body["tool_choice"] = "auto"
                             continue
-                        # Fatal: wrong/missing model — do not soft-retry 16× (looks stuck).
+                        # Fatal: billing / wrong model — do not soft-retry (looks stuck).
                         if _is_fatal_llm_api_error(resp.status, text):
                             model_name = str(_bind.model or "unknown")
                             prov = str(_bind.provider or "unknown")
-                            yield fatal_model_error_message(
-                                status=resp.status,
-                                safe_err=safe_err,
-                                model_name=model_name,
-                                provider=prov,
-                            )
+                            if _is_billing_llm_api_error(resp.status, text):
+                                yield fatal_billing_error_message(
+                                    status=resp.status,
+                                    safe_err=safe_err,
+                                    model_name=model_name,
+                                    provider=prov,
+                                )
+                            else:
+                                yield fatal_model_error_message(
+                                    status=resp.status,
+                                    safe_err=safe_err,
+                                    model_name=model_name,
+                                    provider=prov,
+                                )
                             return
                         # Local RMB: 503 "Loading model" while weights load after
                         # restart — wait for ready and retry same body (partner path).

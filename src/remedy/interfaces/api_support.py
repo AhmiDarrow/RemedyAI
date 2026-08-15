@@ -11,7 +11,6 @@ from typing import Any
 
 from remedy.interfaces.config import (
     CONFIG_PATHS,
-    _is_local_url,
 )
 from remedy.interfaces.config import (
     load_config as _load_toml_config,
@@ -270,9 +269,12 @@ def resolve_llm_slot(
         rt_url = str(getattr(runtime, "_llm_base_url", None) or "")
         if rt_url and (not rt_prov or rt_prov == provider):
             base_url = rt_url
-    if not api_key and (
-        provider.lower() in ("ollama", "rmb", "llamacpp", "local")
-        or (base_url and _is_local_url(base_url))
+    if not api_key and provider.lower() in (
+        "ollama",
+        "rmb",
+        "llamacpp",
+        "local",
+        "custom",
     ):
         api_key = "local" if provider.lower() != "rmb" else "rmb"
     return provider, model, base_url, api_key or ""

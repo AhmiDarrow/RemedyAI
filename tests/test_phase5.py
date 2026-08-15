@@ -261,6 +261,20 @@ class TestSubprocessSandbox:
         assert "not found" in result.stderr.lower()
 
     @pytest.mark.asyncio
+    async def test_permission_denied_missing_name_is_not_found(self, monkeypatch):
+        """WSL often raises EACCES for an unknown PATH name, not ENOENT."""
+        import remedy.execution.process as process_mod
+
+        async def _boom(*_a, **_k):
+            raise PermissionError(13, "Permission denied", "nonexistent_binary_xyz")
+
+        monkeypatch.setattr(process_mod, "create_hidden_subprocess_exec", _boom)
+        sandbox = SubprocessSandbox()
+        result = await sandbox.execute(["nonexistent_binary_xyz"])
+        assert result.exit_code == -1
+        assert "not found" in result.stderr.lower()
+
+    @pytest.mark.asyncio
     async def test_timeout(self):
         sandbox = SubprocessSandbox()
         result = await sandbox.execute(

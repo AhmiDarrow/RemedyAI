@@ -42,6 +42,9 @@ def test_translate_mkdir_p() -> None:
     assert r.changed
     assert "if not exist" in r.text
     assert "src\\foo" in r.text or "src/foo" in r.text.replace("\\", "/")
+    # Trailing `\"` escapes the closer in cmd — must use `\.` instead.
+    assert '\\"' not in r.text
+    assert "\\." in r.text
 
 
 def test_translate_rm_rf() -> None:
@@ -49,13 +52,27 @@ def test_translate_rm_rf() -> None:
     assert r.changed
     assert "rmdir" in r.text
     assert "build" in r.text
+    assert '\\"' not in r.text
 
 
 def test_translate_export_and_dev_null() -> None:
     r = translate_posix_to_host("export FOO=bar && echo hi >/dev/null", host="cmd")
-    assert "set FOO=bar" in r.text
+    assert 'set "FOO=bar"' in r.text or "set FOO=bar" in r.text
     assert "NUL" in r.text
     assert "/dev/null" not in r.text
+
+
+def test_translate_rm_chain_and_plain_del() -> None:
+    """cmd IF must not swallow `&& next`; plain rm must use _q()."""
+    rec = translate_posix_to_host("rm -rf build && echo next", host="cmd")
+    assert rec.changed
+    assert rec.text.strip().startswith("(")
+    assert rec.text.count("(") >= 2
+    # After the IF group, the chain operator must still be there.
+    assert "&&" in rec.text or "& echo" in rec.text.lower()
+    plain = translate_posix_to_host('rm foo"&calc', host="cmd")
+    assert "del" in plain.text
+    assert '"foo""&calc"' in plain.text
 
 
 def test_translate_q_escapes_quote_amp() -> None:
@@ -73,6 +90,7 @@ def test_translate_ls_cat_pwd_which() -> None:
     assert "type" in translate_posix_to_host("cat README.md", host="cmd").text
     assert translate_posix_to_host("pwd", host="cmd").text == "cd"
     assert translate_posix_to_host("which git", host="cmd").text.startswith("where")
+    assert translate_posix_to_host("which 'foo&calc'", host="cmd").text == 'where "foo&calc"'
 
 
 def test_translate_chain_mkdir_and_true() -> None:
@@ -280,7 +298,7 @@ def test_diagnose_mkdir_powershell() -> None:
     d = diagnose_host_failure(
         "mkdir -p a",
         stderr="mkdir: A positional parameter cannot be found that accepts argument '-p'.",
-        translated='if not exist "a\\" mkdir "a"',
+        translated='if not exist "a\\." mkdir "a"',
     )
     assert d.code == "HOST_DIALECT"
     assert d.rewritten
@@ -302,6 +320,41 @@ def test_diagnose_timeout_interactive() -> None:
         timed_out=True,
     )
     assert d.code == "HOST_INTERACTIVE"
+
+
+def test_dialect_rg_cmd_is_path_not_tuple(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from pathlib import Path as P
+
+    home = tmp_path / "remedy-home"
+    home.mkdir()
+    fake = P("/usr/bin/rg")
+
+    def _find_rg(**_k):
+        return fake, "bundled"
+
+    monkeypatch.setattr("remedy.core.rg_binary.find_rg", _find_rg)
+    d = probe_host_dialect(home=home, persist=True)
+    # Unix probe paths stay POSIX on every OS (`/usr/bin/rg`, not `\usr\bin\rg`).
+    assert d.rg_cmd == fake.as_posix()
+    assert not d.rg_cmd.startswith("(")
+
+
+def test_dialect_heals_tuple_rg_cmd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from pathlib import Path as P
+
+    home = tmp_path / "remedy-home"
+    (home / "host").mkdir(parents=True)
+    (home / "host" / "dialect.json").write_text(
+        '{"host":"posix","rg_cmd":"(PosixPath(\'/opt/rg\'), \'bundled\')"}',
+        encoding="utf-8",
+    )
+
+    def _find_rg(**_k):
+        return P("/usr/bin/rg"), "bundled"
+
+    monkeypatch.setattr("remedy.core.rg_binary.find_rg", _find_rg)
+    loaded = load_dialect(home)
+    assert loaded.rg_cmd == "/usr/bin/rg"
 
 
 def test_dialect_persist_and_success(tmp_path: Path) -> None:

@@ -73,8 +73,12 @@ _OPAQUE_PATH_HINT_RE = re.compile(
     r"|\[char\]"
     r"""|['\"][^'\"]*\{0\}[^'\"]*['\"]\s+-f\b"""
     r"|\bjoin-path\b"
+    r"|\[(?:system\.)?io\.path\]::combine\b"
     r"|\benviron\["
     r"|\bos\.environ"
+    r"|\bgetenv\s*\("
+    r"|\$_ENV\b"
+    r"|\$_SERVER\b"
     r"|\bprocess\.env\b"
     r"|\bos\.homedir\b"
     r"|\bexpanduser\b"
@@ -840,7 +844,13 @@ _SCRIPT_HOME_PATH_RE = re.compile(
     r"|\$\{?(?:HOME|USERPROFILE|HOMEPATH)\}?\b"
     r"|%(?:USERPROFILE|HOME|HOMEPATH)%"
     r"|\bos\.homedir\b"
-    r"|\bprocess\.env\b"
+    r"|\bos\.environ\s*\[\s*['\"](?:USERPROFILE|HOME|HOMEPATH|HOMEDRIVE)"
+    r"|\bos\.environ\.get\s*\(\s*['\"](?:USERPROFILE|HOME|HOMEPATH|HOMEDRIVE)"
+    r"|\bos\.getenv\s*\(\s*['\"](?:USERPROFILE|HOME|HOMEPATH|HOMEDRIVE)"
+    r"|\bgetenv\s*\(\s*['\"](?:USERPROFILE|HOME|HOMEPATH|HOMEDRIVE)"
+    r"|\$_ENV\s*\[\s*['\"](?:HOME|USERPROFILE|HOMEPATH)"
+    r"|\$_SERVER\s*\[\s*['\"](?:HOME|USERPROFILE|HOMEPATH)"
+    r"|\bprocess\.env\.(?:HOME|USERPROFILE|HOMEPATH)\b"
     r")"
 )
 
@@ -955,6 +965,14 @@ def _resolve_approval_mode(explicit: str = "") -> str:
     if raw in ("ask", "auto", "full"):
         return raw
     try:
+        from remedy.core.turn_context import current_turn_approval_mode
+
+        snapped = current_turn_approval_mode()
+        if snapped in ("ask", "auto", "full"):
+            return snapped
+    except Exception:
+        pass
+    try:
         from remedy.core.approvals import APPROVALS, normalize_approval_mode
 
         return normalize_approval_mode(explicit or APPROVALS.mode)
@@ -1067,13 +1085,9 @@ def _jail_script_launch_bodies(
     if not is_launch:
         return False, None
     if not targets:
-        # python -m pytest / unidentified launch
-        if _is_known_in_project_mutation(command):
-            return False, None
-        return True, (
-            "shell write jail: script launch has no readable body under write "
-            f"roots [{roots_s}]. Prefer file_write/file_edit."
-        )
+        # python -m pytest / node.exe game.js with no extractable file:
+        # dest-token / cwd-allow logic decides. Do not fail closed here.
+        return False, None
     base = cwd
     if base is None and write_roots:
         base = write_roots[0]
@@ -1172,7 +1186,12 @@ def _evaluate_shell_write_jail(
         )
 
     # Quote-break / cmd chaining after a rewrite (`cat foo"&calc`).
-    if re.search(r'"[^"\n]*[&|^]', cmd) or re.search(r'[&|^][^"\n]*"', cmd):
+    if (
+        re.search(r'"[^"\n]*[&|^]', cmd)
+        or re.search(r'[&|^][^"\n]*"', cmd)
+        or re.search(r"'[^'\n]*[&|^]", cmd)
+        or re.search(r"[&|^][^'\n]*'", cmd)
+    ):
         return (
             "shell write jail: quoted operand contains cmd metacharacters "
             f"under write roots [{roots_s}]. Prefer file_write/file_edit."
@@ -1301,6 +1320,13 @@ def _evaluate_shell_write_jail(
         )
 
     if not offenders:
+        # In-root dest tokens must not skip a body scan of launched scripts
+        # (node C:\proj\drop.py writing Desktop).
+        handled, launch_hit = _jail_script_launch_bodies(
+            cmd, write_roots=roots, cwd=cwd, roots_s=roots_s
+        )
+        if handled:
+            return launch_hit
         return None
 
     bad = offenders[0]

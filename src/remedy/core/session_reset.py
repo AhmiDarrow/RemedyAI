@@ -7,6 +7,7 @@ Does **not** wipe durable Partner Memory (``/remember`` facts) or global config.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import shutil
@@ -277,6 +278,34 @@ async def full_reset_session(
         "undo_purged": False,
         "title_reset": False,
     }
+
+    # 0) Abort the live turn *before* wipe. Otherwise CancelledError persist
+    # writes "Generation stopped…" into the empty session, and the stream
+    # claim 409s the next send until unwind finishes.
+    with contextlib.suppress(Exception):
+        from remedy.core.turn_context import (
+            abort_session as _abort_turn,
+        )
+        from remedy.core.turn_context import (
+            bump_session_reset_epoch,
+            is_session_streaming,
+            release_session_stream_claim,
+        )
+
+        bump_session_reset_epoch(sid)
+        notified = _abort_turn(sid)
+        if not is_session_streaming(sid):
+            pass
+        elif notified == 0:
+            # Claim leftover without a live generator — drop it now.
+            release_session_stream_claim(sid)
+        else:
+            for _ in range(25):
+                if not is_session_streaming(sid):
+                    break
+                await asyncio.sleep(0.08)
+            else:
+                release_session_stream_claim(sid)
 
     # 1) Chat history + session summary row
     if memory is not None and hasattr(memory, "clear_chat_messages"):

@@ -19,7 +19,25 @@ import {
 
 /** Rust in-band failures are strings like missing-ref: / no-match: / no element. */
 export function rustBrowserActionOk(res: unknown): boolean {
-  return typeof res === 'string' && res.startsWith('ok:')
+  if (typeof res !== 'string') return false
+  const s = res.trim()
+  if (!s) return false
+  if (
+    s.startsWith('missing-ref:')
+    || s.startsWith('no-match:')
+    || s.startsWith('no element')
+    || s.startsWith('error:')
+  ) {
+    return false
+  }
+  // Rust click uses "ok:…"; type/key/scroll often "ok", "ok-fallback",
+  // or "browser:{act}:ok".
+  return (
+    s === 'ok'
+    || s.startsWith('ok:')
+    || s.startsWith('ok-')
+    || /:ok(?:-fallback)?$/i.test(s)
+  )
 }
 
 async function readEmbedBounds(): Promise<{
@@ -379,7 +397,10 @@ export function useComputerHost(
       try {
         // Peek only (do not take) — Rust uses take=1. Just ensure rail is open
         // if anything is pending for UX when SPA is focused.
-        const cmd = await fetchComputerUiCommand().catch(() => null)
+        const cmd = await fetchComputerUiCommand(
+          false,
+          sessionIdRef.current,
+        ).catch(() => null)
         if (cmd?.action === 'open_browser' || cmd?.job_action === 'navigate') {
           openRail()
         }
@@ -467,6 +488,8 @@ export function useComputerHost(
         (document.hidden || document.visibilityState === 'hidden')
       // Pause only when hidden AND no claimed job — keep 120ms claim loop snappy.
       if (hidden && !claimedRef.current && !busy.current) {
+        // Rust computer-host still claims navigate. SPA must not claim
+        // click/type/page_text against a hidden rail (ok-fallback "success").
         helloIv = 0
         uiIv = 0
         jobIv = 0

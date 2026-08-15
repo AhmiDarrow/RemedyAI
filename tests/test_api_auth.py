@@ -39,6 +39,22 @@ def test_ensure_token_generates_and_persists(tmp_path, auth_on):
     assert t1 == t2
 
 
+def test_ensure_token_does_not_clobber_foreign_dpapi(tmp_path, auth_on):
+    """Linux/WSL must not overwrite a Windows-sealed token file."""
+    home = tmp_path / "home"
+    home.mkdir()
+    path = token_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    envelope = '{"v": 2, "dpapi": "AAAA"}'
+    path.write_text(envelope, encoding="utf-8")
+    tok = ensure_local_api_token(home)
+    assert len(tok) >= 16
+    assert path.read_text(encoding="utf-8") == envelope
+    alt = path.with_name("local_api_token.posix")
+    assert alt.is_file()
+    assert ensure_local_api_token(home) == tok
+
+
 def test_local_api_token_dpapi_or_plain_roundtrip(tmp_path, auth_on):
     """Bearer must round-trip; on Windows prefer DPAPI envelope (opaque on disk)."""
     import json

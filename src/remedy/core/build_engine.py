@@ -433,6 +433,14 @@ def begin_build_turn(
     force: bool = False,
 ) -> BuildTurnState | None:
     """Start machine supervision for task work (research → plan → build)."""
+    if not force:
+        try:
+            from remedy.core.turn_context import current_plan_mode
+
+            if current_plan_mode(runtime):
+                return None
+        except Exception:
+            pass
     from remedy.core.muscle_profile import muscle_from_runtime
 
     muscle = muscle_from_runtime(runtime)
@@ -442,6 +450,12 @@ def begin_build_turn(
 
         away = looks_like_away_request(message)
     wants = force or looks_like_build_request(message) or away
+    if not force:
+        with suppress(Exception):
+            from remedy.core.react_policy import is_chat_only_message
+
+            if is_chat_only_message(message):
+                return None
     if not wants:
         # Still enable light supervision if open mission/tasks look like build
         with suppress(Exception):

@@ -43,6 +43,7 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         # Claim *before* persisting the user message so two POSTs cannot both start.
         from remedy.core.turn_context import (
             release_session_stream_claim,
+            session_reset_epoch,
             stream_claim_epoch,
             try_claim_session_stream,
         )
@@ -54,6 +55,7 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                 "Stop the current turn first, then send again.",
             )
         claim_epoch = stream_claim_epoch(session_id)
+        reset_epoch_at_start = session_reset_epoch(session_id)
 
         # CancelledError is BaseException — a bare `except Exception` leaked the
         # claim and 409'd the session until process restart.
@@ -465,7 +467,11 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                         persist_text = "*(Used tools — see process.)*"
 
                     if persist_text and memory:
-                        still = await memory.get_chat_session(session_id)
+                        if session_reset_epoch(session_id) != reset_epoch_at_start:
+                            persist_done = True
+                            still = None
+                        else:
+                            still = await memory.get_chat_session(session_id)
                         if still is None:
                             persist_done = True
                         else:
@@ -538,6 +544,8 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                     # drop the assistant row so reload showed only the user turn.
                     # Skip if the cooperative @@aborted path already wrote a row.
                     if memory is not None and not persist_done:
+                        if session_reset_epoch(session_id) != reset_epoch_at_start:
+                            persist_done = True
                         note = ""
                         thinking = None
                         calls: list = []
@@ -556,7 +564,11 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                                 "send **continue** to resume.)*"
                             )
                         with contextlib.suppress(Exception):
-                            still = await memory.get_chat_session(session_id)
+                            still = (
+                                None
+                                if persist_done
+                                else await memory.get_chat_session(session_id)
+                            )
                             if still is not None:
                                 await memory.add_chat_message(
                                     ChatMessage(
@@ -596,7 +608,10 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                     yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': safe_msg})}\n\n"
                     # Persist a short explanation so the chat is not empty after a crash.
                     with contextlib.suppress(Exception):
-                        if memory is not None:
+                        if (
+                            memory is not None
+                            and session_reset_epoch(session_id) == reset_epoch_at_start
+                        ):
                             still = await memory.get_chat_session(session_id)
                             if still is not None:
                                 note = (

@@ -48,6 +48,53 @@ export function coerceSlideId(value: unknown, fallback: SlideId): SlideId {
   return fallback
 }
 
+const OAUTH_BROWSER_MIN = 440
+
+/** Agent / computer-use: Browser takes the right rail (may replace Settings). */
+export function layoutOpenBrowserInRail(prev: WorkspaceLayout): WorkspaceLayout {
+  const next: WorkspaceLayout = {
+    ...prev,
+    right: 'browser',
+    rightOpen: true,
+    rightRail: 'open',
+    rightWidth: Math.max(prev.rightWidth || 0, OAUTH_BROWSER_MIN),
+    leftOpen: prev.leftRail === 'open' || prev.leftOpen,
+  }
+  if (next.left === 'browser') {
+    next.left = 'sessions'
+    next.leftRail = 'open'
+    next.leftOpen = true
+  }
+  return next
+}
+
+/** OAuth: open Browser without unmounting Settings so the form can update. */
+export function layoutOpenBrowserBesideSettings(prev: WorkspaceLayout): WorkspaceLayout {
+  if (prev.left === 'settings') {
+    return {
+      ...prev,
+      right: 'browser',
+      rightRail: 'open',
+      rightOpen: true,
+      rightWidth: Math.max(prev.rightWidth || 0, OAUTH_BROWSER_MIN),
+      left: 'settings',
+      leftRail: 'open',
+      leftOpen: true,
+    }
+  }
+  return {
+    ...prev,
+    left: 'browser',
+    leftRail: 'open',
+    leftOpen: true,
+    leftWidth: Math.max(prev.leftWidth || 0, OAUTH_BROWSER_MIN),
+    right: 'settings',
+    rightRail: 'open',
+    rightOpen: true,
+    rightWidth: Math.max(prev.rightWidth || 0, 300),
+  }
+}
+
 export function coerceRailMode(value: unknown, fallback: RailMode): RailMode {
   if (typeof value === 'string' && RAIL_SET.has(value)) {
     return value as RailMode
