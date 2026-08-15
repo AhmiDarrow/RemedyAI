@@ -93,10 +93,16 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             if sess is None:
                 raise HTTPException(404, "Session not found")
             raw = getattr(sess, "project_path", None)
-            if raw:
-                p = Path(str(raw))
-                root = p.parent if p.is_file() else p
-        items = load_todos(runtime, root=root)
+            from remedy.core.workspace import is_unset_project_path, is_volume_root_path
+
+            if not raw or is_unset_project_path(raw) or is_volume_root_path(raw):
+                return {"todos": []}
+            p = Path(str(raw))
+            root = p.parent if p.is_file() else p
+            if is_volume_root_path(root):
+                return {"todos": []}
+        # Never fall back to the shared runtime / user profile cache.
+        items = load_todos(None, root=root)
         if open_todo_count(items) == 0:
             return {"todos": []}
         return {"todos": todos_public(items)}

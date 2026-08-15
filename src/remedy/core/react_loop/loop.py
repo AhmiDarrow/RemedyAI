@@ -437,6 +437,15 @@ async def call_llm_stream(runtime, message: str,
                     from remedy.core.build_engine import enable_build_host_drive
 
                     enable_build_host_drive(runtime, build_state)
+        with suppress(Exception):
+            from remedy.core.build_engine import enable_work_host_drive
+
+            enable_work_host_drive(
+                runtime,
+                message or "",
+                plan_mode=bool(plan_mode),
+                build_state=build_state,
+            )
         # Frontier continue: brief + ledger inject (no local harness thrash)
         with suppress(Exception):
             from remedy.core.build_engine import frontier_continue_inject
@@ -481,18 +490,15 @@ async def call_llm_stream(runtime, message: str,
             if turn.plan_mode or plan_mode:
                 logger.info("skip rearm — plan mode")
                 return
-            # Verbal-only / trivia / inject must stay tool-free. Pseudo-tool
-            # recovery used to re-arm 24 schemas and pin keep_armed.
+            # Only greetings / verbal trivia stay tool-free. Knowledge
+            # follow-ups re-arm — do not stall a capable model.
             with suppress(Exception):
-                from remedy.core.react_policy import (
-                    build_keeps_tools_armed as _build_keep,
-                )
-                from remedy.core.react_policy import message_wants_tools as _wants
+                from remedy.core.react_policy import is_chat_only_message, is_pure_trivia_message
 
-                if not _wants(message or "") and not _build_keep(
-                    message or "", build_active=_build_active()
+                if is_chat_only_message(message or "") or is_pure_trivia_message(
+                    message or ""
                 ):
-                    logger.info("skip rearm — user message is non-work")
+                    logger.info("skip rearm — user message is chat/trivia")
                     return
             tools, run_until_done = _rearm_agency_tools_fn(turn)
 

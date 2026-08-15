@@ -761,6 +761,8 @@ def message_wants_tools(message: str) -> bool:
     if looks_like_injected_tool_markup(msg):
         return False
     if is_knowledge_question(msg):
+        # Do not *force* tools (avoids a tool-loop on "what time is it").
+        # resolve_tools still *offers* schemas — the host may look.
         return False
     with suppress(Exception):
         from remedy.core.companion import looks_like_companion_request

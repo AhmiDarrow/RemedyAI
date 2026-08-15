@@ -4,6 +4,30 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.26.2] - 2026-08-15
+
+The PC stays in Remedy's hands. Work turns drive the host. Build no longer
+sticks on a hung ledger or a stale checklist.
+
+### Host / agency
+
+- Work turns skip Ask for that turn only (greetings, trivia, Plan, and
+  untrusted still Ask). Settings `approval_mode` is not changed.
+- Knowledge follow-ups (`why is everything failing?`) keep tool schemas.
+  Only Hi / thanks / `1+1` / “reply only X” stay tool-free.
+- Tool re-arm is no longer skipped for knowledge questions.
+
+### Build / ledger / todos
+
+- Auto-verify pytest timeout is 45s, not 300s. `pytest --lf` is not used
+  after a timeout (that re-ran the hang).
+- A timed-out verify does not immediately re-fire on the next message.
+  Required files on disk can cheap-pass so the turn can finish.
+- Writing `.remedy-build/ledger.json` / `todos.json` is not a product write.
+- Machine closes scout/write/verify todos when the files are actually there.
+- Session todos never read the user-profile checklist. Volume-root / unset
+  sessions return an empty list (no tab leak).
+
 ## [0.26.1] - 2026-08-15
 
 Build finishes pages. An open Build drives the host (no Ask pause) and cannot

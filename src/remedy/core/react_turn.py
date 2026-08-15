@@ -302,26 +302,12 @@ def resolve_tools(
                 pack or None, True, "internal_improve", pack="self_fix"
             )
 
-    # Knowledge / verbal-only FIRST. Leftover build_active or implement
-    # keywords must not drag "1 + 1" into a local tool loop.
-    # An *open Build* still keeps tools for frustrated "why is this failing?"
-    # follow-ups — those are about the live task, not trivia.
+    # Only proven trivia / pasted markup strip tools. Knowledge questions
+    # ("why is this failing?") stay armed — the host acts.
     with suppress(Exception):
-        from remedy.core.react_policy import (
-            build_keeps_tools_armed,
-            is_knowledge_question,
-            is_verbal_only_request,
-            looks_like_injected_tool_markup,
-        )
+        from remedy.core.react_policy import is_pure_trivia_message
 
-        trivia = is_verbal_only_request(message or "") or looks_like_injected_tool_markup(
-            message or ""
-        )
-        knowledge = is_knowledge_question(message or "")
-        keep_build = build_keeps_tools_armed(
-            message or "", build_active=build_active
-        )
-        if trivia or (knowledge and not keep_build):
+        if is_pure_trivia_message(message or ""):
             logger.info("react_tools disarm reason=non_work")
             return ToolsDecision(None, False, "non_work", pack="none")
 
@@ -428,17 +414,9 @@ def resolve_tools(
     # inherits tools from continuity rebound. "Reply only STILLALIVE" was
     # falling through to default_armed → local RMB tool-looped for minutes.
     with suppress(Exception):
-        from remedy.core.react_policy import (
-            is_knowledge_question,
-            is_verbal_only_request,
-            looks_like_injected_tool_markup,
-        )
+        from remedy.core.react_policy import is_pure_trivia_message
 
-        if (
-            is_verbal_only_request(message or "")
-            or is_knowledge_question(message or "")
-            or looks_like_injected_tool_markup(message or "")
-        ):
+        if is_pure_trivia_message(message or ""):
             logger.info("react_tools disarm reason=non_work")
             return ToolsDecision(None, False, "non_work", pack="none")
 

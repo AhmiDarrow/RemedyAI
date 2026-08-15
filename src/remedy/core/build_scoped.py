@@ -151,11 +151,8 @@ def scoped_verify_command(
                 test_files.append(trel)
 
     if not test_files:
-        # No mapped tests — prefer last-failed if pytest cache exists
-        if (root / ".pytest_cache").exists() and (
-            (root / "tests").is_dir() or (root / "test").is_dir()
-        ):
-            return "pytest -q --lf"
+        # Never fall back to ``pytest --lf`` — last-failed after a timeout
+        # re-runs the hang and pins the ledger in repair for 300s.
         return ""
 
     # Cap paths for CLI length
