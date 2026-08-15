@@ -230,7 +230,6 @@ async def handle_messenger_event(
     Yields response text chunks (same as handle_event). Persists chat messages
     when runtime.memory is available.
     """
-    from contextlib import suppress
 
     memory = getattr(runtime, "memory", None)
     channel = _channel_value(event.channel)

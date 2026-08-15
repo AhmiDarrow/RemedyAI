@@ -565,10 +565,7 @@ def _is_script_path_token(tok: str) -> bool:
     if not t:
         return False
     low = t.lower().replace("\\", "/")
-    # node_modules / package bins are not source we scan
-    if low.endswith(_SCRIPT_BODY_EXTS):
-        return True
-    return False
+    return bool(low.endswith(_SCRIPT_BODY_EXTS))
 
 
 def extract_script_launch_targets(
@@ -779,7 +776,7 @@ def path_outside_write_roots(
             return Path(raw)
         # Root-relative \Temp\x or /Temp/x → current drive (C:\Temp\x)
         if re.match(r"^[\\/](?![\\/])", raw):
-            drive = Path.cwd().drive or os.environ.get("SystemDrive") or "C:"
+            drive = Path.cwd().drive or os.environ.get("SYSTEMDRIVE") or "C:"
             if len(drive) == 1:
                 drive = drive + ":"
             raw = f"{drive.rstrip(':')}:" + raw
@@ -1052,15 +1049,9 @@ def _command_head(command: str) -> str:
 
 def _is_known_in_project_mutation(command: str) -> bool:
     """True for npm/git/pytest/verify/relative FS verbs — cwd-allow when in roots."""
-    if _is_build_verify_statement(command):
+    if _is_build_verify_statement(command) or _command_head(command) in _IN_PROJECT_CWD_HEADS:
         return True
-    head = _command_head(command)
-    if head in _IN_PROJECT_CWD_HEADS:
-        return True
-    # python -m pytest / uv run … already covered by verify or uv head
-    if re.search(r"(?i)\b(?:python\S*)\s+-m\s+", command or ""):
-        return True
-    return False
+    return bool(re.search(r"(?i)\b(?:python\S*)\s+-m\s+", command or ""))
 
 
 def _jail_script_launch_bodies(
