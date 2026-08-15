@@ -718,6 +718,32 @@ def looks_like_injected_tool_markup(message: str) -> bool:
     return bool(_DSML_TOOL_RE.search(msg) or _PSEUDO_TOOL_RE.search(msg))
 
 
+def is_pure_trivia_message(message: str) -> bool:
+    """Arithmetic / verbal-only / pasted markup — never inherit Build tools."""
+    msg = (message or "").strip()
+    if not msg:
+        return False
+    if is_verbal_only_request(msg) or looks_like_injected_tool_markup(msg):
+        return True
+    return bool(_ARITH_ONLY_RE.match(msg))
+
+
+def build_keeps_tools_armed(message: str, *, build_active: bool) -> bool:
+    """Frustrated / 'why is this failing' follow-ups must not strip an open Build.
+
+    Bare greetings, thanks, verbal-only tokens, and ``1 + 1`` stay tool-free
+    even if a leftover build is active. Everything else keeps agency.
+    """
+    if not build_active:
+        return False
+    msg = (message or "").strip()
+    if not msg:
+        return False
+    if is_chat_only_message(msg):
+        return False
+    return not is_pure_trivia_message(msg)
+
+
 def message_wants_tools(message: str) -> bool:
     """Fail-open: tools on unless the message is proven chat or trivia.
 

@@ -248,6 +248,9 @@ _RUNTIME_BIN_NAMES = frozenset(
         "cmd",
         "bash",
         "sh",
+        # Packaged sidecar is the project Python when frozen
+        "remedy-desktop",
+        "remedy",
     }
 )
 
@@ -320,6 +323,35 @@ def is_runtime_executable_path(path_str: str) -> bool:
     # python3.12 / python312 — whole token, not startswith (python_notes.txt)
     compact = stem.replace(".", "")
     return bool(re.fullmatch(r"python\d*", stem) or re.fullmatch(r"python\d*", compact))
+
+
+_SIDECAR_EXE_STEMS = frozenset({"remedy-desktop", "remedy"})
+
+
+def _is_sidecar_argv_leftover(token: str, command: str = "") -> bool:
+    """True for the space-split leftover of unquoted Remedy Desktop sidecar.
+
+    ``C:\\…\\Remedy Desktop\\remedy-desktop.exe script.py`` tokenizes at the
+    space, so dest scanning sees ``\\remedy-desktop.exe`` (drive root). That
+    is argv debris, not a write. ``copy payload.exe C:\\Windows\\System32\\cmd.exe``
+    is a real dest and must still jail.
+    """
+    raw = _clean_token(token)
+    if not raw:
+        return False
+    name = raw.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower()
+    stem = name[:-4] if name.endswith(".exe") else name
+    if stem not in _SIDECAR_EXE_STEMS:
+        return False
+    blob = (command or "").lower()
+    if "remedy desktop" not in blob and "remedy-desktop" not in blob:
+        return False
+    low = raw.replace("/", "\\").lower()
+    if "\\remedy desktop\\" in low:
+        return True
+    if low.startswith("\\") and not low.startswith("\\\\"):
+        return "\\" not in low[1:].lstrip("\\")
+    return "\\" not in raw and "/" not in raw
 
 
 # Absolute Windows / Unix path tokens in a command line.
@@ -934,11 +966,12 @@ def scan_script_source_for_outside_writes(
         )
     # Constructed dests (Path('C:/')/'Users'/…, os.path/os.sep) hide writes.
     if _PY_WRITE_API_RE.search(code) and _PY_CONSTRUCTED_DEST_RE.search(code):
-        return (
-            "shell write jail: script uses constructed path I/O "
-            f"(Path(drive)/os.path/os.sep) ({script.name}). "
-            "Refuse to run. Prefer file_write under the focus folder."
-        )
+        if _py_constructed_is_write_dest(code):
+            return (
+                "shell write jail: script uses constructed path I/O "
+                f"(Path(drive)/os.path/os.sep) ({script.name}). "
+                "Refuse to run. Prefer file_write under the focus folder."
+            )
     for m in _ABS_PATH_RE.finditer(text):
         tok = m.group(0)
         try:
@@ -951,6 +984,8 @@ def scan_script_source_for_outside_writes(
                 )
         except Exception:
             pass
+        if not _path_appears_as_write_dest(code, tok):
+            continue
         off = path_outside_write_roots(tok, write_roots=roots, cwd=script.parent)
         if off is not None:
             return (
@@ -958,6 +993,54 @@ def scan_script_source_for_outside_writes(
                 f"outside write roots: {off}"
             )
     return None
+
+
+def _path_appears_as_write_dest(text: str, tok: str) -> bool:
+    """True when *tok* is a write/copy destination, not a read-only source."""
+    if not tok:
+        return False
+    esc = re.escape(tok)
+    if re.search(
+        rf"open\s*\(\s*[rRuUbB]*['\"]{esc}['\"]\s*,\s*['\"][wax]",
+        text,
+        re.I,
+    ):
+        return True
+    if re.search(
+        rf"Path\s*\(\s*[rRuUbB]*['\"]{esc}['\"]\s*\)\s*\.\s*"
+        rf"(?:write_text|write_bytes|mkdir|unlink|rmdir|touch|replace)\b",
+        text,
+    ):
+        return True
+    for m in re.finditer(r"shutil\.(?:copy2?|copytree|move|rmtree)\s*\(([^)]*)\)", text, re.I):
+        args = [a.strip() for a in m.group(1).split(",")]
+        if len(args) >= 2 and tok in args[1]:
+            return True
+    return False
+
+
+def _py_constructed_is_write_dest(code: str) -> bool:
+    """True when a constructed absolute Path is the dest of a write, not a copy source."""
+    write_bit = re.compile(
+        r"(?:write_text|write_bytes|\.mkdir\(|\.unlink\(|\.rmdir\(|\.touch\("
+        r"|open\s*\([^;\n]*['\"][wax])",
+        re.I,
+    )
+    copy_src_only = re.compile(r"shutil\.(?:copy2?|copytree|move)\s*\(", re.I)
+    copy_abs_dest = re.compile(
+        r"shutil\.(?:copy2?|copytree|move)\s*\([^,]+,\s*Path\s*\(\s*['\"][A-Za-z]:",
+        re.I,
+    )
+    for line in code.splitlines():
+        if not _PY_CONSTRUCTED_DEST_RE.search(line):
+            continue
+        if copy_abs_dest.search(line):
+            return True
+        if copy_src_only.search(line):
+            continue
+        if write_bit.search(line):
+            return True
+    return False
 
 
 def _resolve_approval_mode(explicit: str = "") -> str:
@@ -1237,6 +1320,9 @@ def _evaluate_shell_write_jail(
         if not rest.strip():
             continue
         for token in extract_path_candidates(rest):
+            # Only skip unquoted sidecar split leftovers, never cmd.exe dests.
+            if _is_sidecar_argv_leftover(token, cmd):
+                continue
             outside = path_outside_write_roots(
                 token, write_roots=roots, cwd=cwd
             )

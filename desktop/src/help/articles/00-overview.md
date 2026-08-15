@@ -21,7 +21,7 @@ project access scope).
 | **Product** | Windows + Linux desktop partner + local API (`127.0.0.1:7400`) |
 | **Data home** | `~/.remedy` (config, memory, skills; DPAPI on Windows) |
 | **Models** | *Your* provider keys or Ollama / RMB — continuity stays on disk |
-| **Current** | **v0.26.0** — first true Windows + Linux desktop |
+| **Current** | **v0.26.1** — Build finishes pages; drives the host |
 | **Install** | [Windows](01-install-windows.md) · [Linux](01-install-linux.md) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · PyPI `remedy-ai` |
 
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.  
@@ -30,6 +30,11 @@ Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
 ---
 
 ## What’s new (start here)
+
+**v0.26.1** highlights:
+
+- Build drives the host (no Ask pause) and cannot claim done on empty or missing files
+- Frustrated follow-ups stay armed; sidecar path is not a false jail dest
 
 **v0.26.0** highlights:
 

@@ -4,6 +4,29 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-08-15
+
+Build finishes pages. An open Build drives the host (no Ask pause) and cannot
+claim done on an empty write or a missing named file.
+
+### Build
+
+- Empty `file_write` / spam writes do not count as success. Named goal files
+  (and landing/wiki HTML) stay required until they exist with real content.
+- Green verify without those files returns to implement, not done.
+- Frustrated follow-ups (`why is everything failing?`) keep tools armed while
+  Build is active. Hi / thanks / `1+1` stay chat-only.
+- Active Build skips Ask for that turn only. Settings `approval_mode` is not
+  changed. Write jail and auth-secret blocks stay on. Plan mode does not skip.
+
+### Jail
+
+- Unquoted `Remedy Desktop\remedy-desktop.exe` is no longer jailed as
+  `C:\remedy-desktop.exe`. Overwrite of `cmd.exe` / `python.exe` still is.
+- Helper scripts may copy *in* from a sibling path; `open(chr(67)+…, 'w')`
+  and dest-is-runtime still fail closed.
+- Argv with spaces is quoted before the jail scan.
+
 ## [0.26.0] - 2026-08-15
 
 First true **Windows + Linux** desktop. Same partner, same local API, OS-correct
