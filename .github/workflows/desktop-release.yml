@@ -371,7 +371,9 @@ jobs:
           echo "asset_name=${ASSET_NAME}" >> $GITHUB_OUTPUT
           SIG=""
           if compgen -G "dist/*.sig" > /dev/null; then
-            SIG=$(cat dist/*.sig | tr -d '\r\n' | head -c 100000)
+            # Keep the .sig bytes intact. Stripping newlines used to smash
+            # minisign; Tauri's .sig is already one base64 line.
+            SIG=$(head -c 100000 dist/*.sig | tr -d '\r')
           fi
           printf '%s' "${SIG}" > dist/signature.txt
           if [[ -z "${SIG}" ]]; then
@@ -391,9 +393,19 @@ jobs:
           ver = os.environ["VER"]
           tag = os.environ["TAG"]
           asset_name = os.environ["ASSET_NAME"]
+          import base64
           sig = open("dist/signature.txt", encoding="utf-8").read().strip()
           if not sig:
               raise SystemExit("empty signature")
+          # Installed Remedy clients call minisign Signature::decode on this
+          # field. Tauri's .sig is a base64 wrapper of that file — unwrap so
+          # auto-update can parse it. (Tauri plugin unwraps itself.)
+          try:
+              raw = base64.b64decode(sig, validate=True).decode("utf-8")
+          except Exception:
+              raw = ""
+          if raw.lstrip().startswith("untrusted comment:"):
+              sig = raw if raw.endswith("\n") else raw + "\n"
           owner = os.environ["REPO_OWNER"]
           repo = os.environ["REPO_NAME"]
           payload = {

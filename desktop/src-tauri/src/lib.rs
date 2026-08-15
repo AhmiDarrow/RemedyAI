@@ -3215,9 +3215,27 @@ fn canonical_installer_name(version: &str) -> String {
 /// Tauri updater pubkey (same blob as tauri.conf.json plugins.updater.pubkey).
 const UPDATER_MINISIGN_PUBKEY_B64: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ2MDEwQzVERTNBQ0JDRTAKUldUZ3ZLempYUXdCMWdRNWl0UzlpSDVUamJQZXRvREFpNE9Mb2xJeGpQck5ubVJ5ZDNxSko0dTYK";
 
+/// Accept raw minisign **or** Tauri's base64-wrapped `.sig` (both appear in latest.json).
+fn decode_updater_signature(sig: &str) -> Result<minisign_verify::Signature, String> {
+    use base64::Engine;
+    use minisign_verify::Signature;
+
+    let sig = sig.trim();
+    if let Ok(parsed) = Signature::decode(sig) {
+        return Ok(parsed);
+    }
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(sig)
+        .map_err(|_| "updater signature parse: Invalid encoding in minisign data".to_string())?;
+    let text = String::from_utf8(decoded)
+        .map_err(|_| "updater signature parse: Invalid encoding in minisign data".to_string())?;
+    Signature::decode(text.trim())
+        .map_err(|e| format!("updater signature parse: {e}"))
+}
+
 fn verify_installer_minisign(exe: &Path, sig: &str) -> Result<(), String> {
     use base64::Engine;
-    use minisign_verify::{PublicKey, Signature};
+    use minisign_verify::PublicKey;
 
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(UPDATER_MINISIGN_PUBKEY_B64)
@@ -3230,8 +3248,7 @@ fn verify_installer_minisign(exe: &Path, sig: &str) -> Result<(), String> {
         .ok_or_else(|| "updater pubkey missing RW line".to_string())?;
     let pk = PublicKey::from_base64(pk_line)
         .map_err(|e| format!("updater pubkey parse: {e}"))?;
-    let signature =
-        Signature::decode(sig.trim()).map_err(|e| format!("updater signature parse: {e}"))?;
+    let signature = decode_updater_signature(sig)?;
     let data = std::fs::read(exe).map_err(|e| format!("read installer for verify: {e}"))?;
     pk.verify(&data, &signature, false)
         .map_err(|e| format!("installer signature mismatch: {e}"))?;
