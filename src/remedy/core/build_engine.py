@@ -46,6 +46,7 @@ _BUILD_RE = re.compile(
     r"compile|gcc|clang|\.c\b|hello\.c|main\.c|"
     r"pygame|play\s+(it|the\s+game)|try\s+it|"
     r"we need (a |an |to )|"
+    r"landing\s+page|web\s*page|product\s+page|marketing\s+page|"
     r"can we (add|resize|change|shrink|tighten)|"
     r"resize|autolock|auto[- ]?lock|"
     r"settings (and |/ )?(about )?(ui|dialog|panel|window)"
@@ -153,7 +154,19 @@ _SOURCE_WRITE_SUFFIXES = frozenset(
         ".swift",
         ".vue",
         ".svelte",
+        ".html",
+        ".htm",
+        ".css",
     }
+)
+
+# Filenames the goal explicitly asked to create (must exist before done).
+_NAMED_FILE_RE = re.compile(
+    r"(?i)(?<![.\w])((?:[\w.-]+[/\\])*[\w.-]+\.(?:html?|css|js|tsx?|jsx?|py|md|json))\b"
+)
+_HTML_PAGE_GOAL_RE = re.compile(
+    r"(?i)\b(?:landing\s+page|web\s*page|html\s+page|product\s+page|"
+    r"marketing\s+page|(?:create|add|build|write)\s+(?:a\s+|an\s+|the\s+)?wiki)\b"
 )
 
 _SHIP_GOAL_RE = re.compile(
@@ -256,6 +269,8 @@ class BuildTurnState:
     resumed: bool = False
     # Unverified mutation set (paths written since last green verify)
     write_set: list[str] = field(default_factory=list)
+    required_files: list[str] = field(default_factory=list)
+    empty_write_paths: list[str] = field(default_factory=list)
     last_error_vector: dict[str, Any] | None = None
     syntax_ok: bool | None = None
     # Block final user-facing "done" until green (machine gate)
@@ -333,6 +348,75 @@ class BuildTurnState:
             self.write_set
         )
 
+    def named_required_files(self) -> list[str]:
+        """Filenames the goal / empty-write failures still demand on disk."""
+        found: list[str] = []
+        seen: set[str] = set()
+
+        def _add(raw: str) -> None:
+            key = (raw or "").replace("\\", "/").lstrip("./").strip()
+            if not key or key in seen:
+                return
+            if "." not in key.split("/")[-1]:
+                return
+            seen.add(key)
+            found.append(key)
+
+        for m in _NAMED_FILE_RE.finditer(self.goal or ""):
+            _add(m.group(1))
+        for p in self.required_files:
+            _add(p)
+        for p in self.empty_write_paths:
+            _add(p)
+        return found
+
+    def _write_set_has(self, name: str) -> bool:
+        low = name.replace("\\", "/").lower()
+        for w in self.write_set or []:
+            wl = str(w).replace("\\", "/").lower()
+            if wl.endswith("/" + low) or wl.endswith(low) or low in wl:
+                return True
+        return False
+
+    def missing_required_files(self) -> list[str]:
+        """Required goal files that were never successfully written."""
+        missing: list[str] = []
+        root = None
+        raw = (self.project_path or "").strip()
+        if raw:
+            from pathlib import Path as _P
+
+            with suppress(Exception):
+                root = _P(raw)
+
+        def _on_disk(name: str) -> bool:
+            if root is None:
+                return False
+            try:
+                cand = root / name
+                return cand.is_file() and cand.stat().st_size > 8
+            except OSError:
+                return False
+
+        for name in self.named_required_files():
+            if self._write_set_has(name) or _on_disk(name):
+                continue
+            missing.append(name)
+        if _HTML_PAGE_GOAL_RE.search(self.goal or ""):
+            html_ok = any(
+                str(w).replace("\\", "/").lower().endswith((".html", ".htm"))
+                for w in (self.write_set or [])
+            ) or any(n.lower().endswith((".html", ".htm")) and _on_disk(n) for n in self.named_required_files())
+            if not html_ok:
+                named_html = [n for n in self.named_required_files() if n.lower().endswith((".html", ".htm"))]
+                if named_html:
+                    for n in named_html:
+                        if n not in missing:
+                            missing.append(n)
+                else:
+                    missing.append("new.html")
+        return missing
+
     def ship_complete(self) -> bool:
         """Ship goal satisfied: push done; release only if goal asked for it."""
         if not self.ship_required:
@@ -347,6 +431,9 @@ class BuildTurnState:
 
     def advance_after_green(self) -> None:
         """After green verify: ship phase if required, else done."""
+        if self.missing_required_files():
+            self.phase = "implement"
+            return
         if self.ship_required and not self.ship_complete():
             self.phase = "ship"
         else:
@@ -464,6 +551,8 @@ def begin_build_turn(
             if _BUILD_RE.search(intent):
                 wants = True
     if not wants:
+        # Leftover open Build still drives the host this turn (no Ask pause).
+        enable_build_host_drive(runtime)
         return None
     # Tiny muscle: soft supervision only (higher explore tolerance)
     goal_txt = (message or "").strip()[:300]
@@ -478,6 +567,10 @@ def begin_build_turn(
         require_verify_after_writes=1,
         ship_required=looks_like_ship_goal(goal_txt),
         away_mode=away,
+        required_files=[
+            m.group(1).replace("\\", "/")
+            for m in _NAMED_FILE_RE.finditer(goal_txt)
+        ],
     )
     # Oracle-first: discover verify command up front
     with suppress(Exception):
@@ -594,7 +687,30 @@ def begin_build_turn(
             session_id=str(turn_session_id(runtime) or ""),
             home=home,
         )
+    enable_build_host_drive(runtime, st)
     return st
+
+
+def enable_build_host_drive(
+    runtime: Any = None,
+    state: BuildTurnState | None = None,
+) -> None:
+    """Active Build drives the host this turn — no Ask pause.
+
+    Write jail and auth-secret blocks stay on. Settings approval_mode is
+    not changed. Plan mode / greetings never call this.
+    """
+    st = state
+    if st is None and runtime is not None:
+        st = get_build_state(runtime)
+    if st is None or not getattr(st, "active", False):
+        return
+    if str(getattr(st, "phase", "") or "") == "done" and not st.missing_required_files():
+        return
+    with suppress(Exception):
+        from remedy.core.turn_context import set_turn_skip_ask
+
+        set_turn_skip_ask(True)
 
 
 def build_protocol_block(state: BuildTurnState) -> str:
@@ -723,6 +839,35 @@ def observe_tool_batch(
     else:
         state.serial_explore_streak = 0
 
+    empty_write_ids: set[str] = set()
+    for msg in tool_messages or []:
+        if not isinstance(msg, dict) or msg.get("role") != "tool":
+            continue
+        content = str(msg.get("content") or "")
+        if (
+            "EMPTY_SOURCE_WRITE" in content
+            or "empty file_write" in content
+            or "SPAM_SOURCE_WRITE" in content
+        ):
+            cid = str(msg.get("tool_call_id") or msg.get("id") or "")
+            if cid:
+                empty_write_ids.add(cid)
+    successful_write = False
+    for tc in tcs:
+        if _tool_name(tc) not in _WRITE_TOOLS:
+            continue
+        tid = str(tc.get("id") or tc.get("tool_call_id") or "")
+        if tid and tid in empty_write_ids:
+            p = _args_path(tc)
+            if p:
+                state.empty_write_paths.append(p)
+                if p not in state.required_files:
+                    state.required_files.append(p)
+            continue
+        successful_write = True
+    if any_write and not successful_write:
+        any_write = False
+
     source_write_this_batch = False
     if any_write:
         state.write_steps += 1
@@ -736,10 +881,15 @@ def observe_tool_batch(
         p = _args_path(tc)
         if p:
             state.touch_path(p)
-            if _tool_name(tc) in _WRITE_TOOLS:
+            tid = str(tc.get("id") or tc.get("tool_call_id") or "")
+            if _tool_name(tc) in _WRITE_TOOLS and not (tid and tid in empty_write_ids):
                 state.mark_write(p)
                 if _is_source_path(p):
                     source_write_this_batch = True
+                # Successful write of a previously empty path
+                state.empty_write_paths = [
+                    e for e in state.empty_write_paths if e.replace("\\", "/") != p.replace("\\", "/")
+                ]
 
     # Only *source* mutations invalidate green (docs/tmp/yml thrash is ignored)
     if source_write_this_batch and state.auto_verify_ran and state.last_verify_ok is True:
@@ -860,6 +1010,21 @@ def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
     """Return a hard user-role inject if the machine schedule is violated."""
     if not state.active:
         return None
+
+    missing = state.missing_required_files()
+    if missing and "force_required_files" not in state.nudges_emitted:
+        state.nudges_emitted.append("force_required_files")
+        state.phase = "implement"
+        listed = ", ".join(missing[:8])
+        return {
+            "role": "user",
+            "content": (
+                "[Build engine · FORCE IMPLEMENT] The goal still needs these files "
+                f"on disk with real content: {listed}. "
+                "file_write each one with the complete source (never empty). "
+                "Do not claim done. Verify only after the files exist."
+            ),
+        }
 
     # Explore thrash → force implement
     if (
@@ -1064,6 +1229,9 @@ def build_blocks_final_answer(state: BuildTurnState | None) -> bool:
         return False
     if not state.require_green_to_finish:
         return False
+    # Empty writes / named goal files still missing — never claim done.
+    if state.empty_write_paths or state.missing_required_files():
+        return True
     # Never started writing — monologue block handles; allow chat abandon
     if state.write_steps == 0 and state.verify_steps == 0 and not state.ship_required:
         return False

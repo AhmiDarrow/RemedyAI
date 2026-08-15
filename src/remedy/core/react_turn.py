@@ -304,18 +304,24 @@ def resolve_tools(
 
     # Knowledge / verbal-only FIRST. Leftover build_active or implement
     # keywords must not drag "1 + 1" into a local tool loop.
+    # An *open Build* still keeps tools for frustrated "why is this failing?"
+    # follow-ups — those are about the live task, not trivia.
     with suppress(Exception):
         from remedy.core.react_policy import (
+            build_keeps_tools_armed,
             is_knowledge_question,
             is_verbal_only_request,
             looks_like_injected_tool_markup,
         )
 
-        if (
-            is_verbal_only_request(message or "")
-            or is_knowledge_question(message or "")
-            or looks_like_injected_tool_markup(message or "")
-        ):
+        trivia = is_verbal_only_request(message or "") or looks_like_injected_tool_markup(
+            message or ""
+        )
+        knowledge = is_knowledge_question(message or "")
+        keep_build = build_keeps_tools_armed(
+            message or "", build_active=build_active
+        )
+        if trivia or (knowledge and not keep_build):
             logger.info("react_tools disarm reason=non_work")
             return ToolsDecision(None, False, "non_work", pack="none")
 

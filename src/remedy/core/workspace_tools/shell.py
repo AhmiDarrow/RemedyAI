@@ -808,10 +808,15 @@ def register_shell_tools(runtime: Any) -> None:
             scope = "project"
         from remedy.core.shell_write_jail import check_shell_write_jail
 
+        def _jail_quote(part: str) -> str:
+            if os.name == "nt" and any(ch in part for ch in " \t"):
+                return '"' + part.replace('"', "") + '"'
+            return part
+
         py_warnings: list[str] = []
         try:
             jail_hit = check_shell_write_jail(
-                " ".join(str(a) for a in argv),
+                " ".join(_jail_quote(str(a)) for a in argv),
                 write_roots=list(roots),
                 cwd=cwd,
                 project_bound=bound,

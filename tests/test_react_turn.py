@@ -79,6 +79,28 @@ def test_resolve_tools_arith_trivia_disarms_even_if_build_active():
     assert d.reason == "non_work"
 
 
+def test_resolve_tools_frustrated_why_keeps_build_armed():
+    """AhmiDarrow-Website: 'why is everything failing?' must not strip Build tools."""
+    all_t = [_tool("file_write"), _tool("file_read"), _tool("bash_exec")]
+    d = resolve_tools(
+        message="why is everything failing?",
+        all_tools=all_t,
+        turn_tier=1,
+        build_active=True,
+        open_tasks=["Create remedy.html marketing landing"],
+    )
+    assert d.tools is not None
+    assert d.run_until_done is True
+    assert d.reason == "build_active"
+    idle = resolve_tools(
+        message="why is everything failing?",
+        all_tools=all_t,
+        turn_tier=1,
+        build_active=False,
+    )
+    assert idle.reason == "non_work"
+
+
 def test_resolve_tools_l1_strips_pure_chat():
     all_t = [_tool("file_write")]
     d = resolve_tools(

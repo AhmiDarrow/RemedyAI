@@ -14,8 +14,10 @@ from remedy.core.react_policy import (
     agency_rearm_nudge_message,
     agency_tool_promise_claim,
     batch_has_tool_errors,
+    build_keeps_tools_armed,
     is_chat_only_message,
     is_knowledge_question,
+    is_pure_trivia_message,
     is_serial_explore_batch,
     is_verbal_only_request,
     looks_like_injected_tool_markup,
@@ -93,6 +95,18 @@ def test_runtime_turn_is_chat_only() -> None:
     assert runtime_turn_is_chat_only(message="run pytest and fix red") is False
     assert runtime_turn_is_chat_only(message="") is False
     assert runtime_turn_is_chat_only() is False
+
+
+def test_build_keeps_tools_armed_frustrated_followup() -> None:
+    assert build_keeps_tools_armed("why is everything failing?", build_active=True) is True
+    assert build_keeps_tools_armed("what's going wrong?", build_active=True) is True
+    assert build_keeps_tools_armed("why is everything failing?", build_active=False) is False
+    assert build_keeps_tools_armed("Hi", build_active=True) is False
+    assert build_keeps_tools_armed("thanks", build_active=True) is False
+    assert build_keeps_tools_armed("1 + 1", build_active=True) is False
+    assert build_keeps_tools_armed("Reply only STILLALIVE", build_active=True) is False
+    assert is_pure_trivia_message("1 + 1") is True
+    assert is_pure_trivia_message("why is everything failing?") is False
 
 
 def test_is_chat_only_message() -> None:
@@ -201,6 +215,9 @@ def test_unfinished_work_blocks_final_class() -> None:
     assert unfinished_work_blocks_final(
         "hi", tools_executed=0, build_active=True
     ) is False
+    assert unfinished_work_blocks_final(
+        "why is everything failing?", tools_executed=0, build_active=True
+    ) is True
     # Length of the model's prose is irrelevant — user asked for work.
     assert unfinished_work_blocks_final(work, tools_executed=0) is True
     nudge = unfinished_work_nudge_message()
