@@ -10,7 +10,13 @@ from typing import Any
 
 from remedy.vision import progress as prog
 from remedy.vision.capabilities import resolve_supports_vision
-from remedy.vision.catalog import DEFAULT_MODEL_ID, catalog_public, get_model_spec
+from remedy.vision.catalog import (
+    DEFAULT_MODEL_ID,
+    catalog_public,
+    default_runtime_id,
+    get_model_spec,
+    normalize_runtime_id,
+)
 from remedy.vision.config import (
     load_vision_json,
     save_vision_json,
@@ -149,7 +155,7 @@ def get_status(
     rid = str(
         side.get("runtime_id")
         or vcfg.get("runtime_id")
-        or "win-cpu-x64"
+        or default_runtime_id()
     )
 
     out: dict[str, Any] = {
@@ -319,7 +325,7 @@ def start_install(
         mid = DEFAULT_MODEL_ID
     rid = runtime_id or vcfg.get("runtime_id")
     if prefer_cuda and not rid:
-        rid = "win-cuda-12.4-x64"
+        rid = default_runtime_id(prefer_gpu=True)
 
     # Already on disk (previous download or rare product bundle) — activate + start
     if is_installed(mid, home):
@@ -338,10 +344,11 @@ def start_install(
     # First-run / recovery: download the same pinned catalog model
     health = system_health(model_id=mid, runtime_id=rid, home_dir=home)
     if prefer_cuda is False and not rid:
-        # Prefer CUDA when host has NVIDIA (option B runtime pick, same weights)
-        if health.get("nvidia_detected"):
+        # Prefer GPU runtime when the host has a matching card (same weights).
+        if health.get("nvidia_detected") or health.get("gpu_vendor"):
             prefer_cuda = True
-            rid = "win-cuda-12.4-x64"
+            rid = default_runtime_id(prefer_gpu=True)
+    rid = normalize_runtime_id(rid, prefer_gpu=prefer_cuda)
     result = _start_install(
         model_id=mid,
         runtime_id=rid,
@@ -386,14 +393,12 @@ def reinstall_runtime(
         if path is not None and cfg is not None:
             vision = dict(cfg.get("vision") or {}) if isinstance(cfg.get("vision"), dict) else {}
             vision["enabled"] = True
-            vision["runtime_id"] = (
-                "win-cuda-12.4-x64" if prefer_cuda else "win-cpu-x64"
-            )
+            vision["runtime_id"] = default_runtime_id(prefer_gpu=prefer_cuda)
             cfg["vision"] = vision
             _write_config(path, cfg)
     except Exception:
         pass
-    rid = "win-cuda-12.4-x64" if prefer_cuda else "win-cpu-x64"
+    rid = default_runtime_id(prefer_gpu=prefer_cuda)
     health = system_health(model_id=mid, runtime_id=rid, home_dir=home)
     result["health"] = health
     result["warnings"] = list(health.get("warnings") or [])

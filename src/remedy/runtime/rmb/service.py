@@ -774,7 +774,13 @@ def _find_llama_binary(state: dict[str, Any], home_dir: str | Path | None) -> Pa
             p = runtime_binary_from_bundle(rid)
             if p and Path(p).is_file():
                 return Path(p)
-        for rid in ("win-cuda-12.4-x64", "win-cpu-x64"):
+        from remedy.runtime.catalog import default_runtime_id, host_runtime_ids
+
+        for rid in (
+            default_runtime_id(prefer_gpu=True),
+            default_runtime_id(prefer_gpu=False),
+            *host_runtime_ids(),
+        ):
             p = runtime_binary_from_bundle(rid)
             if p and Path(p).is_file():
                 return Path(p)

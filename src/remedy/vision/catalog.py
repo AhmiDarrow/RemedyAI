@@ -22,8 +22,11 @@ from remedy.runtime.catalog import (  # noqa: F401
     LocalModelSpec,
     VisionModelSpec,
     catalog_public,
+    default_runtime_id,
     get_model_spec,
     get_runtime_spec,
+    host_runtime_ids,
+    normalize_runtime_id,
     total_bundle_bytes,
     total_install_bytes,
 )
@@ -44,8 +47,11 @@ __all__ = [
     "LocalModelSpec",
     "VisionModelSpec",
     "catalog_public",
+    "default_runtime_id",
     "get_model_spec",
     "get_runtime_spec",
+    "host_runtime_ids",
+    "normalize_runtime_id",
     "total_bundle_bytes",
     "total_install_bytes",
 ]

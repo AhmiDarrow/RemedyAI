@@ -294,6 +294,77 @@ def test_catalog_pins_are_complete():
     assert cpu.zip_name.endswith(".zip")
     assert cpu.sha256 and len(cpu.sha256) == 64
     assert "win-cuda-12.4-x64" in LLAMA_RUNTIMES
+    linux_cpu = get_runtime_spec("linux-cpu-x64")
+    assert linux_cpu.zip_name.endswith(".tar.gz")
+    assert linux_cpu.binary_name == "llama-server"
+    assert linux_cpu.sha256 and len(linux_cpu.sha256) == 64
+    linux_gpu = get_runtime_spec("linux-vulkan-x64")
+    assert linux_gpu.zip_name.endswith(".tar.gz")
+    assert linux_gpu.binary_name == "llama-server"
+    assert linux_gpu.sha256 and len(linux_gpu.sha256) == 64
+
+
+def test_default_runtime_id_is_os_correct():
+    from remedy.runtime.catalog import default_runtime_id, host_runtime_ids
+
+    rid = default_runtime_id()
+    assert rid in LLAMA_RUNTIMES
+    assert rid in host_runtime_ids()
+    gpu = default_runtime_id(prefer_gpu=True)
+    assert gpu in LLAMA_RUNTIMES
+    assert gpu in host_runtime_ids()
+
+
+def test_normalize_runtime_id_remaps_other_os(monkeypatch):
+    import remedy.runtime.catalog as cat
+
+    monkeypatch.setattr(cat.sys, "platform", "linux")
+    assert cat.normalize_runtime_id("win-cpu-x64") == "linux-cpu-x64"
+    assert cat.normalize_runtime_id("win-cuda-12.4-x64") == "linux-vulkan-x64"
+    assert cat.normalize_runtime_id("linux-cpu-x64") == "linux-cpu-x64"
+    assert cat.default_runtime_id() == "linux-cpu-x64"
+    assert cat.default_runtime_id(prefer_gpu=True) == "linux-vulkan-x64"
+
+    monkeypatch.setattr(cat.sys, "platform", "win32")
+    assert cat.normalize_runtime_id("linux-cpu-x64") == "win-cpu-x64"
+    assert cat.normalize_runtime_id("linux-vulkan-x64") == "win-cuda-12.4-x64"
+    assert cat.normalize_runtime_id("win-cpu-x64") == "win-cpu-x64"
+
+
+def test_extract_archive_targz_and_slip(tmp_path: Path):
+    import os
+    import tarfile
+
+    from remedy.vision import install as inst
+
+    dest = tmp_path / "runtime"
+    archive = tmp_path / "llama-b10107-bin-ubuntu-x64.tar.gz"
+    src = tmp_path / "payload"
+    (src / "build" / "bin").mkdir(parents=True)
+    binary = src / "build" / "bin" / "llama-server"
+    binary.write_bytes(b"#!/bin/sh\necho ok\n")
+    if os.name != "nt":
+        binary.chmod(0o644)
+    with tarfile.open(archive, "w:gz") as tf:
+        tf.add(binary, arcname="build/bin/llama-server")
+    inst._extract_archive(archive, dest)
+    out = dest / "build" / "bin" / "llama-server"
+    assert out.is_file()
+    assert out.read_bytes().startswith(b"#!")
+    if os.name != "nt":
+        assert out.stat().st_mode & 0o111
+
+    evil = tmp_path / "evil.tar.gz"
+    with tarfile.open(evil, "w:gz") as tf:
+        info = tarfile.TarInfo(name="../outside")
+        payload = b"nope"
+        info.size = len(payload)
+        tf.addfile(info, __import__("io").BytesIO(payload))
+    try:
+        inst._extract_archive(evil, dest)
+        raise AssertionError("expected slip to be blocked")
+    except ValueError as e:
+        assert "Slip" in str(e)
 
 
 def test_decode_prompt_structure():
@@ -603,8 +674,10 @@ def test_reinstall_runtime_clears_runtime_dir(tmp_path: Path, monkeypatch):
     assert r["ok"] is True
     assert not (rdir / "llama-server.exe").exists()
     assert (mdir / "keep.gguf").is_file()
+    from remedy.runtime.catalog import default_runtime_id
+
     assert called.get("prefer_cuda") is True
-    assert called.get("runtime_id") == "win-cuda-12.4-x64"
+    assert called.get("runtime_id") == default_runtime_id(prefer_gpu=True)
 
 
 def test_decode_metrics_recorded():

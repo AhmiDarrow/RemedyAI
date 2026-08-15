@@ -1,0 +1,11 @@
+{
+  "bundle": {
+    "resources": {
+      "../bin/remedy-desktop.exe": "remedy-desktop.exe",
+      "../dist": "webui",
+      "windows/uninstall_options.ps1": "windows/uninstall_options.ps1",
+      "windows/uninstall_wipe.ps1": "windows/uninstall_wipe.ps1",
+      "windows/remedy-update-ui.ps1": "windows/remedy-update-ui.ps1"
+    }
+  }
+}
