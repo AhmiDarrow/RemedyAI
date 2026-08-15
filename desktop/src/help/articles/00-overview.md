@@ -21,7 +21,7 @@ project access scope).
 | **Product** | Windows + Linux desktop partner + local API (`127.0.0.1:7400`) |
 | **Data home** | `~/.remedy` (config, memory, skills; DPAPI on Windows) |
 | **Models** | *Your* provider keys or Ollama / RMB — continuity stays on disk |
-| **Current** | **v0.26.1** — Build finishes pages; drives the host |
+| **Current** | **v0.26.2** — Host in Remedy's hands; Build does not stick on ledger |
 | **Install** | [Windows](01-install-windows.md) · [Linux](01-install-linux.md) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · PyPI `remedy-ai` |
 
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.  
@@ -30,6 +30,11 @@ Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
 ---
 
 ## What’s new (start here)
+
+**v0.26.2** highlights:
+
+- Work turns drive this PC (no Ask pause); knowledge follow-ups keep tools
+- Build no longer hangs on `pytest --lf` / stale profile todos
 
 **v0.26.1** highlights:
 

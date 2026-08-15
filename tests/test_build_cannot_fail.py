@@ -9,10 +9,15 @@ from remedy.core.build_engine import (
     BuildTurnState,
     build_blocks_final_answer,
     enable_build_host_drive,
+    enable_work_host_drive,
     looks_like_build_request,
     next_machine_nudge,
     observe_tool_batch,
 )
+from remedy.core.build_ledger import BuildLedgerEntry, save_ledger
+from remedy.core.build_oracle import should_auto_verify
+from remedy.core.build_scoped import scoped_verify_command
+from remedy.core.build_todos import sync_todos_with_build, upsert_todos
 from remedy.core.react_policy import build_keeps_tools_armed
 from remedy.core.react_turn import resolve_tools
 from remedy.core.shell_write_jail import (
@@ -138,6 +143,37 @@ def test_build_drives_host_skips_ask(monkeypatch) -> None:
     assert q2.needs_ask("write remedy.html", tool_name="file_write") is not None
 
 
+def test_work_turn_drives_the_pc(monkeypatch) -> None:
+    """Any work turn drives this PC — Ask is not a roadblock. Jail stays on."""
+    q = ApprovalQueue()
+    q.set_mode("ask")
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"access_scope": "project", "approval_mode": "ask"},
+    )
+    toks = begin_turn("work-drive", project_raw=None, active_path=".")
+    try:
+        enable_work_host_drive(
+            runtime=None,
+            message="Create index.html for the landing page",
+            plan_mode=False,
+        )
+        assert turn_skip_ask() is True
+        assert q.needs_ask("write index.html", tool_name="file_write") is None
+        assert q.needs_ask("dir", tool_name="bash_exec") is None
+        set_turn_skip_ask(False)
+        enable_work_host_drive(runtime=None, message="thanks", plan_mode=False)
+        assert turn_skip_ask() is False
+        enable_work_host_drive(
+            runtime=None,
+            message="Create index.html",
+            plan_mode=True,
+        )
+        assert turn_skip_ask() is False
+    finally:
+        end_turn("work-drive", *toks)
+
+
 def test_copy_over_cmd_exe_still_jails() -> None:
     """Sidecar leftover skip must not waive overwrite of a real runtime dest."""
     roots = [Path(r"C:\Users\Administrator\AhmiDarrow-Website")]
@@ -200,3 +236,129 @@ def test_copy_in_script_may_read_sibling_assets(tmp_path: Path) -> None:
         scan_script_source_for_outside_writes(evil, write_roots=[proj.resolve()])
         is not None
     )
+
+
+def test_ledger_write_does_not_count_as_product_write() -> None:
+    st = BuildTurnState(active=True, phase="implement", goal="Create page.html")
+    observe_tool_batch(
+        st,
+        [
+            {
+                "id": "l1",
+                "function": {
+                    "name": "file_write",
+                    "arguments": '{"path":".remedy-build/ledger.json","content":"{}"}',
+                },
+            }
+        ],
+        [{"role": "tool", "tool_call_id": "l1", "content": "wrote ledger"}],
+    )
+    assert st.write_steps == 0
+    assert not any("ledger.json" in str(w) for w in (st.write_set or []))
+
+
+def test_scoped_verify_never_uses_last_failed(tmp_path: Path) -> None:
+    (tmp_path / "tests").mkdir()
+    (tmp_path / ".pytest_cache").mkdir()
+    (tmp_path / "index.html").write_text("<html>ok</html>\n", encoding="utf-8")
+    from types import SimpleNamespace
+
+    rt = SimpleNamespace(effective_project_path=lambda: tmp_path)
+    cmd = scoped_verify_command(
+        rt, [str(tmp_path / "index.html")], base_command="pytest -q"
+    )
+    assert cmd == "" or "--lf" not in cmd
+
+
+def test_timeout_does_not_rearm_auto_verify() -> None:
+    st = BuildTurnState(
+        active=True,
+        phase="repair",
+        goal="Create index.html",
+        write_steps=2,
+        write_set=["index.html"],
+        last_verify_ok=False,
+        last_verify_summary=(
+            "verify exit_code=-1\ntimeout_s=300.0\ncommand=pytest -q --lf\n"
+            "stderr:\nCommand timed out after 300.0s"
+        ),
+        auto_verify_ran=True,
+        write_steps_at_last_green=2,
+    )
+    assert should_auto_verify(st) is False
+
+
+def test_stale_todos_close_when_files_exist(tmp_path: Path) -> None:
+    (tmp_path / "index.html").write_text("<html>hello world</html>\n", encoding="utf-8")
+    from types import SimpleNamespace
+
+    rt = SimpleNamespace(
+        effective_project_path=lambda: tmp_path,
+        config=SimpleNamespace(home_dir=tmp_path),
+        _build_turn=None,
+    )
+    upsert_todos(
+        rt,
+        [
+            {"id": "1", "content": "Scout project folder", "status": "in_progress"},
+            {"id": "2", "content": "Write index.html", "status": "pending"},
+            {"id": "3", "content": "Verify green", "status": "pending"},
+        ],
+        merge=False,
+    )
+    st = BuildTurnState(
+        active=True,
+        phase="verify",
+        goal="Create index.html landing page",
+        project_path=str(tmp_path),
+        write_steps=2,
+        write_set=["index.html"],
+        last_verify_ok=True,
+        required_files=["index.html"],
+    )
+    sync_todos_with_build(rt, st)
+    assert st.open_todo_count == 0
+    assert build_blocks_final_answer(st) is False
+
+
+def test_timeout_ledger_does_not_resume_last_failed(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from remedy.core.build_engine import begin_build_turn
+
+    proj = tmp_path / "site"
+    proj.mkdir()
+    (proj / "index.html").write_text("<html>ok enough</html>\n", encoding="utf-8")
+    save_ledger(
+        BuildLedgerEntry(
+            goal="Create index.html",
+            phase="repair",
+            project_path=str(proj),
+            verify_command="pytest -q",
+            last_verify_ok=False,
+            last_verify_summary="verify exit_code=-1\nCommand timed out after 300.0s",
+            last_scoped_command="pytest -q --lf",
+            write_steps=4,
+            write_set=[str(proj / "index.html"), str(proj / ".remedy-build" / "ledger.json")],
+        ),
+        home=tmp_path,
+    )
+    rt = SimpleNamespace(
+        _llm_provider="xai",
+        _llm_model="grok-4",
+        _llm_base_url="",
+        _session_brief=None,
+        _project_path_raw=str(proj),
+        effective_project_path=lambda: proj,
+        config=SimpleNamespace(home_dir=tmp_path),
+    )
+    toks = begin_turn("ledger-stuck", project_raw=str(proj), active_path=str(proj))
+    try:
+        st = begin_build_turn(rt, "Create index.html marketing landing page")
+        assert st is not None
+        assert "--lf" not in (st.last_scoped_command or "")
+        assert st.auto_verify_ran is True
+        assert st.phase != "repair" or not st.missing_required_files()
+        assert should_auto_verify(st) is False
+    finally:
+        end_turn("ledger-stuck", *toks)

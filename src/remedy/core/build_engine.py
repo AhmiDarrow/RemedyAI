@@ -229,12 +229,23 @@ def _is_filesystem_path(path: str) -> bool:
     return bool(re.search(r"\.[A-Za-z0-9]{1,8}$", p))
 
 
+def _is_build_meta_path(path: str) -> bool:
+    """Ledger / todos / tmp helpers are not product writes."""
+    p = (path or "").strip().lower().replace("\\", "/")
+    if not p:
+        return False
+    if "/.remedy-build/" in p or p.endswith("/.remedy-build"):
+        return True
+    name = p.rsplit("/", 1)[-1]
+    return name in {"ledger.json", "todos.json"}
+
+
 def _is_source_path(path: str) -> bool:
     p = (path or "").strip().lower().replace("\\", "/")
     if not _is_filesystem_path(p):
         return False
-    # Ignore tmp / probe scripts
-    if "/.remedy-build/" in p or p.startswith("_") or "/_dump" in p:
+    # Ignore tmp / probe scripts / ledger
+    if _is_build_meta_path(p) or p.startswith("_") or "/_dump" in p:
         return False
     return any(p.endswith(suf) for suf in _SOURCE_WRITE_SUFFIXES)
 
@@ -322,6 +333,8 @@ class BuildTurnState:
         self.touch_path(path)
         p = (path or "").strip()
         if not p or not _is_filesystem_path(p):
+            return
+        if _is_build_meta_path(p):
             return
         if p not in self.write_set:
             self.write_set.append(p)
@@ -638,19 +651,32 @@ def begin_build_turn(
                 st.verify_steps = max(st.verify_steps, int(led.verify_steps or 0))
             if led.goal and (not st.goal or len(st.goal) < 8):
                 st.goal = led.goal[:300]
-            if led.last_verify_ok is False:
-                st.last_verify_ok = False
-                st.phase = "repair"
             if led.last_verify_summary:
                 st.last_verify_summary = led.last_verify_summary
+            timed_out = "timed out" in (led.last_verify_summary or "").lower()
+            if led.last_verify_ok is False:
+                st.last_verify_ok = False
+                if timed_out:
+                    # Do not immediately re-run the command that just hung the turn.
+                    st.auto_verify_ran = True
+                    st.last_scoped_command = ""
+                    st.write_steps_at_last_green = int(st.write_steps or 0)
+                    st.phase = "implement" if st.missing_required_files() else "verify"
+                else:
+                    st.phase = "repair"
             # Restore body: last fail + unverified writes so the next wake acts
             if led.last_verify_ok is not True:
                 if isinstance(led.last_error_vector, dict) and led.last_error_vector:
-                    st.last_error_vector = dict(led.last_error_vector)
-                if led.last_scoped_command:
-                    st.last_scoped_command = str(led.last_scoped_command)
+                    if not timed_out:
+                        st.last_error_vector = dict(led.last_error_vector)
+                if led.last_scoped_command and not timed_out:
+                    sc = str(led.last_scoped_command)
+                    if "--lf" not in sc:
+                        st.last_scoped_command = sc
                 writes = [
-                    p for p in list(led.write_set or []) if _is_filesystem_path(str(p))
+                    p
+                    for p in list(led.write_set or [])
+                    if _is_filesystem_path(str(p)) and not _is_build_meta_path(str(p))
                 ]
                 if writes:
                     st.write_set = writes[-40:]
@@ -688,6 +714,10 @@ def begin_build_turn(
             home=home,
         )
     enable_build_host_drive(runtime, st)
+    with suppress(Exception):
+        from remedy.core.build_todos import sync_todos_with_build
+
+        sync_todos_with_build(runtime, st)
     return st
 
 
@@ -707,6 +737,33 @@ def enable_build_host_drive(
         return
     if str(getattr(st, "phase", "") or "") == "done" and not st.missing_required_files():
         return
+    with suppress(Exception):
+        from remedy.core.turn_context import set_turn_skip_ask
+
+        set_turn_skip_ask(True)
+
+
+def enable_work_host_drive(
+    runtime: Any = None,
+    message: str = "",
+    *,
+    plan_mode: bool = False,
+    build_state: BuildTurnState | None = None,
+) -> None:
+    """Any work turn drives the host — no Ask pause.
+
+    Greetings, verbal trivia, Plan mode, and untrusted scope stay Ask.
+    Jail and auth-secret blocks stay on. Settings approval_mode is not changed.
+    """
+    if plan_mode:
+        return
+    msg = message or ""
+    with suppress(Exception):
+        from remedy.core.react_policy import is_chat_only_message, is_pure_trivia_message
+
+        if is_chat_only_message(msg) or is_pure_trivia_message(msg):
+            return
+    enable_build_host_drive(runtime, build_state)
     with suppress(Exception):
         from remedy.core.turn_context import set_turn_skip_ask
 
@@ -870,6 +927,11 @@ def observe_tool_batch(
 
     source_write_this_batch = False
     if any_write:
+        written_paths = [_args_path(tc) for tc in tcs if _tool_name(tc) in _WRITE_TOOLS]
+        written_paths = [p for p in written_paths if p]
+        if written_paths and all(_is_build_meta_path(p) for p in written_paths):
+            any_write = False
+    if any_write:
         state.write_steps += 1
         if state.phase in ("scout",):
             state.phase = "implement"
@@ -890,6 +952,11 @@ def observe_tool_batch(
                 state.empty_write_paths = [
                     e for e in state.empty_write_paths if e.replace("\\", "/") != p.replace("\\", "/")
                 ]
+
+    with suppress(Exception):
+        from remedy.core.build_todos import sync_todos_with_build
+
+        sync_todos_with_build(None, state)
 
     # Only *source* mutations invalidate green (docs/tmp/yml thrash is ignored)
     if source_write_this_batch and state.auto_verify_ran and state.last_verify_ok is True:

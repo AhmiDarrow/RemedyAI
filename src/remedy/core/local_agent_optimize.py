@@ -408,9 +408,9 @@ def slim_system_for_local(
     # Trivia / math / world-knowledge: tiny prompt. The agent contract
     # ("call tools immediately") makes reasoners and base models ramble.
     try:
-        from remedy.core.react_policy import is_knowledge_question
+        from remedy.core.react_policy import is_pure_trivia_message
 
-        if is_knowledge_question(user_message):
+        if is_pure_trivia_message(user_message):
             return (
                 f"You are a local assistant on this PC (model: {model or 'local'}).\n"
                 "Answer in one short sentence. No tools. No essays. No chain-of-thought."
@@ -649,9 +649,9 @@ def apply_local_body_optimize(
 
     trivia = False
     try:
-        from remedy.core.react_policy import is_knowledge_question
+        from remedy.core.react_policy import is_pure_trivia_message
 
-        trivia = is_knowledge_question(user_message or "")
+        trivia = is_pure_trivia_message(user_message or "")
     except Exception:
         trivia = False
     if trivia:
