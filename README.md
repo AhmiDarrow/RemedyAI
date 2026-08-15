@@ -42,7 +42,7 @@
 | **Who it’s for** | Owners who want power without multi-agent theater — chat, files, this-PC shell, browser rail, computer use |
 | **What stays local** | Memory, Session Brief, skills, approvals, DPAPI secrets, optional SmolVLM2 vision |
 | **What you bring** | Your API keys / local Ollama — no Remedy cloud account for core use |
-| **Current** | **v0.26.0** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
+| **Current** | **v0.26.1** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
 
 From the creator: *My name is Ahmi, I hope you enjoy my Remedy.*  
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.
@@ -51,7 +51,7 @@ In-app: title-bar / tray → **About Remedy** · **Settings → About**.
 
 ## What’s new
 
-**Latest: [v0.26.0](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.26.0)** — Windows + Linux desktop, Plan/jail/Settings hardening. (0.25.1: jail dests, Stop/abort, tab isolation.)
+**Latest: [v0.26.1](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.26.1)** — Build finishes pages and drives the host. (0.26.0: Windows + Linux desktop.)
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/AhmiDarrow/RemedyAI/master/docs/manual/assets/remedy-partner-architecture.jpg" alt="How Remedy fits together" width="640" />
@@ -75,7 +75,7 @@ Earlier: [0.19.0 parallel multi-provider](https://github.com/AhmiDarrow/RemedyAI
 
 ## Two desktops, one partner
 
-v0.26.0 makes Remedy **truly multiplatform** — the same partner on Windows and Linux, the same `~/.remedy` home, the same local API on `127.0.0.1:7400`.
+v0.26.0 made Remedy **truly multiplatform** — the same partner on Windows and Linux, the same `~/.remedy` home, the same local API on `127.0.0.1:7400`. 0.26.1 is the Build finish/drive fix on that line.
 
 | | **Windows** | **Linux** |
 |--|-------------|-----------|

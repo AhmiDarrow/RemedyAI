@@ -27,6 +27,9 @@ def test_detects_build_requests():
     assert looks_like_build_request("full bugsweep")
     assert looks_like_build_request("bugsweep")
     assert looks_like_build_request("hotfix")
+    assert looks_like_build_request(
+        "Create a beautiful marketing landing page for Remedy"
+    )
     assert not looks_like_build_request("thanks")
     assert not looks_like_build_request("what is a monad?")
 

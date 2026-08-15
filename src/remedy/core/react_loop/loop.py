@@ -433,6 +433,10 @@ async def call_llm_stream(runtime, message: str,
                 proto = build_protocol_block(build_state)
                 if proto:
                     messages.append({"role": "system", "content": str(proto)})
+                with suppress(Exception):
+                    from remedy.core.build_engine import enable_build_host_drive
+
+                    enable_build_host_drive(runtime, build_state)
         # Frontier continue: brief + ledger inject (no local harness thrash)
         with suppress(Exception):
             from remedy.core.build_engine import frontier_continue_inject
@@ -480,9 +484,14 @@ async def call_llm_stream(runtime, message: str,
             # Verbal-only / trivia / inject must stay tool-free. Pseudo-tool
             # recovery used to re-arm 24 schemas and pin keep_armed.
             with suppress(Exception):
+                from remedy.core.react_policy import (
+                    build_keeps_tools_armed as _build_keep,
+                )
                 from remedy.core.react_policy import message_wants_tools as _wants
 
-                if not _wants(message or ""):
+                if not _wants(message or "") and not _build_keep(
+                    message or "", build_active=_build_active()
+                ):
                     logger.info("skip rearm — user message is non-work")
                     return
             tools, run_until_done = _rearm_agency_tools_fn(turn)
