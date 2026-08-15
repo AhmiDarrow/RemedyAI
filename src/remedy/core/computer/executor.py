@@ -1218,15 +1218,55 @@ class ComputerExecutor:
                 )
             else:
                 last_err = finished.error or finished.status or "timeout"
-            # Retry: scroll down then try again
+            # Retry: scroll down then try again (wait/cancel scroll; abortable)
             if attempt == 0:
-                self._enqueue(
+                if self._abort_check():
+                    return public_result(
+                        ok=False,
+                        target="browser",
+                        action="click",
+                        message="Aborted by user",
+                        extra={"aborted": True, "text": text_q},
+                    )
+                scroll_job = self._enqueue(
                     "scroll",
                     {"ui": {"open_browser": True}, "x": 200, "y": 300, "dy": -4},
                 )
-                time.sleep(0.25)
+                self.bridge.wait(
+                    scroll_job.id,
+                    timeout_s=0.8,
+                    poll_s=0.05,
+                    abort_check=self._abort_check,
+                    unclaimed_timeout_s=0.4,
+                    grace_s=0.1,
+                )
+                if self._abort_check() or self._sleep_abortable(0.25):
+                    return public_result(
+                        ok=False,
+                        target="browser",
+                        action="click",
+                        message="Aborted by user",
+                        extra={"aborted": True, "text": text_q},
+                    )
+        # Stop before snapshot/ref/desktop fallbacks after user abort
+        if self._abort_check():
+            return public_result(
+                ok=False,
+                target="browser",
+                action="click",
+                message="Aborted by user",
+                extra={"aborted": True, "text": text_q},
+            )
         # Fallback: snapshot + match + click ref
         snap = self._browser_snapshot_now(kwargs)
+        if self._abort_check():
+            return public_result(
+                ok=False,
+                target="browser",
+                action="click",
+                message="Aborted by user",
+                extra={"aborted": True, "text": text_q},
+            )
         if snap.get("ok") and snap.get("elements"):
             from remedy.core.computer.elements import find_best_element
 
@@ -1247,6 +1287,14 @@ class ComputerExecutor:
                     unclaimed_timeout_s=2.0,
                     grace_s=0.15,
                 )
+                if fin2.status == "cancelled" or self._abort_check():
+                    return public_result(
+                        ok=False,
+                        target="browser",
+                        action="click",
+                        message="Aborted by user",
+                        extra={"aborted": True, "text": text_q},
+                    )
                 if fin2.status == "done" and fin2.result:
                     out = dict(fin2.result)
                     out.setdefault("ok", True)
@@ -1259,6 +1307,14 @@ class ComputerExecutor:
                     )
                     return out
         # Rail miss → desktop UIA (game / native window after computer_app)
+        if self._abort_check():
+            return public_result(
+                ok=False,
+                target="browser",
+                action="click",
+                message="Aborted by user",
+                extra={"aborted": True, "text": text_q},
+            )
         try:
             desk = self._run_desktop(ComputerAction.CLICK, text=text_q, **{
                 k: v for k, v in kwargs.items() if k not in ("text", "ref", "target")
@@ -1551,8 +1607,14 @@ class ComputerExecutor:
             raw_settle = payload.get("settle_s")
             settle = float(raw_settle) if raw_settle is not None else default_settle
             if settle > 0:
-                time.sleep(min(max(settle, 0.0), 1.5))
-                out["settled_s"] = min(max(settle, 0.0), 1.5)
+                capped = min(max(settle, 0.0), 1.5)
+                if self._sleep_abortable(capped):
+                    out["ok"] = False
+                    out["aborted"] = True
+                    out["message"] = "Aborted by user"
+                    out["settled_s"] = 0.0
+                    return out
+                out["settled_s"] = capped
             if optimistic:
                 out.setdefault("ready_for_input", False)
                 out.setdefault("pending_load", True)
@@ -1572,15 +1634,43 @@ class ComputerExecutor:
         if finished.status == "done" and finished.result:
             return _nav_ok(dict(finished.result), optimistic=False)
 
-        # Brief re-read (host may complete mid-return)
+        # Brief re-read (host may complete mid-return) — abortable
         for _ in range(8):
+            if self._abort_check():
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="navigate",
+                    message="Aborted by user",
+                    extra={"aborted": True, "job_id": job.id},
+                )
             again = self.bridge._read(job.id)
             if again and again.status == "done" and again.result:
                 return _nav_ok(dict(again.result), optimistic=False)
-            time.sleep(0.025)
+            if self._sleep_abortable(0.025):
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="navigate",
+                    message="Aborted by user",
+                    extra={"aborted": True, "job_id": job.id},
+                )
+
+        if self._abort_check():
+            return public_result(
+                ok=False,
+                target="browser",
+                action="navigate",
+                message="Aborted by user",
+                extra={"aborted": True, "job_id": job.id},
+            )
 
         twin = self.bridge.find_recent_success(
-            action="navigate", url=url, max_age_s=15.0
+            action="navigate",
+            url=url,
+            max_age_s=15.0,
+            session_id=str(job.session_id or ""),
+            job_id=job.id,
         )
         if twin and twin.result:
             out = dict(twin.result)
@@ -1591,6 +1681,15 @@ class ComputerExecutor:
         # Desktop is alive → fire-and-forget SUCCESS so the model never claims
         # the rail failed while the page is opening (open-url must be instant).
         # Mark optimistic so type/click wait for settle before acting.
+        # Never optimistic-complete after Stop — would still open the URL.
+        if self._abort_check():
+            return public_result(
+                ok=False,
+                target="browser",
+                action="navigate",
+                message="Aborted by user",
+                extra={"aborted": True, "job_id": job.id},
+            )
         if self.bridge.host_connected(max_age_s=20.0):
             result = {
                 "ok": True,

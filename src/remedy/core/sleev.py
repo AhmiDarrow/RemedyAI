@@ -521,7 +521,12 @@ def prepare_llm_http(
     if cfg is None and runtime is not None:
         cfg = cfg_from_runtime(runtime)
     if not force_direct and runtime is not None:
-        force_direct = bool(getattr(runtime, "_sleev_force_direct", False))
+        try:
+            from remedy.core.turn_context import turn_sleev_force_direct
+
+            force_direct = bool(turn_sleev_force_direct(runtime))
+        except Exception:
+            force_direct = bool(getattr(runtime, "_sleev_force_direct", False))
     headers = adapter.auth_headers(api_key or "")
     raw_base = base_url or getattr(adapter, "default_base_url", "") or ""
     if force_direct:

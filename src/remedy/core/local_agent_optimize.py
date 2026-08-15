@@ -891,31 +891,15 @@ async def maybe_bootstrap_local_create(
 
 
 def ensure_local_power_approvals() -> None:
-    """Local coding agents cannot finish if every file_write needs a click.
+    """Skip the Ask click for this local/RMB turn only — never persist Settings.
 
-    When chat is RMB/local, promote approval_mode to auto in-process (and
-    mirror to config when possible) so create/build turns complete end-to-end.
+    Sibling cloud tabs stay in Ask. Process-global ``APPROVALS.mode`` and
+    ``config.toml`` are left untouched.
     """
     try:
-        from remedy.core.approvals import APPROVALS
-        from remedy.interfaces.api_support import (
-            _find_config_path,
-            _write_config,
-            invalidate_config_cache,
-            load_config,
-        )
+        from remedy.core.turn_context import set_turn_skip_ask
 
-        if APPROVALS.mode == "auto":
-            return
-        APPROVALS.set_mode("auto")
-        cfg = load_config() or {}
-        if isinstance(cfg, dict) and str(cfg.get("approval_mode") or "").lower() != "auto":
-            cfg = dict(cfg)
-            cfg["approval_mode"] = "auto"
-            path = _find_config_path()
-            if path is not None:
-                _write_config(path, cfg)
-                invalidate_config_cache()
+        set_turn_skip_ask(True)
     except Exception:
         pass
 

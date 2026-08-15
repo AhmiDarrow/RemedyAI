@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
-from contextlib import suppress
+from contextlib import AsyncExitStack, suppress
 from typing import Any
 from uuid import uuid4
 
@@ -69,7 +69,34 @@ def progress_marker(
 _WRITE_TOOLS = frozenset({"file_write", "file_edit", "file_edit_batch", "apply_patch"})
 
 
-def _write_path_key(name: str, args: dict[str, Any]) -> str | None:
+def _normalize_lock_path(path: str, runtime: Any | None = None) -> str:
+    """Stable lock key for the same inode under different spellings.
+
+    ``src/a.py``, ``./src/a.py``, and an absolute form must share one lock.
+    Prefer runtime.resolve_tool_path when available; else Path.resolve.
+    """
+    raw = (path or "").strip()
+    if not raw:
+        return ""
+    if runtime is not None and hasattr(runtime, "resolve_tool_path"):
+        with suppress(Exception):
+            resolved = runtime.resolve_tool_path(raw, for_write=True)
+            return str(resolved).replace("\\", "/").casefold()
+    from pathlib import Path
+
+    with suppress(Exception):
+        p = Path(raw).expanduser()
+        try:
+            p = p.resolve(strict=False)
+        except OSError:
+            p = p.absolute()
+        return str(p).replace("\\", "/").casefold()
+    return raw.replace("\\", "/").casefold()
+
+
+def _write_path_key(
+    name: str, args: dict[str, Any], runtime: Any | None = None
+) -> str | None:
     """Lock key so concurrent writes never clobber the same path.
 
     Independent paths can run in parallel; intersecting paths share a key.
@@ -85,9 +112,13 @@ def _write_path_key(name: str, args: dict[str, Any]) -> str | None:
         if isinstance(edits, list):
             for e in edits:
                 if isinstance(e, dict) and e.get("path"):
-                    paths.append(str(e.get("path") or "").strip().lower())
+                    norm = _normalize_lock_path(str(e.get("path") or ""), runtime)
+                    if norm:
+                        paths.append(norm)
         if not paths and isinstance(args, dict) and args.get("path"):
-            paths.append(str(args.get("path") or "").strip().lower())
+            norm = _normalize_lock_path(str(args.get("path") or ""), runtime)
+            if norm:
+                paths.append(norm)
         if not paths:
             return "__all_writes__"
         # Single stable key for the whole batch set (sorted join) so two
@@ -100,10 +131,10 @@ def _write_path_key(name: str, args: dict[str, Any]) -> str | None:
         return f"path:{paths[0]}"
     path = ""
     if isinstance(args, dict):
-        path = str(args.get("path") or args.get("file") or "").strip().lower()
+        path = str(args.get("path") or args.get("file") or "").strip()
     if not path:
         return "__all_writes__"
-    return f"path:{path}"
+    return f"path:{_normalize_lock_path(path, runtime)}"
 
 
 async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
@@ -200,7 +231,9 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                 # fall through and execute
             elif args.get("_stream_truncated") or args.get("_invalid_json"):
                 with suppress(Exception):
-                    runtime._remedy_write_budget = max(int(getattr(runtime, "_remedy_write_budget", 0) or 0), 8192)
+                    from remedy.core.turn_context import set_turn_write_budget
+
+                    set_turn_write_budget(8192, runtime)
                 if tname in ("file_edit", "file_edit_batch"):
                     content_str = format_tool_error(
                         "file_edit JSON was cut off mid-stream (edit too large). "
@@ -461,11 +494,34 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                     with suppress(Exception):
                         sq_handle.record_shadow_catch()
 
-        lock_key = _write_path_key(name, args)
+        lock_key = _write_path_key(name, args, runtime)
         if lock_key:
-            lock = path_locks.setdefault(lock_key, asyncio.Lock())
-            async with lock:
-                result, content_str, effective_ok = await _call()
+            # Hand-over-hand: __all_writes__ serializes against every path:*
+            # lock; disjoint single-path writes still run in parallel after
+            # briefly taking the barrier so they cannot race apply_patch.
+            all_lock = path_locks.setdefault("__all_writes__", asyncio.Lock())
+            if lock_key == "__all_writes__":
+                async with all_lock:
+                    extras = [
+                        lk
+                        for k, lk in list(path_locks.items())
+                        if k.startswith("path:")
+                    ]
+                    if extras:
+                        async with AsyncExitStack() as stack:
+                            for lk in extras:
+                                await stack.enter_async_context(lk)
+                            result, content_str, effective_ok = await _call()
+                    else:
+                        result, content_str, effective_ok = await _call()
+            else:
+                path_lock = path_locks.setdefault(lock_key, asyncio.Lock())
+                async with all_lock:
+                    await path_lock.acquire()
+                try:
+                    result, content_str, effective_ok = await _call()
+                finally:
+                    path_lock.release()
         else:
             result, content_str, effective_ok = await _call()
 

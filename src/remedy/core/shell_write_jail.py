@@ -40,8 +40,8 @@ _MUTATION_HINT_RE = re.compile(
     # Download / fetch to file
     r"|\binvoke-webrequest\b|\biwr\b"
     r"|\bcurl\b|\bwget\b"
-    # Interpreter one-shot writes (python.exe / node.exe are the Windows default)
-    r"|\b(?:pythonw|python3|python|py|nodejs|node)(?:\.exe)?\s+(?:-\w+\s+)*-c\b"
+    # Interpreter one-shot writes (python.exe / python3.12 / node.exe)
+    r"|\b(?:pythonw?(?:\d+(?:\.\d+)*)?|py(?!test)|nodejs|node)(?:\.exe)?\s+(?:-\w+\s+)*-c\b"
     r"|\b(?:nodejs|node)(?:\.exe)?\s+(?:-\w+\s+)*-e\b"
     # Windows FS utilities that create/mutate without cmdlets above
     r"|\bfsutil\b|\bmklink\b"
@@ -95,11 +95,11 @@ _OPAQUE_PATH_HINT_RE = re.compile(
 _INTERPRETER_ONESHOT_RE = re.compile(
     r"(?ix)"
     r"(?:"
-    r"\b(?:pythonw|python3|python|py)(?:\.exe)?\s+(?:-\w+\s+)*-c\b"
+    r"\b(?:pythonw?(?:\d+(?:\.\d+)*)?|py(?!test))(?:\.exe)?\s+(?:-\w+\s+)*-c\b"
     r"|\b(?:nodejs|node)(?:\.exe)?\s+(?:-\w+\s+)*-e\b"
     r"|\b(?:powershell|pwsh)(?:\.exe)?[^\n]*-(?:command|c)\b"
     # stdin: `python -` / `python -u -` (not `python -m` / `python -c`)
-    r"|\b(?:pythonw|python3|python|py|nodejs|node)(?:\.exe)?(?:\s+-\w+)*\s+-(?:\s|$|[|&;])"
+    r"|\b(?:pythonw?(?:\d+(?:\.\d+)*)?|py(?!test)|nodejs|node)(?:\.exe)?(?:\s+-\w+)*\s+-(?:\s|$|[|&;])"
     r"|\b(?:php|ruby|perl)(?:\.exe)?\s+(?:-\w+\s+)*-[re]\b"
     r")"
 )
@@ -108,7 +108,7 @@ _INTERPRETER_ONESHOT_RE = re.compile(
 _READONLY_ONESHOT_RE = re.compile(
     r"(?ix)"
     r"(?:"
-    r"\b(?:pythonw|python3|python|py)(?:\.exe)?\s+(?:-\w+\s+)*-c\s+"
+    r"\b(?:pythonw?(?:\d+(?:\.\d+)*)?|py(?!test))(?:\.exe)?\s+(?:-\w+\s+)*-c\s+"
     r"""['\"]\s*(?:print|help)\s*\([^'\"]*\)\s*['\"]"""
     r"|"
     r"\b(?:node|nodejs)(?:\.exe)?\s+(?:-\w+\s+)*-e\s+"
@@ -248,7 +248,9 @@ _RUNTIME_BIN_NAMES = frozenset(
 )
 
 
-_FIRST_TOKEN_RE = re.compile(r"""^\s*(?:"([^"]*)"|'([^']*)'|(\S+))""")
+_FIRST_TOKEN_RE = re.compile(
+    r"""^\s*(?:"([^"]*)"|'([^']*)'|((?:[A-Za-z]:[\\/]Program Files(?: \(x86\))?\S*)|\S+))"""
+)
 
 
 def _split_statements(command: str) -> list[str]:
@@ -318,12 +320,16 @@ def is_runtime_executable_path(path_str: str) -> bool:
 
 # Absolute Windows / Unix path tokens in a command line.
 # Drive-letter must accept C:/ as well as C:\ — POSIX slashes are absolute on Windows.
+# Every Windows root-relative (\Temp\…, /Temp/…) resolves to the current drive.
 _ABS_PATH_RE = re.compile(
     r"(?:"
-    r'(?:[A-Za-z]:[\\/]|\\\\)[^\s\'"<>|;,&]+'  # C:\… C:/… or UNC
+    # C:\Program Files\… (space in folder) then other drive/UNC tokens
+    r'(?:[A-Za-z]:[\\/]Program Files(?: \(x86\))?[^\s\'"<>|;,&]*)'
+    r"|(?:[A-Za-z]:[\\/]|\\\\)[^\s'\"<>|;,&]+"
     r"|/(?:Users|home|tmp|var|etc|opt|mnt|media)/[^\s'\"<>|;,&]+"
-    # Windows root-relative: \Users\Public\x  (cwd-join becomes C:\Users\…)
-    r"|\\(?:Users|Windows|Program Files|ProgramData|System32)[^\s'\"<>|;,&]*"
+    # Root-relative: \Temp\pwn.txt / \Users\… (not UNC \\, not single-letter /c flags)
+    r"|\\(?![\\])[^\s'\"<>|;,&]+"
+    r"|/(?![\\/])(?![A-Za-z](?:[\s'\"<>|;,&]|$))[^\s'\"<>|;,&]+"
     r")"
 )
 
@@ -338,8 +344,8 @@ _REL_ESCAPE_RE = re.compile(
 _QUOTED_PATH_RE = re.compile(
     r"""(?x)
     (?:
-        "((?:[A-Za-z]:[\\/]|\\\\|//|\.\.|~/|\$)[^"]+)"
-      | '((?:[A-Za-z]:[\\/]|\\\\|//|\.\.|~/|\$)[^']+)'
+        "((?:[A-Za-z]:[\\/]|\\\\|//|\.\.|~/|\$|\\)[^"]+)"
+      | '((?:[A-Za-z]:[\\/]|\\\\|//|\.\.|~/|\$|\\)[^']+)'
     )
     """
 )
@@ -382,9 +388,23 @@ def _clean_token(raw: str) -> str:
     return t
 
 
+def _normalize_command_for_paths(command: str) -> str:
+    """Undo cmd caret-escapes and PowerShell ``X:"\\path"`` concatenations."""
+    text = command or ""
+    # C:^\Temp\pwn.txt → C:\Temp\pwn.txt (cmd caret-escape)
+    text = text.replace("^", "")
+    # Set-Content C:"\Temp\pwn.txt" → Set-Content C:\Temp\pwn.txt
+    text = re.sub(
+        r'([A-Za-z]:)\s*["\']([\\/][^"\']*)["\']',
+        lambda m: m.group(1) + m.group(2),
+        text,
+    )
+    return text
+
+
 def extract_path_candidates(command: str) -> list[str]:
     """Extract absolute / escape-relative path strings from a shell command."""
-    text = command or ""
+    text = _normalize_command_for_paths(command or "")
     found: list[str] = []
     seen: set[str] = set()
 
@@ -412,19 +432,284 @@ def extract_path_candidates(command: str) -> list[str]:
 _SCRIPT_LAUNCH_RE = re.compile(
     r"(?ix)"
     r"(?:"
-    r"\b(?:pythonw|python3|python|py)(?:\.exe)?\s+(?!-c\b)[^\n|&;]+"
+    r"\b(?:pythonw?(?:\d+(?:\.\d+)*)?|py(?!test))(?:\.exe)?\s+(?!-c\b)[^\n|&;]+"
     r"|\b(?:nodejs|node)(?:\.exe)?\s+(?!-e\b)[^\n|&;]+"
     r"|\b(?:ruby|perl|php|lua|bash|sh|zsh|pwsh|powershell)(?:\.exe)?\s+"
     r"(?:-[Ff]ile\s+|[^\n|&;-][^\n|&;]*)"
     r"|\b(?:cmd)(?:\.exe)?\s+/[Cc]\s+"
-    r"|(?:^|[\s;&|(])(?:\.\\|\./|/|[A-Za-z]:[\\/])[^\s|&;]+\.(?:py|js|mjs|cjs|ps1|bat|cmd|exe|vbs)\b"
+    r"|(?:^|[\s;&|(])(?:\.\\|\./|/|[A-Za-z]:[\\/])[^\s|&;]+\.(?:py|js|mjs|cjs|ps1|bat|cmd|exe|vbs|sh|rb|pl|php|lua)\b"
     r")"
 )
+
+# Script extensions whose bodies we source-scan on launch (not pytest args).
+_SCRIPT_BODY_EXTS = (
+    ".py",
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".ps1",
+    ".bat",
+    ".cmd",
+    ".vbs",
+    ".sh",
+    ".rb",
+    ".pl",
+    ".php",
+    ".lua",
+)
+
+# Interpreters that execute a script file (body must be scanned).
+_SCRIPT_INTERPRETERS = frozenset(
+    {
+        "python",
+        "python3",
+        "pythonw",
+        "py",
+        "node",
+        "nodejs",
+        "ruby",
+        "perl",
+        "php",
+        "lua",
+        "bash",
+        "sh",
+        "zsh",
+        "pwsh",
+        "powershell",
+        "cmd",
+    }
+)
+
+# Runners that take .py paths as *data* (tests/modules), not scripts to exec.
+_NON_SCRIPT_RUNNERS = frozenset(
+    {
+        "pytest",
+        "py.test",
+        "unittest",
+        "nose",
+        "nosetests",
+        "mypy",
+        "ruff",
+        "pyright",
+        "black",
+        "isort",
+        "coverage",
+        "tox",
+        "nox",
+        "hatch",
+        "uv",
+        "pip",
+        "pipx",
+        "cargo",
+        "npm",
+        "npx",
+        "yarn",
+        "pnpm",
+        "git",
+        "gh",
+        "rg",
+        "fd",
+    }
+)
+
+# Direct path launch only: .\drop.bat / ./write.js (not tests/foo.py args).
+_DIRECT_SCRIPT_LAUNCH_RE = re.compile(
+    r"(?ix)"
+    r"(?:^|[\s;&|(])"
+    r"("
+    r"(?:\.\\|\./)"
+    r"[^\s|&;]+\.(?:py|js|mjs|cjs|ps1|bat|cmd|vbs|sh|rb|pl|php|lua)"
+    r")"
+)
+
+# Nested shells whose remaining tokens are a new command to scan.
+# Do not include python/node -c/-e (those are oneshot payloads, not files).
+_NESTED_SHELL_FLAGS = frozenset(
+    {
+        "/c",
+        "/C",
+        "/k",
+        "/K",
+        "-lc",
+        "-command",
+        "--command",
+    }
+)
+_NESTED_SHELL_HEADS = frozenset(
+    {"cmd", "bash", "sh", "zsh", "pwsh", "powershell"}
+)
+
+
+def _strip_exe(name: str) -> str:
+    n = (name or "").strip().strip("\"'").lower()
+    if n.endswith(".exe"):
+        n = n[:-4]
+    # basename only (C:\…\python.exe → python)
+    if "/" in n or "\\" in n:
+        n = n.replace("\\", "/").rsplit("/", 1)[-1]
+    return n
+
+
+def _is_script_interpreter(head: str) -> bool:
+    """True for python / node / … including versioned ``python3.12`` / ``python312``."""
+    h = _strip_exe(head)
+    if h in _SCRIPT_INTERPRETERS:
+        return True
+    stem = h.split(".", 1)[0]
+    compact = h.replace(".", "")
+    return bool(re.fullmatch(r"python\d*", stem) or re.fullmatch(r"python\d*", compact))
+
+
+def _is_script_path_token(tok: str) -> bool:
+    t = _clean_token(tok)
+    if not t:
+        return False
+    low = t.lower().replace("\\", "/")
+    # node_modules / package bins are not source we scan
+    if low.endswith(_SCRIPT_BODY_EXTS):
+        return True
+    return False
+
+
+def extract_script_launch_targets(
+    command: str, argv: list[str] | None = None
+) -> list[str]:
+    """Return script paths that are *executed* by the command (not mere args).
+
+    ``pytest tests/foo.py`` / ``uv run pytest …`` must NOT body-scan the test
+    file. ``node write.js`` / ``pwsh -File drop.ps1`` / ``.\\drop.bat`` must.
+    """
+    found: list[str] = []
+    seen: set[str] = set()
+
+    def _add(raw: str) -> None:
+        c = _clean_token(raw)
+        if not c or not _is_script_path_token(c):
+            return
+        key = c.lower().replace("\\", "/")
+        if key in seen:
+            return
+        seen.add(key)
+        found.append(c)
+
+    # Prefer structured argv when host_run/bash_exec pass it.
+    tokens: list[str] = []
+    if argv:
+        tokens = [str(a) for a in argv if str(a).strip()]
+    if not tokens and command:
+        # Lightweight tokenize: keep quoted spans, else split on whitespace.
+        parts = re.findall(r'"[^"]*"|\'[^\']*\'|\S+', command or "")
+        tokens = [_clean_token(p) for p in parts if _clean_token(p)]
+
+    if tokens:
+        head = _strip_exe(tokens[0])
+        # uv run pytest … / npm exec … → runner is further along
+        runner_idx = 0
+        if head in {"uv", "npm", "npx", "yarn", "pnpm", "pip", "pipx", "cargo", "hatch"}:
+            # skip package-manager prefix until a real program token
+            for i, t in enumerate(tokens[1:], start=1):
+                st = _strip_exe(t)
+                if st in {"run", "exec", "tool", "x", "dlx"}:
+                    continue
+                if t.startswith("-"):
+                    continue
+                runner_idx = i
+                head = st
+                break
+
+        if head in _NON_SCRIPT_RUNNERS or head == "pytest":
+            # Test runners / package managers: do not scan .py args as scripts.
+            # Exception: `python path/to/x.py` is handled below when head is python.
+            pass
+        elif _is_script_interpreter(head):
+            # First non-flag operand with a script ext is the launched body.
+            # Skip -m module form (python -m pytest …) — module is not a file body.
+            i = runner_idx + 1
+            skip_next = False
+            while i < len(tokens):
+                t = tokens[i]
+                if skip_next:
+                    skip_next = False
+                    i += 1
+                    continue
+                low = t.lower()
+                if low in {"-m", "--module"}:
+                    # python -m pytest … → no script file body
+                    break
+                if low in {"-e"}:
+                    break
+                if low in {"-c"} and head not in _NESTED_SHELL_HEADS:
+                    # python -c / node -e oneshot — no file body
+                    break
+                if low in {"-file", "--file"}:
+                    # next token is the script
+                    if i + 1 < len(tokens):
+                        _add(tokens[i + 1])
+                    break
+                if (
+                    t in _NESTED_SHELL_FLAGS
+                    or low in _NESTED_SHELL_FLAGS
+                    or (low == "-c" and head in _NESTED_SHELL_HEADS)
+                ):
+                    # cmd /c python drop.py → scan drop.py, not "python"
+                    rest = tokens[i + 1 :]
+                    if rest:
+                        for nested in extract_script_launch_targets(
+                            " ".join(rest), argv=rest
+                        ):
+                            _add(nested)
+                        if _is_script_path_token(rest[0]):
+                            _add(rest[0])
+                    break
+                if t.startswith("-"):
+                    # flag with attached value (-Werror) or lone flag
+                    i += 1
+                    continue
+                if _is_script_path_token(t):
+                    _add(t)
+                    break
+                # first non-flag non-script operand (e.g. module name) — stop
+                break
+        elif _is_script_path_token(tokens[0]):
+            # Direct script invoke: .\drop.bat / drop.py / drop.js
+            _add(tokens[0])
+
+    # Also catch direct .\script launches embedded in shell strings.
+    if command:
+        for m in _DIRECT_SCRIPT_LAUNCH_RE.finditer(command):
+            _add(m.group(1))
+
+    return found
+
+
+# Verify / lint / typecheck — in-project builds must never trip the write jail
+# unless they also redirect to a dest (pytest -q > C:\Windows\…).
+_BUILD_VERIFY_HEAD_RE = re.compile(
+    r"(?ix)^\s*(?:"
+    r"(?:uv|hatch|pipx|poetry|pdm)\s+run\s+"
+    r"|python(?:3|w)?(?:\.exe)?\s+-m\s+"
+    r")?"
+    r"(?:pytest|py\.test|ruff|mypy|pyright|black|isort|coverage|tox|nox|"
+    r"unittest|nosetests)\b"
+)
+
+
+def _is_build_verify_statement(part: str) -> bool:
+    p = (part or "").strip()
+    if not p or not _BUILD_VERIFY_HEAD_RE.match(p):
+        return False
+    return not bool(_REDIRECT_WRITE_RE.search(p))
 
 
 def looks_like_mutation(command: str) -> bool:
     """True when the command is likely to create/modify/delete files."""
     c = command or ""
+    parts = _split_statements(c)
+    leftover = [p for p in parts if not _is_build_verify_statement(p)]
+    if parts and not leftover:
+        return False
+    if leftover:
+        c = " ; ".join(leftover)
     if _MUTATION_HINT_RE.search(c):
         return True
     if _INTERPRETER_ONESHOT_RE.search(c):
@@ -439,11 +724,31 @@ def looks_like_mutation(command: str) -> bool:
 
 
 def _is_windows_abs_path(raw: str) -> bool:
-    """Drive-letter or UNC path — absolute on Windows even if POSIX Path disagrees."""
+    """Drive-letter, UNC, or Windows drive-root-relative.
+
+    On POSIX only ``C:\\…``, UNC, and backslash-root (``\\Temp``) count so
+    ``/home`` / ``/tmp/pytest-…`` go through ``_under_any``. Forward-slash
+    root-relative (``/Temp``) is current-drive absolute only on Windows.
+    """
     s = raw or ""
     if re.match(r"^[A-Za-z]:[\\/]", s):
         return True
-    return s.startswith("\\\\") or s.startswith("//")
+    if s.startswith("\\\\") or s.startswith("//"):
+        return True
+    # \Temp\pwn.txt — Windows current-drive abs on every OS (Linux CI fail-closed)
+    if re.match(r"^\\(?![\\])", s):
+        return True
+    # /Temp/pwn.txt — current-drive only on NT
+    return bool(os.name == "nt" and re.match(r"^/(?![/])", s))
+
+
+def _is_devnull_dest(raw: str) -> bool:
+    """Exact device names only — not paths that merely end in ``dev/null``."""
+    t = _clean_token(raw).strip().lower().replace("\\", "/")
+    if not t:
+        return False
+    # \\.\nul → //./nul after slash normalize
+    return t in {"nul", "null", "con", "/dev/null", "//./nul"}
 
 
 def path_outside_write_roots(
@@ -461,6 +766,8 @@ def path_outside_write_roots(
         return None
     if re.fullmatch(r"[A-Za-z]:\\?", raw):
         return None
+    if _is_devnull_dest(raw):
+        return None
     # Unexpanded variables — cannot prove under roots
     if "$" in raw or "%" in raw:
         return Path(raw)
@@ -470,6 +777,12 @@ def path_outside_write_roots(
     if _is_windows_abs_path(raw):
         if os.name != "nt":
             return Path(raw)
+        # Root-relative \Temp\x or /Temp/x → current drive (C:\Temp\x)
+        if re.match(r"^[\\/](?![\\/])", raw):
+            drive = Path.cwd().drive or os.environ.get("SystemDrive") or "C:"
+            if len(drive) == 1:
+                drive = drive + ":"
+            raw = f"{drive.rstrip(':')}:" + raw
         try:
             cand = Path(raw).expanduser().resolve(strict=False)
         except OSError:
@@ -529,6 +842,8 @@ _SCRIPT_HOME_PATH_RE = re.compile(
     r"|\$\{env:(?:USERPROFILE|HOME|HOMEPATH)\}"
     r"|\$\{?(?:HOME|USERPROFILE|HOMEPATH)\}?\b"
     r"|%(?:USERPROFILE|HOME|HOMEPATH)%"
+    r"|\bos\.homedir\b"
+    r"|\bprocess\.env\b"
     r")"
 )
 
@@ -587,6 +902,11 @@ def scan_script_source_for_outside_writes(
     try:
         text = script.read_text(encoding="utf-8", errors="replace")[:200_000]
     except OSError:
+        if project_bound:
+            return (
+                f"shell write jail: launched script cannot be read ({script.name}). "
+                "Refuse to run."
+            )
         return None
     if _AUTH_HINT_RE.search(text):
         return (
@@ -602,8 +922,8 @@ def scan_script_source_for_outside_writes(
     if _SCRIPT_HOME_PATH_RE.search(code) and not _roots_cover_user_profile(roots):
         return (
             "shell write jail: script uses home/profile path construction "
-            f"(Path.home/expanduser/$env:USERPROFILE/%USERPROFILE%) ({script.name}). "
-            "Refuse to run."
+            f"(Path.home/expanduser/os.homedir/process.env/$env:USERPROFILE) "
+            f"({script.name}). Refuse to run."
         )
     # Constructed dests (Path('C:/')/'Users'/…, os.path/os.sep) hide writes.
     if _PY_WRITE_API_RE.search(code) and _PY_CONSTRUCTED_DEST_RE.search(code):
@@ -633,6 +953,166 @@ def scan_script_source_for_outside_writes(
     return None
 
 
+def _resolve_approval_mode(explicit: str = "") -> str:
+    raw = (explicit or "").strip().lower()
+    if raw in ("ask", "auto", "full"):
+        return raw
+    try:
+        from remedy.core.approvals import APPROVALS, normalize_approval_mode
+
+        return normalize_approval_mode(explicit or APPROVALS.mode)
+    except Exception:
+        return "ask"
+
+
+def _is_auth_jail_reason(reason: str) -> bool:
+    low = (reason or "").lower()
+    return "auth" in low or "protected" in low
+
+
+# Heads that may mutate with no extractable dest (relative npm/git/echo>/mkdir).
+_IN_PROJECT_CWD_HEADS = frozenset(
+    {
+        "npm",
+        "npx",
+        "yarn",
+        "pnpm",
+        "git",
+        "gh",
+        "pytest",
+        "py.test",
+        "uv",
+        "hatch",
+        "poetry",
+        "pdm",
+        "pip",
+        "pipx",
+        "ruff",
+        "mypy",
+        "pyright",
+        "black",
+        "isort",
+        "coverage",
+        "tox",
+        "nox",
+        "unittest",
+        "cargo",
+        "go",
+        "dotnet",
+        "gcc",
+        "g++",
+        "c++",
+        "clang",
+        "clang++",
+        "cl",
+        "rustc",
+        "javac",
+        "cmake",
+        "ninja",
+        "make",
+        "nmake",
+        "msbuild",
+        "echo",
+        "printf",
+        "cat",
+        "mkdir",
+        "md",
+        "copy",
+        "cp",
+        "move",
+        "mv",
+        "del",
+        "rm",
+        "rd",
+        "ren",
+        "ni",
+        "sc",
+        "tee",
+        "set-content",
+        "out-file",
+        "add-content",
+        "new-item",
+        "copy-item",
+        "move-item",
+        "remove-item",
+        "rename-item",
+        "tee-object",
+    }
+)
+
+
+def _command_head(command: str) -> str:
+    parts = _split_statements(command)
+    text = (parts[0] if parts else command) or ""
+    m = _FIRST_TOKEN_RE.match(text)
+    if not m:
+        return ""
+    return _strip_exe(m.group(1) or m.group(2) or m.group(3) or "")
+
+
+def _is_known_in_project_mutation(command: str) -> bool:
+    """True for npm/git/pytest/verify/relative FS verbs — cwd-allow when in roots."""
+    if _is_build_verify_statement(command):
+        return True
+    head = _command_head(command)
+    if head in _IN_PROJECT_CWD_HEADS:
+        return True
+    # python -m pytest / uv run … already covered by verify or uv head
+    if re.search(r"(?i)\b(?:python\S*)\s+-m\s+", command or ""):
+        return True
+    return False
+
+
+def _jail_script_launch_bodies(
+    command: str,
+    *,
+    write_roots: list[Path],
+    cwd: Path | None,
+    roots_s: str,
+) -> tuple[bool, str | None]:
+    """Scan launched script files. ``(True, None)`` = allow; ``(True, reason)`` = deny."""
+    targets = extract_script_launch_targets(command)
+    is_launch = bool(_SCRIPT_LAUNCH_RE.search(command or "") or targets)
+    if not is_launch:
+        return False, None
+    if not targets:
+        # python -m pytest / unidentified launch
+        if _is_known_in_project_mutation(command):
+            return False, None
+        return True, (
+            "shell write jail: script launch has no readable body under write "
+            f"roots [{roots_s}]. Prefer file_write/file_edit."
+        )
+    base = cwd
+    if base is None and write_roots:
+        base = write_roots[0]
+    for tok in targets:
+        cand = Path(_clean_token(tok))
+        if not cand.is_absolute() and base is not None:
+            cand = Path(base) / tok
+        try:
+            readable = cand.is_file()
+        except OSError:
+            readable = False
+        if not readable:
+            return True, (
+                f"shell write jail: launched script cannot be read ({tok}). "
+                "Refuse to run."
+            )
+        try:
+            hit = scan_script_source_for_outside_writes(
+                cand, write_roots=write_roots, project_bound=True
+            )
+        except Exception as exc:
+            return True, (
+                f"shell write jail: launched script cannot be scanned "
+                f"({cand.name}): {exc}. Refuse to run."
+            )
+        if hit:
+            return True, hit
+    return True, None
+
+
 def check_shell_write_jail(
     command: str,
     *,
@@ -640,13 +1120,38 @@ def check_shell_write_jail(
     cwd: Path | None = None,
     project_bound: bool = True,
     access_scope: str = "project",
+    approval_mode: str = "",
+    warnings: list[str] | None = None,
 ) -> str | None:
     """Return a block reason if *command* would mutate outside write roots.
 
-    Returns ``None`` when allowed. ``access_scope`` is reserved for callers that
-    already folded scope into *write_roots* (home expands roots to project+home).
+    Returns ``None`` when allowed. ``approval_mode=full`` is owner control:
+    only auth-secret access is blocked (no dest scan, no script-body jail).
     """
     _ = access_scope  # roots are authoritative; keep param for API stability
+    _ = warnings  # kept for callers; Full no longer emits per-command warn text
+    mode = _resolve_approval_mode(approval_mode)
+    # Full: auth-only. Skip the mutation/dest regex walk — this is the hot path.
+    if mode == "full":
+        secret_hit = check_shell_secret_access(command or "")
+        if secret_hit:
+            return secret_hit
+        return None
+    return _evaluate_shell_write_jail(
+        command,
+        write_roots=write_roots,
+        cwd=cwd,
+        project_bound=project_bound,
+    )
+
+
+def _evaluate_shell_write_jail(
+    command: str,
+    *,
+    write_roots: list[Path],
+    cwd: Path | None,
+    project_bound: bool,
+) -> str | None:
     cmd = command or ""
     secret_hit = check_shell_secret_access(cmd)
     if secret_hit:
@@ -759,9 +1264,10 @@ def check_shell_write_jail(
                 "project workdir=, or pass a literal path under the focus folder."
             )
 
-    # Mutation with zero extractable path tokens: allow only if cwd is under
-    # write roots (npm install / git write inside project). Path construction
-    # (env substring, [char], stdin interpreters) cannot be proven — fail closed.
+    # Mutation with zero extractable path tokens: cwd-allow only for known
+    # in-project heads (npm / git / pytest / relative echo>). Script launches
+    # and unknown heads fail closed unless a dest is in-root or a body scan
+    # of the launched file passes.
     if not offenders and not candidates:
         if (
             _OPAQUE_PATH_HINT_RE.search(cmd)
@@ -772,6 +1278,21 @@ def check_shell_write_jail(
                 "shell write jail: mutation dest cannot be proven under write "
                 f"roots [{roots_s}]. Prefer file_write/file_edit with a literal "
                 "path under the focus folder."
+            )
+        if readonly_oneshot:
+            return None
+        handled, launch_hit = _jail_script_launch_bodies(
+            cmd, write_roots=roots, cwd=cwd, roots_s=roots_s
+        )
+        if handled:
+            return launch_hit
+        if _cwd_in_roots() and _is_known_in_project_mutation(cmd):
+            return None
+        if not _is_known_in_project_mutation(cmd):
+            return (
+                "shell write jail: mutation command has no proven path under write "
+                f"roots [{roots_s}]. Prefer file_write/file_edit, or run with "
+                "project workdir set."
             )
         if cwd is not None:
             try:

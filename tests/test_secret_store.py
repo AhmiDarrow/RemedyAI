@@ -79,6 +79,45 @@ def test_migrate_strips_config_plaintext(tmp_path: Path, monkeypatch: pytest.Mon
     assert not (xai_key or "").startswith("sk-was")
 
 
+def test_anthropic_key_saved_on_xai_type_lands_on_anthropic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Pasting sk-ant-… while Type is still Grok must connect Anthropic."""
+    from remedy.interfaces.config import (
+        classify_provider_connection,
+        get_provider_keys,
+    )
+
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    cfg = {"llm_provider": "xai", "home_dir": str(tmp_path)}
+    set_provider_key(cfg, "xai", "sk-ant-api03-userpasted", home=tmp_path)
+    keys = get_provider_keys(cfg, home=tmp_path)
+    assert keys.get("anthropic") == "sk-ant-api03-userpasted"
+    assert keys.get("xai") != "sk-ant-api03-userpasted"
+    ok, reason = classify_provider_connection(
+        "anthropic",
+        cfg=cfg,
+        keys=keys,
+        keys_set={"anthropic": True},
+        ollama_available=False,
+        xai_connected=True,
+    )
+    assert ok is True
+    assert reason in ("api_key", "resolved_key")
+
+
+def test_rehome_misfiled_anthropic_key_under_xai(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    secret_store.set_provider_secret("xai", "sk-ant-api03-parked", home=tmp_path)
+    from remedy.interfaces.config import get_provider_keys
+
+    keys = get_provider_keys({"home_dir": str(tmp_path)}, home=tmp_path)
+    assert keys.get("anthropic") == "sk-ant-api03-parked"
+    assert "sk-ant" not in str(keys.get("xai") or "")
+
+
 def test_write_config_never_persists_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
     cfg_path = tmp_path / "config.toml"

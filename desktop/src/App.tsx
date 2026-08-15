@@ -224,6 +224,7 @@ export default function App() {
     barModel,
     switchToast,
     refreshModels,
+    refreshConnected,
     onProviderModelChange,
     onModelChange,
   } = useSessionLlm({ activeId, sessions, streaming, runningCount })
@@ -1393,8 +1394,12 @@ export default function App() {
                   setToolProcessMode(normalizeToolProcess(s.tool_process))
                   setPrivacyMode(Boolean(s.privacy_mode))
                   setApprovalMode(
-                    String(s.approval_mode || 'ask').toLowerCase() === 'auto' ? 'auto' : 'ask',
+                    (() => {
+                      const am = String(s.approval_mode || 'ask').toLowerCase()
+                      return am === 'auto' || am === 'full' ? am : 'ask'
+                    })(),
                   )
+                  void refreshConnected()
                   return refreshModels({
                     provider: s.llm_provider ? String(s.llm_provider) : undefined,
                   })
@@ -1728,57 +1733,6 @@ export default function App() {
         open={panel === 'skills'}
         onClose={() => setPanel(null)}
         onOpenHelp={openHelp}
-      />
-      {/* Floating settings disabled — always use right rail (openSettingsInRail). */}
-      <SettingsPanel
-        open={false}
-        onClose={() => setPanel(null)}
-        themeId={themeId}
-        onThemeChange={setTheme}
-        density={density}
-        onDensityChange={setDensity}
-        customAccent={customAccent}
-        onCustomAccentChange={setCustomAccent}
-        updateInfo={updateInfo}
-        checkingUpdates={checkingUpdates}
-        updateStatus={updateLastStatus}
-        onCheckUpdates={() => {
-          void runUpdateCheckVisible()
-        }}
-        onInstallUpdate={() => {
-          if (desktopInfo?.update_available && desktopInfo.download_url) {
-            setShowUpdateScreen(true)
-          } else {
-            void runUpdateCheckVisible()
-          }
-        }}
-        models={models}
-        toolProcessMode={toolProcessMode}
-        onToolProcessChange={(mode) => {
-          setToolProcessMode(mode)
-          updateSettings({ tool_process: mode }).catch(() => {})
-        }}
-        onOpenHelp={openHelp}
-        onSettingsSaved={() => {
-          void getSettings()
-            .then((s) => {
-              // Settings is the default for *new* sessions only.
-              if (s.llm_provider && s.llm_model && !activeId) {
-                setLlmProvider(String(s.llm_provider))
-                setModel(String(s.llm_model))
-              }
-              setUserName((s.user_name || '').trim())
-              setToolProcessMode(normalizeToolProcess(s.tool_process))
-              setPrivacyMode(Boolean(s.privacy_mode))
-              setApprovalMode(
-                String(s.approval_mode || 'ask').toLowerCase() === 'auto' ? 'auto' : 'ask',
-              )
-              return refreshModels({
-                provider: s.llm_provider ? String(s.llm_provider) : undefined,
-              })
-            })
-            .catch(() => refreshModels())
-        }}
       />
       </Suspense>
 

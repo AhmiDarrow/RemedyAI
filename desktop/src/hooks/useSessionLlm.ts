@@ -252,10 +252,10 @@ export function useSessionLlm(opts: {
             ? st.model_path.replace(/^.*[\\/]/, '').replace(/\.gguf$/i, '')
             : '')
         if (!stem) return
+        // Status display only — never rewrite session bind without apply.
         if (stem !== (barModel || model)) {
           setLlmProvider('rmb')
           setModel(stem)
-          if (activeId) setSessionBind(activeId, 'rmb', stem)
           void refreshConnected()
         }
       } catch {
@@ -275,7 +275,6 @@ export function useSessionLlm(opts: {
     model,
     activeId,
     streaming,
-    setSessionBind,
     refreshConnected,
   ])
 
@@ -286,6 +285,7 @@ export function useSessionLlm(opts: {
         setLlmProvider(prov)
         setModel(mid)
         void updateSettings({ llm_provider: prov, llm_model: mid }).catch(() => {})
+        void refreshModels({ provider: prov })
         void refreshConnected()
         return
       }
@@ -348,6 +348,7 @@ export function useSessionLlm(opts: {
     switchToast,
     setSwitchToast,
     refreshModels,
+    refreshConnected,
     onProviderModelChange,
     onModelChange,
     showSwitchToast,

@@ -31,7 +31,7 @@ export type SettingsFormFields = {
   sleevGatewayUrl: string
   sleevAllowRemoteGateway: boolean
   soulFieldEnabled: boolean
-  approvalMode: 'ask' | 'auto'
+  approvalMode: 'ask' | 'auto' | 'full'
   harnessMode: string
   harnessMinPct: number
   harnessMaxPct: number
@@ -72,7 +72,7 @@ export function applySettingsSnapshot(
     setSleevGatewayUrl?: (v: string) => void
     setSleevAllowRemoteGateway?: (v: boolean) => void
     setSoulFieldEnabled: (v: boolean) => void
-    setApprovalMode: (v: 'ask' | 'auto') => void
+    setApprovalMode: (v: 'ask' | 'auto' | 'full') => void
     setHarnessMode: (v: string) => void
     setHarnessMinPct: (v: number) => void
     setHarnessMaxPct: (v: number) => void
@@ -114,7 +114,7 @@ export function applySettingsSnapshot(
   set.setSleevAllowRemoteGateway?.(Boolean(s.sleev_allow_remote_gateway))
   set.setSoulFieldEnabled(s.soul_field_enabled !== false)
   const am = String(s.approval_mode || 'ask').toLowerCase()
-  set.setApprovalMode(am === 'auto' ? 'auto' : 'ask')
+  set.setApprovalMode(am === 'auto' || am === 'full' ? am : 'ask')
   set.setHarnessMode(s.harness_mode || 'auto')
   set.setHarnessMinPct(Number(s.harness_min_context_pct ?? 0.75))
   set.setHarnessMaxPct(Number(s.harness_max_context_pct ?? 0.92))

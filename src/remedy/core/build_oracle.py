@@ -225,7 +225,23 @@ async def run_auto_verify(
 
     run_cmd = cmd
     scoped = False
-    if prefer_scoped and getattr(state, "write_set", None):
+    # Prefer the last failing pytest nodeids over a write-set guess.
+    with suppress(Exception):
+        raw = getattr(state, "last_error_vector", None)
+        if isinstance(raw, dict) and not bool(raw.get("ok")):
+            from remedy.core.build_error_vector import scoped_pytest_from_nodes
+
+            sc_fail = scoped_pytest_from_nodes(
+                list(raw.get("failing_nodes") or []),
+                base=cmd,
+            )
+            if not sc_fail:
+                sc_fail = str(raw.get("repair_command") or "").strip()
+            if sc_fail:
+                run_cmd = sc_fail
+                scoped = True
+                state.last_scoped_command = sc_fail
+    if prefer_scoped and not scoped and getattr(state, "write_set", None):
         with suppress(Exception):
             from remedy.core.build_scoped import scoped_verify_command
 
@@ -367,7 +383,7 @@ def should_auto_verify(state: Any) -> bool:
     if cycles >= max_c:
         return False
     writes = int(getattr(state, "write_steps", 0) or 0)
-    need = int(getattr(state, "require_verify_after_writes", 2) or 2)
+    need = int(getattr(state, "require_verify_after_writes", 1) or 1)
     verifies = int(getattr(state, "verify_steps", 0) or 0)
     write_set = list(getattr(state, "write_set", None) or [])
     has_c = any(
@@ -500,14 +516,9 @@ def format_auto_verify_message(
 
             raw = state.last_error_vector
             if isinstance(raw, dict):
-                vec = ErrorVector(
-                    ok=False,
-                    command=str(raw.get("command") or cmd),
-                    exit_hint=str(raw.get("exit_hint") or ""),
-                    failing_nodes=list(raw.get("failing_nodes") or []),
-                    path_lines=list(raw.get("path_lines") or []),
-                    snippets=list(raw.get("snippets") or []),
-                )
+                vec = ErrorVector.from_public(raw)
+                if not vec.command:
+                    vec.command = cmd
         if vec is None:
             vec = parse_verify_output(summary, command=cmd, ok=False)
         return repair_ticket_message(vec)

@@ -445,9 +445,16 @@ async def prepare_turn_preamble(
         )
 
     browse = parse_browse_intent(message or "")
-    runtime._turn_browse = bool(browse.browse_pre_url or browse.page_interaction)
-    runtime._turn_pure_action = bool(browse.pure_action_kick)
-    runtime._turn_has_attachments = bool(attachments)
+    with suppress(Exception):
+        from remedy.core.turn_context import (
+            set_turn_browse,
+            set_turn_has_attachments,
+            set_turn_pure_action,
+        )
+
+        set_turn_browse(bool(browse.browse_pre_url or browse.page_interaction), runtime)
+        set_turn_pure_action(bool(browse.pure_action_kick), runtime)
+        set_turn_has_attachments(bool(attachments), runtime)
 
     with suppress(Exception):
         from remedy.memory.harness.pruner import prune_messages_for_send

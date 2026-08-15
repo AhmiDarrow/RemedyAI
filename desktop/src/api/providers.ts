@@ -90,8 +90,13 @@ export const FALLBACK_PROVIDERS: ProviderInfo[] = [
     id: 'anthropic',
     name: 'Anthropic',
     base_url: 'https://api.anthropic.com/v1',
-    models: [{ id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet' }],
-    default_model: 'claude-3-5-sonnet-latest',
+    models: [
+      { id: 'claude-opus-4-1', name: 'Claude Opus 4.1' },
+      { id: 'claude-sonnet-4-0', name: 'Claude Sonnet 4' },
+      { id: 'claude-3-7-sonnet-latest', name: 'Claude 3.7 Sonnet' },
+      { id: 'claude-3-5-haiku-latest', name: 'Claude 3.5 Haiku' },
+    ],
+    default_model: 'claude-sonnet-4-0',
     auth: ['api_key'],
     oauth: false,
     env_keys: ['ANTHROPIC_API_KEY'],
@@ -337,6 +342,53 @@ export interface ConnectedProvidersResponse {
 
 export async function listConnectedProviders(): Promise<ConnectedProvidersResponse> {
   return apiFetch<ConnectedProvidersResponse>('/providers/connected')
+}
+
+export interface ProviderProbeResult {
+  ok: boolean
+  provider: string
+  base_url?: string
+  status?: number | null
+  latency_ms?: number | null
+  models?: number
+  error?: string | null
+}
+
+export async function probeProvider(input: {
+  provider: string
+  api_key?: string
+  base_url?: string
+}): Promise<ProviderProbeResult> {
+  return apiFetch<ProviderProbeResult>('/providers/probe', {
+    method: 'POST',
+    body: JSON.stringify(input),
+    timeout: 12_000,
+  })
+}
+
+export function connectReasonLabel(reason: string | undefined, connected: boolean): string {
+  switch (reason) {
+    case 'demo':
+      return 'Ready (no key)'
+    case 'ollama_up':
+      return 'Ollama running'
+    case 'ollama_down':
+      return 'Ollama not running'
+    case 'oauth_or_key':
+      return 'Signed in'
+    case 'api_key':
+    case 'resolved_key':
+      return 'API key stored'
+    case 'rmb_local':
+    case 'active_local':
+      return 'Local endpoint'
+    case 'local_url':
+      return 'Local URL'
+    case 'no_credentials':
+      return connected ? 'Connected' : 'Needs API key'
+    default:
+      return connected ? 'Connected' : 'Not connected'
+  }
 }
 
 export async function setSessionLlm(

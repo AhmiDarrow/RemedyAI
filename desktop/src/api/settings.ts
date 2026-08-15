@@ -16,6 +16,8 @@ export interface Settings {
   /** User-set display name for the custom OpenAI-compatible endpoint */
   custom_llm_name?: string
   llm_api_key_set: boolean
+  /** Booleans only — which providers have a stored key. */
+  provider_keys_set?: Record<string, boolean>
   name: string
   /** What Remedy calls the human user */
   user_name?: string
@@ -34,7 +36,7 @@ export interface Settings {
   harness_max_context_pct?: number
   /** Status bar: off | low | medium | high */
   thinking_level?: string
-  /** Status bar: ask (default) | auto — auto = full owner power / work-until-done */
+  /** Status bar: ask | auto (in-project) | full (warn) */
   approval_mode?: string
   /** Tool process: off | medium | full (default off) */
   tool_process?: string
@@ -242,7 +244,7 @@ export interface SettingsUpdate {
   vision_enabled?: boolean
   vision_model_id?: string
   vision_force_decode?: boolean
-  enabled_providers?: string[]
+  enabled_providers?: string[] | null
   enabled_models?: Record<string, string[]>
   last_model_by_provider?: Record<string, string>
   skills_active_budget?: number

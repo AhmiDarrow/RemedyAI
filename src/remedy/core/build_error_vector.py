@@ -10,21 +10,37 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-# pytest: tests/test_x.py::test_foo FAILED
-_PYTEST_FAIL = re.compile(
-    r"(?m)^(?:FAILED\s+)?([\w./\\-]+\.py)(?::(\d+))?(?:::\S+)?\s*(?:FAILED|ERROR)?"
-)
+# pytest short-summary: FAILED tests/test_x.py::test_foo - assert 1 == 2
 _PYTEST_NODE = re.compile(
-    r"(?m)^(?:FAILED|ERROR)\s+([\w./\\-]+\.py(?:::\S+)?)"
+    r"(?m)^(?:FAILED|ERROR)\s+((?:[A-Za-z]:\\)?[\w./\\-]+\.py(?:::\S+)?)"
 )
-# path:line: message (mypy, ruff, tsc-ish)
+_PYTEST_NODE_REASON = re.compile(
+    r"(?m)^(?:FAILED|ERROR)\s+((?:[A-Za-z]:\\)?[\w./\\-]+\.py(?:::\S+)?)\s+-\s+(.+)$"
+)
+# pytest -q one-liner: tests/test_x.py::test_foo FAILED
+_PYTEST_Q = re.compile(
+    r"(?m)^((?:[A-Za-z]:\\)?[\w./\\-]+\.py(?:::\S+)?)\s+(?:FAILED|ERROR)\b"
+)
+# pytest E-prefix assertion / exception lines
+_PYTEST_E = re.compile(r"(?m)^E\s+(.+)$")
+# CPython traceback
+_TRACEBACK_FILE = re.compile(
+    r'(?m)^\s*File\s+"([^"]+\.(?:py|pyw))",\s+line\s+(\d+)'
+)
+# gcc / clang / rustc: file:line[:col]: error: msg
+_COMPILER_ERR = re.compile(
+    r"(?m)^((?:[A-Za-z]:\\)?[^\s:]+?\.(?:c|cc|cpp|cxx|h|hpp|rs|go)):(\d+)(?::\d+)?:\s*"
+    r"(?:error|fatal error):\s*(.+)$"
+)
+# path:line (mypy, ruff, tsc-ish)
 _PATH_LINE = re.compile(
-    r"(?m)([A-Za-z]:\\[^\s:]+|/[^\s:]+|[\w./\\-]+\.(?:py|ts|tsx|js|rs|go))(?::(\d+))+"
+    r"(?m)([A-Za-z]:\\[^\s:]+|/[^\s:]+|[\w./\\-]+\.(?:py|ts|tsx|js|rs|go|c|h))(?::(\d+))+"
 )
-# npm / jest
 _JEST_FAIL = re.compile(r"(?m)●\s+(.+)$")
-# cargo
 _CARGO_ERR = re.compile(r"(?m)^error(?:\[E\d+\])?:\s+(.+)$")
+_IMPORT_ERR = re.compile(
+    r"(?m)(?:ModuleNotFoundError|ImportError):\s+No module named ['\"]([^'\"]+)['\"]"
+)
 
 
 @dataclass
@@ -38,6 +54,7 @@ class ErrorVector:
     path_lines: list[str] = field(default_factory=list)
     snippets: list[str] = field(default_factory=list)
     raw_tail: str = ""
+    repair_command: str = ""
 
     def to_public(self) -> dict[str, Any]:
         return {
@@ -47,7 +64,21 @@ class ErrorVector:
             "failing_nodes": self.failing_nodes[:20],
             "path_lines": self.path_lines[:24],
             "snippets": self.snippets[:12],
+            "repair_command": self.repair_command,
         }
+
+    @classmethod
+    def from_public(cls, raw: dict[str, Any] | None) -> ErrorVector:
+        d = raw if isinstance(raw, dict) else {}
+        return cls(
+            ok=bool(d.get("ok")),
+            command=str(d.get("command") or ""),
+            exit_hint=str(d.get("exit_hint") or ""),
+            failing_nodes=[str(x) for x in (d.get("failing_nodes") or []) if x],
+            path_lines=[str(x) for x in (d.get("path_lines") or []) if x],
+            snippets=[str(x) for x in (d.get("snippets") or []) if x],
+            repair_command=str(d.get("repair_command") or ""),
+        )
 
 
 def parse_verify_output(
@@ -77,22 +108,42 @@ def parse_verify_output(
     if ok:
         return vec
 
-    seen_n: set[str] = set()
-    for m in _PYTEST_NODE.finditer(text):
-        node = m.group(1).strip()
-        if node and node not in seen_n:
-            seen_n.add(node)
-            vec.failing_nodes.append(node)
-    for m in _PYTEST_FAIL.finditer(text):
-        path = m.group(1)
-        line = m.group(2)
-        key = f"{path}:{line}" if line else path
-        if key not in seen_n:
-            seen_n.add(key)
-            if path not in vec.failing_nodes:
-                vec.failing_nodes.append(path)
+    def _add_node(node: str) -> None:
+        n = (node or "").strip()
+        if n and n not in vec.failing_nodes:
+            vec.failing_nodes.append(n)
 
-    seen_pl: set[str] = set()
+    def _add_pl(path: str, line: str = "") -> None:
+        path = (path or "").strip()
+        if not path:
+            return
+        key = f"{path}:{line}" if line else path
+        if key not in vec.path_lines:
+            vec.path_lines.append(key)
+
+    def _add_snip(s: str) -> None:
+        s = (s or "").strip()
+        if s and s not in vec.snippets:
+            vec.snippets.append(s[:200])
+
+    for m in _PYTEST_NODE_REASON.finditer(text):
+        _add_node(m.group(1))
+        _add_snip(m.group(2))
+    for m in _PYTEST_NODE.finditer(text):
+        _add_node(m.group(1))
+    for m in _PYTEST_Q.finditer(text):
+        _add_node(m.group(1))
+    for m in _PYTEST_E.finditer(text):
+        _add_snip(m.group(1))
+    for m in _TRACEBACK_FILE.finditer(text):
+        _add_pl(m.group(1), m.group(2))
+    for m in _COMPILER_ERR.finditer(text):
+        _add_pl(m.group(1), m.group(2))
+        _add_snip(m.group(3))
+    for m in _IMPORT_ERR.finditer(text):
+        _add_snip(f"missing module '{m.group(1)}'")
+
+    seen_pl = set(vec.path_lines)
     for m in _PATH_LINE.finditer(text):
         path = m.group(1)
         line = m.group(2) or ""
@@ -105,26 +156,50 @@ def parse_verify_output(
             break
 
     for m in _JEST_FAIL.finditer(text):
-        s = m.group(1).strip()[:160]
-        if s and s not in vec.snippets:
-            vec.snippets.append(s)
+        _add_snip(m.group(1))
     for m in _CARGO_ERR.finditer(text):
-        s = m.group(1).strip()[:160]
-        if s and s not in vec.snippets:
-            vec.snippets.append(s)
+        _add_snip(m.group(1))
 
-    # Last non-empty error-ish lines
     for line in reversed(text.splitlines()):
         ls = line.strip()
         if not ls or len(ls) < 8:
             continue
         if re.search(r"(?i)error|fail|assert|traceback|exception", ls):
-            if ls not in vec.snippets:
-                vec.snippets.append(ls[:200])
-            if len(vec.snippets) >= 8:
+            _add_snip(ls)
+            if len(vec.snippets) >= 10:
                 break
 
+    vec.repair_command = scoped_pytest_from_nodes(
+        vec.failing_nodes, base=command or ""
+    )
     return vec
+
+
+def scoped_pytest_from_nodes(nodes: list[str], *, base: str = "") -> str:
+    """Smallest pytest command that still hits the failing nodeids."""
+    ids: list[str] = []
+    for raw in nodes or []:
+        n = str(raw or "").strip().replace("\\", "/")
+        if ".py" not in n.lower():
+            continue
+        # drop trailing :line from path:line (keep ::test)
+        if "::" not in n:
+            n = re.sub(r":\d+$", "", n)
+        # Windows drive: C:/proj/tests/foo.py::test — keep as-is
+        if n not in ids:
+            ids.append(n)
+        if len(ids) >= 16:
+            break
+    if not ids:
+        return ""
+    prefix = "pytest -q"
+    b = (base or "").strip()
+    if re.match(r"(?i)^\s*uv\s+run\s+pytest\b", b):
+        prefix = "uv run pytest -q"
+    elif re.match(r"(?i)^\s*python(?:3)?\s+-m\s+pytest\b", b):
+        prefix = "python -m pytest -q"
+    quoted = [f'"{i}"' if " " in i else i for i in ids]
+    return prefix + " " + " ".join(quoted)
 
 
 def format_repair_ticket(vec: ErrorVector) -> str:
@@ -135,27 +210,42 @@ def format_repair_ticket(vec: ErrorVector) -> str:
             f"command=`{vec.command}` {vec.exit_hint}\n"
             "No failures. You may close the build if the goal is met."
         )
+    next_cmd = (
+        vec.repair_command
+        or scoped_pytest_from_nodes(vec.failing_nodes, base=vec.command)
+        or vec.command
+        or ""
+    ).strip()
     lines = [
         "[Build engine · ERROR VECTOR · REPAIR TICKET]",
         f"command=`{vec.command}` {vec.exit_hint or 'FAILED'}",
-        "Machine schedule: fix ONLY these failures, then re-verify with the SAME command.",
-        "Do not expand scope. Do not claim success until exit_code=0.",
+        "Machine schedule: fix ONLY these failures. Do not expand scope.",
+        "Do not claim success until the next verify exits 0.",
     ]
+    if next_cmd:
+        lines.append(f"NEXT VERIFY: `{next_cmd}`")
     if vec.failing_nodes:
         lines.append("Failing nodes:")
         for n in vec.failing_nodes[:12]:
             lines.append(f"  · {n}")
+    read_first = ""
     if vec.path_lines:
         lines.append("path:line hotspots:")
         for p in vec.path_lines[:16]:
             lines.append(f"  · {p}")
+        read_first = re.sub(r":\d+$", "", vec.path_lines[0])
+    elif vec.failing_nodes:
+        read_first = vec.failing_nodes[0].split("::", 1)[0]
     if vec.snippets:
         lines.append("Signals:")
         for s in vec.snippets[:6]:
             lines.append(f"  · {s}")
+    if read_first:
+        lines.append(f"READ FIRST: `{read_first}`")
     lines.append(
-        "Next tool_calls: file_read the hotspots → file_edit multi-hunk → "
-        "bash_exec / job_run kind=verify with the same command."
+        "Next tool_calls (this step): file_read the READ FIRST path → "
+        "file_edit multi-hunk on the implementation (not a rewrite) → "
+        f"bash_exec / job_run kind=verify `{next_cmd or vec.command or 'pytest -q'}`."
     )
     return "\n".join(lines)
 

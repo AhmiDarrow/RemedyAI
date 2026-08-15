@@ -392,6 +392,22 @@ def resolve_under_roots(
             },
         )
 
+    # Relative. Full (warn) may leave the focus folder — still refuse auth.
+    if scope == "full":
+        try:
+            resolved = (primary / candidate).expanduser().resolve()
+        except OSError:
+            resolved = (primary / candidate).expanduser().absolute()
+        refuse_protected_secret_path(resolved)
+        parts_lower = {p.lower() for p in resolved.parts}
+        if any(x in parts_lower for x in ("$recycle.bin", "system volume information")):
+            raise SecurityError(
+                f"Path not allowed: {user_path}",
+                rule="path_denied",
+                detail={"input": user_path},
+            )
+        return resolved
+
     # Relative: try each root; prefer first root that exists
     last_err: Exception | None = None
     for root in roots:

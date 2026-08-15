@@ -382,8 +382,9 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
       <SettingsSection {...sectionProps('security-power')}>
         <FormHint>
           Defaults are safe. <strong style={{ color: 'var(--text-secondary)' }}>Auto</strong>{' '}
-          approvals and opt-in tools never remove your power — they let Remedy finish work
-          when you say so. Hard wipe/privilege blocks stay on for everyone.
+          stays inside the project. <strong style={{ color: 'var(--text-secondary)' }}>Full</strong>{' '}
+          turns the write jail into a warning (auth secrets stay closed).
+          Hard wipe/privilege blocks stay on for everyone.
         </FormHint>
               <div className="mb-2">
                 <FormLabel>Approvals</FormLabel>
@@ -395,14 +396,21 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
                     {
                       id: 'auto',
                       label: 'Auto',
-                      title: 'Work until done — full owner power on trusted scope',
+                      title: 'In-project — build and write without prompts; jail stays outside the folder',
+                    },
+                    {
+                      id: 'full',
+                      label: 'Full',
+                      title: 'No write jail (auth still closed). Warns when leaving the project.',
                     },
                   ]}
                 />
                 <FormHint>
-                  {approvalMode === 'auto'
-                    ? 'Auto: shell, write, edit, and skills run without prompts (except Untrusted scope). Use when you want Remedy to finish the job.'
-                    : 'Ask: high-impact tools show Approve/Deny. Soft-risk patterns are labeled on the banner.'}
+                  {approvalMode === 'full'
+                    ? 'Full (warn): shell and file tools are not write-jailed. Auth secrets stay closed. Remedy warns when a path would have been blocked.'
+                    : approvalMode === 'auto'
+                      ? 'Auto (in-project): pytest, file writes, and host_run inside the focus folder run without prompts. OS, home, and sibling trees stay jailed.'
+                      : 'Ask: high-impact tools show Approve/Deny. Soft-risk patterns are labeled on the banner.'}
                 </FormHint>
               </div>
               <div className="mb-2">

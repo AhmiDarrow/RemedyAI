@@ -4,6 +4,32 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-08-15
+
+Hardening pass: project write jail, Stop/abort, RMB stay-off, and tab isolation.
+
+### Security / jail
+
+- Project-bound shell dest extraction now covers Windows root-relative paths
+  (`\Temp\…`), cmd caret-escapes, and PowerShell `C:"\path"` concatenations.
+- Script-launch body scan covers versioned `python3.12`, `cmd /c python …`,
+  bare `drop.py` / `.js`, and JS `os.homedir` / `process.env`. Unreadable
+  launch files fail closed. In-project `npm` / `git` / `pytest` still run.
+
+### Isolation / RMB / Stop
+
+- Local/RMB turns skip Ask only for that turn — they no longer persist
+  `approval_mode=auto`. Start/heal no longer steal `llm_provider`.
+- User Stop of RMB is persisted; API recycle will not auto-wake it.
+- Desktop Stop posts `/abort` before killing the SSE fetch. Mid-token and
+  RMB-wait abort yield a durable `@@aborted` note.
+
+### Desktop
+
+- Session switch no longer paints the previous chat or double-sends a
+  promoted queue item. Approval banner follows the focused session.
+- Installer no longer `taskkill /IM app.exe`.
+
 ## [0.25.0] - 2026-08-15
 
 Stability pass plus Settings chrome polish. Multi-tab isolation, RMB live

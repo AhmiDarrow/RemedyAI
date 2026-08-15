@@ -318,6 +318,11 @@ def maybe_auto_implement(
     """After explore thrash with zero writes: machine starts TDD + hops."""
     if state is None or not getattr(state, "active", False):
         return None
+    from remedy.core.build_delta import allow_background_drive
+
+    # Live capable models write themselves. Auto TDD/hops steal the turn.
+    if not allow_background_drive(state):
+        return None
     if getattr(state, "auto_drive_ran", False):
         return None
     if int(getattr(state, "write_steps", 0) or 0) > 0:
@@ -351,6 +356,11 @@ def maybe_auto_repair(
 ) -> dict[str, Any] | None:
     """On red verify: hop ranked repair targets (machine, not a prompt)."""
     if state is None or not getattr(state, "active", False):
+        return None
+    from remedy.core.build_delta import allow_background_drive
+
+    # Isolated hops while the live model is repairing duplicate work.
+    if not allow_background_drive(state):
         return None
     if getattr(state, "last_verify_ok", None) is not False:
         return None

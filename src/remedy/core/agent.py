@@ -173,8 +173,11 @@ class BasicRuntime(AgentRuntime):
         self._thinking_level: str = (
             tl if tl in ("off", "low", "medium", "high") else "high"
         )
-        am = str(getattr(config, "approval_mode", None) or "ask").strip().lower()
-        self._approval_mode: str = am if am in ("ask", "auto") else "ask"
+        from remedy.core.approvals import normalize_approval_mode
+
+        self._approval_mode: str = normalize_approval_mode(
+            getattr(config, "approval_mode", None)
+        )
         with suppress(Exception):
             from remedy.core.approvals import APPROVALS
 
@@ -347,6 +350,21 @@ class BasicRuntime(AgentRuntime):
         if for_write:
             roots = self.write_roots()
             scope = self.access_scope()
+            from remedy.core.approvals import APPROVALS, normalize_approval_mode
+
+            # Status-bar Full is the live queue; don't trust a stale field.
+            approval = normalize_approval_mode(APPROVALS.mode)
+            if approval != "full":
+                approval = normalize_approval_mode(
+                    getattr(self, "_approval_mode", None)
+                )
+            # Full (warn): owner granted machine-wide control — do not jail
+            # writes to the focus folder. Auth secrets still refuse below.
+            if approval == "full":
+                return resolve_under_roots(
+                    path or ".", roots or [self.effective_project_path()],
+                    access_scope="full",
+                )
             # With a real project bound, never apply the full absolute bypass
             # for mutations — enforce write_roots membership strictly.
             if not self.project_path_is_unset():

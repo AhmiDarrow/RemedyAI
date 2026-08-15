@@ -130,7 +130,7 @@ export function useAppBootstrap(opts: {
         setThinkingLevel(tl)
       }
       const am = String(settings.approval_mode || 'ask').toLowerCase()
-      if (am === 'ask' || am === 'auto') setApprovalMode(am)
+      if (am === 'ask' || am === 'auto' || am === 'full') setApprovalMode(am)
       setPrivacyMode(Boolean(settings.privacy_mode))
       setToolProcessMode(
         normalizeToolProcess(settings.tool_process ?? settings.show_tool_calls),

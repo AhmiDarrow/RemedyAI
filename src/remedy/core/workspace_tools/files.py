@@ -273,9 +273,9 @@ def register_files_tools(runtime: Any) -> None:
                 code="PATH_DENIED",
                 tool_name="file_write",
                 suggestion=(
-                    "Writes stay inside the project folder under project scope. "
-                    "Use a path under the focus folder, or raise access_scope "
-                    "to home/full in Settings for multi-tree edits."
+                    "Writes stay inside the project folder under Ask/Auto. "
+                    "Use a path under the focus folder, or set Approvals → Full "
+                    "(warn) if you granted machine-wide control."
                 ),
             )
         sid = turn_session_id(runtime)
@@ -399,8 +399,9 @@ def register_files_tools(runtime: Any) -> None:
                 code="PATH_DENIED",
                 tool_name="file_edit",
                 suggestion=(
-                    "Edits stay inside the project folder under project scope. "
-                    "Raise access_scope to home/full only for intentional multi-tree edits."
+                    "Edits stay inside the project folder under Ask/Auto. "
+                    "Use a path under the focus folder, or set Approvals → Full "
+                    "(warn) if you granted machine-wide control."
                 ),
             )
         sid = turn_session_id(runtime)

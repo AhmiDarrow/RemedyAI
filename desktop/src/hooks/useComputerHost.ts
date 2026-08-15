@@ -349,6 +349,7 @@ export function useComputerHost(
     if (!enabled) return
 
     let cancelled = false
+    const claimedRef = { current: false }
 
     const openRail = () => {
       try {
@@ -413,6 +414,7 @@ export function useComputerHost(
           // Belt-and-suspenders: leave for Rust (should not be claimed)
           job = null
         }
+        claimedRef.current = Boolean(job?.id)
         if (job?.id) {
           openRail()
           try {
@@ -435,6 +437,7 @@ export function useComputerHost(
               error: e instanceof Error ? e.message : String(e),
             }).catch(() => null)
           }
+          claimedRef.current = false
         }
       } finally {
         busy.current = false
@@ -462,9 +465,16 @@ export function useComputerHost(
       const hidden =
         typeof document !== 'undefined' &&
         (document.hidden || document.visibilityState === 'hidden')
-      helloMs = hidden ? 12_000 : 4000
-      uiMs = hidden ? 1000 : 250
-      jobMs = hidden ? 500 : 120
+      // Pause only when hidden AND no claimed job — keep 120ms claim loop snappy.
+      if (hidden && !claimedRef.current && !busy.current) {
+        helloIv = 0
+        uiIv = 0
+        jobIv = 0
+        return
+      }
+      helloMs = 4000
+      uiMs = 250
+      jobMs = 120
       helloIv = window.setInterval(() => {
         void hello()
       }, helloMs)

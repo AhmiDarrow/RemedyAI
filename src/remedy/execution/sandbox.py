@@ -156,6 +156,24 @@ class ExecutionResult:
     duration_ms: float = 0.0
 
 
+def allowed_paths_for_shell(
+    roots: list[Path] | None,
+    cwd: Path | None = None,
+) -> list[Path]:
+    """Workdir jail for subprocesses. Empty list = no workdir jail (Full)."""
+    try:
+        from remedy.core.approvals import is_full_approval
+
+        if is_full_approval():
+            return []
+    except Exception:
+        pass
+    out: list[Path] = list(roots or [])
+    if cwd is not None and cwd not in out:
+        out.append(cwd)
+    return out
+
+
 class Sandbox:
     """Base class for execution backends."""
 
@@ -270,10 +288,18 @@ class SubprocessSandbox(Sandbox):
             register_turn_process(proc)
 
             try:
+                abort_ev = current_abort_event()
+                try:
+                    loop = asyncio.get_running_loop()
+                    ev_loop = getattr(abort_ev, "_loop", None)
+                    if ev_loop is not None and ev_loop is not loop:
+                        abort_ev = None
+                except Exception:
+                    abort_ev = None
                 stdout, stderr = await _communicate_or_abort(
                     proc,
                     timeout_seconds=timeout_seconds,
-                    abort_event=current_abort_event(),
+                    abort_event=abort_ev,
                 )
                 if stdout is None and stderr is None:
                     # Aborted or timed out — process already killed

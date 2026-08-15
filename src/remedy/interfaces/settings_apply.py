@@ -188,7 +188,7 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "harness_min_context_pct": float(raw.get("harness_min_context_pct", 0.75)),
         "harness_max_context_pct": float(raw.get("harness_max_context_pct", 0.92)),
         "thinking_level": str(raw.get("thinking_level") or "high").lower(),
-        "approval_mode": str(raw.get("approval_mode") or "ask").lower(),
+        "approval_mode": str(raw.get("approval_mode") or "auto").lower(),
         "tool_process": normalize_tool_process(raw),
         "web_tools_enabled": bool(raw.get("web_tools_enabled", False)),
         "http_bootstrap": bool(raw.get("http_bootstrap", True)),
@@ -279,11 +279,15 @@ async def apply_settings_update(
     if not isinstance(updates, dict) or not updates:
         raise ValueError("updates must be a non-empty object")
 
-    # Drop unknown keys (and nested Nones later via model if used)
+    # Drop unknown keys (and nested Nones later via model if used).
+    # enabled_providers=None means "all on" and must survive (clear a frozen list).
     clean_in: dict[str, Any] = {}
     for k, v in updates.items():
-        if k in SETTABLE_KEYS and v is not None:
-            clean_in[k] = v
+        if k not in SETTABLE_KEYS:
+            continue
+        if v is None and k != "enabled_providers":
+            continue
+        clean_in[k] = v
     if not clean_in:
         raise ValueError(
             "no recognized settings keys in patch. "
@@ -373,20 +377,28 @@ async def apply_settings_update(
         hm = str(patch["harness_mode"]).strip().lower()
         patch["harness_mode"] = hm if hm in ("off", "manual", "auto") else "auto"
 
-    if "enabled_providers" in patch and patch["enabled_providers"] is not None:
-        raw_ep = patch["enabled_providers"]
-        if isinstance(raw_ep, list):
-            patch["enabled_providers"] = [str(x).strip().lower() for x in raw_ep if str(x).strip()]
-        elif isinstance(raw_ep, str) and raw_ep.strip():
-            patch["enabled_providers"] = [x.strip().lower() for x in raw_ep.split(",") if x.strip()]
+    if "enabled_providers" in patch:
+        raw_ep = patch.get("enabled_providers")
+        if raw_ep is None:
+            # Explicit "all providers" — drop a previously frozen allowlist.
+            patch.pop("enabled_providers", None)
+            cfg.pop("enabled_providers", None)
         else:
-            patch["enabled_providers"] = []
-        # Never drop zero-setup demo from the taskbar/settings picker list.
-        if (
-            isinstance(patch["enabled_providers"], list)
-            and "demo" not in patch["enabled_providers"]
-        ):
-            patch["enabled_providers"] = ["demo", *patch["enabled_providers"]]
+            if isinstance(raw_ep, list):
+                patch["enabled_providers"] = [
+                    str(x).strip().lower() for x in raw_ep if str(x).strip()
+                ]
+            elif isinstance(raw_ep, str) and raw_ep.strip():
+                patch["enabled_providers"] = [
+                    x.strip().lower() for x in raw_ep.split(",") if x.strip()
+                ]
+            else:
+                patch["enabled_providers"] = []
+            if (
+                isinstance(patch["enabled_providers"], list)
+                and "demo" not in patch["enabled_providers"]
+            ):
+                patch["enabled_providers"] = ["demo", *patch["enabled_providers"]]
 
     if "enabled_models" in patch and patch["enabled_models"] is not None:
         raw_em = patch["enabled_models"]
@@ -422,13 +434,12 @@ async def apply_settings_update(
         patch["thinking_level"] = tl if tl in ("off", "low", "medium", "high") else "high"
 
     if "approval_mode" in patch and patch["approval_mode"] is not None:
+        from remedy.core.approvals import normalize_approval_mode
+
         am = str(patch["approval_mode"]).strip().lower()
-        # Friendly aliases
-        if am in ("yolo", "full", "owner", "trust"):
-            am = "auto"
         if am in ("confirm", "manual", "safe"):
             am = "ask"
-        patch["approval_mode"] = am if am in ("ask", "auto") else "ask"
+        patch["approval_mode"] = normalize_approval_mode(am)
         try:
             from remedy.core.approvals import APPROVALS
 
@@ -844,7 +855,9 @@ SETUP_ALIASES: dict[str, dict[str, Any]] = {
     "disable web": {"web_tools_enabled": False},
     "auto approval": {"approval_mode": "auto"},
     "approval auto": {"approval_mode": "auto"},
-    "full power": {"approval_mode": "auto"},
+    "full power": {"approval_mode": "full"},
+    "full control": {"approval_mode": "full"},
+    "full warn": {"approval_mode": "full"},
     "work until done": {"approval_mode": "auto"},
     "ask approval": {"approval_mode": "ask"},
     "safe mode": {"approval_mode": "ask"},

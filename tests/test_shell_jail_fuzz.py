@@ -77,6 +77,11 @@ FUZZ_VECTORS: list[tuple[str, bool]] = [
     ("Set-Content readme.txt updated", False),
     ("echo ok > readme.txt", False),
     ("npm install lodash", False),
+    (r"echo pwn > \Temp\pwn.txt", True),
+    (r"echo pwn > C:^\Temp\pwn.txt", True),
+    (r'Set-Content C:"\Temp\pwn.txt" pwn', True),
+    (r"echo pwn > \Temp\dev\null", True),
+    (r"echo pwn > C:\Users\Public\dev\null", True),
     ("python -c \"print(1)\"", False),  # no mutation path when opaque oneshot without write? may block
     # Env substring / [char] / stdin interpreter construction
     (r"echo pwn > %CD:~0,1%:\Temp\x.txt", True),

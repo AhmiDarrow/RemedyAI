@@ -79,11 +79,12 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "free_tier": "none",
         "key_docs_url": "https://console.anthropic.com/settings/keys",
         "models": [
+            {"id": "claude-opus-4-1", "name": "Claude Opus 4.1", "vision": True},
+            {"id": "claude-opus-4-0", "name": "Claude Opus 4", "vision": True},
+            {"id": "claude-sonnet-4-0", "name": "Claude Sonnet 4", "vision": True},
+            {"id": "claude-3-7-sonnet-latest", "name": "Claude 3.7 Sonnet", "vision": True},
             {"id": "claude-3-5-sonnet-latest", "name": "Claude 3.5 Sonnet", "vision": True},
             {"id": "claude-3-5-haiku-latest", "name": "Claude 3.5 Haiku", "vision": True},
-            {"id": "claude-3-haiku-20240307", "name": "Claude 3 Haiku", "vision": True},
-            {"id": "claude-3.5-sonnet", "name": "Claude 3.5 Sonnet (alias)", "vision": True},
-            {"id": "claude-3-haiku", "name": "Claude 3 Haiku (alias)", "vision": True},
         ],
     },
     "google": {

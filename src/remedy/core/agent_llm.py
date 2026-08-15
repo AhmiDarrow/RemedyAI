@@ -12,6 +12,15 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
+
+def _sleev_force(runtime: Any) -> bool:
+    try:
+        from remedy.core.turn_context import turn_sleev_force_direct
+
+        return bool(turn_sleev_force_direct(runtime))
+    except Exception:
+        return bool(getattr(runtime, "_sleev_force_direct", False))
+
 # Shared session for LLM API calls — avoids per-call TLS handshake overhead.
 _shared_session: aiohttp.ClientSession | None = None
 
@@ -289,7 +298,7 @@ async def post_chat(
             api_key=bind.api_key,
             adapter=adapter,
             runtime=runtime,
-            force_direct=bool(getattr(runtime, "_sleev_force_direct", False)),
+            force_direct=_sleev_force(runtime),
         )
     except Exception:
         pass
@@ -363,9 +372,7 @@ async def post_chat(
                                 api_key=bind.api_key,
                                 adapter=adapter,
                                 runtime=runtime,
-                                force_direct=bool(
-                                    getattr(runtime, "_sleev_force_direct", False)
-                                ),
+                                force_direct=_sleev_force(runtime),
                             )
                         except Exception:
                             pass

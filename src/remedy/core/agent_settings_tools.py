@@ -281,9 +281,14 @@ def register_settings_tools(runtime: Any) -> None:
                 if "web" in low and ("tool" in low or "fetch" in low or "enable" in low):
                     patch["web_tools_enabled"] = "disable" not in low and "off" not in low
                 elif re.search(r"\bapproval\b", low) or re.search(
-                    r"\b(?:auto|ask)\s+mode\b", low
+                    r"\b(?:auto|ask|full)\s+mode\b", low
                 ):
-                    patch["approval_mode"] = "ask" if re.search(r"\bask\b", low) else "auto"
+                    if re.search(r"\bask\b", low):
+                        patch["approval_mode"] = "ask"
+                    elif re.search(r"\bfull\b", low):
+                        patch["approval_mode"] = "full"
+                    else:
+                        patch["approval_mode"] = "auto"
                 elif "vision" in low or "smol" in low:
                     patch["vision_enabled"] = "disable" not in low and "off" not in low
                     if patch.get("vision_enabled"):
@@ -523,13 +528,13 @@ def register_settings_tools(runtime: Any) -> None:
         # Widening scope / auto-approval is owner power — model cannot self-grant.
         widen_scope = str(patch.get("access_scope") or "").strip().lower()
         widen_approval = str(patch.get("approval_mode") or "").strip().lower()
-        if widen_scope in ("home", "full") or widen_approval == "auto":
+        if widen_scope in ("home", "full") or widen_approval in ("auto", "full"):
             if widen_scope in ("home", "full"):
                 cmd = f"widen_access_scope:{widen_scope}"
                 reason = f"Raising access_scope to {widen_scope} requires approval"
             else:
-                cmd = "widen_approval_mode:auto"
-                reason = "Switching approval_mode to auto requires approval"
+                cmd = f"widen_approval_mode:{widen_approval}"
+                reason = f"Switching approval_mode to {widen_approval} requires approval"
             locked = _approval_required(runtime, cmd, reason)
             if locked:
                 return locked
@@ -696,7 +701,7 @@ def register_settings_tools(runtime: Any) -> None:
                 },
                 "approval_mode": {
                     "type": "string",
-                    "description": "ask | auto (auto = full owner power)",
+                    "description": "ask | auto (in-project) | full (warn)",
                 },
                 "tool_process": {
                     "type": "string",

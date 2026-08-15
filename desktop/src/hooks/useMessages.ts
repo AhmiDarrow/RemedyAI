@@ -110,8 +110,8 @@ export function useMessages(sessionId: string | null) {
   /** Latest active session — finishOk must not paint onto a switched session. */
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
-  /** Bumped at the start of every load / finishOk history replace; ignore stale. */
-  const loadGenRef = useRef(0)
+  /** Per-session generation tokens — a finish on tab A must not drop tab B's load. */
+  const loadGenBySessionRef = useRef<Map<string, number>>(new Map())
   /** Avoid re-entrant auto-drain while finishing a turn. */
   const drainingRef = useRef(false)
   /** RAF-batched stream text (avoids re-render every token). */
@@ -250,27 +250,29 @@ export function useMessages(sessionId: string | null) {
     // for the same session — previously a stuck stream blocked all session switches.
     if (streamingRef.current && !opts?.force) return
     const loadId = sessionId
-    const gen = ++loadGenRef.current
+    const prevGen = loadGenBySessionRef.current.get(loadId) || 0
+    const gen = prevGen + 1
+    loadGenBySessionRef.current.set(loadId, gen)
     setLoading(true)
     setLoadError(null)
     try {
       const msgs = await listMessages(loadId, MESSAGE_PAGE, 0)
       // Ignore stale responses after a session switch or a newer load/finishOk.
-      if (loadGenRef.current !== gen || sessionIdRef.current !== loadId) return
+      if ((loadGenBySessionRef.current.get(loadId) || 0) !== gen || sessionIdRef.current !== loadId) return
       const list = Array.isArray(msgs) ? msgs : []
       serverCountRef.current = list.length
       setMessages(list)
       setHasOlder(list.length >= MESSAGE_PAGE)
       try {
         const td = await listSessionTodos(loadId)
-        if (loadGenRef.current !== gen || sessionIdRef.current !== loadId) return
+        if ((loadGenBySessionRef.current.get(loadId) || 0) !== gen || sessionIdRef.current !== loadId) return
         const parsed = parseTodosPayload(td)
         setBuildTodos(todosHaveOpen(parsed) ? parsed : [])
       } catch {
         /* checklist is optional */
       }
     } catch (e: unknown) {
-      if (loadGenRef.current !== gen || sessionIdRef.current !== loadId) return
+      if ((loadGenBySessionRef.current.get(loadId) || 0) !== gen || sessionIdRef.current !== loadId) return
       const msg = e instanceof Error ? e.message : String(e)
       console.warn('[remedy] listMessages failed', loadId, msg)
       setLoadError(msg || 'Failed to load messages')
@@ -278,7 +280,7 @@ export function useMessages(sessionId: string | null) {
       setMessages([])
       setHasOlder(false)
     } finally {
-      if (loadGenRef.current === gen && sessionIdRef.current === loadId) {
+      if ((loadGenBySessionRef.current.get(loadId) || 0) === gen && sessionIdRef.current === loadId) {
         setLoading(false)
       }
     }
@@ -324,6 +326,8 @@ export function useMessages(sessionId: string | null) {
     }
     prevSessionForDetachRef.current = sessionId || null
     prevStreamingForDetachRef.current = false
+    // Do not paint the previous transcript as the newly focused session.
+    setMessages([])
     // Clear focused UI only — do not abort streamCtrl (job owns the controller).
     // Hard-clear stream buffers (no flush) so a finishing background turn cannot
     // inject partials into the newly focused session.
@@ -691,9 +695,11 @@ export function useMessages(sessionId: string | null) {
           return
         }
         try {
-          const gen = ++loadGenRef.current
+          const prevGen = loadGenBySessionRef.current.get(targetId) || 0
+          const gen = prevGen + 1
+          loadGenBySessionRef.current.set(targetId, gen)
           const msgs = await listMessages(targetId)
-          if (loadGenRef.current !== gen || sessionIdRef.current !== targetId) return
+          if ((loadGenBySessionRef.current.get(targetId) || 0) !== gen || sessionIdRef.current !== targetId) return
           if (stepsSnapshot.length && msgs.length) {
             const last = msgs[msgs.length - 1]
             if (last && last.role === 'assistant') {
@@ -1284,6 +1290,7 @@ export function useMessages(sessionId: string | null) {
         promoteQueuedOptions(item),
       )
       setQueue((q) => q.filter((x) => x.id !== id))
+      queueRef.current = queueRef.current.filter((x) => x.id !== id)
     },
     [send],
   )
