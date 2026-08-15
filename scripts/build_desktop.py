@@ -261,6 +261,47 @@ def get_hidden_imports() -> list[str]:
     ]
 
 
+def sidecar_target_triple() -> str:
+    """Rust target triple Tauri uses for externalBin (`remedy-desktop-<triple>`)."""
+    import platform
+
+    env_triple = os.environ.get("TAURI_ENV_TARGET_TRIPLE", "").strip()
+    if env_triple:
+        return env_triple
+    machine = platform.machine().lower()
+    norm = {
+        "amd64": "x86_64",
+        "x86_64": "x86_64",
+        "x64": "x86_64",
+        "arm64": "aarch64",
+        "aarch64": "aarch64",
+        "i386": "i686",
+        "i686": "i686",
+        "x86": "i686",
+    }
+    arch = norm.get(machine, machine)
+    sys_name = platform.system().lower()
+    if sys_name == "windows":
+        return f"{arch}-pc-windows-msvc"
+    if sys_name == "darwin":
+        return f"{arch}-apple-darwin"
+    return f"{arch}-unknown-linux-gnu"
+
+
+def sidecar_bin_paths() -> tuple[Path, Path]:
+    """Plain PyInstaller output and the Tauri-triple copy.
+
+    Windows: ``remedy-desktop.exe`` + ``remedy-desktop-x86_64-pc-windows-msvc.exe``.
+    Linux: ``remedy-desktop`` + ``remedy-desktop-x86_64-unknown-linux-gnu`` (no .exe).
+    """
+    suffix = ".exe" if sys.platform == "win32" else ""
+    triple = sidecar_target_triple()
+    return (
+        DESKTOP_BIN / f"remedy-desktop{suffix}",
+        DESKTOP_BIN / f"remedy-desktop-{triple}{suffix}",
+    )
+
+
 def build(cache_clean: bool = False, ci: bool = False):
     """Build the standalone remedy-desktop.exe via PyInstaller."""
     print(f"Building Remedy Desktop exe... (root={ROOT})")
@@ -291,7 +332,6 @@ def build(cache_clean: bool = False, ci: bool = False):
         print("Cleaned PyInstaller cache.")
 
     hidden_imports = get_hidden_imports()
-    version_file = write_sidecar_version_file(v)
     icon_path = ROOT / "desktop" / "src-tauri" / "icons" / "icon.ico"
 
     src_path = str(ROOT / "src")
@@ -309,21 +349,22 @@ def build(cache_clean: bool = False, ci: bool = False):
         "--specpath",
         str(ROOT / "build" / "pyinstaller"),
         "--noupx",  # UPX packing raises AV false-positive rates dramatically
-        "--noconsole",
         # Prefer repo src/ over any older site-packages remedy-ai install
         "--paths",
         src_path,
-        "--version-file",
-        str(version_file),
         "--add-data",
         f"{ROOT / 'src' / 'remedy'}{os.pathsep}remedy",
         "--add-data",
         f"{ROOT / 'pyproject.toml'}{os.pathsep}.",
     ]
-    if icon_path.is_file():
-        cmd.extend(["--icon", str(icon_path)])
-    else:
-        print(f"WARNING: sidecar icon missing at {icon_path} (PE will lack icon resource)")
+    if sys.platform == "win32":
+        # PE identity + no console — Windows-only PyInstaller flags.
+        version_file = write_sidecar_version_file(v)
+        cmd.extend(["--noconsole", "--version-file", str(version_file)])
+        if icon_path.is_file():
+            cmd.extend(["--icon", str(icon_path)])
+        else:
+            print(f"WARNING: sidecar icon missing at {icon_path} (PE will lack icon resource)")
 
     for hi in hidden_imports:
         cmd.extend(["--hidden-import", hi])
@@ -346,29 +387,14 @@ def build(cache_clean: bool = False, ci: bool = False):
     env["PYTHONPATH"] = src_path + os.pathsep + env.get("PYTHONPATH", "")
     subprocess.check_call(cmd, cwd=str(ROOT), env=env)
 
-    exe_path = DESKTOP_BIN / "remedy-desktop.exe"
-    if exe_path.exists():
-        size_mb = exe_path.stat().st_size / (1024 * 1024)
-        print(f"\nBuild complete: {exe_path} ({size_mb:.1f} MB)")
-
-        import platform
-
-        target_triple = os.environ.get("TAURI_ENV_TARGET_TRIPLE", "")
-        if not target_triple:
-            machine = platform.machine().lower()
-            # Normalize common machine names to Rust target triples
-            norm = {"amd64": "x86_64", "x86_64": "x86_64", "x64": "x86_64",
-                    "arm64": "aarch64", "aarch64": "aarch64",
-                    "i386": "i686", "i686": "i686", "x86": "i686"}
-            arch = norm.get(machine, machine)
-            sys_name = platform.system().lower()
-            target_triple = f"{arch}-pc-{sys_name}-msvc" if sys_name == "windows" else f"{arch}-unknown-{sys_name}-gnu"
-        sidecar_path = DESKTOP_BIN / f"remedy-desktop-{target_triple}.exe"
-        shutil.copy2(exe_path, sidecar_path)
-        print(f"Sidecar: {sidecar_path}")
-    else:
-        print("\nERROR: Build failed - no .exe produced")
+    plain, sidecar_path = sidecar_bin_paths()
+    if not plain.is_file():
+        print(f"\nERROR: Build failed — no sidecar at {plain}")
         sys.exit(1)
+    size_mb = plain.stat().st_size / (1024 * 1024)
+    print(f"\nBuild complete: {plain} ({size_mb:.1f} MB)")
+    shutil.copy2(plain, sidecar_path)
+    print(f"Sidecar: {sidecar_path}")
 
 
 if __name__ == "__main__":

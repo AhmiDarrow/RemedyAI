@@ -12,11 +12,19 @@ Remedy Desktop now runs on Linux (including WSLg) as well as Windows. Same partn
 
 | Path | Who it is for |
 |------|----------------|
-| **Dev / source** | `uv run remedy serve` + Linux Tauri build from this repo |
-| **Packaged `.deb` / AppImage** | GitHub Releases when a Linux desktop asset is published |
-| **PyPI CLI** | `pip install remedy-ai` / `uv tool install remedy-ai` then `remedy serve` |
+| **`.deb` / AppImage** | [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) — **v0.26.0+** |
+| **PyPI CLI** | `uv tool install remedy-ai` then `remedy serve` (browser WebUI) |
+| **Dev / source** | This repo: `npm run tauri:dev` / `tauri:build` |
 
-Until a Linux installer is on the same Release as Windows, use **source or PyPI** and the Linux desktop binary from this tree.
+### Packaged desktop (v0.26.0+)
+
+1. Open [RemedyAI Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest).
+2. Download either:
+   - **`Remedy.Desktop_*_amd64.deb`** — Debian/Ubuntu: `sudo apt install ./Remedy.Desktop_*_amd64.deb`
+   - **`Remedy.Desktop_*.AppImage`** — `chmod +x` then run it
+3. Launch **Remedy Desktop** from the app menu (deb) or the AppImage.
+
+Need WebKitGTK on the machine (`libwebkit2gtk-4.1-0` on Ubuntu 22.04+). The AppImage bundles more; the `.deb` expects those system libs.
 
 ## WSLg (Windows host, Linux UI)
 

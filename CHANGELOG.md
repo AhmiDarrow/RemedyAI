@@ -14,7 +14,8 @@ lie under load.
 
 - Linux / WSLg: maximize fills the **Windows work area of the monitor the window
   is on**; Close minimizes to the taskbar (no tray). “Start with Windows” is
-  hidden. Sidecar rejects `/mnt/` and `.exe` shebangs.
+  hidden. Sidecar rejects `/mnt/` and `.exe` shebangs. GitHub Releases now
+  publish **`.deb` + AppImage** beside the Windows installer.
 - Restore no longer immediately re-snaps. External terminal does not exec a
   Windows-interop `$SHELL`. “Open in browser” spawns `xdg-open` and returns.
 - xAI OAuth lives outside Settings so the rail can close; persist failure does
