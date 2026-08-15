@@ -79,6 +79,26 @@ _POSIX_PROJECT_PREFIXES = (
 )
 
 
+def windows_drive_os_kind(raw: str) -> str | None:
+    """Classify a Windows drive path without resolving (works on POSIX CI).
+
+    ``root`` is ``C:\\``. ``os`` is ``C:\\Windows\\...``. Else ``None``.
+    """
+    t = str(raw).strip()
+    if t.startswith("\\\\?\\"):
+        t = t[4:]
+    t = t.replace("/", "\\")
+    if len(t) < 2 or not t[0].isalpha() or t[1] != ":":
+        return None
+    rest = t[2:].lstrip("\\")
+    if not rest:
+        return "root"
+    first = rest.split("\\", 1)[0].lower()
+    if first in _OS_PROJECT_ROOTS:
+        return "os"
+    return None
+
+
 def is_forbidden_project_path(raw: str | Path | None) -> bool:
     """True for OS / secrets trees that must never become the project root.
 
@@ -89,6 +109,8 @@ def is_forbidden_project_path(raw: str | Path | None) -> bool:
     text = str(raw).strip()
     if not text:
         return False
+    if windows_drive_os_kind(text) == "os":
+        return True
     try:
         path = Path(text).expanduser().resolve()
     except OSError:

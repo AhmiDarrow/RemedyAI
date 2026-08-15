@@ -98,6 +98,11 @@ def resolve_cli_home(home: str | os.PathLike[str] | None, *, mkdir: bool = True)
     are refused so a typo cannot mkdir or wipe under ``C:\\Windows``.
     """
     raw = str(home or "~/.remedy").strip() or "~/.remedy"
+    from remedy.core.workspace import windows_drive_os_kind
+
+    kind = windows_drive_os_kind(raw)
+    if kind in ("root", "os"):
+        raise UnsafeHomeError(f"--home refuses system path: {raw}")
     p = Path(raw).expanduser()
     try:
         resolved = p.resolve()
