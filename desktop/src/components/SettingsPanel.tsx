@@ -115,6 +115,7 @@ export function SettingsPanel({
   const scrollBodyRef = useRef<HTMLDivElement>(null)
   /** Monotonic load id — ignore stale GET responses after re-open/save. */
   const loadGenRef = useRef(0)
+  const loadedLlmRef = useRef({ provider: '', model: '', baseUrl: '' })
   const [saved, setSaved] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
@@ -342,9 +343,12 @@ export function SettingsPanel({
       if (s.skills_active_budget) setSkillsBudget(s.skills_active_budget)
       setSettings(s)
       const prov = s.llm_provider || 'openai'
+      const nextModel = s.llm_model || 'gpt-4o-mini'
+      const nextBase = s.llm_base_url || 'https://api.openai.com/v1'
       setProvider(prov)
-      setModel(s.llm_model || 'gpt-4o-mini')
-      setBaseUrl(s.llm_base_url || 'https://api.openai.com/v1')
+      setModel(nextModel)
+      setBaseUrl(nextBase)
+      loadedLlmRef.current = { provider: prov, model: nextModel, baseUrl: nextBase }
       setCustomName((s.custom_llm_name || '').trim())
       setApiKeySet(s.llm_api_key_set)
       setProjectPath(s.project_path || '.')
@@ -634,10 +638,18 @@ export function SettingsPanel({
     setErrorMessage('')
     setStatusMessage('')
     const prevProject = (settings?.project_path || '').trim()
+    const llmEdited =
+      provider !== loadedLlmRef.current.provider
+      || model !== loadedLlmRef.current.model
+      || baseUrl !== loadedLlmRef.current.baseUrl
     const updates: SettingsUpdate = {
-      llm_provider: provider,
-      llm_model: model,
-      llm_base_url: baseUrl,
+      ...(llmEdited
+        ? {
+            llm_provider: provider,
+            llm_model: model,
+            llm_base_url: baseUrl,
+          }
+        : {}),
       custom_llm_name: provider === 'custom' ? customName.trim() : undefined,
       project_path: projectPath,
       browser_home_url: browserHomeUrl.trim() || 'https://github.com/AhmiDarrow/RemedyAI',
@@ -802,33 +814,40 @@ export function SettingsPanel({
       )}
 
       <div
-        className="px-3 pt-2.5 pb-1.5 border-b shrink-0 space-y-1.5"
+        className="settings-chrome px-3 pt-2 pb-2 border-b shrink-0 space-y-2"
         style={{ borderColor: 'color-mix(in srgb, var(--border) 80%, transparent)' }}
       >
-        <div className="flex items-center gap-1" title="How many settings sections are listed">
+        <div
+          className="settings-mode-tabs"
+          role="tablist"
+          aria-label="Settings detail"
+          onKeyDown={(e) => {
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+            e.preventDefault()
+            const next = settingsMode === 'simple' ? 'advanced' : 'simple'
+            setSettingsMode(next)
+            if (next === 'advanced') setShowAdvanced(true)
+          }}
+        >
           {(['simple', 'advanced'] as const).map((m) => (
             <button
               key={m}
               type="button"
+              role="tab"
+              id={`settings-tab-${m}`}
+              aria-selected={settingsMode === m}
+              tabIndex={settingsMode === m ? 0 : -1}
+              title={
+                m === 'simple'
+                  ? 'Essentials — provider, you, project, appearance'
+                  : 'Every section — messengers, vision, power tools, logs'
+              }
               onClick={() => {
                 setSettingsMode(m)
-                                if (m === 'advanced') setShowAdvanced(true)
-              }}
-              className="flex-1 rounded-lg px-2 py-1 text-[10px] font-semibold capitalize"
-              style={{
-                background:
-                  settingsMode === m
-                    ? 'color-mix(in srgb, var(--accent) 16%, transparent)'
-                    : 'color-mix(in srgb, var(--bg-tertiary) 80%, transparent)',
-                color: settingsMode === m ? 'var(--accent)' : 'var(--text-muted)',
-                border: `1px solid ${
-                  settingsMode === m
-                    ? 'color-mix(in srgb, var(--accent) 45%, var(--border))'
-                    : 'color-mix(in srgb, var(--border) 85%, transparent)'
-                }`,
+                if (m === 'advanced') setShowAdvanced(true)
               }}
             >
-              {m === 'simple' ? 'Simple settings' : 'Advanced settings'}
+              {m === 'simple' ? 'Simple' : 'Advanced'}
             </button>
           ))}
         </div>
@@ -842,10 +861,6 @@ export function SettingsPanel({
             if (q.trim()) {
               window.requestAnimationFrame(() => {
                 const root = scrollBodyRef.current
-                const hit = root?.querySelector<HTMLElement>(
-                  '[data-section]:not([hidden])',
-                )
-                // Prefer visible sections that aren't mode-hidden
                 const all = root?.querySelectorAll<HTMLElement>('[data-section]')
                 if (all) {
                   for (const el of all) {
@@ -854,29 +869,17 @@ export function SettingsPanel({
                       break
                     }
                   }
-                } else {
-                  hit?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
                 }
               })
             }
           }}
-          placeholder="Search settings…"
+          placeholder="Search…"
           className="ui-input"
           aria-label="Search settings"
         />
-        {settingsMode === 'simple' ? (
-          <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
-            Simple shows essentials. Switch to <strong>Advanced</strong> for messengers,
-            vision, power tools, and logs.
-          </div>
-        ) : (
-          <div className="text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>
-            Advanced lists every section. Use search to jump.
-          </div>
-        )}
       </div>
 
-      <div ref={scrollBodyRef} className="flex-1 overflow-y-auto p-3 text-xs space-y-4">
+      <div ref={scrollBodyRef} className="flex-1 overflow-y-auto px-2.5 py-2.5 text-xs">
         {loading ? (
           <div style={{ color: 'var(--text-muted)' }}>Loading…</div>
         ) : (
@@ -1043,7 +1046,10 @@ export function SettingsPanel({
               rmbMsg={rmbMsg}
               setRmbMsg={setRmbMsg}
               refreshRmb={refreshRmb}
-              onSettingsSaved={onSettingsSaved}
+              onSettingsSaved={() => {
+                void load()
+                onSettingsSaved?.()
+              }}
               connectedList={connectedList}
               providerSearch={providerSearch}
               setProviderSearch={setProviderSearch}
@@ -1130,14 +1136,13 @@ export function SettingsPanel({
             onClick={() => void handleSave()}
             disabled={saving || loading || !settings}
             className="ui-btn ui-btn-primary flex-1"
-            style={{ padding: '0.55rem 0.75rem' }}
             title={
               loading || !settings
                 ? 'Wait for settings to finish loading'
                 : undefined
             }
           >
-            {saving ? 'Saving & reloading…' : loading ? 'Loading…' : 'Save settings'}
+            {saving ? 'Saving…' : loading ? 'Loading…' : 'Save'}
           </button>
           {saved && !errorMessage && !statusMessage && (
             <span className="text-xs font-semibold" style={{ color: 'var(--success)' }}>

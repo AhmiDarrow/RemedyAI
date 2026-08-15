@@ -17,6 +17,7 @@ import {
   markJobUiCommitted,
   registerStreamJob,
   setJobProcessSteps,
+  shouldRestoreStoppedPartial,
   stopStreamJob,
   withStoppedMarker,
 } from './streamJobs'
@@ -96,6 +97,25 @@ describe('streamJobs', () => {
     expect(withStoppedMarker('Hello world')).toContain('_[Stopped]_')
     expect(withStoppedMarker('done\n\n_[Stopped]_')).toBe('done\n\n_[Stopped]_')
     expect(withStoppedMarker('')).toBe('_[Stopped]_')
+    expect(shouldRestoreStoppedPartial([], 'Partial answer')).toBe(true)
+    expect(
+      shouldRestoreStoppedPartial(
+        [{ role: 'user', content: 'hi' }],
+        'Partial answer',
+      ),
+    ).toBe(true)
+    expect(
+      shouldRestoreStoppedPartial(
+        [{ role: 'assistant', content: 'Partial answer\n\n_[Stopped]_' }],
+        'Partial answer',
+      ),
+    ).toBe(false)
+    expect(
+      shouldRestoreStoppedPartial(
+        [{ role: 'assistant', content: 'Partial answer' }],
+        'Partial answer',
+      ),
+    ).toBe(false)
 
     const c = new AbortController()
     registerStreamJob('abort-ux', c)

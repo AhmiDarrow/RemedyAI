@@ -2,7 +2,7 @@
  * Composer attachment rail: state, File upload, native drop payloads, drag chrome.
  */
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   pendingMetaFromPayload,
   uploadAttachment,
@@ -10,6 +10,11 @@ import {
   type AttachmentMeta,
   type DroppedFilePayload,
 } from '../api/attachments'
+import {
+  NONE_SESSION_KEY,
+  sessionStashKey,
+  swapSessionStash,
+} from '../utils/sessionStash'
 
 const MAX_FILES = 12
 
@@ -31,10 +36,11 @@ function normalizePayload(
 
 export function useComposerAttachments(opts: {
   ensureSessionId: () => Promise<string | null>
+  sessionKey?: string | null
   disabled?: boolean
   onError?: (msg: string) => void
 }) {
-  const { ensureSessionId, disabled, onError } = opts
+  const { ensureSessionId, sessionKey, disabled, onError } = opts
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -43,9 +49,56 @@ export function useComposerAttachments(opts: {
 
   const attachmentsRef = useRef<AttachmentMeta[]>([])
   attachmentsRef.current = attachments
+  const stashRef = useRef(new Map<string, AttachmentMeta[]>())
+  const sessionKeyRef = useRef(sessionStashKey(sessionKey))
+  sessionKeyRef.current = sessionStashKey(sessionKey)
+  const prevKeyRef = useRef(sessionStashKey(sessionKey))
   const inflightDropKeysRef = useRef<Set<string>>(new Set())
   const dragDepth = useRef(0)
   const dragClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const applyToKey = useCallback(
+    (key: string, updater: (prev: AttachmentMeta[]) => AttachmentMeta[]) => {
+      if (sessionKeyRef.current === key) {
+        setAttachments(updater)
+        return
+      }
+      const prev = stashRef.current.get(key) || []
+      stashRef.current.set(key, updater(prev))
+    },
+    [],
+  )
+
+  useEffect(() => {
+    const next = sessionStashKey(sessionKey)
+    const prev = prevKeyRef.current
+    if (next === prev) return
+    const swapped = swapSessionStash(
+      stashRef.current,
+      prev,
+      next,
+      attachmentsRef.current,
+      [],
+    )
+    prevKeyRef.current = swapped.key
+    if (swapped.carried) return
+    setAttachments(swapped.value)
+    setUploadError('')
+    setAttachNotice('')
+    inflightDropKeysRef.current.clear()
+  }, [sessionKey])
+
+  useEffect(() => {
+    return () => {
+      const revoke = (list: AttachmentMeta[]) => {
+        for (const a of list) {
+          if (a.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
+        }
+      }
+      revoke(attachmentsRef.current)
+      for (const list of stashRef.current.values()) revoke(list)
+    }
+  }, [])
 
   const clearDragOver = useCallback(() => {
     dragDepth.current = 0
@@ -85,6 +138,7 @@ export function useComposerAttachments(opts: {
     for (const a of attachmentsRef.current) {
       if (a.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
     }
+    stashRef.current.delete(sessionKeyRef.current)
     setAttachments([])
     setUploadError('')
     setAttachNotice('')
@@ -111,6 +165,7 @@ export function useComposerAttachments(opts: {
       if (!list.length || disabled) return
       setUploadError('')
       setAttachNotice('')
+      const startedKey = sessionKeyRef.current
       const sid = await ensureSessionId()
       if (!sid) {
         const msg = 'Could not create a session for the upload.'
@@ -118,6 +173,8 @@ export function useComposerAttachments(opts: {
         onError?.(msg)
         return
       }
+      const targetKey =
+        startedKey === NONE_SESSION_KEY ? sessionKeyRef.current : startedKey
       const room = MAX_FILES - attachmentsRef.current.length
       if (room <= 0) {
         setUploadError(`Max ${MAX_FILES} attachments per message.`)
@@ -134,14 +191,14 @@ export function useComposerAttachments(opts: {
           }
         }
         if (next.length) {
-          setAttachments((prev) => [...prev, ...next])
-          flashAttached(next.length)
+          applyToKey(targetKey, (prev) => [...prev, ...next])
+          if (sessionKeyRef.current === targetKey) flashAttached(next.length)
         }
       } finally {
         setUploading(false)
       }
     },
-    [disabled, ensureSessionId, flashAttached, onError],
+    [disabled, ensureSessionId, flashAttached, onError, applyToKey],
   )
 
   const addNativePayloads = useCallback(
@@ -184,24 +241,27 @@ export function useComposerAttachments(opts: {
       const batch = unique.slice(0, room)
       const batchKeys = batch.map((p) => nameSizeKey(p.filename, p.size))
       for (const k of batchKeys) inflightDropKeysRef.current.add(k)
+      const startedKey = sessionKeyRef.current
       const optimistic = batch.map(pendingMetaFromPayload)
-      setAttachments((prev) => [...prev, ...optimistic])
+      applyToKey(startedKey, (prev) => [...prev, ...optimistic])
       flashAttached(batch.length)
       setUploading(true)
       const releaseInflight = () => {
         for (const k of batchKeys) inflightDropKeysRef.current.delete(k)
       }
       const sid = await ensureSessionId()
+      const targetKey =
+        startedKey === NONE_SESSION_KEY ? sessionKeyRef.current : startedKey
+      const dropPending = (prev: AttachmentMeta[]) => {
+        const pendingNames = new Set(batch.map((b) => b.filename))
+        return prev.filter(
+          (a) => !(a.id.startsWith('pending-') && pendingNames.has(a.name)),
+        )
+      }
       if (!sid) {
         setUploadError('Could not create a session for the upload.')
         releaseInflight()
-        setAttachments((prev) =>
-          prev.filter(
-            (a) =>
-              !a.id.startsWith('pending-')
-              || !batch.some((b) => b.filename === a.name),
-          ),
-        )
+        applyToKey(targetKey, dropPending)
         setUploading(false)
         return
       }
@@ -215,12 +275,8 @@ export function useComposerAttachments(opts: {
           }
         }
         if (uploaded.length) {
-          setAttachments((prev) => {
-            const pendingNames = new Set(batch.map((b) => b.filename))
-            const withoutOptimistic = prev.filter(
-              (a) => !(a.id.startsWith('pending-') && pendingNames.has(a.name)),
-            )
-            const merged = [...withoutOptimistic, ...uploaded]
+          applyToKey(targetKey, (prev) => {
+            const merged = [...dropPending(prev), ...uploaded]
             const seen = new Set<string>()
             return merged.filter((a) => {
               const k = nameSizeKey(a.name, a.size)
@@ -230,12 +286,7 @@ export function useComposerAttachments(opts: {
             })
           })
         } else {
-          const pendingNames = new Set(batch.map((b) => b.filename))
-          setAttachments((prev) =>
-            prev.filter(
-              (a) => !(a.id.startsWith('pending-') && pendingNames.has(a.name)),
-            ),
-          )
+          applyToKey(targetKey, dropPending)
           setUploadError(
             (prev) => prev || 'Upload failed — files not stored for the agent.',
           )
@@ -245,7 +296,7 @@ export function useComposerAttachments(opts: {
         setUploading(false)
       }
     },
-    [disabled, ensureSessionId, flashAttached, clearDragOver],
+    [disabled, ensureSessionId, flashAttached, clearDragOver, applyToKey],
   )
 
   return {

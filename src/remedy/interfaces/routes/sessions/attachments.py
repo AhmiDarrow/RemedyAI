@@ -33,6 +33,11 @@ def register_attachments_routes(app: FastAPI, *, runtime=None, gateway=None, mem
 
         from remedy.interfaces.attachments import MAX_ATTACHMENT_BYTES, save_upload
 
+        if memory is not None:
+            row = await memory.get_chat_session(session_id)
+            if row is None:
+                raise HTTPException(404, "Session not found")
+
         try:
             raw = base64.b64decode(req.data_base64, validate=False)
         except Exception as e:

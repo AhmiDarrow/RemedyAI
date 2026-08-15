@@ -4,6 +4,38 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-08-15
+
+Stability pass plus Settings chrome polish. Multi-tab isolation, RMB live
+restarts, and host/web abort paths no longer clobber a sibling turn.
+
+### Desktop / Settings
+
+- Simple / Advanced is one tab track (arrow keys, short labels). Search is
+  quieter. Section cards, switches, and segmented rows share one language.
+- Composer draft and attachments stash per chat. Attach-on-empty-shell no
+  longer steals focus if you pick another tab mid-create.
+- Status bar Simple / Advanced and workspace header actions use the same
+  chrome buttons as the rest of the shell.
+
+### Isolation / RMB
+
+- `POST /api/rmb/settings` saves disk then 409s instead of restarting
+  llama-server under a live stream. Start / Use / HF pull / Settings Save
+  do the same.
+- `remedy:rmb-model-changed` no longer writes global `llm_*` unless no chat
+  is open. Persist never stamps the host GGUF stem onto another tab.
+- Stream claim covers legacy `/api/chat/stream`. Missing sessions 404 on
+  GET messages, PUT llm, and attachment upload.
+
+### Host / web / computer-use
+
+- Computer-use jobs claim the focused session only. ConPTY keeps one
+  outstanding stdout read. `web_fetch` abort is checked between redirect
+  hops (no longer swallowed).
+- Sync send forwards jailed attachments. Write-path locks include
+  `apply_patch`.
+
 ### Desktop / live
 
 - Session create / update / delete now publish SSE so the sidebar can refresh

@@ -23,6 +23,7 @@ import {
 } from '../api/vision'
 import { IconPaperclip, IconSend, IconStop } from './icons'
 import { ImageLightbox } from './ImageLightbox'
+import { sessionStashKey, swapSessionStash } from '../utils/sessionStash'
 
 export interface AgentDef {
   name: string
@@ -181,6 +182,10 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   ref,
 ) {
   const [input, setInput] = useState('')
+  const inputRef = useRef('')
+  inputRef.current = input
+  const inputStashRef = useRef(new Map<string, string>())
+  const prevInputKeyRef = useRef(sessionStashKey(sessionId))
   const [previewImage, setPreviewImage] = useState<{ src: string; alt?: string } | null>(
     null,
   )
@@ -223,8 +228,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // Attachment rail must init before any use of `attachments` / attachmentsRef.
   const {
     attachments,
-    setAttachments,
-    attachmentsRef,
     dragOver,
     uploading,
     uploadError,
@@ -234,12 +237,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     addFiles,
     addNativePayloads,
     removeAttachment,
+    clearAttachments,
     clearDragOver,
     armDragOver,
     dragDepth,
-    inflightDropKeysRef,
   } = useComposerAttachments({
     ensureSessionId: resolveSession,
+    sessionKey: sessionId,
     disabled,
   })
 
@@ -283,6 +287,28 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const historyIndexRef = useRef<number>(-1) // -1 = drafting current (not browsing history)
   const draftBeforeHistoryRef = useRef<string>('')
 
+  useEffect(() => {
+    const next = sessionStashKey(sessionId)
+    const prev = prevInputKeyRef.current
+    if (next === prev) return
+    const swapped = swapSessionStash(
+      inputStashRef.current,
+      prev,
+      next,
+      inputRef.current,
+      '',
+    )
+    prevInputKeyRef.current = swapped.key
+    if (swapped.carried) return
+    setInput(swapped.value)
+    setEditingQueueId(null)
+    setShowSuggestions(false)
+    setSuggestions([])
+    setPreviewImage(null)
+    historyIndexRef.current = -1
+    draftBeforeHistoryRef.current = ''
+  }, [sessionId])
+
   // Load full original prompt into the bar when the user clicks Edit.
   // Parent keeps editDraft until send/session change so remounts don't blank it.
   useEffect(() => {
@@ -302,15 +328,6 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       el.style.height = `${Math.min(el.scrollHeight, 200)}px`
     })
   }, [editDraft])
-
-  // Revoke blob preview URLs on unmount
-  useEffect(() => {
-    return () => {
-      for (const a of attachmentsRef.current) {
-        if (a.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
-      }
-    }
-  }, [attachmentsRef])
 
   const detectAtQuery = useCallback((text: string, cursorPos: number) => {
     const before = text.slice(0, cursorPos)
@@ -537,16 +554,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onSend(text, payload.length ? payload : undefined, streaming ? { mode } : undefined)
         }
         setInput('')
+        inputStashRef.current.delete(sessionStashKey(sessionId))
         setEditingQueueId(null)
         historyIndexRef.current = -1
         draftBeforeHistoryRef.current = ''
-        for (const a of attachments) {
-          if (a.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
-        }
-        setAttachments([])
-        setUploadError('')
-        setAttachNotice('')
-        inflightDropKeysRef.current.clear()
+        clearAttachments()
       } finally {
         requestAnimationFrame(() => {
           submittingRef.current = false
@@ -564,6 +576,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       pushPromptHistory,
       editingQueueId,
       onUpdateQueued,
+      sessionId,
+      clearAttachments,
     ],
   )
 
@@ -1131,12 +1145,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 className="text-[0.65rem] px-1.5 py-0.5 rounded"
                 style={{ color: 'var(--text-muted)' }}
                 onClick={() => {
-                  for (const a of attachments) {
-                    if (a.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(a.previewUrl)
-                  }
-                  setAttachments([])
-                  setAttachNotice('')
-                  inflightDropKeysRef.current.clear()
+                  clearAttachments()
                 }}
               >
                 Clear all

@@ -359,28 +359,12 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         # Once connected, ensure config + runtime use xAI if user is mid-setup.
         sess = (status.get("session") or {})
         if sess.get("status") == "connected":
-            # User completed device OAuth — switch active provider to xAI so chat
-            # uses the new credentials immediately (desktop Settings also PUTs).
+            # GET must not steal the chat provider. Only refresh xAI slots
+            # when the owner is already on xAI (Settings PUT still switches).
             cfg = load_config()
-            config_path = _find_config_path() or _default_config_path()
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            provider, model, base_url = normalize_llm_settings(
-                "xai",
-                cfg.get("llm_model"),
-                cfg.get("llm_base_url") or "https://api.x.ai/v1",
-            )
             prev = str(cfg.get("llm_provider") or "").strip().lower()
-            cfg.update(
-                {
-                    "llm_provider": provider,
-                    "llm_model": model,
-                    "llm_base_url": base_url,
-                }
-            )
-            if prev and prev != "xai":
-                cfg["last_llm_provider"] = prev
-            _write_config(config_path, cfg)
-            _hot_reload_xai(runtime, cfg)
+            if prev == "xai":
+                _hot_reload_xai(runtime, cfg)
         return status
 
     @app.post("/api/auth/xai/apikey")

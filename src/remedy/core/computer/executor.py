@@ -1208,6 +1208,14 @@ class ComputerExecutor:
                     out["attempt"] = attempt + 1
                     return out
                 last_err = msg
+            elif finished.status == "cancelled" or self._abort_check():
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="click",
+                    message="Aborted by user",
+                    extra={"aborted": True, "text": text_q},
+                )
             else:
                 last_err = finished.error or finished.status or "timeout"
             # Retry: scroll down then try again
@@ -1553,6 +1561,14 @@ class ComputerExecutor:
                 self.bridge.clear_navigate_optimistic()
             return out
 
+        if finished.status == "cancelled" or self._abort_check():
+            return public_result(
+                ok=False,
+                target="browser",
+                action="navigate",
+                message="Aborted by user",
+                extra={"aborted": True, "job_id": job.id},
+            )
         if finished.status == "done" and finished.result:
             return _nav_ok(dict(finished.result), optimistic=False)
 

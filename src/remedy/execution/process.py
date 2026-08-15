@@ -146,7 +146,6 @@ def kill_process_tree(proc: Any) -> None:
                 timeout=5,
                 **hidden_subprocess_kwargs(),
             )
-            return
         except Exception:
             pass
     try:

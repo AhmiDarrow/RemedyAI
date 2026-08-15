@@ -66,6 +66,12 @@ _OPAQUE_PATH_HINT_RE = re.compile(
     # cmd.exe / delayed-expansion env vars used as path roots
     r"|%[A-Za-z_][\w]*%"
     r"|![A-Za-z_][\w]*!"
+    # Substring expansion: %CD:~0,1% / !VAR:~0,1! (whole %VAR% does not match)
+    r"|%[A-Za-z_][\w]*:~"
+    r"|![A-Za-z_][\w]*:~"
+    # PowerShell [char]67+':\…' / '{0}:\…' -f drive construction
+    r"|\[char\]"
+    r"""|['\"][^'\"]*\{0\}[^'\"]*['\"]\s+-f\b"""
     r"|\bjoin-path\b"
     r"|\benviron\["
     r"|\bos\.environ"
@@ -92,6 +98,9 @@ _INTERPRETER_ONESHOT_RE = re.compile(
     r"\b(?:pythonw|python3|python|py)(?:\.exe)?\s+(?:-\w+\s+)*-c\b"
     r"|\b(?:nodejs|node)(?:\.exe)?\s+(?:-\w+\s+)*-e\b"
     r"|\b(?:powershell|pwsh)(?:\.exe)?[^\n]*-(?:command|c)\b"
+    # stdin: `python -` / `python -u -` (not `python -m` / `python -c`)
+    r"|\b(?:pythonw|python3|python|py|nodejs|node)(?:\.exe)?(?:\s+-\w+)*\s+-(?:\s|$|[|&;])"
+    r"|\b(?:php|ruby|perl)(?:\.exe)?\s+(?:-\w+\s+)*-[re]\b"
     r")"
 )
 
@@ -418,6 +427,8 @@ def looks_like_mutation(command: str) -> bool:
     c = command or ""
     if _MUTATION_HINT_RE.search(c):
         return True
+    if _INTERPRETER_ONESHOT_RE.search(c):
+        return True
     if _SCRIPT_LAUNCH_RE.search(c):
         return True
     if _REDIRECT_WRITE_RE.search(c):
@@ -664,6 +675,13 @@ def check_shell_write_jail(
             "DestinationPath under the project)."
         )
 
+    # Quote-break / cmd chaining after a rewrite (`cat foo"&calc`).
+    if re.search(r'"[^"\n]*[&|^]', cmd) or re.search(r'[&|^][^"\n]*"', cmd):
+        return (
+            "shell write jail: quoted operand contains cmd metacharacters "
+            f"under write roots [{roots_s}]. Prefer file_write/file_edit."
+        )
+
     if not looks_like_mutation(cmd):
         return None
 
@@ -742,8 +760,19 @@ def check_shell_write_jail(
             )
 
     # Mutation with zero extractable path tokens: allow only if cwd is under
-    # write roots (npm install / git write inside project). Else fail closed.
+    # write roots (npm install / git write inside project). Path construction
+    # (env substring, [char], stdin interpreters) cannot be proven — fail closed.
     if not offenders and not candidates:
+        if (
+            _OPAQUE_PATH_HINT_RE.search(cmd)
+            or _PY_CONSTRUCTED_DEST_RE.search(cmd)
+            or _INTERPRETER_ONESHOT_RE.search(cmd)
+        ) and not readonly_oneshot:
+            return (
+                "shell write jail: mutation dest cannot be proven under write "
+                f"roots [{roots_s}]. Prefer file_write/file_edit with a literal "
+                "path under the focus folder."
+            )
         if cwd is not None:
             try:
                 from pathlib import Path as _P

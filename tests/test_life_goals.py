@@ -36,6 +36,18 @@ def test_store_add_list_complete_and_next(tmp_path):
     assert "Finish the novel" in md
 
 
+def test_corrupt_life_goals_json_does_not_wipe(tmp_path):
+    store = LifeGoalStore(tmp_path)
+    store.add("Keep this goal")
+    store.path.write_text("{not json", encoding="utf-8")
+    broken = LifeGoalStore(tmp_path)
+    assert broken.list() == []
+    broken.add("New after corrupt")
+    raw = store.path.read_text(encoding="utf-8")
+    assert "{not json" in raw
+    assert "New after corrupt" not in raw
+
+
 def test_life_goal_lines_prefer_store(tmp_path):
     LifeGoalStore(tmp_path).add("Land the job", next_action="Rewrite the resume")
     lines = life_goal_lines(None, home_dir=tmp_path)

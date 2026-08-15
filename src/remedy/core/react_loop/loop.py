@@ -1396,11 +1396,26 @@ async def call_llm_stream(runtime, message: str,
                             )
                         )
                         if _loading:
-                            _load_waits = int(
-                                getattr(runtime, "_rmb_load_waits", 0) or 0
-                            )
+                            _load_waits = 0
+                            with suppress(Exception):
+                                from remedy.core.turn_context import _react_flags
+
+                                _fl = _react_flags()
+                                if _fl is not None:
+                                    _load_waits = int(_fl.rmb_load_waits or 0)
+                                else:
+                                    _load_waits = int(
+                                        getattr(runtime, "_rmb_load_waits", 0) or 0
+                                    )
                             if _load_waits < 3:
-                                runtime._rmb_load_waits = _load_waits + 1
+                                with suppress(Exception):
+                                    from remedy.core.turn_context import _react_flags
+
+                                    _fl = _react_flags()
+                                    if _fl is not None:
+                                        _fl.rmb_load_waits = _load_waits + 1
+                                    else:
+                                        runtime._rmb_load_waits = _load_waits + 1
                                 yield (
                                     "@@status:Local model is loading — "
                                     "waiting for RMB to become ready…\n"
@@ -3178,54 +3193,26 @@ async def call_llm_stream(runtime, message: str,
                     endpoint, headers=headers, json=body
                 ) as resp:
                     if resp.status == 200:
-                        headers_map = getattr(resp, "headers", None) or {}
-                        content_type = str(
-                            headers_map.get("Content-Type")
-                            or headers_map.get("content-type")
-                            or ""
-                        ).lower()
-                        if use_openai_sse or "event-stream" in content_type:
-                            async for line in resp.content:
-                                line_text = line.decode("utf-8").strip()
-                                if not line_text or line_text.startswith(":"):
-                                    continue
-                                if line_text == "data: [DONE]":
-                                    break
-                                if line_text.startswith("data: "):
-                                    line_text = line_text[6:]
-                                try:
-                                    chunk = json.loads(line_text)
-                                except json.JSONDecodeError:
-                                    continue
-                                delta = (chunk.get("choices") or [{}])[0].get(
-                                    "delta"
-                                ) or {}
-                                piece = delta.get("content")
-                                if piece:
-                                    produced_user_text = True
-                                    yield piece
-                                # Also surface trailing reasoning as answer if
-                                # content stayed empty (DeepSeek reasoner).
-                                reason = (
-                                    delta.get("reasoning_content")
-                                    or delta.get("reasoning")
-                                )
-                                if (
-                                    not piece
-                                    and isinstance(reason, str)
-                                    and reason
-                                ):
-                                    produced_user_text = True
-                                    yield reason
-                        else:
-                            data = await resp.json()
-                            parsed = _adapter.extract_response(data)
-                            piece = parsed.get("content") or parsed.get(
-                                "reasoning_content"
-                            )
-                            if piece:
+                        rs = StreamRoundState()
+                        collected: dict[str, Any] = {}
+                        async for _tok, _user_flag in consume_llm_http_response(
+                            resp,
+                            round_state=rs,
+                            collected=collected,
+                            adapter=_adapter,
+                            bind=_bind,
+                            body=body if isinstance(body, dict) else None,
+                            use_openai_sse=use_openai_sse,
+                            stream_live=True,
+                        ):
+                            if _user_flag:
                                 produced_user_text = True
-                                yield str(piece)
+                            yield _tok
+                        if not produced_user_text:
+                            leftover = rs.text_out or rs.reasoning_out
+                            if leftover:
+                                produced_user_text = True
+                                yield leftover
             except Exception:
                 logger.debug("final synthesis failed", exc_info=True)
         if not produced_user_text:
@@ -3243,16 +3230,6 @@ async def call_llm_stream(runtime, message: str,
                     "Ask me to **continue** or restate the request and I will resume "
                     "from the context already gathered."
                 )
-        # Compound learning + speculative warm for next turn
-        from remedy.core.agent_post_turn import schedule_post_turn_prep
-
-        with suppress(Exception):
-            runtime._last_assistant_text = "".join(assistant_text_acc)[-12000:]
-        schedule_post_turn_prep(
-            runtime,
-            message=message or "",
-            session_id=session_id,
-        )
     except Exception as e:
         logger.exception("LLM stream failed")
         # After tools: prefer synthesis over raw exception as the main answer (#4/#8)
@@ -3273,7 +3250,15 @@ async def call_llm_stream(runtime, message: str,
                     "@@status:Host blip after tools — recovering and finishing…\n"
                 )
                 _finished = False
-                if _is_disc(e) or True:
+                _err_s = str(e or "")
+                _is_5xx = any(
+                    tok in _err_s
+                    for tok in (" 500", " 502", " 503", " 504", "status 5", "HTTP 5")
+                ) or any(
+                    code in _err_s
+                    for code in ("502", "503", "504")
+                )
+                if _is_disc(e) or _is_5xx:
                     for _attempt in range(3):
                         try:
                             import asyncio as _aio
@@ -3282,16 +3267,31 @@ async def call_llm_stream(runtime, message: str,
                             from remedy.core.local_agent_optimize import (
                                 is_local_binding as _ilb_rec,
                             )
+                            from remedy.core.react_loop.stream_consume import (
+                                _await_or_abort,
+                            )
+                            from remedy.core.turn_context import (
+                                current_abort_event,
+                                is_turn_aborted,
+                            )
 
+                            if is_turn_aborted():
+                                break
+                            _abort_ev = current_abort_event()
                             _b2 = get_llm_binding(runtime)
                             if _ilb_rec(
                                 _b2.provider, _b2.model, _b2.base_url
                             ):
                                 from remedy.runtime.rmb.service import wait_rmb_ready
 
-                                _wr = await _aio.to_thread(
-                                    wait_rmb_ready, None, timeout_s=90.0
+                                _wr = await _await_or_abort(
+                                    _aio.to_thread(
+                                        wait_rmb_ready, None, timeout_s=90.0
+                                    ),
+                                    _abort_ev,
                                 )
+                                if is_turn_aborted():
+                                    break
                                 if not _wr.get("ok"):
                                     continue
                             import aiohttp as _ah
@@ -3341,6 +3341,8 @@ async def call_llm_stream(runtime, message: str,
                                         or "sleev" in str(e).lower()
                                     ),
                                 )
+                            if is_turn_aborted():
+                                break
                             async with (
                                 _ah.ClientSession() as _sess,
                                 _sess.post(
@@ -3350,8 +3352,12 @@ async def call_llm_stream(runtime, message: str,
                                     timeout=_ah.ClientTimeout(total=180),
                                 ) as _resp,
                             ):
+                                    if is_turn_aborted():
+                                        break
                                     if _resp.status == 200:
-                                        _data = await _resp.json()
+                                        _data = await _await_or_abort(
+                                            _resp.json(), _abort_ev
+                                        )
                                         _txt = (
                                             (
                                                 (
@@ -3366,7 +3372,7 @@ async def call_llm_stream(runtime, message: str,
                                             yield "\n" + _txt.strip() + "\n"
                                             _finished = True
                                             break
-                                    if _resp.status in (502, 503):
+                                    if _resp.status in (502, 503, 500, 504):
                                         continue
                         except Exception as _rec_exc:
                             logger.warning(
@@ -3430,5 +3436,18 @@ async def call_llm_stream(runtime, message: str,
             f"\nSomething went wrong mid-turn ({e}).\n\n"
             "History is intact; send **continue** or restate the request.\n"
         )
+    finally:
+        # Early `return` inside the step loop used to skip this — desktop
+        # chat never ran soul / metabolism / speculative on a normal final.
+        with suppress(Exception):
+            runtime._last_assistant_text = "".join(assistant_text_acc)[-12000:]
+        with suppress(Exception):
+            from remedy.core.agent_post_turn import schedule_post_turn_prep
+
+            schedule_post_turn_prep(
+                runtime,
+                message=message or "",
+                session_id=session_id,
+            )
 
 

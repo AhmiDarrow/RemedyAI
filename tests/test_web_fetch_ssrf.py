@@ -151,6 +151,49 @@ def test_pinned_fetch_revalidates_redirect_private_and_userinfo():
             _pinned_fetch("http://1.1.1.1/start", max_chars=1000)
 
 
+def test_pinned_fetch_aborts_between_redirect_hops(monkeypatch):
+    """Stop generation must win between hops — do not follow the next Location."""
+    from unittest.mock import MagicMock
+
+    from remedy.core.agent_web_tools import _pinned_fetch
+
+    hops = {"n": 0}
+
+    monkeypatch.setattr(
+        "remedy.core.turn_context.is_turn_aborted",
+        lambda: hops["n"] >= 1,
+    )
+
+    class _Conn:
+        def __init__(self, *a, **k):
+            hops["n"] += 1
+
+        def request(self, *a, **k):
+            pass
+
+        def getresponse(self):
+            resp = MagicMock()
+            resp.status = 302
+            resp.reason = "Found"
+            resp.headers = {}
+            resp.getheader = lambda name, default=None: (
+                "http://8.8.8.8/next" if str(name).lower() == "location" else default
+            )
+            resp.read = lambda *a, **k: b""
+            return resp
+
+        def close(self):
+            pass
+
+    with patch(
+        "remedy.core.agent_web_tools.http.client.HTTPConnection",
+        _Conn,
+    ):
+        with pytest.raises(ValueError, match="ABORTED"):
+            _pinned_fetch("http://1.1.1.1/start", max_chars=1000)
+    assert hops["n"] == 1
+
+
 def test_blocks_ipv6_ula_link_local_loopback_and_mapped():
     """IPv6 ULA/doc/link-local/loopback/multicast and IPv4-mapped loopback stay blocked.
 

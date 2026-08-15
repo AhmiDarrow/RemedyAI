@@ -776,35 +776,23 @@ export function StatusBar({
           {onUiModeChange && (
             <button
               type="button"
-              className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+              className={`seg-btn${advanced ? ' is-active' : ''}`}
               title={
                 advanced
-                  ? 'Advanced UI (full chrome) — click for Simple UI'
-                  : 'Simple UI (calm chrome) — click for Advanced UI'
+                  ? 'Advanced UI (full chrome) — click for Simple'
+                  : 'Simple UI (calm chrome) — click for Advanced'
               }
               onClick={() => onUiModeChange(advanced ? 'simple' : 'advanced')}
-              style={{
-                background: advanced
-                  ? 'color-mix(in srgb, var(--accent) 22%, transparent)'
-                  : 'var(--bg-tertiary)',
-                color: advanced ? 'var(--accent)' : 'var(--text-muted)',
-                border: `1px solid ${advanced ? 'var(--accent)' : 'var(--border)'}`,
-              }}
             >
-              {advanced ? 'Advanced UI' : 'Simple UI'}
+              {advanced ? 'Advanced' : 'Simple'}
             </button>
           )}
           {advanced && onOpenUsage && (
             <button
               type="button"
-              className="text-xs px-1.5 py-0.5 rounded"
+              className="seg-btn"
               title="Usage & Continuity dashboard"
               onClick={onOpenUsage}
-              style={{
-                background: 'var(--bg-tertiary)',
-                color: 'var(--text-muted)',
-                border: '1px solid var(--border)',
-              }}
             >
               Usage
             </button>
@@ -897,16 +885,18 @@ export function StatusBar({
                   ? DEMO_DEFAULT_MODEL
                   : model
               }
+              disabled={streaming}
               onChange={(e) => onModelChange(
                 provider === 'demo' ? coerceDemoModel(e.target.value) : e.target.value,
               )}
               className="ui-select"
-              title="Active model"
+              title={streaming ? 'Stop generation to switch model' : 'Active model'}
               style={{
                 background: 'var(--bg-tertiary)',
                 color: 'var(--text-primary)',
                 border: '1px solid var(--border)',
                 maxWidth: 140,
+                opacity: streaming ? 0.6 : 1,
               }}
             >
               {models

@@ -18,6 +18,30 @@ from remedy.interfaces.api_support import (
 logger = logging.getLogger(__name__)
 
 
+def _resolve_session_project(raw: str | None) -> str | None:
+    """Bind a session to a real folder, or None. Refuse OS / program trees."""
+    from remedy.core.workspace import (
+        ensure_project_dir,
+        is_forbidden_project_path,
+        is_unset_project_path,
+        resolve_project_path,
+    )
+
+    if is_unset_project_path(raw):
+        return None
+    resolved = resolve_project_path(str(raw))
+    if is_forbidden_project_path(raw) or is_forbidden_project_path(resolved):
+        raise HTTPException(
+            400,
+            f"Project path is not allowed: {resolved}. "
+            "Pick a user folder, not an OS or program directory.",
+        )
+    try:
+        return str(ensure_project_dir(resolved))
+    except Exception:
+        return str(resolved)
+
+
 async def _publish_session(kind: str, session: object) -> None:
     sid = str(getattr(session, "id", "") or "")
     if not sid:
@@ -89,11 +113,6 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         if memory is None:
             raise HTTPException(503, "Memory store not available")
 
-        from remedy.core.workspace import (
-            ensure_project_dir,
-            is_unset_project_path,
-            resolve_project_path,
-        )
         from remedy.models import ChatSession as CS
 
         # Omit project_path (None) → inherit global settings project if set.
@@ -103,12 +122,7 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             raw_project = req.project_path
         else:
             raw_project = load_config().get("project_path")
-        project_path = None
-        if not is_unset_project_path(raw_project):
-            try:
-                project_path = str(ensure_project_dir(resolve_project_path(str(raw_project))))
-            except Exception:
-                project_path = str(resolve_project_path(str(raw_project)))
+        project_path = _resolve_session_project(raw_project)
 
         # Stamp provider+model at create so a second project session does not
         # inherit a null bind and thrash the status bar against the first tab.
@@ -181,22 +195,7 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             if v is not None or k == "project_path"
         }
         if "project_path" in fields:
-            from remedy.core.workspace import (
-                ensure_project_dir,
-                is_unset_project_path,
-                resolve_project_path,
-            )
-
-            raw = fields["project_path"]
-            if is_unset_project_path(raw):
-                fields["project_path"] = None
-            else:
-                try:
-                    fields["project_path"] = str(
-                        ensure_project_dir(resolve_project_path(str(raw)))
-                    )
-                except Exception:
-                    fields["project_path"] = str(resolve_project_path(str(raw)))
+            fields["project_path"] = _resolve_session_project(fields["project_path"])
         session = await memory.update_chat_session(session_id, **fields)
         if session is None:
             raise HTTPException(404, "Session not found")
@@ -216,26 +215,13 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         """Attach many sessions to one project folder (or clear → no project)."""
         if memory is None:
             raise HTTPException(503, "Memory store not available")
-        from remedy.core.workspace import (
-            ensure_project_dir,
-            is_unset_project_path,
-            resolve_project_path,
-        )
-
         ids = [str(i).strip() for i in (req.session_ids or []) if str(i).strip()]
         if not ids:
             raise HTTPException(400, "session_ids required")
         if len(ids) > 200:
             raise HTTPException(400, "At most 200 sessions per bulk move")
 
-        project_path: str | None = None
-        if not is_unset_project_path(req.project_path):
-            try:
-                project_path = str(
-                    ensure_project_dir(resolve_project_path(str(req.project_path)))
-                )
-            except Exception:
-                project_path = str(resolve_project_path(str(req.project_path)))
+        project_path = _resolve_session_project(req.project_path)
 
         updated: list[str] = []
         missing: list[str] = []
@@ -264,11 +250,19 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             from remedy.core.turn_context import abort_session as _abort_turn
 
             _abort_turn(sid)
+        with contextlib.suppress(Exception):
+            from remedy.core.turn_context import release_session_stream_claim
+
+            release_session_stream_claim(sid)
         if runtime is not None:
             with contextlib.suppress(Exception):
                 ss = getattr(runtime, "_streaming_sessions", None)
                 if isinstance(ss, set):
                     ss.discard(sid)
+        with contextlib.suppress(Exception):
+            from remedy.execution.host.session import close_shared_session
+
+            await close_shared_session(sid)
         deleted = await memory.delete_chat_session(sid)
         if not deleted:
             raise HTTPException(404, "Session not found")
@@ -296,6 +290,10 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         from remedy.core.turn_context import abort_session as _abort_turn
 
         n = _abort_turn(session_id)
+        with contextlib.suppress(Exception):
+            from remedy.execution.host.session import close_shared_session
+
+            await close_shared_session(str(session_id))
         if runtime is not None:
             # Clear global streaming flag when this session was the active one.
             with contextlib.suppress(Exception):

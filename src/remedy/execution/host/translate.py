@@ -221,8 +221,10 @@ def _q(path: str) -> str:
     p = path.replace("/", "\\") if ("/" in path or os.name == "nt") else path
     if not p:
         return '""'
-    if p.startswith('"') and p.endswith('"'):
-        return p
+    if len(p) >= 2 and p[0] == p[-1] == '"':
+        p = p[1:-1]
+    # cmd treats "" as a literal quote inside a quoted string.
+    p = p.replace('"', '""')
     return f'"{p}"'
 
 
@@ -246,7 +248,7 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
             win_p = p.replace("/", "\\").rstrip("\\")
             # Parens so `mkdir -p dest && gcc` still runs gcc when dest exists.
             # Bare `if not exist … && gcc` skips gcc (IF consumes the line).
-            parts.append(f'(if not exist "{win_p}\\" mkdir "{win_p}")')
+            parts.append(f'(if not exist {_q(win_p + os.sep)} mkdir {_q(win_p)})')
         notes.append("mkdir -p → if not exist mkdir")
         return " & ".join(parts), notes
 

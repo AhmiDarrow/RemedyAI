@@ -127,7 +127,7 @@ class MessengerPollLock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         except OSError as e:
             logger.warning("%s poll lock mkdir failed: %s", self.channel, e)
-            return True  # fail open so a single broken FS path still works
+            return False
 
         # Stale lock: previous owner dead, or heartbeat expired → remove.
         if self.path.is_file():
@@ -138,7 +138,7 @@ class MessengerPollLock:
                     old_pid, old_ts = parsed
                     now = time.time()
                     stale_hb = old_ts > 0 and (now - old_ts) > STALE_LOCK_SECONDS
-                    if old_pid != os.getpid() and _pid_alive(old_pid) and not stale_hb:
+                    if old_pid != os.getpid() and _pid_alive(old_pid):
                         logger.warning(
                             "%s poll lock held by live pid=%s — this process will not "
                             "long-poll (avoid HTTP 409). Quit the other Remedy instance "
@@ -147,8 +147,8 @@ class MessengerPollLock:
                             old_pid,
                         )
                         return False
-                    if old_pid != os.getpid() and (not _pid_alive(old_pid) or stale_hb):
-                        why = "stale heartbeat" if stale_hb and _pid_alive(old_pid) else "dead pid"
+                    if old_pid != os.getpid() and not _pid_alive(old_pid):
+                        why = "stale heartbeat" if stale_hb else "dead pid"
                         logger.info(
                             "%s poll lock reclaim (%s pid=%s age=%.0fs)",
                             self.channel,

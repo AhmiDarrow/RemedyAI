@@ -3347,18 +3347,16 @@ def apply_rmb_settings(
     state = merge_state(state)
     save_rmb_json(state, home_dir)
 
-    # Auto: any GGUF / model change becomes the chat model — users never
-    # need a separate "Use as chat provider" step for RMB.
+    # Steal chat provider only when the user asked, or the loaded GGUF changed.
     model_changed = (
         "model_path" in patch
         or "model_id" in patch
         or bool(patch.get("use_as_chat_provider"))
-        or bool(patch.get("enabled"))
     )
     chat_sync = sync_rmb_chat_identity(
         state,
         home_dir=home_dir,
-        force_provider=model_changed or bool(state.get("enabled")),
+        force_provider=model_changed,
     )
 
     # Which process knobs actually differ after merge (includes profile side-effects)?
@@ -3420,8 +3418,6 @@ def apply_rmb_settings(
             cfg["harness_mode"] = cfg.get("harness_mode") or "auto"
             cfg["harness_min_context_pct"] = 0.55
             cfg["harness_max_context_pct"] = 0.78
-            # Local agent must write/run tools without click-gating every step
-            cfg["approval_mode"] = "auto"
             vision = (
                 dict(cfg.get("vision") or {})
                 if isinstance(cfg.get("vision"), dict)
@@ -3445,7 +3441,6 @@ def apply_rmb_settings(
                     disk["llm_model"] = chat_stem
                     disk["harness_min_context_pct"] = 0.55
                     disk["harness_max_context_pct"] = 0.78
-                    disk["approval_mode"] = "auto"
                     v = (
                         dict(disk.get("vision") or {})
                         if isinstance(disk.get("vision"), dict)
@@ -3462,20 +3457,11 @@ def apply_rmb_settings(
                         disk["llm_model"] = chat_stem
                     disk["harness_min_context_pct"] = 0.55
                     disk["harness_max_context_pct"] = 0.78
-                    # Full local power: don't leave ask-mode blocking every write
-                    if str(disk.get("approval_mode") or "ask").lower() == "ask":
-                        disk["approval_mode"] = "auto"
                     cfg["llm_provider"] = "rmb"
                     cfg["llm_base_url"] = disk["llm_base_url"]
                     cfg["llm_model"] = disk["llm_model"]
                 _write_config(path, disk)
                 invalidate_config_cache()
-                # Hot-apply approvals process mode
-                with contextlib.suppress(Exception):
-                    from remedy.core.approvals import APPROVALS
-
-                    if str(disk.get("approval_mode") or "").lower() == "auto":
-                        APPROVALS.set_mode("auto")
     except Exception:
         logger.debug("config mirror failed", exc_info=True)
 

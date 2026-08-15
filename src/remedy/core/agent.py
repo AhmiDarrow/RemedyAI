@@ -45,6 +45,7 @@ from remedy.core.workspace import (
     allowed_roots_for_scope,
     effective_access_scope,
     ensure_project_dir,
+    is_forbidden_project_path,
     is_unset_project_path,
     normalize_access_scope,
     resolve_project_path,
@@ -370,11 +371,18 @@ class BasicRuntime(AgentRuntime):
             self._project_path_raw = None
             resolved = resolve_project_path(None)
         else:
-            self._project_path_raw = raw.strip() if raw else None
             resolved = resolve_project_path(
                 raw,
                 fallback=self._default_project_path,
             )
+            if is_forbidden_project_path(raw) or is_forbidden_project_path(resolved):
+                raise SecurityError(
+                    f"Project path is not allowed: {resolved}. "
+                    "Pick a user folder, not an OS or program directory.",
+                    rule="forbidden_project",
+                    path=str(resolved),
+                )
+            self._project_path_raw = raw.strip() if raw else None
         with suppress(Exception):
             resolved = ensure_project_dir(resolved)
         self._active_project_path = resolved

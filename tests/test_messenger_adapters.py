@@ -345,6 +345,60 @@ def test_google_chat_auth_length_mismatch_false_not_raise():
     assert ch.verify_inbound_auth(None) is False
 
 
+def test_whatsapp_webhook_rejects_oversized_body():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from remedy.interfaces.routes.webhooks import register_webhook_routes
+    from remedy.models import ChannelKind
+
+    class _WA:
+        def verify_signature(self, *_a, **_k):
+            raise AssertionError("must not verify oversized body")
+
+        async def handle_webhook_payload(self, *_a, **_k):
+            raise AssertionError("must not handle oversized body")
+
+    class _FakeGW:
+        def get_channel(self, kind):
+            if kind == ChannelKind.WHATSAPP:
+                return _WA()
+            return None
+
+    app = FastAPI()
+    register_webhook_routes(app, gateway=_FakeGW())
+    client = TestClient(app)
+    r = client.post("/api/webhooks/whatsapp", content=b"x" * (2 * 1024 * 1024 + 8))
+    assert r.status_code == 413
+
+
+def test_google_chat_webhook_rejects_oversized_content_length():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from remedy.interfaces.routes.webhooks import register_webhook_routes
+    from remedy.models import ChannelKind
+
+    class _FakeGW:
+        def get_channel(self, kind):
+            if kind == ChannelKind.GOOGLE_CHAT:
+                return GoogleChatChannel(self, access_token="secret-token", allow_all=True)
+            return None
+
+        async def emit(self, event):
+            return None
+
+    app = FastAPI()
+    register_webhook_routes(app, gateway=_FakeGW())
+    client = TestClient(app)
+    r = client.post(
+        "/api/webhooks/google_chat",
+        content=b"{}",
+        headers={"Content-Length": str(3 * 1024 * 1024)},
+    )
+    assert r.status_code == 413
+
+
 def test_google_chat_webhook_challenge_does_not_skip_auth_on_message():
     """MESSAGE bodies with a challenge key must still require Bearer auth."""
     from fastapi import FastAPI

@@ -397,11 +397,25 @@ def register_settings_tools(runtime: Any) -> None:
             from remedy.core.approvals import APPROVALS
             from remedy.core.turn_context import turn_session_id
             from remedy.core.workspace import (
+                is_forbidden_project_path,
                 is_unset_project_path,
                 resolve_project_path,
             )
 
             new_raw = patch.get("project_path")
+            if not is_unset_project_path(new_raw) and (
+                is_forbidden_project_path(new_raw)
+                or is_forbidden_project_path(resolve_project_path(str(new_raw)))
+            ):
+                return format_tool_error(
+                    (
+                        f"Project path is not allowed: {new_raw}. "
+                        "Pick a user folder, not an OS or program directory."
+                    ),
+                    code="PROJECT_FORBIDDEN",
+                    tool_name="update_settings",
+                    suggestion="Choose a user project folder.",
+                )
             try:
                 bound = not bool(runtime.project_path_is_unset())
             except Exception as exc:

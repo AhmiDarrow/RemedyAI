@@ -95,6 +95,7 @@ class LifeGoalStore:
         self.last_drive_at: float = 0.0
         self.last_digest_at: float = 0.0
         self.last_steps: list[dict[str, Any]] = []
+        self._disk_corrupt = False
 
     def _read_raw(self) -> dict[str, Any]:
         empty: dict[str, Any] = {
@@ -108,8 +109,12 @@ class LifeGoalStore:
             return empty
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except OSError:
             return empty
+        except json.JSONDecodeError:
+            self._disk_corrupt = True
+            return empty
+        self._disk_corrupt = False
         if not isinstance(raw, dict):
             return {
                 "goals": raw if isinstance(raw, list) else [],
@@ -172,6 +177,8 @@ class LifeGoalStore:
         return out[:_MAX_GOALS]
 
     def _save(self, goals: list[LifeGoal]) -> None:
+        if self._disk_corrupt:
+            return
         self.home.mkdir(parents=True, exist_ok=True)
         payload = {
             "version": 1,

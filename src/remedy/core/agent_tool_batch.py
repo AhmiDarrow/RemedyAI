@@ -66,7 +66,7 @@ def progress_marker(
     return f"@@progress:{json.dumps(payload, separators=(',', ':'))}"
 
 
-_WRITE_TOOLS = frozenset({"file_write", "file_edit", "file_edit_batch"})
+_WRITE_TOOLS = frozenset({"file_write", "file_edit", "file_edit_batch", "apply_patch"})
 
 
 def _write_path_key(name: str, args: dict[str, Any]) -> str | None:
@@ -94,7 +94,9 @@ def _write_path_key(name: str, args: dict[str, Any]) -> str | None:
         # overlapping batches still serialize while disjoint path singles
         # use per-path keys below.
         if len(paths) > 1:
-            return "batch:" + "|".join(sorted(set(paths)))
+            # Share the global write barrier so file_write(path:a) cannot
+            # race a batch that also touches a.
+            return "__all_writes__"
         return f"path:{paths[0]}"
     path = ""
     if isinstance(args, dict):

@@ -51,6 +51,7 @@ async function hostFetch<T>(path: string, init?: RequestInit): Promise<T> {
 export async function computerHostHello(opts?: {
   bounds?: BrowserBoundsPayload | null
   scale?: number
+  sessionId?: string | null
 }): Promise<{ host_connected?: boolean }> {
   return hostFetch('/computer/host/hello', {
     method: 'POST',
@@ -58,6 +59,7 @@ export async function computerHostHello(opts?: {
       client: 'desktop',
       bounds: opts?.bounds || undefined,
       scale: opts?.scale,
+      session_id: opts?.sessionId || undefined,
     }),
   })
 }
@@ -90,10 +92,13 @@ export async function computerCapture(body: {
 
 /** Claim next job. SPA must exclude navigate — Rust owns rail navigates. */
 export async function claimComputerJob(
-  opts?: { exclude?: string },
+  opts?: { exclude?: string; sessionId?: string | null },
 ): Promise<ComputerJob | null> {
   const exclude = opts?.exclude ?? 'navigate'
-  const q = exclude ? `?exclude=${encodeURIComponent(exclude)}` : ''
+  const params = new URLSearchParams()
+  if (exclude) params.set('exclude', exclude)
+  if (opts?.sessionId) params.set('session_id', opts.sessionId)
+  const q = params.toString() ? `?${params.toString()}` : ''
   const data = await hostFetch<{ job?: ComputerJob | null }>(
     `/computer/jobs/next${q}`,
   )

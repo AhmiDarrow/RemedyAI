@@ -75,6 +75,8 @@ class TurnReactFlags:
     force_spread: bool = False
     metabolism_allow_verify: bool = False
     thinking_level: str | None = None
+    context_snapshot: Any = None
+    rmb_load_waits: int = 0
 
 
 _turn_react_flags: ContextVar[TurnReactFlags | None] = ContextVar(
@@ -392,6 +394,17 @@ def abort_session(session_id: str, *, epoch: int | None = None) -> int:
         with contextlib.suppress(Exception):
             ev.set()
     kill_session_processes(sid)
+    with contextlib.suppress(Exception):
+        import asyncio
+
+        from remedy.execution.host.session import close_shared_session
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            loop.create_task(close_shared_session(sid))
     # Cancel in-flight computer-use browser jobs for *this session only*
     # so Stop on one tab does not clobber a concurrent sibling stream.
     with contextlib.suppress(Exception):
@@ -540,16 +553,14 @@ def set_turn_tier(
     *,
     label: str | None = None,
 ) -> None:
+    """Live-turn only — do not write the shared runtime singleton."""
+    del runtime
     flags = _react_flags()
     n = int(value or 0)
     if flags is not None:
         flags.turn_tier = n
         if label is not None:
             flags.turn_tier_label = str(label)
-    elif runtime is not None:
-        runtime._turn_tier = n
-        if label is not None:
-            runtime._turn_tier_label = str(label)
 
 
 def turn_action_ir(runtime: Any = None) -> Any:
@@ -562,11 +573,11 @@ def turn_action_ir(runtime: Any = None) -> Any:
 
 
 def set_turn_action_ir(value: Any, runtime: Any = None) -> None:
+    """Live-turn only — do not write the shared runtime singleton."""
+    del runtime
     flags = _react_flags()
     if flags is not None:
         flags.action_ir = value
-    elif runtime is not None:
-        runtime._action_ir = value
 
 
 def turn_shadow_strict(runtime: Any = None) -> bool:
@@ -579,11 +590,29 @@ def turn_shadow_strict(runtime: Any = None) -> bool:
 
 
 def set_turn_shadow_strict(value: bool, runtime: Any = None) -> None:
+    """Live-turn only — do not write the shared runtime singleton."""
+    del runtime
     flags = _react_flags()
     if flags is not None:
         flags.shadow_strict = bool(value)
-    elif runtime is not None:
-        runtime._shadow_strict = bool(value)
+
+
+def turn_context_snapshot(runtime: Any = None) -> Any:
+    flags = _react_flags()
+    if flags is not None and flags.context_snapshot is not None:
+        return flags.context_snapshot
+    if runtime is not None:
+        return getattr(runtime, "_last_context_snapshot", None)
+    return None
+
+
+def set_turn_context_snapshot(value: Any, runtime: Any = None) -> None:
+    """Live-turn only — process-global runtime snapshot is a last-resort fallback."""
+    flags = _react_flags()
+    if flags is not None:
+        flags.context_snapshot = value
+    if runtime is not None:
+        runtime._last_context_snapshot = value
 
 
 def turn_force_spread(runtime: Any = None) -> bool:

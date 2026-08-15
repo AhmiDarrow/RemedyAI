@@ -50,54 +50,28 @@ export function SettingsSection({
 
   return (
     <section
-      className="rounded-xl overflow-hidden"
-      style={{
-        border: '1px solid color-mix(in srgb, var(--border) 88%, transparent)',
-        background: open
-          ? 'color-mix(in srgb, var(--bg-secondary) 70%, transparent)'
-          : 'transparent',
-      }}
+      className={`settings-section${open ? ' is-open' : ''}`}
       data-section={id}
       data-keywords={`${title} ${summary || ''} ${keywords}`.toLowerCase()}
     >
       <button
         type="button"
         onClick={toggle}
-        className="w-full flex items-center gap-2 px-3 py-2.5 text-left transition-colors"
-        style={{
-          background: open
-            ? 'color-mix(in srgb, var(--accent) 6%, var(--bg-tertiary))'
-            : 'transparent',
-          color: 'var(--text-primary)',
-        }}
+        className="settings-section-head w-full flex items-center gap-2 px-3 py-2 text-left"
         aria-expanded={open}
       >
-        <span
-          className="inline-flex w-4 justify-center text-[10px] flex-shrink-0"
-          style={{ color: open ? 'var(--accent)' : 'var(--text-muted)' }}
-          aria-hidden
-        >
+        <span className="settings-section-chevron" aria-hidden>
           {open ? '▾' : '▸'}
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block font-semibold text-xs tracking-tight">{title}</span>
+          <span className="settings-section-title">{title}</span>
           {!open && summary ? (
-            <span
-              className="block text-[10px] truncate mt-0.5 leading-snug"
-              style={{ color: 'var(--text-muted)' }}
-            >
-              {summary}
-            </span>
+            <span className="settings-section-summary">{summary}</span>
           ) : null}
         </span>
       </button>
       {open && (
-        <div
-          className="px-3 pb-3.5 pt-1.5 space-y-2 text-xs"
-          style={{
-            borderTop: '1px solid color-mix(in srgb, var(--border) 80%, transparent)',
-          }}
-        >
+        <div className="settings-section-body px-3 pb-3 pt-1.5 space-y-2 text-xs">
           {children}
         </div>
       )}

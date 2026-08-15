@@ -107,28 +107,19 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                 from remedy.interfaces.routes.sessions.titles import (
                     title_from_prompt as _title_from_prompt,
                 )
-                from remedy.models import ChatMessage, ChatSession
+                from remedy.models import ChatMessage
 
                 existing = await memory.get_chat_session(session_id)
+                # Persist the tab bind — never the process-wide live GGUF stem.
                 sp, sm = resolve_session_llm_bind(
                     session=existing,
                     req_provider=getattr(req, "provider", None),
                     req_model=req.model,
+                    use_live_rmb=False,
                 )
                 fields = session_llm_update_fields(provider=sp, model=sm)
                 if existing is None:
-                    default_proj = load_config().get("project_path")
-                    title_src = user_text or (
-                        att_dicts[0].get("name") if att_dicts else "Attachments"
-                    )
-                    await memory.create_chat_session(ChatSession(
-                        id=session_id,
-                        title=_title_from_prompt(str(title_src), att_dicts=att_dicts),
-                        model=fields.get("model") or req.model,
-                        llm_provider=fields.get("llm_provider"),
-                        agent=req.agent,
-                        project_path=default_proj,
-                    ))
+                    raise HTTPException(404, "Session not found")
                 else:
                     # Auto-name placeholder sessions from the first real prompt.
                     # Also replace path-only titles (e.g. full OneDrive screenshot path)
@@ -474,20 +465,26 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                         persist_text = "*(Used tools — see process.)*"
 
                     if persist_text and memory:
-                        tok = None
-                        if isinstance(final_usage, dict):
-                            tok = int(final_usage.get("total_tokens") or 0) or None
-                        await memory.add_chat_message(ChatMessage(
-                            session_id=session_id,
-                            role=ChatMessageRole.ASSISTANT,
-                            content=persist_text,
-                            thinking=full_thinking.strip() or None,
-                            tool_calls=collected_tool_calls,
-                            tool_results=collected_tool_results,
-                            model=req.model or getattr(runtime, "_llm_model", None),
-                            tokens=tok,
-                        ))
-                        persist_done = True
+                        still = await memory.get_chat_session(session_id)
+                        if still is None:
+                            persist_done = True
+                        else:
+                            tok = None
+                            if isinstance(final_usage, dict):
+                                tok = int(final_usage.get("total_tokens") or 0) or None
+                            await memory.add_chat_message(ChatMessage(
+                                session_id=session_id,
+                                role=ChatMessageRole.ASSISTANT,
+                                content=persist_text,
+                                thinking=full_thinking.strip() or None,
+                                tool_calls=collected_tool_calls,
+                                tool_results=collected_tool_results,
+                                model=sess_model
+                                or req.model
+                                or getattr(runtime, "_llm_model", None),
+                                tokens=tok,
+                            ))
+                            persist_done = True
                         # Desktop→messenger: mirror so Telegram users see desktop replies.
                         with contextlib.suppress(Exception):
                             from remedy.gateway.session_bridge import (
@@ -544,18 +541,21 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                                 "send **continue** to resume.)*"
                             )
                         with contextlib.suppress(Exception):
-                            await memory.add_chat_message(
-                                ChatMessage(
-                                    session_id=session_id,
-                                    role=ChatMessageRole.ASSISTANT,
-                                    content=note,
-                                    thinking=thinking,
-                                    tool_calls=calls,
-                                    tool_results=results,
-                                    model=req.model
-                                    or getattr(runtime, "_llm_model", None),
+                            still = await memory.get_chat_session(session_id)
+                            if still is not None:
+                                await memory.add_chat_message(
+                                    ChatMessage(
+                                        session_id=session_id,
+                                        role=ChatMessageRole.ASSISTANT,
+                                        content=note,
+                                        thinking=thinking,
+                                        tool_calls=calls,
+                                        tool_results=results,
+                                        model=sess_model
+                                        or req.model
+                                        or getattr(runtime, "_llm_model", None),
+                                    )
                                 )
-                            )
                     with contextlib.suppress(Exception):
                         from remedy.core.turn_context import abort_session as _abort_turn
 
@@ -582,24 +582,27 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                     # Persist a short explanation so the chat is not empty after a crash.
                     with contextlib.suppress(Exception):
                         if memory is not None:
-                            note = (
-                                full_response.strip() + "\n\n"
-                                if (full_response or "").strip()
-                                else ""
-                            )
-                            note += (
-                                f"*(Turn ended with an error: {safe_msg}. "
-                                "History is intact — send **continue** to resume.)*"
-                            )
-                            await memory.add_chat_message(
-                                ChatMessage(
-                                    session_id=session_id,
-                                    role=ChatMessageRole.ASSISTANT,
-                                    content=note,
-                                    model=req.model
-                                    or getattr(runtime, "_llm_model", None),
+                            still = await memory.get_chat_session(session_id)
+                            if still is not None:
+                                note = (
+                                    full_response.strip() + "\n\n"
+                                    if (full_response or "").strip()
+                                    else ""
                                 )
-                            )
+                                note += (
+                                    f"*(Turn ended with an error: {safe_msg}. "
+                                    "History is intact — send **continue** to resume.)*"
+                                )
+                                await memory.add_chat_message(
+                                    ChatMessage(
+                                        session_id=session_id,
+                                        role=ChatMessageRole.ASSISTANT,
+                                        content=note,
+                                        model=sess_model
+                                        or req.model
+                                        or getattr(runtime, "_llm_model", None),
+                                    )
+                                )
                 finally:
                     default_registry.counter(
                         "remedy_chat_requests_total", path="session_stream", status=status

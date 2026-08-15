@@ -235,7 +235,7 @@ def test_download_resumes_partial(tmp_path: Path, monkeypatch):
         def __exit__(self, *a):
             return False
 
-    dest = dest_path("tiny-Q4_K_M.gguf", home_dir=tmp_path)
+    dest = dest_path("tiny-Q4_K_M.gguf", home_dir=tmp_path, repo="Owner/Tiny-GGUF")
     partial = dest.with_suffix(".gguf.partial")
     partial.write_bytes(payload[:500])
 
@@ -285,6 +285,100 @@ def test_dest_namespaces_when_size_mismatches(tmp_path: Path, monkeypatch):
         expected_size=4_000_000_000,
     )
     assert p.name == "Other--Model-GGUF--Model-Q4_K_M.gguf"
+
+
+def test_dest_always_namespaces_by_repo(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.hf.models_dir",
+        lambda home_dir=None: tmp_path,
+    )
+    existing = tmp_path / "Model-Q4_K_M.gguf"
+    existing.write_bytes(b"x" * 100)
+    p = dest_path(
+        "Model-Q4_K_M.gguf",
+        home_dir=tmp_path,
+        repo="Owner/Tiny-GGUF",
+        expected_size=100,
+    )
+    assert p.name == "Owner--Tiny-GGUF--Model-Q4_K_M.gguf"
+
+
+def test_download_one_refuses_skip_without_matching_size(tmp_path: Path, monkeypatch):
+    from remedy.runtime.rmb.hf import _download_one
+
+    dest = tmp_path / "Owner--Tiny--tiny.gguf"
+    dest.write_bytes(b"stale-file-bytes-" + b"x" * 80)
+    payload = b"fresh-payload-" + b"y" * 80
+
+    class _Resp:
+        def __init__(self, data: bytes):
+            self.headers = {"Content-Length": str(len(data))}
+            self.status = 200
+            self._data = data
+            self._i = 0
+
+        def read(self, n: int = -1):
+            if self._i >= len(self._data):
+                return b""
+            if n < 0:
+                chunk = self._data[self._i :]
+                self._i = len(self._data)
+                return chunk
+            chunk = self._data[self._i : self._i + n]
+            self._i += len(chunk)
+            return chunk
+
+        def getcode(self):
+            return self.status
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.hf._urlopen",
+        lambda req, timeout=120.0: _Resp(payload),
+    )
+    out = _download_one("https://huggingface.co/x", dest, expected_size=0)
+    assert out.read_bytes() == payload
+
+
+def test_sibling_part_uses_listed_size(tmp_path: Path, monkeypatch):
+    from remedy.runtime.rmb import hf as hf_mod
+
+    seen: list[int] = []
+
+    def _fake_download(url, dest, *, expected_size=0, on_chunk=None):
+        seen.append(int(expected_size or 0))
+        dest.write_bytes(b"x" * 80)
+        return dest
+
+    monkeypatch.setattr(hf_mod, "_download_one", _fake_download)
+    monkeypatch.setattr(
+        hf_mod,
+        "_listed_file_size",
+        lambda repo, filename, rev: 111 if "00002" in filename else 222,
+    )
+    monkeypatch.setattr(
+        hf_mod,
+        "_sibling_parts",
+        lambda filename: [
+            "model-00001-of-00002.gguf",
+            "model-00002-of-00002.gguf",
+        ],
+    )
+    monkeypatch.setattr(hf_mod, "models_dir", lambda home_dir=None: tmp_path)
+    monkeypatch.setattr(hf_mod, "resolve_url", lambda *a, **k: "https://huggingface.co/x")
+    out = hf_mod.download_gguf(
+        repo="Owner/Tiny",
+        filename="model-00001-of-00002.gguf",
+        home_dir=tmp_path,
+        expected_size=222,
+    )
+    assert out["ok"] is True
+    assert seen == [222, 111]
 
 
 def test_empty_query_errors():

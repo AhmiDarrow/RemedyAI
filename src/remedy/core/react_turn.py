@@ -38,7 +38,7 @@ LOCAL_MAX_TOOLS_PER_STEP = 8
 _EXPLORE_TOOLS = frozenset(
     {"file_read", "list_dir", "repo_search", "memory_search", "soul_recall", "web_search", "web_fetch"}
 )
-_WRITE_TOOLS = frozenset({"file_write", "file_edit", "file_edit_batch"})
+_WRITE_TOOLS = frozenset({"file_write", "file_edit", "file_edit_batch", "apply_patch"})
 _VERIFY_TOOLS = frozenset(
     {"bash_exec", "shell_exec", "job_run", "mission_verify", "mission_update"}
 )

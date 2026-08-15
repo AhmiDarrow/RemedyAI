@@ -61,19 +61,36 @@ def test_lock_file_records_pid(tmp_path):
         assert raw.startswith(str(os.getpid()))
 
 
-def test_stale_heartbeat_reclaim(tmp_path, monkeypatch):
-    """A lock with an ancient heartbeat must be reclaimable even if pid looks live."""
+def test_stale_heartbeat_does_not_reclaim_live_pid(tmp_path, monkeypatch):
+    """A live owner mid-turn may stop heartbeating — do not start a second poller."""
     path = tmp_path / "locks" / "telegram_getupdates.lock"
     path.parent.mkdir(parents=True)
-    # Fake "other" pid that _pid_alive will report live, but heartbeat is ancient.
     path.write_text(f"1 {time.time() - 500:.0f}\n", encoding="utf-8")
     monkeypatch.setattr(
         "remedy.gateway.poll_lock._pid_alive",
         lambda pid: pid == 1,
     )
     lock = MessengerPollLock(tmp_path, "telegram")
+    assert lock.try_acquire() is False
+
+
+def test_dead_pid_lock_is_reclaimed(tmp_path, monkeypatch):
+    path = tmp_path / "locks" / "telegram_getupdates.lock"
+    path.parent.mkdir(parents=True)
+    path.write_text(f"1 {time.time() - 500:.0f}\n", encoding="utf-8")
+    monkeypatch.setattr("remedy.gateway.poll_lock._pid_alive", lambda pid: False)
+    lock = MessengerPollLock(tmp_path, "telegram")
     assert lock.try_acquire() is True
     lock.release()
+
+
+def test_poll_lock_mkdir_fail_closed(tmp_path, monkeypatch):
+    lock = MessengerPollLock(tmp_path, "telegram")
+    monkeypatch.setattr(
+        "pathlib.Path.mkdir",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("denied")),
+    )
+    assert lock.try_acquire() is False
 
 
 def test_inprocess_dual_acquire_refused(tmp_path):

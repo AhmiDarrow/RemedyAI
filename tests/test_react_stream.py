@@ -214,3 +214,15 @@ async def test_consume_http_cancels_when_turn_aborted() -> None:
         assert resp.closed is True
     finally:
         end_turn("sse-abort", *toks)
+
+
+def test_synthesis_leftover_emits_json_or_reasoning():
+    """JSON completions fill round_state without yielding; leftover is the answer."""
+    rs = StreamRoundState()
+    assert not (rs.text_out or rs.reasoning_out)
+    rs.reasoning_parts.append("  only thinking  ")
+    leftover = rs.text_out or rs.reasoning_out
+    assert leftover == "only thinking"
+    rs.content_parts.append("final answer")
+    leftover = rs.text_out or rs.reasoning_out
+    assert leftover == "final answer"

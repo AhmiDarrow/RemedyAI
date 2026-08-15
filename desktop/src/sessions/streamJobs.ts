@@ -251,6 +251,25 @@ export function withStoppedMarker(text: string): string {
   return `${t}\n\n${STOPPED_MARKER}`
 }
 
+/** True when an aborted partial is missing from the server transcript tail. */
+export function shouldRestoreStoppedPartial(
+  serverMessages: { role?: string; content?: string }[],
+  paintText: string | undefined | null,
+): boolean {
+  const raw = (paintText || '').trim()
+  if (!raw) return false
+  for (let i = serverMessages.length - 1; i >= 0; i--) {
+    const m = serverMessages[i]
+    if (m?.role !== 'assistant') continue
+    const content = String(m.content || '')
+    if (content.includes(STOPPED_MARKER) || content.includes('Stopped')) return false
+    const stem = raw.slice(0, Math.min(80, raw.length))
+    if (stem && content.includes(stem)) return false
+    break
+  }
+  return true
+}
+
 /** Stop painting this job as the focused stream; leave server turn running. */
 export function detachStreamJob(sessionId: string) {
   const j = jobs.get(sessionId)

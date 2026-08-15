@@ -235,25 +235,38 @@ class TelegramChannel(ChannelAdapter):
             )
 
     async def _poll_loop(self) -> None:
-        while self._running:
-            try:
-                now = time.monotonic()
-                # Heartbeat lock file so peers can reclaim if we hang/crash.
-                if self._poll_lock is not None and now - self._last_heartbeat > 20.0:
+        async def _heartbeat_tick() -> None:
+            while self._running:
+                await asyncio.sleep(20.0)
+                if self._poll_lock is not None:
                     with contextlib.suppress(Exception):
                         self._poll_lock.heartbeat()
-                    self._last_heartbeat = now
-                if now < self._conflict_until:
-                    await asyncio.sleep(min(5.0, self._conflict_until - now))
-                    continue
-                updates = await self._get_updates(timeout=25)
-                for update in updates:
-                    await self._handle_update(update)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("Telegram poll error")
-                await asyncio.sleep(2.0)
+                    self._last_heartbeat = time.monotonic()
+
+        hb = asyncio.create_task(_heartbeat_tick())
+        try:
+            while self._running:
+                try:
+                    now = time.monotonic()
+                    if self._poll_lock is not None and now - self._last_heartbeat > 20.0:
+                        with contextlib.suppress(Exception):
+                            self._poll_lock.heartbeat()
+                        self._last_heartbeat = now
+                    if now < self._conflict_until:
+                        await asyncio.sleep(min(5.0, self._conflict_until - now))
+                        continue
+                    updates = await self._get_updates(timeout=25)
+                    for update in updates:
+                        await self._handle_update(update)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("Telegram poll error")
+                    await asyncio.sleep(2.0)
+        finally:
+            hb.cancel()
+            with contextlib.suppress(Exception):
+                await hb
 
     async def _get_updates(self, timeout: int = 25) -> list[dict]:
         session = await self._ensure_session()

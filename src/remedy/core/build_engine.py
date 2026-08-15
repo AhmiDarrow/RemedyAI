@@ -481,7 +481,16 @@ def begin_build_turn(
     with suppress(Exception):
         from remedy.core.workspace import is_unset_project_path as _unset_pp
 
-        _bound = not _unset_pp(getattr(runtime, "_project_path_raw", None))
+        raw = None
+        with suppress(Exception):
+            from remedy.core.turn_context import current_turn_workspace
+
+            ws = current_turn_workspace()
+            if ws is not None:
+                raw = getattr(ws, "project_raw", None)
+        if raw is None:
+            raw = getattr(runtime, "_project_path_raw", None)
+        _bound = not _unset_pp(raw)
     with suppress(Exception):
         from remedy.core.build_ledger import load_ledger
 
@@ -728,12 +737,17 @@ def observe_tool_batch(
         ):
             state.wasted_auth_probes += 1
         if any_ship_tool or any_ship_cmd:
-            if "pushed" in low or "everything up-to-date" in low or re.search(
-                r"\bto\s+github\.com[:/]", low
+            fail = any(
+                tok in low
+                for tok in ("rejected", "error:", "fatal:", "not pushed", "permission denied")
+            )
+            if not fail and (
+                "git_push ok" in low
+                or "everything up-to-date" in low
+                or re.search(r"\s->\s", content)
             ):
-                if "error" not in low[:80] and "denied" not in low:
-                    state.ship_pushed = True
-                    state.phase = "ship"
+                state.ship_pushed = True
+                state.phase = "ship"
             if "release" in low and (
                 "created" in low or "https://github.com/" in low or "url:" in low
             ):
@@ -785,7 +799,8 @@ def observe_tool_batch(
             else:
                 saw_red = True
             continue
-        if re.search(r"\b\d+\s+passed\b", low) and "failed" not in low:
+        passed = re.search(r"\b(\d+)\s+passed\b", low)
+        if passed and int(passed.group(1)) > 0 and "failed" not in low:
             saw_green = True
         elif _VERIFY_HINT.search(content) and re.search(
             r"\b(fail|failed|error)\b", low

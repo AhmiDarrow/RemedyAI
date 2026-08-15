@@ -9,6 +9,31 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 logger = logging.getLogger(__name__)
 
+_WEBHOOK_MAX_BYTES = 2 * 1024 * 1024
+
+
+async def _read_body_capped(
+    request: Request,
+    *,
+    max_bytes: int = _WEBHOOK_MAX_BYTES,
+) -> bytes:
+    """Reject oversized Content-Length and stream-cap before HMAC/JWT verify."""
+    cl = request.headers.get("content-length")
+    if cl:
+        try:
+            if int(cl) > max_bytes:
+                raise HTTPException(413, "payload too large")
+        except ValueError:
+            pass
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(413, "payload too large")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 
 def register_webhook_routes(app: FastAPI, *, gateway=None, **_kw) -> None:
     # --- WhatsApp ---
@@ -31,7 +56,7 @@ def register_webhook_routes(app: FastAPI, *, gateway=None, **_kw) -> None:
         ch = _ch(gateway, "WHATSAPP")
         if ch is None:
             raise HTTPException(503, "WhatsApp channel not active")
-        body = await request.body()
+        body = await _read_body_capped(request)
         sig = request.headers.get("X-Hub-Signature-256", "")
         if not ch.verify_signature(body, sig):
             raise HTTPException(403, "bad signature")
@@ -54,7 +79,11 @@ def register_webhook_routes(app: FastAPI, *, gateway=None, **_kw) -> None:
         if hasattr(ch, "verify_inbound_auth") and not ch.verify_inbound_auth(auth):
             raise HTTPException(401, "teams auth failed")
         try:
-            activity = await request.json()
+            import json as _json
+
+            activity = _json.loads((await _read_body_capped(request)).decode("utf-8") or "{}")
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(400, "invalid json") from exc
         if not isinstance(activity, dict):
@@ -69,7 +98,11 @@ def register_webhook_routes(app: FastAPI, *, gateway=None, **_kw) -> None:
         if ch is None:
             raise HTTPException(503, "Google Chat channel not active")
         try:
-            data = await request.json()
+            import json as _json
+
+            data = _json.loads((await _read_body_capped(request)).decode("utf-8") or "{}")
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(400, "invalid json") from exc
         if not isinstance(data, dict):
