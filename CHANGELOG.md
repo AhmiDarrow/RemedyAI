@@ -4,6 +4,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Repo
+
+- Public GitHub tree is the compile/release set only. `tests/`, `community/`,
+  live/soak scripts, review dumps, and desktop `*.test.ts` stay on the
+  maintainer clone (gitignored) and are not pushed. Public CI is ruff / mypy /
+  import / docs / desktop build.
+
 ## [0.26.2] - 2026-08-15
 
 The PC stays in Remedy's hands. Work turns drive the host. Build no longer

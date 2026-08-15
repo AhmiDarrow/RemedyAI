@@ -7,6 +7,7 @@ Durable facts for coding agents working in this repo. Prefer this file + `docs/`
 - **This repo (`C:\Users\Administrator\Old-Remedy`) is the active multi-stack RemedyAI product** — FastAPI + Tauri + Vite SPA. **Not frozen.** It is product authority for this line.
 - **`C:\Users\Administrator\Remedy` is a different product** (machine-only / RDNA). Not a branch of this tree; different bios home (`~/.remedyai` vs `~/.remedy` here). Do not treat one as the archive/replacement of the other.
 - See `ARCHIVE.md` for the sibling-path note (filename is historical; content is status, not “frozen archive”).
+- **Public GitHub tree is compile/release only.** `tests/`, `community/`, live/soak scripts, review dumps, and desktop `*.test.ts` stay on this clone (gitignored / `.git/info/exclude`) and are not pushed.
 
 ## Platforms (Windows + Linux)
 
@@ -80,7 +81,7 @@ on demand.
 
 - **Version surfaces:** `python scripts/sync_version.py {X.Y.Z}` (or `uv run python …`).
 - **Docs gate:** `python scripts/check_docs.py` (and `scripts/sync_help_manual.py` when manuals change).
-- **Tests:** `uv run pytest -q` (full); desktop `cd desktop && npm test && npm run build`.
+- **Tests:** local-only (`tests/` and `desktop/**/*.test.ts` are gitignored, not in the public tree). When present: `uv run pytest -q`; desktop `cd desktop && npm test && npm run build`. Public CI is compile-only (ruff / mypy / import / `check_docs` / `npm run build`).
 - **Python package:** `uv build` then, after CI green, `uv publish` (credentials via env / `~/.pypirc`).
 - **Desktop release:** git tag `v{X.Y.Z}` → GitHub Actions `desktop-release` (see naming rules below).
 - **Commit style:** complete sentences; `release:` / `fix:` / `docs:` prefixes as appropriate.
@@ -132,7 +133,7 @@ One sentence: *what user-visible or API-visible behavior changes?*
 
 ### 4. Required checks by surface (minimum)
 
-Always when shipping runtime/UI: full `pytest` + when desktop touched: `cd desktop && npm test && npm run build`.
+Always when shipping runtime/UI: if the local test tree is present, full `pytest` + when desktop touched: `cd desktop && npm test && npm run build`. Public CI does not run those suites.
 
 | If you touch… | Also verify… |
 |---------------|--------------|
