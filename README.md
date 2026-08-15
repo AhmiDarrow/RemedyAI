@@ -1,17 +1,21 @@
 # Remedy
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/AhmiDarrow/RemedyAI/master/assets/previews/hero_logo_color_on_dark.png" alt="Remedy" width="420" />
+  <img src="https://raw.githubusercontent.com/AhmiDarrow/RemedyAI/master/assets/previews/hero_banner_win_linux.png" alt="Remedy — your personal AI partner on Windows &amp; Linux" width="800" />
 </p>
 
 <p align="center">
-  <strong>Your personal AI partner — on your machine.</strong><br/>
-  Knowledge · design · code · computer use · get-it-done.<br/>
+  <kbd>Windows 11</kbd>&nbsp;&nbsp;<kbd>Linux</kbd>&nbsp;&nbsp;<kbd>WSLg</kbd>&nbsp;&nbsp;<kbd>PyPI</kbd>&nbsp;&nbsp;<kbd>CLI</kbd>
+</p>
+
+<p align="center">
   <em>One continuous partner</em> — not a thin chat wrapper, not a farm of bots.
 </p>
 
 <p align="center">
   <a href="https://github.com/AhmiDarrow/RemedyAI/releases/latest"><strong>Download for Windows</strong></a>
+  ·
+  <a href="https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/01-install-linux.md">Install on Linux</a>
   ·
   <a href="https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/00-overview.md">Owner’s manual</a>
   ·
@@ -31,7 +35,7 @@
   <img src="https://raw.githubusercontent.com/AhmiDarrow/RemedyAI/master/assets/previews/hero_icon_color_on_dark.png" alt="Remedy icon" width="96" />
 </p>
 
-**Remedy** is a Windows-first desktop partner (Tauri + local FastAPI) that keeps **continuity on disk** under `~/.remedy` while **you** pick the chat model (xAI, OpenAI, Anthropic, Google, DeepSeek, Groq, Mistral, OpenRouter, Ollama, Custom).
+**Remedy** is a **true AI partner** — more than a coder/builder — that helps you **track and complete your goals** through research, design, code, and most importantly **action**. It’s a **Windows + Linux** desktop partner (Tauri + local FastAPI) that keeps **continuity on disk** under `~/.remedy` while **you** pick the chat model (xAI, OpenAI, Anthropic, Google, DeepSeek, Groq, Mistral, OpenRouter, Ollama, Custom).
 
 | | |
 |--|--|
@@ -69,9 +73,26 @@ Earlier: [0.19.0 parallel multi-provider](https://github.com/AhmiDarrow/RemedyAI
 
 ---
 
+## Two desktops, one partner
+
+v0.26.0 makes Remedy **truly multiplatform** — the same partner on Windows and Linux, the same `~/.remedy` home, the same local API on `127.0.0.1:7400`.
+
+| | **Windows** | **Linux** |
+|--|-------------|-----------|
+| **Install** | NSIS installer from [Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) | [PyPI / source](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/01-install-linux.md) · packaged `.deb` / AppImage once a Linux desktop asset is published |
+| **Runs on** | Windows 10 / 11 | Native Linux, incl. **WSLg** |
+| **Close ✕** | Hides to the **tray** (API stays warm) | Minimizes to the **taskbar** (WSLg has no tray) |
+| **Maximize** | Standard | **Work-area** — avoids covering the taskbar / panels |
+| **Autostart** | **Start with Windows** | Not yet — no toggle on Linux |
+| **CLI** | `remedy` / `Remedy Desktop.exe` | `python -m remedy` ≡ `remedy` |
+
+Same skills, same messengers, same continuity — pick your shell.
+
+---
+
 ## Contents
 
-1. [About](#about) · [What’s new](#whats-new)  
+1. [About](#about) · [What’s new](#whats-new) · [Two desktops, one partner](#two-desktops-one-partner)  
 2. [What you get](#what-you-get) — product at a glance  
 3. [Why it’s different](#why-its-different) — local continuity + metabolism  
 4. [Workspace on your PC](#workspace-on-your-pc) — files, terminal, browser, computer  
@@ -107,7 +128,7 @@ Also: [CHANGELOG.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/CHANGELO
 
 ## What you get
 
-One desktop app. One local API. Your data under `~/.remedy`.
+One partner, two desktops. One local API. Your data under `~/.remedy`.
 
 | | Capability |
 |--|------------|
@@ -241,9 +262,13 @@ Format: [agentskills.io](https://agentskills.io) · Lifecycle: [SKILL_LIFECYCLE.
 
 ## Install
 
-1. [Download the **latest** Windows installer](https://github.com/AhmiDarrow/RemedyAI/releases/latest)  
-2. Run Setup → provider + optional workspace + optional local vision  
-3. **F1** Help · `/help` commands  
+| | |
+|--|--|
+| **Windows** | [Download the **latest** Windows installer](https://github.com/AhmiDarrow/RemedyAI/releases/latest) → run Setup |
+| **Linux** | [Install from PyPI / source](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/01-install-linux.md) — `.deb` / AppImage once a Linux desktop asset is published |
+| **Anywhere** | `pip install remedy-ai` → `remedy chat` (CLI · WebUI) |
+
+Then **F1** Help · `/help` commands.
 
 > **SmartScreen?** Solo builds are not Authenticode-signed yet — **More info → Run anyway**. Install only from this repo’s Releases. Updates are **minisign**-verified. Autostart = Startup folder (not registry Run).
 
@@ -326,7 +351,7 @@ WebUI is the **same SPA** as desktop (`desktop/dist`). After UI changes:
 ```bash
 git clone https://github.com/AhmiDarrow/RemedyAI.git && cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # 560+ tests; currently ~2313
+uv run pytest -q          # 560+ tests; currently ~2316
 cd desktop && npm test && npm run build
 python scripts/check_docs.py
 cd desktop && npm run tauri:dev   # full shell (set REMEDY_DEV_ROOT to repo)
