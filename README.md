@@ -38,7 +38,7 @@
 | **Who it’s for** | Owners who want power without multi-agent theater — chat, files, this-PC shell, browser rail, computer use |
 | **What stays local** | Memory, Session Brief, skills, approvals, DPAPI secrets, optional SmolVLM2 vision |
 | **What you bring** | Your API keys / local Ollama — no Remedy cloud account for core use |
-| **Current** | **v0.25.0** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
+| **Current** | **v0.25.1** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
 
 From the creator: *My name is Ahmi, I hope you enjoy my Remedy.*  
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.
@@ -47,7 +47,7 @@ In-app: title-bar / tray → **About Remedy** · **Settings → About**.
 
 ## What’s new
 
-**Latest: [v0.25.0](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.25.0)** — Stable tabs (drafts, RMB, computer-use) plus quieter Settings Simple / Advanced chrome.
+**Latest: [v0.25.1](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.25.1)** — Jail dests, Stop/abort, RMB stay-off, tab isolation. (0.25.0: stable tabs + Settings chrome.)
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/AhmiDarrow/RemedyAI/master/docs/manual/assets/remedy-partner-architecture.jpg" alt="How Remedy fits together" width="640" />
@@ -326,7 +326,7 @@ WebUI is the **same SPA** as desktop (`desktop/dist`). After UI changes:
 ```bash
 git clone https://github.com/AhmiDarrow/RemedyAI.git && cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # 560+ tests; currently ~2233
+uv run pytest -q          # 560+ tests; currently ~2277
 cd desktop && npm test && npm run build
 python scripts/check_docs.py
 cd desktop && npm run tauri:dev   # full shell (set REMEDY_DEV_ROOT to repo)

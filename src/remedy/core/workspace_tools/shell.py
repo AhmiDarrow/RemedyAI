@@ -158,8 +158,11 @@ async def _run_host_session(
             tool_name="bash_exec",
             suggestion="Retry without session=true, or close the session.",
         )
+    from remedy.core.approvals import is_full_approval
+
     jail_cwd = Path(here)
-    if not _cwd_in_write_roots(jail_cwd, roots):
+    full = is_full_approval()
+    if not full and not _cwd_in_write_roots(jail_cwd, roots):
         await close_shared_session(session_id=session_id)
         return format_tool_error(
             f"host session cwd left write roots: {jail_cwd}",
@@ -214,7 +217,7 @@ async def _run_host_session(
             tool_name="bash_exec",
             suggestion="Retry without session=true, or close the session.",
         )
-    elif not _cwd_in_write_roots(result.cwd, roots):
+    elif not full and not _cwd_in_write_roots(result.cwd, roots):
         await close_shared_session(session_id=session_id)
         return format_tool_error(
             f"host session cwd left write roots: {result.cwd}",
@@ -409,6 +412,7 @@ def register_shell_tools(runtime: Any) -> None:
             scope = str(runtime.access_scope() or "project")
         except Exception:
             scope = "project"
+        jail_warnings: list[str] = []
         try:
             jail_hit = check_shell_write_jail(
                 command,
@@ -416,6 +420,7 @@ def register_shell_tools(runtime: Any) -> None:
                 cwd=cwd,
                 project_bound=bound,
                 access_scope=scope,
+                warnings=jail_warnings,
             )
         except Exception as exc:
             return format_tool_error(
@@ -435,7 +440,8 @@ def register_shell_tools(runtime: Any) -> None:
                 suggestion=(
                     "Stay inside the focus project. Prefer file_write/file_edit. "
                     "Do not retarget sibling folders (SecretFolder vs SecretSticky). "
-                    "To edit another tree, switch session project explicitly with the user."
+                    "To edit another tree, switch session project explicitly with the user. "
+                    "Or set Approvals → Full (warn) if you granted machine-wide control."
                 ),
             )
         with suppress(Exception):
@@ -451,32 +457,42 @@ def register_shell_tools(runtime: Any) -> None:
                     tool_name="bash_exec",
                     suggestion="Do not git push, publish, or run arbitrary shell.",
                 )
-        import re as _re
-
         from remedy.core.shell_write_jail import (
-            extract_path_candidates,
+            extract_script_launch_targets,
             scan_script_source_for_outside_writes,
         )
 
-        py_tokens = [
-            t
-            for t in extract_path_candidates(command)
-            if str(t).lower().endswith(".py")
-        ]
-        if not py_tokens:
-            py_tokens = [
-                m.group(0)
-                for m in _re.finditer(r"(?:\.?[/\\])?[\w./\\-]+\.py\b", command, _re.I)
-            ]
-        for tok in py_tokens:
+        # Scan bodies of scripts that are *launched* (node/pwsh/bat/.py), not
+        # every .py path mentioned as an arg (pytest tests/foo.py must run).
+        # Full: auth-only (project_bound=False) — skip dest/home regex walk.
+        from remedy.core.approvals import is_full_approval
+
+        _scan_bound = bound and not is_full_approval()
+        _launch_argv = [str(a) for a in _argv] if _argv else None
+        for tok in extract_script_launch_targets(command, argv=_launch_argv):
             try:
                 cand = Path(tok)
                 if not cand.is_absolute():
                     cand = Path(cwd) / tok
-                if cand.is_file():
-                    src_hit = scan_script_source_for_outside_writes(
-                        cand, write_roots=list(roots), project_bound=bound
-                    )
+                try:
+                    is_file = cand.is_file()
+                except OSError:
+                    is_file = False
+                if is_file:
+                    try:
+                        src_hit = scan_script_source_for_outside_writes(
+                            cand, write_roots=list(roots), project_bound=_scan_bound
+                        )
+                    except Exception as exc:
+                        if _scan_bound:
+                            return format_tool_error(
+                                f"shell write jail: launched script cannot be scanned "
+                                f"({cand.name}): {exc}",
+                                code="WRITE_JAIL",
+                                tool_name="bash_exec",
+                                suggestion="Keep launched script I/O under the project folder.",
+                            )
+                        continue
                     if src_hit:
                         return format_tool_error(
                             src_hit,
@@ -484,7 +500,22 @@ def register_shell_tools(runtime: Any) -> None:
                             tool_name="bash_exec",
                             suggestion="Keep launched script I/O under the project folder.",
                         )
-            except Exception:
+                elif _scan_bound:
+                    return format_tool_error(
+                        f"shell write jail: launched script cannot be read ({tok}). "
+                        "Refuse to run.",
+                        code="WRITE_JAIL",
+                        tool_name="bash_exec",
+                        suggestion="Keep launched script I/O under the project folder.",
+                    )
+            except Exception as exc:
+                if _scan_bound:
+                    return format_tool_error(
+                        f"shell write jail: launched script scan failed ({tok}): {exc}",
+                        code="WRITE_JAIL",
+                        tool_name="bash_exec",
+                        suggestion="Keep launched script I/O under the project folder.",
+                    )
                 continue
 
         from remedy.execution.host.diagnose import diagnose_host_failure
@@ -496,7 +527,9 @@ def register_shell_tools(runtime: Any) -> None:
                 from remedy.execution.host.runner import resolve_which
 
                 argv_use = [str(a) for a in _argv]
-                resolved_head = resolve_which(argv_use[0]) if argv_use else None
+                resolved_head = (
+                    resolve_which(argv_use[0], cwd=cwd) if argv_use else None
+                )
                 if resolved_head:
                     argv_use[0] = resolved_head
                 prepared = PreparedCommand(
@@ -521,16 +554,23 @@ def register_shell_tools(runtime: Any) -> None:
                     else "Shrink the script or use file_write + run_python_file."
                 ),
             )
+        def _with_jail_warn(text: str) -> str:
+            if not jail_warnings:
+                return text
+            return "\n".join(jail_warnings) + "\n" + text
+
         if prepared.kind == "noop":
             note = "; ".join(prepared.notes[:4]) or "no-op on this host"
-            return (
+            return _with_jail_warn(
                 "HOST_DIAG HOST_NOOP\n"
                 f"{note}\n"
                 "hint: chmod is ignored on Windows cmd. Skip it or use host_script "
                 "on a real POSIX host."
             )
         argv = prepared.argv
-        sandbox = SubprocessSandbox(allowed_paths=roots or [root, cwd])
+        from remedy.execution.sandbox import allowed_paths_for_shell
+
+        sandbox = SubprocessSandbox(allowed_paths=allowed_paths_for_shell(roots, cwd))
         env = path_env_with_local_bins(cwd)
 
         auto_bg = False
@@ -540,12 +580,14 @@ def register_shell_tools(runtime: Any) -> None:
 
                 auto_bg = command_looks_like_gui_launch(command, cwd)
         if background or auto_bg:
-            return _spawn_background(
-                argv,
-                cwd=cwd,
-                env=env,
-                command=prepared.display or command,
-                auto=auto_bg and not background,
+            return _with_jail_warn(
+                _spawn_background(
+                    argv,
+                    cwd=cwd,
+                    env=env,
+                    command=prepared.display or command,
+                    auto=auto_bg and not background,
+                )
             )
 
         if session:
@@ -556,16 +598,18 @@ def register_shell_tools(runtime: Any) -> None:
                 if _argv
                 else (prepared.display or command)
             )
-            return await _run_host_session(
-                command=sess_cmd,
-                cwd=cwd,
-                timeout=timeout,
-                env=env,
-                roots=list(roots),
-                use_conpty=bool(conpty),
-                session_id=turn_session_id(runtime),
-                project_bound=bound,
-                access_scope=scope,
+            return _with_jail_warn(
+                await _run_host_session(
+                    command=sess_cmd,
+                    cwd=cwd,
+                    timeout=timeout,
+                    env=env,
+                    roots=list(roots),
+                    use_conpty=bool(conpty),
+                    session_id=turn_session_id(runtime),
+                    project_bound=bound,
+                    access_scope=scope,
+                )
             )
 
         try:
@@ -647,7 +691,7 @@ def register_shell_tools(runtime: Any) -> None:
                 from remedy.execution.host.dialect import record_success
 
                 record_success(command, note=prepared.kind)
-        return "\n".join(parts)
+        return _with_jail_warn("\n".join(parts))
 
     async def run_python_file(
         path: str = "",
@@ -765,6 +809,7 @@ def register_shell_tools(runtime: Any) -> None:
             scope = "project"
         from remedy.core.shell_write_jail import check_shell_write_jail
 
+        py_warnings: list[str] = []
         try:
             jail_hit = check_shell_write_jail(
                 " ".join(str(a) for a in argv),
@@ -772,6 +817,7 @@ def register_shell_tools(runtime: Any) -> None:
                 cwd=cwd,
                 project_bound=bound,
                 access_scope=scope,
+                warnings=py_warnings,
             )
         except Exception as exc:
             return format_tool_error(
@@ -789,8 +835,12 @@ def register_shell_tools(runtime: Any) -> None:
             )
         from remedy.core.shell_write_jail import scan_script_source_for_outside_writes
 
+        from remedy.core.approvals import is_full_approval
+
         src_hit = scan_script_source_for_outside_writes(
-            target, write_roots=list(roots), project_bound=bound
+            target,
+            write_roots=list(roots),
+            project_bound=bound and not is_full_approval(),
         )
         if src_hit:
             return format_tool_error(
@@ -799,16 +849,25 @@ def register_shell_tools(runtime: Any) -> None:
                 tool_name="run_python_file",
                 suggestion="Keep script I/O under the project folder.",
             )
+        def _py_warn(text: str) -> str:
+            if not py_warnings:
+                return text
+            return "\n".join(py_warnings) + "\n" + text
+
         if gui_py:
             env_bg = path_env_with_local_bins(cwd)
-            return _spawn_background(
-                argv,
-                cwd=cwd,
-                env=env_bg,
-                command=" ".join(argv),
-                auto=True,
+            return _py_warn(
+                _spawn_background(
+                    argv,
+                    cwd=cwd,
+                    env=env_bg,
+                    command=" ".join(argv),
+                    auto=True,
+                )
             )
-        sandbox = SubprocessSandbox(allowed_paths=roots or [root, cwd])
+        from remedy.execution.sandbox import allowed_paths_for_shell
+
+        sandbox = SubprocessSandbox(allowed_paths=allowed_paths_for_shell(roots, cwd))
         env = path_env_with_local_bins(cwd)
         result = await sandbox.execute(
             argv, workdir=cwd, timeout_seconds=timeout, env=env
@@ -835,7 +894,7 @@ def register_shell_tools(runtime: Any) -> None:
                 "Suggestion: fix the script with file_edit, or raise timeout_seconds. "
                 "Prefer .remedy-build/tmp/ for one-off helpers (not repo root)."
             )
-        return "\n".join(parts)
+        return _py_warn("\n".join(parts))
 
     runtime.tool_registry.register_builtin_handler(
         "bash_exec",
@@ -1068,6 +1127,7 @@ def register_shell_tools(runtime: Any) -> None:
             scan_script_source_for_outside_writes,
         )
 
+        hs_warnings: list[str] = []
         try:
             jail_hit = check_shell_write_jail(
                 text,
@@ -1075,6 +1135,7 @@ def register_shell_tools(runtime: Any) -> None:
                 cwd=cwd,
                 project_bound=bound,
                 access_scope=scope,
+                warnings=hs_warnings,
             )
         except Exception as exc:
             return format_tool_error(
@@ -1099,8 +1160,12 @@ def register_shell_tools(runtime: Any) -> None:
                 tool_name="host_script",
                 suggestion="Shrink the script body.",
             )
+        from remedy.core.approvals import is_full_approval
+
         src_hit = scan_script_source_for_outside_writes(
-            launch.path, write_roots=list(roots), project_bound=bound
+            launch.path,
+            write_roots=list(roots),
+            project_bound=bound and not is_full_approval(),
         )
         if src_hit:
             return format_tool_error(
@@ -1109,20 +1174,29 @@ def register_shell_tools(runtime: Any) -> None:
                 tool_name="host_script",
                 suggestion="Keep script I/O under the project folder.",
             )
+        def _hs_warn(text: str) -> str:
+            if not hs_warnings:
+                return text
+            return "\n".join(hs_warnings) + "\n" + text
+
         if kind == "python":
-            return await run_python_file(
-                path=str(launch.path),
-                timeout_seconds=timeout_seconds,
-                workdir=workdir,
+            return _hs_warn(
+                await run_python_file(
+                    path=str(launch.path),
+                    timeout_seconds=timeout_seconds,
+                    workdir=workdir,
+                )
             )
         jail_cmd = (
             f'pwsh -File "{launch.path}"' if kind == "pwsh" else f'cmd /c "{launch.path}"'
         )
-        return await bash_exec(
-            command=jail_cmd,
-            timeout_seconds=timeout_seconds,
-            workdir=workdir,
-            _argv=launch.argv,
+        return _hs_warn(
+            await bash_exec(
+                command=jail_cmd,
+                timeout_seconds=timeout_seconds,
+                workdir=workdir,
+                _argv=launch.argv,
+            )
         )
 
     runtime.tool_registry.register_builtin_handler(

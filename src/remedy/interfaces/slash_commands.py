@@ -845,14 +845,19 @@ async def handle_slash_command(
         lines = ["## 🔐 Security Status\n"]
 
         # -- Approval mode
-        am = str(cfg.get("approval_mode") or "ask").strip().lower()
-        if am not in ("ask", "auto"):
-            am = "ask"
+        from remedy.core.approvals import normalize_approval_mode
+
+        am = normalize_approval_mode(str(cfg.get("approval_mode") or "ask"))
         # Check live runtime override if available
         if runtime is not None and hasattr(runtime, "_approval_mode"):
-            am = str(runtime._approval_mode).strip().lower()
-        emoji = "✅" if am == "auto" else "⛔"
-        lines.append(f"{emoji} **Approval Mode:** `{am}` — {'Full owner power (auto-approve)' if am == 'auto' else 'Ask before high-impact actions'}")
+            am = normalize_approval_mode(str(runtime._approval_mode))
+        if am == "full":
+            emoji, blurb = "⚠️", "Full (warn) — write jail off except auth"
+        elif am == "auto":
+            emoji, blurb = "✅", "Auto (in-project) — build/write without prompts"
+        else:
+            emoji, blurb = "⛔", "Ask before high-impact actions"
+        lines.append(f"{emoji} **Approval Mode:** `{am}` — {blurb}")
 
         # -- Web tools
         web = bool(cfg.get("web_tools_enabled", False))

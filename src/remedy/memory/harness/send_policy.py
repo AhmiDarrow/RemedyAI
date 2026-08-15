@@ -301,12 +301,18 @@ def apply_auto_harness_send_policy(
         from remedy.core.metabolism.tier import TurnTier, classify_turn_tier
         from remedy.core.turn_context import current_plan_mode
 
+        from remedy.core.turn_context import (
+            turn_browse,
+            turn_has_attachments,
+            turn_pure_action,
+        )
+
         t0 = classify_turn_tier(
             user_text or "",
             tools_enabled=True,
-            browse=bool(getattr(runtime, "_turn_browse", False)),
-            pure_action=bool(getattr(runtime, "_turn_pure_action", False)),
-            has_attachments=bool(getattr(runtime, "_turn_has_attachments", False)),
+            browse=bool(turn_browse(runtime)),
+            pure_action=bool(turn_pure_action(runtime)),
+            has_attachments=bool(turn_has_attachments(runtime)),
             plan_mode=bool(current_plan_mode(runtime)),
         )
         pre_tier = int(t0)

@@ -308,6 +308,7 @@ export function completeStreamJob(
           fn()
           return 0 as unknown as ReturnType<typeof setTimeout>
         }
+  _lastTouchEmitAt.delete(sessionId)
   later(() => {
     const cur = jobs.get(sessionId)
     if (cur && cur.status !== 'running') {
@@ -319,6 +320,11 @@ export function completeStreamJob(
 
 /** Abort client stream + server cooperative cancel. */
 export async function stopStreamJob(sessionId: string): Promise<void> {
+  try {
+    await abortSession(sessionId)
+  } catch {
+    /* */
+  }
   const j = jobs.get(sessionId)
   if (j) {
     try {
@@ -326,11 +332,6 @@ export async function stopStreamJob(sessionId: string): Promise<void> {
     } catch {
       /* */
     }
-  }
-  try {
-    await abortSession(sessionId)
-  } catch {
-    /* */
   }
   completeStreamJob(sessionId, 'aborted')
 }

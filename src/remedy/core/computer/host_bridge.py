@@ -766,11 +766,24 @@ class ComputerHostBridge:
         action: str,
         url: str,
         max_age_s: float = 20.0,
+        session_id: str | None = None,
+        job_id: str | None = None,
     ) -> ComputerJob | None:
         """Find a recent successful job for the same action+URL (reconcile races)."""
         want = (url or "").strip().rstrip("/")
         if not want:
             return None
+        want_sid = str(session_id or self._session_key() or "").strip()
+        want_jid = str(job_id or "").strip()
+        if want_jid:
+            mine = self._read(want_jid)
+            if (
+                mine is not None
+                and mine.action == action
+                and mine.status == "done"
+                and (mine.result or {}).get("ok", True)
+            ):
+                return mine
         cutoff = time.time() - max_age_s
         best: ComputerJob | None = None
         for path in self.root.glob("*.json"):
@@ -785,6 +798,14 @@ class ComputerHostBridge:
             job = ComputerJob.from_dict(raw)
             if job.action != action or job.status != "done":
                 continue
+            if want_sid:
+                js = str(
+                    job.session_id
+                    or (job.payload or {}).get("session_id")
+                    or ""
+                ).strip()
+                if js != want_sid:
+                    continue
             res = job.result or {}
             if not res.get("ok", True):
                 continue

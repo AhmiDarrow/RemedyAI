@@ -327,6 +327,21 @@ def test_resolve_which_python() -> None:
     assert Path(found).name.lower().startswith("python") or "python" in found.lower()
 
 
+def test_resolve_which_finds_venv_pytest(tmp_path: Path) -> None:
+    import os
+
+    scripts = tmp_path / (".venv/Scripts" if os.name == "nt" else ".venv/bin")
+    scripts.mkdir(parents=True)
+    name = "pytest.exe" if os.name == "nt" else "pytest"
+    stub = scripts / name
+    stub.write_text("", encoding="utf-8")
+    if os.name != "nt":
+        stub.chmod(0o755)
+    found = resolve_which("pytest", cwd=tmp_path)
+    assert found
+    assert Path(found).resolve() == stub.resolve()
+
+
 def test_win_shell_prefix_and_runtime_agree() -> None:
     prefix = win_shell_prefix()
     rt = ToolRuntime()

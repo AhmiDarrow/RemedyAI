@@ -54,6 +54,52 @@ def test_forge_pulse_on_build_intent() -> None:
     assert "Forge" in out
 
 
+def test_forge_pulse_speaks_last_red(tmp_path: Path) -> None:
+    from remedy.core.build_ledger import BuildLedgerEntry, save_ledger
+
+    proj = tmp_path / "org_proj"
+    proj.mkdir()
+    save_ledger(
+        BuildLedgerEntry(
+            goal="fix add",
+            phase="repair",
+            project_path=str(proj),
+            last_verify_ok=False,
+            write_set=["src/calc.py"],
+            last_error_vector={
+                "ok": False,
+                "failing_nodes": ["tests/test_calc.py::test_add"],
+                "path_lines": ["src/calc.py:2"],
+                "repair_command": "pytest -q tests/test_calc.py::test_add",
+            },
+            last_scoped_command="pytest -q tests/test_calc.py::test_add",
+        ),
+        home=tmp_path,
+    )
+
+    class _R:
+        _llm_provider = "xai"
+        _llm_model = "grok-4"
+        _llm_base_url = ""
+
+        def effective_project_path(self):
+            return proj
+
+    out = forge_pulse(
+        user_text="continue the fix",
+        tier=2,
+        runtime=_R(),
+        project_path=str(proj),
+        session_id="s",
+        home=tmp_path,
+    )
+    assert out
+    assert "Forge" in out
+    assert "test_add" in out
+    assert "src/calc.py" in out
+    assert "explore in batch" not in out
+
+
 def test_immune_pulse_when_verify_flagged() -> None:
     from remedy.core.metabolism.governor import get_governor, reset_governor
 

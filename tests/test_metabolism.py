@@ -239,7 +239,7 @@ def test_trivial_chat_begin_turn_sets_thinking_off():
         )
         assert turn_thinking_level() == "off"
     finally:
-        end_turn(*tokens)
+        end_turn("think_off_sess", *tokens)
 
 
 def test_tier_early_exits_empty_and_greetings():

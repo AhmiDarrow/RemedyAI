@@ -29,6 +29,12 @@ class XaiApiKeyRequest(BaseModel):
     api_key: str = Field(..., min_length=1)
 
 
+class ProviderProbeRequest(BaseModel):
+    provider: str = Field(..., min_length=1)
+    api_key: str | None = None
+    base_url: str | None = None
+
+
 def _home_from_config(cfg: dict[str, Any] | None = None):
     from pathlib import Path
 
@@ -86,7 +92,9 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         """
         from remedy.interfaces.config import (
             PROVIDER_CATALOG,
+            classify_provider_connection,
             detect_ollama,
+            effective_provider_allowlist,
             get_provider_keys,
             public_provider_catalog,
         )
@@ -103,15 +111,6 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             keys_set = dict.fromkeys(keys, True)
 
         enabled_raw = cfg.get("enabled_providers")
-        if isinstance(enabled_raw, str) and enabled_raw.strip():
-            enabled_set = {
-                x.strip().lower() for x in enabled_raw.split(",") if x.strip()
-            }
-        elif isinstance(enabled_raw, list) and enabled_raw:
-            enabled_set = {str(x).strip().lower() for x in enabled_raw if str(x).strip()}
-        else:
-            enabled_set = None  # all connected are enabled
-
         enabled_models_cfg = cfg.get("enabled_models") or {}
         if not isinstance(enabled_models_cfg, dict):
             enabled_models_cfg = {}
@@ -128,50 +127,26 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         except Exception:
             pass
 
-        items: list[dict[str, Any]] = []
+        classified: list[tuple[str, dict[str, Any], bool, str]] = []
         for pid, meta in catalog.items():
-            connected = False
-            reason = "no_credentials"
-            if pid == "demo":
-                connected = True
-                reason = "demo"
-            elif pid == "ollama":
-                connected = bool(ollama.get("available"))
-                reason = "ollama_up" if connected else "ollama_down"
-            elif pid == "xai" and xai_connected:
-                connected = True
-                reason = "oauth_or_key"
-            elif keys.get(pid) or keys_set.get(pid):
-                connected = True
-                reason = "api_key"
-            # Env / OAuth keys (e.g. POE_API_KEY) resolve but are not always in
-            # the secure-store key list — still treat as connected for the picker.
-            if not connected and pid not in ("demo", "ollama"):
-                with contextlib.suppress(Exception):
-                    from remedy.interfaces.config import resolve_provider_api_key
+            connected, reason = classify_provider_connection(
+                pid,
+                cfg=cfg,
+                keys=keys,
+                keys_set=keys_set,
+                ollama_available=bool(ollama.get("available")),
+                xai_connected=xai_connected,
+            )
+            classified.append((pid, meta, connected, reason))
 
-                    resolved = str(resolve_provider_api_key(cfg, pid) or "").strip()
-                    if resolved and resolved not in ("local", "unused"):
-                        connected = True
-                        reason = "resolved_key"
-            # Custom / local providers (koboldcpp, llama.cpp, LM Studio) are
-            # reachable when their base URL is local — no API key needed.
-            if not connected and pid not in ("demo", "ollama"):
-                try:
-                    from remedy.interfaces.config import provider_credentials_ready
+        enabled_set = effective_provider_allowlist(
+            enabled_raw,
+            catalog_ids=set(catalog),
+            connected_ids={pid for pid, _m, conn, _r in classified if conn},
+        )
 
-                    cr = provider_credentials_ready(
-                        {
-                            "llm_provider": pid,
-                            "llm_base_url": meta.get("base_url", ""),
-                        }
-                    )
-                    if cr:
-                        connected = True
-                        reason = "local_url"
-                except Exception:
-                    pass
-
+        items: list[dict[str, Any]] = []
+        for pid, meta, connected, reason in classified:
             enabled = True if enabled_set is None else (pid in enabled_set)
             # Guest demo must always be switchable when connected (zero-setup path).
             if pid == "demo" and connected:
@@ -318,6 +293,158 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
     async def ollama_detect():
         """Probe local Ollama for first-run / setup suggestions."""
         return detect_ollama()
+
+    @app.post("/api/providers/probe")
+    async def probe_provider(req: ProviderProbeRequest):
+        """Check that a provider answers /models. Does not persist the key."""
+        import time as _time
+
+        import aiohttp
+
+        from remedy.interfaces.config import (
+            PROVIDER_CATALOG,
+            _is_local_url,
+            anthropic_auth_headers,
+            anthropic_models_url,
+            infer_key_owner,
+            resolve_provider_api_key,
+        )
+
+        pid = str(req.provider or "").strip().lower()
+        if not pid:
+            raise HTTPException(status_code=400, detail="provider required")
+        cfg = load_config()
+        key = str(req.api_key or "").strip()
+        if not key:
+            with contextlib.suppress(Exception):
+                key = str(resolve_provider_api_key(cfg, pid) or "").strip()
+        owner = infer_key_owner(key)
+        if owner:
+            pid = owner
+        meta = PROVIDER_CATALOG.get(pid) or {}
+        base = str(req.base_url or "").strip()
+        # Don't keep an xAI URL when the pasted key is Anthropic (etc.).
+        if owner and base and pid != str(req.provider or "").strip().lower():
+            base = ""
+        if not base:
+            if pid == str(cfg.get("llm_provider") or "").strip().lower():
+                base = str(cfg.get("llm_base_url") or "").strip()
+            if not base:
+                base = str(meta.get("base_url") or "").strip()
+
+        if pid == "demo":
+            return {
+                "ok": True,
+                "provider": pid,
+                "base_url": base,
+                "status": 200,
+                "latency_ms": 0,
+                "models": len(list(meta.get("models") or [])),
+                "error": None,
+            }
+        if pid == "ollama":
+            det = detect_ollama()
+            ok = bool(det.get("available"))
+            return {
+                "ok": ok,
+                "provider": pid,
+                "base_url": det.get("base_url") or base,
+                "status": 200 if ok else None,
+                "latency_ms": None,
+                "models": len(list(det.get("models") or [])),
+                "error": None if ok else "Ollama is not running on this machine.",
+            }
+        if not base:
+            return {
+                "ok": False,
+                "provider": pid,
+                "base_url": "",
+                "status": None,
+                "latency_ms": None,
+                "models": 0,
+                "error": "No base URL for this provider.",
+            }
+        needs_key = pid not in ("rmb", "llamacpp", "custom", "ollama", "demo")
+        if needs_key and (not key or key in ("local", "unused")):
+            return {
+                "ok": False,
+                "provider": pid,
+                "base_url": base,
+                "status": None,
+                "latency_ms": None,
+                "models": 0,
+                "error": "No API key stored. Paste a key and Test, then Save.",
+            }
+
+        if pid == "anthropic":
+            models_url = anthropic_models_url(base)
+            headers = anthropic_auth_headers(key)
+        else:
+            models_url = base.rstrip("/") + "/models"
+            headers = {}
+            if key and key not in ("local", "unused"):
+                headers["Authorization"] = f"Bearer {key}"
+        verify_ssl = not _is_local_url(base)
+        timeout = aiohttp.ClientTimeout(total=6.0, connect=3.0)
+        t0 = _time.perf_counter()
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(
+                    models_url, headers=headers, ssl=verify_ssl
+                ) as resp:
+                    ms = round((_time.perf_counter() - t0) * 1000.0, 1)
+                    if not resp.ok:
+                        detail = ""
+                        with contextlib.suppress(Exception):
+                            body = await resp.json()
+                            if isinstance(body, dict):
+                                err = body.get("error")
+                                if isinstance(err, dict):
+                                    detail = str(err.get("message") or "")
+                                elif err:
+                                    detail = str(err)
+                        return {
+                            "ok": False,
+                            "provider": pid,
+                            "base_url": base,
+                            "status": int(resp.status),
+                            "latency_ms": ms,
+                            "models": 0,
+                            "error": detail
+                            or f"Provider returned HTTP {resp.status}. Check the key / URL.",
+                        }
+                    payload = await resp.json()
+                    data = payload.get("data", []) if isinstance(payload, dict) else []
+                    n = len(data) if isinstance(data, list) else 0
+                    return {
+                        "ok": True,
+                        "provider": pid,
+                        "base_url": base,
+                        "status": int(resp.status),
+                        "latency_ms": ms,
+                        "models": n,
+                        "error": None,
+                    }
+        except TimeoutError:
+            return {
+                "ok": False,
+                "provider": pid,
+                "base_url": base,
+                "status": None,
+                "latency_ms": None,
+                "models": 0,
+                "error": "Timed out reaching the provider. Check the URL / network.",
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "provider": pid,
+                "base_url": base,
+                "status": None,
+                "latency_ms": None,
+                "models": 0,
+                "error": f"Could not reach provider: {type(exc).__name__}",
+            }
 
     @app.get("/api/auth/xai")
     async def xai_auth_status():

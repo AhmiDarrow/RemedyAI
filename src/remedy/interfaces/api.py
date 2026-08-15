@@ -158,7 +158,7 @@ def create_app(
                 rmb_ok = False
                 try:
                     from remedy.runtime.rmb.config import load_rmb_json, merge_state
-                    from remedy.runtime.rmb.service import start_rmb_server
+                    from remedy.runtime.rmb.service import ensure_rmb_server
 
                     home0 = cfg0.get("home_dir") if isinstance(cfg0, dict) else None
                     st = merge_state(load_rmb_json(home0))
@@ -178,7 +178,9 @@ def create_app(
                         ensure_rmb_watchdog(home0)
                         with suppress(Exception):
                             adopt_existing_host(home0)
-                        rr = start_rmb_server(home_dir=home0, wait_s=120.0)
+                        # Honor persisted user Stop after recycle — do not
+                        # start_rmb_server (that used to wipe stay-off).
+                        rr = ensure_rmb_server(home_dir=home0, wait_s=120.0)
                         rmb_ok = bool(rr.get("ok"))
                         if rmb_ok:
                             logger.info(

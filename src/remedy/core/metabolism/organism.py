@@ -276,6 +276,23 @@ def _stable_vitals(v: dict[str, Any]) -> dict[str, Any]:
     return {k: val for k, val in v.items() if k not in _VITALS_EPHEMERAL}
 
 
+def note_last_did(did: str, home: Any = None) -> None:
+    """Record what the body just did. Cheap. Overwrites only last_did + ts."""
+    text = (did or "").strip()
+    if not text:
+        return
+    v = load_vitals(home)
+    now = time.time()
+    if not v:
+        v = {"ts": now, "alive": True}
+    if str(v.get("last_did") or "") == text[:200]:
+        return
+    v["ts"] = now
+    v["alive"] = True
+    v["last_did"] = text[:200]
+    persist_vitals(v, home)
+
+
 def persist_vitals(vitals: dict[str, Any], home: Any = None) -> Path | None:
     try:
         root = _home_path(home)
@@ -1078,10 +1095,28 @@ def forge_pulse(
                 from remedy.core.metabolism.evidence import get_evidence_ledger
 
                 eu_n = int(get_evidence_ledger(session_id).evidence_units or 0)
+            # Body memory beats the generic loop — last red / unverified writes
+            body = ""
+            with suppress(Exception):
+                from remedy.core.build_ledger import body_next_line, load_ledger
+
+                proj = project_path
+                if not proj and runtime is not None:
+                    proj = str(runtime.effective_project_path() or "")
+                led = load_ledger(proj or None, home=home)
+                if led is not None:
+                    body = body_next_line(led)
+            default = (
+                body
+                if body
+                else (
+                    "Default: explore in batch → short plan → write → verify green → done. "
+                    "No monologue without tools when the work needs them."
+                )
+            )
             return (
                 f"[Forge · creation] muscle={m.label} parallel≤{m.max_parallel_tools}. "
-                "Default: explore in batch → short plan → write → verify green → done. "
-                "No monologue without tools when the work needs them."
+                + default
                 + (f" Evidence in hand: EU={eu_n}." if eu_n else "")
                 + crystal_hint
             )

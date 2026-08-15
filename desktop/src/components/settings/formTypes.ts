@@ -34,6 +34,11 @@ export interface SettingsFormProps {
   apiKey: string
   setApiKey: Dispatch<SetStateAction<string>>
   apiKeySet: boolean
+  providerKeysSet?: Record<string, boolean>
+  onTestConnection?: () => void
+  testBusy?: boolean
+  testMsg?: string | null
+  testOk?: boolean | null
   projectPath: string
   setProjectPath: Dispatch<SetStateAction<string>>
   browserHomeUrl: string
@@ -90,8 +95,8 @@ export interface SettingsFormProps {
   } | null
   soulFieldEnabled: boolean
   setSoulFieldEnabled: Dispatch<SetStateAction<boolean>>
-  approvalMode: 'ask' | 'auto'
-  setApprovalMode: Dispatch<SetStateAction<'ask' | 'auto'>>
+  approvalMode: 'ask' | 'auto' | 'full'
+  setApprovalMode: Dispatch<SetStateAction<'ask' | 'auto' | 'full'>>
   harnessMode: string
   setHarnessMode: Dispatch<SetStateAction<string>>
   harnessMinPct: number

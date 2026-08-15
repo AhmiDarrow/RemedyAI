@@ -20,7 +20,20 @@ import {
 } from '../utils/demoModels'
 
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
-export type ApprovalMode = 'ask' | 'auto'
+export type ApprovalMode = 'ask' | 'auto' | 'full'
+
+export const APPROVAL_CYCLE: ApprovalMode[] = ['ask', 'auto', 'full']
+
+export function normalizeApprovalMode(raw: unknown): ApprovalMode {
+  const am = String(raw || 'ask').toLowerCase()
+  if (am === 'auto' || am === 'full') return am
+  return 'ask'
+}
+
+export function nextApprovalMode(mode: ApprovalMode): ApprovalMode {
+  const i = APPROVAL_CYCLE.indexOf(mode)
+  return APPROVAL_CYCLE[(i >= 0 ? i + 1 : 0) % APPROVAL_CYCLE.length]!
+}
 
 interface StatusBarProps {
   sessionId: string | null
@@ -85,7 +98,11 @@ const PROVIDER_FALLBACK_MODELS: Record<string, { id: string; name: string }[]> =
   openai: [{ id: 'gpt-4o-mini', name: 'GPT-4o Mini' }],
   google: [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' }],
   groq: [{ id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B' }],
-  anthropic: [{ id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet' }],
+  anthropic: [
+    { id: 'claude-sonnet-4-0', name: 'Claude Sonnet 4' },
+    { id: 'claude-opus-4-1', name: 'Claude Opus 4.1' },
+    { id: 'claude-3-5-haiku-latest', name: 'Claude 3.5 Haiku' },
+  ],
   mistral: [{ id: 'mistral-small-latest', name: 'Mistral Small' }],
   ollama: [{ id: 'llama3.2', name: 'Llama 3.2' }],
   poe: [
@@ -489,6 +506,7 @@ export function StatusBar({
   const dotColor =
     status === 'connected' ? 'var(--success)' : status === 'checking' ? 'var(--warning)' : 'var(--error)'
   const autoApprove = approvalMode === 'auto'
+  const fullControl = approvalMode === 'full'
 
   const dockVision = useMemo(() => {
     const line = visionLine(vision)
@@ -935,25 +953,45 @@ export function StatusBar({
 
               <button
                 type="button"
-                onClick={() => onApprovalModeChange?.(autoApprove ? 'ask' : 'auto')}
+                onClick={() => onApprovalModeChange?.(nextApprovalMode(approvalMode))}
                 className="flex items-center justify-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors"
                 title={
-                  autoApprove
-                    ? 'Auto-approve on — shell/write run without prompts. Click for Ask.'
-                    : 'Ask before risky tools (safe default). Click for Auto.'
+                  fullControl
+                    ? 'Full (warn) — write jail off except auth. Click for Ask.'
+                    : autoApprove
+                      ? 'Auto (in-project) — build/write without prompts. Jail stays outside the folder. Click for Full.'
+                      : 'Ask before risky tools (safe default). Click for Auto.'
                 }
-                aria-label={autoApprove ? 'Auto-approve on' : 'Ask before risky actions'}
-                aria-pressed={autoApprove}
+                aria-label={
+                  fullControl
+                    ? 'Full control with warnings'
+                    : autoApprove
+                      ? 'Auto-approve in project'
+                      : 'Ask before risky actions'
+                }
+                aria-pressed={autoApprove || fullControl}
                 style={{
-                  background: autoApprove
-                    ? 'color-mix(in srgb, var(--success) 28%, var(--bg-tertiary))'
-                    : 'var(--bg-tertiary)',
-                  color: autoApprove ? 'var(--success)' : 'var(--text-secondary)',
-                  border: `1px solid ${autoApprove ? 'var(--success)' : 'var(--border)'}`,
+                  background: fullControl
+                    ? 'color-mix(in srgb, var(--warning, #e6a23c) 32%, var(--bg-tertiary))'
+                    : autoApprove
+                      ? 'color-mix(in srgb, var(--success) 28%, var(--bg-tertiary))'
+                      : 'var(--bg-tertiary)',
+                  color: fullControl
+                    ? 'var(--warning, #e6a23c)'
+                    : autoApprove
+                      ? 'var(--success)'
+                      : 'var(--text-secondary)',
+                  border: `1px solid ${
+                    fullControl
+                      ? 'var(--warning, #e6a23c)'
+                      : autoApprove
+                        ? 'var(--success)'
+                        : 'var(--border)'
+                  }`,
                   minWidth: 36,
                 }}
               >
-                {autoApprove ? 'Auto' : 'Ask'}
+                {fullControl ? 'Full' : autoApprove ? 'Auto' : 'Ask'}
               </button>
 
               <button

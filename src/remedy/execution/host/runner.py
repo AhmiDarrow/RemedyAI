@@ -189,7 +189,7 @@ def prepare_host_command(
     if resolved_host != "posix" and looks_like_plain_argv(text):
         argv = coerce_argv(text)
         if argv:
-            resolved = resolve_which(argv[0])
+            resolved = resolve_which(argv[0], cwd=project_path)
             if resolved:
                 argv[0] = resolved
             notes.append("plain argv — no shell")
@@ -264,8 +264,12 @@ def prepare_host_op(
     )
 
 
-def resolve_which(name: str) -> str | None:
-    """Resolve an executable the way the host would."""
+def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
+    """Resolve an executable the way the host would.
+
+    Also looks in the project's ``.venv`` / ``node_modules/.bin`` so
+    ``pytest`` / ``uv`` / ``ruff`` work without a global install.
+    """
     n = (name or "").strip()
     if not n:
         return None
@@ -289,6 +293,21 @@ def resolve_which(name: str) -> str | None:
             return hit
     except Exception:
         pass
+    if cwd is not None:
+        try:
+            from remedy.core.project_fingerprint import local_bin_dirs
+
+            suffix = ".exe" if os.name == "nt" else ""
+            for d in local_bin_dirs(cwd):
+                cand = d / (n + suffix if suffix and not n.lower().endswith(suffix) else n)
+                if cand.is_file():
+                    return str(cand)
+                if suffix:
+                    alt = d / f"{key}{suffix}"
+                    if alt.is_file():
+                        return str(alt)
+        except Exception:
+            pass
     found = shutil.which(n)
     if found:
         return found

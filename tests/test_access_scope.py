@@ -160,6 +160,19 @@ def test_full_scope_allows_absolute_under_user(tmp_path: Path):
     assert p == f.resolve()
 
 
+def test_full_scope_allows_relative_escape(tmp_path: Path):
+    """Full (warn) must resolve ../sibling — Ask/Auto still jail that."""
+    proj = tmp_path / "proj"
+    sib = tmp_path / "sibling"
+    proj.mkdir()
+    sib.mkdir()
+    target = sib / "out.txt"
+    p = resolve_under_roots("../sibling/out.txt", [proj], access_scope="full")
+    assert p == target.resolve()
+    with pytest.raises(SecurityError):
+        resolve_under_roots("../sibling/out.txt", [proj], access_scope="project")
+
+
 def test_protected_secret_path_detects_auth_tree(tmp_path: Path, monkeypatch):
     """.../.remedy/auth and $REMEDY_HOME/auth are always protected."""
     from remedy.core.security import clear_protected_auth_roots_cache

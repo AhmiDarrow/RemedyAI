@@ -167,6 +167,43 @@ def test_ship_gate_still_asks_in_ask_mode(monkeypatch):
     assert blob and blob.startswith("APPROVAL_REQUIRED")
 
 
+def test_full_mode_skips_prompts_even_on_untrusted(monkeypatch):
+    q = ApprovalQueue()
+    q.set_mode("full")
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"approval_mode": "full", "access_scope": "untrusted"},
+    )
+    assert q.needs_ask("rm -rf /tmp/foo", tool_name="bash_exec") is None
+    assert q.needs_ask("write src/a.py", tool_name="file_write") is None
+
+
+def test_set_full_clears_pending():
+    q = ApprovalQueue()
+    q.set_mode("ask")
+    item = q.create(
+        tool_name="bash_exec",
+        command="python process_assets.py",
+        reason="Shell execution requires approval (bash_exec)",
+        session_id="s1",
+    )
+    assert item.status == "pending"
+    q.set_mode("full")
+    assert item.status == "approved"
+    assert q.list_pending() == []
+
+
+def test_normalize_approval_mode_aliases():
+    from remedy.core.approvals import normalize_approval_mode
+
+    assert normalize_approval_mode("ask") == "ask"
+    assert normalize_approval_mode("auto") == "auto"
+    assert normalize_approval_mode("full") == "full"
+    assert normalize_approval_mode("yolo") == "full"
+    assert normalize_approval_mode("trust") == "auto"
+    assert normalize_approval_mode("nope") == "ask"
+
+
 def test_config_to_agent_config_carries_approval_mode():
     from remedy.interfaces.config import config_to_agent_config
 
@@ -180,3 +217,20 @@ def test_config_to_agent_config_carries_approval_mode():
     )
     assert cfg.approval_mode == "auto"
     assert cfg.access_scope == "project"
+    full = config_to_agent_config(
+        {
+            "approval_mode": "full",
+            "access_scope": "project",
+            "llm_provider": "xai",
+            "llm_model": "grok-4.5",
+        }
+    )
+    assert full.approval_mode == "full"
+    omitted = config_to_agent_config(
+        {
+            "access_scope": "project",
+            "llm_provider": "xai",
+            "llm_model": "grok-4.5",
+        }
+    )
+    assert omitted.approval_mode == "auto"

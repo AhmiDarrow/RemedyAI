@@ -16,18 +16,16 @@
   DetailPrint "Closing running Remedy processes so files can be replaced..."
   ; Tree-kill every known image name (main app + sidecar variants).
   nsExec::ExecToLog 'taskkill /F /T /IM "Remedy Desktop.exe"'
-  nsExec::ExecToLog 'taskkill /F /T /IM "app.exe"'
   nsExec::ExecToLog 'taskkill /F /T /IM "remedy-desktop.exe"'
   nsExec::ExecToLog 'taskkill /F /T /IM "remedy-desktop-x86_64-pc-windows-msvc.exe"'
   nsExec::ExecToLog 'taskkill /F /T /IM "remedy-desktop-amd64-pc-windows-msvc.exe"'
   ; Anything still listening on the sidecar port (stale Python/uvicorn).
   nsExec::ExecToLog 'cmd /c for /f "tokens=5" %a in (''netstat -ano ^| findstr :7400 ^| findstr LISTENING'') do taskkill /F /PID %a'
-  ; PowerShell belt-and-suspenders by process name substring.
-  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match ''^(app|remedy-desktop|Remedy Desktop)$'' -or ($_.Path -and $_.Path -like ''*Remedy Desktop*'') } | Stop-Process -Force -ErrorAction SilentlyContinue"'
+  ; PowerShell belt-and-suspenders — Remedy Desktop / remedy-desktop* only (never generic app.exe).
+  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match ''^(remedy-desktop|Remedy Desktop)$'' -or ($_.Path -and $_.Path -like ''*Remedy Desktop*'') } | Stop-Process -Force -ErrorAction SilentlyContinue"'
   Sleep 2000
   ; Second pass - Windows can take a moment to release file handles.
   nsExec::ExecToLog 'taskkill /F /T /IM "remedy-desktop.exe"'
-  nsExec::ExecToLog 'taskkill /F /T /IM "app.exe"'
   nsExec::ExecToLog 'taskkill /F /T /IM "Remedy Desktop.exe"'
   Sleep 1500
   ; Best-effort delete of locked sidecar so NSIS can recreate it.

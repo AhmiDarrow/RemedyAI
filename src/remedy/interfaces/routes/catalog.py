@@ -214,7 +214,8 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         live_env = str(os.environ.get("REMEDY_LIVE_MODELS", "")).strip().lower()
         live_off = live_env in ("0", "false", "no", "off")
         live_force = live_env in ("1", "true", "yes", "on")
-        # Anthropic Messages API is not OpenAI /models compatible.
+        # Anthropic chat is Messages API; model *list* is GET /v1/models
+        # with x-api-key (handled separately). Other providers use OpenAI /models.
         openai_compat = configured_provider != "anthropic"
         # Demo uses a public gateway whose /models lists image/video, promo, and
         # paid-key models that fail with the guest dummy key — never auto-merge.
@@ -225,6 +226,7 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             and (
                 live_force
                 or openai_compat
+                or configured_provider == "anthropic"
                 or _is_local_url(base_url)
                 or configured_provider in ("ollama", "openrouter", "custom", "poe")
             )
@@ -304,6 +306,39 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                 )
             return found
 
+        async def _discover_anthropic() -> list[dict]:
+            from remedy.interfaces.config import (
+                anthropic_auth_headers,
+                anthropic_models_url,
+                parse_anthropic_models_payload,
+            )
+
+            models_url = anthropic_models_url(base_url)
+            headers = anthropic_auth_headers(api_key)
+            timeout = aiohttp.ClientTimeout(total=6.0, connect=3.0)
+            try:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(
+                        models_url, headers=headers, ssl=verify_ssl
+                    ) as resp:
+                        if not resp.ok:
+                            logger.info(
+                                "Anthropic model discovery HTTP %s for %s",
+                                resp.status,
+                                models_url,
+                            )
+                            return []
+                        body = await resp.json()
+                        return parse_anthropic_models_payload(body)
+            except Exception as exc:
+                logger.info(
+                    "Anthropic model discovery failed (%s): %s: %s",
+                    models_url,
+                    type(exc).__name__,
+                    exc or repr(exc),
+                )
+                return []
+
         # OpenAI-compatible /models (DeepSeek, xAI, OpenAI, Ollama /v1, OpenRouter, Poe, …)
         if (
             not from_cache
@@ -337,6 +372,42 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                     logger.info(
                         "Model discovery inflight error for %s: %s: %s",
                         configured_provider,
+                        type(exc).__name__,
+                        exc or repr(exc),
+                    )
+                finally:
+                    inflight.pop(cache_key, None)
+
+        if (
+            not from_cache
+            and want_live
+            and can_live
+            and configured_provider == "anthropic"
+            and api_key
+        ):
+            import asyncio
+
+            existing = inflight.get(cache_key)
+            if existing is not None:
+                try:
+                    discovered = list(await existing)
+                except Exception:
+                    discovered = []
+            else:
+                loop = asyncio.get_event_loop()
+                fut = loop.create_future()
+                inflight[cache_key] = fut
+                try:
+                    result = await _discover_anthropic()
+                    if not fut.done():
+                        fut.set_result(result)
+                    discovered = list(result)
+                except Exception as exc:
+                    if not fut.done():
+                        fut.set_result([])
+                    discovered = []
+                    logger.info(
+                        "Anthropic discovery inflight error: %s: %s",
                         type(exc).__name__,
                         exc or repr(exc),
                     )

@@ -1048,6 +1048,42 @@ def test_find_recent_success(tmp_path: Path):
     assert found.id == j.id
 
 
+def test_find_recent_success_filters_other_session(tmp_path: Path):
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    other = b.enqueue(
+        "navigate",
+        {"url": "https://mail.google.com"},
+        session_id="tab-b",
+    )
+    b.complete(
+        other.id,
+        ok=True,
+        result={"ok": True, "url": "https://mail.google.com"},
+    )
+    mine = b.enqueue(
+        "navigate",
+        {"url": "https://mail.google.com"},
+        session_id="tab-a",
+    )
+    twin = b.find_recent_success(
+        action="navigate",
+        url="https://mail.google.com",
+        session_id="tab-a",
+        job_id=mine.id,
+    )
+    assert twin is None or twin.session_id == "tab-a"
+    assert twin is None or twin.id == mine.id
+    # Other tab's success must not satisfy this tab.
+    stolen = b.find_recent_success(
+        action="navigate",
+        url="https://mail.google.com",
+        session_id="tab-a",
+    )
+    assert stolen is None
+
+
 def test_navigate_rail_fast_optimistic_when_host_alive(tmp_path: Path, monkeypatch):
     """Open-url must return SUCCESS quickly even if host is slow to complete."""
     import json

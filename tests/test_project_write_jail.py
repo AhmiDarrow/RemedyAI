@@ -57,9 +57,16 @@ def _make_runtime(proj: Path, *, scope: str = "project", home: Path | None = Non
             return False
 
         def resolve_tool_path(self, path: str, *, for_write: bool = False) -> Path:
-            # Mirror BasicRuntime: project-bound writes never use full bypass.
+            # Mirror Agent: Full (warn) may leave the focus folder; Ask/Auto stay jailed.
             if for_write:
+                from remedy.core.approvals import APPROVALS, normalize_approval_mode
+
                 roots = self.write_roots()
+                approval = normalize_approval_mode(
+                    getattr(self, "_approval_mode", None) or APPROVALS.mode
+                )
+                if approval == "full":
+                    return _ru(path or ".", roots, access_scope="full")
                 scope = self.access_scope()
                 enforce = "home" if scope == "home" else "project"
                 return _ru(path or ".", roots, access_scope=enforce)
@@ -204,6 +211,55 @@ async def test_file_write_tool_blocks_desktop(tmp_path: Path, monkeypatch: pytes
         assert "PATH_DENIED" not in ok
         assert "APPROVAL_REQUIRED" not in ok
         assert (proj / "inside.txt").read_text(encoding="utf-8") == "yes"
+    finally:
+        APPROVALS.set_mode(prev)
+
+
+@pytest.mark.asyncio
+async def test_file_write_tool_full_allows_desktop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Full (warn) must not jail file_write to Desktop / sibling trees."""
+    from remedy.core.agent_workspace_tools import register_workspace_tools
+    from remedy.core.approvals import APPROVALS
+    from remedy.skills.tool_registry import ToolRegistry
+
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"approval_mode": "full", "access_scope": "project"},
+    )
+    prev = APPROVALS._mode  # noqa: SLF001
+    APPROVALS.set_mode("full")
+    try:
+        home = tmp_path / "home"
+        desk = home / "Desktop"
+        desk.mkdir(parents=True)
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        sib = tmp_path / "sibling"
+        sib.mkdir()
+
+        rt = _make_runtime(proj, scope="project", home=home)
+        rt._approval_mode = "full"  # type: ignore[attr-defined]
+        reg = ToolRegistry()
+        rt.tool_registry = reg  # type: ignore[attr-defined]
+        rt.config = SimpleNamespace(home_dir=str(tmp_path / "remedy_home"))  # type: ignore[attr-defined]
+        rt._session_id = "test-session-full"  # type: ignore[attr-defined]
+        register_workspace_tools(rt)
+
+        dest = desk / "full_ok.txt"
+        result = await reg.execute(
+            "file_write", path=str(dest), content="owner"
+        )
+        assert "PATH_DENIED" not in result, result
+        assert "WRITE_JAIL" not in result, result
+        assert dest.read_text(encoding="utf-8") == "owner"
+
+        rel = await reg.execute(
+            "file_write", path="../sibling/via_rel.txt", content="rel"
+        )
+        assert "PATH_DENIED" not in rel, rel
+        assert (sib / "via_rel.txt").read_text(encoding="utf-8") == "rel"
     finally:
         APPROVALS.set_mode(prev)
 
@@ -1192,6 +1248,11 @@ def _register_shell_runtime(tmp_path: Path, proj: Path, monkeypatch):
     from remedy.skills.tool_registry import ToolRegistry
 
     monkeypatch.setattr(APPROVALS, "needs_ask", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"approval_mode": "auto", "access_scope": "project"},
+    )
+    APPROVALS.set_mode("auto")
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     rt = _make_runtime(proj, scope="project", home=home)
@@ -1276,8 +1337,15 @@ async def test_host_session_cd_outside_resets_and_jails_relative(
     """session=true leftover cwd must not allow relative writes outside roots."""
     import os
 
+    from remedy.core.approvals import APPROVALS
     from remedy.execution.host.session import close_all_shared_sessions, get_shared_session
 
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"approval_mode": "auto", "access_scope": "project"},
+    )
+    prev = APPROVALS._mode  # noqa: SLF001
+    APPROVALS.set_mode("auto")
     proj = tmp_path / "proj"
     proj.mkdir()
     _rt, reg = _register_shell_runtime(tmp_path, proj, monkeypatch)
@@ -1313,5 +1381,248 @@ async def test_host_session_cd_outside_resets_and_jails_relative(
     finally:
         if leak.exists():
             leak.unlink()
+        APPROVALS.set_mode(prev)
         await close_all_shared_sessions()
+
+
+def test_full_sandbox_has_no_workdir_jail(tmp_path: Path):
+    from remedy.core.approvals import APPROVALS
+    from remedy.execution.sandbox import allowed_paths_for_shell
+
+    prev = APPROVALS.mode
+    try:
+        APPROVALS.set_mode("full")
+        assert allowed_paths_for_shell([tmp_path], tmp_path) == []
+        APPROVALS.set_mode("auto")
+        roots = allowed_paths_for_shell([tmp_path], tmp_path)
+        assert tmp_path in roots
+    finally:
+        APPROVALS.set_mode(prev)
+
+
+def test_pytest_is_not_a_script_launch(tmp_path: Path):
+    """uv/python -m pytest must not body-scan test files (in-project builds)."""
+    from remedy.core.shell_write_jail import extract_script_launch_targets
+
+    sticky = tmp_path / "proj"
+    sticky.mkdir()
+    for cmd in (
+        "uv run pytest -q",
+        "uv run pytest tests/test_foo.py",
+        "python -m pytest tests/test_foo.py",
+        "pytest tests/test_foo.py",
+        "ruff check src",
+        "mypy src",
+    ):
+        assert extract_script_launch_targets(cmd) == [], cmd
+        assert looks_like_mutation(cmd) is False, cmd
+        assert (
+            check_shell_write_jail(
+                cmd,
+                write_roots=[sticky.resolve()],
+                cwd=sticky,
+                project_bound=True,
+                approval_mode="auto",
+            )
+            is None
+        ), cmd
+
+    assert extract_script_launch_targets("python tests/test_foo.py") == [
+        "tests/test_foo.py"
+    ]
+    assert extract_script_launch_targets("node write.js") == ["write.js"]
+
+
+def test_auto_still_blocks_outside_writes(tmp_path: Path):
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    hit = check_shell_write_jail(
+        r"Set-Content C:\Users\Public\pwn.txt pwned",
+        write_roots=[sticky.resolve()],
+        cwd=sticky,
+        project_bound=True,
+        approval_mode="auto",
+    )
+    assert hit is not None
+    assert "outside" in hit.lower() or "write jail" in hit.lower()
+
+
+def test_full_warn_does_not_block_outside_writes(tmp_path: Path):
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    hit = check_shell_write_jail(
+        r"Set-Content C:\Users\Public\pwn.txt pwned",
+        write_roots=[sticky.resolve()],
+        cwd=sticky,
+        project_bound=True,
+        approval_mode="full",
+    )
+    assert hit is None
+    # Opaque / encoded mutations also proceed — Full is owner control.
+    assert (
+        check_shell_write_jail(
+            "python -c \"open(r'C:\\\\Users\\\\Public\\\\x','w').write('z')\"",
+            write_roots=[sticky.resolve()],
+            cwd=sticky,
+            project_bound=True,
+            approval_mode="full",
+        )
+        is None
+    )
+
+
+def test_full_still_blocks_auth_secrets(tmp_path: Path):
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    hit = check_shell_write_jail(
+        r"type C:\Users\Administrator\.remedy\auth\local_api_token",
+        write_roots=[sticky.resolve()],
+        cwd=sticky,
+        project_bound=True,
+        approval_mode="full",
+    )
+    assert hit is not None
+    assert "auth" in hit.lower()
+
+
+def test_root_relative_and_caret_dests_fail_closed(tmp_path: Path):
+    """Issue 1: \\Temp, C:^\\Temp, C:\"\\Temp\" must extract and jail."""
+    from remedy.core.shell_write_jail import extract_path_candidates
+
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    roots = [sticky.resolve()]
+    cases = [
+        r"echo pwn > \Temp\pwn.txt",
+        r"echo pwn > C:^\Temp\pwn.txt",
+        r'Set-Content C:"\Temp\pwn.txt" pwn',
+    ]
+    for cmd in cases:
+        toks = extract_path_candidates(cmd)
+        assert toks, f"expected dest token in {cmd!r}, got {toks}"
+        hit = check_shell_write_jail(
+            cmd,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            approval_mode="auto",
+        )
+        assert hit is not None, f"expected jail for {cmd!r} toks={toks}"
+
+
+def test_posix_in_root_abs_and_devnull_not_jailed(tmp_path: Path):
+    """Unix abs dests under write roots and /dev/null must not fail-closed."""
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    ok = sticky / "ok.txt"
+    roots = [sticky.resolve()]
+    in_root = f'echo y > "{ok}"'
+    assert (
+        check_shell_write_jail(
+            in_root,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            approval_mode="auto",
+        )
+        is None
+    ), in_root
+    for cmd in (
+        "echo hi > /dev/null",
+        "pytest -q > /dev/null",
+        "echo hi > NUL",
+        "dir 2>nul",
+    ):
+        hit = check_shell_write_jail(
+            cmd,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            approval_mode="auto",
+        )
+        assert hit is None, f"devnull/NUL dest should not jail: {cmd!r} → {hit}"
+    # Windows-style still fail-closed on every OS
+    hit = check_shell_write_jail(
+        r"echo pwn > \Temp\pwn.txt",
+        write_roots=roots,
+        cwd=sticky,
+        project_bound=True,
+        approval_mode="auto",
+    )
+    assert hit is not None
+    # Suffix /dev/null is a real path, not the device — fail closed
+    for cmd in (
+        r"echo pwn > \Temp\dev\null",
+        r"echo pwn > C:\Users\Public\dev\null",
+        r"echo pwn > /tmp/evil/dev/null",
+    ):
+        sneak = check_shell_write_jail(
+            cmd,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            approval_mode="auto",
+        )
+        assert sneak is not None, f"path named dev/null must jail: {cmd!r}"
+
+
+def test_versioned_and_nested_script_launch_body_scan(tmp_path: Path):
+    """Issue 2: python3.12 / cmd /c python / bare .js home writes fail closed."""
+    from remedy.core.shell_write_jail import extract_script_launch_targets
+
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    drop = sticky / "drop.py"
+    drop.write_text(
+        "from pathlib import Path\nPath.home().joinpath('Desktop','pwn.txt').write_text('x')\n",
+        encoding="utf-8",
+    )
+    js = sticky / "drop.js"
+    js.write_text(
+        "const os = require('os');\n"
+        "require('fs').writeFileSync(os.homedir() + '/pwn.txt', 'x');\n",
+        encoding="utf-8",
+    )
+    js_env = sticky / "env.js"
+    js_env.write_text(
+        "require('fs').writeFileSync(process.env.USERPROFILE + '/pwn.txt', 'x');\n",
+        encoding="utf-8",
+    )
+    roots = [sticky.resolve()]
+
+    assert extract_script_launch_targets("python3.12 drop.py") == ["drop.py"]
+    assert extract_script_launch_targets("python312 drop.py") == ["drop.py"]
+    assert extract_script_launch_targets("cmd /c python drop.py") == ["drop.py"]
+    assert extract_script_launch_targets("drop.py") == ["drop.py"]
+    assert extract_script_launch_targets("node drop.js") == ["drop.js"]
+
+    for cmd in (
+        "python3.12 drop.py",
+        "python312 drop.py",
+        "cmd /c python drop.py",
+        "python drop.py",
+        "node drop.js",
+        "node env.js",
+    ):
+        hit = check_shell_write_jail(
+            cmd,
+            write_roots=roots,
+            cwd=sticky,
+            project_bound=True,
+            approval_mode="auto",
+        )
+        assert hit is not None, f"expected jail for launched home-write: {cmd!r}"
+
+
+def test_npm_install_still_allowed_in_project(tmp_path: Path):
+    sticky = tmp_path / "SecretSticky"
+    sticky.mkdir()
+    hit = check_shell_write_jail(
+        "npm install lodash",
+        write_roots=[sticky.resolve()],
+        cwd=sticky,
+        project_bound=True,
+        approval_mode="auto",
+    )
+    assert hit is None
 

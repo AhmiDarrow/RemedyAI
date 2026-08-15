@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -70,8 +71,13 @@ def looks_like_xai_credential(key: str | None) -> bool:
     return bool(k.startswith("eyJ") and k.count(".") >= 2)
 
 
-def infer_key_provider(key: str | None) -> str | None:
-    """Best-effort owner for a raw API key (used only for migration)."""
+def infer_key_owner(key: str | None) -> str | None:
+    """Unambiguous key prefix → provider. ``None`` if the prefix is shared.
+
+    Used when saving Settings so ``sk-ant-…`` is stored on Anthropic even if
+    the Type dropdown is still on xAI/Grok. Generic ``sk-`` is *not* claimed
+    (OpenAI and DeepSeek share it).
+    """
     k = (key or "").strip()
     if not k:
         return None
@@ -85,11 +91,59 @@ def infer_key_provider(key: str | None) -> str | None:
         return "google"
     if k.startswith("sk-or-"):
         return "openrouter"
+    if k.startswith("pplx-"):
+        return "perplexity"
+    return None
+
+
+def infer_key_provider(key: str | None) -> str | None:
+    """Best-effort owner for a raw API key (used only for migration)."""
+    owner = infer_key_owner(key)
+    if owner:
+        return owner
+    k = (key or "").strip()
+    if not k:
+        return None
     # DeepSeek console keys are sk-… (same prefix as OpenAI). Prefer deepseek when
     # the key was incorrectly parked on xAI; OpenAI users can re-save once.
     if k.startswith("sk-"):
         return "deepseek"
     return None
+
+
+def rehome_misfiled_provider_keys(
+    stored: dict[str, str],
+    *,
+    home: Path | str | None = None,
+) -> dict[str, str]:
+    """Move uniquely-prefixed keys off the wrong provider slot (xAI ↔ Anthropic)."""
+    if not stored:
+        return stored
+    out = dict(stored)
+    changed = False
+    for pid, val in list(out.items()):
+        owner = infer_key_owner(val)
+        if not owner or owner == pid:
+            continue
+        if owner not in out or not str(out.get(owner) or "").strip():
+            out[owner] = val
+            changed = True
+        # Drop a non-xAI secret parked under xAI (OAuth still lives in xai_auth).
+        if pid == "xai" and not looks_like_xai_credential(val):
+            out.pop(pid, None)
+            changed = True
+        elif pid != owner and owner in out:
+            # Slot had a foreign unique key; keep owner, drop the misfile.
+            out.pop(pid, None)
+            changed = True
+    if changed:
+        try:
+            from remedy.interfaces.secret_store import save_provider_keys
+
+            save_provider_keys(out, home=home)
+        except Exception:
+            pass
+    return out
 
 
 def _home_from_cfg(cfg: dict[str, Any] | None, home: Path | str | None = None) -> Path | None:
@@ -114,6 +168,7 @@ def get_provider_keys(
 
     home_path = _home_from_cfg(cfg, home)
     stored = load_provider_keys(home_path)
+    stored = rehome_misfiled_provider_keys(stored, home=home_path)
     # Transient legacy table (only until migrate_provider_keys scrubs it)
     raw = (cfg or {}).get("provider_keys") or {}
     if isinstance(raw, dict):
@@ -138,6 +193,10 @@ def set_provider_key(
     provider = str(provider or "").strip().lower()
     if not provider:
         return cfg
+    # Never park an Anthropic/Groq/… key under the active Type (usually xAI).
+    owner = infer_key_owner(api_key)
+    if owner:
+        provider = owner
     home_path = _home_from_cfg(cfg, home)
     set_provider_secret(provider, api_key, home=home_path)
     # Never keep secrets in the config dict destined for disk.
@@ -681,6 +740,53 @@ def persona_system_addendum(persona: str | None) -> str:
     return PERSONA_PROMPTS.get(key, "")
 
 
+ANTHROPIC_API_VERSION = "2023-06-01"
+
+
+def anthropic_models_url(base_url: str | None = None) -> str:
+    """GET /v1/models — Anthropic is not OpenAI-compatible."""
+    root = (base_url or "https://api.anthropic.com/v1").rstrip("/")
+    if root.endswith("/messages"):
+        root = root[: -len("/messages")]
+    if not root.endswith("/v1"):
+        root = root + "/v1"
+    return root + "/models"
+
+
+def anthropic_auth_headers(api_key: str) -> dict[str, str]:
+    return {
+        "x-api-key": (api_key or "").strip(),
+        "anthropic-version": ANTHROPIC_API_VERSION,
+    }
+
+
+def parse_anthropic_models_payload(body: object) -> list[dict[str, Any]]:
+    """Normalize Anthropic ``{data:[{id, display_name}]}`` to catalog-shaped rows."""
+    data = body.get("data") if isinstance(body, dict) else None
+    if not isinstance(data, list):
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for m in data:
+        if not isinstance(m, dict):
+            continue
+        mid = str(m.get("id") or "").strip()
+        if not mid or mid in seen:
+            continue
+        seen.add(mid)
+        name = str(m.get("display_name") or m.get("name") or mid).strip() or mid
+        out.append(
+            {
+                "id": mid,
+                "name": name,
+                "provider": "anthropic",
+                "default": False,
+                "source": "endpoint",
+            }
+        )
+    return out
+
+
 def catalog_models_for_provider(provider: str) -> list[dict[str, Any]]:
     """Return built-in model entries tagged with provider."""
     prov = (provider or "openai").lower()
@@ -770,9 +876,9 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
         llm_api_key = "local"
         logger.info("No API key set for local LLM at %s — using dummy key", llm_base_url)
 
-    am = str(config.get("approval_mode") or "ask").strip().lower()
-    if am not in ("ask", "auto"):
-        am = "ask"
+    from remedy.core.approvals import normalize_approval_mode
+
+    am = normalize_approval_mode(str(config.get("approval_mode") or "auto"))
     scope = str(config.get("access_scope") or "project").strip().lower() or "project"
     hm = str(config.get("harness_mode") or "auto").strip().lower()
     if hm not in ("off", "manual", "auto"):
@@ -909,7 +1015,7 @@ log_level = "INFO"
 sarcasm_mode = false
 
 # --- Partner controls (also on status bar / Settings → Security & power) ---
-# approval_mode = "ask"     # ask (safe default) | auto (work-until-done, full owner power)
+# approval_mode = "auto"    # ask | auto (in-project) | full (warn, jail off except auth)
 # thinking_level = "high"   # off | low | medium | high
 # tool_process = "off"      # off | medium | full
 # web_tools_enabled = false # opt-in public web_fetch (SSRF-guarded)
@@ -1140,6 +1246,81 @@ def _toml_scalar(value: Any) -> str:
     # Escape backslashes and quotes for TOML strings
     text = str(value).replace("\\", "\\\\").replace('"', '\\"')
     return f'"{text}"'
+
+
+def effective_provider_allowlist(
+    enabled_raw: object,
+    *,
+    catalog_ids: set[str],
+    connected_ids: set[str],
+) -> set[str] | None:
+    """Return the picker allowlist, or ``None`` meaning every provider is on.
+
+    A short list that is only the currently-connected ids is the buggy Settings
+    save (checkbox init used connected rows, not the catalog). Treat that as
+    “all on” so a newly keyed Anthropic/OpenAI still appears.
+    """
+    if isinstance(enabled_raw, str) and enabled_raw.strip():
+        enabled_set = {x.strip().lower() for x in enabled_raw.split(",") if x.strip()}
+    elif isinstance(enabled_raw, list) and enabled_raw:
+        enabled_set = {str(x).strip().lower() for x in enabled_raw if str(x).strip()}
+    else:
+        return None
+    if not enabled_set:
+        return None
+    catalog = {str(x).strip().lower() for x in catalog_ids if str(x).strip()}
+    connected = {str(x).strip().lower() for x in connected_ids if str(x).strip()}
+    if (
+        catalog
+        and enabled_set <= (connected | {"demo"})
+        and len(catalog - enabled_set) >= 2
+    ):
+        return None
+    return enabled_set
+
+
+def classify_provider_connection(
+    pid: str,
+    *,
+    cfg: dict[str, Any] | None = None,
+    keys: dict[str, Any] | None = None,
+    keys_set: dict[str, Any] | None = None,
+    ollama_available: bool | None = None,
+    xai_connected: bool = False,
+) -> tuple[bool, str]:
+    """Return ``(connected, reason)`` for the status-bar / Settings catalog.
+
+    Catalog default loopback URLs (custom :5001, RMB :8787) are **not**
+    treated as connected unless that provider is the active chat target.
+    """
+    pid = str(pid or "").strip().lower()
+    cfg = cfg if isinstance(cfg, dict) else {}
+    keys = keys if isinstance(keys, dict) else {}
+    keys_set = keys_set if isinstance(keys_set, dict) else {}
+    if pid == "demo":
+        return True, "demo"
+    if pid == "ollama":
+        if ollama_available is None:
+            ollama_available = bool(detect_ollama().get("available"))
+        if ollama_available:
+            return True, "ollama_up"
+        return False, "ollama_down"
+    if pid == "xai" and xai_connected:
+        return True, "oauth_or_key"
+    if keys.get(pid) or keys_set.get(pid):
+        return True, "api_key"
+    resolved = ""
+    with suppress(Exception):
+        resolved = str(resolve_provider_api_key(cfg, pid) or "").strip()
+    if resolved and resolved not in ("local", "unused", "rmb"):
+        return True, "resolved_key"
+    # Placeholder loopback in the catalog must not mark unused rows connected.
+    active = str(cfg.get("llm_provider") or "").strip().lower()
+    if pid in ("rmb", "llamacpp", "custom") and active == pid:
+        base = str(cfg.get("llm_base_url") or "").strip()
+        if base and _is_local_url(base):
+            return True, "active_local"
+    return False, "no_credentials"
 
 
 def provider_credentials_ready(config: dict[str, Any] | None = None) -> bool:

@@ -6,13 +6,11 @@ now lives under ``react_loop/``; this module re-exports the public surface.
 
 from __future__ import annotations
 
-from remedy.core.react_loop.errors import (
-    is_fatal_llm_api_error,
-)
-from remedy.core.react_loop.errors import (
-    is_fatal_llm_api_error as _is_fatal_llm_api_error,
-)
+from remedy.core.react_loop.errors import is_fatal_llm_api_error
 from remedy.core.react_loop.loop import call_llm_stream
+
+# Tests import the underscored alias from the historical module path.
+_is_fatal_llm_api_error = is_fatal_llm_api_error
 
 __all__ = [
     "call_llm_stream",

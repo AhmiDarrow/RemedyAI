@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import suppress
 from typing import Any
 
 from remedy.gateway.messengers import (
@@ -249,6 +250,7 @@ async def handle_messenger_event(
 
     # Prefer full stream_response path (history + tools + continuity stack)
     reply_parts: list[str] = []
+    used_stream_response = False
     if session is not None and hasattr(runtime, "stream_response"):
         claimed = False
         claim_epoch = 0
@@ -275,6 +277,7 @@ async def handle_messenger_event(
                 await persist_user_message(
                     memory, session, message, model=model, agent=agent
                 )
+            used_stream_response = True
             async for chunk in runtime.stream_response(
                 message,
                 session_id=session.id,
@@ -311,6 +314,7 @@ async def handle_messenger_event(
             raise
         except Exception:
             logger.exception("messenger stream_response failed; falling back")
+            used_stream_response = False
             async for chunk in runtime.handle_event(event):
                 if chunk is not None:
                     text = str(chunk)
@@ -344,23 +348,27 @@ async def handle_messenger_event(
             await persist_assistant_message(
                 memory, session, full, model=model, agent=agent
             )
-    # Same continuity post-turn as desktop (soul residue, soma, brief warm)
+    # stream_response already runs schedule_post_turn_prep in finally.
+    # Fallback handle_event does not — keep one call on that path only.
     if session is not None:
         with suppress(Exception):
-            from remedy.core.agent_post_turn import schedule_post_turn_prep
+            from remedy.core.turn_context import in_active_turn
 
-            # Keep origin on runtime for next inject (messenger partner surface)
-            with suppress(Exception):
-                runtime._origin_channel = channel  # type: ignore[attr-defined]
+            runtime._origin_channel = channel  # type: ignore[attr-defined]
+            if not in_active_turn():
                 runtime._session_id = session.id  # type: ignore[attr-defined]
-            if full:
-                with suppress(Exception):
-                    runtime._last_assistant_text = full[-12000:]  # type: ignore[attr-defined]
-            schedule_post_turn_prep(
-                runtime,
-                message=message or "",
-                session_id=str(session.id),
-            )
+        if full:
+            with suppress(Exception):
+                runtime._last_assistant_text = full[-12000:]  # type: ignore[attr-defined]
+        if not used_stream_response:
+            with suppress(Exception):
+                from remedy.core.agent_post_turn import schedule_post_turn_prep
+
+                schedule_post_turn_prep(
+                    runtime,
+                    message=message or "",
+                    session_id=str(session.id),
+                )
 
 
 def outbound_chunks(text: str, channel: str | ChannelKind) -> list[str]:
