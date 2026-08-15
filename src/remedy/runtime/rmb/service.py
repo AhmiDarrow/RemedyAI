@@ -226,9 +226,9 @@ def is_starting() -> bool:
     """True during spawn → healthy window (blocks vision heal/race)."""
     if time.time() < float(_starting_until or 0):
         return True
-    if managed_process_alive() and not is_running(force=False, require_http=True):
-        return True
-    return False
+    return bool(
+        managed_process_alive() and not is_running(force=False, require_http=True)
+    )
 
 
 def is_running(

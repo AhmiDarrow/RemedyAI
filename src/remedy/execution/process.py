@@ -138,7 +138,9 @@ def kill_process_tree(proc: Any) -> None:
     pid = getattr(proc, "pid", None)
     # Prefer tree kill on Windows so pwsh/cmd children die with the shell.
     if sys.platform == "win32" and pid:
-        try:
+        from contextlib import suppress
+
+        with suppress(Exception):
             # /T = tree, /F = force; CREATE_NO_WINDOW so no flash
             subprocess.run(
                 ["taskkill", "/PID", str(pid), "/T", "/F"],
@@ -146,8 +148,6 @@ def kill_process_tree(proc: Any) -> None:
                 timeout=5,
                 **hidden_subprocess_kwargs(),
             )
-        except Exception:
-            pass
     try:
         if getattr(proc, "returncode", None) is not None:
             return  # already exited (asyncio Process)
