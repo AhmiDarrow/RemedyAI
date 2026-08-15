@@ -722,7 +722,7 @@ def organism_cycle(
                 st._load()
                 stamp = float(st.last_pulse_at or 0)
             extras["last_pulse_at"] = stamp
-    row = {
+    row: dict[str, Any] = {
         "ts": now,
         "recalled": int(extras.get("recalled") or 0),
     }

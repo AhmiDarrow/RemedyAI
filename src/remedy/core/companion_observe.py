@@ -93,8 +93,11 @@ def _hwnd_identity(hwnd: int) -> dict[str, Any]:
         import ctypes
         from ctypes import wintypes
 
-        user32 = ctypes.windll.user32
-        kernel32 = ctypes.windll.kernel32
+        windll = getattr(ctypes, "windll", None)
+        if windll is None:
+            return out
+        user32 = windll.user32
+        kernel32 = windll.kernel32
         n = int(user32.GetWindowTextLengthW(hwnd) or 0)
         if n:
             buf = ctypes.create_unicode_buffer(n + 1)

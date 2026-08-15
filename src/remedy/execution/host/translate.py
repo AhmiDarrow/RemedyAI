@@ -365,7 +365,7 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
 
     if head in ("head", "tail"):
         n = 10
-        files: list[str] = []
+        slice_files: list[str] = []
         i = 1
         while i < len(toks):
             t = toks[i]
@@ -379,11 +379,11 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
                 i += 1
                 continue
             if not t.startswith("-"):
-                files.append(_unquote(t))
+                slice_files.append(_unquote(t))
             i += 1
-        if files:
+        if slice_files:
             notes.append(f"{head} → python slice")
-            return _python_line_slice(files[0], n, tail=(head == "tail")), notes
+            return _python_line_slice(slice_files[0], n, tail=(head == "tail")), notes
 
     if head == "find":
         name_pat = ""
