@@ -3,7 +3,7 @@
  * settings hydrate, connected providers, models/agents, first-run wizard.
  */
 
-import { useEffect, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 import { listAgents } from '../api/messages'
 import { listConnectedProviders, type ConnectedProvider } from '../api/providers'
 import { getSettings } from '../api/settings'
@@ -57,8 +57,11 @@ export function useAppBootstrap(opts: {
     setAgentDefs,
   } = opts
 
+  const didBoot = useRef(false)
   useEffect(() => {
     if (serverState !== 'ready') return
+    if (didBoot.current) return
+    didBoot.current = true
     let cancelled = false
     ;(async () => {
       try {

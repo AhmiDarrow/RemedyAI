@@ -52,6 +52,11 @@ def register_llm_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
                     "Stop generation in this session before switching provider/model",
                 )
 
+        if memory is not None:
+            row = await memory.get_chat_session(session_id)
+            if row is None:
+                raise HTTPException(404, "Session not found")
+
         cfg = load_config()
         raw_provider = (req.provider or cfg.get("llm_provider") or "openai")
         raw_model = (req.model or cfg.get("llm_model") or "").strip()
@@ -69,27 +74,8 @@ def register_llm_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
             req.model or cfg.get("llm_model"),
             cfg.get("llm_base_url") if str(req.provider).lower() == str(cfg.get("llm_provider") or "").lower() else None,
         )
-        # Load messages for remeasure
-        messages: list[dict] = []
-        if memory is not None:
-            try:
-                msgs = await memory.get_chat_messages(session_id, limit=80, offset=0)
-                for m in msgs:
-                    messages.append(
-                        {
-                            "role": m.role.value if hasattr(m.role, "value") else str(m.role),
-                            "content": m.content or "",
-                        }
-                    )
-            except Exception:
-                messages = []
-
-        if runtime is not None:
-            with contextlib.suppress(Exception):
-                runtime._session_id = session_id
-            if messages:
-                with contextlib.suppress(Exception):
-                    runtime._last_send_messages = messages
+        # Do not write live runtime._session_id / _last_send_messages — a
+        # picker click on another tab must not poison the in-flight turn.
 
         # Resolve key for new provider
         api_key = None
@@ -143,8 +129,15 @@ def register_llm_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
             try:
                 import asyncio
 
+                from remedy.core.turn_context import any_stream_claimed
                 from remedy.runtime.rmb.service import apply_rmb_chat_model
 
+                if any_stream_claimed():
+                    raise HTTPException(
+                        409,
+                        "Cannot reload RMB while a session is streaming. "
+                        "Stop the current turn first.",
+                    )
                 home = cfg.get("home_dir") if isinstance(cfg, dict) else None
                 rmb_live = await asyncio.to_thread(
                     apply_rmb_chat_model,
@@ -173,6 +166,8 @@ def register_llm_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
                             cfg["llm_model"] = model
                         with contextlib.suppress(Exception):
                             _write_config(config_path, cfg)
+            except HTTPException:
+                raise
             except Exception as exc:
                 logger.warning("session RMB model switch failed: %s", exc)
                 rmb_live = {"ok": False, "error": str(exc)}

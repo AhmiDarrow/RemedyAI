@@ -303,6 +303,7 @@ class ComputerHostBridge:
         self._last_navigate_optimistic_by_session: dict[str, bool] = {}
         # Desktop UI command (open Browser rail like Settings) — memory + disk
         self._ui_command: dict[str, Any] | None = None
+        self._focused_session_id: str = ""
         # Same resolved home as jobs/ so ui_command and job JSON never diverge
         # when callers pass a relative or non-canonical home_dir.
         home = canonical_home(home_dir)
@@ -598,7 +599,7 @@ class ComputerHostBridge:
             except OSError:
                 pass
 
-    def take_ui_command(self) -> dict[str, Any] | None:
+    def take_ui_command(self, session_id: str | None = None) -> dict[str, Any] | None:
         """Atomically read + clear UI command (prevents re-navigate loops)."""
         with self._lock:
             cmd = None
@@ -612,6 +613,10 @@ class ComputerHostBridge:
                             cmd = raw
                 except (OSError, json.JSONDecodeError):
                     cmd = None
+            want = str(session_id or self._focused_session_id or "").strip()
+            cmd_sid = str((cmd or {}).get("session_id") or "").strip()
+            if want and cmd_sid and cmd_sid != want:
+                return None
             self._ui_command = None
             try:
                 if self._ui_path.is_file():
@@ -654,21 +659,26 @@ class ComputerHostBridge:
             "type",
             "screenshot",
         ) or ui.get("open_browser"):
-            self.set_ui_command(
-                {
-                    "action": "open_browser",
-                    "url": pl.get("url") or "",
-                    "job_id": job.id,
-                    "job_action": action,
-                }
-            )
+            cmd = {
+                "action": "open_browser",
+                "url": pl.get("url") or "",
+                "job_id": job.id,
+                "job_action": action,
+            }
+            if sid:
+                cmd["session_id"] = sid
+            self.set_ui_command(cmd)
         return job
+
+    def set_focused_session(self, session_id: str | None) -> None:
+        self._focused_session_id = str(session_id or "").strip()
 
     def claim_next(
         self,
         *,
         exclude_actions: set[str] | frozenset[str] | None = None,
         only_actions: set[str] | frozenset[str] | None = None,
+        session_id: str | None = None,
     ) -> ComputerJob | None:
         """Desktop host: claim oldest pending job.
 
@@ -681,6 +691,7 @@ class ComputerHostBridge:
         """
         skip = {str(a).lower() for a in (exclude_actions or ())}
         only = {str(a).lower() for a in (only_actions or ())} if only_actions else None
+        want = str(session_id or self._focused_session_id or "").strip()
         with self._lock:
             self.mark_host_alive(poller=True)
             files = sorted(self.root.glob("*.json"), key=lambda p: p.stat().st_mtime)
@@ -698,6 +709,11 @@ class ComputerHostBridge:
                 if act in skip:
                     continue
                 if only is not None and act not in only:
+                    continue
+                job_sid = str(
+                    job.session_id or (job.payload or {}).get("session_id") or ""
+                ).strip()
+                if want and job_sid and job_sid != want:
                     continue
                 job.status = "running"
                 self._write(job)
@@ -721,6 +737,8 @@ class ComputerHostBridge:
             # host complete is recorded (agent may re-read after grace).
             safe_result = _scrub_job_result(result) if result is not None else None
             safe_error = _scrub_job_error(error) if error is not None else None
+            if job.status == "cancelled":
+                return job
             if ok:
                 job.status = "done"
                 job.result = safe_result

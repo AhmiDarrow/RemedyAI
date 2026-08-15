@@ -22,6 +22,35 @@ class LibraryDismissBody(BaseModel):
     session_id: str = ""
 
 
+async def _read_upload_capped(
+    upload: UploadFile,
+    *,
+    max_bytes: int | None = None,
+) -> bytes:
+    """Stream an upload with a hard cap (same as /api/skills/import)."""
+    from remedy.skills.library.install import MAX_SKILL_ZIP_BYTES
+
+    cap = int(max_bytes or MAX_SKILL_ZIP_BYTES)
+    size_hint = getattr(upload, "size", None)
+    if size_hint is not None:
+        try:
+            if int(size_hint) > cap:
+                raise HTTPException(413, f"Skill zip exceeds {cap} bytes")
+        except (TypeError, ValueError):
+            pass
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        block = await upload.read(65536)
+        if not block:
+            break
+        total += len(block)
+        if total > cap:
+            raise HTTPException(413, f"Skill zip exceeds {cap} bytes")
+        chunks.append(block)
+    return b"".join(chunks)
+
+
 def register_skills_library_routes(
     app: FastAPI, *, runtime=None, gateway=None, memory=None
 ) -> None:
@@ -205,9 +234,7 @@ def register_skills_library_routes(
             except Exception as e:
                 raise HTTPException(400, f"Invalid metadata JSON: {e}") from e
 
-        data = await skill_zip.read()
-        if len(data) > 50 * 1024 * 1024:
-            raise HTTPException(400, "Skill zip exceeds 50 MB")
+        data = await _read_upload_capped(skill_zip)
         if len(data) < 32:
             raise HTTPException(400, "Empty or invalid zip")
 

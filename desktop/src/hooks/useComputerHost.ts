@@ -17,6 +17,11 @@ import {
   type ComputerJob,
 } from '../api/computer'
 
+/** Rust in-band failures are strings like missing-ref: / no-match: / no element. */
+export function rustBrowserActionOk(res: unknown): boolean {
+  return typeof res === 'string' && res.startsWith('ok:')
+}
+
 async function readEmbedBounds(): Promise<{
   bounds: { x: number; y: number; width: number; height: number } | null
   scale: number
@@ -275,7 +280,7 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
         dy: null,
         ref: null,
       })
-      const ok = typeof res === 'string' && res.startsWith('ok:')
+      const ok = rustBrowserActionOk(res)
       return {
         ok,
         target: 'browser',
@@ -300,11 +305,12 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
       job_id: null,
       ref,
     })
+    const ok = rustBrowserActionOk(res)
     return {
-      ok: true,
+      ok,
       target: 'browser',
       action,
-      message: res || `browser:${action}:ok`,
+      message: ok ? (res || `browser:${action}:ok`) : `browser:${action} failed: ${res}`,
       ref: ref || undefined,
     }
   }
@@ -328,11 +334,14 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
 export function useComputerHost(
   enabled = true,
   onOpenBrowser?: () => void,
+  sessionId?: string | null,
 ): void {
   const busy = useRef(false)
   const uiBusy = useRef(false)
   const openBrowserRef = useRef(onOpenBrowser)
   openBrowserRef.current = onOpenBrowser
+  const sessionIdRef = useRef(sessionId)
+  sessionIdRef.current = sessionId
 
   useEffect(() => {
     // Desktop shell only. Do not gate on server "ready" — host routes are loopback.
@@ -355,6 +364,7 @@ export function useComputerHost(
       await computerHostHello({
         bounds: bounds || undefined,
         scale,
+        sessionId: sessionIdRef.current,
       }).catch(() => null)
     }
 
@@ -391,7 +401,10 @@ export function useComputerHost(
           // Never claim navigate — Rust computer-host owns rail navigates via
           // ui_command take. Dual claim was racing the WebView main thread and
           // causing second-nav timeouts (Google ok, wiki 8s fail).
-          job = await claimComputerJob({ exclude: 'navigate' })
+          job = await claimComputerJob({
+            exclude: 'navigate',
+            sessionId: sessionIdRef.current,
+          })
         } catch (e) {
           console.warn('[computer-host] claim failed', e)
           job = null
@@ -474,4 +487,10 @@ export function useComputerHost(
       window.clearInterval(jobIv)
     }
   }, [enabled])
+
+  // Stamp focused session as soon as the open tab changes (do not wait 4s hello).
+  useEffect(() => {
+    if (!isTauri() || !enabled || !sessionId) return
+    void computerHostHello({ sessionId }).catch(() => null)
+  }, [enabled, sessionId])
 }

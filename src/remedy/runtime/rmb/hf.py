@@ -464,6 +464,21 @@ def list_gguf_files(repo: str, *, revision: str | None = None) -> list[dict[str,
     return items
 
 
+def _listed_file_size(repo_id: str, filename: str, revision: str | None) -> int:
+    """Tree listing size for *filename*, or 0 if the listing has none."""
+    try:
+        want = Path(filename).name.lower()
+        want_path = filename.replace("\\", "/").lower()
+        for row in list_gguf_files(repo_id, revision=revision):
+            path = str(row.get("path") or "").replace("\\", "/").lower()
+            name = str(row.get("name") or "").lower()
+            if path == want_path or name == want:
+                return int(row.get("size") or 0)
+    except Exception:
+        return 0
+    return 0
+
+
 def dest_path(
     filename: str,
     *,
@@ -473,9 +488,10 @@ def dest_path(
 ) -> Path:
     """Flatten to models/{basename}.gguf so the disk scan finds it.
 
-    Same basename from another repo (or a size mismatch) uses
-    ``{owner}--{repo}--{basename}`` so we do not skip/clobber the wrong file.
+    When *repo* is set, always use ``{owner}--{repo}--{basename}`` so two
+    hosts with the same GGUF name cannot skip/clobber each other.
     """
+    _ = expected_size  # callers still pass size; dest no longer branches on it
     base = Path(sanitize_filename(filename)).name
     root = models_dir(home_dir)
     dest = root / base
@@ -485,12 +501,7 @@ def dest_path(
         slug = sanitize_repo(repo).replace("/", "--")
     except HfError:
         return dest
-    namespaced = root / f"{slug}--{base}"
-    if namespaced.is_file():
-        return namespaced
-    if dest.is_file() and expected_size and dest.stat().st_size != int(expected_size):
-        return namespaced
-    return dest
+    return root / f"{slug}--{base}"
 
 
 def _content_length(resp: Any) -> int:
@@ -517,10 +528,6 @@ def _download_one(
         if expected_size and dest.stat().st_size == expected_size:
             if on_chunk:
                 on_chunk(expected_size)
-            return dest
-        if not expected_size:
-            if on_chunk:
-                on_chunk(dest.stat().st_size)
             return dest
 
     partial = dest.with_suffix(dest.suffix + ".partial")
@@ -634,6 +641,8 @@ def download_gguf(
     repo_id = sanitize_repo(repo)
     file_id = sanitize_filename(filename)
     rev = sanitize_revision(revision)
+    if not expected_size:
+        expected_size = _listed_file_size(repo_id, file_id, rev)
     dest = dest_path(
         file_id, home_dir=home_dir, repo=repo_id, expected_size=expected_size
     )
@@ -656,16 +665,21 @@ def download_gguf(
     last = dest
     for part in parts:
         part_url = resolve_url(repo_id, part, rev)
+        part_size = (
+            expected_size
+            if part == file_id
+            else _listed_file_size(repo_id, part, rev)
+        )
         part_dest = dest_path(
             part,
             home_dir=home_dir,
             repo=repo_id,
-            expected_size=expected_size if part == file_id else 0,
+            expected_size=part_size,
         )
         last = _download_one(
             part_url,
             part_dest,
-            expected_size=expected_size if part == file_id else 0,
+            expected_size=part_size,
             on_chunk=_bump,
         )
     _set_progress(
@@ -731,6 +745,14 @@ def start_pull(
                         path=result["path"],
                         message=f"Loading {Path(str(result['path'])).name}…",
                     )
+                    live = True
+                    try:
+                        from remedy.core.turn_context import any_stream_claimed
+
+                        if any_stream_claimed():
+                            live = False
+                    except Exception:
+                        live = True
                     apply_rmb_settings(
                         {
                             "model_path": result["path"],
@@ -738,15 +760,25 @@ def start_pull(
                             "use_as_chat_provider": True,
                         },
                         home_dir=home_dir,
-                        live=True,
+                        live=live,
                         wait_s=120.0,
                     )
                     _check_cancel()
-                    _set_progress(
-                        phase="ready",
-                        path=result["path"],
-                        message=f"Loaded {Path(str(result['path'])).name}",
-                    )
+                    if live:
+                        _set_progress(
+                            phase="ready",
+                            path=result["path"],
+                            message=f"Loaded {Path(str(result['path'])).name}",
+                        )
+                    else:
+                        _set_progress(
+                            phase="ready",
+                            path=result["path"],
+                            message=(
+                                f"Downloaded {Path(str(result['path'])).name} — "
+                                "load after the current turn"
+                            ),
+                        )
                 except HfCancelled:
                     raise
                 except Exception as exc:

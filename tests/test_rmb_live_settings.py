@@ -131,3 +131,55 @@ def test_apply_rmb_settings_live_false_skips_restart(tmp_path, monkeypatch):
     apply_rmb_settings({"ctx_size": 32768}, home_dir=home, live=False)
     assert not starts
     assert int(merge_state(load_rmb_json(home))["ctx_size"]) == 32768
+
+
+def test_apply_rmb_does_not_steal_provider_or_approval(tmp_path, monkeypatch):
+    """Enabled RMB apply must not force llm_provider or flip approval_mode."""
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    home = str(tmp_path)
+    gguf = tmp_path / "local-model.gguf"
+    gguf.write_bytes(b"x" * 80)
+    (tmp_path / "config.toml").write_text(
+        'llm_provider = "openai"\n'
+        'llm_model = "gpt-4o-mini"\n'
+        'llm_base_url = "https://api.openai.com/v1"\n'
+        'approval_mode = "ask"\n',
+        encoding="utf-8",
+    )
+    save_rmb_json(
+        merge_state(
+            {
+                "enabled": True,
+                "ctx_size": 8192,
+                "model_id": "qwen25-coder-7b",
+                "model_path": str(gguf),
+            }
+        ),
+        home,
+    )
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.service.is_running",
+        lambda *a, **k: False,
+    )
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.service.managed_process_alive",
+        lambda: False,
+    )
+    modes: list[str] = []
+    monkeypatch.setattr(
+        "remedy.core.approvals.APPROVALS.set_mode",
+        lambda mode: modes.append(str(mode)),
+        raising=False,
+    )
+    from remedy.interfaces import api_support
+
+    api_support.invalidate_config_cache()
+    apply_rmb_settings(
+        {"ctx_size": 16384, "enabled": True},
+        home_dir=home,
+        live=False,
+    )
+    cfg = api_support.load_config()
+    assert str(cfg.get("llm_provider") or "").lower() == "openai"
+    assert str(cfg.get("approval_mode") or "ask").lower() == "ask"
+    assert modes == []

@@ -27,6 +27,7 @@ def resolve_session_llm_bind(
     session: Any | None,
     req_provider: str | None,
     req_model: str | None,
+    use_live_rmb: bool = True,
 ) -> tuple[str | None, str | None]:
     """Return (provider, model) for this chat turn.
 
@@ -64,15 +65,18 @@ def resolve_session_llm_bind(
         except Exception:
             return None
 
-    # Explicit client pair wins (status bar / picker just set both).
-    if req_p and req_m:
-        p, m = _normalize_pair(req_p, req_m)
-        # RMB: always address the host with the live GGUF stem
-        if (p or "").lower() == "rmb":
+    def _addr(p: str | None, m: str | None) -> tuple[str | None, str | None]:
+        # In-flight address may use the loaded GGUF; persist must not.
+        if use_live_rmb and (p or "").lower() == "rmb":
             live = _rmb_live_stem()
             if live:
                 return p, live
         return p, m
+
+    # Explicit client pair wins (status bar / picker just set both).
+    if req_p and req_m:
+        p, m = _normalize_pair(req_p, req_m)
+        return _addr(p, m)
 
     # Sticky session pair — do not let a lone model string (stale UI / global
     # picker) override a stored provider+model (Grok tab while Settings is DeepSeek).
@@ -81,33 +85,17 @@ def resolve_session_llm_bind(
             # Explicit provider change (status bar) without full pair.
             mid = req_m or sess_m
             p, m = _normalize_pair(req_p, mid)
-            if (p or "").lower() == "rmb":
-                live = _rmb_live_stem()
-                if live:
-                    return p, live
-            return p, m
+            return _addr(p, m)
         if req_m and not req_p:
             owner = infer_provider_from_model(req_m)
             if owner is None or owner == sess_p:
                 p, m = _normalize_pair(sess_p, req_m)
-                if (p or "").lower() == "rmb":
-                    live = _rmb_live_stem()
-                    if live:
-                        return p, live
-                return p, m
+                return _addr(p, m)
             # Foreign model id without provider → ignore; keep sticky bind.
             p, m = _normalize_pair(sess_p, sess_m)
-            if (p or "").lower() == "rmb":
-                live = _rmb_live_stem()
-                if live:
-                    return p, live
-            return p, m
+            return _addr(p, m)
         p, m = _normalize_pair(sess_p, sess_m)
-        if (p or "").lower() == "rmb":
-            live = _rmb_live_stem()
-            if live:
-                return p, live
-        return p, m
+        return _addr(p, m)
 
     # Session has provider only
     if sess_p:

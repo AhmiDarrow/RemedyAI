@@ -322,7 +322,9 @@ def apply_metabolism_injects(
         sid_m = str(getattr(runtime, "_session_id", "") or session_id or "")
         intent_m = "chat"
         with suppress(Exception):
-            snap = getattr(runtime, "_last_context_snapshot", None)
+            from remedy.core.turn_context import turn_context_snapshot
+
+            snap = turn_context_snapshot(runtime)
             if snap is not None:
                 intent_m = str(getattr(snap, "intent", None) or "chat")
         roots_m: list[str] = []
@@ -572,7 +574,9 @@ async def prepare_turn_preamble(
                 tool_result_char_cap=int(_TOOL_RESULT_CHAR_CAP or 0),
             )
             with suppress(Exception):
-                snap = getattr(runtime, "_last_context_snapshot", None)
+                from remedy.core.turn_context import turn_context_snapshot
+
+                snap = turn_context_snapshot(runtime)
                 lib = (getattr(snap, "signals", None) or {}).get("library_suggest")
                 if isinstance(lib, dict) and lib.get("id"):
                     import json as _json

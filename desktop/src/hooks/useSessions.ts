@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 import {
   listSessions,
+  getSession,
   createSession,
   deleteSession,
   updateSession,
@@ -11,6 +12,16 @@ import type { ChatSession } from '../types'
 import { addKnownProject } from '../utils/sessionProjects'
 
 const PAGE_SIZE = 100
+
+/** Keep the focused tab unless it was deleted — page 0 may omit older chats. */
+export function resolveActiveAfterRefresh(
+  cur: string | null,
+  pageIds: string[],
+): 'keep' | 'first' | 'fetch' {
+  if (cur && pageIds.includes(cur)) return 'keep'
+  if (!cur) return 'first'
+  return 'fetch'
+}
 
 export function useSessions() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
@@ -30,10 +41,25 @@ export function useSessions() {
       offsetRef.current = page.sessions.length
       setSessions(page.sessions)
       setHasMore(page.has_more)
+      const pageIds = page.sessions.map((s) => s.id)
+      let focused: string | null = null
       setActiveId((cur) => {
-        if (cur && page.sessions.some((s) => s.id === cur)) return cur
-        return page.sessions.length > 0 ? page.sessions[0]!.id : null
+        focused = cur
+        const mode = resolveActiveAfterRefresh(cur, pageIds)
+        if (mode === 'keep') return cur
+        if (mode === 'first') return page.sessions.length > 0 ? page.sessions[0]!.id : null
+        return cur
       })
+      if (focused && resolveActiveAfterRefresh(focused, pageIds) === 'fetch') {
+        try {
+          const one = await getSession(focused)
+          setSessions((prev) =>
+            prev.some((s) => s.id === one.id) ? prev : [one, ...prev],
+          )
+        } catch {
+          setActiveId(page.sessions.length > 0 ? page.sessions[0]!.id : null)
+        }
+      }
     } catch {
       // server not ready
     } finally {
@@ -74,6 +100,7 @@ export function useSessions() {
       async (
         title?: string,
         llm?: { provider?: string; model?: string },
+        opts?: { focus?: boolean },
       ) => {
         try {
           // New Session = root (no project). Explicit "" so API does not inherit
@@ -85,7 +112,9 @@ export function useSessions() {
             llm_provider: llm?.provider,
           })
           setSessions((prev) => [s, ...prev])
-          setActiveId(s.id)
+          // Attach/drop on empty shell must not steal focus if the user picked
+          // another chat while create() was in flight.
+          if (opts?.focus !== false) setActiveId(s.id)
           return s
         } catch (e: unknown) {
           console.warn(

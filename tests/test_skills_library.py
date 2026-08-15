@@ -27,6 +27,40 @@ REPO = Path(__file__).resolve().parents[1]
 COMMUNITY = REPO / "community" / "remedy-skills"
 
 
+@pytest.mark.asyncio
+async def test_read_upload_capped_rejects_oversize():
+    from fastapi import HTTPException
+
+    from remedy.interfaces.routes.skills_library import _read_upload_capped
+
+    class _Up:
+        def __init__(self, data: bytes, size=None):
+            self._data = data
+            self._i = 0
+            self.size = size
+
+        async def read(self, n: int = -1):
+            if self._i >= len(self._data):
+                return b""
+            if n < 0:
+                chunk = self._data[self._i :]
+                self._i = len(self._data)
+                return chunk
+            chunk = self._data[self._i : self._i + n]
+            self._i += len(chunk)
+            return chunk
+
+    with pytest.raises(HTTPException) as ei:
+        await _read_upload_capped(_Up(b"x" * 200), max_bytes=50)
+    assert ei.value.status_code == 413
+    big = _Up(b"ok", size=999_999)
+    with pytest.raises(HTTPException) as ei2:
+        await _read_upload_capped(big, max_bytes=50)
+    assert ei2.value.status_code == 413
+    got = await _read_upload_capped(_Up(b"hello-zip-bytes"), max_bytes=50)
+    assert got == b"hello-zip-bytes"
+
+
 def test_production_pubkey_is_not_empty():
     raw = base64.b64decode(CATALOG_PUBLIC_KEY_B64)
     assert len(raw) == 32

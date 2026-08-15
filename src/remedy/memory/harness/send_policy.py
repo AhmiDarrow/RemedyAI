@@ -330,7 +330,9 @@ def apply_auto_harness_send_policy(
         # Reuse pre_tier so snapshot force_spread skips a second classify walk
         turn_tier=pre_tier,
     )
-    runtime._last_context_snapshot = snap
+    from remedy.core.turn_context import set_turn_context_snapshot
+
+    set_turn_context_snapshot(snap, runtime)
     est = snap.token_estimate
     level = snap.nudge
     meta["level"] = level

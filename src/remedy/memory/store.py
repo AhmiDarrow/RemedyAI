@@ -502,41 +502,45 @@ class MemoryStore:
     async def list_by_type(
         self, entry_type: MemoryEntryType, limit: int = 50, offset: int = 0
     ) -> list[MemoryEntry]:
-        db = self._ensure_db()
-        rows = db.execute(
-            "SELECT * FROM memory_entries WHERE entry_type = ? "
-            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (entry_type.value, limit, offset),
-        ).fetchall()
+        with self._locked():
+            db = self._ensure_db()
+            rows = db.execute(
+                "SELECT * FROM memory_entries WHERE entry_type = ? "
+                "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (entry_type.value, limit, offset),
+            ).fetchall()
         return [self._row_to_entry(r) for r in rows]
 
     async def list_recent(self, limit: int = 50) -> list[MemoryEntry]:
-        db = self._ensure_db()
-        rows = db.execute(
-            "SELECT * FROM memory_entries ORDER BY created_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        with self._locked():
+            db = self._ensure_db()
+            rows = db.execute(
+                "SELECT * FROM memory_entries ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
         return [self._row_to_entry(r) for r in rows]
 
     async def list_by_session(
         self, session_id: str, limit: int = 200, offset: int = 0
     ) -> list[MemoryEntry]:
         """Return memory entries belonging to a specific session."""
-        db = self._ensure_db()
-        rows = db.execute(
-            "SELECT * FROM memory_entries WHERE session_id = ? "
-            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (session_id, limit, offset),
-        ).fetchall()
+        with self._locked():
+            db = self._ensure_db()
+            rows = db.execute(
+                "SELECT * FROM memory_entries WHERE session_id = ? "
+                "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (session_id, limit, offset),
+            ).fetchall()
         return [self._row_to_entry(r) for r in rows]
 
     async def list_important(self, threshold: float = 0.7, limit: int = 50) -> list[MemoryEntry]:
-        db = self._ensure_db()
-        rows = db.execute(
-            "SELECT * FROM memory_entries WHERE importance >= ? "
-            "ORDER BY importance DESC LIMIT ?",
-            (threshold, limit),
-        ).fetchall()
+        with self._locked():
+            db = self._ensure_db()
+            rows = db.execute(
+                "SELECT * FROM memory_entries WHERE importance >= ? "
+                "ORDER BY importance DESC LIMIT ?",
+                (threshold, limit),
+            ).fetchall()
         return [self._row_to_entry(r) for r in rows]
 
     # -- FTS5 search ---------------------------------------------------------
@@ -552,7 +556,6 @@ class MemoryStore:
         query = sanitize_search_query(query, max_length=500)
         if not query.strip():
             return []
-        db = self._ensure_db()
         type_filter = ""
         params: list[Any] = []
 
@@ -563,7 +566,9 @@ class MemoryStore:
             params = [query, limit]
 
         try:
-            rows = db.execute(
+            with self._locked():
+                db = self._ensure_db()
+                rows = db.execute(
                 f"""
                 SELECT memory_entries.* FROM memory_entries
                 JOIN memory_fts ON memory_entries.rowid = memory_fts.rowid
@@ -571,8 +576,8 @@ class MemoryStore:
                 ORDER BY rank
                 LIMIT ?
                 """,
-                params,
-            ).fetchall()
+                    params,
+                ).fetchall()
             return [self._row_to_entry(r) for r in rows]
         except sqlite3.OperationalError as exc:
             # Invalid MATCH syntax or missing FTS — degrade gracefully (no recursion).
@@ -592,15 +597,16 @@ class MemoryStore:
         q = (query or "").strip()
         if not q:
             return []
-        db = self._ensure_db()
         safe = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         like_q = f"%{safe}%"
-        rows = db.execute(
+        with self._locked():
+            db = self._ensure_db()
+            rows = db.execute(
             "SELECT * FROM memory_entries WHERE title LIKE ? ESCAPE '\\' "
             "OR content LIKE ? ESCAPE '\\' "
             "ORDER BY created_at DESC LIMIT ?",
-            (like_q, like_q, limit),
-        ).fetchall()
+                (like_q, like_q, limit),
+            ).fetchall()
         return [self._row_to_entry(r) for r in rows]
 
     async def search_simple(self, query: str, limit: int = 20) -> list[MemoryEntry]:
@@ -863,10 +869,11 @@ class MemoryStore:
             db.commit()
 
     async def load_user_profile(self, user_id: str = "default") -> UserProfile | None:
-        db = self._ensure_db()
-        row = db.execute(
-            "SELECT profile_json FROM user_profile WHERE user_id = ?", (user_id,)
-        ).fetchone()
+        with self._locked():
+            db = self._ensure_db()
+            row = db.execute(
+                "SELECT profile_json FROM user_profile WHERE user_id = ?", (user_id,)
+            ).fetchone()
         if row is None:
             return None
         data = json.loads(row["profile_json"])
@@ -881,12 +888,13 @@ class MemoryStore:
         return profile
 
     async def search_user_facts(self, query: str, user_id: str = "default", limit: int = 10) -> list[dict]:
-        db = self._ensure_db()
-        rows = db.execute(
-            "SELECT * FROM user_facts WHERE user_id = ? AND (fact LIKE ? OR category LIKE ?) "
-            "ORDER BY reference_count DESC LIMIT ?",
-            (user_id, f"%{query}%", f"%{query}%", limit),
-        ).fetchall()
+        with self._locked():
+            db = self._ensure_db()
+            rows = db.execute(
+                "SELECT * FROM user_facts WHERE user_id = ? AND (fact LIKE ? OR category LIKE ?) "
+                "ORDER BY reference_count DESC LIMIT ?",
+                (user_id, f"%{query}%", f"%{query}%", limit),
+            ).fetchall()
         return [dict(r) for r in rows]
 
     # -- chat sessions --------------------------------------------------------
@@ -1113,11 +1121,12 @@ class MemoryStore:
     async def list_chat_sessions(
         self, limit: int = 50, offset: int = 0
     ) -> list[ChatSession]:
-        db = self._ensure_db()
-        rows = db.execute(
-            "SELECT * FROM chat_sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        ).fetchall()
+        with self._locked():
+            db = self._ensure_db()
+            rows = db.execute(
+                "SELECT * FROM chat_sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
         return [self._row_to_session(r) for r in rows]
 
     async def find_session_by_external(
@@ -1126,16 +1135,17 @@ class MemoryStore:
         external_chat_id: str,
     ) -> ChatSession | None:
         """Look up a messenger session by platform identity."""
-        db = self._ensure_db()
         ch = str(origin_channel or "").strip().lower()
         ext = str(external_chat_id or "").strip()
         if not ch or not ext:
             return None
-        row = db.execute(
-            "SELECT * FROM chat_sessions WHERE origin_channel = ? AND external_chat_id = ? "
-            "ORDER BY updated_at DESC LIMIT 1",
-            (ch, ext),
-        ).fetchone()
+        with self._locked():
+            db = self._ensure_db()
+            row = db.execute(
+                "SELECT * FROM chat_sessions WHERE origin_channel = ? AND external_chat_id = ? "
+                "ORDER BY updated_at DESC LIMIT 1",
+                (ch, ext),
+            ).fetchone()
         if row is None:
             return None
         return self._row_to_session(row)

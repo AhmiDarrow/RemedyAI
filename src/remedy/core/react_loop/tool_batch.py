@@ -98,6 +98,9 @@ async def apply_build_engine_after_batch(
                     )
                 if driven:
                     can_machine_inject(bst, consume=True)
+                    live = get_build_state(runtime)
+                    if live is not None:
+                        bst = live
                     dmsg = format_drive_message(driven)
                     if dmsg is not None:
                         messages.append(dmsg)

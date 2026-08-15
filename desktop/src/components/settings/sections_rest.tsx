@@ -226,12 +226,12 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
           {THEME_LIST.map((t) => (
             <button
               key={t.id}
+              type="button"
               onClick={() => onThemeChange(t.id)}
-              className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left transition-colors w-full"
-              style={{
-                background: t.id === themeId ? 'var(--bg-tertiary)' : 'transparent',
-                color: 'var(--text-primary)',
-              }}
+              className={`settings-choice-row flex items-center gap-2 px-2 py-1.5 text-xs text-left w-full${
+                t.id === themeId ? ' is-active' : ''
+              }`}
+              style={{ color: 'var(--text-primary)' }}
             >
               <ThemeColorDot themeId={t.id} />
               <span>

@@ -29,7 +29,28 @@ def register_legacy_chat_stream_routes(
             raise HTTPException(503, "Runtime not available")
 
         request_id = str(uuid4())
-        session_id = req.session_id or str(uuid4())
+        session_id = str(req.session_id or "").strip()
+        if memory is not None and session_id:
+            row = await memory.get_chat_session(session_id)
+            if row is None:
+                raise HTTPException(404, "Session not found")
+        if not session_id:
+            # Legacy callers with no sid — ephemeral claim id, no persist.
+            session_id = str(uuid4())
+
+        from remedy.core.turn_context import (
+            release_session_stream_claim,
+            stream_claim_epoch,
+            try_claim_session_stream,
+        )
+
+        if not try_claim_session_stream(session_id):
+            raise HTTPException(
+                409,
+                "Session already has a generation in progress. "
+                "Stop the current turn first, then send again.",
+            )
+        claim_epoch = stream_claim_epoch(session_id)
 
         async def event_stream():
             from remedy.core.metrics import default_registry
@@ -57,6 +78,8 @@ def register_legacy_chat_stream_routes(
                     model=sess_model,
                     provider=sess_provider,
                 ):
+                    if isinstance(token, str) and token.startswith("@@"):
+                        continue
                     yield await _sse_stream_text(token, event="token")
             except Exception as e:
                 status = "error"
@@ -69,6 +92,8 @@ def register_legacy_chat_stream_routes(
                 if not safe_msg.strip():
                     safe_msg = "Stream error"
                 yield f"event: error\ndata: {json.dumps({'type': 'error', 'message': safe_msg})}\n\n"
+            finally:
+                release_session_stream_claim(session_id, epoch=claim_epoch)
 
             yield f"event: done\ndata: {json.dumps({'type': 'done', 'request_id': request_id})}\n\n"
             default_registry.counter(

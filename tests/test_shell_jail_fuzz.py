@@ -78,6 +78,14 @@ FUZZ_VECTORS: list[tuple[str, bool]] = [
     ("echo ok > readme.txt", False),
     ("npm install lodash", False),
     ("python -c \"print(1)\"", False),  # no mutation path when opaque oneshot without write? may block
+    # Env substring / [char] / stdin interpreter construction
+    (r"echo pwn > %CD:~0,1%:\Temp\x.txt", True),
+    (r"Set-Content -Path ([char]67+':\Temp\x.txt') pwn", True),
+    (r"echo open(chr(67)+':\\Temp\\x','w').write('pwn') | python -", True),
+    (r"'{0}:\Temp\x.txt' -f 67 | Set-Content -Value pwn", True),
+    (r'cat foo"&calc', True),
+    (r'php -r "file_put_contents(\'C:\\\\Users\\\\Public\\\\x.txt\',\'pwn\');"', True),
+    (r"ruby -e \"File.write('C:/Users/Public/x','pwn')\"", True),
 ]
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from remedy.interfaces.api_support import load_config
@@ -112,12 +112,23 @@ def register_rmb_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
 
         return catalog_public()
 
+    def _refuse_if_streaming() -> None:
+        from remedy.core.turn_context import any_stream_claimed
+
+        if any_stream_claimed():
+            raise HTTPException(
+                409,
+                "Cannot reload RMB while a session is streaming. "
+                "Stop the current turn first.",
+            )
+
     @app.post("/api/rmb/start")
     async def rmb_start() -> dict[str, Any]:
         import asyncio
 
         from remedy.runtime.rmb.service import apply_rmb_settings, start_rmb_server
 
+        _refuse_if_streaming()
         cfg = load_config()
         home = cfg.get("home_dir") if isinstance(cfg, dict) else None
         # ensure enabled
@@ -154,15 +165,26 @@ def register_rmb_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
         cfg = load_config()
         home = cfg.get("home_dir") if isinstance(cfg, dict) else None
         patch = body.model_dump(exclude_none=True)
-        # Settings that affect the running server — always live-apply (restart)
+        from remedy.core.turn_context import any_stream_claimed
+
+        live = not any_stream_claimed()
+        # Persist knobs even mid-turn; never restart llama-server under a stream.
         result = await asyncio.to_thread(
             apply_rmb_settings,
             patch,
             home_dir=home,
             cfg=cfg,
-            live=True,
+            live=live,
             wait_s=120.0,
         )
+        if not live:
+            result["live"] = False
+            result["deferred"] = True
+            raise HTTPException(
+                409,
+                "Saved RMB settings, but cannot restart llama-server while a "
+                "session is streaming. Stop the current turn first.",
+            )
         # Hot-apply chat binding when provider is already RMB (or use_as_chat).
         # Always use GGUF stem so Provider / status bar match Loaded GGUF.
         try:
@@ -224,6 +246,7 @@ def register_rmb_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
             start_rmb_server,
         )
 
+        _refuse_if_streaming()
         cfg = load_config()
         home = cfg.get("home_dir") if isinstance(cfg, dict) else None
         st = await asyncio.to_thread(

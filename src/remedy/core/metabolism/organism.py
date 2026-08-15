@@ -678,6 +678,16 @@ def organism_cycle(
         extras["cas_count"] = prev.get("cas_count") or 0
         extras["cas_durable"] = prev.get("cas_durable") or 0
         extras["last_compact_at"] = last_compact or now
+    if out.get("life_step"):
+        with suppress(Exception):
+            fresh = load_vitals(home)
+            if fresh:
+                extras["cas_count"] = int(
+                    fresh.get("cas_count") or extras.get("cas_count") or 0
+                )
+                extras["cas_durable"] = int(
+                    fresh.get("cas_durable") or extras.get("cas_durable") or 0
+                )
     with suppress(Exception):
         from remedy.core.metabolism.time_crystal import get_time_crystal
 

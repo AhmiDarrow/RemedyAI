@@ -452,16 +452,18 @@ export function FormToggle({
 }) {
   return (
     <label
-      className="flex items-start gap-2 mb-2 cursor-pointer select-none"
+      className={`flex gap-2.5 mb-2 cursor-pointer select-none ${
+        description ? 'items-start' : 'items-center'
+      }`}
       style={{ opacity: disabled ? 0.55 : 1 }}
     >
       <input
         type="checkbox"
-        className="mt-0.5"
+        className={`settings-switch${description ? ' mt-0.5' : ''}`}
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        style={{ accentColor: 'var(--accent)' }}
+        aria-checked={checked}
       />
       <span className="min-w-0">
         <span className="block text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
@@ -594,7 +596,7 @@ export function FormSegmented<T extends string>({
   className?: string
 }) {
   return (
-    <div className={`flex flex-wrap gap-1 mb-2 ${className}`.trim()} role="group">
+    <div className={`form-seg-track mb-2 ${className}`.trim()} role="group">
       {options.map((o) => (
         <button
           key={o.id}

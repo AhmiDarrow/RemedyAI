@@ -12,11 +12,13 @@ import os
 import shutil
 import sys
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 _SENTINEL_PREFIX = "REMEDY_HOST_DONE_"
+_SESSIONS_GUARD = asyncio.Lock()
 
 _PROMPT_MARKERS = (
     b"password:",
@@ -51,6 +53,9 @@ class HostSession:
     _proc: Any = field(default=None, init=False, repr=False)
     _buf: bytearray = field(default_factory=bytearray, init=False, repr=False)
     _lock: asyncio.Lock | None = field(default=None, init=False, repr=False)
+    _stdout_pending: asyncio.Task[bytes] | None = field(
+        default=None, init=False, repr=False
+    )
     started: bool = field(default=False, init=False)
 
     async def start(self) -> None:
@@ -95,14 +100,24 @@ class HostSession:
             return SessionResult(exit_code=-1, stdout="", stderr="empty command", host=self.host)
         await self.start()
         assert self._lock is not None
+        with suppress(Exception):
+            from remedy.core.turn_context import register_turn_process
+
+            register_turn_process(self._proc)
         token = uuid.uuid4().hex[:10]
         sentinel = f"{_SENTINEL_PREFIX}{token}"
         wrapped = _wrap_with_sentinel(self.host, command.strip(), sentinel)
-        async with self._lock:
-            await self._send_raw(wrapped)
-            raw, timed_out, interactive = await self._read_until(
-                sentinel.encode("ascii"), timeout=max(1.0, float(timeout))
-            )
+        try:
+            async with self._lock:
+                await self._send_raw(wrapped)
+                raw, timed_out, interactive = await self._read_until(
+                    sentinel.encode("ascii"), timeout=max(1.0, float(timeout))
+                )
+        finally:
+            with suppress(Exception):
+                from remedy.core.turn_context import unregister_turn_process
+
+                unregister_turn_process(self._proc)
         text = raw.decode("utf-8", errors="replace")
         code, body = _split_sentinel(text, sentinel)
         cwd = ""
@@ -181,13 +196,32 @@ class HostSession:
         deadline = loop.time() + timeout
         interactive = False
         while True:
+            with suppress(Exception):
+                from remedy.core.turn_context import is_turn_aborted
+
+                if is_turn_aborted():
+                    from remedy.execution.process import kill_process_tree
+
+                    kill_process_tree(proc)
+                    return bytes(buf), True, False
             remaining = deadline - loop.time()
             if remaining <= 0:
                 return bytes(buf), True, interactive
+            # One outstanding read — never wait_for-cancel a blocking ConPTY ReadFile.
+            if self._stdout_pending is None or self._stdout_pending.done():
+                self._stdout_pending = asyncio.ensure_future(proc.stdout.read(4096))
+            done, _pending = await asyncio.wait(
+                {self._stdout_pending},
+                timeout=min(0.4, remaining),
+            )
+            if self._stdout_pending not in done:
+                continue
             try:
-                chunk = await asyncio.wait_for(proc.stdout.read(4096), timeout=remaining)
-            except TimeoutError:
+                chunk = self._stdout_pending.result()
+            except Exception:
+                self._stdout_pending = None
                 return bytes(buf), True, interactive
+            self._stdout_pending = None
             if not chunk:
                 return bytes(buf), True, interactive
             buf.extend(chunk)
@@ -330,20 +364,21 @@ async def get_shared_session(
 ) -> HostSession:
     want = host or ("cmd" if os.name == "nt" else "posix")
     key = _session_key(session_id)
-    existing = _SESSIONS.get(key)
-    if existing is not None and existing.host == want and existing._alive():
-        if cwd and existing.cwd and _norm_cwd_key(cwd) != _norm_cwd_key(existing.cwd):
+    async with _SESSIONS_GUARD:
+        existing = _SESSIONS.get(key)
+        if existing is not None and existing.host == want and existing._alive():
+            if cwd and existing.cwd and _norm_cwd_key(cwd) != _norm_cwd_key(existing.cwd):
+                await existing.close()
+                _SESSIONS.pop(key, None)
+            else:
+                return existing
+        elif existing is not None:
             await existing.close()
             _SESSIONS.pop(key, None)
-        else:
-            return existing
-    elif existing is not None:
-        await existing.close()
-        _SESSIONS.pop(key, None)
-    sess = HostSession(host=want, cwd=cwd, env=env, use_conpty=use_conpty)
-    await sess.start()
-    _SESSIONS[key] = sess
-    return sess
+        sess = HostSession(host=want, cwd=cwd, env=env, use_conpty=use_conpty)
+        await sess.start()
+        _SESSIONS[key] = sess
+        return sess
 
 
 async def close_shared_session(session_id: str | None = None) -> None:

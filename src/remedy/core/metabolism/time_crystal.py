@@ -204,16 +204,37 @@ class TimeCrystal:
             if self._rev == self._persist_rev:
                 return None
             rev = self._rev
+            payload = {
+                "session_id": self.session_id,
+                "project_id": self.project_id,
+                "promotions": self.promotions,
+                "blocked_secret": self.blocked_secret,
+                "facts": [
+                    {
+                        "text": f.text,
+                        "horizon": f.horizon,
+                        "source": f.source,
+                        "project_id": f.project_id,
+                        "session_id": f.session_id,
+                        "hits": f.hits,
+                        "ts": f.ts,
+                    }
+                    for f in self.facts
+                ],
+                "durable": [
+                    f.to_public()
+                    for f in self.facts
+                    if f.horizon in ("life", "project_week")
+                ],
+            }
         try:
-            root = Path(home).expanduser() if home else Path.home() / ".remedy"
+            root = _crystal_root(home)
             d = root / "time_crystal"
             d.mkdir(parents=True, exist_ok=True)
-            sid = "".join(
-                c for c in (self.session_id or "default") if c.isalnum() or c in "-_"
-            )[:48]
-            path = d / f"{sid or 'default'}.json"
+            sid = _crystal_sid(self.session_id)
+            path = d / f"{sid}.json"
             path.write_text(
-                json.dumps(self.snapshot(), indent=2, ensure_ascii=False),
+                json.dumps(payload, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
             with self._lock:
@@ -227,15 +248,98 @@ _crystals: dict[str, TimeCrystal] = {}
 _lock = threading.Lock()
 
 
+def _crystal_root(home: Path | str | None = None) -> Path:
+    if home:
+        return Path(home).expanduser()
+    try:
+        from remedy.core.security import get_home_dir
+
+        return get_home_dir()
+    except Exception:
+        return Path.home() / ".remedy"
+
+
+def _crystal_sid(session_id: str | None) -> str:
+    sid = "".join(
+        c for c in (session_id or "default") if c.isalnum() or c in "-_"
+    )[:48]
+    return sid or "default"
+
+
+def _hydrate_crystal(crystal: TimeCrystal, home: Path | str | None = None) -> None:
+    """Load full facts from the sid file on first get (not recent[-10:])."""
+    try:
+        path = _crystal_root(home) / "time_crystal" / f"{_crystal_sid(crystal.session_id)}.json"
+        if not path.is_file():
+            return
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(data, dict):
+        return
+    facts_raw = data.get("facts")
+    if not isinstance(facts_raw, list) or not facts_raw:
+        facts_raw = data.get("durable") or data.get("recent") or []
+    if not isinstance(facts_raw, list):
+        return
+    loaded: list[CrystalFact] = []
+    for row in facts_raw:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("text") or "").strip()
+        if not text:
+            continue
+        horizon = str(row.get("horizon") or "session")
+        if horizon not in HORIZONS:
+            horizon = "session"
+        try:
+            hits = int(row.get("hits") or 1)
+        except (TypeError, ValueError):
+            hits = 1
+        try:
+            ts = float(row.get("ts") or 0) or time.time()
+        except (TypeError, ValueError):
+            ts = time.time()
+        loaded.append(
+            CrystalFact(
+                text=text,
+                horizon=horizon,
+                source=str(row.get("source") or ""),
+                project_id=str(row.get("project_id") or ""),
+                session_id=str(row.get("session_id") or crystal.session_id),
+                hits=max(1, hits),
+                ts=ts,
+            )
+        )
+    if not loaded:
+        return
+    with crystal._lock:
+        if crystal.facts:
+            return
+        crystal.facts = loaded[:MAX_CRYSTAL_FACTS]
+        try:
+            crystal.promotions = int(data.get("promotions") or 0)
+        except (TypeError, ValueError):
+            pass
+        try:
+            crystal.blocked_secret = int(data.get("blocked_secret") or 0)
+        except (TypeError, ValueError):
+            pass
+        crystal._rev += 1
+        crystal._persist_rev = crystal._rev
+
+
 def get_time_crystal(
     session_id: str | None = None,
     *,
     project_id: str = "",
+    home: Path | str | None = None,
 ) -> TimeCrystal:
     from remedy.core.metabolism.session_registry import registry_get
 
     key = (session_id or "").strip() or "_default"
     with _lock:
+        created = key not in _crystals
         crystal = registry_get(
             _crystals,
             key,
@@ -243,7 +347,30 @@ def get_time_crystal(
         )
         if project_id:
             crystal.project_id = project_id
-        return crystal
+    if created:
+        _hydrate_crystal(crystal, home)
+    return crystal
+
+
+def merge_export_durable(*, home: Path | str | None = None) -> list[dict[str, Any]]:
+    """Life + live session keys (never the unused ``_export`` crystal)."""
+    get_time_crystal("life", home=home)
+    if home:
+        d = _crystal_root(home) / "time_crystal"
+        if d.is_dir():
+            for p in d.glob("*.json"):
+                stem = p.stem
+                if stem and stem not in ("_export", "default"):
+                    get_time_crystal(stem, home=home)
+    seen: dict[tuple[Any, Any], dict[str, Any]] = {}
+    with _lock:
+        crystals = list(_crystals.values())
+    for crystal in crystals:
+        if (crystal.session_id or "") == "_export":
+            continue
+        for fact in crystal.export_durable():
+            seen[(fact.get("text"), fact.get("horizon"))] = fact
+    return list(seen.values())
 
 
 def reset_time_crystal(session_id: str | None = None) -> None:

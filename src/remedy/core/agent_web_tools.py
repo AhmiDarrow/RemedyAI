@@ -220,6 +220,15 @@ def _pinned_fetch(url: str, *, max_chars: int, timeout: float = 25.0) -> tuple[s
     """
     current = (url or "").strip()
     for _hop in range(_MAX_REDIRECTS + 1):
+        aborted = False
+        try:
+            from remedy.core.turn_context import is_turn_aborted
+
+            aborted = bool(is_turn_aborted())
+        except Exception:
+            aborted = False
+        if aborted:
+            raise ValueError("ABORTED")
         if not current.startswith(("http://", "https://")):
             raise ValueError("url must start with http:// or https://")
         parsed = urlparse(current)
@@ -367,17 +376,30 @@ async def _rail_page_text(url: str) -> str:
     """
     import asyncio
 
+    def _as_dict(raw: object) -> dict:
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str) and raw.strip():
+            try:
+                import json as _json
+
+                obj = _json.loads(raw)
+            except Exception:
+                return {}
+            return obj if isinstance(obj, dict) else {}
+        return {}
+
     def _run() -> str:
         try:
             from remedy.core.computer.executor import get_computer_executor
             from remedy.core.computer.types import ComputerAction
 
             ex = get_computer_executor()
-            nav = ex.run(ComputerAction.NAVIGATE, url=url, target="browser")
-            if not isinstance(nav, dict):
+            nav = _as_dict(ex.run(ComputerAction.NAVIGATE, url=url, target="browser"))
+            if not nav:
                 return ""
-            page = ex.run(ComputerAction.PAGE_TEXT, target="browser")
-            if not isinstance(page, dict):
+            page = _as_dict(ex.run(ComputerAction.PAGE_TEXT, target="browser"))
+            if not page:
                 return ""
             text = str(page.get("text") or "").strip()
             title = str(page.get("title") or "").strip()
@@ -412,6 +434,12 @@ def register_web_tools(runtime: Any) -> None:
     def _map_fetch_error(e: BaseException, *, tool_name: str) -> str:
         if isinstance(e, ValueError):
             msg = str(e)
+            if msg == "ABORTED":
+                return format_tool_error(
+                    "Aborted by user",
+                    code="ABORTED",
+                    tool_name=tool_name,
+                )
             if "USERINFO" in msg:
                 return format_tool_error(
                     "Refused: URLs must not include user:password@ credentials.",

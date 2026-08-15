@@ -263,7 +263,9 @@ class ApprovalQueue:
             r"\bgh\s+(pr\s+create|repo\s+create|auth\s+login|release\s+create)\b", c
         ):
             return "gh_publish"
-        if re.search(r"\bgit\s+(commit|add|status|diff|log|remote|branch|tag)\b", c):
+        if re.search(r"\bgit\s+(status|diff|log|remote|branch)\b", c):
+            return "git_read"
+        if re.search(r"\bgit\s+(commit|add|tag)\b", c):
             return "git_write"
         return None
 
