@@ -16,6 +16,12 @@ lie under load.
   is on**; Close minimizes to the taskbar (no tray). “Start with Windows” is
   hidden. Sidecar rejects `/mnt/` and `.exe` shebangs. GitHub Releases now
   publish **`.deb` + AppImage** beside the Windows installer.
+- Linux first-run downloads the pinned **llama.cpp** Ubuntu CPU / Vulkan
+  `tar.gz` (same tag as Windows) and `chmod`s `llama-server`. Shared
+  `~/.remedy` homes remap leftover `win-*` runtime ids. `.deb` Depends
+  WebKitGTK / GTK / AppIndicator / Vulkan / OpenMP; AppImage bundles the
+  media framework. Linux Tauri resources no longer require the Windows
+  sidecar `.exe`.
 - Restore no longer immediately re-snaps. External terminal does not exec a
   Windows-interop `$SHELL`. “Open in browser” spawns `xdg-open` and returns.
 - xAI OAuth lives outside Settings so the rail can close; persist failure does

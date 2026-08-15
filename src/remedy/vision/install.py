@@ -8,7 +8,9 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import logging
+import os
 import shutil
+import tarfile
 import threading
 import zipfile
 from collections.abc import Callable
@@ -20,10 +22,10 @@ from urllib.request import Request, urlopen
 from remedy.vision import progress as prog
 from remedy.vision.catalog import (
     DEFAULT_MODEL_ID,
-    DEFAULT_RUNTIME_ID,
     DownloadAsset,
     get_model_spec,
     get_runtime_spec,
+    normalize_runtime_id,
     total_install_bytes,
 )
 from remedy.vision.config import (
@@ -265,6 +267,85 @@ def _extract_zip(zip_path: Path, dest_dir: Path) -> None:
                     out.write(src.read())
 
 
+def _safe_member_path(dest: Path, name: str, *, kind: str) -> Path:
+    cleaned = name.replace("\\", "/").lstrip("/")
+    if not cleaned or ".." in cleaned.split("/"):
+        raise ValueError(f"{kind} Slip blocked: {name}")
+    if len(cleaned) > 1 and cleaned[1] == ":":
+        raise ValueError(f"{kind} Slip blocked (absolute): {name}")
+    target = (dest / cleaned).resolve()
+    try:
+        target.relative_to(dest)
+    except ValueError as exc:
+        raise ValueError(f"{kind} Slip blocked: {name}") from exc
+    return target
+
+
+def _extract_tar(tar_path: Path, dest_dir: Path) -> None:
+    """Extract tar.gz with path-traversal + symlink protection."""
+    _check_cancel()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir.resolve()
+    max_files = 50_000
+    max_member_bytes = 8_000_000_000
+    max_total_bytes = min(max_files * max_member_bytes, max_member_bytes * 50)
+    count = 0
+    total_written = 0
+    with tarfile.open(tar_path, "r:*") as tf:
+        for info in tf.getmembers():
+            _check_cancel()
+            if info.issym() or info.islnk():
+                raise ValueError(f"Tar symlink blocked: {info.name}")
+            if not info.isfile():
+                continue
+            name = info.name or ""
+            target = _safe_member_path(dest, name, kind="Tar")
+            if info.size > max_member_bytes:
+                raise ValueError(f"Tar member too large: {name}")
+            count += 1
+            if count > max_files:
+                raise ValueError(f"Tar has too many files (>{max_files})")
+            src = tf.extractfile(info)
+            if src is None:
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with src, target.open("wb") as out:
+                while True:
+                    block = src.read(1024 * 256)
+                    if not block:
+                        break
+                    total_written += len(block)
+                    if total_written > max_total_bytes:
+                        raise ValueError(f"Tar too large after {name}")
+                    out.write(block)
+            if info.mode & 0o111:
+                with contextlib.suppress(OSError):
+                    target.chmod(target.stat().st_mode | 0o755)
+
+
+def _ensure_posix_executables(root: Path) -> None:
+    """llama-server + .so from official tarballs must be executable on Linux."""
+    if os.name == "nt" or not root.is_dir():
+        return
+    names = {"llama-server", "llama-cli", "llama-quantize", "llama-bench"}
+    for p in root.rglob("*"):
+        if not p.is_file():
+            continue
+        if p.name in names or p.suffix == ".so" or ".so." in p.name:
+            with contextlib.suppress(OSError):
+                p.chmod(p.stat().st_mode | 0o755)
+
+
+def _extract_archive(archive_path: Path, dest_dir: Path) -> None:
+    """Extract a llama.cpp zip or tar.gz into dest_dir, then chmod binaries."""
+    name = archive_path.name.lower()
+    if name.endswith(".tar.gz") or name.endswith(".tgz"):
+        _extract_tar(archive_path, dest_dir)
+    else:
+        _extract_zip(archive_path, dest_dir)
+    _ensure_posix_executables(dest_dir)
+
+
 def _existing_progress_bytes(
     *,
     model_id: str,
@@ -337,7 +418,7 @@ def _run_install(
                 _download_asset(asset, zip_path, on_chunk=bump)
             _check_cancel()
             prog.update(phase="extracting", message=f"Extracting {asset.name}")
-            _extract_zip(zip_path, rdir)
+            _extract_archive(zip_path, rdir)
 
         if runtime_binary_path(home_dir) is None:
             raise RuntimeError(
@@ -420,9 +501,7 @@ def start_install(
     global _install_thread
     mid = (model_id or DEFAULT_MODEL_ID).strip() or DEFAULT_MODEL_ID
     get_model_spec(mid)  # validate
-    rid = (runtime_id or "").strip()
-    if not rid:
-        rid = "win-cuda-12.4-x64" if prefer_cuda else DEFAULT_RUNTIME_ID
+    rid = normalize_runtime_id(runtime_id, prefer_gpu=prefer_cuda)
     get_runtime_spec(rid)
 
     with _install_lock:
@@ -514,7 +593,7 @@ def reinstall_runtime(
     rdir = runtime_dir(home_dir)
     if rdir.exists():
         shutil.rmtree(rdir, ignore_errors=True)
-    rid = "win-cuda-12.4-x64" if prefer_cuda else DEFAULT_RUNTIME_ID
+    rid = normalize_runtime_id(None, prefer_gpu=prefer_cuda)
     # Drop matching zip so a different runtime is always fetched fresh
     dl = downloads_dir(home_dir)
     try:

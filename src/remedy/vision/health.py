@@ -11,6 +11,7 @@ from remedy.vision.catalog import (
     DEFAULT_MODEL_ID,
     get_model_spec,
     get_runtime_spec,
+    normalize_runtime_id,
     total_install_bytes,
 )
 from remedy.vision.config import vision_root
@@ -130,7 +131,7 @@ def system_health(
         min_ram = 6
         need_bytes = 3 * 1024**3
 
-    rid = (runtime_id or "win-cpu-x64").strip() or "win-cpu-x64"
+    rid = normalize_runtime_id(runtime_id)
     try:
         runtime = get_runtime_spec(rid)
         runtime_platform = runtime.platform

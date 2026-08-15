@@ -8,6 +8,7 @@ Default model: SmolVLM2-2.2B (Apache 2.0) — commercial-friendly dependency.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,11 +27,13 @@ _SMOL_MMPROJ_SHA256 = "ae07ea1facd07dd3230c4483b63e8cda96c6944ad2481f33d531f79e8
 _SMOL_MODEL_BYTES = 1_112_602_656
 _SMOL_MMPROJ_BYTES = 592_523_200
 
-# Pinned llama.cpp release (Windows focus).
+# Pinned llama.cpp release (Windows + Linux first-run download).
 LLAMA_CPP_TAG = "b10107"
 _LLAMA_CPU_ZIP = "llama-b10107-bin-win-cpu-x64.zip"
 _LLAMA_CUDA_ZIP = "llama-b10107-bin-win-cuda-12.4-x64.zip"
 _LLAMA_CUDART_ZIP = "cudart-llama-bin-win-cuda-12.4-x64.zip"
+_LLAMA_LINUX_CPU_TGZ = "llama-b10107-bin-ubuntu-x64.tar.gz"
+_LLAMA_LINUX_VULKAN_TGZ = "llama-b10107-bin-ubuntu-vulkan-x64.tar.gz"
 
 # Option B: ship both CPU and CUDA; pick at runtime via NVIDIA detect.
 BUNDLED_RUNTIME_IDS: tuple[str, ...] = ("win-cpu-x64", "win-cuda-12.4-x64")
@@ -143,7 +146,7 @@ class LlamaRuntimeSpec:
 
     id: str
     tag: str
-    platform: str  # win-cpu-x64 | win-cuda-12.4-x64
+    platform: str  # win-cpu-x64 | win-cuda-12.4-x64 | linux-cpu-x64 | linux-vulkan-x64
     zip_name: str
     url: str
     size_bytes: int
@@ -203,9 +206,85 @@ LLAMA_RUNTIMES: dict[str, LlamaRuntimeSpec] = {
             ),
         ),
     ),
+    "linux-cpu-x64": LlamaRuntimeSpec(
+        id="linux-cpu-x64",
+        tag=LLAMA_CPP_TAG,
+        platform="linux-cpu-x64",
+        zip_name=_LLAMA_LINUX_CPU_TGZ,
+        url=(
+            f"https://github.com/ggml-org/llama.cpp/releases/download/"
+            f"{LLAMA_CPP_TAG}/{_LLAMA_LINUX_CPU_TGZ}"
+        ),
+        size_bytes=16_275_561,
+        sha256="afe1ae0b706c4a0830b218a9249037b7a6cc723f81deb78825662128b25453e6",
+        binary_name="llama-server",
+    ),
+    "linux-vulkan-x64": LlamaRuntimeSpec(
+        id="linux-vulkan-x64",
+        tag=LLAMA_CPP_TAG,
+        platform="linux-vulkan-x64",
+        zip_name=_LLAMA_LINUX_VULKAN_TGZ,
+        url=(
+            f"https://github.com/ggml-org/llama.cpp/releases/download/"
+            f"{LLAMA_CPP_TAG}/{_LLAMA_LINUX_VULKAN_TGZ}"
+        ),
+        size_bytes=32_239_108,
+        sha256="28f86dfce8c3723d4e9fd971b8456d946e09324708880533091399d284fe9add",
+        binary_name="llama-server",
+    ),
 }
 
 DEFAULT_RUNTIME_ID = "win-cpu-x64"
+
+
+def default_runtime_id(*, prefer_gpu: bool = False) -> str:
+    """llama-server flavor for this OS (Windows CUDA / Linux Vulkan / CPU)."""
+    if sys.platform == "win32":
+        return "win-cuda-12.4-x64" if prefer_gpu else "win-cpu-x64"
+    if sys.platform.startswith("linux"):
+        return "linux-vulkan-x64" if prefer_gpu else "linux-cpu-x64"
+    return "win-cpu-x64"
+
+
+def host_runtime_ids() -> tuple[str, ...]:
+    """Catalog ids that can actually run on this OS."""
+    if sys.platform == "win32":
+        return ("win-cpu-x64", "win-cuda-12.4-x64")
+    if sys.platform.startswith("linux"):
+        return ("linux-cpu-x64", "linux-vulkan-x64")
+    return (DEFAULT_RUNTIME_ID,)
+
+
+def _runtime_is_gpu(platform: str) -> bool:
+    p = platform.lower()
+    return any(token in p for token in ("cuda", "vulkan", "hip", "metal"))
+
+
+def _runtime_matches_host(platform: str) -> bool:
+    p = platform.lower()
+    if sys.platform == "win32":
+        return p.startswith("win")
+    if sys.platform.startswith("linux"):
+        return p.startswith("linux")
+    return False
+
+
+def normalize_runtime_id(
+    runtime_id: str | None = None,
+    *,
+    prefer_gpu: bool = False,
+) -> str:
+    """Map a catalog id onto one that can run here (shared Win/Linux homes)."""
+    rid = (runtime_id or "").strip()
+    want_gpu = prefer_gpu
+    if rid in LLAMA_RUNTIMES:
+        plat = LLAMA_RUNTIMES[rid].platform
+        if _runtime_matches_host(plat):
+            return rid
+        want_gpu = want_gpu or _runtime_is_gpu(plat)
+    return default_runtime_id(prefer_gpu=want_gpu)
+
+
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8740
 
@@ -222,7 +301,7 @@ def get_model_spec(model_id: str | None = None) -> LocalModelSpec:
 
 
 def get_runtime_spec(runtime_id: str | None = None) -> LlamaRuntimeSpec:
-    rid = (runtime_id or DEFAULT_RUNTIME_ID).strip() or DEFAULT_RUNTIME_ID
+    rid = (runtime_id or default_runtime_id()).strip() or default_runtime_id()
     if rid not in LLAMA_RUNTIMES:
         raise KeyError(
             f"Unknown runtime {rid!r}. Known: {', '.join(sorted(LLAMA_RUNTIMES))}"
@@ -237,7 +316,9 @@ def catalog_public() -> dict[str, Any]:
         "models": [m.to_public_dict() for m in LOCAL_MODELS.values()],
         "roles": list(LOCAL_ROLES),
         "bundled_runtime_ids": list(BUNDLED_RUNTIME_IDS),
-        "bundle_policy": "cpu_and_cuda",  # option B
+        "host_runtime_ids": list(host_runtime_ids()),
+        "default_runtime_id": default_runtime_id(),
+        "bundle_policy": "cpu_and_cuda",  # option B (Windows prebundle)
         "llama_cpp_tag": LLAMA_CPP_TAG,
         "default_port": DEFAULT_PORT,
         "runtimes": [

@@ -5,8 +5,9 @@ Remedy Desktop now runs on Linux (including WSLg) as well as Windows. Same partn
 ## Requirements
 
 - 64-bit Linux with a desktop session (GNOME, KDE, XFCE, or **WSL2 + WSLg**)
-- WebKitGTK (Tauri) and a working local Python/`uv` for the sidecar
-- Network for cloud providers, or a local model (Ollama / RMB)
+- Network for cloud providers, or a local model (Ollama / RMB / first-run vision)
+- Packaged desktop **includes** the Python sidecar (same as Windows). You do **not**
+  need a system `python` / `uv` for the `.deb` or AppImage.
 
 ## Ways to run
 
@@ -24,7 +25,16 @@ Remedy Desktop now runs on Linux (including WSLg) as well as Windows. Same partn
    - **`Remedy.Desktop_*.AppImage`** — `chmod +x` then run it
 3. Launch **Remedy Desktop** from the app menu (deb) or the AppImage.
 
-Need WebKitGTK on the machine (`libwebkit2gtk-4.1-0` on Ubuntu 22.04+). The AppImage bundles more; the `.deb` expects those system libs.
+The **`.deb`** asks apt for the same class of deps Windows bundles or assumes:
+`libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libayatana-appindicator3-1`, `librsvg2-2`,
+`xdg-utils`, `libvulkan1`, `libgomp1`. `sudo apt install ./Remedy.Desktop_*_amd64.deb`
+pulls them. The **AppImage** is more self-contained (media framework included);
+you still need FUSE to run it (`libfuse2` / `libfuse2t64` on Ubuntu).
+
+The **local vision / nano** stack is **not** in the installer (same as Windows):
+first use downloads pinned **SmolVLM2** weights plus **llama.cpp** `llama-server`
+for this OS (`ubuntu-x64` CPU or `ubuntu-vulkan-x64` when a GPU is present) into
+`~/.remedy/vision/`.
 
 ## WSLg (Windows host, Linux UI)
 

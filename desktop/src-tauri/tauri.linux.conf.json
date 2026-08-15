@@ -15,6 +15,22 @@
     "resources": {
       "../dist": "webui",
       "windows/wslg_workarea.ps1": "windows/wslg_workarea.ps1"
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libayatana-appindicator3-1",
+          "librsvg2-2",
+          "xdg-utils",
+          "libvulkan1",
+          "libgomp1"
+        ]
+      },
+      "appimage": {
+        "bundleMediaFramework": true
+      }
     }
   }
 }

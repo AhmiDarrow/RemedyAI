@@ -11,7 +11,7 @@ from remedy.vision.catalog import (
     DEFAULT_HOST,
     DEFAULT_MODEL_ID,
     DEFAULT_PORT,
-    DEFAULT_RUNTIME_ID,
+    default_runtime_id,
 )
 
 
@@ -105,7 +105,7 @@ def vision_section_from_config(cfg: dict[str, Any] | None) -> dict[str, Any]:
         "max_image_bytes": int(raw.get("max_image_bytes") or 4 * 1024 * 1024),
         "timeout_s": float(raw.get("timeout_s") or 90),
         "n_gpu_layers": int(raw.get("n_gpu_layers", -1)),
-        "runtime_id": str(raw.get("runtime_id") or DEFAULT_RUNTIME_ID),
+        "runtime_id": str(raw.get("runtime_id") or default_runtime_id()),
         "force_decode": bool(raw.get("force_decode", False)),
         "force_native": bool(raw.get("force_native", False)),
     }
