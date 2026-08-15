@@ -163,14 +163,14 @@ def _messenger_widen(patch: dict[str, Any], cfg: dict[str, Any]) -> tuple[str, s
                 f"widen_messengers:enable:{mid_s}",
                 f"Enabling messenger {mid_s} requires approval",
             )
+        raw_section = cfg.get(mid_s)
+        section = raw_section if isinstance(raw_section, dict) else {}
         if "allow_all" in body and _truthy(body.get("allow_all")):
-            section = cfg.get(mid_s) if isinstance(cfg.get(mid_s), dict) else {}
             if not _truthy(section.get("allow_all")):
                 return (
                     f"widen_messengers:allow_all:{mid_s}",
                     f"Setting {mid_s} allow_all=true requires approval",
                 )
-        section = cfg.get(mid_s) if isinstance(cfg.get(mid_s), dict) else {}
         for key in _MESSENGER_ALLOWLIST_KEYS:
             if key not in body:
                 continue
