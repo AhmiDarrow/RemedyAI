@@ -17,10 +17,7 @@ from urllib.parse import urlsplit
 logger = logging.getLogger(__name__)
 
 _THINKING_NUDGES = {
-    "off": (
-        "Thinking level: off. Prefer action over long internal monologue. "
-        "Still give complete answers — never cut off mid-thought or mid-reply."
-    ),
+    "off": "",
     "low": (
         "Thinking level: low. Light reasoning when useful. "
         "Still give complete answers and full tool work — never truncate."

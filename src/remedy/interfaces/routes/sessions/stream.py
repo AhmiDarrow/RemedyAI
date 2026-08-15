@@ -472,11 +472,26 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                             tok = None
                             if isinstance(final_usage, dict):
                                 tok = int(final_usage.get("total_tokens") or 0) or None
+                            think_persist = (full_thinking or "").strip() or None
+                            with contextlib.suppress(Exception):
+                                from remedy.core.react_policy import (
+                                    collapse_repeated_sentences,
+                                    looks_like_policy_thinking,
+                                )
+
+                                if think_persist:
+                                    think_persist = collapse_repeated_sentences(
+                                        think_persist
+                                    )
+                                if think_persist and looks_like_policy_thinking(
+                                    think_persist
+                                ):
+                                    think_persist = None
                             await memory.add_chat_message(ChatMessage(
                                 session_id=session_id,
                                 role=ChatMessageRole.ASSISTANT,
                                 content=persist_text,
-                                thinking=full_thinking.strip() or None,
+                                thinking=think_persist,
                                 tool_calls=collected_tool_calls,
                                 tool_results=collected_tool_results,
                                 model=sess_model

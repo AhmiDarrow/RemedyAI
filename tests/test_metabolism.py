@@ -209,6 +209,37 @@ def test_tier_l1_chat():
     assert classify_turn_tier("explain how hashing works briefly") == TurnTier.L1_LEAN
     assert classify_turn_tier("thanks!") == TurnTier.L1_LEAN
     assert classify_turn_tier("hi") == TurnTier.L1_LEAN
+    assert classify_turn_tier("hi what is 1 + 1") == TurnTier.L1_LEAN
+
+
+def test_is_trivial_chat_math_and_greetings():
+    from remedy.core.metabolism.tier import is_trivial_chat
+
+    assert is_trivial_chat("hi")
+    assert is_trivial_chat("thanks!")
+    assert is_trivial_chat("1 + 1")
+    assert is_trivial_chat("hi what is 1 + 1")
+    assert is_trivial_chat("what's 2*2")
+    assert not is_trivial_chat("explain how hashing works briefly")
+    assert not is_trivial_chat("fix the bug in app.py")
+
+
+def test_trivial_chat_begin_turn_sets_thinking_off():
+    from remedy.core.turn_context import (
+        begin_turn,
+        end_turn,
+        turn_thinking_level,
+    )
+
+    tokens = begin_turn("think_off_sess")
+    try:
+        begin_turn_metabolism(
+            session_id="think_off_sess",
+            user_text="hi what is 1 + 1",
+        )
+        assert turn_thinking_level() == "off"
+    finally:
+        end_turn(*tokens)
 
 
 def test_tier_early_exits_empty_and_greetings():

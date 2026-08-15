@@ -608,6 +608,26 @@ def test_looks_like_leaked_scratchpad_dogfood_fail() -> None:
         "- pytest: 1389 passed\n"
     )
     assert looks_like_leaked_scratchpad(good) is False
+
+
+def test_policy_thinking_echo_is_detected():
+    from remedy.core.react_policy import (
+        collapse_repeated_sentences,
+        looks_like_policy_thinking,
+    )
+
+    dump = (
+        "The user is asking a simple math question: \"hi what is 1 + 1\". "
+        "This is pure chat - no tools needed. "
+        "The system reminder says lean chat, answer from context."
+    )
+    assert looks_like_policy_thinking(dump) is True
+    assert looks_like_policy_thinking("2") is False
+    repeated = (
+        "This is pure chat - no tools needed. "
+        "This is pure chat - no tools needed."
+    )
+    assert collapse_repeated_sentences(repeated) == "This is pure chat - no tools needed."
     nudge = post_tools_user_summary_nudge()
     assert nudge["role"] == "user"
     assert "scratchpad" in nudge["content"].lower() or "user-facing" in nudge["content"].lower()

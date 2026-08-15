@@ -13,6 +13,7 @@ from remedy.core.metabolism.machine_map import get_machine_map
 from remedy.core.metabolism.tier import (
     TurnTier,
     classify_turn_tier,
+    is_trivial_chat,
     tier_policy,
     tier_system_block,
 )
@@ -73,6 +74,16 @@ def begin_turn_metabolism(
             browse=browse,
         )
     policy = tier_policy(tier)
+
+    # Short L1 / trivia: High thinking recites the tier note instead of answering.
+    if int(tier) <= 1 and (
+        is_trivial_chat(user_text)
+        or ("\n" not in (user_text or "") and len((user_text or "").strip()) <= 64)
+    ):
+        with suppress(Exception):
+            from remedy.core.turn_context import set_turn_thinking_level
+
+            set_turn_thinking_level("off")
 
     # Cheap accuracy metric — tier distribution (no labels overhead beyond key)
     with suppress(Exception):
