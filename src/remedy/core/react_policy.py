@@ -791,6 +791,16 @@ _LEAKED_SCRATCHPAD_MARKERS = (
     "without leaking tool",
     "i should give a clean",
     "from context without making more tool",
+    "this is pure chat",
+    "no tools needed",
+    "lean chat",
+    "answer from context",
+    "system reminder",
+    "the system says",
+    "the system reminder",
+    "tools only if",
+    "machine work is needed",
+    "conflicting pressure about tools",
 )
 
 
@@ -801,6 +811,32 @@ def strip_stream_status_noise(text: str) -> str:
     t = re.sub(r"(?m)^\s*\[auth required\][^\n]*\n?", "", t)
     t = re.sub(r"(?m)^\s*\[provider fix\][^\n]*\n?", "", t)
     return t.strip()
+
+
+def looks_like_policy_thinking(text: str) -> bool:
+    """True when reasoning is reciting our tier/tool policy instead of thinking."""
+    low = (text or "").strip().lower()
+    if not low:
+        return False
+    hits = sum(1 for m in _LEAKED_SCRATCHPAD_MARKERS if m in low)
+    return hits >= 2 or "system reminder" in low or "lean chat" in low
+
+
+def collapse_repeated_sentences(text: str) -> str:
+    """Drop consecutive duplicate sentences (thinking loops)."""
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    parts = re.split(r"(?<=[.!?])\s+", raw)
+    out: list[str] = []
+    prev = ""
+    for p in parts:
+        key = re.sub(r"\s+", " ", p).strip().lower()
+        if key and key == prev:
+            continue
+        out.append(p)
+        prev = key
+    return " ".join(out).strip()
 
 
 def looks_like_leaked_scratchpad(text: str) -> bool:

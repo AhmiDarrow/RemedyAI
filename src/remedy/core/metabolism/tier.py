@@ -342,10 +342,7 @@ _POLICIES: dict[TurnTier, TierPolicy] = {
         allow_critical_verify=False,
         # Was 2000 — that truncated every real file_read when mis-tiered
         max_tool_result_chars=64_000,
-        system_note=(
-            "[Tier L1] Lean chat: answer from context. "
-            "Tools only if the user clearly needs machine work."
-        ),
+        system_note="Reply to the person. Be brief.",
     ),
     TurnTier.L2_AGENCY: TierPolicy(
         tier=TurnTier.L2_AGENCY,
@@ -493,6 +490,25 @@ def classify_turn_tier(
         )
 
     return TurnTier.L1_LEAN
+
+
+# "hi what is 1 + 1" / "what's 2*2" — never worth a thinking panel.
+_TRIVIAL_ARITH = re.compile(
+    r"(?is)^\s*(?:(?:hi|hey|hello|yo)\b[\s,!.]*)*"
+    r"(?:what(?:'s| is)\s+)?"
+    r"\d+\s*[-+*/x×÷]\s*\d+\s*\??\s*$"
+)
+
+
+def is_trivial_chat(user_text: str = "") -> bool:
+    """True for greetings and one-line trivia (no thinking dump, no tools)."""
+    ut = (user_text or "").strip()
+    if not ut or "\n" in ut:
+        return not ut
+    low = ut.lower().rstrip("!.?")
+    if low in _CHAT_SHORT or ut.lower() in _CHAT_SHORT:
+        return True
+    return bool(len(ut) <= 48 and _TRIVIAL_ARITH.match(ut))
 
 
 def tier_system_block(tier: TurnTier | int) -> str:
