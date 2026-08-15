@@ -262,8 +262,9 @@ def sync_todos_with_build(runtime: Any, state: Any = None) -> list[TodoItem]:
     """
     root = None
     with suppress(Exception):
-        if state is not None and getattr(state, "project_path", ""):
-            root = Path(str(state.project_path))
+        raw_pp = str(getattr(state, "project_path") or "") if state is not None else ""
+        if raw_pp:
+            root = Path(raw_pp)
     items = load_todos(runtime, root=root)
     if not items:
         if state is not None:
