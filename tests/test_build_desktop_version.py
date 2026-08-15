@@ -31,6 +31,22 @@ def test_version_tuple_semver(bd) -> None:
     assert bd._version_tuple("2") == (2, 0, 0, 0)
 
 
+def test_sidecar_bin_paths_linux_has_no_exe(bd, monkeypatch) -> None:
+    monkeypatch.setattr(bd.sys, "platform", "linux")
+    monkeypatch.setenv("TAURI_ENV_TARGET_TRIPLE", "x86_64-unknown-linux-gnu")
+    plain, triple = bd.sidecar_bin_paths()
+    assert plain.name == "remedy-desktop"
+    assert triple.name == "remedy-desktop-x86_64-unknown-linux-gnu"
+
+
+def test_sidecar_bin_paths_windows_keeps_exe(bd, monkeypatch) -> None:
+    monkeypatch.setattr(bd.sys, "platform", "win32")
+    monkeypatch.setenv("TAURI_ENV_TARGET_TRIPLE", "x86_64-pc-windows-msvc")
+    plain, triple = bd.sidecar_bin_paths()
+    assert plain.name == "remedy-desktop.exe"
+    assert triple.name == "remedy-desktop-x86_64-pc-windows-msvc.exe"
+
+
 def test_write_sidecar_version_file_has_product_identity(bd, tmp_path, monkeypatch) -> None:
     """Empty PE identity is a Defender ML signal — resource must name Remedy."""
     # Redirect generated file under tmp_path
