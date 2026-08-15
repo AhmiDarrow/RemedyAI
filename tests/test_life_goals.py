@@ -101,6 +101,22 @@ def test_drive_and_pulse(tmp_path):
     assert pulse_due(tmp_path, days=7) is False
 
 
+def test_add_and_step_is_local_without_force(tmp_path, monkeypatch):
+    """API create must not startfile / web-search (force=False)."""
+    from remedy.memory.life_drive import add_and_step
+
+    revealed: list[str] = []
+    monkeypatch.setattr(
+        "remedy.memory.life_drive.reveal_artifact",
+        lambda path: revealed.append(str(path)) or False,
+    )
+    monkeypatch.setenv("REMEDY_NO_REVEAL", "1")
+    g = add_and_step(tmp_path, "Gauntlet hold 1", source="api", force=False)
+    assert g.title == "Gauntlet hold 1"
+    assert g.next_action
+    assert revealed == []
+
+
 def test_take_step_writes_note_and_advances(tmp_path):
     from remedy.memory.life_drive import classify_action, invent_next, take_step
     from remedy.memory.life_goals import LifeGoal

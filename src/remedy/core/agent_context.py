@@ -50,45 +50,60 @@ async def build_turn_context(runtime: Any) -> str:
 
                 user_name = str(load_config().get("user_name") or "").strip()
             soul_budget = 1800 if muscle.dense_memory else 1200
+            lean = False
+            with suppress(Exception):
+                from remedy.core.react_policy import runtime_turn_is_chat_only
+
+                lean = runtime_turn_is_chat_only(runtime)
             soul = build_soul_context_block(
                 home=home,
-                include_contract=True,
+                include_contract=not lean,
                 provider=str(getattr(bind, "provider", "") or ""),
                 model=str(getattr(bind, "model", "") or ""),
                 user_name=user_name,
                 max_chars=soul_budget,
+                work_threads=not lean,
             )
             if soul:
                 parts.append(soul)
-        # Capable muscle (Grok/Claude/GPT/…) — full builder organism contract
-        build_add = builder_system_addendum(muscle)
-        if build_add:
-            parts.append(build_add)
-        # Live build-engine phase (if this turn is a supervised construction)
+        chat_only = False
         with suppress(Exception):
-            from remedy.core.build_engine import get_build_state
-            from remedy.core.build_ledger import resume_hint
+            from remedy.core.react_policy import runtime_turn_is_chat_only
 
-            bst = get_build_state(runtime)
-            if bst is not None and bst.active:
-                parts.append(
-                    f"[Build engine live] phase={bst.phase} "
-                    f"explore={bst.explore_steps} write={bst.write_steps} "
-                    f"verify={bst.verify_steps} "
-                    f"verify_ok={bst.last_verify_ok} "
-                    f"oracle={bst.verify_command or 'MISSING'} "
-                    f"auto_verify={bst.auto_verify_ran} "
-                    f"paths={', '.join(bst.paths_touched[-6:]) or '—'}"
-                )
-            else:
-                # Mid-ship resume hint even when turn not yet classified as build
-                proj = ""
-                with suppress(Exception):
-                    proj = str(runtime.effective_project_path() or "")
-                home = getattr(getattr(runtime, "config", None), "home_dir", None)
-                hint = resume_hint(proj or None, home=home)
-                if hint:
-                    parts.append(hint)
+            chat_only = runtime_turn_is_chat_only(runtime)
+
+        # Capable muscle — skip the builder contract on greetings (it primes
+        # a resume dump). Work turns still get the full RESEARCH→PLAN→BUILD.
+        if not chat_only:
+            build_add = builder_system_addendum(muscle)
+            if build_add:
+                parts.append(build_add)
+        # Live build-engine phase (if this turn is a supervised construction)
+        if not chat_only:
+            with suppress(Exception):
+                from remedy.core.build_engine import get_build_state
+                from remedy.core.build_ledger import resume_hint
+
+                bst = get_build_state(runtime)
+                if bst is not None and bst.active:
+                    parts.append(
+                        f"[Build engine live] phase={bst.phase} "
+                        f"explore={bst.explore_steps} write={bst.write_steps} "
+                        f"verify={bst.verify_steps} "
+                        f"verify_ok={bst.last_verify_ok} "
+                        f"oracle={bst.verify_command or 'MISSING'} "
+                        f"auto_verify={bst.auto_verify_ran} "
+                        f"paths={', '.join(bst.paths_touched[-6:]) or '—'}"
+                    )
+                else:
+                    # Mid-ship resume hint even when turn not yet classified as build
+                    proj = ""
+                    with suppress(Exception):
+                        proj = str(runtime.effective_project_path() or "")
+                    home = getattr(getattr(runtime, "config", None), "home_dir", None)
+                    hint = resume_hint(proj or None, home=home)
+                    if hint:
+                        parts.append(hint)
 
     # Project workspace (default directory for this session)
     with suppress(Exception):
@@ -247,26 +262,32 @@ async def build_turn_context(runtime: Any) -> str:
                 parts.append(block)
 
     # Session Brief (Memory Harness L2) when present on agent
+    chat_only_ctx = False
     with suppress(Exception):
-        from remedy.memory.harness.brief import brief_to_context_block
-        from remedy.memory.partner_state import ensure_partner_state
+        from remedy.core.react_policy import runtime_turn_is_chat_only
 
-        brief = getattr(runtime, "_session_brief", None)
-        # Phase C: project epistemic graph → brief before inject
+        chat_only_ctx = runtime_turn_is_chat_only(runtime)
+    if not chat_only_ctx:
         with suppress(Exception):
-            ensure_partner_state(runtime).apply_graph_to_brief(brief)
-        block = brief_to_context_block(brief)
-        if block:
-            parts.append(block)
+            from remedy.memory.harness.brief import brief_to_context_block
+            from remedy.memory.partner_state import ensure_partner_state
 
-    # Continuity steering — open tasks / soul threads / mid-ship (anti-thrash)
-    with suppress(Exception):
-        from remedy.core.continuity_steering import continuity_steering_block
+            brief = getattr(runtime, "_session_brief", None)
+            # Phase C: project epistemic graph → brief before inject
+            with suppress(Exception):
+                ensure_partner_state(runtime).apply_graph_to_brief(brief)
+            block = brief_to_context_block(brief)
+            if block:
+                parts.append(block)
 
-        home_cs = getattr(getattr(runtime, "config", None), "home_dir", None)
-        cs = continuity_steering_block(runtime, home=home_cs, max_chars=900)
-        if cs:
-            parts.append(cs)
+        # Continuity steering — open tasks / soul threads / mid-ship (anti-thrash)
+        with suppress(Exception):
+            from remedy.core.continuity_steering import continuity_steering_block
+
+            home_cs = getattr(getattr(runtime, "config", None), "home_dir", None)
+            cs = continuity_steering_block(runtime, home=home_cs, max_chars=900)
+            if cs:
+                parts.append(cs)
 
     # Messenger origin — same partner, remote surface
     with suppress(Exception):

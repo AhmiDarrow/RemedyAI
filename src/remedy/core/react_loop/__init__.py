@@ -15,6 +15,7 @@ from remedy.core.react_loop.binding import (
 )
 from remedy.core.react_loop.build_request import build_step_request_body
 from remedy.core.react_loop.errors import (
+    is_billing_llm_api_error,
     is_fatal_llm_api_error,
     is_thinking_tool_choice_error,
 )
@@ -23,6 +24,7 @@ from remedy.core.react_loop.errors import (
 )
 from remedy.core.react_loop.loop import call_llm_stream
 from remedy.core.react_loop.recovery import (
+    fatal_billing_error_message,
     fatal_model_error_message,
     repeated_provider_error_message,
     soft_retry_notice,
@@ -37,8 +39,10 @@ from remedy.core.react_loop.tool_batch import (
 __all__ = [
     "call_llm_stream",
     "is_fatal_llm_api_error",
+    "is_billing_llm_api_error",
     "is_thinking_tool_choice_error",
     "_is_fatal_llm_api_error",
+    "fatal_billing_error_message",
     "provider_bits",
     "resolve_and_apply_tools",
     "rearm_agency_tools",

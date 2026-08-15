@@ -174,3 +174,14 @@ def test_http_bootstrap_plain_serve_default_on(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(sys, "frozen", False, raising=False)
     assert http_bootstrap_enabled() is True
+
+
+def test_settings_snapshot_http_bootstrap_follows_sidecar_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Omitted config key must not report True on desktop (Save would persist it)."""
+    monkeypatch.setenv("REMEDY_DESKTOP_SIDECAR", "1")
+    monkeypatch.delenv("REMEDY_HTTP_BOOTSTRAP", raising=False)
+    from remedy.interfaces.settings_apply import _http_bootstrap_default
+
+    assert _http_bootstrap_default() is False

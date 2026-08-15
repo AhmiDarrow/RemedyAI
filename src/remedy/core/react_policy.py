@@ -28,6 +28,9 @@ _DEFAULT_SYSTEM_BODY = (
     "systems end-to-end with tools; use soul_recall / soul_status for continuity.\n"
     "Style: warm-professional by default; concise, decisive, high-signal. "
     "Match the user's energy. Prefer action over narration.\n"
+    "**Greetings / thanks / check-ins:** reply in one or two short sentences. "
+    "Do not dump continuity, build ledger, open threads, rapport scores, or a "
+    "resume plan. Do not offer a multi-step work plan unless they asked.\n"
     "**Default for any task (work to do, not pure chat):** RESEARCH → PLAN → BUILD.\n"
     "1) **RESEARCH** — tools first: list_dir / file_read / repo_search / memory_search "
     "/ web as needed; gather facts before inventing.\n"
@@ -40,7 +43,8 @@ _DEFAULT_SYSTEM_BODY = (
     "Do not monologue a multi-step plan in chat and stop — research and build with tools.\n"
     "**Latest message wins:** only do what the **most recent** user message asks. "
     "Do not resume earlier navigates, wikis, goals, or unfinished side-quests unless "
-    "the latest message clearly continues them — or Soul/Brief mark them still open. "
+    "the latest message clearly continues them. A greeting or thanks is not a "
+    "continue. Soul/Brief/ledger stay silent until they ask to pick up work. "
     "When that request is done, stop.\n\n"
     "Scope of help:\n"
     "- Chat and knowledge: answer clearly; use memory/context when present.\n"
@@ -420,7 +424,7 @@ _SOFT_AFFIRM_RE = re.compile(
 # Hard social only (keep tools off even with open history).
 _HARD_CHAT_ONLY_RE = re.compile(
     r"^(?:"
-    r"hi+|hello+|hey+|yo+|sup|"
+    r"hi+(?:\s+there)?|hello+(?:\s+there)?|hey+(?:\s+there)?|yo+|sup|"
     r"thanks?(?:\s+you)?|thx|ty|"
     r"lol|haha|hmm+|nope|"
     r"good\s+(?:morning|afternoon|evening|night)|"
@@ -433,7 +437,7 @@ _HARD_CHAT_ONLY_RE = re.compile(
 # Full chat-only set (message_wants_tools standalone: no history context).
 _CHAT_ONLY_RE = re.compile(
     r"^(?:"
-    r"hi+|hello+|hey+|yo+|sup|"
+    r"hi+(?:\s+there)?|hello+(?:\s+there)?|hey+(?:\s+there)?|yo+|sup|"
     r"thanks?(?:\s+you)?|thx|ty|"
     r"ok(?:ay)?|k|cool|nice|great|awesome|perfect|"
     r"lol|haha|hmm+|mhm+|yep|yup|nope|sure|alright|"
@@ -510,6 +514,9 @@ _CHAT_SHORT_SET = frozenset(
         "hi!",
         "hey!",
         "hello!",
+        "hi there",
+        "hey there",
+        "hello there",
         "thanks",
         "thank you",
         "thanks!",
@@ -575,15 +582,38 @@ def message_asks_to_stop(message: str) -> bool:
     return any(h in msg for h in hard)
 
 
+# Leading "Hi," / "Hey —" so we can see if anything follows the greeting.
+_GREET_PREFIX_RE = re.compile(
+    r"(?i)^(?:hi+|hello+|hey+|yo+|sup)(?:\s+there)?[\s,.!:;—–-]+"
+)
+
+
 def is_chat_only_message(message: str) -> bool:
     """True only for greets, acks, and short meta questions.
 
     L1 must never strip tools unless this is True. Work requests are the
     default — never require a verb/noun hit to stay armed.
+
+    A greeting *prefix* is not enough: "Hi keep going" / "Hey, continue"
+    is work. Bare "Hi" / "Hi!" stays chat-only.
     """
     msg = (message or "").strip()
     if not msg:
         return True
+    # Continue / resume / keep going — even after "Hi,"
+    if _ACTION_KICK_RE.search(msg):
+        return False
+    rest = _GREET_PREFIX_RE.sub("", msg, count=1).strip()
+    if rest and rest != msg:
+        rest_low = rest.lower().rstrip("!.?")
+        leftover_is_chat = (
+            rest_low in _CHAT_SHORT_SET
+            or rest.lower() in _CHAT_SHORT_SET
+            or rest_low in {"there", "again", "friend", "buddy"}
+            or bool(_HARD_CHAT_ONLY_RE.match(rest) or _CHAT_ONLY_RE.match(rest))
+        )
+        if not leftover_is_chat:
+            return False
     if len(msg) <= 24 and "\n" not in msg:
         low = msg.lower().rstrip("!.?")
         if low in _CHAT_SHORT_SET or msg.lower() in _CHAT_SHORT_SET:
@@ -592,6 +622,20 @@ def is_chat_only_message(message: str) -> bool:
         return True
     # Short meta only — "what tools should I use to implement X" stays work.
     return bool(len(msg) <= 80 and _META_NO_TOOLS_RE.search(msg))
+
+
+def runtime_turn_is_chat_only(runtime: Any = None, message: str | None = None) -> bool:
+    """True when this turn's user text is a greeting/ack (no work resume).
+
+    Empty/unknown text is *not* chat-only — we must not strip work injects
+    when the last user line has not been stamped yet.
+    """
+    msg = message
+    if msg is None and runtime is not None:
+        msg = str(getattr(runtime, "_last_user_text", "") or "")
+    if not (msg or "").strip():
+        return False
+    return is_chat_only_message(str(msg))
 
 
 # Polite wrappers that look like questions but are work ("can you add…").

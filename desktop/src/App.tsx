@@ -79,6 +79,7 @@ import { getStreamJob, subscribeStreamJobs } from './sessions/streamJobs'
 import { exportSession, importSession } from './api/messages'
 import { getServerUrl } from './api/client'
 import { getSettings, updateSettings } from './api/settings'
+import { subscribeXaiOAuth } from './api/xaiOAuth'
 
 import { tauriInvoke, tauriListen } from './api/tauri'
 import { normalizeToolProcess, type ToolProcessMode } from './utils/toolLabels'
@@ -573,6 +574,37 @@ export default function App() {
       for (const u of off) u()
     }
   }, [runUpdateCheckVisible, openSettingsInRail])
+
+  // OAuth poll lives outside Settings so a rail switch cannot drop the result.
+  useEffect(() => {
+    return subscribeXaiOAuth((e) => {
+      if (e.phase !== 'connected') return
+      setWsLayout((prev) => {
+        if (prev.right === 'settings' || prev.left === 'settings') return prev
+        const next = {
+          ...prev,
+          right: 'settings' as const,
+          rightRail: 'open' as const,
+          rightOpen: true,
+        }
+        saveWorkspaceLayout(next)
+        return next
+      })
+      void getSettings()
+        .then((s) => {
+          if (s.llm_provider && s.llm_model && !activeId) {
+            setLlmProvider(String(s.llm_provider))
+            setModel(String(s.llm_model))
+          }
+          setUserName((s.user_name || '').trim())
+          void refreshConnected()
+          return refreshModels({
+            provider: s.llm_provider ? String(s.llm_provider) : undefined,
+          })
+        })
+        .catch(() => refreshModels())
+    })
+  }, [activeId, refreshConnected, refreshModels, setLlmProvider, setModel, setUserName, setWsLayout])
 
 
   useAppBootstrap({
@@ -1659,6 +1691,7 @@ export default function App() {
                 const s = await create(undefined, undefined, { focus: false })
                 if (activeIdRef.current) return activeIdRef.current
                 if (s?.id) {
+                  activeIdRef.current = s.id
                   setActiveId(s.id)
                   setOpenTabs((prev) => new Set([...prev, s.id]))
                 }

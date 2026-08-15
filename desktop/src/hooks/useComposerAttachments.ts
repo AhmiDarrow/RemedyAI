@@ -39,8 +39,9 @@ export function useComposerAttachments(opts: {
   sessionKey?: string | null
   disabled?: boolean
   onError?: (msg: string) => void
+  carryNoneToRef?: { current: string | null }
 }) {
-  const { ensureSessionId, sessionKey, disabled, onError } = opts
+  const { ensureSessionId, sessionKey, disabled, onError, carryNoneToRef } = opts
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -79,6 +80,7 @@ export function useComposerAttachments(opts: {
       next,
       attachmentsRef.current,
       [],
+      carryNoneToRef?.current,
     )
     prevKeyRef.current = swapped.key
     if (swapped.carried) return
@@ -173,8 +175,12 @@ export function useComposerAttachments(opts: {
         onError?.(msg)
         return
       }
-      const targetKey =
-        startedKey === NONE_SESSION_KEY ? sessionKeyRef.current : startedKey
+      // Chips belong on the session that stored the bytes — not the tab
+      // focused after the await (user may have clicked another chat).
+      const targetKey = sessionStashKey(sid)
+      if (startedKey === NONE_SESSION_KEY && carryNoneToRef) {
+        carryNoneToRef.current = sid
+      }
       const room = MAX_FILES - attachmentsRef.current.length
       if (room <= 0) {
         setUploadError(`Max ${MAX_FILES} attachments per message.`)
@@ -250,8 +256,10 @@ export function useComposerAttachments(opts: {
         for (const k of batchKeys) inflightDropKeysRef.current.delete(k)
       }
       const sid = await ensureSessionId()
-      const targetKey =
-        startedKey === NONE_SESSION_KEY ? sessionKeyRef.current : startedKey
+      const targetKey = sid ? sessionStashKey(sid) : startedKey
+      if (sid && startedKey === NONE_SESSION_KEY && carryNoneToRef) {
+        carryNoneToRef.current = sid
+      }
       const dropPending = (prev: AttachmentMeta[]) => {
         const pendingNames = new Set(batch.map((b) => b.filename))
         return prev.filter(

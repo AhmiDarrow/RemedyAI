@@ -238,3 +238,31 @@ async def test_bootstrap_writes_runnable_calculator(tmp_path):
     p = subprocess.run(["python", str(out)], capture_output=True, text=True, timeout=10)
     assert p.returncode == 0
     assert p.stdout.strip() == "5"
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_skips_in_plan_mode(tmp_path):
+    from pathlib import Path
+
+    from remedy.core.local_agent_optimize import maybe_bootstrap_local_create
+    from remedy.core.turn_context import begin_turn, end_turn
+
+    out = tmp_path / "calculator.py"
+    msg = f"Create calculator at {out.as_posix()} with add/sub/mul/div"
+
+    class R:
+        _plan_mode = True
+
+        def effective_project_path(self):
+            return str(tmp_path)
+
+        def resolve_tool_path(self, path, for_write=False):
+            return Path(path)
+
+    toks = begin_turn("plan-boot", project_raw=str(tmp_path), active_path=".", plan_mode=True)
+    try:
+        res = await maybe_bootstrap_local_create(R(), msg)
+    finally:
+        end_turn("plan-boot", *toks)
+    assert res is None
+    assert not out.exists()

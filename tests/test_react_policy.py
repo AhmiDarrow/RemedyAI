@@ -82,14 +82,50 @@ def test_message_wants_tools_chat_vs_code() -> None:
     ) is True
 
 
+def test_runtime_turn_is_chat_only() -> None:
+    from remedy.core.react_policy import runtime_turn_is_chat_only
+
+    class R:
+        _last_user_text = "Hi"
+
+    assert runtime_turn_is_chat_only(R()) is True
+    assert runtime_turn_is_chat_only(message="thanks!") is True
+    assert runtime_turn_is_chat_only(message="run pytest and fix red") is False
+    assert runtime_turn_is_chat_only(message="") is False
+    assert runtime_turn_is_chat_only() is False
+
+
 def test_is_chat_only_message() -> None:
     assert is_chat_only_message("thanks") is True
     assert is_chat_only_message("hi") is True
+    assert is_chat_only_message("Hi!") is True
+    assert is_chat_only_message("hey there") is True
     assert is_chat_only_message("what skills do you have?") is True
     assert is_chat_only_message("add a dark mode toggle to the about window") is False
     assert is_chat_only_message(
         "we need a 15minute autolock timeout and resize settings"
     ) is False
+    # Greeting + continue is work — must not look like a bare "Hi"
+    assert is_chat_only_message("Hi keep going") is False
+    assert is_chat_only_message("Hi, keep going") is False
+    assert is_chat_only_message("Hey continue") is False
+    assert is_chat_only_message("hi pick up where we left off") is False
+    assert is_chat_only_message("Hello, resume the build") is False
+    # Typo / extra words after hi still stay work (fail-open)
+    assert is_chat_only_message("Hi kep going") is False
+    assert is_chat_only_message("hi run pytest") is False
+    assert message_wants_tools("Hi keep going") is True
+    assert message_wants_tools("Hi kep going") is True
+
+
+def test_runtime_greeting_prefix_does_not_strip_continue() -> None:
+    from remedy.core.react_policy import runtime_turn_is_chat_only
+
+    assert runtime_turn_is_chat_only(message="Hi") is True
+    assert runtime_turn_is_chat_only(message="Hi keep going") is False
+    assert runtime_turn_is_chat_only(message="Hi, keep going") is False
+    assert runtime_turn_is_chat_only(message="Hi kep going") is False
+    assert runtime_turn_is_chat_only(message="hey continue") is False
 
 
 def test_is_knowledge_question_class() -> None:

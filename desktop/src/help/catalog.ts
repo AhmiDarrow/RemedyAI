@@ -88,6 +88,14 @@ const META: HelpArticleMeta[] = [
     summary: 'Download, install paths, first launch, always-ready.',
   },
   {
+    id: '01-install-linux',
+    title: 'Install (Linux)',
+    category: 'Start here',
+    order: 1.1,
+    tags: ['install', 'linux', 'wslg', 'paths'],
+    summary: 'Linux / WSLg desktop, sidecar rules, shared Windows home.',
+  },
+  {
     id: '02-first-run',
     title: 'First run & setup',
     category: 'Start here',

@@ -298,12 +298,12 @@ def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
             from remedy.core.project_fingerprint import local_bin_dirs
 
             suffix = ".exe" if os.name == "nt" else ""
-            for d in local_bin_dirs(cwd):
-                cand = d / (n + suffix if suffix and not n.lower().endswith(suffix) else n)
+            for bin_dir in local_bin_dirs(cwd):
+                cand = bin_dir / (n + suffix if suffix and not n.lower().endswith(suffix) else n)
                 if cand.is_file():
                     return str(cand)
                 if suffix:
-                    alt = d / f"{key}{suffix}"
+                    alt = bin_dir / f"{key}{suffix}"
                     if alt.is_file():
                         return str(alt)
         except Exception:

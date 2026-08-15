@@ -878,6 +878,22 @@ def test_claim_next_exclude_and_only(tmp_path: Path):
     assert only_nav.id == nav.id
 
 
+def test_renudge_keeps_session_id(tmp_path: Path):
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    job = b.enqueue("navigate", {"url": "https://example.com/a"}, session_id="sess-a")
+    assert b.take_ui_command(session_id="sess-a") is not None
+    assert b.peek_ui_command() is None
+    b.renudge_ui_for_job(job)
+    cmd = b.peek_ui_command()
+    assert cmd is not None
+    assert cmd.get("session_id") == "sess-a"
+    assert cmd.get("url") == "https://example.com/a"
+    b.set_focused_session("sess-b")
+    assert b.take_ui_command() is None
+
+
 def test_wait_renudges_ui_command(tmp_path: Path):
     """If host takes ui_command without completing, wait re-publishes it."""
     import threading
@@ -980,6 +996,32 @@ def test_purge_old_spares_open_jobs(tmp_path: Path):
     assert b._read(done_j.id) is None
 
 
+def test_purge_old_shots_stays_in_own_home(tmp_path: Path, monkeypatch):
+    """A custom home must never delete ~/.remedy/computer/shots."""
+    import os
+    import time
+
+    fake_user = tmp_path / "userhome"
+    default_shots = fake_user / ".remedy" / "computer" / "shots"
+    default_shots.mkdir(parents=True)
+    victim = default_shots / "keep.png"
+    victim.write_bytes(b"\x89PNG_keep")
+    os.utime(victim, (time.time() - 10_000, time.time() - 10_000))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_user))
+
+    custom = tmp_path / "portable"
+    b = ComputerHostBridge(home_dir=custom)
+    own = custom / "computer" / "shots"
+    own.mkdir(parents=True)
+    drop = own / "stale.png"
+    drop.write_bytes(b"\x89PNG_stale")
+    os.utime(drop, (time.time() - 10_000, time.time() - 10_000))
+    n = b.purge_old_shots(max_age_s=60.0)
+    assert n >= 1
+    assert not drop.is_file()
+    assert victim.is_file()
+
+
 def test_purge_old_shots_ttl(tmp_path: Path):
     """Screenshots under computer/shots age out with purge_old (S-COMP-02)."""
     import os
@@ -1033,6 +1075,31 @@ def test_enqueue_stamps_session_id(tmp_path: Path):
     raw = b._read(j.id)
     assert raw is not None
     assert raw.session_id == "tab-9"
+
+
+def test_find_recent_success_does_not_prefix_match_other_path(tmp_path: Path):
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    j = b.enqueue("navigate", {"url": "https://github.com"})
+    b.complete(
+        j.id,
+        ok=True,
+        result={"ok": True, "url": "https://github.com"},
+    )
+    assert (
+        b.find_recent_success(action="navigate", url="https://github.com/foo")
+        is None
+    )
+    child = b.enqueue("navigate", {"url": "https://github.com/foo"})
+    b.complete(
+        child.id,
+        ok=True,
+        result={"ok": True, "url": "https://github.com/foo/bar"},
+    )
+    found = b.find_recent_success(action="navigate", url="https://github.com/foo")
+    assert found is not None
+    assert found.id == child.id
 
 
 def test_find_recent_success(tmp_path: Path):
@@ -1433,6 +1500,29 @@ def test_executor_session_id_prefers_turn_context():
         assert ex._session_id(RT()) == "turn-sid"
     finally:
         end_turn("turn-sid", *toks)
+
+
+def test_executor_run_honors_explicit_session_id():
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    class RT:
+        _session_id = "runtime-stale"
+
+    ex = ComputerExecutor()
+    seen: list[str | None] = []
+    orig = ex._run_body
+
+    def _body(act, *, runtime=None, session_id=None, target="auto", **kwargs):
+        seen.append(session_id)
+        return "ok"
+
+    ex._run_body = _body  # type: ignore[method-assign]
+    try:
+        assert ex.run(ComputerAction.WINDOWS, runtime=RT(), session_id="turn-a") == "ok"
+        assert seen == ["turn-a"]
+    finally:
+        ex._run_body = orig
 
 
 def test_offline_navigate_refuses_os_browser_snapshot_falls_back(

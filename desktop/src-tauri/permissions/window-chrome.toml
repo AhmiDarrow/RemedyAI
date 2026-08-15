@@ -6,10 +6,13 @@ commands.allow = [
   "minimize_main_window",
   "start_dragging_main_window",
   "toggle_maximize_main_window",
+  "is_main_window_maximized",
   "request_close_main_window",
   "switch_to_web_ui",
   "quit_app",
   "request_quit_app",
   "set_desktop_prefs",
   "get_desktop_prefs",
+  "apply_linux_chrome_theme",
+  "set_tray_tooltip",
 ]

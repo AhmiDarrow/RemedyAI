@@ -219,10 +219,13 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   /** When set, Enter/send updates this queue item instead of enqueueing a new one. */
   const [editingQueueId, setEditingQueueId] = useState<string | null>(null)
 
+  const carryNoneToRef = useRef<string | null>(null)
   const resolveSession = useCallback(async (): Promise<string | null> => {
     if (sessionId) return sessionId
-    if (ensureSession) return ensureSession()
-    return null
+    if (!ensureSession) return null
+    const id = await ensureSession()
+    if (id) carryNoneToRef.current = id
+    return id
   }, [sessionId, ensureSession])
 
   // Attachment rail must init before any use of `attachments` / attachmentsRef.
@@ -245,6 +248,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     ensureSessionId: resolveSession,
     sessionKey: sessionId,
     disabled,
+    carryNoneToRef,
   })
 
   const hasImageAttachments = attachments.some((a) => a.is_image)
@@ -297,7 +301,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       next,
       inputRef.current,
       '',
+      carryNoneToRef.current,
     )
+    carryNoneToRef.current = null
     prevInputKeyRef.current = swapped.key
     if (swapped.carried) return
     setInput(swapped.value)

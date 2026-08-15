@@ -788,6 +788,13 @@ async def maybe_bootstrap_local_create(
     if not message_wants_implement(message):
         return None
     try:
+        from remedy.core.turn_context import current_plan_mode
+
+        if current_plan_mode(runtime):
+            return None
+    except Exception:
+        pass
+    try:
         from remedy.core.llm_binding import get_llm_binding
 
         b = get_llm_binding(runtime)

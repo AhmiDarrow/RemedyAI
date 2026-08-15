@@ -78,13 +78,17 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         "show_base_url": False,
         "free_tier": "none",
         "key_docs_url": "https://console.anthropic.com/settings/keys",
+        "limits_blurb": (
+            "Uses prepaid Anthropic API credits (console.anthropic.com). "
+            "A Claude Pro / Max / Claude Code weekly limit does not pay for "
+            "this. Do not paste sk-ant-oat login tokens here."
+        ),
         "models": [
-            {"id": "claude-opus-4-1", "name": "Claude Opus 4.1", "vision": True},
-            {"id": "claude-opus-4-0", "name": "Claude Opus 4", "vision": True},
-            {"id": "claude-sonnet-4-0", "name": "Claude Sonnet 4", "vision": True},
-            {"id": "claude-3-7-sonnet-latest", "name": "Claude 3.7 Sonnet", "vision": True},
-            {"id": "claude-3-5-sonnet-latest", "name": "Claude 3.5 Sonnet", "vision": True},
-            {"id": "claude-3-5-haiku-latest", "name": "Claude 3.5 Haiku", "vision": True},
+            {"id": "claude-opus-5", "name": "Claude Opus 5", "vision": True},
+            {"id": "claude-sonnet-5", "name": "Claude Sonnet 5", "vision": True},
+            {"id": "claude-haiku-4-5", "name": "Claude Haiku 4.5", "vision": True},
+            {"id": "claude-opus-4-8", "name": "Claude Opus 4.8", "vision": True},
+            {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "vision": True},
         ],
     },
     "google": {

@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.25.1"
+version = "0.26.0"
 description = "Remedy Desktop — local AI partner for knowledge, design, and code"
 authors = ["Ahmi <ahmitdarrow@gmail.com>"]
 license = "LicenseRef-Proprietary"
@@ -31,8 +31,6 @@ ureq = { version = "2.12", default-features = false, features = ["tls", "json"] 
 base64 = "0.22"
 sha2 = "0.10"
 minisign-verify = "0.2"
-# Direct registry access for legacy Run-key scrub (no PowerShell Bypass).
-winreg = "0.55"
 # Native save/open dialogs (avoids multi-second PowerShell STA cold-start on export/import).
 rfd = "0.15"
 portable-pty = "0.9.0"
@@ -44,8 +42,15 @@ adblock = { version = "0.13.2", default-features = false, features = [
   "full-regex-handling",
 ] }
 
+# Linux: GTK overlay so the Browser rail child webview is not packed into the
+# default vbox (which splits the window in half). Also used for themed chrome.
+[target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+gtk = "0.18"
+
 # WebView2 COM for in-rail video fullscreen (ContainsFullScreenElementChanged).
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
 windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# Direct registry access for legacy Run-key scrub (no PowerShell Bypass).
+winreg = "0.55"
 

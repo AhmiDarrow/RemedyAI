@@ -31,19 +31,17 @@ class ComputerExecutor:
         self._run_tls = threading.local()
 
     def _session_id(self, runtime: Any | None) -> str | None:
+        tls = self._run_session_id()
+        if tls:
+            return tls
         try:
             from remedy.core.turn_context import turn_session_id
 
-            sid = turn_session_id(runtime)
-            if sid:
-                return sid
+            # turn_session_id already falls back to runtime when *not* in a turn.
+            # Never add a second process-wide read — that stamps Tab B onto Tab A.
+            return turn_session_id(runtime)
         except Exception:
-            pass
-        if runtime is not None:
-            raw = str(getattr(runtime, "_session_id", None) or "").strip()
-            if raw:
-                return raw
-        return None
+            return None
 
     def _run_session_id(self) -> str | None:
         return getattr(self._run_tls, "session_id", None)
@@ -92,6 +90,7 @@ class ComputerExecutor:
         *,
         target: str = "auto",
         runtime: Any | None = None,
+        session_id: str | None = None,
         **kwargs: Any,
     ) -> str:
         act = (
@@ -99,7 +98,8 @@ class ComputerExecutor:
             if isinstance(action, ComputerAction)
             else ComputerAction(str(action).lower())
         )
-        session_id = self._session_id(runtime)
+        sid = str(session_id or "").strip() or self._session_id(runtime)
+        session_id = sid
         self._run_tls.session_id = session_id
         try:
             return self._run_body(

@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { isTauri } from '../api/tauri'
+import { isTauri, tauriInvoke } from '../api/tauri'
 import { browserStackHold } from '../utils/browserStack'
+
+/** Linux (and any undecorated) Tauri build: in-app window controls + drag. */
+function useCustomWindowChrome(): boolean {
+  if (typeof navigator === 'undefined') return false
+  if (!isTauri()) return false
+  const ua = navigator.userAgent || ''
+  return /Linux|X11|Wayland/i.test(ua) && !/Android/i.test(ua)
+}
 
 export type AppMenuAction =
   | 'settings'
@@ -33,8 +41,35 @@ export function TitleBar({
   onMenuAction,
 }: TitleBarProps) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [maximized, setMaximized] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
+  const customChrome = useCustomWindowChrome()
+
+  useEffect(() => {
+    const root = document.documentElement
+    if (customChrome) root.setAttribute('data-custom-chrome', '1')
+    else root.removeAttribute('data-custom-chrome')
+    return () => root.removeAttribute('data-custom-chrome')
+  }, [customChrome])
+
+  useEffect(() => {
+    if (!customChrome) return
+    let live = true
+    const tick = () => {
+      void tauriInvoke<boolean>('is_main_window_maximized')
+        .then((v) => {
+          if (live) setMaximized(Boolean(v))
+        })
+        .catch(() => {})
+    }
+    tick()
+    const id = window.setInterval(tick, 700)
+    return () => {
+      live = false
+      window.clearInterval(id)
+    }
+  }, [customChrome])
 
   useEffect(() => {
     if (!menuOpen) return
@@ -67,14 +102,16 @@ export function TitleBar({
 
   return (
     <div
-      className="titlebar flex items-center flex-shrink-0 select-none"
+      className={`titlebar flex items-stretch flex-shrink-0 select-none${
+        customChrome ? ' has-custom-chrome' : ''
+      }`}
       style={{
         height: 36,
         background: 'var(--bg-secondary)',
         borderBottom: '1px solid var(--border)',
         color: 'var(--text-primary)',
         paddingLeft: 0,
-        paddingRight: 8,
+        paddingRight: customChrome ? 0 : 8,
       }}
     >
       {/* Logo / app menu */}
@@ -157,19 +194,98 @@ export function TitleBar({
         )}
       </div>
 
-      {/* Spacer — window min/max/close live in the OS title bar (decorations: true). */}
-      <div className="flex-1 min-w-0 h-full" aria-hidden />
+      {/* Spacer — OS decorations on Windows; Linux uses this as the drag strip. */}
+      <div
+        className="flex-1 min-w-0 h-full"
+        aria-hidden
+        onMouseDown={(e) => {
+          if (!customChrome || e.button !== 0) return
+          void tauriInvoke('start_dragging_main_window')
+        }}
+        onDoubleClick={() => {
+          if (!customChrome) return
+          void tauriInvoke<boolean>('toggle_maximize_main_window')
+            .then((v) => setMaximized(Boolean(v)))
+            .catch(() => {})
+        }}
+      />
 
       {version && (
         <span
-          className="text-[10px] tabular-nums flex-shrink-0 pr-1"
+          className="titlebar-version text-[10px] tabular-nums flex-shrink-0 self-center pr-2"
           style={{ color: 'var(--text-muted)' }}
           title={`Remedy v${version}`}
         >
           v{version}
         </span>
       )}
+
+      {customChrome && (
+        <div className="titlebar-win-btns flex items-stretch h-full flex-shrink-0">
+          <button
+            type="button"
+            className="titlebar-win-btn"
+            title="Minimize"
+            aria-label="Minimize"
+            onClick={() => void tauriInvoke('minimize_main_window')}
+          >
+            <WinIcon kind="min" />
+          </button>
+          <button
+            type="button"
+            className="titlebar-win-btn"
+            title={maximized ? 'Restore' : 'Maximize'}
+            aria-label={maximized ? 'Restore' : 'Maximize'}
+            onClick={() => {
+              void tauriInvoke<boolean>('toggle_maximize_main_window')
+                .then((v) => setMaximized(Boolean(v)))
+                .catch(() => {})
+            }}
+          >
+            <WinIcon kind={maximized ? 'restore' : 'max'} />
+          </button>
+          <button
+            type="button"
+            className="titlebar-win-btn is-close"
+            title="Close"
+            aria-label="Close"
+            onClick={() => void tauriInvoke('request_close_main_window')}
+          >
+            <WinIcon kind="close" />
+          </button>
+        </div>
+      )}
     </div>
+  )
+}
+
+function WinIcon({ kind }: { kind: 'min' | 'max' | 'restore' | 'close' }) {
+  if (kind === 'min') {
+    return (
+      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+        <path d="M1 5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      </svg>
+    )
+  }
+  if (kind === 'restore') {
+    return (
+      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+        <rect x="3.2" y="1.4" width="5.4" height="5.4" rx="0.4" fill="none" stroke="currentColor" strokeWidth="1.2" />
+        <rect x="1.4" y="3.2" width="5.4" height="5.4" rx="0.4" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      </svg>
+    )
+  }
+  if (kind === 'max') {
+    return (
+      <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+        <rect x="1.4" y="1.4" width="7.2" height="7.2" rx="0.6" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      </svg>
+    )
+  }
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+      <path d="M2 2l6 6M8 2L2 8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
   )
 }
 

@@ -13,6 +13,7 @@ from remedy.core.turn_context import (
     abort_session,
     begin_turn,
     current_plan_mode,
+    current_turn_approval_mode,
     current_turn_tool_steps,
     current_turn_workspace,
     end_turn,
@@ -154,6 +155,24 @@ def test_plan_mode_and_tool_steps_isolated_per_turn():
         assert current_turn_tool_steps() == []
     finally:
         end_turn("build-sess", *t_build)
+
+
+def test_approval_mode_snapped_at_begin_turn():
+    from remedy.core.approvals import APPROVALS
+
+    prev = APPROVALS.mode
+    try:
+        APPROVALS.set_mode("ask")
+        toks = begin_turn("jail-sess", project_raw=None, active_path=".")
+        try:
+            assert current_turn_approval_mode() == "ask"
+            APPROVALS.set_mode("full")
+            assert current_turn_approval_mode() == "ask"
+        finally:
+            end_turn("jail-sess", *toks)
+        assert current_turn_approval_mode() is None
+    finally:
+        APPROVALS.set_mode(prev)
 
 
 def test_continuity_objects_isolated_per_turn():

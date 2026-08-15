@@ -217,6 +217,11 @@ def _unquote(tok: str) -> str:
     return t
 
 
+def _cmd_exist_dir(win_p: str) -> str:
+    """Quoted dir test that does not escape the closing quote (never ``\"``)."""
+    return _q(win_p.rstrip("\\") + "\\.")
+
+
 def _q(path: str) -> str:
     p = path.replace("/", "\\") if ("/" in path or os.name == "nt") else path
     if not p:
@@ -248,7 +253,7 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
             win_p = p.replace("/", "\\").rstrip("\\")
             # Parens so `mkdir -p dest && gcc` still runs gcc when dest exists.
             # Bare `if not exist … && gcc` skips gcc (IF consumes the line).
-            parts.append(f'(if not exist {_q(win_p + os.sep)} mkdir {_q(win_p)})')
+            parts.append(f'(if not exist {_cmd_exist_dir(win_p)} mkdir {_q(win_p)})')
         notes.append("mkdir -p → if not exist mkdir")
         return " & ".join(parts), notes
 
@@ -266,11 +271,13 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
         for p in paths:
             win_p = p.replace("/", "\\").rstrip("\\")
             if recursive:
+                # Parens so `rm -rf dest && gcc` still runs gcc (IF eats the line).
                 bits.append(
-                    f'if exist "{win_p}\\" (rmdir /s /q "{win_p}") else if exist "{win_p}" del /f /q "{win_p}"'
+                    f"(if exist {_cmd_exist_dir(win_p)} (rmdir /s /q {_q(win_p)}) "
+                    f"else if exist {_q(win_p)} del /f /q {_q(win_p)})"
                 )
             else:
-                bits.append(f'del /f /q "{win_p}"')
+                bits.append(f"del /f /q {_q(win_p)}")
         notes.append("rm → del/rmdir")
         return " & ".join(bits), notes
 
@@ -310,11 +317,11 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
     if head == "export" and len(toks) >= 2:
         assign = _unquote(" ".join(toks[1:]))
         notes.append("export → set")
-        return f"set {assign}", notes
+        return f'set "{assign}"', notes
 
     if head == "touch" and len(toks) >= 2:
         paths = [_unquote(t) for t in toks[1:] if not t.startswith("-")]
-        bits = [f'if not exist {_q(p)} type nul > {_q(p)}' for p in paths]
+        bits = [f"(if not exist {_q(p)} type nul > {_q(p)})" for p in paths]
         notes.append("touch → type nul")
         return " & ".join(bits) if bits else s, notes
 
@@ -329,7 +336,8 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
     if head in ("which",) or (head == "command" and len(toks) >= 3 and toks[1] == "-v"):
         name = _unquote(toks[-1])
         notes.append("which → where")
-        return f"where {name}", notes
+        # Always quote — `which 'foo&calc'` must not become `where foo&calc`.
+        return f"where {_q(name)}", notes
 
     if head == "chmod":
         notes.append("chmod ignored on Windows host")

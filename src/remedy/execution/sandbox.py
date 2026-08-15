@@ -16,6 +16,23 @@ from typing import Any
 from remedy.core.security import check_dangerous_command
 
 
+def _spawn_error_stderr(command: list[str], exc: OSError) -> str:
+    """Human stderr for a failed spawn.
+
+    WSL + Windows PATH entries often raise ``PermissionError`` (EACCES) for an
+    unknown command name instead of ``FileNotFoundError``.
+    """
+    import shutil
+
+    name = str(command[0]) if command else ""
+    if isinstance(exc, FileNotFoundError):
+        return f"Command not found: {name or exc}"
+    if isinstance(exc, PermissionError) and name:
+        if not Path(name).is_file() and shutil.which(name) is None:
+            return f"Command not found: {name}"
+    return f"OS error: {exc}"
+
+
 def scrub_subprocess_env(env: dict[str, str] | None = None) -> dict[str, str]:
     """Copy env for child processes without provider keys / injection vectors.
 
@@ -324,18 +341,11 @@ class SubprocessSandbox(Sandbox):
                 )
             finally:
                 unregister_turn_process(proc)
-        except FileNotFoundError as e:
-            elapsed = (time.monotonic() - start) * 1000
-            return ExecutionResult(
-                exit_code=-1,
-                stderr=f"Command not found: {e}",
-                duration_ms=elapsed,
-            )
         except OSError as e:
             elapsed = (time.monotonic() - start) * 1000
             return ExecutionResult(
                 exit_code=-1,
-                stderr=f"OS error: {e}",
+                stderr=_spawn_error_stderr(command, e),
                 duration_ms=elapsed,
             )
 

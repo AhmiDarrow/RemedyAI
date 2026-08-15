@@ -13,6 +13,7 @@ import {
 } from './formUi'
 import { Field, PERSONAS } from './shared'
 import { TOOL_PROCESS_MODES } from '../../utils/toolLabels'
+import { isLinuxDesktop } from '../../utils/platform'
 
 export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
   const {
@@ -451,29 +452,44 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
 
       {/* Always ready */}
       <SettingsSection {...sectionProps('always-ready')}>
+              {!isLinuxDesktop() && (
               <FormToggle
                 checked={launchAtLogin}
                 onChange={setLaunchAtLogin}
                 label="Start with Windows"
+                description="Uses the Windows Startup folder (Settings → Apps → Startup) — not the registry Run key."
               />
+              )}
               <FormToggle
                 checked={startInTray}
                 onChange={setStartInTray}
-                label="Start hidden in tray"
-                description='Off = window opens normally (recommended). On = only a tray icon until you click it. Independent of "Start with Windows".'
+                label={isLinuxDesktop() ? "Start minimized" : "Start hidden in tray"}
+                description={
+                  isLinuxDesktop()
+                    ? "Off = window opens normally (recommended). On = start minimized to the taskbar (WSLg has no tray)."
+                    : 'Off = window opens normally (recommended). On = only a tray icon until you click it. Independent of "Start with Windows".'
+                }
               />
               <FormToggle
                 checked
                 disabled
                 onChange={() => {}}
-                label="Close window (✕) always hides to tray"
-                description="Always on for the always-ready partner: the OS ✕ / Alt+F4 hides Remedy to the system tray and keeps the local API running. Fully stop only from tray Quit."
+                label={
+                  isLinuxDesktop()
+                    ? "Close window (✕) minimizes to the taskbar"
+                    : "Close window (✕) always hides to tray"
+                }
+                description={
+                  isLinuxDesktop()
+                    ? "Always on: ✕ keeps Remedy running and leaves a Windows taskbar button (WSLg has no tray). Fully stop from the app menu → Quit."
+                    : "Always on for the always-ready partner: the OS ✕ / Alt+F4 hides Remedy to the system tray and keeps the local API running. Fully stop only from tray Quit."
+                }
               />
               <FormToggle
                 checked={skipQuitWarn}
                 onChange={setSkipQuitWarn}
                 label="Don't warn when quitting (server stops)"
-                description="Opt-in only. Uses the Windows Startup folder (Settings → Apps → Startup) — not the registry Run key. Quit fully stops the local API; use Switch to WebUI or hide-to-tray to keep the server running."
+                description="Opt-in only. Quit fully stops the local API; use Switch to WebUI or hide-to-tray to keep the server running."
               />
       </SettingsSection>
 

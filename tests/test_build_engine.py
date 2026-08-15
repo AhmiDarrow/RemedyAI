@@ -31,6 +31,18 @@ def test_detects_build_requests():
     assert not looks_like_build_request("what is a monad?")
 
 
+def test_begin_build_turn_greeting_ignores_leftover_brief():
+    rt = SimpleNamespace(
+        _llm_provider="xai",
+        _llm_model="grok-4",
+        _llm_base_url="",
+        _session_brief=SimpleNamespace(intent="implement the installer and ship"),
+    )
+    assert begin_build_turn(rt, "Hi") is None
+    assert begin_build_turn(rt, "thanks") is None
+    assert begin_build_turn(rt, "Hi keep going") is not None
+
+
 def test_begin_build_turn_stamps_runtime():
     rt = SimpleNamespace(
         _llm_provider="xai",

@@ -297,3 +297,27 @@ class TestXaiDeviceLoginMock:
         assert p.provider_name == "xai"
         assert "x.ai" in p.default_base_url
         assert get_provider_for_base_url("https://api.x.ai/v1").provider_name == "xai"
+
+
+class TestSettingsIncludesXaiAuth:
+    def test_get_settings_includes_xai_auth_when_provider_is_not_xai(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+        home = tmp_path.as_posix().replace("\\", "/")
+        (tmp_path / "config.toml").write_text(
+            f'name = "Remedy"\nsetup_completed = true\nllm_provider = "demo"\nhome_dir = "{home}"\n',
+            encoding="utf-8",
+        )
+        xai_auth.save_api_key("xai-visible", home=tmp_path)
+        from fastapi.testclient import TestClient
+
+        from remedy.interfaces.api import create_app
+
+        client = TestClient(create_app())
+        r = client.get("/api/settings")
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data.get("llm_provider") in ("demo", "xai") or "xai_auth" in data
+        assert "xai_auth" in data
+        assert data["xai_auth"].get("connected") is True

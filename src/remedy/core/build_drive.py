@@ -318,6 +318,13 @@ def maybe_auto_implement(
     """After explore thrash with zero writes: machine starts TDD + hops."""
     if state is None or not getattr(state, "active", False):
         return None
+    try:
+        from remedy.core.turn_context import current_plan_mode
+
+        if current_plan_mode(runtime):
+            return None
+    except Exception:
+        pass
     from remedy.core.build_delta import allow_background_drive
 
     # Live capable models write themselves. Auto TDD/hops steal the turn.

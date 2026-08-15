@@ -4,6 +4,48 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-08-15
+
+First true **Windows + Linux** desktop. Same partner, same local API, OS-correct
+chrome and host rewrite. Hardening so Plan, Stop, Settings, and the jail do not
+lie under load.
+
+### Desktop / Linux
+
+- Linux / WSLg: maximize fills the **Windows work area of the monitor the window
+  is on**; Close minimizes to the taskbar (no tray). “Start with Windows” is
+  hidden. Sidecar rejects `/mnt/` and `.exe` shebangs.
+- Restore no longer immediately re-snaps. External terminal does not exec a
+  Windows-interop `$SHELL`. “Open in browser” spawns `xdg-open` and returns.
+- xAI OAuth lives outside Settings so the rail can close; persist failure does
+  not fake Connected. Google OAuth finishes only on **this** session status.
+- Composer send/attach stay on the session that created them. Hidden window
+  does not claim click/type. Computer host retries 401 after token rotate.
+
+### API / Windows loop
+
+- Goal create and partner status run `take_step` off the event loop (no
+  `os.startfile` / web from HTTP create). Life-goal JSON replace retries on
+  Windows lock.
+- `/reset` aborts then wipes; dying-stream persist cannot refill the empty
+  chat. RMB Settings apply waits off-thread (up to 120s).
+- Shared-shell `current_cwd` timeout kills the tree so the next command does
+  not sit on a dead ConPTY read.
+
+### Security / jail / Plan
+
+- Plan mode cannot write via local bootstrap, TDD, or tool rearm.
+- In-flight turns keep the approval mode they started with (Settings → Full
+  does not lift a live Ask/Auto jail).
+- `which 'foo&calc'` rewrites to quoted `where`. `[IO.Path]::Combine` is
+  opaque. Navigate timeout is a **failure**, not fake SUCCESS.
+- Omitted `http_bootstrap` stays off on desktop; first Save no longer mints
+  loopback tokens.
+
+### CLI
+
+- `python -m remedy` is the same CLI as `remedy`.
+
 ## [0.25.1] - 2026-08-15
 
 Hardening pass: project write jail, Stop/abort, RMB stay-off, and tab isolation.

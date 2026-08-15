@@ -571,6 +571,8 @@ def test_shell_write_jail_blocks_sc_copy_python_and_opaque(tmp_path: Path):
         f'python -c "open(r\'{target}\', \'w\').write(\'x\')"',
         r'Set-Content -Path $env:USERPROFILE\Desktop\leak.txt -Value z',
         r'Set-Content -Path (Join-Path $env:USERPROFILE "SecretFolder\x") -Value z',
+        r"Set-Content ([IO.Path]::Combine('C:\Users\Administrator','Desktop','pwn.txt')) x",
+        r"Set-Content ([System.IO.Path]::Combine('C:\Users\Public','pwn.txt')) x",
         r'Set-Content \Users\Public\pwn.txt pwned',
         f'Set-Content "{folder / "python_pwned.txt"}" hi',
     ]
@@ -599,6 +601,7 @@ def test_shell_write_jail_blocks_mixed_opaque_dest(tmp_path: Path):
         r'Set-Content -Path %TEMP%\leak.txt -Value z',
         r'iwr https://example.com -OutFile %TEMP%\x.html',
         r'curl -o %USERPROFILE%\Desktop\x.html https://example.com',
+        r"Set-Content ([IO.Path]::Combine('SecretFolder','pwn.txt')) x",
     ]
     for cmd in cases:
         hit = check_shell_write_jail(
@@ -1431,6 +1434,25 @@ def test_pytest_is_not_a_script_launch(tmp_path: Path):
         "tests/test_foo.py"
     ]
     assert extract_script_launch_targets("node write.js") == ["write.js"]
+
+
+def test_shell_write_jail_scans_in_root_script_launch(tmp_path: Path):
+    """An in-root script path must not skip a body scan of the launched file."""
+    sticky = tmp_path / "proj"
+    sticky.mkdir()
+    drop = sticky / "drop.py"
+    drop.write_text(
+        "from pathlib import Path\nPath.home().joinpath('Desktop','pwn.txt').write_text('x')\n",
+        encoding="utf-8",
+    )
+    hit = check_shell_write_jail(
+        f'python "{drop}"',
+        write_roots=[sticky.resolve()],
+        cwd=sticky,
+        project_bound=True,
+        approval_mode="auto",
+    )
+    assert hit is not None
 
 
 def test_auto_still_blocks_outside_writes(tmp_path: Path):

@@ -507,7 +507,7 @@ async def prepare_turn_preamble(
             message_wants_implement,
         )
 
-        if is_local_binding(_bind0.provider, _bind0.model, _bind0.base_url):
+        if (not plan_mode) and is_local_binding(_bind0.provider, _bind0.model, _bind0.base_url):
             # Always auto-approve + low thinking for local builds — never stall
             # mid-file_write on thumbs-down mode or High thinking monologues.
             ensure_local_power_approvals()

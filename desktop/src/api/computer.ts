@@ -1,5 +1,5 @@
 /** Computer-use host bridge (desktop claims browser jobs from the local API). */
-import { apiFetch, authHeaders, ensureApiToken, getServerUrl } from './client'
+import { apiFetch, authHeaders, clearApiToken, ensureApiToken, getServerUrl } from './client'
 
 function loopbackApi(): string {
   return `${getServerUrl()}/api`
@@ -36,10 +36,26 @@ async function hostFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (init?.body && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json'
   }
-  const res = await fetch(`${loopbackApi()}${path}`, {
+  let res = await fetch(`${loopbackApi()}${path}`, {
     ...init,
     headers,
   })
+  if (res.status === 401) {
+    clearApiToken()
+    await ensureApiToken().catch(() => null)
+    const retryHeaders: Record<string, string> = {
+      Accept: 'application/json',
+      ...authHeaders(),
+      ...(init?.headers as Record<string, string> | undefined),
+    }
+    if (init?.body && !retryHeaders['Content-Type']) {
+      retryHeaders['Content-Type'] = 'application/json'
+    }
+    res = await fetch(`${loopbackApi()}${path}`, {
+      ...init,
+      headers: retryHeaders,
+    })
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`computer host ${path} → ${res.status} ${text.slice(0, 200)}`)
@@ -120,14 +136,19 @@ export type ComputerUiCommand = {
   url?: string
   job_id?: string
   job_action?: string
+  session_id?: string
   ts?: string
 }
 
 /** Server asks Desktop to open Browser rail (like Settings) + optional URL. */
 export async function fetchComputerUiCommand(
   take = false,
+  sessionId?: string | null,
 ): Promise<ComputerUiCommand | null> {
-  const q = take ? '?take=1' : ''
+  const params = new URLSearchParams()
+  if (take) params.set('take', '1')
+  if (sessionId) params.set('session_id', sessionId)
+  const q = params.toString() ? `?${params.toString()}` : ''
   const data = await hostFetch<{ command?: ComputerUiCommand | null }>(
     `/computer/ui/command${q}`,
   )
@@ -142,7 +163,10 @@ export async function ackComputerUiCommand(jobId?: string | null): Promise<void>
 /** UI event: open the Browser rail for agent computer use. */
 export const COMPUTER_UI_EVENT = 'remedy:computer-ui'
 
-export function emitComputerUi(detail: { openBrowser?: boolean }): void {
+export function emitComputerUi(detail: {
+  openBrowser?: boolean
+  keepSettings?: boolean
+}): void {
   if (typeof window === 'undefined') return
   window.dispatchEvent(new CustomEvent(COMPUTER_UI_EVENT, { detail }))
 }
@@ -151,13 +175,19 @@ export function emitComputerUi(detail: { openBrowser?: boolean }): void {
  * Open a URL in Remedy's in-rail Browser (default for webpages).
  * Falls back to system browser only if Tauri navigate is unavailable.
  */
-export async function openUrlInBrowserRail(url: string): Promise<'rail' | 'external'> {
+export async function openUrlInBrowserRail(
+  url: string,
+  opts?: { keepSettings?: boolean },
+): Promise<'rail' | 'external'> {
   const trimmed = (url || '').trim()
   if (!trimmed) return 'external'
   try {
     const { isTauri, tauriInvoke } = await import('./tauri')
     if (isTauri()) {
-      emitComputerUi({ openBrowser: true })
+      emitComputerUi({
+        openBrowser: true,
+        keepSettings: Boolean(opts?.keepSettings),
+      })
       await new Promise((r) => window.setTimeout(r, 350))
       // Best-effort bounds from Browser slide host
       let bounds: BrowserBoundsPayload | null = null

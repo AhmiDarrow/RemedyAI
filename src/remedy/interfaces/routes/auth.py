@@ -332,6 +332,24 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             if not base:
                 base = str(meta.get("base_url") or "").strip()
 
+        if pid == "anthropic" and key:
+            from remedy.interfaces.anthropic_auth import is_subscription_oauth_token
+
+            if is_subscription_oauth_token(key):
+                return {
+                    "ok": False,
+                    "provider": pid,
+                    "base_url": base,
+                    "status": None,
+                    "latency_ms": None,
+                    "models": 0,
+                    "error": (
+                        "That is a Claude Code / Max login token, not a Console API key. "
+                        "Anthropic does not allow those tokens in Remedy. "
+                        "Use a Console key (sk-ant-api…) with API credits, "
+                        "or switch provider."
+                    ),
+                }
         if pid == "demo":
             return {
                 "ok": True,

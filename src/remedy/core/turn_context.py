@@ -83,6 +83,8 @@ class TurnReactFlags:
     write_budget: int = 0
     sleev_force_direct: bool = False
     skip_ask: bool = False
+    # Snapshot at begin_turn — live Settings Full must not lift this turn's jail.
+    approval_mode: str = ""
 
 
 _turn_react_flags: ContextVar[TurnReactFlags | None] = ContextVar(
@@ -114,6 +116,8 @@ _session_procs: dict[str, list[Any]] = {}
 _stream_claims: set[str] = set()
 # sid → claim generation. Stale CancelledError must not abort a newer turn.
 _stream_epochs: dict[str, int] = {}
+# sid → /reset generation. Dying-stream persist must not refill a wiped chat.
+_reset_epochs: dict[str, int] = {}
 # Next-turn injects keyed by session (never a process-global leftover).
 _pending_verify_by_session: dict[str, Any] = {}
 _build_protocol_by_session: dict[str, str] = {}
@@ -247,6 +251,11 @@ def begin_turn(
     path_s = str(active_path) if active_path is not None else ""
     ws = TurnWorkspace(project_raw=project_raw, active_path=path_s)
     roots = list(work_roots) if work_roots is not None else []
+    flags = TurnReactFlags()
+    with contextlib.suppress(Exception):
+        from remedy.core.approvals import APPROVALS, normalize_approval_mode
+
+        flags.approval_mode = normalize_approval_mode(APPROVALS.mode)
     values: tuple[Any, ...] = (
         sid,
         ev,
@@ -259,7 +268,7 @@ def begin_turn(
         True,
         False,
         0,
-        TurnReactFlags(),
+        flags,
     )
     tokens: list[Token] = []
     for var, val in zip(_TURN_CONTEXT_VARS, values, strict=True):
@@ -278,6 +287,19 @@ def current_plan_mode(runtime: Any = None) -> bool:
     if runtime is not None:
         return bool(getattr(runtime, "_plan_mode", False))
     return bool(_turn_plan_mode.get())
+
+
+def current_turn_approval_mode() -> str | None:
+    """Approval mode snapped at begin_turn. None outside a turn.
+
+    Live ``APPROVALS.set_mode('full')`` from Settings must not lift this
+    turn's write jail.
+    """
+    if not in_active_turn():
+        return None
+    flags = _turn_react_flags.get()
+    raw = str(getattr(flags, "approval_mode", "") or "").strip().lower()
+    return raw or None
 
 
 def current_turn_tool_steps(runtime: Any = None) -> list[dict[str, Any]]:
@@ -450,6 +472,26 @@ def stream_claim_epoch(session_id: str) -> int:
         return 0
     with _lock:
         return int(_stream_epochs.get(sid, 0) or 0)
+
+
+def bump_session_reset_epoch(session_id: str) -> int:
+    """Mark a /reset so in-flight persist skips this session. Returns new epoch."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return 0
+    with _lock:
+        n = int(_reset_epochs.get(sid, 0) or 0) + 1
+        _reset_epochs[sid] = n
+        return n
+
+
+def session_reset_epoch(session_id: str) -> int:
+    """Current /reset generation for ``session_id`` (0 if never reset)."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return 0
+    with _lock:
+        return int(_reset_epochs.get(sid, 0) or 0)
 
 
 def release_session_stream_claim(session_id: str, *, epoch: int | None = None) -> None:

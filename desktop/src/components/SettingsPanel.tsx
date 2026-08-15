@@ -14,12 +14,15 @@ import {
 import { getRmbStatus, type RmbStatus } from '../api/rmb'
 import {
   getXaiAuthStatus,
-  startXaiLogin,
-  pollXaiLogin,
   logoutXai,
-  openExternalUrl,
   type XaiAuthStatus,
 } from '../api/auth'
+import {
+  beginXaiOAuth,
+  resumeXaiOAuthPoll,
+  subscribeXaiOAuth,
+  xaiModelAfterOauth,
+} from '../api/xaiOAuth'
 import { apiFetch } from '../api/client'
 import {
   listProviders,
@@ -176,7 +179,6 @@ export function SettingsPanel({
   const [xaiUserCode, setXaiUserCode] = useState('')
   const [xaiVerifyUrl, setXaiVerifyUrl] = useState('')
   const [xaiLoginMsg, setXaiLoginMsg] = useState('')
-  const xaiPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [vision, setVision] = useState<VisionStatus | null>(null)
 
   const [visionBusy, setVisionBusy] = useState(false)
@@ -261,13 +263,6 @@ export function SettingsPanel({
     // not when providerModels array identity changes every parent render.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable snap, avoid stutter loops
   }, [provider, model])
-
-  const stopXaiPoll = useCallback(() => {
-    if (xaiPollRef.current) {
-      clearInterval(xaiPollRef.current)
-      xaiPollRef.current = null
-    }
-  }, [])
 
   const stopVisionPoll = useCallback(() => {
     if (visionPollRef.current) {
@@ -419,7 +414,7 @@ export function SettingsPanel({
       setLogLevel(String(s.log_level || 'INFO').toUpperCase())
       setSarcasmMode(Boolean(s.sarcasm_mode))
       setWebToolsEnabled(Boolean(s.web_tools_enabled))
-      setHttpBootstrap(s.http_bootstrap !== false)
+      setHttpBootstrap(s.http_bootstrap === true)
       setPrivacyMode(Boolean(s.privacy_mode))
       setSleevEnabled(Boolean(s.sleev_enabled))
       setSleevGatewayUrl(String(s.sleev_gateway_url || ''))
@@ -447,18 +442,14 @@ export function SettingsPanel({
       setApiKey('')
       const isAdvanced = providers.some((p) => p.id === prov && p.advanced)
       if (isAdvanced) setShowAdvanced(true)
-      if (prov === 'xai' || s.xai_auth) {
-        try {
-          const xa = s.xai_auth
-            ? (s.xai_auth as XaiAuthStatus)
-            : await getXaiAuthStatus()
-          setXaiAuth(xa)
-          if (xa.connected) setApiKeySet(true)
-        } catch {
-          setXaiAuth(null)
-        }
-      } else {
-        setXaiAuth(null)
+      try {
+        const xa = await getXaiAuthStatus()
+        setXaiAuth(xa)
+        if (xa.connected && prov === 'xai') setApiKeySet(true)
+      } catch {
+        const snap = s.xai_auth as XaiAuthStatus | undefined
+        setXaiAuth(snap || null)
+        if (snap?.connected && prov === 'xai') setApiKeySet(true)
       }
       // Merge shell prefs before unlocking the form so a fast Save cannot
       // persist pre-secondary tray/login values.
@@ -518,18 +509,49 @@ export function SettingsPanel({
       load()
       setSaved(false)
       setErrorMessage('')
-      setXaiLoginMsg('')
-      setXaiUserCode('')
-      setXaiVerifyUrl('')
-      // Deep-link / remember last section
+      resumeXaiOAuthPoll()
       onPanelOpenChange(true)
     } else {
-      stopXaiPoll()
-      setXaiLoginBusy(false)
       onPanelOpenChange(false)
     }
-    return () => stopXaiPoll()
-  }, [open, load, stopXaiPoll, onPanelOpenChange])
+  }, [open, load, onPanelOpenChange])
+
+  useEffect(() => {
+    return subscribeXaiOAuth((e) => {
+      if (e.phase === 'started') {
+        setXaiLoginBusy(true)
+        setXaiUserCode(e.userCode || '')
+        setXaiVerifyUrl(e.verifyUrl || '')
+        setXaiLoginMsg(e.message || '')
+        return
+      }
+      if (e.phase === 'connected') {
+        setXaiLoginBusy(false)
+        setXaiAuth(e.credentials || { provider: 'xai', auth_method: 'oauth', connected: true, has_api_key: false, has_oauth: true })
+        setApiKeySet(true)
+        setXaiLoginMsg(e.message || 'Signed in with xAI')
+        setXaiUserCode('')
+        setProvider('xai')
+        setBaseUrl('https://api.x.ai/v1')
+        setModel((prev) => {
+          const nextModel = xaiModelAfterOauth(prev)
+          loadedLlmRef.current = {
+            provider: 'xai',
+            model: nextModel,
+            baseUrl: 'https://api.x.ai/v1',
+          }
+          return nextModel
+        })
+        onSettingsSaved?.()
+        void load()
+        return
+      }
+      if (e.phase === 'error') {
+        setXaiLoginBusy(false)
+        setXaiLoginMsg(e.error || 'Sign-in failed or expired')
+      }
+    })
+  }, [onSettingsSaved, load])
 
   // Lazy-load vision status only when Local vision is expanded (faster Settings open).
   useEffect(() => {
@@ -547,7 +569,6 @@ export function SettingsPanel({
     setXaiLoginBusy(true)
     setXaiLoginMsg('')
     setErrorMessage('')
-    stopXaiPoll()
     try {
       // Same first-run/wipe bootstrap as SetupWizard — avoid 401 / dead-server races.
       try {
@@ -570,48 +591,7 @@ export function SettingsPanel({
         }
         /* apiFetch will retry token */
       }
-      const start = await startXaiLogin()
-      setXaiUserCode(start.user_code)
-      setXaiVerifyUrl(start.verification_uri_complete || start.verification_uri)
-      setXaiLoginMsg(start.message || `Enter code ${start.user_code} at xAI`)
-      void openExternalUrl(start.verification_uri_complete || start.verification_uri)
-      const sessionId = start.session_id
-      const intervalMs = Math.max(3, start.interval || 5) * 1000
-      xaiPollRef.current = setInterval(async () => {
-        try {
-          const poll = await pollXaiLogin(sessionId)
-          const st = poll.session?.status
-          if (st === 'connected') {
-            stopXaiPoll()
-            setXaiLoginBusy(false)
-            setXaiAuth(poll.credentials)
-            setApiKeySet(true)
-            setXaiLoginMsg('Signed in with xAI')
-            setXaiUserCode('')
-            // Ensure provider is xAI after OAuth — persist so chat switches now.
-            const nextModel = model.startsWith('grok') ? model : 'grok-3-mini'
-            setProvider('xai')
-            setBaseUrl('https://api.x.ai/v1')
-            setModel(nextModel)
-            try {
-              await updateSettings({
-                llm_provider: 'xai',
-                llm_model: nextModel,
-                llm_base_url: 'https://api.x.ai/v1',
-              })
-            } catch (err) {
-              console.warn('persist xAI after OAuth:', err)
-            }
-            onSettingsSaved?.()
-          } else if (st === 'error') {
-            stopXaiPoll()
-            setXaiLoginBusy(false)
-            setXaiLoginMsg(poll.session?.error || 'Sign-in failed or expired')
-          }
-        } catch {
-          // keep polling
-        }
-      }, intervalMs)
+      await beginXaiOAuth({ keepSettings: true, llmModel: model })
     } catch (e: unknown) {
       setXaiLoginBusy(false)
       const msg = e instanceof Error ? e.message : String(e)
@@ -626,6 +606,7 @@ export function SettingsPanel({
       setApiKeySet(false)
       setXaiLoginMsg('Signed out of xAI')
       onSettingsSaved?.()
+      void load()
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
       setErrorMessage(msg || 'Logout failed')
@@ -713,7 +694,10 @@ export function SettingsPanel({
     }
     try {
       try {
-        await invoke('set_launch_at_login', { enabled: launchAtLogin })
+        const { isLinuxDesktop } = await import('../utils/platform')
+        if (!isLinuxDesktop()) {
+          await invoke('set_launch_at_login', { enabled: launchAtLogin })
+        }
       } catch (e) {
         console.warn('launch_at_login OS sync:', e)
       }

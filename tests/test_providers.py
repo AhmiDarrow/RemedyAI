@@ -86,11 +86,10 @@ class TestProviderRegistry:
         assert isinstance(p, OpenAIProvider)
         assert not isinstance(p, LlamaCppProvider)
 
-    def test_select_provider_known_name_loopback_uses_local(self):
-        """Any catalog name on loopback must use local max_tokens (not cloud caps)."""
+    def test_select_provider_known_name_ignores_leftover_loopback(self):
+        """A named cloud provider must not become llamacpp because RMB left a loopback URL."""
         p = select_provider("deepseek", "http://localhost:5001/v1/")
-        assert isinstance(p, LlamaCppProvider)
-        # Non-loopback keeps named cloud adapter
+        assert isinstance(p, DeepSeekProvider)
         p2 = select_provider("deepseek", "https://api.deepseek.com")
         assert isinstance(p2, DeepSeekProvider)
 
@@ -276,6 +275,22 @@ class TestAnthropicProvider:
     def test_chat_endpoint(self):
         p = AnthropicProvider()
         assert p.chat_endpoint("https://api.anthropic.com") == "https://api.anthropic.com/v1/messages"
+
+    def test_chat_endpoint_does_not_double_v1(self):
+        """Settings catalog stores ``…/v1``; doubling it 404s as not_found."""
+        p = AnthropicProvider()
+        assert (
+            p.chat_endpoint("https://api.anthropic.com/v1")
+            == "https://api.anthropic.com/v1/messages"
+        )
+        assert (
+            p.chat_endpoint("https://api.anthropic.com/v1/")
+            == "https://api.anthropic.com/v1/messages"
+        )
+        assert (
+            p.chat_endpoint("https://api.anthropic.com/v1/messages")
+            == "https://api.anthropic.com/v1/messages"
+        )
 
     # -- message conversion ---------------------------------------------------
 

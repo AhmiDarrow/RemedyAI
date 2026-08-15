@@ -131,7 +131,8 @@ def purge_old_shots(*, max_age_s: float = 900.0, home_dir: Path | str | None = N
     roots: list[Path] = []
     if home_dir is not None and str(home_dir).strip():
         roots.append(Path(home_dir).expanduser() / "computer" / "shots")
-    roots.append(Path.home() / ".remedy" / "computer" / "shots")
+    else:
+        roots.append(_remedy_home() / "computer" / "shots")
     cutoff = time.time() - float(max_age_s)
     seen: set[str] = set()
     n = 0
