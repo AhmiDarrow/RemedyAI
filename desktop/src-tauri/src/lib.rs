@@ -1318,8 +1318,8 @@ async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
         .map_err(|e| format!("folder picker channel: {e}"))
 }
 
-/// Open a file or folder with the OS default app (Explorer / associated program).
-/// Windows: prefer explorer / ShellExecute-style open without a visible cmd.exe flash.
+/// Open a folder in Explorer, or reveal a file (select in parent).
+/// Never ShellExecute .md — that pops “Pick an app”. Agent reads via file_read.
 #[tauri::command]
 fn open_path(path: String) -> Result<String, String> {
     let p = PathBuf::from(path.trim());
@@ -1328,14 +1328,13 @@ fn open_path(path: String) -> Result<String, String> {
     }
     #[cfg(target_os = "windows")]
     {
-        // Folders → open in Explorer. Files → Explorer select (fast, no cmd).
+        // Folders → Explorer. Files → highlight in parent (do not open).
         let status = if p.is_dir() {
             Command::new("explorer.exe")
                 .arg(p.as_os_str())
                 .creation_flags(CREATE_NO_WINDOW)
                 .status()
         } else {
-            // /select,path — Explorer opens parent and highlights the file
             let arg = format!("/select,{}", p.display());
             Command::new("explorer.exe")
                 .arg(arg)

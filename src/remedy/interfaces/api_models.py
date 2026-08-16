@@ -33,6 +33,12 @@ class MemoryAddRequest(BaseModel):
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
+class PersonaWipeRequest(BaseModel):
+    """Must send confirm='WIPE'. Does not delete chats, keys, or skills."""
+
+    confirm: str = Field(..., description='Type WIPE to confirm')
+
+
 class SkillInfo(BaseModel):
     name: str
     description: str

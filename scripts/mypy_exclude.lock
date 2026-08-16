@@ -1,0 +1,20 @@
+# Maximum mypy exclude allow-list. May only shrink.
+# pyproject.toml [tool.mypy] exclude must be a subset of this file.
+# To type a module: remove it here and from pyproject in the same commit.
+src/remedy/core/agent.py
+src/remedy/core/react_loop/loop.py
+src/remedy/core/react_loop/tool_batch.py
+src/remedy/core/react_turn.py
+src/remedy/core/agent_llm.py
+src/remedy/core/agent_build_tools.py
+src/remedy/core/build_mutant.py
+src/remedy/core/build_oracle.py
+src/remedy/core/build_scoped.py
+src/remedy/core/retention.py
+src/remedy/core/self_inject.py
+src/remedy/core/learning_loop.py
+src/remedy/core/learning
+src/remedy/core/computer/desktop_win.py
+src/remedy/core/computer/desktop_uia.py
+src/remedy/core/companion.py
+src/remedy/execution/host/conpty.py

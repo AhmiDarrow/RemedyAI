@@ -2,6 +2,7 @@ import { getServerUrl } from '../api/client'
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { getSettings, updateSettings } from '../api/settings'
 import { openExternalUrl } from '../api/auth'
+import { closeBrowserRail } from '../api/computer'
 import {
   beginXaiOAuth,
   resumeXaiOAuthPoll,
@@ -75,6 +76,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [xaiUserCode, setXaiUserCode] = useState('')
   const [xaiVerifyUrl, setXaiVerifyUrl] = useState('')
   const [xaiLoginMsg, setXaiLoginMsg] = useState('')
+  const [oauthBrowserOpen, setOauthBrowserOpen] = useState(false)
   const [enableVision, setEnableVision] = useState(true)
   const [visionStatus, setVisionStatus] = useState<VisionStatus | null>(null)
   const [visionInstallMsg, setVisionInstallMsg] = useState('')
@@ -108,11 +110,17 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         ? ollamaModels
         : (activeMeta?.models || []).map((m) => m.id)
 
+  const closeOauthBrowser = useCallback(() => {
+    setOauthBrowserOpen(false)
+    void closeBrowserRail()
+  }, [])
+
   useEffect(() => {
     resumeXaiOAuthPoll()
     return subscribeXaiOAuth((e) => {
       if (e.phase === 'started') {
         setXaiLoginBusy(true)
+        setOauthBrowserOpen(true)
         setXaiUserCode(e.userCode || '')
         setXaiVerifyUrl(e.verifyUrl || '')
         setXaiLoginMsg(e.message || '')
@@ -121,11 +129,31 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         setXaiConnected(true)
         setXaiLoginMsg(e.message || 'Signed in with xAI')
         setXaiUserCode('')
+        setOauthBrowserOpen(false)
       } else if (e.phase === 'error') {
         setXaiLoginBusy(false)
         setXaiLoginMsg(e.error || 'Sign-in failed or expired')
+        setOauthBrowserOpen(false)
       }
     })
+  }, [])
+
+  useEffect(() => {
+    if (!oauthBrowserOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        closeOauthBrowser()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [oauthBrowserOpen, closeOauthBrowser])
+
+  useEffect(() => {
+    return () => {
+      void closeBrowserRail()
+    }
   }, [])
 
   useEffect(() => {
@@ -274,7 +302,8 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         }
         /* apiFetch will retry token */
       }
-      await beginXaiOAuth({ keepSettings: true, llmModel: model })
+      setOauthBrowserOpen(true)
+      await beginXaiOAuth({ keepSettings: false, openRail: false, llmModel: model })
     } catch (e: unknown) {
       setXaiLoginBusy(false)
       const msg = e instanceof Error ? e.message : String(e)
@@ -302,10 +331,11 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     }
     const idx = STEPS.indexOf(step)
     if (idx < STEPS.length - 1) {
+      if (oauthBrowserOpen) closeOauthBrowser()
       setStep(STEPS[idx + 1])
       setError('')
     }
-  }, [step, provider, apiKey, baseUrl, xaiConnected])
+  }, [step, provider, apiKey, baseUrl, xaiConnected, oauthBrowserOpen, closeOauthBrowser])
 
   const handleBack = useCallback(() => {
     const idx = STEPS.indexOf(step)
@@ -499,6 +529,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     try {
       await saveSetupCore()
       await runVisionInstall()
+      closeOauthBrowser()
       onComplete()
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -510,7 +541,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     } finally {
       setSaving(false)
     }
-  }, [saveSetupCore, runVisionInstall, onComplete])
+  }, [saveSetupCore, runVisionInstall, onComplete, closeOauthBrowser])
 
   /** Save + start vision in background + enter app immediately. */
   const handleUseAppNow = useCallback(async () => {
@@ -520,6 +551,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       await saveSetupCore()
       finishAbortRef.current = true
       void runVisionInstall({ backgroundOnly: true })
+      closeOauthBrowser()
       onComplete()
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -531,7 +563,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     } finally {
       setSaving(false)
     }
-  }, [saveSetupCore, runVisionInstall, onComplete])
+  }, [saveSetupCore, runVisionInstall, onComplete, closeOauthBrowser])
 
   const handleSkip = useCallback(async () => {
     // Mark setup done so the wizard never blocks launch again.
@@ -554,6 +586,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         llm_model: demo?.default_model || 'codestral-latest',
         llm_base_url: demo?.base_url || 'https://api.llm7.io/v1',
       })
+      closeOauthBrowser()
       onComplete()
     } catch (e: unknown) {
       // Still enter the app if the server briefly fails — avoid lockout.
@@ -569,11 +602,12 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       } catch {
         /* headless */
       }
+      closeOauthBrowser()
       onComplete()
     } finally {
       setSaving(false)
     }
-  }, [onComplete, catalog])
+  }, [onComplete, catalog, closeOauthBrowser])
 
   if (!open) return null
 
@@ -599,8 +633,18 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   }
 
   return (
-    <div className="remedy-shell setup-wizard-root">
-      <div className="remedy-shell-card setup-wizard-card" style={{ maxWidth: 520 }}>
+    <div
+      className="remedy-shell setup-wizard-root"
+      style={
+        oauthBrowserOpen
+          ? { alignItems: 'stretch', justifyContent: 'center', gap: 16 }
+          : undefined
+      }
+    >
+      <div
+        className="remedy-shell-card setup-wizard-card"
+        style={{ maxWidth: 520, flexShrink: 0 }}
+      >
         <div className="px-7 pt-7 pb-3 text-center">
           <img src="/logo.png" alt="Remedy" className="remedy-shell-logo" draggable={false} />
           <h1 className="remedy-shell-title">Remedy</h1>
@@ -799,6 +843,20 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                       {xaiLoginBusy ? 'Waiting…' : 'Sign in with xAI'}
                     </button>
                   )}
+                  {oauthBrowserOpen && (
+                    <button
+                      type="button"
+                      onClick={closeOauthBrowser}
+                      className="w-full py-2 rounded-lg text-sm font-medium"
+                      style={{
+                        background: 'var(--bg-secondary)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border)',
+                      }}
+                    >
+                      Close browser
+                    </button>
+                  )}
                   {xaiUserCode && (
                     <div className="text-sm" style={labelStyles}>
                       Code: <code style={{ color: 'var(--accent)' }}>{xaiUserCode}</code>
@@ -808,8 +866,12 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                           className="block mt-1 underline"
                           style={{ color: 'var(--accent)' }}
                           onClick={() => {
+                            setOauthBrowserOpen(true)
                             void import('../api/computer').then(({ openUrlInBrowserRail }) =>
-                              openUrlInBrowserRail(xaiVerifyUrl, { keepSettings: true }),
+                              openUrlInBrowserRail(xaiVerifyUrl, {
+                                keepSettings: false,
+                                openRail: false,
+                              }),
                             )
                           }}
                         >
@@ -1270,6 +1332,46 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
           )}
         </div>
       </div>
+      {oauthBrowserOpen && (
+        <div
+          className="flex flex-col min-w-0 flex-1 rounded-2xl overflow-hidden"
+          style={{
+            border: '1px solid var(--border)',
+            background: 'var(--bg-secondary)',
+            minWidth: 280,
+            maxWidth: 720,
+            minHeight: 0,
+          }}
+        >
+          <div
+            className="flex items-center justify-between gap-3 px-3 py-2 shrink-0"
+            style={{ borderBottom: '1px solid var(--border)' }}
+          >
+            <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+              Sign in
+            </span>
+            <button
+              type="button"
+              onClick={closeOauthBrowser}
+              className="px-3 py-1 rounded-lg text-sm font-medium"
+              style={{
+                background: 'var(--bg-tertiary)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border)',
+              }}
+              aria-label="Close browser"
+              title="Close browser (Esc)"
+            >
+              Close
+            </button>
+          </div>
+          <div
+            data-browser-embed-host
+            className="flex-1 min-h-0 w-full"
+            style={{ background: 'var(--bg-primary)', minHeight: 360 }}
+          />
+        </div>
+      )}
     </div>
   )
 }

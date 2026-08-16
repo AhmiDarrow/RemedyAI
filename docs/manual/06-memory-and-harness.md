@@ -24,6 +24,8 @@ Remedy keeps durable knowledge so it can remember facts, goals, and session cont
 - Status bar shows **Memory · CP** when a checkpoint exists  
 - Slash commands in chat (see below)  
 - Settings → **Your name** syncs into profile  
+- Settings → **You & Agent → Wipe persona…** — forget Partner Memory, soul residue, and life goals (type **WIPE**). Chats, keys, and skills stay.  
+- Deleting a chat asks first and also drops that chat’s notes, attachments, and plans. Partner Memory is kept until you wipe persona.  
 - Settings → **MCP host** — export skills to external MCP clients
 
 ## Essential commands

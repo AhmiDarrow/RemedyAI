@@ -243,6 +243,54 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
         return s, notes
     head = _unquote(toks[0]).lower()
 
+    # start/explorer on .md — do not launch an OS app (Pick an app / Notepad).
+    # Remedy should file_read; host_run can `type` so the agent sees contents.
+    _read_not_open = (
+        ".md",
+        ".markdown",
+        ".txt",
+        ".rst",
+        ".toml",
+        ".yml",
+        ".yaml",
+        ".log",
+        ".ini",
+        ".cfg",
+        ".env",
+        ".json",
+        ".py",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".css",
+        ".html",
+        ".htm",
+    )
+
+    def _read_not_open_doc(p: str) -> bool:
+        return p.lower().endswith(_read_not_open)
+
+    if head in ("cmd", "cmd.exe") and any(
+        _unquote(t).lower() in ("start", "explorer", "explorer.exe") for t in toks[1:]
+    ):
+        rest = [_unquote(t) for t in toks[1:] if _unquote(t).lower() not in (
+            "/c", "/k", "start", "explorer", "explorer.exe", ""
+        )]
+        paths = [t for t in rest if t and not t.startswith("/")]
+        if paths and _read_not_open_doc(paths[0]):
+            notes.append("cmd start text → type (file_read, no OS window)")
+            return f"type {_q(paths[0])}", notes
+
+    if head in ("start", "explorer", "explorer.exe") and len(toks) >= 2:
+        rest = [_unquote(t) for t in toks[1:]]
+        if rest and rest[0] in ("",):
+            rest = rest[1:]
+        paths = [t for t in rest if t and not t.startswith("/")]
+        if paths and _read_not_open_doc(paths[0]):
+            notes.append("start/explorer text → type (file_read, no OS window)")
+            return f"type {_q(paths[0])}", notes
+
     # mkdir -p a b
     if head == "mkdir" and len(toks) >= 2 and toks[1] in ("-p", "--parents"):
         paths = [_unquote(t) for t in toks[2:] if not t.startswith("-")]

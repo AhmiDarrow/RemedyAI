@@ -725,10 +725,12 @@ def turn_skip_ask(runtime: Any = None) -> bool:
 
 def set_turn_skip_ask(value: bool, runtime: Any = None) -> None:
     """Turn-local Ask skip — do not write process-global APPROVALS.mode."""
-    del runtime
     flags = _react_flags()
     if flags is not None:
         flags.skip_ask = bool(value)
+    if runtime is not None:
+        with contextlib.suppress(Exception):
+            runtime._turn_skip_ask = bool(value)
 
 
 def turn_browse(runtime: Any = None) -> bool:

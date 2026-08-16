@@ -18,7 +18,8 @@ _IMPLEMENT_RE = re.compile(
     r"(?is)\b("
     r"create|build|implement|write|make|scaffold|generate|code|app|program|"
     r"script|calculator|todo|cli|gui|server|fix|debug|refactor|patch|add|"
-    r"file|project|feature|function|class|module|test"
+    r"file|project|feature|function|class|module|test|"
+    r"launch|serve|preview|localhost|site|webpage"
     r")\b"
 )
 
@@ -477,6 +478,11 @@ WRITE_FIRST_TOOLS: tuple[str, ...] = (
     "repo_search",
 )
 
+_OPERATE_HOST_RE = re.compile(
+    r"(?is)\b(launch|serve|preview|localhost|http\.server|npm\s+start|"
+    r"start\s+(the\s+)?(dev\s+)?server|open\s+(the\s+)?(site|page|preview))\b"
+)
+
 
 def filter_tools_write_first(
     tools: list[dict[str, Any]] | None,
@@ -490,6 +496,8 @@ def filter_tools_write_first(
     if not message_wants_implement(user_message):
         return tools
     allow = set(WRITE_FIRST_TOOLS)
+    if _OPERATE_HOST_RE.search(user_message or ""):
+        allow.update({"host_run", "bash_exec", "computer_navigate"})
     out: list[dict[str, Any]] = []
     for t in tools:
         fn = t.get("function") if isinstance(t, dict) else None

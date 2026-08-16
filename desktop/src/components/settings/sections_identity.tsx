@@ -1,5 +1,5 @@
 /** Settings form sections — identity. */
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { SettingsFormProps } from './formTypes'
 import { SettingsSection } from '../SettingsSection'
 import {
@@ -14,6 +14,106 @@ import {
 import { Field, PERSONAS } from './shared'
 import { TOOL_PROCESS_MODES } from '../../utils/toolLabels'
 import { isLinuxDesktop } from '../../utils/platform'
+
+function PersonaWipeControl(): ReactNode {
+  const [open, setOpen] = useState(false)
+  const [typed, setTyped] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const ready = typed.trim().toUpperCase() === 'WIPE'
+
+  const run = async () => {
+    if (!ready || busy) return
+    setBusy(true)
+    setMsg('')
+    try {
+      const { apiFetch } = await import('../../api/client')
+      await apiFetch('/memory/persona-wipe', {
+        method: 'POST',
+        body: JSON.stringify({ confirm: 'WIPE' }),
+      })
+      setMsg('Persona wiped. Remedy no longer remembers facts about you.')
+      setTyped('')
+      setOpen(false)
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : 'Wipe failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-3 pt-3 space-y-2" style={{ borderTop: '1px solid var(--border)' }}>
+      <FormLabel>Persona wipe</FormLabel>
+      <FormHint>
+        Forget what Remedy learned about you (Partner Memory, soul residue, life goals).
+        Chats, API keys, skills, and this app stay. Cannot be undone.
+      </FormHint>
+      {!open ? (
+        <FormActionButton
+          variant="danger"
+          onClick={() => {
+            setOpen(true)
+            setMsg('')
+          }}
+        >
+          Wipe persona…
+        </FormActionButton>
+      ) : (
+        <FormNotice tone="error">
+          <div className="space-y-2">
+            <div>
+              This deletes remembered facts, whoami profile, soul/rapport residue, and life
+              goals. Type <strong>WIPE</strong> to confirm.
+            </div>
+            <input
+              type="text"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              placeholder="Type WIPE"
+              autoComplete="off"
+              spellCheck={false}
+              className="ui-input w-full"
+              aria-label="Type WIPE to confirm persona wipe"
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={!ready || busy}
+                onClick={() => void run()}
+                className="px-3 py-1.5 rounded text-xs font-semibold disabled:opacity-40"
+                style={{ background: 'var(--error)', color: '#fff' }}
+              >
+                {busy ? 'Wiping…' : 'Wipe what Remedy knows about me'}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setOpen(false)
+                  setTyped('')
+                }}
+                className="px-3 py-1.5 rounded text-xs"
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </FormNotice>
+      )}
+      {msg ? (
+        <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+          {msg}
+        </div>
+      ) : null}
+    </div>
+  )
+}
 
 export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
   const {
@@ -129,6 +229,7 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
         <FormHint>
           Persona is a communication style. Identity stays your partner — change anytime.
         </FormHint>
+        <PersonaWipeControl />
       </SettingsSection>
 
       {/* Project */}

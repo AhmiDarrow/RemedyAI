@@ -171,24 +171,43 @@ export function emitComputerUi(detail: {
   window.dispatchEvent(new CustomEvent(COMPUTER_UI_EVENT, { detail }))
 }
 
+/** Destroy the native Browser embed (wizard / OAuth have no rail ✕). */
+export async function closeBrowserRail(): Promise<void> {
+  try {
+    const { isTauri, tauriInvoke } = await import('./tauri')
+    if (!isTauri()) return
+    await tauriInvoke('browser_close')
+  } catch {
+    /* already gone */
+  }
+}
+
 /**
  * Open a URL in Remedy's in-rail Browser (default for webpages).
  * Falls back to system browser only if Tauri navigate is unavailable.
+ *
+ * `openRail: false` navigates the embed without opening the workspace rail
+ * (setup wizard has no rail chrome — caller supplies a host + Close).
  */
 export async function openUrlInBrowserRail(
   url: string,
-  opts?: { keepSettings?: boolean },
+  opts?: { keepSettings?: boolean; openRail?: boolean },
 ): Promise<'rail' | 'external'> {
   const trimmed = (url || '').trim()
   if (!trimmed) return 'external'
   try {
     const { isTauri, tauriInvoke } = await import('./tauri')
     if (isTauri()) {
-      emitComputerUi({
-        openBrowser: true,
-        keepSettings: Boolean(opts?.keepSettings),
-      })
-      await new Promise((r) => window.setTimeout(r, 350))
+      if (opts?.openRail !== false) {
+        emitComputerUi({
+          openBrowser: true,
+          keepSettings: Boolean(opts?.keepSettings),
+        })
+        await new Promise((r) => window.setTimeout(r, 350))
+      } else {
+        // Wizard host paints in the same tick as open; wait one layout.
+        await new Promise((r) => window.setTimeout(r, 160))
+      }
       // Best-effort bounds from Browser slide host
       let bounds: BrowserBoundsPayload | null = null
       try {

@@ -54,6 +54,7 @@ puts the file on the composer rail so you can point things out to Remedy.
 
 - **New session** — Ctrl+N, logo menu, or `/new` (root session — no project)  
 - **Reset this session** — `/reset` or `/clear` full clean slate **in place** (history, plans, brief, attachments; same session id; does not open another). Durable memory kept.  
+- **Delete a chat** — sidebar × warns first, then removes the transcript plus that chat’s notes, attachments, plans, and undo. Partner Memory stays until **Wipe persona**.  
 - **Click a session** — loads that chat in the middle pane  
 - **Add project folder** — paste a path or **Browse…** (native folder picker)  
 - **Archive** — filter + auto-hide after 30 days (not pinned); row toggle  

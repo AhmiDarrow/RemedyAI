@@ -1,7 +1,7 @@
 /** xAI device-code OAuth that outlives Settings (rail can unmount the panel). */
 
 import { pollXaiLogin, startXaiLogin, type XaiAuthStatus, type XaiLoginPoll, type XaiLoginStart } from './auth'
-import { openUrlInBrowserRail } from './computer'
+import { closeBrowserRail, openUrlInBrowserRail } from './computer'
 import { updateSettings } from './settings'
 
 export const XAI_OAUTH_EVENT = 'remedy:xai-oauth'
@@ -99,6 +99,7 @@ function startPolling(): void {
         stopXaiOAuthPoll()
         writeStoredSession(null)
         sessionId = null
+        void closeBrowserRail()
         try {
           await persistXaiProvider()
         } catch (err) {
@@ -119,6 +120,7 @@ function startPolling(): void {
         stopXaiOAuthPoll()
         writeStoredSession(null)
         sessionId = null
+        void closeBrowserRail()
         emitXaiOAuth({
           phase: 'error',
           error: poll.session?.error || 'Sign-in failed or expired',
@@ -145,6 +147,8 @@ export function resumeXaiOAuthPoll(): void {
 export async function beginXaiOAuth(opts?: {
   keepSettings?: boolean
   llmModel?: string
+  /** Default true. Wizard passes false — no workspace rail yet. */
+  openRail?: boolean
 }): Promise<XaiLoginStart> {
   stopXaiOAuthPoll()
   preferredModel = opts?.llmModel
@@ -159,7 +163,10 @@ export async function beginXaiOAuth(opts?: {
     verifyUrl,
     message: start.message || `Enter code ${start.user_code} at xAI`,
   })
-  void openUrlInBrowserRail(verifyUrl, { keepSettings: opts?.keepSettings !== false })
+  void openUrlInBrowserRail(verifyUrl, {
+    keepSettings: opts?.keepSettings !== false,
+    openRail: opts?.openRail,
+  })
   startPolling()
   return start
 }
