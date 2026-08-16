@@ -18,6 +18,10 @@ import {
 import { ApprovalBanner } from '../components/ApprovalBanner'
 import { BrowserSlide } from '../components/slides/BrowserSlide'
 import { messagesToMoments, latestExchange } from './storylineMoments'
+import { getSettings } from '../api/settings'
+import { patchVoiceSettings } from '../api/voice'
+import { useVoice } from '../voice/useVoice'
+import type { GenderRole } from '../voice/pickVoice'
 import type { ChatMessage, ChatSession } from '../types'
 import './grove.css'
 
@@ -96,6 +100,57 @@ export function GroveApp({
   const goalSessionsRef = useRef<Record<string, string>>(loadGoalSessions())
   const inputRef = useRef<HTMLInputElement | null>(null)
 
+  // ---- voice: speak-back (gender-matched) + hearing ----
+  const [gender, setGender] = useState<GenderRole>('female')
+  useEffect(() => {
+    getSettings()
+      .then((s) => {
+        const g = String(s.agent_gender || 'female').toLowerCase()
+        setGender(g === 'male' ? 'male' : g === 'neutral' ? 'neutral' : 'female')
+      })
+      .catch(() => {})
+  }, [])
+  const voice = useVoice({ gender, enabled: serverReady })
+  const speakReplies = voice.status?.settings?.speak_replies ?? false
+  const toggleSpeakReplies = useCallback(() => {
+    const next = !speakReplies
+    if (!next) voice.stopSpeaking()
+    patchVoiceSettings({ speak_replies: next })
+      .then(() => voice.refreshStatus())
+      .catch(() => {})
+  }, [speakReplies, voice])
+
+  // Speak each finished reply aloud when the owner chose speak-back.
+  const prevStreamingRef = useRef(false)
+  useEffect(() => {
+    if (prevStreamingRef.current && !streaming && speakReplies) {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i]
+        if (m.role === 'assistant' && (m.content || '').trim() && !m.reverted) {
+          void voice.speak(m.content)
+          break
+        }
+      }
+    }
+    prevStreamingRef.current = streaming
+  }, [streaming, speakReplies, messages, voice])
+
+  const sendFromGroveRef = useRef<((t: string) => Promise<void>) | null>(null)
+  const handleMic = useCallback(async () => {
+    if (voice.recording) {
+      const text = await voice.stopRecording()
+      if (text) {
+        setDraft(text)
+        // Hands-free: heard speech sends (payment/credential steps still
+        // stop at their non-waivable checkpoints server-side).
+        await sendFromGroveRef.current?.(text)
+      }
+    } else {
+      voice.stopSpeaking()
+      await voice.startRecording()
+    }
+  }, [voice])
+
   const refreshBoard = useCallback(() => {
     if (!serverReady) return
     getLifeBoard()
@@ -161,6 +216,7 @@ export function GroveApp({
     },
     [busy, view, activeId, createSession, handleSend],
   )
+  sendFromGroveRef.current = sendFromGrove
 
   const plantGoal = useCallback(
     async (title: string) => {
@@ -189,6 +245,18 @@ export function GroveApp({
       <div className="grove-surface" data-testid="grove-home">
         <div className="grove-topbar">
           <div className="grove-brand">✚ {partnerName || 'Remedy'}</div>
+          <button
+            type="button"
+            className={`grove-voicetoggle${speakReplies ? ' on' : ''}${voice.speaking ? ' speaking' : ''}`}
+            onClick={toggleSpeakReplies}
+            title={
+              speakReplies
+                ? 'Speaking replies aloud — click to go quiet'
+                : 'Click to have replies spoken aloud'
+            }
+          >
+            {speakReplies ? '🔊 aloud' : '🔇 quiet'}
+          </button>
           <button
             type="button"
             className="grove-switch"
@@ -288,12 +356,31 @@ export function GroveApp({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder={
-              serverReady
-                ? 'Tell me anything — a goal, an errand, a worry…'
-                : 'Connecting…'
+              !serverReady
+                ? 'Connecting…'
+                : voice.recording
+                  ? 'Listening — click the mic again when you’re done…'
+                  : voice.transcribing
+                    ? 'Heard you — writing it down…'
+                    : 'Tell me anything — a goal, an errand, a worry…'
             }
             disabled={!serverReady}
           />
+          {voice.micSupported && (
+            <button
+              type="button"
+              className={`grove-micbtn${voice.recording ? ' rec' : ''}`}
+              onClick={() => void handleMic()}
+              disabled={!serverReady}
+              title={
+                voice.recording
+                  ? 'Stop and send what you said'
+                  : 'Speak instead of typing (stays on this PC)'
+              }
+            >
+              🎙
+            </button>
+          )}
           <button type="submit" className="grove-mic" title="Send">
             ↑
           </button>
@@ -331,6 +418,18 @@ export function GroveApp({
             📖 Storyline
           </button>
         </div>
+        <button
+          type="button"
+          className={`grove-voicetoggle${speakReplies ? ' on' : ''}${voice.speaking ? ' speaking' : ''}`}
+          onClick={toggleSpeakReplies}
+          title={
+            speakReplies
+              ? 'Speaking replies aloud — click to go quiet'
+              : 'Click to have replies spoken aloud'
+          }
+        >
+          {speakReplies ? '🔊' : '🔇'}
+        </button>
         <button type="button" className="grove-switch" onClick={onSwitchToStudio}>
           switch to <b>Studio</b>
         </button>
@@ -381,9 +480,28 @@ export function GroveApp({
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder={`Talk inside “${goal.title}”…`}
+              placeholder={
+                voice.recording
+                  ? 'Listening — click the mic again when you’re done…'
+                  : `Talk inside “${goal.title}”…`
+              }
               disabled={!serverReady}
             />
+            {voice.micSupported && (
+              <button
+                type="button"
+                className={`grove-micbtn${voice.recording ? ' rec' : ''}`}
+                onClick={() => void handleMic()}
+                disabled={!serverReady}
+                title={
+                  voice.recording
+                    ? 'Stop and send what you said'
+                    : 'Speak instead of typing (stays on this PC)'
+                }
+              >
+                🎙
+              </button>
+            )}
             <button type="submit" className="grove-mic" title="Send">
               ↑
             </button>
