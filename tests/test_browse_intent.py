@@ -151,3 +151,29 @@ def test_plain_open_still_short_circuits() -> None:
     assert is_open_only_browse("goto gmail") is True
     assert is_open_only_browse("open youtube") is True
     assert is_open_only_browse("bring up google") is True
+
+
+def test_commerce_words_do_not_break_wiki_and_search_kicks() -> None:
+    """Regression: bare nouns book/order/cart/post must not trip interaction
+    and kill the open-only wiki/search fast paths (reviewer P1)."""
+    from remedy.core.computer.browse_intent import (
+        parse_browse_navigate_url,
+        wants_page_interaction,
+    )
+
+    # Wiki topics containing commerce nouns still resolve to Wikipedia
+    for msg in (
+        "show me the jungle book wiki",
+        "open the order of the phoenix wiki",
+        "show me the green book wiki",
+    ):
+        assert wants_page_interaction(msg) is False, msg
+        u = parse_browse_navigate_url(msg)
+        assert u and "wikipedia.org" in u, msg
+
+    # "in order to" idiom is not a commerce verb
+    assert wants_page_interaction("open github in order to check notifications") is False
+
+    # Nested search with a commerce noun in the query still builds a search URL
+    u2 = parse_browse_navigate_url("can you goto google and search for the jungle book")
+    assert u2 and "google.com/search" in u2 and "jungle" in u2

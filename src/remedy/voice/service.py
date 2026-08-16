@@ -141,6 +141,11 @@ def speakable_text(markdown: str, *, max_chars: int = 1400) -> str:
     import re
 
     t = markdown or ""
+    # Truncate BEFORE regex work — output is capped anyway, and the link/image
+    # patterns are O(n²) on adversarial bracket runs (ReDoS guard).
+    hard_cap = max_chars * 8
+    if len(t) > hard_cap:
+        t = t[:hard_cap]
     t = re.sub(r"```.*?```", " (code shown on screen) ", t, flags=re.S)
     t = re.sub(r"`([^`]*)`", r"\1", t)
     t = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", t)  # images
@@ -257,9 +262,13 @@ def install_tts(home_dir: Path | str | None = None) -> None:
 
 
 def install_tts_background(home_dir: Path | str | None = None) -> bool:
-    st = _install_state.get("tts")
-    if isinstance(st, dict) and st.get("status") == "downloading":
-        return False
+    # Lock the check-and-mark so two rapid /voice/install calls can't both
+    # spawn a downloader racing on the same .part file (corrupt model).
+    with _tts_lock:
+        st = _install_state.get("tts")
+        if isinstance(st, dict) and st.get("status") == "downloading":
+            return False
+        _install_state["tts"] = {"status": "downloading", "percent": 0.0}
     t = threading.Thread(target=install_tts, args=(home_dir,), daemon=True)
     t.start()
     return True
