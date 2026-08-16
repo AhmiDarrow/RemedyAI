@@ -4,6 +4,25 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Grove — the partner surface (new default UI)
+
+- New top-level surface **Grove**, the default home for owners (Studio — the
+  full workbench — is one tap away and the choice persists;
+  `remedy.surface` in localStorage). Grove is the life-task partner UI from
+  `docs/LIFE_TASK_PARTNER.md`: home is your goals as plots (from `/goals`),
+  a "needs you" strip surfaces pending approvals with plain-language cards,
+  and a single talkbar plants goals ("I want to…") or just talks.
+- Opening a plot is that goal's **room** with two tabs: **Alongside** (the
+  live stage — Browser rail embedded, latest exchange as captions, pause
+  button while Remedy works) and **Storyline** (the goal's co-written
+  record: you-said / Remedy-said / Remedy-did moments in plain words, never
+  raw tool JSON; typed text is never echoed).
+- Studio gains a `✦ Grove` button in the status bar; Grove keeps a
+  `switch to Studio` pill. Studio stays mounted (hidden) during Grove so
+  terminals, stream jobs, and the computer-host loop survive switching.
+- Goal ↔ session binding is per-goal (`remedy.grove.goalSessions.v1`);
+  each room reuses its conversation across visits.
+
 ### Life tasks (P0 — docs/LIFE_TASK_PARTNER.md; audit: docs/AUDIT_LIFE_TASK_2026-08-16.md)
 
 - **Commerce/life verbs are full tasks.** "goto amazon and order X",
