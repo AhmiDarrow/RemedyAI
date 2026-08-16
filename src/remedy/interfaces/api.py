@@ -145,6 +145,25 @@ def create_app(
         except Exception:
             logger.debug("retention pass skipped", exc_info=True)
 
+        # Vigil heartbeat starts with Remedy — no user action, ever. Inert
+        # until the partner grants her time in conversation (soul_vigil tool);
+        # budgets make the tick harmless. Local-only; never calls a provider.
+        _vigil_thread = None
+        try:
+            from remedy.core.feature_maturity import soul_field_enabled
+
+            if soul_field_enabled():
+                from remedy.memory.soul.vigil import start_vigil_thread
+
+                _cfg_v = load_config()
+                _home_v = (
+                    _cfg_v.get("home_dir") if isinstance(_cfg_v, dict) else None
+                )
+                _vigil_thread = start_vigil_thread(_home_v)
+                logger.info("Vigil heartbeat started (inert until granted)")
+        except Exception:
+            logger.debug("vigil heartbeat start skipped", exc_info=True)
+
         # Local model starts with Remedy when installed + enabled (vision + nano).
         try:
             import asyncio
@@ -279,6 +298,9 @@ def create_app(
         try:
             yield
         finally:
+            if _vigil_thread is not None:
+                with suppress(Exception):
+                    _vigil_thread._vigil_stop.set()  # type: ignore[attr-defined]
             if _self_inject_task is not None:
                 with suppress(Exception):
                     _self_inject_task.cancel()
@@ -497,6 +519,18 @@ def create_app(
             # Starlette TestClient uses host "testclient"
             if client not in ("127.0.0.1", "::1", "localhost", "testclient"):
                 return JSONResponse(status_code=403, content={"error": "loopback only"})
+            # DNS-rebinding guard: a page at evil.com can rebind its DNS to
+            # 127.0.0.1 (so request.client.host passes) but its Host header
+            # still carries the attacker origin. A real loopback client sends
+            # Host: 127.0.0.1[:port] / localhost[:port]. Reject anything else
+            # so the token can't be exfiltrated to a rebound origin.
+            host_hdr = (request.headers.get("host") or "").split(":")[0].strip().lower()
+            if host_hdr and host_hdr not in ("127.0.0.1", "::1", "localhost", "testclient", "testserver", "[", ""):
+                logger.warning("local-bootstrap refused: non-loopback Host %r", host_hdr)
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": "host not loopback (rebinding blocked)"},
+                )
             # Optional owner opt-out of HTTP bootstrap (desktop-only token channel)
             from remedy.interfaces.local_auth import http_bootstrap_enabled
 

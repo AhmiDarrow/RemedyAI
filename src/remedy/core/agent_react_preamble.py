@@ -57,7 +57,7 @@ async def distill_user_message(
     with suppress(Exception):
         runtime._last_user_text = (message or "")[:4000]
     with suppress(Exception):
-        from remedy.core.agent_post_turn import distill_user_message_now
+        from remedy.core.agent_post_turn import distill_user_message_now_async
         from remedy.memory.partner_memory import distill_user_text, is_explicit_remember_intent
 
         msg0 = message or ""
@@ -67,6 +67,8 @@ async def distill_user_message(
                 or getattr(runtime, "_project_path", None)
                 or ""
             ) or None
+            # Main distill awaited here; the now-mirror then only saves the
+            # extracted facts (also awaited) — nothing blocks the event loop.
             await distill_user_text(
                 runtime.memory,
                 msg0,
@@ -74,9 +76,11 @@ async def distill_user_message(
                 session_id=session_id,
                 project_path=project_path,
             )
-            distill_user_message_now(runtime, msg0, session_id=session_id)
+            await distill_user_message_now_async(
+                runtime, msg0, session_id=session_id, already_distilled=True
+            )
         else:
-            distill_user_message_now(runtime, msg0, session_id=session_id)
+            await distill_user_message_now_async(runtime, msg0, session_id=session_id)
 
 
 def parse_browse_intent(message: str) -> BrowseIntentFlags:
@@ -178,6 +182,14 @@ def append_plan_and_computer_addenda(
             from remedy.core.computer.guidance import COMPUTER_USE_SYSTEM_ADDENDUM
 
             context = (context or "") + "\n\n" + COMPUTER_USE_SYSTEM_ADDENDUM
+        # Skill memory: steer toward the click approach that has worked on the
+        # current site (learned from past actions, per host).
+        with suppress(Exception):
+            from remedy.core.computer.computer_skill import _skill_host_hint
+
+            hint = _skill_host_hint(runtime)
+            if hint:
+                context = (context or "") + "\n\n[Computer skill] " + hint
     return context or ""
 
 

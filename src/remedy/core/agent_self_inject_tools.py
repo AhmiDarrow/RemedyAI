@@ -21,7 +21,7 @@ from remedy.core.self_inject import (
 )
 
 
-def _repo_root(runtime: Any) -> str:
+def _repo_root(runtime: Any) -> str | None:
     """The RemedyAI monorepo root (this codebase).
 
     Prefers the live source tree (where ``pyproject.toml`` names this product),
@@ -56,7 +56,10 @@ def _repo_root(runtime: Any) -> str:
             if parent == cur:
                 break
             cur = parent
-    return str(candidates[0])
+    # No verified Remedy checkout found. Return None — callers must refuse
+    # to run a self-inject round rather than reset --hard / rmtree whatever
+    # directory cwd happens to be (an unrelated user project).
+    return None
 
 
 def register_self_inject_tools(runtime: Any) -> None:
@@ -114,6 +117,17 @@ def register_self_inject_tools(runtime: Any) -> None:
         focus=continuity forces continuity-module targeting notes into the round.
         """
         repo = _repo_root(runtime)
+        if not repo:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": (
+                        "self-inject refused: no verified Remedy checkout found "
+                        "(will not modify or git-reset an unrelated directory)"
+                    ),
+                },
+                indent=2,
+            )
         home = getattr(runtime, "home_dir", None) or getattr(
             getattr(runtime, "config", None), "home_dir", None
         )
@@ -221,10 +235,16 @@ def register_self_inject_tools(runtime: Any) -> None:
         home = getattr(runtime, "home_dir", None) or getattr(
             getattr(runtime, "config", None), "home_dir", None
         )
+        _repo = _repo_root(runtime)
+        if not _repo:
+            return json.dumps(
+                {"ok": False, "error": "no verified Remedy checkout found"},
+                indent=2,
+            )
         result = await submit_self_improve_issue(
             runtime,
             home=home,
-            repo=_repo_root(runtime),
+            repo=_repo,
             session_id=turn_session_id(runtime),
         )
         if result.get("banner"):

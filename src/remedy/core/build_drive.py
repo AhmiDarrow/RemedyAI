@@ -17,9 +17,14 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
+
+# Serializes the auto-repair cap's read-check-increment on the shared
+# BuildTurnState (concurrent tabs / turn + background paths).
+_auto_repair_lock = threading.Lock()
 
 _IMPLEMENT_RE = re.compile(
     r"(?i)\b(implement|fix|build|add|create|write|scaffold|ship|develop)\b"
@@ -205,16 +210,79 @@ def drive_build(
         write_set = [str(u.get("path")) for u in units if isinstance(u, dict) and u.get("path")]
 
     gate: dict[str, Any] = {}
+    drive_green: dict[str, Any] = {}
+    repair: dict[str, Any] = {}
     if write_set:
         with suppress(Exception):
             from remedy.core.build_gate_tower import run_gate_tower
+            from remedy.core.build_persist import iterate_to_green_multi
 
             base = str(getattr(st, "verify_command", "") or "") if st else ""
-            gate = run_gate_tower(runtime, write_set, base_verify=base)
 
-    repair: dict[str, Any] = {}
-    if gate and not gate.get("ok") and use_llm:
-        repair = maybe_auto_repair(runtime, st, use_llm=True) or {}
+            def _verify() -> dict[str, Any]:
+                g = run_gate_tower(runtime, write_set, base_verify=base)
+                # progress = how many gate levels pass (monotone toward green)
+                g["progress"] = len(g.get("passed_levels") or [])
+                return g
+
+            def _repair_narrow(_v: dict[str, Any]) -> dict[str, Any]:
+                if not use_llm:
+                    return {"ran": False}
+                res = maybe_auto_repair(runtime, st, use_llm=True) or {}
+                return {"ran": bool(res.get("ran") or res.get("results")), **res}
+
+            def _repair_broad(_v: dict[str, Any]) -> dict[str, Any]:
+                if not use_llm:
+                    return {"ran": False}
+                res = maybe_auto_repair(runtime, st, use_llm=True, broaden=True) or {}
+                return {"ran": bool(res.get("ran") or res.get("results")), **res}
+
+            # Persist with VARIETY: loop verify → repair, and when the narrow
+            # source-first fix stalls, rotate to the broadened strategy
+            # (tests + more targets) before giving up. Drives to actually
+            # passing, from more than one angle.
+            gate = _verify()
+            if gate.get("ok"):
+                drive_green = {"ok": True, "rounds": 0, "reason": "green"}
+            else:
+                # Strategy selection steered by what has landed green before:
+                # if the broadened angle keeps winning, start bold sooner.
+                strat_map = {"source-first": _repair_narrow, "broadened": _repair_broad}
+                order = ["source-first", "broadened"]
+                with suppress(Exception):
+                    from remedy.core.build_persist import order_strategy_names
+                    from remedy.memory.soul.field import load_soul_field
+
+                    home = getattr(getattr(runtime, "config", None), "home_dir", None)
+                    lessons = list(load_soul_field(home).organism_lessons or [])
+                    order = order_strategy_names(order, lessons)
+                outcome = iterate_to_green_multi(
+                    _verify,
+                    [(n, strat_map[n]) for n in order if n in strat_map],
+                    max_rounds=max(2, min(12, int(max_repairs or 3) + 4)),
+                )
+                drive_green = outcome.to_public()
+                repair = {"ran": sum(1 for h in outcome.history if h.get("repaired"))}
+                if outcome.ok:
+                    gate = {"ok": True, "passed_levels": gate.get("passed_levels")}
+                # Learn from the build: fold the outcome into organism memory
+                # so she gets stronger at building the more she builds.
+                with suppress(Exception):
+                    from remedy.core.build_persist import build_lesson_from_outcome
+                    from remedy.memory.soul.update import record_self_inject_lesson
+
+                    lesson = build_lesson_from_outcome(outcome, goal=g)
+                    if lesson:
+                        home = getattr(
+                            getattr(runtime, "config", None), "home_dir", None
+                        )
+                        record_self_inject_lesson(
+                            outcome=lesson["outcome"],
+                            tree=lesson["tree"],
+                            summary=lesson["summary"],
+                            gate_detail=lesson["gate_detail"],
+                            home=home,
+                        )
 
     hops_ok = bool(hop_results) and all(r.get("ok") for r in hop_results if r.get("phase") != "scout")
     scout_only = bool(hop_results) and all(r.get("phase") == "scout" for r in hop_results)
@@ -261,6 +329,7 @@ def drive_build(
         "tdd": tdd.get("tdd") or {},
         "hops": hop_results,
         "gate": {k: gate.get(k) for k in ("ok", "message") if k in gate} if gate else {},
+        "drive_to_green": drive_green,
         "repair": repair,
         "review": review,
         "review_fix": {
@@ -363,8 +432,14 @@ def maybe_auto_repair(
     state: Any,
     *,
     use_llm: bool | None = None,
+    broaden: bool = False,
 ) -> dict[str, Any] | None:
-    """On red verify: hop ranked repair targets (machine, not a prompt)."""
+    """On red verify: hop ranked repair targets (machine, not a prompt).
+
+    ``broaden`` is the second, structurally-different strategy: more targets,
+    more repairs per target, and test files included — used when the narrow
+    source-first pass stalls.
+    """
     if state is None or not getattr(state, "active", False):
         return None
     from remedy.core.build_delta import allow_background_drive
@@ -374,15 +449,22 @@ def maybe_auto_repair(
         return None
     if getattr(state, "last_verify_ok", None) is not False:
         return None
-    cycles = int(getattr(state, "auto_repair_cycles", 0) or 0)
+    # Claim a cycle atomically: read-check-increment under a lock so two
+    # concurrent entries can't both pass the cap and fire duplicate repair
+    # hops that clobber each other's edits.
     cap = int(getattr(state, "max_auto_repair_cycles", 3) or 3)
-    if cycles >= cap:
-        return {
-            "ok": False,
-            "capped": True,
-            "ran": 0,
-            "message": f"auto-repair capped at {cap} cycles — model must file_edit",
-        }
+    if broaden:
+        cap = max(cap, cap + 3)
+    with _auto_repair_lock:
+        cycles = int(getattr(state, "auto_repair_cycles", 0) or 0)
+        if cycles >= cap:
+            return {
+                "ok": False,
+                "capped": True,
+                "ran": 0,
+                "message": f"auto-repair capped at {cap} cycles — model must file_edit",
+            }
+        state.auto_repair_cycles = cycles + 1
     from remedy.core.build_repair_queue import queue_from_error_vector, run_auto_repair_hops
 
     vec = getattr(state, "last_error_vector", None) or {}
@@ -392,16 +474,21 @@ def maybe_auto_repair(
     root = _project_root(runtime)
     q = queue_from_error_vector(vec, write_set=ws, root=root)
     if not q.targets:
+        # Nothing to repair — refund the cycle we optimistically claimed.
+        with _auto_repair_lock:
+            state.auto_repair_cycles = max(
+                0, int(getattr(state, "auto_repair_cycles", 1) or 1) - 1
+            )
         return None
     if use_llm is None:
         use_llm = should_use_live_llm(runtime)
-    state.auto_repair_cycles = cycles + 1
     ran = run_auto_repair_hops(
         runtime,
         q,
         use_llm=bool(use_llm),
-        max_targets=3,
-        max_repairs=2,
+        max_targets=5 if broaden else 3,
+        max_repairs=3 if broaden else 2,
+        include_tests=broaden,
     )
     # Allow another auto-verify after hops landed
     if ran.get("ran"):
@@ -413,9 +500,11 @@ def maybe_auto_repair(
         "ran": ran.get("ran"),
         "results": ran.get("results"),
         "targets": q.to_public(),
+        "broaden": broaden,
         "message": (
             f"auto-repair hops ran={ran.get('ran')} ok={ran.get('ok')} "
             f"cycle={state.auto_repair_cycles}/{cap}"
+            f"{' (broadened)' if broaden else ''}"
         ),
     }
 

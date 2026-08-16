@@ -46,6 +46,8 @@ export async function createSession(params: {
   project_path?: string
   /** Stamp at create so multi-session tabs keep independent providers. */
   llm_provider?: string
+  /** "grove" marks the personal home chat (hidden from Studio's list). */
+  origin_channel?: string
 }): Promise<ChatSession> {
   return apiFetch<ChatSession>('/sessions', {
     method: 'POST',

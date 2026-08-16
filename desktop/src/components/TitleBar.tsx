@@ -289,7 +289,7 @@ function WinIcon({ kind }: { kind: 'min' | 'max' | 'restore' | 'close' }) {
   )
 }
 
-function MenuSep() {
+export function MenuSep() {
   return (
     <div
       className="my-1 mx-2 h-px"
@@ -299,7 +299,7 @@ function MenuSep() {
   )
 }
 
-function MenuItem({
+export function MenuItem({
   label,
   onClick,
   shortcut,

@@ -348,19 +348,49 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
     if not path.exists():
         return {}
 
+    # Hot path: this runs on every turn (soul inject, tools, routes). Cache
+    # the parse keyed by (mtime_ns, size) — a stat per call instead of an
+    # open+parse. Deep-copied on return so caller mutations never leak into
+    # the cache. Writers need no invalidation: save bumps mtime.
+    import copy as _copy
+    import threading as _threading
+
+    global _load_config_cache, _load_config_lock
+    try:
+        _load_config_lock
+    except NameError:
+        _load_config_lock = _threading.Lock()
+        _load_config_cache = {}
+    try:
+        st = path.stat()
+        cache_key = (str(path), st.st_mtime_ns, st.st_size)
+    except OSError:
+        cache_key = None
+    if cache_key is not None:
+        with _load_config_lock:
+            hit = _load_config_cache.get(cache_key[0])
+            if hit is not None and hit[0] == cache_key[1] and hit[1] == cache_key[2]:
+                return _copy.deepcopy(hit[2])
+
     content = path.read_text(encoding="utf-8")
 
     try:
         if path.suffix in (".toml", ".tml"):
-            return tomllib.loads(content)
+            parsed = tomllib.loads(content)
         elif path.suffix in (".yaml", ".yml") or "---" in content[:100] or path.suffix == ".yaml":
-            return yaml.safe_load(content) or {}
+            parsed = yaml.safe_load(content) or {}
         else:
-            return tomllib.loads(content)
+            parsed = tomllib.loads(content)
     except Exception as exc:
         import logging
         logging.getLogger(__name__).error("Failed to parse config %s: %s", path, exc)
         return {}
+    if cache_key is not None and isinstance(parsed, dict):
+        with _load_config_lock:
+            _load_config_cache[cache_key[0]] = (cache_key[1], cache_key[2], parsed)
+            while len(_load_config_cache) > 8:
+                _load_config_cache.pop(next(iter(_load_config_cache)))
+    return _copy.deepcopy(parsed) if isinstance(parsed, dict) else parsed
 
 
 def load_env_overrides(base: dict[str, Any]) -> dict[str, Any]:
@@ -739,7 +769,11 @@ def validate_provider_model(provider: str | None, model: str | None) -> str:
     )
 
 
-# Canonical desktop personas (aligned with SetupWizard).
+# Canonical desktop communication styles (aligned with SetupWizard).
+# Historically named "personas" — these are partner-chosen *speaking styles*,
+# not identity. Remedy's identity/persona canon lives in docs/REMEDY_PERSONA.md
+# and remedy.core.agent_identity; a style addendum tunes register only and
+# never overrides the creed, vow, or temperament.
 PERSONA_PROMPTS: dict[str, str] = {
     "default": "",
     "balanced": (

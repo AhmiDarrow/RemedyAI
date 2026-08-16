@@ -11,12 +11,19 @@ import {
   getLifeBoard,
   listApprovals,
   createLifeGoal,
+  clearLifeActivity,
+  deleteLifeGoal,
+  renameLifeGoal,
   type LifeBoard,
   type LifeGoal,
   type PendingApproval,
 } from '../api/partner'
 import { ApprovalBanner } from '../components/ApprovalBanner'
+import { RemedyLogo } from '../components/RemedyLogo'
 import { BrowserSlide } from '../components/slides/BrowserSlide'
+import { GroveChat } from './GroveChat'
+import { useSplit } from './useSplit'
+import type { SendAttachment } from '../components/Composer'
 import { messagesToMoments, latestExchange } from './storylineMoments'
 import { getSettings } from '../api/settings'
 import { patchVoiceSettings } from '../api/voice'
@@ -26,6 +33,32 @@ import type { ChatMessage, ChatSession } from '../types'
 import './grove.css'
 
 const GOAL_SESSIONS_KEY = 'remedy.grove.goalSessions.v1'
+const HOME_SESSION_KEY = 'remedy.grove.homeSession.v1'
+
+function loadHomeSession(): string {
+  try {
+    return localStorage.getItem(HOME_SESSION_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+function saveHomeSession(id: string): void {
+  try {
+    localStorage.setItem(HOME_SESSION_KEY, id)
+  } catch {
+    /* */
+  }
+}
+
+// Shown only when the board is empty — illustrations of what Grove is for,
+// not real goals. Clicking one seeds a real goal with that title.
+const EXAMPLE_PLOTS: { icon: string; title: string; hint: string }[] = [
+  { icon: '🧾', title: 'Sort out this month’s receipts', hint: 'Drop a photo — I’ll total and organize them' },
+  { icon: '✈️', title: 'Plan a weekend trip', hint: 'Tell me where and when; I’ll research and draft it' },
+  { icon: '📄', title: 'Polish my resume', hint: 'Share it and the role — we’ll tailor it together' },
+  { icon: '🛒', title: 'Reorder the usuals', hint: 'I can shop with you, you approve the checkout' },
+]
 
 function loadGoalSessions(): Record<string, string> {
   try {
@@ -58,18 +91,22 @@ export interface GroveAppProps {
   createSession: (
     title?: string,
     llm?: { provider?: string; model?: string },
-    opts?: { focus?: boolean },
+    opts?: { focus?: boolean; origin?: string },
   ) => Promise<ChatSession | null>
   messages: ChatMessage[]
   partialText: string
   streaming: boolean
   messagesLoading: boolean
-  handleSend: (text: string) => Promise<void> | void
+  handleSend: (text: string, attachments?: SendAttachment[]) => Promise<void> | void
   stop: () => void
   serverReady: boolean
   userName: string
   partnerName: string
   onSwitchToStudio: () => void
+  /** Goal room Remedy asked to open herself (app_control open_goal). */
+  openGoalId?: string | null
+  /** Ack once the requested goal has been opened (or found absent). */
+  onGoalOpened?: () => void
 }
 
 type GroveView = { kind: 'home' } | { kind: 'goal'; goal: LifeGoal }
@@ -90,12 +127,15 @@ export function GroveApp({
   userName,
   partnerName,
   onSwitchToStudio,
+  openGoalId,
+  onGoalOpened,
 }: GroveAppProps) {
   const [view, setView] = useState<GroveView>({ kind: 'home' })
   const [tab, setTab] = useState<RoomTab>('alongside')
   const [board, setBoard] = useState<LifeBoard | null>(null)
   const [approvals, setApprovals] = useState<PendingApproval[]>([])
-  const [draft, setDraft] = useState('')
+  // Draft lives inside GroveChat now; mic transcripts send directly.
+  const [, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const goalSessionsRef = useRef<Record<string, string>>(loadGoalSessions())
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -183,7 +223,7 @@ export function GroveApp({
       const inflight = goalPendingRef.current.get(goal.id)
       if (inflight) return inflight
       const p = (async () => {
-        const s = await createSession(`🌿 ${goal.title}`, undefined, { focus: true })
+        const s = await createSession(`🌿 ${goal.title}`, undefined, { focus: true, origin: 'grove' })
         if (s?.id) {
           map[goal.id] = s.id
           saveGoalSessions(map)
@@ -206,10 +246,20 @@ export function GroveApp({
     [ensureGoalSession],
   )
 
+  // Remedy opening a goal room "within herself" (app_control open_goal). Wait
+  // for the board so a just-created goal resolves; ack once handled (found or
+  // not) so App clears the request and we don't reopen on every board refresh.
+  useEffect(() => {
+    if (!openGoalId || !board) return
+    const g = (board.goals || []).find((x) => x.id === openGoalId)
+    if (g) openGoal(g)
+    onGoalOpened?.()
+  }, [openGoalId, board, openGoal, onGoalOpened])
+
   const sendFromGrove = useCallback(
-    async (text: string) => {
+    async (text: string, attachments?: SendAttachment[]) => {
       const t = text.trim()
-      if (!t || busy) return
+      if ((!t && !attachments?.length) || busy) return
       setBusy(true)
       try {
         if (view.kind === 'goal') {
@@ -220,7 +270,7 @@ export function GroveApp({
         // handleSend self-provisions a session when none is active (home
         // talkbar with no chat yet) and rebinds on activeId change — so we
         // never pre-create here (that made a stray second session).
-        await handleSend(t)
+        await handleSend(t, attachments)
         setDraft('')
       } finally {
         setBusy(false)
@@ -229,6 +279,76 @@ export function GroveApp({
     [busy, view, ensureGoalSession, handleSend],
   )
   sendFromGroveRef.current = sendFromGrove
+
+  /** Session for attachment uploads from Grove home: reuse active, else create. */
+  const homeSessionPendingRef = useRef<Promise<string | null> | null>(null)
+  const homeSessionRef = useRef<string>(loadHomeSession())
+  const ensureHomeSession = useCallback((): Promise<string | null> => {
+    // Base Grove is her HOME — the whole PC, no project folder. Reuse the
+    // home session only if it exists AND carries no project_path; never
+    // inherit a Studio project session (project folders are Studio-only).
+    const stored = homeSessionRef.current
+    const storedSess = stored ? sessions.find((s) => s.id === stored) : undefined
+    if (storedSess && !storedSess.project_path) {
+      if (activeId !== storedSess.id) setActiveId(storedSess.id)
+      return Promise.resolve(storedSess.id)
+    }
+    // The active session may already be a project-free one (not the stored
+    // home) — only reuse it when it has no project folder.
+    const cur = activeId ? sessions.find((s) => s.id === activeId) : undefined
+    if (cur && !cur.project_path) {
+      homeSessionRef.current = cur.id
+      saveHomeSession(cur.id)
+      return Promise.resolve(cur.id)
+    }
+    if (homeSessionPendingRef.current) return homeSessionPendingRef.current
+    const p = (async () => {
+      const s = await createSession(undefined, undefined, { focus: true, origin: 'grove' })
+      if (s?.id) {
+        homeSessionRef.current = s.id
+        saveHomeSession(s.id)
+        return s.id
+      }
+      return null
+    })().finally(() => {
+      homeSessionPendingRef.current = null
+    })
+    homeSessionPendingRef.current = p
+    return p
+  }, [activeId, sessions, setActiveId, createSession])
+
+  // Base Grove home is the ongoing meeting place — one continuous, project-
+  // free conversation. On entering home, bind to the home session (never a
+  // Studio project chat). Her memory (Soul Field + Partner Memory) carries
+  // the relationship across it, so it never feels like it has limits.
+  useEffect(() => {
+    if (view.kind !== 'home' || !serverReady) return
+    // Delegate to ensureHomeSession: it reuses a stored/active project-free
+    // session, and — crucially — PROVISIONS a fresh project-free home when the
+    // only session around is a Studio project chat. Without provisioning, home
+    // would render that Studio conversation until the first send (it never
+    // should — Grove home has no project folder). The pending-ref guard inside
+    // makes repeated calls (on every sessions/activeId change) idempotent.
+    void ensureHomeSession()
+  }, [view.kind, serverReady, ensureHomeSession])
+
+  // Slide-able bars: the owner sizes their own windows; sizes persist.
+  const homeSplit = useSplit({
+    storageKey: 'remedy.grove.split.home.v1',
+    axis: 'x',
+    initial: 0.56,
+    min: 0.28,
+    max: 0.72,
+    label: 'Resize plots and chat',
+  })
+  const roomSplit = useSplit({
+    storageKey: 'remedy.grove.split.room.v1',
+    axis: 'y',
+    initial: 0.6,
+    min: 0.3,
+    max: 0.8,
+    label: 'Resize stage and chat',
+  })
 
   const [plantError, setPlantError] = useState('')
   const plantGoal = useCallback(
@@ -249,6 +369,34 @@ export function GroveApp({
     [refreshBoard, openGoal],
   )
 
+  const removeGoal = useCallback(
+    async (id: string) => {
+      try {
+        await deleteLifeGoal(id)
+      } catch {
+        /* best-effort; refresh reflects truth */
+      }
+      refreshBoard()
+    },
+    [refreshBoard],
+  )
+
+  const editGoal = useCallback(
+    async (id: string, current: string) => {
+      const next = window.prompt('Rename this plot', current)
+      if (next == null) return
+      const t = next.trim()
+      if (!t || t === current) return
+      try {
+        await renameLifeGoal(id, t)
+      } catch {
+        /* best-effort */
+      }
+      refreshBoard()
+    },
+    [refreshBoard],
+  )
+
   const goals = board?.goals || []
   const needsYou = approvals.length
   const lastStep = board?.last_step || null
@@ -267,7 +415,11 @@ export function GroveApp({
     return (
       <div className="grove-surface" data-testid="grove-home">
         <div className="grove-topbar">
-          <div className="grove-brand">✚ {partnerName || 'Remedy'}</div>
+          {/* Circuit-R monogram — never the ✚ cross (non-medical branding). */}
+          <div className="grove-brand">
+            <RemedyLogo size={18} variant="auto" title="Remedy" />
+            {partnerName || 'Remedy'}
+          </div>
           <button
             type="button"
             className={`grove-voicetoggle${speakReplies ? ' on' : ''}${voice.speaking ? ' speaking' : ''}`}
@@ -292,7 +444,11 @@ export function GroveApp({
           </button>
         </div>
 
-        <div className="grove-scroll">
+        <div
+          className={`grove-split${homeSplit.dragging ? ' dragging' : ''}`}
+          ref={homeSplit.containerRef}
+        >
+        <div className="grove-scroll" style={{ width: `${homeSplit.ratio * 100}%` }}>
           <h1 className="grove-hello">
             {timeOfDayGreeting(userName)}
             <span>
@@ -303,10 +459,21 @@ export function GroveApp({
           </h1>
 
           <div className="grove-away">
-            {lastStep?.did && (
+            {goals.length > 0 && lastStep?.did && (
               <div className="grove-pill">
                 <span className="k" /> Last: {lastStep.did}
                 {lastStep.goal ? ` — ${lastStep.goal}` : ''}
+                <button
+                  type="button"
+                  className="grove-pill-x"
+                  title="Clear this"
+                  aria-label="Clear last activity"
+                  onClick={() => {
+                    void clearLifeActivity().then(refreshBoard).catch(() => {})
+                  }}
+                >
+                  ×
+                </button>
               </div>
             )}
             {needsYou > 0 && (
@@ -325,13 +492,46 @@ export function GroveApp({
 
           <div className="grove-plots">
             {goals.map((g) => (
-              <button
-                type="button"
+              <div
                 key={g.id}
                 className="grove-plot"
+                role="button"
+                tabIndex={0}
                 onClick={() => openGoal(g)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    openGoal(g)
+                  }
+                }}
                 data-testid="grove-plot"
               >
+                <div className="grove-plot-actions">
+                  <button
+                    type="button"
+                    className="grove-plot-act"
+                    title="Rename"
+                    aria-label={`Rename ${g.title}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void editGoal(g.id, g.title)
+                    }}
+                  >
+                    ✎
+                  </button>
+                  <button
+                    type="button"
+                    className="grove-plot-act del"
+                    title="Remove"
+                    aria-label={`Remove ${g.title}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void removeGoal(g.id)
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
                 <div className="kind">
                   🌿 {g.horizon || g.status || 'growing'}
                 </div>
@@ -344,8 +544,27 @@ export function GroveApp({
                   </div>
                 )}
                 <span className="livechip">Sit with me →</span>
-              </button>
+              </div>
             ))}
+
+            {goals.length === 0 &&
+              EXAMPLE_PLOTS.map((ex) => (
+                <button
+                  type="button"
+                  key={ex.title}
+                  className="grove-plot example"
+                  onClick={() => void plantGoal(ex.title)}
+                  title="Start this — I'll make it a real plot"
+                >
+                  <div className="kind">✨ example</div>
+                  <h2>
+                    {ex.icon} {ex.title}
+                  </h2>
+                  <div className="last">{ex.hint}</div>
+                  <span className="livechip">Start this →</span>
+                </button>
+              ))}
+
             <div className="grove-plot seed">
               <div>🌱</div>
               <div>
@@ -354,74 +573,60 @@ export function GroveApp({
               <button
                 type="button"
                 className="seedbtn"
-                onClick={() => inputRef.current?.focus()}
+                onClick={() => {
+                  inputRef.current?.focus()
+                  ;(
+                    document.querySelector(
+                      '.grove-chat input[aria-label="Talk to Remedy"]',
+                    ) as HTMLInputElement | null
+                  )?.focus()
+                }}
               >
-                Start below
+                Start in the chat →
               </button>
             </div>
           </div>
         </div>
 
-        {plantError && (
-          <div className="grove-planterror" role="alert">
-            {plantError}
-          </div>
-        )}
-        <form
-          className="grove-talkbar"
-          onSubmit={(e) => {
-            e.preventDefault()
-            const t = draft.trim()
-            if (!t) return
-            if (/^i want to /i.test(t)) {
-              // Only clear the draft once the goal is actually planted.
-              void plantGoal(t.replace(/^i want to /i, '')).then((ok) => {
-                if (ok) setDraft('')
-              })
-            } else {
-              void sendFromGrove(t)
-            }
-          }}
+        <div
+          className={`grove-divider${homeSplit.dragging ? ' active' : ''}`}
+          data-testid="grove-divider"
+          {...homeSplit.dividerProps}
         >
-          <input
-            ref={inputRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            aria-label="Talk to Remedy — a goal, an errand, or a question"
-            placeholder={
-              !serverReady
-                ? 'Connecting…'
-                : voice.recording
-                  ? 'Listening — click the mic again when you’re done…'
-                  : voice.transcribing
-                    ? 'Heard you — writing it down…'
-                    : 'Tell me anything — a goal, an errand, a worry…'
-            }
-            disabled={!serverReady}
-          />
-          {voice.micSupported && (
-            <button
-              type="button"
-              className={`grove-micbtn${voice.recording ? ' rec' : ''}`}
-              onClick={() => void handleMic()}
-              disabled={!serverReady}
-              aria-pressed={voice.recording}
-              aria-label={
-                voice.recording ? 'Stop and send what you said' : 'Speak instead of typing'
-              }
-              title={
-                voice.recording
-                  ? 'Stop and send what you said'
-                  : 'Speak instead of typing (stays on this PC)'
-              }
-            >
-              🎙
-            </button>
+          <span className="grip" />
+        </div>
+
+        <div className="grove-chatpane">
+          {plantError && (
+            <div className="grove-planterror" role="alert">
+              {plantError}
+            </div>
           )}
-          <button type="submit" className="grove-mic" title="Send" aria-label="Send">
-            ↑
-          </button>
-        </form>
+          <GroveChat
+            messages={messages}
+            partialText={partialText}
+            streaming={streaming}
+            loading={messagesLoading}
+            userName={userName}
+            partnerName={partnerName}
+            serverReady={serverReady}
+            placeholder="Tell me anything — a goal, an errand, a receipt, a bug…"
+            onSend={sendFromGrove}
+            onStop={stop}
+            ensureSessionId={ensureHomeSession}
+            sessionKey={activeId}
+            onSpecialSend={async (t) => {
+              if (/^i want to /i.test(t)) {
+                return plantGoal(t.replace(/^i want to /i, ''))
+              }
+              return false
+            }}
+            micSupported={voice.micSupported}
+            recording={voice.recording}
+            onMic={() => void handleMic()}
+          />
+        </div>
+        </div>
         {voice.recording && (
           <div className="grove-sr-live" role="status" aria-live="polite">
             Listening…
@@ -484,77 +689,60 @@ export function GroveApp({
       </div>
 
       {tab === 'alongside' ? (
-        <div className="grove-stagewrap">
-          <div className="grove-stage">
+        <div
+          className={`grove-stagewrap split${roomSplit.dragging ? ' dragging' : ''}`}
+          ref={roomSplit.containerRef}
+        >
+          <div className="grove-stage" style={{ height: `${roomSplit.ratio * 100}%`, flex: 'none' }}>
             <BrowserSlide />
           </div>
-          <div className="grove-talkstrip">
-            <div className="caps">
-              {exchange.you && (
-                <div className="cap you">You — “{exchange.you.slice(0, 160)}”</div>
-              )}
-              {(partialText || exchange.remedy) && (
-                <div className="cap rem">
-                  <b>{partnerName || 'Remedy'} —</b>{' '}
-                  {(partialText || exchange.remedy || '').slice(0, 200)}
-                  {streaming && <span className="grove-typing">…</span>}
-                </div>
-              )}
-              {!exchange.you && !exchange.remedy && !partialText && (
-                <div className="cap you">
-                  {messagesLoading
-                    ? 'Opening this goal’s room…'
-                    : 'Say what you’d like to do — I’ll drive, you watch.'}
-                </div>
-              )}
-            </div>
-            {streaming && (
-              <button type="button" className="grove-chip stop" onClick={() => stop()}>
-                ⏸ Pause
-              </button>
-            )}
-          </div>
-          <form
-            className="grove-talkbar room"
-            onSubmit={(e) => {
-              e.preventDefault()
-              void sendFromGrove(draft)
-            }}
+          <div
+            className={`grove-divider h${roomSplit.dragging ? ' active' : ''}`}
+            data-testid="grove-room-divider"
+            {...roomSplit.dividerProps}
           >
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              aria-label={`Talk inside ${goal.title}`}
-              placeholder={
-                voice.recording
-                  ? 'Listening — click the mic again when you’re done…'
-                  : `Talk inside “${goal.title}”…`
-              }
-              disabled={!serverReady}
-            />
-            {voice.micSupported && (
-              <button
-                type="button"
-                className={`grove-micbtn${voice.recording ? ' rec' : ''}`}
-                onClick={() => void handleMic()}
-                disabled={!serverReady}
-                aria-pressed={voice.recording}
-                aria-label={
-                  voice.recording ? 'Stop and send what you said' : 'Speak instead of typing'
-                }
-                title={
-                  voice.recording
-                    ? 'Stop and send what you said'
-                    : 'Speak instead of typing (stays on this PC)'
-                }
-              >
-                🎙
-              </button>
+            <span className="grip" />
+          </div>
+          <div className="grove-chatpane room">
+            {exchange.you || exchange.remedy || partialText ? null : (
+              <div className="grove-room-hint">
+                {messagesLoading
+                  ? 'Opening this goal’s room…'
+                  : 'Say what you’d like to do — I’ll drive, you watch.'}
+              </div>
             )}
-            <button type="submit" className="grove-mic" title="Send" aria-label="Send">
-              ↑
-            </button>
-          </form>
+            <GroveChat
+              messages={messages}
+              partialText={partialText}
+              streaming={streaming}
+              loading={messagesLoading}
+              userName={userName}
+              partnerName={partnerName}
+              serverReady={serverReady}
+              placeholder={`Talk inside “${goal.title}” — attach anything…`}
+              starters={[
+                {
+                  label: 'Where are we?',
+                  text: 'Catch me up on this goal — where are we, and what’s next?',
+                },
+                {
+                  label: 'Do the next step',
+                  text: 'Take the next step on this goal now — I’ll watch.',
+                },
+                {
+                  label: 'Add a note',
+                  text: 'A note for this goal: ',
+                },
+              ]}
+              onSend={sendFromGrove}
+              onStop={stop}
+              ensureSessionId={() => ensureGoalSession(goal)}
+              sessionKey={activeId}
+              micSupported={voice.micSupported}
+              recording={voice.recording}
+              onMic={() => void handleMic()}
+            />
+          </div>
           {voice.recording && (
             <div className="grove-sr-live" role="status" aria-live="polite">
               Listening…
