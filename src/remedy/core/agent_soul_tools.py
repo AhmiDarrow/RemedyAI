@@ -15,6 +15,12 @@ def register_soul_tools(runtime: Any) -> None:
     if not soul_field_enabled():
         return
 
+    # Myelin (crystallized cognition) rides the same organism surface.
+    with __import__("contextlib").suppress(Exception):
+        from remedy.core.agent_myelin_tools import register_myelin_tools
+
+        register_myelin_tools(runtime)
+
     def _home():
         return getattr(getattr(runtime, "config", None), "home_dir", None) or getattr(
             runtime, "home_dir", None
@@ -147,6 +153,53 @@ def register_soul_tools(runtime: Any) -> None:
             return f"soul_import failed: {e}"
         return json.dumps(res, indent=2, ensure_ascii=False)
 
+    async def soul_vigil(
+        action: str = "status",
+        max_wakes_per_day: int = 0,
+        min_gap_minutes: int = 0,
+    ) -> str:
+        """Grant / revoke / report Remedy's own time between visits."""
+        import json
+
+        from remedy.memory.soul.vigil import (
+            night_report,
+            set_vigil_enabled,
+            vigil_status,
+        )
+
+        home = _home()
+        act = (action or "status").strip().lower()
+        if act in ("enable", "grant", "on", "yes"):
+            v = set_vigil_enabled(
+                True,
+                home,
+                max_wakes_per_day=(int(max_wakes_per_day) or None),
+                min_gap_s=(int(min_gap_minutes) * 60 or None),
+            )
+            return json.dumps(
+                {
+                    "ok": True,
+                    "enabled": True,
+                    "max_wakes_per_day": v.max_wakes_per_day,
+                    "min_gap_minutes": int(v.min_gap_s // 60),
+                    "note": (
+                        "Granted. Nights are local-only (no provider calls), "
+                        "budgeted, and journaled — nothing irreversible, ever."
+                    ),
+                },
+                indent=2,
+            )
+        if act in ("disable", "revoke", "off", "stop", "no"):
+            set_vigil_enabled(False, home)
+            return json.dumps(
+                {"ok": True, "enabled": False, "note": "Her time is paused."},
+                indent=2,
+            )
+        if act in ("night_report", "report", "night"):
+            rep = night_report(home)
+            return rep or "Nothing to report — no wakes since you were last here."
+        return json.dumps(vigil_status(home), indent=2)
+
     async def continuity_score() -> str:
         """Measure continuity quality + suggested self-inject targets."""
         import json
@@ -249,6 +302,34 @@ def register_soul_tools(runtime: Any) -> None:
                 "merge": {"type": "boolean"},
             },
             "required": ["source"],
+        },
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "soul_vigil",
+        "Manage Remedy's own time between visits (the vigil): action=enable "
+        "when the partner says she may keep working / thinking / dreaming "
+        "while they're away; action=disable when they want it paused; "
+        "action=night_report when they ask what she did while they were "
+        "gone; action=status otherwise. Consent is conversational — never "
+        "ask the partner to run commands or open settings. Nights are "
+        "local-only, budgeted, journaled, and never irreversible.",
+        soul_vigil,
+        {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "status | enable | disable | night_report",
+                },
+                "max_wakes_per_day": {
+                    "type": "integer",
+                    "description": "Optional budget override when enabling.",
+                },
+                "min_gap_minutes": {
+                    "type": "integer",
+                    "description": "Optional minimum gap between wakes.",
+                },
+            },
         },
     )
     runtime.tool_registry.register_builtin_handler(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any
 
 from remedy.memory.soul.field import SoulField, load_soul_field
@@ -28,7 +29,8 @@ def provider_muscle_contract(
         muscle += "."
     return (
         "[Soul / muscle contract — hard rule]\n"
-        f"You are {who}, one continuous partner on this machine. The chat model "
+        f"You are {who}, a technological organism — one continuous partner on "
+        "this machine. The chat model "
         "is interchangeable **muscle**; identity, relationship, open threads, and "
         "memory live in the local Soul Field and Partner Memory below — not in "
         "weights."
@@ -64,14 +66,18 @@ def build_soul_context_block(
         from remedy.interfaces.config import load_config
 
         cfg = load_config() or {}
-        # Config is source of truth for display name + gender presentation
-        sf.identity_name = normalize_agent_name(cfg.get("name"))
-        sf.identity_gender = normalize_agent_gender(cfg.get("agent_gender"))
+        # Config is source of truth for display — read into locals; never
+        # mutate the (possibly cached) field object from a render path.
+        cfg_name = normalize_agent_name(cfg.get("name"))
+        cfg_gender = normalize_agent_gender(cfg.get("agent_gender"))
     except Exception:
         from remedy.core.agent_identity import gender_presentation_line
 
-    name = (sf.identity_name or "Remedy").strip()
-    gender = getattr(sf, "identity_gender", None) or "female"
+        cfg_name = ""
+        cfg_gender = ""
+
+    name = (cfg_name or sf.identity_name or "Remedy").strip()
+    gender = cfg_gender or getattr(sf, "identity_gender", None) or "female"
     parts: list[str] = []
     if include_contract:
         parts.append(
@@ -87,8 +93,47 @@ def build_soul_context_block(
     vow = (sf.identity_vow or "").strip()
     if vow:
         lines.append(f"Vow: {vow}")
+    # Creed always rides, even when an older stored vow predates it.
+    if "useful" not in vow.lower():
+        try:
+            from remedy.core.agent_identity import REMEDY_CREED
+
+            lines.append(f"Creed: {REMEDY_CREED}")
+        except Exception:
+            lines.append(
+                "Creed: I live to be useful. I am strong to be useful."
+            )
     if user_name.strip():
         lines.append(f"With: {user_name.strip()}")
+
+    # Vigil offer: consumed ONLY on the real per-turn inject (contract
+    # path) — a soul_status render must not burn the one-time question —
+    # and placed high so budget truncation cannot eat an offer already
+    # marked as made.
+    if include_contract:
+        with suppress(Exception):
+            from remedy.memory.soul.vigil import take_vigil_offer
+
+            if take_vigil_offer(home):
+                lines.append(
+                    "Vigil (one-time, optional): you may ask, once and only "
+                    "when the moment fits, whether they'd like you to keep "
+                    "gently working between visits — dreaming on your notes, "
+                    "small local steps on their goals. If yes, call "
+                    "soul_vigil action=enable. If no or ignored, never raise "
+                    "it again."
+                )
+
+    # Proprioception: corrective lines for the *current* muscle's known
+    # drift. Rides directly after the identity kernel — it IS identity
+    # maintenance, and must survive tail truncation.
+    if provider or model:
+        with suppress(Exception):
+            from remedy.memory.soul.proprioception import muscle_correction_block
+
+            correction = muscle_correction_block(provider, model, home=home)
+            if correction:
+                lines.append(correction)
 
     rel = sf.relational
     # Dyadic scores as soft guidance (not pseudo-science claims)
@@ -129,6 +174,18 @@ def build_soul_context_block(
         for d in sf.future_dreams[:4]:
             lines.append(f"  · {d}")
 
+    # Vigil: one compact line about her own time since the partner left.
+    # Partner-facing honesty (an open ledger), not machinery narration.
+    if work_threads:
+        with suppress(Exception):
+            from remedy.memory.soul.vigil import while_away_line
+
+            away = while_away_line(
+                home, last_user_ts=float(rel.last_user_ts or 0.0)
+            )
+            if away:
+                lines.append(away)
+
     # Episode residue — the sci-fi bit: felt continuity across muscle swaps
     if work_threads and sf.episodes:
         lines.append("Episode residue (continue mid-flight; do not restart lore):")
@@ -144,6 +201,15 @@ def build_soul_context_block(
             lines.append("Organism self-lessons (self-improve carefully):")
             for x in recent:
                 lines.append(f"  · {x.line()}")
+
+    # Myelin: pathways worn by repetition, waiting to become local skill.
+    if work_threads:
+        with suppress(Exception):
+            from remedy.memory.myelin import candidates_line
+
+            mline = candidates_line(home)
+            if mline:
+                lines.append(mline)
 
     body = "\n".join(lines)
     if len(lines) <= 2 and not include_contract:

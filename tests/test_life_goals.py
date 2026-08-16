@@ -36,16 +36,19 @@ def test_store_add_list_complete_and_next(tmp_path):
     assert "Finish the novel" in md
 
 
-def test_corrupt_life_goals_json_does_not_wipe(tmp_path):
+def test_corrupt_life_goals_json_backs_up_and_resumes(tmp_path):
+    # A corrupt file must be preserved (not silently destroyed) AND must not
+    # permanently disable future writes — it is moved aside to .corrupt and a
+    # fresh store accepts new goals.
     store = LifeGoalStore(tmp_path)
     store.add("Keep this goal")
     store.path.write_text("{not json", encoding="utf-8")
     broken = LifeGoalStore(tmp_path)
-    assert broken.list() == []
-    broken.add("New after corrupt")
-    raw = store.path.read_text(encoding="utf-8")
-    assert "{not json" in raw
-    assert "New after corrupt" not in raw
+    assert broken.list() == []          # corrupt read yields empty, not a crash
+    broken.add("New after corrupt")     # writes resume (old bug: silent no-op)
+    assert any(g.title == "New after corrupt" for g in LifeGoalStore(tmp_path).list())
+    backup = store.path.with_suffix(".corrupt")
+    assert backup.is_file() and "{not json" in backup.read_text(encoding="utf-8")
 
 
 def test_life_goal_lines_prefer_store(tmp_path):
@@ -120,7 +123,8 @@ def test_add_and_step_is_local_without_force(tmp_path, monkeypatch):
     assert revealed == []
 
 
-def test_take_step_writes_note_and_advances(tmp_path):
+def test_take_step_writes_note_and_advances(tmp_path, monkeypatch):
+    monkeypatch.setenv("REMEDY_LIFE_NOTES", "1")  # note FILES are opt-in now
     from remedy.memory.life_drive import classify_action, invent_next, take_step
     from remedy.memory.life_goals import LifeGoal
 
@@ -166,7 +170,8 @@ def test_l0_what_should_i_do(tmp_path, monkeypatch):
     assert pulse and "This week" in pulse
 
 
-def test_visible_notes_when_documents_root(tmp_path):
+def test_visible_notes_when_documents_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("REMEDY_LIFE_NOTES", "1")  # note FILES are opt-in now
     from remedy.memory.life_drive import resolve_life_notes_dir, take_step
 
     docs = tmp_path / "Documents"
@@ -220,6 +225,7 @@ def test_digest_after_step(tmp_path):
 
 
 def test_research_embeds_web_hits(tmp_path, monkeypatch):
+    monkeypatch.setenv("REMEDY_LIFE_NOTES", "1")  # note FILES are opt-in now
     from remedy.memory import life_drive
 
     store = LifeGoalStore(tmp_path)
@@ -325,3 +331,77 @@ def test_resolve_tools_launch_site_keeps_host_tools():
     }
     assert tired.reason != "life_goal"
     assert "file_read" in tired_names
+
+
+def test_life_note_files_off_by_default(tmp_path, monkeypatch):
+    """Owner request (Aug 2026): stop writing life notes — files are opt-in."""
+    from remedy.memory.life_drive import take_step
+
+    monkeypatch.delenv("REMEDY_LIFE_NOTES", raising=False)
+    store = LifeGoalStore(tmp_path)
+    store.add("Finish the novel")
+    out = take_step(tmp_path)
+    assert out["ok"] is True
+    assert out["path"] == ""  # no note file written
+    assert "off" in out["markdown"].lower() or "logged" in out["markdown"].lower()
+    life_dir = tmp_path / "life"
+    assert not life_dir.is_dir() or not list(life_dir.glob("*.md"))
+    # Goal still advances — tracking continues, only the files stopped.
+    g = store.active()
+    assert g is not None and g.next_action
+
+
+def test_delete_goal_removes_it(tmp_path):
+    store = LifeGoalStore(tmp_path)
+    g = store.add("Temporary goal")
+    assert store.delete(g.id) is True
+    assert not any(x.id == g.id for x in store.list(include_closed=True))
+    assert store.delete("nonexistent-id") is False
+
+
+def test_patch_renames_goal(tmp_path):
+    store = LifeGoalStore(tmp_path)
+    g = store.add("Old name")
+    store.patch(g.id, title="New name")
+    assert any(x.title == "New name" for x in LifeGoalStore(tmp_path).list())
+
+
+def test_operational_instructions_not_recorded_as_activity(tmp_path):
+    store = LifeGoalStore(tmp_path)
+    store.record_drive({"did": "HOST: start serve.py port 5173", "goal": "run python serve.py"})
+    store.record_drive({"did": "npm run build then open browser", "goal": "x"})
+    assert store.last_step() is None  # operational junk filtered out
+
+
+def test_real_activity_still_recorded(tmp_path):
+    store = LifeGoalStore(tmp_path)
+    store.record_drive({"did": "Drafted resume bullets", "goal": "Land the job"})
+    ls = store.last_step()
+    assert ls and "resume" in ls["did"]
+
+
+def test_clear_activity_wipes_last_step(tmp_path):
+    store = LifeGoalStore(tmp_path)
+    store.record_drive({"did": "Drafted an outline", "goal": "Finish the novel"})
+    assert store.last_step() is not None
+    store.clear_activity()
+    assert LifeGoalStore(tmp_path).last_step() is None
+
+
+def test_delete_is_exact_not_substring(tmp_path):
+    store = LifeGoalStore(tmp_path)
+    a = store.add("Ship app")
+    b = store.add("Ship app v2")
+    # Deleting by the exact title of A must NOT also remove B.
+    assert store.delete("Ship app") is True
+    remaining = {g.title for g in LifeGoalStore(tmp_path).list()}
+    assert "Ship app v2" in remaining and "Ship app" not in remaining
+
+
+def test_delete_by_id_removes_one(tmp_path):
+    store = LifeGoalStore(tmp_path)
+    a = store.add("Alpha")
+    store.add("Alphabet soup")
+    assert store.delete(a.id) is True
+    titles = {g.title for g in LifeGoalStore(tmp_path).list()}
+    assert titles == {"Alphabet soup"}

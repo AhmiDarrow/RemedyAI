@@ -112,7 +112,7 @@ export function useSessions() {
       async (
         title?: string,
         llm?: { provider?: string; model?: string },
-        opts?: { focus?: boolean },
+        opts?: { focus?: boolean; origin?: string },
       ) => {
         try {
           // New Session = root (no project). Explicit "" so API does not inherit
@@ -122,6 +122,7 @@ export function useSessions() {
             project_path: '',
             model: llm?.model,
             llm_provider: llm?.provider,
+            origin_channel: opts?.origin,
           })
           setSessions((prev) => [s, ...prev])
           // Attach/drop on empty shell must not steal focus if the user picked

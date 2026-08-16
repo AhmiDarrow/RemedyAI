@@ -346,11 +346,17 @@ async def run_auto_verify(
     if timed_out:
         if hasattr(state, "last_scoped_command"):
             state.last_scoped_command = ""
+        # A timed-out verify is NOT green. Never synthesize an exit_code=0
+        # line (that regex satisfies every downstream green gate — clearing
+        # the write set and advancing to DONE on tests that never finished).
+        # Files-on-disk is a weak positive signal, surfaced without faking a
+        # pass so the engine keeps the write set and re-verifies.
+        ok = False
         if _cheap_required_files_ok(runtime, state):
-            ok = True
             summary = (
-                "verify exit_code=0\n"
-                "cheap_files_ok=true (runner timed out; required files on disk)\n"
+                "verify timed_out=true\n"
+                "cheap_files_ok=true (required files present, but the test "
+                "runner did not finish — NOT a pass)\n"
                 + summary[:800]
             )
     # Ask-mode / jail is not a test failure — do not enter repair

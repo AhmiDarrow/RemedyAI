@@ -104,6 +104,19 @@ async def build_turn_context(runtime: Any) -> str:
                     hint = resume_hint(proj or None, home=home)
                     if hint:
                         parts.append(hint)
+                    # A bare "continue"/"keep going" over a RED mid-ship build:
+                    # resume and drive it to green on her own, without asking.
+                    with suppress(Exception):
+                        from remedy.core.build_ledger import should_auto_resume_drive
+
+                        um = str(getattr(runtime, "_last_user_text", "") or "")
+                        if should_auto_resume_drive(um, proj or None, home=home):
+                            parts.append(
+                                "[Auto-resume] You have an unfinished RED build and "
+                                "the user said to continue — immediately call "
+                                "build_drive to keep looping verify→repair until "
+                                "green. Act as they would: finish what you started."
+                            )
 
     # Project workspace (default directory for this session)
     with suppress(Exception):

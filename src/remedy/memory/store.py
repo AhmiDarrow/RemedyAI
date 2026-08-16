@@ -482,10 +482,11 @@ class MemoryStore:
             return int(row[0]) if row else 0
 
     async def get(self, entry_id: str | UUID) -> MemoryEntry | None:
-        db = self._ensure_db()
-        row = db.execute(
-            "SELECT * FROM memory_entries WHERE id = ?", (str(entry_id),)
-        ).fetchone()
+        with self._locked():
+            db = self._ensure_db()
+            row = db.execute(
+                "SELECT * FROM memory_entries WHERE id = ?", (str(entry_id),)
+            ).fetchone()
         if row is None:
             return None
         return self._row_to_entry(row)
@@ -706,10 +707,11 @@ class MemoryStore:
         return note
 
     async def get_handoff(self, handoff_id: str | UUID) -> HandoffNote | None:
-        db = self._ensure_db()
-        row = db.execute(
-            "SELECT * FROM handoff_notes WHERE id = ?", (str(handoff_id),)
-        ).fetchone()
+        with self._locked():
+            db = self._ensure_db()
+            row = db.execute(
+                "SELECT * FROM handoff_notes WHERE id = ?", (str(handoff_id),)
+            ).fetchone()
         if row is None:
             return None
         return HandoffNote(
@@ -730,16 +732,17 @@ class MemoryStore:
         self, query: str, limit: int = 5
     ) -> list[HandoffNote]:
         """Find handoff notes relevant to a query."""
-        db = self._ensure_db()
         q = (query or "").strip()
         safe = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         like_q = f"%{safe}%"
-        rows = db.execute(
-            "SELECT * FROM handoff_notes WHERE title LIKE ? ESCAPE '\\' "
-            "OR content LIKE ? ESCAPE '\\' "
-            "ORDER BY created_at DESC LIMIT ?",
-            (like_q, like_q, limit),
-        ).fetchall()
+        with self._locked():
+            db = self._ensure_db()
+            rows = db.execute(
+                "SELECT * FROM handoff_notes WHERE title LIKE ? ESCAPE '\\' "
+                "OR content LIKE ? ESCAPE '\\' "
+                "ORDER BY created_at DESC LIMIT ?",
+                (like_q, like_q, limit),
+            ).fetchall()
         return [
             HandoffNote(
                 id=UUID(r["id"]),
@@ -758,11 +761,12 @@ class MemoryStore:
         ]
 
     async def list_handoffs(self, limit: int = 50) -> list[HandoffNote]:
-        db = self._ensure_db()
-        rows = db.execute(
-            "SELECT * FROM handoff_notes ORDER BY created_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        with self._locked():
+            db = self._ensure_db()
+            rows = db.execute(
+                "SELECT * FROM handoff_notes ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
         return [
             HandoffNote(
                 id=UUID(r["id"]),
@@ -818,10 +822,11 @@ class MemoryStore:
             return summary
 
     async def get_session_summary(self, session_id: str) -> SessionSummary | None:
-        db = self._ensure_db()
-        row = db.execute(
-            "SELECT * FROM session_summaries WHERE session_id = ?", (session_id,)
-        ).fetchone()
+        with self._locked():
+            db = self._ensure_db()
+            row = db.execute(
+                "SELECT * FROM session_summaries WHERE session_id = ?", (session_id,)
+            ).fetchone()
         if row is None:
             return None
         return SessionSummary(
@@ -837,11 +842,12 @@ class MemoryStore:
         )
 
     async def list_sessions(self, limit: int = 50) -> list[SessionSummary]:
-        db = self._ensure_db()
-        rows = db.execute(
-            "SELECT * FROM session_summaries ORDER BY ended_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        with self._locked():
+            db = self._ensure_db()
+            rows = db.execute(
+                "SELECT * FROM session_summaries ORDER BY ended_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
         return [
             SessionSummary(
                 session_id=r["session_id"],
@@ -863,40 +869,49 @@ class MemoryStore:
         with self._locked():
             db = self._ensure_db()
             now = datetime.now(UTC).isoformat()
-            db.execute(
-                "INSERT OR REPLACE INTO user_profile (user_id, profile_json, updated_at) VALUES (?, ?, ?)",
-                (profile.user_id, profile.model_dump_json(indent=2), now),
-            )
-
-            db.execute(
-                "DELETE FROM user_facts WHERE user_id = ?", (profile.user_id,)
-            )
-            db.execute(
-                "DELETE FROM user_traits WHERE user_id = ?", (profile.user_id,)
-            )
-
-            for fact in profile.facts:
+            # DELETE-then-reinsert must be all-or-nothing: an insert error after
+            # the DELETEs would otherwise leave the transaction open with the
+            # wipe applied, and the next commit on this shared connection would
+            # persist an empty profile. Roll back on any failure.
+            try:
                 db.execute(
-                    "INSERT OR REPLACE INTO user_facts (id, user_id, fact, category, confidence, "
-                    "source, created_at, last_referenced, reference_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (str(fact.id), profile.user_id, fact.fact, fact.category, fact.confidence,
-                     fact.source, fact.created_at.isoformat(), fact.last_referenced.isoformat(),
-                     fact.reference_count),
+                    "INSERT OR REPLACE INTO user_profile (user_id, profile_json, updated_at) VALUES (?, ?, ?)",
+                    (profile.user_id, profile.model_dump_json(indent=2), now),
                 )
 
-            for key, trait in profile.traits.items():
-                import json as _json
                 db.execute(
-                    "INSERT OR REPLACE INTO user_traits (user_id, key, value_json, confidence, "
-                    "source, first_observed, last_updated, observation_count) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (profile.user_id, key, _json.dumps(trait.value, default=str),
-                     trait.confidence, trait.source,
-                     trait.first_observed.isoformat(), trait.last_updated.isoformat(),
-                     trait.observation_count),
+                    "DELETE FROM user_facts WHERE user_id = ?", (profile.user_id,)
+                )
+                db.execute(
+                    "DELETE FROM user_traits WHERE user_id = ?", (profile.user_id,)
                 )
 
-            db.commit()
+                for fact in profile.facts:
+                    db.execute(
+                        "INSERT OR REPLACE INTO user_facts (id, user_id, fact, category, confidence, "
+                        "source, created_at, last_referenced, reference_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (str(fact.id), profile.user_id, fact.fact, fact.category, fact.confidence,
+                         fact.source, fact.created_at.isoformat(), fact.last_referenced.isoformat(),
+                         fact.reference_count),
+                    )
+
+                for key, trait in profile.traits.items():
+                    import json as _json
+                    db.execute(
+                        "INSERT OR REPLACE INTO user_traits (user_id, key, value_json, confidence, "
+                        "source, first_observed, last_updated, observation_count) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (profile.user_id, key, _json.dumps(trait.value, default=str),
+                         trait.confidence, trait.source,
+                         trait.first_observed.isoformat(), trait.last_updated.isoformat(),
+                         trait.observation_count),
+                    )
+
+                db.commit()
+            except Exception:
+                with __import__("contextlib").suppress(Exception):
+                    db.rollback()
+                raise
 
     async def load_user_profile(self, user_id: str = "default") -> UserProfile | None:
         with self._locked():

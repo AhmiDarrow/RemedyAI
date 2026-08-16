@@ -82,6 +82,9 @@ class CreateSessionRequest(BaseModel):
     project_path: str | None = None
     # Per-session LLM bind at create (multi-tab providers stay independent).
     llm_provider: str | None = None
+    # Surface origin — "grove" marks the personal home chat so Studio's
+    # raw-work session list can hide it.
+    origin_channel: str | None = None
 
 
 class UpdateSessionRequest(BaseModel):

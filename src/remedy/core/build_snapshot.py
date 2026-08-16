@@ -118,7 +118,15 @@ def restore_snapshot(project: Path | str, snap_id: str) -> dict[str, Any]:
             body = dest / key
             if not body.is_file():
                 continue
-            target = project / rel
+            # Path jail: the sidecar is agent-writable — never restore to an
+            # absolute path or outside the project root.
+            if not rel or Path(rel).is_absolute() or rel.startswith(("/", "\\")):
+                continue
+            target = (project / rel).resolve()
+            try:
+                target.relative_to(project.resolve())
+            except ValueError:
+                continue
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(body, target)
             restored.append(rel)

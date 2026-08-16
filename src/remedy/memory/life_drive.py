@@ -89,6 +89,30 @@ or deletes for you.
 """
 
 
+def life_notes_enabled(home_dir=None) -> bool:
+    """Note FILES are opt-in (owner request: stop writing life notes).
+
+    Goal tracking, drive digests, and Time Crystal entries continue —
+    only the .md note files under Documents/Remedy Life stop unless the
+    owner turns them back on (config ``life_notes_enabled: true`` or
+    ``REMEDY_LIFE_NOTES=1``).
+    """
+    import os as _os
+
+    env = (_os.environ.get("REMEDY_LIFE_NOTES") or "").strip().lower()
+    if env in ("1", "true", "yes", "on"):
+        return True
+    if env in ("0", "false", "no", "off"):
+        return False
+    try:
+        from remedy.interfaces.config import load_config
+
+        cfg = load_config() or {}
+        return bool(cfg.get("life_notes_enabled", False))
+    except Exception:
+        return False
+
+
 def classify_action(text: str) -> str:
     t = (text or "").strip()
     if not t:
@@ -514,6 +538,18 @@ def take_step(
         g = store.find(g.title) or g
     kind = classify_action(action)
     if kind == "irreversible":
+        # Record the attempt so drive_due() goes quiet — otherwise an
+        # irreversible next-action burns every idle/vigil wake forever.
+        with suppress(Exception):
+            store.record_drive(
+                {
+                    "goal": g.title,
+                    "did": f"waiting on you: {action}",
+                    "next": action,
+                    "path": "",
+                    "kind": "needs_you",
+                }
+            )
         return {
             "ok": False,
             "skipped": "needs_you",
@@ -554,8 +590,8 @@ def take_step(
         heading,
         body,
         documents_root=documents_root,
-    )
-    ev = f"{ev_label} → {path.name}"
+    ) if life_notes_enabled(home_dir) else None
+    ev = f"{ev_label} → {path.name}" if path is not None else ev_label
     nxt = follow_up(g, kind)
     store.patch(g.id, next_action=nxt, evidence=ev)
     store.record_drive(
@@ -563,7 +599,7 @@ def take_step(
             "goal": g.title,
             "did": action,
             "next": nxt,
-            "path": str(path),
+            "path": str(path) if path is not None else "",
             "kind": kind,
         }
     )
@@ -576,7 +612,7 @@ def take_step(
         key = mm.put(
             life_body,
             kind="life",
-            path=str(path),
+            path=str(path) if path is not None else "",
             session_id="life",
             body_cap=400,
         )
@@ -596,21 +632,24 @@ def take_step(
         if home_dir:
             crystal.persist(home_dir)
     opened = False
-    if do_reveal:
+    if do_reveal and path is not None:
         opened = reveal_artifact(path)
-    where = _friendly_path(path)
-    opened_line = (
-        f"Opened `{where}` on this PC."
-        if opened
-        else f"Saved `{where}` — open **Documents/Remedy Life** (or Life notes) to read it."
-    )
+    if path is not None:
+        where = _friendly_path(path)
+        opened_line = (
+            f"Opened `{where}` on this PC."
+            if opened
+            else f"Saved `{where}` — open **Documents/Remedy Life** (or Life notes) to read it."
+        )
+    else:
+        opened_line = "Progress logged (life note files are off)."
     return {
         "ok": True,
         "kind": kind,
         "goal": g.title,
         "did": action,
         "next": nxt,
-        "path": str(path),
+        "path": str(path) if path is not None else "",
         "evidence": ev,
         "opened": opened,
         "markdown": (f"**Did:** {action}\n{opened_line}\n**Next I'll take:** {nxt}"),

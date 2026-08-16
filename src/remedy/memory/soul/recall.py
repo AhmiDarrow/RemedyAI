@@ -108,6 +108,45 @@ def recall_unified(
             except RuntimeError:
                 asyncio.run(_facts())
 
+    # Semantic recall (optional, local): surface memories that MEAN what was
+    # asked even with ZERO shared words. Purely additive — when no embedder is
+    # reachable this whole block is a no-op and keyword ranking stands. It scans
+    # the full local soul set (not just lines the keyword gate admitted), so a
+    # meaning-match that shares no tokens with the query can still surface.
+    # Dedupe below merges a line found both ways, keeping the higher score.
+    if q:
+        with suppress(Exception):
+            from remedy.memory.soul.semantic import semantic_scores
+
+            src_by_line: dict[str, str] = {}
+
+            def _add_cand(src: str, line: str) -> None:
+                line = (line or "").strip()
+                if line:
+                    src_by_line.setdefault(line, src)
+
+            for ep in sf.episodes:
+                _add_cand("episode", ep.line())
+            for p in sf.pledges:
+                _add_cand("pledge", p)
+            for t in sf.relational.open_threads:
+                _add_cand("open_thread", t)
+            for t in sf.relational.tensions:
+                _add_cand("tension", t)
+            for h in sf.self_habits:
+                _add_cand("habit", h)
+            for d in getattr(sf, "future_dreams", None) or []:
+                _add_cand("dream", d)
+            for les in sf.organism_lessons[-8:]:
+                _add_cand("organism", les.line())
+
+            sem = semantic_scores(q, list(src_by_line.keys()), home=home)
+            if sem:
+                for line, score in sem.items():
+                    if score >= 0.55:  # a real meaning match, not noise
+                        base = src_by_line.get(line, "memory")
+                        hits.append((0.4 + 0.6 * float(score), f"{base}~meaning", line))
+
     # Dedupe by line text
     seen: set[str] = set()
     ranked: list[tuple[float, str, str]] = []

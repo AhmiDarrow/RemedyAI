@@ -17,10 +17,58 @@ from remedy.memory.soul.field import (
     EpisodeResidue,
     OrganismLesson,
     SoulField,
+    encode_lesson_strength,
+    encode_strength,
+    find_pledge_key,
     load_soul_field,
     looks_like_secret_soul,
+    pledge_trace_touch,
     save_soul_field,
 )
+
+# Words too common to signal that an old memory is genuinely relevant again.
+_RECON_STOP = frozenset(
+    "the a an and or but to of in on for with it this that is are was were be "
+    "i you we he she they me my your our do did does can could would should "
+    "just now then so if not no yes ok okay let lets get got go going make "
+    "want need have has had will won about into out up down over what how why "
+    "when where who which as at by from".split()
+)
+
+
+def _recon_tokens(text: str) -> set[str]:
+    """Content tokens for reconsolidation matching (lowercased, de-noised)."""
+    out: set[str] = set()
+    for w in re.findall(r"[a-zA-Z][a-zA-Z0-9_]{2,}", (text or "").lower()):
+        if w not in _RECON_STOP:
+            out.add(w)
+    return out
+
+
+def _reconsolidate_episodes(sf: SoulField, tokens: set[str], now: float) -> None:
+    """Recall strengthens memory: when this turn is about what an old episode
+    holds, that trace is in active use — harden it against forgetting.
+
+    Content-token overlap is a cheap, local stand-in for "this came up again."
+    Two shared meaningful words is enough to count as a recall; the trace ticks
+    up toward 1.0 and its forgetting clock resets to now. Bounded per turn so a
+    chatty message can't reinforce the whole ring at once.
+    """
+    if not tokens:
+        return
+    scored: list[tuple[int, EpisodeResidue]] = []
+    for ep in sf.episodes:
+        et = _recon_tokens(f"{ep.arc} {ep.open_thread}")
+        if not et:
+            continue
+        overlap = len(tokens & et)
+        if overlap >= 2:
+            scored.append((overlap, ep))
+    # Reinforce the strongest few matches only (avoid ring-wide inflation).
+    for _, ep in sorted(scored, key=lambda s: s[0], reverse=True)[:3]:
+        ep.strength = min(1.0, float(ep.strength or 0.0) + 0.12)
+        ep.recalls = int(ep.recalls or 0) + 1
+        ep.last_recall_ts = now
 
 # --- stance / valence heuristics -------------------------------------------
 
@@ -197,11 +245,15 @@ def update_soul_after_turn(
         if phrase and phrase not in [v.lower() for v in rel.voice_markers]:
             rel.voice_markers.append(phrase)
 
-    # Pledges (life-horizon commitments stated in chat)
+    # Pledges (life-horizon commitments stated in chat). A re-stated pledge is
+    # a recall: its trace reconsolidates, so live commitments outlast dormant ones.
     for m in _PLEDGE.finditer(ut):
         body = (m.group(0) or "").strip()
-        if body and body not in sf.pledges and not looks_like_secret_soul(body):
-            sf.pledges.append(body[:160])
+        if body and not looks_like_secret_soul(body):
+            key = find_pledge_key(sf, body)
+            if key not in sf.pledges:
+                sf.pledges.append(key)
+            pledge_trace_touch(sf, body)
 
     # Living extractors: life/goal lines become soul pledges (same organism)
     with suppress(Exception):
@@ -211,14 +263,11 @@ def update_soul_after_turn(
             if fact.category not in ("life", "goal"):
                 continue
             body = (fact.text or "").strip()
-            if (
-                body
-                and len(body) >= 8
-                and body not in sf.pledges
-                and not looks_like_secret_soul(body)
-            ):
-                sf.pledges.append(body[:160])
-                sf.pledges = sf.pledges[-16:]
+            if body and len(body) >= 8 and not looks_like_secret_soul(body):
+                key = find_pledge_key(sf, body)
+                if key not in sf.pledges:
+                    sf.pledges.append(key)
+                pledge_trace_touch(sf, body)
 
     # Tension: user contradicts a pledge / prior fact shaped claim
     if re.search(r"(?i)\b(actually|never mind|forget that|not anymore|changed my mind)\b", ut):
@@ -241,11 +290,17 @@ def update_soul_after_turn(
         if habit not in sf.self_habits:
             sf.self_habits.append(habit)
 
+    # Reconsolidation: strengthen any existing episode this turn is *about*,
+    # before laying down the new one (so it can't match itself). Memories in
+    # active use resist the forgetting curve; trivial one-offs age out.
+    now_ts = time.time()
+    _reconsolidate_episodes(sf, _recon_tokens(ut), now_ts)
+
     # Episode residue ring
     muscle = "/".join(x for x in (provider.strip(), model.strip()) if x)
     ep = EpisodeResidue(
         id=uuid.uuid4().hex[:10],
-        ts=time.time(),
+        ts=now_ts,
         arc=_compress_arc(ut, at, brief),
         user_stance=_stance(ut),
         open_thread=open_t,
@@ -253,6 +308,11 @@ def update_soul_after_turn(
         muscle=muscle[:80],
         session_id=str(session_id or "")[:80],
         project_hint=(project_path or "").replace("\\", "/")[-80:],
+        # Encode strength from emotional intensity; fresh episode counts as its
+        # own first "recall" so its forgetting clock starts now.
+        strength=encode_strength(val),
+        recalls=0,
+        last_recall_ts=now_ts,
     )
     if ep.arc.strip():
         sf.episodes.append(ep)
@@ -266,6 +326,24 @@ def update_soul_after_turn(
             tc.admit(open_t, horizon="session", source="soul_open_thread")
         for p in sf.pledges[-2:]:
             tc.admit(p, horizon="life", source="soul_pledge")
+
+    # Myelin: count the pathway this turn wore (repetition earns crystallizing)
+    with suppress(Exception):
+        from remedy.memory.myelin import observe_pathway
+
+        observe_pathway(ut, home)
+
+    # Proprioception: fold how this muscle rendered us into its profile
+    with suppress(Exception):
+        from remedy.memory.soul.proprioception import observe_render
+
+        observe_render(
+            assistant_text=at,
+            user_text=ut,
+            provider=provider,
+            model=model,
+            home=home,
+        )
 
     sf.touch()
     save_soul_field(sf, home)
@@ -309,14 +387,19 @@ def record_self_inject_lesson(
     else:
         lesson = summary or f"Round outcome={outcome}"
 
+    now_ts = time.time()
     sf.organism_lessons.append(
         OrganismLesson(
-            ts=time.time(),
+            ts=now_ts,
             outcome=oc or outcome,
             tree=tree or "",
             summary=(summary or "")[:200],
             lesson=lesson[:280],
             round_id=round_id or "",
+            # Encode by what it cost to learn: red scars hardest.
+            strength=encode_lesson_strength(oc or outcome),
+            recalls=0,
+            last_recall_ts=now_ts,
         )
     )
     sf.touch()

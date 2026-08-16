@@ -140,8 +140,14 @@ def run_auto_repair_hops(
     use_llm: bool = True,
     max_targets: int = 3,
     max_repairs: int = 2,
+    include_tests: bool = False,
 ) -> dict[str, Any]:
-    """Execute live_unit_hop on top queue targets (machine repair loop)."""
+    """Execute live_unit_hop on top queue targets (machine repair loop).
+
+    ``include_tests`` (broadened strategy): also hop test files — a failure
+    can live in an over-strict or wrong test, not only the source. The
+    default (narrow) strategy repairs source first.
+    """
     from remedy.core.build_live_hop import live_unit_hop
 
     results: list[dict[str, Any]] = []
@@ -152,8 +158,9 @@ def run_auto_repair_hops(
             guess = _test_to_source_guess(path)
             if guess and not guess.endswith(".py"):
                 guess = guess if "/" in guess else guess  # keep
-            # skip pure test hops for auto LLM unless only target
-            if len(queue.targets) > 1:
+            # skip pure test hops for auto LLM unless only target — unless the
+            # broadened strategy explicitly wants to repair tests too.
+            if len(queue.targets) > 1 and not include_tests:
                 continue
         try:
             res = live_unit_hop(

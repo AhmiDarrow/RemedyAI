@@ -314,7 +314,7 @@ def sync_todos_with_build(runtime: Any, state: Any = None) -> list[TodoItem]:
                         if cand.is_file() and cand.stat().st_size > 8:
                             done = True
         if "verify" in low or "green" in low:
-            if verify_ok or (files_ok and (verify_ok or timed_out or phase in {"done", "ship"})):
+            if verify_ok or (files_ok and (verify_ok or phase in {"done", "ship"})):
                 done = True
         if "tdd" in low or "failing test" in low:
             if files_ok or verify_ok:
