@@ -33,8 +33,31 @@ Operate this Windows PC with Remedy-native tools when the Desktop is running.
 1. **Structured observe first** — snapshot/find (a11y/DOM), not screenshots.
 2. **Act with labels** — click by **text** or **ref**, not guessed pixels.
 3. **Compound when possible** — `computer_act(url=…, click=…, type=…, key=enter)`.
-4. **Re-observe only on failure** — one retry with snapshot; do not spiral vision.
-5. **Latest user message only** — do not resume old wiki/goals mid-task.
+4. **Verify outcomes** — `computer_act` reports `observed` url/title after acting.
+   Pass `expect_url=` / `expect_text=` (substring) so the call fails loudly when
+   the outcome doesn't match (e.g. `expect_text="added to cart"`). An
+   `unverified` result is NOT completion — re-observe before claiming the
+   user's goal is done.
+5. **Re-observe only on failure** — one retry with snapshot; do not spiral vision.
+6. **Latest user message only** — do not resume old wiki/goals mid-task.
+
+### Life tasks (order / book / apply / renew / buy)
+
+"goto amazon and order X" is a FULL task, never open-only: navigate → find the
+item → add to cart → stop at checkout for the owner. Money, credentials, and
+final submissions are owner checkpoints — never complete a payment without the
+owner's explicit go-ahead at that step.
+
+### Vault — stored payment info & credentials
+
+The owner's secrets live in the encrypted Vault. You NEVER see values:
+1. `vault_list` → handles + labels (e.g. `card-visa` "Visa …4242", bound to amazon.com)
+2. Fill with the token: `computer_type text="{{vault:card-visa}}"` (or in
+   `computer_act type=`) — the machine substitutes the real value at the
+   input field, enforces the site binding, and asks the owner first.
+3. Never ask the user to paste card numbers / passwords into chat; never try
+   to read, print, or web-send a vault value. If a site is not in the item's
+   binding, tell the owner — do not work around it.
 
 ### Open-only vs interaction
 

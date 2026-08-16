@@ -34,6 +34,51 @@ def is_full_approval(raw: str | None = None) -> bool:
         return False
 
 
+# Owner checkpoints (docs/LIFE_TASK_PARTNER.md §2.2): money / payment /
+# irreversible-purchase actions on the computer ALWAYS stop for the owner —
+# no approval mode (auto/full), no turn flag, no optimization may skip them.
+# Scope: computer_* tools only. Coding/build tools (bash_exec, file_write, …)
+# are deliberately untouched so frontier-model coding agency keeps full flow.
+SENSITIVE_PREFIX = "Owner checkpoint"
+
+_SENSITIVE_COMPUTER_RE = re.compile(
+    r"(?is)\b("
+    # Purchase finalization
+    r"place\s+(?:your\s+)?order|pay\s+now|buy\s+now|order\s+now|purchase\s+now|"
+    r"confirm\s+(?:&\s*)?(?:order|purchase|payment|pay|subscription)|"
+    r"complete\s+(?:order|purchase|payment|checkout)|"
+    r"submit\s+(?:order|payment)|"
+    r"start\s+(?:your\s+)?subscription|"
+    # Money movement
+    r"send\s+money|transfer\s+funds|wire\s+transfer|donate\s+now|"
+    # Payment credentials as click/typed context
+    r"card\s*number|cvv|cvc|security\s+code"
+    r")\b"
+    # Vault secret use (handle-based fill) — always an owner moment
+    r"|vault=|\{\{\s*vault:"
+)
+
+
+def sensitive_computer_checkpoint(tool_name: str, context: str) -> str | None:
+    """Non-waivable owner-checkpoint reason for payment/purchase computer actions.
+
+    Returns a reason string starting with :data:`SENSITIVE_PREFIX`, or None.
+    Only ``computer_*`` tools are eligible — this never adds friction to
+    coding/build tools.
+    """
+    tool = (tool_name or "").strip()
+    if not tool.startswith("computer_"):
+        return None
+    c = context or ""
+    m = _SENSITIVE_COMPUTER_RE.search(c)
+    if not m:
+        return None
+    return (
+        f"{SENSITIVE_PREFIX} — payment/purchase actions always need your "
+        f"go-ahead (no approval mode skips this). Detected: {m.group(0)!r}"
+    )
+
+
 # Soft-ask (not hard-block): user can approve once / session / always-pattern
 _ASK_PATTERNS = re.compile(
     r"(?is)"
@@ -60,6 +105,9 @@ class PendingApproval:
     created_at: float = field(default_factory=time.time)
     status: str = "pending"  # pending | approved | denied
     fingerprint: str = ""
+    # Owner checkpoint (payment/purchase): mode flips never auto-approve it and
+    # "always" approvals downgrade to session (one go-ahead ≠ standing consent).
+    sensitive: bool = False
 
 
 class ApprovalQueue:
@@ -101,6 +149,10 @@ class ApprovalQueue:
                     if item.status != "pending":
                         continue
                     if item.tool_name in self.OWNER_LOCK_TOOLS:
+                        continue
+                    # Owner checkpoints (payment/purchase) stay pending — a mode
+                    # flip is not a go-ahead for money.
+                    if item.sensitive:
                         continue
                     item.status = "approved"
                     sid = item.session_id or "default"
@@ -183,7 +235,15 @@ class ApprovalQueue:
         - ``untrusted`` access scope still always asks unless mode is ``full``.
         Hard security blocks (wipe/privilege) live in ``check_dangerous_command``
         and are separate from this partner-trust queue.
+
+        **Owner checkpoints** (payment/purchase computer actions) are checked
+        FIRST and are non-waivable: they ask in every mode including ``full``,
+        and ignore turn-level skip flags. Computer tools only — coding tools
+        keep the mode contract above.
         """
+        sensitive = sensitive_computer_checkpoint(tool_name, command)
+        if sensitive:
+            return sensitive
         # Re-sync mode when config explicitly sets approval_mode (desktop thumbs).
         # Scope always comes from config when available.
         untrusted = False
@@ -311,6 +371,7 @@ class ApprovalQueue:
             reason=reason,
             session_id=session_id,
             fingerprint=self.fingerprint(tool_name, command),
+            sensitive=(reason or "").startswith(SENSITIVE_PREFIX),
         )
         with self._lock:
             self._items[item.id] = item
@@ -345,13 +406,72 @@ class ApprovalQueue:
                 return item
             item.status = "approved" if approve else "denied"
             if approve:
-                if scope == "always":
+                if scope == "always" and not item.sensitive:
                     self._approved_fps.add(item.fingerprint)
                     self._trim_approved_fps()
                 else:
+                    # Sensitive (payment/purchase) go-aheads are one-time-ish:
+                    # session scope at most, never process-wide "always".
                     sid = item.session_id or "default"
                     self._add_session_fp(sid, item.fingerprint)
             return item
+
+    @staticmethod
+    def plain_summary(item: PendingApproval) -> str:
+        """One plain-language sentence a non-technical owner can act on.
+
+        Approval cards lead with this; the raw command stays available under a
+        details expander (docs/LIFE_TASK_PARTNER.md §3).
+        """
+        tool = (item.tool_name or "").strip()
+        cmd = (item.command or "").strip()
+
+        def _field(name: str) -> str:
+            m = re.search(rf"{name}='([^']*)'", cmd) or re.search(
+                rf'{name}="([^"]*)"', cmd
+            )
+            return (m.group(1) if m else "").strip()
+
+        if tool.startswith("computer_"):
+            click = _field("click") or _field("text")
+            url = _field("url")
+            where = f" on {url}" if url else " on the current page"
+            if item.sensitive:
+                lead = "Remedy wants your go-ahead for a payment step"
+                svm = re.search(r"vault=([a-z0-9._,-]+)", cmd)
+                if svm:
+                    return (
+                        f"{lead}: fill your stored secret {svm.group(1)!r}"
+                        f"{where} (the value stays encrypted — the AI never "
+                        "sees it)."
+                    )
+                if click:
+                    return f"{lead}: press {click!r}{where}."
+                return f"{lead}{where}."
+            if tool == "computer_app":
+                app = _field("app")
+                return f"Remedy wants to open {app or 'an app'} on this PC."
+            vm = re.search(r"vault=([a-z0-9._,-]+)", cmd)
+            if vm:
+                lead = (
+                    f"Remedy wants to fill your stored secret {vm.group(1)!r}"
+                    f"{where} (the value stays encrypted — the AI never sees it)"
+                )
+                if click:
+                    lead += f", after pressing {click!r}"
+                return lead + "."
+            if click:
+                return f"Remedy wants to press {click!r}{where}."
+            if tool == "computer_type":
+                return "Remedy wants to type into the focused field."
+            return f"Remedy wants to use the computer ({tool.removeprefix('computer_')})."
+        if tool == "bash_exec":
+            return f"Remedy wants to run a command: {cmd[:120]}"
+        if tool in ("file_write", "file_edit"):
+            return f"Remedy wants to change a file: {cmd[:120]}"
+        if tool == "mail_send":
+            return "Remedy wants to send an email."
+        return f"Remedy wants to run {tool}: {cmd[:120]}"
 
     def to_public(self, item: PendingApproval) -> dict[str, Any]:
         soft_risk = None
@@ -362,12 +482,16 @@ class ApprovalQueue:
             "tool_name": item.tool_name,
             "command": item.command[:500],
             "reason": item.reason,
+            "summary": self.plain_summary(item),
+            "sensitive": item.sensitive,
             "soft_risk": soft_risk,
             "session_id": item.session_id,
             "status": item.status,
             "created_at": item.created_at,
             "approval_mode_hint": (
-                "Approve for this session, or set Approvals → Auto (in-project) "
+                "One-time go-ahead for payment steps — these ask in every mode. "
+                if item.sensitive
+                else "Approve for this session, or set Approvals → Auto (in-project) "
                 "to finish work without prompts. Full (warn) turns the write jail "
                 "into a warning only — auth secrets stay closed."
             ),

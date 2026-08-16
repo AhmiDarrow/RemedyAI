@@ -976,7 +976,12 @@ def test_cancel_never_clobbers_terminal_status(tmp_path: Path):
 
 
 def test_purge_old_spares_open_jobs(tmp_path: Path):
-    """purge_old must not delete pending/running work (docstring: finished only)."""
+    """purge_old must not delete pending/running work (docstring: finished only).
+
+    Open jobs are spared while a live host could still claim them; past the
+    stale TTL they are *expired + scrubbed* (never plaintext-forever), but the
+    file itself is kept — purge never silently deletes open work (S-COMP-03).
+    """
     import os
     import time
 
@@ -984,16 +989,24 @@ def test_purge_old_spares_open_jobs(tmp_path: Path):
     open_j = b.enqueue("navigate", {"url": "https://example.com/open"})
     done_j = b.enqueue("snapshot", {})
     b.complete(done_j.id, ok=True, result={"ok": True, "elements": []})
-    # Age both files past cutoff
-    old = time.time() - 10_000
+    # Age both files past the finished-job cutoff but inside the stale TTL
+    old = time.time() - 120
     for jid in (open_j.id, done_j.id):
         p = b._path(jid)
         os.utime(p, (old, old))
-    n = b.purge_old(max_age_s=60.0)
+    n = b.purge_old(max_age_s=60.0, stale_open_ttl_s=1800.0)
     assert n >= 1
     assert b._read(open_j.id) is not None
     assert b._read(open_j.id).status == "pending"
     assert b._read(done_j.id) is None
+
+    # Past the stale TTL the open job expires (cancelled) but is not deleted.
+    very_old = time.time() - 10_000
+    os.utime(b._path(open_j.id), (very_old, very_old))
+    b.purge_old(max_age_s=60.0, stale_open_ttl_s=1800.0)
+    expired = b._read(open_j.id)
+    assert expired is not None
+    assert expired.status == "cancelled"
 
 
 def test_purge_old_shots_stays_in_own_home(tmp_path: Path, monkeypatch):
@@ -1757,3 +1770,244 @@ def test_concurrent_sessions_enqueue_and_abort_isolated(tmp_path: Path, monkeypa
     claimed = b.claim_next()
     assert claimed is not None
     assert claimed.session_id == "B"
+
+
+# ---------------------------------------------------------------------------
+# Life-task P0: post-action verification (docs/LIFE_TASK_PARTNER.md §2.3/§2.5)
+# ---------------------------------------------------------------------------
+
+
+def _fresh_executor(tmp_path: Path, monkeypatch):
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.executor import ComputerExecutor
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    ex = ComputerExecutor(home_dir=tmp_path)
+    ex.bridge.mark_host_alive(poller=True)
+    return ex
+
+
+def test_parse_expect_normalizes_all_forms(tmp_path: Path, monkeypatch):
+    from remedy.core.computer.executor import ComputerExecutor
+
+    p = ComputerExecutor._parse_expect
+    assert p({"expect_url": "amazon.com/cart"}) == {"url": "amazon.com/cart"}
+    assert p({"expect_text": "Added to cart"}) == {"text": "Added to cart"}
+    assert p({"expect": {"url_contains": "checkout", "text_contains": "total"}}) == {
+        "url": "checkout",
+        "text": "total",
+    }
+    assert p({}) == {}
+
+
+def test_act_verifies_expected_text_failure(tmp_path: Path, monkeypatch):
+    """expect_text mismatch → ok=False with a re-observe instruction."""
+    ex = _fresh_executor(tmp_path, monkeypatch)
+
+    monkeypatch.setattr(
+        ex,
+        "_browser_click_text",
+        lambda text_q, kwargs: {"ok": True, "message": f"clicked {text_q}"},
+    )
+    monkeypatch.setattr(
+        ex,
+        "_page_probe",
+        lambda **_k: {
+            "ok": True,
+            "url": "https://www.amazon.com/product/x",
+            "title": "Product page",
+            "text_hash": "abc",
+            "text_head": "Buy now — in stock",
+        },
+    )
+    out = ex._computer_act(
+        {"click": "Add to Cart", "expect_text": "added to cart"},
+        hint="",
+        req_target="browser",
+    )
+    assert out.get("ok") is False
+    assert "verification failed" in str(out.get("message", ""))
+    assert out.get("verified") is False
+
+
+def test_act_verifies_expected_url_success(tmp_path: Path, monkeypatch):
+    ex = _fresh_executor(tmp_path, monkeypatch)
+
+    monkeypatch.setattr(
+        ex,
+        "_browser_click_text",
+        lambda text_q, kwargs: {"ok": True, "message": f"clicked {text_q}"},
+    )
+    probes = iter(
+        [
+            # pre-state (current page)
+            {
+                "ok": True,
+                "url": "https://www.amazon.com/product/x",
+                "title": "Product",
+                "text_hash": "before",
+                "text_head": "Buy now",
+            },
+            # post-state (cart)
+            {
+                "ok": True,
+                "url": "https://www.amazon.com/cart",
+                "title": "Shopping Cart",
+                "text_hash": "after",
+                "text_head": "1 item added to cart",
+            },
+        ]
+    )
+    monkeypatch.setattr(ex, "_page_probe", lambda **_k: next(probes))
+    out = ex._computer_act(
+        {"click": "Add to Cart", "expect_url": "amazon.com/cart"},
+        hint="",
+        req_target="browser",
+    )
+    assert out.get("ok") is True, out
+    assert out.get("verified") is True
+    assert out.get("page_changed") is True
+    assert out.get("observed", {}).get("url") == "https://www.amazon.com/cart"
+    assert "observed" in str(out.get("message", ""))
+
+
+def test_act_unverified_when_probe_unavailable(tmp_path: Path, monkeypatch):
+    """Host can't be observed → success stays ok but is flagged unverified."""
+    ex = _fresh_executor(tmp_path, monkeypatch)
+
+    monkeypatch.setattr(
+        ex,
+        "_browser_click_text",
+        lambda text_q, kwargs: {"ok": True, "message": f"clicked {text_q}"},
+    )
+    monkeypatch.setattr(ex, "_page_probe", lambda **_k: {"ok": False})
+    out = ex._computer_act({"click": "Next"}, hint="", req_target="browser")
+    assert out.get("ok") is True
+    assert out.get("unverified") is True
+    assert "not verified" in str(out.get("message", ""))
+
+
+def test_act_without_mutating_steps_skips_probe(tmp_path: Path, monkeypatch):
+    """Pure navigate compound must not pay a probe round-trip."""
+    ex = _fresh_executor(tmp_path, monkeypatch)
+    calls = {"probe": 0}
+
+    def _probe(**_k):
+        calls["probe"] += 1
+        return {"ok": False}
+
+    monkeypatch.setattr(ex, "_page_probe", _probe)
+    monkeypatch.setattr(
+        ex,
+        "_navigate_rail_fast",
+        lambda payload, hint, req_target: {"ok": True, "message": "SUCCESS"},
+    )
+    out = ex._computer_act(
+        {"url": "https://mail.google.com"}, hint="", req_target="browser"
+    )
+    assert out.get("ok") is True
+    assert calls["probe"] == 0
+
+
+def test_purge_scrubs_stale_pending_secret_jobs(tmp_path: Path, monkeypatch):
+    """A pending type-job the host never claimed must not keep plaintext
+    secrets on disk past the stale TTL (S-COMP-03)."""
+    import json as _json
+    import os as _os
+    import time as _time
+
+    from remedy.core.computer import host_bridge as hb
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    bridge = hb.get_host_bridge(tmp_path)
+    job = bridge.enqueue("type", {"ui": {"open_browser": True}, "text": "hunter2-secret"})
+    path = bridge.root / f"{job.id}.json"
+    assert path.is_file()
+    assert "hunter2-secret" in path.read_text(encoding="utf-8")
+
+    # Fresh pending job: never touched (host may still claim it)
+    bridge.purge_old(max_age_s=900.0, stale_open_ttl_s=1800.0)
+    assert "hunter2-secret" in path.read_text(encoding="utf-8")
+
+    # Backdate past the stale TTL → expired + scrubbed, file kept for audit
+    old = _time.time() - 3600.0
+    _os.utime(path, (old, old))
+    n = bridge.purge_old(max_age_s=900.0, stale_open_ttl_s=1800.0)
+    assert n >= 1
+    raw = _json.loads(path.read_text(encoding="utf-8"))
+    assert raw["status"] == "cancelled"
+    assert "hunter2-secret" not in path.read_text(encoding="utf-8")
+    assert "expired" in str(raw.get("error") or "")
+
+
+def test_purge_still_never_touches_fresh_running_jobs(tmp_path: Path, monkeypatch):
+    from remedy.core.computer import host_bridge as hb
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    bridge = hb.get_host_bridge(tmp_path)
+    job = bridge.enqueue("type", {"text": "live-secret"})
+    claimed = bridge.claim_next()
+    assert claimed is not None and claimed.id == job.id
+    bridge.purge_old(max_age_s=0.0, stale_open_ttl_s=1800.0)
+    path = bridge.root / f"{job.id}.json"
+    assert path.is_file()
+    assert "live-secret" in path.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Desktop input primitives (life-task audit P0 #9) — layout-testable pieces
+# ---------------------------------------------------------------------------
+
+
+def _fake_us_vk_scan(code_point: int) -> int:
+    """Minimal US-layout VkKeyScanW: high byte = shift state, low byte = VK."""
+    table = {
+        ord("a"): 0x0041,
+        ord("s"): 0x0053,
+        ord("1"): 0x0031,
+        ord("?"): 0x01BF,  # shift + VK_OEM_2
+        ord(":"): 0x01BA,  # shift + VK_OEM_1
+        ord("!"): 0x0131,  # shift + '1'
+        ord("/"): 0x00BF,
+    }
+    return table.get(code_point, -1)
+
+
+def test_resolve_key_combo_honors_shift_state():
+    """'?' must press Shift+VK_OEM_2 — not the bare (unshifted) key."""
+    from remedy.core.computer.desktop_win import resolve_key_combo
+
+    assert resolve_key_combo("?", vk_scan=_fake_us_vk_scan) == [0x10, 0xBF]
+    assert resolve_key_combo(":", vk_scan=_fake_us_vk_scan) == [0x10, 0xBA]
+    assert resolve_key_combo("!", vk_scan=_fake_us_vk_scan) == [0x10, 0x31]
+    # Unshifted char stays bare
+    assert resolve_key_combo("/", vk_scan=_fake_us_vk_scan) == [0xBF]
+    # Explicit shift not duplicated
+    assert resolve_key_combo("shift+?", vk_scan=_fake_us_vk_scan) == [0x10, 0xBF]
+
+
+def test_resolve_key_combo_modifiers_first_and_fkeys():
+    from remedy.core.computer.desktop_win import resolve_key_combo
+
+    assert resolve_key_combo("ctrl+s", vk_scan=_fake_us_vk_scan) == [0x11, 0x53]
+    # F6–F12 / insert / printscreen are now real keys
+    assert resolve_key_combo("f6", vk_scan=_fake_us_vk_scan) == [0x75]
+    assert resolve_key_combo("f12", vk_scan=_fake_us_vk_scan) == [0x7B]
+    assert resolve_key_combo("insert", vk_scan=_fake_us_vk_scan) == [0x2D]
+    assert resolve_key_combo("printscreen", vk_scan=_fake_us_vk_scan) == [0x2C]
+    assert resolve_key_combo("ctrl+shift+s", vk_scan=_fake_us_vk_scan) == [
+        0x11,
+        0x10,
+        0x53,
+    ]
+
+
+def test_resolve_key_combo_unknown_raises():
+    import pytest as _pytest
+
+    from remedy.core.computer.desktop_win import resolve_key_combo
+
+    with _pytest.raises(ValueError):
+        resolve_key_combo("notakey", vk_scan=_fake_us_vk_scan)
+    with _pytest.raises(ValueError):
+        resolve_key_combo("€", vk_scan=_fake_us_vk_scan)  # not on fake layout

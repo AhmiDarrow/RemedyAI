@@ -201,6 +201,8 @@ def register_computer_tools(runtime: Any) -> None:
         goal: str = "",
         target: str = "auto",
         hint: str = "",
+        expect_url: str = "",
+        expect_text: str = "",
     ) -> str:
         """Multi-step computer action in ONE call (fast path).
 
@@ -208,9 +210,24 @@ def register_computer_tools(runtime: Any) -> None:
         Prefer this for login/search flows instead of many tiny tool rounds.
         Example: url=https://mail.google.com click=\"Sign in\" type=\"user@gmail.com\" key=enter
         Default target=auto: URL → rail; after computer_app → desktop.
+
+        Verification: after acting, the machine observes the page and reports
+        ``observed`` url/title (+ ``page_changed``). Pass ``expect_url=`` and/or
+        ``expect_text=`` (substring) to make the call FAIL when the outcome does
+        not match — e.g. expect_text=\"added to cart\". Success without
+        verification is reported as unverified; do not claim the user's goal is
+        done from an unverified result.
         """
         # Do not put typed secrets in the approval banner; only lengths / labels.
         type_note = f"type_chars={len(type)}" if type else "type=-"
+        try:
+            from remedy.core.vault import token_handles
+
+            handles = token_handles(type or "")
+            if handles:
+                type_note += f" vault={','.join(handles)}"
+        except Exception:
+            pass
         summary = (
             f"act url={url!r} click={click!r} {type_note} key={key!r} "
             f"goal={goal!r} target={target or 'auto'}"
@@ -230,15 +247,68 @@ def register_computer_tools(runtime: Any) -> None:
             key=key,
             goal=goal,
             text=click,
+            expect_url=expect_url,
+            expect_text=expect_text,
         )
+
+    async def vault_list() -> str:
+        """List the owner's stored secrets as handles + metadata (never values).
+
+        Use the returned token (e.g. ``{{vault:card-visa}}``) in computer_type /
+        computer_act type= to fill it machine-side. Secrets are added by the
+        owner in Settings → Vault — never ask the user to paste secret values
+        into chat.
+        """
+        import json as _json
+
+        try:
+            from remedy.core import vault
+
+            home = None
+            with __import__("contextlib").suppress(Exception):
+                home = getattr(getattr(runtime, "config", None), "home_dir", None)
+            items = vault.vault_list(home)
+            if not items:
+                return _json.dumps(
+                    {
+                        "ok": True,
+                        "items": [],
+                        "note": (
+                            "Vault is empty. The owner can add payment info / "
+                            "credentials in Settings → Vault; values never "
+                            "appear in chat."
+                        ),
+                    }
+                )
+            return _json.dumps({"ok": True, "items": items})
+        except Exception as exc:
+            return _json.dumps({"ok": False, "error": str(exc)})
 
     async def computer_type(
         text: str = "",
         target: str = "auto",
         hint: str = "",
     ) -> str:
-        """Type text into the focused UI (browser or desktop)."""
-        summary = f"type chars={len(text or '')} target={target or 'auto'}"
+        """Type text into the focused UI (browser or desktop).
+
+        Stored secrets: pass a vault token like ``{{vault:card-visa}}`` — the
+        machine substitutes the real value at the input path (you never see
+        it), enforces the item's site binding, and asks the owner first.
+        Never ask the user to paste card numbers or passwords into chat; use
+        vault_list to find handles.
+        """
+        vault_note = ""
+        try:
+            from remedy.core.vault import token_handles
+
+            handles = token_handles(text or "")
+            if handles:
+                vault_note = f" vault={','.join(handles)}"
+        except Exception:
+            pass
+        summary = (
+            f"type chars={len(text or '')} target={target or 'auto'}{vault_note}"
+        )
         blocked = _computer_approval_gate(runtime, "computer_type", summary)
         if blocked:
             return blocked
@@ -505,12 +575,20 @@ def register_computer_tools(runtime: Any) -> None:
                 "goal": {"type": "string", "description": "Short task description"},
                 "target": target_prop,
                 "hint": hint_prop,
+                "expect_url": {
+                    "type": "string",
+                    "description": "Fail unless the observed URL contains this after acting",
+                },
+                "expect_text": {
+                    "type": "string",
+                    "description": "Fail unless observed page text/title contains this after acting",
+                },
             },
         },
     )
     reg.register_builtin_handler(
         "computer_type",
-        "Type text into the focused control (browser or desktop).",
+        "Type text into the focused control (browser or desktop). Stored secrets: pass {{vault:handle}} (see vault_list).",
         computer_type,
         {
             "type": "object",
@@ -521,6 +599,12 @@ def register_computer_tools(runtime: Any) -> None:
             },
             "required": ["text"],
         },
+    )
+    reg.register_builtin_handler(
+        "vault_list",
+        "List the owner's stored secret handles (cards, passwords) — metadata only, never values. Fill with {{vault:handle}} in computer_type/computer_act.",
+        vault_list,
+        {"type": "object", "properties": {}},
     )
     reg.register_builtin_handler(
         "computer_key",
