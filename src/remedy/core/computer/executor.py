@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import threading
 import time
@@ -575,6 +576,13 @@ class ComputerExecutor:
             )
         if act is ComputerAction.TYPE:
             text = str(kwargs.get("text") or "")
+            # Desktop destination is unverifiable → domain-bound vault items
+            # refuse here by design (owner can store an unbound item if wanted).
+            text, vault_err = self._expand_vault_text(
+                text, destination_url="", action="type"
+            )
+            if vault_err is not None:
+                return vault_err
             typed_box: list[int] = [0]
             try:
                 win.type_text(
@@ -762,6 +770,17 @@ class ComputerExecutor:
         asked for it, or the Desktop host fails to claim the job quickly.
         """
         payload = {k: v for k, v in kwargs.items() if v is not None}
+        # Vault tokens in typed text expand machine-side, bound to the rail's
+        # current site — the model and job log only ever saw the handle.
+        if act is ComputerAction.TYPE and payload.get("text"):
+            expanded, vault_err = self._expand_vault_text(
+                str(payload.get("text") or ""),
+                destination_url=self.bridge.last_navigate_url(),
+                action="type",
+            )
+            if vault_err is not None:
+                return vault_err
+            payload["text"] = expanded
         if act is ComputerAction.NAVIGATE and payload.get("url"):
             raw_u = str(payload.get("url") or "")
             cleaned = normalize_url(raw_u)
@@ -1375,6 +1394,7 @@ class ComputerExecutor:
                 )
             time.sleep(0.2)
         if type_text:
+            # _run_desktop TYPE expands vault tokens itself (unbound items only)
             ty = self._run_desktop(ComputerAction.TYPE, text=type_text, hint=hint)
             log.append(f"type:{ty.get('ok')} chars={len(type_text)}")
             if not ty.get("ok"):
@@ -1422,6 +1442,12 @@ class ComputerExecutor:
         type_text = str(payload.get("type") or payload.get("type_text") or "").strip()
         key = str(payload.get("key") or "").strip()
         goal = str(payload.get("goal") or hint or "")
+        expect = self._parse_expect(payload)
+        mutating = bool(click or type_text or key)
+        # Pre-state only when acting on the *current* page (page_changed signal).
+        pre_state: dict[str, Any] | None = None
+        if mutating and not url and (click or key):
+            pre_state = self._page_probe(max_wait_s=1.5)
 
         if url:
             nav = self._navigate_rail_fast(
@@ -1453,6 +1479,14 @@ class ComputerExecutor:
             time.sleep(0.25)
 
         if type_text:
+            type_text, vault_err = self._expand_vault_text(
+                type_text,
+                destination_url=self.bridge.last_navigate_url() or url,
+                action="act",
+            )
+            if vault_err is not None:
+                vault_err["steps"] = log
+                return vault_err
             # Prefer focusing email/username field if goal implies login
             if not click and any(
                 w in (goal + " " + type_text).lower()
@@ -1501,13 +1535,195 @@ class ComputerExecutor:
             )
             log.append(f"key:{fin.status == 'done'} {key}")
 
+        # Observe the outcome — success is observed, not asserted
+        # (docs/LIFE_TASK_PARTNER.md §2.3/§2.5).
+        verify_extra, verify_fail = self._verify_act_outcome(
+            pre=pre_state, expect=expect, acted=mutating
+        )
+        if verify_fail:
+            return public_result(
+                ok=False,
+                target="browser",
+                action="act",
+                message=verify_fail,
+                extra={
+                    "steps": log,
+                    "url": url or None,
+                    "click": click or None,
+                    **verify_extra,
+                },
+            )
+        msg = "SUCCESS: " + " | ".join(log)
+        observed = verify_extra.get("observed")
+        if isinstance(observed, dict) and (observed.get("url") or observed.get("title")):
+            msg += (
+                f" | observed: {str(observed.get('title') or '')[:60]!r}"
+                f" @ {str(observed.get('url') or '')[:100]}"
+            )
+        if verify_extra.get("unverified"):
+            msg += (
+                " | note: outcome not verified (page probe unavailable) — "
+                "run computer_page_text or computer_snapshot before claiming the "
+                "goal is complete."
+            )
         return public_result(
             ok=True,
             target="browser",
             action="act",
-            message="SUCCESS: " + " | ".join(log),
-            extra={"steps": log, "url": url or None, "click": click or None},
+            message=msg,
+            extra={
+                "steps": log,
+                "url": url or None,
+                "click": click or None,
+                **verify_extra,
+            },
         )
+
+    def _expand_vault_text(
+        self,
+        text: str,
+        *,
+        destination_url: str,
+        action: str = "type",
+    ) -> tuple[str, dict[str, Any] | None]:
+        """Machine-side ``{{vault:handle}}`` → secret substitution.
+
+        The plaintext exists only on the wire from vault to input path — never
+        in model context or tool results. Domain-bound items refuse to decrypt
+        for the wrong destination (docs/LIFE_TASK_PARTNER.md §2.3: secrets only
+        type into verified fields). Returns ``(expanded, error_result|None)``;
+        error results are plain-language and secret-free.
+        """
+        if not text or "{{" not in text:
+            return text, None
+        try:
+            from remedy.core import vault
+
+            if not vault.contains_vault_token(text):
+                return text, None
+            expanded, _handles = vault.expand_text(
+                text, destination_url=destination_url, home=self.home_dir
+            )
+            return expanded, None
+        except Exception as exc:
+            # VaultError/VaultDomainError messages are safe (no secret material).
+            return text, public_result(
+                ok=False,
+                target="browser" if destination_url else "desktop",
+                action=action,
+                message=(
+                    f"Vault refused to fill this secret: {exc} "
+                    "Nothing was typed."
+                ),
+                extra={"vault_refused": True},
+            )
+
+    def _page_probe(self, *, max_wait_s: float = 2.5) -> dict[str, Any]:
+        """Light best-effort page observation for post-action verification.
+
+        Returns ``{"ok", "url", "title", "text_hash", "text_head"}``. Never
+        raises; ``ok=False`` when the host is offline/slow — verification is
+        then reported as *unverified*, not as failure (life-task doctrine:
+        observe outcomes when we can, never fabricate them).
+        """
+        out = {"ok": False, "url": "", "title": "", "text_hash": "", "text_head": ""}
+        try:
+            job = self._enqueue(
+                "page_text",
+                {"ui": {"open_browser": True}, "browser_action": "page_text"},
+            )
+            fin = self.bridge.wait(
+                job.id,
+                timeout_s=max(0.5, float(max_wait_s)),
+                poll_s=0.05,
+                abort_check=self._abort_check,
+                unclaimed_timeout_s=min(1.2, float(max_wait_s)),
+                grace_s=0.1,
+            )
+            if fin.status == "done" and fin.result:
+                res = dict(fin.result)
+                text = str(res.get("text") or "")
+                out["ok"] = True
+                out["url"] = str(res.get("url") or "")
+                out["title"] = str(res.get("title") or "")
+                out["text_head"] = text[:280]
+                if text:
+                    out["text_hash"] = hashlib.sha256(
+                        text.encode("utf-8", "replace")
+                    ).hexdigest()[:16]
+        except Exception:
+            pass
+        return out
+
+    @staticmethod
+    def _parse_expect(payload: dict[str, Any]) -> dict[str, str]:
+        """Normalize expect_url= / expect_text= / expect={...} into one dict."""
+        expect: dict[str, str] = {}
+        raw = payload.get("expect")
+        if isinstance(raw, dict):
+            for src, dst in (
+                ("url_contains", "url"),
+                ("text_contains", "text"),
+                ("url", "url"),
+                ("text", "text"),
+            ):
+                v = str(raw.get(src) or "").strip()
+                if v and dst not in expect:
+                    expect[dst] = v
+        for key, dst in (("expect_url", "url"), ("expect_text", "text")):
+            v = str(payload.get(key) or "").strip()
+            if v and dst not in expect:
+                expect[dst] = v
+        return expect
+
+    def _verify_act_outcome(
+        self,
+        *,
+        pre: dict[str, Any] | None,
+        expect: dict[str, str],
+        acted: bool,
+    ) -> tuple[dict[str, Any], str | None]:
+        """Post-action observation → (extra fields, failure message | None)."""
+        extra: dict[str, Any] = {}
+        if not acted:
+            return extra, None
+        post = self._page_probe()
+        if not post.get("ok"):
+            extra["verified"] = False
+            extra["unverified"] = True
+            return extra, None
+        observed = {"url": post.get("url") or "", "title": post.get("title") or ""}
+        extra["observed"] = observed
+        if pre and pre.get("ok"):
+            extra["page_changed"] = bool(
+                (pre.get("url") or "") != (post.get("url") or "")
+                or (pre.get("text_hash") or "") != (post.get("text_hash") or "")
+            )
+        if expect:
+            hay_url = str(post.get("url") or "").lower()
+            hay_text = (
+                str(post.get("title") or "") + "\n" + str(post.get("text_head") or "")
+            ).lower()
+            want_url = str(expect.get("url") or "").lower()
+            want_text = str(expect.get("text") or "").lower()
+            if want_url and want_url not in hay_url:
+                extra["verified"] = False
+                return extra, (
+                    f"act ran but verification failed: expected URL containing "
+                    f"{expect.get('url')!r}, observed {observed.get('url')!r} "
+                    f"({observed.get('title')!r}). Re-observe with "
+                    "computer_snapshot before retrying."
+                )
+            if want_text and want_text not in hay_text:
+                extra["verified"] = False
+                return extra, (
+                    f"act ran but verification failed: expected page text containing "
+                    f"{expect.get('text')!r}; observed title {observed.get('title')!r}. "
+                    "Re-observe with computer_snapshot or computer_page_text "
+                    "before retrying."
+                )
+            extra["verified"] = True
+        return extra, None
 
     def _browser_page_text(self) -> dict[str, Any]:
         self.bridge.settle_after_navigate(min_s=0.6, max_s=1.5)

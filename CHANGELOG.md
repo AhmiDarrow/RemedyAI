@@ -4,6 +4,56 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Life tasks (P0 — docs/LIFE_TASK_PARTNER.md; audit: docs/AUDIT_LIFE_TASK_2026-08-16.md)
+
+- **Commerce/life verbs are full tasks.** "goto amazon and order X",
+  buy/book/apply/renew/pay/subscribe/checkout no longer short-circuit as
+  open-only browse — the loop drives to completion instead of stopping at
+  "Opened Amazon in the Browser rail."
+- **Success is observed, not asserted.** `computer_act` probes the page after
+  mutating steps and reports `observed` url/title + `page_changed`; new
+  `expect_url=` / `expect_text=` make the call fail loudly when the outcome
+  does not match. Unverified results say so and instruct re-observation.
+- **Owner checkpoints (non-waivable).** Payment/purchase computer actions
+  ("Place order", "Pay now", card fields, vault fills) always ask — in
+  `auto` AND `full`, ignoring turn skip flags. "Always" approvals on these
+  downgrade to session; mode flips never auto-approve them. Coding/build
+  tools (`bash_exec`, `file_write`, …) are untouched — frontier-model coding
+  keeps full flow (regression-tested).
+- **Plain-language approval cards.** `to_public` now leads with a `summary`
+  a non-technical owner can act on ("Remedy wants to press 'Submit' on
+  irs.gov…"); raw command stays for the details expander.
+
+### Remedy Vault (payment info & credentials)
+
+- New `remedy.core.vault`: handle-based secret store. **Established crypto
+  only** — libsodium SecretBox (XSalsa20-Poly1305) under a master key sealed
+  by DPAPI (Windows) or an owner passphrase (Argon2id); never an invented
+  cipher. The AI-attacker defense is architectural: model context, transcripts,
+  logs, and job files only ever see `{{vault:handle}}` tokens — plaintext
+  exists transiently machine-side on the way to the input field.
+- `computer_type` / `computer_act type=` expand vault tokens machine-side
+  with **site binding** (a card bound to amazon.com refuses everywhere else;
+  unverifiable desktop destinations refuse bound items by design). Every
+  fill is an owner checkpoint + audit line (handle, never the value).
+- New `vault_list` agent tool (metadata only). Secrets enter via owner-side
+  API (`vault_add`) — Settings → Vault UI is the follow-up surface.
+
+### Computer use — input correctness
+
+- `press_key` honors the layout shift state: `?`, `:`, `!` now send
+  Shift+key instead of the unshifted key; F6–F12 / Insert / PrintScreen added.
+- `type_text` sends real VK_RETURN for newlines (many apps ignore U+000A).
+- `drag` interpolates ~12 movement steps with a pre-drop pause so
+  Explorer/list drag-drop registers; horizontal scroll (`dx`) implemented
+  via MOUSEEVENTF_HWHEEL.
+
+### Security
+
+- Stale pending/running computer jobs the host never claimed are expired and
+  their typed payloads scrubbed after a 30-minute TTL (plaintext secrets no
+  longer sit in `~/.remedy/computer/jobs` indefinitely when a poller dies).
+
 ### Build drive / Full control
 
 - Build scouts one step on landing/serve goals, then injects **DRIVE HOST**

@@ -107,7 +107,15 @@ _INTERACTION_RE = re.compile(
     r"password|username|user\s*name|email\s*address|"
     r"type|enter|fill|input|click|press|submit|select|"
     r"once\s+there|then\s+|after\s+that|and\s+then|"
-    r"log\s+me|sign\s+me|authenticate|credentials"
+    r"log\s+me|sign\s+me|authenticate|credentials|"
+    # Life-task / commerce verbs — "goto amazon and order X" is a full task,
+    # never an open-only browse (docs/LIFE_TASK_PARTNER.md).
+    r"buy|order|purchase|checkout|check\s+out|"
+    r"add\s+to\s+(?:the\s+)?(?:cart|basket|bag)|cart|basket|"
+    r"book|reserve|schedule|apply|pay|renew|register|"
+    r"subscribe|enroll|sign\s+up|donate|"
+    r"download|upload|send|reply|post|comment|"
+    r"cancel\s+(?:my|the|an?)\b|return\s+(?:my|the|an?)\b|track\s+(?:my|the|an?)\b"
     r")\b"
 )
 
