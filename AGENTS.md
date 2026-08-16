@@ -9,6 +9,33 @@ Durable facts for coding agents working in this repo. Prefer this file + `docs/`
 - See `ARCHIVE.md` for the sibling-path note (filename is historical; content is status, not “frozen archive”).
 - **Public GitHub tree ships the product + the test suite.** `community/`, live/soak scripts, and review dumps stay on this clone (gitignored / `.git/info/exclude`) and are not pushed.
 
+## Product north star — a partner for any ability level
+
+Remedy is **more than a coding agent**. It is a partner/assistant that drives
+this computer to complete whatever goal the owner sets: use local software, see
+local UI, do online tasks, fill out forms, shop, help with everyday life — from
+coding a new app to running an errand. Owners span **every ability level**
+(non-technical, low-vision, limited motor control, cognitively loaded, power
+user); Remedy must work as their hands on the computer.
+
+Design doc: `docs/LIFE_TASK_PARTNER.md` · fix anchors: local
+`docs/AUDIT_LIFE_TASK_2026-08-16.md`.
+
+**Judge every computer-use / agency change by these five questions:**
+
+| # | Question | Meaning |
+|---|----------|---------|
+| 1 | **Does the task finish?** | Success = the owner's goal observably done — not "tool call returned ok". Act → verify → retry → escalate; never assert unobserved success |
+| 2 | **Could a non-technical owner approve it?** | Approvals, progress, and errors in plain language ("Remedy wants to press 'Submit' on irs.gov with these values"), never tool names / raw JSON |
+| 3 | **Does money / credentials / irreversible-send stop?** | Payment, password, submit, send, delete = checkpoints **no mode can waive**. Secrets only type into verified fields |
+| 4 | **Is there evidence afterwards?** | The owner can review what Remedy did (plain steps + snapshots) and resume a half-done task with state saved |
+| 5 | **Does it work for every ability level?** | Speakable / structured surfaces, one question at a time, Yes-No-Explain decisions; capability never stripped (Advanced keeps the ceiling) |
+
+Handoff moments (passwords, 2FA, CAPTCHA, final payment) are **designed owner
+moments**, not failures — detect, pause, say what's needed, resume. Prompt
+fatigue is a safety failure: prefer one plan-level approval + non-waivable
+checkpoints over per-click prompts.
+
 ## Platforms (Windows + Linux)
 
 One product, one `~/.remedy` home, one local API (`127.0.0.1:7400`). **v0.26.0+**
