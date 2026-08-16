@@ -4,6 +4,28 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Voice — Remedy speaks and hears (local, optional)
+
+- **Speak-back**: new `remedy.voice` package + `/api/voice/*` routes. Local
+  TTS via **Kokoro-82M** (model Apache-2.0, `kokoro-onnx` runtime MIT) —
+  CPU-realtime, near-SOTA quality per byte. The speaking voice follows the
+  owner's existing **`agent_gender`** setting (female → `af_heart`, male →
+  `am_michael`, neutral → `af_sky`; `voice_override` picks any Kokoro voice).
+  Replies are cleaned for listening (code blocks/links/tables stripped) and
+  streamed as WAV. Zero-install fallback: the desktop uses OS voices
+  (speechSynthesis) matched to the same gender until Kokoro is installed.
+- **Hearing**: local STT via **faster-whisper** (MIT). Mic button in Grove
+  records (MediaRecorder) → `/api/voice/transcribe` → heard speech sends.
+  Model size configurable (`small` default → `large-v3-turbo` for best
+  quality). Audio never leaves this machine, and spoken commands still stop
+  at the non-waivable payment/credential checkpoints.
+- Ships as the **`remedy-ai[voice]`** extra — base install stays light.
+  Engines lazy-load; `/api/voice/status` reports availability + reasons;
+  `POST /api/voice/install` downloads Kokoro model files (~340 MB) /
+  warms the whisper model into `~/.remedy/voice/`.
+- Grove gains a 🔊 aloud / 🔇 quiet toggle (persisted server-side as
+  `speak_replies`) and pulsing mic buttons on both talkbars.
+
 ### Grove — the partner surface (new default UI)
 
 - New top-level surface **Grove**, the default home for owners (Studio — the
