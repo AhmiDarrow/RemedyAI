@@ -106,6 +106,23 @@ export async function patchLifeGoal(
   })
 }
 
+export async function deleteLifeGoal(id: string): Promise<void> {
+  await apiFetch(`/goals/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+/** Clear the "Last:" activity pill history (drive steps). */
+export async function clearLifeActivity(): Promise<void> {
+  await apiFetch('/goals/activity/clear', { method: 'POST' })
+}
+
+/** Rename a goal's title (edit until it becomes a real, worked goal). */
+export async function renameLifeGoal(id: string, title: string): Promise<LifeGoal> {
+  return apiFetch<LifeGoal>(`/goals/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  })
+}
+
 export interface PartnerStatus {
   version?: string
   pending_approvals: number

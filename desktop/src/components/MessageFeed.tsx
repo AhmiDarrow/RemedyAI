@@ -63,6 +63,12 @@ interface MessageFeedProps {
   toolProcessMode?: ToolProcessMode
   onEditUserMessage?: (msgId: string, content: string) => void
   onQuickPrompt?: (text: string) => void
+  /** Empty-state starter chips — Studio set by default; Grove passes its own. */
+  starters?: { label: string; text: string }[]
+  /** Empty-state subtitle override (surface-specific tone). */
+  emptySub?: ReactNode
+  /** Empty-state keyboard-hint row override. */
+  emptyHints?: ReactNode
   /** Regenerate from the user turn that produced this assistant message. */
   onRegenerate?: (assistantMsgId: string) => void
   /** Display name for the human (avatar + label). */
@@ -98,6 +104,7 @@ function firstName(name: string | undefined | null): string {
   return t.split(/\s+/)[0] || 'You'
 }
 
+/** Studio workbench starters — Grove overrides these via the `starters` prop. */
 const STARTERS = [
   {
     label: 'What can you help with?',
@@ -634,6 +641,9 @@ export function MessageFeed({
   toolProcessMode = 'off',
   onEditUserMessage,
   onQuickPrompt,
+  starters,
+  emptySub,
+  emptyHints,
   onRegenerate,
   userName,
   partnerName = 'Remedy',
@@ -900,7 +910,7 @@ export function MessageFeed({
               : 'Your partner is ready'}
           </div>
           <div className="chat-empty-sub">
-            {projectPath ? (
+            {emptySub ?? (projectPath ? (
               <>
                 Project folder attached — ask to explore, review, or implement.
                 <br />
@@ -911,7 +921,7 @@ export function MessageFeed({
                 Ask anything, plan, research, or open a project to build.{' '}
                 <code>/help</code> lists commands · <code>F1</code> opens the Help wiki.
               </>
-            )}
+            ))}
           </div>
           {onQuickPrompt && (
             <div
@@ -919,7 +929,7 @@ export function MessageFeed({
               role="group"
               aria-label="Starter prompts"
             >
-              {STARTERS.map((s) => (
+              {(starters ?? STARTERS).map((s) => (
                 <button
                   key={s.label}
                   type="button"
@@ -933,8 +943,12 @@ export function MessageFeed({
             </div>
           )}
           <div className="chat-empty-sub mt-0.5" style={{ maxWidth: '26rem', opacity: 0.85 }}>
-            <code>Enter</code> send · <code>Shift+Enter</code> new line ·{' '}
-            <code>@</code> files · <code>/</code> commands · <code>Shift+Tab</code> Plan/Build
+            {emptyHints ?? (
+              <>
+                <code>Enter</code> send · <code>Shift+Enter</code> new line ·{' '}
+                <code>@</code> files · <code>/</code> commands · <code>Shift+Tab</code> Plan/Build
+              </>
+            )}
           </div>
         </div>
       )}

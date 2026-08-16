@@ -59,6 +59,108 @@ _SENSITIVE_COMPUTER_RE = re.compile(
 )
 
 
+# Mutation computer tools that can finalize a purchase on a payment surface.
+_MUTATION_COMPUTER_TOOLS = frozenset(
+    {"computer_click", "computer_act", "computer_key", "computer_type", "computer_drag"}
+)
+# Page-context signals that we're on a checkout / payment surface. When the
+# current rail page looks like this AND a mutation's target could not be
+# classified (coordinate click, bare Enter, unresolved ref), we fail closed —
+# without prompting on every keypress during ordinary browsing.
+_PAYMENT_SURFACE_RE = re.compile(
+    r"(?is)("
+    r"/(checkout|cart|payment|billing|pay|order|purchase|donate)\b"
+    r"|checkout\.|\bcheckout\b|\bpayment\b|\bbilling\b"
+    r"|place\s+order|pay\s+now|order\s+summary|order\s+total|"
+    r"card\s*number|cardholder|cvv|cvc|expiry|billing\s+address"
+    r")"
+)
+# Keys that can submit a focused payment form.
+_SUBMIT_KEYS = frozenset({"enter", "return", "\n", "space", " "})
+
+
+def looks_like_payment_surface(page_context: str) -> bool:
+    return bool(_PAYMENT_SURFACE_RE.search(page_context or ""))
+
+
+def payment_surface_checkpoint(
+    tool_name: str,
+    *,
+    label_resolved: bool,
+    page_context: str,
+    key: str = "",
+) -> str | None:
+    """Owner checkpoint for an *unclassifiable* mutation on a payment surface.
+
+    Fires when: a mutation computer tool acts by coordinates / bare submit
+    key / unresolved ref (``label_resolved`` is False) AND the current page
+    context looks like checkout/payment. Non-waivable, like the text
+    classifier — closes the 'click Place-Order by pixel' bypass without
+    adding friction to normal browsing.
+    """
+    tool = (tool_name or "").strip()
+    if tool not in _MUTATION_COMPUTER_TOOLS:
+        return None
+    if label_resolved:
+        return None  # a resolved label already went through the text classifier
+    if tool == "computer_key" and (key or "").strip().lower() not in _SUBMIT_KEYS:
+        return None  # non-submitting keystroke on a form field is fine
+    if not looks_like_payment_surface(page_context):
+        return None
+    return (
+        f"{SENSITIVE_PREFIX} — a purchase/payment page is open and this action "
+        "has no readable target (coordinate/key/ref). Payment steps always need "
+        "your go-ahead; confirm this is intended."
+    )
+
+
+_CARD_CANDIDATE_RE = re.compile(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)")
+
+
+def _luhn_ok(digits: str) -> bool:
+    d = [int(c) for c in digits if c.isdigit()]
+    if not 13 <= len(d) <= 19:
+        return False
+    checksum = 0
+    for i, n in enumerate(reversed(d)):
+        if i % 2 == 1:
+            n *= 2
+            if n > 9:
+                n -= 9
+        checksum += n
+    return checksum % 10 == 0
+
+
+def looks_like_raw_card(text: str) -> bool:
+    """True when *text* contains a Luhn-valid 13–19 digit card number."""
+    for m in _CARD_CANDIDATE_RE.finditer(text or ""):
+        if _luhn_ok(m.group(0)):
+            return True
+    return False
+
+
+def raw_secret_checkpoint(tool_name: str, typed_text: str) -> str | None:
+    """Owner checkpoint when a raw card number is typed (not a vault handle).
+
+    The vault path ({{vault:handle}}) is the intended way to fill payment
+    details; typing a bare PAN would otherwise slip past the classifier
+    (the summary hides the content). Fail closed on a Luhn-valid card so
+    money details never get typed without the owner's explicit go-ahead.
+    """
+    tool = (tool_name or "").strip()
+    if tool not in ("computer_type", "computer_act"):
+        return None
+    if "{{vault:" in (typed_text or "") or "{{ vault:" in (typed_text or ""):
+        return None  # vault handle — its own owner moment, bound to the site
+    if looks_like_raw_card(typed_text):
+        return (
+            f"{SENSITIVE_PREFIX} — that looks like a raw card number. Payment "
+            "details always need your go-ahead; prefer a saved vault entry so "
+            "the value is bound to the site and never typed by guesswork."
+        )
+    return None
+
+
 def sensitive_computer_checkpoint(tool_name: str, context: str) -> str | None:
     """Non-waivable owner-checkpoint reason for payment/purchase computer actions.
 

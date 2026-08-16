@@ -109,8 +109,9 @@ def compute_soma(
         thread_bit = f" · {life_title[:40]}"
     elif rel.open_threads:
         thread_bit = f" · {rel.open_threads[-1][:40]}"
+    who = (getattr(sf, "identity_name", "") or "Remedy").strip() or "Remedy"
     tooltip = (
-        f"Remedy {emoji} {label} · rapport {rel.rapport:.0%} · trust {rel.trust:.0%}"
+        f"{who} {emoji} {label} · rapport {rel.rapport:.0%} · trust {rel.trust:.0%}"
         f"{(' · ' + muscle_hint) if muscle_hint else ''}"
         f"{thread_bit}"
     )

@@ -25,6 +25,17 @@ _MAX_GOALS = 80
 _MAX_EVIDENCE = 24
 _lock = threading.Lock()
 
+# Command/operational shapes that are NOT life goals — keep them off the board.
+_OPERATIONAL_RE = re.compile(
+    r"(?i)(^\s*host:|serve\.py|\bport\s+\d|\brun\s+python\b|\bnpm\s+(run|install)\b|"
+    r"\bpython\s+\S+\.py\b|\bgit\s+(push|commit|status)\b|open\s+browser|"
+    r"localhost|127\.0\.0\.1|:\d{4}\b|--build\b|dev\s+build)"
+)
+
+
+def _looks_operational(text: str) -> bool:
+    return bool(_OPERATIONAL_RE.search(text or ""))
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -114,7 +125,15 @@ class LifeGoalStore:
         except OSError:
             return empty
         except json.JSONDecodeError:
-            self._disk_corrupt = True
+            # Back up the unreadable file once and start fresh — a corrupt
+            # read must NOT permanently disable all future saves (the old
+            # behavior silently dropped every add/complete/patch until
+            # restart, reporting success to the caller).
+            with __import__("contextlib").suppress(OSError):
+                bad = self.path.with_suffix(".corrupt")
+                if not bad.exists():
+                    self.path.replace(bad)
+            self._disk_corrupt = False
             return empty
         self._disk_corrupt = False
         if not isinstance(raw, dict):
@@ -297,6 +316,24 @@ class LifeGoalStore:
             self._save(goals)
         return g
 
+    def delete(self, goal_id: str) -> bool:
+        """Hard-remove ONE goal by exact id (or exact title) — never a
+        substring, so 'Ship app' can't also wipe 'Ship app v2'."""
+        needle = (goal_id or "").strip().lower()
+        if not needle:
+            return False
+        with _lock:
+            goals = self._load()
+            target = next(
+                (g for g in goals if g.id.lower() == needle), None
+            ) or next(
+                (g for g in goals if g.title.strip().lower() == needle), None
+            )
+            if target is None:
+                return False
+            self._save([g for g in goals if g.id != target.id])
+        return True
+
     def set_next(self, title: str, action: str, *, next_by: str = "") -> LifeGoal | None:
         g = self.find(title)
         if g is None or g.status not in OPEN_STATUSES:
@@ -336,6 +373,8 @@ class LifeGoalStore:
         g = self.get(goal_id) or self.find(goal_id)
         if g is None:
             return None
+        if "title" in fields and str(fields.get("title") or "").strip():
+            g.title = str(fields["title"]).strip()[:200]
         if "status" in fields and str(fields["status"] or "") in STATUSES:
             g.status = str(fields["status"])
         if "next_action" in fields and fields["next_action"] is not None:
@@ -376,15 +415,27 @@ class LifeGoalStore:
             goals = self._load()
             self.last_drive_at = stamp
             if isinstance(step, dict) and (step.get("did") or step.get("goal")):
-                row = {
-                    "ts": stamp,
-                    "goal": str(step.get("goal") or "")[:200],
-                    "did": str(step.get("did") or "")[:280],
-                    "next": str(step.get("next") or "")[:280],
-                    "path": str(step.get("path") or "")[:400],
-                    "kind": str(step.get("kind") or "")[:32],
-                }
-                self.last_steps = (list(self.last_steps) + [row])[-12:]
+                # Don't surface operational/command instructions as life
+                # "activity" — that clutters the partner's board with things
+                # like "HOST: start serve.py" (not a life goal step).
+                blob = f"{step.get('goal') or ''} {step.get('did') or ''}"
+                if not _looks_operational(blob):
+                    row = {
+                        "ts": stamp,
+                        "goal": str(step.get("goal") or "")[:200],
+                        "did": str(step.get("did") or "")[:280],
+                        "next": str(step.get("next") or "")[:280],
+                        "path": str(step.get("path") or "")[:400],
+                        "kind": str(step.get("kind") or "")[:32],
+                    }
+                    self.last_steps = (list(self.last_steps) + [row])[-12:]
+            self._save(goals)
+
+    def clear_activity(self) -> None:
+        """Wipe the recorded drive steps (the 'Last:' board pill history)."""
+        with _lock:
+            goals = self._load()
+            self.last_steps = []
             self._save(goals)
 
     def record_digest(self) -> None:
@@ -489,7 +540,13 @@ def weekly_pulse(home_dir: str | Path | None = None) -> dict[str, Any]:
     for g in open_g:
         try:
             updated = datetime.fromisoformat(g.updated_at.replace("Z", "+00:00"))
-        except ValueError:
+            if updated.tzinfo is None:
+                # Legacy / externally-edited naive stamp — treat as UTC so the
+                # aware `now - updated` below never raises TypeError.
+                from datetime import UTC as _UTC
+
+                updated = updated.replace(tzinfo=_UTC)
+        except (ValueError, TypeError):
             updated = now
         age_days = max(0.0, (now - updated).total_seconds() / 86400.0)
         if not g.next_action:

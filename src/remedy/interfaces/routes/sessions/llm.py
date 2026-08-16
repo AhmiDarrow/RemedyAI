@@ -70,9 +70,11 @@ def register_llm_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         provider, model, base_url = normalize_llm_settings(
-            req.provider,
-            req.model or cfg.get("llm_model"),
-            cfg.get("llm_base_url") if str(req.provider).lower() == str(cfg.get("llm_provider") or "").lower() else None,
+            raw_provider,
+            raw_model,
+            cfg.get("llm_base_url")
+            if str(raw_provider).lower() == str(cfg.get("llm_provider") or "").lower()
+            else None,
         )
         # Do not write live runtime._session_id / _last_send_messages — a
         # picker click on another tab must not poison the in-flight turn.

@@ -15,6 +15,19 @@ logger = logging.getLogger(__name__)
 
 def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     """Register routes (closes over runtime/gateway/memory)."""
+    # -- app control (Remedy driving her own interface) --------------------
+    @app.get("/api/app/command")
+    async def app_command(take: bool = False):
+        """Client polls this fast; Remedy enqueues UI actions via app_control.
+
+        take=1 atomically removes the command so it dispatches exactly once.
+        """
+        from remedy.core.app_control import app_control_bus
+
+        bus = app_control_bus()
+        cmd = bus.take() if take else bus.peek()
+        return {"command": cmd}
+
     # -- updates ------------------------------------------------------------
     @app.get("/api/updates/check")
     async def check_updates(current: str | None = Query(default=None)):

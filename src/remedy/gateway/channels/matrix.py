@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from pathlib import Path
 
 from remedy.gateway.channels.allowlist import is_allowed, parse_ids
 from remedy.gateway.channels.base_http import HttpSessionMixin
@@ -13,6 +14,30 @@ from remedy.gateway.router import ChannelAdapter
 from remedy.models import ChannelKind
 
 logger = logging.getLogger(__name__)
+
+
+def _matrix_home(home: str | None) -> Path:
+    return Path(home).expanduser() if home else Path.home() / ".remedy"
+
+
+def _load_matrix_since(home: str | None) -> str:
+    """Persisted /sync ``next_batch`` cursor — prevents full-room replay on restart."""
+    path = _matrix_home(home) / "locks" / "matrix_since.txt"
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _save_matrix_since(home: str | None, since: str) -> None:
+    if not since:
+        return
+    path = _matrix_home(home) / "locks" / "matrix_since.txt"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(since + "\n", encoding="utf-8")
+    except OSError as e:
+        logger.debug("save matrix _since failed: %s", e)
 
 
 class MatrixChannel(HttpSessionMixin, ChannelAdapter):
@@ -26,8 +51,10 @@ class MatrixChannel(HttpSessionMixin, ChannelAdapter):
         room_id: str = "",
         allow_ids: list[str] | None = None,
         allow_all: bool = False,
+        home_dir: str | None = None,
     ) -> None:
         super().__init__(ChannelKind.MATRIX, gateway)
+        self._home_dir = home_dir
         self.access_token = (access_token or "").strip()
         self.homeserver = (homeserver or "").rstrip("/")
         self.user_id = str(user_id or "").strip()
@@ -49,6 +76,22 @@ class MatrixChannel(HttpSessionMixin, ChannelAdapter):
         if not (self.access_token and self.homeserver):
             logger.info("Matrix channel: stub mode (missing token or homeserver)")
             return
+        # Derive our own user_id when it's left unset, so the self-message
+        # guard below can skip our own echoes (otherwise the bot replies to
+        # itself forever in an allowlisted/allow_all room).
+        if not self.user_id:
+            try:
+                session = await self.ensure_http()
+                async with session.get(
+                    f"{self.homeserver}/_matrix/client/v3/account/whoami",
+                    headers=self._headers(),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        self.user_id = str(data.get("user_id") or "").strip()
+            except Exception:
+                logger.exception("Matrix whoami failed")
+        self._since = _load_matrix_since(self._home_dir)
         logger.info("Matrix channel active (room=%s)", self.room_id)
         self._sync_task = asyncio.create_task(self._sync_loop())
 
@@ -124,6 +167,7 @@ class MatrixChannel(HttpSessionMixin, ChannelAdapter):
                         continue
                     data = await resp.json()
                 self._since = data.get("next_batch") or self._since
+                _save_matrix_since(self._home_dir, self._since)
                 await self._handle_sync(data)
             except asyncio.CancelledError:
                 raise

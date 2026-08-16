@@ -20,7 +20,13 @@
   background: var(--bg-secondary);
   flex: none;
 }
-.grove-brand { font-weight: 600; letter-spacing: 0.3px; }
+.grove-brand {
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
 .grove-switch {
   margin-left: auto;
   font-size: 0.78rem;
@@ -355,3 +361,223 @@
     animation: none !important;
   }
 }
+
+/* ---- slide-able split: the owner sizes their own windows ---- */
+.grove-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+.grove-split .grove-scroll { flex: none; min-width: 0; padding-bottom: 16px; }
+.grove-divider {
+  flex: none;
+  width: 10px;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  touch-action: none;
+}
+.grove-divider .grip {
+  width: 3px;
+  height: 44px;
+  border-radius: 3px;
+  background: var(--border, rgba(127, 127, 127, 0.35));
+  transition: background 0.15s, height 0.15s;
+}
+.grove-divider:hover .grip,
+.grove-divider:focus-visible .grip,
+.grove-divider.active .grip {
+  background: var(--accent, #4a9);
+  height: 72px;
+}
+.grove-divider:focus-visible { outline: none; }
+.grove-divider.h {
+  width: auto;
+  height: 10px;
+  cursor: row-resize;
+}
+.grove-divider.h .grip { width: 44px; height: 3px; }
+.grove-divider.h:hover .grip,
+.grove-divider.h:focus-visible .grip,
+.grove-divider.h.active .grip { width: 72px; height: 3px; }
+.grove-split.dragging, .grove-stagewrap.split.dragging { user-select: none; }
+
+/* ---- Grove chat pane: full Remedy, Grove tone ---- */
+.grove-chatpane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border, rgba(127, 127, 127, 0.18));
+}
+.grove-chatpane.room { border-left: none; }
+.grove-stagewrap.split { display: flex; flex-direction: column; }
+.grove-chat {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.grove-chat-feed {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.grove-chat-feed > * { flex: 1; min-height: 0; }
+.grove-room-hint {
+  flex: none;
+  padding: 8px 18px 0;
+  font-size: 0.9rem;
+  color: var(--text-secondary, #888);
+}
+.grove-talkbar.chatbar { position: relative; margin: 8px 14px 12px; }
+.grove-attachbtn {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+  background: transparent;
+  cursor: pointer;
+  font-size: 1rem;
+}
+.grove-attachbtn:hover { border-color: var(--accent, #4a9); }
+.grove-attachrail {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 16px 0;
+  align-items: center;
+}
+.grove-attachchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+  background: var(--bg-secondary, rgba(127, 127, 127, 0.08));
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grove-attachchip.img { border-color: var(--accent, #4a9); }
+.grove-attachchip button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0 2px;
+  color: inherit;
+  opacity: 0.7;
+}
+.grove-attachchip button:hover { opacity: 1; }
+.grove-attachnote { font-size: 0.8rem; color: var(--text-secondary, #888); }
+.grove-attachnote.err { color: var(--danger, #d66); }
+.grove-chat.dragover::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+  border: 2px dashed var(--accent, #4a9); border-radius: 12px; }
+.grove-dropveil {
+  position: absolute;
+  inset: auto 16px 74px 16px;
+  text-align: center;
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--bg-secondary, rgba(30, 30, 30, 0.85));
+  color: var(--text-primary, #eee);
+  pointer-events: none;
+  font-size: 0.9rem;
+}
+.grove-mic.stop { font-size: 0.9rem; }
+
+/* Narrow windows: stack cards over chat, divider still drags (vertical feel kept simple) */
+@media (max-width: 860px) {
+  .grove-split { flex-direction: column; }
+  .grove-split .grove-scroll { width: 100% !important; max-height: 45%; }
+  .grove-divider { width: auto; height: 10px; cursor: row-resize; }
+  .grove-divider .grip { width: 44px; height: 3px; }
+  .grove-chatpane { border-left: none; border-top: 1px solid var(--border, rgba(127,127,127,0.18)); }
+}
+
+/* ---- card actions (remove / edit) + example plots ---- */
+.grove-plot { position: relative; }
+.grove-plot-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.grove-plot:hover .grove-plot-actions,
+.grove-plot:focus-within .grove-plot-actions { opacity: 1; }
+.grove-plot-act {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border, rgba(127,127,127,0.3));
+  background: var(--bg-secondary, rgba(20,20,20,0.75));
+  color: var(--text-secondary, #aaa);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.grove-plot-act:hover { color: var(--text-primary, #eee); border-color: var(--accent, #4a9); }
+.grove-plot-act.del:hover { color: var(--danger, #e66); border-color: var(--danger, #e66); }
+.grove-plot.example { opacity: 0.9; border-style: dashed; }
+.grove-plot.example .kind { color: var(--text-secondary, #999); }
+.grove-plot.example:hover { opacity: 1; border-color: var(--accent, #4a9); }
+
+/* ---- chat composer polish: multiline textarea + rounded rect ---- */
+.grove-talkbar.chatbar {
+  align-items: flex-end;
+  border-radius: 22px;
+  padding: 8px 10px 8px 14px;
+}
+.grove-talkbar.chatbar textarea {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  resize: none;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-family: inherit;
+  line-height: 1.4;
+  max-height: 140px;
+  padding: 7px 2px;
+  overflow-y: auto;
+}
+.grove-talkbar.chatbar textarea::placeholder { color: var(--text-muted); }
+.grove-talkbar.chatbar .grove-attachbtn,
+.grove-talkbar.chatbar .grove-micbtn,
+.grove-talkbar.chatbar .grove-mic { margin-bottom: 1px; }
+
+/* dismiss × on the "Last:" activity pill */
+.grove-pill-x {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.5;
+  font-size: 0.95rem;
+  line-height: 1;
+  margin-left: 6px;
+  padding: 0 2px;
+}
+.grove-pill-x:hover { opacity: 1; }

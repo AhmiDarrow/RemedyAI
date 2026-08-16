@@ -402,3 +402,24 @@ def test_session_todos_do_not_leak_from_runtime_cache(client):
     assert leaked.json()["todos"] == []
     mine = c.get(f"/api/sessions/{owner.json()['id']}/todos")
     assert any(t.get("content") == "secret checklist" for t in mine.json()["todos"])
+
+
+def test_grove_session_tagged_origin_and_no_project(client):
+    """Grove home/goal chats: origin_channel='grove', no project folder —
+    they are the eternal dialogue, not Studio workbench sessions."""
+    c, _ = client
+    r = c.post(
+        "/api/sessions",
+        json={"title": "🏡 Home", "project_path": "", "origin_channel": "grove"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("origin_channel") == "grove"
+    assert body.get("project_path") in (None, "", ".")
+
+
+def test_studio_session_has_no_grove_origin(client):
+    c, _ = client
+    r = c.post("/api/sessions", json={"title": "Work"})
+    assert r.status_code == 200
+    assert r.json().get("origin_channel") in (None, "")
