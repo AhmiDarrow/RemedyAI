@@ -62,6 +62,8 @@ import { useSessions } from './hooks/useSessions'
 import { useMessages } from './hooks/useMessages'
 import { useTheme } from './hooks/useTheme'
 import { loadUiMode, saveUiMode, type UiMode } from './utils/uiMode'
+import { loadSurface, saveSurface, type AppSurface } from './utils/surface'
+import { GroveApp } from './grove/GroveApp'
 import { browserStackSet } from './utils/browserStack'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useNotifications } from './hooks/useNotifications'
@@ -235,6 +237,12 @@ export default function App() {
   const [privacyMode, setPrivacyMode] = useState(false)
   const [toolProcessMode, setToolProcessMode] = useState<ToolProcessMode>('off')
   const [uiMode, setUiMode] = useState<UiMode>(() => loadUiMode())
+  // Grove (partner home, default) vs Studio (this full workbench)
+  const [surface, setSurface] = useState<AppSurface>(() => loadSurface())
+  const switchSurface = useCallback((s: AppSurface) => {
+    setSurface(s)
+    saveSurface(s)
+  }, [])
   /** Plan mode is per-session so switching chats does not stick Plan/Build. */
   const [planModeBySession, setPlanModeBySession] = useState<Record<string, boolean>>({})
   const planMode = Boolean(activeId && planModeBySession[activeId])
@@ -1463,8 +1471,32 @@ export default function App() {
         commands={paletteCommands}
       />
 
+      {/* Grove: partner surface (default). Studio stays mounted underneath
+          (display:none) so terminals / streams / the computer-host loop
+          survive the switch. */}
+      {surface === 'grove' && (
+        <GroveApp
+          sessions={sessions}
+          activeId={activeId}
+          setActiveId={setActiveId}
+          createSession={create}
+          messages={messages}
+          partialText={partialText}
+          streaming={streaming}
+          messagesLoading={messagesLoading}
+          handleSend={handleSend}
+          stop={stop}
+          serverReady={serverState === 'ready'}
+          userName={userName}
+          partnerName={partnerName}
+          onSwitchToStudio={() => switchSurface('studio')}
+        />
+      )}
+
       {/* True three-column shell: Left | Chat | Right (rails on outer edges) */}
-      <div className="flex flex-1 min-h-0 h-full items-stretch">
+      <div
+        className="flex flex-1 min-h-0 h-full items-stretch"
+        style={surface === 'grove' ? { display: 'none' } : undefined}>
         <WorkspaceSide
           side="left"
           active={wsLayout.left}
@@ -1769,6 +1801,7 @@ export default function App() {
       />
       </Suspense>
 
+      {surface !== 'grove' && (
       <StatusBar
           sessionId={activeId}
           streaming={streaming}
@@ -1862,7 +1895,9 @@ export default function App() {
           }}
           timeTravelOpen={timeTravelOpen}
           onToggleTimeTravel={() => setTimeTravelOpen((v) => !v)}
+          onOpenGrove={() => switchSurface('grove')}
         />
+      )}
 
         <Suspense fallback={null}>
           <UsageDashboard
