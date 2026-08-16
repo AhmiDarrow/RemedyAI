@@ -48,6 +48,12 @@ server = [
 desktop-build = [
     "pyinstaller>=6.21.0",
 ]
+# Local speech: Kokoro-82M TTS (Apache-2.0 model, MIT runtime) +
+# faster-whisper STT (MIT). Optional — base install stays light.
+voice = [
+    "kokoro-onnx>=0.3.0,<1",
+    "faster-whisper>=1.0.0,<2",
+]
 
 [project.urls]
 Homepage = "https://github.com/AhmiDarrow/RemedyAI"
