@@ -100,23 +100,32 @@ _CLEAR_GOALS_RE = re.compile(
     r")\s*[.!]?\s*$"
 )
 
-# Multi-step UI work after open — must NOT short-circuit after navigate alone
+# Multi-step UI work after open — must NOT short-circuit after navigate alone.
+# Verb-PHRASES only: bare nouns like "book"/"order"/"cart"/"post" wrecked the
+# wiki/search open-only kicks ("show me the jungle book wiki", "search google
+# for best cart") — see tests. Commerce verbs need an object/context to count.
 _INTERACTION_RE = re.compile(
-    r"(?is)\b("
-    r"sign\s*in|log\s*in|login|log\s*me\s*in|sign\s*me\s*in|"
-    r"password|username|user\s*name|email\s*address|"
-    r"type|enter|fill|input|click|press|submit|select|"
-    r"once\s+there|then\s+|after\s+that|and\s+then|"
-    r"log\s+me|sign\s+me|authenticate|credentials|"
-    # Life-task / commerce verbs — "goto amazon and order X" is a full task,
-    # never an open-only browse (docs/LIFE_TASK_PARTNER.md).
-    r"buy|order|purchase|checkout|check\s+out|"
-    r"add\s+to\s+(?:the\s+)?(?:cart|basket|bag)|cart|basket|"
-    r"book|reserve|schedule|apply|pay|renew|register|"
-    r"subscribe|enroll|sign\s+up|donate|"
-    r"download|upload|send|reply|post|comment|"
-    r"cancel\s+(?:my|the|an?)\b|return\s+(?:my|the|an?)\b|track\s+(?:my|the|an?)\b"
-    r")\b"
+    r"(?is)("
+    r"\bsign\s*in\b|\blog\s*in\b|\blogin\b|\blog\s*me\s*in\b|\bsign\s*me\s*in\b|"
+    r"\bpassword\b|\busername\b|\buser\s*name\b|\bemail\s*address\b|"
+    r"\btype\b|\bfill\s+(?:in|out)\b|\bclick\b|\bpress\b|\bsubmit\b|"
+    r"\bonce\s+there\b|\bafter\s+that\b|\band\s+then\b|"
+    r"\blog\s+me\b|\bsign\s+me\b|\bauthenticate\b|\bcredentials\b|"
+    # Life-task / commerce verb-phrases — "goto amazon and order X" is a full
+    # task, never an open-only browse (docs/LIFE_TASK_PARTNER.md). "order" is
+    # gated to exclude the nouns that wrecked wiki kicks: "order of (the
+    # phoenix)" and "in order to".
+    r"\bbuy\b|"
+    r"(?<!in\s)\border\s+(?!of\b)(?!to\b)\w|"
+    r"\bpurchase\b|\bcheck\s*out\b|\badd\s+to\s+(?:the\s+|my\s+)?(?:cart|basket|bag)\b|"
+    r"\bplace\s+(?:an?\s+)?order\b|\bplace\s+the\s+order\b|"
+    r"\bbook\s+(?:me\s+|a\s+|an\s+|the\s+)|\breserve\s+(?:me\s+|a\s+|an\s+|the\s+)|"
+    r"\bschedule\s+(?:me\s+|a\s+|an\s+|the\s+|my\s+)|"
+    r"\bapply\s+for\b|\bpay\s+(?:for|my|the)\b|\brenew\s+(?:my|the)\b|"
+    r"\bsign\s+up\b|\bsubscribe\s+to\b|\benroll\b|\bdonate\b|"
+    r"\bcancel\s+(?:my|the|an?)\b|\breturn\s+(?:my|the|an?)\b|\btrack\s+(?:my|the|an?)\b|"
+    r"\breply\s+to\b|\bpost\s+(?:a|an|my|the)\b"
+    r")"
 )
 
 

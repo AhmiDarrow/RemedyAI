@@ -1048,13 +1048,19 @@ export default function App() {
   // Wire global shortcuts from hotkeys.ts (single source of truth for labels + keys).
   const globalShortcuts: ShortcutDef[] = useMemo(() => {
     const togglePlan = () => setPlanMode((p) => !p)
+    // Studio-only shortcuts are no-ops in Grove — they mutate the hidden
+    // Studio layout / plan mode with no visible effect and would confuse a
+    // partner-surface user (reviewer: Grove polish #1).
+    const studioOnly = (fn: () => void) => () => {
+      if (surface !== 'grove') fn()
+    }
     const byAction: Record<string, () => void> = {
-      'New chat session': () => {
+      'New chat session': studioOnly(() => {
         void handleNewSession()
-      },
-      'Open command palette': () => setPaletteOpen((o) => !o),
-      'Toggle plan mode': togglePlan,
-      'Open settings': () => openSettingsInRail(),
+      }),
+      'Open command palette': studioOnly(() => setPaletteOpen((o) => !o)),
+      'Toggle plan mode': studioOnly(togglePlan),
+      'Open settings': studioOnly(() => openSettingsInRail()),
       "Open Help wiki (owner's manual)": () => openHelp(),
       'Larger text': () => bumpFontScale(1),
       'Smaller text': () => bumpFontScale(-1),
@@ -1092,7 +1098,7 @@ export default function App() {
       })
     }
     return out
-  }, [handleNewSession, openHelp, helpOpen, openSettingsInRail, setPlanMode, bumpFontScale, setFontScale])
+  }, [handleNewSession, openHelp, helpOpen, openSettingsInRail, setPlanMode, bumpFontScale, setFontScale, surface])
 
   useKeyboardShortcuts(globalShortcuts)
 
@@ -1522,8 +1528,12 @@ export default function App() {
               : undefined
           }
         >
-          {/* Unmount when this slide is in popout — avoids dual Browser bounds / dual PTYs */}
-          {wsLayout.leftRail === 'open' && popout?.id !== wsLayout.left
+          {/* Unmount when this slide is in popout OR Grove is the surface —
+              avoids a second BrowserSlide/PTY fighting Grove's stage over the
+              native embed's bounds (hidden Studio rects read as zero). */}
+          {surface !== 'grove'
+          && wsLayout.leftRail === 'open'
+          && popout?.id !== wsLayout.left
             ? renderSlide(wsLayout.left)
             : null}
         </WorkspaceSide>
@@ -1758,7 +1768,9 @@ export default function App() {
               : undefined
           }
         >
-          {wsLayout.rightRail === 'open' && popout?.id !== wsLayout.right
+          {surface !== 'grove'
+          && wsLayout.rightRail === 'open'
+          && popout?.id !== wsLayout.right
             ? renderSlide(wsLayout.right)
             : null}
         </WorkspaceSide>

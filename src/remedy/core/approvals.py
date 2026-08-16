@@ -124,6 +124,10 @@ class ApprovalQueue:
         # Session-scoped approvals
         self._session_fps: dict[str, set[str]] = {}
         self._session_order: list[str] = []
+        # One-shot grants for sensitive (payment/purchase/vault) actions:
+        # consumed on the very next matching call so an owner "yes" can never
+        # be replayed on a later/different action (e.g. cross-site).
+        self._one_shot: dict[str, set[str]] = {}
         # ask | auto | full — status-bar cycle
         self._mode: str = "ask"
 
@@ -406,15 +410,34 @@ class ApprovalQueue:
                 return item
             item.status = "approved" if approve else "denied"
             if approve:
-                if scope == "always" and not item.sensitive:
+                sid = item.session_id or "default"
+                if item.sensitive:
+                    # Payment/purchase/vault: a single-use grant, NEVER a
+                    # persisted fingerprint. Consumed by the next matching
+                    # call so it cannot be replayed on a later or cross-site
+                    # action (docs/LIFE_TASK_PARTNER.md §2.2).
+                    self._one_shot.setdefault(sid, set()).add(item.fingerprint)
+                elif scope == "always":
                     self._approved_fps.add(item.fingerprint)
                     self._trim_approved_fps()
                 else:
-                    # Sensitive (payment/purchase) go-aheads are one-time-ish:
-                    # session scope at most, never process-wide "always".
-                    sid = item.session_id or "default"
                     self._add_session_fp(sid, item.fingerprint)
             return item
+
+    def take_one_shot(
+        self, tool_name: str, command: str, session_id: str | None = None
+    ) -> bool:
+        """Consume a one-shot sensitive grant if present. Single use."""
+        fp = self.fingerprint(tool_name, command)
+        sid = session_id or "default"
+        with self._lock:
+            grants = self._one_shot.get(sid)
+            if grants and fp in grants:
+                grants.discard(fp)
+                if not grants:
+                    self._one_shot.pop(sid, None)
+                return True
+        return False
 
     @staticmethod
     def plain_summary(item: PendingApproval) -> str:

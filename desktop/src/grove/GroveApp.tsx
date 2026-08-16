@@ -167,22 +167,32 @@ export function GroveApp({
     return () => clearInterval(t)
   }, [refreshBoard])
 
-  /** Session bound to a goal's room — reuse if it still exists, else create. */
+  /** Session bound to a goal's room — reuse if it still exists, else create.
+   *
+   * In-flight promises are de-duped per goal so a double-click (or mic +
+   * re-click) can't create two sessions and orphan the first. */
+  const goalPendingRef = useRef<Map<string, Promise<string | null>>>(new Map())
   const ensureGoalSession = useCallback(
-    async (goal: LifeGoal): Promise<string | null> => {
+    (goal: LifeGoal): Promise<string | null> => {
       const map = goalSessionsRef.current
       const existing = map[goal.id]
       if (existing && sessions.some((s) => s.id === existing)) {
         setActiveId(existing)
-        return existing
+        return Promise.resolve(existing)
       }
-      const s = await createSession(`🌿 ${goal.title}`, undefined, { focus: true })
-      if (s?.id) {
-        map[goal.id] = s.id
-        saveGoalSessions(map)
-        return s.id
-      }
-      return null
+      const inflight = goalPendingRef.current.get(goal.id)
+      if (inflight) return inflight
+      const p = (async () => {
+        const s = await createSession(`🌿 ${goal.title}`, undefined, { focus: true })
+        if (s?.id) {
+          map[goal.id] = s.id
+          saveGoalSessions(map)
+          return s.id
+        }
+        return null
+      })().finally(() => goalPendingRef.current.delete(goal.id))
+      goalPendingRef.current.set(goal.id, p)
+      return p
     },
     [sessions, setActiveId, createSession],
   )
@@ -202,32 +212,38 @@ export function GroveApp({
       if (!t || busy) return
       setBusy(true)
       try {
-        if (view.kind === 'home') {
-          // Home talkbar: plant/tend via a fresh (or current) conversation.
-          if (!activeId) {
-            await createSession(undefined, undefined, { focus: true })
-          }
+        if (view.kind === 'goal') {
+          // Make sure this goal's session exists + is active before sending,
+          // so a fast type-and-Enter doesn't post into the previous room.
+          await ensureGoalSession(view.goal)
         }
+        // handleSend self-provisions a session when none is active (home
+        // talkbar with no chat yet) and rebinds on activeId change — so we
+        // never pre-create here (that made a stray second session).
         await handleSend(t)
         setDraft('')
       } finally {
         setBusy(false)
       }
     },
-    [busy, view, activeId, createSession, handleSend],
+    [busy, view, ensureGoalSession, handleSend],
   )
   sendFromGroveRef.current = sendFromGrove
 
+  const [plantError, setPlantError] = useState('')
   const plantGoal = useCallback(
-    async (title: string) => {
+    async (title: string): Promise<boolean> => {
       const t = title.trim()
-      if (!t) return
+      if (!t) return false
+      setPlantError('')
       try {
         const g = await createLifeGoal(t)
         refreshBoard()
         if (g?.id) openGoal(g)
+        return true
       } catch {
-        /* surfaced by board staying unchanged */
+        setPlantError("I couldn't plant that goal just now — try again in a moment.")
+        return false
       }
     },
     [refreshBoard, openGoal],
@@ -239,6 +255,13 @@ export function GroveApp({
   const exchange = useMemo(() => latestExchange(messages), [messages])
   const moments = useMemo(() => messagesToMoments(messages), [messages])
 
+  // Storyline keeps the newest moment (and "Happening now") in view.
+  const storyRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const el = storyRef.current
+    if (el && tab === 'storyline') el.scrollTop = el.scrollHeight
+  }, [moments.length, partialText, streaming, tab])
+
   // ---------------- home ----------------
   if (view.kind === 'home') {
     return (
@@ -249,6 +272,8 @@ export function GroveApp({
             type="button"
             className={`grove-voicetoggle${speakReplies ? ' on' : ''}${voice.speaking ? ' speaking' : ''}`}
             onClick={toggleSpeakReplies}
+            aria-pressed={speakReplies}
+            aria-label={speakReplies ? 'Speaking replies aloud' : 'Replies are silent'}
             title={
               speakReplies
                 ? 'Speaking replies aloud — click to go quiet'
@@ -337,6 +362,11 @@ export function GroveApp({
           </div>
         </div>
 
+        {plantError && (
+          <div className="grove-planterror" role="alert">
+            {plantError}
+          </div>
+        )}
         <form
           className="grove-talkbar"
           onSubmit={(e) => {
@@ -344,8 +374,10 @@ export function GroveApp({
             const t = draft.trim()
             if (!t) return
             if (/^i want to /i.test(t)) {
-              void plantGoal(t.replace(/^i want to /i, ''))
-              setDraft('')
+              // Only clear the draft once the goal is actually planted.
+              void plantGoal(t.replace(/^i want to /i, '')).then((ok) => {
+                if (ok) setDraft('')
+              })
             } else {
               void sendFromGrove(t)
             }
@@ -355,6 +387,7 @@ export function GroveApp({
             ref={inputRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            aria-label="Talk to Remedy — a goal, an errand, or a question"
             placeholder={
               !serverReady
                 ? 'Connecting…'
@@ -372,6 +405,10 @@ export function GroveApp({
               className={`grove-micbtn${voice.recording ? ' rec' : ''}`}
               onClick={() => void handleMic()}
               disabled={!serverReady}
+              aria-pressed={voice.recording}
+              aria-label={
+                voice.recording ? 'Stop and send what you said' : 'Speak instead of typing'
+              }
               title={
                 voice.recording
                   ? 'Stop and send what you said'
@@ -381,10 +418,15 @@ export function GroveApp({
               🎙
             </button>
           )}
-          <button type="submit" className="grove-mic" title="Send">
+          <button type="submit" className="grove-mic" title="Send" aria-label="Send">
             ↑
           </button>
         </form>
+        {voice.recording && (
+          <div className="grove-sr-live" role="status" aria-live="polite">
+            Listening…
+          </div>
+        )}
       </div>
     )
   }
@@ -422,6 +464,8 @@ export function GroveApp({
           type="button"
           className={`grove-voicetoggle${speakReplies ? ' on' : ''}${voice.speaking ? ' speaking' : ''}`}
           onClick={toggleSpeakReplies}
+          aria-pressed={speakReplies}
+          aria-label={speakReplies ? 'Speaking replies aloud' : 'Replies are silent'}
           title={
             speakReplies
               ? 'Speaking replies aloud — click to go quiet'
@@ -480,6 +524,7 @@ export function GroveApp({
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
+              aria-label={`Talk inside ${goal.title}`}
               placeholder={
                 voice.recording
                   ? 'Listening — click the mic again when you’re done…'
@@ -493,6 +538,10 @@ export function GroveApp({
                 className={`grove-micbtn${voice.recording ? ' rec' : ''}`}
                 onClick={() => void handleMic()}
                 disabled={!serverReady}
+                aria-pressed={voice.recording}
+                aria-label={
+                  voice.recording ? 'Stop and send what you said' : 'Speak instead of typing'
+                }
                 title={
                   voice.recording
                     ? 'Stop and send what you said'
@@ -502,13 +551,18 @@ export function GroveApp({
                 🎙
               </button>
             )}
-            <button type="submit" className="grove-mic" title="Send">
+            <button type="submit" className="grove-mic" title="Send" aria-label="Send">
               ↑
             </button>
           </form>
+          {voice.recording && (
+            <div className="grove-sr-live" role="status" aria-live="polite">
+              Listening…
+            </div>
+          )}
         </div>
       ) : (
-        <div className="grove-story" data-testid="grove-storyline">
+        <div className="grove-story" data-testid="grove-storyline" ref={storyRef}>
           {moments.length === 0 && !messagesLoading && (
             <div className="grove-story-empty">
               The story starts when you do — everything we say and everything I

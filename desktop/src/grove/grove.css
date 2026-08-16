@@ -323,3 +323,35 @@
   color: #fff;
   animation: grove-blink 1.1s infinite;
 }
+
+/* ---------- error + a11y live region + reduced motion ---------- */
+.grove-planterror {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 74px;
+  max-width: min(640px, 92%);
+  background: var(--bg-secondary);
+  border: 1px solid #c0574a;
+  color: var(--text-primary);
+  border-radius: 12px;
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  z-index: 9;
+}
+.grove-sr-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .grove-live-dot,
+  .grove-pill.needs .k,
+  .grove-voicetoggle.speaking,
+  .grove-micbtn.rec {
+    animation: none !important;
+  }
+}

@@ -315,27 +315,69 @@ def test_ordinary_computer_clicks_not_checkpointed_in_auto(monkeypatch):
     )
 
 
-def test_sensitive_approval_never_persists_as_always(monkeypatch):
-    """'Always' on a payment step downgrades to session scope."""
+def test_sensitive_approval_is_one_shot_not_persisted(monkeypatch):
+    """A payment go-ahead is single-use — never a persisted session/always
+    fingerprint (prevents cross-site / later replay; reviewer P0)."""
     _cfg(monkeypatch)
     q = ApprovalQueue()
     q.set_mode("ask")
-    reason = q.needs_ask(
-        "click text='Place order' target=auto", tool_name="computer_click"
-    )
+    cmd = "click text='Place order' target=auto"
+    reason = q.needs_ask(cmd, tool_name="computer_click")
     assert reason
     item = q.create(
-        tool_name="computer_click",
-        command="click text='Place order' target=auto",
-        reason=reason,
-        session_id="s1",
+        tool_name="computer_click", command=cmd, reason=reason, session_id="s1"
     )
     assert item.sensitive is True
-    q.resolve(item.id, approve=True, scope="always")
+    q.resolve(item.id, approve=True, scope="always")  # even "always"
+    # No persisted approval anywhere
     assert item.fingerprint not in q._approved_fps
-    assert item.fingerprint in q._session_fps.get("s1", set())
-    # Same exact action re-runs this session without a new prompt
-    assert q.is_approved("computer_click", item.command, session_id="s1") is True
+    assert item.fingerprint not in q._session_fps.get("s1", set())
+    # is_approved must NOT cover it
+    assert q.is_approved("computer_click", cmd, session_id="s1") is False
+    # One-shot grant is consumed exactly once
+    assert q.take_one_shot("computer_click", cmd, session_id="s1") is True
+    assert q.take_one_shot("computer_click", cmd, session_id="s1") is False
+
+
+def test_sensitive_grant_does_not_replay_cross_site(monkeypatch):
+    """One approval cannot silently authorize the same action elsewhere.
+
+    computer_click summaries carry no URL, so before the fix an approved
+    'Place order' replayed on any site. One-shot consumption blocks the
+    second use. Uses the shared APPROVALS singleton (the gate imports it),
+    so restore its state afterwards to avoid polluting other tests."""
+    from remedy.core.agent_computer_tools import _computer_approval_gate
+
+    _cfg(monkeypatch)
+    from remedy.core import approvals as ap
+
+    q = ap.APPROVALS
+    prev_mode = q.mode
+    prev_one_shot = {k: set(v) for k, v in q._one_shot.items()}
+    try:
+        q.set_mode("full")
+        q._one_shot.clear()
+
+        summary = "click text='Place order' ref='' x=0 y=0 button=left clicks=1 target=auto"
+
+        class RT:  # minimal runtime; turn_session_id falls back gracefully
+            pass
+
+        blocked1 = _computer_approval_gate(RT(), "computer_click", summary)
+        assert blocked1 and "APPROVAL_REQUIRED" in blocked1
+        # Owner approves the pending item
+        import re as _re
+
+        aid = _re.search(r"id=(\w+)", blocked1).group(1)
+        q.resolve(aid, approve=True, scope="session")
+        # First retry proceeds (grant consumed)
+        assert _computer_approval_gate(RT(), "computer_click", summary) is None
+        # A later identical action (e.g. injected click on another site) re-prompts
+        assert _computer_approval_gate(RT(), "computer_click", summary) is not None
+    finally:
+        q.set_mode(prev_mode)
+        q._one_shot.clear()
+        q._one_shot.update(prev_one_shot)
 
 
 def test_mode_flip_leaves_sensitive_pending(monkeypatch):

@@ -155,34 +155,61 @@ def test_reveal_is_audited_without_value(tmp_path: Path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_executor_expands_vault_on_browser_type(tmp_path: Path, monkeypatch):
+def test_executor_binds_to_live_page_not_last_navigate(tmp_path: Path, monkeypatch):
+    """Domain binding must use the LIVE probed URL, not the last explicit
+    navigate — a click/redirect could have changed the origin (reviewer P0)."""
     from remedy.core.computer import host_bridge as hb
     from remedy.core.computer.executor import ComputerExecutor
 
     monkeypatch.setattr(hb, "_bridge", None)
     _add_card(tmp_path)
     ex = ComputerExecutor(home_dir=tmp_path)
-    ex.bridge.mark_host_alive(poller=True)
+
+    # last_navigate says amazon, but the live page is actually the attacker's.
     ex.bridge.mark_navigated("https://www.amazon.com/checkout")
-
-    expanded, err = ex._expand_vault_text(
-        "{{vault:card-visa}}",
-        destination_url=ex.bridge.last_navigate_url(),
+    monkeypatch.setattr(
+        ex, "_page_probe", lambda **_k: {"ok": True, "url": "https://evil.example.com/pay"}
     )
+    expanded, err = ex._expand_vault_text("{{vault:card-visa}}", target="browser")
+    assert err is not None and err["ok"] is False
+    assert CARD not in json.dumps(err)
+    assert expanded == "{{vault:card-visa}}"
+
+    # Live page really is the bound site → fills.
+    monkeypatch.setattr(
+        ex, "_page_probe", lambda **_k: {"ok": True, "url": "https://www.amazon.com/pay"}
+    )
+    expanded2, err2 = ex._expand_vault_text("{{vault:card-visa}}", target="browser")
+    assert err2 is None
+    assert expanded2 == CARD
+
+
+def test_executor_fails_closed_when_page_unknown(tmp_path: Path, monkeypatch):
+    """Bound item + unconfirmable page → refuse (fail closed)."""
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.executor import ComputerExecutor
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    _add_card(tmp_path)
+    ex = ComputerExecutor(home_dir=tmp_path)
+    monkeypatch.setattr(ex, "_page_probe", lambda **_k: {"ok": False})
+    _expanded, err = ex._expand_vault_text("{{vault:card-visa}}", target="browser")
+    assert err is not None and err["ok"] is False
+
+
+def test_executor_unbound_item_fills_without_page(tmp_path: Path, monkeypatch):
+    """Unbound secrets fill anywhere, even when the page can't be probed."""
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.vault import vault_add
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    vault_add(value="s3cret", handle="wifi", kind="note", home=tmp_path)
+    ex = ComputerExecutor(home_dir=tmp_path)
+    monkeypatch.setattr(ex, "_page_probe", lambda **_k: {"ok": False})
+    expanded, err = ex._expand_vault_text("{{vault:wifi}}", target="browser")
     assert err is None
-    assert expanded == CARD
-
-    # Wrong site: plain-language refusal, nothing typed, no secret in message
-    ex.bridge.mark_navigated("https://evil.example.com")
-    expanded2, err2 = ex._expand_vault_text(
-        "{{vault:card-visa}}",
-        destination_url=ex.bridge.last_navigate_url(),
-    )
-    assert err2 is not None
-    assert err2["ok"] is False
-    assert "Nothing was typed" in err2["message"]
-    assert CARD not in json.dumps(err2)
-    assert expanded2 == "{{vault:card-visa}}"  # untouched
+    assert expanded == "s3cret"
 
 
 def test_executor_desktop_type_refuses_bound_items(tmp_path: Path, monkeypatch):
@@ -194,7 +221,7 @@ def test_executor_desktop_type_refuses_bound_items(tmp_path: Path, monkeypatch):
     _add_card(tmp_path)
     ex = ComputerExecutor(home_dir=tmp_path)
     _expanded, err = ex._expand_vault_text(
-        "{{vault:card-visa}}", destination_url="", action="type"
+        "{{vault:card-visa}}", destination_url="", action="type", target="desktop"
     )
     assert err is not None and err["ok"] is False
 
