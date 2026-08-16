@@ -292,3 +292,34 @@
 }
 .grove-mo.now { border-left-color: var(--accent); }
 .grove-mo.now .who { color: var(--accent); }
+
+/* ---------- voice ---------- */
+.grove-voicetoggle {
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.grove-voicetoggle.on { color: var(--text-primary); border-color: var(--accent); }
+.grove-voicetoggle.speaking { animation: grove-blink 1.2s infinite; }
+.grove-micbtn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 16px;
+  cursor: pointer;
+  flex: none;
+}
+.grove-micbtn:hover { border-color: var(--accent); }
+.grove-micbtn.rec {
+  background: #a33c2f;
+  border-color: #a33c2f;
+  color: #fff;
+  animation: grove-blink 1.1s infinite;
+}
