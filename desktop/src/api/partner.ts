@@ -5,6 +5,12 @@ export interface PendingApproval {
   tool_name: string
   command: string
   reason: string
+  /** Plain-language headline the owner can act on ("Remedy wants to…"). */
+  summary?: string
+  /** Payment / credential / vault owner checkpoint — asks in every mode. */
+  sensitive?: boolean
+  soft_risk?: string | null
+  approval_mode_hint?: string
   session_id?: string | null
   status: string
   created_at?: number

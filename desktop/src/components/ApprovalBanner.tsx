@@ -76,22 +76,40 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
             className="font-semibold mb-1.5 flex items-center gap-1.5 text-[0.72rem] uppercase tracking-wide"
             style={{ color: 'var(--warning)' }}
           >
-            <span aria-hidden>⚠</span>
-            Approval required
+            <span aria-hidden>{item.sensitive ? '💳' : '⚠'}</span>
+            {item.sensitive ? 'Payment step — needs you' : 'Approval required'}
           </div>
-          <div className="mb-1.5 text-xs" style={{ color: 'var(--text-secondary)' }}>
-            {item.reason}
+          {/* Plain-language headline first (Grove premise); raw reason/command
+              demoted to a details line. */}
+          <div className="mb-1.5 text-sm" style={{ color: 'var(--text-primary)' }}>
+            {item.summary || item.reason}
           </div>
-          <code
-            className="block mb-2.5 px-2.5 py-1.5 rounded-lg break-all text-[0.7rem] font-mono"
-            style={{
-              background: 'color-mix(in srgb, var(--bg-tertiary) 85%, transparent)',
-              color: 'var(--text-primary)',
-              border: '1px solid color-mix(in srgb, var(--border) 85%, transparent)',
-            }}
-          >
-            {item.command}
-          </code>
+          {item.sensitive && (
+            <div className="mb-1.5 text-[0.72rem]" style={{ color: 'var(--warning)' }}>
+              Asked every time — no mode skips a payment or stored-secret step.
+            </div>
+          )}
+          <details className="mb-2.5">
+            <summary
+              className="text-[0.7rem] cursor-pointer select-none"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              Details
+            </summary>
+            <div className="mt-1 text-[0.7rem]" style={{ color: 'var(--text-secondary)' }}>
+              {item.reason}
+            </div>
+            <code
+              className="block mt-1 px-2.5 py-1.5 rounded-lg break-all text-[0.7rem] font-mono"
+              style={{
+                background: 'color-mix(in srgb, var(--bg-tertiary) 85%, transparent)',
+                color: 'var(--text-primary)',
+                border: '1px solid color-mix(in srgb, var(--border) 85%, transparent)',
+              }}
+            >
+              {item.command}
+            </code>
+          </details>
           <div className="flex gap-2 items-center flex-wrap">
             <button
               type="button"
@@ -99,7 +117,11 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
               onClick={() => void act(item, true)}
               className="ui-btn ui-btn-primary"
             >
-              {busyId === item.id ? 'Working…' : 'Approve once'}
+              {busyId === item.id
+                ? 'Working…'
+                : item.sensitive
+                  ? 'Yes, go ahead'
+                  : 'Approve once'}
             </button>
             <button
               type="button"
@@ -107,7 +129,7 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
               onClick={() => void act(item, false)}
               className="ui-btn ui-btn-secondary"
             >
-              Deny
+              {item.sensitive ? 'Not now' : 'Deny'}
             </button>
           </div>
         </div>

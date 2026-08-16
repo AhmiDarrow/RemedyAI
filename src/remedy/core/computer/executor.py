@@ -576,10 +576,14 @@ class ComputerExecutor:
             )
         if act is ComputerAction.TYPE:
             text = str(kwargs.get("text") or "")
+            # Report the pre-expansion length so a vault secret's true length
+            # never leaks to the model via char counts.
+            reported_len = len(text)
+            had_vault = "{{" in text
             # Desktop destination is unverifiable → domain-bound vault items
             # refuse here by design (owner can store an unbound item if wanted).
             text, vault_err = self._expand_vault_text(
-                text, destination_url="", action="type"
+                text, destination_url="", action="type", target="desktop"
             )
             if vault_err is not None:
                 return vault_err
@@ -620,12 +624,13 @@ class ComputerExecutor:
                         "aborted": True,
                     },
                 )
+            length = "a stored secret" if had_vault else f"{reported_len} chars"
             return public_result(
                 ok=True,
                 target="desktop",
                 action="type",
-                message=f"Typed {len(text)} chars",
-                extra={"length": len(text)},
+                message=f"Typed {length}",
+                extra={"length": reported_len if not had_vault else None},
             )
         if act is ComputerAction.KEY:
             key = str(kwargs.get("key") or "")
@@ -773,10 +778,11 @@ class ComputerExecutor:
         # Vault tokens in typed text expand machine-side, bound to the rail's
         # current site — the model and job log only ever saw the handle.
         if act is ComputerAction.TYPE and payload.get("text"):
+            # Binding domain is the LIVE page (probed inside), not last navigate.
             expanded, vault_err = self._expand_vault_text(
                 str(payload.get("text") or ""),
-                destination_url=self.bridge.last_navigate_url(),
                 action="type",
+                target="browser",
             )
             if vault_err is not None:
                 return vault_err
@@ -1394,9 +1400,10 @@ class ComputerExecutor:
                 )
             time.sleep(0.2)
         if type_text:
+            typed_reported = "a stored secret" if "{{" in type_text else f"{len(type_text)} chars"
             # _run_desktop TYPE expands vault tokens itself (unbound items only)
             ty = self._run_desktop(ComputerAction.TYPE, text=type_text, hint=hint)
-            log.append(f"type:{ty.get('ok')} chars={len(type_text)}")
+            log.append(f"type:{ty.get('ok')} {typed_reported}")
             if not ty.get("ok"):
                 return public_result(
                     ok=False,
@@ -1479,10 +1486,13 @@ class ComputerExecutor:
             time.sleep(0.25)
 
         if type_text:
+            typed_reported = "a stored secret" if "{{" in type_text else f"{len(type_text)} chars"
+            # Bind to the live page (post-click/redirect), probed inside — a
+            # click earlier in this same act may have changed the origin.
             type_text, vault_err = self._expand_vault_text(
                 type_text,
-                destination_url=self.bridge.last_navigate_url() or url,
                 action="act",
+                target="browser",
             )
             if vault_err is not None:
                 vault_err["steps"] = log
@@ -1510,7 +1520,7 @@ class ComputerExecutor:
                 grace_s=0.15,
             )
             ok_t = fin.status == "done"
-            log.append(f"type:{ok_t} chars={len(type_text)}")
+            log.append(f"type:{ok_t} {typed_reported}")
             if not ok_t:
                 return public_result(
                     ok=False,
@@ -1583,8 +1593,9 @@ class ComputerExecutor:
         self,
         text: str,
         *,
-        destination_url: str,
+        destination_url: str = "",
         action: str = "type",
+        target: str = "browser",
     ) -> tuple[str, dict[str, Any] | None]:
         """Machine-side ``{{vault:handle}}`` → secret substitution.
 
@@ -1593,6 +1604,12 @@ class ComputerExecutor:
         for the wrong destination (docs/LIFE_TASK_PARTNER.md §2.3: secrets only
         type into verified fields). Returns ``(expanded, error_result|None)``;
         error results are plain-language and secret-free.
+
+        Security: for the browser rail the binding domain is the **live** page
+        URL (fresh ``_page_probe``), never the last *explicit navigate* — a
+        click/redirect/SSO hop that changed the page must not let a bound
+        secret type into an unexpected origin. Fail closed: if the probe
+        cannot confirm the current URL, refuse.
         """
         if not text or "{{" not in text:
             return text, None
@@ -1601,15 +1618,39 @@ class ComputerExecutor:
 
             if not vault.contains_vault_token(text):
                 return text, None
+
+            bind_url = destination_url
+            if target == "browser":
+                probe = self._page_probe(max_wait_s=2.0)
+                if probe.get("ok") and probe.get("url"):
+                    bind_url = str(probe.get("url"))
+                else:
+                    # Only enforce fail-closed when a domain-bound item is at
+                    # stake; unbound items are fine to fill anywhere.
+                    handles = vault.token_handles(text)
+                    items = {i["handle"]: i for i in vault.vault_list(self.home_dir)}
+                    if any(items.get(h, {}).get("domains") for h in handles):
+                        return text, public_result(
+                            ok=False,
+                            target=target,
+                            action=action,
+                            message=(
+                                "Vault refused: I couldn't confirm which page "
+                                "is open, and this secret is locked to specific "
+                                "sites. Open the site in the rail and retry. "
+                                "Nothing was typed."
+                            ),
+                            extra={"vault_refused": True},
+                        )
             expanded, _handles = vault.expand_text(
-                text, destination_url=destination_url, home=self.home_dir
+                text, destination_url=bind_url, home=self.home_dir
             )
             return expanded, None
         except Exception as exc:
             # VaultError/VaultDomainError messages are safe (no secret material).
             return text, public_result(
                 ok=False,
-                target="browser" if destination_url else "desktop",
+                target=target,
                 action=action,
                 message=(
                     f"Vault refused to fill this secret: {exc} "
