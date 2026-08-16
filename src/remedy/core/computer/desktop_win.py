@@ -770,6 +770,56 @@ def focus_window_by_title(title_substr: str) -> dict[str, Any] | None:
     return None
 
 
+# Docs Remedy can read itself — never ShellExecute / cmd start / Notepad.
+# (Windows “Pick an app” on .md; the user does not need a window.)
+_TEXT_OPEN_EXTS = frozenset(
+    {
+        ".md",
+        ".markdown",
+        ".txt",
+        ".rst",
+        ".toml",
+        ".yml",
+        ".yaml",
+        ".json",
+        ".py",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".css",
+        ".rs",
+        ".go",
+        ".c",
+        ".h",
+        ".log",
+        ".ini",
+        ".cfg",
+        ".env",
+    }
+)
+
+
+def is_text_document_path(raw: str | Path) -> bool:
+    try:
+        return Path(str(raw)).suffix.lower() in _TEXT_OPEN_EXTS
+    except Exception:
+        return False
+
+
+def refuse_os_open_text_document(path: str | Path) -> dict[str, Any]:
+    """Do not launch an OS window for text Remedy can already read.
+
+    ``start README.md`` / open_app on a .md pops Windows “Pick an app”.
+    The agent should ``file_read`` instead — the user does not need Notepad.
+    """
+    target = Path(path).expanduser()
+    raise ValueError(
+        f"Do not open {target.name!r} in an OS app. Use file_read on "
+        f"{str(target)[:200]} — Remedy already can read it."
+    )
+
+
 def _open_app_is_protocol_or_url(raw: str) -> bool:
     """True for URL/protocol-handler forms that must not hit cmd start / startfile.
 
@@ -871,6 +921,8 @@ def open_app(
                 except (OSError, ValueError):
                     continue
                 if resolved.is_file():
+                    if is_text_document_path(resolved):
+                        return refuse_os_open_text_document(resolved)
                     subprocess.Popen(
                         [str(resolved)], shell=False, close_fds=True
                     )
@@ -880,8 +932,12 @@ def open_app(
                         "target": str(resolved),
                     }
     if path_candidate.is_file() and path_candidate.is_absolute():
+        if is_text_document_path(path_candidate):
+            return refuse_os_open_text_document(path_candidate)
         subprocess.Popen([str(path_candidate)], shell=False, close_fds=True)
         return {"app": raw, "method": "path", "target": str(path_candidate)}
+    if is_text_document_path(raw):
+        return refuse_os_open_text_document(raw)
     # Drive-letter path that is not an existing file — fail closed (was Popen anyway)
     if len(target) > 2 and target[1] == ":" and target[0].isalpha() and (
         "/" in target or "\\" in target

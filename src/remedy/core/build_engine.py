@@ -47,6 +47,9 @@ _BUILD_RE = re.compile(
     r"pygame|play\s+(it|the\s+game)|try\s+it|"
     r"we need (a |an |to )|"
     r"landing\s+page|web\s*page|product\s+page|marketing\s+page|"
+    r"launch\s+(the\s+)?(site|server|app|page|preview)|"
+    r"serve\s+(it\s+)?locally|start\s+(the\s+)?(dev\s+)?server|"
+    r"preview\s+(the\s+)?(site|page)|"
     r"can we (add|resize|change|shrink|tighten)|"
     r"resize|autolock|auto[- ]?lock|"
     r"settings (and |/ )?(about )?(ui|dialog|panel|window)"
@@ -234,7 +237,8 @@ def _is_build_meta_path(path: str) -> bool:
     p = (path or "").strip().lower().replace("\\", "/")
     if not p:
         return False
-    if "/.remedy-build/" in p or p.endswith("/.remedy-build"):
+    norm = p if p.startswith("/") else "/" + p
+    if "/.remedy-build/" in norm or norm.endswith("/.remedy-build"):
         return True
     name = p.rsplit("/", 1)[-1]
     return name in {"ledger.json", "todos.json"}
@@ -420,14 +424,20 @@ class BuildTurnState:
                 str(w).replace("\\", "/").lower().endswith((".html", ".htm"))
                 for w in (self.write_set or [])
             ) or any(n.lower().endswith((".html", ".htm")) and _on_disk(n) for n in self.named_required_files())
+            if not html_ok and root is not None:
+                with suppress(Exception):
+                    html_ok = any(
+                        h.is_file() and h.stat().st_size > 0
+                        for h in list(root.glob("*.html")) + list(root.glob("*.htm"))
+                    )
             if not html_ok:
                 named_html = [n for n in self.named_required_files() if n.lower().endswith((".html", ".htm"))]
                 if named_html:
                     for n in named_html:
                         if n not in missing:
                             missing.append(n)
-                else:
-                    missing.append("new.html")
+                elif not html_ok:
+                    missing.append("index.html")
         return missing
 
     def ship_complete(self) -> bool:
@@ -569,12 +579,22 @@ def begin_build_turn(
         return None
     # Tiny muscle: soft supervision only (higher explore tolerance)
     goal_txt = (message or "").strip()[:300]
+    html_or_serve = bool(
+        _HTML_PAGE_GOAL_RE.search(goal_txt)
+        or re.search(
+            r"(?i)\b(launch|serve|preview|localhost|index\.html|landing\s+page)\b",
+            goal_txt,
+        )
+    )
+    explore_cap = 1 if away else (2 if muscle.is_frontier else (3 if muscle.is_capable else 5))
+    if html_or_serve:
+        explore_cap = 1
     st = BuildTurnState(
         active=True,
         phase="scout",
         goal=goal_txt,
         muscle_tier=muscle.label,
-        max_serial_explore=1 if away else (2 if muscle.is_frontier else (3 if muscle.is_capable else 5)),
+        max_serial_explore=explore_cap,
         # Partner: always auto-verify after the first write (C hello.c must compile
         # immediately; waiting for 2 writes left simple 1-file tasks unverified).
         require_verify_after_writes=1,
@@ -740,7 +760,7 @@ def enable_build_host_drive(
     with suppress(Exception):
         from remedy.core.turn_context import set_turn_skip_ask
 
-        set_turn_skip_ask(True)
+        set_turn_skip_ask(True, runtime)
 
 
 def enable_work_host_drive(
@@ -767,7 +787,7 @@ def enable_work_host_drive(
     with suppress(Exception):
         from remedy.core.turn_context import set_turn_skip_ask
 
-        set_turn_skip_ask(True)
+        set_turn_skip_ask(True, runtime)
 
 
 def build_protocol_block(state: BuildTurnState) -> str:
@@ -799,14 +819,16 @@ def build_protocol_block(state: BuildTurnState) -> str:
         "not a long essay unless the user asked plan-only.\n"
         "3) BUILD (implement): file_write for new files, file_edit multi-hunk for "
         "changes; then VERIFY (bash_exec / job_run kind=verify / mission_verify); "
-        "REPAIR until green → DONE."
+        "REPAIR until green → DONE. Static HTML: files on disk is verify — do not "
+        "run pytest. To show the page: host_run `python -m http.server` in the "
+        "project folder, then computer_navigate http://127.0.0.1:8000/ ."
         f"{ship}\n"
-        "Machine loop (Claude-class): todo_write a short checklist, file_glob to "
-        "discover, then build_drive (TDD → hops → gates). The machine auto-drives "
-        "after explore thrash and auto-repairs on red verify — continue from those "
-        "results, do not restart. Never claim shipped without a verify signal. "
-        "Never monologue a plan without tool_calls. "
-        "Never explore one file per step. "
+        "YOU DRIVE THIS PC this turn (Ask is skipped; jail/auth/Plan stay). "
+        "Do not call help_list or goal_add. Do not ask permission. "
+        "Use file_read / file_write / host_run / bash_exec now. "
+        "Machine loop: todo_write a short checklist, then write and verify. "
+        "The machine will force implement after scout and auto-verify after writes. "
+        "Never monologue a plan without tool_calls. Never explore one file per step. "
         f"Serial explore cap before forced implement: {state.max_serial_explore}. "
         f"Writes before auto-verify: {state.require_verify_after_writes}."
     )
@@ -1090,6 +1112,39 @@ def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
                 f"on disk with real content: {listed}. "
                 "file_write each one with the complete source (never empty). "
                 "Do not claim done. Verify only after the files exist."
+            ),
+        }
+
+    # Static page on disk — drive serve before pytest/verify essays
+    html_ready = int(state.write_steps or 0) > 0 or any(
+        str(w).lower().endswith((".html", ".htm")) for w in (state.write_set or [])
+    )
+    if not html_ready and (state.project_path or "").strip():
+        with suppress(Exception):
+            from pathlib import Path as _P
+
+            root = _P(state.project_path)
+            html_ready = any(
+                h.is_file() and h.stat().st_size > 0
+                for h in list(root.glob("*.html")) + list(root.glob("*.htm"))
+            )
+    if (
+        "force_serve" not in state.nudges_emitted
+        and html_ready
+        and (
+            _HTML_PAGE_GOAL_RE.search(state.goal or "")
+            or re.search(r"(?i)\b(launch|serve|preview|localhost)\b", state.goal or "")
+        )
+    ):
+        state.nudges_emitted.append("force_serve")
+        return {
+            "role": "user",
+            "content": (
+                "[Build engine · DRIVE HOST] The page files exist. "
+                "host_run `python -m http.server 8000` with workdir= the project "
+                "folder (timeout_seconds=5 is fine — the server stays up). "
+                "Then computer_navigate http://127.0.0.1:8000/ . "
+                "Do not open .md/.html via start/explorer. Do not pytest."
             ),
         }
 

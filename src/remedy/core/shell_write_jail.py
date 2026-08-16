@@ -45,6 +45,7 @@ _MUTATION_HINT_RE = re.compile(
     r"|\b(?:nodejs|node)(?:\.exe)?\s+(?:-\w+\s+)*-e\b"
     # Windows FS utilities that create/mutate without cmdlets above
     r"|\bfsutil\b|\bmklink\b"
+    r"|\btouch\b"
     r")"
 )
 
@@ -343,12 +344,30 @@ def _is_sidecar_argv_leftover(token: str, command: str = "") -> bool:
     stem = name[:-4] if name.endswith(".exe") else name
     if stem not in _SIDECAR_EXE_STEMS:
         return False
-    blob = (command or "").lower()
+    blob = (command or "").strip().lower()
     if "remedy desktop" not in blob and "remedy-desktop" not in blob:
         return False
+    head = blob.split(None, 1)[0] if blob else ""
+    head = head.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
+    if head.endswith(".exe"):
+        head = head[:-4]
+    if head in {
+        "copy",
+        "xcopy",
+        "robocopy",
+        "move",
+        "cp",
+        "mv",
+        "set-content",
+        "out-file",
+        "add-content",
+    }:
+        return False
     low = raw.replace("/", "\\").lower()
-    if "\\remedy desktop\\" in low:
-        return True
+    # Full dest paths are writes. Only skip a single leftover token
+    # (``\remedy-desktop.exe`` after an unquoted ``Remedy Desktop\`` split).
+    if re.match(r"^[a-z]:[\\/]", low) or low.count("\\") >= 2:
+        return False
     if low.startswith("\\") and not low.startswith("\\\\"):
         return "\\" not in low[1:].lstrip("\\")
     return "\\" not in raw and "/" not in raw

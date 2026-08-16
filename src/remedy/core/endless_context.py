@@ -47,6 +47,7 @@ CODING_TOOL_PACK: tuple[str, ...] = (
     "file_write",
     "file_edit",
     "file_edit_batch",
+    "host_run",
     "bash_exec",
     "repo_search",
     "mission_start",

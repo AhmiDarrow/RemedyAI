@@ -81,7 +81,20 @@ def discover_verify_command(runtime: Any, *, path: str = "") -> str:
             if root is None:
                 root = runtime.effective_project_path()
             p = Path(root)
-            if (p / "pyproject.toml").exists() or (p / "pytest.ini").exists() or (
+            py_markers = (
+                (p / "pyproject.toml").exists()
+                or (p / "pytest.ini").exists()
+                or (p / "setup.py").exists()
+            )
+            node_markers = (p / "package.json").exists()
+            html_only = (
+                ((p / "index.html").is_file() or any(p.glob("*.html")))
+                and not py_markers
+                and not node_markers
+            )
+            if html_only:
+                cmd = ""
+            elif (p / "pyproject.toml").exists() or (p / "pytest.ini").exists() or (
                 p / "tests"
             ).is_dir():
                 # Prefer real Python markers; empty tests/ from a bad seed does not count
@@ -136,6 +149,12 @@ def _cheap_required_files_ok(runtime: Any, state: Any) -> bool:
             named = list(state.named_required_files() or [])
     if named:
         return True
+    goal = str(getattr(state, "goal", "") or "")
+    writes = [str(w).lower() for w in (getattr(state, "write_set", None) or [])]
+    html_goal = bool(re.search(r"(?i)\b(html|landing\s+page|web\s*page|wiki)\b", goal))
+    html_writes = any(w.endswith((".html", ".htm", ".css")) for w in writes)
+    if not html_goal and not html_writes:
+        return False
     root = None
     with suppress(Exception):
         raw = getattr(state, "project_path", "") or ""
@@ -151,7 +170,7 @@ def _cheap_required_files_ok(runtime: Any, state: Any) -> bool:
 
     p = _P(root)
     html = list(p.glob("*.html")) + list(p.glob("*.htm"))
-    return any(h.is_file() and h.stat().st_size > 8 for h in html)
+    return any(h.is_file() and h.stat().st_size > 0 for h in html)
 
 
 def oracle_missing_nudge(state: Any) -> dict[str, str]:
@@ -365,7 +384,11 @@ async def run_auto_verify(
         state.last_verify_summary = summary
     if hasattr(state, "phase"):
         if ok:
-            state.phase = "done"
+            with suppress(Exception):
+                if hasattr(state, "advance_after_green"):
+                    state.advance_after_green()
+                else:
+                    state.phase = "done"
         elif timed_out:
             missing = False
             with suppress(Exception):

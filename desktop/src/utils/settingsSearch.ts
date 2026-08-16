@@ -38,7 +38,7 @@ export const SETTINGS_SECTION_META: Record<
   'you-agent': {
     title: 'You & Agent',
     summary: 'Names & persona',
-    keywords: 'user name agent persona identity',
+    keywords: 'user name agent persona identity wipe memory forget whoami soul',
   },
   workspace: {
     title: 'Project workspace',

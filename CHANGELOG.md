@@ -4,12 +4,51 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Build drive / Full control
+
+- Build scouts one step on landing/serve goals, then injects **DRIVE HOST**
+  (`python -m http.server` + Browser rail). Protocol says this turn drives
+  the PC — no help_list, no Ask.
+- `set_turn_skip_ask` also stamps `runtime._turn_skip_ask` so skip-Ask is
+  not lost if turn flags are missing.
+- Full approval + explore-stuck can machine-drive code units. HTML/landing
+  goals never plant TDD `.py` files. Auth jail and Plan stay closed.
+
+### Agency / files
+
+- Local tool cap keeps `file_read` / `file_write` / `host_run` / `bash_exec`
+  instead of the first eight registered tools (`help_list` used to win).
+- `host_run` is in the local coding pack. Launch/serve turns keep host tools
+  on write-first. Life-goal packing cannot steal an active Build or a host
+  command (`cat README.md` no longer matches “cat”).
+- Static HTML folders no longer get `pytest` as the oracle. Unnamed landing
+  pages accept `index.html` on disk (not a phantom `new.html`). `.remedy-build/tmp/`
+  is not a product write.
+- “Launch the site locally” is no longer classified as a life goal. That
+  used to strip `file_read` / `host_run` / `bash_exec` so the model only
+  saw `goal_*` and `help_list` and could not start a server.
+- Opening `.md` for Remedy to *read* no longer launches an OS app (Pick an
+  app / Notepad). `start README.md` becomes `type`; `open_app` tells the
+  model to `file_read`. The user does not need a window for that.
+- Jail: `touch` is a mutation; `copy` onto the sidecar exe is no longer
+  skipped as leftover; `cmd /c start` on `.html`/`.py`/`.json` becomes `type`;
+  host `pytest --lf` is stripped (45s auto-verify already refused it).
+
+### Memory / privacy
+
+- Deleting a chat warns first and also drops that chat’s memory notes,
+  attachments, plans, and undo history. Partner Memory stays.
+- Settings → You & Agent → **Wipe persona…** (type `WIPE`) forgets facts
+  about you, soul residue, and life goals. Chats, keys, and skills stay.
+  This is not a full `~/.remedy` uninstall wipe.
+
 ### Repo
 
-- Public GitHub tree is the compile/release set only. `tests/`, `community/`,
-  live/soak scripts, review dumps, and desktop `*.test.ts` stay on the
-  maintainer clone (gitignored) and are not pushed. Public CI is ruff / mypy /
-  import / docs / desktop build.
+- Test suite is public again (pytest + desktop vitest). Confidence for
+  licensees beats a slimmer tree. CI runs Linux full pytest, a Windows
+  security/path subset, and `npm test`. `community/`, live/soak scripts, and
+  review dumps stay on the maintainer clone.
+- `memory/` gitignore is repo-root only so `src/remedy/memory/` is not swallowed.
 
 ## [0.26.2] - 2026-08-15
 

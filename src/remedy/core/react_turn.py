@@ -34,6 +34,33 @@ MAX_PSEUDO_RECOVERIES = 4
 MAX_DISCONNECT_RETRIES = 8
 # Local: max tool schemas per model step after write-first pack.
 LOCAL_MAX_TOOLS_PER_STEP = 8
+# Prefer these when capping — first-N used to drop host_run behind help/goal.
+_OPERATE_CORE_TOOLS = (
+    "file_read",
+    "file_write",
+    "file_edit",
+    "file_edit_batch",
+    "list_dir",
+    "repo_search",
+    "host_run",
+    "bash_exec",
+    "computer_navigate",
+)
+_OPERATE_DEFER_TOOLS = frozenset(
+    {
+        "help_list",
+        "help_read",
+        "goal_add",
+        "goal_list",
+        "goal_complete",
+        "goal_verify",
+        "goal_set_next",
+        "goal_drive",
+        "goal_clear_all",
+        "companion_context",
+        "companion_design",
+    }
+)
 
 _EXPLORE_TOOLS = frozenset(
     {"file_read", "list_dir", "repo_search", "memory_search", "soul_recall", "web_search", "web_fetch"}
@@ -321,9 +348,25 @@ def resolve_tools(
             from remedy.core.build_engine import looks_like_build_request
             from remedy.core.local_agent_optimize import message_wants_implement
 
-            if not message_wants_implement(message or "") and not looks_like_build_request(
-                message or ""
-            ):
+            hostish = bool(
+                re.search(
+                    r"(?is)\b("
+                    r"launch|serve|preview|localhost|http\.server|npm\s|"
+                    r"file_read|file_write|host_run|bash_exec|"
+                    r"start\s+(the\s+)?(dev\s+)?server|"
+                    r"open\s+(the\s+)?(site|page|home\s+page)|"
+                    r"\.(?:py|html?|ts|tsx|js|css)\b"
+                    r")\b",
+                    message or "",
+                )
+            )
+            work = (
+                bool(build_active)
+                or hostish
+                or message_wants_implement(message or "")
+                or looks_like_build_request(message or "")
+            )
+            if not work:
                 def _tool_name(t: dict) -> str:
                     fn = t.get("function") if isinstance(t.get("function"), dict) else {}
                     return str(fn.get("name") or t.get("name") or "")
@@ -389,7 +432,7 @@ def resolve_tools(
                     pack = "write_first"
                     reason = "task_write_first"
         if local and tools and len(tools) > LOCAL_MAX_TOOLS_PER_STEP:
-            tools = tools[:LOCAL_MAX_TOOLS_PER_STEP]
+            tools = cap_tools_for_step(tools, local=True)
             reason = reason + "+local_cap"
         logger.info(
             "react_tools arm reason=%s pack=%s count=%d local=%s step=%d",
@@ -552,6 +595,11 @@ def is_disconnect_error(exc: BaseException | str) -> bool:
     )
 
 
+def _tool_schema_name(t: dict[str, Any]) -> str:
+    fn = t.get("function") if isinstance(t.get("function"), dict) else {}
+    return str((fn or {}).get("name") or t.get("name") or "")
+
+
 def cap_tools_for_step(
     tools: list[dict[str, Any]] | None,
     *,
@@ -562,7 +610,38 @@ def cap_tools_for_step(
         return tools
     if len(tools) <= max_tools:
         return tools
-    return tools[:max_tools]
+    by_name: dict[str, dict[str, Any]] = {}
+    for t in tools:
+        n = _tool_schema_name(t)
+        if n and n not in by_name:
+            by_name[n] = t
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for n in _OPERATE_CORE_TOOLS:
+        t = by_name.get(n)
+        if t is None or n in seen:
+            continue
+        out.append(t)
+        seen.add(n)
+        if len(out) >= max_tools:
+            return out
+    for t in tools:
+        n = _tool_schema_name(t)
+        if not n or n in seen or n in _OPERATE_DEFER_TOOLS:
+            continue
+        out.append(t)
+        seen.add(n)
+        if len(out) >= max_tools:
+            return out
+    for t in tools:
+        n = _tool_schema_name(t)
+        if not n or n in seen:
+            continue
+        out.append(t)
+        seen.add(n)
+        if len(out) >= max_tools:
+            break
+    return out
 
 
 def extract_tool_names(tool_calls: list[dict[str, Any]] | None) -> list[str]:

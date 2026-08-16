@@ -19,10 +19,27 @@ from typing import Any
 
 
 def allow_background_drive(state: Any) -> bool:
-    """True only when the user is not at the keyboard (unattended)."""
+    """True when the machine should take the implement loop.
+
+    Away-mode is unattended. Full approval + explore-stuck (no writes) is
+    owner control — drive instead of more scout. HTML/serve goals stay off
+    this path (``maybe_auto_implement`` refuses them).
+    """
     if state is None or not getattr(state, "active", False):
         return False
-    return bool(getattr(state, "away_mode", False))
+    if bool(getattr(state, "away_mode", False)):
+        return True
+    try:
+        from remedy.core.approvals import is_full_approval
+
+        if not is_full_approval():
+            return False
+    except Exception:
+        return False
+    writes = int(getattr(state, "write_steps", 0) or 0)
+    streak = int(getattr(state, "serial_explore_streak", 0) or 0)
+    cap = int(getattr(state, "max_serial_explore", 3) or 3)
+    return writes == 0 and streak >= max(1, cap)
 
 
 def collapse_to_one_card(

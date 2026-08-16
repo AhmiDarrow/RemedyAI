@@ -106,7 +106,6 @@ remedy.key.pub
 # ---------------------------------------------------------------------------
 # Local-only trees — stay on disk, not in the public compile/release repo
 # ---------------------------------------------------------------------------
-tests/
 examples/
 community/
 experiments/
@@ -143,13 +142,9 @@ scripts/process_logo_alpha.py
 scripts/lib_host_poller.py
 scripts/lib_local_token.py
 
-# Desktop unit tests (local only; public CI builds without them)
-desktop/**/*.test.ts
-desktop/**/*.test.tsx
-desktop/vitest.config.ts
-
-# Agent / session scratch that must never ship
-memory/
+# Agent / session scratch that must never ship (repo-root only —
+# do not ignore src/remedy/memory/).
+/memory/
 NUL
 /Users/
 /~/

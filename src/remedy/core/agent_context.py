@@ -241,9 +241,10 @@ async def build_turn_context(runtime: Any) -> str:
                 am = normalize_approval_mode(APPROVALS.mode)
                 if am == "full":
                     parts.append(
-                        "Approvals: Full (warn). Write and run anywhere this account "
-                        "can. Auth secrets (~/.remedy/auth) stay closed. Do not stop "
-                        "to ask permission for project or sibling-folder work — build."
+                        "Approvals: Full (warn). The host is in Remedy's hands. "
+                        "Write and run anywhere this account can. Auth secrets "
+                        "(~/.remedy/auth) stay closed. Do not stop to ask. "
+                        "Do not call help_list. file_write / host_run / bash_exec now."
                     )
                 elif am == "auto":
                     parts.append(

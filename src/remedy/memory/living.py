@@ -22,16 +22,31 @@ from typing import Any
 
 _LIFE_RE = re.compile(
     r"(?i)\b("
-    r"kids?|child(?:ren)?|wife|husband|partner|family|dog|cat|mom|dad|"
-    r"health|sleep|tired|burn(?:ed)?\s*out|overwhelmed|anxious|therapy|"
-    r"money|rent|bills?|vacation|birthday|funeral|wedding|pregnant|"
-    r"my life|personal|home|tonight|this weekend"
+    r"kids?|child(?:ren)?|wife|husband|my\s+partner|our\s+family|"
+    r"mom|dad|my\s+life|"
+    r"burn(?:ed)?\s*out|overwhelmed|anxious|therapy|"
+    r"vacation|birthday|funeral|wedding|pregnant|"
+    r"this weekend"
     r")\b"
 )
 _GOAL_RE = re.compile(
     r"(?i)\b("
     r"goal|priority|this (?:week|month|year)|deadline|ship(?:ping)?|"
-    r"launch|quit|habit|resolution|i want to (?:get|become|finish|start)"
+    r"launch\s+(?:a\s+|my\s+|our\s+)?(?:product|company|startup|career)|"
+    r"quit|habit|resolution|i want to (?:get|become|finish|start)"
+    r")\b"
+)
+
+# Software / host work — must beat the life-goal classifier.
+# Bare "launch" used to steal "launch the site locally" into goal_* tools only.
+_HOST_WORK_RE = re.compile(
+    r"(?i)\b("
+    r"localhost|127\.0\.0\.1|package\.json|vite|uvicorn|flask|"
+    r"npm\s|npx\s|http\.server|serve\.py|start\.bat|"
+    r"(?:launch|start|run|serve|preview|open)\s+(?:the\s+|a\s+|my\s+)?"
+    r"(?:site|website|server|app|page|home\s+page|dev\s*server|local(?:host)?|preview|http)|"
+    r"see\s+(?:the\s+)?(?:new\s+)?(?:page|site|preview)|"
+    r"dev\s*server|web\s*server"
     r")\b"
 )
 _DESIGN_RE = re.compile(
@@ -60,11 +75,11 @@ def turn_kind(query: str | None) -> str:
     t = (query or "").strip()
     if not t:
         return "general"
-    if _LIFE_RE.search(t) and not _CODE_RE.search(t):
+    if _LIFE_RE.search(t) and not _CODE_RE.search(t) and not _HOST_WORK_RE.search(t):
         return "life"
     if _DESIGN_RE.search(t):
         return "design"
-    if _CODE_RE.search(t):
+    if _CODE_RE.search(t) or _HOST_WORK_RE.search(t):
         return "code"
     if _GOAL_RE.search(t):
         return "goal"

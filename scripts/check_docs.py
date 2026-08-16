@@ -333,9 +333,8 @@ def _collect_pytest_count() -> int | None:
 def check_test_count_claim() -> CheckResult:
     """README test-count claim must stay near live pytest collection count.
 
-    Public tree does not ship tests/. Skip when the suite is absent or the
-    README no longer claims a count. Local clones that keep tests/ still
-    validate the claim when present.
+    Skip when the suite is absent (partial checkout) or the README no
+    longer claims a count. The public tree ships tests/.
 
     Accepts either:
       (560+ tests; currently ~561)

@@ -1,0 +1,136 @@
+"""Phase A1: full-wipe / skills-wipe must leave no ghost skill stats.
+
+Keeps the personal-partner reinstall path honest: after skills wipe or full
+purge, skill_stats.json must not resurrect ghost success rates.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from remedy.interfaces import uninstaller as uninst
+
+
+def test_wipe_skills_removes_skill_stats(tmp_path: Path, monkeypatch):
+    home = tmp_path / ".remedy"
+    skills = home / "skills"
+    skills.mkdir(parents=True)
+    (skills / "x" / "SKILL.md").parent.mkdir()
+    (skills / "x" / "SKILL.md").write_text("# x\n", encoding="utf-8")
+    stats = home / "skill_stats.json"
+    stats.write_text('{"version":1,"skills":{"x":{"total_executions":3}}}', encoding="utf-8")
+    # Leave memory so we prove skills wipe is selective
+    mem = home / "memory.db"
+    mem.write_text("stub", encoding="utf-8")
+
+    monkeypatch.setattr(uninst, "REMEDY_HOME", home)
+    uninst._wipe_skills()  # noqa: SLF001
+
+    assert not skills.exists()
+    assert not stats.exists()
+    assert mem.exists()
+
+
+def test_full_wipe_paths_documented_in_ps1():
+    """Desktop NSIS wipe script still covers config/skills/full + skill_stats."""
+    root = Path(__file__).resolve().parents[1]
+    ps1 = root / "desktop" / "src-tauri" / "windows" / "uninstall_wipe.ps1"
+    text = ps1.read_text(encoding="utf-8")
+    assert "skill_stats.json" in text
+    assert "full" in text.lower()
+    assert ".remedy" in text
+    # Visual decoder / llama.cpp must be stopped and removed on config or full wipe
+    assert "llama-server" in text
+    assert "vision" in text
+    assert "Remove-VisionTree" in text or "vision" in text
+    # Full wipe must clear user + public/common desktop & Start Menu shortcuts
+    assert "CommonDesktopDirectory" in text
+    assert "CommonPrograms" in text
+    assert "CommonStartup" in text
+    assert "PUBLIC" in text
+    assert "Remedy Desktop.lnk" in text
+
+
+def test_wipe_config_removes_vision_tree(tmp_path: Path, monkeypatch):
+    home = tmp_path / ".remedy"
+    vision = home / "vision" / "runtime"
+    vision.mkdir(parents=True)
+    (vision / "llama-server.exe").write_bytes(b"fake")
+    (home / "vision" / "models" / "qwen").mkdir(parents=True)
+    (home / "vision" / "models" / "qwen" / "m.gguf").write_bytes(b"gguf")
+    (home / "config.toml").write_text("name='x'\n", encoding="utf-8")
+    mem = home / "memory.db"
+    mem.write_text("keep", encoding="utf-8")
+
+    monkeypatch.setattr(uninst, "REMEDY_HOME", home)
+    uninst._wipe_config()  # noqa: SLF001
+    uninst._wipe_vision()  # noqa: SLF001
+
+    assert not (home / "vision").exists()
+    assert mem.exists()  # memory preserved on config wipe
+
+
+def test_pip_uninstall_targets_only_remedy_ai(monkeypatch):
+    """Never ``pip uninstall remedy`` — that name is an unrelated PyPI package."""
+    calls: list[list[str]] = []
+
+    class Fake:
+        returncode = 0
+        stdout = "Successfully uninstalled remedy-ai"
+        stderr = ""
+
+    def fake_run(cmd, **_kwargs):
+        calls.append(list(cmd))
+        return Fake()
+
+    monkeypatch.setattr("remedy.execution.process.run_hidden", fake_run)
+    assert uninst._pip_dists() == ("remedy-ai",)  # noqa: SLF001
+    assert uninst._pip_uninstall() is True  # noqa: SLF001
+    assert calls
+    dists = [c[-1] for c in calls]
+    assert dists == ["remedy-ai"]
+    assert all("uninstall" in c for c in calls)
+    assert all("remedy" not in c or "remedy-ai" in c for c in calls)
+
+
+def test_uninstaller_source_never_names_bare_remedy_dist():
+    src = Path(uninst.__file__).read_text(encoding="utf-8")
+    assert '"remedy-ai"' in src
+    assert '("remedy-ai", "remedy")' not in src
+    assert 'for dist in ("remedy-ai", "remedy")' not in src
+
+
+def test_uninstall_pip_fail_exits_1_and_skips_complete(tmp_path: Path, monkeypatch, capsys):
+    import pytest
+    from rich.prompt import Confirm
+
+    home = tmp_path / ".remedy"
+    home.mkdir()
+    monkeypatch.setattr(uninst, "REMEDY_HOME", home)
+    monkeypatch.setattr(uninst, "_pip_uninstall", lambda: False)
+    monkeypatch.setattr(Confirm, "ask", lambda *_a, **_k: True)
+    with pytest.raises(SystemExit) as ei:
+        uninst.run_uninstall(purge=False, dry_run=False, home=home)
+    assert ei.value.code == 1
+    out = capsys.readouterr().out
+    assert "complete" not in out.lower()
+
+
+def test_assert_safe_wipe_root_refuses_non_remedy_paths(tmp_path: Path):
+    """Wipe must refuse profile dirs, arbitrary trees, and misnamed homes."""
+    import pytest
+
+    # Valid tmp .remedy (tests + intentional product data trees)
+    good = tmp_path / ".remedy"
+    good.mkdir()
+    assert uninst._assert_safe_wipe_root(good) == good.resolve()  # noqa: SLF001
+
+    # Wrong leaf name
+    bad_name = tmp_path / "not-remedy"
+    bad_name.mkdir()
+    with pytest.raises(RuntimeError, match="must be a .remedy"):
+        uninst._assert_safe_wipe_root(bad_name)  # noqa: SLF001
+
+    # User home itself
+    with pytest.raises(RuntimeError):
+        uninst._assert_safe_wipe_root(Path.home())  # noqa: SLF001
