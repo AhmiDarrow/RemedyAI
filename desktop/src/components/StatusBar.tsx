@@ -71,6 +71,8 @@ interface StatusBarProps {
   /** Toggle interactive Time Travel timeline panel. */
   timeTravelOpen?: boolean
   onToggleTimeTravel?: () => void
+  /** Switch back to the Grove partner surface (default home). */
+  onOpenGrove?: () => void
   /** Open multiprovider Usage & Continuity dashboard */
   onOpenUsage?: () => void
   /** Main chrome density: Simple hides power-user controls */
@@ -275,6 +277,7 @@ export function StatusBar({
   onOpenUsage,
   timeTravelOpen = false,
   onToggleTimeTravel,
+  onOpenGrove,
   uiMode = 'simple',
   onUiModeChange,
 }: StatusBarProps) {
@@ -783,6 +786,16 @@ export function StatusBar({
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0 flex-nowrap">
+          {onOpenGrove && (
+            <button
+              type="button"
+              className="seg-btn"
+              title="Grove — your partner home (goals, live actions, story)"
+              onClick={onOpenGrove}
+            >
+              ✦ Grove
+            </button>
+          )}
           {onUiModeChange && (
             <button
               type="button"
