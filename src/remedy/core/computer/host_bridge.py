@@ -1194,7 +1194,15 @@ class ComputerHostBridge:
                             "typed payload scrubbed after stale TTL"
                         )
                         job.payload = _scrub_retained_payload(job.payload)
-                        self._write(job)
+                        # Write back to THIS file, not _path(job.id): a file
+                        # whose JSON id ≠ filename must still get scrubbed here
+                        # (otherwise the plaintext lingers forever).
+                        try:
+                            path.write_text(
+                                json.dumps(job.to_dict()), encoding="utf-8"
+                            )
+                        except OSError:
+                            pass
                         n += 1
                     continue
                 path.unlink(missing_ok=True)

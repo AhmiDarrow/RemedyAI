@@ -22,6 +22,27 @@ async def _run_computer(ex: Any, action: Any, **kwargs: Any) -> str:
     return await asyncio.to_thread(ex.run, action, session_id=sid, **kwargs)
 
 
+def _resolve_ref_label(ex: Any, ref: str) -> str:
+    """Best-effort element label for a snapshot ref (for approval summaries).
+
+    Returns "" when unknown — the gate then treats an unresolvable ref click
+    on a mutation as needing approval in Ask mode anyway; the value here is
+    making the payment classifier see 'Place order' when the model clicks by
+    ref instead of text.
+    """
+    r = (ref or "").strip()
+    if not r:
+        return ""
+    try:
+        info = ex.bridge.last_elements_info()
+        for el in info.get("elements") or []:
+            if str(el.get("ref") or "") == r:
+                return str(el.get("name") or el.get("text") or "")
+    except Exception:
+        pass
+    return ""
+
+
 def _computer_approval_gate(runtime: Any, tool_name: str, summary: str) -> str | None:
     """Return APPROVAL_REQUIRED text when Ask mode blocks a mutation, else None."""
     from remedy.core.approvals import APPROVALS
@@ -31,7 +52,15 @@ def _computer_approval_gate(runtime: Any, tool_name: str, summary: str) -> str |
     if not ask_reason:
         return None
     sid = turn_session_id(runtime)
-    if APPROVALS.is_approved(tool_name, summary, session_id=sid):
+    from remedy.core.approvals import SENSITIVE_PREFIX
+
+    sensitive = ask_reason.startswith(SENSITIVE_PREFIX)
+    if sensitive:
+        # Sensitive actions never ride a persisted approval — only a one-shot
+        # grant consumed here. is_approved (session/always) does not apply.
+        if APPROVALS.take_one_shot(tool_name, summary, session_id=sid):
+            return None
+    elif APPROVALS.is_approved(tool_name, summary, session_id=sid):
         return None
     item = APPROVALS.create(
         tool_name=tool_name,
@@ -117,8 +146,11 @@ def register_computer_tools(runtime: Any) -> None:
 
         Prefer text=\"Membership options\" or ref=e3 over guessing pixels.
         """
+        # Resolve ref → element label so the payment/owner checkpoint can see
+        # snapshot clicks (the primary click path), not just text= clicks.
+        label = text or _resolve_ref_label(ex, ref)
         summary = (
-            f"click text={text!r} ref={ref!r} x={x} y={y} "
+            f"click text={(label or text)!r} ref={ref!r} x={x} y={y} "
             f"button={button} clicks={clicks} target={target or 'auto'}"
         )
         blocked = _computer_approval_gate(runtime, "computer_click", summary)
