@@ -55,6 +55,7 @@ class GoalCreateRequest(BaseModel):
 
 
 class GoalPatchRequest(BaseModel):
+    title: str | None = None
     status: str | None = None
     next_action: str | None = None
     next_by: str | None = None
@@ -236,6 +237,23 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         if g is None:
             raise HTTPException(404, "goal not found")
         return g.to_public()
+
+    @app.delete("/api/goals/{goal_id}")
+    async def delete_goal(goal_id: str):
+        from remedy.memory.life_goals import LifeGoalStore
+
+        store = LifeGoalStore(_life_home())
+        ok = store.delete(goal_id)
+        if not ok:
+            raise HTTPException(404, "goal not found")
+        return {"ok": True, "deleted": goal_id}
+
+    @app.post("/api/goals/activity/clear")
+    async def clear_activity():
+        from remedy.memory.life_goals import LifeGoalStore
+
+        LifeGoalStore(_life_home()).clear_activity()
+        return {"ok": True}
 
     def _plan_store():
         from pathlib import Path

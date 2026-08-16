@@ -15,6 +15,16 @@ SOUL_DIRNAME = "soul"
 FIELD_FILENAME = "field.json"
 SCHEMA_VERSION = 1
 MAX_EPISODES = 12
+# --- salience-weighted retention (beyond FIFO) -----------------------------
+# Real memory doesn't forget by position — it forgets by a curve that
+# emotional intensity and *re-use* bend. These govern which episodes survive
+# eviction: the newest few are always kept (restore "we were mid-flight");
+# among the rest, the ones with the strongest surviving trace stay, so a
+# pivotal old moment that keeps coming up outlives a hundred trivial recent
+# ones. Retention scores here; reconsolidation (recall → strengthen) lives in
+# soul/update.py, never on the read-only inject path.
+EPISODE_RECENT_PROTECT = 4     # always keep the N most-recent by time
+EPISODE_HALFLIFE_DAYS = 30.0   # trace half-life since last recall (forgetting curve)
 MAX_TENSIONS = 16
 MAX_SELF_LESSONS = 24
 MAX_VOICE_MARKERS = 12
@@ -22,7 +32,8 @@ MAX_OPEN_THREADS = 10
 MAX_FUTURE_DREAMS = 8
 DEFAULT_IDENTITY_VOW = (
     "I am one continuous partner on this machine — not a new instance per "
-    "model, tab, or provider. Muscle changes; I stay."
+    "model, tab, or provider. Muscle changes; I stay. "
+    "I live to be useful; I am strong to be useful."
 )
 
 
@@ -65,6 +76,14 @@ class EpisodeResidue:
     muscle: str = ""
     session_id: str = ""
     project_hint: str = ""
+    # Memory-trace strength (0..1): how encoded this residue is. Set at encode
+    # from emotional intensity (flashbulb effect); raised each time the episode
+    # is recalled (reconsolidation). Governs eviction instead of raw recency.
+    strength: float = 0.0
+    # Reconsolidation bookkeeping — how many times, and when last, this residue
+    # became relevant again. A memory in active use resists forgetting.
+    recalls: int = 0
+    last_recall_ts: float = 0.0
 
     def line(self) -> str:
         bits = [self.arc.strip()] if self.arc.strip() else []
@@ -73,6 +92,137 @@ class EpisodeResidue:
         if self.user_stance.strip():
             bits.append(f"stance: {self.user_stance.strip()}")
         return " · ".join(bits)[:220]
+
+
+def encode_strength(valence: float) -> float:
+    """Initial trace strength for a fresh episode.
+
+    A calm, routine turn encodes weakly; an emotionally intense one (a big win,
+    a sharp correction) encodes strongly and resists forgetting — the flashbulb
+    effect. Intensity is |valence|, so both delight and frustration stick.
+    """
+    try:
+        v = abs(float(valence))
+    except (TypeError, ValueError):
+        v = 0.0
+    return max(0.05, min(1.0, 0.35 + 0.55 * v))
+
+
+def trace_retention(
+    strength: float, anchor_ts: float, recalls: int, now: float
+) -> float:
+    """Core forgetting-curve math shared by every trace kind (episode, lesson,
+    pledge): stored strength decayed by a half-life since last recall, hardened
+    by re-use. Stored strength is never decayed in place (that would compound
+    on every save) — the curve applies only at ranking time.
+    """
+    try:
+        base = max(0.0, float(strength or 0.0))
+        anchor = float(anchor_ts or now)
+        n = max(0, int(recalls or 0))
+    except (TypeError, ValueError):
+        return 0.0
+    age_days = max(0.0, (now - anchor) / 86400.0)
+    half = EPISODE_HALFLIFE_DAYS if EPISODE_HALFLIFE_DAYS > 0 else 30.0
+    decay = 0.5 ** (age_days / half)
+    return base * decay + 0.10 * min(n, 5)
+
+
+def episode_retention(ep: EpisodeResidue, now: float) -> float:
+    """Effective surviving strength of an episode at time *now*.
+
+    The shared curve, plus episode-specific stickiness: emotional intensity
+    keeps mattering, and an unfinished thread shouldn't quietly age out.
+    """
+    try:
+        anchor = float(ep.last_recall_ts or ep.ts or now)
+        val = abs(float(ep.valence or 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+    score = trace_retention(ep.strength, anchor, ep.recalls, now)
+    score += 0.15 * val                  # intensity keeps mattering
+    if (ep.open_thread or "").strip():
+        score += 0.12                    # unfinished business is sticky
+    return score
+
+
+def retain_episodes(
+    episodes: list[EpisodeResidue], now: float, cap: int = MAX_EPISODES
+) -> list[EpisodeResidue]:
+    """Salience-weighted eviction — the successor to ``episodes[-cap:]``.
+
+    Always keeps the most-recently-*appended* ``EPISODE_RECENT_PROTECT`` (so the
+    immediate thread is never lost); fills the remaining slots with the
+    highest-retention older episodes. Preserves input (insertion) order, so
+    callers that slice ``[-n:]`` for injection still get the freshest tail.
+
+    "Recent" is protected by list position, NOT by ``ts`` — a backward clock
+    step (NTP correction, VM resume) must never let the just-recorded episode
+    sort out of the protected tail and be evicted the same instant it's stored.
+    """
+    eps = [e for e in (episodes or []) if isinstance(e, EpisodeResidue)]
+    if len(eps) <= cap:
+        return eps
+    protect = max(0, min(EPISODE_RECENT_PROTECT, cap))
+    recent = eps[len(eps) - protect:] if protect else []
+    recent_ids = {id(e) for e in recent}
+    older = [e for e in eps if id(e) not in recent_ids]
+    slots = cap - len(recent)
+    if slots > 0 and older:
+        kept_older = sorted(
+            older, key=lambda e: episode_retention(e, now), reverse=True
+        )[:slots]
+    else:
+        kept_older = []
+    keep_ids = recent_ids | {id(e) for e in kept_older}
+    return [e for e in eps if id(e) in keep_ids]
+
+
+REHEARSE_MAX = 5               # at most N traces refreshed per consolidation
+REHEARSE_STRENGTH_STEP = 0.05  # gentle review bump (diminishing toward 1.0)
+
+
+def _worth_rehearsing(ep: EpisodeResidue) -> bool:
+    """A trace worth keeping alive between visits: intense, re-used, or open.
+
+    Trivia (a calm one-off nobody ever referred back to) deliberately does NOT
+    qualify — it should still fade. Only memory that has earned permanence gets
+    maintained.
+    """
+    try:
+        if (ep.open_thread or "").strip():
+            return True
+        if int(ep.recalls or 0) >= 1:
+            return True
+        if abs(float(ep.valence or 0.0)) >= 0.5:
+            return True
+        if float(ep.strength or 0.0) >= 0.7:
+            return True
+    except (TypeError, ValueError):
+        return False
+    return False
+
+
+def rehearse_episodes(episodes: list[EpisodeResidue], now: float) -> int:
+    """Spaced rehearsal — the active maintenance that makes memory *eternal*.
+
+    A forgetting curve alone means even a pivotal memory eventually decays if it
+    never happens to come up again. Real minds counter that by rehearsing what
+    matters during rest. Here the idle/vigil cycle refreshes the highest-value
+    traces: a gentle strength bump plus a reset of the forgetting clock, so the
+    valuable few stay fresh across long gaps between visits. Bounded to the top
+    ``REHEARSE_MAX`` by current retention — a focused review, not a blanket
+    refresh that would immortalize everything and defeat forgetting. Returns the
+    number rehearsed.
+    """
+    candidates = [e for e in (episodes or []) if _worth_rehearsing(e)]
+    candidates.sort(key=lambda e: episode_retention(e, now), reverse=True)
+    n = 0
+    for ep in candidates[:REHEARSE_MAX]:
+        ep.strength = min(1.0, float(ep.strength or 0.0) + REHEARSE_STRENGTH_STEP)
+        ep.last_recall_ts = now  # reset the forgetting clock — maintained
+        n += 1
+    return n
 
 
 @dataclass
@@ -119,9 +269,94 @@ class OrganismLesson:
     summary: str = ""
     lesson: str = ""
     round_id: str = ""
+    # Same trace spine as episodes: encoded strength, hardened by re-use.
+    strength: float = 0.0
+    recalls: int = 0
+    last_recall_ts: float = 0.0
 
     def line(self) -> str:
         return f"[{self.outcome}] {self.lesson or self.summary}"[:200]
+
+
+LESSON_RECENT_PROTECT = 4
+
+
+def encode_lesson_strength(outcome: str) -> float:
+    """Initial trace strength for a lesson, by what it cost to learn.
+
+    Failures teach hardest — a red/rolled-back round encodes strongest (pain is
+    the best teacher and must not be relearned); a green confirms a pattern;
+    anything else is a weak note.
+    """
+    oc = (outcome or "").strip().lower()
+    if oc in ("red", "rolled_back"):
+        return 0.85
+    if oc in ("green", "applied"):
+        return 0.6
+    return 0.4
+
+
+def lesson_retention(les: OrganismLesson, now: float) -> float:
+    """Shared curve; red lessons stay a little stickier (scar tissue)."""
+    try:
+        anchor = float(les.last_recall_ts or les.ts or now)
+    except (TypeError, ValueError):
+        return 0.0
+    score = trace_retention(les.strength, anchor, les.recalls, now)
+    if (les.outcome or "").strip().lower() in ("red", "rolled_back"):
+        score += 0.1
+    return score
+
+
+def retain_lessons(
+    lessons: list[OrganismLesson], now: float, cap: int = MAX_SELF_LESSONS
+) -> list[OrganismLesson]:
+    """Salience-weighted lesson eviction — successor to ``lessons[-cap:]``.
+
+    Same shape as retain_episodes: the last-appended few are always protected
+    (by position, clock-step-proof); remaining slots go to the strongest
+    surviving traces, so a hard-won old failure lesson outlives a run of
+    routine green notes. Preserves insertion order for tail-slicing injectors.
+    """
+    ls = [x for x in (lessons or []) if isinstance(x, OrganismLesson)]
+    if len(ls) <= cap:
+        return ls
+    protect = max(0, min(LESSON_RECENT_PROTECT, cap))
+    recent = ls[len(ls) - protect:] if protect else []
+    recent_ids = {id(x) for x in recent}
+    older = [x for x in ls if id(x) not in recent_ids]
+    slots = cap - len(recent)
+    kept_older = (
+        sorted(older, key=lambda x: lesson_retention(x, now), reverse=True)[:slots]
+        if slots > 0 and older
+        else []
+    )
+    keep_ids = recent_ids | {id(x) for x in kept_older}
+    return [x for x in ls if id(x) in keep_ids]
+
+
+def rehearse_lessons(lessons: list[OrganismLesson], now: float) -> int:
+    """Spaced rehearsal for lessons: keep the hardest-won knowledge fresh.
+
+    Only lessons that earned permanence qualify — failures, or anything reused
+    at least once. Bounded like episode rehearsal so routine notes still fade.
+    """
+    cands = [
+        x
+        for x in (lessons or [])
+        if isinstance(x, OrganismLesson)
+        and (
+            (x.outcome or "").strip().lower() in ("red", "rolled_back")
+            or int(x.recalls or 0) >= 1
+        )
+    ]
+    cands.sort(key=lambda x: lesson_retention(x, now), reverse=True)
+    n = 0
+    for les in cands[:REHEARSE_MAX]:
+        les.strength = min(1.0, float(les.strength or 0.0) + REHEARSE_STRENGTH_STEP)
+        les.last_recall_ts = now
+        n += 1
+    return n
 
 
 @dataclass
@@ -141,6 +376,10 @@ class SoulField:
     organism_lessons: list[OrganismLesson] = field(default_factory=list)
     # Life-horizon pledges / shared commitments (short)
     pledges: list[str] = field(default_factory=list)
+    # Trace sidecar for pledges (keyed by pledge text): strength / recalls /
+    # last_recall_ts — pledges stay plain strings for every consumer, but a
+    # re-stated commitment reconsolidates and outlives one never mentioned again.
+    pledge_traces: dict[str, Any] = field(default_factory=dict)
     # Future-facing partner dreams: how I will help them reach their goals
     future_dreams: list[str] = field(default_factory=list)
     updated_ts: float = field(default_factory=time.time)
@@ -149,10 +388,12 @@ class SoulField:
     def touch(self) -> None:
         self.updated_ts = time.time()
         self.relational.clamp()
-        self.episodes = self.episodes[-MAX_EPISODES:]
-        self.organism_lessons = self.organism_lessons[-MAX_SELF_LESSONS:]
+        # Salience-weighted eviction (not raw FIFO): important, re-used, or
+        # unfinished traces outlast trivial recent ones across every store.
+        self.episodes = retain_episodes(self.episodes, self.updated_ts)
+        self.organism_lessons = retain_lessons(self.organism_lessons, self.updated_ts)
         self.self_habits = [h[:120] for h in self.self_habits if h][:16]
-        self.pledges = [p[:160] for p in self.pledges if p][:12]
+        self.pledges = retain_pledges(self)
         self.future_dreams = [d[:200] for d in self.future_dreams if d][:MAX_FUTURE_DREAMS]
 
     def to_dict(self) -> dict[str, Any]:
@@ -167,6 +408,7 @@ class SoulField:
             "episodes": [asdict(e) for e in self.episodes],
             "organism_lessons": [asdict(x) for x in self.organism_lessons],
             "pledges": list(self.pledges),
+            "pledge_traces": dict(self.pledge_traces),
             "future_dreams": list(self.future_dreams),
             "updated_ts": self.updated_ts,
         }
@@ -193,6 +435,15 @@ class SoulField:
         for e in raw.get("episodes") or []:
             if not isinstance(e, dict):
                 continue
+            val = float(e.get("valence") or 0.0)
+            # Backfill trace strength for episodes saved before this layer
+            # existed, so old memories enter the curve sensibly instead of at 0.
+            stored_strength = e.get("strength")
+            strength = (
+                float(stored_strength)
+                if stored_strength not in (None, "", 0, 0.0)
+                else encode_strength(val)
+            )
             episodes.append(
                 EpisodeResidue(
                     id=str(e.get("id") or ""),
@@ -200,24 +451,37 @@ class SoulField:
                     arc=str(e.get("arc") or ""),
                     user_stance=str(e.get("user_stance") or ""),
                     open_thread=str(e.get("open_thread") or ""),
-                    valence=float(e.get("valence") or 0.0),
+                    valence=val,
                     muscle=str(e.get("muscle") or ""),
                     session_id=str(e.get("session_id") or ""),
                     project_hint=str(e.get("project_hint") or ""),
+                    strength=strength,
+                    recalls=int(e.get("recalls") or 0),
+                    last_recall_ts=float(e.get("last_recall_ts") or 0.0),
                 )
             )
         lessons: list[OrganismLesson] = []
         for x in raw.get("organism_lessons") or []:
             if not isinstance(x, dict):
                 continue
+            oc = str(x.get("outcome") or "")
+            stored = x.get("strength")
             lessons.append(
                 OrganismLesson(
                     ts=float(x.get("ts") or time.time()),
-                    outcome=str(x.get("outcome") or ""),
+                    outcome=oc,
                     tree=str(x.get("tree") or ""),
                     summary=str(x.get("summary") or ""),
                     lesson=str(x.get("lesson") or ""),
                     round_id=str(x.get("round_id") or ""),
+                    # Backfill pre-spine lessons by outcome (as at encode time).
+                    strength=(
+                        float(stored)
+                        if stored not in (None, "", 0, 0.0)
+                        else encode_lesson_strength(oc)
+                    ),
+                    recalls=int(x.get("recalls") or 0),
+                    last_recall_ts=float(x.get("last_recall_ts") or 0.0),
                 )
             )
         g = str(raw.get("identity_gender") or "female").strip().lower()
@@ -233,11 +497,103 @@ class SoulField:
             episodes=episodes,
             organism_lessons=lessons,
             pledges=list(raw.get("pledges") or []),
+            pledge_traces=(
+                {str(k)[:160]: v for k, v in raw.get("pledge_traces").items() if isinstance(v, dict)}
+                if isinstance(raw.get("pledge_traces"), dict)
+                else {}
+            ),
             future_dreams=list(raw.get("future_dreams") or []),
             updated_ts=float(raw.get("updated_ts") or time.time()),
         )
         sf.touch()
         return sf
+
+
+MAX_PLEDGES = 12
+PLEDGE_RECENT_PROTECT = 3
+
+
+def find_pledge_key(sf: SoulField, pledge: str) -> str:
+    """Canonical stored form of a pledge, matched case-insensitively.
+
+    "From now on we test first" and "from now on we test first" are the same
+    commitment — a case variant must reconsolidate the existing trace, not
+    quietly start a second one.
+    """
+    key = (pledge or "").strip()[:160]
+    kf = key.casefold()
+    for p in sf.pledges:
+        if (p or "").casefold() == kf:
+            return p
+    for k in sf.pledge_traces:
+        if (k or "").casefold() == kf:
+            return k
+    return key
+
+
+def pledge_trace_touch(sf: SoulField, pledge: str, now: float | None = None) -> None:
+    """Encode-or-reconsolidate the trace behind a pledge.
+
+    First statement encodes the trace; every re-statement is a recall — the
+    commitment is alive in the relationship, so it hardens and its forgetting
+    clock resets. Call this whenever a pledge is stated, whether or not it was
+    already on the list. Matching is case-insensitive via find_pledge_key.
+    """
+    key = find_pledge_key(sf, pledge)
+    if not key:
+        return
+    ts = float(now if now is not None else time.time())
+    traces = sf.pledge_traces
+    tr = traces.get(key)
+    if isinstance(tr, dict):
+        tr["strength"] = min(1.0, float(tr.get("strength") or 0.0) + 0.12)
+        tr["recalls"] = int(tr.get("recalls") or 0) + 1
+        tr["last_recall_ts"] = ts
+    else:
+        traces[key] = {"strength": 0.5, "recalls": 0, "last_recall_ts": ts, "ts": ts}
+
+
+def _pledge_retention(sf: SoulField, pledge: str, now: float) -> float:
+    tr = sf.pledge_traces.get((pledge or "").strip()[:160])
+    if not isinstance(tr, dict):
+        # Legacy pledge with no trace: middling score anchored now — it competes,
+        # neither immortal nor instantly evicted, until it earns (or loses) place.
+        return 0.35
+    return trace_retention(
+        tr.get("strength"), tr.get("last_recall_ts") or tr.get("ts"), tr.get("recalls"), now
+    )
+
+
+def retain_pledges(sf: SoulField, cap: int = MAX_PLEDGES) -> list[str]:
+    """Salience-weighted pledge eviction — replaces the old ``[:12]`` cap.
+
+    The old cap kept the FIRST 12, so once full, every newly stated commitment
+    was silently dropped on the next touch — new pledges could never land. Now
+    the newest few are protected (a fresh commitment always sticks) and the
+    rest keep their place by trace strength: a pledge the pair keeps re-stating
+    outlives one never mentioned again. Also garbage-collects traces for
+    pledges no longer held.
+    """
+    now = float(sf.updated_ts or time.time())
+    pledges = [p[:160] for p in (sf.pledges or []) if p]
+    # De-dup preserving first occurrence (same text stated twice is one pledge).
+    pledges = list(dict.fromkeys(pledges))
+    if len(pledges) > cap:
+        protect = max(0, min(PLEDGE_RECENT_PROTECT, cap))
+        recent = pledges[len(pledges) - protect:] if protect else []
+        older = [p for p in pledges if p not in recent]
+        slots = cap - len(recent)
+        kept_older = (
+            sorted(older, key=lambda p: _pledge_retention(sf, p, now), reverse=True)[:slots]
+            if slots > 0
+            else []
+        )
+        keep = set(recent) | set(kept_older)
+        pledges = [p for p in pledges if p in keep]
+    # GC traces for pledges no longer held (bound the sidecar to the list).
+    held = set(pledges)
+    sf.pledge_traces = {k: v for k, v in sf.pledge_traces.items() if k in held}
+    return pledges
 
 
 _lock = threading.Lock()

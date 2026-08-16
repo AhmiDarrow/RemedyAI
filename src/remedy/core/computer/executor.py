@@ -24,6 +24,20 @@ from remedy.core.computer.router import (
 from remedy.core.computer.types import ComputerAction, public_result
 
 
+def _skill_host(url_or_label: str) -> str:
+    """Host origin only for skill memory — never the path/query (no secrets)."""
+    s = (url_or_label or "").strip()
+    if not s:
+        return ""
+    with contextlib.suppress(Exception):
+        if "://" in s:
+            from urllib.parse import urlparse
+
+            return (urlparse(s).hostname or "").lower()
+    # Already a bare host label / desktop tag.
+    return s.split("/", 1)[0].lower()
+
+
 class ComputerExecutor:
     def __init__(self, home_dir: Path | str | None = None) -> None:
         self.home_dir = home_dir
@@ -243,6 +257,43 @@ class ComputerExecutor:
                 session_id=self._session_id(runtime),
                 home_dir=self.home_dir,
             )
+            # Skill memory: learn which approach works per site (click-family).
+            with contextlib.suppress(Exception):
+                from remedy.core.computer.computer_skill import (
+                    approach_of,
+                    record_action,
+                )
+
+                if act.value in ("click", "act", "drag"):
+                    host = _skill_host(
+                        self.bridge.last_navigate_url() or host_label(tgt)
+                    )
+                    record_action(
+                        host,
+                        act.value,
+                        approach_of(act.value, kwargs),
+                        bool(result.get("ok")),
+                        home=self.home_dir,
+                    )
+                    # Newly mastered a site → fold it into who she is (once).
+                    if bool(result.get("ok")):
+                        from remedy.core.computer.computer_skill import (
+                            maybe_site_lesson,
+                        )
+
+                        lesson = maybe_site_lesson(host, home=self.home_dir)
+                        if lesson:
+                            from remedy.memory.soul.update import (
+                                record_self_inject_lesson,
+                            )
+
+                            record_self_inject_lesson(
+                                outcome=lesson["outcome"],
+                                tree=lesson["tree"],
+                                summary=lesson["summary"],
+                                gate_detail=lesson["gate_detail"],
+                                home=self.home_dir,
+                            )
             return json.dumps(result, default=str)
         except Exception as e:
             err = public_result(

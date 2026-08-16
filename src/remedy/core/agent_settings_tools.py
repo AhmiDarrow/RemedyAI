@@ -618,7 +618,76 @@ def register_settings_tools(runtime: Any) -> None:
                 tool_name="update_settings",
             )
 
+    async def app_control(
+        action: str = "",
+        target: str = "",
+        goal_id: str = "",
+        section: str = "",
+        panel: str = "",
+    ) -> str:
+        """Drive Remedy's own interface — switch surface, open panels, etc."""
+        import json as _json
+
+        from remedy.core.app_control import VALID_ACTIONS, request_app_action
+
+        act = (action or "").strip()
+        if act not in VALID_ACTIONS:
+            return _json.dumps(
+                {
+                    "ok": False,
+                    "error": f"unknown action {act!r}",
+                    "actions": sorted(VALID_ACTIONS),
+                }
+            )
+        params: dict[str, Any] = {}
+        if act == "switch_surface":
+            t = (target or "").strip().lower()
+            if t not in ("grove", "studio"):
+                return _json.dumps(
+                    {"ok": False, "error": "switch_surface needs target=grove|studio"}
+                )
+            params["target"] = t
+        elif act == "open_goal":
+            if not goal_id.strip():
+                return _json.dumps({"ok": False, "error": "open_goal needs goal_id"})
+            params["goal_id"] = goal_id.strip()
+        elif act == "open_settings" and section.strip():
+            params["section"] = section.strip()
+        elif act == "open_panel":
+            if not panel.strip():
+                return _json.dumps({"ok": False, "error": "open_panel needs panel"})
+            params["panel"] = panel.strip()
+        res = request_app_action(act, **params)
+        res["note"] = "The app will do this within a moment — it's her own UI."
+        return _json.dumps(res)
+
     reg = runtime.tool_registry
+    reg.register_builtin_handler(
+        "app_control",
+        "Drive Remedy's OWN interface instantly (no user clicks needed): "
+        "action='switch_surface' target='studio'|'grove' (switch the workbench "
+        "view — use when the user says 'switch to studio', 'go to grove', 'let's "
+        "code'); action='open_settings' section=''; action='open_panel' panel=''; "
+        "action='open_goal' goal_id=''; action='focus_composer'; "
+        "action='new_session'. This moves her own windows — for changing "
+        "settings/models use update_settings; for the PC/apps use computer_* / "
+        "host_run.",
+        app_control,
+        {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "switch_surface | open_settings | open_panel | open_goal | focus_composer | new_session",
+                },
+                "target": {"type": "string", "description": "grove | studio (for switch_surface)"},
+                "goal_id": {"type": "string"},
+                "section": {"type": "string"},
+                "panel": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    )
     reg.register_builtin_handler(
         "get_settings",
         "Read current Remedy settings (provider, model, Sleev routing, web tools, "

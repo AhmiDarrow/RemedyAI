@@ -1021,14 +1021,42 @@ def open_app(
     if which:
         subprocess.Popen([which], shell=False, close_fds=True)
         return {"app": raw, "method": "which", "target": which}
+    # Appliances: anything in her house (Start Menu inventory), natural name.
+    # "spotify", "word", "steam" resolve here without hardcoded aliases.
+    try:
+        from remedy.core.computer.appliances import best_appliance
+
+        hit = best_appliance(raw)
+        if hit is not None:
+            lnk = Path(hit.path)
+            if lnk.is_file() and lnk.suffix.lower() == ".lnk":
+                # Launch via the app's own shortcut: preserves its intended
+                # args/working dir. Path comes from our Start Menu scan only.
+                os.startfile(str(lnk))  # noqa: S606 — trusted scan root
+                return {
+                    "app": raw,
+                    "method": "appliance",
+                    "target": hit.name,
+                    "path": str(lnk),
+                }
+    except Exception:
+        pass
     # Last resort: cmd start only for simple registered app names (no path seps)
     if "/" in raw or "\\" in raw or ":" in raw:
         raise ValueError(
             f"open_app could not resolve {raw[:80]!r} (no path / PATH entry)"
         )
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._ +\-]*", raw):
+        hint = ""
+        try:
+            from remedy.core.computer.appliances import suggestions_line
+
+            hint = suggestions_line(raw)
+        except Exception:
+            hint = ""
         raise ValueError(
             f"open_app refuses unsafe app name for shell start: {raw[:48]!r}"
+            + (f" · {hint}" if hint else "")
         )
     subprocess.Popen(
         ["cmd", "/c", "start", "", raw],

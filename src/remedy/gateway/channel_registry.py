@@ -158,6 +158,7 @@ def register_messenger_channels(
                     room_id=str(s.get("room_id") or ""),
                     allow_ids=parse_list_field(s.get("allow_ids") or s.get("room_id")),
                     allow_all=bool(s.get("allow_all")),
+                    home_dir=str(home) if home else None,
                 )
             )
             registered.append("matrix")

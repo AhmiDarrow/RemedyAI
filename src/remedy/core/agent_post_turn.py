@@ -250,6 +250,109 @@ def distill_user_message_now(
     return out
 
 
+async def _force_memory_save_async(memory: Any, content: str) -> None:
+    """Await the memory_save mirror directly — no private loop, no blocking.
+
+    Runs on the caller's event loop so the shared, loop-bound MemoryStore is
+    never driven from a second loop (and the uvicorn loop is never frozen).
+    """
+    import re
+
+    from remedy.memory.partner_memory import looks_like_secret, upsert_profile_fact
+    from remedy.models import MemoryEntry, MemoryEntryType
+
+    text = re.sub(r"\s+", " ", (content or "").strip())
+    if not text or looks_like_secret(text):
+        return
+    await memory.upsert(
+        MemoryEntry(
+            title=text[:120] or "Remembered",
+            content=text,
+            entry_type=MemoryEntryType.NOTE,
+            importance=0.85,
+        )
+    )
+    if len(text) < 400:
+        profile = await memory.get_or_create_profile()
+        upsert_profile_fact(
+            profile,
+            text,
+            category="general",
+            confidence=0.95,
+            source="explicit",
+            force=True,
+        )
+        await memory.save_user_profile(profile)
+
+
+async def distill_user_message_now_async(
+    runtime: Any,
+    message: str,
+    *,
+    session_id: str | None = None,
+    already_distilled: bool = False,
+) -> dict[str, Any]:
+    """Async twin of :func:`distill_user_message_now` — never blocks the loop.
+
+    When *already_distilled* is True the main partner-memory distill was
+    already awaited by the caller, so only the belt-and-suspenders
+    memory_save mirror runs (awaited, not thread-blocked).
+    """
+    out: dict[str, Any] = {"added": 0, "reinforced": 0, "skipped": 0, "tool_saved": False}
+    text = (message or "").strip()
+    mem = getattr(runtime, "memory", None)
+    if not text or mem is None:
+        return out
+    with suppress(Exception):
+        from remedy.memory.partner_memory import (
+            distill_user_text,
+            extract_heuristic_facts,
+            is_explicit_remember_intent,
+        )
+
+        if not is_explicit_remember_intent(text):
+            return out
+        project_path = (
+            str(
+                getattr(getattr(runtime, "config", None), "project_path", None)
+                or getattr(runtime, "_project_path", None)
+                or ""
+            )
+            or None
+        )
+        sid = str(session_id or getattr(runtime, "_session_id", None) or "")
+        result: dict[str, Any] | None = None
+        if not already_distilled:
+            result = await distill_user_text(
+                mem,
+                text,
+                brief=getattr(runtime, "_session_brief", None),
+                session_id=sid or None,
+                project_path=project_path,
+            )
+            if isinstance(result, dict):
+                out.update(result)
+
+        facts = extract_heuristic_facts(text)
+        fact_texts = [f.text for f in facts if (f.text or "").strip()]
+        if not fact_texts and isinstance(result, dict):
+            fact_texts = list(result.get("facts") or [])
+        if not fact_texts:
+            import re
+
+            m = re.search(
+                r"(?i)remember(?:\s+(?:this|that|the|fact))?[:\s]+(.+?)(?:[.!?\n]|$)",
+                text,
+            )
+            if m:
+                fact_texts = [m.group(1).strip()]
+        for ft in fact_texts[:3]:
+            with suppress(Exception):
+                await _force_memory_save_async(mem, str(ft))
+                out["tool_saved"] = True
+    return out
+
+
 def _force_memory_save_sync(memory: Any, content: str) -> None:
     """Mirror memory_save tool: NOTE entry + partner profile fact (sync path)."""
     import asyncio

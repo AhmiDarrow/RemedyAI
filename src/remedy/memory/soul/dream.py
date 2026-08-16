@@ -18,6 +18,10 @@ from remedy.memory.soul.field import (
     SoulField,
     load_soul_field,
     looks_like_secret_soul,
+    pledge_trace_touch,
+    rehearse_episodes,
+    rehearse_lessons,
+    retain_episodes,
     save_soul_field,
 )
 
@@ -173,9 +177,13 @@ def dream_cycle(
             if pretty not in sf.relational.open_threads:
                 sf.relational.open_threads.append(pretty[:160])
                 promoted_threads += 1
-            # Life-ish if repeated often
-            if n >= 3 and pretty not in sf.pledges:
-                sf.pledges.append(f"Stay with: {pretty[:140]}")
+            # Life-ish if repeated often. If the pledge already exists, the
+            # recurring thread is a recall of it — reconsolidate its trace.
+            if n >= 3:
+                stay = f"Stay with: {pretty[:140]}"
+                if stay not in sf.pledges:
+                    sf.pledges.append(stay)
+                pledge_trace_touch(sf, stay)
 
     # Promote recurring arcs mentioning "always/never/prefer" into habits
     habit_n = 0
@@ -200,10 +208,18 @@ def dream_cycle(
         if habit not in sf.self_habits:
             sf.self_habits.append(habit)
 
-    # Compress oldest episodes if over cap (keep last 8 raw, dream-merge rest)
+    # Spaced rehearsal: before compressing, refresh the highest-value traces so
+    # what matters survives the gaps between visits (active maintenance = truly
+    # eternal, not just slow-decaying).
+    now_ts = time.time()
+    rehearsed_n = rehearse_episodes(sf.episodes, now_ts)
+    rehearsed_n += rehearse_lessons(sf.organism_lessons, now_ts)
+
+    # Compress if over cap — salience-weighted, NOT raw FIFO. The old
+    # `episodes[-8:]` would have discarded exactly the pivotal old memories
+    # rehearsal just kept warm; retain_episodes keeps recent + highest-retention.
     if len(sf.episodes) > 10:
-        # Keep newest 8; drop middle noise (oldest of the excess)
-        sf.episodes = sf.episodes[-8:]
+        sf.episodes = retain_episodes(sf.episodes, now_ts, cap=8)
 
     # Promote durable life/goal partner facts into soul pledges (organism densify)
     if memory is not None:
@@ -332,6 +348,7 @@ def dream_cycle(
         "skipped": False,
         "episodes_before": before_eps,
         "episodes_after": len(sf.episodes),
+        "rehearsed": rehearsed_n,
         "dominant_stance": dominant,
         "promoted_threads": promoted_threads,
         "habits_added": habit_n,

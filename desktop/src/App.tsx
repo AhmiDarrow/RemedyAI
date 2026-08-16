@@ -64,6 +64,7 @@ import { useTheme } from './hooks/useTheme'
 import { loadUiMode, saveUiMode, type UiMode } from './utils/uiMode'
 import { loadSurface, saveSurface, type AppSurface } from './utils/surface'
 import { GroveApp } from './grove/GroveApp'
+import { takeAppCommand } from './api/appControl'
 import { browserStackSet } from './utils/browserStack'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useNotifications } from './hooks/useNotifications'
@@ -154,6 +155,13 @@ export default function App() {
     rename,
     refresh: refreshSessions,
   } = useSessions()
+  // Studio lists raw-work sessions only — Grove's personal home/goal chats
+  // (origin_channel = "grove") are hers and the user's meeting place, not
+  // workbench sessions, so they never appear in Studio's list.
+  const studioSessions = useMemo(
+    () => sessions.filter((s) => s.origin_channel !== 'grove'),
+    [sessions],
+  )
   const {
     messages,
     loading: messagesLoading,
@@ -243,6 +251,9 @@ export default function App() {
     setSurface(s)
     saveSurface(s)
   }, [])
+  // Goal room Remedy asked to open herself (app_control open_goal); GroveApp
+  // consumes it once its board carries the goal, then acks to clear it.
+  const [pendingGroveGoal, setPendingGroveGoal] = useState<string | null>(null)
   /** Plan mode is per-session so switching chats does not stick Plan/Build. */
   const [planModeBySession, setPlanModeBySession] = useState<Record<string, boolean>>({})
   const planMode = Boolean(activeId && planModeBySession[activeId])
@@ -704,6 +715,62 @@ export default function App() {
       )
     }
   }, [create, barProvider, barModel, setSessionBind])
+
+  // App control: Remedy drives her own interface. Poll the server bus for
+  // UI actions she enqueued (switch surface, open settings/panel/goal, …)
+  // and dispatch them — her "within herself" actions happen without clicks.
+  useEffect(() => {
+    if (serverState !== 'ready') return
+    let alive = true
+    const tick = async () => {
+      const cmd = await takeAppCommand()
+      if (!alive || !cmd) return
+      try {
+        switch (cmd.action) {
+          case 'switch_surface': {
+            const t = cmd.params?.target
+            if (t === 'grove' || t === 'studio') switchSurface(t)
+            break
+          }
+          case 'open_settings':
+            switchSurface('studio')
+            openSettingsInRail()
+            break
+          case 'open_panel': {
+            const p = cmd.params?.panel
+            if (p === 'memory' || p === 'skills' || p === 'settings') {
+              switchSurface('studio')
+              setPanel(p)
+            }
+            break
+          }
+          case 'open_goal': {
+            const gid = cmd.params?.goal_id
+            if (gid) {
+              switchSurface('grove')
+              setPendingGroveGoal(gid)
+            }
+            break
+          }
+          case 'new_session':
+            void handleNewSession()
+            break
+          case 'focus_composer':
+            composerRef.current?.focus()
+            break
+          default:
+            break
+        }
+      } catch {
+        /* dispatch is best-effort */
+      }
+    }
+    const iv = window.setInterval(() => void tick(), 700)
+    return () => {
+      alive = false
+      window.clearInterval(iv)
+    }
+  }, [serverState, switchSurface, openSettingsInRail, setPanel, handleNewSession])
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -1319,7 +1386,7 @@ export default function App() {
   const sessionsSlide = (
     <Sidebar
       embedded
-      sessions={sessions}
+      sessions={studioSessions}
       activeId={activeId}
       busySessionIds={busyIds}
       onSelect={handleSelect}
@@ -1496,6 +1563,8 @@ export default function App() {
           userName={userName}
           partnerName={partnerName}
           onSwitchToStudio={() => switchSurface('studio')}
+          openGoalId={pendingGroveGoal}
+          onGoalOpened={() => setPendingGroveGoal(null)}
         />
       )}
 
@@ -1606,6 +1675,10 @@ export default function App() {
               position: 'relative',
             }}
           >
+            {/* Grove has its own feed: skip rendering this hidden one while
+                Grove is the surface, so streaming chunks aren't rendered
+                twice. Remount on switch-back re-sticks to bottom. */}
+            {surface !== 'grove' && (
             <MessageFeed
               messages={messages}
               partialText={partialText}
@@ -1634,6 +1707,7 @@ export default function App() {
               }
               sessionId={activeId}
             />
+            )}
           </div>
 
           <div

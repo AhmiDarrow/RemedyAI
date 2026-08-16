@@ -43,12 +43,63 @@ def _resolve_ref_label(ex: Any, ref: str) -> str:
     return ""
 
 
-def _computer_approval_gate(runtime: Any, tool_name: str, summary: str) -> str | None:
+def _page_context(ex: Any) -> str:
+    """Best-effort text of the current rail surface (URL + last element labels).
+
+    Used only to detect a checkout/payment surface for the owner checkpoint —
+    never logged, never sent to a model.
+    """
+    bits: list[str] = []
+    try:
+        bits.append(str(ex.bridge.last_navigate_url() or ""))
+    except Exception:
+        pass
+    try:
+        info = ex.bridge.last_elements_info() or {}
+        bits.append(str(info.get("target") or ""))
+        for el in (info.get("elements") or [])[:40]:
+            bits.append(str(el.get("name") or el.get("text") or ""))
+    except Exception:
+        pass
+    return " ".join(b for b in bits if b)[:2000]
+
+
+def _computer_approval_gate(
+    runtime: Any,
+    tool_name: str,
+    summary: str,
+    *,
+    page_context: str = "",
+    label_resolved: bool = True,
+    key: str = "",
+    typed_text: str = "",
+) -> str | None:
     """Return APPROVAL_REQUIRED text when Ask mode blocks a mutation, else None."""
-    from remedy.core.approvals import APPROVALS
+    from remedy.core.approvals import (
+        APPROVALS,
+        payment_surface_checkpoint,
+        raw_secret_checkpoint,
+    )
     from remedy.core.turn_context import turn_session_id
 
-    ask_reason = APPROVALS.needs_ask(summary, tool_name=tool_name)
+    ask_reason: str | None = None
+    # The payment-surface + raw-card heads-ups are for the CAUTIOUS DEFAULT
+    # only. When the owner has set auto/full, they have deliberately handed
+    # Remedy the keys to the machine — she uses the PC as if it were hers,
+    # effortlessly, with no per-action roadblocks (the standing grant is the
+    # countersignature). These extra checks apply solely in ``ask`` mode so a
+    # brand-new user still gets a money heads-up until they trust her fully.
+    if APPROVALS.mode == "ask":
+        ask_reason = payment_surface_checkpoint(
+            tool_name,
+            label_resolved=label_resolved,
+            page_context=page_context,
+            key=key,
+        )
+        if not ask_reason:
+            ask_reason = raw_secret_checkpoint(tool_name, typed_text)
+    if not ask_reason:
+        ask_reason = APPROVALS.needs_ask(summary, tool_name=tool_name)
     if not ask_reason:
         return None
     sid = turn_session_id(runtime)
@@ -153,7 +204,12 @@ def register_computer_tools(runtime: Any) -> None:
             f"click text={(label or text)!r} ref={ref!r} x={x} y={y} "
             f"button={button} clicks={clicks} target={target or 'auto'}"
         )
-        blocked = _computer_approval_gate(runtime, "computer_click", summary)
+        _label_ok = bool((text or "").strip()) or bool(_resolve_ref_label(ex, ref))
+        blocked = _computer_approval_gate(
+            runtime, "computer_click", summary,
+            page_context=_page_context(ex),
+            label_resolved=_label_ok,
+        )
         if blocked:
             return blocked
         return await _run_computer(ex,
@@ -264,7 +320,13 @@ def register_computer_tools(runtime: Any) -> None:
             f"act url={url!r} click={click!r} {type_note} key={key!r} "
             f"goal={goal!r} target={target or 'auto'}"
         )
-        blocked = _computer_approval_gate(runtime, "computer_act", summary)
+        blocked = _computer_approval_gate(
+            runtime, "computer_act", summary,
+            page_context=_page_context(ex),
+            label_resolved=bool((click or "").strip()),
+            key=key,
+            typed_text=type,
+        )
         if blocked:
             return blocked
         return await _run_computer(ex,
@@ -341,7 +403,10 @@ def register_computer_tools(runtime: Any) -> None:
         summary = (
             f"type chars={len(text or '')} target={target or 'auto'}{vault_note}"
         )
-        blocked = _computer_approval_gate(runtime, "computer_type", summary)
+        blocked = _computer_approval_gate(
+            runtime, "computer_type", summary,
+            typed_text=text,
+        )
         if blocked:
             return blocked
         return await _run_computer(ex,
@@ -359,7 +424,12 @@ def register_computer_tools(runtime: Any) -> None:
     ) -> str:
         """Press a key or combo (enter, tab, ctrl+s, alt+f4, …)."""
         summary = f"key={key!r} target={target or 'auto'}"
-        blocked = _computer_approval_gate(runtime, "computer_key", summary)
+        blocked = _computer_approval_gate(
+            runtime, "computer_key", summary,
+            page_context=_page_context(ex),
+            label_resolved=False,
+            key=key,
+        )
         if blocked:
             return blocked
         return await _run_computer(ex,
@@ -436,7 +506,11 @@ def register_computer_tools(runtime: Any) -> None:
     ) -> str:
         """Drag from (x,y) to (x2,y2)."""
         summary = f"drag ({x},{y})->({x2},{y2}) target={target or 'auto'}"
-        blocked = _computer_approval_gate(runtime, "computer_drag", summary)
+        blocked = _computer_approval_gate(
+            runtime, "computer_drag", summary,
+            page_context=_page_context(ex),
+            label_resolved=False,
+        )
         if blocked:
             return blocked
         return await _run_computer(ex,

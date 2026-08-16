@@ -1070,7 +1070,15 @@ def observe_tool_batch(
                 saw_red = True
             continue
         passed = re.search(r"\b(\d+)\s+passed\b", low)
-        if passed and int(passed.group(1)) > 0 and "failed" not in low:
+        if (
+            passed
+            and int(passed.group(1)) > 0
+            and "failed" not in low
+            # pytest can report "3 passed, 2 errors" (collection/fixture
+            # errors) with no "failed" — that is not green.
+            and not re.search(r"\b\d+\s+error(s)?\b", low)
+            and "errors during collection" not in low
+        ):
             saw_green = True
         elif _VERIFY_HINT.search(content) and re.search(
             r"\b(fail|failed|error)\b", low

@@ -144,6 +144,7 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             agent=req.agent,
             project_path=project_path,
             llm_provider=sess_provider,
+            origin_channel=req.origin_channel,
         )
         saved = await memory.create_chat_session(session)
         await _publish_session("session_created", saved)

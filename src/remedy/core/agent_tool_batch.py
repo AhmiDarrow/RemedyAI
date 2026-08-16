@@ -67,6 +67,38 @@ def progress_marker(
 
 
 _WRITE_TOOLS = frozenset({"file_write", "file_edit", "file_edit_batch", "apply_patch"})
+_READ_TOOLS = frozenset({"file_read", "list_dir", "repo_search"})
+
+
+def _norm_path_str(p: str) -> str:
+    """Loose path normalization for cross-tool matching (slashes + basename)."""
+    return (p or "").replace("\\", "/").strip().rstrip("/")
+
+
+def _evict_reads_for_path(
+    path: str,
+    seen_fps: set[str],
+    result_cache: dict[str, str],
+) -> None:
+    """Drop cached read results that reference *path* after a write to it.
+
+    Fingerprints are ``name::json-args``; match a read whose args JSON mentions
+    the same normalized path (or its basename) so the model's verify-read runs
+    live instead of being filtered as a duplicate.
+    """
+    norm = _norm_path_str(path)
+    if not norm:
+        return
+    base = norm.rsplit("/", 1)[-1]
+    for fp in list(seen_fps):
+        head = fp.split("::", 1)[0]
+        if head not in _READ_TOOLS:
+            continue
+        body = fp.split("::", 1)[1] if "::" in fp else ""
+        body_norm = body.replace("\\\\", "/").replace("\\/", "/")
+        if norm in body_norm or (base and f'"{base}"' in body) or base in body_norm:
+            seen_fps.discard(fp)
+            result_cache.pop(fp, None)
 
 
 def _normalize_lock_path(path: str, runtime: Any | None = None) -> str:
@@ -552,6 +584,17 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             )
         result_cache[fp] = content_str
         seen_fps.add(fp)
+        # After a successful write, evict any cached read of the same path so a
+        # later verify-read returns fresh content instead of the pre-edit copy
+        # (filter_fresh_tool_calls would otherwise treat the re-read as a repeat
+        # and replay stale source for the rest of the turn).
+        if name in _WRITE_TOOLS and effective_ok:
+            with suppress(Exception):
+                _evict_reads_for_path(
+                    str(args.get("path") or args.get("file") or "").strip(),
+                    seen_fps,
+                    result_cache,
+                )
         # Trace step for post-turn auto-learn (per-turn ContextVar list)
         with suppress(Exception):
             from remedy.core.turn_context import current_turn_tool_steps, turn_session_id

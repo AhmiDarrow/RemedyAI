@@ -8,12 +8,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import threading
 import time
 from contextlib import suppress
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+# The ledger is written from the per-turn path AND the vigil thread — serialize
+# read-modify-write so a concurrent save can't drop an appended hop or corrupt
+# the file via a shared temp name.
+_ledger_lock = threading.RLock()
 
 
 @dataclass
@@ -198,13 +205,22 @@ def save_ledger(
     entry.updated_ts = time.time()
     path = ledger_path(entry.project_path or None, home=home)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
     data = json.dumps(entry.to_dict(), ensure_ascii=False, indent=2)
-    tmp.write_text(data, encoding="utf-8")
-    with suppress(Exception):
-        tmp.replace(path)
-        return path
-    path.write_text(data, encoding="utf-8")
+    # Unique temp per writer (pid+tid) so two concurrent saves never interleave
+    # bytes into one ledger.tmp and promote torn JSON via replace.
+    tmp = path.with_suffix(f".tmp{os.getpid()}.{threading.get_ident()}")
+    with _ledger_lock:
+        tmp.write_text(data, encoding="utf-8")
+        # Atomic-or-nothing: keep the old file on a failed replace rather than
+        # corrupting it (a torn write would make load_ledger drop all state).
+        for _ in range(3):
+            try:
+                tmp.replace(path)
+                return path
+            except OSError:
+                time.sleep(0.02)
+        with suppress(OSError):
+            tmp.unlink()
     return path
 
 
@@ -216,6 +232,19 @@ def merge_turn_into_ledger(
     home: str | Path | None = None,
 ) -> BuildLedgerEntry:
     """Upsert ledger from live BuildTurnState."""
+    with _ledger_lock:
+        return _merge_turn_into_ledger_locked(
+            state, project_path=project_path, session_id=session_id, home=home
+        )
+
+
+def _merge_turn_into_ledger_locked(
+    state: Any,
+    *,
+    project_path: str = "",
+    session_id: str = "",
+    home: str | Path | None = None,
+) -> BuildLedgerEntry:
     existing = load_ledger(project_path or getattr(state, "project_path", None), home=home)
     entry = existing or BuildLedgerEntry()
     if not entry.created_ts:
@@ -311,15 +340,16 @@ def append_hop(
     *,
     home: str | Path | None = None,
 ) -> BuildLedgerEntry:
-    entry = load_ledger(project_path, home=home) or BuildLedgerEntry(
-        project_path=project_path
-    )
-    entry.project_path = project_path or entry.project_path
-    h = dict(hop)
-    h["ts"] = time.time()
-    entry.hops.append(h)
-    entry.hops = entry.hops[-40:]
-    save_ledger(entry, home=home)
+    with _ledger_lock:
+        entry = load_ledger(project_path, home=home) or BuildLedgerEntry(
+            project_path=project_path
+        )
+        entry.project_path = project_path or entry.project_path
+        h = dict(hop)
+        h["ts"] = time.time()
+        entry.hops.append(h)
+        entry.hops = entry.hops[-40:]
+        save_ledger(entry, home=home)
     return entry
 
 
@@ -373,6 +403,52 @@ def body_next_line(entry: BuildLedgerEntry) -> str:
     return " ".join(body_next_lines(entry))
 
 
+def needs_resume_drive(entry: "BuildLedgerEntry | None") -> bool:
+    """True when a build was left mid-ship and RED — she should keep driving.
+
+    A red build with writes on disk is unfinished work she owns; the next
+    turn should resume and drive it to green, not abandon it. Green or
+    write-less ledgers do not qualify (nothing to persist toward).
+    """
+    if entry is None:
+        return False
+    if entry.phase == "done" and entry.last_verify_ok is True:
+        return False
+    if entry.last_verify_ok is not False:
+        return False
+    return bool(entry.write_set)
+
+
+_CONTINUE_RE = re.compile(
+    r"(?is)^\s*(continue|keep going|carry on|go on|proceed|resume|"
+    r"finish (it|that|up)|keep at it|carry it out|and\?|next|more|go)\s*[.!?]*\s*$"
+)
+
+
+def looks_like_continue(message: str) -> bool:
+    """A bare continue signal (not a fresh, unrelated request)."""
+    m = (message or "").strip()
+    return not m or bool(_CONTINUE_RE.match(m))
+
+
+def should_auto_resume_drive(
+    message: str,
+    project_path: str | Path | None = None,
+    *,
+    home: str | Path | None = None,
+) -> bool:
+    """Auto-resume the drive-to-green loop only on a continue + red build.
+
+    Deliberately conservative — a new, unrelated request must NOT hijack the
+    turn into an old build ("latest message wins"). Empty / "continue" /
+    "keep going" over a red mid-ship ledger is the one case she resumes on
+    her own.
+    """
+    if not looks_like_continue(message):
+        return False
+    return needs_resume_drive(load_ledger(project_path, home=home))
+
+
 def resume_hint(project_path: str | Path | None = None, *, home: str | Path | None = None) -> str:
     """Human/machine inject line for continuing a mid-ship build."""
     entry = load_ledger(project_path, home=home)
@@ -389,6 +465,15 @@ def resume_hint(project_path: str | Path | None = None, *, home: str | Path | No
         "[Build ledger — resume mid-ship]",
         f"phase={entry.phase} goal={entry.goal[:160] or '—'}",
     ]
+    # Red build left mid-ship = unfinished work she owns. Direct her to keep
+    # driving to green (build_drive loops verify→repair), not to abandon it.
+    if needs_resume_drive(entry):
+        lines.append(
+            "This build is RED with writes on disk — do not leave it unfinished. "
+            "Continue driving it to green: call build_drive (it loops "
+            "verify→repair→re-verify until tests pass), or read the failure and "
+            "file_edit directly, then re-verify. Do not claim done until green."
+        )
     if not body:
         lines.append(
             f"verify_command={entry.verify_command or '(none discovered)'} "

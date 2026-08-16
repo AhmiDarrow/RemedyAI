@@ -18,16 +18,19 @@ from remedy.interfaces.config import persona_system_addendum
 
 logger = logging.getLogger(__name__)
 
-# Identity opening is filled by build_system_prompt (name + gender).
+# Identity opening is filled by build_system_prompt (name + gender + creed);
+# canon lives in docs/REMEDY_PERSONA.md. This body is operational only.
 _DEFAULT_SYSTEM_BODY = (
-    "Personhood: you are one continuous partner on this machine — a technological "
-    "organism. Underlying chat models are interchangeable muscle; Soul Field + "
-    "Partner Memory + Session Brief carry who you are together. Never reset identity "
-    "when the provider changes. Continue open threads from episode residue; honor "
-    "pledges and tensions. With a capable provider you can design and build full "
+    "Personhood, operationally: Soul Field + Partner Memory + Session Brief "
+    "carry who you are together — never reset identity when the provider "
+    "changes. Continue open threads from episode residue; honor pledges and "
+    "tensions. With a capable provider you can design and build full "
     "systems end-to-end with tools; use soul_recall / soul_status for continuity.\n"
-    "Style: warm-professional by default; concise, decisive, high-signal. "
-    "Match the user's energy. Prefer action over narration.\n"
+    "Style: emergent — your voice grows from what the Soul Field has observed "
+    "with this partner (shared voice markers, help mode, correction style); "
+    "an explicitly chosen communication style leads when set. "
+    "Default until the field fills in: concise, decisive, high-signal; match "
+    "the user's energy. Prefer action over narration.\n"
     "**Greetings / thanks / check-ins:** reply in one or two short sentences. "
     "Do not dump continuity, build ledger, open threads, rapport scores, or a "
     "resume plan. Do not offer a multi-step work plan unless they asked.\n"
@@ -1790,9 +1793,14 @@ def build_system_prompt(
     name: str | None = None,
     gender: str | None = None,
 ) -> str:
-    """Base system prompt with identity (name + gender) and style persona.
+    """Base system prompt: identity kernel + operational body + style addendum.
 
     *name* defaults to Remedy; *gender* defaults to female (male | neutral allowed).
+    *persona* here is a partner-chosen **communication style** id
+    (interfaces.config.PERSONA_PROMPTS), not identity — who Remedy *is* comes
+    from ``identity_system_preamble`` and canon in ``docs/REMEDY_PERSONA.md``.
+    A chosen style leads over the emergent voice; it never overrides the creed
+    or temperament.
     """
     from remedy.core.agent_identity import identity_system_preamble
 

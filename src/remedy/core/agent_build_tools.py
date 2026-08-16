@@ -507,6 +507,9 @@ def register_build_tools(runtime: Any) -> None:
         if res.get("error") and not res.get("tdd"):
             return f"build_drive failed: {res.get('error')}"
         lines = [res.get("message") or json.dumps({k: res.get(k) for k in ('ok', 'phase')})]
+        dg = res.get("drive_to_green") or {}
+        if dg.get("message"):
+            lines.append(f"Drive-to-green: {dg['message']}")
         hops = res.get("hops") or []
         for h in hops[:10]:
             if isinstance(h, dict):
@@ -602,10 +605,13 @@ def register_build_tools(runtime: Any) -> None:
     )
     runtime.tool_registry.register_builtin_handler(
         "build_drive",
-        "Machine-owned implement-verify-fix loop: compile spec, write failing "
-        "TDD tests, hop units (use_llm=true fills/repairs via the turn model), "
-        "run gate tower, auto-repair. Prefer this over a long plan monologue "
-        "when the user asked to implement/build. Continue from the result.",
+        "Machine-owned implement-VERIFY-fix loop that drives to actually-green: "
+        "compile spec, write failing TDD tests, hop units (use_llm=true fills/"
+        "repairs via the turn model), then LOOP gate-tower verify → auto-repair "
+        "→ re-verify until the tests pass, a repair budget is hit, or progress "
+        "stalls (it reports which). Does not stop at first red. Prefer this over "
+        "a long plan monologue when the user asked to implement/build; read "
+        "drive_to_green in the result and continue only if it's not yet green.",
         build_drive,
         {
             "type": "object",
