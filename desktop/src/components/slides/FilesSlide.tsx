@@ -131,14 +131,7 @@ export function FilesSlide({
           flashStatus(`Opened ${f.name}`)
           return
         } catch {
-          await tauriInvoke('open_external_url', {
-            url: `file:///${full.replace(/\\/g, '/')}`,
-            preferFirefox: false,
-          }).catch(() => {
-            throw new Error('open failed')
-          })
-          flashStatus(`Opened ${f.name}`)
-          return
+          throw new Error('open failed')
         }
       }
       window.open(`file:///${full.replace(/\\/g, '/')}`, '_blank')

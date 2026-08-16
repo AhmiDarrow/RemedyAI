@@ -499,6 +499,36 @@ class MemoryStore:
             db.commit()
             return cursor.rowcount > 0
 
+    async def delete_by_session(self, session_id: str) -> int:
+        """Drop memory entries + session summary for one chat."""
+        sid = str(session_id or "").strip()
+        if not sid:
+            return 0
+        with self._locked():
+            db = self._ensure_db()
+            cur = db.execute(
+                "DELETE FROM memory_entries WHERE session_id = ?", (sid,)
+            )
+            with contextlib.suppress(sqlite3.Error):
+                db.execute(
+                    "DELETE FROM session_summaries WHERE session_id = ?", (sid,)
+                )
+            db.commit()
+            return int(cur.rowcount or 0)
+
+    async def delete_by_type(self, entry_type: str | MemoryEntryType) -> int:
+        kind = getattr(entry_type, "value", entry_type)
+        kind = str(kind or "").strip()
+        if not kind:
+            return 0
+        with self._locked():
+            db = self._ensure_db()
+            cur = db.execute(
+                "DELETE FROM memory_entries WHERE entry_type = ?", (kind,)
+            )
+            db.commit()
+            return int(cur.rowcount or 0)
+
     async def list_by_type(
         self, entry_type: MemoryEntryType, limit: int = 50, offset: int = 0
     ) -> list[MemoryEntry]:
@@ -1018,11 +1048,20 @@ class MemoryStore:
             return self._row_to_session(row)
 
     async def delete_chat_session(self, session_id: str) -> bool:
+        sid = str(session_id or "").strip()
         with self._locked():
             db = self._ensure_db()
-            db.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+            db.execute("DELETE FROM chat_messages WHERE session_id = ?", (sid,))
+            with contextlib.suppress(sqlite3.Error):
+                db.execute(
+                    "DELETE FROM session_summaries WHERE session_id = ?", (sid,)
+                )
+            with contextlib.suppress(sqlite3.Error):
+                db.execute(
+                    "DELETE FROM memory_entries WHERE session_id = ?", (sid,)
+                )
             cursor = db.execute(
-                "DELETE FROM chat_sessions WHERE id = ?", (session_id,)
+                "DELETE FROM chat_sessions WHERE id = ?", (sid,)
             )
             db.commit()
             return cursor.rowcount > 0

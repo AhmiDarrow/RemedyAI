@@ -1059,7 +1059,15 @@ function ProjectSection({
                     style={{ color: 'var(--error)' }}
                     onClick={(e) => {
                       e.stopPropagation()
-                      onDelete(s.id)
+                      const title = (s.title || 'this chat').trim()
+                      const ok = window.confirm(
+                        `Delete “${title}”?\n\n`
+                          + 'This removes the transcript plus session notes, attachments, '
+                          + 'plans, and undo history for this chat.\n\n'
+                          + 'Partner Memory (facts Remedy remembers about you) is kept. '
+                          + 'Use Settings → You & Agent → Wipe persona to forget those.',
+                      )
+                      if (ok) onDelete(s.id)
                     }}
                   >
                     ×

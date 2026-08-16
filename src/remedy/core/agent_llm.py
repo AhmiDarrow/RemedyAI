@@ -70,6 +70,7 @@ _LOCAL_TOOL_PRIORITY = (
     "file_write",
     "file_edit",
     "file_edit_batch",
+    "host_run",
     "todo_write",
     "todo_read",
     "build_drive",

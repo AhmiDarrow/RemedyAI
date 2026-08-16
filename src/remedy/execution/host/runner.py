@@ -133,6 +133,12 @@ def prepare_host_command(
 ) -> PreparedCommand:
     """Turn a model-emitted command string into an argv the sandbox can exec."""
     raw = (command or "").strip()
+    if re.search(r"(?i)\bpytest\b", raw) and re.search(
+        r"(?i)(?:^|\s)(?:--lf|--last-failed)\b", raw
+    ):
+        raw = re.sub(r"(?i)(?:^|\s)--lf\b", " ", raw)
+        raw = re.sub(r"(?i)(?:^|\s)--last-failed\b", " ", raw)
+        raw = re.sub(r"\s+", " ", raw).strip()
     resolved_host = host or ("cmd" if os.name == "nt" else "posix")
     if not raw:
         return PreparedCommand(

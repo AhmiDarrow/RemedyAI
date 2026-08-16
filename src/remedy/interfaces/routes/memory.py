@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 
 from remedy.interfaces.api_models import (
     MemoryAddRequest,
+    PersonaWipeRequest,
     SkillInfo,
     WebhookPayload,
 )
@@ -77,6 +78,24 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         )
         saved = await memory.upsert(entry)
         return {"id": str(saved.id), "title": saved.title, "status": "saved"}
+
+    @app.post("/api/memory/persona-wipe")
+    async def persona_wipe(req: PersonaWipeRequest):
+        """Forget Partner Memory / soul residue. Chats, keys, and skills stay."""
+        from remedy.memory.persona_wipe import wipe_persona
+
+        home = None
+        with suppress(Exception):
+            from remedy.interfaces.config import load_config
+
+            home = (load_config() or {}).get("home_dir")
+        try:
+            stats = await wipe_persona(
+                memory, home=home, runtime=runtime, confirm=req.confirm
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"status": "wiped", **stats}
 
     # -- skills --------------------------------------------------------------
     def _skill_info(s) -> SkillInfo:

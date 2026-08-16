@@ -156,7 +156,8 @@ Remedy is **source-available** (see repo `LICENSE` / `COMMERCIAL.md`). Free for 
 - Never paste long-lived keys into chat if you can use Settings.  
 - `config.toml` should not contain raw API keys after modern saves.  
 - Rotate provider keys if a machine is shared or compromised.  
-- Full uninstall wipe removes `~/.remedy` when you choose **full wipe**.
+- Full uninstall wipe removes `~/.remedy` when you choose **full wipe**.  
+- In-app **Wipe persona** (Settings → You & Agent) forgets facts about you only — not chats, keys, or the app. Type **WIPE** to confirm.
 
 ## Plan vs Build
 

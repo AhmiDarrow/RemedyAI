@@ -341,7 +341,10 @@ def maybe_auto_implement(
         forced = True
     if streak < cap and not forced:
         return None
-    if not goal_wants_machine_implement(str(getattr(state, "goal", "") or "")):
+    goal = str(getattr(state, "goal", "") or "")
+    if re.search(r"(?i)\b(landing\s+page|web\s*page|html\s+page|index\.html)\b", goal):
+        return None
+    if not goal_wants_machine_implement(goal):
         return None
     if _project_root(runtime) is None:
         return None

@@ -226,12 +226,18 @@ export function AssistantSection({
               setBusy(false)
               const email = poll.email || poll.credentials?.email
               setMsg(email ? `Connected · ${email}` : 'Connected')
+              void import('../../api/computer').then(({ closeBrowserRail }) =>
+                closeBrowserRail(),
+              )
               await refreshGoogle()
               onAccountsChanged?.()
             } else if (poll.status === 'error') {
               stopPoll()
               setBusy(false)
               setMsg(poll.error || 'Sign-in failed')
+              void import('../../api/computer').then(({ closeBrowserRail }) =>
+                closeBrowserRail(),
+              )
             }
           } catch {
             /* keep polling */
