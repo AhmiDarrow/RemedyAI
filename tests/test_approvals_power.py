@@ -234,3 +234,166 @@ def test_config_to_agent_config_carries_approval_mode():
         }
     )
     assert omitted.approval_mode == "auto"
+
+
+# ---------------------------------------------------------------------------
+# Owner checkpoints — payment/purchase computer actions are non-waivable
+# (docs/LIFE_TASK_PARTNER.md §2.2/§3; AGENTS.md north star Q3)
+# ---------------------------------------------------------------------------
+
+
+def _cfg(monkeypatch, **extra):
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"access_scope": "project", **extra},
+    )
+
+
+def test_payment_click_asks_in_every_mode(monkeypatch):
+    """'Place order' must checkpoint in ask, auto, AND full — no waiver."""
+    from remedy.core.approvals import SENSITIVE_PREFIX
+
+    _cfg(monkeypatch)
+    for mode in ("ask", "auto", "full"):
+        q = ApprovalQueue()
+        q.set_mode(mode)
+        reason = q.needs_ask(
+            "act url='https://www.amazon.com/checkout' click='Place order' "
+            "type_chars=0 key='' goal='order paper towels' target=auto",
+            tool_name="computer_act",
+        )
+        assert reason is not None, mode
+        assert reason.startswith(SENSITIVE_PREFIX), (mode, reason)
+
+
+def test_payment_checkpoint_ignores_turn_skip_ask(monkeypatch):
+    """turn_skip_ask (local-power turns) must NOT bypass owner checkpoints."""
+    _cfg(monkeypatch)
+    monkeypatch.setattr("remedy.core.turn_context.turn_skip_ask", lambda: True)
+    q = ApprovalQueue()
+    q.set_mode("auto")
+    reason = q.needs_ask(
+        "click text='Pay now' ref='' x=0 y=0 button=left clicks=1 target=auto",
+        tool_name="computer_click",
+    )
+    assert reason is not None
+    assert "checkpoint" in reason.lower()
+
+
+def test_coding_tools_keep_full_flow(monkeypatch):
+    """Frontier coding agency untouched: bash/file tools never trip the
+    payment classifier, and auto/full stay promptless for them."""
+    _cfg(monkeypatch)
+    for mode in ("auto", "full"):
+        q = ApprovalQueue()
+        q.set_mode(mode)
+        # Even payment-looking text in shell/file work must not checkpoint —
+        # the sensitive tier is computer_* only.
+        assert (
+            q.needs_ask("python pay_now_report.py --confirm-payment", tool_name="bash_exec")
+            is None
+        ), mode
+        assert q.needs_ask("write src/checkout/place_order.py", tool_name="file_write") is None
+        assert q.needs_ask("edit src/billing/cvv_mask.py", tool_name="file_edit") is None
+
+
+def test_ordinary_computer_clicks_not_checkpointed_in_auto(monkeypatch):
+    """Non-payment clicks keep the auto contract (no prompt fatigue)."""
+    _cfg(monkeypatch)
+    q = ApprovalQueue()
+    q.set_mode("auto")
+    assert (
+        q.needs_ask(
+            "act url='https://www.amazon.com' click='Add to Cart' target=auto",
+            tool_name="computer_act",
+        )
+        is None
+    )
+    assert (
+        q.needs_ask("click text='Next' target=auto", tool_name="computer_click")
+        is None
+    )
+
+
+def test_sensitive_approval_never_persists_as_always(monkeypatch):
+    """'Always' on a payment step downgrades to session scope."""
+    _cfg(monkeypatch)
+    q = ApprovalQueue()
+    q.set_mode("ask")
+    reason = q.needs_ask(
+        "click text='Place order' target=auto", tool_name="computer_click"
+    )
+    assert reason
+    item = q.create(
+        tool_name="computer_click",
+        command="click text='Place order' target=auto",
+        reason=reason,
+        session_id="s1",
+    )
+    assert item.sensitive is True
+    q.resolve(item.id, approve=True, scope="always")
+    assert item.fingerprint not in q._approved_fps
+    assert item.fingerprint in q._session_fps.get("s1", set())
+    # Same exact action re-runs this session without a new prompt
+    assert q.is_approved("computer_click", item.command, session_id="s1") is True
+
+
+def test_mode_flip_leaves_sensitive_pending(monkeypatch):
+    """Switching to auto/full auto-approves ordinary prompts but never a
+    payment checkpoint."""
+    _cfg(monkeypatch)
+    q = ApprovalQueue()
+    q.set_mode("ask")
+    ordinary = q.create(
+        tool_name="computer_click",
+        command="click text='Next'",
+        reason="Computer control requires approval (computer_click)",
+        session_id="s1",
+    )
+    payment = q.create(
+        tool_name="computer_click",
+        command="click text='Place order'",
+        reason=q.needs_ask(
+            "click text='Place order'", tool_name="computer_click"
+        )
+        or "",
+        session_id="s1",
+    )
+    q.set_mode("full")
+    assert q.get(ordinary.id).status == "approved"
+    assert q.get(payment.id).status == "pending"
+
+
+def test_plain_summary_is_owner_legible(monkeypatch):
+    """Approval cards lead with plain language, not tool jargon."""
+    _cfg(monkeypatch)
+    q = ApprovalQueue()
+    item = q.create(
+        tool_name="computer_act",
+        command=(
+            "act url='https://www.amazon.com/checkout' click='Place order' "
+            "type_chars=0 key='' goal='' target=auto"
+        ),
+        reason=q.needs_ask(
+            "act url='https://www.amazon.com/checkout' click='Place order'",
+            tool_name="computer_act",
+        )
+        or "",
+        session_id="s1",
+    )
+    pub = q.to_public(item)
+    assert pub["sensitive"] is True
+    assert pub["summary"].startswith("Remedy wants")
+    assert "Place order" in pub["summary"]
+    assert "payment" in pub["summary"].lower()
+    # Non-sensitive click card
+    item2 = q.create(
+        tool_name="computer_click",
+        command="click text='Sign in' ref='' x=0 y=0 button=left clicks=1 target=auto",
+        reason="Computer control requires approval (computer_click)",
+        session_id="s1",
+    )
+    pub2 = q.to_public(item2)
+    assert pub2["sensitive"] is False
+    assert "Sign in" in pub2["summary"]
+    assert "computer_click" not in pub2["summary"]

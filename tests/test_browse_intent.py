@@ -104,3 +104,50 @@ def test_short_site_label() -> None:
     assert "elephant" in short_site_label(
         "https://www.google.com/search?q=elephant"
     ).lower()
+
+
+def test_life_task_verbs_are_interaction_not_open_only() -> None:
+    """Commerce / life-task phrasing must never short-circuit as open-only.
+
+    Regression for the headline life-task gap: "goto amazon and order X"
+    previously matched open-only browse and the loop stopped after navigate
+    (docs/LIFE_TASK_PARTNER.md).
+    """
+    from remedy.core.computer.browse_intent import (
+        is_open_only_browse,
+        is_pure_action_kick,
+        parse_browse_navigate_url,
+        wants_page_interaction,
+    )
+
+    tasks = [
+        "goto amazon and order paper towels",
+        "open amazon and buy a phone charger",
+        "go to amazon, add paper towels to the cart and checkout",
+        "open walmart.com and order my usual groceries",
+        "goto youtube and subscribe to the channel",
+        "open the pharmacy site and renew my prescription",
+        "go to the dmv site and schedule an appointment",
+        "open irs.gov and apply for an extension",
+        "goto patreon and donate to the creator",
+        "open gmail and send a reply to mom",
+    ]
+    for msg in tasks:
+        assert wants_page_interaction(msg) is True, msg
+        assert is_open_only_browse(msg) is False, msg
+        assert is_pure_action_kick(msg) is False, msg
+
+    # Aliased sites still pre-navigate so the agent starts on the right page.
+    assert (
+        parse_browse_navigate_url("goto amazon and order paper towels")
+        == "https://www.amazon.com"
+    )
+
+
+def test_plain_open_still_short_circuits() -> None:
+    """Pure opens keep the fast path — no regression from the verb expansion."""
+    from remedy.core.computer.browse_intent import is_open_only_browse
+
+    assert is_open_only_browse("goto gmail") is True
+    assert is_open_only_browse("open youtube") is True
+    assert is_open_only_browse("bring up google") is True

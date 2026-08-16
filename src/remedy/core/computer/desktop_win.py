@@ -37,6 +37,18 @@ _VK = {
     "f3": 0x72,
     "f4": 0x73,
     "f5": 0x74,
+    "f6": 0x75,
+    "f7": 0x76,
+    "f8": 0x77,
+    "f9": 0x78,
+    "f10": 0x79,
+    "f11": 0x7A,
+    "f12": 0x7B,
+    "insert": 0x2D,
+    "ins": 0x2D,
+    "printscreen": 0x2C,
+    "prtsc": 0x2C,
+    "prtscn": 0x2C,
     "ctrl": 0x11,
     "control": 0x11,
     "alt": 0x12,
@@ -277,6 +289,7 @@ MOUSEEVENTF_RIGHTUP = 0x0010
 MOUSEEVENTF_MIDDLEDOWN = 0x0020
 MOUSEEVENTF_MIDDLEUP = 0x0040
 MOUSEEVENTF_WHEEL = 0x0800
+MOUSEEVENTF_HWHEEL = 0x1000
 MOUSEEVENTF_ABSOLUTE = 0x8000
 MOUSEEVENTF_VIRTUALDESK = 0x4000
 KEYEVENTF_KEYUP = 0x0002
@@ -373,14 +386,25 @@ def click(x: int, y: int, *, button: str = "left", clicks: int = 1) -> None:
         time.sleep(0.04)
 
 
-def drag(x1: int, y1: int, x2: int, y2: int) -> None:
+def drag(x1: int, y1: int, x2: int, y2: int, *, steps: int = 12) -> None:
+    """Press, move in interpolated steps, pause, release.
+
+    Explorer / list drag-drop ignores an instant start→end jump; real drags
+    move through intermediate points and give the drop target a beat to
+    register before button-up.
+    """
     _require_windows()
     move_mouse(x1, y1)
     time.sleep(0.02)
     _send_input(INPUT(INPUT_MOUSE, INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, None))))
-    time.sleep(0.02)
-    move_mouse(x2, y2)
-    time.sleep(0.02)
+    time.sleep(0.05)
+    n = max(2, int(steps))
+    for i in range(1, n + 1):
+        t = i / n
+        move_mouse(int(x1 + (x2 - x1) * t), int(y1 + (y2 - y1) * t))
+        time.sleep(0.012)
+    # Let the drop target highlight/accept before release
+    time.sleep(0.12)
     _send_input(INPUT(INPUT_MOUSE, INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP, 0, None))))
 
 
@@ -397,7 +421,15 @@ def scroll(x: int, y: int, *, dy: int = -3, dx: int = 0) -> None:
                 INPUT_UNION(mi=MOUSEINPUT(0, 0, data & 0xFFFFFFFF, MOUSEEVENTF_WHEEL, 0, None)),
             )
         )
-    _ = dx  # horizontal wheel later if needed
+    if dx:
+        # Horizontal wheel: +120 per notch right
+        data = int(dx) * 120
+        _send_input(
+            INPUT(
+                INPUT_MOUSE,
+                INPUT_UNION(mi=MOUSEINPUT(0, 0, data & 0xFFFFFFFF, MOUSEEVENTF_HWHEEL, 0, None)),
+            )
+        )
 
 
 def type_text(
@@ -425,6 +457,22 @@ def type_text(
                 raise
             except Exception:
                 pass
+        if ch in ("\r", "\n"):
+            # '\r\n' counts once; many apps ignore U+000A as a key event —
+            # send a real VK_RETURN press instead.
+            if ch == "\r" and i + 1 < len(text) and text[i + 1] == "\n":
+                n += 1
+                continue
+            _send_input(
+                INPUT(INPUT_KEYBOARD, INPUT_UNION(ki=KEYBDINPUT(0x0D, 0, 0, 0, None))),
+                INPUT(
+                    INPUT_KEYBOARD,
+                    INPUT_UNION(ki=KEYBDINPUT(0x0D, 0, KEYEVENTF_KEYUP, 0, None)),
+                ),
+            )
+            n += 1
+            time.sleep(0.005)
+            continue
         code = ord(ch)
         down = KEYBDINPUT(0, code, KEYEVENTF_UNICODE, 0, None)
         up = KEYBDINPUT(0, code, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, 0, None)
@@ -439,22 +487,48 @@ def type_text(
     return n
 
 
-def press_key(key: str) -> None:
-    """Press a key or combo like 'ctrl+s', 'enter', 'a'."""
-    _require_windows()
+def resolve_key_combo(key: str, *, vk_scan=None) -> list[int]:
+    """'ctrl+s' / '?' / 'shift+f6' → ordered VK list (modifiers first).
+
+    Honors the VkKeyScanW shift-state byte: '?', ':', '!' need Shift held —
+    dropping the high byte sent the *unshifted* key ('/', ';', '1').
+    *vk_scan* is injectable for tests on non-Windows.
+    """
     parts = [p.strip().lower() for p in (key or "").replace("-", "+").split("+") if p.strip()]
     if not parts:
-        return
-    vks: list[int] = []
+        return []
+    mods: list[int] = []
+    mains: list[int] = []
     for p in parts:
         if p in _VK:
-            vks.append(_VK[p])
+            vk = _VK[p]
+            (mods if vk in (0x10, 0x11, 0x12, 0x5B) else mains).append(vk)
         elif len(p) == 1:
-            # VkKeyScanW for character
-            sc = ctypes.windll.user32.VkKeyScanW(ord(p))
-            vks.append(sc & 0xFF)
+            if vk_scan is None:
+                vk_scan = ctypes.windll.user32.VkKeyScanW
+            sc = int(vk_scan(ord(p)))
+            if sc == -1:
+                raise ValueError(f"Key has no VK mapping on this layout: {p!r}")
+            shift_state = (sc >> 8) & 0xFF
+            # Prepend the modifiers the layout requires for this character
+            if shift_state & 1 and 0x10 not in mods:
+                mods.append(0x10)  # VK_SHIFT
+            if shift_state & 2 and 0x11 not in mods:
+                mods.append(0x11)  # VK_CONTROL
+            if shift_state & 4 and 0x12 not in mods:
+                mods.append(0x12)  # VK_MENU (Alt)
+            mains.append(sc & 0xFF)
         else:
             raise ValueError(f"Unknown key: {p}")
+    return mods + mains
+
+
+def press_key(key: str) -> None:
+    """Press a key or combo like 'ctrl+s', 'enter', '?', 'shift+f6'."""
+    _require_windows()
+    vks = resolve_key_combo(key)
+    if not vks:
+        return
     for vk in vks:
         _send_input(INPUT(INPUT_KEYBOARD, INPUT_UNION(ki=KEYBDINPUT(vk, 0, 0, 0, None))))
     for vk in reversed(vks):

@@ -460,6 +460,13 @@ class ComputerHostBridge:
             self._last_navigate_optimistic_by_session[sid] = bool(optimistic)
             self._trim_session_maps()
 
+    def last_navigate_url(self) -> str:
+        """Last rail URL this session navigated to (vault domain binding)."""
+        sid = self._session_key()
+        if sid:
+            return str(self._last_navigate_url_by_session.get(sid) or "")
+        return str(self._last_navigate_url or "")
+
     def clear_navigate_optimistic(self) -> None:
         self._last_navigate_optimistic = False
         sid = self._session_key()
@@ -1139,18 +1146,32 @@ class ComputerHostBridge:
                     self.mark_host_dead()
         return job
 
-    def purge_old(self, *, max_age_s: float = 900.0) -> int:
+    def purge_old(
+        self,
+        *,
+        max_age_s: float = 900.0,
+        stale_open_ttl_s: float = 1800.0,
+    ) -> int:
         """Delete finished job files older than *max_age_s* (default 15 minutes).
 
         Open work (pending/running) is never deleted — only terminal jobs and
         unreadable/corrupt JSON files past the age cutoff. Also purges aged
         desktop/browser screenshots under ``computer/shots/`` (S-COMP-02).
+
+        **Stale-open scrub (S-COMP-03):** a pending/running job the host never
+        claimed can carry a plaintext typed payload (passwords need plaintext
+        while open). If such a job is older than *stale_open_ttl_s* (default 30
+        minutes — a dead poller, not a slow one), it is expired: status →
+        ``cancelled``, payload secrets scrubbed. Plaintext secrets must never
+        sit on disk indefinitely.
         """
         cutoff = time.time() - max_age_s
+        stale_cutoff = time.time() - max(float(stale_open_ttl_s), float(max_age_s))
         n = 0
         for path in list(self.root.glob("*.json")):
             try:
-                if path.stat().st_mtime >= cutoff:
+                mtime = path.stat().st_mtime
+                if mtime >= cutoff:
                     continue
                 try:
                     raw = json.loads(path.read_text(encoding="utf-8"))
@@ -1163,6 +1184,18 @@ class ComputerHostBridge:
                     "pending",
                     "running",
                 ):
+                    if mtime < stale_cutoff:
+                        # Host is dead for this job — expire it and scrub the
+                        # typed payload so no plaintext secret outlives the TTL.
+                        job = ComputerJob.from_dict(raw)
+                        job.status = "cancelled"
+                        job.error = (
+                            "expired: host never claimed/finished this job; "
+                            "typed payload scrubbed after stale TTL"
+                        )
+                        job.payload = _scrub_retained_payload(job.payload)
+                        self._write(job)
+                        n += 1
                     continue
                 path.unlink(missing_ok=True)
                 n += 1
