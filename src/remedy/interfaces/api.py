@@ -164,27 +164,35 @@ def create_app(
         except Exception:
             logger.debug("vigil heartbeat start skipped", exc_info=True)
 
-        # Remedy's clock: fires stored reminders/due dates. Local-only, cheap
-        # (small JSON read), so it always runs — real life is scheduled.
-        _reminder_thread = None
+        # Remedy's clock + reach: fires stored reminders/due dates into the
+        # durable outbox and (when the owner has channels) their messengers.
+        # Local-only and cheap (small JSON read), so it always runs.
+        _notify_thread = None
         try:
-            from remedy.core.reminders import start_reminder_thread
+            import asyncio as _asyncio
+
+            from remedy.core.notify import start_delivery_thread
 
             _cfg_r = load_config()
             _home_r = _cfg_r.get("home_dir") if isinstance(_cfg_r, dict) else None
+            try:
+                _main_loop = _asyncio.get_running_loop()
+            except RuntimeError:
+                _main_loop = None
 
-            def _on_due(items) -> None:
-                # Phase 2 owns delivery (desktop / messenger). For now make the
-                # firing visible and durable so nothing is silently dropped.
-                for it in items:
-                    logger.info(
-                        "Reminder due: %s (%s)",
-                        getattr(it, "text", "")[:120],
-                        getattr(it, "id", ""),
+            def _messenger_send(text: str) -> None:
+                """Bridge the sync clock thread onto the async gateway."""
+                if gateway is None or _main_loop is None:
+                    return
+                with contextlib.suppress(Exception):
+                    _asyncio.run_coroutine_threadsafe(
+                        gateway.broadcast(text), _main_loop
                     )
 
-            _reminder_thread = start_reminder_thread(_home_r, on_due=_on_due)
-            logger.info("Reminder clock started")
+            _notify_thread = start_delivery_thread(
+                _home_r, messenger_send=_messenger_send
+            )
+            logger.info("Reminder clock + delivery started")
         except Exception:
             logger.debug("reminder clock start skipped", exc_info=True)
 

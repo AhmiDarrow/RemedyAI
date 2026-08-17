@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import FastAPI, Query, Request, Response
 
 from remedy import __version__ as _remedy_version
+from remedy.interfaces.config import load_config
 from remedy.interfaces.api_models import (
     StatusResponse,
 )
@@ -79,6 +80,39 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         with vision install / model discovery. Public (no auth).
         """
         return {"status": "ok", "version": _remedy_version, "ts": time.time()}
+
+    @app.get("/api/notifications")
+    async def list_notifications_route(
+        unread_only: bool = Query(default=False),
+        limit: int = Query(default=50),
+    ):
+        """Things Remedy surfaced while you were away (durable outbox)."""
+        from remedy.core.notify import list_notifications, unread_count
+
+        home = None
+        with contextlib.suppress(Exception):
+            home = (load_config() or {}).get("home_dir")
+        items = list_notifications(
+            unread_only=bool(unread_only), limit=int(limit or 50), home=home
+        )
+        return {
+            "notifications": [n.to_dict() for n in items],
+            "unread": unread_count(home),
+            "count": len(items),
+        }
+
+    @app.post("/api/notifications/read")
+    async def mark_notifications_read(payload: dict[str, Any] | None = None):
+        """Mark notification ids read (or all=true)."""
+        from remedy.core.notify import mark_read, unread_count
+
+        home = None
+        with contextlib.suppress(Exception):
+            home = (load_config() or {}).get("home_dir")
+        body = payload or {}
+        ids = [str(i) for i in (body.get("ids") or [])]
+        changed = mark_read(ids, all_=bool(body.get("all")), home=home)
+        return {"ok": True, "marked": changed, "unread": unread_count(home)}
 
     @app.get("/api/coordination/presence")
     async def coordination_presence(session_id: str | None = Query(default=None)):
