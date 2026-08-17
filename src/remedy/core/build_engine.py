@@ -789,6 +789,26 @@ def begin_build_turn(
             session_id=str(turn_session_id(runtime) or ""),
             home=home,
         )
+    # Body coordination: announce this muscle's presence so sibling sessions see
+    # it, and the write path can block cross-session overwrites.
+    with suppress(Exception):
+        from remedy.core import coordination as _coord
+        from remedy.core.llm_binding import get_llm_binding
+        from remedy.core.turn_context import turn_session_id
+
+        _home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        _b = get_llm_binding(runtime)
+        _muscle = "/".join(
+            x for x in ((_b.provider or "").strip(), (_b.model or "").strip()) if x
+        )
+        _coord.register(
+            str(turn_session_id(runtime) or ""),
+            muscle=_muscle,
+            project_path=st.project_path,
+            goal=st.goal,
+            phase=st.phase,
+            home=_home,
+        )
     enable_build_host_drive(runtime, st)
     with suppress(Exception):
         from remedy.core.build_todos import sync_todos_with_build
@@ -846,6 +866,25 @@ def enable_work_host_drive(
         set_turn_skip_ask(True, runtime)
 
 
+def _coworkers_block() -> str:
+    """Body awareness: name the other live muscles + held files, or ''."""
+    with suppress(Exception):
+        from remedy.core import coordination as _coord
+        from remedy.core.turn_context import current_session_id
+
+        sid = str(current_session_id() or "")
+        note = _coord.coworkers_note(sid)
+        if note:
+            return (
+                f"\n[Body coordination] {note} "
+                "You are one muscle of the same Remedy: do NOT edit files a "
+                "sibling session is holding (the write tool refuses them). "
+                "Split the work — pick files/areas the others are not touching, "
+                "or wait for their hold to free."
+            )
+    return ""
+
+
 def build_protocol_block(state: BuildTurnState) -> str:
     """Hard system block injected at turn start for build supervision."""
     if getattr(state, "read_only", False) and int(getattr(state, "write_steps", 0) or 0) == 0:
@@ -860,6 +899,7 @@ def build_protocol_block(state: BuildTurnState) -> str:
             "more details', and do not claim you must build. Only edit if the user "
             "explicitly asked you to fix or change something (that switches this into "
             "a full build with the green gate)."
+            f"{_coworkers_block()}"
         )
     oracle = (
         f"Oracle verify_command=`{state.verify_command}`"
@@ -900,6 +940,7 @@ def build_protocol_block(state: BuildTurnState) -> str:
         "Never monologue a plan without tool_calls. Never explore one file per step. "
         f"Serial explore cap before forced implement: {state.max_serial_explore}. "
         f"Writes before auto-verify: {state.require_verify_after_writes}."
+        f"{_coworkers_block()}"
     )
 
 
@@ -1053,6 +1094,16 @@ def observe_tool_batch(
         from remedy.core.build_todos import sync_todos_with_build
 
         sync_todos_with_build(None, state)
+
+    # Body coordination heartbeat — every tool wave keeps this muscle's beacon
+    # fresh so a live build never loses its claims mid-work.
+    with suppress(Exception):
+        from remedy.core import coordination as _coord
+        from remedy.core.turn_context import current_session_id
+
+        _sid = str(current_session_id() or "")
+        if _sid:
+            _coord.heartbeat(_sid, phase=state.phase)
 
     # Only *source* mutations invalidate green (docs/tmp/yml thrash is ignored)
     if source_write_this_batch and state.auto_verify_ran and state.last_verify_ok is True:

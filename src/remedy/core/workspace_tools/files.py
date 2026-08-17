@@ -45,6 +45,50 @@ def register_files_tools(runtime: Any) -> None:
     def _track_read(target: Path) -> None:
         track_read(runtime, target)
 
+    def _claim_or_block(sid: str | None, target: Path, *, tool_name: str) -> str | None:
+        """Body coordination: claim ``target`` for this session before writing.
+
+        Returns a tool-error string when another *live* muscle (session) already
+        holds the file — block-and-coordinate, never overwrite. Returns None on
+        success (the claim is recorded/refreshed). Best-effort; never raises.
+        """
+        if not sid:
+            return None
+        with suppress(Exception):
+            from remedy.core import coordination as _coord
+            from remedy.core.llm_binding import get_llm_binding
+
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+            proj = ""
+            with suppress(Exception):
+                proj = str(runtime.effective_project_path() or "")
+            muscle = ""
+            with suppress(Exception):
+                _b = get_llm_binding(runtime)
+                muscle = "/".join(
+                    x
+                    for x in ((_b.provider or "").strip(), (_b.model or "").strip())
+                    if x
+                )
+            conflict = _coord.claim_path(
+                sid, target, muscle=muscle, project_path=proj, home=home
+            )
+            if conflict is not None:
+                who = conflict.muscle or "another session"
+                return format_tool_error(
+                    f"'{target.name}' is being worked on right now by {who} "
+                    f"(session {conflict.session_id[:8]}) — not overwriting it.",
+                    code="PATH_HELD_BY_OTHER_SESSION",
+                    tool_name=tool_name,
+                    suggestion=(
+                        "Another of Remedy's muscles holds this file. Pick a "
+                        "different file, or coordinate before editing — never "
+                        "overwrite a sibling's work. The hold frees automatically "
+                        "when that session moves on."
+                    ),
+                )
+        return None
+
     async def file_read(
         path: str = ".",
         offset: int = 0,
@@ -315,6 +359,9 @@ def register_files_tools(runtime: Any) -> None:
                 f"({len(previous)} chars)."
             )
 
+        blocked = _claim_or_block(sid, target, tool_name="file_write")
+        if blocked:
+            return blocked
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(new_body, encoding="utf-8")
@@ -501,6 +548,9 @@ def register_files_tools(runtime: Any) -> None:
                     " If this hunk already failed, do not resend it."
                 ),
             )
+        blocked = _claim_or_block(sid, target, tool_name="file_edit")
+        if blocked:
+            return blocked
         try:
             target.write_text(result.new_content, encoding="utf-8")
         except OSError as e:
@@ -634,6 +684,10 @@ def register_files_tools(runtime: Any) -> None:
             )
             if not r.ok or r.new_content is None:
                 reports.append(f"[{i}] {p}: FAIL {r.message}")
+                continue
+            blocked = _claim_or_block(sid, target, tool_name="file_edit_batch")
+            if blocked:
+                reports.append(f"[{i}] {p}: held by another session — skipped")
                 continue
             try:
                 target.write_text(r.new_content, encoding="utf-8")
