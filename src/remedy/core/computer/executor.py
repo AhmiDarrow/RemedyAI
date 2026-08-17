@@ -240,7 +240,8 @@ class ComputerExecutor:
         if act is ComputerAction.NAVIGATE:
             req_target = "desktop" if wants_system_browser(str(hint), target) else "browser"
         elif act is ComputerAction.PAGE_TEXT:
-            req_target = "browser"
+            # Explicit desktop → UIA text read of a native window; default rail.
+            req_target = "desktop" if str(target or "").strip().lower() == "desktop" else "browser"
         elif act is ComputerAction.WAIT:
             req_target = "desktop"  # pure sleep; target irrelevant
         elif act is ComputerAction.APP:
@@ -488,6 +489,65 @@ class ComputerExecutor:
                 ).strip()
         return result
 
+    @staticmethod
+    def _desktop_evidence() -> dict[str, Any]:
+        """Post-action proof for desktop acts: foreground window + focused element.
+
+        The desktop analogue of the rail's page probe — without this, native
+        clicks/types report success with zero observation.
+        """
+        ev: dict[str, Any] = {}
+        with contextlib.suppress(Exception):
+            from remedy.core.computer import desktop_win as win
+
+            fg = win.foreground_window_info()
+            if fg.get("title"):
+                ev["foreground"] = str(fg["title"])[:100]
+                ev["foreground_hwnd"] = int(fg.get("hwnd") or 0)
+        with contextlib.suppress(Exception):
+            from remedy.core.computer.desktop_uia import focused_element_info
+
+            fi = focused_element_info()
+            if fi:
+                ev["focused"] = {
+                    "name": fi.get("name", ""),
+                    "role": fi.get("role", ""),
+                    "value": str(fi.get("value") or "")[:200],
+                }
+        return ev
+
+    def _desktop_click_element(
+        self, win: Any, el: dict[str, Any], *, button: str, clicks: int
+    ) -> dict[str, Any]:
+        """Click a desktop element the reliable way.
+
+        Offscreen elements (kept + flagged by the UIA snapshot) are scrolled
+        into view first, then re-located so the click lands on real pixels.
+        Returns the possibly-updated element dict.
+        """
+        if el.get("offscreen") and el.get("hwnd"):
+            with contextlib.suppress(Exception):
+                from remedy.core.computer.desktop_uia import element_action
+
+                res = element_action(
+                    int(el["hwnd"]),
+                    str(el.get("name") or ""),
+                    role=str(el.get("role") or ""),
+                    action="scroll_into_view",
+                )
+                if res.get("ok"):
+                    time.sleep(0.15)
+                    fresh = win.desktop_snapshot(
+                        limit=80, mode="controls", hwnd=int(el["hwnd"])
+                    )
+                    from remedy.core.computer.elements import find_best_element
+
+                    upd = find_best_element(fresh, str(el.get("name") or ""))
+                    if upd is not None and not upd.get("offscreen"):
+                        el = upd
+        win.click_element(el, button=button, clicks=clicks)
+        return el
+
     def _run_desktop(self, act: ComputerAction, **kwargs: Any) -> dict[str, Any]:
         from remedy.core.computer import desktop_win as win
 
@@ -587,9 +647,11 @@ class ComputerExecutor:
             )
         if act is ComputerAction.FIND:
             query = str(kwargs.get("text") or kwargs.get("query") or kwargs.get("hint") or "")
+            _find_hwnd_raw = kwargs.get("hwnd")
             elements = win.desktop_snapshot(
                 limit=int(kwargs.get("limit") or 60),
                 mode=str(kwargs.get("mode") or "auto"),
+                hwnd=int(_find_hwnd_raw) if _find_hwnd_raw not in (None, "", 0, "0") else None,
             )
             self.bridge.set_last_elements(elements, target="desktop")
             from remedy.core.computer.elements import find_best_elements
@@ -627,7 +689,8 @@ class ComputerExecutor:
                         action="click",
                         message=f"No desktop control matching text={text_q!r} — try computer_snapshot",
                     )
-                win.click_element(
+                el = self._desktop_click_element(
+                    win,
                     el,
                     button=str(kwargs.get("button") or "left"),
                     clicks=int(kwargs.get("clicks") or 1),
@@ -643,6 +706,7 @@ class ComputerExecutor:
                         "x": el.get("x"),
                         "y": el.get("y"),
                         "match_score": el.get("match_score"),
+                        **self._desktop_evidence(),
                     },
                 )
             if ref:
@@ -659,7 +723,8 @@ class ComputerExecutor:
                         action="click",
                         message=f"Unknown ref {ref} — run computer_snapshot first",
                     )
-                win.click_element(
+                el = self._desktop_click_element(
+                    win,
                     el,
                     button=str(kwargs.get("button") or "left"),
                     clicks=int(kwargs.get("clicks") or 1),
@@ -669,7 +734,13 @@ class ComputerExecutor:
                     target="desktop",
                     action="click",
                     message=f"Clicked ref={ref} ({el.get('name', '')[:40]})",
-                    extra={"ref": ref, "x": el.get("x"), "y": el.get("y"), "hwnd": el.get("hwnd")},
+                    extra={
+                        "ref": ref,
+                        "x": el.get("x"),
+                        "y": el.get("y"),
+                        "hwnd": el.get("hwnd"),
+                        **self._desktop_evidence(),
+                    },
                 )
             x, y = int(kwargs.get("x") or 0), int(kwargs.get("y") or 0)
             if x == 0 and y == 0:
@@ -729,13 +800,56 @@ class ComputerExecutor:
             )
             if vault_err is not None:
                 return vault_err
+            # ref= → UIA ValuePattern.SetValue: sets the WHOLE value atomically
+            # into that specific control — no focus races, verified read-back.
+            set_ref = str(kwargs.get("ref") or "").strip()
+            if set_ref and not had_vault:
+                el = self.bridge.get_element_by_ref(set_ref)
+                if el is not None and el.get("hwnd") and el.get("uia"):
+                    from remedy.core.computer.desktop_uia import element_action
+
+                    res = element_action(
+                        int(el["hwnd"]),
+                        str(el.get("name") or ""),
+                        role=str(el.get("role") or ""),
+                        action="set_value",
+                        text=text,
+                    )
+                    if res.get("ok"):
+                        return public_result(
+                            ok=True,
+                            target="desktop",
+                            action="type",
+                            message=str(res.get("message") or "Set value"),
+                            extra={
+                                "ref": set_ref,
+                                "length": reported_len,
+                                "method": "uia_set_value",
+                                "verified": bool(res.get("verified")),
+                                **self._desktop_evidence(),
+                            },
+                        )
+                    # Not settable → click it to focus, then fall through to keys.
+                    with contextlib.suppress(Exception):
+                        win.click_element(el)
+                        time.sleep(0.1)
             typed_box: list[int] = [0]
+            type_method = "keystrokes"
             try:
-                win.type_text(
-                    text,
-                    abort_check=self._abort_check,
-                    chars_typed=typed_box,
-                )
+                # Secrets always go per-char (never through the clipboard).
+                if had_vault:
+                    win.type_text(
+                        text,
+                        abort_check=self._abort_check,
+                        chars_typed=typed_box,
+                    )
+                else:
+                    tf = win.type_text_fast(
+                        text,
+                        abort_check=self._abort_check,
+                        chars_typed=typed_box,
+                    )
+                    type_method = str(tf.get("method") or "keystrokes")
             except RuntimeError as e:
                 if "abort" in str(e).lower():
                     self._cancel_open_jobs(reason="aborted")
@@ -767,12 +881,17 @@ class ComputerExecutor:
                     },
                 )
             length = "a stored secret" if had_vault else f"{reported_len} chars"
+            verb = "Pasted" if type_method == "paste" else "Typed"
             return public_result(
                 ok=True,
                 target="desktop",
                 action="type",
-                message=f"Typed {length}",
-                extra={"length": reported_len if not had_vault else None},
+                message=f"{verb} {length}",
+                extra={
+                    "length": reported_len if not had_vault else None,
+                    "method": type_method,
+                    **self._desktop_evidence(),
+                },
             )
         if act is ComputerAction.KEY:
             key = str(kwargs.get("key") or "")
@@ -782,10 +901,21 @@ class ComputerExecutor:
                 target="desktop",
                 action="key",
                 message=f"Pressed {key}",
-                extra={"key": key},
+                extra={"key": key, **self._desktop_evidence()},
             )
         if act is ComputerAction.SCROLL:
             x, y = int(kwargs.get("x", 0)), int(kwargs.get("y", 0))
+            if x == 0 and y == 0:
+                # No point given → scroll the FOREGROUND window's center, not the
+                # top-left corner of the screen (which scrolled nothing useful).
+                with contextlib.suppress(Exception):
+                    fg = win.foreground_window_info()
+                    for w in win.list_windows(limit=40):
+                        if int(w.get("hwnd") or 0) == int(fg.get("hwnd") or 0):
+                            b = w.get("bounds") or {}
+                            x = (int(b.get("left") or 0) + int(b.get("right") or 0)) // 2
+                            y = (int(b.get("top") or 0) + int(b.get("bottom") or 0)) // 2
+                            break
             raw_dy = kwargs.get("dy")
             dy = int(raw_dy) if raw_dy is not None else -3
             win.scroll(x, y, dy=dy)
@@ -798,6 +928,53 @@ class ComputerExecutor:
             )
         if act is ComputerAction.WINDOWS:
             mode = str(kwargs.get("mode") or "list").lower()
+            if mode in ("minimize", "maximize", "restore", "close", "move", "resize"):
+                hwnd = int(kwargs.get("hwnd") or 0)
+                title = str(kwargs.get("title") or kwargs.get("hint") or "").strip()
+                if not hwnd and title:
+                    needle = title.lower()
+                    with contextlib.suppress(Exception):
+                        for w in win.list_windows(limit=80):
+                            if needle in str(w.get("title") or "").lower():
+                                hwnd = int(w.get("hwnd") or 0)
+                                title = str(w.get("title") or "")
+                                break
+                if not hwnd:
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="windows",
+                        message=f"hwnd or matching title required for {mode}",
+                    )
+                real = title
+                with contextlib.suppress(Exception):
+                    for w in win.list_windows(limit=80):
+                        if int(w.get("hwnd") or 0) == hwnd:
+                            real = str(w.get("title") or "")
+                            break
+                if real and _is_host_browser(real):
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="windows",
+                        message=_HOST_BROWSER_REFUSAL,
+                        extra={"refused": "host_browser", "title": real},
+                    )
+                res = win.manage_window(
+                    hwnd,
+                    mode,
+                    x=kwargs.get("x"),
+                    y=kwargs.get("y"),
+                    width=kwargs.get("width"),
+                    height=kwargs.get("height"),
+                )
+                return public_result(
+                    ok=bool(res.get("ok")),
+                    target="desktop",
+                    action="windows",
+                    message=str(res.get("message") or mode),
+                    extra={"hwnd": hwnd, "mode": mode, "title": real[:80]},
+                )
             if mode in ("focus", "activate"):
                 hwnd = int(kwargs.get("hwnd") or 0)
                 title = str(kwargs.get("title") or kwargs.get("hint") or "").strip()
@@ -941,6 +1118,71 @@ class ComputerExecutor:
                 )
             return self._computer_act_desktop(
                 dict(kwargs), hint=str(kwargs.get("hint") or "")
+            )
+        if act is ComputerAction.PAGE_TEXT:
+            # Native page_text: read the actual CONTENT of a window via UIA
+            # (edit/document values + labels) — Remedy can read what she typed.
+            from remedy.core.computer.desktop_uia import read_window_text
+
+            hwnd = int(kwargs.get("hwnd") or 0)
+            if not hwnd:
+                fg = win.foreground_window_info()
+                hwnd = int(fg.get("hwnd") or 0)
+            if not hwnd:
+                return public_result(
+                    ok=False,
+                    target="desktop",
+                    action="page_text",
+                    message="No window to read — pass hwnd= or focus one first",
+                )
+            info = read_window_text(hwnd)
+            if not info:
+                return public_result(
+                    ok=False,
+                    target="desktop",
+                    action="page_text",
+                    message=(
+                        f"UIA could not read hwnd={hwnd} — "
+                        "computer_screenshot for a pixel view instead"
+                    ),
+                )
+            n_fields = len(info.get("fields") or [])
+            return public_result(
+                ok=True,
+                target="desktop",
+                action="page_text",
+                message=(
+                    f"Read {info.get('title') or 'window'!r}: "
+                    f"{len(info.get('text') or '')} chars, {n_fields} field(s)"
+                ),
+                extra=info,
+            )
+        if act is ComputerAction.PRESS_HOLD:
+            if self._abort_check():
+                raise RuntimeError("Aborted by user")
+            x, y = int(kwargs.get("x") or 0), int(kwargs.get("y") or 0)
+            ref = str(kwargs.get("ref") or "").strip()
+            if ref and not (x or y):
+                el = self.bridge.get_element_by_ref(ref)
+                if el is not None:
+                    x, y = int(el.get("x") or 0), int(el.get("y") or 0)
+            if not (x or y):
+                return public_result(
+                    ok=False,
+                    target="desktop",
+                    action="press_hold",
+                    message="press_hold needs x/y or a ref from computer_snapshot",
+                )
+            hold_ms = int(kwargs.get("hold_ms") or 2600)
+            info = win.press_hold(
+                x, y, hold_ms=hold_ms, abort_check=self._abort_check
+            )
+            return public_result(
+                ok=True,
+                target="desktop",
+                action="press_hold",
+                message=f"Held ({x},{y}) for {info['held_ms']}ms",
+                extra={**info, **self._desktop_evidence()},
             )
         return public_result(
             ok=False,

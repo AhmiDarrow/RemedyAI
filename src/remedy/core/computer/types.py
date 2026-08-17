@@ -26,6 +26,7 @@ COMPUTER_TOOL_NAMES = frozenset(
         "computer_page_text",
         "computer_find",
         "computer_act",
+        "computer_press_hold",
     }
 )
 

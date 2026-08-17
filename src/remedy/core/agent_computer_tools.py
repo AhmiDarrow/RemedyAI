@@ -263,17 +263,23 @@ def register_computer_tools(runtime: Any) -> None:
             app=app,
         )
 
-    async def computer_page_text(hint: str = "", target: str = "browser") -> str:
-        """Extract visible text from the Browser rail page (no vision).
+    async def computer_page_text(
+        hint: str = "", target: str = "browser", hwnd: int = 0
+    ) -> str:
+        """Extract visible text — Browser rail page, or a NATIVE window's content.
 
-        ``target`` is accepted for schema parity with other computer tools; page
-        text is always read from the in-app Browser rail (not full desktop).
+        target=desktop reads the actual content of a native app via UI
+        Automation: edit fields and documents contribute their live values,
+        labels their names. hwnd= picks the window (default: foreground).
+        This is how you READ what an app shows or what you just typed — no
+        screenshot needed.
         """
-        _ = target  # browser-rail only; ignore desktop/auto extras from the model
+        want_desktop = str(target or "").strip().lower() == "desktop" or bool(hwnd)
         return await _run_computer(ex,
             ComputerAction.PAGE_TEXT,
-            target="browser",
+            target="desktop" if want_desktop else "browser",
             hint=hint,
+            hwnd=hwnd,
             runtime=runtime,
         )
 
@@ -396,6 +402,7 @@ def register_computer_tools(runtime: Any) -> None:
         text: str = "",
         target: str = "auto",
         hint: str = "",
+        ref: str = "",
     ) -> str:
         """Type text into the focused UI (browser or desktop).
 
@@ -429,6 +436,7 @@ def register_computer_tools(runtime: Any) -> None:
             hint=hint,
             runtime=runtime,
             text=text,
+            ref=ref,
         )
 
     async def computer_key(
@@ -495,10 +503,14 @@ def register_computer_tools(runtime: Any) -> None:
         hwnd: int = 0,
         title: str = "",
         limit: int = 40,
+        x: int | None = None,
+        y: int | None = None,
+        width: int | None = None,
+        height: int | None = None,
         target: str = "desktop",
         hint: str = "",
     ) -> str:
-        """List visible windows or focus by hwnd / title substring (desktop)."""
+        """List / focus / minimize / maximize / restore / close / move / resize windows."""
         return await _run_computer(ex,
             ComputerAction.WINDOWS,
             target=target or "desktop",
@@ -508,6 +520,10 @@ def register_computer_tools(runtime: Any) -> None:
             hwnd=hwnd,
             title=title,
             limit=limit,
+            x=x,
+            y=y,
+            width=width,
+            height=height,
         )
 
     async def computer_drag(
@@ -685,14 +701,17 @@ def register_computer_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "computer_page_text",
-        "Read visible text from the in-app Browser rail page (no vision/screenshot).",
+        "Read visible text — Browser rail page, OR a native app's content (target=desktop reads edit fields/documents via UI Automation, no screenshot).",
         computer_page_text,
         {
             "type": "object",
             "properties": {
                 "hint": hint_prop,
-                # Accepted for parity; always routes to browser rail.
                 "target": target_prop,
+                "hwnd": {
+                    "type": "integer",
+                    "description": "Native window to read (default: foreground). Implies target=desktop.",
+                },
             },
         },
     )
@@ -747,12 +766,19 @@ def register_computer_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "computer_type",
-        "Type text into the focused control (browser or desktop). Stored secrets: pass {{vault:handle}} (see vault_list).",
+        "Type text into the focused control (browser or desktop). Long text pastes atomically. ref= (desktop cN) sets that control's value directly via UIA — most reliable for fields. Stored secrets: pass {{vault:handle}} (see vault_list).",
         computer_type,
         {
             "type": "object",
             "properties": {
                 "text": {"type": "string"},
+                "ref": {
+                    "type": "string",
+                    "description": (
+                        "Desktop control ref (cN from computer_snapshot): set its "
+                        "value directly via UIA — atomic, verified, no focus races."
+                    ),
+                },
                 "target": target_prop,
                 "hint": hint_prop,
             },
@@ -816,20 +842,28 @@ def register_computer_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "computer_windows",
-        "List visible OS windows or focus by hwnd / title substring (desktop).",
+        "List, focus, or MANAGE OS windows: minimize / maximize / restore / close / move / resize by hwnd or title substring (desktop).",
         computer_windows,
         {
             "type": "object",
             "properties": {
                 "mode": {
                     "type": "string",
-                    "description": "list | focus",
+                    "description": (
+                        "list | focus | minimize | maximize | restore | close | "
+                        "move | resize. close is polite (WM_CLOSE — the app may "
+                        "show a save prompt; snapshot to drive it)."
+                    ),
                 },
                 "hwnd": {"type": "integer"},
                 "title": {
                     "type": "string",
-                    "description": "Window title substring for mode=focus",
+                    "description": "Window title substring for focus/manage modes",
                 },
+                "x": {"type": "integer", "description": "move: new left"},
+                "y": {"type": "integer", "description": "move: new top"},
+                "width": {"type": "integer", "description": "resize: new width"},
+                "height": {"type": "integer", "description": "resize: new height"},
                 "limit": {"type": "integer"},
                 "target": target_prop,
                 "hint": hint_prop,
