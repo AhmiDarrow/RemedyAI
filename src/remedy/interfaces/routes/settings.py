@@ -1,6 +1,7 @@
 """API route registration for Remedy FastAPI app."""
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 
@@ -346,6 +347,22 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         from remedy.interfaces.settings_apply import apply_settings_update
 
         updates = req.model_dump(exclude_none=True)
+        # A saved/changed API key or provider switch is the "I fixed it" signal:
+        # give that provider a fresh chance instead of staying quarantined until
+        # a process restart (3 consecutive failures re-quarantine immediately).
+        if str(updates.get("llm_api_key") or "").strip() or str(
+            updates.get("llm_provider") or ""
+        ).strip():
+            with contextlib.suppress(Exception):
+                from remedy.core.providers import clear_provider_quarantine
+
+                clear_provider_quarantine(
+                    str(
+                        updates.get("llm_provider")
+                        or load_config().get("llm_provider")
+                        or ""
+                    )
+                )
         cache = getattr(app.state, "_model_discovery_cache", None)
         try:
             result = await apply_settings_update(
