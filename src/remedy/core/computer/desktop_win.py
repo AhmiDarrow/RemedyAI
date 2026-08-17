@@ -64,12 +64,43 @@ def _require_windows() -> None:
         raise RuntimeError("Desktop computer use requires Windows")
 
 
+_dpi_ready = False
+
+
+def _ensure_dpi_awareness() -> None:
+    """Make this process Per-Monitor-Aware v2, once, before touching any window.
+
+    The old SetProcessDPIAware() is system-DPI only: on a mixed-DPI setup
+    (150% laptop + 100% external) coordinates and captures on the scaled monitor
+    come out wrong, so clicks miss. PerMonitorV2 gives true physical pixels on
+    every display. Falls back gracefully on older Windows. Identical behaviour on
+    a single 100% monitor, so this only ever fixes the scaled case.
+    """
+    global _dpi_ready
+    if _dpi_ready or sys.platform != "win32":
+        return
+    _dpi_ready = True
+    with contextlib.suppress(Exception):
+        user32 = ctypes.windll.user32
+        user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+        user32.SetProcessDpiAwarenessContext.restype = wintypes.BOOL
+        # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+        if user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+            return
+    with contextlib.suppress(Exception):
+        # PROCESS_PER_MONITOR_DPI_AWARE = 2 (Windows 8.1+)
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        return
+    with contextlib.suppress(Exception):
+        ctypes.windll.user32.SetProcessDPIAware()
+
+
 def _capture_virtual_screen() -> tuple[bytes, int, int, int, int, int]:
     """Return (bgr_bytes, stride, width, height, origin_x, origin_y)."""
     _require_windows()
     user32 = ctypes.windll.user32
     gdi32 = ctypes.windll.gdi32
-    user32.SetProcessDPIAware()
+    _ensure_dpi_awareness()
 
     left = user32.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
     top = user32.GetSystemMetrics(77)  # SM_YVIRTUALSCREEN
@@ -173,11 +204,92 @@ def purge_old_shots(*, max_age_s: float = 900.0, home_dir: Path | str | None = N
     return n
 
 
-def screenshot_png(path: Path | None = None) -> dict[str, Any]:
-    """Capture the virtual screen to a PNG file. Returns path + size."""
+# 3x5 bitmap font for Set-of-Mark digit labels (drawn on pixels, no font lib).
+_DIGITS_3x5 = {
+    "0": ("111", "101", "101", "101", "111"),
+    "1": ("010", "110", "010", "010", "111"),
+    "2": ("111", "001", "111", "100", "111"),
+    "3": ("111", "001", "111", "001", "111"),
+    "4": ("101", "101", "111", "001", "001"),
+    "5": ("111", "100", "111", "001", "111"),
+    "6": ("111", "100", "111", "101", "111"),
+    "7": ("111", "001", "010", "010", "010"),
+    "8": ("111", "101", "111", "101", "111"),
+    "9": ("111", "101", "111", "001", "111"),
+}
+
+
+def _set_px(buf: bytearray, stride: int, w: int, h: int, x: int, y: int, bgr: tuple) -> None:
+    if 0 <= x < w and 0 <= y < h:
+        o = y * stride + x * 3
+        buf[o], buf[o + 1], buf[o + 2] = bgr
+
+
+def _draw_marks_on_bgr(
+    buf: bytearray, stride: int, width: int, height: int, marks: list[dict[str, Any]]
+) -> None:
+    """Draw numbered Set-of-Mark labels onto the raw BGR buffer, in place.
+
+    Each mark: {"n": int, "x": int, "y": int} (image pixels). A magenta label
+    box with white digits is placed at the point so a vision model can say
+    "click mark 7" instead of estimating a pixel.
+    """
+    MAGENTA = (255, 0, 255)  # BGR
+    WHITE = (255, 255, 255)
+    scale = 2
+    for m in marks:
+        label = str(int(m.get("n", 0)))
+        px = int(m.get("x", 0))
+        py = int(m.get("y", 0))
+        # label box just above/left of the point, clamped on-screen
+        box_w = len(label) * (3 * scale + scale) + scale
+        box_h = 5 * scale + 2 * scale
+        bx = max(0, min(px, width - box_w - 1))
+        by = max(0, min(py, height - box_h - 1))
+        for yy in range(by, by + box_h):
+            for xx in range(bx, bx + box_w):
+                _set_px(buf, stride, width, height, xx, yy, MAGENTA)
+        cx = bx + scale
+        for ch in label:
+            glyph = _DIGITS_3x5.get(ch)
+            if glyph:
+                for gy, rowbits in enumerate(glyph):
+                    for gx, bit in enumerate(rowbits):
+                        if bit == "1":
+                            for sy in range(scale):
+                                for sx in range(scale):
+                                    _set_px(
+                                        buf,
+                                        stride,
+                                        width,
+                                        height,
+                                        cx + gx * scale + sx,
+                                        by + scale + gy * scale + sy,
+                                        WHITE,
+                                    )
+            cx += 3 * scale + scale
+
+
+def screenshot_png(
+    path: Path | None = None, *, marks: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """Capture the virtual screen to a PNG file. Returns path + size.
+
+    *marks*: optional Set-of-Mark labels (image-pixel coords) drawn onto the
+    capture so a vision model can reference numbered targets.
+    """
     raw, stride, width, height, left, top = _capture_virtual_screen()
     out = Path(path) if path is not None else _default_shot_path("desk")
     out.parent.mkdir(parents=True, exist_ok=True)
+    if marks:
+        buf = bytearray(raw)
+        # marks are in SCREEN coords; convert to image (subtract origin)
+        img_marks = [
+            {"n": mk.get("n"), "x": int(mk.get("x", 0)) - left, "y": int(mk.get("y", 0)) - top}
+            for mk in marks
+        ]
+        _draw_marks_on_bgr(buf, stride, width, height, img_marks)
+        raw = bytes(buf)
     _write_png_bgr(out, width, height, raw, stride)
     # Opportunistic TTL so desktop captures do not accumulate forever.
     with contextlib.suppress(Exception):
@@ -245,22 +357,27 @@ def screenshot_region_png(
 
 
 def _write_png_bgr(path: Path, width: int, height: int, raw: bytes, stride: int) -> None:
-    """Minimal PNG writer (RGB from BGR rows)."""
+    """Minimal PNG writer (RGB from BGR rows).
+
+    BGR→RGB conversion is done with C-level extended-slice assignment per row
+    instead of a per-pixel Python loop — on a 4K frame that is ~8M interpreted
+    iterations removed, turning multi-second encodes into tens of ms. zlib
+    level 1 keeps compression fast (the model does not need max ratio).
+    """
     import binascii
     import zlib
 
-    rows = []
+    row_bytes = width * 3
+    scanlines = bytearray()
     for y in range(height):
-        row = raw[y * stride : y * stride + width * 3]
-        # BGR → RGB
-        rgb = bytearray(width * 3)
-        for i in range(width):
-            b, g, r = row[i * 3], row[i * 3 + 1], row[i * 3 + 2]
-            rgb[i * 3] = r
-            rgb[i * 3 + 1] = g
-            rgb[i * 3 + 2] = b
-        rows.append(b"\x00" + bytes(rgb))
-    compressed = zlib.compress(b"".join(rows), 6)
+        base = y * stride
+        row = raw[base : base + row_bytes]
+        rgb = bytearray(row)  # copy; G channel already in place
+        rgb[0::3] = row[2::3]  # R ← B-position bytes
+        rgb[2::3] = row[0::3]  # B ← R-position bytes
+        scanlines += b"\x00"
+        scanlines += rgb
+    compressed = zlib.compress(bytes(scanlines), 1)
 
     def chunk(tag: bytes, data: bytes) -> bytes:
         return (
@@ -343,7 +460,7 @@ def _send_input(*inputs: INPUT) -> None:
 
 def _abs_coords(x: int, y: int) -> tuple[int, int]:
     user32 = ctypes.windll.user32
-    user32.SetProcessDPIAware()
+    _ensure_dpi_awareness()
     left = user32.GetSystemMetrics(76)
     top = user32.GetSystemMetrics(77)
     width = user32.GetSystemMetrics(78) or 1
@@ -585,6 +702,72 @@ def list_windows(limit: int = 40) -> list[dict[str, Any]]:
     return results
 
 
+def _window_class(hwnd: int) -> str:
+    with contextlib.suppress(Exception):
+        buf = ctypes.create_unicode_buffer(256)
+        ctypes.windll.user32.GetClassNameW(int(hwnd), buf, 256)
+        return buf.value
+    return ""
+
+
+# UAC / consent runs on the SECURE DESKTOP — SendInput cannot reach it at all.
+_SECURE_TITLES = ("user account control", "windows security")
+
+
+def detect_system_prompt() -> dict[str, Any]:
+    """Detect a foreground blocker Remedy cannot drive: a UAC / secure-desktop
+    consent prompt.
+
+    Returns {"blocked": bool, "kind": str, "message": str}. When blocked, the
+    caller must return an honest "needs the owner at the keyboard" result rather
+    than silently no-op'ing SendInput against the secure desktop.
+    """
+    with contextlib.suppress(Exception):
+        fg = foreground_window_info()
+        title = str(fg.get("title") or "").lower()
+        cls = _window_class(int(fg.get("hwnd") or 0)).lower()
+        if any(t in title for t in _SECURE_TITLES) or cls in (
+            "credential dialog xaml host",
+            "#32770",  # a #32770 titled like UAC — treat cautiously below
+        ):
+            if any(t in title for t in _SECURE_TITLES):
+                return {
+                    "blocked": True,
+                    "kind": "uac",
+                    "message": (
+                        "A Windows security / UAC prompt is on the secure desktop. "
+                        "I can't click it — Windows blocks all automated input there "
+                        "by design. Please approve or dismiss it yourself, then say "
+                        "continue."
+                    ),
+                }
+    return {"blocked": False, "kind": "", "message": ""}
+
+
+# Common Win32 dialog class (Save As / Open / Print / message box)
+_DIALOG_CLASS = "#32770"
+
+
+def find_dialog_window() -> dict[str, Any] | None:
+    """The foreground common dialog (Save As / Open / message box), or None.
+
+    These are separate top-level #32770 windows — Remedy drives their filename
+    Edit and buttons by UIA just like any app; this just locates one after a
+    Ctrl+S / Ctrl+O so she knows to look for it.
+    """
+    with contextlib.suppress(Exception):
+        fg = foreground_window_info()
+        hwnd = int(fg.get("hwnd") or 0)
+        if hwnd and _window_class(hwnd).lower() == _DIALOG_CLASS.lower():
+            return {"hwnd": hwnd, "title": str(fg.get("title") or "")}
+        # Not foreground? scan visible windows for a dialog class.
+        for w in list_windows(limit=30):
+            wh = int(w.get("hwnd") or 0)
+            if wh and _window_class(wh).lower() == _DIALOG_CLASS.lower():
+                return {"hwnd": wh, "title": str(w.get("title") or "")}
+    return None
+
+
 def desktop_snapshot(
     limit: int = 40,
     *,
@@ -669,7 +852,7 @@ def print_window_png(hwnd: int, path: Path | None = None) -> dict[str, Any]:
     _require_windows()
     user32 = ctypes.windll.user32
     gdi32 = ctypes.windll.gdi32
-    user32.SetProcessDPIAware()
+    _ensure_dpi_awareness()
     rect = wintypes.RECT()
     if not user32.GetWindowRect(int(hwnd), ctypes.byref(rect)):
         raise RuntimeError("GetWindowRect failed")
@@ -1389,7 +1572,7 @@ def list_monitors() -> list[dict[str, Any]]:
     """Enumerate display monitors (physical pixels, DPI-aware)."""
     _require_windows()
     user32 = ctypes.windll.user32
-    user32.SetProcessDPIAware()
+    _ensure_dpi_awareness()
     monitors: list[dict[str, Any]] = []
 
     class RECT(ctypes.Structure):
