@@ -68,6 +68,19 @@ def progress_marker(
 
 _WRITE_TOOLS = frozenset({"file_write", "file_edit", "file_edit_batch", "apply_patch"})
 _READ_TOOLS = frozenset({"file_read", "list_dir", "repo_search"})
+# Non-idempotent tools: shell/host execution and verify/build runs whose result
+# legitimately changes between steps (re-running `pytest` after a fix). Their
+# result-cache entry is fine WITHIN a batch (distributes to duplicate calls),
+# but must be evicted at batch end so a later step re-executes fresh instead of
+# replaying a stale "FAILED" — and so filter_fresh_tool_calls does not drop the
+# re-run as an already-seen fingerprint.
+_NO_CACHE_TOOLS = frozenset(
+    {
+        "bash_exec", "shell_exec", "host_run", "host_script", "host_mkdir",
+        "host_which", "mission_verify", "goal_verify", "myelin_verify",
+        "write_set_verify", "build", "verify",
+    }
+)
 
 
 def _norm_path_str(p: str) -> str:
@@ -912,5 +925,16 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             todos_tok = take_todos_event(runtime)
             if todos_tok:
                 yield todos_tok, {}
+
+    # Evict non-idempotent tool results from the TURN-scoped cache/seen set so a
+    # later step re-issuing the identical command (e.g. `pytest -q` after a fix)
+    # actually re-executes instead of replaying this batch's stale result, and
+    # filter_fresh_tool_calls does not drop it as an already-seen fingerprint.
+    for tc in pending:
+        name = ((tc.get("function") or {}).get("name") or "").strip()
+        if name in _NO_CACHE_TOOLS:
+            fp = _tool_call_fingerprint(tc)
+            result_cache.pop(fp, None)
+            seen_fps.discard(fp)
 
 

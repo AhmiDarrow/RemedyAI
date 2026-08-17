@@ -154,15 +154,18 @@ class ToolRuntime:
             record.retries = attempt
             try:
                 result = await self._do_execute(tool_call, timeout or self.default_timeout)
-                if result.success:
-                    break
+                # A tool that RAN and returned (even non-zero exit) is
+                # authoritative — never re-run it, or a side-effecting command
+                # (bash_exec, host_run, a build/install) executes twice. Only a
+                # transient EXCEPTION (infra failure before the tool ran) is
+                # worth retrying.
+                break
             except Exception as e:
                 last_exception = e
                 record.stderr = str(e)
-
-            if attempt < self.max_retries:
-                wait = self.retry_backoff * (2 ** attempt)
-                await asyncio.sleep(wait)
+                if attempt < self.max_retries:
+                    wait = self.retry_backoff * (2 ** attempt)
+                    await asyncio.sleep(wait)
 
         # Fallback result
         if result is None:
@@ -194,18 +197,27 @@ class ToolRuntime:
         if tool_call.tool_name in self._handlers:
             try:
                 handler = self._handlers[tool_call.tool_name]
-                data = await handler(tool_call.arguments)
+                # Enforce the timeout here too — a hung handler must not block
+                # the loop forever (the sandbox path already bounds itself).
+                data = await asyncio.wait_for(handler(tool_call.arguments), timeout)
                 return ToolResult(
                     call_id=tool_call.id,
                     success=True,
                     data={"result": str(data)},
                 )
-            except Exception as e:
+            except TimeoutError:
+                # A hung tool is NOT a transient infra blip — return a failed
+                # result (the retry loop breaks on a returned result), so we do
+                # not re-run a possibly side-effecting handler.
                 return ToolResult(
                     call_id=tool_call.id,
                     success=False,
-                    error=str(e),
+                    error=f"Tool '{tool_call.tool_name}' timed out after {timeout:.0f}s",
                 )
+            # Other handler exceptions PROPAGATE so the retry loop can retry a
+            # genuine transient failure (raised before the tool's work landed).
+            # A tool that RAN and returned success=False is a real result and is
+            # never retried (that would double side effects).
 
         # Sandbox execution
         if self.sandbox:

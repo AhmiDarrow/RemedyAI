@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from collections import Counter
 from contextlib import suppress
@@ -28,6 +29,9 @@ from remedy.memory.soul.field import (
 # Min seconds between dream passes (per process / home)
 _DEFAULT_DREAM_COOLDOWN_S = 120.0
 _last_dream_ts: dict[str, float] = {}
+# Serializes the check-and-claim so two concurrent passes (vigil tick +
+# post-turn hook) cannot both run and clobber each other's SoulField save.
+_DREAM_CLAIM_LOCK = threading.Lock()
 
 
 def _run_coro_sync(factory: Any, *, timeout: float = 8.0) -> Any:
@@ -49,8 +53,20 @@ def _run_coro_sync(factory: Any, *, timeout: float = 8.0) -> Any:
         asyncio.get_running_loop()
     except RuntimeError:
         return _runner()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(_runner).result(timeout=timeout)
+    # NOT a `with` block: the context manager's __exit__ calls
+    # shutdown(wait=True), which re-joins the worker and defeats the timeout —
+    # a hung coroutine would block the dream thread forever. Submit, race the
+    # timeout, and on TimeoutError abandon the worker (cancel_futures) so we
+    # return promptly instead of hanging.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    fut = pool.submit(_runner)
+    try:
+        result = fut.result(timeout=timeout)
+        pool.shutdown(wait=False)
+        return result
+    except concurrent.futures.TimeoutError:
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
 
 
 def _home_key(home: str | Any) -> str:
@@ -170,8 +186,12 @@ def dream_cycle(
     When *use_local* and a loopback LLM is reachable, refine recent episode
     labels (RMB / local llama) after heuristic merge.
     """
-    if not should_dream(home, force=force):
-        return {"ok": True, "skipped": True, "reason": "cooldown"}
+    # Atomic check-and-claim: a second concurrent pass sees the just-written
+    # cooldown timestamp and skips, so only one pass consolidates + saves.
+    with _DREAM_CLAIM_LOCK:
+        if not should_dream(home, force=force):
+            return {"ok": True, "skipped": True, "reason": "cooldown"}
+        _last_dream_ts[_home_key(home)] = time.time()
 
     sf = field if field is not None else load_soul_field(home)
     before_eps = len(sf.episodes)

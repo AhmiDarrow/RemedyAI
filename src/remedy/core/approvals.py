@@ -442,10 +442,28 @@ class ApprovalQueue:
         return False
 
     @staticmethod
-    def _vcs_family(command: str) -> str | None:
-        """Normalize git/gh push-family commands for sticky session approval."""
+    def _has_shell_chaining(command: str) -> bool:
+        """True if *command* chains/redirects to another command. Quoted text
+        (e.g. a commit message containing '&&') is ignored so it does not
+        trip the check."""
+        # Drop quoted spans so operators inside a message/arg don't count.
+        unq = re.sub(r"'[^']*'", " ", command or "")
+        unq = re.sub(r'"[^"]*"', " ", unq)
+        return bool(re.search(r"(;|&&|\|\||\||`|\$\(|\n|\r|>|<|&\s|\bthen\b|\bdo\b)", unq))
+
+    @classmethod
+    def _vcs_family(cls, command: str) -> str | None:
+        """Normalize git/gh push-family commands for sticky session approval.
+
+        SECURITY: a family match only applies to a SINGLE clean git/gh
+        statement. A chained/redirected command (git status && curl … | sh)
+        must never inherit a prior `git status` approval — that was an approval
+        gate bypass — so anything with shell chaining returns None and re-asks.
+        """
         c = (command or "").strip().lower()
         if not c:
+            return None
+        if cls._has_shell_chaining(c):
             return None
         if re.search(r"\bgit\s+push\b", c):
             return "git_push"
