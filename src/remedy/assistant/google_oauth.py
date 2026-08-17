@@ -39,6 +39,9 @@ SCOPES = (
     "profile",
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.compose",
+    # modify = archive / mark read / labels. Needed for follow-through on mail;
+    # it does NOT grant permanent delete (that would be gmail.full).
+    "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/calendar.events",
 )
 

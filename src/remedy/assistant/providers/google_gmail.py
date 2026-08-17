@@ -74,6 +74,18 @@ class GoogleGmailProvider:
                     "(APIs & Services → Library → Gmail API → Enable), wait ~1 minute, "
                     f"then retry. Detail: {msg}"
                 ) from e
+            if e.code in (401, 403) and (
+                "insufficient" in low
+                or "scope" in low
+                or "permission" in low
+                or "request had insufficient authentication" in low
+            ):
+                raise RuntimeError(
+                    "Google hasn't granted this permission yet. Reconnect in "
+                    "Settings → Personal assistant → Google (Gmail) → Connect, and "
+                    "accept the mail-management permission (archive / mark read). "
+                    f"Detail: {msg}"
+                ) from e
             raise RuntimeError(f"Gmail API {e.code}: {msg}") from e
 
     def list_messages(self, *, query: str = "", limit: int = 20) -> list[MailMessage]:
@@ -143,11 +155,132 @@ class GoogleGmailProvider:
             raw=data,
         )
 
-    def _raw_message(self, *, to: str, subject: str, body: str) -> str:
+    def _raw_message(
+        self,
+        *,
+        to: str,
+        subject: str,
+        body: str,
+        in_reply_to: str = "",
+        references: str = "",
+        cc: str = "",
+    ) -> str:
         msg = MIMEText(body or "", "plain", "utf-8")
         msg["To"] = to
         msg["Subject"] = subject or ""
+        if cc:
+            msg["Cc"] = cc
+        # Threading headers — without these a "reply" starts a NEW conversation
+        # in the recipient's client even if Gmail groups it server-side.
+        if in_reply_to:
+            msg["In-Reply-To"] = in_reply_to
+            msg["References"] = references or in_reply_to
         return base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+
+    def _headers_of(self, data: dict[str, Any]) -> dict[str, str]:
+        return {
+            str(h.get("name") or "").lower(): str(h.get("value") or "")
+            for h in (data.get("payload") or {}).get("headers") or []
+            if isinstance(h, dict)
+        }
+
+    def reply_to_message(
+        self,
+        message_id: str,
+        *,
+        body: str,
+        reply_all: bool = False,
+    ) -> dict[str, Any]:
+        """Reply IN THREAD to an existing message.
+
+        Pulls the original's Message-ID / From / Subject so the reply threads
+        properly in every mail client, and posts it with the same threadId.
+        """
+        mid = (message_id or "").strip()
+        if not mid:
+            raise ValueError("message_id required")
+        original = self._request(
+            "GET",
+            f"/users/me/messages/{mid}",
+            query={"format": "metadata"},
+        )
+        headers = self._headers_of(original)
+        thread_id = str(original.get("threadId") or "")
+        orig_msg_id = headers.get("message-id") or ""
+        # Reply goes to Reply-To when present, else the sender.
+        to_addr = headers.get("reply-to") or headers.get("from") or ""
+        if not to_addr:
+            raise RuntimeError("Could not determine a reply address for that message.")
+        cc = headers.get("cc", "") if reply_all else ""
+        subject = headers.get("subject") or ""
+        if subject and not subject.lower().startswith("re:"):
+            subject = f"Re: {subject}"
+        references = headers.get("references") or ""
+        if orig_msg_id:
+            references = f"{references} {orig_msg_id}".strip()
+        raw = self._raw_message(
+            to=to_addr,
+            subject=subject,
+            body=body,
+            in_reply_to=orig_msg_id,
+            references=references,
+            cc=cc,
+        )
+        data = self._request(
+            "POST",
+            "/users/me/messages/send",
+            body={"raw": raw, "threadId": thread_id} if thread_id else {"raw": raw},
+        )
+        return {
+            "ok": True,
+            "message_id": str(data.get("id") or ""),
+            "thread_id": str(data.get("threadId") or thread_id),
+            "to": to_addr,
+            "subject": subject,
+            "in_reply_to": orig_msg_id,
+            "message": f"Replied in thread to {to_addr}: {subject or '(no subject)'}",
+        }
+
+    def modify_labels(
+        self,
+        message_id: str,
+        *,
+        add: list[str] | None = None,
+        remove: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Add/remove Gmail labels (INBOX, UNREAD, STARRED, or label ids)."""
+        mid = (message_id or "").strip()
+        if not mid:
+            raise ValueError("message_id required")
+        body: dict[str, Any] = {}
+        if add:
+            body["addLabelIds"] = [str(x) for x in add]
+        if remove:
+            body["removeLabelIds"] = [str(x) for x in remove]
+        if not body:
+            raise RuntimeError("Nothing to change — pass add= or remove=.")
+        data = self._request("POST", f"/users/me/messages/{mid}/modify", body=body)
+        return {
+            "ok": True,
+            "message_id": str(data.get("id") or mid),
+            "labels": [str(x) for x in (data.get("labelIds") or [])],
+            "message": "Labels updated",
+        }
+
+    def archive_message(self, message_id: str) -> dict[str, Any]:
+        """Archive = drop it out of the inbox (Gmail keeps it searchable)."""
+        out = self.modify_labels(message_id, remove=["INBOX"])
+        out["message"] = "Archived (out of inbox, still searchable)"
+        return out
+
+    def mark_read(self, message_id: str, *, read: bool = True) -> dict[str, Any]:
+        out = (
+            self.modify_labels(message_id, remove=["UNREAD"])
+            if read
+            else self.modify_labels(message_id, add=["UNREAD"])
+        )
+        out["message"] = "Marked read" if read else "Marked unread"
+        return out
 
     def create_draft(self, *, to: str, subject: str, body: str) -> dict[str, Any]:
         raw = self._raw_message(to=to, subject=subject, body=body)

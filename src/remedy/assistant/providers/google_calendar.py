@@ -135,6 +135,67 @@ class GoogleCalendarProvider:
         )
 
 
+    def get_event(self, event_id: str) -> CalendarEvent:
+        """Fetch one event by id (so a patch can report what actually changed)."""
+        item = self._request("GET", f"/calendars/primary/events/{event_id}")
+        start_o = item.get("start") or {}
+        end_o = item.get("end") or {}
+        return CalendarEvent(
+            id=str(item.get("id") or event_id),
+            title=str(item.get("summary") or "(no title)"),
+            start=str(start_o.get("dateTime") or start_o.get("date") or ""),
+            end=str(end_o.get("dateTime") or end_o.get("date") or ""),
+            description=str(item.get("description") or ""),
+            location=str(item.get("location") or ""),
+            raw=item,
+        )
+
+    def update_event(
+        self,
+        event_id: str,
+        *,
+        title: str = "",
+        start: str = "",
+        end: str = "",
+        description: str = "",
+        location: str = "",
+    ) -> CalendarEvent:
+        """PATCH an existing event — reschedule or retitle. Only sends the
+        fields the caller actually supplied, so nothing else is clobbered."""
+        body: dict[str, Any] = {}
+        if (title or "").strip():
+            body["summary"] = title.strip()
+        if (start or "").strip():
+            body["start"] = _event_time(start.strip())
+        if (end or "").strip():
+            body["end"] = _event_time(end.strip())
+        if (description or "").strip():
+            body["description"] = description
+        if (location or "").strip():
+            body["location"] = location
+        if not body:
+            raise RuntimeError("Nothing to update — pass a new title/start/end.")
+        item = self._request(
+            "PATCH", f"/calendars/primary/events/{event_id}", body=body
+        )
+        start_o = item.get("start") or {}
+        end_o = item.get("end") or {}
+        return CalendarEvent(
+            id=str(item.get("id") or event_id),
+            title=str(item.get("summary") or title),
+            start=str(start_o.get("dateTime") or start_o.get("date") or start),
+            end=str(end_o.get("dateTime") or end_o.get("date") or end),
+            description=str(item.get("description") or description or ""),
+            location=str(item.get("location") or location or ""),
+            raw=item,
+        )
+
+    def delete_event(self, event_id: str) -> dict[str, Any]:
+        """Cancel/remove an event from the primary calendar."""
+        self._request("DELETE", f"/calendars/primary/events/{event_id}")
+        return {"ok": True, "event_id": event_id, "message": "Event cancelled"}
+
+
 def _event_time(iso_or_date: str) -> dict[str, str]:
     """Build Google Calendar start/end body.
 
