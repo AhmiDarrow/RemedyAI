@@ -209,6 +209,24 @@ Do not ask what is on the clipboard when a read already returned it.
 3. `computer_type` / `computer_key` until the task completes
 4. Reversible first; confirm destructive actions
 
+Native-app power moves (prefer these over pixel guessing):
+- **READ an app's content**: `computer_page_text target=desktop` — returns the
+  window's edit/document values and labels via UI Automation. Use it to check
+  what a field contains or to verify what you just typed. No screenshot needed.
+- **SET a field directly**: `computer_type ref=cN text=…` writes that control's
+  whole value atomically via UIA (verified read-back, no focus races). Best for
+  form fields, Save-As filename boxes, and search boxes.
+- **Offscreen items**: snapshot keeps below-the-fold items (marked offscreen);
+  clicking one auto-scrolls it into view first — don't manually scroll-hunt.
+- **Windows**: `computer_windows mode=minimize|maximize|restore|close|move|resize`
+  manages windows (close is polite — a save prompt may appear; snapshot to
+  drive it). Tile two windows with move/resize to work across apps.
+- Every desktop click/type/key result includes `foreground` + `focused` (name /
+  role / value) — CHECK it: if the foreground window isn't the app you meant,
+  refocus before continuing instead of typing into the wrong window.
+- Save/Open dialogs: `ctrl+s` → snapshot → the filename box is an `edit` —
+  `computer_type ref=… text=C:/full/path.ext` then `computer_click text=Save`.
+
 ### Build → run → play (games / GUI / compiled apps)
 
 After writing a runnable (`.c` / `.py` / `.exe` / pygame / etc.):
