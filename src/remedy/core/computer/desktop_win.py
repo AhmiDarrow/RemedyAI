@@ -823,11 +823,275 @@ def click_element(el: dict[str, Any], *, button: str = "left", clicks: int = 1) 
     click(x, y, button=button, clicks=clicks)
 
 
-def focus_window(hwnd: int) -> None:
+def focus_window(hwnd: int) -> bool:
+    """Restore + foreground *hwnd*, VERIFIED.
+
+    Windows' foreground lock can silently ignore SetForegroundWindow; we check
+    GetForegroundWindow and fall back to AttachThreadInput so input never lands
+    in the wrong app. Returns True when hwnd (or a child) is foreground.
+    """
     _require_windows()
     user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
     user32.ShowWindow(hwnd, 9)  # SW_RESTORE
     user32.SetForegroundWindow(hwnd)
+    if _foreground_is(hwnd):
+        return True
+    # Foreground lock: attach our thread's input state to the foreground thread.
+    with contextlib.suppress(Exception):
+        fg = user32.GetForegroundWindow()
+        fg_tid = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+        my_tid = kernel32.GetCurrentThreadId()
+        if fg_tid and fg_tid != my_tid:
+            user32.AttachThreadInput(my_tid, fg_tid, True)
+            try:
+                user32.BringWindowToTop(hwnd)
+                user32.SetForegroundWindow(hwnd)
+            finally:
+                user32.AttachThreadInput(my_tid, fg_tid, False)
+    if _foreground_is(hwnd):
+        return True
+    # Last resort: brief ALT tap releases the foreground lock for us.
+    with contextlib.suppress(Exception):
+        _send_input(
+            INPUT(INPUT_KEYBOARD, INPUT_UNION(ki=KEYBDINPUT(0x12, 0, 0, 0, None))),
+            INPUT(
+                INPUT_KEYBOARD,
+                INPUT_UNION(ki=KEYBDINPUT(0x12, 0, KEYEVENTF_KEYUP, 0, None)),
+            ),
+        )
+        user32.SetForegroundWindow(hwnd)
+    time.sleep(0.05)
+    return _foreground_is(hwnd)
+
+
+def _foreground_is(hwnd: int) -> bool:
+    """True when *hwnd* or one of its ancestors/owner is the foreground window."""
+    with contextlib.suppress(Exception):
+        user32 = ctypes.windll.user32
+        fg = user32.GetForegroundWindow()
+        if not fg:
+            return False
+        if int(fg) == int(hwnd):
+            return True
+        # Owned/child relationship either way counts (dialogs, WebView hosts).
+        GA_ROOTOWNER = 3
+        return int(user32.GetAncestor(fg, GA_ROOTOWNER)) == int(
+            user32.GetAncestor(hwnd, GA_ROOTOWNER)
+        )
+    return False
+
+
+def foreground_window_info() -> dict[str, Any]:
+    """Title/hwnd of the current foreground window — act→verify evidence."""
+    out: dict[str, Any] = {"hwnd": 0, "title": ""}
+    with contextlib.suppress(Exception):
+        user32 = ctypes.windll.user32
+        fg = user32.GetForegroundWindow()
+        if fg:
+            buf = ctypes.create_unicode_buffer(256)
+            user32.GetWindowTextW(fg, buf, 256)
+            out = {"hwnd": int(fg), "title": buf.value}
+    return out
+
+
+# --- window management verbs (minimize / maximize / restore / close / move) --
+
+_SW = {"minimize": 6, "maximize": 3, "restore": 9}
+
+
+def manage_window(
+    hwnd: int,
+    verb: str,
+    *,
+    x: int | None = None,
+    y: int | None = None,
+    width: int | None = None,
+    height: int | None = None,
+) -> dict[str, Any]:
+    """minimize | maximize | restore | close | move | resize a top-level window.
+
+    close sends WM_CLOSE (polite — the app may prompt to save; that prompt is a
+    normal window Remedy can then drive). move/resize use SetWindowPos.
+    """
+    _require_windows()
+    user32 = ctypes.windll.user32
+    v = (verb or "").strip().lower()
+    if not hwnd:
+        return {"ok": False, "message": "hwnd required"}
+    if v in _SW:
+        user32.ShowWindow(int(hwnd), _SW[v])
+        return {"ok": True, "message": f"{v} hwnd={hwnd}"}
+    if v == "close":
+        WM_CLOSE = 0x0010
+        user32.PostMessageW(int(hwnd), WM_CLOSE, 0, 0)
+        return {
+            "ok": True,
+            "message": (
+                f"Sent close to hwnd={hwnd} (the app may show a save prompt — "
+                "snapshot to see it)"
+            ),
+        }
+    if v in ("move", "resize"):
+        rect = wintypes.RECT()
+        user32.GetWindowRect(int(hwnd), ctypes.byref(rect))
+        nx = int(x) if x is not None else rect.left
+        ny = int(y) if y is not None else rect.top
+        nw = int(width) if width is not None else rect.right - rect.left
+        nh = int(height) if height is not None else rect.bottom - rect.top
+        SWP_NOZORDER = 0x0004
+        SWP_NOACTIVATE = 0x0010
+        user32.SetWindowPos(
+            int(hwnd), 0, nx, ny, nw, nh, SWP_NOZORDER | SWP_NOACTIVATE
+        )
+        return {"ok": True, "message": f"{v} hwnd={hwnd} → ({nx},{ny}) {nw}x{nh}"}
+    return {"ok": False, "message": f"Unknown window verb {verb!r}"}
+
+
+# --- clipboard (as-the-user data transport + fast atomic paste) -------------
+
+
+def get_clipboard_text() -> str:
+    """Read CF_UNICODETEXT from the clipboard ('' when empty/non-text)."""
+    _require_windows()
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    CF_UNICODETEXT = 13
+    for _ in range(5):  # clipboard can be briefly held by another app
+        if user32.OpenClipboard(0):
+            break
+        time.sleep(0.02)
+    else:
+        return ""
+    try:
+        # 64-bit: default int restype truncates the HANDLE — declare it.
+        user32.GetClipboardData.restype = ctypes.c_void_p
+        h = user32.GetClipboardData(CF_UNICODETEXT)
+        if not h:
+            return ""
+        kernel32.GlobalLock.restype = ctypes.c_void_p
+        kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+        kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+        p = kernel32.GlobalLock(ctypes.c_void_p(h))
+        if not p:
+            return ""
+        try:
+            return ctypes.wstring_at(p)
+        finally:
+            kernel32.GlobalUnlock(ctypes.c_void_p(h))
+    except Exception:
+        return ""
+    finally:
+        user32.CloseClipboard()
+
+
+def set_clipboard_text(text: str) -> bool:
+    """Put *text* on the clipboard as CF_UNICODETEXT."""
+    _require_windows()
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    CF_UNICODETEXT = 13
+    GMEM_MOVEABLE = 0x0002
+    data = str(text or "")
+    for _ in range(5):
+        if user32.OpenClipboard(0):
+            break
+        time.sleep(0.02)
+    else:
+        return False
+    try:
+        user32.EmptyClipboard()
+        nbytes = (len(data) + 1) * 2
+        kernel32.GlobalAlloc.restype = ctypes.c_void_p
+        kernel32.GlobalLock.restype = ctypes.c_void_p
+        kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+        kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+        kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
+        user32.SetClipboardData.restype = ctypes.c_void_p
+        user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+        h = kernel32.GlobalAlloc(GMEM_MOVEABLE, nbytes)
+        if not h:
+            return False
+        p = kernel32.GlobalLock(ctypes.c_void_p(h))
+        if not p:
+            kernel32.GlobalFree(ctypes.c_void_p(h))
+            return False
+        ctypes.memmove(p, ctypes.create_unicode_buffer(data), nbytes)
+        kernel32.GlobalUnlock(ctypes.c_void_p(h))
+        if not user32.SetClipboardData(CF_UNICODETEXT, ctypes.c_void_p(h)):
+            kernel32.GlobalFree(ctypes.c_void_p(h))
+            return False
+        return True
+    except Exception:
+        return False
+    finally:
+        user32.CloseClipboard()
+
+
+# Long text via per-char SendInput is slow (~200 chars/s) and any focus change
+# corrupts it mid-string. Above this length, paste atomically via clipboard.
+PASTE_THRESHOLD = 200
+
+
+def type_text_fast(
+    text: str,
+    *,
+    abort_check: Callable[[], bool] | None = None,
+    chars_typed: list[int] | None = None,
+) -> dict[str, Any]:
+    """Type text — atomically via clipboard-paste when long, per-char when short.
+
+    Preserves the user's clipboard (saved and restored around the paste). Falls
+    back to per-char typing when the clipboard path fails, so behaviour is a
+    strict superset of type_text. Returns {"chars", "method"}.
+    """
+    data = str(text or "")
+    if len(data) <= PASTE_THRESHOLD or "\r" in data or "\n" in data:
+        # Short text (or text with newlines — apps treat pasted vs typed
+        # newlines differently, e.g. chat boxes that send on Enter).
+        n = type_text(data, abort_check=abort_check, chars_typed=chars_typed)
+        return {"chars": n, "method": "keystrokes"}
+    saved = get_clipboard_text()
+    try:
+        if not set_clipboard_text(data):
+            n = type_text(data, abort_check=abort_check, chars_typed=chars_typed)
+            return {"chars": n, "method": "keystrokes"}
+        press_key("ctrl+v")
+        time.sleep(0.15)
+        if chars_typed is not None:
+            chars_typed[:] = [len(data)]
+        return {"chars": len(data), "method": "paste"}
+    finally:
+        with contextlib.suppress(Exception):
+            set_clipboard_text(saved)
+
+
+def press_hold(
+    x: int,
+    y: int,
+    *,
+    hold_ms: int = 2600,
+    abort_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    """Trusted press-AND-HOLD at (x,y) — accessibility gesture for native apps."""
+    _require_windows()
+    move_mouse(x, y)
+    time.sleep(0.05)
+    _send_input(INPUT(INPUT_MOUSE, INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, 0x0002, 0, None))))
+    held = 0.0
+    step = 0.1
+    total = max(0.1, float(hold_ms) / 1000.0)
+    try:
+        while held < total:
+            time.sleep(min(step, total - held))
+            held += step
+            if abort_check is not None and abort_check():
+                break
+    finally:
+        _send_input(
+            INPUT(INPUT_MOUSE, INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, 0x0004, 0, None)))
+        )
+    return {"held_ms": int(min(held, total) * 1000), "x": x, "y": y}
 
 
 def focus_window_by_title(title_substr: str) -> dict[str, Any] | None:
