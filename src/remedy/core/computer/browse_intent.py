@@ -241,9 +241,13 @@ def retail_search_url(site: str, query: str) -> str | None:
 # "go to walmart and find whole milk", "target search paper towels",
 # "walmart buy a gallon of milk" → straight to the retailer's results page.
 # Built once from the retailer table so a new alias needs no second edit.
+# Unambiguous shopping verbs only. Bare "get"/"grab" were dropped: they turned
+# product phrases that merely start with them ("walmart get well soon card")
+# into verb+remainder mis-parses ("well soon card"). "get me…"/"go get" still
+# route via the general life-task path; here we keep the search kick precise.
 _RETAIL_VERB = (
     r"search(?:\s+for)?|look\s+up|look\s+for|find|shop\s+for|"
-    r"buy|order|get|grab|pick\s+up|browse\s+for"
+    r"buy|order|purchase|pick\s+up|browse\s+for|add"
 )
 
 

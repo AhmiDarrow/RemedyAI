@@ -17,6 +17,17 @@ use std::os::windows::process::CommandExt;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// Sidecar / user-data home.
+/// Reap a fire-and-forget child on a detached thread so it does not linger as
+/// a zombie (defunct) until the app exits. Used for `xdg-open` launches, whose
+/// Child we otherwise drop without ever calling wait().
+#[cfg(all(unix, not(target_os = "macos")))]
+fn reap_detached(child: Child) {
+    std::thread::spawn(move || {
+        let mut c = child;
+        let _ = c.wait();
+    });
+}
+
 /// - `REMEDY_HOME` when set
 /// - else `%USERPROFILE%\.remedy` / `~/.remedy`
 fn remedy_home() -> PathBuf {
@@ -1361,13 +1372,14 @@ fn open_path(path: String) -> Result<String, String> {
     {
         // spawn, not status(): some xdg-open handlers block until the
         // launched app exits, which froze the Files slide on Linux/WSLg.
-        Command::new("xdg-open")
+        let child = Command::new("xdg-open")
             .arg(&p)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
             .map_err(|e| format!("open_path: {e}"))?;
+        reap_detached(child);
         return Ok(format!("Opened {}", p.display()));
     }
 }
@@ -1613,13 +1625,14 @@ fn open_external_url(url: String, prefer_firefox: Option<bool>) -> Result<String
             }
         }
         // spawn, not status(): xdg-open may block until the browser exits.
-        Command::new("xdg-open")
+        let child = Command::new("xdg-open")
             .arg(&url)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
             .map_err(|e| format!("open url failed: {e}"))?;
+        reap_detached(child);
         return Ok(format!("Opened default browser: {url}"));
     }
 
@@ -2571,10 +2584,11 @@ fn open_data_folder() -> Result<String, String> {
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        Command::new("xdg-open")
+        let child = Command::new("xdg-open")
             .arg(&path_str)
             .spawn()
             .map_err(|e| format!("Failed to open folder: {e}"))?;
+        reap_detached(child);
     }
 
     Ok(path_str)

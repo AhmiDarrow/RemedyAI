@@ -276,6 +276,12 @@ class SubprocessSandbox(Sandbox):
 
         # Always scrub secrets / injection vectors from child env.
         safe_env = scrub_subprocess_env(env)
+        # Force UTF-8 in the child so non-ASCII stdout/stderr survives the
+        # decode("utf-8") below (mirrors the persistent-session path). Without
+        # this, a child Python on Windows emits cp1252 and unicode output is
+        # corrupted into replacement chars.
+        safe_env.setdefault("PYTHONIOENCODING", "utf-8")
+        safe_env.setdefault("PYTHONUTF8", "1")
 
         try:
             from remedy.core.turn_context import (

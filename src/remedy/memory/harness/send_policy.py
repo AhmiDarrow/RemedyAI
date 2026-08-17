@@ -104,10 +104,11 @@ def _ensure_session_brief(runtime: Any, session_id: str = "") -> Any:
             # Park foreign brief under its own key; do not destroy it
             store[bsid] = brief
             brief = None
-        elif sid and not bsid:
-            with suppress(Exception):
-                brief.session_id = sid
-        elif not sid or not bsid or bsid == sid:
+        else:
+            # Same session, or an as-yet-unlabelled brief we adopt for `sid`.
+            # (The old separate `elif sid and not bsid` branch set the id but
+            # fell through to create a fresh empty brief, DESTROYING this one's
+            # working memory — folded in here so the existing brief survives.)
             if sid and brief is not None and not bsid:
                 with suppress(Exception):
                     brief.session_id = sid
