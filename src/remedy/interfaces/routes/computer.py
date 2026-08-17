@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -103,6 +104,7 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         b = _bridge()
         return {
             "host_connected": b.host_connected(),
+            "focused_session_id": b.focused_session_id(),
             "browser_bounds": b.get_browser_bounds(),
             "pending_jobs": b.pending_count(),
             "ui_command": b.peek_ui_command(),
@@ -142,22 +144,26 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             raise HTTPException(501, "capture requires Windows")
         from remedy.core.computer import desktop_win as win
 
-        try:
+        # GDI/PIL capture + PNG encode can take hundreds of ms — keep the
+        # loop free so the host pollers and chat stream do not stall.
+        def _grab():
             if (
                 req.x is not None
                 and req.y is not None
                 and req.width is not None
                 and req.height is not None
             ):
-                info = win.screenshot_region_png(
+                return win.screenshot_region_png(
                     int(req.x),
                     int(req.y),
                     int(req.width),
                     int(req.height),
                     scale=float(req.scale or 1.0),
                 )
-            else:
-                info = win.screenshot_png()
+            return win.screenshot_png()
+
+        try:
+            info = await asyncio.to_thread(_grab)
         except Exception as e:
             raise HTTPException(500, str(e)) from e
         return {"ok": True, "capture": info}

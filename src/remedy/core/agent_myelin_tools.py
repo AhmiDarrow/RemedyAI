@@ -85,10 +85,7 @@ def register_myelin_tools(runtime: Any) -> None:
         if raw:
             try:
                 parsed = json.loads(raw)
-                if isinstance(parsed, list):
-                    arg_list = [str(a) for a in parsed]
-                else:
-                    arg_list = [raw]
+                arg_list = [str(a) for a in parsed] if isinstance(parsed, list) else [raw]
             except json.JSONDecodeError:
                 arg_list = raw.split()
         return json.dumps(

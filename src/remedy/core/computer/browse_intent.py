@@ -39,6 +39,26 @@ SITE_ALIASES: dict[str, str] = {
     "wikipedia": "https://en.wikipedia.org",
     "wiki": "https://en.wikipedia.org",
     "amazon": "https://www.amazon.com",
+    # Retail / grocery — Remedy shops for owners who cannot drive the mouse.
+    "walmart": "https://www.walmart.com",
+    "target": "https://www.target.com",
+    "best buy": "https://www.bestbuy.com",
+    "bestbuy": "https://www.bestbuy.com",
+    "costco": "https://www.costco.com",
+    "sams club": "https://www.samsclub.com",
+    "sam's club": "https://www.samsclub.com",
+    "kroger": "https://www.kroger.com",
+    "aldi": "https://www.aldi.us",
+    "walgreens": "https://www.walgreens.com",
+    "cvs": "https://www.cvs.com",
+    "home depot": "https://www.homedepot.com",
+    "homedepot": "https://www.homedepot.com",
+    "lowes": "https://www.lowes.com",
+    "lowe's": "https://www.lowes.com",
+    "ebay": "https://www.ebay.com",
+    "etsy": "https://www.etsy.com",
+    "chewy": "https://www.chewy.com",
+    "instacart": "https://www.instacart.com",
     "netflix": "https://www.netflix.com",
     "chatgpt": "https://chatgpt.com",
     "claude": "https://claude.ai",
@@ -175,7 +195,88 @@ def _search_url(site: str, query: str) -> str | None:
         return f"https://www.youtube.com/results?search_query={quote_plus(q)}"
     if site in ("duckduckgo", "ddg"):
         return f"https://duckduckgo.com/?q={quote_plus(q)}"
+    retail = _retail_search_url(site, q)
+    if retail:
+        return retail
     return None
+
+
+# Product search lands DIRECTLY on results — never the homepage, never the
+# header's store/ZIP locator ("milk" typed there → /store-finder, lost turn).
+_RETAIL_SEARCH: dict[str, str] = {
+    "walmart": "https://www.walmart.com/search?q={q}",
+    "target": "https://www.target.com/s?searchTerm={q}",
+    "amazon": "https://www.amazon.com/s?k={q}",
+    "bestbuy": "https://www.bestbuy.com/site/searchpage.jsp?st={q}",
+    "best buy": "https://www.bestbuy.com/site/searchpage.jsp?st={q}",
+    "costco": "https://www.costco.com/CatalogSearch?keyword={q}",
+    "samsclub": "https://www.samsclub.com/s/{q}",
+    "sams club": "https://www.samsclub.com/s/{q}",
+    "sam's club": "https://www.samsclub.com/s/{q}",
+    "kroger": "https://www.kroger.com/search?query={q}",
+    "walgreens": "https://www.walgreens.com/search/results.jsp?Ntt={q}",
+    "cvs": "https://www.cvs.com/search?searchTerm={q}",
+    "home depot": "https://www.homedepot.com/s/{q}",
+    "homedepot": "https://www.homedepot.com/s/{q}",
+    "lowes": "https://www.lowes.com/search?searchTerm={q}",
+    "lowe's": "https://www.lowes.com/search?searchTerm={q}",
+    "ebay": "https://www.ebay.com/sch/i.html?_nkw={q}",
+    "etsy": "https://www.etsy.com/search?q={q}",
+    "chewy": "https://www.chewy.com/s?query={q}",
+}
+
+
+def _retail_search_url(site: str, q: str) -> str | None:
+    tpl = _RETAIL_SEARCH.get((site or "").strip().lower())
+    if not tpl or not q:
+        return None
+    return tpl.format(q=quote_plus(q))
+
+
+def retail_search_url(site: str, query: str) -> str | None:
+    """Public: direct product-search URL for a known retailer (or None)."""
+    return _retail_search_url(site, _clean_target(query))
+
+
+# "go to walmart and find whole milk", "target search paper towels",
+# "walmart buy a gallon of milk" → straight to the retailer's results page.
+# Built once from the retailer table so a new alias needs no second edit.
+_RETAIL_VERB = (
+    r"search(?:\s+for)?|look\s+up|look\s+for|find|shop\s+for|"
+    r"buy|order|get|grab|pick\s+up|browse\s+for"
+)
+
+
+_RETAIL_SEARCH_RE: re.Pattern[str] | None = None
+
+
+def _retail_search_matcher() -> re.Pattern[str]:
+    global _RETAIL_SEARCH_RE
+    rx = _RETAIL_SEARCH_RE
+    if rx is None:
+        names = sorted((re.escape(k) for k in _RETAIL_SEARCH), key=len, reverse=True)
+        alt = "|".join(names)
+        rx = re.compile(
+            r"(?is)^\s*(?:please\s+)?"
+            r"(?:goto|go\s+to|open|visit|on|at|from)?\s*"
+            r"(?P<site>" + alt + r")\s+"
+            r"(?:and\s+)?(?:" + _RETAIL_VERB + r")\s+"
+            r"(?:me\s+)?(?:a\s+|an\s+|some\s+|the\s+|one\s+)?(?P<q>.+?)"
+            r"\s*[.!?]*\s*$"
+        )
+        _RETAIL_SEARCH_RE = rx
+    return rx
+
+
+def parse_retail_search(message: str) -> str | None:
+    """'<retailer> <verb> <product>' → the retailer's direct results URL."""
+    msg = (message or "").strip()
+    if not msg or len(msg) > 280:
+        return None
+    m = _retail_search_matcher().match(msg)
+    if not m:
+        return None
+    return retail_search_url(m.group("site"), m.group("q"))
 
 
 def short_site_label(url: str) -> str:
@@ -290,7 +391,13 @@ def parse_browse_navigate_url(message: str) -> str | None:
     if looks_like_url(msg) and " " not in msg.strip() and "@" not in msg:
         return normalize_url(msg)
 
-    # Search patterns first ("goto google and search elephant")
+    # Retail product search first — "go to walmart and find milk" lands on
+    # the results page, never the homepage/store-locator (a lost turn).
+    retail = parse_retail_search(msg)
+    if retail:
+        return retail
+
+    # Search patterns ("goto google and search elephant")
     sm = _SEARCH_ON_SITE_RE.match(msg)
     if sm:
         site = (

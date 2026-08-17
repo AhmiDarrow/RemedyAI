@@ -28,11 +28,7 @@ from remedy.memory.soul.field import (
 
 # Words too common to signal that an old memory is genuinely relevant again.
 _RECON_STOP = frozenset(
-    "the a an and or but to of in on for with it this that is are was were be "
-    "i you we he she they me my your our do did does can could would should "
-    "just now then so if not no yes ok okay let lets get got go going make "
-    "want need have has had will won about into out up down over what how why "
-    "when where who which as at by from".split()
+    ["the", "a", "an", "and", "or", "but", "to", "of", "in", "on", "for", "with", "it", "this", "that", "is", "are", "was", "were", "be", "i", "you", "we", "he", "she", "they", "me", "my", "your", "our", "do", "did", "does", "can", "could", "would", "should", "just", "now", "then", "so", "if", "not", "no", "yes", "ok", "okay", "let", "lets", "get", "got", "go", "going", "make", "want", "need", "have", "has", "had", "will", "won", "about", "into", "out", "up", "down", "over", "what", "how", "why", "when", "where", "who", "which", "as", "at", "by", "from"]
 )
 
 

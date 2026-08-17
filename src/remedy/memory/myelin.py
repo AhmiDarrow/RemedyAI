@@ -46,7 +46,7 @@ import sys
 import threading
 import time
 from contextlib import suppress
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -72,8 +72,7 @@ _VERBS = (
 )
 _SIG_VERB = re.compile(rf"(?i)\b({_VERBS})\b")
 _STOP = frozenset(
-    "the a an my our your this that these those all every each some of for "
-    "to in on at with from and or please can you me it them again".split()
+    ["the", "a", "an", "my", "our", "your", "this", "that", "these", "those", "all", "every", "each", "some", "of", "for", "to", "in", "on", "at", "with", "from", "and", "or", "please", "can", "you", "me", "it", "them", "again"]
 )
 _SECRETISH = re.compile(
     r"(?i)(api[_-]?key|password|secret|token|sk-[a-z0-9]{8,}|bearer\s+\S+)"

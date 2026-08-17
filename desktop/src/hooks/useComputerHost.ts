@@ -151,7 +151,8 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
     // After optimistic navigate, WebView2 may still be loading — retry once.
     let res = ''
     let lastErr: unknown = null
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // 2 attempts × 9s rail evals fits the executor's 22s snapshot wait.
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
         if (attempt > 0) {
           await new Promise((r) => window.setTimeout(r, 400 + attempt * 200))
@@ -225,7 +226,8 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
   ) {
     let res = ''
     let lastErr: unknown = null
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // 2 attempts × 9s rail evals fits the executor's 20s page_text wait.
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
         if (attempt > 0) {
           await new Promise((r) => window.setTimeout(r, 350 + attempt * 150))
@@ -423,8 +425,9 @@ export function useComputerHost(
           // Never claim navigate — Rust computer-host owns rail navigates via
           // ui_command take. Dual claim was racing the WebView main thread and
           // causing second-nav timeouts (Google ok, wiki 8s fail).
+          // `ready` is a Rust-only probe (unsupported here) — leave it too.
           job = await claimComputerJob({
-            exclude: 'navigate',
+            exclude: 'navigate,ready',
             sessionId: sessionIdRef.current,
           })
         } catch (e) {

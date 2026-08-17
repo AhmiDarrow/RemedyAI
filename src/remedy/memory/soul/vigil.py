@@ -209,19 +209,18 @@ def _journal_append(entry: dict[str, Any], home: str | Path | None = None) -> No
     p = _journal_path(home)
     p.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(entry, ensure_ascii=False, default=str)
-    with suppress(Exception):
-        with _lock:
-            with p.open("a", encoding="utf-8") as f:
-                f.write(line + "\n")
-            # Ring: keep the journal from growing without bound
-            lines = p.read_text(encoding="utf-8").splitlines()
-            if len(lines) > JOURNAL_MAX_LINES:
-                tmp = p.with_suffix(".jsonl.tmp")
-                tmp.write_text(
-                    "\n".join(lines[-JOURNAL_KEEP_LINES:]) + "\n",
-                    encoding="utf-8",
-                )
-                tmp.replace(p)
+    with suppress(Exception), _lock:
+        with p.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+        # Ring: keep the journal from growing without bound
+        lines = p.read_text(encoding="utf-8").splitlines()
+        if len(lines) > JOURNAL_MAX_LINES:
+            tmp = p.with_suffix(".jsonl.tmp")
+            tmp.write_text(
+                "\n".join(lines[-JOURNAL_KEEP_LINES:]) + "\n",
+                encoding="utf-8",
+            )
+            tmp.replace(p)
 
 
 def journal_since(

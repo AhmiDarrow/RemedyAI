@@ -403,7 +403,7 @@ def body_next_line(entry: BuildLedgerEntry) -> str:
     return " ".join(body_next_lines(entry))
 
 
-def needs_resume_drive(entry: "BuildLedgerEntry | None") -> bool:
+def needs_resume_drive(entry: BuildLedgerEntry | None) -> bool:
     """True when a build was left mid-ship and RED — she should keep driving.
 
     A red build with writes on disk is unfinished work she owns; the next

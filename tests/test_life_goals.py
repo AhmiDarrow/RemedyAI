@@ -390,8 +390,8 @@ def test_clear_activity_wipes_last_step(tmp_path):
 
 def test_delete_is_exact_not_substring(tmp_path):
     store = LifeGoalStore(tmp_path)
-    a = store.add("Ship app")
-    b = store.add("Ship app v2")
+    store.add("Ship app")
+    store.add("Ship app v2")
     # Deleting by the exact title of A must NOT also remove B.
     assert store.delete("Ship app") is True
     remaining = {g.title for g in LifeGoalStore(tmp_path).list()}

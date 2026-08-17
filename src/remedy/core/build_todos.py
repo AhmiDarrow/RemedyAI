@@ -262,7 +262,7 @@ def sync_todos_with_build(runtime: Any, state: Any = None) -> list[TodoItem]:
     """
     root = None
     with suppress(Exception):
-        raw_pp = str(getattr(state, "project_path") or "") if state is not None else ""
+        raw_pp = str(state.project_path or "") if state is not None else ""
         if raw_pp:
             root = Path(raw_pp)
     items = load_todos(runtime, root=root)
@@ -281,7 +281,6 @@ def sync_todos_with_build(runtime: Any, state: Any = None) -> list[TodoItem]:
 
     wrote = int(getattr(state, "write_steps", 0) or 0) > 0
     verify_ok = getattr(state, "last_verify_ok", None) is True
-    timed_out = "timed out" in str(getattr(state, "last_verify_summary", "") or "").lower()
     files_ok = bool(named) and not missing
     phase = str(getattr(state, "phase", "") or "")
 
@@ -324,6 +323,16 @@ def sync_todos_with_build(runtime: Any, state: Any = None) -> list[TodoItem]:
         if done:
             t.status = "completed"
             changed = True
+
+    # A finished build owns its checklist: once the machine declares the
+    # build done (green verify, nothing missing), close every remaining row.
+    # Heuristic misses (row wording that names no file, e.g. "RemedyPDF
+    # update") used to leave a live checklist on screen after completion.
+    if str(getattr(state, "phase", "") or "") == "done" and not missing:
+        for t in items:
+            if t.status in {"pending", "in_progress"}:
+                t.status = "completed"
+                changed = True
 
     if changed:
         save_todos(items, runtime, root=root)

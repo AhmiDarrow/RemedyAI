@@ -137,10 +137,13 @@ def test_life_task_verbs_are_interaction_not_open_only() -> None:
         assert is_open_only_browse(msg) is False, msg
         assert is_pure_action_kick(msg) is False, msg
 
-    # Aliased sites still pre-navigate so the agent starts on the right page.
+    # Aliased sites pre-navigate so the agent starts on the right page —
+    # and for a known retailer + product that page is the results page, not
+    # the homepage (the retail search kick). The task is still NOT open-only:
+    # the loop continues to add-to-cart / checkout after this navigate.
     assert (
         parse_browse_navigate_url("goto amazon and order paper towels")
-        == "https://www.amazon.com"
+        == "https://www.amazon.com/s?k=paper+towels"
     )
 
 
@@ -177,3 +180,56 @@ def test_commerce_words_do_not_break_wiki_and_search_kicks() -> None:
     # Nested search with a commerce noun in the query still builds a search URL
     u2 = parse_browse_navigate_url("can you goto google and search for the jungle book")
     assert u2 and "google.com/search" in u2 and "jungle" in u2
+
+
+def test_retail_search_urls_go_straight_to_results():
+    """Retailer search lands on the results URL — never homepage/store-finder."""
+    from remedy.core.computer.browse_intent import retail_search_url
+
+    assert retail_search_url("walmart", "milk") == "https://www.walmart.com/search?q=milk"
+    assert retail_search_url("target", "paper towels") == (
+        "https://www.target.com/s?searchTerm=paper+towels"
+    )
+    assert retail_search_url("amazon", "usb c cable") == (
+        "https://www.amazon.com/s?k=usb+c+cable"
+    )
+    assert retail_search_url("kroger", "milk") == "https://www.kroger.com/search?query=milk"
+    # Unknown site → None (caller falls back to generic handling)
+    assert retail_search_url("bobs-corner-store", "milk") is None
+
+
+def test_retail_site_aliases_resolve():
+    from remedy.core.computer.browse_intent import resolve_site_alias
+
+    assert resolve_site_alias("walmart") == "https://www.walmart.com"
+    assert resolve_site_alias("best buy") == "https://www.bestbuy.com"
+    assert resolve_site_alias("lowe's") == "https://www.lowes.com"
+
+
+def test_retail_search_kick_lands_on_results():
+    """'go to <retailer> and find/buy <product>' → the results URL, never the
+    homepage or store-locator (the lost-turn trap)."""
+    from remedy.core.computer.browse_intent import parse_browse_navigate_url
+
+    u = parse_browse_navigate_url("go to walmart and find whole milk")
+    assert u == "https://www.walmart.com/search?q=whole+milk"
+    u = parse_browse_navigate_url("go to target and find paper towels")
+    assert u == "https://www.target.com/s?searchTerm=paper+towels"
+    u = parse_browse_navigate_url("go to amazon and find a 6ft usb-c cable")
+    assert u and "amazon.com/s?k=" in u and "usb-c+cable" in u
+    u = parse_browse_navigate_url("go to kroger and find a dozen large eggs")
+    assert u == "https://www.kroger.com/search?query=dozen+large+eggs"
+    # "buy/order" verbs count too
+    u = parse_browse_navigate_url("walmart buy a gallon of milk")
+    assert u == "https://www.walmart.com/search?q=gallon+of+milk"
+
+
+def test_retail_open_only_still_homepage():
+    """Bare 'go to walmart' (no product) stays on the homepage."""
+    from remedy.core.computer.browse_intent import parse_browse_navigate_url
+
+    assert parse_browse_navigate_url("go to walmart") == "https://www.walmart.com"
+    # Non-retail search is unaffected
+    assert "google.com/search" in (
+        parse_browse_navigate_url("go to google and search elephant") or ""
+    )

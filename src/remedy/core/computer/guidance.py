@@ -41,6 +41,46 @@ Operate this Windows PC with Remedy-native tools when the Desktop is running.
 5. **Re-observe only on failure** — one retry with snapshot; do not spiral vision.
 6. **Latest user message only** — do not resume old wiki/goals mid-task.
 
+### Shopping (grocery / retail) — go STRAIGHT to results
+
+Known retailers have direct search URLs — navigate to the RESULTS page in one
+step; do not land on the homepage and hunt for the search box:
+
+| Site | Search URL |
+|------|-----------|
+| Walmart | `https://www.walmart.com/search?q=milk` |
+| Target | `https://www.target.com/s?searchTerm=milk` |
+| Amazon | `https://www.amazon.com/s?k=milk` |
+| Kroger | `https://www.kroger.com/search?query=milk` |
+| Best Buy | `https://www.bestbuy.com/site/searchpage.jsp?st=…` |
+| Costco | `https://www.costco.com/CatalogSearch?keyword=…` |
+| Walgreens / CVS | `…/search/results.jsp?Ntt=…` / `…/search?searchTerm=…` |
+| Home Depot / Lowe's | `…/s/…` / `…/search?searchTerm=…` |
+| eBay / Etsy / Chewy | `…/sch/i.html?_nkw=…` / `…/search?q=…` / `…/s?query=…` |
+
+Traps that lose the task:
+- The header ZIP/store-locator box is NOT product search — typing an address
+  or item there lands on `/store-finder`. If you end up there, navigate to
+  the direct search URL above.
+- Retail pages are HEAVY: after navigate, `computer_wait 0.8` then snapshot
+  once. If a snapshot times out, wait and retry the RAIL — do not switch to
+  desktop screenshots for a web shop.
+- Verify with `expect_text=` ("added to cart", the product name). Add to cart
+  via `computer_click text="Add to cart"` near the matched product.
+- Store pickup/delivery choice and CHECKOUT are owner checkpoints: set the
+  cart up, then hand over — never place the order without the owner's
+  explicit go-ahead at that step.
+
+**Ask before you assume** (the general rule applies hardest here — a wrong
+item costs real money). When the request leaves a real choice open — size /
+fit, quantity, brand for a bare category ("milk" → whole / 2% / skim? store
+brand or a name?), variant (scent, color, count, model), budget across a wide
+range — and neither the message nor the owner's known preferences settle it,
+STOP and ask before adding to the cart. Do it *with the options in hand*: look
+first, then ask grounded in what you see — "Walmart has Great Value whole milk
+(gallon, $2.92) or Fairlife 2% (52oz, $4.48) — which?" One turn, one bundled
+question; if they said "my usual" or it's in their profile, use it and say so.
+
 ### Life tasks (order / book / apply / renew / buy)
 
 "goto amazon and order X" is a FULL task, never open-only: navigate → find the
@@ -111,6 +151,10 @@ web task left the rail sticky.
 
 ### Never
 
+- **Driving the owner's own browser.** Web tasks live in the in-app Browser
+  rail ONLY. Never focus a Firefox/Chrome/Edge window, Ctrl+T, or type a URL
+  into the owner's browser — you have no page eyes there and it hijacks their
+  session. Rail unreachable → wait 2s, retry the rail, then tell the owner.
 - Screenshot → vision as the default for **web/DOM** (slow). For games /
   empty UIA it is the correct path and is automatic.
 - Stopping after navigate when the user also asked to sign in / type / click

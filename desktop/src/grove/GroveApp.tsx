@@ -19,6 +19,7 @@ import {
   type PendingApproval,
 } from '../api/partner'
 import { ApprovalBanner } from '../components/ApprovalBanner'
+import { COMPUTER_UI_EVENT } from '../api/computer'
 import { RemedyLogo } from '../components/RemedyLogo'
 import { BrowserSlide } from '../components/slides/BrowserSlide'
 import { GroveChat } from './GroveChat'
@@ -132,6 +133,28 @@ export function GroveApp({
 }: GroveAppProps) {
   const [view, setView] = useState<GroveView>({ kind: 'home' })
   const [tab, setTab] = useState<RoomTab>('alongside')
+  // Home surface mirrors a goal room's tabs: plots (default) · Alongside
+  // (live browser stage — shop/browse together) · Storyline (the record).
+  const [homeTab, setHomeTab] = useState<'plots' | 'alongside' | 'storyline'>('plots')
+
+  // When Remedy starts driving the Browser rail (shopping, forms), bring the
+  // stage on screen: an unmounted rail has no bounds, so her page snapshots
+  // degrade to desktop captures and she loses her eyes. Alongside = watching.
+  const viewKindRef = useRef(view.kind)
+  viewKindRef.current = view.kind
+  useEffect(() => {
+    const onComputerUi = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { openBrowser?: boolean } | undefined
+      if (!detail?.openBrowser) return
+      if (viewKindRef.current === 'home') {
+        setHomeTab((cur) => (cur === 'alongside' ? cur : 'alongside'))
+      } else {
+        setTab((cur) => (cur === 'alongside' ? cur : 'alongside'))
+      }
+    }
+    window.addEventListener(COMPUTER_UI_EVENT, onComputerUi)
+    return () => window.removeEventListener(COMPUTER_UI_EVENT, onComputerUi)
+  }, [])
   const [board, setBoard] = useState<LifeBoard | null>(null)
   const [approvals, setApprovals] = useState<PendingApproval[]>([])
   // Draft lives inside GroveChat now; mic transcripts send directly.
@@ -407,8 +430,9 @@ export function GroveApp({
   const storyRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     const el = storyRef.current
-    if (el && tab === 'storyline') el.scrollTop = el.scrollHeight
-  }, [moments.length, partialText, streaming, tab])
+    if (el && (tab === 'storyline' || homeTab === 'storyline'))
+      el.scrollTop = el.scrollHeight
+  }, [moments.length, partialText, streaming, tab, homeTab])
 
   // ---------------- home ----------------
   if (view.kind === 'home') {
@@ -419,6 +443,31 @@ export function GroveApp({
           <div className="grove-brand">
             <RemedyLogo size={18} variant="auto" title="Remedy" />
             {partnerName || 'Remedy'}
+          </div>
+          <div className="grove-tabs home">
+            <button
+              type="button"
+              className={homeTab === 'plots' ? 'on' : ''}
+              onClick={() => setHomeTab('plots')}
+            >
+              Home
+            </button>
+            <button
+              type="button"
+              className={homeTab === 'alongside' ? 'on' : ''}
+              onClick={() => setHomeTab('alongside')}
+              title="Live stage — I drive the browser, you watch (shop, forms, email)"
+            >
+              Alongside
+            </button>
+            <button
+              type="button"
+              className={homeTab === 'storyline' ? 'on' : ''}
+              onClick={() => setHomeTab('storyline')}
+              title="Everything we say and do, in order, in plain words"
+            >
+              📖 Storyline
+            </button>
           </div>
           <button
             type="button"
@@ -444,6 +493,7 @@ export function GroveApp({
           </button>
         </div>
 
+        {homeTab === 'plots' && (
         <div
           className={`grove-split${homeSplit.dragging ? ' dragging' : ''}`}
           ref={homeSplit.containerRef}
@@ -627,6 +677,79 @@ export function GroveApp({
           />
         </div>
         </div>
+        )}
+        {homeTab === 'alongside' && (
+          <div
+            className={`grove-stagewrap split${roomSplit.dragging ? ' dragging' : ''}`}
+            ref={roomSplit.containerRef}
+          >
+            <div
+              className="grove-stage"
+              style={{ height: `${roomSplit.ratio * 100}%`, flex: 'none' }}
+            >
+              <BrowserSlide />
+            </div>
+            <div
+              className={`grove-divider h${roomSplit.dragging ? ' active' : ''}`}
+              {...roomSplit.dividerProps}
+            >
+              <span className="grip" />
+            </div>
+            <div className="grove-chatpane room">
+              <GroveChat
+                messages={messages}
+                partialText={partialText}
+                streaming={streaming}
+                loading={messagesLoading}
+                userName={userName}
+                partnerName={partnerName}
+                serverReady={serverReady}
+                placeholder="Tell me what to do — I’ll drive, you watch."
+                onSend={sendFromGrove}
+                onStop={stop}
+                ensureSessionId={ensureHomeSession}
+                sessionKey={activeId}
+                onSpecialSend={async (t) => {
+                  if (/^i want to /i.test(t)) {
+                    return plantGoal(t.replace(/^i want to /i, ''))
+                  }
+                  return false
+                }}
+                micSupported={voice.micSupported}
+                recording={voice.recording}
+                onMic={() => void handleMic()}
+              />
+            </div>
+          </div>
+        )}
+        {homeTab === 'storyline' && (
+          <div className="grove-story" data-testid="grove-home-storyline" ref={storyRef}>
+            {moments.length === 0 && !messagesLoading && (
+              <div className="grove-story-empty">
+                Everything we say and everything I do lands here, in order, in
+                plain words.
+              </div>
+            )}
+            {moments.map((mo) => (
+              <div key={mo.id} className={`grove-mo ${mo.kind}`}>
+                <div className="who">
+                  {mo.kind === 'you-said'
+                    ? 'You said'
+                    : mo.kind === 'remedy-said'
+                      ? `${partnerName || 'Remedy'} said`
+                      : `${partnerName || 'Remedy'} did`}
+                </div>
+                <div className="said">{mo.text}</div>
+              </div>
+            ))}
+            {streaming && (
+              <div className="grove-mo remedy-said now">
+                <div className="who">Happening now</div>
+                <div className="said">{partialText || '…'}</div>
+              </div>
+            )}
+          </div>
+        )}
         {voice.recording && (
           <div className="grove-sr-live" role="status" aria-live="polite">
             Listening…

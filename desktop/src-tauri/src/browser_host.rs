@@ -487,9 +487,93 @@ pub struct BrowserBounds {
 }
 
 /// Chrome mobile — sites serve compact / mobile templates suited to the rail.
-const UA_MOBILE: &str = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
-/// Desktop Edge — full multi-column layouts when user requests desktop site.
-const UA_DESKTOP: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0";
+// UA strings carry the *installed* engine's major version. A frozen
+// "Chrome/131" on a 151 runtime disagreed with the engine's own client hints
+// (Sec-CH-UA says 151) — the exact mismatch retail anti-bot stacks key on;
+// Walmart served "Robot or human?" on the first navigate. Honest = invisible.
+const UA_FALLBACK_MAJOR: &str = "131";
+
+fn engine_major() -> String {
+    tauri::webview_version()
+        .ok()
+        .and_then(|v| v.split('.').next().map(str::to_string))
+        .filter(|m| !m.is_empty() && m.chars().all(|c| c.is_ascii_digit()))
+        .unwrap_or_else(|| UA_FALLBACK_MAJOR.to_string())
+}
+
+fn ua_mobile() -> String {
+    let m = engine_major();
+    format!(
+        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{m}.0.0.0 Mobile Safari/537.36"
+    )
+}
+
+/// Desktop Edge — byte-identical to the WebView2 default UA for this runtime,
+/// so desktop mode is not an override at all.
+fn ua_desktop() -> String {
+    let m = engine_major();
+    format!(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{m}.0.0.0 Safari/537.36 Edg/{m}.0.0.0"
+    )
+}
+
+/// CDP `Emulation.setUserAgentOverride` params so the client hints
+/// (Sec-CH-UA-Platform / -Mobile / brands) agree with the UA header. Without
+/// this the mobile UA says Android while hints say Windows — a bot tell.
+#[cfg(windows)]
+fn ua_override_params(desktop: bool) -> String {
+    let m = engine_major();
+    let ua = rail_user_agent(desktop);
+    let brands = json!([
+        {"brand": "Chromium", "version": m},
+        {"brand": if desktop { "Microsoft Edge" } else { "Google Chrome" }, "version": m},
+        {"brand": "Not.A/Brand", "version": "99"},
+    ]);
+    let meta = if desktop {
+        json!({
+            "brands": brands,
+            "fullVersionList": brands,
+            "platform": "Windows",
+            "platformVersion": "15.0.0",
+            "architecture": "x86",
+            "model": "",
+            "mobile": false,
+            "bitness": "64",
+            "wow64": false,
+        })
+    } else {
+        json!({
+            "brands": brands,
+            "fullVersionList": brands,
+            "platform": "Android",
+            "platformVersion": "14.0.0",
+            "architecture": "",
+            "model": "Pixel 8",
+            "mobile": true,
+            "bitness": "",
+            "wow64": false,
+        })
+    };
+    json!({
+        "userAgent": ua,
+        "acceptLanguage": "en-US,en;q=0.9",
+        "platform": if desktop { "Win32" } else { "Linux armv81" },
+        "userAgentMetadata": meta,
+    })
+    .to_string()
+}
+
+/// Make the client hints match the UA header (best-effort, Windows CDP).
+#[cfg(windows)]
+fn apply_ua_client_hints(wv: &tauri::Webview, desktop: bool) {
+    let params = ua_override_params(desktop);
+    if let Err(e) = cdp_call(wv, "Emulation.setUserAgentOverride", params) {
+        log::warn!("browser UA client-hints override failed: {e}");
+    }
+}
+
+#[cfg(not(windows))]
+fn apply_ua_client_hints(_wv: &tauri::Webview, _desktop: bool) {}
 
 fn browser_rail_prefs_path() -> std::path::PathBuf {
     let home = if cfg!(target_os = "windows") {
@@ -505,14 +589,18 @@ fn browser_rail_prefs_path() -> std::path::PathBuf {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 struct BrowserRailPrefs {
-    /// When true, embed uses desktop UA; default false = mobile (better in narrow rail).
+    /// When true (default), the embed is a plain Edge/WebView2 desktop
+    /// browser — the UA it really is. Mobile view stays one click away for
+    /// narrow rails; it carries an Android UA + matching client hints, but a
+    /// desktop engine claiming to be a phone is what retail bot walls flag,
+    /// so it is opt-in rather than the default.
     pub desktop_site: bool,
 }
 
 impl Default for BrowserRailPrefs {
     fn default() -> Self {
         Self {
-            desktop_site: false,
+            desktop_site: true,
         }
     }
 }
@@ -565,11 +653,11 @@ impl Default for BrowserState {
     }
 }
 
-fn rail_user_agent(desktop: bool) -> &'static str {
+fn rail_user_agent(desktop: bool) -> String {
     if desktop {
-        UA_DESKTOP
+        ua_desktop()
     } else {
-        UA_MOBILE
+        ua_mobile()
     }
 }
 
@@ -1018,6 +1106,132 @@ fn attach_fullscreen_handler(app: AppHandle, wv: tauri::Webview) {
 #[cfg(not(windows))]
 fn attach_fullscreen_handler(_app: AppHandle, _wv: tauri::Webview) {}
 
+// ---------------------------------------------------------------------------
+// Trusted input (CDP). Synthetic `el.dispatchEvent(new MouseEvent(...))`
+// carries `event.isTrusted === false` — the loudest bot signal retail
+// anti-fraud stacks (DataDome / PerimeterX / Akamai / Turnstile) key on, and
+// cart/checkout pages are the most guarded pages on the web. CDP input goes
+// through the renderer's real input pipeline (the same mechanism DevTools
+// and Playwright use), so pages see trusted events. Remedy shops *with* her
+// user present — trusted input + human-held checkout is the honest posture.
+// ---------------------------------------------------------------------------
+
+#[cfg(windows)]
+fn cdp_call(wv: &tauri::Webview, method: &str, params_json: String) -> Result<String, String> {
+    use webview2_com::CallDevToolsProtocolMethodCompletedHandler;
+
+    let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
+    let tx_err = tx.clone();
+    let method_owned = method.to_string();
+    wv.with_webview(move |platform| {
+        let controller = platform.controller();
+        let core = match unsafe { controller.CoreWebView2() } {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tx_err.send(Err(format!("CoreWebView2: {e}")));
+                return;
+            }
+        };
+        let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(
+            move |error_code: windows::core::Result<()>, result_json: String| {
+                let _ = tx.send(match error_code {
+                    Ok(()) => Ok(result_json),
+                    Err(e) => Err(format!("cdp: {e}")),
+                });
+                Ok(())
+            },
+        ));
+        let m = windows::core::HSTRING::from(method_owned.as_str());
+        let p = windows::core::HSTRING::from(params_json.as_str());
+        if let Err(e) = unsafe { core.CallDevToolsProtocolMethod(&m, &p, &handler) } {
+            let _ = tx_err.send(Err(format!("cdp start: {e}")));
+        }
+    })
+    .map_err(|e| format!("with_webview: {e}"))?;
+    rx.recv_timeout(Duration::from_secs(4))
+        .map_err(|_| "cdp timeout".to_string())?
+}
+
+#[cfg(windows)]
+fn cdp_mouse(
+    wv: &tauri::Webview,
+    kind: &str,
+    x: f64,
+    y: f64,
+    button: &str,
+    click_count: i32,
+) -> Result<(), String> {
+    let params = json!({
+        "type": kind,
+        "x": x,
+        "y": y,
+        "button": button,
+        "clickCount": click_count,
+        "buttons": if kind == "mousePressed" { 1 } else { 0 },
+    });
+    cdp_call(wv, "Input.dispatchMouseEvent", params.to_string()).map(|_| ())
+}
+
+/// Real click at viewport CSS coords — page sees isTrusted=true events.
+#[cfg(windows)]
+fn cdp_click_trusted(wv: &tauri::Webview, x: f64, y: f64, button: &str) -> Result<(), String> {
+    let btn = if button == "right" { "right" } else { "left" };
+    // The pointer arrives before it presses — like a hand does.
+    let _ = cdp_mouse(wv, "mouseMoved", x, y, "none", 0);
+    cdp_mouse(wv, "mousePressed", x, y, btn, 1)?;
+    cdp_mouse(wv, "mouseReleased", x, y, btn, 1)
+}
+
+/// Trusted text entry into the focused editable (real input events; React
+/// and vanilla listeners both see isTrusted=true).
+#[cfg(windows)]
+fn cdp_insert_text(wv: &tauri::Webview, text: &str) -> Result<(), String> {
+    cdp_call(wv, "Input.insertText", json!({ "text": text }).to_string()).map(|_| ())
+}
+
+/// Trusted named-key press (Enter submits forms natively — no requestSubmit
+/// shim needed). Returns None for keys we don't map; caller falls back.
+#[cfg(windows)]
+fn cdp_named_key(wv: &tauri::Webview, key: &str) -> Option<Result<(), String>> {
+    let (vk, text): (i32, &str) = match key {
+        "Enter" => (13, "\r"),
+        "Tab" => (9, ""),
+        "Escape" => (27, ""),
+        "Backspace" => (8, ""),
+        "Delete" => (46, ""),
+        "ArrowLeft" => (37, ""),
+        "ArrowUp" => (38, ""),
+        "ArrowRight" => (39, ""),
+        "ArrowDown" => (40, ""),
+        "PageUp" => (33, ""),
+        "PageDown" => (34, ""),
+        "Home" => (36, ""),
+        "End" => (35, ""),
+        _ => return None,
+    };
+    let down = json!({
+        "type": if text.is_empty() { "rawKeyDown" } else { "keyDown" },
+        "key": key,
+        "code": key,
+        "windowsVirtualKeyCode": vk,
+        "nativeVirtualKeyCode": vk,
+        "text": text,
+        "unmodifiedText": text,
+    });
+    let up = json!({
+        "type": "keyUp",
+        "key": key,
+        "code": key,
+        "windowsVirtualKeyCode": vk,
+        "nativeVirtualKeyCode": vk,
+    });
+    Some(
+        cdp_call(wv, "Input.dispatchKeyEvent", down.to_string())
+            .and_then(|_| cdp_call(wv, "Input.dispatchKeyEvent", up.to_string()))
+            .map(|_| ()),
+    )
+}
+
 fn apply_page_fullscreen(app: &AppHandle, fullscreen: bool) {
     let Some(state) = app.try_state::<BrowserState>() else {
         return;
@@ -1089,7 +1303,7 @@ pub fn browser_view_mode(state: State<'_, BrowserState>) -> Result<serde_json::V
 /// Apply mobile/desktop User-Agent on a live embed (WebView2 Settings2).
 #[cfg(windows)]
 fn set_embed_user_agent(wv: &tauri::Webview, desktop: bool) -> Result<(), String> {
-    let ua = rail_user_agent(desktop).to_string();
+    let ua = rail_user_agent(desktop);
     let (tx, rx) = std::sync::mpsc::sync_channel::<Result<(), String>>(1);
     wv.with_webview(move |platform| {
         use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings2;
@@ -1108,7 +1322,9 @@ fn set_embed_user_agent(wv: &tauri::Webview, desktop: bool) -> Result<(), String
         let _ = tx.send(result);
     })
     .map_err(|e| format!("with_webview: {e}"))?;
-    rx.recv().map_err(|e| format!("UA channel: {e}"))?
+    rx.recv().map_err(|e| format!("UA channel: {e}"))??;
+    apply_ua_client_hints(wv, desktop);
+    Ok(())
 }
 
 #[cfg(not(windows))]
@@ -1121,7 +1337,7 @@ fn set_embed_user_agent(_wv: &tauri::Webview, _desktop: bool) -> Result<(), Stri
 /// Prefers **in-place** User-Agent change + hard reload (no destroy). Falls back
 /// to destroy+recreate if Settings2 is unavailable. SPA should pass current URL
 /// + host bounds when available.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_set_desktop_site(
     app: AppHandle,
     state: State<'_, BrowserState>,
@@ -1426,7 +1642,7 @@ pub fn navigate_embed(
     );
     let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(blank))
         .focused(false)
-        .user_agent(ua)
+        .user_agent(&ua)
         .background_color(Color(18, 18, 22, 255))
         // Privacy Shield + OAuth special-scheme rewrite (storagerelay / intent)
         .on_navigation(move |url| {
@@ -1455,13 +1671,15 @@ pub fn navigate_embed(
             if u.is_empty() || u.starts_with("about:") {
                 return;
             }
+            let mut prev_url = String::new();
             if let Some(st) = app_for_load.try_state::<BrowserState>() {
                 if let Ok(mut g) = st.current_url.lock() {
+                    prev_url = g.clone();
                     *g = u.clone();
                 }
             }
             let _ = app_for_load.emit("browser-url-changed", json!({ "url": u }));
-            complete_pending_navigate_if_any(&app_for_load, &u);
+            complete_pending_navigate_if_any(&app_for_load, &u, &prev_url);
             // Same-window OAuth: window.open → location.assign (no popup surface).
             let _ = wv.eval(SAME_WINDOW_OAUTH_JS);
             // Scrollbars only (no zoom / chrome overrides)
@@ -1511,6 +1729,12 @@ pub fn navigate_embed(
 
     // Video fullscreen: expand child WebView2 to the app window on request.
     attach_fullscreen_handler(app.clone(), wv.clone());
+    // Client hints must agree with the UA header. Off-thread: cdp_call waits
+    // on a completion callback that only the main-thread pump can deliver.
+    {
+        let wv_hints = wv.clone();
+        std::thread::spawn(move || apply_ua_client_hints(&wv_hints, desktop));
+    }
 
     if may_show {
         let _ = wv.show();
@@ -1662,8 +1886,23 @@ fn computer_host_loop(app: AppHandle) {
         // Claim navigate leftovers + DOM jobs (SPA may also claim; only one wins).
         // page_text/ready must be claimable by Rust — SPA alone is not enough when
         // the React host is busy or mid-bootstrap after navigate.
+        //
+        // While the main window is hidden (tray) or minimized the SPA pauses
+        // its claim loop entirely, so observe jobs (snapshot/page_text/ready)
+        // would sit pending until the executor timed out — Remedy went blind
+        // exactly when the owner drove her from the WebUI with the desktop
+        // tucked away. Rust owns those jobs whenever the SPA cannot.
+        let spa_can_claim = main_window(&app)
+            .map(|w| w.is_visible().unwrap_or(true) && !w.is_minimized().unwrap_or(false))
+            .unwrap_or(true);
+        // `ready` is a Rust-only probe (the SPA rejects it) — always ours.
+        let only = if spa_can_claim {
+            "navigate,ready"
+        } else {
+            "navigate,snapshot,a11y,page_text,ready"
+        };
         if let Ok(resp) = auth_req(agent.get(
-            &api_url("/api/computer/jobs/next?only=navigate"),
+            &api_url(&format!("/api/computer/jobs/next?only={only}")),
         ))
         .call()
         {
@@ -2184,9 +2423,47 @@ fn arm_pending_navigate(app: &AppHandle, job_id: String, url: String) {
     });
 }
 
-fn complete_pending_navigate_if_any(app: &AppHandle, loaded_url: &str) {
+/// Hostname with any leading `www.` dropped (walmart.com == www.walmart.com).
+fn nav_host(u: &str) -> String {
+    Url::parse(u)
+        .ok()
+        .and_then(|p| p.host_str().map(|h| h.to_ascii_lowercase()))
+        .map(|h| h.trim_start_matches("www.").to_string())
+        .unwrap_or_default()
+}
+
+fn same_page_url(a: &str, b: &str) -> bool {
+    a.trim_end_matches('/') == b.trim_end_matches('/')
+}
+
+fn complete_pending_navigate_if_any(app: &AppHandle, loaded_url: &str, prev_url: &str) {
+    // Only a load event that is *our* navigation settles the pending job:
+    // the requested URL itself, or a new page on the same host (redirect,
+    // e.g. /search → /blocked). A late Finished event from the previous
+    // page (same URL the rail already showed) used to complete a walmart
+    // /search navigate with "URL: https://www.walmart.com/" — the agent
+    // read that as "search did not happen" and hunted for the search box.
+    // Anything else resolves via the 8s optimistic timer.
     let pending = if let Some(st) = app.try_state::<BrowserState>() {
-        st.pending_navigate.lock().ok().and_then(|mut g| g.take())
+        st.pending_navigate.lock().ok().and_then(|mut g| {
+            let matches = g
+                .as_ref()
+                .map(|(_, dest)| {
+                    if same_page_url(loaded_url, dest) {
+                        return true;
+                    }
+                    let want = nav_host(dest);
+                    let got = nav_host(loaded_url);
+                    let same_host = want.is_empty() || got.is_empty() || want == got;
+                    same_host && !same_page_url(loaded_url, prev_url)
+                })
+                .unwrap_or(false);
+            if matches {
+                g.take()
+            } else {
+                None
+            }
+        })
     } else {
         None
     };
@@ -2277,7 +2554,7 @@ pub fn browser_go_forward(app: AppHandle) -> Result<(), String> {
 
 /// Live URL of the embed. Prefers WebView2's real location (link clicks / history);
 /// falls back to last navigated URL in state.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn browser_current_url(
     app: AppHandle,
     state: State<'_, BrowserState>,
@@ -2333,7 +2610,13 @@ pub fn browser_last_bounds(state: State<'_, BrowserState>) -> Result<Option<Brow
 
 /// Agent-driven input into the embed (coordinates relative to the page viewport).
 /// Used by the computer-use host poller — not a feature gate, task completion path.
-#[tauri::command]
+///
+/// `async`: this command blocks on `eval_with_callback` / CDP results. A plain
+/// sync command runs on the main thread, and WebView2 delivers those callbacks
+/// through the main thread's message pump — so every SPA-claimed snapshot /
+/// page_text / click deadlocked into the 9s timeout while the Rust poller
+/// thread (off-main) ran the very same evals in ~1s. Off-main is mandatory.
+#[tauri::command(async)]
 pub fn browser_agent_action(
     app: AppHandle,
     action: String,
@@ -2355,6 +2638,11 @@ pub fn browser_agent_action(
         .ok_or_else(|| "browser not open — navigate first".to_string())?;
     let act = action.to_lowercase();
     let jid_owned = job_id.clone().unwrap_or_default();
+    let button_cdp = button.clone();
+    #[cfg(windows)]
+    let text_cdp = text.clone();
+    #[cfg(windows)]
+    let key_cdp = key.clone();
     let js = match act.as_str() {
         "snapshot" | "a11y" => {
             // Richer a11y-ish scrape; return array via eval_with_callback.
@@ -2484,20 +2772,9 @@ pub fn browser_agent_action(
   const name=(best.getAttribute('aria-label')||best.innerText||best.placeholder||best.tagName||'').trim().replace(/\s+/g,' ').slice(0,80);
   const tag=(best.tagName||'').toLowerCase();
   const itype=(best.type||'').toLowerCase();
-  const out='ok:'+bestS.toFixed(0)+':'+tag+':'+itype+':'+name;
-  // Defer click — navigating <a> would tear down the document before return,
-  // so eval_with_callback never fires (host timeout).
-  setTimeout(function(){{
-    const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:0}};
-    try{{ best.dispatchEvent(new MouseEvent('mousedown', opts)); }}catch(e){{}}
-    try{{ best.dispatchEvent(new MouseEvent('mouseup', opts)); }}catch(e){{}}
-    try{{ best.dispatchEvent(new MouseEvent('click', opts)); }}catch(e){{}}
-    if(typeof best.click==='function') try{{ best.click(); }}catch(e){{}}
-    if(/^(INPUT|TEXTAREA)$/.test(best.tagName)){{
-      try{{ best.select&&best.select(); }}catch(e){{}}
-    }}
-  }}, 0);
-  return out;
+  // Locate only — the host dispatches a TRUSTED click at these coords
+  // (synthetic dispatchEvent is isTrusted=false → bot-flagged at checkout).
+  return 'okxy:'+Math.round(x)+':'+Math.round(y)+':'+bestS.toFixed(0)+':'+tag+':'+itype+':'+name;
 }})()"#
             )
         }
@@ -2516,16 +2793,8 @@ pub fn browser_agent_action(
   try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}
   const r=el.getBoundingClientRect();
   const x=r.x+r.width/2, y=r.y+r.height/2;
-  const out='ok:'+ref+':'+(el.tagName||'?');
-  // Defer — navigating links destroy the document before return.
-  setTimeout(function(){{
-    const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:0}};
-    try{{ el.dispatchEvent(new MouseEvent('mousedown', opts)); }}catch(e){{}}
-    try{{ el.dispatchEvent(new MouseEvent('mouseup', opts)); }}catch(e){{}}
-    try{{ el.dispatchEvent(new MouseEvent('click', opts)); }}catch(e){{}}
-    if(typeof el.click==='function') try{{ el.click(); }}catch(e){{}}
-  }}, 0);
-  return out;
+  // Locate only — host clicks these coords via trusted input.
+  return 'okxy:'+Math.round(x)+':'+Math.round(y)+':'+ref+':'+(el.tagName||'?');
 }})()"#
             )
         }
@@ -2542,15 +2811,8 @@ pub fn browser_agent_action(
   try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}
   const r=el.getBoundingClientRect();
   const x=r.x+r.width/2, y=r.y+r.height/2;
-  const out='ok:'+ref;
-  setTimeout(function(){{
-    const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:0}};
-    try{{ el.dispatchEvent(new MouseEvent('mousedown', opts)); }}catch(e){{}}
-    try{{ el.dispatchEvent(new MouseEvent('mouseup', opts)); }}catch(e){{}}
-    try{{ el.dispatchEvent(new MouseEvent('click', opts)); }}catch(e){{}}
-    if(typeof el.click==='function') try{{ el.click(); }}catch(e){{}}
-  }}, 0);
-  return out;
+  // Locate only — host clicks these coords via trusted input.
+  return 'okxy:'+Math.round(x)+':'+Math.round(y)+':'+ref;
 }})()"#
                 )
             } else {
@@ -2562,25 +2824,20 @@ pub fn browser_agent_action(
             } else {
                 "click"
             };
+            // js_btn/btn only picked the synthetic event name — the host now
+            // dispatches trusted input; right-click comes from button= param.
+            let _ = js_btn;
             format!(
                 r#"(function(){{
   const x={cx}, y={cy};
   const el=document.elementFromPoint(x,y)||document.body;
   if(!el) return 'no element';
   try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}
-  const out='ok:'+(el.tagName||'?');
-  setTimeout(function(){{
-    const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:{btn_code}}};
-    try{{ el.dispatchEvent(new MouseEvent('mousedown', opts)); }}catch(e){{}}
-    try{{ el.dispatchEvent(new MouseEvent('mouseup', opts)); }}catch(e){{}}
-    try{{ el.dispatchEvent(new MouseEvent('{js_btn}', opts)); }}catch(e){{}}
-  }}, 0);
-  return out;
+  // Locate only — host clicks these coords via trusted input.
+  return 'okxy:'+Math.round(x)+':'+Math.round(y)+':'+(el.tagName||'?');
 }})()"#,
                 cx = cx,
                 cy = cy,
-                js_btn = js_btn,
-                btn_code = if btn == "right" { 2 } else { 0 },
             )
             }
         }
@@ -2671,13 +2928,53 @@ pub fn browser_agent_action(
     // Snapshot/page_text need a longer budget: after fire-and-forget navigate the
     // WebView2 may still be loading and eval callbacks stall until the load settles.
     let eval_timeout_s: u64 = match act.as_str() {
-        // Keep under executor wait (~12–14s) with at most 2 attempts + ready poll.
-        "snapshot" | "a11y" | "page_text" => 5,
+        // Heavy retail pages (Walmart/Target) stall evals well past 5s while
+        // loading — 5s snapshots died 3× in a row and Remedy went blind
+        // mid-shop. Budgets sized with executor waits (snapshot 22s, click
+        // 18s) at 2 host attempts each.
+        "snapshot" | "a11y" | "page_text" => 9,
         "click" | "click_ref" | "click_text" | "type" | "type_text" | "key" | "scroll"
-        | "drag" => 6,
+        | "drag" => 8,
         "ready" => 2,
         _ => 4,
     };
+    // Trusted typing / named keys first (Windows CDP — real input pipeline).
+    // Any failure falls through to the synthetic JS path below unchanged.
+    #[cfg(windows)]
+    {
+        if matches!(act.as_str(), "type" | "type_text") {
+            if let Some(txt) = text_cdp.as_deref().filter(|s| !s.is_empty()) {
+                let (ftx, frx) = std::sync::mpsc::channel::<String>();
+                let focus_js = "(function(){const el=document.activeElement;\
+return (el&&(el.isContentEditable||/^(INPUT|TEXTAREA)$/.test(el.tagName)))\
+?'rm-editable':'rm-not-editable';})()";
+                if wv
+                    .eval_with_callback(focus_js, move |r| {
+                        let _ = ftx.send(r);
+                    })
+                    .is_ok()
+                {
+                    if let Ok(chk) = frx.recv_timeout(Duration::from_secs(2)) {
+                        if chk.trim().trim_matches('"') == "rm-editable"
+                            && cdp_insert_text(&wv, txt).is_ok()
+                        {
+                            log::info!("browser agent action {act} → ok:trusted-type");
+                            return Ok("ok:trusted-type".into());
+                        }
+                    }
+                }
+            }
+        }
+        if act == "key" {
+            if let Some(k) = key_cdp.as_deref() {
+                if let Some(Ok(())) = cdp_named_key(&wv, k) {
+                    log::info!("browser agent action key → ok:trusted-key");
+                    return Ok("ok:trusted-key".into());
+                }
+            }
+        }
+    }
+
     let (tx, rx) = std::sync::mpsc::channel::<String>();
     wv.eval_with_callback(js, move |result| {
         let _ = tx.send(result);
@@ -2688,6 +2985,54 @@ pub fn browser_agent_action(
         .map_err(|_| {
             format!("browser agent action timed out on webview ({eval_timeout_s}s / {act})")
         })?;
+
+    // Trusted click hand-off: the locator JS returned viewport coords; the
+    // host dispatches real input there. Fallback (non-Windows rail / CDP
+    // error): synthetic events at the same point — the old behavior.
+    {
+        let raw_unq = raw.trim().trim_matches('"').to_string();
+        if let Some(rest) = raw_unq.strip_prefix("okxy:") {
+            let mut it = rest.splitn(3, ':');
+            let cx: f64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(-1.0);
+            let cy: f64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(-1.0);
+            let meta = it.next().unwrap_or("").to_string();
+            if cx >= 0.0 && cy >= 0.0 {
+                let btn = button_cdp.clone().unwrap_or_else(|| "left".into());
+                #[cfg(windows)]
+                let trusted = match cdp_click_trusted(&wv, cx, cy, &btn) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        log::warn!("trusted click failed — synthetic fallback: {e}");
+                        false
+                    }
+                };
+                #[cfg(not(windows))]
+                let trusted = false;
+                if !trusted {
+                    let ev = if btn == "right" { "contextmenu" } else { "click" };
+                    let code = if btn == "right" { 2 } else { 0 };
+                    let fb = format!(
+                        r#"(function(){{
+  const x={cx}, y={cy};
+  const el=document.elementFromPoint(x,y)||document.body;
+  const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:{code}}};
+  try{{ el.dispatchEvent(new MouseEvent('mousedown', opts)); }}catch(e){{}}
+  try{{ el.dispatchEvent(new MouseEvent('mouseup', opts)); }}catch(e){{}}
+  try{{ el.dispatchEvent(new MouseEvent('{ev}', opts)); }}catch(e){{}}
+  if({code}===0&&typeof el.click==='function') try{{ el.click(); }}catch(e){{}}
+}})()"#
+                    );
+                    let _ = wv.eval(&fb);
+                }
+                let out = format!("ok:{meta}");
+                log::info!(
+                    "browser agent action {act} → {out} ({} input)",
+                    if trusted { "trusted" } else { "synthetic" }
+                );
+                return Ok(out);
+            }
+        }
+    }
 
     if act == "snapshot" || act == "a11y" {
         // raw is JSON array of elements (or null/error string)
@@ -2751,7 +3096,12 @@ pub fn browser_agent_action(
     }
 
     log::info!("browser agent action {act} → {raw}");
-    Ok(if raw.is_empty() {
+    // eval_with_callback hands back the JSON encoding of the JS return value:
+    // a plain 'ok' arrives as "\"ok\"" (quotes included). The SPA's ok-check
+    // compares against bare `ok`, so scroll/type/key read as failures
+    // ("browser:scroll failed: \"ok\"") — unquote JSON strings here.
+    let raw = serde_json::from_str::<String>(&raw).unwrap_or(raw);
+    Ok(if raw.is_empty() || raw == "null" || raw == "undefined" {
         format!("browser:{act}:ok")
     } else {
         raw
