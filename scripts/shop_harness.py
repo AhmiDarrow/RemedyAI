@@ -73,6 +73,23 @@ SCENARIOS = [
             "then stop at the cart — do not check out."
         ),
     },
+    {
+        "id": "target-setstore",
+        "label": "Target · set store by address",
+        "prompt": (
+            "On target.com, set my store to the Target nearest 1825 E Primrose "
+            "St, Springfield MO 65804. Find the right store in the list and "
+            "make it my store, then tell me which store you selected."
+        ),
+    },
+    {
+        "id": "walmart-store",
+        "label": "Walmart · set store 65804",
+        "prompt": (
+            "On walmart.com, set my pickup store to a Walmart near ZIP 65804. "
+            "Pick the closest one and make it my store, then tell me which."
+        ),
+    },
 ]
 
 _SEARCH_URL_RE = re.compile(
