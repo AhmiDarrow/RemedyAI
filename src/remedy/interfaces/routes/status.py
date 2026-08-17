@@ -80,6 +80,48 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         """
         return {"status": "ok", "version": _remedy_version, "ts": time.time()}
 
+    @app.get("/api/coordination/presence")
+    async def coordination_presence(session_id: str | None = Query(default=None)):
+        """Body coordination roster — the live muscles (sessions) and their holds.
+
+        Feeds the desktop status surface so the user can see Remedy's whole body
+        at work: which sessions are building, on what, holding which files.
+        ``session_id`` (optional) marks that beacon as "you" in the payload.
+        """
+        import os as _os
+
+        beacons: list[dict[str, Any]] = []
+        with contextlib.suppress(Exception):
+            from remedy.core.coordination import active_beacons
+
+            now = time.time()
+            for b in active_beacons():
+                held = sorted(
+                    _os.path.basename(p) for p in b.live_claims(now)
+                )
+                beacons.append(
+                    {
+                        "session_id": b.session_id,
+                        "you": bool(session_id and b.session_id == session_id),
+                        "muscle": b.muscle,
+                        "project": _os.path.basename(
+                            (b.project_path or "").rstrip("/\\")
+                        )
+                        or b.project_path
+                        or "",
+                        "project_path": b.project_path,
+                        "goal": b.goal,
+                        "phase": b.phase,
+                        "held_files": held[:12],
+                        "held_count": len(held),
+                        "age_seconds": max(0, int(now - b.started_ts)),
+                        "heartbeat_seconds_ago": max(
+                            0, int(now - b.heartbeat_ts)
+                        ),
+                    }
+                )
+        return {"beacons": beacons, "count": len(beacons), "ts": time.time()}
+
     @app.get("/api/metrics")
     async def get_metrics(
         request: Request,
