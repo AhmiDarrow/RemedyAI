@@ -2097,3 +2097,22 @@ def test_host_browser_window_focus_is_refused(tmp_path):
     )
     assert d["ok"] is False
     assert "in-app Browser rail" in d["message"]
+
+
+def test_press_hold_tool_registered_and_routes():
+    """computer_press_hold is a first-class tool → PRESS_HOLD action (the
+    owner's authorized hands for an accessibility hold gesture)."""
+    from remedy.core.computer.types import ComputerAction, action_from_tool
+
+    assert action_from_tool("computer_press_hold") is ComputerAction.PRESS_HOLD
+    assert ComputerAction.PRESS_HOLD.value == "press_hold"
+
+
+def test_press_hold_learns_per_site():
+    """press_hold approaches feed the same learn-what-worked skill memory as
+    click, so overcoming a wall compounds."""
+    from remedy.core.computer.computer_skill import approach_of
+
+    assert approach_of("press_hold", {"text": "Press & Hold"}) == "text"
+    assert approach_of("press_hold", {"ref": "e3"}) == "ref"
+    assert approach_of("press_hold", {"x": 400, "y": 300}) == "coords"
