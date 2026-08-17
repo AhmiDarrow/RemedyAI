@@ -353,7 +353,7 @@ def test_sensitive_grant_does_not_replay_cross_site(monkeypatch):
 
     q = ap.APPROVALS
     prev_mode = q.mode
-    prev_one_shot = {k: set(v) for k, v in q._one_shot.items()}
+    prev_one_shot = {k: dict(v) for k, v in q._one_shot.items()}
     try:
         q.set_mode("full")
         q._one_shot.clear()
@@ -378,6 +378,77 @@ def test_sensitive_grant_does_not_replay_cross_site(monkeypatch):
         q.set_mode(prev_mode)
         q._one_shot.clear()
         q._one_shot.update(prev_one_shot)
+
+
+def test_sensitive_grant_does_not_consume_on_other_origin(monkeypatch):
+    """Approve Place-order on amazon → retry on a different host re-asks."""
+    _cfg(monkeypatch)
+    q = ApprovalQueue()
+    q.set_mode("ask")
+    cmd = "click text='Place order' target=auto"
+    reason = q.needs_ask(cmd, tool_name="computer_click")
+    item = q.create(
+        tool_name="computer_click",
+        command=cmd,
+        reason=reason,
+        session_id="s1",
+        origin="https://www.amazon.com/checkout",
+    )
+    q.resolve(item.id, approve=True, scope="session")
+    assert (
+        q.take_one_shot(
+            "computer_click", cmd, session_id="s1", origin="https://evil.example/pay"
+        )
+        is False
+    )
+    # Grant was dropped (not left for a later spoof) — same-site retry also asks.
+    assert (
+        q.take_one_shot(
+            "computer_click", cmd, session_id="s1", origin="https://www.amazon.com/checkout"
+        )
+        is False
+    )
+
+
+def test_sensitive_grant_same_origin_still_consumes(monkeypatch):
+    _cfg(monkeypatch)
+    q = ApprovalQueue()
+    q.set_mode("ask")
+    cmd = "click text='Place order' target=auto"
+    reason = q.needs_ask(cmd, tool_name="computer_click")
+    item = q.create(
+        tool_name="computer_click",
+        command=cmd,
+        reason=reason,
+        session_id="s1",
+        origin="amazon.com",
+    )
+    q.resolve(item.id, approve=True)
+    assert (
+        q.take_one_shot(
+            "computer_click", cmd, session_id="s1", origin="https://www.amazon.com/cart"
+        )
+        is True
+    )
+
+
+def test_press_hold_is_mutation_not_high_impact():
+    """press_hold participates in payment-surface fallback without becoming
+    an always-ask HIGH_IMPACT tool (CAPTCHA holds must stay effortless)."""
+    from remedy.core.approvals import (
+        _MUTATION_COMPUTER_TOOLS,
+        ApprovalQueue,
+        payment_surface_checkpoint,
+    )
+
+    assert "computer_press_hold" in _MUTATION_COMPUTER_TOOLS
+    assert "computer_press_hold" not in ApprovalQueue.HIGH_IMPACT_TOOLS
+    r = payment_surface_checkpoint(
+        "computer_press_hold",
+        label_resolved=False,
+        page_context="https://shop.example.com/checkout Place order",
+    )
+    assert r and r.startswith("Owner checkpoint")
 
 
 def test_mode_flip_leaves_sensitive_pending(monkeypatch):

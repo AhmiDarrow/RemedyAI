@@ -421,6 +421,12 @@ def live_unit_hop(
         from remedy.core.build_ledger import append_hop
 
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        hop_goal = ""
+        with suppress(Exception):
+            from remedy.core.build_engine import get_build_state
+
+            st = get_build_state(runtime)
+            hop_goal = str(getattr(st, "goal", "") or "") if st is not None else ""
         append_hop(
             str(root),
             {
@@ -437,6 +443,7 @@ def live_unit_hop(
                 "snap_id": snap_meta.get("snap_id"),
             },
             home=home,
+            goal=hop_goal or None,
         )
     with suppress(Exception):
         from remedy.core.build_engine import get_build_state
@@ -544,6 +551,12 @@ def live_build_project(
         from remedy.core.build_ledger import append_hop
 
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        hop_goal = ""
+        with suppress(Exception):
+            from remedy.core.build_engine import get_build_state
+
+            st = get_build_state(runtime)
+            hop_goal = str(getattr(st, "goal", "") or "") if st is not None else ""
         append_hop(
             str(root),
             {
@@ -554,6 +567,7 @@ def live_build_project(
                 "failures": [f.path for f in result.failures],
             },
             home=home,
+            goal=hop_goal or None,
         )
 
     return {

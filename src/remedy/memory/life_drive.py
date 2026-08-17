@@ -521,11 +521,14 @@ def take_step(
 ) -> dict[str, Any]:
     """Do one local step. Safe to call from idle or L0.
 
-    *force* (or explicit *reveal* / *allow_web*) is for a human who asked —
-    open the note and, if web tools are on, look something up. Idle ticks
-    stay quiet and local.
+    *force* (or explicit *allow_web*) is for a human who asked — do the step
+    and, if web tools are on, look something up. Idle ticks stay quiet and local.
+
+    Auto-opening the note in the OS app is OFF by default (it surprised users
+    with a stray Notepad window); the reply tells them where the note is saved.
+    A caller can still pass ``reveal=True`` to open it explicitly.
     """
-    do_reveal = force if reveal is None else bool(reveal)
+    do_reveal = False if reveal is None else bool(reveal)
     do_web = force if allow_web is None else bool(allow_web)
     store = LifeGoalStore(home_dir)
     g = store.active()

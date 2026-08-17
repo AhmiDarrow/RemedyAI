@@ -266,6 +266,7 @@ def _retail_search_matcher() -> re.Pattern[str]:
         # whole paragraph jammed into ?q=.
         rx = re.compile(
             r"(?is)^\s*(?:please\s+)?"
+            r"(?:can\s+you\s+|could\s+you\s+|please\s+can\s+you\s+)?"
             r"(?:goto|go\s+to|open|visit|on|at|from)?\s*"
             r"(?P<site>" + alt + r")\s*[,;:]?\s+"
             r"(?:and\s+)?(?:" + _RETAIL_VERB + r")\s+"

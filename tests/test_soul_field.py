@@ -23,6 +23,14 @@ from remedy.memory.soul.inject import build_soul_context_block, provider_muscle_
 from remedy.memory.soul.update import record_self_inject_lesson, update_soul_after_turn
 
 
+def test_looks_like_secret_soul_catches_password_prose():
+    from remedy.memory.soul.field import looks_like_secret_soul
+
+    assert looks_like_secret_soul("my password is hunter2")
+    assert looks_like_secret_soul("token: abcdef")
+    assert not looks_like_secret_soul("we walked through the garden")
+
+
 def test_muscle_contract_mentions_continuity():
     c = provider_muscle_contract(provider="xai", model="grok")
     assert "Soul" in c or "soul" in c.lower()

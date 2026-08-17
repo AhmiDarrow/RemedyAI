@@ -32,25 +32,35 @@ def _same_or_child_url(got: str, want: str) -> bool:
     """True when *got* is *want* or a same-host child path (redirect).
 
     Raw ``startswith`` on the full URL treats ``https://github.com`` as
-    success for ``https://github.com/foo`` (and the reverse).
+    success for ``https://github.com/foo`` (and the reverse). Query strings
+    are compared when *want* has one, so ``/search?q=eggs`` does not satisfy
+    a later navigate to ``/search?q=milk``. Path ``/`` is exact-only — every
+    path is a child of root, which made any same-host success reconcile.
     """
     if not got or not want:
         return False
     if got == want:
         return True
-    from urllib.parse import urlsplit
+    from urllib.parse import parse_qs, urlsplit
 
     a = urlsplit(got)
     b = urlsplit(want)
-    host_a = (a.hostname or "").lower()
-    host_b = (b.hostname or "").lower()
+    host_a = (a.hostname or "").lower().removeprefix("www.")
+    host_b = (b.hostname or "").lower().removeprefix("www.")
     if not host_a or host_a != host_b:
         return False
     pa = (a.path or "/").rstrip("/") or "/"
     pb = (b.path or "/").rstrip("/") or "/"
     if pa == pb:
+        if b.query:
+            want_q = parse_qs(b.query, keep_blank_values=True)
+            got_q = parse_qs(a.query or "", keep_blank_values=True)
+            return all(got_q.get(k) == v for k, v in want_q.items())
         return True
-    # Landed on a child of the requested path (common after trailing-slash redirect).
+    # Landed on a child of the requested path (trailing-slash redirect).
+    # Root is not a prefix of every path — that made any same-host URL match.
+    if pb == "/":
+        return False
     return pa.startswith(pb.rstrip("/") + "/")
 
 
@@ -333,6 +343,9 @@ class ComputerHostBridge:
         self._last_navigate_at_by_session: dict[str, float] = {}
         self._last_navigate_url_by_session: dict[str, str] = {}
         self._last_navigate_optimistic_by_session: dict[str, bool] = {}
+        # URL the host last *observed* (snapshot / page_text / navigate done).
+        self._last_observed_url: str = ""
+        self._last_observed_url_by_session: dict[str, str] = {}
         # Desktop UI command (open Browser rail like Settings) — memory + disk
         self._ui_command: dict[str, Any] | None = None
         self._focused_session_id: str = ""
@@ -405,6 +418,7 @@ class ComputerHostBridge:
             self._last_navigate_at_by_session.pop(k, None)
             self._last_navigate_url_by_session.pop(k, None)
             self._last_navigate_optimistic_by_session.pop(k, None)
+            self._last_observed_url_by_session.pop(k, None)
 
     def set_last_drive_target(self, target: str) -> None:
         t = (target or "").strip().lower()
@@ -466,6 +480,23 @@ class ComputerHostBridge:
         if sid:
             return str(self._last_navigate_url_by_session.get(sid) or "")
         return str(self._last_navigate_url or "")
+
+    def mark_observed_url(self, url: str) -> None:
+        u = str(url or "").strip()
+        if not u:
+            return
+        self._last_observed_url = u
+        sid = self._session_key()
+        if sid:
+            self._last_observed_url_by_session[sid] = u
+            self._trim_session_maps()
+
+    def last_observed_url(self) -> str:
+        """Last URL the host reported as actually showing (not just requested)."""
+        sid = self._session_key()
+        if sid:
+            return str(self._last_observed_url_by_session.get(sid) or "")
+        return str(self._last_observed_url or "")
 
     def clear_navigate_optimistic(self) -> None:
         self._last_navigate_optimistic = False
@@ -842,6 +873,19 @@ class ComputerHostBridge:
             # Typed passwords / tokens must not linger in payload after terminal.
             if job.status in ("done", "error", "cancelled"):
                 job.payload = _scrub_retained_payload(job.payload)
+            if ok and isinstance(safe_result, dict):
+                observed = str(safe_result.get("url") or "").strip()
+                if observed:
+                    # complete() holds self._lock; mark without re-locking.
+                    self._last_observed_url = observed
+                    sid = str(
+                        job.session_id
+                        or (job.payload or {}).get("session_id")
+                        or self._session_key()
+                        or ""
+                    ).strip()
+                    if sid:
+                        self._last_observed_url_by_session[sid] = observed
             self._write(job)
             # Opportunistic cleanup so page_text / snapshots do not linger on disk.
             if job.status in ("done", "error", "cancelled"):

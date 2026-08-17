@@ -62,12 +62,18 @@ def _spawn_background(
         if auto
         else ""
     )
+    win_note = (
+        "\nHeads up: a new console/app window will appear on screen for this "
+        "process — that's expected, not an error."
+        if os.name == "nt"
+        else ""
+    )
     return (
         f"started background pid={proc.pid} cwd={cwd}{note}\n"
         f"command={command}\n"
         "The process is running. Use computer_app or computer_snapshot "
         "target=desktop to play/inspect the window. Do not treat this as "
-        "exit_code=0 of a finished program — observe the UI next."
+        f"exit_code=0 of a finished program — observe the UI next.{win_note}"
     )
 
 

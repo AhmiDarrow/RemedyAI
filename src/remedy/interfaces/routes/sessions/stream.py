@@ -556,6 +556,14 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                     # Client disconnect / ASGI cancel — kill shell children + CUA jobs
                     # so Stop / tab close does not leave tools running.
                     status = "cancelled"
+                    # CPython 3.12 sticky cancellation: the next await would
+                    # re-raise unless we uncancel first. Persist + abort must
+                    # still run so Stop does not drop the assistant row or
+                    # leave tools running.
+                    _task = asyncio.current_task()
+                    if _task is not None:
+                        with contextlib.suppress(Exception):
+                            _task.uncancel()
                     # Persist whatever we already streamed. Fetch abort used to
                     # drop the assistant row so reload showed only the user turn.
                     # Skip if the cooperative @@aborted path already wrote a row.

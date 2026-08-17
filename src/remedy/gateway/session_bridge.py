@@ -243,7 +243,9 @@ async def handle_messenger_event(
             session = await ensure_session_for_event(memory, event, runtime=runtime)
             if session is not None:
                 event.session_id = session.id
-                runtime._session_id = session.id  # type: ignore[attr-defined]
+                # Do not write runtime._session_id here — a desktop tab mid-ReAct
+                # shares this process. begin_turn / ContextVar owns isolation;
+                # the fallback write below only runs when no turn is active.
         except Exception:
             logger.exception("messenger session bridge failed")
 
@@ -291,6 +293,11 @@ async def handle_messenger_event(
                     reply_parts.append(text)
                     yield text
         except asyncio.CancelledError:
+            # CPython 3.12 sticky cancel — uncancel so persist/abort awaits run.
+            _task = asyncio.current_task()
+            if _task is not None:
+                with suppress(Exception):
+                    _task.uncancel()
             # Mirror desktop SSE persist-on-cancel — user row already saved.
             note = "".join(reply_parts).strip()
             if not note:
