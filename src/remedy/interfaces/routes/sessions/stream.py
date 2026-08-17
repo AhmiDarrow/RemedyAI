@@ -57,6 +57,17 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         claim_epoch = stream_claim_epoch(session_id)
         reset_epoch_at_start = session_reset_epoch(session_id)
 
+        # An EXPLICIT provider choice on this send gives that provider a fresh
+        # chance: the user may have just fixed billing/keys ("I added credits").
+        # Without this, a quarantined provider stayed dead until process restart
+        # (clear_provider_quarantine had no callers). Three consecutive failures
+        # re-quarantine immediately, so a genuinely broken provider stays cheap.
+        if (req.provider or "").strip():
+            with contextlib.suppress(Exception):
+                from remedy.core.providers import clear_provider_quarantine
+
+                clear_provider_quarantine(req.provider)
+
         # CancelledError is BaseException — a bare `except Exception` leaked the
         # claim and 409'd the session until process restart.
         handed_to_stream = False
