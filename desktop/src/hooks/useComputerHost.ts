@@ -439,6 +439,15 @@ export function useComputerHost(
 
     const tickJobs = async () => {
       if (cancelled || busy.current) return
+      // Do not claim rail jobs while the window is hidden/minimized and no job
+      // is already in flight — the rail has no eyes then and Rust drives it.
+      // The event-driven reschedule() pause could be missed (a job was in
+      // flight at the visibilitychange, and nothing re-pauses afterward), so
+      // gate here too, on every tick.
+      const hiddenNow =
+        typeof document !== 'undefined' &&
+        (document.hidden || document.visibilityState === 'hidden')
+      if (hiddenNow && !claimedRef.current) return
       busy.current = true
       try {
         try {

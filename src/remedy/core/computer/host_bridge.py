@@ -745,15 +745,22 @@ class ComputerHostBridge:
         * No focus / untagged job / same session → yes.
         * The focused tab is mid-turn (streaming) → protect it; another
           session's job stays pending (no wrong-tab navigate).
-        * The focused tab is idle → the rail follows whoever is actually
-          driving. A session run from the WebUI, the harness, or a tab that
-          is not the desktop's open one used to be starved forever: every
-          poller filtered on the desktop's tab, observe jobs sat pending,
-          the agent read "host offline" and improvised on the desktop.
+        * The focused tab is idle AND the requesting session is the one
+          actively driving (streaming) → the rail follows that driver. A
+          session run from the WebUI or another tab used to be starved: every
+          poller filtered on the desktop's tab, observe jobs sat pending, the
+          agent read "host offline" and improvised on the desktop.
+        * The focused tab is idle but the requesting session is NOT driving
+          (a stale/abandoned pending job from an idle other session) → do NOT
+          hijack the focused idle rail with it.
         """
         if not want or not job_sid or job_sid == want:
             return True
-        return not self._session_is_streaming(want)
+        # Serve another session's job over the focused idle rail ONLY when that
+        # other session is the active driver — never a stale idle job.
+        return (not self._session_is_streaming(want)) and self._session_is_streaming(
+            job_sid
+        )
 
     def claim_next(
         self,

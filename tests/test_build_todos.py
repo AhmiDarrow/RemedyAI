@@ -156,12 +156,31 @@ def test_done_build_closes_whole_checklist(tmp_path):
     assert open_todo_count(load_todos(rt)) == 2
     state = BuildTurnState(goal="remedypdf update", project_path=str(tmp_path))
     state.phase = "done"
+    state.last_verify_ok = True  # a GREEN-verified done build owns its checklist
     items = sync_todos_with_build(rt, state)
     assert open_todo_count(items) == 0
     # save_todos drops fully-closed lists: disk file gone, next load empty
     assert not (tmp_path / ".remedy-build" / "todos.json").is_file()
     assert load_todos(rt) == []
     assert state.open_todo_count == 0
+
+
+def test_done_without_green_verify_keeps_open_rows(tmp_path):
+    """phase="done" but verify NOT green → do not claim heuristic-miss rows
+    done (the checklist must not report unverified work as accomplished)."""
+    from remedy.core.build_todos import sync_todos_with_build
+
+    rt = _rt(tmp_path)
+    upsert_todos(
+        rt,
+        [{"id": "a", "content": "RemedyPDF update polish pass", "status": "in_progress"}],
+        merge=False,
+    )
+    state = BuildTurnState(goal="remedypdf update", project_path=str(tmp_path))
+    state.phase = "done"
+    state.last_verify_ok = False
+    items = sync_todos_with_build(rt, state)
+    assert open_todo_count(items) == 1
 
 
 def test_unfinished_build_keeps_open_rows(tmp_path):

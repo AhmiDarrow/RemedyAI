@@ -31,16 +31,42 @@ from remedy.core.computer.types import ComputerAction, public_result
 # fell back to when the rail poller was starved. This is a hard executor-level
 # refusal, not a prompt suggestion (guidance.py states the same rule for the
 # model; this enforces it even if the model ignores it).
-_HOST_BROWSER_RE = re.compile(
-    r"(?i)(?:^|[\\/ ])(firefox|chrome|msedge|microsoft\s*edge|"
-    r"\bedge\b|opera|brave|vivaldi|iexplore|chromium)(?:\.exe)?(?:$|[\s\"'])"
+# Exact executable/app basenames of the owner's own web browsers.
+_HOST_BROWSER_EXES = frozenset(
+    {
+        "firefox", "chrome", "msedge", "edge", "opera", "opera_gx",
+        "brave", "vivaldi", "iexplore", "chromium", "waterfox", "librewolf",
+        "google chrome", "microsoft edge", "mozilla firefox", "opera gx",
+        "brave browser",
+    }
+)
+# Browser window titles read "<page> — Google Chrome" / "<page> - Mozilla Firefox".
+_HOST_BROWSER_TITLE_RE = re.compile(
+    r"(?i)[-–—|]\s*(mozilla firefox|google chrome|microsoft edge|opera gx|"
+    r"opera|brave|vivaldi|internet explorer|chromium|waterfox|librewolf)\s*$"
 )
 
 
 def _is_host_browser(name: str) -> bool:
-    """True when *name* names one of the owner's own web browsers."""
-    s = (name or "").strip()
-    return bool(s) and bool(_HOST_BROWSER_RE.search(s))
+    """True when *name* names one of the owner's own web browsers.
+
+    Precise on purpose: the browser token must be the whole exe/app basename
+    (``computer_app``) or the trailing "— <Browser>" of a window title
+    (``windows focus``). A substring match wrongly refused legitimate apps and
+    games whose name merely contains 'edge'/'brave'/'opera' (Edge of Tomorrow,
+    a game called Brave, an Opera music player) — those must still launch.
+    """
+    s = (name or "").strip().strip("\"'")
+    if not s:
+        return False
+    # Basename stem (strip path + .exe) — the computer_app case.
+    stem = re.split(r"[\\/]", s)[-1].strip().strip("\"'")
+    if stem.lower().endswith(".exe"):
+        stem = stem[:-4]
+    if stem.strip().lower() in _HOST_BROWSER_EXES:
+        return True
+    # Window-title case: "<page> — <Browser>".
+    return bool(_HOST_BROWSER_TITLE_RE.search(s))
 
 
 _HOST_BROWSER_REFUSAL = (
@@ -972,9 +998,14 @@ class ComputerExecutor:
                 ComputerAction.TYPE,
                 ComputerAction.KEY,
                 ComputerAction.SCROLL,
+                ComputerAction.DRAG,
+                ComputerAction.PRESS_HOLD,
                 ComputerAction.ACT,
             ):
                 # Optimistic enqueue — host poller may still be alive on disk.
+                # PRESS_HOLD/DRAG belong here too: they enqueue exactly like
+                # CLICK, so a stale host_connected flag must not hard-fail the
+                # owner's accessibility hold when a click would have gone through.
                 pass
             else:
                 return public_result(
@@ -990,8 +1021,63 @@ class ComputerExecutor:
         # Navigate: always queue for rail first (even if host_connected was false —
         # poller may wake; fail fast if unclaimed).
 
-        # Screenshot: prefer PrintWindow on WebView host, else crop rail bounds
+        # Screenshot for coordinate-guided action. Prefer the KNOWN rail bounds
+        # crop (always the rail, and it carries devicePixelRatio) over
+        # PrintWindow (which may capture the wrong Remedy webview and carries no
+        # scale). The coordinate contract must be DPI-honest: the capture is in
+        # PHYSICAL pixels but computer_click / computer_press_hold x,y are CSS
+        # viewport pixels, so on a scaled display (dpr!=1) the model must divide
+        # what it reads by the scale. Saying "pixels ARE click coords" is only
+        # true at dpr=1 — anything else was off by the DPR factor.
         if act is ComputerAction.SCREENSHOT:
+            def _coord_msg(width: int, height: int, scale: float) -> str:
+                base = f"Browser rail capture ({width}x{height}). "
+                if abs(scale - 1.0) < 0.01:
+                    return base + (
+                        "Pixel coordinates in this image ARE the page's click "
+                        "coordinates — for anything you can see but that has no "
+                        "snapshot element (a challenge iframe, a canvas, a custom "
+                        "control), use computer_click x=… y=… or "
+                        "computer_press_hold x=… y=… with the x,y you read here."
+                    )
+                return base + (
+                    f"This image is {scale:g}x the page (HiDPI). For anything "
+                    "you can see but that has no snapshot element, DIVIDE the "
+                    f"x,y you read here by {scale:g}, then use computer_click "
+                    "x=… y=… or computer_press_hold x=… y=… — those take page "
+                    "(CSS) coordinates, not image pixels."
+                )
+
+            bounds = self.bridge.get_browser_bounds()
+            scale = float((bounds or {}).get("scale") or 1.0)
+            if bounds and bounds.get("width", 0) > 40 and bounds.get("height", 0) > 40:
+                try:
+                    from remedy.core.computer import desktop_win as win
+
+                    info = win.screenshot_region_png(
+                        int(bounds["x"]),
+                        int(bounds["y"]),
+                        int(bounds["width"]),
+                        int(bounds["height"]),
+                        scale=scale,
+                    )
+                    return public_result(
+                        ok=True,
+                        target="browser",
+                        action="screenshot",
+                        message=_coord_msg(info["width"], info["height"], scale),
+                        extra={
+                            **info,
+                            "bounds": bounds,
+                            "method": "region_crop",
+                            "coord_scale": scale,
+                            "coord_space": "css_over_scale" if scale != 1.0 else "page_viewport",
+                        },
+                    )
+                except Exception:
+                    pass  # fall through to PrintWindow / host job
+            # Fallback: PrintWindow the rail webview. No reliable scale here, so
+            # tell the model the coords may need the page's devicePixelRatio.
             try:
                 from remedy.core.computer import desktop_win as win
 
@@ -1002,51 +1088,16 @@ class ComputerExecutor:
                         ok=True,
                         target="browser",
                         action="screenshot",
-                        message=(
-                            f"Browser rail capture ({info['width']}x{info['height']}). "
-                            "Pixel coordinates in this image ARE the page's click "
-                            "coordinates — to act on anything you can see but that "
-                            "has no snapshot element (a challenge iframe, a canvas, "
-                            "a custom control), use computer_click x=… y=… or "
-                            "computer_press_hold x=… y=… with the x,y you read here."
-                        ),
-                        extra={**info, "method": "PrintWindow", "coord_space": "page_viewport"},
+                        message=_coord_msg(info["width"], info["height"], scale),
+                        extra={
+                            **info,
+                            "method": "PrintWindow",
+                            "coord_scale": scale,
+                            "coord_space": "css_over_scale" if scale != 1.0 else "page_viewport",
+                        },
                     )
             except Exception:
                 pass
-            bounds = self.bridge.get_browser_bounds()
-            if bounds and bounds.get("width", 0) > 40 and bounds.get("height", 0) > 40:
-                try:
-                    from remedy.core.computer import desktop_win as win
-
-                    info = win.screenshot_region_png(
-                        int(bounds["x"]),
-                        int(bounds["y"]),
-                        int(bounds["width"]),
-                        int(bounds["height"]),
-                        scale=float(bounds.get("scale") or 1.0),
-                    )
-                    return public_result(
-                        ok=True,
-                        target="browser",
-                        action="screenshot",
-                        message=(
-                            f"Browser rail capture ({info['width']}x{info['height']}). "
-                            "Pixel coordinates in this image ARE the page's click "
-                            "coordinates — for anything you can see but that has no "
-                            "snapshot element (a challenge iframe, a canvas, a custom "
-                            "control), use computer_click x=… y=… or computer_press_hold "
-                            "x=… y=… with the x,y you read here."
-                        ),
-                        extra={
-                            **info,
-                            "bounds": bounds,
-                            "method": "region_crop",
-                            "coord_space": "page_viewport",
-                        },
-                    )
-                except Exception:
-                    pass  # fall through to host job / full desktop
 
         # Compound act: navigate → wait → click/type chain (research: fewer observe steps)
         if act is ComputerAction.ACT:

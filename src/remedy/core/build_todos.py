@@ -324,11 +324,12 @@ def sync_todos_with_build(runtime: Any, state: Any = None) -> list[TodoItem]:
             t.status = "completed"
             changed = True
 
-    # A finished build owns its checklist: once the machine declares the
-    # build done (green verify, nothing missing), close every remaining row.
-    # Heuristic misses (row wording that names no file, e.g. "RemedyPDF
-    # update") used to leave a live checklist on screen after completion.
-    if str(getattr(state, "phase", "") or "") == "done" and not missing:
+    # A GREEN-verified finished build owns its checklist: only when the build
+    # actually declared done with a passing verify and nothing missing do we
+    # close every remaining row (heuristic misses like "RemedyPDF update" name
+    # no file and used to linger). Requiring verify_ok keeps the checklist from
+    # claiming work done when the build reached "done" WITHOUT a green verify.
+    if phase == "done" and verify_ok and not missing:
         for t in items:
             if t.status in {"pending", "in_progress"}:
                 t.status = "completed"
