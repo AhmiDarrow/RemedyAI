@@ -25,10 +25,11 @@ import json
 import os
 import threading
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 # A session with no heartbeat for this long is considered gone (crash/idle).
 BEACON_TTL = 180.0
@@ -96,7 +97,7 @@ class SessionBeacon:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "SessionBeacon":
+    def from_dict(cls, raw: dict[str, Any]) -> SessionBeacon:
         raw = raw or {}
         return cls(
             session_id=str(raw.get("session_id") or ""),
@@ -179,9 +180,27 @@ def _prune(beacons: dict[str, SessionBeacon], now: float) -> None:
         b.claims = b.live_claims(now)
 
 
+def _test_isolated(home: str | Path | None) -> bool:
+    """True when running under pytest with NO explicit registry home.
+
+    Unit tests exercising unrelated code (begin_build_turn fixtures etc.) must
+    not write beacons into the developer's real ~/.remedy registry. Tests that
+    genuinely test coordination pass ``home=`` or set REMEDY_HOME.
+    """
+    if home is not None:
+        return False
+    if os.environ.get("REMEDY_HOME"):
+        return False
+    return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
 @contextmanager
 def _txn(home: str | Path | None = None) -> Iterator[dict[str, SessionBeacon]]:
     """Read-modify-write the registry under both the in-process and file lock."""
+    if _test_isolated(home):
+        # Isolated no-op: readers see empty, writers write nowhere.
+        yield {}
+        return
     with _thread_lock:
         fd = _acquire_file_lock(home)
         try:
@@ -232,9 +251,15 @@ def heartbeat(
     phase: str | None = None,
     goal: str | None = None,
     project_path: str | None = None,
+    muscle: str | None = None,
     home: str | Path | None = None,
 ) -> None:
-    """Keep a beacon alive; optionally update phase/goal/project."""
+    """Keep a beacon alive; optionally update phase/goal/project/muscle.
+
+    ``muscle`` here self-corrects the label: register() may run before the
+    per-turn LLM binding is set, but heartbeats fire mid-turn when the true
+    provider/model is known.
+    """
     sid = (session_id or "").strip()
     if not sid:
         return
@@ -251,6 +276,8 @@ def heartbeat(
             b.goal = goal[:300]
         if project_path:
             b.project_path = str(project_path)
+        if muscle:
+            b.muscle = muscle
 
 
 def unregister(session_id: str, *, home: str | Path | None = None) -> None:

@@ -493,6 +493,23 @@ async def call_llm_stream(runtime, message: str,
                 proto = build_protocol_block(build_state)
                 if proto:
                     messages.append({"role": "system", "content": str(proto)})
+                # Body coordination: stamp the beacon's muscle label from THIS
+                # turn's actual LLM binding (the one the HTTP calls use) — the
+                # register() inside begin_build_turn may only see the runtime
+                # default when the per-turn ContextVar isn't visible there.
+                with suppress(Exception):
+                    from remedy.core.coordination import heartbeat as _coord_hb
+
+                    _muscle_lbl = "/".join(
+                        x
+                        for x in (
+                            (_bind.provider or "").strip(),
+                            (_bind.model or "").strip(),
+                        )
+                        if x
+                    )
+                    if _muscle_lbl and session_id:
+                        _coord_hb(str(session_id), muscle=_muscle_lbl)
                 with suppress(Exception):
                     from remedy.core.build_engine import enable_build_host_drive
 
@@ -3664,5 +3681,31 @@ async def call_llm_stream(runtime, message: str,
             # Best-effort (the reply already streamed) — but log so a failing
             # memory/soul save is diagnosable instead of vanishing silently.
             logger.warning("post-turn prep failed: %r", _ptp_exc)
+        # Body coordination: a turn that ends with the build green/done (or that
+        # never wrote) has no unfinished work to protect — free its file holds
+        # so a sibling can take over immediately (live handoff). An UNFINISHED
+        # build (red verify / open todos) keeps its claims across turns.
+        with suppress(Exception):
+            from remedy.core.build_engine import (
+                build_has_open_drive,
+                get_build_state,
+            )
+            from remedy.core.coordination import release_path
+
+            _bst_f = get_build_state(runtime)
+            _done_enough = (
+                _bst_f is None
+                or not getattr(_bst_f, "active", False)
+                or (
+                    not build_has_open_drive(_bst_f)
+                    and (
+                        getattr(_bst_f, "last_verify_ok", None) is True
+                        or int(getattr(_bst_f, "write_steps", 0) or 0) == 0
+                        or getattr(_bst_f, "phase", "") == "done"
+                    )
+                )
+            )
+            if _done_enough and session_id:
+                release_path(str(session_id), None)
 
 

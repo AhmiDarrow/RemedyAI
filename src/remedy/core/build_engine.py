@@ -1096,14 +1096,28 @@ def observe_tool_batch(
         sync_todos_with_build(None, state)
 
     # Body coordination heartbeat — every tool wave keeps this muscle's beacon
-    # fresh so a live build never loses its claims mid-work.
+    # fresh so a live build never loses its claims mid-work. Mid-turn the true
+    # per-turn LLM binding is set, so this also self-corrects the muscle label
+    # (register() at turn start may have seen only the runtime default).
     with suppress(Exception):
         from remedy.core import coordination as _coord
+        from remedy.core.llm_binding import get_llm_binding
         from remedy.core.turn_context import current_session_id
 
         _sid = str(current_session_id() or "")
         if _sid:
-            _coord.heartbeat(_sid, phase=state.phase)
+            _muscle = ""
+            with suppress(Exception):
+                _b = get_llm_binding(None)
+                # Only trust the label when a real per-turn binding is set
+                # (the no-context fallback has provider but an empty model).
+                if (_b.model or "").strip():
+                    _muscle = "/".join(
+                        x
+                        for x in ((_b.provider or "").strip(), (_b.model or "").strip())
+                        if x
+                    )
+            _coord.heartbeat(_sid, phase=state.phase, muscle=_muscle or None)
 
     # Only *source* mutations invalidate green (docs/tmp/yml thrash is ignored)
     if source_write_this_batch and state.auto_verify_ran and state.last_verify_ok is True:
