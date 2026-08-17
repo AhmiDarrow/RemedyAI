@@ -340,6 +340,10 @@ def end_turn(
             # Drop any leftover proc handles for this session if no turns remain
             if sid not in _registry:
                 _session_procs.pop(sid, None)
+    # Body coordination note: file holds are NOT released at end_turn on purpose
+    # — a multi-turn build keeps its claims between turns so a sibling can't
+    # stomp unfinished work. Holds free on Stop/abort (abort_session) or via the
+    # claim TTL when the session goes quiet.
     for var, tok in zip(_TURN_CONTEXT_VARS, tokens, strict=False):
         if tok is not None:
             with contextlib.suppress(Exception):
@@ -442,6 +446,13 @@ def abort_session(session_id: str, *, epoch: int | None = None) -> int:
             reason="session_aborted",
             session_id=sid,
         )
+    # Body coordination: a stopped session releases its beacon + file claims so
+    # sibling muscles are not blocked on a hold nobody is using. (Crashed
+    # sessions self-heal via the beacon TTL.)
+    with contextlib.suppress(Exception):
+        from remedy.core.coordination import unregister as _coord_unregister
+
+        _coord_unregister(sid)
     return len(events)
 
 
