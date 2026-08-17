@@ -215,3 +215,106 @@ def test_clipboard_roundtrip_preserves_user_data() -> None:
 def test_foreground_window_info_shape() -> None:
     info = W.foreground_window_info()
     assert set(info) == {"hwnd", "title"}
+
+
+# --- fast PNG writer correctness (BGR→RGB slice swap) -----------------------
+
+
+def test_png_writer_swaps_bgr_to_rgb(tmp_path) -> None:
+    import struct
+    import zlib
+
+    w, h = 2, 1
+    stride = (w * 3 + 3) & ~3
+    # BGR pixels: red(0,0,255), green(0,255,0)
+    raw = bytes([0, 0, 255, 0, 255, 0]) + b"\x00" * (stride - 6)
+    out = tmp_path / "px.png"
+    W._write_png_bgr(out, w, h, raw, stride)
+    data = out.read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    i = data.index(b"IDAT")
+    ln = struct.unpack(">I", data[i - 4 : i])[0]
+    dec = zlib.decompress(data[i + 4 : i + 4 + ln])
+    # scanline: filter byte + RGB pixels
+    assert list(dec[1:7]) == [255, 0, 0, 0, 255, 0]  # red, green in RGB
+
+
+# --- Set-of-Mark drawing ----------------------------------------------------
+
+
+def test_set_of_mark_draws_box_and_digit() -> None:
+    w, h = 60, 40
+    stride = (w * 3 + 3) & ~3
+    buf = bytearray(b"\x00" * stride * h)
+    W._draw_marks_on_bgr(buf, stride, w, h, [{"n": 3, "x": 5, "y": 5}])
+    magenta = sum(
+        1
+        for y in range(h)
+        for x in range(w)
+        if tuple(buf[y * stride + x * 3 : y * stride + x * 3 + 3]) == (255, 0, 255)
+    )
+    white = sum(
+        1
+        for y in range(h)
+        for x in range(w)
+        if tuple(buf[y * stride + x * 3 : y * stride + x * 3 + 3]) == (255, 255, 255)
+    )
+    assert magenta > 0 and white > 0  # label box + digit pixels
+
+
+def test_screenshot_mark_flag_builds_legend(tmp_path, monkeypatch) -> None:
+    ex = ComputerExecutor(home_dir=tmp_path)
+    ex.bridge.set_last_elements(
+        [
+            {"ref": "c1", "name": "OK", "x": 100, "y": 200},
+            {"ref": "c2", "name": "Cancel", "x": 300, "y": 200},
+        ],
+        target="desktop",
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_shot(path=None, *, marks=None):
+        captured["marks"] = marks
+        return {"path": "x.png", "width": 800, "height": 600, "origin": {"x": 0, "y": 0}}
+
+    monkeypatch.setattr(W, "screenshot_png", fake_shot)
+    monkeypatch.setattr(ComputerExecutor, "_see_if_needed", lambda self, r, **k: r)
+    out = ex._run_desktop(ComputerAction.SCREENSHOT, mark=True)
+    assert out["ok"] is True
+    assert captured["marks"] and captured["marks"][0]["n"] == 1
+    legend = out.get("marks") or []
+    assert {m["ref"] for m in legend} == {"c1", "c2"}
+
+
+# --- UAC / system-prompt guard ----------------------------------------------
+
+
+def test_uac_blocks_input_actions(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        W,
+        "detect_system_prompt",
+        lambda: {"blocked": True, "kind": "uac", "message": "UAC is up — approve it"},
+    )
+    ex = ComputerExecutor(home_dir=tmp_path)
+    for act in (ComputerAction.CLICK, ComputerAction.TYPE, ComputerAction.KEY):
+        out = ex._run_desktop(act, x=10, y=10, text="secret", key="enter")
+        assert out["ok"] is False
+        assert out.get("blocked") == "uac"
+
+
+def test_no_system_prompt_allows_actions(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        W, "detect_system_prompt", lambda: {"blocked": False, "kind": "", "message": ""}
+    )
+    monkeypatch.setattr(W, "press_key", lambda k: None)
+    monkeypatch.setattr(W, "foreground_window_info", lambda: {"hwnd": 1, "title": "App"})
+    ex = ComputerExecutor(home_dir=tmp_path)
+    out = ex._run_desktop(ComputerAction.KEY, key="enter")
+    assert out["ok"] is True
+
+
+@pytest.mark.skipif(not IS_WIN, reason="Windows only")
+def test_detect_system_prompt_clean_when_no_uac() -> None:
+    r = W.detect_system_prompt()
+    assert r["blocked"] in (True, False)  # shape; usually False in CI/dev
+    assert set(r) == {"blocked", "kind", "message"}

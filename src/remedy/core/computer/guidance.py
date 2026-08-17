@@ -224,8 +224,16 @@ Native-app power moves (prefer these over pixel guessing):
 - Every desktop click/type/key result includes `foreground` + `focused` (name /
   role / value) — CHECK it: if the foreground window isn't the app you meant,
   refocus before continuing instead of typing into the wrong window.
-- Save/Open dialogs: `ctrl+s` → snapshot → the filename box is an `edit` —
-  `computer_type ref=… text=C:/full/path.ext` then `computer_click text=Save`.
+- **Save / Open dialogs** (common Win32 dialog): `computer_key alt+n` focuses the
+  File-name box → `computer_type text=C:/full/path.ext` → `computer_key alt+s`
+  (Save) or `alt+o` (Open). These hotkeys are far more reliable than hunting the
+  field in the file list.
+- **UAC / "Windows Security" prompts**: you CANNOT click these — Windows runs
+  them on a secure desktop that blocks all automated input. A desktop
+  click/type there returns blocked; tell the owner to approve it and continue.
+- **Pixel-only apps** (game / canvas / no a11y): `computer_screenshot mark=true`
+  overlays numbered boxes on snapshot elements and returns a mark→ref legend —
+  reference a mark instead of estimating x/y.
 
 ### Build → run → play (games / GUI / compiled apps)
 
