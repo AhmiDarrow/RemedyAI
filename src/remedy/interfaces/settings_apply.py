@@ -39,6 +39,22 @@ def _http_bootstrap_default() -> bool:
         return False
 
 
+def _effective_http_bootstrap_display(raw: dict[str, Any]) -> bool:
+    """What http_bootstrap ACTUALLY resolves to (env > config > default), so
+    Settings does not misreport when REMEDY_HTTP_BOOTSTRAP overrides config."""
+    from contextlib import suppress
+
+    with suppress(Exception):
+        from remedy.interfaces.local_auth import _env_truthy
+
+        env = _env_truthy("REMEDY_HTTP_BOOTSTRAP")
+        if env is not None:
+            return bool(env)
+    if "http_bootstrap" in raw:
+        return bool(raw["http_bootstrap"])
+    return _http_bootstrap_default()
+
+
 def _memory_encrypt_status_public(raw: dict[str, Any]) -> str:
     """Return off | sqlcipher | unavailable for Settings honesty."""
     if not bool(raw.get("memory_encrypt", False)):
@@ -213,11 +229,10 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "approval_mode": str(raw.get("approval_mode") or "auto").lower(),
         "tool_process": normalize_tool_process(raw),
         "web_tools_enabled": bool(raw.get("web_tools_enabled", False)),
-        "http_bootstrap": (
-            bool(raw["http_bootstrap"])
-            if "http_bootstrap" in raw
-            else _http_bootstrap_default()
-        ),
+        # Mirror the real governing logic (env > config > default) so Settings
+        # shows the value that actually applies — _http_bootstrap_default() is
+        # env-blind and would misreport when REMEDY_HTTP_BOOTSTRAP is set.
+        "http_bootstrap": _effective_http_bootstrap_display(raw),
         "privacy_mode": bool(raw.get("privacy_mode", False)),
         "sleev_enabled": bool(raw.get("sleev_enabled", False)),
         "sleev_gateway_url": str(raw.get("sleev_gateway_url") or "").strip(),
@@ -283,7 +298,33 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
     return out
 
 
+# Serializes concurrent settings saves. apply_settings_update is a load ->
+# mutate -> _write_config cycle spanning awaits; two overlapping POSTs would
+# otherwise each load a snapshot and the last write would drop the other's
+# changes. Runs on the API event loop, so an asyncio.Lock is the right primitive.
+_SETTINGS_APPLY_LOCK = asyncio.Lock()
+
+
 async def apply_settings_update(
+    updates: dict[str, Any],
+    *,
+    runtime: Any = None,
+    gateway: Any = None,
+    memory: Any = None,
+    model_discovery_cache: dict | None = None,
+) -> dict[str, Any]:
+    """Apply a partial settings patch (serialized). Never returns raw secrets."""
+    async with _SETTINGS_APPLY_LOCK:
+        return await _apply_settings_update_inner(
+            updates,
+            runtime=runtime,
+            gateway=gateway,
+            memory=memory,
+            model_discovery_cache=model_discovery_cache,
+        )
+
+
+async def _apply_settings_update_inner(
     updates: dict[str, Any],
     *,
     runtime: Any = None,

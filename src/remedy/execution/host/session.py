@@ -242,8 +242,19 @@ class HostSession:
             if not chunk:
                 return bytes(buf), True, interactive
             buf.extend(chunk)
-            low = bytes(buf).lower()
-            if any(m in low for m in _PROMPT_MARKERS):
+            # The sentinel means the command COMPLETED — check it first so a
+            # command that merely printed a prompt-like word (cat a file with
+            # "password:", git output with "are you sure") is never mistaken
+            # for a live prompt.
+            if marker in buf:
+                return bytes(buf), False, interactive
+            # A real interactive prompt is the CURRENT unterminated line: the
+            # process is blocked on stdin, so the marker sits AFTER the last
+            # newline with nothing following it. Output that contains the marker
+            # followed by a newline is just text and must not kill the shared
+            # session (that was destroying legitimate commands + losing cwd/env).
+            tail = bytes(buf).lower().rsplit(b"\n", 1)[-1]
+            if any(m in tail for m in _PROMPT_MARKERS):
                 interactive = True
                 from remedy.execution.process import kill_process_tree
 
@@ -251,8 +262,6 @@ class HostSession:
                 self._proc = None
                 self.started = False
                 return bytes(buf), True, True
-            if marker in buf:
-                return bytes(buf), False, interactive
 
 
 def _cwd_command(host: str) -> str:

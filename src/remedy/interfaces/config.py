@@ -1532,7 +1532,7 @@ def detect_ollama(base_url: str | None = None, timeout: float = 1.5) -> dict[str
             name = m.get("name") or m.get("model") or ""
             if name:
                 # Prefer short name without :latest
-                short = name.rstrip(":latest") if name.endswith(":latest") else name
+                short = name.removesuffix(":latest")
                 models.append(short)
         return {
             "available": True,

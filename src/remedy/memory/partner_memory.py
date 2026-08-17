@@ -11,11 +11,18 @@ stable constraints — without requiring power-user setup.
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 from remedy.memory.profile import UserFact, UserProfile
+
+# Serializes the profile read-modify-write (get_or_create -> mutate ->
+# save_user_profile wipes+reinserts). Overlapping distill passes on different
+# background threads would otherwise each snapshot then clobber the other's
+# facts. timeout acquire keeps it deadlock-proof if two ever share one loop.
+_PROFILE_WRITE_LOCK = threading.Lock()
 
 # Injection budget (chars) — denser personhood without drowning small models
 DEFAULT_MAX_CHARS = 1400
@@ -748,89 +755,96 @@ async def distill_user_text(
     candidates = extract_heuristic_facts(user_text)
     candidates.extend(extract_from_brief(brief))
 
-    profile = await memory.get_or_create_profile()
-    name_changed = False
+    # Serialize the whole read-modify-write so concurrent distill passes do
+    # not each snapshot the profile and clobber the other's facts on save.
+    _locked = _PROFILE_WRITE_LOCK.acquire(timeout=15)
+    try:
+        profile = await memory.get_or_create_profile()
+        name_changed = False
 
-    for cand in candidates:
-        if cand.source == "brief" and cand.confidence < 0.7:
-            result["skipped"] += 1
-            continue
+        for cand in candidates:
+            if cand.source == "brief" and cand.confidence < 0.7:
+                result["skipped"] += 1
+                continue
 
-        if cand.category == "identity":
-            m = re.search(
-                r"(?i)(?:my name is|call me|i(?:'m| am) called)\s+([A-Za-z][A-Za-z0-9_.\- ]{1,40})",
-                cand.text,
+            if cand.category == "identity":
+                m = re.search(
+                    r"(?i)(?:my name is|call me|i(?:'m| am) called)\s+([A-Za-z][A-Za-z0-9_.\- ]{1,40})",
+                    cand.text,
+                )
+                if m:
+                    name = m.group(1).strip()
+                    if name and not looks_like_secret(name):
+                        if profile.display_name != name[:60]:
+                            profile.display_name = name[:60]
+                            name_changed = True
+
+            # High-confidence / explicit remember inject immediately
+            accept_conf = cand.confidence
+            force = cand.source == "explicit" or cand.confidence >= 0.95
+            if not force and not should_auto_accept(cand):
+                accept_conf = min(cand.confidence, MIN_INJECT_CONFIDENCE - 0.01)
+
+            # Project-ish decisions/constraints get scoped when we have a project
+            use_proj = (
+                project_path
+                if cand.category in ("constraint", "workflow", "preference", "craft", "stack")
+                else None
             )
-            if m:
-                name = m.group(1).strip()
-                if name and not looks_like_secret(name):
-                    if profile.display_name != name[:60]:
-                        profile.display_name = name[:60]
-                        name_changed = True
+            uf, action = upsert_profile_fact(
+                profile,
+                cand.text,
+                category=cand.category,
+                confidence=accept_conf,
+                source=cand.source,
+                project_path=use_proj,
+                force=force,
+            )
+            if action == "skipped" or uf is None:
+                result["skipped"] += 1
+                continue
+            if action == "added":
+                result["added"] += 1
+                if use_proj and cand.category in ("constraint", "workflow", "craft", "stack"):
+                    with __import__("contextlib").suppress(Exception):
+                        from remedy.core.project_learning import record_project_chapter
 
-        # High-confidence / explicit remember inject immediately
-        accept_conf = cand.confidence
-        force = cand.source == "explicit" or cand.confidence >= 0.95
-        if not force and not should_auto_accept(cand):
-            accept_conf = min(cand.confidence, MIN_INJECT_CONFIDENCE - 0.01)
-
-        # Project-ish decisions/constraints get scoped when we have a project
-        use_proj = (
-            project_path
-            if cand.category in ("constraint", "workflow", "preference", "craft", "stack")
-            else None
-        )
-        uf, action = upsert_profile_fact(
-            profile,
-            cand.text,
-            category=cand.category,
-            confidence=accept_conf,
-            source=cand.source,
-            project_path=use_proj,
-            force=force,
-        )
-        if action == "skipped" or uf is None:
-            result["skipped"] += 1
-            continue
-        if action == "added":
-            result["added"] += 1
-            if use_proj and cand.category in ("constraint", "workflow", "craft", "stack"):
-                with __import__("contextlib").suppress(Exception):
-                    from remedy.core.project_learning import record_project_chapter
-
-                    record_project_chapter(
-                        use_proj,
-                        decision=cand.text if cand.category in ("constraint", "workflow") else "",
-                        note=cand.text if cand.category in ("craft", "stack") else "",
-                    )
-            # Also land in entry store so memory_search FTS finds it
-            if force or cand.source == "explicit":
-                with __import__("contextlib").suppress(Exception):
-                    from remedy.models import MemoryEntry, MemoryEntryType
-
-                    if hasattr(memory, "upsert"):
-                        import inspect
-
-                        entry = MemoryEntry(
-                            title=(cand.text[:80] or "Remembered"),
-                            content=cand.text,
-                            entry_type=MemoryEntryType.NOTE,
-                            importance=0.85,
+                        record_project_chapter(
+                            use_proj,
+                            decision=cand.text if cand.category in ("constraint", "workflow") else "",
+                            note=cand.text if cand.category in ("craft", "stack") else "",
                         )
-                        res = memory.upsert(entry)
-                        if inspect.isawaitable(res):
-                            # We're already async in distill_user_text
-                            await res  # type: ignore[misc]
-        else:
-            result["reinforced"] += 1
-        result["facts"].append(uf.fact)
+                # Also land in entry store so memory_search FTS finds it
+                if force or cand.source == "explicit":
+                    with __import__("contextlib").suppress(Exception):
+                        from remedy.models import MemoryEntry, MemoryEntryType
 
-    # Gentle decay once in a while on distill passes
-    decayed = apply_gentle_decay(profile)
-    result["decayed"] = decayed
+                        if hasattr(memory, "upsert"):
+                            import inspect
 
-    if result["added"] or result["reinforced"] or name_changed or decayed:
-        await memory.save_user_profile(profile)
+                            entry = MemoryEntry(
+                                title=(cand.text[:80] or "Remembered"),
+                                content=cand.text,
+                                entry_type=MemoryEntryType.NOTE,
+                                importance=0.85,
+                            )
+                            res = memory.upsert(entry)
+                            if inspect.isawaitable(res):
+                                # We're already async in distill_user_text
+                                await res  # type: ignore[misc]
+            else:
+                result["reinforced"] += 1
+            result["facts"].append(uf.fact)
+
+        # Gentle decay once in a while on distill passes
+        decayed = apply_gentle_decay(profile)
+        result["decayed"] = decayed
+
+        if result["added"] or result["reinforced"] or name_changed or decayed:
+            await memory.save_user_profile(profile)
+    finally:
+        if _locked:
+            _PROFILE_WRITE_LOCK.release()
     _ = session_id  # reserved for future audit metadata
     return result
 

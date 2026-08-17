@@ -890,12 +890,20 @@ def test_take_ui_command_skips_other_session_while_focused_tab_is_busy(
     assert taken is not None
     assert taken.get("job_id") == job.id
     assert taken.get("session_id") == "sess-b"
-    # Idle focused tab: the driver's open_browser goes through.
-    _streaming(monkeypatch)
+    # Idle focused tab + the OTHER session is the active driver → goes through.
+    _streaming(monkeypatch, "sess-c")
     job2 = b.enqueue("navigate", {"url": "https://example.com/c"}, session_id="sess-c")
     b.set_focused_session("sess-a")
     taken2 = b.take_ui_command()
     assert taken2 is not None and taken2.get("job_id") == job2.id
+
+    # Idle focused tab but the other session is NOT driving (a stale command)
+    # → must NOT hijack the focused idle rail.
+    _streaming(monkeypatch)  # nobody streaming
+    job3 = b.enqueue("navigate", {"url": "https://example.com/d"}, session_id="sess-d")
+    assert job3.session_id == "sess-d"
+    b.set_focused_session("sess-a")
+    assert b.take_ui_command() is None
 
 
 def test_claim_next_exclude_and_only(tmp_path: Path):

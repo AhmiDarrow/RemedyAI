@@ -72,8 +72,36 @@ window.__rmdyName=function(el){
     el.innerText||el.value||el.placeholder||(el.getAttribute&&el.getAttribute('name'))||
     el.tagName||'').toString().trim().replace(/\s+/g,' ');
 };
+// True TOP-WINDOW rect for any element. Shadow-DOM elements share the top
+// document's layout so their getBoundingClientRect is already top-relative;
+// but an element inside a same-origin IFRAME reports coordinates relative to
+// that frame's own viewport. Walk up each frameElement, adding its offset (and
+// border/padding), so snapshot x/y, click, and press_hold all target the real
+// page point instead of clicking empty top-window chrome (a silent miss).
+window.__rmdyRect=function(el){
+  let r; try{ r=el.getBoundingClientRect(); }catch(e){ return null; }
+  let x=r.x, y=r.y; const w=r.width, h=r.height;
+  try{
+    let win=el.ownerDocument&&el.ownerDocument.defaultView;
+    let guard=0;
+    while(win&&win.frameElement&&guard++<8){
+      const fr=win.frameElement.getBoundingClientRect();
+      let bl=0,bt=0,pl=0,pt=0;
+      try{
+        const cs=win.parent.getComputedStyle(win.frameElement);
+        bl=parseFloat(cs.borderLeftWidth)||0; bt=parseFloat(cs.borderTopWidth)||0;
+        pl=parseFloat(cs.paddingLeft)||0; pt=parseFloat(cs.paddingTop)||0;
+      }catch(e){}
+      x+=fr.x+bl+pl; y+=fr.y+bt+pt;
+      if(win===win.parent) break;
+      win=win.parent;
+    }
+  }catch(e){}
+  return {x:x,y:y,width:w,height:h,top:y,left:x,right:x+w,bottom:y+h};
+};
 window.__rmdyVisible=function(el){
-  let r; try{ r=el.getBoundingClientRect(); }catch(e){ return false; }
+  const r=window.__rmdyRect(el);
+  if(!r) return false;
   let st; try{ st=window.getComputedStyle(el); }catch(e){ st=null; }
   if(st&&(st.visibility==='hidden'||st.display==='none'||st.opacity==='0')) return false;
   if(el.disabled) return false;
@@ -1222,8 +1250,11 @@ fn resolve_point(
     text: Option<&str>,
     r#ref: Option<&str>,
 ) -> Result<(f64, f64), String> {
+    // Explicit coordinates win when BOTH are present and on-screen (>=0),
+    // including (0,0) — gate on presence, not positivity, so a top-left target
+    // is not silently discarded into text/ref resolution.
     if let (Some(px), Some(py)) = (x, y) {
-        if px > 0.0 || py > 0.0 {
+        if px >= 0.0 && py >= 0.0 && px.is_finite() && py.is_finite() {
             return Ok((px, py));
         }
     }
@@ -1235,13 +1266,17 @@ fn resolve_point(
   const el=window.__rmdyFind('{escaped}');
   if(!el) return 'missing-ref';
   try{{ el.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
-  const r=el.getBoundingClientRect();
+  const r=window.__rmdyRect(el)||el.getBoundingClientRect();
   return 'xy:'+(r.x+r.width/2)+':'+(r.y+r.height/2);
 }})()"#,
             dom = REMEDY_DOM_JS
         )
     } else if let Some(t) = text.filter(|s| !s.is_empty()) {
-        let escaped = t.replace('\\', "\\\\").replace('\'', "\\'").replace('\n', " ");
+        let escaped = t
+            .replace('\\', "\\\\")
+            .replace('\'', "\\'")
+            .replace('\n', " ")
+            .replace('\r', " ");
         format!(
             r#"(function(){{
   {dom}
@@ -1257,7 +1292,7 @@ fn resolve_point(
   }}
   if(!best||bestS<40) return 'no-match';
   try{{ best.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
-  const r=best.getBoundingClientRect();
+  const r=window.__rmdyRect(best)||best.getBoundingClientRect();
   return 'xy:'+(r.x+r.width/2)+':'+(r.y+r.height/2);
 }})()"#,
             dom = REMEDY_DOM_JS
@@ -2976,7 +3011,7 @@ pub fn browser_agent_action(
   const sel='a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[role=tab],[role=menuitem],[role=option],[role=checkbox],[role=switch],[role=radio],[contenteditable=true],summary,label,[onclick]';
   const nodes=window.__rmdyDeep(sel).filter(window.__rmdyVisible).slice(0,160);
   return nodes.map((el,i) => {{
-    const r=el.getBoundingClientRect();
+    const r=window.__rmdyRect(el)||el.getBoundingClientRect();
     const ref='e'+(i+1);
     try {{ el.setAttribute('data-remedy-ref', ref); }} catch(e) {{}}
     const text=(el.innerText||'').trim().replace(/\s+/g,' ').slice(0,120);
@@ -3046,7 +3081,8 @@ pub fn browser_agent_action(
             let escaped = needle
                 .replace('\\', "\\\\")
                 .replace('\'', "\\'")
-                .replace('\n', " ");
+                .replace('\n', " ")
+                .replace('\r', " ");
             format!(
                 r#"(function(){{
   {dom}
@@ -3061,7 +3097,7 @@ pub fn browser_agent_action(
   const sel='a,button,input,textarea,select,[role=button],[role=link],[role=tab],[role=menuitem],[role=option],[role=radio],[role=checkbox],[contenteditable=true],summary,label,[onclick]';
   function score(el){{
     if(!window.__rmdyVisible(el)) return -1;
-    const r=el.getBoundingClientRect();
+    const r=window.__rmdyRect(el)||el.getBoundingClientRect();
     const name=window.__rmdyName(el).toLowerCase();
     if(!name) return -1;
     let s=0;
@@ -3108,7 +3144,7 @@ pub fn browser_agent_action(
   if(!best||bestS<15) return 'no-match:'+q;
   try{{ best.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
   try{{ best.focus({{preventScroll:true}}); }}catch(e){{}}
-  const r=best.getBoundingClientRect();
+  const r=window.__rmdyRect(best)||best.getBoundingClientRect();
   const x=r.x+r.width/2, y=r.y+r.height/2;
   const name=(best.getAttribute('aria-label')||best.innerText||best.placeholder||best.tagName||'').trim().replace(/\s+/g,' ').slice(0,80);
   const tag=(best.tagName||'').toLowerCase();
@@ -3134,7 +3170,7 @@ pub fn browser_agent_action(
   if(!el) return 'missing-ref:'+ref;
   try{{ el.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
   try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}
-  const r=el.getBoundingClientRect();
+  const r=window.__rmdyRect(el)||el.getBoundingClientRect();
   const x=r.x+r.width/2, y=r.y+r.height/2;
   // Locate only — host clicks these coords via trusted input.
   return 'okxy:'+Math.round(x)+':'+Math.round(y)+':'+ref+':'+(el.tagName||'?');
@@ -3154,7 +3190,7 @@ pub fn browser_agent_action(
   if(!el) return 'missing-ref:'+ref;
   try{{ el.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
   try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}
-  const r=el.getBoundingClientRect();
+  const r=window.__rmdyRect(el)||el.getBoundingClientRect();
   const x=r.x+r.width/2, y=r.y+r.height/2;
   // Locate only — host clicks these coords via trusted input.
   return 'okxy:'+Math.round(x)+':'+Math.round(y)+':'+ref;

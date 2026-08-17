@@ -213,15 +213,24 @@ def save_ledger(
         tmp.write_text(data, encoding="utf-8")
         # Atomic-or-nothing: keep the old file on a failed replace rather than
         # corrupting it (a torn write would make load_ledger drop all state).
-        for _ in range(3):
+        # Widen the retry budget with backoff, and RAISE if it never lands —
+        # a silent drop made callers believe resume state persisted when it did
+        # not (a build's progress would be lost with no signal).
+        last_err: OSError | None = None
+        delay = 0.02
+        for _ in range(8):
             try:
                 tmp.replace(path)
                 return path
-            except OSError:
-                time.sleep(0.02)
+            except OSError as e:
+                last_err = e
+                time.sleep(delay)
+                delay = min(delay * 2, 0.5)
         with suppress(OSError):
             tmp.unlink()
-    return path
+        raise OSError(
+            f"save_ledger: could not persist {path} after retries: {last_err}"
+        )
 
 
 def merge_turn_into_ledger(
