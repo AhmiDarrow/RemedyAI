@@ -270,6 +270,103 @@ def _draw_marks_on_bgr(
             cx += 3 * scale + scale
 
 
+def detect_ui_candidates(
+    raw: bytes,
+    stride: int,
+    width: int,
+    height: int,
+    *,
+    max_marks: int = 20,
+) -> list[dict[str, Any]]:
+    """Find likely UI targets from PIXELS alone (games / canvas / no a11y tree).
+
+    Pure-Python and fast enough to run per screenshot: sample the frame onto a
+    coarse grid, mark cells with strong local contrast (edges = drawn UI), then
+    merge neighbouring edge cells into candidate boxes. Returns candidate
+    centers/bounds in image pixels, largest-first — the Set-of-Mark fallback
+    when a snapshot has zero elements.
+    """
+    if width < 32 or height < 32 or not raw:
+        return []
+    # ~4px sampling: 4K → ~960x540 grid cells of luma.
+    step = max(2, min(width, height) // 480 * 2) or 4
+    gw = max(2, width // step)
+    gh = max(2, height // step)
+    luma = [[0] * gw for _ in range(gh)]
+    for gy in range(gh):
+        base = (gy * step) * stride
+        row = raw[base : base + width * 3]
+        lr = luma[gy]
+        for gx in range(gw):
+            o = gx * step * 3
+            # fast integer luma (b+2g+r)/4
+            lr[gx] = (row[o] + (row[o + 1] << 1) + row[o + 2]) >> 2
+    # Edge cells: local gradient above threshold.
+    TH = 24
+    edges = [[False] * gw for _ in range(gh)]
+    for gy in range(1, gh - 1):
+        lp, lc, ln = luma[gy - 1], luma[gy], luma[gy + 1]
+        er = edges[gy]
+        for gx in range(1, gw - 1):
+            c = lc[gx]
+            if (
+                abs(c - lc[gx - 1]) > TH
+                or abs(c - lc[gx + 1]) > TH
+                or abs(c - lp[gx]) > TH
+                or abs(c - ln[gx]) > TH
+            ):
+                er[gx] = True
+    # Merge edge cells into boxes via single-pass row-run + box union.
+    boxes: list[list[int]] = []  # [x0,y0,x1,y1] in grid coords
+    for gy in range(gh):
+        er = edges[gy]
+        gx = 0
+        while gx < gw:
+            if not er[gx]:
+                gx += 1
+                continue
+            x0 = gx
+            while gx < gw and er[gx]:
+                gx += 1
+            run = [x0, gy, gx - 1, gy]
+            merged = False
+            for b in boxes:
+                # touch/overlap vertically-adjacent boxes → union
+                if b[1] <= gy <= b[3] + 1 and not (run[2] < b[0] - 1 or run[0] > b[2] + 1):
+                    b[0] = min(b[0], run[0])
+                    b[1] = min(b[1], run[1])
+                    b[2] = max(b[2], run[2])
+                    b[3] = max(b[3], run[3])
+                    merged = True
+                    break
+            if not merged:
+                boxes.append(run)
+    out: list[dict[str, Any]] = []
+    for b in boxes:
+        x0, y0, x1, y1 = (
+            b[0] * step,
+            b[1] * step,
+            min((b[2] + 1) * step, width - 1),
+            min((b[3] + 1) * step, height - 1),
+        )
+        w = x1 - x0
+        h = y1 - y0
+        # UI-sized things only: skip specks and near-full-frame borders.
+        if w < 12 or h < 8 or w > width * 0.9 or h > height * 0.9:
+            continue
+        out.append(
+            {
+                "x": x0 + w // 2,
+                "y": y0 + h // 2,
+                "w": w,
+                "h": h,
+                "area": w * h,
+            }
+        )
+    out.sort(key=lambda c: -int(c["area"]))
+    return out[: max(1, int(max_marks))]
+
+
 def screenshot_png(
     path: Path | None = None, *, marks: list[dict[str, Any]] | None = None
 ) -> dict[str, Any]:
