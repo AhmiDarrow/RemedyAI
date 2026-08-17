@@ -46,7 +46,7 @@ def register_assistant_tools(runtime: Any) -> None:
 
                     from remedy.assistant.providers.google_calendar import get_google_calendar
 
-                    cal = get_google_calendar(home)
+                    cal = _calendar_provider()
                     if cal is not None:
                         now = datetime.now(UTC)
                         events = cal.list_events(
@@ -186,10 +186,11 @@ def register_assistant_tools(runtime: Any) -> None:
         from remedy.assistant.privacy import consent_ok
         from remedy.assistant.providers.google_calendar import get_google_calendar
 
-        ok, reason = consent_ok(home)
-        if not ok:
-            return json.dumps({"ok": False, "message": reason}, indent=2)
-        cal = get_google_calendar(home)
+        cal = _calendar_provider()
+        if cal is not None and getattr(cal, "provider_id", "") != "caldav":
+            ok, reason = consent_ok(home)
+            if not ok:
+                return json.dumps({"ok": False, "message": reason}, indent=2)
         if cal is None:
             return json.dumps(
                 {
@@ -241,10 +242,11 @@ def register_assistant_tools(runtime: Any) -> None:
         from remedy.assistant.privacy import consent_ok
         from remedy.assistant.providers.google_calendar import get_google_calendar
 
-        ok, reason = consent_ok(home)
-        if not ok:
-            return json.dumps({"ok": False, "message": reason}, indent=2)
-        cal = get_google_calendar(home)
+        cal = _calendar_provider()
+        if cal is not None and getattr(cal, "provider_id", "") != "caldav":
+            ok, reason = consent_ok(home)
+            if not ok:
+                return json.dumps({"ok": False, "message": reason}, indent=2)
         if cal is None:
             return json.dumps(
                 {
@@ -397,6 +399,20 @@ def register_assistant_tools(runtime: Any) -> None:
             return get_google_gmail(home)
         return None
 
+    def _calendar_provider():
+        """Prefer CalDAV (app password, no cloud project); fall back to OAuth."""
+        with __import__("contextlib").suppress(Exception):
+            from remedy.assistant.providers.caldav import get_caldav_calendar
+
+            c = get_caldav_calendar(home)
+            if c is not None:
+                return c
+        with __import__("contextlib").suppress(Exception):
+            from remedy.assistant.providers.google_calendar import get_google_calendar
+
+            return get_google_calendar(home)
+        return None
+
     async def calendar_update_event(
         event_id: str = "",
         title: str = "",
@@ -409,10 +425,11 @@ def register_assistant_tools(runtime: Any) -> None:
         from remedy.assistant.privacy import consent_ok
         from remedy.assistant.providers.google_calendar import get_google_calendar
 
-        ok, reason = consent_ok(home)
-        if not ok:
-            return json.dumps({"ok": False, "message": reason}, indent=2)
-        cal = get_google_calendar(home)
+        cal = _calendar_provider()
+        if cal is not None and getattr(cal, "provider_id", "") != "caldav":
+            ok, reason = consent_ok(home)
+            if not ok:
+                return json.dumps({"ok": False, "message": reason}, indent=2)
         if cal is None:
             return json.dumps(
                 {"ok": False, "message": "Google Calendar not connected."}, indent=2
@@ -455,10 +472,11 @@ def register_assistant_tools(runtime: Any) -> None:
         from remedy.core.approvals import APPROVALS
         from remedy.core.turn_context import turn_session_id
 
-        ok, reason = consent_ok(home)
-        if not ok:
-            return json.dumps({"ok": False, "message": reason}, indent=2)
-        cal = get_google_calendar(home)
+        cal = _calendar_provider()
+        if cal is not None and getattr(cal, "provider_id", "") != "caldav":
+            ok, reason = consent_ok(home)
+            if not ok:
+                return json.dumps({"ok": False, "message": reason}, indent=2)
         if cal is None:
             return json.dumps(
                 {"ok": False, "message": "Google Calendar not connected."}, indent=2
