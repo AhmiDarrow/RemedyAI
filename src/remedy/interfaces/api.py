@@ -164,6 +164,30 @@ def create_app(
         except Exception:
             logger.debug("vigil heartbeat start skipped", exc_info=True)
 
+        # Remedy's clock: fires stored reminders/due dates. Local-only, cheap
+        # (small JSON read), so it always runs — real life is scheduled.
+        _reminder_thread = None
+        try:
+            from remedy.core.reminders import start_reminder_thread
+
+            _cfg_r = load_config()
+            _home_r = _cfg_r.get("home_dir") if isinstance(_cfg_r, dict) else None
+
+            def _on_due(items) -> None:
+                # Phase 2 owns delivery (desktop / messenger). For now make the
+                # firing visible and durable so nothing is silently dropped.
+                for it in items:
+                    logger.info(
+                        "Reminder due: %s (%s)",
+                        getattr(it, "text", "")[:120],
+                        getattr(it, "id", ""),
+                    )
+
+            _reminder_thread = start_reminder_thread(_home_r, on_due=_on_due)
+            logger.info("Reminder clock started")
+        except Exception:
+            logger.debug("reminder clock start skipped", exc_info=True)
+
         # Local model starts with Remedy when installed + enabled (vision + nano).
         try:
             import asyncio
