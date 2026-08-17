@@ -88,3 +88,37 @@ def test_coworkers_note_names_others(home) -> None:
 def test_alone_note_is_empty(home) -> None:
     C.register("solo", muscle="xai/grok", home=home)
     assert C.coworkers_note("solo", home=home) == ""
+
+
+def test_same_provider_sessions_coordinate_independently(home) -> None:
+    """Multi-agent on ONE provider: 2 DeepSeek sessions + Grok + Fable.
+
+    Coordination keys on session_id — provider is display metadata only — so
+    same-provider sessions are fully independent muscles: separate beacons,
+    separate claims, and conflicts detected between them like anyone else.
+    """
+    # Two DeepSeek sessions crunching numbers, Grok researching, Fable architecting.
+    assert C.claim_path("ds-1", "/proj/stats.py", muscle="deepseek/deepseek-v4", home=home) is None
+    assert C.claim_path("ds-2", "/proj/model.py", muscle="deepseek/deepseek-v4", home=home) is None
+    assert C.claim_path("grok-1", "/proj/research.md", muscle="xai/grok-4.5", home=home) is None
+    assert C.claim_path("fable-1", "/proj/design.md", muscle="anthropic/claude-fable-5", home=home) is None
+
+    # All four are distinct live beacons — same provider does NOT merge them.
+    assert len(C.active_beacons(home=home)) == 4
+
+    # DeepSeek #2 trying DeepSeek #1's file conflicts (same-provider collision).
+    conflict = C.claim_path("ds-2", "/proj/stats.py", muscle="deepseek/deepseek-v4", home=home)
+    assert conflict is not None and conflict.session_id == "ds-1"
+
+    # DeepSeek #1 re-claiming its OWN file is always fine.
+    assert C.claim_path("ds-1", "/proj/stats.py", home=home) is None
+
+    # One DeepSeek session ends — only ITS claims free; the twin keeps its own.
+    C.unregister("ds-1", home=home)
+    assert C.claim_path("ds-2", "/proj/stats.py", home=home) is None
+    assert C.path_holder("/proj/model.py", exclude="grok-1", home=home).session_id == "ds-2"
+
+    # The coworkers note distinguishes the twins by session id.
+    note = C.coworkers_note("grok-1", home=home)
+    assert note.count("deepseek/deepseek-v4") == 1  # ds-1 gone; ds-2 named once
+    assert "ds-2"[:8] in note or "ds-2" in note
