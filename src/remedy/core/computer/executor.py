@@ -588,6 +588,7 @@ class ComputerExecutor:
             mark_flag = bool(kwargs.get("mark"))
             marks: list[dict[str, Any]] = []
             legend: list[dict[str, Any]] = []
+            marks_from_pixels = False
             if mark_flag:
                 info0 = self.bridge.last_elements_info()
                 els = (
@@ -598,11 +599,38 @@ class ComputerExecutor:
                 if not els:
                     els = win.desktop_snapshot(limit=40, mode="auto")
                     self.bridge.set_last_elements(els, target="desktop")
-                for i, el in enumerate(els[:30], start=1):
-                    marks.append({"n": i, "x": int(el.get("x") or 0), "y": int(el.get("y") or 0)})
-                    legend.append(
-                        {"mark": i, "ref": el.get("ref"), "name": str(el.get("name") or "")[:50]}
-                    )
+                if els:
+                    for i, el in enumerate(els[:30], start=1):
+                        marks.append(
+                            {"n": i, "x": int(el.get("x") or 0), "y": int(el.get("y") or 0)}
+                        )
+                        legend.append(
+                            {
+                                "mark": i,
+                                "ref": el.get("ref"),
+                                "name": str(el.get("name") or "")[:50],
+                            }
+                        )
+                else:
+                    # No accessibility tree (game / canvas / custom paint):
+                    # detect candidate targets from pixels and mark those.
+                    marks_from_pixels = True
+                    raw, strd, cw, ch, ox, oy = win._capture_virtual_screen()
+                    cands = win.detect_ui_candidates(raw, strd, cw, ch, max_marks=20)
+                    for i, c in enumerate(cands, start=1):
+                        marks.append(
+                            {"n": i, "x": int(c["x"]) + ox, "y": int(c["y"]) + oy}
+                        )
+                        legend.append(
+                            {
+                                "mark": i,
+                                "x": int(c["x"]) + ox,
+                                "y": int(c["y"]) + oy,
+                                "w": c["w"],
+                                "h": c["h"],
+                                "source": "pixels",
+                            }
+                        )
             if mon is not None and str(mon).strip() != "" and str(mon).lower() != "all":
                 info = win.screenshot_monitor_png(int(mon))
                 msg = f"Monitor {mon} screenshot ({info['width']}x{info['height']})"
@@ -611,7 +639,8 @@ class ComputerExecutor:
                 msg = f"Screenshot saved ({info['width']}x{info['height']})"
                 if legend:
                     info["marks"] = legend
-                    msg += f" with {len(legend)} numbered marks"
+                    src = "pixel-detected" if marks_from_pixels else "element"
+                    msg += f" with {len(legend)} {src} marks (click by mark's x/y or ref)"
             return public_result(
                 ok=True,
                 target="desktop",
