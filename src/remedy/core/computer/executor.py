@@ -1003,10 +1003,14 @@ class ComputerExecutor:
                         target="browser",
                         action="screenshot",
                         message=(
-                            f"WebView PrintWindow capture "
-                            f"({info['width']}x{info['height']})"
+                            f"Browser rail capture ({info['width']}x{info['height']}). "
+                            "Pixel coordinates in this image ARE the page's click "
+                            "coordinates — to act on anything you can see but that "
+                            "has no snapshot element (a challenge iframe, a canvas, "
+                            "a custom control), use computer_click x=… y=… or "
+                            "computer_press_hold x=… y=… with the x,y you read here."
                         ),
-                        extra={**info, "method": "PrintWindow"},
+                        extra={**info, "method": "PrintWindow", "coord_space": "page_viewport"},
                     )
             except Exception:
                 pass
@@ -1027,10 +1031,19 @@ class ComputerExecutor:
                         target="browser",
                         action="screenshot",
                         message=(
-                            f"Browser rail region capture "
-                            f"({info['width']}x{info['height']})"
+                            f"Browser rail capture ({info['width']}x{info['height']}). "
+                            "Pixel coordinates in this image ARE the page's click "
+                            "coordinates — for anything you can see but that has no "
+                            "snapshot element (a challenge iframe, a canvas, a custom "
+                            "control), use computer_click x=… y=… or computer_press_hold "
+                            "x=… y=… with the x,y you read here."
                         ),
-                        extra={**info, "bounds": bounds, "method": "region_crop"},
+                        extra={
+                            **info,
+                            "bounds": bounds,
+                            "method": "region_crop",
+                            "coord_space": "page_viewport",
+                        },
                     )
                 except Exception:
                     pass  # fall through to host job / full desktop
