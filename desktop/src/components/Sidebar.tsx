@@ -25,6 +25,12 @@ import {
 } from '../utils/sessionProjects'
 import { applySidebarOrder, PINNED_GROUP_KEY } from '../sidebar/orderApply'
 import { useSidebarOrder } from '../sidebar/useSidebarOrder'
+import {
+  projectRemoveConfirm,
+  sessionDeleteConfirm,
+  sessionsDeleteConfirm,
+} from '../utils/confirmMessages'
+import { ConfirmDialog, type ConfirmRequest } from './ConfirmDialog'
 import { IconEdit } from './icons'
 import { OrderButtons } from './OrderButtons'
 import { SessionBusyBadge } from './SessionBusyBadge'
@@ -303,6 +309,49 @@ export function Sidebar({
 
   const clearSelection = () => setSelected(new Set())
 
+  // Remedy's own confirm (never the browser's "localhost:5173 says…").
+  const [confirmReq, setConfirmReq] = useState<
+    (ConfirmRequest & { onYes: () => void }) | null
+  >(null)
+  const askConfirm = (req: ConfirmRequest & { onYes: () => void }) =>
+    setConfirmReq(req)
+
+  const confirmDeleteSession = (id: string, rawTitle: string) => {
+    askConfirm({ ...sessionDeleteConfirm(rawTitle), onYes: () => onDelete(id) })
+  }
+
+  const confirmDeleteSelected = () => {
+    const ids = [...selected]
+    if (!ids.length) return
+    askConfirm({
+      ...sessionsDeleteConfirm(ids.length),
+      onYes: () => {
+        ids.forEach((id) => onDelete(id))
+        clearSelection()
+      },
+    })
+  }
+
+  /** Remove a project folder from the sidebar (chats are kept, not deleted). */
+  const confirmRemoveProject = (key: string) => {
+    if (!key || isNoProjectPath(key)) return
+    if (isProjectLocked(key)) return
+    const inProject = sessions.filter((s) => projectKey(s.project_path) === key).length
+    askConfirm({
+      ...projectRemoveConfirm(key, inProject),
+      onYes: () => {
+        setKnownProjects(removeKnownProject(key))
+        const ids = sessions
+          .filter((s) => projectKey(s.project_path) === key)
+          .map((s) => s.id)
+        if (ids.length) {
+          if (onBulkSetProject) onBulkSetProject(ids, null)
+          else if (onSetSessionProject) ids.forEach((id) => onSetSessionProject(id, null))
+        }
+      },
+    })
+  }
+
   const moveSelectedTo = (projectPath: string | null) => {
     const ids = [...selected]
     if (!ids.length) return
@@ -527,6 +576,18 @@ export function Sidebar({
           ))}
           <button
             type="button"
+            className="text-[10px] px-1.5 py-0.5 rounded font-semibold"
+            style={{
+              background: 'color-mix(in srgb, var(--error) 16%, transparent)',
+              color: 'var(--error)',
+            }}
+            title={`Delete ${selected.size} selected chat${selected.size === 1 ? '' : 's'}`}
+            onClick={confirmDeleteSelected}
+          >
+            Delete
+          </button>
+          <button
+            type="button"
             className="text-[10px] ml-auto"
             style={{ color: 'var(--text-muted)' }}
             onClick={clearSelection}
@@ -564,7 +625,6 @@ export function Sidebar({
             busySet={busySet}
             onSelect={onSelect}
             onToggleSelect={toggleSelect}
-            onDelete={onDelete}
             onRename={onRename}
             onStartRename={startRename}
             onCommitRename={commitRename}
@@ -645,11 +705,12 @@ export function Sidebar({
             }}
             onDragLeaveProject={() => setDropHoverKey(null)}
             onDropProject={(e) => onDropOnProject(e, group.key ? group.path : null)}
+            onConfirmDeleteSession={confirmDeleteSession}
             onRemoveKnownProject={
               group.key
               && group.key !== PINNED_GROUP_KEY
               && !lockedProjects.has(group.key)
-                ? () => setKnownProjects(removeKnownProject(group.path))
+                ? () => confirmRemoveProject(group.key)
                 : undefined
             }
           />
@@ -687,6 +748,20 @@ export function Sidebar({
         ↑↓ reorder · 📁 move · Archive / pin on hover
       </div>
       {footer}
+      <ConfirmDialog
+        open={Boolean(confirmReq)}
+        title={confirmReq?.title || ''}
+        body={confirmReq?.body}
+        confirmLabel={confirmReq?.confirmLabel}
+        cancelLabel={confirmReq?.cancelLabel}
+        danger={confirmReq?.danger ?? true}
+        onCancel={() => setConfirmReq(null)}
+        onConfirm={() => {
+          const req = confirmReq
+          setConfirmReq(null)
+          req?.onYes()
+        }}
+      />
     </div>
   )
 }
@@ -709,7 +784,6 @@ function ProjectSection({
   busySet,
   onSelect,
   onToggleSelect,
-  onDelete,
   onRename,
   onStartRename,
   onCommitRename,
@@ -735,6 +809,7 @@ function ProjectSection({
   onDragLeaveProject,
   onDropProject,
   onRemoveKnownProject,
+  onConfirmDeleteSession,
 }: {
   group: ProjectGroup
   collapsed: boolean
@@ -753,7 +828,6 @@ function ProjectSection({
   busySet: Set<string>
   onSelect: (id: string) => void
   onToggleSelect: (id: string, e: React.MouseEvent) => void
-  onDelete: (id: string) => void
   onRename?: (id: string, title: string) => void
   onStartRename: (s: ChatSession) => void
   onCommitRename: (id: string) => void
@@ -779,6 +853,7 @@ function ProjectSection({
   onDragLeaveProject: () => void
   onDropProject: (e: DragEvent) => void
   onRemoveKnownProject?: () => void
+  onConfirmDeleteSession: (id: string, title: string) => void
 }) {
   const isNone = !group.key && !isPinnedStrip
   const count = group.sessions.length
@@ -879,11 +954,17 @@ function ProjectSection({
             +
           </button>
         )}
-        {onRemoveKnownProject && count === 0 && !locked && !isPinnedStrip && (
+        {onRemoveKnownProject && !locked && !isPinnedStrip && (
           <button
             type="button"
             className="opacity-0 group-hover/header:opacity-100 text-[10px] w-4"
             style={{ color: 'var(--error)' }}
+            title={
+              count === 0
+                ? 'Remove this folder from the sidebar'
+                : `Remove folder from sidebar (its ${count} chat${count === 1 ? '' : 's'} move to No project)`
+            }
+            aria-label="Remove project folder from sidebar"
             onClick={(e) => {
               e.stopPropagation()
               onRemoveKnownProject()
@@ -1059,15 +1140,7 @@ function ProjectSection({
                     style={{ color: 'var(--error)' }}
                     onClick={(e) => {
                       e.stopPropagation()
-                      const title = (s.title || 'this chat').trim()
-                      const ok = window.confirm(
-                        `Delete “${title}”?\n\n`
-                          + 'This removes the transcript plus session notes, attachments, '
-                          + 'plans, and undo history for this chat.\n\n'
-                          + 'Partner Memory (facts Remedy remembers about you) is kept. '
-                          + 'Use Settings → You & Agent → Wipe persona to forget those.',
-                      )
-                      if (ok) onDelete(s.id)
+                      onConfirmDeleteSession(s.id, s.title || '')
                     }}
                   >
                     ×
