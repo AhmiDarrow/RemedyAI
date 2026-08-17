@@ -282,6 +282,32 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
     }
   }
 
+  // Press-and-hold: trusted hold gesture (verification walls, hold-to-confirm).
+  // hold_ms rides the `dy` slot. Rust resolves x/y or locates by text/ref.
+  if (action === 'press_hold') {
+    const res = await tauriInvoke<string>('browser_agent_action', {
+      action: 'press_hold',
+      x: p.x != null ? Number(p.x) : null,
+      y: p.y != null ? Number(p.y) : null,
+      x2: null,
+      y2: null,
+      text: p.text != null ? String(p.text) : null,
+      key: null,
+      button: null,
+      dy: p.hold_ms != null ? Number(p.hold_ms) : p.dy != null ? Number(p.dy) : null,
+      job_id: null,
+      ref: p.ref != null ? String(p.ref) : null,
+    })
+    const ok = rustBrowserActionOk(res)
+    return {
+      ok,
+      target: 'browser',
+      action: 'press_hold',
+      message: ok ? `Pressed and held (${res})` : `press_hold failed: ${res}`,
+      detail: res,
+    }
+  }
+
   if (['click', 'type', 'key', 'scroll', 'drag', 'click_ref'].includes(action)) {
     const ref = p.ref != null ? String(p.ref) : null
     const text = p.text != null ? String(p.text) : null

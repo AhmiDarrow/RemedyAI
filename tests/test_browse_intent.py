@@ -233,3 +233,19 @@ def test_retail_open_only_still_homepage():
     assert "google.com/search" in (
         parse_browse_navigate_url("go to google and search elephant") or ""
     )
+
+
+def test_retail_query_stops_at_first_clause():
+    """A multi-step prompt searches the PRODUCT, not the whole paragraph
+    jammed into ?q= (the '...milk. Add one gallon to the cart, then stop' bug)."""
+    from remedy.core.computer.browse_intent import parse_browse_navigate_url
+
+    u = parse_browse_navigate_url(
+        "Go to walmart and find whole milk. Add one gallon of whole milk to the "
+        "cart, then stop at the cart and hand it to me"
+    )
+    assert u == "https://www.walmart.com/search?q=whole+milk"
+    u = parse_browse_navigate_url("go to kroger and find a dozen large eggs then add to cart")
+    assert u == "https://www.kroger.com/search?query=dozen+large+eggs"
+    u = parse_browse_navigate_url("go to walmart, find paper towels please")
+    assert u == "https://www.walmart.com/search?q=paper+towels"

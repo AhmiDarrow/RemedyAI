@@ -21,6 +21,101 @@ fn api_url(path: &str) -> String {
     format!("{}{}", crate::api_base_url(), path)
 }
 
+/// Shared DOM helpers for every agent scrape/click. Prepended to the snapshot
+/// and click JS so Remedy sees the WHOLE page — not just the light DOM.
+///
+/// Why this exists: modern retail sites (Target, Kroger, Best Buy) render
+/// their controls inside Web Component **shadow roots** and same-origin
+/// **iframes**, which a plain `document.querySelectorAll` cannot see. Remedy
+/// would "find" a store card in page_text yet have no clickable element for
+/// its "Make this my store" button. And even in the light DOM, a list of
+/// stores gives five identical "Set as store" buttons with nothing to tell
+/// them apart — the store name + address live in an ancestor CARD, not on the
+/// button. These helpers pierce shadow/iframes AND attach that card context so
+/// a generic button becomes identifiable ("Set as store" · "Hueytown …35023").
+const REMEDY_DOM_JS: &str = r#"
+window.__rmdyRoots=function(){
+  const roots=[document];
+  const walk=(root)=>{
+    let els;
+    try{ els=root.querySelectorAll('*'); }catch(e){ return; }
+    for(const el of els){
+      if(el.shadowRoot){ roots.push(el.shadowRoot); walk(el.shadowRoot); }
+    }
+  };
+  try{ walk(document); }catch(e){}
+  // Same-origin iframes only (cross-origin throws → skipped, never leaked).
+  try{
+    for(const f of document.querySelectorAll('iframe')){
+      try{ const d=f.contentDocument; if(d){ roots.push(d); walk(d); } }catch(e){}
+    }
+  }catch(e){}
+  return roots;
+};
+window.__rmdyDeep=function(sel){
+  const out=[]; const seen=new Set();
+  for(const root of window.__rmdyRoots()){
+    let els; try{ els=root.querySelectorAll(sel); }catch(e){ continue; }
+    for(const el of els){ if(!seen.has(el)){ seen.add(el); out.push(el); } }
+  }
+  return out;
+};
+window.__rmdyFind=function(ref){
+  for(const root of window.__rmdyRoots()){
+    let el; try{ el=root.querySelector('[data-remedy-ref="'+ref+'"]'); }catch(e){ continue; }
+    if(el) return el;
+  }
+  return null;
+};
+window.__rmdyName=function(el){
+  return (el.getAttribute&&(el.getAttribute('aria-label')||el.getAttribute('title'))||
+    el.innerText||el.value||el.placeholder||(el.getAttribute&&el.getAttribute('name'))||
+    el.tagName||'').toString().trim().replace(/\s+/g,' ');
+};
+window.__rmdyVisible=function(el){
+  let r; try{ r=el.getBoundingClientRect(); }catch(e){ return false; }
+  let st; try{ st=window.getComputedStyle(el); }catch(e){ st=null; }
+  if(st&&(st.visibility==='hidden'||st.display==='none'||st.opacity==='0')) return false;
+  if(el.disabled) return false;
+  return r.width>2&&r.height>2&&r.bottom>0&&r.right>0&&r.top<innerHeight&&r.left<innerWidth;
+};
+// The disambiguating context for a control: the text of its nearest CARD-like
+// ancestor (store tile / search result / product), minus the control's own
+// label, capped. Card detection is SIZE-based, not class-name guessing, so it
+// generalizes across sites: the smallest ancestor whose text is meaningfully
+// larger than the control (it wraps siblings — the store name, address, hours)
+// but still bounded (a card, not the whole page). Card-ish tags/roles/classes
+// only nudge the bound wider. Crosses shadow boundaries via getRootNode().host.
+window.__rmdyCtx=function(el){
+  const CARD=/(card|tile|result|store|item|listitem|cell|option|product|location|pod|address)/i;
+  const self=((el.innerText||el.value||'')+'').trim().replace(/\s+/g,' ');
+  const selfLen=self.length;
+  let node=el.parentElement, hops=0;
+  const strip=(t)=>{ t=(t||'').trim().replace(/\s+/g,' '); if(self) t=t.split(self).join(' ').replace(/\s+/g,' ').trim(); return t; };
+  while(node&&hops<9){
+    let t=''; try{ t=(node.innerText||'').trim().replace(/\s+/g,' '); }catch(e){ t=''; }
+    const tag=(node.tagName||'').toLowerCase();
+    const role=((node.getAttribute&&node.getAttribute('role'))||'').toLowerCase();
+    const idcls=((node.className&&node.className.toString&&node.className.toString())||'')+' '+
+      ((node.getAttribute&&(node.getAttribute('data-testid')||node.getAttribute('data-test')))||'');
+    const cardish=tag==='li'||tag==='article'||role==='listitem'||role==='option'||role==='article'||CARD.test(idcls);
+    // A real card: adds ≥12 chars of sibling context beyond the control, and
+    // is not the whole page. Card-ish containers may be a bit larger.
+    const cap=cardish?420:300;
+    if(t.length>=selfLen+12 && t.length<=cap){
+      const stripped=strip(t);
+      if(stripped.length>=4) return stripped.slice(0,180);
+    }
+    if(!node.parentElement){
+      const rootNode=node.getRootNode&&node.getRootNode();
+      node=(rootNode&&rootNode.host)?rootNode.host:null;
+    } else { node=node.parentElement; }
+    hops++;
+  }
+  return '';
+};
+"#;
+
 /// Force OAuth / SSO into the same rail WebView (no popup window).
 /// Brand-agnostic: path/query heuristics, not site-specific hosts.
 const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
@@ -1116,6 +1211,80 @@ fn attach_fullscreen_handler(_app: AppHandle, _wv: tauri::Webview) {}
 // user present — trusted input + human-held checkout is the honest posture.
 // ---------------------------------------------------------------------------
 
+/// Resolve a viewport point for a gesture: explicit x/y if given, else locate
+/// the element by text/ref (deep query — shadow DOM + same-origin iframes) and
+/// return its center. Used by press-and-hold so the model can target a control
+/// by label the same way it clicks.
+fn resolve_point(
+    wv: &tauri::Webview,
+    x: Option<f64>,
+    y: Option<f64>,
+    text: Option<&str>,
+    r#ref: Option<&str>,
+) -> Result<(f64, f64), String> {
+    if let (Some(px), Some(py)) = (x, y) {
+        if px > 0.0 || py > 0.0 {
+            return Ok((px, py));
+        }
+    }
+    let locator = if let Some(rf) = r#ref.filter(|s| !s.is_empty()) {
+        let escaped = rf.replace('\\', "\\\\").replace('\'', "\\'");
+        format!(
+            r#"(function(){{
+  {dom}
+  const el=window.__rmdyFind('{escaped}');
+  if(!el) return 'missing-ref';
+  try{{ el.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
+  const r=el.getBoundingClientRect();
+  return 'xy:'+(r.x+r.width/2)+':'+(r.y+r.height/2);
+}})()"#,
+            dom = REMEDY_DOM_JS
+        )
+    } else if let Some(t) = text.filter(|s| !s.is_empty()) {
+        let escaped = t.replace('\\', "\\\\").replace('\'', "\\'").replace('\n', " ");
+        format!(
+            r#"(function(){{
+  {dom}
+  const q='{escaped}'.toLowerCase().trim();
+  const sel='a,button,input,[role=button],[role=link],[role=checkbox],[role=switch],label,[onclick],div,span';
+  let best=null,bestS=-1;
+  for(const el of window.__rmdyDeep(sel)){{
+    if(!window.__rmdyVisible(el)) continue;
+    const name=window.__rmdyName(el).toLowerCase();
+    if(!name) continue;
+    let s=name===q?100:(name.includes(q)?70:(q.includes(name)&&name.length>2?40:0));
+    if(s>bestS){{ bestS=s; best=el; }}
+  }}
+  if(!best||bestS<40) return 'no-match';
+  try{{ best.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
+  const r=best.getBoundingClientRect();
+  return 'xy:'+(r.x+r.width/2)+':'+(r.y+r.height/2);
+}})()"#,
+            dom = REMEDY_DOM_JS
+        )
+    } else {
+        return Err("press_hold needs x/y, text, or ref".into());
+    };
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    wv.eval_with_callback(&locator, move |r| {
+        let _ = tx.send(r);
+    })
+    .map_err(|e| format!("resolve_point: {e}"))?;
+    let raw = rx
+        .recv_timeout(Duration::from_secs(9))
+        .map_err(|_| "resolve_point timed out".to_string())?;
+    let unq = raw.trim().trim_matches('"');
+    if let Some(rest) = unq.strip_prefix("xy:") {
+        let mut it = rest.split(':');
+        let px: f64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(-1.0);
+        let py: f64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(-1.0);
+        if px >= 0.0 && py >= 0.0 {
+            return Ok((px, py));
+        }
+    }
+    Err(format!("press_hold could not locate target ({unq})"))
+}
+
 #[cfg(windows)]
 fn cdp_call(wv: &tauri::Webview, method: &str, params_json: String) -> Result<String, String> {
     use webview2_com::CallDevToolsProtocolMethodCompletedHandler;
@@ -2193,6 +2362,56 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
         return;
     }
 
+    if action == "press_hold" {
+        let text = payload.get("text").and_then(|t| t.as_str()).map(String::from);
+        let r#ref = payload.get("ref").and_then(|t| t.as_str()).map(String::from);
+        let x = payload.get("x").and_then(|v| v.as_f64());
+        let y = payload.get("y").and_then(|v| v.as_f64());
+        let hold = payload
+            .get("hold_ms")
+            .and_then(|v| v.as_i64())
+            .map(|v| v as i32);
+        match browser_agent_action(
+            app.clone(),
+            "press_hold".into(),
+            x,
+            y,
+            None,
+            None,
+            text,
+            None,
+            None,
+            hold,
+            None,
+            r#ref,
+        ) {
+            Ok(raw) => {
+                let ok = raw.starts_with("ok:");
+                complete_job(
+                    agent,
+                    &id,
+                    ok,
+                    json!({
+                        "ok": ok,
+                        "target": "browser",
+                        "action": "press_hold",
+                        "message": if ok {
+                            format!("Pressed and held ({raw})")
+                        } else {
+                            format!("press_hold failed: {raw}")
+                        },
+                        "detail": raw,
+                        "via": "rust-host",
+                    }),
+                    if ok { None } else { Some("press_hold failed".to_string()) },
+                );
+            }
+            Err(e) => complete_job(agent, &id, false, json!({}), Some(e)),
+        }
+        ack_ui_command(agent, &id);
+        return;
+    }
+
     // type/key/scroll left for SPA poller
     log::info!("computer-host: job {id} action={action} left for SPA or next tick");
 }
@@ -2643,53 +2862,106 @@ pub fn browser_agent_action(
     let text_cdp = text.clone();
     #[cfg(windows)]
     let key_cdp = key.clone();
+
+    // Press-and-hold: Remedy as the owner's authorized hands for an
+    // accessibility gesture (press-and-hold verification, hold-to-confirm).
+    // Resolve coordinates (x/y direct, or locate by text/ref — including in a
+    // challenge iframe/shadow), then hold a REAL trusted mouse press for the
+    // duration. Synthetic events never pass these walls; trusted CDP input is
+    // the whole point.
+    if act == "press_hold" {
+        let hold_ms = dy.map(|v| v.clamp(300, 12000)).unwrap_or(2600) as u64;
+        let (px, py) = resolve_point(&wv, x, y, text.as_deref(), r#ref.as_deref())?;
+        #[cfg(windows)]
+        {
+            let _ = cdp_mouse(&wv, "mouseMoved", px, py, "none", 0);
+            cdp_mouse(&wv, "mousePressed", px, py, "left", 1)?;
+            std::thread::sleep(Duration::from_millis(hold_ms));
+            cdp_mouse(&wv, "mouseReleased", px, py, "left", 1)?;
+            return Ok(format!("ok:press_hold:{}:{}:{}ms", px.round(), py.round(), hold_ms));
+        }
+        #[cfg(not(windows))]
+        {
+            // Best-effort synthetic pointer hold (may not pass trusted walls).
+            let js = format!(
+                r#"(function(){{
+  const x={px}, y={py};
+  const el=document.elementFromPoint(x,y)||document.body;
+  const opt={{bubbles:true,cancelable:true,clientX:x,clientY:y,pointerId:1,button:0,buttons:1}};
+  try{{ el.dispatchEvent(new PointerEvent('pointerdown',opt)); }}catch(e){{}}
+  try{{ el.dispatchEvent(new MouseEvent('mousedown',opt)); }}catch(e){{}}
+  setTimeout(function(){{
+    try{{ el.dispatchEvent(new PointerEvent('pointerup',opt)); }}catch(e){{}}
+    try{{ el.dispatchEvent(new MouseEvent('mouseup',opt)); }}catch(e){{}}
+    try{{ el.dispatchEvent(new MouseEvent('click',opt)); }}catch(e){{}}
+  }}, {hold_ms});
+  return 'ok:press_hold_synth';
+}})()"#
+            );
+            let (tx, rx) = std::sync::mpsc::channel::<String>();
+            wv.eval_with_callback(&js, move |r| {
+                let _ = tx.send(r);
+            })
+            .map_err(|e| format!("press_hold: {e}"))?;
+            let _ = rx.recv_timeout(Duration::from_millis(hold_ms + 1500));
+            return Ok(format!("ok:press_hold:{}:{}:{}ms", px.round(), py.round(), hold_ms));
+        }
+    }
+
     let js = match act.as_str() {
         "snapshot" | "a11y" => {
             // Richer a11y-ish scrape; return array via eval_with_callback.
-            r#"(function(){
-  try {
-    document.querySelectorAll('[data-remedy-ref]').forEach(el => el.removeAttribute('data-remedy-ref'));
-  } catch(e) {}
-  const sel='a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[role=tab],[role=menuitem],[role=option],[role=checkbox],[role=switch],[contenteditable=true],summary,label,[onclick]';
-  const nodes=[...document.querySelectorAll(sel)].filter(el => {
-    const r=el.getBoundingClientRect();
-    const st=window.getComputedStyle(el);
-    if(st.visibility==='hidden'||st.display==='none'||st.opacity==='0'||el.disabled) return false;
-    return r.width>2&&r.height>2&&r.bottom>0&&r.right>0&&r.top<innerHeight&&r.left<innerWidth;
-  }).slice(0,120);
-  return nodes.map((el,i) => {
+            // Deep query (shadow DOM + same-origin iframes) + per-element card
+            // context so generic controls in a list are distinguishable.
+            format!(
+                r#"(function(){{
+  {dom}
+  try {{
+    window.__rmdyDeep('[data-remedy-ref]').forEach(el => el.removeAttribute('data-remedy-ref'));
+  }} catch(e) {{}}
+  const sel='a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[role=tab],[role=menuitem],[role=option],[role=checkbox],[role=switch],[role=radio],[contenteditable=true],summary,label,[onclick]';
+  const nodes=window.__rmdyDeep(sel).filter(window.__rmdyVisible).slice(0,160);
+  return nodes.map((el,i) => {{
     const r=el.getBoundingClientRect();
     const ref='e'+(i+1);
-    try { el.setAttribute('data-remedy-ref', ref); } catch(e) {}
+    try {{ el.setAttribute('data-remedy-ref', ref); }} catch(e) {{}}
     const text=(el.innerText||'').trim().replace(/\s+/g,' ').slice(0,120);
     const tag=(el.tagName||'').toLowerCase();
     const itype=String(el.type||'').toLowerCase();
-    const auto=String(el.getAttribute('autocomplete')||'').toLowerCase();
+    const auto=String((el.getAttribute&&el.getAttribute('autocomplete'))||'').toLowerCase();
     // Never ship password/OTP/secret field values into tool results → LLM.
+    const nm=((el.getAttribute&&el.getAttribute('name'))||'').toLowerCase();
     const sensitive = tag==='input' && (
       itype==='password' || itype==='hidden' ||
       auto.includes('password') || auto.includes('one-time') || auto==='one-time-code' ||
       auto.includes('cc-') || auto.includes('card') ||
-      (el.getAttribute('name')||'').toLowerCase().match(/pass|otp|cvv|cvc|secret|token/)
+      nm.match(/pass|otp|cvv|cvc|secret|token/)
     );
     const rawVal = (el.value!=null?String(el.value):'');
     const hasVal = rawVal.length>0;
+    const aria=(el.getAttribute&&el.getAttribute('aria-label'))||'';
     // Prefer labels/placeholder over raw value for name (avoids password in name).
-    const name=(el.getAttribute('aria-label')||el.getAttribute('title')||text||el.placeholder||el.name||(sensitive?'':rawVal)||el.tagName||'').trim().replace(/\s+/g,' ').slice(0,120);
-    return {
-      ref, tag, role:el.getAttribute('role')||'',
+    const name=(aria||(el.getAttribute&&el.getAttribute('title'))||text||el.placeholder||el.name||(sensitive?'':rawVal)||el.tagName||'').trim().replace(/\s+/g,' ').slice(0,120);
+    // Selected/pressed state (a store already chosen, a tab active, …).
+    const state=((el.getAttribute&&(el.getAttribute('aria-pressed')||el.getAttribute('aria-selected')||el.getAttribute('aria-checked')))||'').toString();
+    let ctx=''; try {{ ctx=window.__rmdyCtx(el); }} catch(e) {{}}
+    return {{
+      ref, tag, role:(el.getAttribute&&el.getAttribute('role'))||'',
       name, text,
+      context: (ctx===name)?'':ctx,
+      state: (state==='true'||state==='false'||state==='mixed')?state:'',
       value: sensitive ? (hasVal ? '[filled]' : '') : rawVal.slice(0,80),
       value_redacted: !!sensitive,
       placeholder:(el.placeholder||'').slice(0,80),
-      href:(el.href||el.getAttribute('href')||'').slice(0,200),
-      title:(el.getAttribute('title')||'').slice(0,80),
+      href:(el.href||(el.getAttribute&&el.getAttribute('href'))||'').slice(0,200),
+      title:((el.getAttribute&&el.getAttribute('title'))||'').slice(0,80),
       x:Math.round(r.x+r.width/2), y:Math.round(r.y+r.height/2),
       w:Math.round(r.width), h:Math.round(r.height)
-    };
-  });
-})()"#
-            .to_string()
+    }};
+  }});
+}})()"#,
+                dom = REMEDY_DOM_JS
+            )
         }
         "page_text" => {
             r#"(function(){
@@ -2723,33 +2995,42 @@ pub fn browser_agent_action(
                 .replace('\n', " ");
             format!(
                 r#"(function(){{
+  {dom}
   const q='{escaped}'.toLowerCase().trim();
   if(!q) return 'missing-text';
-  const sel='a,button,input,textarea,select,[role=button],[role=link],[role=tab],[role=menuitem],[role=option],[contenteditable=true],summary,label,[onclick]';
-  const nodes=[...document.querySelectorAll(sel)];
+  const qt=q.split(/\s+/).filter(Boolean);
+  const sel='a,button,input,textarea,select,[role=button],[role=link],[role=tab],[role=menuitem],[role=option],[role=radio],[role=checkbox],[contenteditable=true],summary,label,[onclick]';
   function score(el){{
+    if(!window.__rmdyVisible(el)) return -1;
     const r=el.getBoundingClientRect();
-    const st=window.getComputedStyle(el);
-    if(st.visibility==='hidden'||st.display==='none'||st.opacity==='0'||el.disabled) return -1;
-    if(r.width<2||r.height<2||r.bottom<0||r.right<0||r.top>innerHeight||r.left>innerWidth) return -1;
-    const name=(el.getAttribute('aria-label')||el.getAttribute('title')||el.innerText||el.value||el.placeholder||el.name||'').trim().replace(/\s+/g,' ').toLowerCase();
+    const name=window.__rmdyName(el).toLowerCase();
     if(!name) return -1;
     let s=0;
     if(name===q) s=100;
     else if(name.includes(q)) s=70;
     else if(q.includes(name)&&name.length>2) s=40;
     else {{
-      const qt=q.split(/\s+/).filter(Boolean);
       const nt=name.split(/\s+/);
       const hit=qt.filter(t=>nt.some(n=>n.includes(t)||t.includes(n))).length;
       if(hit) s=15*(hit/qt.length);
-      else return -1;
+      else s=0;
     }}
+    // Context-aware disambiguation: query tokens the control's LABEL does not
+    // cover, matched against its CARD context, break ties between N identical
+    // controls (e.g. five "Set as store" buttons → the Hueytown one). This is
+    // what lets "set as store hueytown supercenter" pick the right store.
+    let ctx=''; try {{ ctx=window.__rmdyCtx(el).toLowerCase(); }} catch(e) {{}}
+    if(ctx && qt.length>1){{
+      const missing=qt.filter(t=>!name.includes(t));
+      const inCtx=missing.filter(t=>ctx.includes(t)).length;
+      if(inCtx) s+=20*(inCtx/qt.length);
+    }}
+    if(s<=0) return -1;
     if(r.width>8&&r.width<900&&r.height>8&&r.height<220) s+=5;
     return s;
   }}
   let best=null, bestS=-1;
-  for(const el of nodes){{
+  for(const el of window.__rmdyDeep(sel)){{
     const s=score(el);
     if(s>bestS){{ bestS=s; best=el; }}
   }}
@@ -2757,8 +3038,7 @@ pub fn browser_agent_action(
   if(!best||bestS<15){{
     for(let pass=0; pass<4 && (!best||bestS<15); pass++){{
       window.scrollBy(0, Math.floor(innerHeight*0.75));
-      const nodes2=[...document.querySelectorAll(sel)];
-      for(const el of nodes2){{
+      for(const el of window.__rmdyDeep(sel)){{
         const s=score(el);
         if(s>bestS){{ bestS=s; best=el; }}
       }}
@@ -2775,7 +3055,8 @@ pub fn browser_agent_action(
   // Locate only — the host dispatches a TRUSTED click at these coords
   // (synthetic dispatchEvent is isTrusted=false → bot-flagged at checkout).
   return 'okxy:'+Math.round(x)+':'+Math.round(y)+':'+bestS.toFixed(0)+':'+tag+':'+itype+':'+name;
-}})()"#
+}})()"#,
+                dom = REMEDY_DOM_JS
             )
         }
         "click_ref" => {
@@ -2786,8 +3067,9 @@ pub fn browser_agent_action(
             let escaped = rf.replace('\\', "\\\\").replace('\'', "\\'");
             format!(
                 r#"(function(){{
+  {dom}
   const ref='{escaped}';
-  const el=document.querySelector('[data-remedy-ref="'+ref+'"]');
+  const el=window.__rmdyFind(ref);
   if(!el) return 'missing-ref:'+ref;
   try{{ el.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
   try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}
@@ -2795,7 +3077,8 @@ pub fn browser_agent_action(
   const x=r.x+r.width/2, y=r.y+r.height/2;
   // Locate only — host clicks these coords via trusted input.
   return 'okxy:'+Math.round(x)+':'+Math.round(y)+':'+ref+':'+(el.tagName||'?');
-}})()"#
+}})()"#,
+                dom = REMEDY_DOM_JS
             )
         }
         "click" => {
@@ -2804,8 +3087,9 @@ pub fn browser_agent_action(
                 let escaped = rf.replace('\\', "\\\\").replace('\'', "\\'");
                 format!(
                     r#"(function(){{
+  {dom}
   const ref='{escaped}';
-  const el=document.querySelector('[data-remedy-ref="'+ref+'"]');
+  const el=window.__rmdyFind(ref);
   if(!el) return 'missing-ref:'+ref;
   try{{ el.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
   try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}
@@ -2813,7 +3097,8 @@ pub fn browser_agent_action(
   const x=r.x+r.width/2, y=r.y+r.height/2;
   // Locate only — host clicks these coords via trusted input.
   return 'okxy:'+Math.round(x)+':'+Math.round(y)+':'+ref;
-}})()"#
+}})()"#,
+                    dom = REMEDY_DOM_JS
                 )
             } else {
             let cx = x.unwrap_or(0.0);
