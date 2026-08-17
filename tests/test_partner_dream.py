@@ -140,3 +140,31 @@ def test_continuity_includes_dreams(tmp_path):
     assert sf.future_dreams
     if block:
         assert "Dreams of the future" in block or "birthday" in block.lower()
+
+
+def test_run_coro_sync_never_leaks_unawaited_coroutine() -> None:
+    """A memory backend raising RuntimeError inside the thread must not fall
+    through into a second asyncio.run() on the running loop (which raised
+    before awaiting and leaked the coroutine — the dream.py RuntimeWarning)."""
+    import asyncio
+    import contextlib
+    import warnings
+
+    from remedy.memory.soul.dream import _run_coro_sync
+
+    async def _boom() -> int:
+        raise RuntimeError("attached to a different loop")
+
+    async def _ok() -> int:
+        return 7
+
+    async def _drive() -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            with contextlib.suppress(RuntimeError):
+                _run_coro_sync(_boom, timeout=3)
+            assert _run_coro_sync(_ok, timeout=3) == 7
+
+    asyncio.run(_drive())
+    # No running loop → same-thread path
+    assert _run_coro_sync(_ok, timeout=3) == 7

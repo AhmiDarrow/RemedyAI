@@ -669,7 +669,7 @@ class ComputerHostBridge:
                     cmd = None
             want = str(session_id or self._focused_session_id or "").strip()
             cmd_sid = str((cmd or {}).get("session_id") or "").strip()
-            if want and cmd_sid and cmd_sid != want:
+            if not self._rail_allows(cmd_sid, want):
                 return None
             self._ui_command = None
             try:
@@ -727,6 +727,34 @@ class ComputerHostBridge:
     def set_focused_session(self, session_id: str | None) -> None:
         self._focused_session_id = str(session_id or "").strip()
 
+    def focused_session_id(self) -> str:
+        return self._focused_session_id
+
+    @staticmethod
+    def _session_is_streaming(session_id: str) -> bool:
+        try:
+            from remedy.core.turn_context import is_session_streaming
+
+            return bool(is_session_streaming(session_id))
+        except Exception:
+            return False
+
+    def _rail_allows(self, job_sid: str, want: str) -> bool:
+        """One WebView rail, many sessions: may a host serve *job_sid* now?
+
+        * No focus / untagged job / same session → yes.
+        * The focused tab is mid-turn (streaming) → protect it; another
+          session's job stays pending (no wrong-tab navigate).
+        * The focused tab is idle → the rail follows whoever is actually
+          driving. A session run from the WebUI, the harness, or a tab that
+          is not the desktop's open one used to be starved forever: every
+          poller filtered on the desktop's tab, observe jobs sat pending,
+          the agent read "host offline" and improvised on the desktop.
+        """
+        if not want or not job_sid or job_sid == want:
+            return True
+        return not self._session_is_streaming(want)
+
     def claim_next(
         self,
         *,
@@ -767,7 +795,7 @@ class ComputerHostBridge:
                 job_sid = str(
                     job.session_id or (job.payload or {}).get("session_id") or ""
                 ).strip()
-                if want and job_sid and job_sid != want:
+                if not self._rail_allows(job_sid, want):
                     continue
                 job.status = "running"
                 self._write(job)
@@ -1197,12 +1225,10 @@ class ComputerHostBridge:
                         # Write back to THIS file, not _path(job.id): a file
                         # whose JSON id ≠ filename must still get scrubbed here
                         # (otherwise the plaintext lingers forever).
-                        try:
+                        with contextlib.suppress(OSError):
                             path.write_text(
                                 json.dumps(job.to_dict()), encoding="utf-8"
                             )
-                        except OSError:
-                            pass
                         n += 1
                     continue
                 path.unlink(missing_ok=True)

@@ -137,3 +137,44 @@ def test_open_todos_block_done_after_writes():
     assert build_blocks_final_answer(st) is True
     st.open_todo_count = 0
     assert build_blocks_final_answer(st) is False
+
+
+def test_done_build_closes_whole_checklist(tmp_path):
+    """phase="done" closes every remaining row — even wording that matches
+    no file/verify heuristic (the RemedyPDF-update stale-list bug)."""
+    from remedy.core.build_todos import sync_todos_with_build
+
+    rt = _rt(tmp_path)
+    upsert_todos(
+        rt,
+        [
+            {"id": "a", "content": "RemedyPDF update polish pass", "status": "in_progress"},
+            {"id": "b", "content": "double-check export margins", "status": "pending"},
+        ],
+        merge=False,
+    )
+    assert open_todo_count(load_todos(rt)) == 2
+    state = BuildTurnState(goal="remedypdf update", project_path=str(tmp_path))
+    state.phase = "done"
+    items = sync_todos_with_build(rt, state)
+    assert open_todo_count(items) == 0
+    # save_todos drops fully-closed lists: disk file gone, next load empty
+    assert not (tmp_path / ".remedy-build" / "todos.json").is_file()
+    assert load_todos(rt) == []
+    assert state.open_todo_count == 0
+
+
+def test_unfinished_build_keeps_open_rows(tmp_path):
+    """Anything short of phase="done" must NOT sweep the checklist."""
+    from remedy.core.build_todos import sync_todos_with_build
+
+    rt = _rt(tmp_path)
+    upsert_todos(
+        rt,
+        [{"id": "a", "content": "polish the export pass", "status": "pending"}],
+        merge=False,
+    )
+    state = BuildTurnState(goal="g", project_path=str(tmp_path))
+    state.phase = "verify"
+    items = sync_todos_with_build(rt, state)
+    assert open_todo_count(items) == 1

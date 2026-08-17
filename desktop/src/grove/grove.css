@@ -59,6 +59,8 @@
 @keyframes grove-blink { 50% { opacity: 0.3; } }
 
 .grove-tabs { display: flex; gap: 6px; margin-left: 10px; }
+/* Home tab group sits just after the brand monogram. */
+.grove-tabs.home { margin-left: 6px; }
 .grove-tabs button {
   border: 1px solid var(--border);
   background: var(--bg-primary);

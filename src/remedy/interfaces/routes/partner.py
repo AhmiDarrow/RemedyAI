@@ -228,12 +228,16 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         fields = req.model_dump(exclude_none=True)
         if not fields:
             raise HTTPException(400, "nothing to patch")
-        if fields.get("status") == "done":
-            g = store.complete(goal_id, evidence=str(fields.get("evidence") or ""))
-        elif fields.get("status") == "paused":
-            g = store.pause(goal_id)
-        else:
-            g = store.patch(goal_id, **fields)
+
+        # Store I/O (JSON + activity log) off the event loop, like create.
+        def _apply():
+            if fields.get("status") == "done":
+                return store.complete(goal_id, evidence=str(fields.get("evidence") or ""))
+            if fields.get("status") == "paused":
+                return store.pause(goal_id)
+            return store.patch(goal_id, **fields)
+
+        g = await asyncio.to_thread(_apply)
         if g is None:
             raise HTTPException(404, "goal not found")
         return g.to_public()
@@ -243,7 +247,7 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         from remedy.memory.life_goals import LifeGoalStore
 
         store = LifeGoalStore(_life_home())
-        ok = store.delete(goal_id)
+        ok = await asyncio.to_thread(store.delete, goal_id)
         if not ok:
             raise HTTPException(404, "goal not found")
         return {"ok": True, "deleted": goal_id}
@@ -252,7 +256,7 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
     async def clear_activity():
         from remedy.memory.life_goals import LifeGoalStore
 
-        LifeGoalStore(_life_home()).clear_activity()
+        await asyncio.to_thread(LifeGoalStore(_life_home()).clear_activity)
         return {"ok": True}
 
     def _plan_store():

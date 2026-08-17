@@ -527,6 +527,22 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                                         role="assistant",
                                     )
 
+                    # Flush the checklist event a last-batch verify queued
+                    # after that batch's flush point — otherwise a build that
+                    # finishes on its final tool batch leaves the stale
+                    # checklist on screen until the next turn.
+                    with contextlib.suppress(Exception):
+                        from remedy.core.build_todos import take_todos_event
+
+                        _td_tok = take_todos_event(runtime)
+                        if _td_tok:
+                            _td_raw = _td_tok[len("@@todos:") :]
+                            _td_payload = json.loads(_td_raw) if _td_raw else {}
+                            if isinstance(_td_payload, dict):
+                                yield sse_event(
+                                    "todos", {"type": "todos", **_td_payload}
+                                )
+
                     done_payload: dict = {
                         "type": "done",
                         "request_id": request_id,

@@ -357,7 +357,7 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
 
     global _load_config_cache, _load_config_lock
     try:
-        _load_config_lock
+        _load_config_lock  # noqa: B018
     except NameError:
         _load_config_lock = _threading.Lock()
         _load_config_cache = {}

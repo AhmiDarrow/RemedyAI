@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from remedy.interfaces.plugin import (
     HookManager,
     PluginManager,
@@ -33,6 +35,8 @@ def test_hook_chain_short_circuit() -> None:
 
 def test_plugin_manager_discover_and_load_demo() -> None:
     examples = Path(__file__).resolve().parents[1] / "examples"
+    if not (examples / "demo_plugin").exists() and not (examples / "demo_plugin.py").is_file():
+        pytest.skip("examples/ stays in the local tree (not public)")
     hooks = HookManager()
     pm = PluginManager(hooks)
 

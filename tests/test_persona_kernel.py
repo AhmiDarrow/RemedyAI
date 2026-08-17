@@ -24,7 +24,6 @@ from remedy.memory.soul.field import (
 )
 from remedy.memory.soul.inject import build_soul_context_block, provider_muscle_contract
 
-
 # --- Creed (charter §1) ---------------------------------------------------
 
 
@@ -80,6 +79,15 @@ def test_temperament_invariants_present():
     assert "emergent" in low
     assert "never claim humanity" in low
     assert "not preach" in low
+
+
+def test_ask_before_assume_rides_the_preamble():
+    """Underspecified choices → ask one grounded question, never guess. General
+    Remedy behavior (not shopping-only), so it lives in the persona kernel."""
+    low = identity_system_preamble().lower()
+    assert "ask before you assume" in low
+    # Reversible low-stakes defaults still get decided, not paused on.
+    assert "reversible" in low and "low-stakes" in low
 
 
 # --- Emergent voice vs. style addendum (charter §5) -----------------------

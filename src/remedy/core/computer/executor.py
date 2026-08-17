@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import re
 import threading
 import time
 from pathlib import Path
@@ -22,6 +23,33 @@ from remedy.core.computer.router import (
     wants_system_browser,
 )
 from remedy.core.computer.types import ComputerAction, public_result
+
+# Owner's own web browsers. Remedy has the in-app Browser rail for every web
+# task — she must NEVER launch or focus one of these. Driving the owner's
+# browser gives her no page eyes (the rail's snapshot/page_text/click do not
+# reach it), hijacks the owner's logged-in session, and is exactly what she
+# fell back to when the rail poller was starved. This is a hard executor-level
+# refusal, not a prompt suggestion (guidance.py states the same rule for the
+# model; this enforces it even if the model ignores it).
+_HOST_BROWSER_RE = re.compile(
+    r"(?i)(?:^|[\\/ ])(firefox|chrome|msedge|microsoft\s*edge|"
+    r"\bedge\b|opera|brave|vivaldi|iexplore|chromium)(?:\.exe)?(?:$|[\s\"'])"
+)
+
+
+def _is_host_browser(name: str) -> bool:
+    """True when *name* names one of the owner's own web browsers."""
+    s = (name or "").strip()
+    return bool(s) and bool(_HOST_BROWSER_RE.search(s))
+
+
+_HOST_BROWSER_REFUSAL = (
+    "Refused: web tasks live in the in-app Browser rail, not the owner's own "
+    "browser. Use computer_navigate / computer_act (target=browser) — you have "
+    "no page eyes in a Firefox/Chrome/Edge window and it hijacks the owner's "
+    "session. If the rail is unreachable, computer_wait 2 and retry the rail, "
+    "then tell the owner — do not open a desktop browser."
+)
 
 
 def _skill_host(url_or_label: str) -> str:
@@ -481,6 +509,14 @@ class ComputerExecutor:
             )
         if act is ComputerAction.APP:
             app = str(kwargs.get("app") or kwargs.get("name") or "")
+            if _is_host_browser(app):
+                return public_result(
+                    ok=False,
+                    target="desktop",
+                    action="app",
+                    message=_HOST_BROWSER_REFUSAL,
+                    extra={"refused": "host_browser", "app": app},
+                )
             search_dirs = list(kwargs.get("search_dirs") or [])
             info = win.open_app(app, search_dirs=search_dirs or None)
             # New window — drop stale UIA refs from the previous app
@@ -710,6 +746,14 @@ class ComputerExecutor:
             if mode in ("focus", "activate"):
                 hwnd = int(kwargs.get("hwnd") or 0)
                 title = str(kwargs.get("title") or kwargs.get("hint") or "").strip()
+                if title and _is_host_browser(title):
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="windows",
+                        message=_HOST_BROWSER_REFUSAL,
+                        extra={"refused": "host_browser", "title": title},
+                    )
                 if not hwnd and title:
                     found = win.focus_window_by_title(title)
                     if not found:
@@ -1073,8 +1117,13 @@ class ComputerExecutor:
                     hwnd=kwargs.get("hwnd"),
                 )
                 desk["note"] = (
-                    f"Browser rail unavailable ({reason}); "
-                    "desktop window/control snapshot instead"
+                    f"BROWSER RAIL UNREACHABLE ({reason}) — the elements below "
+                    "are DESKTOP WINDOWS, NOT the web page. Do NOT drive the "
+                    "owner's own browser (Firefox/Chrome/Edge windows, Ctrl+T, "
+                    "typing URLs) — web tasks live in the in-app rail only. "
+                    "computer_wait 2 then retry computer_snapshot "
+                    "target=browser; if it stays unreachable, tell the owner "
+                    "instead of improvising on the desktop."
                 )
                 desk["fallback"] = "desktop"
                 desk.setdefault("target", "desktop")
@@ -1087,10 +1136,12 @@ class ComputerExecutor:
             slept = self.bridge.settle_after_navigate(min_s=0.7, max_s=1.8)
             # Shorter unclaimed wait when we already believe host is offline.
             unclaimed = 6.0 if host_looks_live else 2.5
-            # Host may wait for page ready + up to 2×5s eval retries.
+            # Host runs up to 2×9s rail evals + ready poll — heavy retail
+            # pages (Walmart) stall evals past the old 5s and Remedy lost
+            # her eyes mid-shop. Cover the host's worst case.
             total_wait = float(
                 kwargs.get("timeout_s")
-                or (14.0 if host_looks_live else 5.0)
+                or (22.0 if host_looks_live else 5.0)
             )
             last_err = ""
             last_job_id = ""
@@ -1180,7 +1231,8 @@ class ComputerExecutor:
             )
 
         unclaimed = 3.0
-        total_wait = float(kwargs.get("timeout_s") or 12.0)
+        # Covers 2×9s rail evals on slow retail pages.
+        total_wait = float(kwargs.get("timeout_s") or 20.0)
         job = self._enqueue(act.value, payload)
         finished = self.bridge.wait(
             job.id,
@@ -1219,7 +1271,7 @@ class ComputerExecutor:
             last_job_id = job.id
             finished = self.bridge.wait(
                 job.id,
-                timeout_s=14.0,
+                timeout_s=18.0,
                 poll_s=0.05,
                 abort_check=self._abort_check,
                 unclaimed_timeout_s=5.0,
