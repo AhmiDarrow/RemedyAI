@@ -281,6 +281,226 @@ def register_assistant_tools(runtime: Any) -> None:
             indent=2,
         )
 
+    async def calendar_update_event(
+        event_id: str = "",
+        title: str = "",
+        start: str = "",
+        end: str = "",
+        description: str = "",
+        location: str = "",
+    ) -> str:
+        """Reschedule or edit an existing calendar event (only what you pass)."""
+        from remedy.assistant.privacy import consent_ok
+        from remedy.assistant.providers.google_calendar import get_google_calendar
+
+        ok, reason = consent_ok(home)
+        if not ok:
+            return json.dumps({"ok": False, "message": reason}, indent=2)
+        cal = get_google_calendar(home)
+        if cal is None:
+            return json.dumps(
+                {"ok": False, "message": "Google Calendar not connected."}, indent=2
+            )
+        if not (event_id or "").strip():
+            return json.dumps(
+                {"ok": False, "message": "event_id required (from calendar_list_events)."},
+                indent=2,
+            )
+        fn = getattr(cal, "update_event", None)
+        if fn is None:
+            return json.dumps(
+                {"ok": False, "message": "This calendar provider cannot update events."},
+                indent=2,
+            )
+        try:
+            ev = fn(
+                event_id.strip(),
+                title=title,
+                start=start,
+                end=end,
+                description=description,
+                location=location,
+            )
+        except Exception as exc:
+            return json.dumps({"ok": False, "message": str(exc)}, indent=2)
+        return json.dumps(
+            {
+                "ok": True,
+                "event": {"id": ev.id, "title": ev.title, "start": ev.start, "end": ev.end},
+                "message": f"Updated: {ev.title} @ {ev.start}",
+            },
+            indent=2,
+        )
+
+    async def calendar_cancel_event(event_id: str = "") -> str:
+        """Cancel (delete) an event on the primary calendar. Asks first in Ask mode."""
+        from remedy.assistant.privacy import consent_ok
+        from remedy.assistant.providers.google_calendar import get_google_calendar
+        from remedy.core.approvals import APPROVALS
+        from remedy.core.turn_context import turn_session_id
+
+        ok, reason = consent_ok(home)
+        if not ok:
+            return json.dumps({"ok": False, "message": reason}, indent=2)
+        cal = get_google_calendar(home)
+        if cal is None:
+            return json.dumps(
+                {"ok": False, "message": "Google Calendar not connected."}, indent=2
+            )
+        eid = (event_id or "").strip()
+        if not eid:
+            return json.dumps(
+                {"ok": False, "message": "event_id required (from calendar_list_events)."},
+                indent=2,
+            )
+        # Deleting someone's appointment is not reversible from here.
+        label = eid
+        with __import__("contextlib").suppress(Exception):
+            ev0 = cal.get_event(eid)
+            label = f"{ev0.title} @ {ev0.start}"
+        summary = f"calendar_cancel_event {label[:100]}"
+        ask_reason = APPROVALS.needs_ask(summary, tool_name="calendar_cancel_event")
+        sid = turn_session_id(runtime)
+        if ask_reason and not APPROVALS.is_approved(
+            "calendar_cancel_event", summary, session_id=sid
+        ):
+            item = APPROVALS.create(
+                tool_name="calendar_cancel_event",
+                command=summary,
+                reason=ask_reason,
+                session_id=sid,
+            )
+            return (
+                f"APPROVAL_REQUIRED id={item.id}\n"
+                f"reason={ask_reason}\n"
+                f"event={label}\n"
+                "Do not invent success. Tell the user this needs approval "
+                f"(or /approve {item.id}), then retry."
+            )
+        fn = getattr(cal, "delete_event", None)
+        if fn is None:
+            return json.dumps(
+                {"ok": False, "message": "This calendar provider cannot delete events."},
+                indent=2,
+            )
+        try:
+            fn(eid)
+        except Exception as exc:
+            return json.dumps({"ok": False, "message": str(exc)}, indent=2)
+        return json.dumps(
+            {"ok": True, "event_id": eid, "message": f"Cancelled: {label}"}, indent=2
+        )
+
+    async def mail_reply(
+        message_id: str = "",
+        body: str = "",
+        reply_all: bool = False,
+    ) -> str:
+        """Reply IN THREAD to a message (keeps the conversation together)."""
+        from remedy.assistant.privacy import consent_ok, redact_secrets
+        from remedy.assistant.providers.google_gmail import get_google_gmail
+        from remedy.core.approvals import APPROVALS
+        from remedy.core.turn_context import turn_session_id
+
+        ok, reason = consent_ok(home)
+        if not ok:
+            return json.dumps({"ok": False, "message": reason}, indent=2)
+        mail = get_google_gmail(home)
+        if mail is None:
+            return json.dumps({"ok": False, "message": "Gmail not connected."}, indent=2)
+        mid = (message_id or "").strip()
+        if not mid:
+            return json.dumps(
+                {"ok": False, "message": "message_id required (from mail_list)."}, indent=2
+            )
+        # Sending on the owner's behalf always respects the approval gate.
+        summary = f"mail_reply to message={mid} chars={len(body or '')}"
+        ask_reason = APPROVALS.needs_ask(summary, tool_name="mail_reply")
+        sid = turn_session_id(runtime)
+        if ask_reason and not APPROVALS.is_approved("mail_reply", summary, session_id=sid):
+            item = APPROVALS.create(
+                tool_name="mail_reply",
+                command=summary,
+                reason=ask_reason,
+                session_id=sid,
+            )
+            return (
+                f"APPROVAL_REQUIRED id={item.id}\n"
+                f"reason={ask_reason}\n"
+                f"message_id={mid}\n"
+                "Do not invent success. Tell the user this needs approval "
+                f"(or /approve {item.id}), then retry mail_reply."
+            )
+        fn = getattr(mail, "reply_to_message", None)
+        if fn is None:
+            return json.dumps(
+                {"ok": False, "message": "This mail provider cannot reply in thread."},
+                indent=2,
+            )
+        try:
+            result = fn(mid, body=body or "", reply_all=bool(reply_all))
+        except Exception as exc:
+            return json.dumps({"ok": False, "message": str(exc)}, indent=2)
+        safe = {
+            "ok": True,
+            "message_id": result.get("message_id"),
+            "thread_id": result.get("thread_id"),
+            "to": result.get("to"),
+            "subject": result.get("subject"),
+            "message": result.get("message"),
+            "privacy": "Sent via Gmail API; body not re-sent to the model.",
+        }
+        return json.dumps(redact_secrets(safe), indent=2)
+
+    async def mail_archive(message_id: str = "") -> str:
+        """Archive a message (out of the inbox, still searchable)."""
+        from remedy.assistant.privacy import consent_ok
+        from remedy.assistant.providers.google_gmail import get_google_gmail
+
+        ok, reason = consent_ok(home)
+        if not ok:
+            return json.dumps({"ok": False, "message": reason}, indent=2)
+        mail = get_google_gmail(home)
+        if mail is None:
+            return json.dumps({"ok": False, "message": "Gmail not connected."}, indent=2)
+        mid = (message_id or "").strip()
+        if not mid:
+            return json.dumps({"ok": False, "message": "message_id required."}, indent=2)
+        fn = getattr(mail, "archive_message", None)
+        if fn is None:
+            return json.dumps(
+                {"ok": False, "message": "This mail provider cannot archive."}, indent=2
+            )
+        try:
+            return json.dumps(fn(mid), indent=2)
+        except Exception as exc:
+            return json.dumps({"ok": False, "message": str(exc)}, indent=2)
+
+    async def mail_mark_read(message_id: str = "", read: bool = True) -> str:
+        """Mark a message read (or unread with read=false)."""
+        from remedy.assistant.privacy import consent_ok
+        from remedy.assistant.providers.google_gmail import get_google_gmail
+
+        ok, reason = consent_ok(home)
+        if not ok:
+            return json.dumps({"ok": False, "message": reason}, indent=2)
+        mail = get_google_gmail(home)
+        if mail is None:
+            return json.dumps({"ok": False, "message": "Gmail not connected."}, indent=2)
+        mid = (message_id or "").strip()
+        if not mid:
+            return json.dumps({"ok": False, "message": "message_id required."}, indent=2)
+        fn = getattr(mail, "mark_read", None)
+        if fn is None:
+            return json.dumps(
+                {"ok": False, "message": "This mail provider cannot change read state."},
+                indent=2,
+            )
+        try:
+            return json.dumps(fn(mid, read=bool(read)), indent=2)
+        except Exception as exc:
+            return json.dumps({"ok": False, "message": str(exc)}, indent=2)
+
     async def mail_list(query: str = "in:inbox", limit: int = 15) -> str:
         """List Gmail messages (needs Connect Google / Gmail)."""
         from remedy.assistant.privacy import (
@@ -825,6 +1045,73 @@ def register_assistant_tools(runtime: Any) -> None:
                 "description": {"type": "string"},
             },
             "required": ["title", "start", "end"],
+        },
+    )
+    reg.register_builtin_handler(
+        "calendar_update_event",
+        "Reschedule or edit an existing event (event_id from calendar_list_events). "
+        "Only the fields you pass change — use this to move a time, not create a duplicate.",
+        calendar_update_event,
+        {
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "string"},
+                "title": {"type": "string"},
+                "start": {"type": "string", "description": "New ISO start or YYYY-MM-DD"},
+                "end": {"type": "string", "description": "New ISO end or YYYY-MM-DD"},
+                "description": {"type": "string"},
+                "location": {"type": "string"},
+            },
+            "required": ["event_id"],
+        },
+    )
+    reg.register_builtin_handler(
+        "calendar_cancel_event",
+        "Cancel/delete a calendar event (event_id from calendar_list_events). "
+        "Not reversible from here — asks the owner first in Ask mode.",
+        calendar_cancel_event,
+        {
+            "type": "object",
+            "properties": {"event_id": {"type": "string"}},
+            "required": ["event_id"],
+        },
+    )
+    reg.register_builtin_handler(
+        "mail_reply",
+        "Reply IN THREAD to a message (message_id from mail_list). Keeps the "
+        "conversation together — prefer this over mail_send when answering mail.",
+        mail_reply,
+        {
+            "type": "object",
+            "properties": {
+                "message_id": {"type": "string"},
+                "body": {"type": "string"},
+                "reply_all": {"type": "boolean", "description": "Include original Cc"},
+            },
+            "required": ["message_id", "body"],
+        },
+    )
+    reg.register_builtin_handler(
+        "mail_archive",
+        "Archive a message — out of the inbox, still searchable.",
+        mail_archive,
+        {
+            "type": "object",
+            "properties": {"message_id": {"type": "string"}},
+            "required": ["message_id"],
+        },
+    )
+    reg.register_builtin_handler(
+        "mail_mark_read",
+        "Mark a message read (read=false to mark unread).",
+        mail_mark_read,
+        {
+            "type": "object",
+            "properties": {
+                "message_id": {"type": "string"},
+                "read": {"type": "boolean"},
+            },
+            "required": ["message_id"],
         },
     )
     reg.register_builtin_handler(
