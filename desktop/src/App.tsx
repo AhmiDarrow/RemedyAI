@@ -1849,8 +1849,10 @@ export default function App() {
             : null}
         </WorkspaceSide>
 
-        {/* Shared by Terminal / Browser / Scratch — same exit chrome + Esc */}
-        {popout && (
+        {/* Shared by Terminal / Browser / Scratch — same exit chrome + Esc.
+            Unmount while Grove is up: a leftover browser popout would fight
+            Grove's BrowserSlide for the single native WebView2. */}
+        {popout && surface !== 'grove' && (
           <PopoutOverlay
             title={(SLIDE_META[popout.id] ?? SLIDE_META.sessions).label}
             fullscreen={popout.fullscreen}

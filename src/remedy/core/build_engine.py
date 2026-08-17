@@ -184,6 +184,27 @@ def looks_like_ship_goal(goal: str) -> bool:
     return bool(_SHIP_GOAL_RE.search(goal or ""))
 
 
+# Generic continuation = the message IS essentially just "continue" / "keep
+# going" (optionally "finish it"), NOT "finish <specific thing>". Anchored to the
+# whole message so a real goal ("finish the API") stays goal-keyed.
+_CONTINUATION_RE = re.compile(
+    r"(?i)^\s*(continue|keep\s+going|carry\s+on|go\s+on|go\s+ahead|resume|"
+    r"pick\s+up(\s+where.*)?|proceed|finish\s+(it|up|this)|finish|keep\s+at\s+it|"
+    r"more|next)\s*[.!…]*\s*$"
+)
+
+
+def _is_generic_continuation(goal: str) -> bool:
+    """True for "continue" / "keep going" / empty — resume the project's active
+    build regardless of its stored goal. A specific goal stays goal-keyed so it
+    can't inherit a sibling goal's green watermark.
+    """
+    g = (goal or "").strip()
+    if not g:
+        return True
+    return bool(_CONTINUATION_RE.match(g))
+
+
 def _is_filesystem_path(path: str) -> bool:
     """True for real paths; false for shell command blobs in ledger noise."""
     p = (path or "").strip()
@@ -290,6 +311,9 @@ class BuildTurnState:
     syntax_ok: bool | None = None
     # Block final user-facing "done" until green (machine gate)
     require_green_to_finish: bool = True
+    # Read-only review/analysis: deliver findings — no file_write / verify needed.
+    # Flips to a full build (require_green_to_finish=True) the instant a write lands.
+    read_only: bool = False
     # Convergence / mission binding
     mission_id: str = ""
     auto_verify_cycles: int = 0
@@ -589,12 +613,23 @@ def begin_build_turn(
     explore_cap = 1 if away else (2 if muscle.is_frontier else (3 if muscle.is_capable else 5))
     if html_or_serve:
         explore_cap = 1
+    # Read-only review/analysis: supervise the research, but never push writes or
+    # demand a green verify to finish. A write later flips it into a full build.
+    read_only = False
+    with suppress(Exception):
+        from remedy.core.intent_policy import looks_like_readonly_request
+
+        read_only = looks_like_readonly_request(goal_txt) and not looks_like_ship_goal(
+            goal_txt
+        )
     st = BuildTurnState(
         active=True,
         phase="scout",
         goal=goal_txt,
         muscle_tier=muscle.label,
         max_serial_explore=explore_cap,
+        read_only=read_only,
+        require_green_to_finish=not read_only,
         # Partner: always auto-verify after the first write (C hello.c must compile
         # immediately; waiting for 2 writes left simple 1-file tasks unverified).
         require_verify_after_writes=1,
@@ -635,13 +670,34 @@ def begin_build_turn(
         from remedy.core.build_ledger import load_ledger
 
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
-        led = load_ledger(st.project_path or None, home=home) if _bound else None
+        # Load THIS turn's goal entry — never the project's active other-goal
+        # build (that copied a sibling's green watermark / verify command). But a
+        # generic "continue" / "keep going" means "resume whatever I was doing",
+        # so fall back to the project's active build (goal=None) in that case.
+        _resume_goal = None if _is_generic_continuation(st.goal) else (st.goal or None)
+        led = (
+            load_ledger(st.project_path or None, home=home, goal=_resume_goal)
+            if _bound
+            else None
+        )
+        # A specific goal with no exact ledger entry falls back to the project's
+        # active build, so a reworded / refined goal ("Create index.html" →
+        # "Create index.html landing page") and "continue the fix" still resume.
+        # The green watermark is NOT carried on this cross-goal fallback, so a
+        # *different* goal can never inherit a sibling's "verified" state.
+        _cross_goal = False
+        if led is None and _bound and _resume_goal is not None:
+            with suppress(Exception):
+                led = load_ledger(st.project_path or None, home=home, goal=None)
+                _cross_goal = led is not None
         if led is not None:
-            # Always carry oracle + green watermark (even when phase=done)
+            # Always carry oracle / verify command (same project → same tests).
             if led.verify_command and not st.verify_command:
                 st.verify_command = led.verify_command
                 st.oracle_ok = True
-            if led.last_verify_ok is True:
+            # Green watermark only for the same goal / generic continuation —
+            # never let a cross-goal fallback inherit "verified".
+            if led.last_verify_ok is True and not _cross_goal:
                 st.last_verify_ok = True
                 st.auto_verify_ran = True
                 st.write_steps_at_last_green = max(
@@ -792,6 +848,19 @@ def enable_work_host_drive(
 
 def build_protocol_block(state: BuildTurnState) -> str:
     """Hard system block injected at turn start for build supervision."""
+    if getattr(state, "read_only", False) and int(getattr(state, "write_steps", 0) or 0) == 0:
+        return (
+            "[Read-only review — RESEARCH → SYNTHESIZE → DELIVER]\n"
+            f"Goal: {state.goal or '(user request)'}\n"
+            "1) RESEARCH (scout): batch file_read/list_dir/repo_search in ONE step "
+            "(4–12). One good sweep is enough — do not re-scout for marginal detail.\n"
+            "2) SYNTHESIZE: strengths, risks, concrete file:line findings, ranked.\n"
+            "3) DELIVER the written review. DONE = findings delivered. A read-only "
+            "review needs NO file_write and NO verify signal — do not loop for 'a few "
+            "more details', and do not claim you must build. Only edit if the user "
+            "explicitly asked you to fix or change something (that switches this into "
+            "a full build with the green gate)."
+        )
     oracle = (
         f"Oracle verify_command=`{state.verify_command}`"
         if state.verify_command
@@ -957,6 +1026,11 @@ def observe_tool_batch(
         state.write_steps += 1
         if state.phase in ("scout",):
             state.phase = "implement"
+        # A read-only review that starts writing is now a real build — restore the
+        # green gate so the change is verified before "done".
+        if state.read_only:
+            state.read_only = False
+            state.require_green_to_finish = True
     if any_verify:
         state.verify_steps += 1
         state.phase = "verify"
@@ -1103,9 +1177,52 @@ def observe_tool_batch(
         state.clear_write_set_on_green()
 
 
+def _has_c_toolchain() -> bool:
+    """True when a C/C++ compiler is on PATH (gcc / clang / cc / MSVC cl)."""
+    import shutil
+
+    return any(shutil.which(x) for x in ("gcc", "clang", "cc", "cl"))
+
+
+def _wrote_c_source(state: BuildTurnState) -> bool:
+    writes = [str(w).lower() for w in (getattr(state, "write_set", None) or [])]
+    return any(w.endswith((".c", ".cpp", ".cc", ".cxx")) for w in writes)
+
+
 def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
     """Return a hard user-role inject if the machine schedule is violated."""
     if not state.active:
+        return None
+
+    # C/C++ source written but no compiler on this PC → say so once, in plain
+    # language, and stop the futile gcc-retry loop. Only fires when the machine
+    # genuinely cannot compile, so environments with a toolchain are unaffected.
+    if (
+        "no_c_toolchain" not in state.nudges_emitted
+        and _wrote_c_source(state)
+        and not _has_c_toolchain()
+    ):
+        state.nudges_emitted.append("no_c_toolchain")
+        state.require_green_to_finish = False  # can't compile here — don't trap
+        return {
+            "role": "user",
+            "content": (
+                "[Build engine · NEEDS A COMPILER] The C/C++ source is saved, but "
+                "there is no compiler (gcc/clang) on this PC's PATH — it cannot be "
+                "built or run here. Do NOT keep retrying the compile. Tell the user "
+                "plainly and simply: the code is written and where it lives, and to "
+                "build/run it they need a C compiler installed (on Windows: "
+                "`winget install -e --id GnuWin32.Make` won't do it — install "
+                "MinGW-w64 or MSYS2 gcc, or use `winget install BrechtSanders."
+                "WinLibs.POSIX.UCRT`, then reopen the terminal). Then stop — do not "
+                "claim the program ran."
+            ),
+        }
+
+    # Read-only review with no writes yet: never push writes or verify. The model
+    # delivers findings and finishes. A write flips read_only off (see
+    # observe_tool_batch), after which the normal build nudges apply.
+    if getattr(state, "read_only", False) and int(state.write_steps or 0) == 0:
         return None
 
     missing = state.missing_required_files()
@@ -1339,6 +1456,48 @@ def build_has_open_drive(state: BuildTurnState | None) -> bool:
     return int(getattr(state, "open_todo_count", 0) or 0) > 0 or (
         bool(getattr(state, "ship_required", False)) and not state.ship_complete()
     )
+
+
+def build_progress_score(state: BuildTurnState | None) -> int:
+    """Monotonic 'is the build advancing' score — writes/verifies/repairs/ship/green.
+
+    The loop's stall guard uses this: an open drive keeps overriding the step
+    caps only while this score is still climbing, so a progressing build is
+    never capped.
+    """
+    if state is None or not getattr(state, "active", False):
+        return 0
+    s = (
+        int(getattr(state, "write_steps", 0) or 0)
+        + int(getattr(state, "verify_steps", 0) or 0)
+        + int(getattr(state, "repair_steps", 0) or 0)
+    )
+    if getattr(state, "last_verify_ok", None) is True:
+        s += 1
+    if getattr(state, "ship_pushed", False):
+        s += 3
+    if getattr(state, "ship_released", False):
+        s += 3
+    return s
+
+
+def open_drive_should_continue(
+    state: BuildTurnState | None,
+    *,
+    steps_since_progress: int,
+    patience: int = 60,
+) -> bool:
+    """Open todos / unfinished ship may override the loop step caps — but only
+    while the build is still advancing.
+
+    No write/verify/ship/green progress for ``patience`` steps → return False so
+    the loop stops honestly instead of running to the hard 10k step wall. A build
+    that keeps making progress resets the counter and is never capped, so this
+    removes the runaway without weakening a legitimate long build.
+    """
+    if not build_has_open_drive(state):
+        return False
+    return int(steps_since_progress) <= int(patience)
 
 
 def green_gate_cap_allows_final(

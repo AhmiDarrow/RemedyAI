@@ -47,6 +47,35 @@ _HOST_BROWSER_TITLE_RE = re.compile(
 )
 
 
+def _expect_url_matches(want: str, hay: str) -> bool:
+    """Host-aware expect_url match (rejects github.com ⊆ github.com.evil.com)."""
+    w = (want or "").strip().lower()
+    h = (hay or "").strip().lower()
+    if not w or not h:
+        return False
+    from urllib.parse import urlsplit
+
+    def _split(raw: str) -> tuple[str, str, str]:
+        blob = raw if "://" in raw else f"https://{raw.lstrip('/')}"
+        p = urlsplit(blob)
+        host = (p.hostname or "").lower().removeprefix("www.")
+        path = (p.path or "/").rstrip("/") or "/"
+        return host, path, (p.query or "")
+
+    try:
+        wh, wp, wq = _split(w)
+        hh, hp, hq = _split(h)
+    except Exception:
+        return w in h
+    if not wh:
+        return w in h
+    if wh != hh:
+        return False
+    if wp != "/" and wp not in hp and hp not in wp:
+        return False
+    return not (wq and wq not in hq)
+
+
 def _is_host_browser(name: str) -> bool:
     """True when *name* names one of the owner's own web browsers.
 
@@ -781,20 +810,37 @@ class ComputerExecutor:
                         extra={"refused": "host_browser", "title": title},
                     )
                 if not hwnd and title:
-                    found = win.focus_window_by_title(title)
-                    if not found:
+                    needle = title.lower()
+                    match: dict[str, Any] | None = None
+                    with contextlib.suppress(Exception):
+                        for w in win.list_windows(limit=80):
+                            real = str(w.get("title") or "")
+                            if needle in real.lower():
+                                match = w
+                                break
+                    if not match:
                         return public_result(
                             ok=False,
                             target="desktop",
                             action="windows",
                             message=f"No window matching title={title!r}",
                         )
+                    real = str(match.get("title") or "")
+                    if _is_host_browser(real):
+                        return public_result(
+                            ok=False,
+                            target="desktop",
+                            action="windows",
+                            message=_HOST_BROWSER_REFUSAL,
+                            extra={"refused": "host_browser", "title": real},
+                        )
+                    win.focus_window(int(match["hwnd"]))
                     return public_result(
                         ok=True,
                         target="desktop",
                         action="windows",
-                        message=f"Focused window: {found.get('title', '')[:80]}",
-                        extra=found,
+                        message=f"Focused window: {real[:80]}",
+                        extra={"hwnd": int(match["hwnd"]), "title": real},
                     )
                 if not hwnd:
                     return public_result(
@@ -803,6 +849,20 @@ class ComputerExecutor:
                         action="windows",
                         message="hwnd or title required for focus",
                     )
+                # hwnd path: refuse if the resolved window is a host browser.
+                with contextlib.suppress(Exception):
+                    for w in win.list_windows(limit=80):
+                        if int(w.get("hwnd") or 0) == hwnd:
+                            real = str(w.get("title") or "")
+                            if _is_host_browser(real):
+                                return public_result(
+                                    ok=False,
+                                    target="desktop",
+                                    action="windows",
+                                    message=_HOST_BROWSER_REFUSAL,
+                                    extra={"refused": "host_browser", "title": real},
+                                )
+                            break
                 win.focus_window(hwnd)
                 return public_result(
                     ok=True,
@@ -1738,7 +1798,7 @@ class ComputerExecutor:
                 unclaimed_timeout_s=2.0,
                 grace_s=0.15,
             )
-            ok_t = fin.status == "done"
+            ok_t = fin.status == "done" and (fin.result or {}).get("ok", True) is not False
             log.append(f"type:{ok_t} {typed_reported}")
             if not ok_t:
                 return public_result(
@@ -1762,7 +1822,16 @@ class ComputerExecutor:
                 unclaimed_timeout_s=2.0,
                 grace_s=0.1,
             )
-            log.append(f"key:{fin.status == 'done'} {key}")
+            key_ok = fin.status == "done" and (fin.result or {}).get("ok", True) is not False
+            log.append(f"key:{key_ok} {key}")
+            if not key_ok:
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="act",
+                    message=f"act: key {key!r} failed — {fin.error or fin.status}",
+                    extra={"steps": log},
+                )
 
         # Observe the outcome — success is observed, not asserted
         # (docs/LIFE_TASK_PARTNER.md §2.3/§2.5).
@@ -1966,7 +2035,7 @@ class ComputerExecutor:
             ).lower()
             want_url = str(expect.get("url") or "").lower()
             want_text = str(expect.get("text") or "").lower()
-            if want_url and want_url not in hay_url:
+            if want_url and not _expect_url_matches(want_url, hay_url):
                 extra["verified"] = False
                 return extra, (
                     f"act ran but verification failed: expected URL containing "

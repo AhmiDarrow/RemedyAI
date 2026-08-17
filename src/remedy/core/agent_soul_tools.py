@@ -81,11 +81,13 @@ def register_soul_tools(runtime: Any) -> None:
 
     async def soul_dream(force: bool = False, use_local: bool = True) -> str:
         """Dream: remember them, remember myself, aim at their goals."""
+        import asyncio
         import json
 
         from remedy.memory.soul.dream import dream_cycle
 
-        result = dream_cycle(
+        result = await asyncio.to_thread(
+            dream_cycle,
             home=_home(),
             force=bool(force),
             memory=getattr(runtime, "memory", None),

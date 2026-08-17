@@ -222,6 +222,11 @@ def test_retail_search_kick_lands_on_results():
     # "buy/order" verbs count too
     u = parse_browse_navigate_url("walmart buy a gallon of milk")
     assert u == "https://www.walmart.com/search?q=gallon+of+milk"
+    # Polite prefixes share the same matcher as the generic browse command.
+    u = parse_browse_navigate_url("can you go to walmart and find whole milk")
+    assert u == "https://www.walmart.com/search?q=whole+milk"
+    u = parse_browse_navigate_url("could you go to target and find paper towels")
+    assert u == "https://www.target.com/s?searchTerm=paper+towels"
 
 
 def test_retail_open_only_still_homepage():

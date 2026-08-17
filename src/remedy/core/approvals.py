@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 import threading
 import time
@@ -61,7 +62,14 @@ _SENSITIVE_COMPUTER_RE = re.compile(
 
 # Mutation computer tools that can finalize a purchase on a payment surface.
 _MUTATION_COMPUTER_TOOLS = frozenset(
-    {"computer_click", "computer_act", "computer_key", "computer_type", "computer_drag"}
+    {
+        "computer_click",
+        "computer_act",
+        "computer_key",
+        "computer_type",
+        "computer_drag",
+        "computer_press_hold",
+    }
 )
 # Page-context signals that we're on a checkout / payment surface. When the
 # current rail page looks like this AND a mutation's target could not be
@@ -81,6 +89,24 @@ _SUBMIT_KEYS = frozenset({"enter", "return", "\n", "space", " "})
 
 def looks_like_payment_surface(page_context: str) -> bool:
     return bool(_PAYMENT_SURFACE_RE.search(page_context or ""))
+
+
+def _origin_host(raw: str) -> str:
+    """www-stripped hostname from a URL, host, or page-context blob."""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    token = s.split()[0]
+    with contextlib.suppress(Exception):
+        from urllib.parse import urlsplit
+
+        blob = token if "://" in token else f"https://{token}"
+        host = (urlsplit(blob).hostname or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        if host and "." in host:
+            return host
+    return ""
 
 
 def payment_surface_checkpoint(
@@ -207,6 +233,8 @@ class PendingApproval:
     # Owner checkpoint (payment/purchase): mode flips never auto-approve it and
     # "always" approvals downgrade to session (one go-ahead ≠ standing consent).
     sensitive: bool = False
+    # Live page host at create time. One-shot consume must match this host.
+    origin: str = ""
 
 
 class ApprovalQueue:
@@ -226,7 +254,8 @@ class ApprovalQueue:
         # One-shot grants for sensitive (payment/purchase/vault) actions:
         # consumed on the very next matching call so an owner "yes" can never
         # be replayed on a later/different action (e.g. cross-site).
-        self._one_shot: dict[str, set[str]] = {}
+        # sid -> {fingerprint: origin-host} — origin-bound single-use grants
+        self._one_shot: dict[str, dict[str, str]] = {}
         # ask | auto | full — status-bar cycle
         self._mode: str = "ask"
 
@@ -484,6 +513,7 @@ class ApprovalQueue:
         command: str,
         reason: str,
         session_id: str | None = None,
+        origin: str = "",
     ) -> PendingApproval:
         item = PendingApproval(
             id=uuid4().hex[:12],
@@ -493,6 +523,7 @@ class ApprovalQueue:
             session_id=session_id,
             fingerprint=self.fingerprint(tool_name, command),
             sensitive=(reason or "").startswith(SENSITIVE_PREFIX),
+            origin=_origin_host(origin),
         )
         with self._lock:
             self._items[item.id] = item
@@ -533,7 +564,9 @@ class ApprovalQueue:
                     # persisted fingerprint. Consumed by the next matching
                     # call so it cannot be replayed on a later or cross-site
                     # action (docs/LIFE_TASK_PARTNER.md §2.2).
-                    self._one_shot.setdefault(sid, set()).add(item.fingerprint)
+                    self._one_shot.setdefault(sid, {})[item.fingerprint] = (
+                        item.origin or ""
+                    )
                 elif scope == "always":
                     self._approved_fps.add(item.fingerprint)
                     self._trim_approved_fps()
@@ -542,19 +575,29 @@ class ApprovalQueue:
             return item
 
     def take_one_shot(
-        self, tool_name: str, command: str, session_id: str | None = None
+        self,
+        tool_name: str,
+        command: str,
+        session_id: str | None = None,
+        origin: str = "",
     ) -> bool:
-        """Consume a one-shot sensitive grant if present. Single use."""
+        """Consume a one-shot sensitive grant if present. Single use.
+
+        When the grant recorded an origin host, the live page must match.
+        A mismatch drops the grant (no silent consume) so the owner is asked
+        again — same action on a different site is a new decision.
+        """
         fp = self.fingerprint(tool_name, command)
         sid = session_id or "default"
+        live = _origin_host(origin)
         with self._lock:
             grants = self._one_shot.get(sid)
-            if grants and fp in grants:
-                grants.discard(fp)
-                if not grants:
-                    self._one_shot.pop(sid, None)
-                return True
-        return False
+            if not grants or fp not in grants:
+                return False
+            granted = grants.pop(fp)
+            if not grants:
+                self._one_shot.pop(sid, None)
+            return not (granted and live and granted != live)
 
     @staticmethod
     def plain_summary(item: PendingApproval) -> str:

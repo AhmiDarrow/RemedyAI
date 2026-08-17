@@ -6,7 +6,74 @@ guidance and (optionally) bias tool use. Deterministic; no network.
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+# Read-only intents (review / analyze / explain) must NOT be force-fit into the
+# write-and-verify build loop — that is what strands "review the project" in an
+# endless RESEARCH→PLAN→BUILD spiral. This detector is shared with the build
+# engine so the classifier and the machine supervisor agree on "read-only".
+# Strong read-only framings — inherently "tell me / show me", never "do it".
+# These win even when a change word appears later (usually as a noun, e.g.
+# "explain how the build loop works").
+_STRONG_READONLY_RE = re.compile(
+    r"(?i)("
+    r"\b(explain|describe|summar(?:y|ize|ise)|walk\s+me\s+through|"
+    r"tell\s+me\s+(?:about|how|what|why))\b"
+    # "what does/is/are X" but not social ("what's up/new/good", "what are you")
+    r"|\bwhat\s+(?:does|is|are)\s+(?!you\b|up\b|new\b|good\b|going\s+on)"
+    r"|\bhow\s+(?:does|do)\b"
+    # "how is/are X" but not "how are you / how's it going / how are things"
+    r"|\bhow\s+(?:is|are)\s+(?!you\b|it\s+going|things\b|ya\b|we\b|everyone\b|your\s+day)"
+    r"|\bwhy\s+(?:is|does|are|do)\s+(?!you\b)"
+    r")"
+)
+# Weak read-only verbs — read-only only when no change verb is also present.
+_WEAK_READONLY_RE = re.compile(
+    r"(?i)\b("
+    r"review|audit|analy[sz]e|analysis|assess|examine|inspect|"
+    r"investigate|research|go\s+over|read\s+through|understand|"
+    r"look\s+(?:over|at|into|through)|critique|evaluate|diagnose|trace"
+    r")\b"
+)
+# Change verbs exclude read-only. "build"/"release"/"ship"/"patch" are pinned to
+# their verb sense so noun phrases ("the build system", "release notes") don't
+# trip. Anything missed here is still caught by the write→build auto-upgrade.
+_CHANGE_VERB_RE = re.compile(
+    r"(?i)\b("
+    r"implement|scaffold|deploy|rebuild|"
+    r"build(?:s|ing)?\s+(?:a|an|the|me|us|it|this|out|from|your|my|new)|"
+    r"ship\s+(?:it|a|the)|releas(?:e|es|ing|ed)\s+(?:a|an|the|it|this|version|v?\d)|"
+    r"creat(?:e|ing)|generate|writ(?:e|ing)\s+(?:a|the|some|me)?\s*"
+    r"(?:script|file|test|code|module|app|program|function|class|page|patch)|"
+    r"add(?:s|ing)?|fix(?:es|ing)?|refactor|edit(?:s|ing)?|modif(?:y|ies|ying)|"
+    r"chang(?:e|ing)|updat(?:e|ing)|rewrit(?:e|ing)|patch\s+(?:it|the|a)|"
+    r"migrat(?:e|ing)|upgrad(?:e|ing)|replac(?:e|ing)|install|delet(?:e|ing)|"
+    r"remov(?:e|ing)|renam(?:e|ing)|convert|optimi[sz]e|wire\s+up|"
+    r"set\s*up|setup|make\s+(?:it|me|a|the)|bump"
+    r")\b"
+)
+
+
+def looks_like_readonly_request(message: str) -> bool:
+    """True when the ask is read-only (review/analyze/explain) with no change verb.
+
+    Two-tier: a strong framing ("explain/summarize/what does…") is read-only even
+    if a change word appears (usually a noun). A weak verb (review/audit/analyze…)
+    is read-only only when no change verb is present. Conservative so genuine build
+    work keeps the full research → plan → build loop — and the build engine upgrades
+    a read-only turn to a full build the instant the model writes a file, so a
+    misclassified edit is never stranded.
+    """
+    msg = (message or "").strip()
+    if not msg:
+        return False
+    if _STRONG_READONLY_RE.search(msg):
+        return True
+    if _CHANGE_VERB_RE.search(msg):
+        return False
+    return bool(_WEAK_READONLY_RE.search(msg))
+
 
 # Compact system addenda — never rewrite persona; only focus the turn.
 _PACKS: dict[str, dict[str, Any]] = {
@@ -113,6 +180,30 @@ _PACKS: dict[str, dict[str, Any]] = {
         "prefer_tools": False,
         "suggest_tools": ["plan_list", "plan_show"],
     },
+    "review": {
+        "id": "review",
+        "system": (
+            "[Read-only review] The user asked you to review / analyze / explain — "
+            "not to change code. RESEARCH → SYNTHESIZE → DELIVER.\n"
+            "1) RESEARCH: batch file_read / list_dir / repo_search in ONE step — "
+            "gather ground truth. One good sweep is enough; do not re-scout for "
+            "marginal detail.\n"
+            "2) SYNTHESIZE: strengths, risks, and concrete file:line findings, "
+            "ranked by impact.\n"
+            "3) DELIVER the written review. This is DONE when the findings are "
+            "delivered — a read-only review needs NO file_write and NO verify "
+            "signal, and you should not loop for 'a few more details'. Only start "
+            "editing if the user explicitly asked you to fix or change something."
+        ),
+        "prefer_tools": True,
+        "suggest_tools": [
+            "list_dir",
+            "file_read",
+            "repo_search",
+            "file_glob",
+            "memory_search",
+        ],
+    },
     "tool": {
         "id": "tool",
         "system": (
@@ -206,6 +297,11 @@ def policy_for_intent(intent: str, *, user_text: str = "") -> dict[str, Any]:
         )
     ):
         return dict(_PACKS["autonomous"])
+    # Read-only review / analysis / explain — deliver findings, do NOT get pulled
+    # into the write-and-verify build loop. Wins over the generic task pack no
+    # matter what the router labeled it (this is the review-loop fix).
+    if looks_like_readonly_request(ut):
+        return dict(_PACKS["review"])
     if key == "chat":
         if any(w in ut for w in ("remember", "what do you know", "/memory", "/whoami", "/forget")):
             return dict(_PACKS["memory"])

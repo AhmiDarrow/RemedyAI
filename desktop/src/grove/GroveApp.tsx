@@ -98,7 +98,11 @@ export interface GroveAppProps {
   partialText: string
   streaming: boolean
   messagesLoading: boolean
-  handleSend: (text: string, attachments?: SendAttachment[]) => Promise<void> | void
+  handleSend: (
+    text: string,
+    attachments?: SendAttachment[],
+    opts?: { mode?: 'after' | 'interrupt'; sessionId?: string },
+  ) => Promise<void> | void
   stop: () => void
   serverReady: boolean
   userName: string
@@ -200,6 +204,7 @@ export function GroveApp({
 
   const sendFromGroveRef = useRef<((t: string) => Promise<void>) | null>(null)
   const handleMic = useCallback(async () => {
+    if (voice.transcribing) return
     if (voice.recording) {
       const text = await voice.stopRecording()
       if (text) {
@@ -279,30 +284,6 @@ export function GroveApp({
     onGoalOpened?.()
   }, [openGoalId, board, openGoal, onGoalOpened])
 
-  const sendFromGrove = useCallback(
-    async (text: string, attachments?: SendAttachment[]) => {
-      const t = text.trim()
-      if ((!t && !attachments?.length) || busy) return
-      setBusy(true)
-      try {
-        if (view.kind === 'goal') {
-          // Make sure this goal's session exists + is active before sending,
-          // so a fast type-and-Enter doesn't post into the previous room.
-          await ensureGoalSession(view.goal)
-        }
-        // handleSend self-provisions a session when none is active (home
-        // talkbar with no chat yet) and rebinds on activeId change — so we
-        // never pre-create here (that made a stray second session).
-        await handleSend(t, attachments)
-        setDraft('')
-      } finally {
-        setBusy(false)
-      }
-    },
-    [busy, view, ensureGoalSession, handleSend],
-  )
-  sendFromGroveRef.current = sendFromGrove
-
   /** Session for attachment uploads from Grove home: reuse active, else create. */
   const homeSessionPendingRef = useRef<Promise<string | null> | null>(null)
   const homeSessionRef = useRef<string>(loadHomeSession())
@@ -339,6 +320,28 @@ export function GroveApp({
     homeSessionPendingRef.current = p
     return p
   }, [activeId, sessions, setActiveId, createSession])
+
+  const sendFromGrove = useCallback(
+    async (text: string, attachments?: SendAttachment[]) => {
+      const t = text.trim()
+      if ((!t && !attachments?.length) || busy) return
+      setBusy(true)
+      try {
+        let sid: string | null = null
+        if (view.kind === 'goal') {
+          sid = await ensureGoalSession(view.goal)
+        } else {
+          sid = await ensureHomeSession()
+        }
+        await handleSend(t, attachments, sid ? { sessionId: sid } : undefined)
+        setDraft('')
+      } finally {
+        setBusy(false)
+      }
+    },
+    [busy, view, ensureGoalSession, ensureHomeSession, handleSend],
+  )
+  sendFromGroveRef.current = sendFromGrove
 
   // Base Grove home is the ongoing meeting place — one continuous, project-
   // free conversation. On entering home, bind to the home session (never a
