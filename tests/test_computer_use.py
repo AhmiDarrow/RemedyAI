@@ -2116,3 +2116,48 @@ def test_press_hold_learns_per_site():
     assert approach_of("press_hold", {"text": "Press & Hold"}) == "text"
     assert approach_of("press_hold", {"ref": "e3"}) == "ref"
     assert approach_of("press_hold", {"x": 400, "y": 300}) == "coords"
+
+
+def test_stale_ref_click_recovers_by_remembered_label(tmp_path, monkeypatch):
+    """A ref goes stale when the page changes; a click by that ref must not
+    just fail — it re-locates the SAME control by its remembered label+context
+    (adapt-and-overcome), turning a dead ref into a successful click."""
+    import json as _json
+
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    # Remember what e7 was (as a fresh snapshot would have stored it).
+    ex.bridge.set_last_elements(
+        [{"ref": "e7", "name": "Make this my store", "context": "Hueytown Supercenter 35023"}],
+        target="browser",
+    )
+
+    class _Job:
+        id = "j1"
+
+    # The host reports the ref is gone (page changed).
+    monkeypatch.setattr(ex, "_enqueue", lambda *a, **k: _Job())
+
+    class _Fin:
+        status = "done"
+        result = None
+        error = "browser:click failed: missing-ref:e7"
+
+    monkeypatch.setattr(ex.bridge, "wait", lambda *a, **k: _Fin())
+
+    # Recovery re-locates by text — capture the query it used.
+    calls: list[str] = []
+
+    def _fake_click_text(query, kwargs):
+        calls.append(query)
+        return {"ok": True, "target": "browser", "action": "click", "message": f"Clicked {query}"}
+
+    monkeypatch.setattr(ex, "_browser_click_text", _fake_click_text)
+
+    out = _json.loads(ex.run(ComputerAction.CLICK, target="browser", ref="e7"))
+    assert out["ok"] is True
+    assert out.get("recovered_from") == "stale_ref"
+    assert calls and "Make this my store" in calls[0]
+    assert "Hueytown" in calls[0]  # context words help pick the right one

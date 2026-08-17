@@ -1256,17 +1256,50 @@ class ComputerExecutor:
             abort_check=self._abort_check,
             unclaimed_timeout_s=unclaimed,
         )
+        done_out: dict[str, Any] | None = None
         if finished.status == "done" and finished.result:
-            out = dict(finished.result)
-            out.setdefault("ok", True)
-            out.setdefault("target", "browser")
-            out.setdefault("action", act.value)
-            if act is ComputerAction.SNAPSHOT and out.get("elements"):
+            done_out = dict(finished.result)
+            done_out.setdefault("ok", True)
+            done_out.setdefault("target", "browser")
+            done_out.setdefault("action", act.value)
+            if act is ComputerAction.SNAPSHOT and done_out.get("elements"):
                 self.bridge.set_last_elements(
-                    list(out.get("elements") or []),
+                    list(done_out.get("elements") or []),
                     target="browser",
                 )
-            return out
+            if done_out.get("ok"):
+                return done_out
+
+        # Stale-ref auto-recovery: a ref is scoped to the snapshot that made
+        # it; if the page changed the DOM element is gone and the host returns
+        # "missing-ref" (as a failed result OR a job error). Rather than fail,
+        # re-locate the SAME control by its remembered label + card context
+        # (which re-scans the live DOM) — the adapt-and-overcome move, for her.
+        fail_msg = str(
+            (done_out or {}).get("message")
+            or (done_out or {}).get("detail")
+            or finished.error
+            or ""
+        )
+        if act is ComputerAction.CLICK and "missing-ref" in fail_msg:
+            ref = str(kwargs.get("ref") or payload.get("ref") or "").strip()
+            remembered = self.bridge.get_element_by_ref(ref) if ref else None
+            name = str((remembered or {}).get("name") or "").strip()
+            if name:
+                ctx = str((remembered or {}).get("context") or "")
+                ctx_bits = " ".join(w for w in re.findall(r"[A-Za-z0-9]{3,}", ctx)[:4])
+                query = (name + " " + ctx_bits).strip()
+                recovered = self._browser_click_text(query, kwargs)
+                if recovered.get("ok"):
+                    recovered["note"] = (
+                        f"ref {ref} was stale (page changed) — re-located by "
+                        f"label {name!r} and clicked"
+                    )
+                    recovered["recovered_from"] = "stale_ref"
+                    return recovered
+
+        if done_out is not None:
+            return done_out
         err = finished.error or finished.status
         return public_result(
             ok=False,
