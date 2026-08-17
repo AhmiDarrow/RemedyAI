@@ -55,6 +55,7 @@ class ComputerAction(StrEnum):
     WINDOWS = "windows"
     MONITORS = "monitors"
     DRAG = "drag"
+    PRESS_HOLD = "press_hold"
     WAIT = "wait"
     APP = "app"
     PAGE_TEXT = "page_text"
@@ -74,6 +75,7 @@ def action_from_tool(name: str) -> ComputerAction | None:
         "computer_windows": ComputerAction.WINDOWS,
         "computer_monitors": ComputerAction.MONITORS,
         "computer_drag": ComputerAction.DRAG,
+        "computer_press_hold": ComputerAction.PRESS_HOLD,
         "computer_wait": ComputerAction.WAIT,
         "computer_app": ComputerAction.APP,
         "computer_page_text": ComputerAction.PAGE_TEXT,

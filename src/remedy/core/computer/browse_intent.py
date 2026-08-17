@@ -256,13 +256,18 @@ def _retail_search_matcher() -> re.Pattern[str]:
     if rx is None:
         names = sorted((re.escape(k) for k in _RETAIL_SEARCH), key=len, reverse=True)
         alt = "|".join(names)
+        # The product is the FIRST clause after the verb — stop at a sentence
+        # or clause boundary so a multi-step prompt ("...find whole milk. Add
+        # one gallon to the cart, then stop...") searches "whole milk", not the
+        # whole paragraph jammed into ?q=.
         rx = re.compile(
             r"(?is)^\s*(?:please\s+)?"
             r"(?:goto|go\s+to|open|visit|on|at|from)?\s*"
-            r"(?P<site>" + alt + r")\s+"
+            r"(?P<site>" + alt + r")\s*[,;:]?\s+"
             r"(?:and\s+)?(?:" + _RETAIL_VERB + r")\s+"
             r"(?:me\s+)?(?:a\s+|an\s+|some\s+|the\s+|one\s+)?(?P<q>.+?)"
-            r"\s*[.!?]*\s*$"
+            r"(?=[.,;:!?\n]|\s+(?:then\b|and\s+(?:then|stop|hand|add|put)\b|"
+            r"add\s+(?:it|them|one|to)\b|please\b)|\s*$)"
         )
         _RETAIL_SEARCH_RE = rx
     return rx

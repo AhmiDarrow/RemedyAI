@@ -28,6 +28,10 @@ def element_search_blob(el: dict[str, Any]) -> str:
         str(el.get("role") or ""),
         str(el.get("title") or ""),
         str(el.get("type") or ""),
+        # Card context (the enclosing store/result/product tile's text) lets a
+        # query span control-label + surroundings so a generic "Set as store"
+        # is found by the store's name/address in its card.
+        str(el.get("context") or ""),
     ]
     return _norm(" ".join(parts))
 
@@ -60,6 +64,17 @@ def score_element(el: dict[str, Any], query: str) -> float:
     if q_toks and b_toks:
         inter = q_toks & b_toks
         score += 15.0 * len(inter) / max(1, len(q_toks))
+    # Card-context disambiguation: query tokens the LABEL does not cover but
+    # the enclosing card does (store name / address) break ties between N
+    # identical controls — the whole point of the context field.
+    context = _norm(str(el.get("context") or ""))
+    if context and len(q_toks) > 1:
+        name_toks = set(re.findall(r"[a-z0-9]{2,}", name))
+        ctx_toks = set(re.findall(r"[a-z0-9]{2,}", context))
+        missing = q_toks - name_toks
+        in_ctx = missing & ctx_toks
+        if in_ctx:
+            score += 22.0 * len(in_ctx) / max(1, len(q_toks))
     # Semantic boosts (login forms)
     if any(t in q for t in ("email", "username", "user name", "login", "e-mail")):
         if itype in ("email", "text") or "email" in blob or "user" in blob:
@@ -149,7 +164,20 @@ def format_som_list(
         x, y = el.get("x"), el.get("y")
         score = el.get("match_score")
         extra = f" score={score}" if score is not None else ""
-        lines.append(f"[{ref}] {tag} \"{name}\" @({x},{y}){extra}")
+        # aria-pressed/selected/checked state — a store already chosen, an
+        # active tab, a ticked box — so the model does not re-toggle it.
+        state = str(el.get("state") or "").strip()
+        if state == "true":
+            extra += " [selected]"
+        elif state == "false":
+            extra += " [not-selected]"
+        # Card context distinguishes N identical controls (which store's
+        # "Set as store"). Only shown when it adds signal beyond the label.
+        context = re.sub(r"\s+", " ", str(el.get("context") or "").strip())
+        ctx_out = ""
+        if context and _norm(context) != _norm(name):
+            ctx_out = f' · in: "{context[:80]}"'
+        lines.append(f'[{ref}] {tag} "{name}" @({x},{y}){extra}{ctx_out}')
     if not lines:
         return "(no interactive elements)"
     header = "Elements (Set-of-Mark — click with computer_click ref= or text=):\n"

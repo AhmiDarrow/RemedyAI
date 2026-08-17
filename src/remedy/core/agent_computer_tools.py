@@ -523,6 +523,41 @@ def register_computer_tools(runtime: Any) -> None:
             y2=y2,
         )
 
+    async def computer_press_hold(
+        text: str = "",
+        ref: str = "",
+        x: int = 0,
+        y: int = 0,
+        hold_ms: int = 2600,
+        target: str = "auto",
+        hint: str = "",
+    ) -> str:
+        """Press and HOLD a control (press-and-hold verification, a hold button).
+
+        The owner's authorized hands for an accessibility gesture they may be
+        unable to perform. Locate by text/ref or pass x/y (from a screenshot).
+        """
+        where = text or ref or f"({x},{y})"
+        summary = f"press-and-hold {where} for {hold_ms}ms target={target or 'auto'}"
+        blocked = _computer_approval_gate(
+            runtime, "computer_press_hold", summary,
+            page_context=_page_context(ex),
+            label_resolved=bool(text or ref),
+        )
+        if blocked:
+            return blocked
+        return await _run_computer(ex,
+            ComputerAction.PRESS_HOLD,
+            target=target or "auto",
+            hint=hint,
+            runtime=runtime,
+            text=text or None,
+            ref=ref or None,
+            x=x or None,
+            y=y or None,
+            hold_ms=int(hold_ms) if hold_ms else 2600,
+        )
+
     reg = runtime.tool_registry
     target_prop = {
         "type": "string",
@@ -797,5 +832,29 @@ def register_computer_tools(runtime: Any) -> None:
                 "hint": hint_prop,
             },
             "required": ["x", "y", "x2", "y2"],
+        },
+    )
+    reg.register_builtin_handler(
+        "computer_press_hold",
+        "Press and HOLD a control (press-and-hold / 'activate and hold' "
+        "verification, a hold-to-confirm button) — Remedy as the owner's "
+        "authorized hands for an accessibility gesture. Locate by text= or "
+        "ref= from a snapshot, or pass x=/y= from a screenshot. hold_ms "
+        "defaults to 2600.",
+        computer_press_hold,
+        {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "Visible label to press-hold"},
+                "ref": {"type": "string", "description": "Element ref (e3 / c5) from snapshot"},
+                "x": {"type": "integer"},
+                "y": {"type": "integer"},
+                "hold_ms": {
+                    "type": "integer",
+                    "description": "Hold duration in ms (default 2600)",
+                },
+                "target": target_prop,
+                "hint": hint_prop,
+            },
         },
     )
