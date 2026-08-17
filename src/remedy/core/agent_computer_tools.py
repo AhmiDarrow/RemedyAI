@@ -154,10 +154,14 @@ def register_computer_tools(runtime: Any) -> None:
         target: str = "auto",
         hint: str = "",
         monitor: str = "",
+        mark: bool = False,
     ) -> str:
         """Capture the browser rail or full desktop. Prefer before click/type.
 
         monitor: empty = full virtual screen / rail; integer index for one display.
+        mark=true (desktop): overlay numbered boxes on the last snapshot's
+        elements and return a mark→ref legend — for pixel-only apps, reference a
+        numbered mark instead of estimating x/y.
         """
         return await _run_computer(ex,
             ComputerAction.SCREENSHOT,
@@ -165,6 +169,7 @@ def register_computer_tools(runtime: Any) -> None:
             hint=hint,
             runtime=runtime,
             monitor=monitor if str(monitor).strip() != "" else None,
+            mark=mark,
         )
 
     async def computer_snapshot(
@@ -616,6 +621,13 @@ def register_computer_tools(runtime: Any) -> None:
                 "monitor": {
                     "type": "string",
                     "description": "Monitor index from computer_monitors (desktop only)",
+                },
+                "mark": {
+                    "type": "boolean",
+                    "description": (
+                        "Desktop: overlay numbered marks on snapshot elements + "
+                        "return a mark→ref legend (Set-of-Mark for pixel targeting)."
+                    ),
                 },
             },
         },

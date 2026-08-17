@@ -551,6 +551,27 @@ class ComputerExecutor:
     def _run_desktop(self, act: ComputerAction, **kwargs: Any) -> dict[str, Any]:
         from remedy.core.computer import desktop_win as win
 
+        # UAC / secure-desktop guard: SendInput cannot touch the secure desktop,
+        # so a click/type/key there would silently no-op and we'd report a false
+        # success. Tell the owner honestly instead.
+        if act in (
+            ComputerAction.CLICK,
+            ComputerAction.TYPE,
+            ComputerAction.KEY,
+            ComputerAction.PRESS_HOLD,
+            ComputerAction.DRAG,
+        ):
+            with contextlib.suppress(Exception):
+                sysp = win.detect_system_prompt()
+                if sysp.get("blocked"):
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action=act.value,
+                        message=sysp["message"],
+                        extra={"blocked": sysp.get("kind") or "system_prompt"},
+                    )
+
         if act is ComputerAction.SCREENSHOT:
             if kwargs.get("hwnd"):
                 info = win.print_window_png(int(kwargs["hwnd"]))
@@ -562,12 +583,35 @@ class ComputerExecutor:
                     extra=info,
                 )
             mon = kwargs.get("monitor")
+            # Set-of-Mark: overlay numbered boxes at the last desktop snapshot's
+            # elements so a vision model can "click mark N" instead of guessing.
+            mark_flag = bool(kwargs.get("mark"))
+            marks: list[dict[str, Any]] = []
+            legend: list[dict[str, Any]] = []
+            if mark_flag:
+                info0 = self.bridge.last_elements_info()
+                els = (
+                    list(info0.get("elements") or [])
+                    if str(info0.get("target") or "") == "desktop"
+                    else []
+                )
+                if not els:
+                    els = win.desktop_snapshot(limit=40, mode="auto")
+                    self.bridge.set_last_elements(els, target="desktop")
+                for i, el in enumerate(els[:30], start=1):
+                    marks.append({"n": i, "x": int(el.get("x") or 0), "y": int(el.get("y") or 0)})
+                    legend.append(
+                        {"mark": i, "ref": el.get("ref"), "name": str(el.get("name") or "")[:50]}
+                    )
             if mon is not None and str(mon).strip() != "" and str(mon).lower() != "all":
                 info = win.screenshot_monitor_png(int(mon))
                 msg = f"Monitor {mon} screenshot ({info['width']}x{info['height']})"
             else:
-                info = win.screenshot_png()
+                info = win.screenshot_png(marks=marks or None)
                 msg = f"Screenshot saved ({info['width']}x{info['height']})"
+                if legend:
+                    info["marks"] = legend
+                    msg += f" with {len(legend)} numbered marks"
             return public_result(
                 ok=True,
                 target="desktop",
