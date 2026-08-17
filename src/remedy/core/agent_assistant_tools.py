@@ -75,15 +75,18 @@ def register_assistant_tools(runtime: Any) -> None:
                     parts.append(f"(Could not load calendar: {exc})")
                     parts.append("")
         if prefs.brief.include_mail:
-            if not google_ok:
+            _brief_mail = _mail_provider()
+            _imap_mail = (
+                _brief_mail is not None
+                and getattr(_brief_mail, "provider_id", "") == "imap"
+            )
+            if not google_ok and not _imap_mail:
                 parts.append("## Mail")
                 parts.append(f"(Skipped — {google_reason})")
                 parts.append("")
             else:
                 try:
-                    from remedy.assistant.providers.google_gmail import get_google_gmail
-
-                    mail = get_google_gmail(home)
+                    mail = _brief_mail
                     if mail is not None:
                         msgs = mail.list_messages(query="in:inbox", limit=8)
                         parts.append("## Inbox (recent)")
@@ -281,6 +284,119 @@ def register_assistant_tools(runtime: Any) -> None:
             indent=2,
         )
 
+    async def mail_connect(address: str = "", app_password: str = "") -> str:
+        """Connect a mailbox with an app password (no cloud project needed).
+
+        Works with Gmail / Outlook / Yahoo / Fastmail / iCloud once 2-step
+        verification is on. Verifies IMAP + SMTP before saving.
+        """
+        from remedy.assistant.providers.imap_smtp import (
+            ImapSmtpMailProvider,
+            MailAccount,
+            preset_for,
+            save_mail_credentials,
+        )
+
+        addr = (address or "").strip()
+        pwd = (app_password or "").replace(" ", "")
+        if not addr or not pwd:
+            p = preset_for(addr) if addr else {}
+            url = p.get("app_password_url") or ""
+            return json.dumps(
+                {
+                    "ok": False,
+                    "message": (
+                        "I need the email address and a 16-character app password "
+                        "(not the normal account password)."
+                        + (f" Generate one at {url}" if url else "")
+                    ),
+                },
+                indent=2,
+            )
+        # Verify before storing so a typo never gets saved as "connected".
+        acct = MailAccount.from_address(addr, pwd)
+        if not acct.is_ready():
+            return json.dumps(
+                {
+                    "ok": False,
+                    "message": (
+                        f"I don't know the mail servers for {addr.split('@')[-1]}. "
+                        "Supported without setup: Gmail, Outlook/Hotmail, Yahoo, "
+                        "Fastmail, iCloud."
+                    ),
+                },
+                indent=2,
+            )
+        try:
+            ImapSmtpMailProvider(acct).verify()
+        except Exception as exc:
+            return json.dumps({"ok": False, "message": str(exc)}, indent=2)
+        saved = save_mail_credentials(addr, pwd, home=home)
+        # Connecting a mailbox with explicit credentials IS the consent for
+        # account access — record it rather than sending the owner to a second
+        # toggle. What it means is stated plainly in the reply.
+        with __import__("contextlib").suppress(Exception):
+            store.patch_prefs(privacy_ai_accepted=True, account_access_accepted=True)
+        saved["privacy"] = (
+            "The app password is stored in Remedy's local encrypted secret store "
+            "and is never sent to the model. Mail you ask me to read or answer "
+            "does get sent to your chosen AI provider for that turn."
+        )
+        return json.dumps(saved, indent=2)
+
+    async def mail_status() -> str:
+        """Which mailbox is connected and how (app password vs Google OAuth)."""
+        from remedy.assistant.providers.imap_smtp import load_mail_account, preset_for
+
+        acct = load_mail_account(home)
+        google = False
+        with __import__("contextlib").suppress(Exception):
+            from remedy.assistant.google_oauth import load_tokens
+
+            google = bool(load_tokens(home).connected)
+        if acct is not None:
+            p = preset_for(acct.address)
+            return json.dumps(
+                {
+                    "ok": True,
+                    "connected": True,
+                    "method": "app_password",
+                    "address": acct.address,
+                    "provider": p.get("label") or "mail",
+                    "google_oauth": google,
+                    "message": f"Connected as {acct.address} over IMAP/SMTP",
+                },
+                indent=2,
+            )
+        return json.dumps(
+            {
+                "ok": True,
+                "connected": bool(google),
+                "method": "google_oauth" if google else "",
+                "google_oauth": google,
+                "message": (
+                    "Google OAuth connected"
+                    if google
+                    else "No mailbox connected. Use mail_connect with an app password."
+                ),
+            },
+            indent=2,
+        )
+
+    def _mail_provider():
+        """Prefer the app-password mailbox; fall back to Google OAuth."""
+        with __import__("contextlib").suppress(Exception):
+            from remedy.assistant.providers.imap_smtp import get_imap_mail
+
+            m = get_imap_mail(home)
+            if m is not None:
+                return m
+        with __import__("contextlib").suppress(Exception):
+            from remedy.assistant.providers.google_gmail import get_google_gmail
+
+            return get_google_gmail(home)
+        return None
+
     async def calendar_update_event(
         event_id: str = "",
         title: str = "",
@@ -402,10 +518,11 @@ def register_assistant_tools(runtime: Any) -> None:
         from remedy.core.approvals import APPROVALS
         from remedy.core.turn_context import turn_session_id
 
-        ok, reason = consent_ok(home)
-        if not ok:
-            return json.dumps({"ok": False, "message": reason}, indent=2)
-        mail = get_google_gmail(home)
+        mail = _mail_provider()
+        if mail is not None and getattr(mail, "provider_id", "") != "imap":
+            ok, reason = consent_ok(home)
+            if not ok:
+                return json.dumps({"ok": False, "message": reason}, indent=2)
         if mail is None:
             return json.dumps({"ok": False, "message": "Gmail not connected."}, indent=2)
         mid = (message_id or "").strip()
@@ -445,10 +562,11 @@ def register_assistant_tools(runtime: Any) -> None:
             "ok": True,
             "message_id": result.get("message_id"),
             "thread_id": result.get("thread_id"),
+            "in_reply_to": result.get("in_reply_to"),
             "to": result.get("to"),
             "subject": result.get("subject"),
             "message": result.get("message"),
-            "privacy": "Sent via Gmail API; body not re-sent to the model.",
+            "privacy": "Sent from your mailbox; body not re-sent to the model.",
         }
         return json.dumps(redact_secrets(safe), indent=2)
 
@@ -457,10 +575,11 @@ def register_assistant_tools(runtime: Any) -> None:
         from remedy.assistant.privacy import consent_ok
         from remedy.assistant.providers.google_gmail import get_google_gmail
 
-        ok, reason = consent_ok(home)
-        if not ok:
-            return json.dumps({"ok": False, "message": reason}, indent=2)
-        mail = get_google_gmail(home)
+        mail = _mail_provider()
+        if mail is not None and getattr(mail, "provider_id", "") != "imap":
+            ok, reason = consent_ok(home)
+            if not ok:
+                return json.dumps({"ok": False, "message": reason}, indent=2)
         if mail is None:
             return json.dumps({"ok": False, "message": "Gmail not connected."}, indent=2)
         mid = (message_id or "").strip()
@@ -481,10 +600,11 @@ def register_assistant_tools(runtime: Any) -> None:
         from remedy.assistant.privacy import consent_ok
         from remedy.assistant.providers.google_gmail import get_google_gmail
 
-        ok, reason = consent_ok(home)
-        if not ok:
-            return json.dumps({"ok": False, "message": reason}, indent=2)
-        mail = get_google_gmail(home)
+        mail = _mail_provider()
+        if mail is not None and getattr(mail, "provider_id", "") != "imap":
+            ok, reason = consent_ok(home)
+            if not ok:
+                return json.dumps({"ok": False, "message": reason}, indent=2)
         if mail is None:
             return json.dumps({"ok": False, "message": "Gmail not connected."}, indent=2)
         mid = (message_id or "").strip()
@@ -510,10 +630,11 @@ def register_assistant_tools(runtime: Any) -> None:
         )
         from remedy.assistant.providers.google_gmail import get_google_gmail
 
-        ok, reason = consent_ok(home)
-        if not ok:
-            return json.dumps({"ok": False, "message": reason}, indent=2)
-        mail = get_google_gmail(home)
+        mail = _mail_provider()
+        if mail is not None and getattr(mail, "provider_id", "") != "imap":
+            ok, reason = consent_ok(home)
+            if not ok:
+                return json.dumps({"ok": False, "message": reason}, indent=2)
         if mail is None:
             return json.dumps(
                 {
@@ -563,10 +684,11 @@ def register_assistant_tools(runtime: Any) -> None:
         )
         from remedy.assistant.providers.google_gmail import get_google_gmail
 
-        ok, reason = consent_ok(home)
-        if not ok:
-            return json.dumps({"ok": False, "message": reason}, indent=2)
-        mail = get_google_gmail(home)
+        mail = _mail_provider()
+        if mail is not None and getattr(mail, "provider_id", "") != "imap":
+            ok, reason = consent_ok(home)
+            if not ok:
+                return json.dumps({"ok": False, "message": reason}, indent=2)
         if mail is None:
             return json.dumps(
                 {
@@ -607,10 +729,11 @@ def register_assistant_tools(runtime: Any) -> None:
         from remedy.assistant.privacy import consent_ok, redact_secrets
         from remedy.assistant.providers.google_gmail import get_google_gmail
 
-        ok, reason = consent_ok(home)
-        if not ok:
-            return json.dumps({"ok": False, "message": reason}, indent=2)
-        mail = get_google_gmail(home)
+        mail = _mail_provider()
+        if mail is not None and getattr(mail, "provider_id", "") != "imap":
+            ok, reason = consent_ok(home)
+            if not ok:
+                return json.dumps({"ok": False, "message": reason}, indent=2)
         if mail is None:
             return json.dumps(
                 {
@@ -655,10 +778,11 @@ def register_assistant_tools(runtime: Any) -> None:
         from remedy.assistant.providers.google_gmail import get_google_gmail
         from remedy.core.approvals import APPROVALS
 
-        ok, reason = consent_ok(home)
-        if not ok:
-            return json.dumps({"ok": False, "message": reason}, indent=2)
-        mail = get_google_gmail(home)
+        mail = _mail_provider()
+        if mail is not None and getattr(mail, "provider_id", "") != "imap":
+            ok, reason = consent_ok(home)
+            if not ok:
+                return json.dumps({"ok": False, "message": reason}, indent=2)
         if mail is None:
             return json.dumps(
                 {
@@ -1046,6 +1170,31 @@ def register_assistant_tools(runtime: Any) -> None:
             },
             "required": ["title", "start", "end"],
         },
+    )
+    reg.register_builtin_handler(
+        "mail_connect",
+        "Connect the owner's mailbox with an APP PASSWORD (no Google Cloud project "
+        "needed). Works for Gmail / Outlook / Yahoo / Fastmail / iCloud once 2-step "
+        "verification is on. Verifies IMAP+SMTP before saving. Ask the owner to "
+        "generate the 16-character app password — never their normal password.",
+        mail_connect,
+        {
+            "type": "object",
+            "properties": {
+                "address": {"type": "string", "description": "Full email address"},
+                "app_password": {
+                    "type": "string",
+                    "description": "16-character app password from the mail provider",
+                },
+            },
+            "required": ["address", "app_password"],
+        },
+    )
+    reg.register_builtin_handler(
+        "mail_status",
+        "Which mailbox is connected and by which method (app password or Google OAuth).",
+        mail_status,
+        {"type": "object", "properties": {}},
     )
     reg.register_builtin_handler(
         "calendar_update_event",

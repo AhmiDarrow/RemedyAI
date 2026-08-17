@@ -10,10 +10,10 @@ from typing import Any
 from fastapi import FastAPI, Query, Request, Response
 
 from remedy import __version__ as _remedy_version
-from remedy.interfaces.config import load_config
 from remedy.interfaces.api_models import (
     StatusResponse,
 )
+from remedy.interfaces.config import load_config
 
 logger = logging.getLogger(__name__)
 
