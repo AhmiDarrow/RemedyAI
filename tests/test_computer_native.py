@@ -318,3 +318,93 @@ def test_detect_system_prompt_clean_when_no_uac() -> None:
     r = W.detect_system_prompt()
     assert r["blocked"] in (True, False)  # shape; usually False in CI/dev
     assert set(r) == {"blocked", "kind", "message"}
+
+
+# --- pixel candidate detection (Set-of-Mark without an a11y tree) -----------
+
+
+def _synthetic_frame(width: int, height: int, boxes: list[tuple]) -> tuple:
+    """Dark frame with bright filled boxes → strong edges for the detector."""
+    stride = (width * 3 + 3) & ~3
+    buf = bytearray(b"\x10" * (stride * height))
+    for x0, y0, x1, y1 in boxes:
+        for y in range(y0, y1):
+            o = y * stride
+            for x in range(x0, x1):
+                p = o + x * 3
+                buf[p] = buf[p + 1] = buf[p + 2] = 240
+    return bytes(buf), stride
+
+
+def test_detect_ui_candidates_finds_drawn_boxes() -> None:
+    w, h = 400, 300
+    raw, stride = _synthetic_frame(w, h, [(40, 40, 160, 100), (220, 180, 360, 260)])
+    cands = W.detect_ui_candidates(raw, stride, w, h)
+    assert len(cands) >= 2
+    # each candidate center should fall inside one of the drawn boxes
+    def inside(c, box):
+        x0, y0, x1, y1 = box
+        return x0 - 12 <= c["x"] <= x1 + 12 and y0 - 12 <= c["y"] <= y1 + 12
+
+    boxes = [(40, 40, 160, 100), (220, 180, 360, 260)]
+    assert any(inside(cands[0], b) for b in boxes)
+    assert any(inside(cands[1], b) for b in boxes)
+
+
+def test_detect_ui_candidates_ignores_blank_frame() -> None:
+    w, h = 300, 200
+    raw, stride = _synthetic_frame(w, h, [])
+    assert W.detect_ui_candidates(raw, stride, w, h) == []
+
+
+def test_detect_ui_candidates_respects_max() -> None:
+    w, h = 500, 400
+    boxes = [(x, y, x + 30, y + 20) for x in range(20, 440, 60) for y in range(20, 340, 60)]
+    raw, stride = _synthetic_frame(w, h, boxes)
+    assert len(W.detect_ui_candidates(raw, stride, w, h, max_marks=5)) <= 5
+
+
+def test_detect_ui_candidates_tiny_frame_safe() -> None:
+    assert W.detect_ui_candidates(b"", 0, 4, 4) == []
+
+
+def test_screenshot_marks_fall_back_to_pixels(tmp_path, monkeypatch) -> None:
+    """No a11y elements → marks come from pixel detection, with x/y in legend."""
+    ex = ComputerExecutor(home_dir=tmp_path)
+    ex.bridge.set_last_elements([], target="desktop")
+    monkeypatch.setattr(W, "desktop_snapshot", lambda **k: [])
+    monkeypatch.setattr(
+        W, "_capture_virtual_screen", lambda: (b"\x00" * 300, 30, 10, 10, 5, 7)
+    )
+    monkeypatch.setattr(
+        W,
+        "detect_ui_candidates",
+        lambda raw, stride, w, h, **k: [{"x": 100, "y": 50, "w": 40, "h": 20, "area": 800}],
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_shot(path=None, *, marks=None):
+        captured["marks"] = marks
+        return {"path": "x.png", "width": 800, "height": 600, "origin": {"x": 5, "y": 7}}
+
+    monkeypatch.setattr(W, "screenshot_png", fake_shot)
+    monkeypatch.setattr(ComputerExecutor, "_see_if_needed", lambda self, r, **k: r)
+    out = ex._run_desktop(ComputerAction.SCREENSHOT, mark=True)
+    assert out["ok"] is True
+    # screen coords = candidate + capture origin
+    assert captured["marks"] == [{"n": 1, "x": 105, "y": 57}]
+    legend = out.get("marks") or []
+    assert legend[0]["source"] == "pixels"
+    assert (legend[0]["x"], legend[0]["y"]) == (105, 57)
+    assert "pixel-detected" in out["message"]
+
+
+# --- desktop app playbook is present in guidance ---------------------------
+
+
+def test_guidance_has_desktop_playbook() -> None:
+    from remedy.core.computer.guidance import COMPUTER_USE_SYSTEM_ADDENDUM as text
+
+    assert "Desktop app playbook" in text
+    for route in ("ctrl+l", "alt+n", "Name Box", "ctrl+z"):
+        assert route in text
