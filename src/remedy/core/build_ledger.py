@@ -182,19 +182,82 @@ def ledger_path(
     return ledger_dir_for_project(project_path, home=home) / "ledger.json"
 
 
+def _goal_key(goal: str | None) -> str:
+    """Stable key for a build within a project — a normalized hash of the goal.
+
+    Turns of the SAME build share a goal (BuildTurnState.goal is set once at
+    build start), so they map to one entry; a genuinely different goal in the
+    same project directory maps to its OWN entry instead of clobbering.
+    """
+    norm = re.sub(r"[^a-z0-9]+", " ", str(goal or "").lower()).strip()
+    if not norm:
+        return "_default"
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()[:12]
+
+
+def _read_ledger_map(path: Path) -> tuple[dict[str, BuildLedgerEntry], str]:
+    """Read the on-disk ledger into (builds_by_goal_key, active_key).
+
+    Back-compatible: a legacy flat single-entry file (no ``builds`` key) is
+    read as one build keyed by its goal.
+    """
+    builds: dict[str, BuildLedgerEntry] = {}
+    active = ""
+    if not path.is_file():
+        return builds, active
+    with suppress(Exception):
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(raw, dict) and isinstance(raw.get("builds"), dict):
+            for k, v in raw["builds"].items():
+                if isinstance(v, dict):
+                    builds[str(k)] = BuildLedgerEntry.from_dict(v)
+            active = str(raw.get("active") or "")
+        elif isinstance(raw, dict):
+            # Legacy flat entry — one build.
+            entry = BuildLedgerEntry.from_dict(raw)
+            k = _goal_key(entry.goal)
+            builds[k] = entry
+            active = k
+    if active not in builds:
+        active = ""
+    return builds, active
+
+
+def _pick_active(builds: dict[str, BuildLedgerEntry], active: str) -> BuildLedgerEntry | None:
+    """The build a bare ``load_ledger(project)`` should resume: prefer an
+    unfinished build, most-recently-updated; else the recorded active."""
+    if not builds:
+        return None
+
+    def _finished(e: BuildLedgerEntry) -> bool:
+        return e.phase == "done" and e.last_verify_ok is True
+
+    unfinished = [e for e in builds.values() if not _finished(e)]
+    pool = unfinished or list(builds.values())
+    # Prefer the recorded active when it is in the pool (stable resume target).
+    if active in builds and builds[active] in pool:
+        return builds[active]
+    return max(pool, key=lambda e: float(e.updated_ts or 0.0))
+
+
 def load_ledger(
     project_path: str | Path | None = None,
     *,
     home: str | Path | None = None,
+    goal: str | None = None,
 ) -> BuildLedgerEntry | None:
+    """Return a build entry for the project.
+
+    Default (no *goal*): the active/most-recent unfinished build — the resume
+    target, exactly as before. With *goal*: the entry for THAT specific build
+    (or None), so a merge accumulates into its own goal's entry instead of
+    clobbering another goal built concurrently in the same directory.
+    """
     path = ledger_path(project_path, home=home)
-    if not path.is_file():
-        return None
-    with suppress(Exception):
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(raw, dict):
-            return BuildLedgerEntry.from_dict(raw)
-    return None
+    builds, active = _read_ledger_map(path)
+    if goal is not None:
+        return builds.get(_goal_key(goal))
+    return _pick_active(builds, active)
 
 
 def save_ledger(
@@ -205,17 +268,34 @@ def save_ledger(
     entry.updated_ts = time.time()
     path = ledger_path(entry.project_path or None, home=home)
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = json.dumps(entry.to_dict(), ensure_ascii=False, indent=2)
-    # Unique temp per writer (pid+tid) so two concurrent saves never interleave
-    # bytes into one ledger.tmp and promote torn JSON via replace.
     tmp = path.with_suffix(f".tmp{os.getpid()}.{threading.get_ident()}")
     with _ledger_lock:
+        # Upsert this build by its goal key; the just-saved build becomes the
+        # active resume target. Other goals in the same project are preserved,
+        # not clobbered. Read+write under the lock so concurrent saves of
+        # DIFFERENT goals do not lose each other.
+        builds, _active = _read_ledger_map(path)
+        key = _goal_key(entry.goal)
+        builds[key] = entry
+        # Cap: keep the most-recently-updated builds so the file cannot grow
+        # without bound if many one-off goals touch the same directory.
+        if len(builds) > 12:
+            keep = sorted(
+                builds.items(), key=lambda kv: float(kv[1].updated_ts or 0.0), reverse=True
+            )[:12]
+            builds = dict(keep)
+            if key not in builds:
+                builds[key] = entry
+        payload = {
+            "builds": {k: e.to_dict() for k, e in builds.items()},
+            "active": key,
+        }
+        data = json.dumps(payload, ensure_ascii=False, indent=2)
         tmp.write_text(data, encoding="utf-8")
         # Atomic-or-nothing: keep the old file on a failed replace rather than
-        # corrupting it (a torn write would make load_ledger drop all state).
-        # Widen the retry budget with backoff, and RAISE if it never lands —
-        # a silent drop made callers believe resume state persisted when it did
-        # not (a build's progress would be lost with no signal).
+        # corrupting it. Widen the retry budget with backoff, and RAISE if it
+        # never lands — a silent drop made callers believe resume state
+        # persisted when it did not.
         last_err: OSError | None = None
         delay = 0.02
         for _ in range(8):
@@ -254,7 +334,16 @@ def _merge_turn_into_ledger_locked(
     session_id: str = "",
     home: str | Path | None = None,
 ) -> BuildLedgerEntry:
-    existing = load_ledger(project_path or getattr(state, "project_path", None), home=home)
+    # Load THIS build's own entry by goal — not the project's active build —
+    # so two different goals built in the same directory accumulate into
+    # separate entries instead of one clobbering the other's paths/steps/state.
+    proj = project_path or getattr(state, "project_path", None)
+    this_goal = str(getattr(state, "goal", "") or "")
+    existing = load_ledger(proj, home=home, goal=this_goal) if this_goal else None
+    if existing is None:
+        # Fall back to the active build only when there is no goal yet (a build
+        # that has not named its goal continues the project's current one).
+        existing = load_ledger(proj, home=home) if not this_goal else None
     entry = existing or BuildLedgerEntry()
     if not entry.created_ts:
         entry.created_ts = time.time()
