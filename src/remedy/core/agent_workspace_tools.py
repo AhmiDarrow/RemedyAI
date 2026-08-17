@@ -63,6 +63,12 @@ def register_workspace_tools(runtime: Any) -> None:
     except Exception:
         pass
     try:
+        from remedy.core.agent_reminder_tools import register_reminder_tools
+
+        register_reminder_tools(runtime)
+    except Exception:
+        pass
+    try:
         from remedy.core.agent_settings_tools import register_settings_tools
 
 
