@@ -55,3 +55,26 @@ def get_llm_binding(runtime: Any | None = None) -> LlmBinding:
 
 def binding_from_runtime(runtime: Any) -> LlmBinding:
     return get_llm_binding(runtime)
+
+
+def binding_looks_unconfigured(bind: LlmBinding) -> bool:
+    """True only for the genuine first-run 'nothing set up' case: a cloud
+    provider with no API key and no custom base_url.
+
+    Local / RMB / Ollama / llama.cpp (via is_local_binding) and any base_url
+    proxy setup all return False, so a working configuration never trips this.
+    Callers should also exclude an active Sleev gateway route.
+    """
+    try:
+        from remedy.core.local_agent_optimize import is_local_binding
+
+        if is_local_binding(bind.provider, bind.model, bind.base_url):
+            return False
+    except Exception:
+        # If we can't classify it, assume it's usable — never block on doubt.
+        return False
+    if (bind.api_key or "").strip():
+        return False
+    if (bind.base_url or "").strip():
+        return False
+    return bool((bind.provider or "").strip())

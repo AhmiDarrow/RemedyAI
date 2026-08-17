@@ -1973,6 +1973,20 @@ def turn_has_unfinished_work(
     """
     if not tools_enabled:
         return False
+    # Read-only review/analysis: the deliverable is the written findings, not file
+    # writes. It is never "unfinished" at the epoch wall (until it starts writing,
+    # which flips read_only off). This is the review-loop fix at the loop layer.
+    with suppress(Exception):
+        from remedy.core.build_engine import get_build_state as _gbs
+
+        _b = _gbs(runtime)
+        if (
+            _b is not None
+            and getattr(_b, "active", False)
+            and getattr(_b, "read_only", False)
+            and int(getattr(_b, "write_steps", 0) or 0) == 0
+        ):
+            return False
     if open_tasks:
         for t in open_tasks:
             if (t or "").strip():

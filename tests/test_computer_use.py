@@ -8,12 +8,52 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from remedy.core.computer.host_bridge import ComputerHostBridge, _scrub_job_result
+from remedy.core.computer.host_bridge import (
+    ComputerHostBridge,
+    _same_or_child_url,
+    _scrub_job_result,
+)
 from remedy.core.computer.router import ComputerTarget, resolve_target
 from remedy.core.computer.types import COMPUTER_PLAN_MODE_TOOLS, COMPUTER_TOOL_NAMES
 from remedy.core.plan_store import PLAN_MODE_TOOL_NAMES
 from remedy.interfaces.api import create_app
 from remedy.models import AgentConfig
+
+
+def test_same_or_child_url_query_and_root():
+    """Query-blind match would treat /search?q=eggs as /search?q=milk.
+    Root must not satisfy every same-host child path."""
+    assert _same_or_child_url(
+        "https://www.walmart.com/search?q=milk",
+        "https://www.walmart.com/search?q=milk",
+    )
+    assert not _same_or_child_url(
+        "https://www.walmart.com/search?q=eggs",
+        "https://www.walmart.com/search?q=milk",
+    )
+    # Extra facets on the landed URL are fine if want's query is present.
+    assert _same_or_child_url(
+        "https://www.walmart.com/search?q=milk&facet=brand",
+        "https://www.walmart.com/search?q=milk",
+    )
+    assert not _same_or_child_url(
+        "https://github.com/foo",
+        "https://github.com",
+    )
+    assert _same_or_child_url(
+        "https://github.com/foo/bar",
+        "https://github.com/foo",
+    )
+
+
+def test_expect_url_rejects_host_spoof():
+    from remedy.core.computer.executor import _expect_url_matches
+
+    assert _expect_url_matches("github.com", "https://github.com/foo")
+    assert not _expect_url_matches("github.com", "https://github.com.evil.com/x")
+    assert not _expect_url_matches("github.com", "https://not-github.com/")
+    assert not _expect_url_matches("github.com", "https://evil.example/?next=github.com")
+    assert _expect_url_matches("amazon.com/cart", "https://www.amazon.com/cart/foo")
 
 
 def test_scrub_job_result_redacts_secrets():
@@ -2059,6 +2099,16 @@ def test_resolve_key_combo_unknown_raises():
         resolve_key_combo("notakey", vk_scan=_fake_us_vk_scan)
     with _pytest.raises(ValueError):
         resolve_key_combo("€", vk_scan=_fake_us_vk_scan)  # not on fake layout
+
+
+def test_browse_tool_ok_parses_json_not_success_substring():
+    from remedy.core.react_loop.loop import _browse_tool_ok
+
+    assert _browse_tool_ok('{"ok": true, "user_visible": true}') == (True, False)
+    assert _browse_tool_ok('{"ok":false}') == (False, True)
+    assert _browse_tool_ok("navigate unsuccessful") == (False, False)
+    assert _browse_tool_ok('{"ok": false, "user_visible": true}') == (False, True)
+    assert _browse_tool_ok('{"ok": true, "rail_failed": true}') == (False, True)
 
 
 def test_host_browser_launch_is_refused(tmp_path):

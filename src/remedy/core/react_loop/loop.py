@@ -107,6 +107,29 @@ from remedy.core.turn_context import (
 logger = logging.getLogger(__name__)
 
 
+def _browse_tool_ok(body: str) -> tuple[bool, bool]:
+    """Parse a computer/navigate tool body → (ok_true, ok_false).
+
+    JSON ``ok`` is authoritative. Do not substring-match ``success``
+    (matches ``unsuccessful``) or ``user_visible`` (present on failures too).
+    """
+    raw = body or ""
+    low = raw.lower()
+    failed = "rail_failed" in low
+    with suppress(Exception):
+        data = json.loads(raw)
+        if isinstance(data, dict) and "ok" in data:
+            ok = bool(data["ok"]) and not failed
+            return ok, (not bool(data["ok"])) or failed
+    import re as _re
+
+    if failed or _re.search(r'"ok"\s*:\s*false', low):
+        return False, True
+    if _re.search(r'"ok"\s*:\s*true', low):
+        return True, False
+    return False, False
+
+
 def _stopped_note(tools_ran: bool) -> str:
     if tools_ran:
         return (
@@ -230,6 +253,28 @@ async def call_llm_stream(runtime, message: str,
                 runtime=runtime,
             )
 
+        # First-run guard: a cloud provider with no API key and no proxy/Sleev
+        # route can't chat. Say so in plain language instead of a cryptic 401.
+        # Local / RMB / base_url / Sleev setups never reach this branch.
+        with suppress(Exception):
+            from remedy.core.llm_binding import binding_looks_unconfigured
+
+            _sleev_route = False
+            with suppress(Exception):
+                from remedy.core.sleev import cfg_from_runtime as _scf0
+                from remedy.core.sleev import is_sleev_endpoint as _ise0
+
+                _sleev_route = bool(_ise0(endpoint, _scf0(runtime)))
+            if binding_looks_unconfigured(_bind) and not _sleev_route:
+                yield (
+                    "\nI don't have a model to think with yet — there's no API key "
+                    f"set for **{_bind.provider or 'the provider'}**.\n\n"
+                    "Open **Settings → Models**, choose a provider and paste its API "
+                    "key — or switch to a local model / RMB, which needs no key. "
+                    "Then send your message again.\n"
+                )
+                return
+
         # Long agent runs: high wall-clock + read idle so multi-step work
         # (and long thinking streams) are not killed mid-flight.
         # Sleev gateway: short connect so a dead proxy fails open quickly
@@ -301,15 +346,30 @@ async def call_llm_stream(runtime, message: str,
         thinking_choice_repaired = False
         green_gate_reopen_count = 0
         max_green_gate_reopens = 6
+        # Open-drive stall guard: open todos / unfinished ship let a build
+        # override the caps above — but ONLY while it keeps advancing. Track the
+        # last step that made progress; a drive that stalls for
+        # `open_drive_patience` steps stops honestly instead of burning to
+        # max_total. A progressing build resets the counter and is never capped.
+        open_drive_patience = max(
+            16, int(getattr(runtime, "_open_drive_patience", 60) or 60)
+        )
+        last_progress_score = 0
+        last_progress_step = 0
+        open_drive_stalled_notified = False
 
         def _open_drive_keeps_going() -> bool:
             with suppress(Exception):
                 from remedy.core.build_engine import (
-                    build_has_open_drive,
                     get_build_state,
+                    open_drive_should_continue,
                 )
 
-                return build_has_open_drive(get_build_state(runtime))
+                return open_drive_should_continue(
+                    get_build_state(runtime),
+                    steps_since_progress=step - last_progress_step,
+                    patience=open_drive_patience,
+                )
             return False
 
         def _build_active() -> bool:
@@ -708,15 +768,10 @@ async def call_llm_stream(runtime, message: str,
                     if tool_msg:
                         messages.append(tool_msg)
                         body = str(tool_msg.get("content") or "")
-                        low = body.lower()
-                        if (
-                            "success" in low
-                            or '"ok": true' in low
-                            or '"ok":true' in low
-                            or "user_visible" in low
-                        ) and "rail_failed" not in low and '"ok": false' not in low:
+                        parsed_ok, parsed_fail = _browse_tool_ok(body)
+                        if parsed_ok:
                             browse_ok = True
-                        elif '"ok": false' in low or "rail_failed" in low:
+                        elif parsed_fail:
                             browse_fail_snip = body[:400]
                 tool_batches_this_turn += 1
                 productive_in_epoch += 1
@@ -809,6 +864,46 @@ async def call_llm_stream(runtime, message: str,
                         )
                         yield "@@aborted\n"
                         return
+
+                # Open-drive stall guard: record real build progress; if an open
+                # drive stalls (no write/verify/ship/green advance) past patience,
+                # nudge once for an honest status instead of retrying to the wall.
+                with suppress(Exception):
+                    from remedy.core.build_engine import (
+                        build_has_open_drive,
+                        build_progress_score,
+                        get_build_state,
+                    )
+
+                    _bst_p = get_build_state(runtime)
+                    _score = build_progress_score(_bst_p)
+                    if _score > last_progress_score:
+                        last_progress_score = _score
+                        last_progress_step = step
+                    elif (
+                        not open_drive_stalled_notified
+                        and build_has_open_drive(_bst_p)
+                        and (step - last_progress_step) > open_drive_patience
+                    ):
+                        open_drive_stalled_notified = True
+                        logger.info(
+                            "Open-drive stall: no progress in %d steps (step %d)",
+                            step - last_progress_step,
+                            step,
+                        )
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "[Progress check] The remaining checklist or "
+                                    "publish steps haven't advanced in a while. If "
+                                    "you're blocked, stop and tell me plainly: what "
+                                    "you finished, what's left, and exactly what you "
+                                    "need from me (a key, an install, a decision). "
+                                    "Don't keep retrying the same thing silently."
+                                ),
+                            }
+                        )
 
                 # Soft epoch roll every epoch_size model rounds: compact + checkpoint.
                 # Tools stay on — run until finished (not a tool-budget stop).
@@ -1660,11 +1755,23 @@ async def call_llm_stream(runtime, message: str,
                             body = dict(body) if isinstance(body, dict) else {}
                             body["stream"] = False
                             continue
+                        logger.warning(
+                            "LLM provider error HTTP %s: %s",
+                            resp.status,
+                            safe_err[:500],
+                        )
+                        _hint = {
+                            401: "the model key looks invalid or expired — check it in Settings",
+                            403: "the provider refused the request (key permissions or region)",
+                            429: "the provider is rate-limiting or out of quota — wait a moment or switch model",
+                            500: "the provider had a server error",
+                            502: "the provider had a server error",
+                            503: "the provider is temporarily unavailable",
+                        }.get(int(resp.status or 0), "the provider returned an error")
                         yield (
-                            f"\n[LLM ERROR — HTTP {resp.status}]\n"
-                            f"{safe_err[:500]}\n[END LLM ERROR]\n"
-                            "Stopped after repeated API errors. "
-                            "Switch model or check the provider, then resend.\n"
+                            f"\nThe model provider stopped responding — {_hint}. "
+                            "You can switch model in Settings and resend, or try "
+                            "again in a moment. Your history is intact.\n"
                         )
                         return
 
@@ -3535,16 +3642,17 @@ async def call_llm_stream(runtime, message: str,
                 "History is intact — send **continue** to resume.\n"
             )
             return
+        logger.warning("Unhandled mid-turn error: %r", e, exc_info=True)
         yield (
-            f"\nSomething went wrong mid-turn ({e}).\n\n"
-            "History is intact; send **continue** or restate the request.\n"
+            "\nSomething went wrong on my side mid-turn — your history is intact.\n\n"
+            "Send **continue** to pick up where we left off, or restate the request.\n"
         )
     finally:
         # Early `return` inside the step loop used to skip this — desktop
         # chat never ran soul / metabolism / speculative on a normal final.
         with suppress(Exception):
             runtime._last_assistant_text = "".join(assistant_text_acc)[-12000:]
-        with suppress(Exception):
+        try:
             from remedy.core.agent_post_turn import schedule_post_turn_prep
 
             schedule_post_turn_prep(
@@ -3552,5 +3660,9 @@ async def call_llm_stream(runtime, message: str,
                 message=message or "",
                 session_id=session_id,
             )
+        except Exception as _ptp_exc:
+            # Best-effort (the reply already streamed) — but log so a failing
+            # memory/soul save is diagnosable instead of vanishing silently.
+            logger.warning("post-turn prep failed: %r", _ptp_exc)
 
 

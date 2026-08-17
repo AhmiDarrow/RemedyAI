@@ -437,10 +437,12 @@ def append_hop(
     hop: dict[str, Any],
     *,
     home: str | Path | None = None,
+    goal: str | None = None,
 ) -> BuildLedgerEntry:
     with _ledger_lock:
-        entry = load_ledger(project_path, home=home) or BuildLedgerEntry(
-            project_path=project_path
+        entry = load_ledger(project_path, home=home, goal=goal) or BuildLedgerEntry(
+            project_path=project_path,
+            goal=str(goal or "")[:400],
         )
         entry.project_path = project_path or entry.project_path
         h = dict(hop)
