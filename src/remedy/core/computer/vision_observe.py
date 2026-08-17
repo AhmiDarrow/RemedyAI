@@ -51,18 +51,44 @@ DESIGN_FOCUS_QUESTION = (
     "Do not invent a layout. Do not list click coordinates."
 )
 
+# Document intake: a photo/scan of real-world paper. Transcription first —
+# a wrong amount or date here becomes a wrong bill or a missed deadline.
+DOCUMENT_FOCUS_QUESTION = (
+    "This is a photo or scan of a real-world document (a bill, letter, notice, "
+    "appointment card, prescription, or receipt).\n"
+    "### Transcription\n"
+    "Transcribe the readable text, keeping the reading order. Do NOT summarise "
+    "yet and do NOT invent words — if a part is blurred, cut off, or unreadable, "
+    "write [unreadable] rather than guessing.\n"
+    "### Key facts\n"
+    "Only what is actually printed:\n"
+    "- who it is from (organisation / sender)\n"
+    "- what it is about (one line)\n"
+    "- any amount of money, exactly as printed\n"
+    "- any date, exactly as printed, and what each date means "
+    "(due / appointment / issued / expires)\n"
+    "- any account, invoice, reference, or phone number\n"
+    "- what the document asks the reader to DO, if anything\n"
+    "### Uncertain\n"
+    "List anything you could not read with confidence. Never fill a gap with a "
+    "plausible guess — an invented amount or deadline is worse than a blank."
+)
+
 _MAX_QUEUED_SHOTS = 2
 
 
 def _normalize_observe_kind(kind: str | None) -> str:
     k = (kind or "cua").strip().lower()
-    return k if k == "design" else "cua"
+    return k if k in ("design", "document") else "cua"
 
 
 def focus_question_for_kind(kind: str = "cua", hint: str = "") -> str:
+    k = _normalize_observe_kind(kind)
     base = (
         DESIGN_FOCUS_QUESTION
-        if _normalize_observe_kind(kind) == "design"
+        if k == "design"
+        else DOCUMENT_FOCUS_QUESTION
+        if k == "document"
         else CUA_FOCUS_QUESTION
     )
     if (hint or "").strip():
