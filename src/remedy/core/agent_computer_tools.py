@@ -48,11 +48,16 @@ def _page_context(ex: Any) -> str:
     """Best-effort text of the current rail surface (URL + last element labels).
 
     Used only to detect a checkout/payment surface for the owner checkpoint —
-    never logged, never sent to a model.
+    never logged, never sent to a model. Prefers a URL the host actually
+    observed (snapshot / page_text / navigate complete) over the last
+    requested navigate, so SPA checkout hops still classify.
     """
     bits: list[str] = []
     with contextlib.suppress(Exception):
-        bits.append(str(ex.bridge.last_navigate_url() or ""))
+        live = ""
+        if hasattr(ex.bridge, "last_observed_url"):
+            live = str(ex.bridge.last_observed_url() or "")
+        bits.append(live or str(ex.bridge.last_navigate_url() or ""))
     try:
         info = ex.bridge.last_elements_info() or {}
         bits.append(str(info.get("target") or ""))
@@ -61,6 +66,12 @@ def _page_context(ex: Any) -> str:
     except Exception:
         pass
     return " ".join(b for b in bits if b)[:2000]
+
+
+def _page_origin(page_context: str) -> str:
+    from remedy.core.approvals import _origin_host
+
+    return _origin_host(page_context)
 
 
 def _computer_approval_gate(
@@ -104,11 +115,14 @@ def _computer_approval_gate(
     sid = turn_session_id(runtime)
     from remedy.core.approvals import SENSITIVE_PREFIX
 
+    origin = _page_origin(page_context)
     sensitive = ask_reason.startswith(SENSITIVE_PREFIX)
     if sensitive:
         # Sensitive actions never ride a persisted approval — only a one-shot
         # grant consumed here. is_approved (session/always) does not apply.
-        if APPROVALS.take_one_shot(tool_name, summary, session_id=sid):
+        if APPROVALS.take_one_shot(
+            tool_name, summary, session_id=sid, origin=origin
+        ):
             return None
     elif APPROVALS.is_approved(tool_name, summary, session_id=sid):
         return None
@@ -117,6 +131,7 @@ def _computer_approval_gate(
         command=summary,
         reason=ask_reason,
         session_id=sid,
+        origin=origin,
     )
     return (
         f"APPROVAL_REQUIRED id={item.id}\n"
@@ -537,15 +552,19 @@ def register_computer_tools(runtime: Any) -> None:
         The owner's authorized hands for an accessibility gesture they may be
         unable to perform. Locate by text/ref or pass x/y (from a screenshot).
         """
-        where = text or ref or f"({x},{y})"
+        label = text or _resolve_ref_label(ex, ref)
+        where = label or text or ref or f"({x},{y})"
         summary = f"press-and-hold {where} for {hold_ms}ms target={target or 'auto'}"
         blocked = _computer_approval_gate(
             runtime, "computer_press_hold", summary,
             page_context=_page_context(ex),
-            label_resolved=bool(text or ref),
+            label_resolved=bool((text or "").strip()) or bool(_resolve_ref_label(ex, ref)),
         )
         if blocked:
             return blocked
+        # (0, 0) with no locator is the schema default (unset). A lone 0 on
+        # one axis is a real edge coordinate — do not coerce it to None.
+        point = (int(x or 0), int(y or 0)) != (0, 0)
         return await _run_computer(ex,
             ComputerAction.PRESS_HOLD,
             target=target or "auto",
@@ -553,8 +572,8 @@ def register_computer_tools(runtime: Any) -> None:
             runtime=runtime,
             text=text or None,
             ref=ref or None,
-            x=x or None,
-            y=y or None,
+            x=(int(x) if point or text or ref else None),
+            y=(int(y) if point or text or ref else None),
             hold_ms=int(hold_ms) if hold_ms else 2600,
         )
 

@@ -750,6 +750,10 @@ fn save_rail_prefs(prefs: &BrowserRailPrefs) {
 
 pub struct BrowserState {
     current_url: Mutex<String>,
+    /// Last URL a load event actually committed. Used as prev_url for the
+    /// stale-Finished guard — `current_url` may already be the *destination*
+    /// (address bar) before on_page_load fires.
+    last_committed_url: Mutex<String>,
     last_bounds: Mutex<Option<BrowserBounds>>,
     /// When true, do not show() the embed (Settings/Help/overlays cover the host).
     /// Prevents the native WebView2 HWND from floating above React chrome.
@@ -767,6 +771,7 @@ impl Default for BrowserState {
         let prefs = load_rail_prefs();
         Self {
             current_url: Mutex::new("https://github.com/AhmiDarrow/RemedyAI".into()),
+            last_committed_url: Mutex::new("https://github.com/AhmiDarrow/RemedyAI".into()),
             last_bounds: Mutex::new(None),
             stack_suppressed: AtomicBool::new(false),
             desktop_site: AtomicBool::new(prefs.desktop_site),
@@ -1878,6 +1883,9 @@ pub fn navigate_embed(
             let mut prev_url = String::new();
             if let Some(st) = app_for_load.try_state::<BrowserState>() {
                 if let Ok(mut g) = st.current_url.lock() {
+                    *g = u.clone();
+                }
+                if let Ok(mut g) = st.last_committed_url.lock() {
                     prev_url = g.clone();
                     *g = u.clone();
                 }

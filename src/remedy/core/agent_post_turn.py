@@ -128,11 +128,20 @@ def schedule_post_turn_prep(
                     sf = load_soul_field(home)
                     ready = len(sf.episodes) >= 3 or bool(sf.pledges) or bool(sf.future_dreams)
                     if ready and should_dream(home):
-                        dream_cycle(
-                            home=home,
-                            memory=getattr(runtime, "memory", None),
-                            field=sf,
-                        )
+                        # Off the request task so SSE finally can release the
+                        # stream claim — a follow-up send must not 409.
+                        import threading
+
+                        threading.Thread(
+                            target=dream_cycle,
+                            kwargs={
+                                "home": home,
+                                "memory": getattr(runtime, "memory", None),
+                                "field": sf,
+                            },
+                            daemon=True,
+                            name="remedy-dream",
+                        ).start()
                 # Soft arm mission from soul when idle-ish (no active mission)
                 with suppress(Exception):
                     from remedy.memory.soul.field import load_soul_field

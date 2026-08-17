@@ -63,6 +63,9 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoice {
   // Bumped on every stopSpeaking/speak so a slow in-flight synth can't play
   // over a newer one or leak its object URL.
   const speakGenRef = useRef(0)
+  const startingRef = useRef(false)
+  const aliveRef = useRef(true)
+  const ttsWaitRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const micSupported =
     typeof navigator !== 'undefined'
@@ -82,6 +85,10 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoice {
 
   const stopSpeaking = useCallback(() => {
     speakGenRef.current += 1
+    if (ttsWaitRef.current != null) {
+      clearTimeout(ttsWaitRef.current)
+      ttsWaitRef.current = null
+    }
     try {
       audioRef.current?.pause()
     } catch {
@@ -104,8 +111,10 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoice {
     (text: string) => {
       const synth = typeof window !== 'undefined' ? window.speechSynthesis : null
       if (!synth) return
+      const gen = speakGenRef.current
       const clean = stripMarkdownForSpeech(text)
       const speakNow = (voices: SpeechSynthesisVoice[]) => {
+        if (gen !== speakGenRef.current) return
         const utter = new SpeechSynthesisUtterance(clean)
         const match = pickFallbackVoice(
           voices.map((v) => ({ name: v.name, lang: v.lang, default: v.default })),
@@ -128,12 +137,14 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoice {
         // else the gender match is lost to the OS default.
         const handler = () => {
           synth.removeEventListener('voiceschanged', handler)
+          if (gen !== speakGenRef.current) return
           speakNow(synth.getVoices() || [])
         }
         synth.addEventListener('voiceschanged', handler)
-        // Fallback if the event never fires
-        setTimeout(() => {
+        ttsWaitRef.current = setTimeout(() => {
+          ttsWaitRef.current = null
           synth.removeEventListener('voiceschanged', handler)
+          if (gen !== speakGenRef.current) return
           if (!synth.speaking) speakNow(synth.getVoices() || [])
         }, 500)
       }
@@ -186,9 +197,14 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoice {
   )
 
   const startRecording = useCallback(async (): Promise<boolean> => {
-    if (!micSupported || recording) return false
+    if (!micSupported || recording || startingRef.current) return false
+    startingRef.current = true
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      if (!aliveRef.current) {
+        stream.getTracks().forEach((t) => t.stop())
+        return false
+      }
       streamRef.current = stream
       const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
@@ -204,6 +220,8 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoice {
       return true
     } catch {
       return false
+    } finally {
+      startingRef.current = false
     }
   }, [micSupported, recording])
 
@@ -250,8 +268,10 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoice {
   }, [])
 
   // Cleanup on unmount
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    aliveRef.current = true
+    return () => {
+      aliveRef.current = false
       stopSpeaking()
       try {
         recRef.current?.stop()
@@ -259,9 +279,8 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoice {
         /* */
       }
       streamRef.current?.getTracks().forEach((t) => t.stop())
-    },
-    [stopSpeaking],
-  )
+    }
+  }, [stopSpeaking])
 
   return {
     status,

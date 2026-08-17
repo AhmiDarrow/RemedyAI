@@ -289,14 +289,16 @@ export function useChatSendFlow(opts: {
         is_image?: boolean
         is_text?: boolean
       }[],
-      opts?: { mode?: 'after' | 'interrupt' },
+      opts?: { mode?: 'after' | 'interrupt'; sessionId?: string },
     ) => {
       // Clear edit prefill once the user sends (revised prompt is on its way).
       setEditDraft(null)
       if (text.startsWith('/') && !attachments?.length) {
         await handleCommand(text)
       } else {
-        let sid = activeId
+        // Prefer an explicit session (Grove ensureGoal/Home) over the render
+        // closure — setActiveId after await has not re-rendered yet.
+        let sid = opts?.sessionId || activeId
         if (!sid) {
           // Prompt was typed on the empty shell — post + focus that new
           // session even if the user clicked another chat during create().

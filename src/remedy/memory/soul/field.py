@@ -654,7 +654,7 @@ def clear_soul_cache() -> None:
 
 
 _SECRET_RE = re.compile(
-    r"(?i)(api[_-]?key|password\s*[:=]|sk-[a-z0-9]{10,}|bearer\s+[a-z0-9])"
+    r"(?i)(api[_-]?key|password|secret|token|sk-[a-z0-9]{8,}|bearer\s+\S+)"
 )
 
 
