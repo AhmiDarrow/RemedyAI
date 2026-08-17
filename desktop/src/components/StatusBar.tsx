@@ -2,6 +2,10 @@ import { getServerUrl } from '../api/client'
 import { useState, useEffect, useMemo } from 'react'
 import { getLatestCheckpoint, getPartnerStatus } from '../api/partner'
 import { getVisionStatus, type VisionStatus } from '../api/vision'
+import {
+  getCoordinationPresence,
+  type CoordinationBeacon,
+} from '../api/coordination'
 import type { ConnectedProvider } from '../api/providers'
 import { ThemeSwitcher } from './ThemeSwitcher'
 import { FormSelect } from './settings/formUi'
@@ -288,6 +292,8 @@ export function StatusBar({
   const [providerHealthTip, setProviderHealthTip] = useState<string | null>(null)
   const [accessScope, setAccessScope] = useState<string>('')
   const [vision, setVision] = useState<VisionStatus | null>(null)
+  // Body coordination: the OTHER live muscles (sibling sessions) building now.
+  const [siblings, setSiblings] = useState<CoordinationBeacon[]>([])
 
   // Display provider: only treat as Demo when the *model id* is a curated guest id
   // AND the parent still says another provider (cross-wire). Never flip a real
@@ -507,6 +513,48 @@ export function StatusBar({
     }
   }, [])
 
+  // Poll body-coordination presence: which sibling sessions are building and
+  // what they hold. Quiet when alone (slow poll); livelier when the body is
+  // busy so holds/goals stay fresh in the tooltip.
+  useEffect(() => {
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    async function tick() {
+      let nextMs = 30_000
+      try {
+        const p = await getCoordinationPresence(sessionId)
+        if (!cancelled) {
+          const others = (p.beacons || []).filter((b) => !b.you)
+          setSiblings(others)
+          nextMs = others.length > 0 ? 8_000 : 30_000
+        }
+      } catch {
+        if (!cancelled) setSiblings([])
+        nextMs = 45_000
+      }
+      if (!cancelled) timer = setTimeout(() => void tick(), nextMs)
+    }
+    void tick()
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [sessionId])
+
+  const bodyTip = useMemo(() => {
+    if (!siblings.length) return ''
+    const lines = siblings.map((b) => {
+      const who = b.muscle || 'another muscle'
+      const where = b.project || '?'
+      const goal = b.goal ? ` — ${b.goal}` : ''
+      const held = b.held_files.length
+        ? `\n   holding: ${b.held_files.slice(0, 6).join(', ')}${b.held_count > 6 ? ` (+${b.held_count - 6})` : ''}`
+        : ''
+      return `• ${who} · ${where}${goal} (${b.phase})${held}`
+    })
+    return `Remedy's other muscles at work — their held files are protected from overwrites:\n${lines.join('\n')}`
+  }, [siblings])
+
   const dotColor =
     status === 'connected' ? 'var(--success)' : status === 'checking' ? 'var(--warning)' : 'var(--error)'
   const autoApprove = approvalMode === 'auto'
@@ -655,6 +703,25 @@ export function StatusBar({
           >
             Provider: flaky
           </button>
+        )}
+
+        {siblings.length > 0 && (
+          <span
+            className="px-1.5 py-0.5 rounded flex-shrink-0 text-[10px] font-medium inline-flex items-center gap-1"
+            style={{
+              color: 'var(--accent)',
+              background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+              border: '1px solid var(--border)',
+              cursor: 'help',
+            }}
+            title={bodyTip}
+            aria-label={`${siblings.length} other Remedy session${siblings.length > 1 ? 's' : ''} working`}
+          >
+            <span aria-hidden="true">🫀</span>
+            {siblings.length === 1
+              ? `1 other muscle · ${siblings[0].muscle || siblings[0].project || 'working'}`
+              : `${siblings.length} other muscles working`}
+          </span>
         )}
 
         {dockVision.show && dockVision.line ? (
