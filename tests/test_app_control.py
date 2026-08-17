@@ -58,7 +58,7 @@ def test_all_valid_actions_enqueue():
 
 
 def test_queue_is_capped():
-    for i in range(100):
+    for _i in range(100):
         request_app_action("focus_composer")
     # deque(maxlen=32) — never unbounded
     bus = app_control_bus()

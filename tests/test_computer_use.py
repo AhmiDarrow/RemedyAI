@@ -822,11 +822,25 @@ def test_wait_honors_ui_command_without_claim(tmp_path: Path):
     assert finished.status == "done"
 
 
-def test_claim_next_skips_other_session(tmp_path: Path):
-    """One WebView rail: do not claim a background tab's pending job."""
+def _streaming(monkeypatch, *sids: str) -> None:
+    """Pretend these sessions have a live turn (turn_context stream claim)."""
+    from remedy.core.computer import host_bridge as hb
+
+    live = set(sids)
+    monkeypatch.setattr(
+        hb.ComputerHostBridge,
+        "_session_is_streaming",
+        staticmethod(lambda sid: sid in live),
+    )
+
+
+def test_claim_next_skips_other_session_while_focused_tab_is_busy(tmp_path: Path, monkeypatch):
+    """One WebView rail: a busy focused tab is protected — a background tab's
+    pending job stays pending (no wrong-tab navigate mid-turn)."""
     from remedy.core.computer.host_bridge import ComputerHostBridge
 
     b = ComputerHostBridge(home_dir=tmp_path)
+    _streaming(monkeypatch, "sess-a")
     focused = b.enqueue("click", {"x": 1}, session_id="sess-a")
     other = b.enqueue("click", {"x": 2}, session_id="sess-b")
     b.set_focused_session("sess-a")
@@ -839,11 +853,30 @@ def test_claim_next_skips_other_session(tmp_path: Path):
     assert claimed_b.id == other.id
 
 
-def test_take_ui_command_skips_other_session(tmp_path: Path):
-    """Focused-session take must leave another tab's open_browser command."""
+def test_claim_next_rail_follows_driver_when_focused_tab_idle(tmp_path: Path, monkeypatch):
+    """Focused desktop tab idle → a session driven from the WebUI / harness /
+    another tab gets the rail instead of starving (the "host offline →
+    improvise on the desktop" failure)."""
     from remedy.core.computer.host_bridge import ComputerHostBridge
 
     b = ComputerHostBridge(home_dir=tmp_path)
+    _streaming(monkeypatch, "sess-b")  # only the driver is mid-turn
+    other = b.enqueue("page_text", {}, session_id="sess-b")
+    b.set_focused_session("sess-a")
+    claimed = b.claim_next(session_id="sess-a")  # SPA polls with its own tab
+    assert claimed is not None
+    assert claimed.id == other.id
+
+
+def test_take_ui_command_skips_other_session_while_focused_tab_is_busy(
+    tmp_path: Path, monkeypatch
+):
+    """Focused-session take must leave another tab's open_browser command
+    while the focused tab is mid-turn; an idle focused tab lets it through."""
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    _streaming(monkeypatch, "sess-a")
     job = b.enqueue("navigate", {"url": "https://example.com/b"}, session_id="sess-b")
     assert job.session_id == "sess-b"
     cmd = b.peek_ui_command()
@@ -857,6 +890,12 @@ def test_take_ui_command_skips_other_session(tmp_path: Path):
     assert taken is not None
     assert taken.get("job_id") == job.id
     assert taken.get("session_id") == "sess-b"
+    # Idle focused tab: the driver's open_browser goes through.
+    _streaming(monkeypatch)
+    job2 = b.enqueue("navigate", {"url": "https://example.com/c"}, session_id="sess-c")
+    b.set_focused_session("sess-a")
+    taken2 = b.take_ui_command()
+    assert taken2 is not None and taken2.get("job_id") == job2.id
 
 
 def test_claim_next_exclude_and_only(tmp_path: Path):
@@ -878,7 +917,7 @@ def test_claim_next_exclude_and_only(tmp_path: Path):
     assert only_nav.id == nav.id
 
 
-def test_renudge_keeps_session_id(tmp_path: Path):
+def test_renudge_keeps_session_id(tmp_path: Path, monkeypatch):
     from remedy.core.computer.host_bridge import ComputerHostBridge
 
     b = ComputerHostBridge(home_dir=tmp_path)
@@ -890,6 +929,7 @@ def test_renudge_keeps_session_id(tmp_path: Path):
     assert cmd is not None
     assert cmd.get("session_id") == "sess-a"
     assert cmd.get("url") == "https://example.com/a"
+    _streaming(monkeypatch, "sess-b")
     b.set_focused_session("sess-b")
     assert b.take_ui_command() is None
 
@@ -2011,3 +2051,49 @@ def test_resolve_key_combo_unknown_raises():
         resolve_key_combo("notakey", vk_scan=_fake_us_vk_scan)
     with _pytest.raises(ValueError):
         resolve_key_combo("€", vk_scan=_fake_us_vk_scan)  # not on fake layout
+
+
+def test_host_browser_launch_is_refused(tmp_path):
+    """computer_app firefox/chrome/edge is a HARD refusal — web work lives in
+    the in-app rail; driving the owner's browser gives no page eyes and
+    hijacks their session (the rail-starved fallback the poller fix removed)."""
+    import json as _json
+
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    for name in ("firefox", "chrome", "msedge", "Microsoft Edge", "brave", "firefox.exe"):
+        d = _json.loads(ex.run(ComputerAction.APP, target="desktop", app=name))
+        assert d["ok"] is False, name
+        assert "in-app Browser rail" in d["message"], name
+        assert d.get("refused") == "host_browser" or (d.get("extra") or {}).get(
+            "refused"
+        ) == "host_browser", name
+
+    # A non-browser app is unaffected by the guard (block is browser-specific).
+    from remedy.core.computer import executor as _ex
+
+    assert _ex._is_host_browser("notepad") is False
+    assert _ex._is_host_browser("calculator") is False
+    assert _ex._is_host_browser("code") is False  # VS Code, not a web browser
+
+
+def test_host_browser_window_focus_is_refused(tmp_path):
+    """Focusing a browser window by title is refused the same way."""
+    import json as _json
+
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    d = _json.loads(
+        ex.run(
+            ComputerAction.WINDOWS,
+            target="desktop",
+            mode="focus",
+            title="Shopping Harness — Mozilla Firefox",
+        )
+    )
+    assert d["ok"] is False
+    assert "in-app Browser rail" in d["message"]

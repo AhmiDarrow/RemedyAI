@@ -122,7 +122,7 @@ def test_not_green_message_directs_model():
 
 # --- diverse repair: rotate strategies when one stalls --------------------
 
-from remedy.core.build_persist import iterate_to_green_multi
+from remedy.core.build_persist import iterate_to_green_multi  # noqa: E402
 
 
 def test_second_strategy_lands_when_first_stalls():
@@ -131,7 +131,7 @@ def test_second_strategy_lands_when_first_stalls():
 
     def verify():
         # green only after B has run (tracked by a mutable the strategies flip)
-        i = calls["n"]
+        calls["n"]
         calls["n"] += 1
         return {"ok": state["green"], "progress": state["prog"]}
 
@@ -219,7 +219,7 @@ def test_empty_strategies_safe():
 
 # --- building makes her stronger at building (organism learning) ----------
 
-from remedy.core.build_persist import build_lesson_from_outcome
+from remedy.core.build_persist import build_lesson_from_outcome  # noqa: E402
 
 
 def test_green_drive_becomes_a_reinforcing_lesson():
@@ -272,7 +272,7 @@ def test_build_lesson_lands_in_soul_field(tmp_path):
 
 # --- learned lessons steer future strategy order (loop fully closed) ------
 
-from remedy.core.build_persist import order_strategy_names, strategy_win_counts
+from remedy.core.build_persist import order_strategy_names, strategy_win_counts  # noqa: E402
 
 
 def _green(strategy: str):

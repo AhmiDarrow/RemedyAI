@@ -320,3 +320,24 @@ def test_get_provider_demo():
     headers = p.auth_headers("")
     assert "Authorization" in headers
     assert "Bearer" in headers["Authorization"]
+
+
+def test_public_catalog_never_echoes_key_material():
+    """GET /api/providers is static metadata — a configured key must never
+    appear, and the only 'sk-' in the payload is help text (D-PROVIDERS-LEAK
+    was a substring false positive on "do not paste sk-ant-oat tokens")."""
+    import json
+    import re
+
+    from remedy.interfaces.config import public_provider_catalog
+
+    fake = "sk-ant-api03-ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+    cfg = {
+        "provider_keys": {"anthropic": fake, "openai": "sk-" + "Q" * 40},
+        "llm_api_key": fake,
+        "llm_provider": "anthropic",
+    }
+    blob = json.dumps(public_provider_catalog(cfg))
+    assert fake not in blob
+    assert "Q" * 40 not in blob
+    assert not re.search(r"\b(sk|xai)-[A-Za-z0-9_\-]{20,}", blob)

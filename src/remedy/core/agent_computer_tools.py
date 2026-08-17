@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 
 from remedy.core.computer.executor import get_computer_executor
@@ -50,10 +51,8 @@ def _page_context(ex: Any) -> str:
     never logged, never sent to a model.
     """
     bits: list[str] = []
-    try:
+    with contextlib.suppress(Exception):
         bits.append(str(ex.bridge.last_navigate_url() or ""))
-    except Exception:
-        pass
     try:
         info = ex.bridge.last_elements_info() or {}
         bits.append(str(info.get("target") or ""))

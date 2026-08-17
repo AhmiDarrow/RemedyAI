@@ -25,8 +25,9 @@ of claiming done.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 DEFAULT_MAX_ROUNDS = 6
 DEFAULT_PATIENCE = 2
@@ -202,7 +203,7 @@ def _advance(si: int, n: int) -> tuple[int, int, bool]:
     return si, 0, False
 
 
-import re as _re
+import re as _re  # noqa: E402
 
 _VIA_RE = _re.compile(r"via\s+([a-z][a-z0-9-]*)", _re.I)
 

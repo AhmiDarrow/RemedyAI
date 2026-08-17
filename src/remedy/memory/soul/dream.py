@@ -30,6 +30,29 @@ _DEFAULT_DREAM_COOLDOWN_S = 120.0
 _last_dream_ts: dict[str, float] = {}
 
 
+def _run_coro_sync(factory: Any, *, timeout: float = 8.0) -> Any:
+    """Run ``await factory()`` to completion from sync code.
+
+    Works whether or not an event loop is running on this thread. The
+    coroutine is created *inside* the branch that runs it, so a failure in
+    the thread path (a memory backend bound to another loop raising
+    RuntimeError, a timeout) can never fall through into a second
+    ``asyncio.run`` on the running loop and leak an un-awaited coroutine.
+    """
+    import asyncio
+    import concurrent.futures
+
+    def _runner() -> Any:
+        return asyncio.run(factory())
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return _runner()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(_runner).result(timeout=timeout)
+
+
 def _home_key(home: str | Any) -> str:
     from pathlib import Path
 
@@ -115,7 +138,7 @@ def _local_enrich_episodes(sf: SoulField, *, base_url: str = "") -> dict[str, An
         if not isinstance(raw, dict):
             continue
         try:
-            idx = int(raw.get("i"))
+            idx = int(raw.get("i", -1))
         except (TypeError, ValueError):
             continue
         if idx < 0 or idx >= len(recent):
@@ -224,9 +247,6 @@ def dream_cycle(
     # Promote durable life/goal partner facts into soul pledges (organism densify)
     if memory is not None:
         with suppress(Exception):
-            import asyncio
-            import concurrent.futures
-
             async def _life() -> int:
                 profile = await memory.get_or_create_profile()
                 from remedy.memory.living import life_goal_lines
@@ -239,32 +259,17 @@ def dream_cycle(
                 sf.pledges = sf.pledges[-16:]
                 return n
 
-            try:
-                asyncio.get_running_loop()
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    pool.submit(lambda: asyncio.run(_life())).result(timeout=8)
-            except RuntimeError:
-                asyncio.run(_life())
+            _run_coro_sync(_life, timeout=8)
 
     # Dreams of the future: bind their goals to how I will partner better
     dreams_n = 0
     profile_for_dream: Any = None
     if memory is not None:
         with suppress(Exception):
-            import asyncio
-            import concurrent.futures
-
             async def _prof() -> Any:
                 return await memory.get_or_create_profile()
 
-            try:
-                asyncio.get_running_loop()
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    profile_for_dream = pool.submit(lambda: asyncio.run(_prof())).result(
-                        timeout=8
-                    )
-            except RuntimeError:
-                profile_for_dream = asyncio.run(_prof())
+            profile_for_dream = _run_coro_sync(_prof, timeout=8)
     with suppress(Exception):
         from remedy.memory.soul.partner_dream import apply_partner_dreams, compose_partner_dreams
 
@@ -282,9 +287,6 @@ def dream_cycle(
     partner_added = 0
     if memory is not None and sf.relational.open_threads:
         with suppress(Exception):
-            import asyncio
-            import concurrent.futures
-
             from remedy.memory.partner_memory import upsert_profile_fact
 
             top = sf.relational.open_threads[-1]
@@ -301,14 +303,7 @@ def dream_cycle(
                 await memory.save_user_profile(profile)
                 return 1 if action in ("added", "reinforced") else 0
 
-            try:
-                asyncio.get_running_loop()
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    partner_added = pool.submit(lambda: asyncio.run(_add())).result(
-                        timeout=8
-                    )
-            except RuntimeError:
-                partner_added = asyncio.run(_add())
+            partner_added = int(_run_coro_sync(_add, timeout=8) or 0)
 
     # Bridge top pledges into Time Crystal life horizon
     crystal_n = 0

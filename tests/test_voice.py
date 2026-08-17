@@ -8,7 +8,6 @@ contract (503 + fallback hints), plus engine paths via mocks.
 from __future__ import annotations
 
 import io
-import json
 import wave
 from pathlib import Path
 
@@ -23,7 +22,6 @@ from remedy.voice.service import (
     voice_for_gender,
     voice_status,
 )
-
 
 # ---------------------------------------------------------------------------
 # Gender → voice (befitting the assigned gender role)

@@ -1359,14 +1359,16 @@ fn open_path(path: String) -> Result<String, String> {
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        let status = Command::new("xdg-open")
+        // spawn, not status(): some xdg-open handlers block until the
+        // launched app exits, which froze the Files slide on Linux/WSLg.
+        Command::new("xdg-open")
             .arg(&p)
-            .status()
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
             .map_err(|e| format!("open_path: {e}"))?;
-        if status.success() {
-            return Ok(format!("Opened {}", p.display()));
-        }
-        return Err(format!("open_path failed: {status}"));
+        return Ok(format!("Opened {}", p.display()));
     }
 }
 
@@ -1610,14 +1612,15 @@ fn open_external_url(url: String, prefer_firefox: Option<bool>) -> Result<String
                 return Ok(format!("Opened in Firefox: {url}"));
             }
         }
-        let status = Command::new("xdg-open")
+        // spawn, not status(): xdg-open may block until the browser exits.
+        Command::new("xdg-open")
             .arg(&url)
-            .status()
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
             .map_err(|e| format!("open url failed: {e}"))?;
-        if status.success() {
-            return Ok(format!("Opened default browser: {url}"));
-        }
-        return Err(format!("xdg-open exited {status}"));
+        return Ok(format!("Opened default browser: {url}"));
     }
 
     #[allow(unreachable_code)]
@@ -2088,15 +2091,7 @@ fn wslg_windows_workarea(hint: Option<(i32, i32, u32, u32)>) -> Option<(i32, i32
     }
     let script = wslg_workarea_script()?;
     let ps = wslg_powershell_exe()?;
-    let script_arg = wslg_windows_path(&script);
-    let mut cmd = Command::new(ps);
-    cmd.args(["-NoProfile", "-NonInteractive", "-File"])
-        .arg(&script_arg);
-    if let Some((x, y, w, h)) = hint {
-        cmd.env("REMEDY_HINT_RECT", format!("{x},{y},{w},{h}"));
-    }
-    let out = cmd.output().ok()?;
-    let text = String::from_utf8_lossy(&out.stdout);
+    let text = wslg_run_workarea_script(&ps, &script, hint, None);
     for line in text.lines() {
         let line = line.trim();
         let Some(rest) = line.strip_prefix("work=") else {
@@ -2118,6 +2113,31 @@ fn wslg_windows_workarea(hint: Option<(i32, i32, u32, u32)>) -> Option<(i32, i32
         return Some(wa);
     }
     None
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn wslg_b64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        out.push(T[((n >> 18) & 63) as usize] as char);
+        out.push(T[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 { T[((n >> 6) & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { T[(n & 63) as usize] as char } else { '=' });
+    }
+    out
 }
 
 #[cfg(any(
@@ -2221,16 +2241,69 @@ fn wslg_place_host_on_workarea(
     let Some(ps) = wslg_powershell_exe() else {
         return;
     };
-    let script_arg = wslg_windows_path(&script);
     let place = format!("{x},{y},{width},{height}");
+    let _ = wslg_run_workarea_script(&ps, &script, hint, Some(&place));
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+/// Run `wslg_workarea.ps1` through Windows PowerShell and return stdout.
+///
+/// Packaged installs live under /usr/lib → Windows sees the script as a UNC
+/// path (`\wsl.localhost\...`). The default execution policy refuses
+/// unsigned remote scripts, so the packaged .deb/AppImage never got a work
+/// area (window stayed unmaximized). `-ExecutionPolicy Bypass` is
+/// process-scoped; if group policy pins it, fall back to `-EncodedCommand`,
+/// which carries the script body inline and never hits the file-policy path.
+fn wslg_run_workarea_script(
+    ps: &Path,
+    script: &Path,
+    hint: Option<(i32, i32, u32, u32)>,
+    place: Option<&str>,
+) -> String {
+    let apply_env = |cmd: &mut Command| {
+        if let Some((x, y, w, h)) = hint {
+            cmd.env("REMEDY_HINT_RECT", format!("{x},{y},{w},{h}"));
+        }
+        if let Some(p) = place {
+            cmd.env("REMEDY_PLACE_HOST", p);
+        }
+    };
+    let script_arg = wslg_windows_path(script);
     let mut cmd = Command::new(ps);
-    cmd.args(["-NoProfile", "-NonInteractive", "-File"])
-        .arg(&script_arg)
-        .env("REMEDY_PLACE_HOST", &place);
-    if let Some((hx, hy, hw, hh)) = hint {
-        cmd.env("REMEDY_HINT_RECT", format!("{hx},{hy},{hw},{hh}"));
+    cmd.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+    ])
+    .arg(&script_arg);
+    apply_env(&mut cmd);
+    let mut text = cmd
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    if text.lines().any(|l| l.trim().starts_with("work=")) {
+        return text;
     }
-    let _ = cmd.status();
+    if let Ok(body) = std::fs::read_to_string(script) {
+        let utf16: Vec<u8> = body.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        let encoded = wslg_b64(&utf16);
+        let mut cmd2 = Command::new(ps);
+        cmd2.args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &encoded]);
+        apply_env(&mut cmd2);
+        if let Ok(o) = cmd2.output() {
+            text = String::from_utf8_lossy(&o.stdout).into_owned();
+        }
+    }
+    text
 }
 
 #[cfg(any(
