@@ -292,7 +292,7 @@ class ComputerExecutor:
                     record_action,
                 )
 
-                if act.value in ("click", "act", "drag"):
+                if act.value in ("click", "act", "drag", "press_hold"):
                     host = _skill_host(
                         self.bridge.last_navigate_url() or host_label(tgt)
                     )
@@ -919,6 +919,8 @@ class ComputerExecutor:
             ComputerAction.SNAPSHOT,
             ComputerAction.PAGE_TEXT,
             ComputerAction.FIND,
+            ComputerAction.PRESS_HOLD,
+            ComputerAction.DRAG,
         ):
             payload.setdefault("ui", {})
             if isinstance(payload.get("ui"), dict):
@@ -1443,27 +1445,44 @@ class ComputerExecutor:
                 message="Aborted by user",
                 extra={"aborted": True, "text": text_q},
             )
-        try:
-            desk = self._run_desktop(ComputerAction.CLICK, text=text_q, **{
-                k: v for k, v in kwargs.items() if k not in ("text", "ref", "target")
-            })
-            if desk.get("ok"):
-                desk["note"] = (
-                    f"Browser rail click missed ({last_err}); "
-                    "clicked matching desktop control instead"
-                )
-                desk["fallback"] = "desktop"
-                return desk
-        except Exception:
-            pass
+        # A missed rail click must NOT fall back to driving the desktop — web
+        # work lives in the rail (the old desktop-click fallback is how Remedy
+        # walked off the rail onto a look-alike control).
+        #
+        # A press-and-hold / "I'm not a robot" wall is NOT a dead end: Remedy is
+        # the owner's authorized hands (many owners are disabled and cannot do
+        # the gesture themselves), so she performs the mechanical action rather
+        # than punting it. Point her at the hold capability, still on the rail.
+        hold_wall = any(
+            w in text_q.lower()
+            for w in ("press & hold", "press and hold", "hold to confirm", "hold to verify",
+                      "activate and hold", "press hold")
+        )
+        if hold_wall:
+            return public_result(
+                ok=False,
+                target="browser",
+                action="click",
+                message=(
+                    "That is a press-and-hold verification. A plain click will not "
+                    "pass it — use computer_press_hold on the button (by text, ref, "
+                    "or x/y). You are the owner's authorized hands for this "
+                    "accessibility action; complete it on the rail. If it sits in a "
+                    "challenge iframe you can't reach by text, computer_screenshot to "
+                    "locate the button, then computer_press_hold x=… y=…."
+                ),
+                extra={"text": text_q, "needs": "press_hold"},
+            )
         return public_result(
             ok=False,
             target="browser",
             action="click",
             message=(
-                f"Could not click text={text_q!r} in Browser rail ({last_err}). "
-                "If this is a desktop app/game, retry computer_click "
-                "target=desktop (or computer_snapshot target=desktop first)."
+                f"Could not click text={text_q!r} in the Browser rail ({last_err}). "
+                "Re-read the rail with computer_snapshot / computer_page_text and try "
+                "again by ref, or add the item's card text to disambiguate "
+                "(e.g. text='Add to cart <product name>'). Stay on the rail — do "
+                "NOT switch to the desktop for a web page."
             ),
             extra={"text": text_q},
         )

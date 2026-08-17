@@ -60,3 +60,65 @@ def test_som_list_and_email_boost() -> None:
         "log me in with username user@example.com please"
     )
     assert creds.get("email") == "user@example.com"
+
+
+def test_card_context_disambiguates_identical_controls():
+    """Five identical 'Set as store' buttons — the query picks the one whose
+    CARD context matches the store name/address. This is the store-selection
+    failure: found the store but no way to click the right control."""
+    from remedy.core.computer.elements import find_best_element, score_element
+
+    els = [
+        {
+            "ref": f"e{i+1}",
+            "tag": "button",
+            "name": "Set as store",
+            "context": ctx,
+            "w": 120,
+            "h": 36,
+            "x": 300,
+            "y": 100 + i * 80,
+        }
+        for i, ctx in enumerate(
+            [
+                "Springfield Sunshine 1500 E Sunshine St, Springfield MO 65804",
+                "Hueytown Supercenter 1420 Ave, Hueytown AL 35023",
+                "Republic Rd 3520 W Republic Rd, Springfield MO 65807",
+            ]
+        )
+    ]
+    best = find_best_element(els, "set as store Hueytown 35023")
+    assert best is not None and best["ref"] == "e2"
+    # The right card outscores an identical-label sibling.
+    assert score_element(els[1], "set as store Hueytown 35023") > score_element(
+        els[0], "set as store Hueytown 35023"
+    )
+
+
+def test_som_shows_context_and_selected_state():
+    """SoM list surfaces the card context (to disambiguate) and aria state (so
+    the model does not re-toggle an already-selected store/tab)."""
+    from remedy.core.computer.elements import format_som_list
+
+    els = [
+        {
+            "ref": "e1",
+            "tag": "button",
+            "name": "Set as store",
+            "context": "Hueytown Supercenter 1420 Ave AL 35023",
+            "x": 1,
+            "y": 1,
+        },
+        {
+            "ref": "e2",
+            "tag": "button",
+            "name": "Your store",
+            "context": "Springfield Sunshine",
+            "state": "true",
+            "x": 1,
+            "y": 2,
+        },
+    ]
+    som = format_som_list(els)
+    assert 'in: "Hueytown Supercenter' in som
+    assert "[selected]" in som  # e2 already-chosen store
