@@ -6,6 +6,8 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react'
+import { skillDeleteConfirm } from '../utils/confirmMessages'
+import { ConfirmDialog } from './ConfirmDialog'
 import { SkillsLibrary } from './SkillsLibrary'
 
 interface PanelProps {
@@ -781,6 +783,8 @@ export function SkillsPanel({
   const [editSaving, setEditSaving] = useState(false)
   const [packMsg, setPackMsg] = useState<string | null>(null)
   const [budgetBanner, setBudgetBanner] = useState<string | null>(null)
+  // Remedy's own confirm for skill deletion (never the browser popup).
+  const [confirmSkill, setConfirmSkill] = useState<string | null>(null)
 
   const [reuse, setReuse] = useState<{
     total_activations: number
@@ -872,13 +876,10 @@ export function SkillsPanel({
     }
   }
 
-  const deleteSkillRow = async (name: string) => {
-    const ok = window.confirm(
-      `Delete skill “${name}” permanently?\n\n` +
-        `This removes it from the agent and deletes its folder under ~/.remedy/skills/.\n` +
-        `Bundled skills cannot be deleted this way. You can reinstall library skills later.`,
-    )
-    if (!ok) return
+  const deleteSkillRow = (name: string) =>
+    setConfirmSkill(name)
+
+  const doDeleteSkill = async (name: string) => {
     setBusy(name)
     setError(null)
     try {
@@ -1353,6 +1354,16 @@ export function SkillsPanel({
           )}
         </>
       ) : null}
+      <ConfirmDialog
+        open={Boolean(confirmSkill)}
+        {...skillDeleteConfirm(confirmSkill || '')}
+        onCancel={() => setConfirmSkill(null)}
+        onConfirm={() => {
+          const name = confirmSkill
+          setConfirmSkill(null)
+          if (name) void doDeleteSkill(name)
+        }}
+      />
     </Panel>
   )
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { isTauri, tauriInvoke } from '../../api/tauri'
+import { ConfirmDialog } from '../ConfirmDialog'
 
 function storageKey(sessionId: string | null) {
   return `remedy.scratch.${sessionId || 'global'}`
@@ -21,6 +22,7 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
   const [preview, setPreview] = useState(false)
   const [status, setStatus] = useState('')
   const [dirty, setDirty] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
   const key = useMemo(() => storageKey(sessionId), [sessionId])
   const persistTimer = useRef<number | null>(null)
   const statusTimer = useRef<number | null>(null)
@@ -211,13 +213,7 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
           className="px-1.5 py-0.5 rounded disabled:opacity-40"
           style={{ color: 'var(--error)' }}
           disabled={!text}
-          onClick={() => {
-            if (window.confirm('Clear this scratch pad?')) {
-              save('', true)
-              flashStatus('Cleared')
-              taRef.current?.focus()
-            }
-          }}
+          onClick={() => setConfirmClear(true)}
         >
           Clear
         </button>
@@ -286,6 +282,19 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
           {stats.words === 1 ? '' : 's'} · {stats.chars} char{stats.chars === 1 ? '' : 's'}
         </span>
       </div>
+      <ConfirmDialog
+        open={confirmClear}
+        title="Clear this scratch pad?"
+        body={'Everything written here is erased. This can’t be undone — use “Save as…” first if you want to keep it.'}
+        confirmLabel="Clear pad"
+        onCancel={() => setConfirmClear(false)}
+        onConfirm={() => {
+          setConfirmClear(false)
+          save('', true)
+          flashStatus('Cleared')
+          taRef.current?.focus()
+        }}
+      />
     </div>
   )
 }
