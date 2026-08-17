@@ -1,6 +1,7 @@
 """Provider auth routes (xAI OAuth device-code + API key)."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 from typing import Any
@@ -490,7 +491,9 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         from remedy.interfaces.xai_auth import start_device_login
 
         try:
-            result = start_device_login(home=_home_from_config())
+            # Network round-trip to xAI — off the loop so a slow accounts
+            # server cannot stall every other request (chat stream, hello).
+            result = await asyncio.to_thread(start_device_login, home=_home_from_config())
         except Exception as exc:
             logger.warning("xAI device login failed: %s", exc)
             raise HTTPException(status_code=502, detail=f"xAI OAuth start failed: {exc}") from exc

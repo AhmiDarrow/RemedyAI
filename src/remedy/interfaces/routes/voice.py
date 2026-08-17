@@ -8,6 +8,7 @@ degrades to OS voices (speechSynthesis) instead of erroring at the owner.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import tempfile
 from pathlib import Path
@@ -195,10 +196,8 @@ def register_voice_routes(
             )
         finally:
             if tmp is not None:
-                try:
+                with contextlib.suppress(OSError):
                     tmp.unlink(missing_ok=True)
-                except OSError:
-                    pass
         if result is None:
             return Response(
                 content=(

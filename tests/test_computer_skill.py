@@ -10,7 +10,6 @@ from remedy.core.computer.computer_skill import (
     steer_hint,
 )
 
-
 # --- approach classification ----------------------------------------------
 
 
@@ -103,7 +102,7 @@ def test_full_loop_record_then_steer(tmp_path):
 
 # --- mastery becomes part of who she is (organism lesson) ------------------
 
-from remedy.core.computer.computer_skill import maybe_site_lesson
+from remedy.core.computer.computer_skill import maybe_site_lesson  # noqa: E402
 
 
 def test_mastery_lesson_fires_once(tmp_path):

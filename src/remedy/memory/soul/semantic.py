@@ -29,9 +29,10 @@ import math
 import os
 import threading
 import time
+from collections.abc import Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from remedy.memory.soul.field import soul_dir
 
@@ -141,7 +142,7 @@ def cosine(a: Sequence[float], b: Sequence[float]) -> float:
     dot = 0.0
     na = 0.0
     nb = 0.0
-    for x, y in zip(a, b):
+    for x, y in zip(a, b, strict=False):
         dot += x * y
         na += x * x
         nb += y * y
@@ -219,7 +220,7 @@ def _embed_cached(texts: list[str], home: str | Path | None) -> dict[str, list[f
     with _lock:
         cache = _model_invalidated(_load_cache(home))  # re-read; don't clobber peers
         vecs = cache.get("vecs") or {}
-        for t, v in zip(missing, fresh):
+        for t, v in zip(missing, fresh, strict=False):
             result[t] = v
             vecs[_hash(t)] = {"v": v, "ts": now, "t": t[:80]}
         cache["vecs"] = vecs

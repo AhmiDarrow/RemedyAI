@@ -133,10 +133,7 @@ def _luhn_ok(digits: str) -> bool:
 
 def looks_like_raw_card(text: str) -> bool:
     """True when *text* contains a Luhn-valid 13–19 digit card number."""
-    for m in _CARD_CANDIDATE_RE.finditer(text or ""):
-        if _luhn_ok(m.group(0)):
-            return True
-    return False
+    return any(_luhn_ok(m.group(0)) for m in _CARD_CANDIDATE_RE.finditer(text or ""))
 
 
 def raw_secret_checkpoint(tool_name: str, typed_text: str) -> str | None:
