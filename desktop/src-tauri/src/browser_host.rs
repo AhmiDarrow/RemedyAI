@@ -2065,10 +2065,14 @@ fn computer_host_loop(app: AppHandle) {
             .map(|w| w.is_visible().unwrap_or(true) && !w.is_minimized().unwrap_or(false))
             .unwrap_or(true);
         // `ready` is a Rust-only probe (the SPA rejects it) — always ours.
+        // When the SPA is down (desktop minimized / tray — the common WebUI
+        // case), Rust must drive EVERYTHING, interactive actions included, or
+        // click/type/press-hold sit unclaimed until the executor times out
+        // ("timeout waiting for desktop host"). handle_job runs them all.
         let only = if spa_can_claim {
             "navigate,ready"
         } else {
-            "navigate,snapshot,a11y,page_text,ready"
+            "navigate,snapshot,a11y,page_text,ready,click,type,key,scroll,drag,press_hold"
         };
         if let Ok(resp) = auth_req(agent.get(
             &api_url(&format!("/api/computer/jobs/next?only={only}")),
@@ -2097,6 +2101,7 @@ fn computer_host_loop(app: AppHandle) {
                     if matches!(
                         action,
                         "snapshot" | "a11y" | "page_text" | "ready" | "click"
+                            | "type" | "key" | "scroll" | "drag" | "press_hold"
                     ) {
                         let app2 = app.clone();
                         let agent2 = agent.clone();
@@ -2412,7 +2417,56 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
         return;
     }
 
-    // type/key/scroll left for SPA poller
+    // type / key / scroll / drag — Rust drives these too when the SPA is down
+    // (desktop minimized). browser_agent_action already implements them.
+    if matches!(action.as_str(), "type" | "key" | "scroll" | "drag") {
+        let text = payload.get("text").and_then(|t| t.as_str()).map(String::from);
+        let key = payload.get("key").and_then(|t| t.as_str()).map(String::from);
+        let x = payload.get("x").and_then(|v| v.as_f64());
+        let y = payload.get("y").and_then(|v| v.as_f64());
+        let x2 = payload.get("x2").and_then(|v| v.as_f64());
+        let y2 = payload.get("y2").and_then(|v| v.as_f64());
+        let dy = payload.get("dy").and_then(|v| v.as_i64()).map(|v| v as i32);
+        match browser_agent_action(
+            app.clone(),
+            action.clone(),
+            x,
+            y,
+            x2,
+            y2,
+            text,
+            key,
+            None,
+            dy,
+            None,
+            None,
+        ) {
+            Ok(raw) => {
+                let ok = !raw.starts_with("no-")
+                    && !raw.starts_with("missing")
+                    && !raw.starts_with("error");
+                complete_job(
+                    agent,
+                    &id,
+                    ok,
+                    json!({
+                        "ok": ok,
+                        "target": "browser",
+                        "action": action,
+                        "message": if ok { format!("{action} ok ({raw})") }
+                                   else { format!("{action} failed: {raw}") },
+                        "detail": raw,
+                        "via": "rust-host",
+                    }),
+                    if ok { None } else { Some(format!("{action} failed")) },
+                );
+            }
+            Err(e) => complete_job(agent, &id, false, json!({}), Some(e)),
+        }
+        ack_ui_command(agent, &id);
+        return;
+    }
+
     log::info!("computer-host: job {id} action={action} left for SPA or next tick");
 }
 
@@ -2999,6 +3053,11 @@ pub fn browser_agent_action(
   const q='{escaped}'.toLowerCase().trim();
   if(!q) return 'missing-text';
   const qt=q.split(/\s+/).filter(Boolean);
+  // Meaningful tokens only — a fuzzy hit on a stopword ("to","a","the") or a
+  // 1-2 char fragment must NOT fire a click for a label that isn't there.
+  const STOP=new Set(['the','a','an','to','of','in','on','at','for','and','or',
+    'my','me','it','one','some','this','that','with','from','into','your','their']);
+  const mqt=qt.filter(t=>t.length>=3 && !STOP.has(t));
   const sel='a,button,input,textarea,select,[role=button],[role=link],[role=tab],[role=menuitem],[role=option],[role=radio],[role=checkbox],[contenteditable=true],summary,label,[onclick]';
   function score(el){{
     if(!window.__rmdyVisible(el)) return -1;
@@ -3011,19 +3070,21 @@ pub fn browser_agent_action(
     else if(q.includes(name)&&name.length>2) s=40;
     else {{
       const nt=name.split(/\s+/);
-      const hit=qt.filter(t=>nt.some(n=>n.includes(t)||t.includes(n))).length;
-      if(hit) s=15*(hit/qt.length);
-      else s=0;
+      const use=mqt.length?mqt:qt;
+      const hit=use.filter(t=>nt.some(n=>n.includes(t)||t.includes(n))).length;
+      // Full meaningful match ≈22 (fires); a lone spurious token stays under
+      // the 15 no-match cutoff, so a wrong label is not clicked.
+      s = use.length ? 22*(hit/use.length) : 0;
     }}
     // Context-aware disambiguation: query tokens the control's LABEL does not
     // cover, matched against its CARD context, break ties between N identical
     // controls (e.g. five "Set as store" buttons → the Hueytown one). This is
     // what lets "set as store hueytown supercenter" pick the right store.
     let ctx=''; try {{ ctx=window.__rmdyCtx(el).toLowerCase(); }} catch(e) {{}}
-    if(ctx && qt.length>1){{
-      const missing=qt.filter(t=>!name.includes(t));
+    if(ctx && mqt.length>1){{
+      const missing=mqt.filter(t=>!name.includes(t));
       const inCtx=missing.filter(t=>ctx.includes(t)).length;
-      if(inCtx) s+=20*(inCtx/qt.length);
+      if(inCtx) s+=20*(inCtx/mqt.length);
     }}
     if(s<=0) return -1;
     if(r.width>8&&r.width<900&&r.height>8&&r.height<220) s+=5;

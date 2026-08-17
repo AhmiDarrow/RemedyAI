@@ -9,6 +9,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
+_STOP = frozenset(
+    ["the", "a", "an", "to", "of", "in", "on", "at", "for", "and", "or", "my", "me", "it", "one", "some", "this", "that", "with", "from", "into", "your", "their"]
+)
+
 
 def _norm(s: str) -> str:
     t = (s or "").lower().strip()
@@ -58,8 +62,11 @@ def score_element(el: dict[str, Any], query: str) -> float:
         score += 40.0
     if q in blob:
         score += 25.0
-    # token overlap
-    q_toks = set(re.findall(r"[a-z0-9]{2,}", q))
+    # token overlap — meaningful tokens only, so a stopword ("to","the") does
+    # not inflate a non-match into a spurious hit.
+    q_toks = {t for t in re.findall(r"[a-z0-9]{2,}", q) if t not in _STOP}
+    if not q_toks:
+        q_toks = set(re.findall(r"[a-z0-9]{2,}", q))
     b_toks = set(re.findall(r"[a-z0-9]{2,}", blob))
     if q_toks and b_toks:
         inter = q_toks & b_toks

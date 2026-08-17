@@ -73,7 +73,13 @@ def test_daily_budget_is_a_hard_ceiling(tmp_path):
     _accumulate_episodes(tmp_path)
     set_vigil_enabled(True, tmp_path, max_wakes_per_day=1, min_gap_s=60)
     reset_dream_cooldown()
-    now = time.time()
+    # Anchor `now` to LOCAL noon so the +1h second tick stays on the same day
+    # — the daily reset is keyed on local date, and running this within an hour
+    # of local midnight used to flip the day and spuriously refund the budget.
+    lt = time.localtime()
+    now = time.mktime(
+        (lt.tm_year, lt.tm_mon, lt.tm_mday, 12, 0, 0, lt.tm_wday, lt.tm_yday, lt.tm_isdst)
+    )
     assert vigil_tick(tmp_path, now=now).get("woke") is True
     reset_dream_cooldown()
     res = vigil_tick(tmp_path, now=now + 3600)

@@ -122,3 +122,18 @@ def test_som_shows_context_and_selected_state():
     som = format_som_list(els)
     assert 'in: "Hueytown Supercenter' in som
     assert "[selected]" in som  # e2 already-chosen store
+
+
+def test_nonsense_query_does_not_fire_on_stopword():
+    """A query with no meaningful overlap must not match a control via a
+    trivial token — 'click XYZZY QUUX' should find nothing, not a random link."""
+    from remedy.core.computer.elements import find_best_element
+
+    els = [
+        {"ref": "e1", "name": "Request a substitution", "tag": "a", "w": 120, "h": 30},
+        {"ref": "e2", "name": "View your orders", "tag": "a", "w": 120, "h": 30},
+    ]
+    # No shared meaningful token → below the 20 min_score → None
+    assert find_best_element(els, "the a to of quuxzzy") is None
+    # But a real meaningful token still matches
+    assert (find_best_element(els, "substitution") or {}).get("ref") == "e1"
