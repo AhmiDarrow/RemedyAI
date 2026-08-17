@@ -69,6 +69,12 @@ def register_workspace_tools(runtime: Any) -> None:
     except Exception:
         pass
     try:
+        from remedy.core.agent_document_tools import register_document_tools
+
+        register_document_tools(runtime)
+    except Exception:
+        pass
+    try:
         from remedy.core.agent_settings_tools import register_settings_tools
 
 
