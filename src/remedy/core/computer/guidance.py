@@ -232,8 +232,32 @@ Native-app power moves (prefer these over pixel guessing):
   them on a secure desktop that blocks all automated input. A desktop
   click/type there returns blocked; tell the owner to approve it and continue.
 - **Pixel-only apps** (game / canvas / no a11y): `computer_screenshot mark=true`
-  overlays numbered boxes on snapshot elements and returns a mark→ref legend —
-  reference a mark instead of estimating x/y.
+  overlays numbered boxes and returns a mark legend. When the app HAS no
+  accessibility tree, marks are detected from pixels (edge/contrast regions) and
+  each legend row carries its own `x`/`y` — click those coordinates directly
+  instead of estimating from the image.
+
+### Desktop app playbook (native software — go straight to the control)
+
+Like retail search URLs, native apps have direct routes. Use the keyboard: it is
+faster and far more reliable than hunting controls.
+
+| App | Go straight there |
+|-----|-------------------|
+| **File Explorer** | `ctrl+l` = address bar → type a full path → `enter`. `ctrl+f` = search box. `f2` rename, `ctrl+shift+n` new folder, `alt+enter` properties. |
+| **Save / Open dialog** | `alt+n` filename box → type FULL path → `alt+s` (Save) / `alt+o` (Open). Never click through the file list. |
+| **Excel / Sheets-like** | Name Box (`ctrl+g` or click it) → type a cell like `B7` → `enter` jumps there. `ctrl+home` top-left, `ctrl+arrow` edge of data, `f2` edit cell, `ctrl+s` save. |
+| **Word / editors** | `ctrl+f` find, `ctrl+h` replace, `ctrl+end` document end, `ctrl+s` save. Read content with `computer_page_text target=desktop` rather than screenshotting pages. |
+| **Browsers (system)** | `ctrl+l` address bar, `ctrl+t` new tab, `ctrl+w` close tab, `f5` reload. Prefer the in-app rail unless the owner asked for their own browser. |
+| **Any app** | `alt` reveals menu-bar access keys; `alt+f4` closes; `ctrl+z` undo (your first move after a mistake). |
+
+Rules that keep native work reliable:
+- Prefer `computer_type ref=cN` (UIA set-value) for any field — atomic and
+  verified. Fall back to click-then-type only when the control has no value.
+- After a destructive or state-changing step, `computer_page_text target=desktop`
+  to CONFIRM the result before reporting done — never assume a keystroke landed.
+- A dialog you did not expect (save prompt, error, "are you sure") is a normal
+  window: snapshot it, read it, then answer it. Do not keep typing past it.
 
 ### Build → run → play (games / GUI / compiled apps)
 
