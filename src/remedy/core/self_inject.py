@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
@@ -29,6 +30,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from remedy.core.project_fingerprint import (
     fingerprint_path,
@@ -169,15 +172,41 @@ async def git_capture(repo: str | Path) -> dict[str, Any]:
     }
 
 
-async def git_restore(repo: str | Path, snapshot: dict[str, Any]) -> str:
-    """Restore the tree to the pre-round snapshot without nuking unrelated dirt.
+def _live_claimed_paths() -> set[str]:
+    """Files another live session is actively working on — never revert these.
+
+    Uses the body-coordination registry: a beacon's claim means a real session
+    (or the owner, through one) has that file open right now.
+    """
+    out: set[str] = set()
+    with suppress(Exception):
+        from remedy.core.coordination import active_beacons
+
+        for beacon in active_beacons():
+            for claimed in beacon.live_claims():
+                out.add(str(claimed).replace("\\", "/").lower())
+    return out
+
+
+async def git_restore(
+    repo: str | Path,
+    snapshot: dict[str, Any],
+    *,
+    round_paths: list[str] | None = None,
+) -> str:
+    """Restore the tree to the pre-round snapshot without nuking unrelated work.
 
     1. ``git reset --hard HEAD`` — discard tracked changes made during the round
        (index + worktree) back to the current HEAD.
     2. Re-apply the **captured** pre-round patch so sibling dirty work that was
        already present when the round started returns (not wiped forever).
-    3. Delete untracked files that appeared *after* the snapshot (round debris);
-       pre-existing untracked files are left alone.
+    3. Delete untracked files **this round created** — and only those.
+
+    ``round_paths`` is the round's own write set. Without it there is no way to
+    tell round debris from a file the owner (or a concurrent session) just
+    created, so nothing untracked is deleted at all. Leaving a stray artifact is
+    always better than destroying someone's new work: this loop has silently
+    eaten concurrent edits before.
     """
     import tempfile
 
@@ -225,24 +254,41 @@ async def git_restore(repo: str | Path, snapshot: dict[str, Any]) -> str:
         except Exception as exc:  # noqa: BLE001
             errors.append(f"patch restore failed: {exc}")
 
-    # Drop untracked files created during the round only
-    snap_untracked = {str(p).replace("\\", "/") for p in (snapshot.get("untracked") or [])}
-    _code, cur_raw, _err = await _git_out(repo, "ls-files", "--others", "--exclude-standard")
-    for rel in cur_raw.splitlines():
-        rel = rel.strip()
-        if not rel:
-            continue
-        norm = rel.replace("\\", "/")
-        if norm in snap_untracked:
-            continue
-        target = repo / rel
-        with suppress(Exception):
-            if target.is_file():
-                target.unlink()
-            elif target.is_dir():
-                import shutil
+    # Drop untracked files THIS ROUND created — nothing else.
+    if round_paths:
+        snap_untracked = {
+            str(p).replace("\\", "/") for p in (snapshot.get("untracked") or [])
+        }
+        mine = {str(p).replace("\\", "/").lstrip("./") for p in round_paths if str(p).strip()}
+        protected = _live_claimed_paths()
+        _code, cur_raw, _err = await _git_out(
+            repo, "ls-files", "--others", "--exclude-standard"
+        )
+        for rel in cur_raw.splitlines():
+            rel = rel.strip()
+            if not rel:
+                continue
+            norm = rel.replace("\\", "/")
+            if norm in snap_untracked:
+                continue  # already dirty before the round started
+            if norm not in mine:
+                continue  # someone else's file — not ours to delete
+            target = repo / rel
+            with suppress(Exception):
+                if str(target.resolve()).replace("\\", "/").lower() in protected:
+                    continue  # a live session is working on it right now
+            with suppress(Exception):
+                if target.is_file():
+                    target.unlink()
+                elif target.is_dir():
+                    import shutil
 
-                shutil.rmtree(target, ignore_errors=True)
+                    shutil.rmtree(target, ignore_errors=True)
+    elif snapshot.get("untracked") is not None:
+        logger.info(
+            "self-inject restore: no round write set — leaving untracked files "
+            "alone rather than risking concurrent work"
+        )
 
     return "; ".join(e for e in errors if e)
 
