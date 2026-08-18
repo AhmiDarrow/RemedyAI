@@ -10,6 +10,7 @@ See ``docs/SELF_INJECT.md`` § Client updates.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import time
@@ -67,14 +68,43 @@ def in_internal_improve() -> bool:
     return bool(_INTERNAL.get())
 
 
+# Exact attribution: the paths THIS round's own tools wrote. Without it we can
+# only diff the tree, which cannot tell a rogue draft from the owner editing in
+# another window — and guessing wrong destroys real work.
+_ROUND_WRITES: ContextVar[set[str] | None] = ContextVar(
+    "remedy_internal_improve_writes", default=None
+)
+
+
 @contextmanager
-def internal_improve_context() -> Iterator[None]:
-    """Mark this coroutine as an unattended self-fix (not a user turn)."""
+def internal_improve_context() -> Iterator[set[str]]:
+    """Mark this coroutine as an unattended self-fix (not a user turn).
+
+    Yields the live set of paths the round writes, so the caller can keep the
+    reference after the context resets the ContextVar.
+    """
     token = _INTERNAL.set(True)
+    writes: set[str] = set()
+    writes_token = _ROUND_WRITES.set(writes)
     try:
-        yield
+        yield writes
     finally:
         _INTERNAL.reset(token)
+        _ROUND_WRITES.reset(writes_token)
+
+
+def note_internal_write(path: str | Path) -> None:
+    """Called by the file tools when an unattended draft writes something."""
+    bucket = _ROUND_WRITES.get()
+    if bucket is None:
+        return
+    with suppress(Exception):
+        bucket.add(str(path).replace("\\", "/"))
+
+
+def round_writes() -> set[str]:
+    """Paths this round actually wrote (empty outside a draft)."""
+    return set(_ROUND_WRITES.get() or set())
 
 
 def internal_improve_shell_ok(command: str) -> bool:
@@ -150,12 +180,39 @@ def read_pending_ship(home: str | Path | None = None) -> dict[str, Any] | None:
     return None
 
 
+def _fault_report(target: DraftTarget, round_: SelfInjectRound, changed: list[str]) -> str:
+    """What broke, and the fix that proved itself — ready to send upstream."""
+    gates = "\n".join(
+        f"- `{cmd}` → exit {code}"
+        for cmd, code in (round_.gate_exit_codes or {}).items()
+    )
+    files = "\n".join(f"- `{c}`" for c in changed[:8]) or "- (none)"
+    return (
+        "### What went wrong\n"
+        f"{target.evidence}\n\n"
+        "### Where\n"
+        f"`{target.path}`\n\n"
+        "### Context\n"
+        f"{target.why}\n\n"
+        "### Fix\n"
+        f"{round_.summary}\n\n"
+        "**Files changed**\n"
+        f"{files}\n\n"
+        "**Verified by**\n"
+        f"{gates or '- (no gate recorded)'}\n\n"
+        "_Found and fixed automatically on a source checkout; the patch passed "
+        "its gate locally before this report was queued. Not applied to any "
+        "other install._"
+    )
+
+
 def write_pending_ship(
     home: str | Path | None,
     *,
     round_id: str,
     summary: str,
     changed: list[str],
+    report: str = "",
 ) -> Path:
     """Queue a local-green draft for a *human/Auto ship*. Never pushes."""
     path = pending_ship_path(home)
@@ -164,6 +221,7 @@ def write_pending_ship(
         "round_id": round_id,
         "summary": summary[:240],
         "changed": list(changed)[:12],
+        "report": str(report or "")[:4000],
         "ts": _now_utc(),
         "ship": False,
         "note": (
@@ -288,21 +346,75 @@ def pick_draft_target(
     repo: str | Path,
     home: str | Path | None = None,
 ) -> DraftTarget | None:
-    """Pick one evidenced defect. No evidence → None (do not invent work)."""
+    """Pick one evidenced defect. No evidence → None (do not invent work).
+
+    Faults Remedy actually hit come first and, by default, are the ONLY trigger:
+    self-improvement is for fixing what broke during real work, not for going
+    looking for something to change. The speculative pickers (pytest's stale
+    lastfailed cache, ruff nits) are opt-in via ``REMEDY_SELF_INJECT_SPECULATIVE=1``
+    — the first one ever run picked a network flake, which no edit can fix.
+    """
     repo_p = Path(repo)
     if not is_source_checkout(repo_p):
         return None
-    for picker in (
-        lambda: _from_lastfailed(repo_p),
-        lambda: _from_traceback(repo_p, home),
-        lambda: _from_ledger_red(repo_p, home),
-        lambda: _from_ruff(repo_p),
-    ):
+    pickers: list[Any] = [lambda: _from_fault(repo_p, home)]
+    if os.environ.get("REMEDY_SELF_INJECT_SPECULATIVE") == "1":
+        pickers += [
+            lambda: _from_lastfailed(repo_p),
+            lambda: _from_traceback(repo_p, home),
+            lambda: _from_ledger_red(repo_p, home),
+            lambda: _from_ruff(repo_p),
+        ]
+    for picker in pickers:
         with suppress(Exception):
             tgt = picker()
             if tgt is not None:
                 return tgt
     return None
+
+
+def _from_fault(repo: Path, home: str | Path | None) -> DraftTarget | None:
+    """A fault Remedy actually hit during real work — the primary trigger.
+
+    Environmental faults (network, provider auth, missing toolchain) are
+    recorded but never targeted: no edit to this repo can fix the world.
+    """
+    from remedy.core.error_journal import next_target_fault
+
+    fault = next_target_fault(home=home)
+    if fault is None:
+        return None
+    # Point the jail at the file the traceback blames, when we can find it.
+    allowed: list[str] = []
+    src_hint = ""
+    with suppress(Exception):
+        name = (fault.where or "").split(":")[0].strip()
+        if name.endswith(".py"):
+            matches = [
+                p.relative_to(repo).as_posix()
+                for p in (repo / "src").rglob(name)
+                if p.is_file()
+            ]
+            if len(matches) == 1:
+                src_hint = matches[0]
+                allowed = [src_hint]
+    if not allowed:
+        allowed = ["src/remedy/"]
+    evidence = (
+        f"{fault.exc_type or 'error'} at {fault.where or '?'} "
+        f"(hit {fault.count}x): {fault.message}"
+    )
+    return DraftTarget(
+        kind="fault",
+        path=src_hint or (fault.where or "src/remedy/"),
+        test_id="",
+        evidence=evidence[:400],
+        allowed=allowed,
+        why=(
+            f"Remedy hit this while working: {fault.message[:160]}. "
+            f"Context: {fault.context[:120] or 'n/a'}. Fault id {fault.id}."
+        ),
+    )
 
 
 def _from_lastfailed(repo: Path) -> DraftTarget | None:
@@ -545,14 +657,26 @@ async def _drain_internal_turn(
     return "".join(chunks)[:4000]
 
 
+def _q(path: str) -> str:
+    """Quote only when needed.
+
+    prepare_host_command splits on whitespace and does NOT strip quotes, so an
+    always-quoted path reaches the tool as a literal `"tests/x.py"` — which is
+    why every gate failed on Windows with ruff E902 "filename syntax is
+    incorrect". Unquoted is correct for the space-free repo paths we generate.
+    """
+    s = str(path or "")
+    return f'"{s}"' if (" " in s or "\t" in s) else s
+
+
 def _gate_cmds(repo: Path, target: DraftTarget, changed: list[str]) -> list[str]:
     cmds: list[str] = []
     py = [c for c in changed if c.endswith(".py")]
     if py:
-        quoted = " ".join(f'"{c}"' for c in py[:6])
-        cmds.append(f"uv run ruff check {quoted}")
+        joined = " ".join(_q(c) for c in py[:6])
+        cmds.append(f"uv run ruff check {joined}")
     if target.test_id:
-        cmds.append(f'uv run pytest -q "{target.test_id}"')
+        cmds.append(f"uv run pytest -q {_q(target.test_id)}")
     else:
         with suppress(Exception):
             from remedy.core.build_scoped import map_source_to_test_candidates
@@ -565,9 +689,9 @@ def _gate_cmds(repo: Path, target: DraftTarget, changed: list[str]) -> list[str]
                     except Exception:
                         tests.append(str(tp))
             if tests:
-                cmds.append(f'uv run pytest -q "{tests[0]}"')
+                cmds.append(f"uv run pytest -q {_q(tests[0])}")
     if not cmds and py:
-        cmds.append(f'uv run python -m py_compile "{py[0]}"')
+        cmds.append(f"uv run python -m py_compile {_q(py[0])}")
     return cmds
 
 
@@ -601,13 +725,15 @@ async def run_unattended_draft(
 
     prev_steps = getattr(runtime, "_max_react_steps", None)
     assistant = ""
+    own_writes: set[str] = set()
     try:
         if runtime is not None:
             runtime._max_react_steps = _DRAFT_STEPS
-        with internal_improve_context():
+        with internal_improve_context() as _writes:
             assistant = await _drain_internal_turn(
                 runtime, _draft_prompt(tgt), repo_p, timeout=_DRAFT_TIMEOUT_S
             )
+        own_writes = set(_writes)
     except Exception as exc:  # noqa: BLE001
         with suppress(Exception):
             await git_restore(repo_p, snap)
@@ -625,9 +751,50 @@ async def run_unattended_draft(
     if not changed:
         return {"skipped": "no_edit", "target": tgt.to_public(), "assistant": assistant[:400]}
 
+    # Attribution guard. The round starts on a clean tree, but the draft turn
+    # takes minutes — anything the OWNER (or a concurrent session) edits in that
+    # window also shows up in `changed`. Rolling that back destroyed real work
+    # three times in one session. Files outside the round's own jail are, by
+    # definition, not its business: never revert them, and stop the round.
+    # Prefer EXACT attribution: what the round's own tools wrote. Only when that
+    # is unavailable do we fall back to "inside the jail" as a proxy.
+    mine = {c for c in changed if c in own_writes} if own_writes else set()
+    if own_writes:
+        foreign = [c for c in changed if c not in mine]
+        if foreign:
+            with suppress(Exception):
+                await git_restore(repo_p, snap, round_paths=sorted(mine))
+            record_red(home, tgt.key())
+            return {
+                "skipped": "concurrent_edit",
+                "target": tgt.to_public(),
+                "foreign": foreign[:8],
+                "note": (
+                    "Files changed that this round did not write — the owner or "
+                    "another session was working. Left untouched."
+                ),
+            }
+        changed = sorted(mine)
+
+    allowed_now = [c for c in changed if not _jail_violation([c], tgt.allowed)]
+    foreign = [c for c in changed if c not in allowed_now]
+    if foreign and not own_writes:
+        with suppress(Exception):
+            await git_restore(repo_p, snap, round_paths=allowed_now)
+        record_red(home, tgt.key())
+        return {
+            "skipped": "concurrent_edit",
+            "target": tgt.to_public(),
+            "foreign": foreign[:8],
+            "note": (
+                "Files changed outside this round's jail while it was drafting — "
+                "treating them as someone else's work and leaving them untouched."
+            ),
+        }
+
     jail = _jail_violation(changed, tgt.allowed)
     if jail or _diff_too_large(str(after.get("diff") or "")):
-        await git_restore(repo_p, snap)
+        await git_restore(repo_p, snap, round_paths=changed)
         record_red(home, tgt.key())
         reason = jail or "diff_too_large"
         round_ = SelfInjectRound(
@@ -665,15 +832,34 @@ async def run_unattended_draft(
     round_.status = "green" if all_green else "red"
     round_ = await apply_or_rollback(round_, repo_p, snap, home=home)
     append_ledger(round_, home)
+    # A fault-driven round updates the journal either way: a failed attempt is
+    # counted (so a stubborn fault stops burning rounds), a green one closes it.
+    fault_id = ""
+    if tgt.kind == "fault":
+        with suppress(Exception):
+            fault_id = str(tgt.why).split("Fault id ", 1)[-1].strip(" .")
     if round_.status in ("red", "rolled_back") or not all_green:
         record_red(home, tgt.key())
+        if fault_id:
+            with suppress(Exception):
+                from remedy.core.error_journal import note_fix_attempt
+
+                note_fix_attempt(fault_id, home=home)
     else:
         record_green(home, tgt.key())
+        if fault_id:
+            with suppress(Exception):
+                from remedy.core.error_journal import mark_fixed
+
+                mark_fixed(fault_id, home=home)
+        # Queue the report + the verified fix for the owner to submit upstream.
+        # Never posted automatically — self_improve_submit_issue needs Approve.
         write_pending_ship(
             home,
             round_id=round_.round_id,
             summary=round_.summary,
             changed=changed,
+            report=_fault_report(tgt, round_, changed) if fault_id else "",
         )
     return {
         "round_id": round_.round_id,
