@@ -213,11 +213,37 @@ async def git_restore(
     repo = Path(repo)
     errors: list[str] = []
 
-    code, _out, err = await _git_out(repo, "reset", "--hard", "HEAD")
-    if code != 0 and err.strip():
-        errors.append(err.strip())
+    protected = _live_claimed_paths()
 
-    diff = str(snapshot.get("diff") or "")
+    def _held_by_live_session(rel: str) -> bool:
+        with suppress(Exception):
+            return str((repo / rel).resolve()).replace("\\", "/").lower() in protected
+        return False
+
+    # Scoped restore: when the round declares its write set AND the tree was
+    # clean at snapshot time (the normal unattended case), revert exactly those
+    # paths. A blanket `reset --hard` would also wipe tracked edits the owner
+    # made while the round was drafting — which is how this loop ate real work.
+    snap_was_clean = not (snapshot.get("changed") or snapshot.get("untracked"))
+    scoped = bool(round_paths) and snap_was_clean
+    if scoped:
+        paths = [
+            str(p).replace("\\", "/")
+            for p in (round_paths or [])
+            if str(p).strip() and not _held_by_live_session(str(p))
+        ]
+        if paths:
+            code, _out, err = await _git_out(repo, "checkout", "HEAD", "--", *paths)
+            # Paths that only ever existed untracked have no HEAD version —
+            # not an error worth surfacing.
+            if code != 0 and err.strip() and "did not match" not in err.lower():
+                errors.append(err.strip())
+    else:
+        code, _out, err = await _git_out(repo, "reset", "--hard", "HEAD")
+        if code != 0 and err.strip():
+            errors.append(err.strip())
+
+    diff = "" if scoped else str(snapshot.get("diff") or "")
     if diff.strip():
         # Apply via temp file so binary patches and large diffs work.
         try:

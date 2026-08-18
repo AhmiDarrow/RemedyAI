@@ -45,6 +45,24 @@ def register_files_tools(runtime: Any) -> None:
     def _track_read(target: Path) -> None:
         track_read(runtime, target)
 
+    def _note_internal_write(target: Path) -> None:
+        """Attribute this write to an unattended self-improve round, if any.
+
+        Exact attribution is what lets a rollback revert the round's own files
+        without touching whatever the owner changed in another window.
+        """
+        with suppress(Exception):
+            from remedy.core.self_inject_draft import (
+                in_internal_improve,
+                note_internal_write,
+            )
+
+            if in_internal_improve():
+                rel = str(target)
+                with suppress(Exception):
+                    rel = str(target.resolve().relative_to(Path.cwd().resolve()))
+                note_internal_write(rel)
+
     def _claim_or_block(sid: str | None, target: Path, *, tool_name: str) -> str | None:
         """Body coordination: claim ``target`` for this session before writing.
 
@@ -365,6 +383,7 @@ def register_files_tools(runtime: Any) -> None:
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(new_body, encoding="utf-8")
+            _note_internal_write(target)
         except OSError as e:
             parent = _parent_hint(path)
             return format_tool_error(
@@ -553,6 +572,7 @@ def register_files_tools(runtime: Any) -> None:
             return blocked
         try:
             target.write_text(result.new_content, encoding="utf-8")
+            _note_internal_write(target)
         except OSError as e:
             return format_tool_error(
                 f"cannot write {path}: {e}",
@@ -691,6 +711,7 @@ def register_files_tools(runtime: Any) -> None:
                 continue
             try:
                 target.write_text(r.new_content, encoding="utf-8")
+                _note_internal_write(target)
             except OSError as e:
                 reports.append(f"[{i}] {p}: write error {e}")
                 continue
