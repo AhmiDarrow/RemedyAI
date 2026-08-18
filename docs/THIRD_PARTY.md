@@ -23,3 +23,39 @@
 - **License:** Dual-licensed **MIT** or **Unlicense** (see `third_party/ripgrep/`)
 - **Redistribution:** Official release binaries may be bundled or downloaded at first use into `~/.remedy/bin`
 - **Pin:** see `third_party/ripgrep/VERSION` and `remedy.core.rg_binary.RG_VERSION`
+
+## Telephony components (fetched on request, never bundled)
+
+Nothing below ships in the installer. Remedy names each one — purpose, size,
+licence — and asks before downloading it (`remedy.telephony.consent.COMPONENTS`).
+An owner who never uses the phone features never downloads any of them.
+
+### baresip + libre (SIP engine)
+
+- **Project:** [baresip/baresip](https://github.com/baresip/baresip)
+- **Use:** SIP signalling for the `sip` line option (her own number)
+- **License:** **BSD-3-Clause**
+- **Redistribution:** not bundled; fetched to `~/.remedy/bin` on request
+- **Note:** PJSIP was rejected for this role — GPLv2-or-later or a paid
+  commercial licence, neither of which suits a source-available product.
+
+### smart-turn (semantic endpointing)
+
+- **Project:** [pipecat-ai/smart-turn](https://huggingface.co/pipecat-ai/smart-turn-v2)
+- **Use:** deciding when a speaker has finished, so she does not talk over people
+- **License:** **BSD-2-Clause**
+- **Redistribution:** not bundled; fetched to `~/.remedy/voice` on request
+
+### Chatterbox (TTS + zero-shot voice cloning)
+
+- **Project:** [resemble-ai/chatterbox](https://github.com/resemble-ai/chatterbox)
+- **Use:** the human-bar voice tier on capable GPUs
+- **License:** **MIT**
+- **Redistribution:** not bundled; fetched on request
+
+### Android system image (VM line option)
+
+- **Project:** Android-x86 / BlissOS
+- **Use:** running a VoIP calling app on the host, with no phone involved
+- **License:** the publisher's terms (AOSP is Apache-2.0; vendor builds vary)
+- **Redistribution:** never bundled; the owner is pointed at the publisher
