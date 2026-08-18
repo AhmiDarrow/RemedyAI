@@ -136,7 +136,9 @@ async def test_git_restore_preserves_pre_round_dirty(tmp_path):
     # Round mutates further + adds noise untracked
     tracked.write_text("base\nowner-wip\nround-bad\n", encoding="utf-8")
     (repo / "round_noise.txt").write_text("tmp\n", encoding="utf-8")
-    err = await git_restore(repo, snap)
+    # The round declares what IT wrote; anything else untracked is someone
+    # else's work and is never deleted (see tests/test_self_inject_restore.py).
+    err = await git_restore(repo, snap, round_paths=["round_noise.txt"])
     assert err == "" or "error" not in err.lower()
     text = tracked.read_text(encoding="utf-8")
     assert "owner-wip" in text
