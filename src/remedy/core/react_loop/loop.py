@@ -3660,6 +3660,13 @@ async def call_llm_stream(runtime, message: str,
             )
             return
         logger.warning("Unhandled mid-turn error: %r", e, exc_info=True)
+        # Remember what actually broke — this is what self-improvement acts on.
+        with suppress(Exception):
+            from remedy.core.error_journal import record_exception
+
+            record_exception(
+                e, kind="turn_crash", context=str(message or "")[:200]
+            )
         yield (
             "\nSomething went wrong on my side mid-turn — your history is intact.\n\n"
             "Send **continue** to pick up where we left off, or restate the request.\n"
@@ -3681,6 +3688,10 @@ async def call_llm_stream(runtime, message: str,
             # Best-effort (the reply already streamed) — but log so a failing
             # memory/soul save is diagnosable instead of vanishing silently.
             logger.warning("post-turn prep failed: %r", _ptp_exc)
+            with suppress(Exception):
+                from remedy.core.error_journal import record_exception
+
+                record_exception(_ptp_exc, kind="post_turn", context="post-turn prep")
         # Body coordination: a turn that ends with the build green/done (or that
         # never wrote) has no unfinished work to protect — free its file holds
         # so a sibling can take over immediately (live handoff). An UNFINISHED

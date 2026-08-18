@@ -109,3 +109,38 @@ def test_live_session_claim_protects_a_file(repo, tmp_path, monkeypatch) -> None
     )
 
     assert held.exists(), "a live session's claimed file must survive rollback"
+
+
+def test_concurrent_tracked_edit_survives_scoped_rollback(repo) -> None:
+    """The remaining hole: `reset --hard` wiped tracked edits made during the
+    round. A scoped restore must revert only the round's own files."""
+    snap = asyncio.run(git_capture(repo))  # clean tree, as the loop requires
+    # Round edits its own file...
+    (repo / "tracked.py").write_text("round edit\n", encoding="utf-8")
+    # ...while the owner edits a different tracked file.
+    mine = repo / "owner_file.py"
+    mine.write_text("owner work\n", encoding="utf-8")
+    _run(repo, "add", "owner_file.py")
+    _run(repo, "commit", "-qm", "owner file")
+    mine.write_text("owner work IN PROGRESS\n", encoding="utf-8")
+
+    asyncio.run(git_restore(repo, snap, round_paths=["tracked.py"]))
+
+    assert (repo / "tracked.py").read_text(encoding="utf-8") == "original\n"
+    assert mine.read_text(encoding="utf-8") == "owner work IN PROGRESS\n"
+
+
+def test_gate_commands_are_not_over_quoted() -> None:
+    """Every gate failed on Windows because quotes reached the tool literally."""
+    from pathlib import Path as _P
+
+    from remedy.core.self_inject_draft import _gate_cmds
+    from remedy.execution.host.runner import prepare_host_command
+
+    class T:
+        test_id = "tests/test_x.py::test_y"
+
+    cmds = _gate_cmds(_P("."), T(), ["src/remedy/core/x.py"])
+    for cmd in cmds:
+        argv = prepare_host_command(cmd, project_path=_P(".")).argv
+        assert not any(a.startswith('"') for a in argv), f"literal quotes in {argv}"
