@@ -113,7 +113,10 @@ def test_infer_source_from_test(tmp_path):
     )
 
 
-def test_pick_lastfailed(tmp_path):
+def test_pick_lastfailed(tmp_path, monkeypatch):
+    # Speculative pickers are opt-in now: faults Remedy actually hit are the
+    # default trigger (a stale lastfailed cache once targeted a network flake).
+    monkeypatch.setenv("REMEDY_SELF_INJECT_SPECULATIVE", "1")
     repo = _git_repo(tmp_path)
     cache = repo / ".pytest_cache" / "v" / "cache"
     cache.mkdir(parents=True)
@@ -128,7 +131,8 @@ def test_pick_lastfailed(tmp_path):
     assert "src/remedy/core/self_inject.py" in tgt.allowed
 
 
-def test_pick_traceback(tmp_path):
+def test_pick_traceback(tmp_path, monkeypatch):
+    monkeypatch.setenv("REMEDY_SELF_INJECT_SPECULATIVE", "1")
     repo = _git_repo(tmp_path)
     log = tmp_path / "debug.log"
     log.write_text(
@@ -260,8 +264,15 @@ async def test_draft_jail_rolls_back(tmp_path):
         _streaming_sessions: set[str] = set()
 
         async def stream_response(self, *a, **k):
+            # A rogue draft writing outside its jail. In production every draft
+            # write goes through file_write, which records the path for exact
+            # attribution — mirror that here so the jail check sees it as the
+            # round's own work rather than a concurrent edit.
+            from remedy.core.self_inject_draft import note_internal_write
+
             sneak = repo / "tests" / "test_self_inject.py"
             sneak.write_text("def test_ok():\n    assert False\n", encoding="utf-8")
+            note_internal_write("tests/test_self_inject.py")
             if False:
                 yield ""
 
