@@ -123,6 +123,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   and the readable one, carrying her relational memory and pledges in the
   clear, was not. `soul_export` now returns a message naming where exports go
   instead of raising.
+- **`remedy gateway channels` shows the direction column again.** It printed
+  `[in/out]` unescaped, which rich reads as a style tag and swallows — so the
+  column appeared only for a messenger supporting *neither* direction, the
+  exact opposite of what it is for.
 - **`.jsx` files are no longer reported as broken.** They were handed to
   `node --check`, which rejects the *extension* with
   `ERR_UNKNOWN_FILE_EXTENSION` before reading a character — so every `.jsx`
