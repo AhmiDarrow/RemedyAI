@@ -216,6 +216,42 @@ const META: HelpArticleMeta[] = [
     summary: 'Demo mode, free API keys, and local Ollama — use Remedy without paying.',
   },
   {
+    id: '22-grove',
+    title: 'Grove (partner home)',
+    category: 'Daily use',
+    order: 4.5,
+    tags: ['grove', 'goals', 'plots', 'storyline', 'alongside', 'surface', 'studio'],
+    summary:
+      'The default surface: goals as plots, a needs-you strip, and each goal’s room with a live stage and a plain-words record.',
+  },
+  {
+    id: '23-vault',
+    title: 'Remedy Vault',
+    category: 'Configuration',
+    order: 4.6,
+    tags: ['vault', 'card', 'payment', 'password', 'credentials', 'secret', 'site binding'],
+    summary:
+      'Card details and passwords Remedy can fill without ever seeing them — handles in context, plaintext only machine-side.',
+  },
+  {
+    id: '24-telephony',
+    title: 'Telephony (bench)',
+    category: 'Reference',
+    order: 17,
+    tags: ['phone', 'call', 'voice', 'sip', 'bluetooth', 'telephony', 'bench'],
+    summary:
+      'Phase 0: a voice measured against a human bar on a simulated line. No hardware, no number, nobody called.',
+  },
+  {
+    id: '25-coordination',
+    title: 'Coordination (multi-session)',
+    category: 'Reference',
+    order: 17.5,
+    tags: ['coordination', 'sessions', 'claims', 'beacon', 'multi-session', 'lock'],
+    summary:
+      'Several Remedy sessions on one repo without overwriting each other: per-path claims that lapse when a session dies.',
+  },
+  {
     id: '21-personal-assistant',
     title: 'Personal assistant',
     category: 'Daily use',

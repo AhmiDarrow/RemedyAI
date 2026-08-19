@@ -133,6 +133,81 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   about you, soul residue, and life goals. Chats, keys, and skills stay.
   This is not a full `~/.remedy` uninstall wipe.
 
+### Her clock, her reach, her paperwork (personal assistant)
+
+- **Reminders that actually fire** (`remedy.core.reminders`, `agent_reminder_tools`).
+  `remind_me` takes plain language — `in 30m`, `tomorrow 9am`, `friday 3pm`,
+  `2026-09-01`, a bare `5pm` — plus an importance and an optional recurrence.
+  `reminder_list` / `_done` / `_snooze` / `_cancel` close the loop; a repeating
+  reminder marked done rolls to its next date rather than vanishing.
+  `reminder_sync_bills` turns stored bills with due dates into reminders and is
+  safe to re-run.
+- **The reach** (`remedy.core.notify`). Quiet hours default to 22:00–07:00 and
+  only `high` importance may break them; anything lower is *held*, not dropped.
+  An identical message inside 300 s is suppressed. Delivery writes to a durable
+  outbox first and pushes to messengers second, so a messenger being down never
+  loses the reminder.
+- **Mail with an app password, no cloud project**
+  (`assistant.providers.imap_smtp`). Presets for Gmail, Outlook/Hotmail/Live,
+  Yahoo, Fastmail and iCloud. `mail_connect` verifies IMAP *and* SMTP before
+  storing anything, so a mailbox never reads "connected" when it is not;
+  `mail_disconnect` forgets the password and unlinks the account. List, read,
+  reply-in-thread, draft, send, archive, mark read.
+- **Calendar on the same credential** (`assistant.providers.caldav`). Where the
+  provider offers CalDAV — Gmail, iCloud, Fastmail — connecting the mailbox
+  connects the calendar too, with no second login. List, create, update
+  (only the fields you pass), cancel.
+- **Paperwork** (`remedy.core.documents`). `document_read` pulls text out of a
+  photo, scan, `.txt` or `.md` — images through the local vision decoder, on
+  your machine. `document_intake` classifies it as bill, appointment,
+  prescription, notice, receipt, statement or other, and *proposes* actions: a
+  reminder for a due date, a bill entry, a calendar event. Proposes; you confirm.
+- **Money stays organization, never advice.** Budget, bills and debts are
+  numbers you enter and arithmetic you can check. `debt_scenario` says so every
+  time it runs. No credit pulls, no bank links.
+- Owner documentation: **docs/manual/21-personal-assistant.md**, in the F1 wiki.
+
+### Telephony — Phase 0 (bench only; no hardware, no minutes)
+
+- New `remedy.telephony` package: a transport abstraction (`line.py`), a
+  simulated 8 kHz mu-law circuit with a scripted counterpart (`backends/fake`),
+  a pure-stdlib G.711 codec and resampler (`narrowband.py`), Windows frame
+  pacing (`timing.py`), and the human-bar harness (`bench.py`,
+  `voice/realtime/`). Nothing dials anyone.
+- The bar is numbers, not vibes: answer by 600 ms p50, barge-in inside 150 ms,
+  under 3% talking over people, under 800 ms of uncovered silence. Both scripted
+  calls pass. `python -m remedy.telephony.bench` runs them.
+- Four lines are offered as a **choice**, not one imposed — her own SIP number,
+  a VoIP app in a local Android VM, the owner's phone on a cable, or the same
+  phone over Bluetooth. Bluetooth is last and never the default: it is the only
+  one with a distance limit.
+- **Nothing telephony-related ships.** baresip, smart-turn, Chatterbox and any
+  Android image are fetched only when asked for, from their own publishers, and
+  named with their licence and size first (`telephony/consent.py`). No call
+  happens before the owner agrees to phone-specific terms, recorded with the
+  version they agreed to.
+- Design and measurements: **docs/TELEPHONY.md**; terms: **docs/TELEPHONY_TERMS.md**.
+
+### Self-improvement triggers on real faults
+
+- New `remedy.core.error_journal`. Self-improvement used to go *looking* for
+  work in pytest's stale lastfailed cache; its first round targeted a network
+  flake no code edit could fix, and it would have kept doing that. Now a round
+  starts only from something that actually went wrong during real work, with the
+  context to fix it.
+- Faults are classified, and only `open` ones are self-fix targets.
+  `environmental` (a provider 401, a dead network, a missing compiler) and
+  `model` (a malformed tool call, an empty answer) are recorded so she can
+  explain herself, and never burned a round on. A fault tried three times is
+  parked.
+
+### Body coordination
+
+- `remedy.core.coordination`: session beacons under a file lock, so several
+  Remedy sessions can work the same repo without overwriting each other. Write
+  claims are per-path; a session that dies releases its claims by heartbeat
+  expiry rather than holding them for ever.
+
 ### Repo
 
 - Test suite is public again (pytest + desktop vitest). Confidence for
