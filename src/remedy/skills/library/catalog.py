@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from remedy.core.atomic_json import scratch_path
 from remedy.skills.library.keys import (
     CATALOG_PUBLIC_KEY_B64,
     DEFAULT_CATALOG_SIG_URL,
@@ -177,8 +178,8 @@ async def get_skills_catalog(
         verify_catalog_signature(data, sig, public_key_b64=pubkey)
         cache_dir.mkdir(parents=True, exist_ok=True)
         # Atomic-ish cache write (temp + replace)
-        tmp_c = cache_dir / "catalog.json.tmp"
-        tmp_s = cache_dir / "catalog.json.sig.tmp"
+        tmp_c = scratch_path(cache_dir / "catalog.json")
+        tmp_s = scratch_path(cache_dir / "catalog.json.sig")
         tmp_c.write_bytes(data)
         tmp_s.write_text(sig + "\n", encoding="utf-8")
         tmp_c.replace(cache_file)

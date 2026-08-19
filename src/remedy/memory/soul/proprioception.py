@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import scratch_path
 from remedy.memory.soul.field import soul_dir
 
 PROPRIO_FILENAME = "proprioception.json"
@@ -264,7 +265,7 @@ def save_profiles(
     }
     p = _path(home)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
+    tmp = scratch_path(p)
     data = json.dumps(payload, ensure_ascii=False, indent=2)
     tmp.write_text(data, encoding="utf-8")
     # Atomic-or-nothing: a failed replace (Windows lock) keeps the OLD

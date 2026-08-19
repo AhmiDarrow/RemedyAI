@@ -51,6 +51,7 @@ from urllib.parse import urlparse
 from nacl import pwhash, secret
 from nacl import utils as nacl_utils
 
+from remedy.core.atomic_json import scratch_path
 from remedy.interfaces.secret_store import (
     _dpapi_available,
     _dpapi_protect,
@@ -263,7 +264,7 @@ def _save_items(items: dict[str, VaultItem], home: Path | str | None = None) -> 
             for it in items.values()
         ],
     }
-    tmp = path.with_suffix(".tmp")
+    tmp = scratch_path(path)
     tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     _harden_path(tmp, is_dir=False)
     tmp.replace(path)

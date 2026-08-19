@@ -19,6 +19,7 @@ from remedy.assistant.models import (
     _id,
     _now,
 )
+from remedy.core.atomic_json import scratch_path
 
 _STORE_NAME = "assistant.json"
 _lock = threading.Lock()
@@ -64,7 +65,7 @@ class AssistantStore:
 
     def _save(self) -> None:
         self._data["updated_at"] = _now()
-        tmp = self.path.with_suffix(".tmp")
+        tmp = scratch_path(self.path)
         tmp.write_text(json.dumps(self._data, indent=2), encoding="utf-8")
         tmp.replace(self.path)
 
