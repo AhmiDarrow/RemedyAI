@@ -123,6 +123,20 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   and the readable one, carrying her relational memory and pledges in the
   clear, was not. `soul_export` now returns a message naming where exports go
   instead of raising.
+- **A surgical AST patch no longer duplicates decorators.** `FunctionDef.lineno`
+  points at the `def` line, not at the decorators above it, so replacing a
+  decorated function kept the old decorators and wrote the patch's own on top.
+  The merged file still compiled — which is exactly the failure this module
+  exists to prevent. `@cache` twice is harmless; `@app.route(...)` twice
+  registers the route twice and `@retry(3)` twice is nine attempts. The span
+  now widens to cover the existing decorators only when the patch carries its
+  own, so a patch that omits them still inherits them.
+- **`/pin` turns a credential away instead of echoing it.** The write was
+  already refused underneath, but the failure came back as
+  `Could not pin “sk-ant-…”` — transient-sounding, so the owner retries, and
+  the key lands in the session transcript, which is persisted and exportable.
+  A pinned fact is injected into every prompt, so this is the one place a
+  secret must be turned away loudest.
 - **`remedy gateway channels` shows the direction column again.** It printed
   `[in/out]` unescaped, which rich reads as a style tag and swallows — so the
   column appeared only for a messenger supporting *neither* direction, the
