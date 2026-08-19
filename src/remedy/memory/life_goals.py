@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from remedy.core.atomic_json import scratch_path
+
 HORIZONS = ("week", "season", "life")
 STATUSES = ("open", "active", "paused", "done", "dropped")
 OPEN_STATUSES = frozenset({"open", "active"})
@@ -210,7 +212,7 @@ class LifeGoalStore:
             "last_steps": self.last_steps[-12:],
             "goals": [g.to_public() for g in goals[:_MAX_GOALS]],
         }
-        tmp = self.path.with_suffix(".json.tmp")
+        tmp = scratch_path(self.path)
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         last: OSError | None = None
         for i in range(16):

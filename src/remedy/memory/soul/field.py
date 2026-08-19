@@ -11,6 +11,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import scratch_path
+
 SOUL_DIRNAME = "soul"
 FIELD_FILENAME = "field.json"
 SCHEMA_VERSION = 1
@@ -636,7 +638,7 @@ def save_soul_field(field: SoulField, home: str | Path | None = None) -> Path:
     field.touch()
     path = field_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
+    tmp = scratch_path(path)
     data = json.dumps(field.to_dict(), ensure_ascii=False, indent=2)
     tmp.write_text(data, encoding="utf-8")
     with suppress(Exception):

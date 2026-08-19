@@ -27,7 +27,20 @@ import os
 from pathlib import Path
 from typing import Any
 
-__all__ = ["write_json_atomic", "write_text_atomic"]
+__all__ = ["scratch_path", "write_json_atomic", "write_text_atomic"]
+
+
+def scratch_path(target: Path | str) -> Path:
+    """A scratch file beside *target* that no other process will pick.
+
+    ``path.with_suffix(".tmp")`` gives every writer the *same* scratch name, so
+    two of them — the desktop app and a CLI, two threads, two windows — write
+    the same file at once and whichever renames second publishes a corrupted or
+    interleaved result. The pid makes it unique; keeping it in the same
+    directory keeps ``os.replace`` atomic.
+    """
+    t = Path(target)
+    return t.with_name(f".{t.name}.{os.getpid()}.tmp")
 
 
 def write_text_atomic(
@@ -42,7 +55,7 @@ def write_text_atomic(
     p.parent.mkdir(parents=True, exist_ok=True)
     # Same directory: os.replace is only atomic within one filesystem, and the
     # system temp dir is often a different one.
-    tmp = p.with_name(f".{p.name}.{os.getpid()}.tmp")
+    tmp = scratch_path(p)
     try:
         with open(tmp, "w", encoding=encoding, newline="") as fh:
             fh.write(text)

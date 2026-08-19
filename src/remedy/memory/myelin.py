@@ -50,6 +50,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import scratch_path
+
 MYELIN_DIRNAME = "myelin"
 LEDGER_FILENAME = "ledger.json"
 SHEATHS_DIRNAME = "sheaths"
@@ -176,7 +178,7 @@ def save_ledger(ledger: dict[str, Any], home: str | Path | None = None) -> None:
         )[:MAX_PATHWAYS]
         ledger["pathways"] = dict(keep)
     p = _ledger_path(home)
-    tmp = p.with_suffix(".tmp")
+    tmp = scratch_path(p)
     tmp.write_text(json.dumps(ledger, ensure_ascii=False, indent=2), encoding="utf-8")
     for _ in range(3):
         try:
@@ -267,7 +269,7 @@ def save_sheath(sheath: Sheath, home: str | Path | None = None) -> Path:
     d = sheath_path(sheath.slug, home)
     d.mkdir(parents=True, exist_ok=True)
     meta = d / "sheath.json"
-    tmp = d / "sheath.json.tmp"
+    tmp = scratch_path(d / "sheath.json")
     tmp.write_text(
         json.dumps(sheath.to_dict(), ensure_ascii=False, indent=2),
         encoding="utf-8",

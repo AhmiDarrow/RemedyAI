@@ -22,6 +22,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import scratch_path
+
 SKILL_REL = Path("computer") / "skill.json"
 MIN_EVIDENCE = 3          # don't steer on thin data
 MAX_HOSTS = 200
@@ -91,7 +93,7 @@ def _save(data: dict[str, Any], home: str | Path | None = None) -> None:
         data["hosts"] = dict(items)
     p = _path(home)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
+    tmp = scratch_path(p)
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     for _ in range(3):
         try:

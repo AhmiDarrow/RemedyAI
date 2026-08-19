@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import scratch_path
+
 logger = logging.getLogger(__name__)
 
 _CENSUS_REL = Path("host") / "home.json"
@@ -168,7 +170,7 @@ def load_census(home: str | Path | None = None) -> HomeCensus | None:
 def save_census(census: HomeCensus, home: str | Path | None = None) -> Path:
     path = census_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
+    tmp = scratch_path(path)
     tmp.write_text(json.dumps(census.to_dict(), indent=2), encoding="utf-8")
     tmp.replace(path)
     return path
