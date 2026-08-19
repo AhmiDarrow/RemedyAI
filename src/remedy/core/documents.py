@@ -324,7 +324,7 @@ def extract_facts(text: str, *, now: datetime | None = None) -> DocumentFacts:
         phones=sorted({p.strip() for p in _PHONE_RE.findall(body)})[:6],
         emails=sorted(set(_EMAIL_RE.findall(body)))[:6],
         urls=sorted(set(_URL_RE.findall(body)))[:6],
-        accounts=sorted({a for a in _ACCOUNT_RE.findall(body)})[:6],
+        accounts=sorted(set(_ACCOUNT_RE.findall(body)))[:6],
         sender=_first_line_sender(body),
         unreadable="[unreadable]" in body.lower(),
     )

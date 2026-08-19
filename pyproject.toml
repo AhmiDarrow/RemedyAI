@@ -87,8 +87,11 @@ markers = [
 target-version = "py312"
 line-length = 100
 lint.select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
-# E501/SIM102: long prompts + intentional nested guards; N81x short import aliases.
-lint.ignore = ["SIM114", "C419", "E501", "SIM102", "N814", "N817", "B005"]
+# E501/SIM102: long prompts + intentional nested guards; N81x short import aliases
+# (`from remedy.core import reminders as R`) — a deliberate house style, so N812
+# joins the N814/N817 already here rather than sitting in the warning count where
+# people learn to scroll past it.
+lint.ignore = ["SIM114", "C419", "E501", "SIM102", "N812", "N814", "N817", "B005"]
 fix = true
 unsafe-fixes = false
 

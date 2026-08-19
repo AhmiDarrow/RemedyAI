@@ -118,7 +118,7 @@ class MailAccount:
     @classmethod
     def from_address(
         cls, address: str, password: str, **overrides: Any
-    ) -> "MailAccount":
+    ) -> MailAccount:
         p = preset_for(address)
         acct = cls(
             address=address.strip(),
@@ -215,10 +215,10 @@ class ImapSmtpMailProvider:
         try:
             conn.select("INBOX", readonly=True)
         finally:
-            with _quiet():
+            with _Quiet():
                 conn.logout()
         srv = self._smtp()
-        with _quiet():
+        with _Quiet():
             srv.quit()
         return {
             "ok": True,
@@ -268,7 +268,7 @@ class ImapSmtpMailProvider:
                     )
                 )
         finally:
-            with _quiet():
+            with _Quiet():
                 conn.logout()
         return out
 
@@ -303,7 +303,7 @@ class ImapSmtpMailProvider:
                 },
             )
         finally:
-            with _quiet():
+            with _Quiet():
                 conn.logout()
 
     # -- write --------------------------------------------------------------
@@ -313,7 +313,7 @@ class ImapSmtpMailProvider:
         try:
             srv.send_message(msg, from_addr=self.account.address, to_addrs=to_addrs)
         finally:
-            with _quiet():
+            with _Quiet():
                 srv.quit()
 
     def send_message(self, *, to: str, subject: str, body: str) -> dict[str, Any]:
@@ -387,7 +387,7 @@ class ImapSmtpMailProvider:
                 f'"{folder}"', "\\Draft", imaplib.Time2Internaldate(_now()), msg.as_bytes()
             )
         finally:
-            with _quiet():
+            with _Quiet():
                 conn.logout()
         return {
             "ok": True,
@@ -407,7 +407,7 @@ class ImapSmtpMailProvider:
             op = "+FLAGS" if read else "-FLAGS"
             conn.store(message_id.encode("ascii"), op, "\\Seen")
         finally:
-            with _quiet():
+            with _Quiet():
                 conn.logout()
         return {
             "ok": True,
@@ -431,10 +431,10 @@ class ImapSmtpMailProvider:
                     "check the archive folder name for this mailbox."
                 )
             conn.store(mid, "+FLAGS", "\\Deleted")
-            with _quiet():
+            with _Quiet():
                 conn.expunge()
         finally:
-            with _quiet():
+            with _Quiet():
                 conn.logout()
         return {
             "ok": True,
@@ -449,7 +449,7 @@ def _now():
     return _t.time()
 
 
-class _quiet:
+class _Quiet:
     """Swallow teardown errors — a failed logout must not mask a good result."""
 
     def __enter__(self) -> None:
@@ -497,19 +497,19 @@ def _body_text(msg: Any) -> str:
     if msg.is_multipart():
         for part in msg.walk():
             if part.get_content_type() == "text/plain" and not part.get_filename():
-                with _quiet():
+                with _Quiet():
                     return part.get_payload(decode=True).decode(
                         part.get_content_charset() or "utf-8", "replace"
                     )
         for part in msg.walk():
             if part.get_content_type() == "text/html":
-                with _quiet():
+                with _Quiet():
                     html = part.get_payload(decode=True).decode(
                         part.get_content_charset() or "utf-8", "replace"
                     )
                     return re.sub(r"<[^>]+>", " ", html)
         return ""
-    with _quiet():
+    with _Quiet():
         return msg.get_payload(decode=True).decode(
             msg.get_content_charset() or "utf-8", "replace"
         )

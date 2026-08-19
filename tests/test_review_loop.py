@@ -25,7 +25,6 @@ from remedy.core.intent_policy import (
     policy_for_intent,
 )
 
-
 # --- detection -------------------------------------------------------------
 
 READONLY = [
