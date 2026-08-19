@@ -192,6 +192,11 @@ def _prefer_connect_ip(ips: list[str]) -> str:
     return ips[0]
 
 
+#: A redirect body is never used. Read a little so the socket closes cleanly,
+#: and never more.
+_REDIRECT_DRAIN_BYTES = 8192
+
+
 def _read_capped(resp: http.client.HTTPResponse, cap: int) -> tuple[bytes, str | None]:
     """Read body up to cap+1 bytes (detect truncation)."""
     chunks: list[bytes] = []
@@ -281,7 +286,11 @@ def _pinned_fetch(url: str, *, max_chars: int, timeout: float = 25.0) -> tuple[s
             status = resp.status
             if status in _REDIRECT_STATUS:
                 loc = resp.getheader("Location") or ""
-                resp.read()  # drain
+                # Drain, but bounded. Every other read here is capped; this one
+                # was not, and a hostile server can answer a 302 with a
+                # multi-gigabyte body — read whole, into memory, before the
+                # redirect is even looked at. Nothing here needs the body.
+                _read_capped(resp, _REDIRECT_DRAIN_BYTES)
                 conn.close()
                 if not loc:
                     raise ValueError(f"HTTP {status} redirect without Location")

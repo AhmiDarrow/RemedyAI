@@ -317,3 +317,17 @@ async def test_web_search_parses_pinned_html(monkeypatch):
     assert "https://example.com/a" in out
     assert "Beta Title" in out
     assert "web_fetch" in out.lower()
+
+
+def test_a_redirect_body_is_drained_but_bounded():
+    """Every other read in web_fetch is capped; the redirect drain was not, so
+    a hostile 302 with a multi-gigabyte body was read whole into memory before
+    the redirect was even looked at. Nothing here needs that body."""
+    import inspect
+
+    from remedy.core import agent_web_tools
+
+    src = inspect.getsource(agent_web_tools)
+    assert "resp.read()  # drain" not in src, "unbounded drain is back"
+    assert "_REDIRECT_DRAIN_BYTES" in src
+    assert 0 < agent_web_tools._REDIRECT_DRAIN_BYTES <= 1024 * 1024
