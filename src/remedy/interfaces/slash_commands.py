@@ -11,7 +11,7 @@ import contextlib
 import logging
 from typing import Any
 
-from remedy.interfaces.config import PROVIDER_CATALOG
+from remedy.interfaces.config import PROVIDER_CATALOG, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -604,9 +604,11 @@ async def handle_slash_command(
         if runtime is not None:
             home = getattr(getattr(runtime, "config", None), "home_dir", None)
         if not home:
+            # Deliberately not a nested import: binding the name here made it a
+            # local of the *whole* function, so /security-status and /import —
+            # branches that never reach this line — raised UnboundLocalError on
+            # their own uses of it.
             try:
-                from remedy.interfaces.config import load_config
-
                 home = load_config().get("home_dir")
             except Exception:
                 home = None
