@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
 from remedy.memory.soul.field import (
     SoulField,
     clear_soul_cache,
@@ -29,7 +30,7 @@ def soul_export_payload(home: str | Path | None = None) -> dict[str, Any]:
     raw = sf.to_dict()
     # Scrub secret-shaped strings from free text fields
     def scrub_list(items: list[Any]) -> list[Any]:
-        out = []
+        out: list[Any] = []
         for it in items or []:
             if isinstance(it, str):
                 if looks_like_secret_soul(it):
@@ -74,7 +75,7 @@ def export_soul_plain(
     if not path.is_absolute():
         path = soul_dir(home).parent / "exports" / path.name
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_json_atomic(path, payload, ensure_ascii=False)
     return path
 
 

@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from remedy.core.atomic_json import write_json_atomic
+
 _TASTE_HINT = re.compile(
     r"(?i)\b("
     r"prefer|always use|never use|spacing|typeface|font|density|"
@@ -58,7 +60,7 @@ def load_taste(runtime: Any = None) -> list[dict[str, str]]:
 def save_taste(items: list[dict[str, str]], runtime: Any = None) -> Path:
     fp = _path(runtime)
     fp.parent.mkdir(parents=True, exist_ok=True)
-    fp.write_text(json.dumps(items, indent=2), encoding="utf-8")
+    write_json_atomic(fp, items)
     return fp
 
 

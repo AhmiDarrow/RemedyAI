@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
 from remedy.memory.soul.field import load_soul_field, soul_dir
 
 
@@ -135,10 +136,7 @@ def compute_soma(
 def persist_soma(snap: SomaSnapshot, home: str | Path | None = None) -> Path:
     """Write soma.json for desktop/tray consumers."""
     path = soul_dir(home) / "soma.json"
-    path.write_text(
-        json.dumps(snap.to_public(), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    write_json_atomic(path, snap.to_public(), ensure_ascii=False)
     return path
 
 

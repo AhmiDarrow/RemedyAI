@@ -80,10 +80,34 @@ class FramePacer:
         self.late_frames = 0
         self.worst_late_ms = 0.0
 
-    def reset(self) -> None:
+    def rebase(self) -> None:
+        """Start a fresh contiguous run of frames; the next one is never late.
+
+        Deadlines only mean something *inside* a run. Between runs the audio
+        source is still working — a synthesizer warming up for the next clause
+        owes us nothing on a 20 ms clock — and charging that wait to the pacer
+        would report a stall in the engine as a stutter on the wire.
+
+        This does *not* clear ``late_frames``/``worst_late_ms``: playout rebases
+        many times a call and the bench reads the counters once at the end, so
+        zeroing here would report only the last chunk and hide a call that
+        stuttered throughout. Use ``clear_stats()`` to start a new measurement.
+        """
         self._next = None
+
+    def clear_stats(self) -> None:
+        """Forget the pacing history. Only for starting a new measurement."""
         self.late_frames = 0
         self.worst_late_ms = 0.0
+
+    def reset(self) -> None:
+        """Re-base *and* forget the history — the original ``reset``.
+
+        Kept because it was here first and callers may rely on it. Playout wants
+        ``rebase()``; a measurement starting from scratch wants this.
+        """
+        self.rebase()
+        self.clear_stats()
 
     async def wait(self) -> None:
         """Block until the next frame is due."""
@@ -160,6 +184,9 @@ def audio_priority() -> Iterator[str]:
         return
 
     task_index = wintypes.DWORD(0)
+    # Without an explicit restype ctypes truncates the returned HANDLE to a
+    # 32-bit signed int, and the revert below would be handed a bad handle.
+    avrt.AvSetMmThreadCharacteristicsW.restype = wintypes.HANDLE
     handle = avrt.AvSetMmThreadCharacteristicsW(
         ctypes.c_wchar_p("Pro Audio"), ctypes.byref(task_index)
     )

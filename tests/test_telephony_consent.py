@@ -56,6 +56,10 @@ def test_withdrawing_blocks_again(tmp_path):
 
 def test_withdrawing_when_nothing_was_agreed_is_harmless(tmp_path):
     consent.withdraw(tmp_path)
+    # And it really is a no-op rather than a half-written record: nothing agreed
+    # before, nothing agreed after, and the gate still refuses.
+    assert not consent.read(tmp_path).current
+    assert consent.ask(tmp_path), "she must still ask"
 
 
 def test_a_material_change_re_asks_and_says_what_changed(tmp_path, monkeypatch):

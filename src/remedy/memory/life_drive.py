@@ -412,10 +412,12 @@ def notice_progress(
             f"You marked this complete.\n\n_{msg[:280]}_\n",
             documents_root=documents_root,
         )
-        nxt = store.active()
+        # A different thing from the ``nxt`` string below: this is the goal
+        # still open after this one closed.
+        still_open = store.active()
         extra = ""
-        if nxt is not None:
-            extra = f"\nStill holding **{nxt.title}** — next: {nxt.next_action or 'name one move'}."
+        if still_open is not None:
+            extra = f"\nStill holding **{still_open.title}** — next: {still_open.next_action or 'name one move'}."
         return {
             "ok": True,
             "kind": "goal_done",

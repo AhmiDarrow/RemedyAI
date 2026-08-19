@@ -215,6 +215,26 @@ const META: HelpArticleMeta[] = [
     tags: ['free', 'demo', 'gemini', 'groq', 'ollama', 'openrouter', 'no signup', 'rmb'],
     summary: 'Demo mode, free API keys, and local Ollama — use Remedy without paying.',
   },
+  {
+    id: '21-personal-assistant',
+    title: 'Personal assistant',
+    category: 'Daily use',
+    order: 6.5,
+    tags: [
+      'reminders',
+      'mail',
+      'imap',
+      'app password',
+      'calendar',
+      'caldav',
+      'budget',
+      'bills',
+      'debt',
+      'documents',
+    ],
+    summary:
+      'Reminders that fire, mail and calendar with an app password (no cloud project), money organization, and paperwork intake.',
+  },
 ]
 
 const rawModules = import.meta.glob('./articles/*.md', {

@@ -223,3 +223,55 @@ def test_delivery_thread_lifecycle(home) -> None:
     assert t.is_alive()
     ev.set()
     t.join(timeout=6)
+
+
+def test_the_messenger_bridge_in_api_can_actually_be_called():
+    """``api.py`` imports ``suppress``, not ``contextlib``. The reminder bridge
+    used the bare module name, so every push raised NameError — and
+    ``deliver_due`` wraps the call in its own ``suppress``, so each reminder was
+    recorded as delivered while no messenger ever heard about it.
+
+    Compiling the source is the honest check: the bug was a name that only
+    existed at call time, which no import-level test would have caught.
+    """
+    import ast
+    import inspect
+    from pathlib import Path
+
+    from remedy.interfaces import api
+
+    src = Path(inspect.getsourcefile(api)).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+
+    bound = {"contextlib"} & {
+        alias.asname or alias.name.split(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    used = {
+        node.value.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "contextlib"
+    }
+    assert not (used - bound), (
+        "api.py uses contextlib.* without importing contextlib — "
+        "a NameError that only fires when the reminder bridge runs"
+    )
+
+
+def test_a_failing_messenger_never_stops_the_durable_outbox(tmp_path):
+    """The suppress around the push is right — the outbox is what must survive.
+    It just must not be the thing that hides a broken bridge."""
+    from remedy.core import notify
+
+    boom = []
+
+    def _explode(text: str) -> None:
+        boom.append(text)
+        raise RuntimeError("messenger down")
+
+    out = notify.deliver_due(home=tmp_path, messenger_send=_explode)
+    assert isinstance(out["delivered"], list)

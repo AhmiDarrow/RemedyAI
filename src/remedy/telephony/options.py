@@ -29,6 +29,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from remedy.core.atomic_json import write_text_atomic
 from remedy.telephony.line import Capabilities
 
 logger = logging.getLogger(__name__)
@@ -91,8 +92,8 @@ def chosen(home: Path | str | None = None) -> str:
 
 def choose(name: str, home: Path | str | None = None) -> str:
     """Remember the owner's pick. Changing it later is just saying so again."""
-    _cfg_path(home).write_text(
-        json.dumps({"line": name}, indent=2) + "\n", encoding="utf-8"
+    write_text_atomic(
+        _cfg_path(home), json.dumps({"line": name}, indent=2) + "\n"
     )
     return name
 

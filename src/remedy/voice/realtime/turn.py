@@ -20,11 +20,13 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Protocol
 
-from remedy.telephony.narrowband import FRAME_MS, rms
+from remedy.telephony.narrowband import FRAME_MS, PHONE_RATE, resample, rms
 
 logger = logging.getLogger(__name__)
 
@@ -151,15 +153,30 @@ class SmartTurnDetector:
     model_path: str = ""
     #: Below this the model's "unfinished" verdict is trusted and we keep waiting.
     completion_threshold: float = 0.55
-    #: Never wait longer than this regardless of the model.
+    #: Never keep waiting more than this *past the first endpoint the model
+    #: overrules*. It bounds the model's veto, not the length of the utterance:
+    #: measured against speech duration instead, any sentence longer than a
+    #: couple of seconds — which is most of them, and exactly the trailing-off
+    #: case this class exists for — would skip the model entirely and silently
+    #: degrade to energy endpointing.
     max_wait_ms: float = 2400.0
+    #: Trailing audio kept for the model. It only ever judges the end of a turn,
+    #: and a held pause no longer bounds this, so a long monologue must not be
+    #: buffered whole.
+    window_ms: float = 8000.0
+    #: Line rate, for sizing that window in bytes.
+    sample_rate: int = PHONE_RATE
+    #: What the model was trained on. smart-turn is Wav2Vec2-based, so 16 kHz.
+    #: The line is 8 kHz, so every window is resampled before it goes in.
+    model_sample_rate: int = 16000
     energy: EnergyTurnDetector = field(default_factory=EnergyTurnDetector)
 
     _session: Any = field(default=None, init=False)
     _tried: bool = field(default=False, init=False)
     _unavailable: str = field(default="", init=False)
     _buffer: bytearray = field(default_factory=bytearray, init=False)
-    _speech_ms: float = field(default=0.0, init=False)
+    _held_ms: float = field(default=0.0, init=False)
+    _holding: bool = field(default=False, init=False)
 
     @property
     def speaking(self) -> bool:
@@ -188,7 +205,7 @@ class SmartTurnDetector:
             self._unavailable = "no smart-turn model configured"
             return
         try:
-            import onnxruntime  # type: ignore
+            import onnxruntime
         except ImportError:
             self._unavailable = "onnxruntime not installed"
             return
@@ -203,30 +220,46 @@ class SmartTurnDetector:
     def reset(self) -> None:
         self.energy.reset()
         self._buffer.clear()
-        self._speech_ms = 0.0
+        self._release()
+
+    def _release(self) -> None:
+        """Stop counting against ``max_wait_ms``; the model is not holding us."""
+        self._held_ms = 0.0
+        self._holding = False
+
+    def _endpoint(self) -> TurnEvent:
+        self._buffer.clear()
+        self._release()
+        return TurnEvent.ENDPOINT
+
+    @property
+    def _window_bytes(self) -> int:
+        return max(1, int(self.window_ms * self.sample_rate / 1000.0)) * 2
 
     def feed(self, pcm: bytes, at: float) -> TurnEvent | None:
         event = self.energy.feed(pcm, at)
         if self.energy.speaking or event is TurnEvent.ENDPOINT:
             self._buffer.extend(pcm)
-            self._speech_ms += self.energy.frame_ms
+            if len(self._buffer) > self._window_bytes:
+                del self._buffer[: len(self._buffer) - self._window_bytes]
+        if self._holding:
+            # Only the time we have spent overruling energy counts here.
+            self._held_ms += self.energy.frame_ms
         if event is TurnEvent.SPEECH_START:
             self._buffer.clear()
             self._buffer.extend(pcm)
-            self._speech_ms = self.energy.frame_ms
+            self._release()
             return event
         if event is not TurnEvent.ENDPOINT:
             return None
         # Energy says the turn ended. Ask the model whether the thought did.
-        if self._speech_ms >= self.max_wait_ms or not self.available:
-            self._buffer.clear()
-            self._speech_ms = 0.0
-            return TurnEvent.ENDPOINT
+        if self._held_ms >= self.max_wait_ms or not self.available:
+            return self._endpoint()
         if self._complete(bytes(self._buffer)):
-            self._buffer.clear()
-            self._speech_ms = 0.0
-            return TurnEvent.ENDPOINT
-        # Mid-sentence pause: keep listening.
+            return self._endpoint()
+        # Mid-sentence pause: keep listening, and start the clock on how long we
+        # are willing to be held there.
+        self._holding = True
         self.energy._speaking = True  # noqa: SLF001 — same conceptual object
         self.energy._silent_ms = 0.0  # noqa: SLF001
         return None
@@ -239,16 +272,116 @@ class SmartTurnDetector:
             return True
         return score >= self.completion_threshold
 
+    # -- model I/O -----------------------------------------------------------
+
+    def _model_input(self, pcm: bytes) -> Any:
+        """Line audio -> exactly the tensor this model asked for.
+
+        Shapes are read off the session rather than hard-coded: smart-turn has
+        shipped as v2 and v3 with different fixed windows, and a model pinned
+        later must not need a code change here.
+        """
+        import numpy as np
+
+        wide = resample(pcm, self.sample_rate, self.model_sample_rate)
+        samples = np.frombuffer(wide, dtype="<i2").astype(np.float32) / 32768.0
+
+        want = None
+        with suppress(Exception):
+            shape = self._session.get_inputs()[0].shape
+            tail = shape[-1]
+            if isinstance(tail, int) and tail > 0:
+                want = tail
+        if want is None:
+            want = int(self.model_sample_rate * self.window_ms / 1000.0)
+
+        if samples.size >= want:
+            samples = samples[-want:]  # the *end* of the turn is what is judged
+        else:
+            samples = np.pad(samples, (want - samples.size, 0))
+        return samples.reshape(1, -1)
+
+    @staticmethod
+    def _probability(raw: Any) -> float:
+        """Whatever the model emitted -> P(the speaker finished).
+
+        Two heads are in the wild: a 2-logit classifier and a single sigmoid
+        output. Telling them apart by shape is more durable than assuming.
+        """
+        import numpy as np
+
+        arr = np.asarray(raw, dtype=np.float64).reshape(-1)
+        if arr.size == 0:
+            raise ValueError("model returned nothing")
+        if arr.size >= 2:
+            # Softmax over the last two logits: index 1 is "complete".
+            pair = arr[-2:]
+            pair = pair - pair.max()
+            exp = np.exp(pair)
+            return float(exp[1] / exp.sum())
+        value = float(arr[0])
+        if 0.0 <= value <= 1.0:
+            return value
+        return float(1.0 / (1.0 + np.exp(-value)))
+
     def score(self, pcm: bytes) -> float:
         """Probability the speaker finished. Overridden in tests with a stub."""
-        raise NotImplementedError("smart-turn ONNX I/O wiring lands with the model pin")
+        self._ensure()
+        if self._session is None:
+            raise RuntimeError(self._unavailable or "smart-turn model not loaded")
+        tensor = self._model_input(pcm)
+        name = self._session.get_inputs()[0].name
+        outputs = self._session.run(None, {name: tensor})
+        if not outputs:
+            raise ValueError("model returned no outputs")
+        return self._probability(outputs[0])
 
 
-def make_detector(model_path: str = "") -> TurnDetector:
-    """Best detector available, without ever leaving the caller without one."""
-    if model_path:
-        smart = SmartTurnDetector(model_path=model_path)
+#: Where a fetched smart-turn model lands, following the same
+#: ``REMEDY_HOME/<area>/models/`` shape the vision runtime uses.
+SMART_TURN_DIRNAME = "smart-turn"
+
+
+def smart_turn_model_path(home: Path | str | None = None) -> str:
+    """The pinned smart-turn model on this machine, or "" if none is here yet.
+
+    Nothing telephony-related ships with Remedy, so the model arrives only when
+    the owner asks for it (``telephony.consent.COMPONENTS``). Looking for it
+    here is what lets ``make_detector`` pick it up without every caller having
+    to know the path — which is why the semantic detector was unreachable:
+    ``make_detector`` needed a path and nothing ever passed one.
+    """
+    import os
+
+    base = Path(
+        home or os.environ.get("REMEDY_HOME") or "~/.remedy"
+    ).expanduser()
+    root = base / "voice" / "models" / SMART_TURN_DIRNAME
+    if not root.is_dir():
+        return ""
+    # A pinned release is one .onnx file; take the newest if a re-pin left two.
+    found = sorted(
+        (p for p in root.glob("*.onnx") if p.is_file()),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return str(found[0]) if found else ""
+
+
+def make_detector(
+    model_path: str = "", *, home: Path | str | None = None
+) -> TurnDetector:
+    """Best detector available, without ever leaving the caller without one.
+
+    With no explicit path, look for a model the owner has already fetched. An
+    absent model is the normal case and is not a failure: energy endpointing is
+    the floor, and it is what every call used before the model existed.
+    """
+    path = model_path or smart_turn_model_path(home)
+    if path:
+        smart = SmartTurnDetector(model_path=path)
         if smart.available:
+            logger.info("turn-taking: semantic endpointing via %s", path)
             return smart
         logger.info("turn-taking: %s; using energy endpointing", smart.unavailable_reason)
     return EnergyTurnDetector()

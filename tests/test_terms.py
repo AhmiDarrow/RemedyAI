@@ -98,3 +98,13 @@ def test_general_terms_alone_do_not_unlock_the_phone(tmp_path):
     terms.accept(tmp_path)
     with pytest.raises(consent.TermsNotAcceptedError):
         consent.require(tmp_path)
+
+
+def test_the_spoken_count_matches_the_points_actually_said():
+    """"five things" followed by six things is the kind of small wrongness that
+    makes everything else she says sound unreliable."""
+    from remedy.core import terms as t
+
+    said = t.ask(home="/nonexistent-home-for-this-test")
+    assert f"{t._count(len(t.SPOKEN_POINTS))} things" in said
+    assert said.count("\n- ") == len(t.SPOKEN_POINTS)

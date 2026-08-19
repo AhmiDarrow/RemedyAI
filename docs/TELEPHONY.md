@@ -282,17 +282,28 @@ app automation.
 ## What Phase 0 measured
 
 `python -m remedy.telephony.bench` runs scripted calls over the simulated
-circuit. **Both scenarios pass.**
+circuit. **Both scenarios pass.** Median of three runs on an otherwise idle
+host; the spread across runs is under 20 ms on every latency figure.
 
 | Metric | clinic-booking | ivr-menu | Bar |
 |---|--:|--:|--:|
-| Time to first audio, p50 | 407 ms | 406 ms | 600 ms |
-| Time to first audio, p95 | 425 ms | 422 ms | 1000 ms |
-| Time to the answer itself, p95 | 1035 ms | 883 ms | 2200 ms |
+| Turns completed | 5 of 5 | 4 of 4 | all |
+| Turns with no answer | 0 | 0 | 0 |
+| Time to first audio, p50 | 401 ms | 401 ms | 600 ms |
+| Time to first audio, p95 | 420 ms | 419 ms | 1000 ms |
+| Time to the answer itself, p95 | 1035 ms | 906 ms | 2200 ms |
 | Barge-in | 0 ms | — | 150 ms |
 | Talks over people | 0.0% | 0.0% | 3.0% |
 | Long gaps | 0.0% | 0.0% | 5.0% |
-| Worst uncovered silence | 425 ms | 422 ms | 800 ms |
+| Worst uncovered silence | 420 ms | 419 ms | 800 ms |
+| Frames late inside a chunk | 0 | 0 | < 40 ms |
+
+The first two rows are there because they used to be the gap in the gate rather
+than a line in the table. A turn she never answered has no latency, so every
+percentile skipped it and nothing else counted it — five turns with one answered
+scored a clean pass. So did a scenario that hung and got scored on whatever it
+had managed first, which is what `ivr-menu` did on every run: it stalled after
+one exchange and reported the timing of that one exchange as the result.
 
 Read honestly: the transport, turn-taking, speculation, backchannels and
 barge-in are the real implementation; STT, the model, and synthesis are stubs
@@ -304,43 +315,59 @@ accent — real engines drop into the same harness unchanged.
 ### Three findings that changed the design
 
 **1. A naive loop cannot pass, and shortening the endpointer does not save it.**
-Measured, time-to-answer is `hangover + ~590 ms` of engines:
+Measured, time-to-answer is `hangover + ~730 ms` of engines:
 
 | Endpointer hangover | 150 ms | 350 ms | 700 ms | 900 ms |
 |---|--:|--:|--:|--:|
-| Time to answer | 745 ms | 944 ms | 1287 ms | 1485 ms |
+| Time to answer | 887 ms | 1083 ms | 1427 ms | 1626 ms |
 
-The hangover is over half the latency at 700 ms, but cutting it to 150 ms still
-lands at 745 ms — over the bar — and starts answering into people's
-mid-sentence pauses. Hence speculation (start the answer during the pause, hold
-it back until the endpoint confirms) and backchannels timed from when sound
-stopped rather than from when the endpointer noticed.
+The hangover is the larger half of the latency at 700 ms, but cutting it to
+150 ms still lands at 887 ms — well over the 600 ms bar — and starts answering
+into people's mid-sentence pauses. Hence speculation (start the answer during
+the pause, hold it back until the endpoint confirms) and backchannels timed from
+when sound stopped rather than from when the endpointer noticed.
 
-**2. The engine budget is ~620 ms, with under 1.5× headroom.**
+These are 140 ms higher than first published, at every hangover, because the
+first measurement charged synthesis its 140 ms warm-up once per call instead of
+once per request. A constant offset across four independent rows is what made
+the cause obvious.
 
-| Engines | 1.0× | 1.5× | 2.0× |
-|---|--:|--:|--:|
-| Verdict | pass | fail | fail |
+**2. The engine budget is ~730 ms, with headroom under 2×.**
 
-At 1.5× the answer lands so late the far end has started talking again. This is
-a hard constraint on engine selection: STT + model + first audio must total
-around 620 ms on the owner's machine. Kokoro and Chatterbox-Turbo fit; a large
-LLM-based synthesizer or a cloud model with 800 ms time-to-first-token does not,
-on its own.
+| Engines | 1.0× | 1.25× | 1.5× | 2.0× |
+|---|--:|--:|--:|--:|
+| Verdict | pass | pass | pass | fail |
+
+At 2× the answer lands so late that every turn is a long gap and the worst
+uncovered silence reaches 1030 ms, against an 800 ms bar. Note the failure mode:
+long gaps, not talking over people. It used to read as the latter, because the
+scripted far end had been mistaking her backchannels for a finished turn and
+cutting in on top of the answer — a harness bug, not the engines.
+
+This is still a hard constraint on engine selection: STT + model + first audio
+must total around 730 ms on the owner's machine. Kokoro and Chatterbox-Turbo
+fit; a large LLM-based synthesizer or a cloud model with 800 ms
+time-to-first-token does not, on its own.
 
 **3. The transport costs nothing; the engines cost everything.** Per 20 ms
 frame, against a 20 ms budget:
 
 | Stage | Median | Share of budget |
 |---|--:|--:|
-| Energy / turn detection | 0.013 ms | 0.07% |
-| mu-law round trip | 0.056 ms | 0.28% |
-| 16 kHz resample + codec | 0.220 ms | 1.10% |
+| Energy / turn detection | 0.014 ms | 0.07% |
+| mu-law round trip | 0.058 ms | 0.29% |
+| 16 kHz resample + codec | 0.217 ms | 1.09% |
+| 24 kHz resample + codec | 0.353 ms | 1.77% |
 
-The always-on path is **0.35% of one core** — roughly 285x headroom. Pure-Python
-codec and VAD are not a bottleneck and do not need numpy or a C extension. Every
-real constraint is in STT, the model, and synthesis, which is where the ~620 ms
-budget above belongs.
+The always-on path is **0.35% of one core** at 16 kHz and **1.8%** at 24 kHz —
+still roughly 55x headroom on the expensive path. Pure-Python codec and VAD are
+not a bottleneck and do not need numpy or a C extension. Every real constraint
+is in STT, the model, and synthesis, which is where the ~620 ms budget above
+belongs.
+
+The 24 kHz row is the one that matters in practice: Chatterbox speaks at 24 kHz
+and a phone line does not, so every frame she says goes through that conversion.
+`narrowband.resample()` handles any rate pair; the 2x paths stay exact.
 
 **4. Windows cannot pace a 20 ms frame by default.** `asyncio.sleep(20 ms)`
 takes **31.3 ms** — a 56% overshoot that makes the RTP frame interval
@@ -395,6 +422,90 @@ look like product bugs; this one did, and the caching turned an intermittent
   interruption means 500 ms into what she is actually saying. A bench that
   measures the wrong moment is worse than no bench: it fails the product for
   the harness's mistake.
+
+### And a second pass, from reading it
+
+The five above were found by running the bench. The rest were found by reading
+it, and the harness ones are worse than product bugs, because each made the
+bench *quieter* rather than noisier — a gate that passes what it should fail
+teaches you nothing.
+
+**In the bench:**
+
+- **A turn she never answered scored as a pass.** It has no latency, so every
+  percentile skipped it, and nothing else counted it: five turns with one
+  answered came back with zero failures. Unanswered turns are now counted as
+  the longest wait there is, and named in the failure list.
+- **A call that hung scored as a pass.** The timeout was logged and the call
+  scored on whatever it had managed first. `ivr-menu` had been doing exactly
+  that on every run since the scenario was written — stalling after one
+  exchange and reporting that one exchange as the result.
+- **…and the reason it hung was a 40 ms window.** A turn had to be 500 ms of
+  audio to count, to stop a "mm-hm" being read as an answer. But the filler is
+  260 ms and a one-word reply — "Appointments." — is 300 ms, so the threshold
+  sat above both: the scripted far end waited for a turn that could not arrive.
+  It is 280 ms now, and a test pins it between the two using the audio the
+  bench actually generates.
+- **The median was not the median.** `round(k + 0.5)` stands in for `ceil`
+  everywhere except on exact half-integers, where Python rounds to even — so
+  the median of two turns came back as the slower one, and of six as the
+  fourth. Every latency figure in the table above was computed that way.
+- **The playout gate measured the engine, not the wire.** Every late frame was
+  the *first* frame of a synthesis chunk; not one was late inside a chunk. The
+  counter was reporting a synthesizer warming up as a transport stutter, while
+  the per-turn reset threw away the history that would have shown it: 28 late
+  frames and a 60 ms worst case reported as 1 and 22.6 ms. Pacing is now judged
+  within a contiguous run, and the audible gap between runs stays where it
+  belongs, in dead air.
+- **Synthesis warm-up was charged once per call.** One `ToneTts` serves every
+  turn and its "first chunk" flag was per instance, so every turn after the
+  first got its opening chunk 100 ms early — flattering exactly the
+  time-to-first-audio number Phase 0 is gated on.
+- **The gate itself ran unguarded.** Every other timing test skips when the host
+  cannot hold a 20 ms frame. The one the phase is judged on did not, so load
+  manufactured the overlaps it measures and it failed intermittently with
+  nothing wrong in the pipeline.
+
+**In the product:**
+
+- **One engine hiccup ended the call.** A responder or synthesis error during a
+  speculative turn left the state at SPECULATING with the task already dead;
+  the next endpoint committed to a task that no longer existed, and since a turn
+  can only begin from LISTENING she never spoke again. One transient error, and
+  the rest of the call was silence.
+- **A 24 kHz voice could not reach the wire.** Playout framed at the line rate
+  and labelled at the synthesizer's. Fine while both were 8 kHz; with Chatterbox
+  at 24 kHz each frame carried 6.7 ms of audio paced as though it were 20 ms —
+  playout at a third speed, the speech budget counted three times over, and a
+  rate the backend rejects outright. `narrowband.resample()` now converts any
+  rate pair and playout frames what it actually sends.
+- **A click of silence in every sentence.** Synthesis chunks do not land on
+  20 ms boundaries, and each tail was padded out with zeroes rather than carried
+  into the next chunk — up to 20 ms of digital silence spliced into the middle
+  of her voice, at every chunk a real synthesizer emits.
+- **Hanging up could hang the call object.** The end-of-call sentinel was posted
+  with a suppressed QueueFull while ordinary frames drop the oldest to make
+  room. A far end that rings off while the consumer is behind left the loop
+  awaiting a producer that had gone.
+- **Semantic endpointing switched itself off on long sentences.** The model's
+  veto was bounded by the length of the utterance rather than by how long the
+  veto had lasted, so anything past ~2.4 s — most real sentences, and exactly
+  the trailing-off case the model exists for — silently fell back to a silence
+  timer.
+- **She could not see a radio she had.** The Bluetooth probe closed the radio
+  handle with a `bthprops.cpl` export that does not exist, so on any PC that
+  *does* have one the call raised, the catch turned it into "I cannot tell", and
+  she told the owner she could not make calls. (This host has no radio, so the
+  blocker list below was right by luck.)
+- **Two lines were offered but never probed.** `line_options()` offers four ways
+  to get a line; `probe_all()` checked two of them, and `can_call` recognised
+  only the phone bridge and SIP. A signed-in Android VM or a wired phone — both
+  complete paths — would have shown as ready on the menu while she insisted she
+  could not call anyone. A test now requires every offered line to be probed.
+- **She could not find an engine she had downloaded.** `probe_sip` looked for
+  `baresip`, never `baresip.exe`, and skipped the `~/.remedy/bin` fallback
+  entirely unless a home was passed explicitly — which is where Phase 1 puts it,
+  on the platform this ships on first.
 
 ## Boundaries
 

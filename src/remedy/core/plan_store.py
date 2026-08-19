@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from remedy.core.atomic_json import write_json_atomic
+
 # Lifecycle sets used by store + desktop Plan banner.
 PLAN_TERMINAL_STATUSES = frozenset({"done", "cancelled"})
 PLAN_ACTIONABLE_STATUSES = frozenset({"draft", "approved", "active"})
@@ -151,7 +153,7 @@ class PlanStore:
     def save(self, plan: TaskPlan) -> TaskPlan:
         plan.updated_at = _now()
         path = self._path(plan.id)
-        path.write_text(json.dumps(plan.to_dict(), indent=2), encoding="utf-8")
+        write_json_atomic(path, plan.to_dict())
         return plan
 
     def get(self, plan_id: str) -> TaskPlan | None:

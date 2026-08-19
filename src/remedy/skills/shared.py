@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
 from remedy.skills.registry import SkillRegistry
 
 _lock = threading.Lock()
@@ -79,11 +80,10 @@ def load_skill_packs(home_dir: str | Path | None = None) -> dict[str, Any]:
 
 
 def save_skill_packs(data: dict[str, Any], home_dir: str | Path | None = None) -> Path:
-    import json
 
     path = skill_packs_path(home_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    write_json_atomic(path, data)
     invalidate_shared_registry()
     return path
 
