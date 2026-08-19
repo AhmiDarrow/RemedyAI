@@ -33,6 +33,12 @@ logger = logging.getLogger(__name__)
 
 # Google's modern CalDAV host refuses Basic auth (401 loginRequired); the legacy
 # path still serves app passwords. iCloud/Fastmail use their own hosts.
+#: Ceiling on what a calendar server may hand back. Real REPORT responses are
+#: kilobytes; this only stops a hostile or broken one exhausting memory.
+_MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+#: Error bodies are quoted into messages, so they stay small.
+_MAX_ERROR_BYTES = 64 * 1024
+
 CALDAV_PRESETS: dict[str, str] = {
     "gmail.com": "https://www.google.com/calendar/dav/{email}/events/",
     "googlemail.com": "https://www.google.com/calendar/dav/{email}/events/",
@@ -250,9 +256,13 @@ class CalDavCalendarProvider:
             # across a redirect, so a 302 would hand the app password to
             # whatever host the calendar server named.
             with urlopen_no_redirect(req, timeout=30) as resp:
-                return resp.status, resp.read().decode("utf-8", "replace")
+                # Bounded: a calendar answer is kilobytes, and a hostile or
+                # broken server should not be able to hand us a body larger
+                # than memory. 32 MiB is far past any real REPORT.
+                body = resp.read(_MAX_RESPONSE_BYTES)
+                return resp.status, body.decode("utf-8", "replace")
         except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", "replace")
+            detail = e.read(_MAX_ERROR_BYTES).decode("utf-8", "replace")
             if e.code in (401, 403):
                 raise RuntimeError(
                     "The calendar rejected that app password. Same password as "
