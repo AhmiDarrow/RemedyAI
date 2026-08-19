@@ -9,7 +9,6 @@ Models: api_models.py  |  Helpers: api_support.py  |  Routes: create_app() below
 from __future__ import annotations
 
 import atexit
-import hmac
 import logging
 import os
 import sys
@@ -513,13 +512,7 @@ def create_app(
             expected = f"Bearer {api_key}"
 
             # Constant-time compare — never raise on length mismatch (→ always 401).
-            def _ct_eq(a: str, b: str) -> bool:
-                ae, be = a.encode("utf-8"), b.encode("utf-8")
-                if len(ae) != len(be):
-                    # Still touch compare_digest shape for timing hygiene
-                    hmac.compare_digest(ae, ae)
-                    return False
-                return hmac.compare_digest(ae, be)
+            from remedy.core.security import secret_equals as _ct_eq
 
             bearer_ok = _ct_eq(auth, expected)
             alt = request.headers.get("X-Remedy-Token", "")

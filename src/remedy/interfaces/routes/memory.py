@@ -807,14 +807,7 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         expected = str(expected or "").strip()
         webhook_secret = (_os.environ.get("REMEDY_WEBHOOK_SECRET") or "").strip()
 
-        def _ct_eq(a: str, b: str) -> bool:
-            import hmac
-
-            ae, be = a.encode("utf-8"), b.encode("utf-8")
-            if len(ae) != len(be):
-                hmac.compare_digest(ae, ae)
-                return False
-            return hmac.compare_digest(ae, be)
+        from remedy.core.security import secret_equals as _ct_eq
 
         if _auth_enabled():
             if not expected and not webhook_secret:
