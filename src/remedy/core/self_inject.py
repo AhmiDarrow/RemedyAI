@@ -129,7 +129,22 @@ def read_ledger(home: str | Path | None = None) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-async def _git_out(repo: Path, *args: str) -> tuple[int, str, str]:
+#: Longest any single git call in a round may take. Generous — ``git apply`` on
+#: a large diff is legitimately slow — but finite.
+_GIT_TIMEOUT_S = 120.0
+
+
+async def _git_out(
+    repo: Path, *args: str, timeout_s: float = _GIT_TIMEOUT_S
+) -> tuple[int, str, str]:
+    """Run git and return (code, stdout, stderr). Never waits for ever.
+
+    This loop runs unattended, and git blocks indefinitely on things that happen
+    in real repositories: a stale ``index.lock``, a hook waiting on stdin, a
+    credential prompt. Without a bound the round never finished and nothing
+    said why — it simply stopped. A timeout is reported as a failed git call,
+    which the callers already know how to handle.
+    """
     proc = await asyncio.create_subprocess_exec(
         "git",
         "-C",
@@ -137,8 +152,18 @@ async def _git_out(repo: Path, *args: str) -> tuple[int, str, str]:
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        stdin=asyncio.subprocess.DEVNULL,  # a prompt must fail, not hang
     )
-    out_b, err_b = await proc.communicate()
+    try:
+        out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+    except TimeoutError:
+        with suppress(ProcessLookupError, OSError):
+            proc.kill()
+        with suppress(Exception):
+            await proc.wait()
+        joined = " ".join(args)
+        logger.warning("git %s in %s timed out after %.0fs", joined, repo, timeout_s)
+        return 1, "", f"git {joined} timed out after {timeout_s:.0f}s"
     return (
         int(proc.returncode or 0),
         (out_b or b"").decode("utf-8", "replace"),

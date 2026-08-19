@@ -52,12 +52,19 @@ def hidden_subprocess_kwargs() -> dict[str, Any]:
     return out
 
 
+#: Default wall for a hidden child process. Every caller today passes its own,
+#: so this changes nothing now — it is here so the next one that forgets does
+#: not get an unbounded wait. Pass ``timeout=None`` for a deliberately
+#: unbounded run (an interactive dev server, a long build).
+DEFAULT_RUN_TIMEOUT_S = 120.0
+
+
 def run_hidden(
     args: Sequence[str],
     *,
     capture_output: bool = False,
     text: bool = False,
-    timeout: float | None = None,
+    timeout: float | None = DEFAULT_RUN_TIMEOUT_S,
     cwd: str | None = None,
     env: Mapping[str, str] | None = None,
     check: bool = False,
