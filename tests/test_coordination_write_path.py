@@ -17,7 +17,9 @@ from remedy.core import coordination as C
 
 
 def _make_runtime(proj: Path, home: Path, session_id: str, remedy_home: Path):
-    from remedy.core.workspace import (
+    # noqa below: isort wants the aliased names split into four separate
+    # import statements. One grouped import reads better here.
+    from remedy.core.workspace import (  # noqa: I001
         allowed_roots_for_scope as _ar,
         effective_access_scope,
         resolve_under_roots as _ru,

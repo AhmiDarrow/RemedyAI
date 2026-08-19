@@ -193,7 +193,7 @@ def test_type_fast_long_pastes_and_restores_clipboard(monkeypatch) -> None:
 
 def test_type_fast_newlines_stay_keystrokes(monkeypatch) -> None:
     monkeypatch.setattr(W, "type_text", lambda t, **k: len(t))
-    r = W.type_text_fast(("line\n" * 100))
+    r = W.type_text_fast("line\n" * 100)
     assert r["method"] == "keystrokes"
 
 
@@ -403,11 +403,11 @@ def test_screenshot_marks_fall_back_to_pixels(tmp_path, monkeypatch) -> None:
 
 
 def test_guidance_has_desktop_playbook() -> None:
-    from remedy.core.computer.guidance import COMPUTER_USE_SYSTEM_ADDENDUM as text
+    from remedy.core.computer.guidance import COMPUTER_USE_SYSTEM_ADDENDUM
 
-    assert "Desktop app playbook" in text
+    assert "Desktop app playbook" in COMPUTER_USE_SYSTEM_ADDENDUM
     for route in ("ctrl+l", "alt+n", "Name Box", "ctrl+z"):
-        assert route in text
+        assert route in COMPUTER_USE_SYSTEM_ADDENDUM
 
 
 def test_a_wedged_computer_host_can_still_be_abandoned():

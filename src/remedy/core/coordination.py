@@ -392,7 +392,7 @@ def coworkers_note(
     Empty string when she is working alone.
     """
     now = time.time()
-    others = [b for b in active_beacons(exclude=session_id, home=home)]
+    others = list(active_beacons(exclude=session_id, home=home))
     if not others:
         return ""
     parts: list[str] = []
