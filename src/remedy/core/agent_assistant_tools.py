@@ -44,7 +44,6 @@ def register_assistant_tools(runtime: Any) -> None:
                 try:
                     from datetime import UTC, datetime, timedelta
 
-                    from remedy.assistant.providers.google_calendar import get_google_calendar
 
                     cal = _calendar_provider()
                     if cal is not None:
@@ -184,7 +183,6 @@ def register_assistant_tools(runtime: Any) -> None:
         from datetime import UTC, datetime, timedelta
 
         from remedy.assistant.privacy import consent_ok
-        from remedy.assistant.providers.google_calendar import get_google_calendar
 
         cal = _calendar_provider()
         if cal is not None and getattr(cal, "provider_id", "") != "caldav":
@@ -240,7 +238,6 @@ def register_assistant_tools(runtime: Any) -> None:
     ) -> str:
         """Create an event on primary Google Calendar (ISO start/end or YYYY-MM-DD all-day)."""
         from remedy.assistant.privacy import consent_ok
-        from remedy.assistant.providers.google_calendar import get_google_calendar
 
         cal = _calendar_provider()
         if cal is not None and getattr(cal, "provider_id", "") != "caldav":
@@ -346,6 +343,17 @@ def register_assistant_tools(runtime: Any) -> None:
         )
         return json.dumps(saved, indent=2)
 
+    async def mail_disconnect() -> str:
+        """Forget the connected mailbox and its app password.
+
+        Connecting used to be a one-way door: there was no tool, route, or CLI
+        path back out, so the only way to unlink a mailbox was deleting keys by
+        hand.
+        """
+        from remedy.assistant.providers.imap_smtp import clear_mail_credentials
+
+        return json.dumps(clear_mail_credentials(home=home), indent=2)
+
     async def mail_status() -> str:
         """Which mailbox is connected and how (app password vs Google OAuth)."""
         from remedy.assistant.providers.imap_smtp import load_mail_account, preset_for
@@ -423,7 +431,6 @@ def register_assistant_tools(runtime: Any) -> None:
     ) -> str:
         """Reschedule or edit an existing calendar event (only what you pass)."""
         from remedy.assistant.privacy import consent_ok
-        from remedy.assistant.providers.google_calendar import get_google_calendar
 
         cal = _calendar_provider()
         if cal is not None and getattr(cal, "provider_id", "") != "caldav":
@@ -468,7 +475,6 @@ def register_assistant_tools(runtime: Any) -> None:
     async def calendar_cancel_event(event_id: str = "") -> str:
         """Cancel (delete) an event on the primary calendar. Asks first in Ask mode."""
         from remedy.assistant.privacy import consent_ok
-        from remedy.assistant.providers.google_calendar import get_google_calendar
         from remedy.core.approvals import APPROVALS
         from remedy.core.turn_context import turn_session_id
 
@@ -532,7 +538,6 @@ def register_assistant_tools(runtime: Any) -> None:
     ) -> str:
         """Reply IN THREAD to a message (keeps the conversation together)."""
         from remedy.assistant.privacy import consent_ok, redact_secrets
-        from remedy.assistant.providers.google_gmail import get_google_gmail
         from remedy.core.approvals import APPROVALS
         from remedy.core.turn_context import turn_session_id
 
@@ -591,7 +596,6 @@ def register_assistant_tools(runtime: Any) -> None:
     async def mail_archive(message_id: str = "") -> str:
         """Archive a message (out of the inbox, still searchable)."""
         from remedy.assistant.privacy import consent_ok
-        from remedy.assistant.providers.google_gmail import get_google_gmail
 
         mail = _mail_provider()
         if mail is not None and getattr(mail, "provider_id", "") != "imap":
@@ -616,7 +620,6 @@ def register_assistant_tools(runtime: Any) -> None:
     async def mail_mark_read(message_id: str = "", read: bool = True) -> str:
         """Mark a message read (or unread with read=false)."""
         from remedy.assistant.privacy import consent_ok
-        from remedy.assistant.providers.google_gmail import get_google_gmail
 
         mail = _mail_provider()
         if mail is not None and getattr(mail, "provider_id", "") != "imap":
@@ -640,13 +643,12 @@ def register_assistant_tools(runtime: Any) -> None:
             return json.dumps({"ok": False, "message": str(exc)}, indent=2)
 
     async def mail_list(query: str = "in:inbox", limit: int = 15) -> str:
-        """List Gmail messages (needs Connect Google / Gmail)."""
+        """List the owner's mail — IMAP app password or Google OAuth."""
         from remedy.assistant.privacy import (
             consent_ok,
             redact_secrets,
             sanitize_mail_list_item,
         )
-        from remedy.assistant.providers.google_gmail import get_google_gmail
 
         mail = _mail_provider()
         if mail is not None and getattr(mail, "provider_id", "") != "imap":
@@ -694,13 +696,12 @@ def register_assistant_tools(runtime: Any) -> None:
         return json.dumps(redact_secrets(payload), indent=2)
 
     async def mail_get(message_id: str = "") -> str:
-        """Read one Gmail message by id (body snippet / plain text)."""
+        """Read one message by id (body snippet / plain text)."""
         from remedy.assistant.privacy import (
             consent_ok,
             redact_secrets,
             sanitize_mail_body,
         )
-        from remedy.assistant.providers.google_gmail import get_google_gmail
 
         mail = _mail_provider()
         if mail is not None and getattr(mail, "provider_id", "") != "imap":
@@ -743,9 +744,8 @@ def register_assistant_tools(runtime: Any) -> None:
         subject: str = "",
         body: str = "",
     ) -> str:
-        """Create a Gmail draft (does not send)."""
+        """Create a draft (does not send)."""
         from remedy.assistant.privacy import consent_ok, redact_secrets
-        from remedy.assistant.providers.google_gmail import get_google_gmail
 
         mail = _mail_provider()
         if mail is not None and getattr(mail, "provider_id", "") != "imap":
@@ -787,13 +787,12 @@ def register_assistant_tools(runtime: Any) -> None:
         subject: str = "",
         body: str = "",
     ) -> str:
-        """Send a Gmail message now (needs Connect Google + gmail.compose).
+        """Send a message now, over IMAP/SMTP or Gmail.
 
         High-impact: in Ask approval mode the user must confirm before send.
         Auto mode (owner power) skips the prompt on trusted scopes.
         """
         from remedy.assistant.privacy import consent_ok, redact_secrets
-        from remedy.assistant.providers.google_gmail import get_google_gmail
         from remedy.core.approvals import APPROVALS
 
         mail = _mail_provider()
@@ -1157,7 +1156,9 @@ def register_assistant_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "calendar_list_events",
-        "List Google Calendar primary events (needs Connect Google OAuth). days default 7.",
+        "List the owner's calendar events. Works over CalDAV with the mailbox app "
+        "password (Gmail / iCloud / Fastmail) or Google OAuth — whichever is "
+        "connected. days default 7.",
         calendar_list_events,
         {
             "type": "object",
@@ -1170,7 +1171,9 @@ def register_assistant_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "calendar_create_event",
-        "Create a Google Calendar event on primary calendar (official API, not browser login).",
+        "Create an event on the owner's calendar. Works over CalDAV with the mailbox "
+        "app password or Google OAuth — whichever is connected. Official API, "
+        "never a browser login.",
         calendar_create_event,
         {
             "type": "object",
@@ -1207,6 +1210,14 @@ def register_assistant_tools(runtime: Any) -> None:
             },
             "required": ["address", "app_password"],
         },
+    )
+    reg.register_builtin_handler(
+        "mail_disconnect",
+        "Disconnect the owner's mailbox: forget the stored app password and drop "
+        "the linked account. Use when they ask to unlink, or before connecting a "
+        "different address.",
+        mail_disconnect,
+        {"type": "object", "properties": {}},
     )
     reg.register_builtin_handler(
         "mail_status",
@@ -1283,7 +1294,9 @@ def register_assistant_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "mail_list",
-        "List Gmail messages (query e.g. in:inbox, from:x). Needs Connect Google (Gmail).",
+        "List the owner's mail (query e.g. in:inbox, from:x). Works over IMAP with an "
+        "app password (Gmail / Outlook / Yahoo / Fastmail / iCloud) or Google "
+        "OAuth — whichever is connected. mail_connect links one.",
         mail_list,
         {
             "type": "object",
@@ -1298,7 +1311,8 @@ def register_assistant_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "mail_get",
-        "Read one Gmail message by id from mail_list (plain text / snippet).",
+        "Read one message by id from mail_list (plain text / snippet). Same mailbox "
+        "mail_list used — IMAP app password or Google OAuth.",
         mail_get,
         {
             "type": "object",
@@ -1310,7 +1324,8 @@ def register_assistant_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "mail_create_draft",
-        "Create a Gmail draft (does not send). Needs Connect Google (Gmail).",
+        "Create a draft (does not send). Works with an IMAP app password or Google "
+        "OAuth — whichever mailbox is connected.",
         mail_create_draft,
         {
             "type": "object",
@@ -1324,7 +1339,7 @@ def register_assistant_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "mail_send",
-        "Send a Gmail message now (not a draft). Needs Connect Google. "
+        "Send a message now (not a draft), over IMAP/SMTP or Google OAuth. "
         "Use only when the user explicitly asks to send.",
         mail_send,
         {

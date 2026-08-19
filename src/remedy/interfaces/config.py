@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import threading
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -322,6 +323,19 @@ def resolve_provider_api_key(
     return global_key
 
 
+#: Parsed-config cache, keyed by path. ``load_config`` runs on every turn (soul
+#: inject, tools, routes), so the parse is cached against (mtime_ns, size).
+#:
+#: Defined here rather than created on first call inside the function. That
+#: idiom — ``try: _lock except NameError: _lock = Lock()`` — races on a
+#: multi-threaded start: two callers can each build a *different* lock, so
+#: neither excludes the other, and the second one re-binds the cache dict out
+#: from under the first. A caller arriving between the two assignments saw the
+#: lock exist and the cache not, and got a NameError out of a hot path.
+_load_config_lock = threading.Lock()
+_load_config_cache: dict[str, tuple[int, int, dict]] = {}
+
+
 def load_config(path: Path | None = None) -> dict[str, Any]:
     """Load config from a file, auto-detecting format (TOML or YAML).
 
@@ -353,14 +367,7 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
     # open+parse. Deep-copied on return so caller mutations never leak into
     # the cache. Writers need no invalidation: save bumps mtime.
     import copy as _copy
-    import threading as _threading
 
-    global _load_config_cache, _load_config_lock
-    try:
-        _load_config_lock  # noqa: B018
-    except NameError:
-        _load_config_lock = _threading.Lock()
-        _load_config_cache = {}
     try:
         st = path.stat()
         cache_key = (str(path), st.st_mtime_ns, st.st_size)

@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_text_atomic
+
 
 def _offload_root(home: Path | str | None = None) -> Path:
     if home is None:
@@ -39,7 +41,7 @@ def offload_tool_body(
         h = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
         path = root / f"{sid}_{h}.txt"
         if not path.is_file():
-            path.write_text(text, encoding="utf-8", errors="replace")
+            write_text_atomic(path, text)
         # First line outcome + handle
         first = text.strip().split("\n", 1)[0][:160]
         handle = (

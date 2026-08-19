@@ -408,3 +408,31 @@ def test_guidance_has_desktop_playbook() -> None:
     assert "Desktop app playbook" in text
     for route in ("ctrl+l", "alt+n", "Name Box", "ctrl+z"):
         assert route in text
+
+
+def test_a_wedged_computer_host_can_still_be_abandoned():
+    """``stop`` keeps the handle when the worker outlives its join, so a second
+    worker cannot land on the same job queue. ``force`` is the escape hatch for
+    a worker that will never return, and must stay available."""
+    import threading
+
+    from remedy.core.computer.cli_host import LocalComputerHost
+
+    host = LocalComputerHost()
+    release = threading.Event()
+    host._thread = threading.Thread(target=release.wait, daemon=True)
+    host._thread.start()
+    try:
+        assert host.stop(timeout=0.05) is False
+        assert host.running, "running must not lie while the worker is alive"
+
+        assert host.stop(timeout=0.05, force=True) is True
+        assert not host.running
+    finally:
+        release.set()
+
+
+def test_stopping_a_host_that_never_started_succeeds():
+    from remedy.core.computer.cli_host import LocalComputerHost
+
+    assert LocalComputerHost().stop() is True

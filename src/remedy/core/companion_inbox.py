@@ -12,6 +12,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
+
 _WATCH_NAMES = ("Desktop", "Downloads")
 _INTERESTING = frozenset(
     {
@@ -71,7 +73,7 @@ def _save_seen(seen: dict[str, float], runtime: Any = None) -> None:
     if len(seen) > 400:
         items = sorted(seen.items(), key=lambda kv: kv[1], reverse=True)[:300]
         seen = dict(items)
-    fp.write_text(json.dumps(seen), encoding="utf-8")
+    write_json_atomic(fp, seen, indent=None)
 
 
 def watch_roots(*, extra: list[Path] | None = None) -> list[Path]:

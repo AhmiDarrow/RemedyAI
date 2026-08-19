@@ -184,7 +184,12 @@ def create_app(
                 """Bridge the sync clock thread onto the async gateway."""
                 if gateway is None or _main_loop is None:
                     return
-                with contextlib.suppress(Exception):
+                # ``suppress`` is what this module imports; the bare
+                # ``contextlib`` name was never bound, so this raised NameError
+                # on every push — and notify.deliver_due wraps the call in its
+                # own suppress, so every reminder was recorded as delivered
+                # while no messenger ever heard about it.
+                with suppress(Exception):
                     _asyncio.run_coroutine_threadsafe(
                         gateway.broadcast(text), _main_loop
                     )

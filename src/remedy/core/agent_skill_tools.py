@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.errors import format_tool_error
+from remedy.core.relpath import norm_rel
 
 logger = logging.getLogger(__name__)
 
@@ -260,7 +261,7 @@ def register_skill_tools(runtime: Any) -> None:
                     suggestion=f"Available: {', '.join(scripts)}",
                 )
         # Packaged skills: only scripts/ tree is executable (never SKILL.md etc.)
-        chosen_norm = chosen.replace("\\", "/").lstrip("./")
+        chosen_norm = norm_rel(chosen)
         if not chosen_norm.startswith("scripts/"):
             return format_tool_error(
                 f"Script must live under scripts/: {chosen}",

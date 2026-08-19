@@ -11,6 +11,7 @@ a machine and hoping nobody notices.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -80,13 +81,16 @@ class BargeInRecord:
 
 
 def percentile(values: list[float], pct: float) -> float:
-    """Nearest-rank percentile. No numpy — this runs in tests and on the line."""
+    """Nearest-rank percentile. No numpy — this runs in tests and on the line.
+
+    ``ceil``, not ``round(k + 0.5)``: Python rounds halves to even, so that
+    idiom lands one rank too high whenever ``k`` is an odd integer — the median
+    of two turns came back as the slower one, and of six as the fourth.
+    """
     if not values:
         return 0.0
     ordered = sorted(values)
-    if len(ordered) == 1:
-        return ordered[0]
-    rank = max(1, min(len(ordered), int(round(pct / 100.0 * len(ordered) + 0.5))))
+    rank = max(1, min(len(ordered), math.ceil(pct / 100.0 * len(ordered))))
     return ordered[rank - 1]
 
 
@@ -129,11 +133,27 @@ class CallMetrics:
         return sum(1 for t in self.turns if t.false_interrupt) / len(self.turns)
 
     @property
+    def unanswered(self) -> list[TurnRecord]:
+        """Turns she took and never actually answered.
+
+        Invisible to every percentile — ``ttfs`` has no sample for a turn with
+        no speech in it — so counting them nowhere let total silence score
+        better than a slow answer: five turns, one answered, and the call
+        passed clean.
+        """
+        return [t for t in self.turns if not t.her_first_speech]
+
+    @property
     def false_wait_rate(self) -> float:
         if not self.turns:
             return 0.0
-        # Judged on the answer, not on the filler that preceded it.
-        late = sum(1 for t in self.turns if t.ttfs_ms > self.bar.long_gap_ms)
+        # Judged on the answer, not on the filler that preceded it. No answer at
+        # all is the longest wait there is, not an absent measurement.
+        late = sum(
+            1
+            for t in self.turns
+            if not t.her_first_speech or t.ttfs_ms > self.bar.long_gap_ms
+        )
         return late / len(self.turns)
 
     @property
@@ -158,6 +178,7 @@ class CallMetrics:
             "false_wait_rate": round(self.false_wait_rate, 4),
             "worst_dead_air_ms": round(self.worst_dead_air_ms, 1),
             "fillers_used": sum(1 for x in self.turns if x.filler_used),
+            "unanswered": len(self.unanswered),
         }
 
     def failures(self) -> list[str]:
@@ -197,6 +218,11 @@ class CallMetrics:
             out.append(
                 f"leaves long gaps: {self.false_wait_rate:.1%}, "
                 f"bar {self.bar.false_wait_rate:.1%}"
+            )
+        silent = self.unanswered
+        if silent:
+            out.append(
+                f"{len(silent)} of {len(self.turns)} turns got no answer at all"
             )
         if self.worst_dead_air_ms > self.bar.dead_air_ms:
             out.append(

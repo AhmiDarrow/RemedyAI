@@ -34,7 +34,7 @@ from enum import StrEnum
 from typing import Any, Protocol
 
 from remedy.telephony.line import AudioFrame, Call
-from remedy.telephony.narrowband import PHONE_RATE, frame_bytes, rms
+from remedy.telephony.narrowband import PHONE_RATE, frame_bytes, resample, rms
 from remedy.telephony.timing import FramePacer
 from remedy.voice.realtime.metrics import CallMetrics, TurnRecord
 from remedy.voice.realtime.turn import EnergyTurnDetector, TurnDetector, TurnEvent
@@ -114,6 +114,8 @@ class VoicePipeline:
     _first_audio_sent: bool = field(default=False, init=False)
     _speaking_started: bool = field(default=False, init=False)
     _spoken_ms: float = field(default=0.0, init=False)
+    #: Sub-frame tail of the last synthesis chunk, waiting for the next one.
+    _carry: bytearray = field(default_factory=bytearray, init=False)
     _stop: bool = field(default=False, init=False)
 
     # -- lifecycle -----------------------------------------------------------
@@ -127,6 +129,10 @@ class VoicePipeline:
                 await self._on_frame(frame)
         finally:
             await self._abandon_turn()
+            # A turn the far end hung up in the middle of is not an answer she
+            # withheld, and must not be scored as one. Anything she actually
+            # said has already set ``her_first_speech``, which this leaves alone.
+            self._drop_turn_record()
         return self.metrics
 
     async def stop(self) -> None:
@@ -209,6 +215,12 @@ class VoicePipeline:
 
     def _on_endpoint(self, at: float) -> None:
         if self.state is PipelineState.SPECULATING:
+            if self._turn is None or self._turn.done():
+                # Nothing to commit to. Belt and braces against the wedge
+                # described in ``_respond``: answer from scratch instead.
+                self._drop_turn_record()
+                self._begin_turn(speculative=False)
+                return
             # The gamble paid: release whatever is already synthesized.
             self.state = PipelineState.THINKING
             self._commit.set()
@@ -219,7 +231,11 @@ class VoicePipeline:
         """They cut in. Stop immediately — finishing the sentence is the tell."""
         rec = self.metrics.start_barge_in(at)
         await self._abandon_turn()
-        self.pacer.reset()
+        # They took the turn back before she got a word out. That is them
+        # interrupting, not her going silent — the barge-in is recorded above
+        # and the turn is not scored as unanswered.
+        self._drop_turn_record()
+        self._carry.clear()
         self.state = PipelineState.LISTENING
         rec.silenced = self.clock()
         logger.debug("barge-in on call %s after %.0f ms", self.call.id, rec.latency_ms)
@@ -236,11 +252,16 @@ class VoicePipeline:
         self._first_audio_sent = False
         self._speaking_started = False
         self._spoken_ms = 0.0
+        self._carry.clear()
         self._commit = asyncio.Event()
+        if self._backchannel is not None and not self._backchannel.done():
+            # Recovering from a dead speculation can land here with a filler
+            # still playing. Dropping the reference would leave it interleaving
+            # frames with the new turn's answer.
+            self._backchannel.cancel()
         self._backchannel = None
         if not speculative:
             self._commit.set()
-        self.pacer.reset()
         self.state = (
             PipelineState.SPECULATING if speculative else PipelineState.THINKING
         )
@@ -283,7 +304,15 @@ class VoicePipeline:
         except Exception:
             logger.exception("call %s: turn failed", self.call.id)
         finally:
-            if self.state in (PipelineState.SPEAKING, PipelineState.THINKING):
+            if self.state is PipelineState.SPECULATING:
+                # The speculation died before anyone heard it — an engine error,
+                # or a model with nothing to say. Leaving the state here would
+                # wedge the call: the next endpoint would commit to a task that
+                # no longer exists, and ``_begin_turn`` is only reachable from
+                # LISTENING, so she would never speak again.
+                self._drop_turn_record()
+                self.state = PipelineState.LISTENING
+            elif self.state in (PipelineState.SPEAKING, PipelineState.THINKING):
                 self.state = PipelineState.LISTENING
 
     @property
@@ -308,31 +337,84 @@ class VoicePipeline:
             if not self._speaking_started:
                 self._speaking_started = True
                 self.state = PipelineState.SPEAKING
-                # Waiting for commit is not playout drift: re-base the pacer so
-                # the hold is not reported as a late frame.
-                self.pacer.reset()
-            await self._playout(pcm, rec, backchannel=False)
+            await self._playout(
+                pcm, rec, backchannel=False, src_rate=self._tts_rate, flush=False
+            )
+        if self._carry:
+            # End of the clause: nothing is coming to complete the last frame,
+            # so pad it out rather than hold audio she has already said.
+            await self._playout(
+                b"", rec, backchannel=False, src_rate=self._tts_rate, flush=True
+            )
 
     async def _say_backchannel(self) -> None:
         """The noise a listening human makes. Deliberately not gated on commit."""
         rec = self._turn_rec
         if self.filler_audio is None or rec is None or self._first_audio_sent:
             return
-        rec.filler_used = True
-        await self._playout(self.filler_audio(), rec, backchannel=True)
+        try:
+            rec.filler_used = True
+            # Filler is generated at the line rate, not the synthesizer's.
+            await self._playout(
+                self.filler_audio(),
+                rec,
+                backchannel=True,
+                src_rate=self.config.sample_rate,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Nothing awaits this task, so an unhandled error here vanishes into
+            # "Task exception was never retrieved" and the filler silently stops
+            # working for the rest of the call.
+            logger.exception("call %s: backchannel failed", self.call.id)
+
+    @property
+    def _tts_rate(self) -> int:
+        return int(getattr(self.tts, "sample_rate", self.config.sample_rate))
 
     async def _playout(
-        self, pcm: bytes, rec: TurnRecord, *, backchannel: bool
+        self,
+        pcm: bytes,
+        rec: TurnRecord,
+        *,
+        backchannel: bool,
+        src_rate: int,
+        flush: bool = True,
     ) -> None:
         """Send PCM as 20 ms frames, yielding between each so barge-in can land."""
-        step = frame_bytes(self.config.sample_rate)
-        rate = getattr(self.tts, "sample_rate", self.config.sample_rate)
+        # One chunk is one contiguous run. Whatever the engine spent producing
+        # it — a synthesis warm-up, a held commit, the gap after a barge-in — is
+        # not the transport failing to hold its cadence, and must not be
+        # reported as one. Audible gaps between chunks are real and are measured
+        # where they belong, as ``dead_air_ms`` below.
+        self.pacer.rebase()
+        # The synthesizer need not speak at the line's rate — Chatterbox runs at
+        # 24 kHz — so convert before framing. Framing 24 kHz audio into 8 kHz
+        # frames would pace playout at a third of speed, overcount the speech
+        # budget threefold, and hand the backend a rate it cannot put on a wire.
+        rate = self.config.sample_rate
+        if src_rate != rate:
+            pcm = resample(pcm, src_rate, rate)
+        step = frame_bytes(rate)
+        if self._carry:
+            pcm = bytes(self._carry) + pcm
+            self._carry.clear()
+        if not flush:
+            # A synthesizer's chunks do not land on 20 ms boundaries. Padding
+            # each tail with zeroes splices a click of digital silence into the
+            # middle of her sentence at every chunk — up to 20 ms, every time.
+            # Carry it into the next chunk instead; ``flush`` pads once, at the
+            # end, where the silence is real.
+            whole = len(pcm) - (len(pcm) % step)
+            self._carry.extend(pcm[whole:])
+            pcm = pcm[:whole]
         for off in range(0, len(pcm), step):
             chunk = pcm[off : off + step]
             if len(chunk) < step:
                 chunk = chunk + b"\x00" * (step - len(chunk))
             now = self.clock()
-            self._spoken_ms += (len(chunk) / 2) / self.config.sample_rate * 1000.0
+            self._spoken_ms += (len(chunk) / 2) / rate * 1000.0
             if rms(chunk) >= _AUDIBLE:
                 if not self._first_audio_sent:
                     self._first_audio_sent = True

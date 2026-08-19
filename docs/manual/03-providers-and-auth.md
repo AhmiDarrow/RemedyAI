@@ -46,6 +46,30 @@ remedy auth logout xai
 remedy auth apikey xai xai-...
 ```
 
+## Every other provider — API key, from the CLI
+
+`remedy auth` used to refuse anything but xAI. It now covers every provider in
+the catalog, which matters on Linux and on headless installs where the desktop
+Settings screen is not the way in.
+
+```bash
+remedy auth apikey anthropic            # prompts, hidden input
+remedy auth apikey openai sk-...        # or pass it inline
+remedy auth status anthropic            # stored? fingerprint? env fallback?
+remedy auth status all                  # every provider holding a key
+remedy auth logout openai               # clear one
+remedy auth logout all                  # clear every stored key
+```
+
+**Key storage:** `~/.remedy/auth/provider_keys.json`, DPAPI-sealed on Windows.
+`status` prints a short fingerprint and never the key itself, so it is safe to
+paste into a bug report. Providers that need no key — Ollama, RMB, llama.cpp,
+Demo — say so rather than storing an empty one, and `login` on a key-only
+provider points you at `apikey` instead of failing silently.
+
+xAI keeps its own path above: it is the one provider with device-code OAuth, and
+its credentials live in `~/.remedy/auth/xai.json`.
+
 ### OAuth failure checklist
 
 - Local server must be running (status bar not disconnected).  

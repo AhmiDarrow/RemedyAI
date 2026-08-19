@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remedy.core.relpath import norm_rel
+
 _SKIP = frozenset(
     {".venv", "venv", "node_modules", ".git", "__pycache__", "dist", "build", ".remedy-build"}
 )
@@ -162,7 +164,7 @@ def closure_from_index(
     budget: int = 4000,
 ) -> str:
     """Minimal linker-style context for a unit path."""
-    rel = path.replace("\\", "/").lstrip("./")
+    rel = norm_rel(path)
     lines: list[str] = [f"# unit: {rel}", f"# indexed_files={index.file_count}"]
     local = sorted(index.defs_by_path.get(rel) or [])
     if local:

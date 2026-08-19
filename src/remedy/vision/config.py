@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
 from remedy.vision.catalog import (
     DEFAULT_HOST,
     DEFAULT_MODEL_ID,
@@ -59,7 +60,7 @@ def save_vision_json(data: dict[str, Any], home_dir: str | Path | None = None) -
     root = vision_root(home_dir)
     root.mkdir(parents=True, exist_ok=True)
     path = vision_json_path(home_dir)
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    write_json_atomic(path, data)
     # Force runtime hot-path reparse (Windows mtime granularity)
     try:
         from remedy.vision.runtime import invalidate_running_cache

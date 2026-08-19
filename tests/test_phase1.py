@@ -142,8 +142,21 @@ class TestMemoryRepair:
 
     @pytest.mark.asyncio
     async def test_checkpoint(self, store):
+        """A WAL checkpoint that silently did nothing used to pass this."""
+        entry = MemoryEntry(title="Durable", content="survives a checkpoint")
+        await store.upsert(entry)
+
         repair = MemoryRepair(store)
         await repair.checkpoint()
+
+        # The point of TRUNCATE is that the write-ahead log is folded into the
+        # database, so the data is readable with no WAL left to replay.
+        db = store._ensure_db()
+        rows = db.execute(
+            "SELECT COUNT(*) FROM memory_entries WHERE title = ?", ("Durable",)
+        ).fetchone()
+        assert rows[0] == 1
+        assert (await repair.check_integrity())["integrity"] == "ok"
 
     @pytest.mark.asyncio
     async def test_rebuild_fts(self, store):

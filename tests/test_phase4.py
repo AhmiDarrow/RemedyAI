@@ -164,7 +164,24 @@ class TestGateway:
         gateway.register_channel(cli)
         gateway.register_channel(web)
 
-        asyncio.run(gateway.broadcast("hello"))
+        # The name promises "to all", and broadcast returns a per-channel
+        # verdict — which this test used to throw away, so a broadcast that
+        # reached nobody would have passed.
+        results = asyncio.run(gateway.broadcast("hello"))
+        assert set(results) == {cli.kind, web.kind}, "a channel was not even tried"
+        assert results[cli.kind] is True
+        # WEB is a request/response relay, not a push channel: with no pending
+        # request to answer it declines, and says so rather than pretending.
+        assert results[web.kind] is False
+
+    def test_broadcast_skips_what_it_was_told_to_exclude(self, gateway):
+        cli = CLIChannel(gateway)
+        web = WebChannel(gateway)
+        gateway.register_channel(cli)
+        gateway.register_channel(web)
+
+        results = asyncio.run(gateway.broadcast("hello", exclude=[cli.kind]))
+        assert set(results) == {web.kind}
 
     def test_send_to_specific_channel(self, gateway):
         cli = CLIChannel(gateway)

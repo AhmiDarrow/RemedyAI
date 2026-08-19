@@ -6,9 +6,12 @@ signals or learn pre-gates across unrelated chats.
 
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -86,13 +89,22 @@ class _SessionPattern:
             )
             return {
                 "action": decision.action,
-                "reasoning": decision.reasoning,
+                # ``LifecycleDecision`` calls it ``reason``. Asking for
+                # ``reasoning`` raised, the blanket catch below turned that into
+                # action="unknown", and the pre-gate looked like it was running
+                # while every trace it ever saw came back undecided.
+                "reasoning": decision.reason,
                 "confidence": decision.confidence,
                 "effort": effort.score,
                 "pre_approved": decision.action == "accept",
                 "skip_learn": decision.action in ("reject", "skip"),
             }
         except Exception as e:
+            # Say so. This catch used to swallow an AttributeError on every
+            # single call, and "unknown" is indistinguishable from a policy that
+            # genuinely could not decide — the pre-gate looked alive for as long
+            # as nobody read the error field.
+            logger.warning("pattern pre-gate failed, no decision made: %s", e)
             return {"action": "unknown", "error": str(e), "skip_learn": False}
 
     def snapshot(self) -> dict[str, Any]:

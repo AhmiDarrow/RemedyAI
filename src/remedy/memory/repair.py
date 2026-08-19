@@ -10,6 +10,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+from remedy.core.atomic_json import write_json_atomic
 from remedy.memory.store import MemoryStore
 
 
@@ -83,14 +84,16 @@ class MemoryRepair:
 
         # Also create a manifest
         manifest_path = backup_base / f"memory_backup_{timestamp}.json"
-        import json
         info = await self.check_integrity()
-        manifest_path.write_text(json.dumps({
-            "backup_path": str(backup_path),
-            "original_path": str(db_path),
-            "timestamp": timestamp,
-            "stats": info,
-        }, indent=2, default=str))
+        write_json_atomic(
+            manifest_path,
+            {
+                "backup_path": str(backup_path),
+                "original_path": str(db_path),
+                "timestamp": timestamp,
+                "stats": info,
+            },
+        )
 
         return backup_path
 
