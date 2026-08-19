@@ -6,6 +6,7 @@ decompiles a goal into UnitSpecs with declare/requires/tests stubs.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 from pathlib import Path
@@ -121,7 +122,7 @@ def compile_goal_to_spec(
 
     # Enrich from disk index if root given
     if root:
-        with __import__("contextlib").suppress(Exception):
+        with contextlib.suppress(Exception):
             from remedy.core.build_symbol_index import build_symbol_index
 
             idx = build_symbol_index(root)

@@ -6,6 +6,7 @@ Remedy must not store or send Claude Code / Max OAuth tokens
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 SUBSCRIPTION_OAUTH_PREFIXES = (
@@ -58,7 +59,7 @@ def public_anthropic_status(*, home=None) -> dict[str, Any]:
     from remedy.interfaces.secret_store import get_provider_secret
 
     secret = ""
-    with __import__("contextlib").suppress(Exception):
+    with contextlib.suppress(Exception):
         secret = str(get_provider_secret("anthropic", home=home) or "")
     kind = classify_anthropic_secret(secret)
     return {

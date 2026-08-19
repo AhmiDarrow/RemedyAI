@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.errors import format_tool_error
+from remedy.core.repo_search import _SKIP_DIR_NAMES
 from remedy.core.workspace_tools.guards import (
     junk_write_guard,
     note_path,
@@ -76,6 +77,11 @@ def register_search_tools(runtime: Any) -> None:
         if sym and not (pattern or "").strip():
             # Definition-oriented multi-pattern search
             all_hits: list[SearchHit] = []
+            # Dedup by (path, line) through a set rather than rescanning
+            # all_hits for every hit: symbol search runs several patterns and
+            # max_matches goes to 500, so the pairwise version did up to a
+            # quarter of a million comparisons per call. Order is preserved.
+            seen_hits: set[tuple[str, int]] = set()
             engine_used = "python"
             for pat in symbol_search_patterns(sym):
                 hits, engine = search_repo(
@@ -91,9 +97,9 @@ def register_search_tools(runtime: Any) -> None:
                 )
                 engine_used = engine
                 for h in hits:
-                    if not any(
-                        x.path == h.path and x.line == h.line for x in all_hits
-                    ):
+                    key = (h.path, h.line)
+                    if key not in seen_hits:
+                        seen_hits.add(key)
                         all_hits.append(h)
                 if len(all_hits) >= int(max_matches or 50):
                     break
@@ -176,7 +182,12 @@ def register_search_tools(runtime: Any) -> None:
             entries = sorted(
                 target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())
             )
-            visible = [p for p in entries if not p.name.startswith(".")]
+            # Dotted entries are shown. Hiding every one of them made
+            # .github/, .gitignore and .env.example undiscoverable — Remedy
+            # could read them only by guessing the name. Only the machine
+            # noise directories (.git, __pycache__, node_modules, …) are
+            # withheld, matching what repo_search and file_glob already skip.
+            visible = [p for p in entries if p.name not in _SKIP_DIR_NAMES]
             total = len(visible)
             page = visible[off : off + lim]
             for p in page:

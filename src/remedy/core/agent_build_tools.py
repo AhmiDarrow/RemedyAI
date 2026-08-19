@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import Any
 
@@ -226,7 +227,7 @@ def register_build_tools(runtime: Any) -> None:
             write_set = list(st.write_set)
         # Fall back to ledger hop paths
         if not write_set:
-            with __import__("contextlib").suppress(Exception):
+            with contextlib.suppress(Exception):
                 from remedy.core.build_ledger import load_ledger
 
                 led = load_ledger(proj, home=_home())
@@ -244,7 +245,7 @@ def register_build_tools(runtime: Any) -> None:
                 "build_unit_hop / build_live_project first."
             )
         ms = mutation_score_paths(root, write_set)
-        with __import__("contextlib").suppress(Exception):
+        with contextlib.suppress(Exception):
             if st is not None:
                 st.last_mutation_score = ms  # type: ignore[attr-defined]
             runtime._last_mutation_score = ms  # type: ignore[attr-defined]
@@ -269,7 +270,7 @@ def register_build_tools(runtime: Any) -> None:
         g = (goal or "").strip()
         if not g:
             st = None
-            with __import__("contextlib").suppress(Exception):
+            with contextlib.suppress(Exception):
                 from remedy.core.build_engine import get_build_state
 
                 st = get_build_state(runtime)

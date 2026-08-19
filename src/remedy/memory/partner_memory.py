@@ -10,6 +10,7 @@ stable constraints — without requiring power-user setup.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import threading
 from dataclasses import dataclass
@@ -166,11 +167,30 @@ _EXPLICIT_REMEMBER_RE = re.compile(
     r")\b"
 )
 
+# Guards every durable write: profile facts, soul updates, the epistemic graph,
+# /remember, and post-turn auto-extraction. A miss here is a credential living
+# in memory across sessions and getting replayed into later prompts, so the
+# prefixes of the providers Remedy actually talks to are all spelled out.
+#
+# The token bodies allow "-" and "_": real keys are hyphenated
+# (sk-ant-api03-…, xoxb-1234-5678-…), and the older [a-z0-9]{10,} body stopped
+# at the first hyphen, which meant an Anthropic key did not match at all.
 _SECRET_RE = re.compile(
     r"(?i)("
-    r"api[_-]?key|secret[_-]?key|password\s*[:=]|bearer\s+[a-z0-9\-._~+/]+=*"
-    r"|sk-[a-z0-9]{10,}|xai-[a-z0-9]{10,}|ghp_[a-z0-9]{20,}"
-    r"|-----begin (?:rsa )?private key-----"
+    r"api[_-]?key|secret[_-]?key|secret[_-]?access[_-]?key"
+    r"|password\s*[:=]|passwd\s*[:=]|bearer\s+[a-z0-9\-._~+/]+=*"
+    # OpenAI / Anthropic / xAI / OpenRouter / Mistral / DeepSeek style
+    r"|sk-[a-z0-9_-]{10,}|xai-[a-z0-9_-]{10,}"
+    # GitHub: classic PAT, OAuth, server-to-server, refresh, fine-grained
+    r"|gh[pousr]_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}"
+    # GitLab / HuggingFace / Slack / Google / AWS / Stripe / SendGrid / Twilio
+    r"|glpat-[a-z0-9_-]{10,}|hf_[a-z0-9]{20,}"
+    r"|xox[abposr]-[a-z0-9-]{10,}|xapp-[a-z0-9-]{10,}"
+    r"|AIza[a-z0-9_-]{30,}"
+    r"|AKIA[a-z0-9]{16}|ASIA[a-z0-9]{16}"
+    r"|sk_live_[a-z0-9]{20,}|rk_live_[a-z0-9]{20,}"
+    r"|SG\.[a-z0-9_-]{20,}"
+    r"|-----begin (?:rsa |ec |dsa |openssh )?private key-----"
     r"|authorization:\s*bearer"
     r")"
 )
@@ -806,7 +826,7 @@ async def distill_user_text(
             if action == "added":
                 result["added"] += 1
                 if use_proj and cand.category in ("constraint", "workflow", "craft", "stack"):
-                    with __import__("contextlib").suppress(Exception):
+                    with contextlib.suppress(Exception):
                         from remedy.core.project_learning import record_project_chapter
 
                         record_project_chapter(
@@ -816,7 +836,7 @@ async def distill_user_text(
                         )
                 # Also land in entry store so memory_search FTS finds it
                 if force or cand.source == "explicit":
-                    with __import__("contextlib").suppress(Exception):
+                    with contextlib.suppress(Exception):
                         from remedy.models import MemoryEntry, MemoryEntryType
 
                         if hasattr(memory, "upsert"):

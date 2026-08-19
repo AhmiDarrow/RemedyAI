@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import sqlite3
 import threading
 from datetime import UTC, datetime
@@ -612,7 +613,7 @@ class MemoryStore:
             return [self._row_to_entry(r) for r in rows]
         except sqlite3.OperationalError as exc:
             # Invalid MATCH syntax or missing FTS — degrade gracefully (no recursion).
-            logger = __import__("logging").getLogger(__name__)
+            logger = logging.getLogger(__name__)
             logger.debug(
                 "FTS MATCH failed (%s); falling back to LIKE for query=%r",
                 exc,
@@ -909,7 +910,7 @@ class MemoryStore:
 
                 db.commit()
             except Exception:
-                with __import__("contextlib").suppress(Exception):
+                with contextlib.suppress(Exception):
                     db.rollback()
                 raise
 

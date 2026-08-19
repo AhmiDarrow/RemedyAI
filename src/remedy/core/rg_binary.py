@@ -18,6 +18,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import threading
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -245,7 +246,7 @@ def _extract_rg_from_archive(archive: Path, dest_dir: Path) -> Path:
     return found
 
 
-_ensure_lock = __import__("threading").Lock()
+_ensure_lock = threading.Lock()
 _ensure_started = False
 _ensure_failed = False
 
