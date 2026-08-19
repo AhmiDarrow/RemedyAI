@@ -123,6 +123,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   and the readable one, carrying her relational memory and pledges in the
   clear, was not. `soul_export` now returns a message naming where exports go
   instead of raising.
+- **`.jsx` files are no longer reported as broken.** They were handed to
+  `node --check`, which rejects the *extension* with
+  `ERR_UNKNOWN_FILE_EXTENSION` before reading a character — so every `.jsx`
+  file came back red whatever was in it, and the "error" shown to the model was
+  a Node internals traceback about file formats. Read as "your code is broken",
+  that sends the model rewriting a working component. `.jsx` now takes the same
+  structural check `.tsx` already falls back to; `.js` keeps the real parser.
 - **`list_dir` shows dotfiles.** Hiding every entry beginning with `.` made
   `.github/`, `.gitignore` and `.env.example` undiscoverable — readable only
   by guessing the name. Only the machine-noise directories are withheld now,
