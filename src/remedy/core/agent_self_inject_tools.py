@@ -7,6 +7,7 @@ rollback -> record -> continue. See ``docs/SELF_INJECT.md``.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import Any
 
@@ -47,7 +48,7 @@ def _repo_root(runtime: Any) -> str | None:
         for _ in range(6):
             pp = cur / "pyproject.toml"
             if pp.exists():
-                with __import__("contextlib").suppress(Exception):
+                with contextlib.suppress(Exception):
                     if _is_remedy_pp(pp.read_text(encoding="utf-8", errors="ignore")):
                         return str(cur)
             if (cur / ".git").exists():
@@ -134,7 +135,7 @@ def register_self_inject_tools(runtime: Any) -> None:
         round_ = SelfInjectRound(tree=tree)
         focus_n = (focus or "auto").strip().lower()
         # Continuity-targeted self-improvement (organism densifying its own memory)
-        with __import__("contextlib").suppress(Exception):
+        with contextlib.suppress(Exception):
             from remedy.memory.soul.continuity_metrics import primary_self_inject_focus
 
             cont = primary_self_inject_focus(home)
@@ -168,7 +169,7 @@ def register_self_inject_tools(runtime: Any) -> None:
             round_.finished_utc = __import__(
                 "remedy.core.self_inject", fromlist=["_now_utc"]
             )._now_utc()
-            with __import__("contextlib").suppress(Exception):
+            with contextlib.suppress(Exception):
                 append_ledger(round_, home)
             return f"self-inject round error: {e}"
 

@@ -3,14 +3,30 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
-from contextlib import suppress
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from remedy.core.react_policy import is_productive_tool_batch
 from remedy.core.react_turn import extract_tool_names, extract_write_paths
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _soft(stage: str) -> Iterator[None]:
+    """A best-effort stage: it may fail, but it may not fail *silently*.
+
+    Every step below is optional — the turn must survive a build-engine that
+    is half-configured or mid-refactor. Plain ``suppress(Exception)`` bought
+    that at the price of making a typo in any of them invisible forever, which
+    is how a dead code path can sit here for months looking healthy. Same
+    tolerance, with a debug line naming the stage that fell over.
+    """
+    try:
+        yield
+    except Exception:
+        logger.debug("build engine stage %r failed", stage, exc_info=True)
 
 
 def record_tool_batch_stats(
@@ -43,7 +59,7 @@ def record_tool_batch_stats(
 
 def inject_phase_nudge(turn: Any, messages: list[dict[str, Any]]) -> None:
     """Task-loop phase nudge (RESEARCH → PLAN → BUILD) when inject budget allows."""
-    with suppress(Exception):
+    with _soft("phase-nudge"):
         pn = turn.phase_nudge()
         if pn and turn.inject_count <= turn.max_injects:
             messages.append(pn)
@@ -59,7 +75,7 @@ async def apply_build_engine_after_batch(
 ) -> AsyncIterator[str]:
     """Run syntax/import gates, auto-verify, machine nudges. Yields @@status lines."""
     # Machine build engine: syntax gate + auto-verify + force nudges
-    with suppress(Exception):
+    with _soft("build-engine"):
         from remedy.core.build_engine import (
             get_build_state,
             next_machine_nudge,
@@ -82,7 +98,7 @@ async def apply_build_engine_after_batch(
             observe_tool_batch(bst, fresh_calls, batch_tool_msgs)
             # Explore thrash + zero writes → machine starts TDD / hops
             # instead of only injecting a FORCE IMPLEMENT essay.
-            with suppress(Exception):
+            with _soft("auto-implement-drive"):
                 from remedy.core.build_drive import (
                     format_drive_message,
                     maybe_auto_implement,
@@ -114,7 +130,7 @@ async def apply_build_engine_after_batch(
                     )
             # Post-write blast-radius digest (mapped tests / import cone)
             # so the model verifies the right nodes instead of the whole suite.
-            with suppress(Exception):
+            with _soft("write-review"):
                 from remedy.core.build_drive import review_write_set
 
                 wrote_now = any(
@@ -176,7 +192,7 @@ async def apply_build_engine_after_batch(
                         yield "@@status:Build syntax gate red\n"
                 # Import-graph dry-run (faster than pytest for .py)
                 if not bad:
-                    with suppress(Exception):
+                    with _soft("import-dry-run"):
                         from remedy.core.build_import_graph import (
                             dry_run_imports_for_paths,
                             format_import_dry_run_message,
@@ -201,7 +217,7 @@ async def apply_build_engine_after_batch(
                                 yield "@@status:Build import dry-run red\n"
                             else:
                                 # mutation score for next scoped verify
-                                with suppress(Exception):
+                                with _soft("mutation-score"):
                                     ms = mutation_score_paths(
                                         root_p, list(bst.write_set)
                                     )
@@ -225,7 +241,7 @@ async def apply_build_engine_after_batch(
                 # Surface oracle seed if machine planted smoke tests
                 seed = getattr(bst, "_seed_message", None)
                 if seed and isinstance(seed, dict):
-                    with suppress(Exception):
+                    with _soft("seed-oracle"):
                         from remedy.core.build_seed_oracle import (
                             format_seed_oracle_message,
                         )
@@ -247,7 +263,7 @@ async def apply_build_engine_after_batch(
                     )
                     # Mark turn green so the loop can short-summary without re-tooling
                     # (play/ship goals keep agency — see keep_agency_after_green).
-                    with suppress(Exception):
+                    with _soft("keep-agency-after-green"):
                         from remedy.core.build_engine import keep_agency_after_green
 
                         if not keep_agency_after_green(bst):
@@ -270,7 +286,7 @@ async def apply_build_engine_after_batch(
                         rearm_agency()
                         yield "@@status:Build green — continue ship\n"
                     else:
-                        with suppress(Exception):
+                        with _soft("keep-agency-after-verify"):
                             from remedy.core.build_engine import keep_agency_after_green
 
                             if keep_agency_after_green(bst):
@@ -280,7 +296,7 @@ async def apply_build_engine_after_batch(
                     if ship_line:
                         yield ship_line
                     # Second pass over the write set (todos, bare except, syntax)
-                    with suppress(Exception):
+                    with _soft("live-llm-check"):
                         from remedy.core.build_drive import should_use_live_llm
                         from remedy.core.build_review_fix import (
                             format_review_fix_message,
@@ -300,7 +316,7 @@ async def apply_build_engine_after_batch(
                             )
                             if rf.get("errors") and not rf.get("ok"):
                                 rearm_agency()
-                    with suppress(Exception):
+                    with _soft("machine-nudge"):
                         from remedy.core.build_engine import can_machine_inject
                         from remedy.core.companion_observe import (
                             append_observe_messages,
@@ -334,7 +350,7 @@ async def apply_build_engine_after_batch(
                     # Allow another cycle after next writes
                     bst.auto_verify_ran = False
                     # C: schedule repair queue from error vector
-                    with suppress(Exception):
+                    with _soft("repair-queue"):
                         from remedy.core.build_repair_queue import (
                             queue_from_error_vector,
                         )
@@ -352,7 +368,7 @@ async def apply_build_engine_after_batch(
                             )
                     # Machine hops the queue — do not wait for the model
                     # to remember build_repair_queue(run_hops=true).
-                    with suppress(Exception):
+                    with _soft("build-drive-format"):
                         from remedy.core.build_drive import (
                             format_drive_message,
                             maybe_auto_repair,
@@ -416,7 +432,7 @@ async def apply_build_engine_after_batch(
                         bst.verify_steps,
                     )
             # Persist ledger every batch
-            with suppress(Exception):
+            with _soft("home-beacon"):
                 home_b = getattr(
                     getattr(runtime, "config", None), "home_dir", None
                 )

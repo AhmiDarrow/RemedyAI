@@ -36,6 +36,7 @@ This is the reference implementation for ``docs/RESEARCH_memory_middleman.md``.
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import threading
 import time
@@ -428,7 +429,7 @@ def _counts(text: str) -> dict[str, int]:
 
 def _log(x: float) -> float:
     # ln with a floor to keep IDF finite
-    return float(__import__("math").log(max(x, 1e-9)))
+    return float(math.log(max(x, 1e-9)))
 
 
 def _snippet(body: str, max_chars: int = 120) -> str:

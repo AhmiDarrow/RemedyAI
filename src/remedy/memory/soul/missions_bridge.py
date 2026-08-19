@@ -6,6 +6,7 @@ a durable mission checklist so capable muscle can finish what the soul remembers
 
 from __future__ import annotations
 
+import json
 import re
 from contextlib import suppress
 from typing import Any
@@ -116,19 +117,19 @@ def arm_soul_missions(
             :16
         ]:
             try:
-                import json as _json
-
-                data = _json.loads(fp.read_text(encoding="utf-8"))
+                data = json.loads(fp.read_text(encoding="utf-8"))
                 if isinstance(data, dict) and data.get("goal"):
                     recent_goals.append(str(data["goal"]))
             except Exception:
                 continue
 
+    # Normalise the recent goals once instead of per candidate — the goal
+    # texts do not change while we walk the candidate list.
+    recent_norm = {_normalize(g) for g in recent_goals}
+
     armed: list[dict[str, str]] = []
     for cand in candidates[: max(1, max_new)]:
-        if any(
-            _normalize(g) == _normalize(cand["goal"]) for g in recent_goals
-        ):
+        if _normalize(cand["goal"]) in recent_norm:
             continue
         steps = [ln.strip(" -*\t0123456789.") for ln in cand["steps"].splitlines() if ln.strip()]
         m = create_mission(

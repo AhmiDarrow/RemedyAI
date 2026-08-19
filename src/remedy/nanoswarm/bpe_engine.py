@@ -8,6 +8,7 @@ Used only for token *counts* / estimates. Provider API usage remains ground trut
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import threading
@@ -362,9 +363,7 @@ def pack_dict_from_merges(
     return {
         "id": pack_id,
         "version": version,
-        "created": __import__("datetime").datetime.now(
-            __import__("datetime").UTC
-        ).date().isoformat(),
+        "created": datetime.datetime.now(datetime.UTC).date().isoformat(),
         "corpus_note": corpus_note,
         "vocab_size": 256 + len(merges),
         "byte_fallback": True,

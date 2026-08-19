@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import uuid
@@ -102,7 +103,7 @@ class LocalJobQueue:
             if len(self._pending) >= 32:
                 self._pending.sort(key=lambda j: (j.priority, -j.created_at))
                 dropped = self._pending.pop(0)
-                logger = __import__("logging").getLogger(__name__)
+                logger = logging.getLogger(__name__)
                 logger.warning(
                     "Local job queue full; dropped job %s kind=%s",
                     dropped.job_id,

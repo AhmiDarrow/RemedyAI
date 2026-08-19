@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 
@@ -16,7 +17,7 @@ def register_soul_tools(runtime: Any) -> None:
         return
 
     # Myelin (crystallized cognition) rides the same organism surface.
-    with __import__("contextlib").suppress(Exception):
+    with contextlib.suppress(Exception):
         from remedy.core.agent_myelin_tools import register_myelin_tools
 
         register_myelin_tools(runtime)
@@ -123,12 +124,27 @@ def register_soul_tools(runtime: Any) -> None:
         d = (dest or "").strip()
         if not d:
             d = str(Path(home or Path.home() / ".remedy") / "exports" / "soul-field.json")
-        if (passphrase or "").strip():
-            path = export_soul_encrypted(d, passphrase=passphrase, home=home)
-            mode = "encrypted"
-        else:
-            path = export_soul_plain(d, home=home)
-            mode = "plain"
+        try:
+            if (passphrase or "").strip():
+                path = export_soul_encrypted(d, passphrase=passphrase, home=home)
+                mode = "encrypted"
+            else:
+                path = export_soul_plain(d, home=home)
+                mode = "plain"
+        except ValueError as e:
+            # Exports stay under home/exports. Say where, so the owner can ask
+            # again with a path that works instead of seeing a raw traceback.
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": str(e),
+                    "hint": (
+                        "Pass a bare filename (it lands in the exports folder) "
+                        "or a path under it, then copy the file where you want."
+                    ),
+                },
+                indent=2,
+            )
         return json.dumps({"ok": True, "path": str(path), "mode": mode}, indent=2)
 
     async def soul_import(

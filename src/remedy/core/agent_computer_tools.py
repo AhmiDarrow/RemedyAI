@@ -146,7 +146,7 @@ def register_computer_tools(runtime: Any) -> None:
     """Always-on computer use (browser rail + full desktop). No feature gate."""
 
     home = None
-    with __import__("contextlib").suppress(Exception):
+    with contextlib.suppress(Exception):
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
     ex = get_computer_executor(home)
 
@@ -384,7 +384,7 @@ def register_computer_tools(runtime: Any) -> None:
             from remedy.core import vault
 
             home = None
-            with __import__("contextlib").suppress(Exception):
+            with contextlib.suppress(Exception):
                 home = getattr(getattr(runtime, "config", None), "home_dir", None)
             items = vault.vault_list(home)
             if not items:
