@@ -12,6 +12,7 @@ This is faster than full suite and more precise than single-file mapping alone.
 from __future__ import annotations
 
 import ast
+import os
 import re
 import subprocess
 import sys
@@ -212,7 +213,7 @@ def dry_run_import(
             capture_output=True,
             text=True,
             timeout=timeout_s,
-            env={**dict(**__import__("os").environ), "PYTHONPATH": env_pythonpath},
+            env={**dict(os.environ), "PYTHONPATH": env_pythonpath},
         )
     except (subprocess.TimeoutExpired, OSError) as e:
         return {"ok": False, "module": module, "error": str(e)[:400]}

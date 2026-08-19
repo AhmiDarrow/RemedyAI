@@ -1675,9 +1675,16 @@ class ComputerExecutor:
                 extra={"job_id": last_job_id},
             )
 
-        unclaimed = 3.0
-        # Covers 2×9s rail evals on slow retail pages.
-        total_wait = float(kwargs.get("timeout_s") or 20.0)
+        # An outstanding ui_command means "the host is about to run this" only
+        # if a host exists. With Desktop closed nobody ever takes the command,
+        # so wait()'s unclaimed fail-fast reads the stale file as progress and
+        # burns the whole timeout. host_connected() is the honest signal.
+        host_looks_live = self.bridge.host_connected(max_age_s=12.0)
+        unclaimed = 3.0 if host_looks_live else 1.5
+        # Covers 2×9s rail evals on slow retail pages; no host, no such wait.
+        total_wait = float(
+            kwargs.get("timeout_s") or (20.0 if host_looks_live else 4.0)
+        )
         job = self._enqueue(act.value, payload)
         finished = self.bridge.wait(
             job.id,
@@ -2379,6 +2386,9 @@ class ComputerExecutor:
         # Legacy SPA path still handles payload.browser_action on click jobs.
         last_err = "page_text failed — open a page in the rail first"
         last_job_id = ""
+        # Both attempts still run with Desktop closed; they just do not each
+        # sit out a 14s rail-eval budget no host is spending. See _run_browser.
+        host_looks_live = self.bridge.host_connected(max_age_s=12.0)
         for attempt, action in enumerate(("page_text", "page_text")):
             job = self._enqueue(
                 action,
@@ -2387,10 +2397,10 @@ class ComputerExecutor:
             last_job_id = job.id
             finished = self.bridge.wait(
                 job.id,
-                timeout_s=14.0,
+                timeout_s=14.0 if host_looks_live else 3.5,
                 poll_s=0.05,
                 abort_check=self._abort_check,
-                unclaimed_timeout_s=5.0,
+                unclaimed_timeout_s=5.0 if host_looks_live else 1.5,
                 grace_s=0.8,
             )
             if finished.status == "done" and finished.result:

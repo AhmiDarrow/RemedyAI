@@ -7,6 +7,7 @@ No secrets. Local ``~/.remedy/life_goals.json`` only.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -131,7 +132,7 @@ class LifeGoalStore:
             # read must NOT permanently disable all future saves (the old
             # behavior silently dropped every add/complete/patch until
             # restart, reporting success to the caller).
-            with __import__("contextlib").suppress(OSError):
+            with contextlib.suppress(OSError):
                 bad = self.path.with_suffix(".corrupt")
                 if not bad.exists():
                     self.path.replace(bad)

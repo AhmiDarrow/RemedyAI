@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import Any
 
@@ -13,7 +14,7 @@ def register_assistant_tools(runtime: Any) -> None:
     """Always-on PA organization tools; calendar/mail OAuth comes later."""
 
     home = None
-    with __import__("contextlib").suppress(Exception):
+    with contextlib.suppress(Exception):
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
     store = get_assistant_store(home)
 
@@ -148,7 +149,7 @@ def register_assistant_tools(runtime: Any) -> None:
                 )
             parts.append("")
         # Goals from runtime if available
-        with __import__("contextlib").suppress(Exception):
+        with contextlib.suppress(Exception):
             tasks = list(runtime.list_tasks() or [])
             open_g = [
                 t
@@ -334,7 +335,7 @@ def register_assistant_tools(runtime: Any) -> None:
         # Connecting a mailbox with explicit credentials IS the consent for
         # account access — record it rather than sending the owner to a second
         # toggle. What it means is stated plainly in the reply.
-        with __import__("contextlib").suppress(Exception):
+        with contextlib.suppress(Exception):
             store.patch_prefs(privacy_ai_accepted=True, account_access_accepted=True)
         saved["privacy"] = (
             "The app password is stored in Remedy's local encrypted secret store "
@@ -360,7 +361,7 @@ def register_assistant_tools(runtime: Any) -> None:
 
         acct = load_mail_account(home)
         google = False
-        with __import__("contextlib").suppress(Exception):
+        with contextlib.suppress(Exception):
             from remedy.assistant.google_oauth import load_tokens
 
             google = bool(load_tokens(home).connected)
@@ -395,13 +396,13 @@ def register_assistant_tools(runtime: Any) -> None:
 
     def _mail_provider():
         """Prefer the app-password mailbox; fall back to Google OAuth."""
-        with __import__("contextlib").suppress(Exception):
+        with contextlib.suppress(Exception):
             from remedy.assistant.providers.imap_smtp import get_imap_mail
 
             m = get_imap_mail(home)
             if m is not None:
                 return m
-        with __import__("contextlib").suppress(Exception):
+        with contextlib.suppress(Exception):
             from remedy.assistant.providers.google_gmail import get_google_gmail
 
             return get_google_gmail(home)
@@ -409,13 +410,13 @@ def register_assistant_tools(runtime: Any) -> None:
 
     def _calendar_provider():
         """Prefer CalDAV (app password, no cloud project); fall back to OAuth."""
-        with __import__("contextlib").suppress(Exception):
+        with contextlib.suppress(Exception):
             from remedy.assistant.providers.caldav import get_caldav_calendar
 
             c = get_caldav_calendar(home)
             if c is not None:
                 return c
-        with __import__("contextlib").suppress(Exception):
+        with contextlib.suppress(Exception):
             from remedy.assistant.providers.google_calendar import get_google_calendar
 
             return get_google_calendar(home)
@@ -495,7 +496,7 @@ def register_assistant_tools(runtime: Any) -> None:
             )
         # Deleting someone's appointment is not reversible from here.
         label = eid
-        with __import__("contextlib").suppress(Exception):
+        with contextlib.suppress(Exception):
             ev0 = cal.get_event(eid)
             label = f"{ev0.title} @ {ev0.start}"
         summary = f"calendar_cancel_event {label[:100]}"
