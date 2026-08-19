@@ -146,15 +146,19 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         except Exception as exc:
             # Session deleted mid-turn (FK / missing row) → 404, not opaque 500
             if memory is not None:
+                # Decide inside the suppress, raise outside it. HTTPException
+                # IS an Exception, so raising in there swallowed the 404 and
+                # the caller got the opaque 500 this branch exists to avoid.
+                gone = False
                 with contextlib.suppress(Exception):
-                    still = await memory.get_chat_session(session_id)
-                    if still is None:
-                        logger.info(
-                            "send_message session gone mid-turn id=%s err=%s",
-                            session_id,
-                            exc,
-                        )
-                        raise HTTPException(404, "Session not found") from exc
+                    gone = await memory.get_chat_session(session_id) is None
+                if gone:
+                    logger.info(
+                        "send_message session gone mid-turn id=%s err=%s",
+                        session_id,
+                        exc,
+                    )
+                    raise HTTPException(404, "Session not found") from exc
             logger.exception("send_message failed session=%s", session_id)
             raise HTTPException(500, "Internal Server Error") from exc
         finally:
@@ -255,9 +259,15 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             response_text += token
             # Bail if session vanished mid-stream (user closed tab / deleted)
             if memory is not None and len(response_text) % 64 == 0:
+                # Same swallowed-raise as above: the bail never fired, so every
+                # remaining token was still generated for a session that no
+                # longer existed and the 404 only arrived after the whole
+                # stream had been paid for.
+                gone = False
                 with contextlib.suppress(Exception):
-                    if await memory.get_chat_session(session_id) is None:
-                        raise HTTPException(404, "Session not found")
+                    gone = await memory.get_chat_session(session_id) is None
+                if gone:
+                    raise HTTPException(404, "Session not found")
         elapsed_s = time.perf_counter() - start
         elapsed = elapsed_s * 1000
         default_registry.counter(

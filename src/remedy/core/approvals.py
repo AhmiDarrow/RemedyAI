@@ -342,6 +342,14 @@ class ApprovalQueue:
             "file_edit",
             "skill_run",
             "mail_send",
+            # mail_reply and calendar_cancel_event both build a full
+            # APPROVAL_REQUIRED item and both say in their own tool description
+            # that they ask first — but neither name was ever listed here, so
+            # needs_ask returned None and the whole block was dead in every
+            # mode. Mail left the mailbox and appointments were deleted with no
+            # prompt at all.
+            "mail_reply",
+            "calendar_cancel_event",
             "computer_click",
             "computer_type",
             "computer_key",
@@ -427,6 +435,11 @@ class ApprovalQueue:
                 reason = "Skill script execution requires approval (skill_run)"
             elif tool == "mail_send":
                 reason = "Sending email requires approval (mail_send)"
+            elif tool == "mail_reply":
+                reason = "Replying by email requires approval (mail_reply)"
+            elif tool == "calendar_cancel_event":
+                reason = "Cancelling an appointment requires approval "
+                reason += "(calendar_cancel_event)"
             elif tool.startswith("computer_"):
                 reason = f"Computer control requires approval ({tool})"
         if not reason and c and _ASK_PATTERNS.search(c):

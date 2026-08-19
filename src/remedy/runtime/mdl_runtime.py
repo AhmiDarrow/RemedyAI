@@ -233,6 +233,11 @@ def start_tier(
                 }
         time.sleep(0.4)
 
+    # Reporting failure while leaving the child alive and registered means a
+    # server that merely loads slower than wait_s keeps ~1GB of VRAM and shows
+    # up as running on the next port probe, with nothing to reconcile it.
+    with contextlib.suppress(Exception):
+        stop_tier(tier_name)
     return {
         "ok": False,
         "error": f"Tier {tier_name} did not become healthy within {wait_s}s",

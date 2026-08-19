@@ -670,7 +670,10 @@ def register_assistant_tools(runtime: Any) -> None:
         try:
             msgs = mail.list_messages(
                 query=(query or "in:inbox").strip() or "in:inbox",
-                limit=min(int(limit or 15), 25),
+                # Clamped both ends: min() alone let a negative limit through
+                # to the provider, which is not a smaller page but a nonsense
+                # one.
+                limit=max(1, min(int(limit or 15), 25)),
             )
         except Exception as exc:
             return json.dumps({"ok": False, "message": str(exc)}, indent=2)

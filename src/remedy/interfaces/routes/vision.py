@@ -178,7 +178,14 @@ def register_vision_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             return started
         path = body.path
         p: Path | None = Path(path) if path else None
-        if p is None or not p.is_file():
+        # A path that was given but is not there is an error, not a cue to
+        # decode the self-test image instead. It used to fall through to the
+        # 8x8 red square below and answer ok:true with a description of it, so
+        # a typo'd or deleted screenshot came back as a confident decode of
+        # something the caller never sent.
+        if p is not None and not p.is_file():
+            return {"ok": False, "error": f"File not found: {path}"}
+        if p is None:
             # Default self-test image under ~/.remedy (create a tiny PNG if missing)
             try:
                 from remedy.interfaces.config import load_config as _lc
