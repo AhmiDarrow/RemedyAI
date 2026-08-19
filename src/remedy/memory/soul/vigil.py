@@ -38,6 +38,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import scratch_path
 from remedy.memory.soul.field import load_soul_field, soul_dir
 
 VIGIL_FILENAME = "vigil.json"
@@ -131,7 +132,7 @@ def save_vigil(v: Vigil, home: str | Path | None = None) -> Path:
     v.clamp()
     p = _path(home)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
+    tmp = scratch_path(p)
     data = json.dumps(asdict(v), ensure_ascii=False, indent=2)
     tmp.write_text(data, encoding="utf-8")
     for _ in range(3):
@@ -215,7 +216,7 @@ def _journal_append(entry: dict[str, Any], home: str | Path | None = None) -> No
         # Ring: keep the journal from growing without bound
         lines = p.read_text(encoding="utf-8").splitlines()
         if len(lines) > JOURNAL_MAX_LINES:
-            tmp = p.with_suffix(".jsonl.tmp")
+            tmp = scratch_path(p)
             tmp.write_text(
                 "\n".join(lines[-JOURNAL_KEEP_LINES:]) + "\n",
                 encoding="utf-8",
