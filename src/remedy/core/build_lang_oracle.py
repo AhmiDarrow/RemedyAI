@@ -135,7 +135,21 @@ def check_lang_syntax(path: str | Path) -> dict[str, Any]:
         out["engine"] = "json"
         return out
 
-    if suffix in {".js", ".mjs", ".cjs", ".jsx"}:
+    if suffix == ".jsx":
+        # NOT node --check: node cannot parse .jsx at all. It rejects the
+        # *extension* with ERR_UNKNOWN_FILE_EXTENSION before it looks at a
+        # single character, so every .jsx file came back red no matter what was
+        # in it — and the "error" handed to the model was a Node internals
+        # traceback about file formats, which reads as "your code is broken"
+        # and sends it rewriting a working component. Structural check instead,
+        # the same fallback .tsx already uses.
+        ok, err = brace_balance(text)
+        out["ok"] = ok
+        out["error"] = err
+        out["engine"] = "brace (jsx)"
+        return out
+
+    if suffix in {".js", ".mjs", ".cjs"}:
         node = _which("node")
         if node:
             ok, err = _run([node, "--check", str(p)])
