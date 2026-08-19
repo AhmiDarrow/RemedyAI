@@ -128,6 +128,26 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   by guessing the name. Only the machine-noise directories are withheld now,
   matching what `repo_search` and `file_glob` already skip.
 
+### Coverage — the thin modules
+
+- Behaviour tests for the modules the suite had barely touched: the messenger
+  registry and every adapter's inbound allowlist, workspace search, first-run
+  setup, the desktop CLI, the in-process computer host, ship / mission / soul /
+  partner / build / myelin / document / discovery tools, session titles, the
+  Hermes and OpenClaw skill import, `remedy memory|user|handoff|migrate`, and
+  the gateway wiring `serve` depends on. Two are worth naming: a driver that
+  calls 122 registered tools with defaults and fails on any programming error,
+  and a check that every `remedy …` line in the docs parses against the real
+  parser.
+- The suite can no longer take the wheel. `conftest` points `REMEDY_HOME` at a
+  throwaway directory before any test module loads, and the tool driver
+  excludes by construction anything that reaches the real machine — the
+  desktop job queue, the clipboard, and the model-server thread `soul_dream`
+  starts.
+- Telegram now strips inbound text before deciding it is empty, the way
+  discord and slack already did; a message of nothing but spaces used to start
+  a whole agent turn.
+
 ### Responsiveness
 
 - Browser tools fail fast when Desktop is not running. An outstanding

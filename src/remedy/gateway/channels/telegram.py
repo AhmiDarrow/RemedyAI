@@ -339,8 +339,10 @@ class TelegramChannel(ChannelAdapter):
                 save_update_offset(self._home_dir, self._last_update_id, "telegram")
 
         msg = update.get("message") or update.get("edited_message") or {}
-        # Ignore service messages and bot echoes (no text).
-        text = msg.get("text")
+        # Ignore service messages and bot echoes (no text). Strip first, the
+        # way discord and slack already do: a message of nothing but spaces
+        # carries no instruction, and it used to start a whole agent turn.
+        text = (msg.get("text") or "").strip()
         if not text:
             return
         # Never re-process bot's own outbound (safety if Telegram ever delivers them).
