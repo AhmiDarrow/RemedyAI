@@ -69,11 +69,21 @@ def export_soul_plain(
     dest: str | Path,
     home: str | Path | None = None,
 ) -> Path:
-    """Write redacted JSON (no passphrase). Path under home/exports when relative."""
+    """Write redacted JSON (no passphrase), under ``home/exports``.
+
+    Uses the same guard as the encrypted export. The two used to disagree:
+    an absolute *dest* was written wherever it pointed here, while
+    ``export_soul_encrypted`` refused anything outside ``home/exports``. That
+    is backwards — the sealed file was jailed and the readable one, carrying
+    her relational memory and pledges in the clear, could be dropped into any
+    directory on the machine, outside every write root the other file tools
+    respect.
+    """
+    from remedy.core.metabolism.identity_export import _safe_export_path
+
     payload = soul_export_payload(home)
-    path = Path(dest).expanduser()
-    if not path.is_absolute():
-        path = soul_dir(home).parent / "exports" / path.name
+    root = home if home is not None else soul_dir(home).parent
+    path = _safe_export_path(dest, home=root)
     path.parent.mkdir(parents=True, exist_ok=True)
     write_json_atomic(path, payload, ensure_ascii=False)
     return path

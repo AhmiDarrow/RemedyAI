@@ -89,6 +89,57 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   Explorer/list drag-drop registers; horizontal scroll (`dx`) implemented
   via MOUSEEVENTF_HWHEEL.
 
+### Correctness — bugs found by driving the code, not reading it
+
+- **Clipboard reads no longer crash Remedy.** The Win32 backend declared no
+  ctypes `restype`, so `GetClipboardData` was assumed to return a 32-bit int
+  and the top half of every 64-bit HANDLE was discarded. `GlobalLock` then
+  locked a bogus handle and `wstring_at` walked unmapped memory — a Windows
+  access violation, which is not a Python exception and which the surrounding
+  `except Exception` could never catch: the process simply died mid-turn. All
+  clipboard entry points now declare real prototypes, and the text read is
+  bounded by `GlobalSize` instead of scanning for a terminator.
+- **A mission that named a verify command no longer reports itself complete
+  before that command has ever run.** Ticking the last checklist box moved the
+  mission out of `active`, which is the state both `mission_update` and
+  `mission_status` test before warning — so the "run mission_verify first"
+  gate could not fire, and the mission read `[completed]` next to
+  `Verify: pytest -q (not run)`.
+- **`gh_release` no longer pushes a tag to the remote before asking.** It
+  created and pushed the tag, *then* consulted the approval gate, so a release
+  put a tag on origin in Ask mode without the owner ever seeing a prompt.
+- **`looks_like_secret` now catches the credentials it is most likely to
+  meet.** Its token body stopped at the first hyphen, so a real Anthropic key
+  (`sk-ant-api03-…`) matched nothing at all; OpenAI project keys, AWS access
+  and secret keys, Slack, Google, GitLab, HuggingFace, Stripe and SendGrid
+  were all missed too. This guard sits on seventeen durable-write paths —
+  profile facts, soul updates, the epistemic graph, `/remember`, and post-turn
+  auto-extraction — so a miss meant a key living in memory across sessions and
+  being replayed into later prompts.
+- **A plain soul export is jailed like the encrypted one.** The two disagreed:
+  `export_soul_encrypted` refused any path outside `home/exports`, while
+  `export_soul_plain` wrote an absolute *dest* wherever it pointed — outside
+  every write root the other file tools respect. The sealed file was protected
+  and the readable one, carrying her relational memory and pledges in the
+  clear, was not. `soul_export` now returns a message naming where exports go
+  instead of raising.
+- **`list_dir` shows dotfiles.** Hiding every entry beginning with `.` made
+  `.github/`, `.gitignore` and `.env.example` undiscoverable — readable only
+  by guessing the name. Only the machine-noise directories are withheld now,
+  matching what `repo_search` and `file_glob` already skip.
+
+### Responsiveness
+
+- Browser tools fail fast when Desktop is not running. An outstanding
+  `ui_command` was read as "the host is about to run this", but with no host
+  nobody ever takes the command, so the stale file looked like progress and
+  the tool sat out its whole budget. `computer_navigate` went from 22s to 5s
+  and `computer_page_text` from 30s to 9s; a live host keeps the full budget.
+- Symbol search dedups hits through a set rather than rescanning the result
+  list per hit (up to ~250k comparisons per call at `max_matches=500`).
+- Build-engine stages log the stage that fell over instead of vanishing into a
+  bare `suppress(Exception)`. Same tolerance, no more silent dead paths.
+
 ### Security
 
 - Stale pending/running computer jobs the host never claimed are expired and

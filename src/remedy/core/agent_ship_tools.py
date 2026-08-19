@@ -8,6 +8,7 @@ Keeps credentials via scrub allowlist (GH_TOKEN) and sticky VCS approvals.
 
 from __future__ import annotations
 
+import contextlib
 import re
 from typing import Any
 
@@ -56,7 +57,7 @@ def register_ship_tools(runtime: Any) -> None:
 
     def _mark_build(ship_pushed: bool | None = None, ship_released: bool | None = None,
                     ship_url: str = "", release_url: str = "") -> None:
-        with __import__("contextlib").suppress(Exception):
+        with contextlib.suppress(Exception):
             from remedy.core.build_engine import get_build_state
 
             st = get_build_state(runtime)
@@ -107,7 +108,7 @@ def register_ship_tools(runtime: Any) -> None:
             try:
                 out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             except TimeoutError:
-                with __import__("contextlib").suppress(Exception):
+                with contextlib.suppress(Exception):
                     proc.kill()
                 return 124, "", f"timeout after {timeout}s"
             out = (out_b or b"").decode("utf-8", errors="replace")
@@ -149,7 +150,7 @@ def register_ship_tools(runtime: Any) -> None:
             try:
                 out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             except TimeoutError:
-                with __import__("contextlib").suppress(Exception):
+                with contextlib.suppress(Exception):
                     proc.kill()
                 return 124, "", f"timeout after {timeout}s"
             out = (out_b or b"").decode("utf-8", errors="replace")
@@ -225,7 +226,7 @@ def register_ship_tools(runtime: Any) -> None:
                 "could not read password",
             )
         ):
-            with __import__("contextlib").suppress(Exception):
+            with contextlib.suppress(Exception):
                 from remedy.core.build_engine import get_build_state
 
                 st = get_build_state(runtime)
@@ -258,6 +259,18 @@ def register_ship_tools(runtime: Any) -> None:
         # Ensure tag exists locally (lightweight)
         code_t, _, err_t = await _run_git(["rev-parse", tg])
         if code_t != 0:
+            # Pushing a tag is a push. It used to happen here before the
+            # release approval below was consulted, so gh_release could put a
+            # tag on the remote in Ask mode without ever showing the owner a
+            # prompt — the one thing git_push exists to prevent. Gate it on
+            # the same sticky VCS family, ahead of any mutation.
+            tag_blocked = approval_required_for_ship(
+                f"git push origin {tg}",
+                turn_session_id(runtime),
+                reason="git push tag (ship)",
+            )
+            if tag_blocked:
+                return tag_blocked
             # Create annotated-ish lightweight tag on HEAD
             await _run_git(["tag", tg])
             # Push tag
@@ -313,7 +326,7 @@ def register_ship_tools(runtime: Any) -> None:
                 f"url={url or '—'}\n{blob[:800]}"
             )
         if "auth" in low or "login" in low or "token" in low:
-            with __import__("contextlib").suppress(Exception):
+            with contextlib.suppress(Exception):
                 from remedy.core.build_engine import get_build_state
 
                 st = get_build_state(runtime)

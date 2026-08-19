@@ -248,7 +248,15 @@ def advance_step(
                 break
         else:
             if all(s.status in ("done", "skipped") for s in m.steps):
-                m.status = "completed"
+                # A mission that named a verify command is not finished because
+                # the last box got ticked — it is finished when that check
+                # passes. Completing here moved the mission out of "active",
+                # which is the state mission_update and mission_status test
+                # before warning, so the gate could never fire: the mission
+                # read [completed] with "Verify: pytest -q (not run)".
+                # mission_verify still completes it the moment verify passes.
+                if not m.verify_command or m.verify_status == "passed":
+                    m.status = "completed"
     elif status == "failed":
         m.retries += 1
         if m.retries >= m.max_retries:

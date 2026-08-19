@@ -75,6 +75,66 @@ class FakeCompanionBackend:
         return dict(self.fg)
 
 
+_WIN32_PROTOTYPES_SET = False
+
+
+def _declare_win32_clipboard_prototypes() -> None:
+    """Give ctypes the real signatures for the clipboard calls.
+
+    Without an explicit ``restype`` ctypes assumes ``int`` — 32 bits. Every
+    HANDLE/HGLOBAL these functions return is 64 bits on a 64-bit Python, so the
+    top half was being discarded and the truncated value handed straight back
+    to ``GlobalLock``. Locking a bogus handle can still hand back a non-null
+    pointer, and ``wstring_at`` on that pointer walks unmapped memory: a
+    Windows access violation, which is not a Python exception, cannot be caught
+    by the ``except Exception`` below, and takes the whole process down
+    mid-turn. Declaring the prototypes once is the whole fix.
+    """
+    global _WIN32_PROTOTYPES_SET
+    if _WIN32_PROTOTYPES_SET or os.name != "nt":
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    shell32 = ctypes.windll.shell32
+
+    user32.OpenClipboard.argtypes = [ctypes.c_void_p]
+    user32.OpenClipboard.restype = wintypes.BOOL
+    user32.CloseClipboard.argtypes = []
+    user32.CloseClipboard.restype = wintypes.BOOL
+    user32.EmptyClipboard.argtypes = []
+    user32.EmptyClipboard.restype = wintypes.BOOL
+    user32.IsClipboardFormatAvailable.argtypes = [wintypes.UINT]
+    user32.IsClipboardFormatAvailable.restype = wintypes.BOOL
+    user32.GetClipboardData.argtypes = [wintypes.UINT]
+    user32.GetClipboardData.restype = ctypes.c_void_p
+    user32.SetClipboardData.argtypes = [wintypes.UINT, ctypes.c_void_p]
+    user32.SetClipboardData.restype = ctypes.c_void_p
+
+    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalUnlock.restype = wintypes.BOOL
+    kernel32.GlobalSize.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalSize.restype = ctypes.c_size_t
+    kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+    kernel32.GlobalAlloc.restype = ctypes.c_void_p
+    kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalFree.restype = ctypes.c_void_p
+
+    shell32.DragQueryFileW.argtypes = [
+        ctypes.c_void_p,
+        wintypes.UINT,
+        ctypes.c_wchar_p,
+        wintypes.UINT,
+    ]
+    shell32.DragQueryFileW.restype = wintypes.UINT
+
+    _WIN32_PROTOTYPES_SET = True
+
+
 class Win32CompanionBackend:
     """ctypes Win32 clipboard + foreground (no extra deps)."""
 
@@ -82,6 +142,8 @@ class Win32CompanionBackend:
         if os.name != "nt":
             return None
         import ctypes
+
+        _declare_win32_clipboard_prototypes()
 
         user32 = ctypes.windll.user32
         kernel32 = ctypes.windll.kernel32
@@ -93,11 +155,17 @@ class Win32CompanionBackend:
             handle = user32.GetClipboardData(_CF_UNICODETEXT)
             if not handle:
                 return None
-            kernel32.GlobalLock.restype = ctypes.c_void_p
+            size = int(kernel32.GlobalSize(handle) or 0)
             ptr = kernel32.GlobalLock(handle)
             if not ptr:
                 return None
             try:
+                if size >= 2:
+                    # Read exactly what was allocated, then stop at the
+                    # terminator. An unbounded wstring_at keeps walking until
+                    # it finds a NUL, which is the run-away read if the buffer
+                    # is ever short or unterminated.
+                    return ctypes.wstring_at(ptr, size // 2).split("\x00", 1)[0]
                 return ctypes.wstring_at(ptr)
             finally:
                 kernel32.GlobalUnlock(handle)
@@ -110,6 +178,8 @@ class Win32CompanionBackend:
         if os.name != "nt":
             return []
         import ctypes
+
+        _declare_win32_clipboard_prototypes()
 
         user32 = ctypes.windll.user32
         shell32 = ctypes.windll.shell32
@@ -140,6 +210,8 @@ class Win32CompanionBackend:
             return None
         import ctypes
 
+        _declare_win32_clipboard_prototypes()
+
         user32 = ctypes.windll.user32
         kernel32 = ctypes.windll.kernel32
         if not user32.OpenClipboard(None):
@@ -150,11 +222,9 @@ class Win32CompanionBackend:
             handle = user32.GetClipboardData(_CF_DIB)
             if not handle:
                 return None
-            kernel32.GlobalSize.restype = ctypes.c_size_t
             size = int(kernel32.GlobalSize(handle) or 0)
             if size < 40:
                 return None
-            kernel32.GlobalLock.restype = ctypes.c_void_p
             ptr = kernel32.GlobalLock(handle)
             if not ptr:
                 return None
@@ -173,6 +243,8 @@ class Win32CompanionBackend:
             return False
         import ctypes
 
+        _declare_win32_clipboard_prototypes()
+
         user32 = ctypes.windll.user32
         kernel32 = ctypes.windll.kernel32
         data = (text or "") + "\x00"
@@ -184,7 +256,6 @@ class Win32CompanionBackend:
             hglob = kernel32.GlobalAlloc(_GMEM_MOVEABLE, len(buf))
             if not hglob:
                 return False
-            kernel32.GlobalLock.restype = ctypes.c_void_p
             dest = kernel32.GlobalLock(hglob)
             if not dest:
                 kernel32.GlobalFree(hglob)
