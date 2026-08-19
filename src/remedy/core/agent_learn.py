@@ -51,9 +51,10 @@ def should_auto_learn_from_steps(steps: list[dict[str, Any]] | None) -> bool:
         for s in steps
         if (s.get("tool") or s.get("name") or s.get("tool_name")) not in _META_TOOLS
     ]
+    # The inner `if len(steps) < 4` this replaced was already implied by the
+    # line above it, so the nesting read as an extra condition that was not one.
     if len(real) < 3 and len(steps) < 4:
-        if len(steps) < 4:
-            return False
+        return False
     successes = sum(1 for s in steps if s.get("success"))
     if successes < 3:
         return False
