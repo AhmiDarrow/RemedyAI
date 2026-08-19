@@ -144,7 +144,7 @@ class Fault:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "Fault":
+    def from_dict(cls, raw: dict[str, Any]) -> Fault:
         raw = raw or {}
         return cls(
             id=str(raw.get("id") or ""),

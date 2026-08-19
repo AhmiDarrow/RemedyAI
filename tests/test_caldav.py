@@ -12,7 +12,6 @@ import pytest
 
 import remedy.assistant.providers.caldav as C
 
-
 # --- URL presets ------------------------------------------------------------
 
 
@@ -243,7 +242,7 @@ def test_event_url_forms() -> None:
     assert dav._event_url("abc").endswith("/abc.ics")
     assert dav._event_url("abc.ics").endswith("/abc.ics")
     assert dav._event_url("https://x/dav/z.ics") == "https://x/dav/z.ics"
-    assert dav._event_url("/dav/me/z.ics").startswith("https://x/dav/me/z.ics".split("/dav")[0])
+    assert dav._event_url("/dav/me/z.ics").startswith("https://x")
 
 
 def test_list_events_uses_report() -> None:
