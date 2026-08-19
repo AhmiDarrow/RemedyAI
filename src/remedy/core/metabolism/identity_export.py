@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
+
 EXPORT_VERSION = 1
 
 
@@ -189,7 +191,7 @@ def export_identity(
     else:
         path = Path(dest).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(package, indent=2), encoding="utf-8")
+    write_json_atomic(path, package)
     with contextlib.suppress(Exception):
         os.chmod(path, 0o600)
     return path

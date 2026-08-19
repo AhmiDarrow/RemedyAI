@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from remedy.core.atomic_json import write_json_atomic
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -99,7 +101,7 @@ class CheckpointStore:
 
     def save(self, cp: TurnCheckpoint) -> TurnCheckpoint:
         path = self._path(cp.id)
-        path.write_text(json.dumps(cp.to_dict(), indent=2), encoding="utf-8")
+        write_json_atomic(path, cp.to_dict())
         return cp
 
     def get(self, cp_id: str) -> TurnCheckpoint | None:

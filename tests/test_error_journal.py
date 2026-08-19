@@ -224,3 +224,68 @@ def test_real_bug_still_targeted_among_noise(home) -> None:
     )
     target = EJ.next_target_fault(home=home)
     assert target is not None and target.id == real.id
+
+
+class TestStatusCodesNeedContext:
+    """A traceback is full of line numbers, and three of them used to mean
+    "not ours to fix".
+
+    The environmental regex matched bare ``401``/``403``/``429`` anywhere in the
+    blob — and ``record_fault`` classifies message *plus traceback*. So any real
+    bug in a file longer than 400 lines could be filed as the world being the
+    world and never become a self-improvement target: the exact failure this
+    module was written to prevent, running backwards.
+    """
+
+    @pytest.mark.parametrize(
+        "traceback_line",
+        [
+            'AttributeError: no attribute id\n  File "src/remedy/core/agent.py", line 401, in run',
+            'KeyError: user_id\n  File "src/remedy/memory/store.py", line 429, in upsert',
+            'TypeError: unsupported operand\n  File "src/remedy/core/loop.py", line 403, in step',
+        ],
+    )
+    def test_a_line_number_is_not_an_http_status(self, traceback_line):
+        from remedy.core.error_journal import STATUS_OPEN, classify
+
+        assert classify(traceback_line) == STATUS_OPEN
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Error code: 401 - Unauthorized: invalid api key",
+            "401 Client Error: Unauthorized for url: https://api.example/v1",
+            "HTTP 403: Forbidden",
+            "429 Too Many Requests: rate limit reached",
+            "ConnectionRefusedError: [Errno 111] Connection refused",
+            "socket.gaierror: [Errno 11001] getaddrinfo failed",
+        ],
+    )
+    def test_the_world_being_the_world_is_still_caught(self, text):
+        from remedy.core.error_journal import STATUS_ENVIRONMENTAL, classify
+
+        assert classify(text) == STATUS_ENVIRONMENTAL
+
+    def test_an_identifier_that_merely_contains_dns_is_not_a_network_fault(self):
+        from remedy.core.error_journal import STATUS_OPEN, classify
+
+        assert classify("AttributeError: module has no attribute parse_dns_config") == (
+            STATUS_OPEN
+        )
+
+    def test_a_real_fault_with_an_unlucky_traceback_is_targetable(self, tmp_path):
+        from remedy.core.error_journal import record_fault
+
+        fault = record_fault(
+            "turn_crash",
+            "AttributeError: 'NoneType' object has no attribute 'id'",
+            exc_type="AttributeError",
+            where="agent.py:401",
+            traceback='  File "src/remedy/core/agent.py", line 401, in run\n    x.id',
+            home=tmp_path,
+        )
+        assert fault is not None
+        assert fault.is_targetable(), (
+            "a real crash was filed as environmental because its traceback "
+            "mentioned line 401"
+        )

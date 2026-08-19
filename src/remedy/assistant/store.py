@@ -127,6 +127,23 @@ class AssistantStore:
             self._save()
         return acct
 
+    def remove_account(self, account_id: str) -> bool:
+        """Forget a linked account. True when one was actually removed.
+
+        Connecting was a one-way door: there was an ``upsert`` and no way back
+        out, so disconnecting a mailbox left a "connected" row behind for ever.
+        """
+        wanted = str(account_id or "").strip()
+        if not wanted:
+            return False
+        with _lock:
+            kept = [a.to_dict() for a in self.list_accounts() if a.id != wanted]
+            if len(kept) == len(self._data.get("accounts") or []):
+                return False
+            self._data["accounts"] = kept
+            self._save()
+        return True
+
     def accounts_public(self) -> list[dict[str, Any]]:
         """Safe status for Settings / tools (no tokens)."""
         return [
@@ -411,6 +428,75 @@ class AssistantStore:
             self._save()
         return item
 
+    #: Mail providers Remedy can already reach over IMAP/SMTP with an app
+    #: password, keyed by the domain that carries their preset. Outlook and
+    #: Yahoo were reported as "planned" long after ``imap_smtp.PRESETS`` grew
+    #: entries for both — telling the owner a capability she already had was
+    #: still coming.
+    _IMAP_PROVIDERS: tuple[tuple[str, str, str], ...] = (
+        ("microsoft", "Microsoft (Outlook)", "outlook.com"),
+        ("yahoo", "Yahoo (Ymail!)", "yahoo.com"),
+        ("fastmail", "Fastmail", "fastmail.com"),
+        ("icloud", "iCloud Mail", "icloud.com"),
+    )
+
+    def _provider_rows(self, google_status: str) -> list[dict[str, Any]]:
+        """What each mail provider's state actually is, not what it once was.
+
+        ``connected`` — an app password for that domain is stored here.
+        ``ready``     — Remedy knows its servers; it needs an app password.
+        ``planned``   — genuinely not reachable yet.
+        """
+        from remedy.assistant.providers.imap_smtp import ADDRESS_KEY, PRESETS
+
+        linked_domain = ""
+        try:
+            from remedy.interfaces.secret_store import get_provider_secret
+
+            address = get_provider_secret(ADDRESS_KEY, self.home) or ""
+            linked_domain = address.split("@")[-1].strip().lower()
+        except Exception:
+            linked_domain = ""
+
+        def _canonical(domain: str) -> str:
+            row = PRESETS.get(domain) or {}
+            return str(row.get("alias_of") or domain)
+
+        linked = _canonical(linked_domain) if linked_domain else ""
+        # Google has two routes: OAuth (needs a cloud project) and the same
+        # IMAP app password as everyone else. Report the better of the two, or
+        # "planned" would keep claiming Gmail was unreachable while
+        # ``PRESETS["gmail.com"]`` sat right there.
+        gmail = PRESETS.get("gmail.com") or {}
+        if linked == "gmail.com":
+            google_row = {"id": "google", "name": "Google (Gmail)", "status": "connected"}
+        elif google_status == "connected":
+            google_row = {"id": "google", "name": "Google (Gmail)", "status": "connected"}
+        else:
+            google_row = {
+                "id": "google",
+                "name": "Google (Gmail)",
+                "status": "ready" if gmail else google_status,
+                "via": "oauth" if google_status == "ready" else "imap",
+                "app_password_url": gmail.get("app_password_url", ""),
+            }
+        rows: list[dict[str, Any]] = [google_row]
+        for pid, name, domain in self._IMAP_PROVIDERS:
+            if domain not in PRESETS:  # pragma: no cover — preset removed
+                rows.append({"id": pid, "name": name, "status": "planned"})
+                continue
+            preset = PRESETS[domain]
+            rows.append(
+                {
+                    "id": pid,
+                    "name": name,
+                    "status": "connected" if linked == domain else "ready",
+                    "via": "imap",
+                    "app_password_url": preset.get("app_password_url", ""),
+                }
+            )
+        return rows
+
     def public_status(self) -> dict[str, Any]:
         prefs = self.get_prefs()
         google_status = "planned"
@@ -455,15 +541,7 @@ class AssistantStore:
             "has_budget": self.get_budget() is not None,
             "debt_count": len(self.list_debts()),
             "bill_count": len(self.list_bills()),
-            "providers_planned": [
-                {
-                    "id": "google",
-                    "name": "Google (Gmail)",
-                    "status": google_status,
-                },
-                {"id": "microsoft", "name": "Microsoft (Outlook)", "status": "planned"},
-                {"id": "yahoo", "name": "Yahoo (Ymail!)", "status": "planned"},
-            ],
+            "providers_planned": self._provider_rows(google_status),
             "data_residency": "local",
             "tokens_to_model": False,
         }

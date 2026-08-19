@@ -7,8 +7,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+from remedy.core.relpath import norm_rel
 
 
 @dataclass
@@ -56,7 +59,7 @@ def _norm_path(p: str, root: Path | None = None) -> str:
                 p = pp.relative_to(root.resolve()).as_posix()
         except Exception:
             pass
-    return p.lstrip("./")
+    return norm_rel(p)
 
 
 def queue_from_error_vector(
@@ -85,7 +88,7 @@ def queue_from_error_vector(
         node_s = str(node)
         path = _norm_path(node_s, root_p)
         # Prefer mapping test → source
-        src = _test_to_source_guess(path)
+        src = _test_to_source_guess(path, root_p)
         if src and src != path:
             add(src, f"fails under {node_s}", 10 + i, node=node_s)
         add(path, f"failing node {node_s}", 20 + i, node=node_s)
@@ -104,19 +107,87 @@ def queue_from_error_vector(
     return q
 
 
-def _test_to_source_guess(test_path: str) -> str | None:
+def _repo_root(root: Path | str | None = None) -> Path:
+    """Where to look for sources. Explicit root wins; otherwise walk up to a
+    directory that actually contains ``src`` or ``pyproject.toml``."""
+    if root:
+        return Path(root)
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "pyproject.toml").exists() or (parent / "src").is_dir():
+            return parent
+    return Path.cwd()
+
+
+def _source_candidates(stem: str) -> list[str]:
+    """Every plausible source layout for a test stem, most specific first.
+
+    ``telephony_line`` could be ``telephony/line.py`` or ``telephony_line.py``,
+    and only the tree knows which. Underscores are the only evidence a test file
+    name carries about package structure, so try each of them as a separator.
+    """
+    parts = stem.split("_")
+    out: list[str] = []
+    for cut in range(len(parts) - 1, 0, -1):
+        out.append("/".join(parts[:cut]) + "/" + "_".join(parts[cut:]) + ".py")
+    out.append(stem + ".py")
+    return out
+
+
+@lru_cache(maxsize=8)
+def _source_index(root_s: str) -> tuple[str, ...]:
+    """Every source file in the tree, once. Rebuilt per root, cached after."""
+    root = Path(root_s)
+    base = root / "src" if (root / "src").is_dir() else root
+    try:
+        return tuple(
+            p.relative_to(root).as_posix()
+            for p in base.rglob("*.py")
+            if p.is_file() and "__pycache__" not in p.parts
+        )
+    except OSError:
+        return ()
+
+
+@lru_cache(maxsize=1024)
+def _resolve_source(stem: str, root_s: str) -> str | None:
+    """Turn a bare test stem into a path that exists, or None.
+
+    The bare name on its own was never resolvable: a queue whose top-priority
+    target is ``telephony_line.py`` sends the repair loop at a file that is not
+    in the tree, while the real one sits at ``src/remedy/telephony/line.py``.
+    Package nesting is unknown here, so match on the tail of the path and take
+    the shallowest hit.
+    """
+    index = _source_index(root_s)
+    if not index:
+        return None
+    for candidate in _source_candidates(stem):
+        hits = [
+            p for p in index if p == candidate or p.endswith("/" + candidate)
+        ]
+        if hits:
+            return min(hits, key=lambda p: (p.count("/"), len(p)))
+    return None
+
+
+def _test_to_source_guess(test_path: str, root: Path | str | None = None) -> str | None:
+    """The source a failing test is probably about, as a path that exists.
+
+    Falls back to the bare name when nothing in the tree matches, so a guess is
+    never worse than it used to be — only more often usable.
+    """
     rel = test_path.replace("\\", "/")
     name = Path(rel).name
+    stem = ""
     if name.startswith("test_"):
         stem = name[len("test_") :]
-        parent = str(Path(rel).parent).replace("\\", "/")
-        # tests/test_foo.py → foo.py
-        if "tests" in parent.split("/"):
-            return stem  # best-effort bare name; caller may resolve
-        return stem
-    if name.endswith("_test.py"):
-        return name[: -len("_test.py")] + ".py"
-    return None
+        stem = stem[: -len(".py")] if stem.endswith(".py") else stem
+    elif name.endswith("_test.py"):
+        stem = name[: -len("_test.py")]
+    if not stem:
+        return None
+    return _resolve_source(stem, str(_repo_root(root))) or (stem + ".py")
 
 
 def format_repair_queue_message(queue: RepairQueue) -> dict[str, str]:
@@ -155,17 +226,21 @@ def run_auto_repair_hops(
         # Prefer non-test sources
         path = t.path
         if path.startswith("tests/") or Path(path).name.startswith("test_"):
+            # Repair the source, not the test. The guess used to be computed
+            # here and then thrown away, so the "prefer non-test sources"
+            # strategy above never actually happened: a lone failing target got
+            # its *test* rewritten, and any other target was skipped outright.
             guess = _test_to_source_guess(path)
-            if guess and not guess.endswith(".py"):
-                guess = guess if "/" in guess else guess  # keep
-            # skip pure test hops for auto LLM unless only target — unless the
-            # broadened strategy explicitly wants to repair tests too.
-            if len(queue.targets) > 1 and not include_tests:
+            if guess and guess != path and Path(guess).exists():
+                path = guess
+            elif len(queue.targets) > 1 and not include_tests:
+                # Nothing to redirect to. Hopping the test itself is a last
+                # resort, and only when it is the sole target.
                 continue
         try:
             res = live_unit_hop(
                 runtime,
-                path=path if path.endswith(".py") else path,
+                path=path,
                 symbol=t.symbol or Path(path).stem,
                 use_llm=use_llm,
                 max_repairs=max_repairs,

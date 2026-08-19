@@ -65,9 +65,37 @@ def test_to_phone_from_16k_produces_8k_length():
     assert len(nb.to_phone(pcm, 16000)) == nb.frame_bytes(8000)
 
 
-def test_to_phone_rejects_unsupported_rate():
+def test_to_phone_from_24k_produces_8k_length():
+    """Chatterbox speaks at 24 kHz and the line does not. See resample()."""
+    pcm = _pcm([1000] * 480)  # 20 ms at 24 kHz
+    assert len(nb.to_phone(pcm, 24000)) == nb.frame_bytes(8000)
+
+
+def test_to_phone_rejects_nonsense_rate():
     with pytest.raises(ValueError):
-        nb.to_phone(_pcm([0] * 100), 44100)
+        nb.to_phone(_pcm([0] * 100), 0)
+
+
+def test_resample_is_identity_at_the_same_rate():
+    pcm = _pcm([7, -7, 300] * 20)
+    assert nb.resample(pcm, 8000, 8000) == pcm
+
+
+def test_resample_scales_length_by_the_rate_ratio():
+    pcm = _pcm([0] * 480)  # 20 ms at 24 kHz
+    assert len(nb.resample(pcm, 24000, 8000)) == 160 * 2
+    assert len(nb.resample(pcm, 24000, 48000)) == 960 * 2
+
+
+def test_resample_preserves_a_constant_signal():
+    """A DC level must survive the trip, or every voice comes out quieter."""
+    out = nb.resample(_pcm([8000] * 480), 24000, 8000)
+    samples = struct.unpack(f"<{len(out) // 2}h", out)
+    assert all(abs(x - 8000) <= 1 for x in samples)
+
+
+def test_resample_of_empty_is_empty():
+    assert nb.resample(b"", 24000, 8000) == b""
 
 
 def test_rms_separates_silence_from_speech():

@@ -6,11 +6,11 @@ personhood, not only random code churn.
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
 from remedy.memory.soul.field import load_soul_field, soul_dir
 
 
@@ -170,10 +170,7 @@ def measure_continuity(home: str | Path | None = None) -> ContinuityScore:
     )
     try:
         path = soul_dir(home) / "continuity_score.json"
-        path.write_text(
-            json.dumps(score.to_public(), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        write_json_atomic(path, score.to_public(), ensure_ascii=False)
     except Exception:
         pass
     return score

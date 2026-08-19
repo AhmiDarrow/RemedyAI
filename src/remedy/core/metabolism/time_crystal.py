@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
+
 HORIZONS = ("turn", "session", "project_week", "life")
 # Bound fact list growth (was 300) — hot_block sort + inject size stay cheap.
 MAX_CRYSTAL_FACTS = 128
@@ -234,10 +236,7 @@ class TimeCrystal:
             d.mkdir(parents=True, exist_ok=True)
             sid = _crystal_sid(self.session_id)
             path = d / f"{sid}.json"
-            path.write_text(
-                json.dumps(payload, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
+            write_json_atomic(path, payload, ensure_ascii=False)
             with self._lock:
                 self._persist_rev = rev
             return path

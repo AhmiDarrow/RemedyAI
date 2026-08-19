@@ -44,5 +44,9 @@ def test_version_pin():
 
 
 def test_system_rg_optional():
-    # May or may not exist on the machine — just must not raise.
-    _ = find_system_rg()
+    # May or may not exist on the machine, but the answer has to be usable:
+    # either a path that is really there, or nothing.
+    found = find_system_rg()
+    assert found is None or found == "" or Path(found).is_file(), (
+        f"find_system_rg returned {found!r}, which is not a file"
+    )

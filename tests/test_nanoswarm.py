@@ -476,3 +476,41 @@ def test_start_install_message_is_download_when_missing(tmp_path, monkeypatch):
     r = vs.start_install(cfg={"home_dir": str(tmp_path / "h"), "vision": {"enabled": True}})
     assert r.get("mode") == "download"
     assert "Download" in (r.get("message") or "") or "download" in (r.get("message") or "").lower()
+
+
+def test_the_learn_pregate_actually_reaches_a_decision():
+    """It asked ``LifecycleDecision`` for ``reasoning``; the field is ``reason``.
+
+    Every call raised, the blanket catch turned that into action="unknown", and
+    the pre-gate looked alive while no trace it ever saw was judged — nothing
+    was pre-approved and nothing was skipped, for the life of the process.
+    """
+    from remedy.nanoswarm.pattern_nanobot import _SessionPattern
+
+    sp = _SessionPattern()
+    for i in range(6):
+        sp.on_tool_step(f"tool_{i % 3}", success=True, duration_ms=120.0)
+    out = sp.pregate_trace(overall_success=True, title="a real trace")
+
+    assert "error" not in out, out.get("error")
+    assert out["action"] != "unknown"
+    assert out["action"] in ("accept", "reject", "promote", "demote", "prune", "hold")
+    assert out["reasoning"], "a decision with no stated reason is not a decision"
+    assert isinstance(out["skip_learn"], bool)
+
+
+def test_a_pregate_that_cannot_decide_says_why(caplog):
+    """"unknown" must never again be indistinguishable from a crash."""
+    import logging
+
+    from remedy.nanoswarm import pattern_nanobot
+    from remedy.nanoswarm.pattern_nanobot import _SessionPattern
+
+    sp = _SessionPattern()
+    sp.on_tool_step("a")
+    with caplog.at_level(logging.WARNING, logger=pattern_nanobot.__name__):
+        sp.steps = None  # force the failure path
+        out = sp.pregate_trace()
+    assert out["action"] == "unknown"
+    assert out["error"]
+    assert any("pre-gate failed" in r.message for r in caplog.records)

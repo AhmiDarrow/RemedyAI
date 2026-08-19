@@ -1,6 +1,7 @@
 """API route registration for Remedy FastAPI app."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -54,18 +55,27 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         installer_url = None
         errors: list[str] = []
 
-        try:
+        # Every fetch below runs in a worker thread. urlopen is blocking, and
+        # this is an async route: done inline, one unreachable host froze the
+        # whole local API — chat, streaming, everything — for up to 40 seconds
+        # across the three calls.
+        def _fetch(url: str, timeout: float) -> dict:
             import json as _json
             import urllib.request as _urllib
 
             req = _urllib.Request(
-                "https://pypi.org/pypi/remedy-ai/json",
+                url,
                 headers={"Accept": "application/json", "User-Agent": "Remedy-Updater"},
             )
             # `_urllib` is already urllib.request (not the top-level package).
-            with _urllib.urlopen(req, timeout=10) as resp:
-                data = _json.loads(resp.read().decode())
-                latest_python = data["info"]["version"]
+            with _urllib.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+                return _json.loads(resp.read().decode())
+
+        try:
+            data = await asyncio.to_thread(
+                _fetch, "https://pypi.org/pypi/remedy-ai/json", 10
+            )
+            latest_python = data["info"]["version"]
         except Exception as e:
             errors.append(f"PyPI: {e}")
 
@@ -75,18 +85,7 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             "https://api.github.com/repos/AhmiDarrow/RemedyAI/releases/latest",
         ):
             try:
-                import json as _json
-                import urllib.request as _urllib
-
-                req = _urllib.Request(
-                    url,
-                    headers={
-                        "Accept": "application/json",
-                        "User-Agent": "Remedy-Updater",
-                    },
-                )
-                with _urllib.urlopen(req, timeout=15) as resp:
-                    data = _json.loads(resp.read().decode())
+                data = await asyncio.to_thread(_fetch, url, 15)
                 if "version" in data:
                     latest_desktop = str(data.get("version") or "").lstrip("vV")
                     release_url = (

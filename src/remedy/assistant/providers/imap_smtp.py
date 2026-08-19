@@ -543,11 +543,89 @@ def save_mail_credentials(
         }
     set_provider_secret(ADDRESS_KEY, addr, home=home)
     set_provider_secret(SECRET_KEY, pwd, home=home)
+    caps = _record_linked_account(addr, p, home=home)
     return {
         "ok": True,
         "address": addr,
         "provider": p.get("label") or "mail",
+        "capabilities": caps,
         "message": f"Saved credentials for {addr}",
+    }
+
+
+def _provider_id(address: str) -> str:
+    """Which linked-account provider a mailbox belongs to."""
+    dom = (address or "").split("@")[-1].strip().lower()
+    row = PRESETS.get(dom) or {}
+    canonical = str(row.get("alias_of") or dom)
+    return {
+        "gmail.com": "google",
+        "outlook.com": "microsoft",
+        "yahoo.com": "yahoo",
+        "fastmail.com": "fastmail",
+        "icloud.com": "icloud",
+    }.get(canonical, canonical or "mail")
+
+
+def _record_linked_account(
+    address: str, preset: dict[str, Any], *, home: Path | str | None = None
+) -> list[str]:
+    """Put the mailbox on the linked-accounts list.
+
+    The Google OAuth flow has always done this; the app-password flow stored the
+    credential and stopped, so a mailbox could be fully working while Settings
+    and ``assistant_accounts`` both showed nothing linked at all.
+
+    Returns the capabilities recorded, so the caller can say what it got.
+    """
+    import time
+
+    from remedy.assistant.models import LinkedAccount
+    from remedy.assistant.providers.caldav import caldav_url_for
+    from remedy.assistant.store import get_assistant_store
+
+    caps = ["mail"]
+    if caldav_url_for(address):
+        caps.append("calendar")
+    try:
+        get_assistant_store(home).upsert_account(
+            LinkedAccount(
+                id=f"imap_{_provider_id(address)}",
+                provider=_provider_id(address),
+                email=address,
+                capabilities=caps,
+                status="connected",
+                last_sync=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — the credential is already saved
+        logger.warning("could not record the linked mail account: %s", exc)
+    return caps
+
+
+def clear_mail_credentials(home: Path | str | None = None) -> dict[str, Any]:
+    """Disconnect the mailbox: forget the credential and the linked account.
+
+    There was no way to undo ``save_mail_credentials`` at all — connecting was a
+    one-way door, and the only way back out was deleting keys by hand.
+    """
+    from remedy.interfaces.secret_store import clear_provider_secret, get_provider_secret
+
+    addr = (get_provider_secret(ADDRESS_KEY, home=home) or "").strip()
+    if not addr:
+        return {"ok": True, "message": "No mailbox was connected.", "address": ""}
+    clear_provider_secret(SECRET_KEY, home=home)
+    clear_provider_secret(ADDRESS_KEY, home=home)
+    try:
+        from remedy.assistant.store import get_assistant_store
+
+        get_assistant_store(home).remove_account(f"imap_{_provider_id(addr)}")
+    except Exception as exc:  # noqa: BLE001 — the credential is already gone
+        logger.warning("could not clear the linked mail account: %s", exc)
+    return {
+        "ok": True,
+        "address": addr,
+        "message": f"Disconnected {addr}. The app password has been forgotten.",
     }
 
 

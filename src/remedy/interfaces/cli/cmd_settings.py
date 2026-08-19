@@ -24,6 +24,153 @@ from remedy.interfaces.config import (
 )
 
 
+def _known_providers() -> dict[str, dict]:
+    from remedy.interfaces.config import PROVIDER_CATALOG
+
+    return dict(PROVIDER_CATALOG)
+
+
+def _auth_methods(provider: str) -> list[str]:
+    entry = _known_providers().get(provider) or {}
+    return [str(a) for a in (entry.get("auth") or [])]
+
+
+def _print_key_status(home, provider: str = "") -> None:
+    """What is stored, never what it is. Fingerprints only."""
+    from remedy.interfaces import secret_store
+
+    status = secret_store.public_secret_status(home, include_fingerprints=True)
+    fingerprints = status.get("fingerprints") or {}
+    catalog = _known_providers()
+
+    rows = [provider] if provider else sorted(status.get("providers_with_keys") or [])
+    table = Table(title=f"API keys ({status.get('encoding')})")
+    table.add_column("Provider")
+    table.add_column("Key stored")
+    table.add_column("Fingerprint")
+    table.add_column("Env fallback")
+    if not rows:
+        console.print("[dim]No provider API keys stored yet.[/dim]")
+    else:
+        for name in rows:
+            entry = catalog.get(name) or {}
+            env = ", ".join(
+                k for k in (entry.get("env_keys") or []) if os.environ.get(k)
+            )
+            has = name in fingerprints
+            table.add_row(
+                name,
+                "[green]yes[/green]" if has else "[dim]no[/dim]",
+                str(fingerprints.get(name) or "—"),
+                env or "—",
+            )
+        console.print(table)
+    console.print(f"[dim]Stored in {status.get('store_path')}[/dim]")
+    if status.get("encoding_warning"):
+        console.print(f"[yellow]{status['encoding_warning']}[/yellow]")
+
+
+def _auth_api_key_provider(provider: str, cmd: str | None, args, home) -> None:
+    """auth login/logout/status/apikey for every provider that is not xAI.
+
+    The storage layer has always handled all of them — ``secret_store`` is
+    DPAPI-sealed and keyed by provider — but this command refused anything but
+    xAI, so a CLI-only owner had no way to set a key at all short of editing
+    files by hand.
+    """
+    from remedy.interfaces import secret_store
+
+    catalog = _known_providers()
+    if provider == "all":
+        # Additive: the bare command still defaults to xai, as it always has.
+        if cmd == "status":
+            _print_key_status(home)
+            return
+        if cmd == "logout":
+            secret_store.clear_provider_secret(None, home)
+            console.print("[green]Cleared every stored provider API key.[/green]")
+            return
+        console.print(
+            "[yellow]'all' works with status and logout.[/yellow] "
+            "Name a provider to store or sign in to one."
+        )
+        raise SystemExit(2)
+    if provider not in catalog:
+        console.print(
+            f"[red]Unknown provider '{provider}'.[/red] "
+            f"Known: {', '.join(sorted(catalog))}, all"
+        )
+        raise SystemExit(2)
+
+    methods = _auth_methods(provider)
+    label = str(catalog[provider].get("label") or provider)
+
+    if cmd == "status":
+        if "api_key" not in methods:
+            console.print(
+                f"[green]{label} needs no key[/green] — it runs locally or "
+                "allows guest access."
+            )
+            return
+        _print_key_status(home, provider)
+        return
+
+    if cmd == "logout":
+        if secret_store.get_provider_secret(provider, home) is None:
+            console.print(f"[dim]No stored key for {label}; nothing to clear.[/dim]")
+            return
+        secret_store.clear_provider_secret(provider, home)
+        console.print(f"[green]Cleared the stored API key for {label}.[/green]")
+        return
+
+    if cmd == "apikey":
+        if "api_key" not in methods:
+            console.print(
+                f"[yellow]{label} does not take an API key[/yellow] — it runs "
+                "locally or allows guest access, so there is nothing to store."
+            )
+            raise SystemExit(2)
+        key = getattr(args, "api_key", None)
+        if not key:
+            from rich.prompt import Prompt
+
+            key = Prompt.ask(f"{label} API key", password=True, console=console)
+        key = str(key or "").strip()
+        if not key:
+            console.print("[red]API key is empty.[/red]")
+            raise SystemExit(1)
+        try:
+            secret_store.set_provider_secret(provider, key, home)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise SystemExit(1) from exc
+        console.print(
+            f"[green]Saved {label} API key.[/green] "
+            f"fingerprint={secret_store.fingerprint_key(key)}"
+        )
+        return
+
+    if cmd == "login":
+        if "oauth" in methods:  # pragma: no cover — xAI is handled above today
+            console.print(
+                f"[yellow]{label} supports OAuth, but only xAI's device-code "
+                "flow is wired up.[/yellow]"
+            )
+            raise SystemExit(2)
+        console.print(
+            f"[yellow]{label} has no interactive sign-in — it authenticates with "
+            f"an API key.[/yellow]",
+            f"Run: [bold]remedy auth apikey {provider}[/bold]",
+        )
+        raise SystemExit(2)
+
+    console.print(
+        "[dim]Usage: remedy auth login|logout|status|apikey "
+        f"{provider}[/dim]"
+    )
+    raise SystemExit(2)
+
+
 def _cmd_auth(args) -> None:
     """Provider auth: login / logout / status / apikey (xAI device-code OAuth)."""
     import time
@@ -38,11 +185,8 @@ def _cmd_auth(args) -> None:
     cmd = getattr(args, "auth_cmd", None)
 
     if provider != "xai":
-        console.print(
-            f"[yellow]Auth for '{provider}' is not implemented yet. "
-            "Currently supported: xai[/yellow]"
-        )
-        raise SystemExit(2)
+        _auth_api_key_provider(provider, cmd, args, home)
+        return
 
     from remedy.interfaces import xai_auth
 

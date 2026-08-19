@@ -69,12 +69,16 @@ class CallStats:
     frames_out: int = 0
     started_at: float = 0.0
     ended_at: float = 0.0
+    #: The same clock ``started_at`` was stamped from. A call driven by an
+    #: injected clock (the bench, any test) would otherwise report an
+    #: in-progress duration as the difference between two unrelated origins.
+    now: Any = field(default=time.monotonic, repr=False, compare=False)
 
     @property
     def duration_s(self) -> float:
         if not self.started_at:
             return 0.0
-        end = self.ended_at or time.monotonic()
+        end = self.ended_at or self.now()
         return max(0.0, end - self.started_at)
 
 
@@ -101,8 +105,8 @@ class Call:
         self.sample_rate = sample_rate
         self.state = CallState.IDLE
         self.end_reason: EndReason | None = None
-        self.stats = CallStats()
         self._clock = clock or time.monotonic
+        self.stats = CallStats(now=self._clock)
         self._inbound: asyncio.Queue[AudioFrame | None] = asyncio.Queue(maxsize=256)
         self._state_waiters: list[asyncio.Future[CallState]] = []
         self._dtmf_in: list[str] = []
@@ -119,8 +123,7 @@ class Call:
             self.stats.started_at = self._clock()
         if state in (CallState.ENDED, CallState.FAILED):
             self.stats.ended_at = self._clock()
-            with contextlib.suppress(asyncio.QueueFull):
-                self._inbound.put_nowait(None)
+            self._close_inbound()
         logger.debug("call %s: %s -> %s", self.id, prev, state)
         for fut in self._state_waiters:
             if not fut.done():
@@ -141,6 +144,30 @@ class Call:
             return self.state
 
     # -- audio ---------------------------------------------------------------
+
+    def _close_inbound(self) -> None:
+        """Post the end-of-call sentinel, making room for it if we must.
+
+        Dropping it is not an option: ``audio_in()`` would drain the queue and
+        then block on a producer that has hung up, so the pipeline's ``run()``
+        never returns and the call object leaks for the life of the process. A
+        consumer far enough behind to fill the queue has already lost frames —
+        losing one more to say goodbye is the cheap half of that trade.
+        """
+        try:
+            self._inbound.put_nowait(None)
+            return
+        except asyncio.QueueFull:
+            pass
+        with contextlib.suppress(asyncio.QueueEmpty):
+            self._inbound.get_nowait()
+        try:
+            self._inbound.put_nowait(None)
+            logger.warning(
+                "call %s: inbound queue full at hangup, dropped a frame", self.id
+            )
+        except asyncio.QueueFull:  # pragma: no cover — nothing else consumes here
+            logger.error("call %s: could not post the end-of-call sentinel", self.id)
 
     def _deliver(self, frame: AudioFrame) -> None:
         """Backend -> pipeline. Drops the oldest frame rather than blocking the

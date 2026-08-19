@@ -23,6 +23,7 @@ Open **Help** ( **F1** or **Ctrl+/** ) for a searchable wiki UI that loads these
 | [04-security-and-data.md](04-security-and-data.md) | Security & data (✕→tray, SSRF, jails) |
 | [05-chat-and-sessions.md](05-chat-and-sessions.md) | Chat, rails, Plan/Build |
 | [06-memory-and-harness.md](06-memory-and-harness.md) | Memory & harness |
+| [21-personal-assistant.md](21-personal-assistant.md) | Personal assistant (reminders, mail, calendar, money, paperwork) |
 | [18-agency.md](18-agency.md) | Coding agency (Build-class tools) |
 | [19-metabolism.md](19-metabolism.md) | Partner Metabolism L0–L3 (**0.20.0**, Advanced) |
 | [07-skills.md](07-skills.md) | Skills & Library |

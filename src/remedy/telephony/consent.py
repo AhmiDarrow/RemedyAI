@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from remedy.core.atomic_json import write_text_atomic
+
 logger = logging.getLogger(__name__)
 
 #: Bump only for a *material* change. Every bump re-asks every owner.
@@ -94,10 +96,10 @@ def read(home: Path | str | None = None) -> Consent:
 def accept(home: Path | str | None = None) -> Consent:
     """Record agreement. Only ever called after the points were actually said."""
     consent = Consent(version=TERMS_VERSION, at=datetime.now(UTC).isoformat())
-    _path(home).write_text(
+    write_text_atomic(
+        _path(home),
         json.dumps({"version": consent.version, "at": consent.at, "doc": DOC}, indent=2)
         + "\n",
-        encoding="utf-8",
     )
     logger.info("telephony terms v%d accepted", consent.version)
     return consent

@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
+
 # Bound IR step list growth on long agency turns (memory + to_public cost).
 MAX_IR_STEPS = 96
 
@@ -167,10 +169,7 @@ class ActionIR:
                 c for c in (self.session_id or "default") if c.isalnum() or c in "-_"
             )[:40]
             path = d / f"{sid}_{self.turn_id}.json"
-            path.write_text(
-                json.dumps(self.to_public(), indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
+            write_json_atomic(path, self.to_public(), ensure_ascii=False)
             return path
         except Exception:
             return None
