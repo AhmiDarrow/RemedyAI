@@ -100,6 +100,28 @@ def clear_protected_auth_roots_cache() -> None:
     _HOME_DIR_ENV = None
 
 
+def secret_equals(presented: str | bytes | None, expected: str | bytes | None) -> bool:
+    """Constant-time secret comparison that never raises.
+
+    Three copies of this lived in the tree — the local API bearer check, the
+    generic webhook, and the Google Chat adapter — each identical, each a place
+    the next fix could miss. Length inequality still touches ``compare_digest``
+    so the timing shape does not itself say "wrong length", and a bad type or
+    encoding answers False rather than turning an auth check into a 500.
+    """
+    import hmac
+
+    try:
+        a = presented.encode("utf-8") if isinstance(presented, str) else bytes(presented or b"")
+        b = expected.encode("utf-8") if isinstance(expected, str) else bytes(expected or b"")
+    except (TypeError, ValueError, UnicodeError):
+        return False
+    if len(a) != len(b):
+        hmac.compare_digest(a, a)
+        return False
+    return hmac.compare_digest(a, b)
+
+
 def is_protected_secret_path(path: Path | str | None) -> bool:
     """True when *path* resolves under a Remedy auth secrets directory.
 

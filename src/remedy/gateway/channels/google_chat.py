@@ -81,7 +81,6 @@ class GoogleChatChannel(HttpSessionMixin, ChannelAdapter):
         Google Chat HTTP push can use app-level bearer verification. When no
         access_token is configured, reject (channel is stub / outbound-only).
         """
-        import hmac as _hmac
 
         if not self.access_token:
             return False
@@ -103,11 +102,9 @@ class GoogleChatChannel(HttpSessionMixin, ChannelAdapter):
             return False
         presented = auth[7:].strip()
         # Constant-time; unequal lengths → False (never raise → never 500).
-        pe, ee = presented.encode("utf-8"), self.access_token.encode("utf-8")
-        if len(pe) != len(ee):
-            _hmac.compare_digest(pe, pe)
-            return False
-        return _hmac.compare_digest(pe, ee)
+        from remedy.core.security import secret_equals
+
+        return secret_equals(presented, self.access_token)
 
     async def handle_event(self, data: dict[str, Any]) -> bool:
         """Handle Chat app event (MESSAGE).

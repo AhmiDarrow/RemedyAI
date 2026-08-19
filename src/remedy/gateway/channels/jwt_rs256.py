@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import logging
 import threading
@@ -106,7 +107,10 @@ def verify_rs256(token: str, *, n: int, e: int) -> bool:
         return False
     digest_info = em[sep + 1 :]
     expected = _DIGESTINFO_SHA256 + digest
-    return digest_info == expected
+    # Exact match, constant time. Requiring the DigestInfo to be *exactly* the
+    # tail is what rules out the classic e=3 forgery, where trailing garbage is
+    # ignored; comparing in constant time is the standard on top of that.
+    return hmac.compare_digest(digest_info, expected)
 
 
 def decode_jwt_header(token: str) -> dict[str, Any] | None:
