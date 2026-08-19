@@ -76,3 +76,32 @@ def test_redirects_are_never_followed():
     src = inspect.getsource(caldav.CalDavCalendarProvider._dav)
     assert "urlopen_no_redirect" in src
     assert "urllib.request.urlopen(" not in src
+
+
+class TestResponseBounds:
+    """A calendar answer is kilobytes. A hostile or broken server must not be
+    able to hand back a body larger than memory."""
+
+    def test_the_body_read_is_capped(self):
+        import inspect
+
+        from remedy.assistant.providers import caldav
+
+        src = inspect.getsource(caldav.CalDavCalendarProvider._dav)
+        assert "_MAX_RESPONSE_BYTES" in src
+        assert "resp.read()" not in src, "unbounded read is back"
+
+    def test_error_bodies_are_capped_too(self):
+        import inspect
+
+        from remedy.assistant.providers import caldav
+
+        src = inspect.getsource(caldav.CalDavCalendarProvider._dav)
+        assert "_MAX_ERROR_BYTES" in src
+        assert "e.read()" not in src
+
+    def test_the_caps_are_generous_enough_for_real_calendars(self):
+        from remedy.assistant.providers import caldav
+
+        assert caldav._MAX_RESPONSE_BYTES >= 8 * 1024 * 1024
+        assert caldav._MAX_ERROR_BYTES >= 4096

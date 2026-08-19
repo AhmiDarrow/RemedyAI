@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 _WEBHOOK_MAX_BYTES = 2 * 1024 * 1024
 
 
-async def _read_body_capped(
+async def read_body_capped(
     request: Request,
     *,
     max_bytes: int = _WEBHOOK_MAX_BYTES,
@@ -33,6 +33,11 @@ async def _read_body_capped(
             raise HTTPException(413, "payload too large")
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+#: The name this had before it was shared. Kept so nothing that already imports
+#: it has to change.
+_read_body_capped = read_body_capped
 
 
 def register_webhook_routes(app: FastAPI, *, gateway=None, **_kw) -> None:
