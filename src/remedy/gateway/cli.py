@@ -235,9 +235,13 @@ def main_gateway(args) -> None:
                 flags.append("in")
             if m.outbound:
                 flags.append("out")
+            # Escaped: rich reads a bare [in/out] as a style tag and prints
+            # nothing at all, so the direction column only ever appeared for a
+            # messenger that supports neither direction — the exact opposite of
+            # what it is for.
             console.print(
                 f"  {m.id:14} {m.status:8} {m.name}  "
-                f"[{'/'.join(flags) or '—'}]"
+                rf"\[{'/'.join(flags) or '—'}]"
             )
 
 
