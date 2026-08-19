@@ -440,7 +440,27 @@ async def handle_slash_command(
         if memory is None:
             return {"text": "Memory store not available."}
         try:
-            from remedy.memory.partner_memory import pin_facts, upsert_profile_fact
+            from remedy.memory.partner_memory import (
+                looks_like_secret,
+                pin_facts,
+                upsert_profile_fact,
+            )
+
+            # /remember checks this; /pin did not. upsert_profile_fact refused
+            # the write underneath either way, so nothing was ever stored — but
+            # the failure came back as a vague "Could not pin <the key>", which
+            # reads as transient (so the owner retries) and puts the credential
+            # into the session transcript, which is persisted and exportable.
+            # A pinned fact is injected into every prompt, so this is the one
+            # place a secret must be turned away loudest.
+            if looks_like_secret(text):
+                return {
+                    "text": (
+                        "That looks like a secret (API key/password). "
+                        "I won’t pin it — a pinned fact goes into every prompt. "
+                        "Use a secret store or an environment variable."
+                    )
+                }
 
             profile = await memory.get_or_create_profile()
             touched = pin_facts(profile, text, pinned=True)
