@@ -140,22 +140,56 @@ def upsample_2x(pcm: bytes) -> bytes:
     return _pack(_convolve(stretched, _LOWPASS))
 
 
+def resample(pcm: bytes, src_rate: int, dst_rate: int) -> bytes:
+    """Any rate to any rate, 16-bit mono, in stdlib.
+
+    The 2x helpers above are the common paths and stay exact. This covers the
+    rest, because synthesizers do not restrict themselves to powers of two of a
+    phone line: Chatterbox speaks at 24 kHz, and 24 kHz is not 3 dB from
+    anything. Linear interpolation with a low-pass on the dense side — the same
+    treatment ``downsample_2x``/``upsample_2x`` give their factor of two.
+    """
+    if src_rate <= 0 or dst_rate <= 0:
+        raise ValueError(f"invalid rates {src_rate} -> {dst_rate}")
+    if src_rate == dst_rate:
+        return pcm
+    if (src_rate, dst_rate) == (WIDE_RATE, PHONE_RATE):
+        return downsample_2x(pcm)
+    if (src_rate, dst_rate) == (PHONE_RATE, WIDE_RATE):
+        return upsample_2x(pcm)
+
+    s = _unpack(pcm)
+    if not s:
+        return b""
+    if dst_rate < src_rate:
+        # Band-limit *before* decimating, or everything above the new Nyquist
+        # folds back down as tones that were never spoken.
+        s = _convolve(s, _LOWPASS)
+
+    n_out = max(1, round(len(s) * dst_rate / src_rate))
+    step = len(s) / n_out
+    out: list[int] = []
+    for i in range(n_out):
+        pos = i * step
+        lo = int(pos)
+        hi = min(lo + 1, len(s) - 1)
+        frac = pos - lo
+        out.append(int(round(s[lo] + (s[hi] - s[lo]) * frac)))
+    if dst_rate > src_rate:
+        # Smooth the staircase the interpolation left behind.
+        out = _convolve(out, _LOWPASS)
+    return _pack(out)
+
+
 def to_phone(pcm: bytes, sample_rate: int) -> bytes:
     """Her synthesized audio -> what the far end actually hears (8 kHz PCM)."""
-    if sample_rate == WIDE_RATE:
-        pcm = downsample_2x(pcm)
-    elif sample_rate != PHONE_RATE:
-        raise ValueError(f"unsupported source rate {sample_rate}")
+    pcm = resample(pcm, sample_rate, PHONE_RATE)
     return ulaw_to_pcm(pcm_to_ulaw(pcm))
 
 
 def from_phone(pcm: bytes, sample_rate: int) -> bytes:
     """Line audio (8 kHz PCM) -> the rate the STT engine wants."""
-    if sample_rate == PHONE_RATE:
-        return pcm
-    if sample_rate == WIDE_RATE:
-        return upsample_2x(pcm)
-    raise ValueError(f"unsupported target rate {sample_rate}")
+    return resample(pcm, PHONE_RATE, sample_rate)
 
 
 def rms(pcm: bytes) -> float:

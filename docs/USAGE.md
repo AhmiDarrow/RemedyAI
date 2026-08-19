@@ -79,6 +79,11 @@ remedy auth logout xai
 
 ```bash
 remedy auth apikey xai xai-your-console-key
+
+# Any other provider — same command, no OAuth involved
+remedy auth apikey anthropic        # prompts, hidden
+remedy auth status all              # which providers hold a key (fingerprints, never the key)
+remedy auth logout openai           # clear one; `all` clears every stored key
 # or:
 set XAI_API_KEY=xai-your-console-key   # Windows
 export XAI_API_KEY=xai-your-console-key  # Unix

@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from remedy.core.atomic_json import write_text_atomic
+
 logger = logging.getLogger(__name__)
 
 #: Bump only for a *material* change. Every bump re-asks every owner.
@@ -75,6 +77,16 @@ class Agreement:
         return 0 < self.version < TERMS_VERSION
 
 
+#: Said aloud, so the number is a word. Derived rather than written into the
+#: sentence: "five things" followed by six things is the kind of small wrongness
+#: that makes everything else she says sound unreliable.
+_NUMBER_WORDS = {2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven"}
+
+
+def _count(n: int) -> str:
+    return _NUMBER_WORDS.get(n, str(n))
+
+
 def read(home: Path | str | None = None) -> Agreement:
     try:
         raw = json.loads(_path(home).read_text(encoding="utf-8"))
@@ -93,10 +105,10 @@ def read(home: Path | str | None = None) -> Agreement:
 def accept(home: Path | str | None = None) -> Agreement:
     """Record agreement. Only called after the points were actually said."""
     agreed = Agreement(version=TERMS_VERSION, at=datetime.now(UTC).isoformat())
-    _path(home).write_text(
+    write_text_atomic(
+        _path(home),
         json.dumps({"version": agreed.version, "at": agreed.at, "doc": DOC}, indent=2)
         + "\n",
-        encoding="utf-8",
     )
     logger.info("terms v%d accepted", agreed.version)
     return agreed
@@ -112,7 +124,7 @@ def ask(home: Path | str | None = None) -> str:
     agreed = read(home)
     if agreed.current:
         return ""
-    lead = "Before we start, five things you should hear once."
+    lead = f"Before we start, {_count(len(SPOKEN_POINTS))} things you should hear once."
     if agreed.stale:
         changed = TERMS_CHANGES.get(TERMS_VERSION, "the terms have changed")
         lead = f"The terms have changed — {changed}. Worth hearing again."

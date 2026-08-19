@@ -23,6 +23,8 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
+from remedy.core.relpath import norm_rel
+
 # ---------------------------------------------------------------------------
 # Intent detection
 # ---------------------------------------------------------------------------
@@ -395,7 +397,7 @@ class BuildTurnState:
         seen: set[str] = set()
 
         def _add(raw: str) -> None:
-            key = (raw or "").replace("\\", "/").lstrip("./").strip()
+            key = norm_rel(raw)
             if not key or key in seen:
                 return
             if "." not in key.split("/")[-1]:

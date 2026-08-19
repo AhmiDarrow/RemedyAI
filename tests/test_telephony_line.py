@@ -149,3 +149,37 @@ async def test_a_backend_that_cannot_describe_itself_is_treated_as_real(tmp_path
     # Any un-agreed terms layer is enough to stop it; the point is that it stops.
     with pytest.raises(RuntimeError):
         await Line(backend=_Mystery(), home=tmp_path).place("+15550100")
+
+
+@pytest.mark.asyncio
+async def test_hangup_always_reaches_a_consumer_that_fell_behind():
+    """A dropped end-of-call sentinel hangs ``audio_in()`` for good.
+
+    ``_deliver`` drops the oldest frame to make room when the queue is full;
+    the sentinel used to just give up. A far end that hangs up while the
+    consumer is seconds behind then left the loop awaiting a producer that had
+    gone, so the call never finished.
+    """
+    call = _call()
+    call._set_state(CallState.ACTIVE)
+    frame = silence(8000)
+    while not call._inbound.full():
+        call._deliver(frame)
+
+    call._set_state(CallState.ENDED, EndReason.REMOTE_HANGUP)
+
+    heard = 0
+    async for _ in call.audio_in():
+        heard += 1
+    assert heard > 0, "the backlog was thrown away, not drained"
+
+
+@pytest.mark.asyncio
+async def test_an_in_progress_duration_uses_the_call_s_own_clock():
+    """``started_at`` is stamped from the injected clock; the fallback end must
+    come from the same one, or a live call reports a nonsense duration."""
+    now = [500.0]
+    call = _call(clock=lambda: now[0])
+    call._set_state(CallState.ACTIVE)
+    now[0] += 3.0
+    assert call.stats.duration_s == pytest.approx(3.0)

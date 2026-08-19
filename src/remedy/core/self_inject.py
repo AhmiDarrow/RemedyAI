@@ -31,13 +31,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 from remedy.core.project_fingerprint import (
     fingerprint_path,
     path_env_with_local_bins,
 )
+from remedy.core.relpath import norm_rel
 from remedy.execution.sandbox import SubprocessSandbox
+
+logger = logging.getLogger(__name__)
 
 LEDGER_NAME = "self_inject_ledger.jsonl"
 
@@ -285,7 +286,7 @@ async def git_restore(
         snap_untracked = {
             str(p).replace("\\", "/") for p in (snapshot.get("untracked") or [])
         }
-        mine = {str(p).replace("\\", "/").lstrip("./") for p in round_paths if str(p).strip()}
+        mine = {norm_rel(p) for p in round_paths if str(p).strip()}
         protected = _live_claimed_paths()
         _code, cur_raw, _err = await _git_out(
             repo, "ls-files", "--others", "--exclude-standard"

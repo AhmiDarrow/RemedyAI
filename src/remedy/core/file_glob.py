@@ -11,6 +11,7 @@ import os
 import re
 from pathlib import Path
 
+from remedy.core.relpath import norm_rel
 from remedy.core.repo_search import _SKIP_DIR_NAMES
 
 _DEFAULT_MAX = 80
@@ -50,7 +51,7 @@ def match_glob(rel: str, pattern: str) -> bool:
     pat = (pattern or "").replace("\\", "/").strip()
     if not pat:
         return True
-    rel_n = rel.replace("\\", "/").lstrip("./")
+    rel_n = norm_rel(rel)
     name = Path(rel_n).name
     if "/" not in pat and "**" not in pat:
         return fnmatch.fnmatch(name, pat)

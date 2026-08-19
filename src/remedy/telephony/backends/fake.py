@@ -42,8 +42,17 @@ from remedy.telephony.timing import FramePacer
 
 logger = logging.getLogger(__name__)
 
-#: Audio shorter than this from her end reads as a backchannel, not a turn.
-MIN_TURN_MS = 500.0
+#: Audio shorter than this, in one unbroken run, reads as a backchannel
+#: rather than a turn — the far end does not start talking because you said
+#: "mm-hm".
+#:
+#: It has to sit *above* the longest backchannel and *below* the shortest
+#: real reply, and those are closer together than they look: the bench's
+#: filler is 260 ms and a one-word answer ("Appointments.") is 300 ms. At
+#: 500 ms it sat above both, so a one-word reply never counted as a turn,
+#: the scripted far end waited for one that could not arrive, and the whole
+#: scenario hung until the bench timed it out.
+MIN_TURN_MS = 280.0
 
 #: A gap this long from her ends one run of speech and begins another. A
 #: backchannel is therefore its own run, and the answer that follows it starts a
@@ -214,6 +223,14 @@ class FakeCall(Call):
         on the same millisecond as the answer it was meant to cut into.
         """
         if not self._she_speaks.is_set() or self._her_speech_started is None:
+            return 0.0
+        if self.her_silence_ms() > SPEECH_RUN_GAP_MS:
+            # The run is over; she simply has not begun the next one yet. A run
+            # is only re-based when the *next* voiced frame arrives, so without
+            # this the clock keeps running through the silence after a
+            # backchannel and a 260 ms "mm-hm" reads as half a second of
+            # speech — putting the scripted interruption back on top of the
+            # answer it was meant to cut into.
             return 0.0
         return (self._clock() - self._her_speech_started) * 1000.0
 

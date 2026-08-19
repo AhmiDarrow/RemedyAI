@@ -24,7 +24,9 @@ _MAX_SYSTEM_CHARS = 2_000
 def local_text_complete(
     prompt: str,
     *,
-    base_url: str,
+    # Callers legitimately pass None (no local endpoint configured yet) and
+    # the body already answers {'ok': False, 'error': 'no base_url'}.
+    base_url: str | None = None,
     max_tokens: int = 16,
     temperature: float = 0.0,
     timeout_s: float = 20.0,
@@ -68,8 +70,8 @@ def local_text_complete(
     )
     try:
         # Never follow Location (loopback 302 → metadata/LAN SSRF).
-        with urlopen_no_redirect(req, timeout=timeout_s) as resp:  # type: ignore[union-attr]
-            payload = json.loads(resp.read().decode("utf-8"))  # type: ignore[union-attr]
+        with urlopen_no_redirect(req, timeout=timeout_s) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
     except HTTPError as e:
         err = ""
         try:

@@ -1208,8 +1208,12 @@ class ComputerExecutor:
                     action="page_text",
                     message="No window to read — pass hwnd= or focus one first",
                 )
-            info = read_window_text(hwnd)
-            if not info:
+            # Its own name: ``read_window_text`` may return None, while the
+            # ``info`` this function reuses elsewhere never does. Sharing the
+            # name was the one thing standing between this package and a clean
+            # mypy run, and a clean run is what makes the next error visible.
+            window_text = read_window_text(hwnd)
+            if not window_text:
                 return public_result(
                     ok=False,
                     target="desktop",
@@ -1219,16 +1223,16 @@ class ComputerExecutor:
                         "computer_screenshot for a pixel view instead"
                     ),
                 )
-            n_fields = len(info.get("fields") or [])
+            n_fields = len(window_text.get("fields") or [])
             return public_result(
                 ok=True,
                 target="desktop",
                 action="page_text",
                 message=(
-                    f"Read {info.get('title') or 'window'!r}: "
-                    f"{len(info.get('text') or '')} chars, {n_fields} field(s)"
+                    f"Read {window_text.get('title') or 'window'!r}: "
+                    f"{len(window_text.get('text') or '')} chars, {n_fields} field(s)"
                 ),
-                extra=info,
+                extra=window_text,
             )
         if act is ComputerAction.PRESS_HOLD:
             if self._abort_check():

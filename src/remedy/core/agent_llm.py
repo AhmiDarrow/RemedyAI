@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import os
@@ -53,13 +54,47 @@ def _llm_timeout(bind: Any) -> aiohttp.ClientTimeout:
     return aiohttp.ClientTimeout(total=total, connect=30)
 
 
-def close_shared_session() -> None:
-    """Close the shared session (call on shutdown)."""
+#: Close tasks we scheduled but cannot await, held so the loop does not collect
+#: them mid-close ("Task was destroyed but it is pending").
+_closing: set[asyncio.Task] = set()
+
+
+async def aclose_shared_session() -> None:
+    """Close the shared session. Await this on shutdown."""
     global _shared_session
-    if _shared_session is not None and not _shared_session.closed:
+    session, _shared_session = _shared_session, None
+    if session is not None and not session.closed:
         with contextlib.suppress(Exception):
-            pass  # aiohttp.ClientSession.close() is async; caller should await
-    _shared_session = None
+            await session.close()
+
+
+def close_shared_session() -> None:
+    """Close the shared session from sync code.
+
+    The body of this used to be a bare ``pass``, under a comment saying
+    ``ClientSession.close()`` is async and the caller should await it. No caller
+    ever did — nothing in the tree imports this function — so the session behind
+    every LLM call was only ever dereferenced, never closed, leaving its
+    connection pool open until the interpreter went away. Worse, dropping the
+    reference makes the next call build a *second* session, so anyone who did
+    wire this up would have leaked one pool per shutdown.
+
+    Prefer ``aclose_shared_session`` where you can await.
+    """
+    global _shared_session
+    session, _shared_session = _shared_session, None
+    if session is None or session.closed:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # No loop on this thread: spin one up just long enough to close.
+        with contextlib.suppress(Exception):
+            asyncio.run(session.close())
+        return
+    task = loop.create_task(session.close())
+    _closing.add(task)
+    task.add_done_callback(_closing.discard)
 
 
 # Coding-first tool order when pre-sliming for local/RMB hosts (matches RMB priority).

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.builds.reducer import BuildSpec, Signature, UnitSpec
+from remedy.core.relpath import norm_rel
 
 _VERB_HINTS = re.compile(
     r"\b(implement|build|add|create|write|ship|scaffold|make|fix|fix)\b",
@@ -68,7 +69,7 @@ def compile_goal_to_spec(
 
     if py_paths:
         for i, p in enumerate(py_paths[:8]):
-            rel = p.replace("\\", "/").lstrip("./")
+            rel = norm_rel(p)
             stem = Path(rel).stem
             sym = _safe_ident(funcs[i] if i < len(funcs) else stem)
             units.append(_make_unit(rel, sym, goal))
@@ -150,7 +151,7 @@ def compile_goal_to_spec(
 
 
 def _make_unit(path: str, symbol: str, goal: str) -> UnitSpec:
-    path = path.replace("\\", "/").lstrip("./")
+    path = norm_rel(path)
     symbol = _safe_ident(symbol)
     test_src = (
         f"import importlib\n"

@@ -254,3 +254,61 @@ def test_build_tools_ah_registered(tmp_path, monkeypatch):
 
     out = asyncio.run(handlers["build_compile_spec"](goal="add def foo"))  # type: ignore[operator]
     assert "units" in out or "ok" in out
+
+
+def test_a_failing_test_points_at_a_source_file_that_exists():
+    """The queue's top target used to be a bare name — "telephony_line.py" —
+    that is nowhere in the tree, while the file it meant sits at
+    src/remedy/telephony/line.py. The repair loop was aimed at nothing."""
+    from pathlib import Path
+
+    from remedy.core.build_repair_queue import (
+        _test_to_source_guess,
+        queue_from_error_vector,
+    )
+
+    for test_file, expect in (
+        ("tests/test_telephony_line.py", "src/remedy/telephony/line.py"),
+        ("tests/test_voice_realtime_pipeline.py", "src/remedy/voice/realtime/pipeline.py"),
+        ("tests/test_terms.py", "src/remedy/core/terms.py"),
+    ):
+        assert _test_to_source_guess(test_file) == expect
+
+    q = queue_from_error_vector(
+        {"failing_nodes": ["tests/test_telephony_line.py::test_x"]}
+    )
+    top = q.targets[0]
+    assert top.path == "src/remedy/telephony/line.py"
+    assert Path(top.path).is_file(), "top repair target does not exist"
+
+
+def test_an_unresolvable_test_still_gets_its_old_best_effort_guess():
+    """Never worse than before: with nothing matching in the tree, the bare
+    name is still returned rather than nothing at all."""
+    from remedy.core.build_repair_queue import _test_to_source_guess
+
+    assert _test_to_source_guess("tests/test_no_such_module_anywhere.py") == (
+        "no_such_module_anywhere.py"
+    )
+    assert _test_to_source_guess("notes.md") is None
+
+
+def test_auto_repair_hops_the_source_not_the_test(monkeypatch):
+    """``run_auto_repair_hops`` computed the source path and discarded it, so
+    a failing test got its own file rewritten instead of the code under it."""
+    from remedy.core import build_live_hop
+    from remedy.core.build_repair_queue import queue_from_error_vector, run_auto_repair_hops
+
+    hopped: list[str] = []
+
+    def _fake_hop(runtime, *, path, symbol, use_llm, max_repairs, tests=""):
+        hopped.append(path)
+        return {"ok": True}
+
+    monkeypatch.setattr(build_live_hop, "live_unit_hop", _fake_hop)
+    q = queue_from_error_vector(
+        {"failing_nodes": ["tests/test_telephony_line.py::test_x"]}
+    )
+    run_auto_repair_hops(object(), q, use_llm=False, max_targets=3)
+    assert hopped, "no hop was attempted at all"
+    assert hopped[0] == "src/remedy/telephony/line.py"

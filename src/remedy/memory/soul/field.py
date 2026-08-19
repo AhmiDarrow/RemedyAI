@@ -108,8 +108,18 @@ def encode_strength(valence: float) -> float:
     return max(0.05, min(1.0, 0.35 + 0.55 * v))
 
 
+def _clean_traces(raw: Any) -> dict[str, dict]:
+    """Pledge traces from disk, keeping only well-formed entries."""
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k)[:160]: v for k, v in raw.items() if isinstance(v, dict)}
+
+
 def trace_retention(
-    strength: float, anchor_ts: float, recalls: int, now: float
+    strength: float | None,
+    anchor_ts: float | None,
+    recalls: int | None,
+    now: float,
 ) -> float:
     """Core forgetting-curve math shared by every trace kind (episode, lesson,
     pledge): stored strength decayed by a half-life since last recall, hardened
@@ -497,11 +507,7 @@ class SoulField:
             episodes=episodes,
             organism_lessons=lessons,
             pledges=list(raw.get("pledges") or []),
-            pledge_traces=(
-                {str(k)[:160]: v for k, v in raw.get("pledge_traces").items() if isinstance(v, dict)}
-                if isinstance(raw.get("pledge_traces"), dict)
-                else {}
-            ),
+            pledge_traces=_clean_traces(raw.get("pledge_traces")),
             future_dreams=list(raw.get("future_dreams") or []),
             updated_ts=float(raw.get("updated_ts") or time.time()),
         )

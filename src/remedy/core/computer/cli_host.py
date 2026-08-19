@@ -60,12 +60,25 @@ class LocalComputerHost:
             time.sleep(0.05)
         return self.running
 
-    def stop(self, *, timeout: float = 2.0) -> None:
+    def stop(self, *, timeout: float = 2.0, force: bool = False) -> bool:
+        """Stop the worker. Returns True once it has actually gone.
+
+        A worker that outlives its join is still holding the filesystem job
+        queue. Dropping the handle then would make ``running`` lie and let the
+        next ``start()`` clear the stop flag and put a *second* worker on that
+        same queue, so by default the handle is kept and this returns False.
+
+        ``force=True`` abandons it anyway — the original behaviour, kept as the
+        escape hatch for a wedged worker that will never return.
+        """
         self._stop.set()
         t = self._thread
         if t is not None and t.is_alive():
             t.join(timeout=timeout)
+            if t.is_alive() and not force:
+                return False
         self._thread = None
+        return True
 
     def status(self) -> dict[str, Any]:
         from remedy.core.computer.host_bridge import get_host_bridge
@@ -359,8 +372,16 @@ def start_cli_computer_host(home_dir: Path | str | None = None) -> LocalComputer
     return host
 
 
-def stop_cli_computer_host() -> None:
-    global _local_host
+def stop_cli_computer_host(*, timeout: float = 2.0, force: bool = False) -> bool:
+    """Stop the shared host. Returns True once the worker has actually gone.
+
+    The singleton itself is deliberately kept: ``LocalComputerHost`` restarts
+    cleanly (``start`` clears the stop flag and makes a fresh thread), and
+    holding it keeps ``status()`` — jobs completed, last action, last error —
+    answerable after shutdown. The ``global`` that used to sit here assigned
+    nothing.
+    """
     with _local_lock:
-        if _local_host is not None:
-            _local_host.stop()
+        if _local_host is None:
+            return True
+        return _local_host.stop(timeout=timeout, force=force)

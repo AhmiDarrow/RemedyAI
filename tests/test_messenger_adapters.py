@@ -98,12 +98,21 @@ async def test_whatsapp_webhook_emit():
 @pytest.mark.asyncio
 async def test_mattermost_matrix_stub_start():
     gw = _GW()
-    mm = MattermostChannel(gw, bot_token="", base_url="")
-    await mm.start()
-    await mm.stop()
-    mx = MatrixChannel(gw, access_token="", homeserver="")
-    await mx.start()
-    await mx.stop()
+    # "Did not raise" was the whole assertion here. Unconfigured, both run in
+    # stub mode by design; what has to hold is that start/stop actually move the
+    # channel between states and that a stub send never blows up mid-broadcast.
+    for ch in (
+        MattermostChannel(gw, bot_token="", base_url=""),
+        MatrixChannel(gw, access_token="", homeserver=""),
+    ):
+        assert not ch.running
+        await ch.start()
+        assert ch.running, f"{ch.kind} did not come up"
+        assert await ch.send("hello") is True  # stub mode: never a broadcast failure
+        await ch.stop()
+        assert not ch.running, f"{ch.kind} did not come back down"
+        await ch.stop()  # idempotent
+        assert not ch.running
 
 
 def test_channel_kinds_exist():

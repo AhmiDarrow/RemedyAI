@@ -831,7 +831,7 @@ async def distill_user_text(
                             res = memory.upsert(entry)
                             if inspect.isawaitable(res):
                                 # We're already async in distill_user_text
-                                await res  # type: ignore[misc]
+                                await res
             else:
                 result["reinforced"] += 1
             result["facts"].append(uf.fact)

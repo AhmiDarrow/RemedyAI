@@ -13,6 +13,7 @@ probe that returns "I could not tell".
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -67,6 +68,10 @@ def has_bluetooth_radio() -> bool | None:
             _fields_ = [("dwSize", wintypes.DWORD)]
 
         bthprops = ctypes.WinDLL("bthprops.cpl")
+        kernel32 = ctypes.WinDLL("kernel32")
+        # Without an explicit restype ctypes truncates the returned HANDLE to a
+        # 32-bit signed int, and the close below would be handed a bad handle.
+        bthprops.BluetoothFindFirstRadio.restype = wintypes.HANDLE
         params = _FindParams(ctypes.sizeof(_FindParams))
         radio = wintypes.HANDLE()
         finder = bthprops.BluetoothFindFirstRadio(
@@ -74,7 +79,11 @@ def has_bluetooth_radio() -> bool | None:
         )
         if not finder:
             return False
-        bthprops.BluetoothCloseHandle(radio)
+        # The radio handle is an ordinary kernel object — bthprops.cpl exports
+        # no BluetoothCloseHandle, and asking it for one raises AttributeError,
+        # which the catch below would turn into "I cannot tell" on exactly the
+        # machines that *do* have a radio.
+        kernel32.CloseHandle(radio)
         bthprops.BluetoothFindRadioClose(finder)
         return True
     except Exception as exc:  # noqa: BLE001 — a probe never raises at the owner
@@ -159,7 +168,13 @@ def _is_vm(serial: str) -> bool:
     return serial.startswith("emulator-") or serial.startswith("127.0.0.1:")
 
 
-def probe_android() -> BackendProbe:
+#: (authorized, pending) serials, as ``adb_devices`` returns them. Threaded
+#: through the probes that need it so ``probe_all`` shells out once rather than
+#: once per probe — it runs mid-conversation and adb costs up to four seconds.
+AdbState = tuple[list[str], list[str]]
+
+
+def probe_android(devices: AdbState | None = None) -> BackendProbe:
     caps = Capabilities(
         outbound=True, inbound=True, dtmf_send=True, sms=True, full_duplex=True
     )
@@ -170,7 +185,7 @@ def probe_android() -> BackendProbe:
             missing=("the Android platform tools are not installed",),
             action="I can install them for you — they are a small free download from Google.",
         )
-    ok, pending = adb_devices()
+    ok, pending = adb_devices() if devices is None else devices
     ok = [serial for serial in ok if not _is_vm(serial)]
     if ok:
         return BackendProbe(name="android", capabilities=caps, detail=f"connected: {ok[0]}")
@@ -211,9 +226,17 @@ def probe_sip(home: Path | str | None = None) -> BackendProbe:
         outbound=True, inbound=True, dtmf_send=True, dtmf_receive=True, full_duplex=True
     )
     exe = shutil.which("baresip")
-    if not exe and home:
-        candidate = Path(home).expanduser() / "bin" / "baresip"
-        exe = str(candidate) if candidate.exists() else ""
+    if not exe:
+        # Fetched components land in REMEDY_HOME/bin, which is not on PATH — and
+        # on Windows the file is baresip.exe, so looking only for the bare name
+        # meant she could never find an engine she had downloaded herself.
+        base = Path(
+            home or os.environ.get("REMEDY_HOME", "~/.remedy")
+        ).expanduser()
+        for candidate in (base / "bin" / "baresip.exe", base / "bin" / "baresip"):
+            if candidate.exists():
+                exe = str(candidate)
+                break
     if not exe:
         return BackendProbe(
             name="sip",
@@ -256,14 +279,26 @@ class TelephonyStatus:
     def ready(self) -> list[BackendProbe]:
         return [p for p in self.probes if p.ready and p.name != "bench"]
 
+    #: Lines that stand on their own — no second device, no second half.
+    STANDALONE = ("sip", "android_vm", "phone_wired")
+
     @property
     def can_call(self) -> bool:
-        """Real calls need both halves: something to dial with, and audio."""
+        """Any one complete path is enough.
+
+        The phone bridge is the only one that needs two halves — ADB to dial,
+        Bluetooth to carry the voice. The rest carry both themselves, and
+        leaving them out of this made her deny a line she actually had.
+        """
         android = self.get("android")
         bluetooth = self.get("bluetooth_hfp")
-        sip = self.get("sip")
         phone_bridge = bool(android and android.ready and bluetooth and bluetooth.ready)
-        return phone_bridge or bool(sip and sip.ready)
+        if phone_bridge:
+            return True
+        return any(
+            (probe := self.get(name)) is not None and probe.ready
+            for name in self.STANDALONE
+        )
 
     def say(self) -> str:
         """One short spoken-style status: what is missing, and what to do.
@@ -287,9 +322,12 @@ class TelephonyStatus:
                 blockers.append(f"{gap} — {probe.action}" if probe.action else gap)
 
         if not blockers:
-            sip = self.get("sip")
-            if sip is not None and sip.missing:
-                return f"Not yet: {sip.missing[0]}" + (f" — {sip.action}" if sip.action else "")
+            for name in self.STANDALONE:
+                probe = self.get(name)
+                if probe is not None and probe.missing:
+                    return f"Not yet: {probe.missing[0]}" + (
+                        f" — {probe.action}" if probe.action else ""
+                    )
             return "I could not work out what is missing; worth a closer look."
 
         if len(blockers) == 1:
@@ -302,9 +340,25 @@ class TelephonyStatus:
 
 
 def probe_all(home: Path | str | None = None) -> TelephonyStatus:
-    """Everything, fast, never raising. Safe to call mid-conversation."""
+    """Everything, fast, never raising. Safe to call mid-conversation.
+
+    Every line ``line_options()`` offers has to be probed here too, or the two
+    surfaces disagree: the menu says the Android VM is ready and the status says
+    she cannot make calls.
+    """
+    # One adb call, shared. Three probes need it and each shell-out can cost up
+    # to _PROBE_TIMEOUT_S; this is read aloud mid-sentence.
+    devices: AdbState = adb_devices() if _adb_path() else ([], [])
+    android = probe_android(devices)
     return TelephonyStatus(
-        probes=[probe_android(), probe_bluetooth_hfp(), probe_sip(home), probe_bench()]
+        probes=[
+            android,
+            probe_bluetooth_hfp(),
+            probe_android_vm(devices),
+            probe_phone_wired(android),
+            probe_sip(home),
+            probe_bench(),
+        ]
     )
 
 
@@ -313,7 +367,7 @@ def probe_all(home: Path | str | None = None) -> TelephonyStatus:
 # ---------------------------------------------------------------------------
 
 
-def probe_android_vm() -> BackendProbe:
+def probe_android_vm(devices: AdbState | None = None) -> BackendProbe:
     """An Android VM running here — no phone, no radio, no distance.
 
     Worth being exact about what this can and cannot do: a VM has no baseband
@@ -331,12 +385,20 @@ def probe_android_vm() -> BackendProbe:
             missing=("the Android platform tools are not installed",),
             action="I can install them — a small free download, and no phone is involved.",
         )
-    ok, _ = adb_devices()
+    ok, _ = adb_devices() if devices is None else devices
     if [s for s in ok if _is_vm(s)]:
         return BackendProbe(
             name="android_vm",
             capabilities=caps,
-            detail="An Android VM is running here; it still needs a VoIP account signed in.",
+            # A running VM is not a phone line, the same way an installed SIP
+            # engine is not a number. Reporting it ready made ``can_call`` claim
+            # a line that cannot dial anyone.
+            missing=("no calling app is signed in on the Android VM yet",),
+            action=(
+                "Sign in to a VoIP app such as Google Voice in the VM and I can "
+                "call through it."
+            ),
+            detail="The VM is running here, so distance and phone battery do not matter.",
         )
     return BackendProbe(
         name="android_vm",
@@ -355,7 +417,7 @@ def probe_android_vm() -> BackendProbe:
 # ---------------------------------------------------------------------------
 
 
-def probe_phone_wired() -> BackendProbe:
+def probe_phone_wired(android: BackendProbe | None = None) -> BackendProbe:
     """The owner's actual SIM, with a cable doing what Bluetooth did.
 
     The phone routes call audio to what it believes is a wired headset, which is
@@ -363,7 +425,7 @@ def probe_phone_wired() -> BackendProbe:
     network — so the phone does not have to sit next to the PC, only stay
     plugged into it.
     """
-    android = probe_android()
+    android = probe_android() if android is None else android
     caps = Capabilities(
         outbound=True, inbound=True, dtmf_send=True, sms=True, full_duplex=True
     )
@@ -394,8 +456,9 @@ def probe_phone_wired() -> BackendProbe:
 def line_options(home: Path | str | None = None) -> list[LineOption]:
     """Every way to get a line, with its honest trade, ready to be read aloud."""
     sip = probe_sip(home)
-    vm = probe_android_vm()
-    wired = probe_phone_wired()
+    devices: AdbState = adb_devices() if _adb_path() else ([], [])
+    vm = probe_android_vm(devices)
+    wired = probe_phone_wired(probe_android(devices))
     bt = probe_bluetooth_hfp()
     # A missing SIP engine or VM is a download; a missing Bluetooth radio is
     # hardware, and given it is also the least reliable option we do not put it
