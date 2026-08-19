@@ -98,3 +98,44 @@ class TestJailedAttachments:
         from remedy.interfaces.attachments import filter_jailed_attachments
 
         assert isinstance(filter_jailed_attachments(bad), list)
+
+
+class TestPathGuardsAreCaseInsensitive:
+    """Windows is the primary platform and its filesystem is case-insensitive,
+    so ``~/.REMEDY/AUTH/xai.json`` is the same file as ``~/.remedy/auth/xai.json``.
+    A guard that only recognises one spelling protects only one spelling.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _home(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+        security.clear_protected_auth_roots_cache()
+        (tmp_path / "auth").mkdir(parents=True, exist_ok=True)
+        yield tmp_path
+        security.clear_protected_auth_roots_cache()
+
+    @pytest.mark.parametrize(
+        "spelling",
+        ["auth/xai.json", "AUTH/xai.json", "Auth/XAI.JSON", "aUtH/deep/nested.json"],
+    )
+    def test_every_spelling_of_auth_is_protected(self, _home, spelling):
+        assert security.is_protected_secret_path(_home / spelling) is True
+
+    def test_a_traversal_that_lands_in_auth_is_protected(self, _home):
+        assert security.is_protected_secret_path(
+            _home / "auth" / ".." / "auth" / "x.json"
+        )
+
+    def test_an_ordinary_file_is_not(self, _home):
+        assert security.is_protected_secret_path(_home / "notes.txt") is False
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [".remedy/auth/x.json", ".REMEDY/AUTH/x.json", ".remedy/undo/s.jsonl"],
+    )
+    def test_the_restore_guard_matches_the_same_spellings(self, spelling):
+        from pathlib import Path
+
+        from remedy.core.time_travel import SessionUndoLog
+
+        assert SessionUndoLog._is_restore_forbidden(Path.home() / spelling) is True
