@@ -218,10 +218,7 @@ def next_occurrence(due_ts: float, recurrence: str) -> float | None:
 
 
 def _days_in_month(year: int, month: int) -> int:
-    if month == 12:
-        nxt = datetime(year + 1, 1, 1)
-    else:
-        nxt = datetime(year, month + 1, 1)
+    nxt = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
     return (nxt - timedelta(days=1)).day
 
 

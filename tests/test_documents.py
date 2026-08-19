@@ -7,7 +7,7 @@ execute an action: it proposes, the owner confirms.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import datetime
 
 import pytest
 
