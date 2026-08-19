@@ -833,7 +833,11 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             if not (bearer_ok or secret_ok):
                 raise HTTPException(401, "Webhook auth required")
 
-        body = await request.body()
+        # Bounded, like every other webhook here. Only 1000 characters of this
+        # are ever kept, but ``request.body()`` buffers the whole thing first.
+        from remedy.interfaces.routes.webhooks import read_body_capped
+
+        body = await read_body_capped(request)
         event = GatewayEvent(
             kind=EventKind.WEBHOOK,
             channel=ChannelKind.API,
