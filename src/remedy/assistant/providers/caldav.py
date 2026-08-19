@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.assistant.providers.base import CalendarEvent
+from remedy.core.security import urlopen_no_redirect
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +213,16 @@ class CalDavCalendarProvider:
         raw = f"{self.account.address}:{self.account.password}".encode()
         return "Basic " + base64.b64encode(raw).decode("ascii")
 
+    def _require_same_origin(self, target: str) -> None:
+        """Every request carries the app password; none may leave the host."""
+        base = urllib.parse.urlsplit(self.account.url)
+        got = urllib.parse.urlsplit(str(target or ""))
+        if (got.scheme, got.netloc.lower()) != (base.scheme, base.netloc.lower()):
+            raise RuntimeError(
+                "Refusing to send calendar credentials to "
+                f"{got.netloc or str(target)[:40]!r} — that is not your calendar host."
+            )
+
     def _dav(
         self,
         method: str,
@@ -222,6 +233,7 @@ class CalDavCalendarProvider:
         content_type: str = "application/xml; charset=utf-8",
     ) -> tuple[int, str]:
         target = url or self.account.url
+        self._require_same_origin(target)
         req = urllib.request.Request(
             target,
             data=body,
@@ -234,7 +246,10 @@ class CalDavCalendarProvider:
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            # Never follow Location: urllib carries the Authorization header
+            # across a redirect, so a 302 would hand the app password to
+            # whatever host the calendar server named.
+            with urlopen_no_redirect(req, timeout=30) as resp:
                 return resp.status, resp.read().decode("utf-8", "replace")
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")
@@ -268,12 +283,29 @@ class CalDavCalendarProvider:
         }
 
     def _event_url(self, event_id: str) -> str:
+        """Build an event URL that can only ever point at the owner's calendar.
+
+        Event ids are the ``<href>`` values from the server's own REPORT
+        response, and they also arrive from the model as tool arguments. An
+        absolute one used to be returned verbatim — and ``_dav`` puts the
+        mailbox app password in an ``Authorization`` header — so a calendar
+        entry (or a prompt-injected id) reading ``http://elsewhere/x`` was
+        enough to send that credential to a stranger. Same origin or nothing.
+        """
         eid = str(event_id or "").strip()
-        if eid.startswith("http"):
+        base = urllib.parse.urlsplit(self.account.url)
+        if not eid:
+            raise ValueError("An event id is required")
+        if "://" in eid or eid.lower().startswith(("http:", "https:")):
+            got = urllib.parse.urlsplit(eid)
+            if (got.scheme, got.netloc.lower()) != (base.scheme, base.netloc.lower()):
+                raise RuntimeError(
+                    "Refusing to send calendar credentials to "
+                    f"{got.netloc or eid[:40]!r} — that is not your calendar host."
+                )
             return eid
         if eid.startswith("/"):
-            parts = urllib.parse.urlsplit(self.account.url)
-            return f"{parts.scheme}://{parts.netloc}{eid}"
+            return f"{base.scheme}://{base.netloc}{eid}"
         if not eid.endswith(".ics"):
             eid = f"{eid}.ics"
         return self.account.url.rstrip("/") + "/" + eid
