@@ -108,6 +108,18 @@ def replace_top_level_def(
         )
     lines = (source or "").splitlines(keepends=True)
     start = target.lineno - 1
+    # A decorated def has lineno on the `def` line, not on the decorators above
+    # it. Replacing from there kept the old decorators and then wrote the
+    # patch's own on top, so a patch that carried its decorators produced them
+    # twice — and the merged file still compiled, which is precisely the
+    # failure this module exists to avoid. `@cache` twice is harmless;
+    # `@app.route(...)` twice registers the route twice and `@retry(3)` twice
+    # is nine attempts. Only widen the span when the patch brings its own.
+    new_head = new_mod.body[0]
+    if getattr(new_head, "decorator_list", None) and getattr(
+        target, "decorator_list", None
+    ):
+        start = min(d.lineno for d in target.decorator_list) - 1
     end = target.end_lineno  # exclusive in slice end
     # Preserve trailing newline on replacement
     repl = new_def_source
