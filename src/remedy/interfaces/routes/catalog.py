@@ -558,7 +558,10 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                     try:
                         fm = yaml.safe_load(parts[1])
                         if isinstance(fm, dict):
-                            name = fm.get("description", name)
+                            # Was fm.get("description", name): a command with
+                            # frontmatter showed its description where its name
+                            # belonged, and the file stem was lost.
+                            name = fm.get("name", name)
                             desc = fm.get("description", "")
                     except Exception:
                         pass

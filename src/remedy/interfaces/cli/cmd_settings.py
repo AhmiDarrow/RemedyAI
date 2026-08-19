@@ -477,7 +477,11 @@ def _cmd_computer(args) -> None:
                 import sys
                 from pathlib import Path as _P
 
-                repo = _P(__file__).resolve().parents[3]
+                # parents[3] is <root>/src, not <root> — the poller was
+                # looked for at <root>/src/scripts/ and never found, so
+                # `remedy computer host --api` printed "script missing" and
+                # silently did nothing, every time.
+                repo = _P(__file__).resolve().parents[4]
                 poller = repo / "scripts" / "computer_host_poller.py"
                 if poller.is_file():
                     import subprocess

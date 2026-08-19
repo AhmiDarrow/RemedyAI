@@ -123,6 +123,34 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   and the readable one, carrying her relational memory and pledges in the
   clear, was not. `soul_export` now returns a message naming where exports go
   instead of raising.
+- **`mail_reply` and `calendar_cancel_event` were never gated.** Both build a
+  full APPROVAL_REQUIRED item, and calendar_cancel_event's own tool description
+  promises "asks the owner first in Ask mode" — but neither name was listed in
+  `HIGH_IMPACT_TOOLS`, so `needs_ask` returned None and the entire block was
+  dead in every mode. Mail left the owner's mailbox and appointments were
+  deleted with no prompt at all. Auto mode still waives both, as it always did.
+- **A 404 raised inside `contextlib.suppress(Exception)` was swallowed.**
+  `HTTPException` is an `Exception`. Two sites in the session message route
+  were affected: a session deleted mid-turn returned the opaque 500 the branch
+  existed to avoid, and the mid-stream bail never fired — every remaining token
+  was still generated and paid for on behalf of a session that no longer
+  existed, with the 404 arriving only after the whole stream was done.
+- **`POST /api/vision/test` no longer answers `ok:true` for a file it never
+  read.** A path that did not exist fell through to the generated 8x8 self-test
+  image, so a typo'd or deleted screenshot came back as a confident decode of a
+  red square. Sending no path at all still runs the self-test.
+- **`remedy computer host --api` starts the poller.** It resolved `parents[3]`,
+  which is `<root>/src`, so it looked under `src/scripts/`, never found the
+  script, printed "script missing" and silently did nothing — every time.
+- **A custom command is listed under its name.** The frontmatter reader took
+  `fm["description"]` into *both* name and description, so a command with
+  frontmatter appeared under its description text and its own name was lost.
+- **A tier that starts too slowly is stopped rather than leaked.** The timeout
+  path reported failure but neither terminated the child nor cleared the slot,
+  so a llama-server that merely loaded slower than the wait kept roughly a
+  gigabyte of VRAM and still answered the next port probe as running.
+- **`mail_list` clamps both ends of its page size.** `min()` alone let a
+  negative limit through to the provider untouched.
 - **A surgical AST patch no longer duplicates decorators.** `FunctionDef.lineno`
   points at the `def` line, not at the decorators above it, so replacing a
   decorated function kept the old decorators and wrote the patch's own on top.
