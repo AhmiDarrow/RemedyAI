@@ -108,3 +108,90 @@ def test_the_durable_stores_use_the_atomic_writer(module, func):
 
     src = inspect.getsource(importlib.import_module(module))
     assert "write_json_atomic" in src, f"{module} no longer writes atomically"
+
+
+class TestScratchNames:
+    """Two writers must not pick the same scratch file.
+
+    ``path.with_suffix(".tmp")`` gave every writer the *same* name — the desktop
+    app and a CLI, two threads, two windows — so they wrote it at once and
+    whichever renamed second published a corrupted or interleaved result.
+    Thirteen call sites did this.
+    """
+
+    def test_the_scratch_name_is_process_unique(self, tmp_path):
+        import os
+
+        from remedy.core.atomic_json import scratch_path
+
+        got = scratch_path(tmp_path / "profiles.json")
+        assert str(os.getpid()) in got.name
+        assert got.name != "profiles.tmp"
+
+    def test_it_stays_in_the_same_directory(self, tmp_path):
+        """os.replace is only atomic within one filesystem."""
+        from remedy.core.atomic_json import scratch_path
+
+        target = tmp_path / "deep" / "state.json"
+        assert scratch_path(target).parent == target.parent
+
+    def test_the_full_name_is_kept_so_two_targets_never_collide(self, tmp_path):
+        """with_suffix() collapsed catalog.json and catalog.json.sig onto the
+        same scratch file."""
+        from remedy.core.atomic_json import scratch_path
+
+        a = scratch_path(tmp_path / "catalog.json")
+        b = scratch_path(tmp_path / "catalog.json.sig")
+        assert a != b
+
+    def test_no_module_still_uses_a_fixed_scratch_name(self):
+        import ast
+        from pathlib import Path
+
+        offenders = []
+        for path in sorted(Path("src/remedy").rglob("*.py")):
+            if "bundled_skills" in path.parts:
+                continue
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+            except SyntaxError:  # pragma: no cover
+                continue
+            for n in ast.walk(tree):
+                if (isinstance(n, ast.Call)
+                        and getattr(n.func, "attr", "") == "with_suffix"
+                        and n.args
+                        and isinstance(n.args[0], ast.Constant)
+                        and str(n.args[0].value).endswith(".tmp")):
+                    offenders.append(f"{path.relative_to('src/remedy')}:{n.lineno}")
+        assert not offenders, (
+            "fixed scratch names (use atomic_json.scratch_path):\n  "
+            + "\n  ".join(offenders)
+        )
+
+
+def test_saving_a_project_profile_is_one_operation():
+    """The file write and the cache update have to be inside the same lock, or
+    two writers leave the cache holding one version over the other's file."""
+    import ast
+    import inspect
+    import textwrap
+
+    from remedy.core import project_learning
+
+    src = textwrap.dedent(inspect.getsource(project_learning.save_all))
+    tree = ast.parse(src)
+    withs = [n for n in ast.walk(tree) if isinstance(n, ast.With)]
+    assert withs, "save_all no longer takes the lock"
+    guarded = {
+        getattr(inner, "lineno", -1)
+        for w in withs
+        for inner in ast.walk(w)
+    }
+    writes = [
+        n.lineno
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and getattr(n.func, "id", "") == "write_json_atomic"
+    ]
+    assert writes, "save_all no longer writes atomically"
+    assert all(w in guarded for w in writes), "the write is outside the lock"

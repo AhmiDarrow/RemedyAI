@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
+
 _lock = threading.RLock()  # RLock: load_project_profile → load_all re-entrancy
 # Hot-path cache: profiles.json rarely changes mid-turn; avoid re-read + parse.
 _all_cache: dict[str, Any] | None = None
@@ -152,12 +154,13 @@ def load_all() -> dict[str, Any]:
 
 def save_all(data: dict[str, Any]) -> None:
     path = _store_path(create=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    tmp.replace(path)
-    # Keep cache coherent with what we just wrote
+    # The write and the cache update are one operation. Split, two writers could
+    # interleave — A writes the file, B writes the file, B updates the cache, A
+    # updates the cache — leaving the cache holding A's data over B's file, and
+    # the stat that keys the cache taken from the wrong version.
     global _all_cache, _all_cache_path, _all_cache_mtime_ns, _all_cache_size
     with _lock:
+        write_json_atomic(path, data)
         meta = _stat_ns_size(path)
         if meta is not None:
             mtime_ns, size = meta

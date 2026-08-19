@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import scratch_path
+
 _SECRET_FIELD_TOKEN_RE = re.compile(
     r"(?i)(^|[^a-z])(pass|token|pin|otp)([^a-z]|$)"
 )
@@ -615,7 +617,7 @@ class ComputerHostBridge:
         path = self._path(job.id)
         data = json.dumps(job.to_dict(), indent=2)
         # Atomic-ish write so wait() never reads a half-written file
-        tmp = path.with_suffix(".tmp")
+        tmp = scratch_path(path)
         tmp.write_text(data, encoding="utf-8")
         last: OSError | None = None
         for i in range(16):

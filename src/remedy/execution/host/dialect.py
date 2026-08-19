@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import scratch_path
+
 _DIALECT_REL = Path("host") / "dialect.json"
 
 
@@ -84,7 +86,7 @@ def load_dialect(home: str | Path | None = None) -> HostDialect:
 def save_dialect(dialect: HostDialect, home: str | Path | None = None) -> Path:
     path = dialect_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
+    tmp = scratch_path(path)
     tmp.write_text(json.dumps(dialect.to_dict(), indent=2), encoding="utf-8")
     tmp.replace(path)
     return path
