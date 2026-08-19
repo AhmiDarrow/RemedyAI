@@ -28,6 +28,45 @@ from remedy.core.workspace_tools.guards import (
 )
 
 
+def _record_undo(
+    runtime: Any,
+    *,
+    sid: Any,
+    target: Path,
+    previous: str | None,
+    existed: bool,
+    new_size: int,
+) -> str:
+    """Put the undo entry on disk **before** the write that needs it.
+
+    This used to run after ``write_text``, wrapped in ``except Exception:
+    pass``. By then the previous content was already gone from the file, so a
+    failure to record it — a full disk, a permission problem on the undo
+    directory — lost the owner's work with nobody told. The safety net has to
+    exist before the risk, not after it.
+
+    Returns a warning to append to the tool's reply when the trail could not be
+    written. The write still goes ahead: refusing would take away a capability
+    over a bookkeeping failure. But the owner is told that this one cannot be
+    undone.
+    """
+    try:
+        from remedy.core.time_travel import SessionUndoLog
+
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        SessionUndoLog(home).record_file_write(
+            session_id=str(sid or getattr(runtime, "_session_id", "") or ""),
+            path=target,
+            previous_content=previous,
+            existed=existed,
+            new_size=new_size,
+            message_id=getattr(runtime, "_active_message_id", None),
+        )
+    except Exception as exc:  # noqa: BLE001 — never block the write itself
+        return f" (no undo trail for this one: {exc})"
+    return ""
+
+
 def register_files_tools(runtime: Any) -> None:
     """Register files workspace tools."""
     def _parent_hint(path: str) -> str:
@@ -380,6 +419,14 @@ def register_files_tools(runtime: Any) -> None:
         blocked = _claim_or_block(sid, target, tool_name="file_write")
         if blocked:
             return blocked
+        undo_warn = _record_undo(
+            runtime,
+            sid=sid,
+            target=target,
+            previous=previous,
+            existed=existed,
+            new_size=len(new_body or ""),
+        )
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(new_body, encoding="utf-8")
@@ -397,27 +444,13 @@ def register_files_tools(runtime: Any) -> None:
                 ),
             )
         runtime._track_artifact(str(target))
-        try:
-            from remedy.core.time_travel import SessionUndoLog
-
-            home = getattr(getattr(runtime, "config", None), "home_dir", None)
-            SessionUndoLog(home).record_file_write(
-                session_id=str(sid or getattr(runtime, "_session_id", "") or ""),
-                path=target,
-                previous_content=previous,
-                existed=existed,
-                new_size=len(new_body or ""),
-                message_id=getattr(runtime, "_active_message_id", None),
-            )
-        except Exception:
-            pass
         note = ""
         if existed and previous is not None and not force_full_write:
             if len(previous) >= _FULL_WRITE_PREFER_EDIT_BYTES:
                 note = (
                     " (tip: prefer file_edit for future small deltas on this file)"
                 )
-        return f"Wrote {len(new_body)} bytes to {path}{note}"
+        return f"Wrote {len(new_body)} bytes to {path}{note}{undo_warn}"
 
     async def file_edit(
         path: str = "",
@@ -570,6 +603,14 @@ def register_files_tools(runtime: Any) -> None:
         blocked = _claim_or_block(sid, target, tool_name="file_edit")
         if blocked:
             return blocked
+        undo_warn = _record_undo(
+            runtime,
+            sid=sid,
+            target=target,
+            previous=previous,
+            existed=True,
+            new_size=len(result.new_content or ""),
+        )
         try:
             target.write_text(result.new_content, encoding="utf-8")
             _note_internal_write(target)
@@ -580,22 +621,8 @@ def register_files_tools(runtime: Any) -> None:
                 tool_name="file_edit",
             )
         runtime._track_artifact(str(target))
-        try:
-            from remedy.core.time_travel import SessionUndoLog
-
-            home = getattr(getattr(runtime, "config", None), "home_dir", None)
-            SessionUndoLog(home).record_file_write(
-                session_id=str(sid or getattr(runtime, "_session_id", "") or ""),
-                path=target,
-                previous_content=previous,
-                existed=True,
-                new_size=len(result.new_content or ""),
-                message_id=getattr(runtime, "_active_message_id", None),
-            )
-        except Exception:
-            pass
         _track_read(target)
-        return f"{result.message} path={path}{read_warn}"
+        return f"{result.message} path={path}{read_warn}{undo_warn}"
 
     async def file_edit_batch(edits: Any = "") -> str:
         """Apply search/replace hunks across one or more files (JSON array).
@@ -709,6 +736,15 @@ def register_files_tools(runtime: Any) -> None:
             if blocked:
                 reports.append(f"[{i}] {p}: held by another session — skipped")
                 continue
+            # Undo trail before the write, in parity with file_edit / file_write.
+            undo_warn = _record_undo(
+                runtime,
+                sid=sid,
+                target=target,
+                previous=previous,
+                existed=True,
+                new_size=len(r.new_content or ""),
+            )
             try:
                 target.write_text(r.new_content, encoding="utf-8")
                 _note_internal_write(target)
@@ -716,22 +752,7 @@ def register_files_tools(runtime: Any) -> None:
                 reports.append(f"[{i}] {p}: write error {e}")
                 continue
             runtime._track_artifact(str(target))
-            # Undo trail (parity with file_edit / file_write)
-            try:
-                from remedy.core.time_travel import SessionUndoLog
-
-                home = getattr(getattr(runtime, "config", None), "home_dir", None)
-                SessionUndoLog(home).record_file_write(
-                    session_id=str(sid or getattr(runtime, "_session_id", "") or ""),
-                    path=target,
-                    previous_content=previous,
-                    existed=True,
-                    new_size=len(r.new_content or ""),
-                    message_id=getattr(runtime, "_active_message_id", None),
-                )
-            except Exception:
-                pass
-            reports.append(f"[{i}] {p}: OK {r.message}")
+            reports.append(f"[{i}] {p}: OK {r.message}{undo_warn}")
         return "file_edit_batch:\n" + "\n".join(reports)
 
 

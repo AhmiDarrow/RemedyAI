@@ -839,13 +839,13 @@ def path_outside_write_roots(
             cand = Path(raw).expanduser().resolve(strict=False)
         except OSError:
             cand = Path(raw).expanduser().absolute()
-        try:
-            from remedy.core.security import is_protected_secret_path
+        from remedy.core.security import is_protected_secret_path_strict
 
-            if is_protected_secret_path(cand):
-                return cand
-        except Exception:
-            pass
+        # Fail closed. Swallowing this used to fall through to the write-root
+        # test below, and ~/.remedy/auth lives *under* the home write root — so
+        # a check that could not run let the shell write the keys.
+        if is_protected_secret_path_strict(cand):
+            return cand
         if _under_any(cand, roots):
             return None
         return cand
@@ -871,13 +871,10 @@ def path_outside_write_roots(
 
     # Auth secrets are never shell-writable — even when home/full write roots
     # contain ~/.remedy/auth (or $REMEDY_HOME/auth) as a subpath.
-    try:
-        from remedy.core.security import is_protected_secret_path
+    from remedy.core.security import is_protected_secret_path_strict
 
-        if is_protected_secret_path(cand):
-            return cand
-    except Exception:
-        pass
+    if is_protected_secret_path_strict(cand):
+        return cand
 
     if _under_any(cand, roots):
         return None
@@ -937,16 +934,15 @@ def check_shell_secret_access(command: str) -> str | None:
             "(~/.remedy/auth). Keys and tokens stay out of the shell."
         )
     for token in extract_path_candidates(cmd):
-        try:
-            from remedy.core.security import is_protected_secret_path
+        from remedy.core.security import is_protected_secret_path_strict
 
-            if is_protected_secret_path(token):
-                return (
-                    "shell jail: refuse access to Remedy auth secrets "
-                    f"({token}). Keys and tokens stay out of the shell."
-                )
-        except Exception:
-            continue
+        # ``continue`` here skipped the token entirely — one unreadable path and
+        # the secret gate simply did not apply to it.
+        if is_protected_secret_path_strict(token):
+            return (
+                "shell jail: refuse access to Remedy auth secrets "
+                f"({token}). Keys and tokens stay out of the shell."
+            )
     return None
 
 
@@ -993,16 +989,13 @@ def scan_script_source_for_outside_writes(
             )
     for m in _ABS_PATH_RE.finditer(text):
         tok = m.group(0)
-        try:
-            from remedy.core.security import is_protected_secret_path
+        from remedy.core.security import is_protected_secret_path_strict
 
-            if is_protected_secret_path(tok):
-                return (
-                    "shell write jail: script references Remedy auth secrets "
-                    f"({script.name}). Refuse to run."
-                )
-        except Exception:
-            pass
+        if is_protected_secret_path_strict(tok):
+            return (
+                "shell write jail: script references Remedy auth secrets "
+                f"({script.name}). Refuse to run."
+            )
         if not _path_appears_as_write_dest(code, tok):
             continue
         off = path_outside_write_roots(tok, write_roots=roots, cwd=script.parent)
