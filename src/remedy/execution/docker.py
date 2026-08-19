@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import shutil
 import tempfile
 from pathlib import Path
 
 from remedy.execution.sandbox import ExecutionResult, Sandbox
+
+logger = logging.getLogger(__name__)
 
 
 class DockerSandbox(Sandbox):
@@ -172,8 +175,14 @@ class DockerSandbox(Sandbox):
             duration_ms=elapsed,
         )
 
-    async def sandbox_exists(self, name: str) -> bool:
-        """Check if a sandbox label still exists."""
+    async def sandbox_exists(self, name: str, *, timeout_s: float = 15.0) -> bool:
+        """Check if a sandbox label still exists.
+
+        Bounded: a wedged docker daemon makes ``docker ps`` hang indefinitely,
+        and this was awaited with no timeout — so a question about a container
+        could stall the caller for ever. An unanswerable question is answered
+        "no such sandbox", which is the safe reading: the caller creates one.
+        """
         from remedy.execution.process import create_hidden_subprocess_exec
 
         proc = await create_hidden_subprocess_exec(
@@ -182,7 +191,15 @@ class DockerSandbox(Sandbox):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
+        try:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+        except TimeoutError:
+            with contextlib.suppress(ProcessLookupError, OSError):
+                proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.wait()
+            logger.warning("docker ps timed out after %.0fs; assuming no sandbox", timeout_s)
+            return False
         return bool(stdout.strip())
 
     async def cleanup(self) -> None:
@@ -196,6 +213,7 @@ class DockerSandbox(Sandbox):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            await proc.wait()
+            # Prune is best-effort housekeeping; never let it stall shutdown.
+            await asyncio.wait_for(proc.wait(), timeout=30.0)
         except Exception:
             pass
