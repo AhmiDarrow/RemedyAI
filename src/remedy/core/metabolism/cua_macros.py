@@ -110,7 +110,13 @@ class CuaMacroStore:
                         if looks_like_secret_text(val):
                             continue
                     except Exception:
-                        pass
+                        # Swallowing this left ``val`` at its *original* value —
+                        # userinfo and query string intact, secret check never
+                        # run — and the line below then wrote it to the stored
+                        # macro. A value we could not screen is a value we do
+                        # not keep: the macro is a little less precise, which is
+                        # cheaper than a token on disk.
+                        continue
                     safe_args[k] = val
             if tool == "computer_type":
                 safe_args = {"text": "[omitted]"}
