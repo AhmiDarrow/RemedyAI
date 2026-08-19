@@ -7,11 +7,14 @@ in chat so the agent can read them via tools or (for images) multimodal input.
 from __future__ import annotations
 
 import base64
+import logging
 import mimetypes
 import re
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 # Per-file cap; total batch should stay under ~25 MiB for API sanity.
 MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024
@@ -124,7 +127,14 @@ def filter_jailed_attachments(
     home_dir: str | Path | None = None,
     session_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Drop attachment refs whose path escapes the attachments tree."""
+    """Drop attachment refs whose path escapes the attachments tree.
+
+    Never raises. Every caller wraps this in ``contextlib.suppress`` and keeps
+    its *unfiltered* list on error — so one unverifiable path used to disable
+    the gate for the whole request, which is exactly the forged-path
+    exfiltration ``is_path_under_attachments`` exists to stop. A path we cannot
+    check is a path we do not use.
+    """
     out: list[dict[str, Any]] = []
     for a in attachments or []:
         if not isinstance(a, dict):
@@ -134,7 +144,14 @@ def filter_jailed_attachments(
             # Pathless metadata only — keep for name display, never read body.
             out.append(a)
             continue
-        if is_path_under_attachments(p, home_dir=home_dir, session_id=session_id):
+        try:
+            allowed = is_path_under_attachments(
+                p, home_dir=home_dir, session_id=session_id
+            )
+        except Exception:  # noqa: BLE001 — an unanswerable check is a refusal
+            logger.warning("attachment path could not be checked; dropping: %r", p)
+            continue
+        if allowed:
             out.append(a)
     return out
 

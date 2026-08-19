@@ -7,12 +7,15 @@ vulnerabilities like path traversal, injection, and unsafe defaults.
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import re
 from pathlib import Path
 from typing import Any, cast
 
 from remedy.core.errors import SecurityError
+
+logger = logging.getLogger(__name__)
 
 _HOME_DIR: Path | None = None
 _HOME_DIR_ENV: str | None = None
@@ -134,6 +137,27 @@ def is_protected_secret_path(path: Path | str | None) -> bool:
             except Exception:
                 continue
     return False
+
+
+def is_protected_secret_path_strict(path: Path | str | None) -> bool:
+    """The same question, answered conservatively: an error means "protected".
+
+    Write gates guard on this. Every caller in ``shell_write_jail`` wrapped the
+    plain check in ``try: ... except: pass``, so a check that could not run
+    became a check that *passed* — and since ``~/.remedy/auth`` sits under the
+    home write root, falling through meant the shell could write the very
+    secrets the jail exists to keep out of tool paths.
+
+    Refusing on error can at worst cost one legitimate write, which the owner
+    sees and can retry. Allowing on error costs the keys.
+    """
+    try:
+        return is_protected_secret_path(path)
+    except Exception:  # noqa: BLE001 — the whole point is to not propagate
+        logger.warning(
+            "protected-secret check failed for %r; refusing it as protected", path
+        )
+        return True
 
 
 def refuse_protected_secret_path(path: Path | str | None) -> None:
