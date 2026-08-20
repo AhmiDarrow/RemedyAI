@@ -83,6 +83,10 @@ class SignalChannel(ChannelAdapter):
             out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except TimeoutError:
             proc.kill()
+            # Reap it. kill() only signals; without the wait the child stays a
+            # zombie, and _receive_loop polls every 10s, so they accumulate.
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(proc.wait(), timeout=5)
             return 1, "", "timeout"
         return (
             int(proc.returncode or 0),

@@ -346,12 +346,19 @@ class _ConPTYProcess:
             self.stdin.close()
         with suppress(Exception):
             self.stdout.close()
+        # Two closes, two suppressions. They shared one before, so a throwing
+        # ClosePseudoConsole skipped CloseHandle — and the process handle was
+        # zeroed below regardless, leaving nothing able to close it, ever.
         with suppress(Exception):
             import ctypes
 
             k32 = ctypes.WinDLL("kernel32", use_last_error=True)
             if self._pc:
                 k32.ClosePseudoConsole(self._pc)
+        with suppress(Exception):
+            import ctypes
+
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
             if self._ph:
                 k32.CloseHandle(self._ph)
         self._pc = 0
