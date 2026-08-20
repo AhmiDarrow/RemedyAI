@@ -1,4 +1,4 @@
-"""Voice engines: Kokoro TTS + faster-whisper STT, lazy and optional.
+"""Voice engines: Kokoro TTS + faster-whisper STT + smart-turn, lazy and optional.
 
 Everything degrades gracefully: no [voice] extra installed → status reports
 why, /voice/speak returns 503 with fallback="browser" so the desktop uses OS
@@ -7,6 +7,7 @@ voices, /voice/transcribe returns 503 and the mic button explains itself.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -16,6 +17,7 @@ import threading
 import time
 import urllib.request
 import wave
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -78,8 +80,10 @@ def save_voice_settings(
         cur["speed"] = min(2.0, max(0.5, float(cur.get("speed") or 1.0)))
     except (TypeError, ValueError):
         cur["speed"] = 1.0
-    _settings_path(home_dir).write_text(
-        json.dumps(cur, indent=2) + "\n", encoding="utf-8"
+    from remedy.core.atomic_json import write_text_atomic
+
+    write_text_atomic(
+        _settings_path(home_dir), json.dumps(cur, indent=2) + "\n"
     )
     return cur
 
@@ -203,7 +207,7 @@ _TTS_VOICES_URL = (
 
 _tts_lock = threading.Lock()
 _tts_engine: Any | None = None
-_install_state: dict[str, Any] = {"tts": None, "stt": None}
+_install_state: dict[str, Any] = {"tts": None, "stt": None, "smart-turn": None}
 
 
 def tts_paths(home_dir: Path | str | None = None) -> tuple[Path, Path]:
@@ -409,6 +413,143 @@ def transcribe_file(
 
 
 # ---------------------------------------------------------------------------
+# smart-turn (semantic endpointing for live calls) — a pinned ONNX file
+# ---------------------------------------------------------------------------
+#
+# ``telephony.consent.COMPONENTS["smart-turn"]`` declares the component and
+# its licence; this is the fetch that declaration promised. The detector in
+# ``voice.realtime.turn`` looks in ``voice/models/smart-turn/*.onnx`` on every
+# ``make_detector`` call, so a file landing here is picked up by the next call
+# without a restart.
+
+
+@dataclass(frozen=True, slots=True)
+class SmartTurnPin:
+    """One exact file from the Hub: repo + commit + name + size + digest."""
+
+    repo: str
+    revision: str
+    filename: str
+    size: int
+    sha256: str
+    licence: str
+
+    @property
+    def url(self) -> str:
+        from remedy.runtime.rmb.hf import HF_API, sanitize_repo, sanitize_revision
+
+        return (
+            f"{HF_API}/{sanitize_repo(self.repo)}/resolve/"
+            f"{sanitize_revision(self.revision)}/{self.filename}"
+        )
+
+
+#: smart-turn v3.2, CPU build (int8, Whisper-tiny encoder, 8 s log-mel window).
+#: Pinned to a commit rather than ``main`` so the digest below stays true.
+SMART_TURN_PIN = SmartTurnPin(
+    repo="pipecat-ai/smart-turn-v3",
+    revision="f766f81d3cfdf7737ac64aad813d91bbfd56bf93",
+    filename="smart-turn-v3.2-cpu.onnx",
+    size=8_679_182,
+    sha256="2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f",
+    licence="BSD-2-Clause",
+)
+
+_smart_turn_lock = threading.Lock()
+
+
+def smart_turn_dir(home_dir: Path | str | None = None) -> Path:
+    from remedy.voice.realtime.turn import SMART_TURN_DIRNAME
+
+    return voice_home(home_dir) / "models" / SMART_TURN_DIRNAME
+
+
+def smart_turn_path(home_dir: Path | str | None = None) -> Path:
+    return smart_turn_dir(home_dir) / SMART_TURN_PIN.filename
+
+
+def smart_turn_deps_available() -> bool:
+    try:
+        import onnxruntime  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def smart_turn_installed(home_dir: Path | str | None = None) -> bool:
+    return smart_turn_path(home_dir).is_file()
+
+
+def _hf_open(url: str, *, timeout: float = 120.0) -> Any:
+    """Open a Hub URL through the RMB opener (redirects pinned to HF hosts).
+
+    Tests replace this to fake the HTTP layer; nothing else here touches it.
+    """
+    from remedy.runtime.rmb.hf import _auth_headers, _urlopen
+
+    req = urllib.request.Request(url, headers=_auth_headers())
+    return _urlopen(req, timeout=timeout)
+
+
+def install_smart_turn(home_dir: Path | str | None = None) -> Path:
+    """Blocking download of the pinned smart-turn model (~8 MB), verified.
+
+    The bytes stream into a ``.part`` file next to the destination and are
+    renamed into place only once the size and sha256 both match the pin; any
+    failure removes the partial so a half file can never be mistaken for a
+    model by ``make_detector``'s ``*.onnx`` glob.
+    """
+    pin = SMART_TURN_PIN
+    dest = smart_turn_path(home_dir)
+    _install_state["smart-turn"] = {"status": "downloading", "percent": 0.0}
+    if dest.is_file():
+        _install_state["smart-turn"] = {"status": "done", "percent": 100.0}
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    try:
+        digest = hashlib.sha256()
+        done = 0
+        with _hf_open(pin.url) as resp, tmp.open("wb") as f:
+            while True:
+                chunk = resp.read(1 << 18)
+                if not chunk:
+                    break
+                done += len(chunk)
+                if done > pin.size:
+                    raise ValueError(
+                        f"{pin.filename} is larger than the pinned {pin.size} bytes"
+                    )
+                digest.update(chunk)
+                f.write(chunk)
+                st = _install_state.get("smart-turn")
+                if isinstance(st, dict):
+                    st["percent"] = round(done * 100 / pin.size, 1)
+        if done != pin.size:
+            raise ValueError(f"{pin.filename}: expected {pin.size} bytes, got {done}")
+        if digest.hexdigest() != pin.sha256:
+            raise ValueError(f"{pin.filename}: sha256 does not match the pin")
+        tmp.replace(dest)
+        _install_state["smart-turn"] = {"status": "done", "percent": 100.0}
+        return dest
+    except Exception as exc:
+        tmp.unlink(missing_ok=True)
+        _install_state["smart-turn"] = {"status": "error", "error": str(exc)[:300]}
+        raise
+
+
+def install_smart_turn_background(home_dir: Path | str | None = None) -> bool:
+    with _smart_turn_lock:
+        st = _install_state.get("smart-turn")
+        if isinstance(st, dict) and st.get("status") == "downloading":
+            return False
+        _install_state["smart-turn"] = {"status": "downloading", "percent": 0.0}
+    t = threading.Thread(target=install_smart_turn, args=(home_dir,), daemon=True)
+    t.start()
+    return True
+
+# ---------------------------------------------------------------------------
 # Status
 # ---------------------------------------------------------------------------
 
@@ -419,6 +560,18 @@ def voice_status(
     cfg = load_voice_settings(home_dir)
     tts_ok = tts_deps_available() and tts_installed(home_dir)
     stt_ok = stt_deps_available()
+    turn_deps = smart_turn_deps_available()
+    turn_installed = smart_turn_installed(home_dir)
+    turn_ok = turn_deps and turn_installed
+    reason_turn = (
+        None
+        if turn_ok
+        else (
+            "onnxruntime not installed (pip install remedy-ai[voice])"
+            if not turn_deps
+            else "smart-turn model not downloaded yet"
+        )
+    )
     reason_tts = (
         None
         if tts_ok
@@ -454,6 +607,22 @@ def voice_status(
             "models": list(_VALID_STT),
             "installed": stt_installed(home_dir),
             "install": _install_state.get("stt"),
+        },
+        "smart_turn": {
+            "available": turn_ok,
+            "engine": "smart-turn-v3" if turn_ok else None,
+            "reason": reason_turn,
+            "deps": turn_deps,
+            "installed": turn_installed,
+            "install": _install_state.get("smart-turn"),
+            "path": str(smart_turn_path(home_dir)) if turn_installed else None,
+            "source": {
+                "repo": SMART_TURN_PIN.repo,
+                "revision": SMART_TURN_PIN.revision,
+                "filename": SMART_TURN_PIN.filename,
+                "licence": SMART_TURN_PIN.licence,
+            },
+            "fallback": "energy",
         },
         "settings": cfg,
     }

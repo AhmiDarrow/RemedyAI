@@ -340,6 +340,28 @@ class _ConPTYProcess:
         self._ph = process_handle
         self._pc = pc_handle
 
+    def poll(self) -> int | None:
+        """STILL_ACTIVE (259) means the child is running; anything else is done."""
+        if self.returncode is not None:
+            return self.returncode
+        if not self._ph:
+            return self.returncode
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            code = wintypes.DWORD(0)
+            ok = k32.GetExitCodeProcess(self._ph, ctypes.byref(code))
+            if not ok:
+                return None
+            if int(code.value) == 259:  # STILL_ACTIVE
+                return None
+            self.returncode = int(code.value)
+            return self.returncode
+        except Exception:
+            return None
+
     def kill(self) -> None:
         self._terminate()
 

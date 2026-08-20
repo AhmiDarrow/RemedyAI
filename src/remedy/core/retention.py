@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
+
 logger = logging.getLogger(__name__)
 
 # Sensible clamps (days). 0 = disabled for that category.
@@ -285,9 +287,7 @@ def _memory_key_material(cfg: dict[str, Any] | None = None) -> str:
 
             if _dpapi_available():
                 blob = base64.b64encode(_dpapi_protect(key.encode("utf-8"))).decode("ascii")
-                key_path.write_text(
-                    json.dumps({"v": 2, "dpapi": blob}), encoding="utf-8"
-                )
+                write_json_atomic(key_path, {"v": 2, "dpapi": blob}, indent=None)
             else:
                 key_path.write_text(key, encoding="utf-8")
         except Exception:

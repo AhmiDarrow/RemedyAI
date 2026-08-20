@@ -26,6 +26,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
 from remedy.core.self_inject_draft import (
     is_source_checkout,
     read_pending_ship,
@@ -87,7 +88,7 @@ def read_inbox_state(home: str | Path | None = None) -> dict[str, Any] | None:
 def write_inbox_state(home: str | Path | None, payload: dict[str, Any]) -> Path:
     path = inbox_state_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    write_json_atomic(path, payload, ensure_ascii=False)
     return path
 
 

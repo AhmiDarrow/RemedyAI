@@ -14,6 +14,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
+
 _VITALS_NAME = "organism.json"
 # path -> (mtime, payload). Pulse/status polls hit RAM, not disk.
 _vitals_cache: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -306,10 +308,7 @@ def persist_vitals(vitals: dict[str, Any], home: Any = None) -> Path | None:
             mtime = hit[0] if hit is not None else path.stat().st_mtime
             _vitals_cache[key] = (mtime, payload)
             return path
-        path.write_text(
-            json.dumps(payload, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        write_json_atomic(path, payload, ensure_ascii=False)
         try:
             mtime = path.stat().st_mtime
         except OSError:

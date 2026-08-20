@@ -15,6 +15,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
+
 
 @dataclass
 class SnapEntry:
@@ -53,10 +55,7 @@ def load_manifest(project: Path | str) -> list[dict[str, Any]]:
 
 def _save_manifest(project: Path, snaps: list[dict[str, Any]]) -> None:
     p = _manifest_path(project)
-    p.write_text(
-        json.dumps({"snaps": snaps[-80:], "updated": time.time()}, indent=2),
-        encoding="utf-8",
-    )
+    write_json_atomic(p, {"snaps": snaps[-80:], "updated": time.time()})
 
 
 def snapshot_paths(

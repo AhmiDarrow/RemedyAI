@@ -507,8 +507,9 @@ async def test_read_until_poll_timeout_does_not_end_command() -> None:
 
     sess = HostSession(host="posix")
     sess._proc = _Proc()
-    raw, timed_out, _ = await sess._read_until(b"MARK", timeout=3.0)
+    raw, timed_out, _, shell_exit = await sess._read_until(b"MARK", timeout=3.0)
     assert timed_out is False
+    assert shell_exit is None
     assert b"MARK" in raw
 
 
@@ -535,8 +536,9 @@ async def test_read_until_real_deadline_still_times_out() -> None:
 
     sess = HostSession(host="posix")
     sess._proc = _Proc()
-    _raw, timed_out, _ = await sess._read_until(b"MARK", timeout=0.7)
+    _raw, timed_out, _, shell_exit = await sess._read_until(b"MARK", timeout=0.7)
     assert timed_out is True
+    assert shell_exit is None
     # ConPTY ReadFile cannot be cancelled; one outstanding read must survive
     # the poll timeout (wait_for-cancel used to leak the overlapped I/O).
     assert cancelled["n"] == 0

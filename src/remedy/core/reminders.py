@@ -25,6 +25,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
+
 _lock = threading.RLock()
 
 STATUS_PENDING = "pending"
@@ -235,14 +237,9 @@ def _read(home: str | Path | None) -> list[Reminder]:
 
 def _write(home: str | Path | None, items: list[Reminder]) -> None:
     p = _store_path(home)
-    tmp = p.with_suffix(f".{os.getpid()}.tmp")
     payload = {"reminders": [r.to_dict() for r in items]}
     with suppress(Exception):
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        os.replace(str(tmp), str(p))
-        return
-    with suppress(Exception):
-        tmp.unlink()
+        write_json_atomic(p, payload)
 
 
 def add_reminder(

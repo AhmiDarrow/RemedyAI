@@ -51,7 +51,7 @@ from urllib.parse import urlparse
 from nacl import pwhash, secret
 from nacl import utils as nacl_utils
 
-from remedy.core.atomic_json import scratch_path
+from remedy.core.atomic_json import write_text_atomic
 from remedy.interfaces.secret_store import (
     _dpapi_available,
     _dpapi_protect,
@@ -182,9 +182,10 @@ def _load_or_create_master_key(
         blob = json.loads(kp.read_text(encoding="utf-8"))
         return _unseal_master_key(blob, passphrase=passphrase)
     key = _new_master_key()
-    kp.write_text(
+    write_text_atomic(
+        kp,
         json.dumps(_seal_master_key(key, passphrase=passphrase)) + "\n",
-        encoding="utf-8",
+        mode=0o600,
     )
     _harden_path(kp, is_dir=False)
     return key
@@ -264,10 +265,7 @@ def _save_items(items: dict[str, VaultItem], home: Path | str | None = None) -> 
             for it in items.values()
         ],
     }
-    tmp = scratch_path(path)
-    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    _harden_path(tmp, is_dir=False)
-    tmp.replace(path)
+    write_text_atomic(path, json.dumps(data, indent=2) + "\n", mode=0o600)
     _harden_path(path, is_dir=False)
 
 

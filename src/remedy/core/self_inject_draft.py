@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
 from remedy.core.self_inject import (
     SelfInjectRound,
     _now_utc,
@@ -229,7 +230,7 @@ def write_pending_ship(
             "as an inbox comment — no branch, no release."
         ),
     }
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    write_json_atomic(path, payload, ensure_ascii=False)
     return path
 
 
@@ -254,7 +255,7 @@ def _save_draft_state(home: str | Path | None, data: dict[str, Any]) -> None:
     path = draft_state_path(home)
     with suppress(Exception):
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        write_json_atomic(path, data, ensure_ascii=False)
 
 
 def red_blocked(home: str | Path | None, key: str) -> bool:
