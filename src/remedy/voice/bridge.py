@@ -28,9 +28,20 @@ class WorkerError(RuntimeError):
     """The worker answered with an error, or could not answer at all."""
 
 
+#: Engine families that must not share a process. ctranslate2 (whisper)
+#: and torch (Chatterbox) each bundle a cuDNN; loaded into one process in
+#: the wrong order they take it down ("Could not load symbol
+#: cudnnGetLibConfig"). The hq lane imports torch first and never touches
+#: whisper; the voice lane never imports torch.
+Lane = str
+LANE_VOICE: Lane = "voice"
+LANE_HQ: Lane = "hq"
+
+
 class VoiceBridge:
-    def __init__(self, home_dir: Path | str | None = None) -> None:
+    def __init__(self, home_dir: Path | str | None = None, lane: Lane = LANE_VOICE) -> None:
         self.home_dir = str(home_dir) if home_dir else None
+        self.lane = lane
         self._proc: subprocess.Popen[str] | None = None
         self._lock = threading.Lock()
         self._next_id = 0
@@ -47,6 +58,7 @@ class VoiceBridge:
             raise WorkerError("Remedy's voice runtime is not set up yet.")
         env = rt.child_env(self.home_dir, with_source=True)
         env["REMEDY_VOICE_WORKER"] = "1"
+        env["REMEDY_VOICE_LANE"] = self.lane
         from remedy.execution.process import hidden_subprocess_kwargs
 
         proc = subprocess.Popen(
@@ -63,7 +75,7 @@ class VoiceBridge:
         t = threading.Thread(target=self._pump_stderr, args=(proc,), daemon=True)
         t.start()
         self._stderr_thread = t
-        logger.info("voice worker started (pid %s) with %s", proc.pid, py)
+        logger.info("voice worker [%s] started (pid %s) with %s", self.lane, proc.pid, py)
         return proc
 
     @staticmethod
@@ -207,18 +219,27 @@ class VoiceBridge:
         return float((out or {}).get("score", 0.0))
 
 
-_bridges: dict[str, VoiceBridge] = {}
+_bridges: dict[tuple[str, str], VoiceBridge] = {}
 _bridges_lock = threading.Lock()
 
 
-def get_bridge(home_dir: Path | str | None = None) -> VoiceBridge:
-    key = str(home_dir or "")
+def get_bridge(home_dir: Path | str | None = None, lane: Lane = LANE_VOICE) -> VoiceBridge:
+    key = (str(home_dir or ""), lane)
     with _bridges_lock:
         b = _bridges.get(key)
         if b is None:
-            b = VoiceBridge(home_dir)
+            b = VoiceBridge(home_dir, lane)
             _bridges[key] = b
         return b
+
+
+def stop_lane(home_dir: Path | str | None, lane: Lane) -> None:
+    """Stop one lane's worker (after pip changed what it would import)."""
+    key = (str(home_dir or ""), lane)
+    with _bridges_lock:
+        b = _bridges.pop(key, None)
+    if b is not None:
+        b.stop()
 
 
 def stop_all() -> None:

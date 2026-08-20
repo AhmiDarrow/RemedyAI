@@ -279,6 +279,8 @@ def _run_script(
 ) -> tuple[bool, str]:
     """Run one sheath script in a subprocess. Never shell; cwd = sheath dir."""
     try:
+        from remedy.execution.process import hidden_subprocess_kwargs
+
         r = subprocess.run(
             [sys.executable, str(script), *args],
             cwd=str(script.parent),
@@ -286,6 +288,7 @@ def _run_script(
             text=True,
             timeout=timeout,
             shell=False,
+            **hidden_subprocess_kwargs(),
         )
         out = (r.stdout or "") + (("\n" + r.stderr) if r.stderr else "")
         return r.returncode == 0, out[:OUTPUT_CAP]
