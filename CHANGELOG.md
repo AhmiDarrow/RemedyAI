@@ -123,6 +123,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   and the readable one, carrying her relational memory and pledges in the
   clear, was not. `soul_export` now returns a message naming where exports go
   instead of raising.
+- **Mail is identified by UID, not by position.** A plain IMAP `SEARCH` answers
+  with *sequence numbers* — positions in the mailbox, which renumber on every
+  expunge. `list_messages` handed those out as message ids (labelling them
+  `uid` in `raw`, which is what they should always have been), so archiving one
+  message shifted every id the caller was still holding onto the message next
+  door: a later `archive_message` or `mark_read` then acted on the wrong mail.
+  Search, fetch, store and copy all speak `UID` now.
 - **A failed pseudo-console teardown no longer strands the process handle.**
   `_close` covered two independent closes with one `suppress`, so a throwing
   `ClosePseudoConsole` skipped `CloseHandle` — and the field was zeroed anyway,

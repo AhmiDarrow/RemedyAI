@@ -195,6 +195,10 @@ class FakeMessage:
     attachments: tuple[Attachment, ...] = ()
     flags: set[str] = field(default_factory=set)
     extra_headers: dict[str, str] = field(default_factory=dict)
+    #: Assigned by the mailbox. Stable for the life of the message and never
+    #: reused — unlike a sequence number, which is a position and renumbers on
+    #: every expunge.
+    uid: int = 0
     # Bytes exactly as the server would hand them over, for the cases a
     # well-formed builder cannot express: a body that lies about its charset,
     # a message with no headers at all.
@@ -395,8 +399,32 @@ class FakeMailbox:
 
     def __init__(self, folders: dict[str, list[FakeMessage]] | None = None) -> None:
         self.folders: dict[str, list[FakeMessage]] = {"INBOX": []}
+        self._next_uid = 1
         for name, msgs in (folders or {}).items():
             self.folders[name] = list(msgs)
+        for msgs in self.folders.values():
+            for msg in msgs:
+                if not msg.uid:
+                    msg.uid = self._next_uid
+                    self._next_uid += 1
+
+    def assign_uid(self, msg: FakeMessage) -> int:
+        """Give a newly added message its permanent id."""
+        if not msg.uid:
+            msg.uid = self._next_uid
+            self._next_uid += 1
+        return msg.uid
+
+    def by_uid(self, uid: str | int, name: str = "INBOX") -> FakeMessage | None:
+        try:
+            want = int(_as_text(uid))
+        except (TypeError, ValueError):
+            return None
+        return next((m for m in self.folder(name) if m.uid == want), None)
+
+    def uid_of(self, key: str, name: str = "INBOX") -> str:
+        """The UID of the message with this key, as the wire spells it."""
+        return str(self.by_key(key, name).uid)
 
     def folder(self, name: str = "INBOX") -> list[FakeMessage]:
         return self.folders[_unquote(name)]
@@ -568,6 +596,55 @@ class FakeIMAP4SSL:
         self.is_readonly = bool(readonly)
         return "OK", [str(len(self.server.mailbox.folder(name))).encode()]
 
+    # -- UID commands ------------------------------------------------------
+    # A UID is stable; a sequence number is a position. The provider speaks
+    # UID so that archiving one message does not silently shift every id the
+    # caller is still holding onto.
+
+    def _uid_to_seq(self, message_set: Any) -> str:
+        """Translate a UID set to the sequence numbers it points at *now*.
+
+        A UID with no message left resolves to nothing, which the delegated
+        command then treats exactly as a message set the server ignored.
+        """
+        msgs = self._mailbox()
+        out: list[str] = []
+        for part in _as_text(message_set).split(","):
+            try:
+                want = int(part.strip())
+            except ValueError:
+                continue
+            for i, msg in enumerate(msgs, 1):
+                if msg.uid == want:
+                    out.append(str(i))
+                    break
+        return ",".join(out)
+
+    def uid(self, command: Any, *args: Any) -> tuple[str, list[Any]]:
+        cmd = _as_text(command).upper()
+        self.server.uid_calls.append((cmd, tuple(_as_text(a) for a in args)))
+        if cmd == "SEARCH":
+            self._require("search", "SELECTED")
+            self.server.searches.append(tuple(_as_text(c) for c in args))
+            if self.server.search_result is not None:
+                return self.server.search_result
+            hits = [
+                str(msg.uid).encode()
+                for msg in self._mailbox()
+                if _matches(msg, args)
+            ]
+            return "OK", [b" ".join(hits)]
+        if not args:
+            raise imaplib.IMAP4.error(f"UID {cmd} needs a message set")
+        seq = self._uid_to_seq(args[0])
+        if cmd == "FETCH":
+            return self.fetch(seq, args[1])
+        if cmd == "STORE":
+            return self.store(seq, args[1], args[2])
+        if cmd == "COPY":
+            return self.copy(seq, args[1])
+        raise imaplib.IMAP4.error(f"unsupported UID command {cmd}")
+
     def search(self, charset: Any, *criteria: Any) -> tuple[str, list[bytes]]:
         self._require("search", "SELECTED")
         self.server.searches.append(tuple(_as_text(c) for c in criteria))
@@ -719,6 +796,9 @@ class FakeIMAPServer(_Faultable):
         self.fetches: list[tuple[str, str]] = []
         self.stores: list[tuple[str, str, str]] = []
         self.copies: list[tuple[str, str]] = []
+        #: Every UID command as the caller spelled it — the provider's view,
+        #: before translation to whatever position the message occupies now.
+        self.uid_calls: list[tuple[str, tuple[str, ...]]] = []
         self.appends: list[Appended] = []
         self.expunged: list[str] = []
         self.logouts = 0
