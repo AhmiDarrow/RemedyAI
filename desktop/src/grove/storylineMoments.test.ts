@@ -38,6 +38,12 @@ describe('describeToolCall', () => {
     expect(describeToolCall({ name: 'computer_click', args: { text: 'Sign in' } })).toBe(
       'Pressed “Sign in”',
     )
+    expect(describeToolCall({ name: 'computer_select', args: { value: 'CA' } })).toBe(
+      'Chose “CA”',
+    )
+    expect(describeToolCall({ name: 'computer_fill', args: { fields: [] } })).toBe(
+      'Filled in a form',
+    )
     expect(describeToolCall({ name: 'mail_send', args: {} })).toContain('go-ahead')
     expect(
       describeToolCall({ name: 'host_run', args: { command: 'exit /b 7' } }),
@@ -49,7 +55,7 @@ describe('describeToolCall', () => {
       name: 'computer_type',
       args: { text: 'hunter2-secret' },
     })
-    expect(d).toBe('Typed into the focused field')
+    expect(d).toBe('Typed into a field')
     expect(d).not.toContain('hunter2')
   })
 

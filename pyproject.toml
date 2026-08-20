@@ -54,6 +54,10 @@ voice = [
     "kokoro-onnx>=0.3.0,<1",
     "faster-whisper>=1.0.0,<2",
 ]
+# Human-bar TTS (Grove HQ + phone). Heavy: pulls torch. Not first-run.
+voice-hq = [
+    "chatterbox-tts",
+]
 
 [project.urls]
 Homepage = "https://github.com/AhmiDarrow/RemedyAI"

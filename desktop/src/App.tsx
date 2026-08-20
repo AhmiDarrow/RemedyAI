@@ -64,6 +64,7 @@ import { useTheme } from './hooks/useTheme'
 import { loadUiMode, saveUiMode, type UiMode } from './utils/uiMode'
 import { loadSurface, saveSurface, type AppSurface } from './utils/surface'
 import { GroveApp } from './grove/GroveApp'
+import './grove/grove.css'
 import { takeAppCommand } from './api/appControl'
 import { browserStackSet } from './utils/browserStack'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
@@ -251,6 +252,7 @@ export default function App() {
   const [uiMode, setUiMode] = useState<UiMode>(() => loadUiMode())
   // Grove (partner home, default) vs Studio (this full workbench)
   const [surface, setSurface] = useState<AppSurface>(() => loadSurface())
+  const [groveSettingsOpen, setGroveSettingsOpen] = useState(false)
   const switchSurface = useCallback((s: AppSurface) => {
     setSurface(s)
     saveSurface(s)
@@ -315,6 +317,19 @@ export default function App() {
       return next
     })
   }, [])
+  const surfaceRef = useRef(surface)
+  surfaceRef.current = surface
+  /** Open Settings on the current surface — Grove overlay, Studio rail. Never switch surfaces. */
+  const openSettings = useCallback((section?: string) => {
+    if (section) saveLastSettingsSection(section)
+    if (surfaceRef.current === 'grove') {
+      setGroveSettingsOpen(true)
+      return
+    }
+    setGroveSettingsOpen(false)
+    openSettingsInRail()
+  }, [openSettingsInRail])
+  const closeGroveSettings = useCallback(() => setGroveSettingsOpen(false), [])
   /** Track recently opened sessions (for archive filter only — no chip strip UI). */
   const [openTabs, setOpenTabs] = useState<Set<string>>(new Set())
   const openTabIds = useMemo(() => [...openTabs], [openTabs])
@@ -424,19 +439,19 @@ export default function App() {
 
   /** Run update check with visible UI (settings About section), not a silent focus. */
   const runUpdateCheckVisible = useCallback(async () => {
-    openSettingsInRail()
+    openSettings()
     const result = await checkUpdates()
     if (result.updateAvailable && result.desktopInfo?.download_url) {
       setShowUpdateScreen(true)
     }
     return result
-  }, [checkUpdates, openSettingsInRail])
+  }, [checkUpdates, openSettings])
 
   const handleMenuAction = useCallback(
     (action: AppMenuAction) => {
       switch (action) {
         case 'settings':
-          openSettingsInRail()
+          openSettings()
           break
         case 'memory':
           setPanel('memory')
@@ -505,7 +520,7 @@ export default function App() {
           break
       }
     },
-    [runUpdateCheckVisible, desktopInfo, create, openHelp, requestQuitWithWarning, openSettingsInRail],
+    [runUpdateCheckVisible, desktopInfo, create, openHelp, requestQuitWithWarning, openSettings],
   )
 
   // Tray Quit / window close when not hide-to-tray → show server-stop warning
@@ -582,7 +597,7 @@ export default function App() {
     let cancelled = false
     void (async () => {
       const listeners = await Promise.all([
-        tauriListen('tray-open-settings', () => openSettingsInRail()),
+        tauriListen('tray-open-settings', () => openSettings()),
         tauriListen('tray-check-updates', () => {
           void runUpdateCheckVisible()
         }),
@@ -598,7 +613,7 @@ export default function App() {
       cancelled = true
       for (const u of off) u()
     }
-  }, [runUpdateCheckVisible, openSettingsInRail])
+  }, [runUpdateCheckVisible, openSettings])
 
   // OAuth poll lives outside Settings so a rail switch cannot drop the result.
   useEffect(() => {
@@ -739,13 +754,13 @@ export default function App() {
             break
           }
           case 'open_settings':
-            switchSurface('studio')
-            openSettingsInRail()
+            openSettings()
             break
           case 'open_panel': {
             const p = cmd.params?.panel
-            if (p === 'memory' || p === 'skills' || p === 'settings') {
-              switchSurface('studio')
+            if (p === 'settings') {
+              openSettings()
+            } else if (p === 'memory' || p === 'skills') {
               setPanel(p)
             }
             break
@@ -776,7 +791,7 @@ export default function App() {
       alive = false
       window.clearInterval(iv)
     }
-  }, [serverState, switchSurface, openSettingsInRail, setPanel, handleNewSession])
+  }, [serverState, switchSurface, openSettings, setPanel, handleNewSession])
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -1079,11 +1094,12 @@ export default function App() {
       }
     }
   }, [studioVoice, handleSend])
-  const openVoiceSettings = useCallback(() => {
-    saveLastSettingsSection('voice')
-    switchSurface('studio')
-    openSettingsInRail()
-  }, [switchSurface, openSettingsInRail])
+  useEffect(() => {
+    if (surface === 'studio' && groveSettingsOpen) {
+      setGroveSettingsOpen(false)
+      openSettingsInRail()
+    }
+  }, [surface, groveSettingsOpen, openSettingsInRail])
 
   const paletteCommands: CommandItem[] = useMemo(() => {
     const items: CommandItem[] = [
@@ -1115,7 +1131,7 @@ export default function App() {
       { id: 'plan', label: 'Toggle Plan / Build', description: 'Switch between plan and build', category: 'general', action: () => setPlanMode((p) => !p) },
       { id: 'memory', label: 'Memory', description: 'Toggle memory panel', category: 'panel', action: () => setPanel((p) => (p === 'memory' ? null : 'memory')) },
       { id: 'skills', label: 'Skills', description: 'Toggle skills panel', category: 'panel', action: () => setPanel((p) => (p === 'skills' ? null : 'skills')) },
-      { id: 'settings', label: 'Settings', description: 'Open Settings in the right rail', category: 'panel', action: () => openSettingsInRail() },
+      { id: 'settings', label: 'Settings', description: 'Open Settings', category: 'panel', action: () => openSettings() },
       {
         id: 'help',
         label: 'Help',
@@ -1177,7 +1193,7 @@ export default function App() {
     handleImport,
     activeId,
     openHelp,
-    openSettingsInRail,
+    openSettings,
     setPlanMode,
   ])
 
@@ -1196,7 +1212,7 @@ export default function App() {
       }),
       'Open command palette': studioOnly(() => setPaletteOpen((o) => !o)),
       'Toggle plan mode': studioOnly(togglePlan),
-      'Open settings': studioOnly(() => openSettingsInRail()),
+      'Open settings': () => openSettings(),
       "Open Help wiki (owner's manual)": () => openHelp(),
       'Larger text': () => bumpFontScale(1),
       'Smaller text': () => bumpFontScale(-1),
@@ -1205,6 +1221,10 @@ export default function App() {
         // HelpPanel also handles Esc while open; this covers palette / side panels.
         if (helpOpen) {
           setHelpOpen(false)
+          return
+        }
+        if (groveSettingsOpen) {
+          setGroveSettingsOpen(false)
           return
         }
         setPaletteOpen(false)
@@ -1234,7 +1254,7 @@ export default function App() {
       })
     }
     return out
-  }, [handleNewSession, openHelp, helpOpen, openSettingsInRail, setPlanMode, bumpFontScale, setFontScale, surface])
+  }, [handleNewSession, openHelp, helpOpen, groveSettingsOpen, openSettings, setPlanMode, bumpFontScale, setFontScale, surface])
 
   useKeyboardShortcuts(globalShortcuts)
 
@@ -1249,6 +1269,7 @@ export default function App() {
     browserStackSet('diagnostics', diagnosticsOpen)
     browserStackSet('concurrent-turn', Boolean(concurrentConfirm))
     browserStackSet('ask-user-name', askUserName)
+    browserStackSet('grove-settings', groveSettingsOpen)
     return () => {
       browserStackSet('help', false)
       browserStackSet('palette', false)
@@ -1259,6 +1280,7 @@ export default function App() {
       browserStackSet('diagnostics', false)
       browserStackSet('concurrent-turn', false)
       browserStackSet('ask-user-name', false)
+      browserStackSet('grove-settings', false)
     }
   }, [
     helpOpen,
@@ -1270,6 +1292,7 @@ export default function App() {
     diagnosticsOpen,
     concurrentConfirm,
     askUserName,
+    groveSettingsOpen,
   ])
 
   const shellProps = {
@@ -1520,77 +1543,79 @@ export default function App() {
     />
   )
 
+  const renderSettingsPanel = (opts: { embedded: boolean; onClose: () => void }) => (
+    <Suspense fallback={<div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading settings…</div>}>
+      <SettingsPanel
+        open
+        embedded={opts.embedded}
+        onClose={opts.onClose}
+        themeId={themeId}
+        onThemeChange={setTheme}
+        density={density}
+        onDensityChange={setDensity}
+        customAccent={customAccent}
+        onCustomAccentChange={setCustomAccent}
+        fontScale={fontScale}
+        onFontScaleChange={setFontScale}
+        reduceMotion={reduceMotion}
+        onReduceMotionChange={setReduceMotion}
+        highContrast={highContrast}
+        onHighContrastChange={setHighContrast}
+        updateInfo={updateInfo}
+        checkingUpdates={checkingUpdates}
+        updateStatus={updateLastStatus}
+        onCheckUpdates={() => {
+          void runUpdateCheckVisible()
+        }}
+        onInstallUpdate={() => {
+          if (desktopInfo?.update_available && desktopInfo.download_url) {
+            setShowUpdateScreen(true)
+          } else {
+            void runUpdateCheckVisible()
+          }
+        }}
+        models={models}
+        toolProcessMode={toolProcessMode}
+        onToolProcessChange={(mode) => {
+          setToolProcessMode(mode)
+          updateSettings({ tool_process: mode }).catch(() => {})
+        }}
+        onOpenHelp={openHelp}
+        onSettingsSaved={() => {
+          void getSettings()
+            .then((s) => {
+              // Settings is the default for *new* sessions only.
+              // Never rewrite the open chat's provider bind.
+              if (s.llm_provider && s.llm_model && !activeId) {
+                setLlmProvider(String(s.llm_provider))
+                setModel(String(s.llm_model))
+              }
+              setUserName((s.user_name || '').trim())
+              setToolProcessMode(normalizeToolProcess(s.tool_process))
+              setPrivacyMode(Boolean(s.privacy_mode))
+              setApprovalMode(
+                (() => {
+                  const am = String(s.approval_mode || 'ask').toLowerCase()
+                  return am === 'auto' || am === 'full' ? am : 'ask'
+                })(),
+              )
+              void refreshConnected()
+              return refreshModels({
+                provider: s.llm_provider ? String(s.llm_provider) : undefined,
+              })
+            })
+            .catch(() => refreshModels())
+        }}
+      />
+    </Suspense>
+  )
+
   const renderSlide = (id: SlideId) => {
     switch (id) {
       case 'sessions':
         return sessionsSlide
       case 'settings':
-        return (
-          <Suspense fallback={<div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading settings…</div>}>
-          <SettingsPanel
-            open
-            embedded
-            onClose={() => {}}
-            themeId={themeId}
-            onThemeChange={setTheme}
-            density={density}
-            onDensityChange={setDensity}
-            customAccent={customAccent}
-            onCustomAccentChange={setCustomAccent}
-            fontScale={fontScale}
-            onFontScaleChange={setFontScale}
-            reduceMotion={reduceMotion}
-            onReduceMotionChange={setReduceMotion}
-            highContrast={highContrast}
-            onHighContrastChange={setHighContrast}
-            updateInfo={updateInfo}
-            checkingUpdates={checkingUpdates}
-            updateStatus={updateLastStatus}
-            onCheckUpdates={() => {
-              void runUpdateCheckVisible()
-            }}
-            onInstallUpdate={() => {
-              if (desktopInfo?.update_available && desktopInfo.download_url) {
-                setShowUpdateScreen(true)
-              } else {
-                void runUpdateCheckVisible()
-              }
-            }}
-            models={models}
-            toolProcessMode={toolProcessMode}
-            onToolProcessChange={(mode) => {
-              setToolProcessMode(mode)
-              updateSettings({ tool_process: mode }).catch(() => {})
-            }}
-            onOpenHelp={openHelp}
-            onSettingsSaved={() => {
-              void getSettings()
-                .then((s) => {
-                  // Settings is the default for *new* sessions only.
-                  // Never rewrite the open chat's provider bind.
-                  if (s.llm_provider && s.llm_model && !activeId) {
-                    setLlmProvider(String(s.llm_provider))
-                    setModel(String(s.llm_model))
-                  }
-                  setUserName((s.user_name || '').trim())
-                  setToolProcessMode(normalizeToolProcess(s.tool_process))
-                  setPrivacyMode(Boolean(s.privacy_mode))
-                  setApprovalMode(
-                    (() => {
-                      const am = String(s.approval_mode || 'ask').toLowerCase()
-                      return am === 'auto' || am === 'full' ? am : 'ask'
-                    })(),
-                  )
-                  void refreshConnected()
-                  return refreshModels({
-                    provider: s.llm_provider ? String(s.llm_provider) : undefined,
-                  })
-                })
-                .catch(() => refreshModels())
-            }}
-          />
-          </Suspense>
-        )
+        return renderSettingsPanel({ embedded: true, onClose: () => {} })
       case 'files':
         return <FilesSlide sessionId={activeId} />
       case 'terminal':
@@ -1632,7 +1657,6 @@ export default function App() {
           userName={userName}
           partnerName={partnerName}
           onSwitchToStudio={() => switchSurface('studio')}
-          onOpenSettings={openVoiceSettings}
           openGoalId={pendingGroveGoal}
           onGoalOpened={() => setPendingGroveGoal(null)}
         />
@@ -1871,7 +1895,7 @@ export default function App() {
               sessionId={activeId}
               llmProvider={barProvider || llmProvider}
               llmModel={barModel || model}
-              onOpenSettings={openSettingsInRail}
+              onOpenSettings={openSettings}
               onMic={() => void handleStudioMic()}
               micSupported={studioVoice.micSupported}
               recording={studioVoice.recording}
@@ -1963,6 +1987,40 @@ export default function App() {
         onOpenHelp={openHelp}
       />
       </Suspense>
+
+      {surface === 'grove' && groveSettingsOpen ? (
+        <>
+          <button
+            type="button"
+            className="grove-settings-backdrop"
+            aria-label="Close settings"
+            onClick={closeGroveSettings}
+          />
+          <div
+            className="grove-settings-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Settings"
+            data-testid="grove-settings"
+          >
+            <div className="grove-settings-sheet-head">
+              <span>Settings</span>
+              <button
+                type="button"
+                className="ui-btn ui-btn-ghost"
+                style={{ padding: '0.15rem 0.4rem' }}
+                aria-label="Close settings"
+                onClick={closeGroveSettings}
+              >
+                {'\u00D7'}
+              </button>
+            </div>
+            <div className="grove-settings-sheet-body">
+              {renderSettingsPanel({ embedded: true, onClose: closeGroveSettings })}
+            </div>
+          </div>
+        </>
+      ) : null}
 
       {surface !== 'grove' && (
       <StatusBar
@@ -2149,7 +2207,7 @@ export default function App() {
       }
       userName={userName}
       onOpenHelp={openHelp}
-      onOpenSettings={openSettingsInRail}
+      onOpenSettings={openSettings}
       onOpenDiagnostics={() => setDiagnosticsOpen(true)}
     />
     </AppShell>

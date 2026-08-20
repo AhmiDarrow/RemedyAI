@@ -13,6 +13,7 @@ import {
 } from './formUi'
 import { Field, PERSONAS } from './shared'
 import { VoiceSection } from './VoiceSection'
+import { PhoneSection } from './PhoneSection'
 import { TOOL_PROCESS_MODES } from '../../utils/toolLabels'
 import { isLinuxDesktop } from '../../utils/platform'
 
@@ -238,6 +239,7 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
         sectionProps={sectionProps('voice')}
         settingsMode={settingsMode}
       />
+      <PhoneSection sectionProps={sectionProps('phone')} />
 
       {/* Project */}
       <SettingsSection

@@ -40,10 +40,31 @@ export interface VoiceSmartTurnStatus {
   }
 }
 
+export interface VoiceHqStatus {
+  available: boolean
+  engine: string | null
+  deps?: boolean
+  installed?: boolean
+  install?: { status?: string; percent?: number; error?: string; message?: string } | null
+  reason?: string | null
+  hint?: string | null
+  approx_mb?: number
+  licence?: string
+  source?: string
+  fallback?: string
+}
+
+export interface VoicePackStatus {
+  deps?: boolean
+  install?: { status?: string; percent?: number; error?: string; message?: string } | null
+}
+
 export interface VoiceStatus {
-  tts: VoiceSideStatus
+  tts: VoiceSideStatus & { quality?: string }
   stt: VoiceSideStatus
   smart_turn?: VoiceSmartTurnStatus
+  hq?: VoiceHqStatus
+  pack?: VoicePackStatus
   settings: {
     tts_enabled: boolean
     stt_enabled: boolean
@@ -52,11 +73,12 @@ export interface VoiceStatus {
     speed: number
     stt_model: string
     language: string
+    tts_quality?: string
   }
 }
 
-export async function getVoiceStatus(): Promise<VoiceStatus> {
-  return apiFetch<VoiceStatus>('/voice/status')
+export async function getVoiceStatus(opts?: { timeout?: number }): Promise<VoiceStatus> {
+  return apiFetch<VoiceStatus>('/voice/status', { timeout: opts?.timeout })
 }
 
 export async function patchVoiceSettings(
@@ -69,12 +91,16 @@ export async function patchVoiceSettings(
 }
 
 export async function installVoice(
-  component: 'tts' | 'stt' | 'smart-turn',
-): Promise<{ ok: boolean; error?: string; hint?: string }> {
-  return apiFetch<{ ok: boolean; error?: string; hint?: string }>('/voice/install', {
-    method: 'POST',
-    body: JSON.stringify({ component }),
-  })
+  component: 'tts' | 'stt' | 'smart-turn' | 'chatterbox' | 'all',
+): Promise<{ ok: boolean; started?: boolean; error?: string; hint?: string }> {
+  return apiFetch<{ ok: boolean; started?: boolean; error?: string; hint?: string }>(
+    '/voice/install',
+    {
+      method: 'POST',
+      body: JSON.stringify({ component }),
+      timeout: 20_000,
+    },
+  )
 }
 
 /** Synthesize speech; returns a playable object URL, or null → use fallback. */

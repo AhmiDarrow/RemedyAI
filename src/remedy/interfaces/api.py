@@ -204,8 +204,6 @@ def create_app(
         try:
             import asyncio
 
-            from remedy.vision.service import maybe_autostart_local_model
-
             cfg0 = load_config()
 
             def _bg_autostart() -> None:
@@ -245,19 +243,37 @@ def create_app(
                             logger.info("RMB auto-start: %s", rr.get("error") or rr)
                 except Exception:
                     logger.exception("RMB auto-start background task failed")
-                # Vision only if RMB did not take the host (failed start may clear skip)
+                # Voice models (Kokoro / whisper / smart-turn) always download
+                # on first run — not a Settings option.
+                try:
+                    from remedy.voice.service import ensure_voice_assets
+
+                    home0 = cfg0.get("home_dir") if isinstance(cfg0, dict) else None
+                    vr = ensure_voice_assets(home0)
+                    if vr.get("started"):
+                        logger.info("Voice assets first-run download: %s", vr.get("started"))
+                except Exception:
+                    logger.exception("Voice assets first-run ensure failed")
+
+                # Vision files always download on first run. llama-server start
+                # is skipped when RMB already owns the GPU host.
                 try:
                     from remedy.runtime.rmb.mode import should_skip_vision_stack
+                    from remedy.vision.service import maybe_ensure_local_model
 
-                    if rmb_ok or should_skip_vision_stack(cfg0 if isinstance(cfg0, dict) else None):
-                        logger.info("Skipping SmolVLM autostart — RMB exclusive host")
-                        return
-                except Exception:
-                    if rmb_ok:
-                        return
-                try:
-                    r = maybe_autostart_local_model(cfg0)
-                    if r.get("ok"):
+                    skip_smol = bool(
+                        rmb_ok
+                        or should_skip_vision_stack(
+                            cfg0 if isinstance(cfg0, dict) else None
+                        )
+                    )
+                    r = maybe_ensure_local_model(cfg0)
+                    if skip_smol and r.get("ok") and not r.get("skipped"):
+                        logger.info(
+                            "Local vision download underway; SmolVLM start skipped "
+                            "(RMB exclusive host)"
+                        )
+                    elif r.get("ok"):
                         logger.info("Local model auto-started with Remedy")
                     elif not r.get("skipped"):
                         logger.info(

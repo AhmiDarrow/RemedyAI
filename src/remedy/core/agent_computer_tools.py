@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 from typing import Any
 
 from remedy.core.computer.executor import get_computer_executor
@@ -72,6 +73,26 @@ def _page_origin(page_context: str) -> str:
     from remedy.core.approvals import _origin_host
 
     return _origin_host(page_context)
+
+
+def _fill_typed_text(fields: list | str) -> str:
+    """Concatenate the values a computer_fill call will type (for checkpoints)."""
+    rows: Any = fields
+    if isinstance(rows, str):
+        try:
+            rows = json.loads(rows)
+        except (json.JSONDecodeError, TypeError):
+            return rows
+    if not isinstance(rows, list):
+        return ""
+    parts: list[str] = []
+    for row in rows:
+        if isinstance(row, dict):
+            for key in ("value", "type", "select", "option"):
+                v = row.get(key)
+                if v:
+                    parts.append(str(v))
+    return "\n".join(parts)
 
 
 def _computer_approval_gate(
@@ -444,6 +465,66 @@ def register_computer_tools(runtime: Any) -> None:
             ref=ref,
         )
 
+    async def computer_select(
+        value: str = "",
+        option: str = "",
+        text: str = "",
+        ref: str = "",
+        target: str = "browser",
+        hint: str = "",
+    ) -> str:
+        """Choose an option in a <select> (dropdown) by visible text or value."""
+        choice = (value or option or text or "").strip()
+        summary = f"select {choice!r} ref={ref or '-'}"
+        blocked = _computer_approval_gate(
+            runtime, "computer_select", summary,
+            page_context=_page_context(ex),
+            label_resolved=bool(ref or choice),
+        )
+        if blocked:
+            return blocked
+        return await _run_computer(
+            ex,
+            ComputerAction.SELECT,
+            target=target or "browser",
+            hint=hint,
+            runtime=runtime,
+            value=choice,
+            text=choice,
+            ref=ref,
+        )
+
+    async def computer_fill(
+        fields: list | str = "",
+        target: str = "browser",
+        hint: str = "",
+    ) -> str:
+        """Fill several form fields in one call.
+
+        fields is a list of objects: {ref or text (label), value and/or select}.
+        Example: [{\"text\":\"First name\",\"value\":\"Ada\"},
+        {\"text\":\"State\",\"select\":\"California\"}]
+        """
+        summary = "fill form fields"
+        # Join every typed value so the raw-secret checkpoint sees a card
+        # number whether it arrives via computer_type or computer_fill.
+        typed = _fill_typed_text(fields)
+        blocked = _computer_approval_gate(
+            runtime, "computer_fill", summary,
+            page_context=_page_context(ex),
+            typed_text=typed,
+        )
+        if blocked:
+            return blocked
+        return await _run_computer(
+            ex,
+            ComputerAction.FILL,
+            target=target or "browser",
+            hint=hint,
+            runtime=runtime,
+            fields=fields,
+        )
+
     async def computer_key(
         key: str = "",
         target: str = "auto",
@@ -778,7 +859,10 @@ def register_computer_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "computer_type",
-        "Type text into the focused control (browser or desktop). Long text pastes atomically. ref= (desktop cN) sets that control's value directly via UIA — most reliable for fields. Stored secrets: pass {{vault:handle}} (see vault_list).",
+        "Type text into a field (browser or desktop). Long text pastes atomically. "
+        "ref= from computer_snapshot is most reliable: browser eN writes that control; "
+        "desktop cN sets the value via UIA. Stored secrets: pass {{vault:handle}} "
+        "(see vault_list).",
         computer_type,
         {
             "type": "object",
@@ -787,14 +871,49 @@ def register_computer_tools(runtime: Any) -> None:
                 "ref": {
                     "type": "string",
                     "description": (
-                        "Desktop control ref (cN from computer_snapshot): set its "
-                        "value directly via UIA — atomic, verified, no focus races."
+                        "Snapshot ref: browser eN focuses/writes that field; "
+                        "desktop cN sets the value via UIA (atomic, verified)."
                     ),
                 },
                 "target": target_prop,
                 "hint": hint_prop,
             },
             "required": ["text"],
+        },
+    )
+    reg.register_builtin_handler(
+        "computer_select",
+        "Choose an option in a dropdown (<select>) by visible text or value. "
+        "Pass ref= from computer_snapshot when you have it, plus value= the option.",
+        computer_select,
+        {
+            "type": "object",
+            "properties": {
+                "value": {"type": "string", "description": "Option value or visible text"},
+                "option": {"type": "string"},
+                "text": {"type": "string", "description": "Option label if value omitted"},
+                "ref": {"type": "string", "description": "eN from computer_snapshot"},
+                "target": target_prop,
+                "hint": hint_prop,
+            },
+        },
+    )
+    reg.register_builtin_handler(
+        "computer_fill",
+        "Fill several form fields in ONE call. fields=[{ref or text, value or select}, …]. "
+        "Prefer this over many computer_type rounds on a form.",
+        computer_fill,
+        {
+            "type": "object",
+            "properties": {
+                "fields": {
+                    "type": "array",
+                    "description": "List of {ref|text, value|select}",
+                },
+                "target": target_prop,
+                "hint": hint_prop,
+            },
+            "required": ["fields"],
         },
     )
     reg.register_builtin_handler(
