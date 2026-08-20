@@ -36,6 +36,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
+
 logger = logging.getLogger(__name__)
 
 APPLIANCES_REL = Path("host") / "appliances.json"
@@ -227,9 +229,7 @@ def save_inventory(
 ) -> Path:
     p = inventory_path(home)
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(f".tmp{os.getpid()}.{threading.get_ident()}")
-    tmp.write_text(json.dumps(inv.to_dict(), indent=2), encoding="utf-8")
-    tmp.replace(p)
+    write_json_atomic(p, inv.to_dict())
     return p
 
 

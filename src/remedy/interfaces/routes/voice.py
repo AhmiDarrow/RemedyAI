@@ -42,7 +42,7 @@ class VoiceSettingsPatch(BaseModel):
 
 
 class VoiceInstallRequest(BaseModel):
-    component: str = "tts"  # tts | stt
+    component: str = "tts"  # tts | stt | smart-turn
 
 
 def _home(cfg: dict[str, Any] | None) -> str | None:
@@ -111,6 +111,19 @@ def register_voice_routes(
                 target=get_stt_model, args=(_home(cfg),), daemon=True
             ).start()
             return {"ok": True, "started": True}
+        if comp in ("smart-turn", "smart_turn"):
+            from remedy.voice.service import (
+                install_smart_turn_background,
+                smart_turn_deps_available,
+            )
+
+            if not smart_turn_deps_available():
+                return {
+                    "ok": False,
+                    "error": "onnxruntime not installed — pip install remedy-ai[voice]",
+                }
+            started = install_smart_turn_background(_home(cfg))
+            return {"ok": True, "started": started}
         return {"ok": False, "error": f"unknown component {comp!r}"}
 
     @app.post("/api/voice/speak")

@@ -47,6 +47,7 @@ from remedy.execution.host.session import (
 from tests.harness.fake_win32 import (
     CONPTY_PRELUDE,
     FakeConsoleHost,
+    FakeShellExitError,
     FakeWinDLL,
     fake_cmd_shell,
     handle_value,
@@ -795,6 +796,22 @@ def test_a_failing_closehandle_is_swallowed_and_the_stream_stays_closed(wired: A
 # ---------------------------------------------------------------------------
 
 
+def test_fake_cmd_shell_exit_ends_the_process() -> None:
+    run = fake_cmd_shell()
+    with pytest.raises(FakeShellExitError) as ei:
+        run("exit /b 7")
+    assert ei.value.code == 7
+    with pytest.raises(FakeShellExitError) as ei:
+        run("exit")
+    assert ei.value.code == 0
+    with pytest.raises(FakeShellExitError) as ei:
+        run("exit 3")
+    assert ei.value.code == 3
+    # A failed command must not kill the shell — the sentinel still has to run.
+    out = run("no_such_cmd")
+    assert "not recognized" in out
+
+
 @windows_only
 def test_a_new_process_looks_like_an_asyncio_subprocess(wired: Any) -> None:
     host, _fake = wired
@@ -802,6 +819,7 @@ def test_a_new_process_looks_like_an_asyncio_subprocess(wired: Any) -> None:
 
     assert proc.pid == host.pid
     assert proc.returncode is None, "a live process has no exit code yet"
+    assert proc.poll() is None, "GetExitCodeProcess is STILL_ACTIVE while alive"
     assert proc.stderr is None, "a console merges stderr into stdout"
     assert isinstance(proc.stdin, _HandleStream)
     assert isinstance(proc.stdout, _HandleStream)
@@ -823,6 +841,7 @@ def test_killing_the_process_terminates_it_and_releases_everything(
 
     assert host.terminated == [(handles["process"], 1)]
     assert proc.returncode == 1
+    assert proc.poll() == 1
     assert host.is_closed(handles["stdin"])
     assert host.is_closed(handles["stdout"])
     assert host.closed_pseudoconsoles == [handles["pc"]]
@@ -1079,16 +1098,77 @@ async def test_a_conpty_session_presses_enter_not_linefeed() -> None:
 @pytest.mark.asyncio
 async def test_a_conpty_session_reports_the_real_exit_code_not_the_echo() -> None:
     # The echo of the sentinel line carries the literal ``%ERRORLEVEL%``;
-    # reading it as 0 turned every failed command into a success.
+    # reading it as 0 turned every failed command into a success. A missing
+    # command fails without exiting the shell, so the sentinel still runs.
     host = _echoing_host()
     with install_fake_win32(console=host):
         sess, proc = await _conpty_session(host)
+        res = await sess.run("no_such_cmd", timeout=5)
+        _drop(sess, proc)
+
+    assert res.timed_out is False
+    assert res.exit_code == 9009
+    assert "not recognized" in res.stdout
+
+
+@windows_only
+@pytest.mark.asyncio
+async def test_exit_slash_b_returns_the_shell_code_instead_of_timing_out() -> None:
+    """Live: ``run("exit /b 7")`` waited for a sentinel the dead shell
+    would never print, then surfaced a timeout. The child is gone; say so."""
+    host = _echoing_host()
+    with install_fake_win32(console=host):
+        sess, proc = await _conpty_session(host)
+        res = await sess.run("exit /b 7", timeout=5)
+        alive_after = sess.started
+        polled = proc.poll()
+        _drop(sess, proc)
+
+    assert res.timed_out is False
+    assert res.exit_code == 7
+    assert "the shell exited (code 7) while running the command" in res.stdout
+    assert alive_after is False
+    assert polled == 7
+
+
+@windows_only
+@pytest.mark.asyncio
+async def test_the_next_run_respawns_after_the_shell_exits() -> None:
+    host = _echoing_host()
+    with install_fake_win32(console=host):
+
+        async def override(_argv: list[str], *, cwd: Any = None, env: Any = None) -> Any:
+            return conpty._spawn_conpty_sync(["cmd.exe", "/Q", "/K"], None, None)
+
+        spawn_conpty._override = override  # type: ignore[attr-defined]
+        sess = HostSession(host="cmd", use_conpty=True)
+        first = await sess.run("exit /b 7", timeout=5)
+        second = await sess.run("echo still here", timeout=5)
+        proc = sess._proc
+        _drop(sess, proc)
+
+    assert first.exit_code == 7
+    assert first.timed_out is False
+    assert second.timed_out is False
+    assert second.exit_code == 0
+    assert second.stdout == "still here"
+
+
+@windows_only
+@pytest.mark.asyncio
+async def test_a_pipe_session_also_notices_when_the_shell_exits() -> None:
+    host = FakeConsoleHost(
+        pid=0, echo=False, shell=fake_cmd_shell("C:\\plain"), newline_submits=True
+    )
+    with install_fake_win32(console=host):
+        sess, proc = await _conpty_session(host)
+        sess._used_conpty = False
         res = await sess.run("exit 3", timeout=5)
         _drop(sess, proc)
 
     assert res.timed_out is False
     assert res.exit_code == 3
-    assert res.stdout == ""
+    assert "the shell exited (code 3) while running the command" in res.stdout
 
 
 @windows_only

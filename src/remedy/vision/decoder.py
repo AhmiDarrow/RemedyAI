@@ -19,7 +19,25 @@ from remedy.vision.runtime import mark_used
 logger = logging.getLogger(__name__)
 
 
+# Windows mimetypes.guess_type often has no .webp (and sometimes no .gif)
+# because it consults the registry. Name the common image types ourselves
+# so a screenshot's data-URL type is the file's type, not a png fallback.
+_IMAGE_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+}
+
+
 def _guess_mime(path: Path) -> str:
+    known = _IMAGE_MIME.get(path.suffix.lower())
+    if known:
+        return known
     mime, _ = mimetypes.guess_type(path.name)
     if mime and mime.startswith("image/"):
         return mime

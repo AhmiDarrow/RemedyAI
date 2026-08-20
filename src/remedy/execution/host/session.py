@@ -41,6 +41,22 @@ _PROMPT_MARKERS = (
 )
 
 
+def _child_exit_code(proc: Any) -> int | None:
+    """The child's exit code if it has already ended, else None.
+
+    asyncio.subprocess.Process exposes ``returncode`` but not ``poll``.
+    ``_ConPTYProcess`` has both — ``poll()`` is GetExitCodeProcess.
+    """
+    poll = getattr(proc, "poll", None)
+    if callable(poll):
+        with suppress(Exception):
+            rc = poll()
+            if rc is not None:
+                return int(rc)
+    rc = getattr(proc, "returncode", None)
+    return int(rc) if rc is not None else None
+
+
 @dataclass
 class SessionResult:
     exit_code: int
@@ -121,7 +137,7 @@ class HostSession:
         try:
             async with self._lock:
                 await self._send_raw(wrapped)
-                raw, timed_out, interactive = await self._read_until(
+                raw, timed_out, interactive, shell_exit = await self._read_until(
                     sentinel.encode("ascii"), timeout=max(1.0, float(timeout))
                 )
         finally:
@@ -138,16 +154,32 @@ class HostSession:
             conpty=bool(getattr(self, "_used_conpty", False)),
         )
         cwd = ""
+        if shell_exit is not None:
+            # The child died while we waited for the sentinel (`exit`,
+            # `exit /b N`, the shell crashing). Returning a timeout here used
+            # to kill a process that was already gone and leave the next
+            # `run()` writing to a closed pipe.
+            self._abandon_proc()
+            note = f"the shell exited (code {shell_exit}) while running the command"
+            if note not in body:
+                body = f"{body}\n{note}" if body else note
+            return SessionResult(
+                exit_code=int(shell_exit),
+                stdout=body,
+                timed_out=False,
+                interactive=interactive,
+                cwd="",
+                host=self.host,
+                used_conpty=bool(getattr(self, "_used_conpty", False)),
+            )
         if timed_out:
             # Do not leave the timed-out command running in the shared shell.
             with suppress(Exception):
                 from remedy.execution.process import kill_process_tree
 
                 kill_process_tree(self._proc)
-            self._proc = None
-            self.started = False
-            self._stdout_pending = None
-        elif not timed_out:
+            self._abandon_proc()
+        else:
             cwd = await self.current_cwd()
         return SessionResult(
             exit_code=code if not timed_out else -1,
@@ -169,18 +201,17 @@ class HostSession:
         assert self._lock is not None
         async with self._lock:
             await self._send_raw(wrapped)
-            raw, timed_out, _ = await self._read_until(
+            raw, timed_out, _, shell_exit = await self._read_until(
                 sentinel.encode("ascii"), timeout=8.0
             )
-        if timed_out:
+        if timed_out or shell_exit is not None:
             # Same as run(): a wedged cwd probe must not leave ReadFile pending.
-            with suppress(Exception):
-                from remedy.execution.process import kill_process_tree
+            if timed_out:
+                with suppress(Exception):
+                    from remedy.execution.process import kill_process_tree
 
-                kill_process_tree(self._proc)
-            self._proc = None
-            self.started = False
-            self._stdout_pending = None
+                    kill_process_tree(self._proc)
+            self._abandon_proc()
             return ""
         _code, body = _split_sentinel(
             raw.decode("utf-8", errors="replace"),
@@ -209,9 +240,16 @@ class HostSession:
 
         kill_process_tree(proc)
 
+    def _abandon_proc(self) -> None:
+        self._proc = None
+        self.started = False
+        self._stdout_pending = None
+
     def _alive(self) -> bool:
         proc = self._proc
         if proc is None:
+            return False
+        if _child_exit_code(proc) is not None:
             return False
         return getattr(proc, "returncode", None) is None
 
@@ -232,10 +270,10 @@ class HostSession:
 
     async def _read_until(
         self, marker: bytes, *, timeout: float
-    ) -> tuple[bytes, bool, bool]:
+    ) -> tuple[bytes, bool, bool, int | None]:
         proc = self._proc
         if proc is None or proc.stdout is None:
-            return b"", True, False
+            return b"", True, False, None
         buf = bytearray()
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
@@ -248,10 +286,10 @@ class HostSession:
                     from remedy.execution.process import kill_process_tree
 
                     kill_process_tree(proc)
-                    return bytes(buf), True, False
+                    return bytes(buf), True, False, None
             remaining = deadline - loop.time()
             if remaining <= 0:
-                return bytes(buf), True, interactive
+                return bytes(buf), True, interactive, None
             # One outstanding read — never wait_for-cancel a blocking ConPTY ReadFile.
             if self._stdout_pending is None or self._stdout_pending.done():
                 self._stdout_pending = asyncio.ensure_future(proc.stdout.read(4096))
@@ -265,17 +303,28 @@ class HostSession:
                 chunk = self._stdout_pending.result()
             except Exception:
                 self._stdout_pending = None
-                return bytes(buf), True, interactive
+                exited = _child_exit_code(proc)
+                if exited is not None:
+                    return bytes(buf), False, interactive, exited
+                return bytes(buf), True, interactive, None
             self._stdout_pending = None
             if not chunk:
-                return bytes(buf), True, interactive
+                exited = _child_exit_code(proc)
+                if exited is not None:
+                    return bytes(buf), False, interactive, exited
+                # The fake console ReadFile is non-blocking: empty while the
+                # child is still alive just means "nothing yet". A real
+                # blocking ReadFile returning empty is EOF, and poll() will
+                # have seen the death above. Sleep a beat so we do not spin.
+                await asyncio.sleep(min(0.05, remaining))
+                continue
             buf.extend(chunk)
             # The sentinel means the command COMPLETED — check it first so a
             # command that merely printed a prompt-like word (cat a file with
             # "password:", git output with "are you sure") is never mistaken
             # for a live prompt.
             if _sentinel_done(bytes(buf), marker):
-                return bytes(buf), False, interactive
+                return bytes(buf), False, interactive, None
             # A real interactive prompt is the CURRENT unterminated line: the
             # process is blocked on stdin, so the marker sits AFTER the last
             # newline with nothing following it. Output that contains the marker
@@ -287,9 +336,8 @@ class HostSession:
                 from remedy.execution.process import kill_process_tree
 
                 kill_process_tree(proc)
-                self._proc = None
-                self.started = False
-                return bytes(buf), True, True
+                self._abandon_proc()
+                return bytes(buf), True, True, None
 
 
 def _cwd_command(host: str) -> str:

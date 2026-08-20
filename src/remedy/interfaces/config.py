@@ -17,6 +17,8 @@ from urllib.parse import urlparse
 
 import yaml
 
+from remedy.core.atomic_json import write_text_atomic
+
 try:
     import tomllib
 except ImportError:
@@ -1204,9 +1206,9 @@ def create_default_config(home_dir: Path | None = None) -> Path:
             first_run_project = ensure_new_project_seed()
         except Exception:
             first_run_project = None
-        config_path.write_text(
+        write_text_atomic(
+            config_path,
             generate_default_config(hd, first_run_project=first_run_project),
-            encoding="utf-8",
         )
     return config_path
 

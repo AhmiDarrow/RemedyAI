@@ -34,6 +34,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
+
 _lock = threading.RLock()
 
 STATUS_OPEN = "open"
@@ -177,17 +179,9 @@ def _read(home: str | Path | None) -> list[Fault]:
 
 def _write(home: str | Path | None, faults: list[Fault]) -> None:
     p = _store_path(home)
-    tmp = p.with_suffix(f".{os.getpid()}.tmp")
     keep = sorted(faults, key=lambda f: f.last_seen, reverse=True)[:MAX_FAULTS]
     with suppress(Exception):
-        tmp.write_text(
-            json.dumps({"faults": [f.to_dict() for f in keep]}, indent=2),
-            encoding="utf-8",
-        )
-        os.replace(str(tmp), str(p))
-        return
-    with suppress(Exception):
-        tmp.unlink()
+        write_json_atomic(p, {"faults": [f.to_dict() for f in keep]})
 
 
 def record_fault(

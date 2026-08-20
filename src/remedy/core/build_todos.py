@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from remedy.core.atomic_json import write_json_atomic
+
 _VALID = frozenset({"pending", "in_progress", "completed", "cancelled"})
 
 
@@ -143,7 +145,7 @@ def save_todos(
         return fp
     fp.parent.mkdir(parents=True, exist_ok=True)
     payload = [t.to_public() for t in stored]
-    fp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    write_json_atomic(fp, payload)
     return fp
 
 

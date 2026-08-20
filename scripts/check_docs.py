@@ -336,11 +336,10 @@ def check_test_count_claim() -> CheckResult:
     Skip when the suite is absent (partial checkout) or the README no
     longer claims a count. The public tree ships tests/.
 
-    Accepts either:
-      (560+ tests; currently ~561)
-      (560+ tests)
-    Floor must be <= actual. If ~N is present, |actual - N| must be <= 25
-    (forces a README bump after large suite growth/shrink).
+    One number, the live suite: ``# ~7753 tests`` next to ``uv run pytest``.
+    (The old ``560+ tests; currently ~N`` form was a historical floor from
+    when the suite was ~560 items, not a second class of tests.)
+    ``|claimed - collected|`` must be <= 25 so a large add/drop forces a bump.
     """
     msgs: list[str] = []
     if not (ROOT / "tests").is_dir():
@@ -353,21 +352,27 @@ def check_test_count_claim() -> CheckResult:
         return CheckResult("test-count", False, ["README.md missing"])
 
     text = README.read_text(encoding="utf-8")
-    # Prefer the Development section claim
-    floor_m = re.search(
-        r"(\d+)\+\s*tests?(?:\s*;\s*currently\s*~?(\d+))?",
+    # Prefer the pytest comment in Development: ``uv run pytest -q  # ~N tests``
+    claim_m = re.search(
+        r"uv run pytest[^\n]*#\s*~?(\d+)\s*tests",
         text,
         re.IGNORECASE,
     )
-    if not floor_m:
+    if not claim_m:
+        # Legacy: ``560+ tests; currently ~N``
+        claim_m = re.search(
+            r"currently\s*~(\d+)",
+            text,
+            re.IGNORECASE,
+        )
+    if not claim_m:
         return CheckResult(
             "test-count",
             True,
             ["skipped: README has no public test-count claim"],
         )
 
-    floor = int(floor_m.group(1))
-    claimed = int(floor_m.group(2)) if floor_m.group(2) else None
+    claimed = int(claim_m.group(1))
     actual = _collect_pytest_count()
     if actual is None:
         return CheckResult(
@@ -378,32 +383,21 @@ def check_test_count_claim() -> CheckResult:
 
     bad = 0
     msgs.append(f"live pytest collection: {actual}")
-    msgs.append(f"README floor: {floor}+")
-    if claimed is not None:
-        msgs.append(f"README currently ~{claimed}")
+    msgs.append(f"README ~{claimed} tests")
 
-    if actual < floor:
-        msgs.append(f"suite shrank below floor ({actual} < {floor}+) — lower the claim")
+    delta = abs(actual - claimed)
+    if delta > 25:
+        msgs.append(
+            f"README ~{claimed} is {delta} off from live {actual} "
+            f"(tolerance 25) — update README"
+        )
         bad += 1
     else:
-        msgs.append("ok: floor <= actual")
+        msgs.append(f"ok: claim within tolerance (Δ={delta})")
 
-    if claimed is not None:
-        delta = abs(actual - claimed)
-        # tight enough that the "currently ~N" number stays honest
-        if delta > 25:
-            msgs.append(
-                f"currently ~{claimed} is {delta} off from live {actual} "
-                f"(tolerance 25) — update README"
-            )
-            bad += 1
-        else:
-            msgs.append(f"ok: currently claim within tolerance (Δ={delta})")
-
-    # Soft nudge: if exact-ish and delta > 5, still OK but note it
-    if claimed is not None and 5 < abs(actual - claimed) <= 25:
+    if 5 < delta <= 25:
         msgs.append(
-            f"note: consider bumping 'currently ~{claimed}' → ~{actual} "
+            f"note: consider bumping '~{claimed}' → ~{actual} "
             f"(not required until Δ>25)"
         )
 
@@ -411,8 +405,7 @@ def check_test_count_claim() -> CheckResult:
         "test-count",
         bad == 0,
         msgs,
-        f'Update README Development section, e.g. '
-        f'"{floor}+ tests; currently ~{actual}"',
+        f'Update README Development section, e.g. "# ~{actual} tests"',
     )
 
 
@@ -653,7 +646,7 @@ def main() -> None:
         print("  catalog   docs/manual chapters ↔ catalog.ts META ids")
         print("  commands  _BUILTIN_COMMANDS ↔ manual/11 + README slash table")
         print("  hotkeys   hotkeys.ts ↔ manual/12-reference-shortcuts")
-        print("  tests     README 'N+ tests; currently ~M' vs live collection")
+        print("  tests     README '~N tests' vs live pytest collection")
         print("  readme    README mentions sync/check scripts")
         print("  pypi      README links are absolute (PyPI long_description)")
         print("  urls      pyproject [project.urls] Documentation/Changelog/Issues")

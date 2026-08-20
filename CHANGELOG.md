@@ -4,6 +4,27 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Continuity, voice, and the phone line (leftovers from 2026-08-20)
+
+- **State files no longer tear on a crash.** Remaining `write_text(json.dumps(...))`
+  sites (todos, missions, vault, organism vitals, the computer-host job
+  queue, voice settings, host dialect/census, …) now go through
+  `write_json_atomic` / `write_text_atomic`. A kill mid-write leaves the
+  previous good file, not half a JSON document.
+- **Phone-line anti-aliasing matches the decimation.** The 5-tap binomial
+  used for 24 kHz → 8 kHz let 4–12 kHz content fold back as tones nobody
+  spoke. Downsampling now uses a windowed-sinc low-pass designed for the
+  actual ratio (2× / 3× / 6×), with ≥40 dB stopband above the 8 kHz Nyquist.
+- **`exit` in a host session no longer times out.** `run("exit /b 7")`
+  used to wait for a sentinel the dead shell would never print. The session
+  now notices the child has gone, returns the shell's code with a clear
+  message, and the next `run()` respawns rather than writing to a closed pipe.
+- **Smart-turn can actually be installed.** `/api/voice/install` with
+  `component=smart-turn` fetches the pinned pipecat v3.2 CPU ONNX
+  (`pipecat-ai/smart-turn-v3` @ `f766f81d…`, BSD-2-Clause, ~8 MB), verifies
+  size + sha256, and drops it where `make_detector` already looks — so the
+  next call picks it up without a restart.
+
 ### Voice — Remedy speaks and hears (local, optional)
 
 - **Speak-back**: new `remedy.voice` package + `/api/voice/*` routes. Local

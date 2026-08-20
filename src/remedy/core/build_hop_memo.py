@@ -13,6 +13,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
+
 
 def memo_key(
     *,
@@ -79,7 +81,7 @@ def store_hop(
         "source": source,
         "sha": hashlib.sha256(source.encode("utf-8", errors="replace")).hexdigest(),
     }
-    fp.write_text(json.dumps(payload), encoding="utf-8")
+    write_json_atomic(fp, payload, indent=None)
     return fp
 
 

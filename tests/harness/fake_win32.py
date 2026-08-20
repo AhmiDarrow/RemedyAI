@@ -52,6 +52,7 @@ __all__ = [
     "FakeDesktop",
     "FakeFunction",
     "FakePipe",
+    "FakeShellExitError",
     "FakeUIAElement",
     "FakeUIAutomation",
     "FakeWin32",
@@ -62,6 +63,14 @@ __all__ = [
     "install_fake_win32",
     "uia_element",
 ]
+
+
+class FakeShellExitError(Exception):
+    """The fake cmd.exe process has ended (``exit`` / ``exit /b N``)."""
+
+    def __init__(self, code: int = 0) -> None:
+        super().__init__(code)
+        self.code = int(code)
 
 
 # --------------------------------------------------------------------------
@@ -1194,6 +1203,8 @@ class FakeConsoleHost:
         self.spawns: list[dict[str, Any]] = []
         self.terminated: list[tuple[int, int]] = []
         self.process_handle = 0
+        self.process_alive = True
+        self.process_exit_code = 0
         self.attribute_lists: list[Any] = []
         self.attribute_updates: list[tuple[Any, ...]] = []
 
@@ -1241,6 +1252,7 @@ class FakeConsoleHost:
         k32.on("DeleteProcThreadAttributeList", lambda *_a: 1)
         k32.on("CreateProcessW", self.CreateProcessW)
         k32.on("TerminateProcess", self.TerminateProcess)
+        k32.on("GetExitCodeProcess", self.GetExitCodeProcess)
         k32.on("GetLastError", lambda: self.last_error)
 
     # -- kernel32 entry points --------------------------------------------
@@ -1328,7 +1340,12 @@ class FakeConsoleHost:
                 self._rows[idx] = row
                 out.push(b"\x1b[?25l" + text.encode("utf-8") + f"\x1b[{row};1H".encode() + b"\x1b[?25h")
             if self.shell is not None:
-                produced = self.shell(text)
+                try:
+                    produced = self.shell(text)
+                except FakeShellExitError as e:
+                    self._process_exited(e.code)
+                    buf[:] = b""  # typed-but-not-yet-submitted lines die with it
+                    break
                 if produced:
                     out.push(produced.encode("utf-8"))
                     self._rows[idx] = self._rows.get(idx, 1) + produced.count("\n")
@@ -1464,6 +1481,8 @@ class FakeConsoleHost:
         )
         if self.fail_create_process:
             return 0
+        self.process_alive = True
+        self.process_exit_code = 0
         self.process_handle = self._handle("process")
         thread_handle = self._handle("thread")
         if ppi is not None:
@@ -1477,6 +1496,19 @@ class FakeConsoleHost:
 
     def TerminateProcess(self, handle: Any, code: Any = 1) -> int:  # noqa: N802
         self.terminated.append((handle_value(handle), int(code)))
+        self._process_exited(int(code))
+        return 1
+
+    def _process_exited(self, code: int) -> None:
+        self.process_alive = False
+        self.process_exit_code = int(code)
+
+    def GetExitCodeProcess(self, handle: Any, pcode: Any) -> int:  # noqa: N802
+        del handle
+        if self.process_alive:
+            set_out(pcode, 259)  # STILL_ACTIVE
+        else:
+            set_out(pcode, self.process_exit_code)
         return 1
 
 
@@ -1487,8 +1519,10 @@ CONPTY_PRELUDE = b"\x1b[?9001h\x1b[?1004h\x1b[?25l\x1b[2J\x1b[m\x1b[H"
 
 def fake_cmd_shell(cwd: str = "C:\\work") -> Callable[[str], str]:
     """Just enough of ``cmd.exe`` for the host session: ``echo``, ``cd``,
-    ``%ERRORLEVEL%``, ``&``-joined commands and ``exit N``. Everything else
-    (``chcp`` and friends) prints nothing. Lines end CRLF, as cmd's do.
+    ``%ERRORLEVEL%``, ``&``-joined commands and ``exit`` / ``exit /b N``.
+    ``exit`` ends the process (raises ``FakeShellExitError``) the way an
+    interactive ``cmd /K`` does. Everything else (``chcp`` and friends)
+    prints nothing. Lines end CRLF, as cmd's do.
     """
     state = {"errorlevel": 0}
 
@@ -1504,9 +1538,17 @@ def fake_cmd_shell(cwd: str = "C:\\work") -> Callable[[str], str]:
                 out.append(text.replace("%ERRORLEVEL%", str(state["errorlevel"])))
             elif lower == "cd":
                 out.append(cwd)
-            elif lower.startswith("exit "):
-                with contextlib.suppress(ValueError):
-                    state["errorlevel"] = int(part.split()[1])
+            elif lower == "exit" or lower.startswith("exit ") or lower.startswith("exit\t"):
+                tokens = part.split()
+                code = 0
+                try:
+                    if len(tokens) >= 3 and tokens[1].lower() == "/b":
+                        code = int(tokens[2])
+                    elif len(tokens) >= 2:
+                        code = int(tokens[1])
+                except ValueError:
+                    code = 0
+                raise FakeShellExitError(code)
             elif part and not lower.startswith("chcp"):
                 out.append(f"'{part.split()[0]}' is not recognized as an internal or external command,")
                 state["errorlevel"] = 9009

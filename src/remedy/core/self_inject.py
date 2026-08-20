@@ -31,6 +31,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
 from remedy.core.project_fingerprint import (
     fingerprint_path,
     path_env_with_local_bins,
@@ -534,8 +535,8 @@ def request_sidecar_restart(
     }
     try:
         locks.mkdir(parents=True, exist_ok=True)
-        (locks / "self_inject_apply").write_text(
-            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        write_json_atomic(
+            locks / "self_inject_apply", payload, indent=None, ensure_ascii=False
         )
         return True
     except Exception:
@@ -687,7 +688,7 @@ def _record_tick(home: str | Path | None, payload: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         blob = dict(payload)
         blob["ts"] = _now_utc()
-        path.write_text(json.dumps(blob, indent=2, ensure_ascii=False), encoding="utf-8")
+        write_json_atomic(path, blob, ensure_ascii=False)
 
 
 async def run_unattended_improve(

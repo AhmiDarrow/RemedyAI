@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from remedy.core.atomic_json import scratch_path
+from remedy.core.atomic_json import write_json_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +63,7 @@ def load_rmb_json(home_dir: str | Path | None = None) -> dict[str, Any]:
 def save_rmb_json(state: dict[str, Any], home_dir: str | Path | None = None) -> None:
     path = rmb_json_path(home_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = scratch_path(path)
-    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    write_json_atomic(path, state)
 
 
 def default_state() -> dict[str, Any]:
