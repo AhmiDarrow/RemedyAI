@@ -38,11 +38,24 @@ def _get_version() -> str:
     """Resolve package version for CLI, API, About panel, and frozen builds.
 
     Order:
+      0. Frozen build: the ``pyproject.toml`` PyInstaller bundled next to the
+         code. It is the version the sidecar was built as; a stale
+         ``remedy-ai`` dist-info swept in from the build machine's
+         site-packages must never win over it.
       1. Repo ``pyproject.toml`` when running from the source tree / editable install
          (avoids stale site-packages dist-info like 0.9.2 while source is 0.10.x)
       2. importlib.metadata for installed wheels
-      3. Frozen / adjacent pyproject copies
+      3. Adjacent pyproject copies
     """
+    # 0) Frozen: the bundled pyproject is authoritative.
+    try:
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            ver = _read_version_from_pyproject(Path(sys._MEIPASS) / "pyproject.toml")
+            if ver:
+                return ver
+    except Exception:
+        pass
+
     # 1) Authoritative for dev / editable: the checkout we are executing from.
     src_pp = _source_tree_pyproject()
     if src_pp is not None:
@@ -66,12 +79,6 @@ def _get_version() -> str:
         Path(sys.prefix) / "pyproject.toml",
         Path(sys.prefix) / "_internal" / "pyproject.toml",
     ]
-    try:
-        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-            candidates.insert(0, Path(sys._MEIPASS) / "pyproject.toml")
-    except Exception:
-        pass
-
     for candidate in candidates:
         ver = _read_version_from_pyproject(candidate)
         if ver:
