@@ -721,6 +721,7 @@ class ComputerHostBridge:
             "ready",
             "click",
             "type",
+            "select",
             "screenshot",
         ) or ui.get("open_browser"):
             cmd = {
@@ -1200,6 +1201,7 @@ class ComputerHostBridge:
                     "key",
                     "scroll",
                     "find",
+                    "select",
                 ):
                     self.mark_host_dead()
         return job

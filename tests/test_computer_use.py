@@ -1389,6 +1389,8 @@ def test_computer_guidance_present():
     assert "computer_screenshot" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "computer_snapshot" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "computer_act" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "computer_select" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "computer_fill" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "target" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "play" in COMPUTER_USE_SYSTEM_ADDENDUM.lower()
     assert "target=desktop" in COMPUTER_USE_SYSTEM_ADDENDUM
@@ -2109,6 +2111,98 @@ def test_browse_tool_ok_parses_json_not_success_substring():
     assert _browse_tool_ok("navigate unsuccessful") == (False, False)
     assert _browse_tool_ok('{"ok": false, "user_visible": true}') == (False, True)
     assert _browse_tool_ok('{"ok": true, "rail_failed": true}') == (False, True)
+
+
+def test_select_and_fill_are_first_class_actions():
+    from remedy.core.computer.types import COMPUTER_TOOL_NAMES, ComputerAction, action_from_tool
+
+    assert "computer_select" in COMPUTER_TOOL_NAMES
+    assert "computer_fill" in COMPUTER_TOOL_NAMES
+    assert action_from_tool("computer_select") is ComputerAction.SELECT
+    assert action_from_tool("computer_fill") is ComputerAction.FILL
+
+
+def test_fill_without_fields_fails_closed(tmp_path):
+    import json as _json
+
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    d = _json.loads(ex.run(ComputerAction.FILL, target="browser", fields=[]))
+    assert d["ok"] is False
+    assert "fields" in d["message"].lower()
+
+
+def test_fill_walks_each_field(tmp_path):
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    calls: list[tuple] = []
+    ex = ComputerExecutor(home_dir=tmp_path)
+
+    def fake_run_browser(act, **kw):
+        calls.append((act, kw))
+        return {"ok": True, "action": act.value, "message": "ok"}
+
+    ex._run_browser = fake_run_browser  # type: ignore[method-assign]
+    d = ex._computer_fill(
+        {
+            "fields": [
+                {"text": "Name", "value": "Ada"},
+                {"ref": "e4", "select": "CA"},
+            ]
+        }
+    )
+    assert d["ok"] is True
+    assert d["action"] == "fill"
+    kinds = [c[0] for c in calls]
+    assert ComputerAction.CLICK in kinds
+    assert ComputerAction.TYPE in kinds
+    assert ComputerAction.SELECT in kinds
+    sel = next(kw for act, kw in calls if act is ComputerAction.SELECT)
+    assert sel.get("ref") == "e4"
+    assert sel.get("value") == "CA"
+
+
+def test_select_enqueues_select_action(tmp_path, monkeypatch):
+    import json as _json
+
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    seen: list[tuple] = []
+
+    class _Job:
+        id = "sel1"
+
+    def _enq(action, payload=None, **_kw):
+        seen.append((action, dict(payload or {})))
+        return _Job()
+
+    class _Fin:
+        status = "done"
+        result = {"ok": True, "action": "select", "detail": "ok:CA"}
+        error = None
+
+    monkeypatch.setattr(ex, "_enqueue", _enq)
+    monkeypatch.setattr(ex.bridge, "wait", lambda *_a, **_k: _Fin())
+    monkeypatch.setattr(ex.bridge, "host_connected", lambda *_a, **_k: True)
+
+    d = _json.loads(
+        ex.run(
+            ComputerAction.SELECT,
+            target="browser",
+            value="CA",
+            ref="e4",
+        )
+    )
+    assert d["ok"] is True
+    assert seen
+    assert seen[0][0] == "select"
+    assert seen[0][1].get("ref") == "e4"
+    assert seen[0][1].get("value") == "CA" or seen[0][1].get("text") == "CA"
 
 
 def test_host_browser_launch_is_refused(tmp_path):

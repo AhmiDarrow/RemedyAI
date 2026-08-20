@@ -1968,6 +1968,72 @@ body.is-rail-resizing [data-browser-embed-host] {
   box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 45%, transparent);
   transition: width 0.3s ease;
 }
+.remedy-shell-progress-fill.is-unknown {
+  width: 32%;
+  animation: remedy-download-unknown 1.4s ease-in-out infinite;
+}
+@keyframes remedy-download-unknown {
+  0% { transform: translateX(-40%); }
+  100% { transform: translateX(220%); }
+}
+
+/* Title-bar download strip — lives in the unused spacer. */
+.titlebar-download {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  z-index: 1;
+}
+.titlebar-download-track {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 50%;
+  height: 7px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg-tertiary) 70%, var(--bg-primary));
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.titlebar-download-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 40%, transparent);
+  transition: width 0.3s ease;
+}
+.titlebar-download-fill.is-unknown {
+  width: 32%;
+  animation: remedy-download-unknown 1.4s ease-in-out infinite;
+}
+.titlebar-download-label {
+  position: relative;
+  z-index: 1;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  color: var(--text-primary);
+  text-shadow:
+    0 0 10px var(--bg-secondary),
+    0 0 10px var(--bg-secondary),
+    0 1px 0 var(--bg-secondary);
+}
+@media (prefers-reduced-motion: reduce) {
+  .remedy-shell-progress-fill.is-unknown,
+  .titlebar-download-fill.is-unknown {
+    animation: none;
+  }
+}
 .remedy-shell-step-row {
   display: flex;
   flex-wrap: wrap;

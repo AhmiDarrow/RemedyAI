@@ -121,10 +121,12 @@ def test_status_reports_reasons_when_engines_missing(tmp_path: Path, monkeypatch
     monkeypatch.setattr(svc, "stt_deps_available", lambda: False)
     st = voice_status(tmp_path, agent_gender="male")
     assert st["tts"]["available"] is False
-    assert "voice pack" in st["tts"]["reason"]
+    assert "not on this computer" in (st["tts"]["reason"] or "").lower()
+    assert "pip" not in (st["tts"]["reason"] or "").lower()
     assert st["tts"]["hint"] == "pip install remedy-ai[voice]"
+    assert st["pack"]["deps"] is False
     assert "smart_turn" in st
-    assert "voice pack" in st["smart_turn"]["reason"]
+    assert "not on this computer" in (st["smart_turn"]["reason"] or "").lower()
     assert st["tts"]["fallback"] == "browser"
     assert st["tts"]["voice"] == "am_michael"
     assert st["stt"]["available"] is False
@@ -200,6 +202,79 @@ def test_api_transcribe_rejects_empty_and_degrades(client: TestClient):
     assert r2.status_code in (200, 503)
     if r2.status_code == 503:
         assert "error" in r2.json()
+
+
+def test_api_voice_install_all_starts_pack(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    import remedy.voice.service as svc
+
+    monkeypatch.setattr(svc, "install_voice_pack_background", lambda home=None: True)
+    r = client.post("/api/voice/install", json={"component": "all"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    blob = str(body).lower()
+    assert "pip" not in blob
+
+
+def test_api_voice_install_stt_without_deps_starts_pack(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
+    import remedy.voice.service as svc
+
+    monkeypatch.setattr(svc, "stt_deps_available", lambda: False)
+    monkeypatch.setattr(svc, "install_voice_pack_background", lambda home=None: True)
+    r = client.post("/api/voice/install", json={"component": "stt"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert "pip" not in str(body).lower()
+
+
+def test_install_voice_pack_runs_extras_then_models(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import remedy.voice.service as svc
+
+    called: list[str] = []
+
+    monkeypatch.setattr(svc, "tts_deps_available", lambda: False)
+    monkeypatch.setattr(svc, "stt_deps_available", lambda: False)
+
+    def fake_pip() -> None:
+        called.append("pip")
+        monkeypatch.setattr(svc, "tts_deps_available", lambda: True)
+        monkeypatch.setattr(svc, "stt_deps_available", lambda: True)
+
+    monkeypatch.setattr(svc, "_pip_install_voice_extras", fake_pip)
+    monkeypatch.setattr(svc, "tts_installed", lambda home=None: True)
+    monkeypatch.setattr(svc, "stt_installed", lambda home=None: True)
+    monkeypatch.setattr(svc, "smart_turn_installed", lambda home=None: True)
+    svc.install_voice_pack(tmp_path)
+    assert called == ["pip"]
+    assert svc._install_state["pack"]["status"] == "done"
+
+
+def test_run_pip_packages_pulses_then_succeeds(monkeypatch: pytest.MonkeyPatch):
+    import remedy.voice.service as svc
+
+    class _Proc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(svc.subprocess, "run", lambda *a, **k: _Proc())
+    monkeypatch.setattr(svc.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(svc.sys, "frozen", False, raising=False)
+    state: dict = {"pack": {"status": "downloading", "percent": 5.0}}
+    svc.run_pip_packages(("kokoro-onnx",), state, "pack", cap=40.0)
+    assert state["pack"]["status"] == "downloading"
+
+
+def test_owner_pack_error_never_leaks_a_pip_command():
+    from remedy.voice.service import _owner_pack_error
+
+    out = _owner_pack_error(RuntimeError("pip install remedy-ai[voice] failed"))
+    assert "pip" not in out.lower()
 
 
 def test_api_voice_install_unknown_is_plain(client: TestClient):

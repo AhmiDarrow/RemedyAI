@@ -558,6 +558,40 @@ export function FormLinkButton({
   )
 }
 
+export function FormDownloadProgress({
+  label,
+  percent,
+  className = '',
+}: {
+  label: string
+  percent?: number | null
+  className?: string
+}) {
+  const known = typeof percent === 'number' && Number.isFinite(percent) && percent >= 3
+  const pct = known ? Math.max(0, Math.min(100, Math.round(percent as number))) : null
+  return (
+    <div
+      className={`mb-2 min-w-[12rem] ${className}`.trim()}
+      role="progressbar"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={pct ?? undefined}
+    >
+      <div className="remedy-shell-progress-track" style={{ height: '0.45rem' }}>
+        <div
+          className={`remedy-shell-progress-fill${known ? '' : ' is-unknown'}`}
+          style={{ width: known ? `${pct}%` : '32%' }}
+        />
+      </div>
+      <FormHint>
+        {label}
+        {pct != null ? ` · ${pct}%` : ''}
+      </FormHint>
+    </div>
+  )
+}
+
 export function FormActionButton({
   children,
   onClick,

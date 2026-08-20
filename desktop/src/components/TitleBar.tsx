@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { isTauri, tauriInvoke } from '../api/tauri'
 import { browserStackHold } from '../utils/browserStack'
+import { TitleBarDownload } from './TitleBarDownload'
 
 /** Linux (and any undecorated) Tauri build: in-app window controls + drag. */
 function useCustomWindowChrome(): boolean {
@@ -194,10 +195,10 @@ export function TitleBar({
         )}
       </div>
 
-      {/* Spacer — OS decorations on Windows; Linux uses this as the drag strip. */}
+      {/* Spacer — OS decorations on Windows; Linux uses this as the drag strip.
+          Downloads render here (pointer-events: none) so the drag still works. */}
       <div
-        className="flex-1 min-w-0 h-full"
-        aria-hidden
+        className="flex-1 min-w-0 h-full relative"
         onMouseDown={(e) => {
           if (!customChrome || e.button !== 0) return
           void tauriInvoke('start_dragging_main_window')
@@ -208,7 +209,9 @@ export function TitleBar({
             .then((v) => setMaximized(Boolean(v)))
             .catch(() => {})
         }}
-      />
+      >
+        <TitleBarDownload />
+      </div>
 
       {version && (
         <span

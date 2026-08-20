@@ -39,10 +39,11 @@ class VoiceSettingsPatch(BaseModel):
     speed: float | None = None
     stt_model: str | None = None
     language: str | None = None
+    tts_quality: str | None = None
 
 
 class VoiceInstallRequest(BaseModel):
-    component: str = "tts"  # tts | stt | smart-turn
+    component: str = "tts"  # tts | stt | smart-turn | chatterbox | all | pack
 
 
 def _home(cfg: dict[str, Any] | None) -> str | None:
@@ -79,53 +80,65 @@ def register_voice_routes(
         cfg = load_config()
         data = {k: v for k, v in patch.model_dump().items() if v is not None}
         if data:
-            return await asyncio.to_thread(save_voice_settings, data, _home(cfg))
+            saved = await asyncio.to_thread(save_voice_settings, data, _home(cfg))
+            if str(saved.get("tts_quality") or "") == "hq":
+                from remedy.voice.chatterbox import install_chatterbox_background
+
+                await asyncio.to_thread(install_chatterbox_background, _home(cfg))
+            return saved
         return load_voice_settings(_home(cfg))
 
     @app.post("/api/voice/install")
     async def voice_install_route(req: VoiceInstallRequest) -> dict[str, Any]:
         cfg = load_config()
         comp = (req.component or "tts").strip().lower()
+        if comp in ("all", "*", "pack", "voice"):
+            from remedy.voice.service import install_voice_pack_background
+
+            started = await asyncio.to_thread(install_voice_pack_background, _home(cfg))
+            return {"ok": True, "started": started}
         if comp == "tts":
-            from remedy.voice.service import install_tts_background, tts_deps_available
+            from remedy.voice.service import (
+                install_tts_background,
+                install_voice_pack_background,
+                tts_deps_available,
+            )
 
             if not tts_deps_available():
-                return {
-                    "ok": False,
-                    "error": "The voice pack is not installed on this computer.",
-                    "hint": "pip install remedy-ai[voice]",
-                }
-            started = install_tts_background(_home(cfg))
+                started = await asyncio.to_thread(install_voice_pack_background, _home(cfg))
+                return {"ok": True, "started": started}
+            started = await asyncio.to_thread(install_tts_background, _home(cfg))
             return {"ok": True, "started": started}
         if comp == "stt":
-            # faster-whisper downloads on first model load; warm it in background.
-            from remedy.voice.service import get_stt_model, stt_deps_available
+            from remedy.voice.service import (
+                install_stt_background,
+                install_voice_pack_background,
+                stt_deps_available,
+            )
 
             if not stt_deps_available():
-                return {
-                    "ok": False,
-                    "error": "The voice pack is not installed on this computer.",
-                    "hint": "pip install remedy-ai[voice]",
-                }
-            import threading
-
-            threading.Thread(
-                target=get_stt_model, args=(_home(cfg),), daemon=True
-            ).start()
-            return {"ok": True, "started": True}
+                started = await asyncio.to_thread(install_voice_pack_background, _home(cfg))
+                return {"ok": True, "started": started}
+            started = await asyncio.to_thread(install_stt_background, _home(cfg))
+            return {"ok": True, "started": started}
         if comp in ("smart-turn", "smart_turn"):
             from remedy.voice.service import (
                 install_smart_turn_background,
+                install_voice_pack_background,
                 smart_turn_deps_available,
             )
 
+            # Same as tts/stt: without onnxruntime the model can never load,
+            # so fetch the pack (which brings it) instead of a dead download.
             if not smart_turn_deps_available():
-                return {
-                    "ok": False,
-                    "error": "The voice pack is not installed on this computer.",
-                    "hint": "pip install remedy-ai[voice]",
-                }
-            started = install_smart_turn_background(_home(cfg))
+                started = await asyncio.to_thread(install_voice_pack_background, _home(cfg))
+                return {"ok": True, "started": started}
+            started = await asyncio.to_thread(install_smart_turn_background, _home(cfg))
+            return {"ok": True, "started": started}
+        if comp in ("chatterbox", "hq"):
+            from remedy.voice.chatterbox import install_chatterbox_background
+
+            started = await asyncio.to_thread(install_chatterbox_background, _home(cfg))
             return {"ok": True, "started": started}
         return {"ok": False, "error": f"Unknown voice piece {comp!r}."}
 

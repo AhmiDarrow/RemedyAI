@@ -51,9 +51,10 @@ An owner who never uses the phone features never downloads any of them.
 ### Chatterbox (TTS + zero-shot voice cloning)
 
 - **Project:** [resemble-ai/chatterbox](https://github.com/resemble-ai/chatterbox)
-- **Use:** the human-bar voice tier on capable GPUs
+- **Use:** the human-bar voice tier (Grove HQ + phone pipeline)
 - **License:** **MIT**
-- **Redistribution:** not bundled; fetched on request
+- **Redistribution:** not bundled; fetched when **Settings → Voice → High quality
+  voice** is turned on (`~/.remedy/voice/chatterbox/`)
 
 ### Android system image (VM line option)
 

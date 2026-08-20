@@ -281,7 +281,7 @@ export async function pullHfModel(body: {
 }
 
 export async function getHfProgress(): Promise<{ ok?: boolean; progress?: HfProgress }> {
-  return apiFetch('/rmb/hf/progress')
+  return apiFetch('/rmb/hf/progress', { timeout: 4000 })
 }
 
 export async function cancelHfPull(): Promise<{ ok?: boolean; error?: string; progress?: HfProgress }> {

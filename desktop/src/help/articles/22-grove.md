@@ -42,6 +42,17 @@ went into it.
 Each goal keeps its own conversation, so returning to a plot picks up where you
 left off rather than starting cold.
 
+## Settings (stay in Grove)
+
+The logo (top-left) menu **Settings…** and **Ctrl+,** open Settings as a sheet
+on Grove. They do **not** switch you to Studio. Speak/quiet is the 🔊/🔇
+control in the Grove top bar — there is no extra Voice button.
+
+Voice, vision, and local helpers download when Remedy first starts. Progress
+shows in the empty strip of the title bar (next to the logo). If the voice
+pack did not arrive, Settings → Voice has **Download Remedy's voice**.
+Advanced still shows the pip command for power users.
+
 ## Switching to Studio
 
 Grove keeps a **switch to Studio** pill; Studio keeps a **✦ Grove** button in

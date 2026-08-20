@@ -4,6 +4,7 @@ import type { SettingsFormProps } from './formTypes'
 import { SettingsSection } from '../SettingsSection'
 import {
   FormActionButton,
+  FormDownloadProgress,
   FormHint,
   FormLabel,
   FormNotice,
@@ -374,40 +375,24 @@ function HfPullPanel({
       ) : null}
       {pulling ? (
         <div className="mt-1">
-          <div
-            className="h-1 rounded overflow-hidden"
-            style={{ background: 'var(--bg-primary)' }}
-          >
-            <div
-              className="h-full"
-              style={{
-                width: `${pct}%`,
-                background: 'var(--accent)',
+          <FormDownloadProgress
+            label={progress?.message || `Downloading ${progress?.filename || 'GGUF'}`}
+            percent={progress?.bytes_total ? pct : (typeof progress?.pct === 'number' ? pct : null)}
+          />
+          {progress?.phase === 'downloading' ? (
+            <FormActionButton
+              variant="ghost"
+              disabled={false}
+              onClick={() => {
+                void cancelHfPull().then((r) => {
+                  if (r.error) onMsg(r.error)
+                  else onMsg('Cancelling download…')
+                })
               }}
-            />
-          </div>
-          <div className="flex items-center justify-between mt-1">
-            <span className="text-[9px]" style={{ color: 'var(--text-muted)' }}>
-              {progress?.message || `Downloading ${progress?.filename || 'GGUF'}…`}
-              {progress?.bytes_total
-                ? ` · ${pct}%`
-                : ''}
-            </span>
-            {progress?.phase === 'downloading' ? (
-              <FormActionButton
-                variant="ghost"
-                disabled={false}
-                onClick={() => {
-                  void cancelHfPull().then((r) => {
-                    if (r.error) onMsg(r.error)
-                    else onMsg('Cancelling download…')
-                  })
-                }}
-              >
-                Cancel
-              </FormActionButton>
-            ) : null}
-          </div>
+            >
+              Cancel
+            </FormActionButton>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -1485,8 +1470,8 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
       >
         <FormHint>
           Local <strong style={{ color: 'var(--text-secondary)' }}>SmolVLM2 2.2B</strong>{' '}
-          (Apache 2.0 · llama.cpp) — image understanding + local assist. Required dependency
-          when your chat model is text-only. One-time download (~1.6 GB). Starts with Remedy.
+          (Apache 2.0 · llama.cpp) — image understanding + local assist. Downloads with
+          Remedy (~1.6 GB, one-time). Starts with Remedy. Not optional.
         </FormHint>
         {(vision?.warnings?.length || 0) > 0 && (
           <FormNotice tone="warn">
@@ -1538,38 +1523,28 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                 : ''}
             </FormStatusRow>
           ) : null}
-          {(vision?.progress?.bytes_total || 0) > 0 &&
-          (vision?.progress?.phase === 'downloading' ||
-            vision?.progress?.phase === 'extracting') ? (
-            <div className="mt-1">
-              <div
-                className="h-1 rounded overflow-hidden"
-                style={{ background: 'var(--bg-primary)' }}
-              >
-                <div
-                  className="h-full rounded"
-                  style={{
-                    width: `${Math.min(
-                      100,
-                      Math.round(
-                        (100 * (vision.progress?.bytes_done || 0)) /
-                          (vision.progress?.bytes_total || 1),
-                      ),
-                    )}%`,
-                    background: 'var(--accent)',
-                  }}
-                />
-              </div>
-              <div className="mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                {formatDownloadGb(vision.progress?.bytes_done)} /{' '}
-                {formatDownloadGb(vision.progress?.bytes_total)}
-                {vision.progress?.current_file
-                  ? ` · ${vision.progress.current_file}`
-                  : ''}
-              </div>
-            </div>
+          {(vision?.progress?.phase === 'downloading'
+            || vision?.progress?.phase === 'extracting'
+            || vision?.progress?.phase === 'verifying') ? (
+            <FormDownloadProgress
+              label={
+                vision.progress?.current_file
+                  ? `${formatDownloadGb(vision.progress?.bytes_done)} / ${formatDownloadGb(vision.progress?.bytes_total)} · ${vision.progress.current_file}`
+                  : vision.progress?.message
+                    || `${formatDownloadGb(vision.progress?.bytes_done)} / ${formatDownloadGb(vision.progress?.bytes_total)}`
+              }
+              percent={
+                (vision.progress?.bytes_total || 0) > 0
+                  ? Math.round(
+                      (100 * (vision.progress?.bytes_done || 0))
+                        / (vision.progress?.bytes_total || 1),
+                    )
+                  : null
+              }
+            />
           ) : null}
         </FormStatusCard>
+        {p.settingsMode === 'advanced' ? (
         <FormToggle
           checked={Boolean(vision?.enabled)}
           disabled={!vision?.installed || visionBusy}
@@ -1591,6 +1566,8 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             })()
           }}
         />
+        ) : null}
+        {p.settingsMode === 'advanced' ? (
         <FormToggle
           checked={Boolean(vision?.force_decode)}
           disabled={!vision?.installed || !vision?.enabled || visionBusy}
@@ -1616,16 +1593,22 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             })()
           }}
         />
+        ) : null}
         <div className="flex flex-wrap gap-1.5">
           {!vision?.installed ? (
             <>
+              {(vision?.progress?.phase === 'downloading'
+                || vision?.progress?.phase === 'extracting'
+                || vision?.progress?.phase === 'verifying') ? (
+                <FormHint>Downloading with Remedy…</FormHint>
+              ) : (
               <FormActionButton
                 variant="primary"
                 disabled={visionBusy}
                 onClick={() => {
                   void (async () => {
                     setVisionBusy(true)
-                    setVisionMsg('Downloading pinned local model…')
+                    setVisionMsg('Retrying local model download…')
                     try {
                       const preferCuda = Boolean(vision?.health?.nvidia_detected)
                       const r = await installVision({ prefer_cuda: preferCuda })
@@ -1651,8 +1634,10 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                   })()
                 }}
               >
-                Download &amp; install local model
+                Retry download
               </FormActionButton>
+              )}
+              {p.settingsMode === 'advanced' ? (
               <FormActionButton
                 disabled={visionBusy}
                 onClick={() => {
@@ -1663,7 +1648,7 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                       const r = await activateVisionBundle()
                       if (r.ok === false || r.error) {
                         setVisionMsg(
-                          r.error || 'No local files found — use Download & install.',
+                          r.error || 'No local files found — retry the download.',
                         )
                       } else {
                         setVisionMsg(r.message || 'Activated — starts with Remedy')
@@ -1679,6 +1664,7 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
               >
                 Use existing files
               </FormActionButton>
+              ) : null}
               {(vision?.progress?.phase === 'downloading'
                 || vision?.progress?.phase === 'extracting'
                 || vision?.progress?.phase === 'verifying') && (

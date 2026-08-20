@@ -344,6 +344,7 @@ def test_every_computer_handler_is_a_coroutine(tools):
         ("computer_key", ["key"]),
         ("computer_navigate", ["url"]),
         ("computer_drag", ["x", "y", "x2", "y2"]),
+        ("computer_fill", ["fields"]),
     ],
 )
 def test_schemas_declare_the_arguments_the_action_cannot_work_without(
@@ -535,6 +536,8 @@ async def test_wait_forwards_the_requested_pause(tools):
         ("computer_drag", {"x": 1, "y": 2, "x2": 3, "y2": 4}),
         ("computer_act", {"click": "Search"}),
         ("computer_app", {"app": "notepad"}),
+        ("computer_select", {"value": "Oregon"}),
+        ("computer_fill", {"fields": [{"text": "Name", "value": "Ada"}]}),
     ],
 )
 async def test_in_ask_mode_a_mutation_stops_before_it_reaches_the_machine(
@@ -657,6 +660,21 @@ async def test_a_pixel_click_on_a_checkout_page_is_effortless_in_full_mode(tools
 async def test_typing_a_raw_card_number_stops_in_ask_mode(tools):
     out = await tools.t["computer_type"](text="4242 4242 4242 4242")
     assert SENSITIVE_PREFIX in out
+    assert tools.ex.calls == []
+
+
+@pytest.mark.asyncio
+async def test_filling_a_raw_card_number_stops_like_typing_one_does(tools):
+    """computer_fill types too — a PAN in fields[].value is the same moment."""
+    out = await tools.t["computer_fill"](
+        fields=[{"text": "Card number", "value": "4242 4242 4242 4242"}]
+    )
+    assert SENSITIVE_PREFIX in out
+    assert tools.ex.calls == []
+    out2 = await tools.t["computer_fill"](
+        fields='[{"text": "Card number", "value": "4242424242424242"}]'
+    )
+    assert SENSITIVE_PREFIX in out2
     assert tools.ex.calls == []
 
 
@@ -802,6 +820,28 @@ async def test_type_forwards_the_target_control_ref(tools):
     assert action is ComputerAction.TYPE
     assert kwargs["text"] == "hello"
     assert kwargs["ref"] == "c4"
+
+
+@pytest.mark.asyncio
+async def test_select_forwards_the_option_and_ref(tools):
+    tools.approvals.set_mode("auto")
+    await tools.t["computer_select"](value="Oregon", ref="e4")
+    action, kwargs = tools.ex.last
+    assert action is ComputerAction.SELECT
+    assert kwargs["value"] == "Oregon"
+    assert kwargs["ref"] == "e4"
+    assert kwargs["target"] == "browser"
+
+
+@pytest.mark.asyncio
+async def test_fill_forwards_the_field_list(tools):
+    tools.approvals.set_mode("auto")
+    fields = [{"text": "Name", "value": "Ada"}, {"ref": "e4", "select": "CA"}]
+    await tools.t["computer_fill"](fields=fields)
+    action, kwargs = tools.ex.last
+    assert action is ComputerAction.FILL
+    assert kwargs["fields"] == fields
+    assert kwargs["target"] == "browser"
 
 
 @pytest.mark.asyncio

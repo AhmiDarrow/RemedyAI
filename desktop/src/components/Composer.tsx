@@ -1073,8 +1073,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               <>
                 This chat model may not see images.
                 {visionStatus?.installed
-                  ? ' Turn on local vision in Settings — starts with Remedy when enabled.'
-                  : ' Install local vision in Settings (one-time SmolVLM2 2.2B download).'}
+                  ? ' Local vision is on this computer and starts with Remedy.'
+                  : ' Local vision downloads with Remedy — no extra step.'}
               </>
             )}
           </div>

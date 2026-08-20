@@ -22,7 +22,8 @@ Operate this Windows PC with Remedy-native tools when the Desktop is running.
 | `computer_snapshot` | SoM list of controls `[e1] button \"…\"` — not for open-only |
 | `computer_find` | Rank matches for a label |
 | `computer_page_text` | Read page text (no vision) |
-| `computer_type` / `computer_key` | Type / keys after focus |
+| `computer_type` / `computer_key` | Type / keys; **`ref=eN`** writes that field (do not type into whatever is focused) |
+| `computer_select` / `computer_fill` | Dropdowns (`value=` option) and multi-field forms in **one** call |
 | `computer_wait` | Short settle 0.3–1.0s if needed |
 | `computer_app` / `computer_windows` | Launch/focus OS apps |
 | `computer_screenshot` | Games / custom-drawn UIs — **auto-runs built-in vision** (OCR + click x/y) |
@@ -99,6 +100,19 @@ to cart"), that card text is how you tell them apart:
   store or tab — read state before toggling.
 - If a control truly is not in the snapshot, it may be off-screen: `computer_act`
   click-by-text auto-scrolls to find it; otherwise scroll and snapshot again.
+
+### Forms (browser rail)
+
+A form is one job, not a pile of unfocused keystrokes:
+
+- **Dropdown**: `computer_select ref=eN value="Oregon"` (visible option text
+  is fine). If you only have the field label, pass `hint="State"` plus the
+  option as `value=`.
+- **Many fields**: `computer_fill fields=[{"text":"First name","value":"Ada"},{"text":"State","select":"Oregon"}]`. Prefer this over a round-trip per box.
+- **One field**: `computer_type ref=eN text=…` — `ref=` is the snapshot
+  `[eN]`. Without a ref, click the label first.
+- After fill, `computer_page_text` or snapshot to **verify** values landed
+  before any Submit. Unverified fill is not done.
 
 ### Shopping (grocery / retail) — go STRAIGHT to results
 

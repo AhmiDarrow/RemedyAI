@@ -42,7 +42,14 @@ Optional default **project folder** — working directory for tools, shell, and 
 - **Your name** — what Remedy calls you (also in Settings later)  
 - **Communication style** — Balanced, Efficient, Detailed, Playful  
 
-### 5. Ready
+### 5. On this PC
+
+Vision, voice, and local helpers **download automatically** the first time
+Remedy starts. You can finish setup while they continue in the background.
+If the voice pack did not arrive, Settings → Voice has **Download Remedy's
+voice** (Advanced still shows the pip command).
+
+### 6. Ready
 
 - Optional **Keep Remedy ready (Start with Windows)**  
 - **Start Chatting** saves settings and closes the wizard  
