@@ -21,7 +21,7 @@ project access scope).
 | **Product** | Windows + Linux desktop partner + local API (`127.0.0.1:7400`) |
 | **Data home** | `~/.remedy` (config, memory, skills; DPAPI on Windows) |
 | **Models** | *Your* provider keys or Ollama / RMB — continuity stays on disk |
-| **Current** | **v0.26.2** — Host in Remedy's hands; Build does not stick on ledger |
+| **Current** | **v0.30.0** — Grove, voice, life tasks and the Vault; telephony Phase 0 |
 | **Install** | [Windows](01-install-windows.md) · [Linux](01-install-linux.md) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · PyPI `remedy-ai` |
 
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.  
@@ -30,6 +30,12 @@ Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
 ---
 
 ## What’s new (start here)
+
+**v0.30.0** highlights:
+
+- Grove is the default surface; Remedy speaks and hears locally
+- Life tasks with observed success, owner checkpoints, and the Remedy Vault
+- Reminders, mail, calendar, documents; telephony bench-only (Phase 0)
 
 **v0.26.2** highlights:
 
