@@ -143,6 +143,26 @@ def _stopped_note(tools_ran: bool) -> str:
     )
 
 
+def _take_nudges(session_id: Any, runtime: Any) -> list[str]:
+    """Owner messages queued for this turn (see turn_context.push_nudge)."""
+    from remedy.core.turn_context import drain_nudges, turn_session_id
+
+    sid = turn_session_id(runtime, fallback=str(session_id or "") or None)
+    return drain_nudges(sid)
+
+
+def _steer_message(text: str) -> dict[str, Any]:
+    """The owner spoke mid-turn. Plain user role — it *is* the user."""
+    return {
+        "role": "user",
+        "content": (
+            f"{text}\n\n"
+            "(Said while you were working — fold it into what you are doing "
+            "now; do not start over unless it asks you to.)"
+        ),
+    }
+
+
 async def _wait_rmb_ready_abortable(timeout_s: float) -> dict[str, Any]:
     import asyncio as _aio
 
@@ -873,6 +893,13 @@ async def call_llm_stream(runtime, message: str,
             timeout=timeout, connector=connector
         ) as http:
             for step in range(max_total):
+                # Mid-turn steering: anything the owner said while the last
+                # step ran goes in now, before she plans the next one.
+                with suppress(Exception):
+                    for _nudge in _take_nudges(session_id, runtime):
+                        messages.append(_steer_message(_nudge))
+                        yield "@@steered\n"
+
                 # Cooperative abort between ReAct steps (Stop generation).
                 with suppress(Exception):
                     from remedy.core.turn_context import is_turn_aborted
@@ -2301,6 +2328,23 @@ async def call_llm_stream(runtime, message: str,
                         continue
 
                 if text_out and (not tool_calls_list or force_answer):
+                    # A nudge that arrived while this answer streamed must not
+                    # be lost: keep what she said, add the owner's words, and
+                    # let her continue instead of ending the turn.
+                    # (force_answer means "no more tools", not "ignore the owner".)
+                    _late = _take_nudges(session_id, runtime)
+                    if _late:
+                        # Buffered rounds (tools armed) have not shown this
+                        # text yet; live rounds already streamed it.
+                        if not stream_live and not _looks_like_pseudo_tools(text_out):
+                            yield text_out
+                            produced_user_text = True
+                        messages.append({"role": "assistant", "content": text_out})
+                        for _nudge in _late:
+                            messages.append(_steer_message(_nudge))
+                        yield "\n\n"
+                        yield "@@steered\n"
+                        continue
                     # Local muscle vs frontier: set once per finalization path
                     _harness_on = False
                     with suppress(Exception):

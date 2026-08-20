@@ -77,6 +77,21 @@ export async function abortSession(sessionId: string): Promise<void> {
   await apiFetch(`/sessions/${sessionId}/abort`, { method: 'POST' })
 }
 
+/**
+ * Say something to a turn that is already running. The words join the live
+ * loop at its next step — no stop, no restart. `steered: false` means no
+ * turn was running; send normally instead.
+ */
+export async function steerSession(
+  sessionId: string,
+  message: string,
+): Promise<{ steered: boolean }> {
+  return apiFetch(`/sessions/${sessionId}/steer`, {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  })
+}
+
 /** Export session as plain text (.txt) or markdown (.md). */
 export async function exportSession(
   sessionId: string,

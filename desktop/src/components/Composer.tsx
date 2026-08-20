@@ -42,14 +42,14 @@ export type SendAttachment = {
 export type ComposerQueuedItem = {
   id: string
   text: string
-  mode: 'after' | 'interrupt'
+  mode: 'after' | 'interrupt' | 'steer'
 }
 
 interface ComposerProps {
   onSend: (
     text: string,
     attachments?: SendAttachment[],
-    opts?: { mode?: 'after' | 'interrupt' },
+    opts?: { mode?: 'after' | 'interrupt' | 'steer' },
   ) => void
   onStop: () => void
   onCommand: (command: string) => void
@@ -60,7 +60,7 @@ interface ComposerProps {
   onCancelQueued?: (id: string) => void
   onClearQueue?: () => void
   onPromoteQueued?: (id: string) => void
-  onUpdateQueued?: (id: string, patch: { text?: string; mode?: 'after' | 'interrupt' }) => void
+  onUpdateQueued?: (id: string, patch: { text?: string; mode?: 'after' | 'interrupt' | 'steer' }) => void
   planMode?: boolean
   /** Shift+Tab toggles Plan ↔ Build (composer-focused). */
   onTogglePlanMode?: () => void
@@ -534,7 +534,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }, [])
 
   const handleSubmit = useCallback(
-    (mode: 'after' | 'interrupt' = 'after') => {
+    (mode: 'after' | 'interrupt' | 'steer' = 'after') => {
       const text = input.trim()
       if ((!text && attachments.length === 0) || disabled || uploading) return
       // Commands still require a quiet moment (no concurrent turn side-effects).

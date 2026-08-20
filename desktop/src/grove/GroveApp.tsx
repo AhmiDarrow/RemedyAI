@@ -101,7 +101,7 @@ export interface GroveAppProps {
   handleSend: (
     text: string,
     attachments?: SendAttachment[],
-    opts?: { mode?: 'after' | 'interrupt'; sessionId?: string },
+    opts?: { mode?: 'after' | 'interrupt' | 'steer'; sessionId?: string },
   ) => Promise<void> | void
   stop: () => void
   serverReady: boolean
@@ -372,11 +372,12 @@ export function GroveApp({
           sid = await ensureHomeSession()
         }
         // Grove has no queue UI: a message sent while she is working steers
-        // her — the running turn stops (its partial reply stays as a stopped
-        // moment) and the new message goes now. Idle sends are unaffected.
+        // her — the words join the running turn at its next step (she keeps
+        // going and folds them in). With an attachment, or if the turn just
+        // ended, it falls back to stop-and-send. Idle sends are unaffected.
         await handleSend(t, attachments, {
           ...(sid ? { sessionId: sid } : {}),
-          mode: 'interrupt',
+          mode: 'steer',
         })
         setDraft('')
       } finally {
