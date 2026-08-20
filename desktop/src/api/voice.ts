@@ -56,6 +56,8 @@ export interface VoiceHqStatus {
 
 export interface VoicePackStatus {
   deps?: boolean
+  /** False only when this computer cannot run the voice pack at all. */
+  supported?: boolean
   install?: { status?: string; percent?: number; error?: string; message?: string } | null
 }
 

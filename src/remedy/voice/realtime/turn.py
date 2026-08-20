@@ -178,6 +178,7 @@ class SmartTurnDetector:
     executor: Any = None
 
     _session: Any = field(default=None, init=False)
+    _remote: bool = field(default=False, init=False)
     _tried: bool = field(default=False, init=False)
     _unavailable: str = field(default="", init=False)
     _buffer: bytearray = field(default_factory=bytearray, init=False)
@@ -197,7 +198,7 @@ class SmartTurnDetector:
     @property
     def available(self) -> bool:
         self._ensure()
-        return self._session is not None
+        return self._session is not None or self._remote
 
     @property
     def unavailable_reason(self) -> str:
@@ -211,6 +212,18 @@ class SmartTurnDetector:
         self._tried = True
         if not self.model_path:
             self._unavailable = "no smart-turn model configured"
+            return
+        # Desktop: the model runs inside the managed voice runtime; this
+        # detector keeps the windowing and asks the worker for the score.
+        from remedy.voice.runtime import use_managed_runtime
+
+        if use_managed_runtime():
+            from remedy.voice.service import smart_turn_deps_available
+
+            if not smart_turn_deps_available():
+                self._unavailable = "voice pack not installed"
+                return
+            self._remote = True
             return
         try:
             import onnxruntime
@@ -322,6 +335,7 @@ class SmartTurnDetector:
             score = self.score(pcm)
         except Exception as exc:  # noqa: BLE001 — a model failure must not hang a call
             self._session = None
+            self._remote = False
             self._unavailable = f"smart-turn inference failed: {exc}"
             logger.warning(
                 "turn-taking: %s; falling back to energy endpointing", self._unavailable
@@ -406,6 +420,10 @@ class SmartTurnDetector:
     def score(self, pcm: bytes) -> float:
         """Probability the speaker finished. Overridden in tests with a stub."""
         self._ensure()
+        if self._remote:
+            from remedy.voice.bridge import get_bridge
+
+            return get_bridge().turn_score(pcm, self.model_path)
         if self._session is None:
             raise RuntimeError(self._unavailable or "smart-turn model not loaded")
         tensor = self._model_input(pcm)

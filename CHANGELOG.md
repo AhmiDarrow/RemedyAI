@@ -4,6 +4,25 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Remedy Desktop gets a real voice
+
+- **Voice works in the installed app.** The Desktop sidecar could never
+  `pip install` anything, so "Download Remedy's voice" and the
+  high-quality voice both ended in "update Remedy Desktop and try again" —
+  advice nothing could satisfy. Voice now works like vision: on first
+  Download the sidecar fetches a pinned, sha256-verified CPython 3.12
+  (~70 MB, python-build-standalone) into `~/.remedy/voice/runtime/`,
+  installs the voice pack there, and runs Kokoro / whisper / smart-turn /
+  Chatterbox in that Python through a small worker. The installer stays
+  ~57 MB; HQ voice (torch) is possible for the first time in Desktop.
+- **Honest words when something is off.** A computer with no pinned
+  runtime (not Windows x64 / Linux x64 / Linux arm64) is told so, and the
+  Download button is not offered; no Desktop owner sees a pip command.
+- **`remedy update` / `remedy uninstall` know they are the Desktop
+  sidecar**: update points at About → Check for updates instead of trying
+  to pip-upgrade the frozen exe; uninstall clears data and leaves removing
+  the program to Windows Apps / the package manager.
+
 ## [0.30.0] - 2026-08-20
 
 ### Review fixes — forms, the phone line, and voice installs

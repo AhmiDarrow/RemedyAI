@@ -308,9 +308,18 @@ def run_uninstall(
         console.print("[yellow]Uninstall cancelled.[/yellow]")
         return
 
-    # Uninstall package
-    console.print("\n[bold]Uninstalling package...[/bold]")
-    ok = _pip_uninstall()
+    # Uninstall package. A frozen sidecar has no pip and is not a pip
+    # install: the Desktop uninstaller (Windows Apps / the .deb) removes
+    # the program; this path only clears the owner's data.
+    if getattr(sys, "frozen", False):
+        console.print(
+            "\n[dim]Remedy Desktop is removed from Windows Apps / your package "
+            "manager; this clears data only.[/dim]"
+        )
+        ok = True
+    else:
+        console.print("\n[bold]Uninstalling package...[/bold]")
+        ok = _pip_uninstall()
 
     # Data wipe (path-safety guard before any rmtree)
     if purge and REMEDY_HOME.exists():
