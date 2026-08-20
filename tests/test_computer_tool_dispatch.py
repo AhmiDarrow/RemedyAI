@@ -761,12 +761,10 @@ async def test_a_press_hold_summary_prefers_the_control_it_found(tools):
 
 @pytest.mark.asyncio
 async def test_a_hold_gesture_on_an_ordinary_page_is_not_gated_in_ask_mode(tools):
-    """Sentinel for the current gate list.
-
-    ``computer_press_hold`` is the one mutating computer tool absent from
-    ``ApprovalQueue.HIGH_IMPACT_TOOLS``, so in ask mode it only stops when the
-    payment classifier or the checkout-surface fallback fires. If that list
-    changes, this test should change with it — deliberately, not by accident.
+    """Deliberate, not a gap: a press-and-hold is how a CAPTCHA challenge is
+    answered, so prompting on every one would make them unusable. It stays in
+    _MUTATION_COMPUTER_TOOLS, so the payment-surface checkpoint still stops it
+    on a checkout page — see test_press_hold_is_mutation_not_high_impact.
     """
     tools.ex.bridge = _Bridge(observed_url=NORMAL_URL)
     out = await tools.t["computer_press_hold"](text="Hold to reveal")

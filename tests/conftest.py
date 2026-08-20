@@ -22,3 +22,12 @@ if not os.environ.get("REMEDY_HOME"):
     import tempfile
 
     os.environ["REMEDY_HOME"] = tempfile.mkdtemp(prefix="remedy-test-home-")
+
+# Rich colourises when the environment says the terminal can take it, and a
+# dozen tests assert on the *text* it prints. With FORCE_COLOR set — which some
+# CI images and agent harnesses do — those assertions meet ANSI escapes and
+# fail, while the same tests pass on a plain terminal. Pin it off for the suite
+# so a test result never depends on what shell it was started from.
+os.environ["NO_COLOR"] = "1"
+os.environ.pop("FORCE_COLOR", None)
+os.environ.setdefault("TERM", "dumb")

@@ -901,15 +901,13 @@ def test_a_process_with_no_handles_at_all_terminates_without_a_wild_close(wired:
 
 
 @windows_only
-def test_a_failing_pseudoconsole_close_currently_strands_the_process_handle(
+def test_a_failing_pseudoconsole_close_still_closes_the_process_handle(
     wired: Any,
 ) -> None:
-    """BUG, captured as it stands: one suppress() covers two independent closes.
-
-    ``_close`` closes the pseudoconsole and the process handle inside a single
-    ``with suppress(Exception)``. If ClosePseudoConsole throws, the process
-    handle is never closed and the field is zeroed anyway, so nothing can ever
-    close it — one leaked kernel object per failed teardown.
+    """``_close`` used to close the pseudoconsole and the process handle inside
+    one ``with suppress(Exception)``. A throwing ClosePseudoConsole skipped
+    CloseHandle — and the field was zeroed below regardless, so nothing could
+    ever close it: one leaked kernel object per failed teardown.
     """
     host, fake = wired
     proc, handles = _open_process(host)
@@ -918,8 +916,8 @@ def test_a_failing_pseudoconsole_close_currently_strands_the_process_handle(
     proc.kill()
 
     assert proc.returncode == 1
-    assert not host.is_closed(handles["process"]), "leaked — see the docstring"
-    assert proc._ph == 0, "and the handle is forgotten, so no retry is possible"
+    assert host.is_closed(handles["process"]), "the process handle was still leaked"
+    assert proc._ph == 0
 
 
 @windows_only
