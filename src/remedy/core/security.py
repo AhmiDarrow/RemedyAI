@@ -108,6 +108,10 @@ def secret_equals(presented: str | bytes | None, expected: str | bytes | None) -
     the next fix could miss. Length inequality still touches ``compare_digest``
     so the timing shape does not itself say "wrong length", and a bad type or
     encoding answers False rather than turning an auth check into a 500.
+
+    An empty secret never matches — not even an empty presentation. ``("", "")``
+    and ``(None, None)`` answered True, which is an auth check that passes when
+    the expected secret is unset and the client sends nothing.
     """
     import hmac
 
@@ -116,10 +120,57 @@ def secret_equals(presented: str | bytes | None, expected: str | bytes | None) -
         b = expected.encode("utf-8") if isinstance(expected, str) else bytes(expected or b"")
     except (TypeError, ValueError, UnicodeError):
         return False
+    if not a or not b:
+        return False
     if len(a) != len(b):
         hmac.compare_digest(a, a)
         return False
     return hmac.compare_digest(a, b)
+
+
+#: Well-known credential files, by name. ``list_dir`` hides these so a
+#: directory listing does not advertise where the keys are; the dotfile
+#: examples (``.env.example``) stay visible because they hold no secret.
+_CREDENTIAL_NAMES = frozenset(
+    {
+        ".env",
+        ".npmrc",
+        ".pypirc",
+        ".netrc",
+        "_netrc",
+        ".git-credentials",
+        ".aws",
+        ".ssh",
+        ".gnupg",
+        ".docker",
+        ".kube",
+        "credentials.json",
+        "service-account.json",
+    }
+)
+_CREDENTIAL_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".ppk")
+_CREDENTIAL_PREFIXES = ("id_rsa", "id_ed25519", "id_ecdsa", "id_dsa")
+_CREDENTIAL_ENV_EXAMPLES = (".example", ".sample", ".template", ".dist")
+
+
+def is_credential_filename(name: str | None) -> bool:
+    """True when *name* (a bare file/dir name) is a well-known credential file.
+
+    Name-based, so it is cheap enough for directory listings: ``.env`` and its
+    per-environment variants, package-manager auth files, SSH/cloud credential
+    directories, private keys and certificates. Templates such as
+    ``.env.example`` are not credentials and are reported False.
+    """
+    n = str(name or "").strip().lower()
+    if not n:
+        return False
+    if n in _CREDENTIAL_NAMES:
+        return True
+    if n.startswith(".env."):
+        return not n.endswith(_CREDENTIAL_ENV_EXAMPLES)
+    if n.startswith(_CREDENTIAL_PREFIXES):
+        return True
+    return n.endswith(_CREDENTIAL_SUFFIXES)
 
 
 def is_protected_secret_path(path: Path | str | None) -> bool:

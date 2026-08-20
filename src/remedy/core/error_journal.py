@@ -49,15 +49,16 @@ MAX_FAULTS = 200
 _ENVIRONMENTAL = re.compile(
     r"(?i)("
     r"connection\s*(refused|reset|aborted|error)|timed?\s*out|timeout|"
-    r"temporary failure in name resolution|getaddrinfo|dns|"
-    r"ssl|certificate|unreachable|network is|socket|"
+    r"temporary failure in name resolution|getaddrinfo|\bdns\b|"
+    r"\bssl\b|certificate|unreachable|network is|\bsocket\b|"
     # HTTP status codes need context. Bare "401", "403", "429" matched any
     # traceback with a line number that happened to be one of them — so real
     # code bugs in files longer than 400 lines were filed as "the world being
     # the world" and never became self-improvement targets. That is the exact
     # failure this module exists to prevent, inverted.
-    r"(?:http[/ ]?[\d.]*\s*)?(?:status|code|error)\s*[:=]?\s*(?:401|403|429)|"
-    r"(?:401|403|429)\s+(?:client\s+error|unauthorized|forbidden|too\s+many)|"
+    r"(?:http[/ ]?[\d.]*\s*)?(?:status|code|error)\s*[:=]?\s*(?:401|403|429)\b|"
+    r"\bhttps?(?:[/ ][\d.]+)?\s+(?:401|403|429)\b|"
+    r"\b(?:401|403|429)\s+(?:client\s+error|unauthorized|forbidden|too\s+many)|"
     r"rate.?limit|quota|insufficient_quota|"
     r"unauthorized|forbidden|invalid api key|authentication|"
     r"5\d\d\s+(server|bad gateway|service unavailable)|"

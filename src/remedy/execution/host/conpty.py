@@ -14,6 +14,7 @@ from typing import Any
 _PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016
 _EXTENDED_STARTUPINFO_PRESENT = 0x00080000
 _CREATE_UNICODE_ENVIRONMENT = 0x00000400
+_STARTF_USESTDHANDLES = 0x00000100
 
 
 def spawn_conpty_supported() -> bool:
@@ -166,7 +167,15 @@ def _spawn_conpty_sync(
         raise OSError("CreatePipe output failed")
 
     h_pc = ctypes.c_void_p()
-    hr = k32.CreatePseudoConsole(COORD(120, 40), h_pty_in, h_pty_out, 0, ctypes.byref(h_pc))
+    # restype=HRESULT makes ctypes RAISE on a failing HRESULT rather than
+    # return it, so a plain ``if hr != 0`` branch never ran and all four pipe
+    # ends leaked on every failed attempt. Catch, close, re-raise as ours.
+    try:
+        hr = k32.CreatePseudoConsole(
+            COORD(120, 40), h_pty_in, h_pty_out, 0, ctypes.byref(h_pc)
+        )
+    except OSError as exc:
+        hr = getattr(exc, "winerror", None) or -1
     if hr != 0:
         for h in (h_pty_in, h_con_in, h_con_out, h_pty_out):
             k32.CloseHandle(h)
@@ -202,6 +211,15 @@ def _spawn_conpty_sync(
 
     siex = StartupInfoExW()
     siex.StartupInfo.cb = ctypes.sizeof(StartupInfoExW)
+    # bInheritHandles=False does NOT stop the child inheriting the parent's
+    # standard handles when those are redirected (service / launcher): the
+    # child's output then lands on Remedy's own stdout and every run() times
+    # out. STARTF_USESTDHANDLES with NULL handles makes the pseudoconsole the
+    # child's only stdio.
+    siex.StartupInfo.dwFlags = _STARTF_USESTDHANDLES
+    siex.StartupInfo.hStdInput = None
+    siex.StartupInfo.hStdOutput = None
+    siex.StartupInfo.hStdError = None
     siex.lpAttributeList = ctypes.cast(attr_buf, ctypes.c_void_p)
 
     cmdline = subprocess.list2cmdline(argv)

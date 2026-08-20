@@ -359,3 +359,65 @@ def test_generic_webhook_accepts_secret_header_with_middleware(auth_on, tmp_path
         headers={"X-Remedy-Webhook-Secret": "wrong"},
     )
     assert r2.status_code == 401
+
+
+def test_generic_webhook_caps_body_before_parsing(auth_on, tmp_path, monkeypatch):
+    """A 3 MiB body is refused with 413 before anything parses it.
+
+    The body is deliberately *not* valid JSON: the old handler declared a typed
+    body parameter, so FastAPI buffered and parsed it first and answered 422
+    instead of 413, and ``read_body_capped`` never saw the raw stream.
+    """
+    from starlette.requests import Request as _Req
+
+    from remedy.interfaces.api_models import WebhookPayload
+
+    class _GW:
+        async def enqueue(self, _event):
+            raise AssertionError("oversized webhook must not be enqueued")
+
+    parses: list[bytes] = []
+    real = WebhookPayload.model_validate_json
+
+    def _spy(data, *a, **kw):
+        parses.append(bytes(data))
+        return real(data, *a, **kw)
+
+    monkeypatch.setattr(WebhookPayload, "model_validate_json", staticmethod(_spy))
+    buffered: list[int] = []
+    real_body = _Req.body
+
+    async def _body_spy(self):
+        out = await real_body(self)
+        buffered.append(len(out))
+        return out
+
+    monkeypatch.setattr(_Req, "body", _body_spy)
+    tok = ensure_local_api_token(tmp_path)
+    app = create_app(gateway=_GW(), api_key=tok)
+    client = TestClient(app)
+    big = b'{"source": "ci", "event": "push", "data": {"x": "' + b"a" * (3 * 1024 * 1024)
+    r = client.post(
+        "/api/webhook/ci",
+        content=big,
+        headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+    )
+    assert r.status_code == 413, r.text
+    assert parses == []
+    assert buffered == []
+
+
+def test_generic_webhook_bad_json_is_422(auth_on, tmp_path):
+    class _GW:
+        async def enqueue(self, _event):
+            raise AssertionError("invalid webhook must not be enqueued")
+
+    tok = ensure_local_api_token(tmp_path)
+    app = create_app(gateway=_GW(), api_key=tok)
+    client = TestClient(app)
+    r = client.post(
+        "/api/webhook/ci",
+        content=b'{"event": 5',
+        headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+    )
+    assert r.status_code == 422

@@ -139,11 +139,23 @@ def _auth_api_key_provider(provider: str, cmd: str | None, args, home) -> None:
         if not key:
             console.print("[red]API key is empty.[/red]")
             raise SystemExit(1)
+        # Same door the desktop app uses: it refuses Claude subscription
+        # tokens and files a key under the provider that actually issued it,
+        # instead of whatever provider was named on the command line.
+        from remedy.interfaces.config import infer_key_owner, set_provider_key
+
         try:
-            secret_store.set_provider_secret(provider, key, home)
+            set_provider_key({}, provider, key, home=home)
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
             raise SystemExit(1) from exc
+        owner = infer_key_owner(key)
+        if owner and owner != provider:
+            console.print(
+                f"[yellow]That key belongs to {owner}, not {label}; "
+                f"stored it under {owner}.[/yellow]"
+            )
+            label = owner
         console.print(
             f"[green]Saved {label} API key.[/green] "
             f"fingerprint={secret_store.fingerprint_key(key)}"

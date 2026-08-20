@@ -139,3 +139,50 @@ class TestPathGuardsAreCaseInsensitive:
         from remedy.core.time_travel import SessionUndoLog
 
         assert SessionUndoLog._is_restore_forbidden(Path.home() / spelling) is True
+
+
+class TestJailedAttachmentCallSites:
+    """The three callers imported the filter *inside* ``suppress(Exception)``.
+    An import failure was therefore silent and left every attachment in —
+    the gate vanished without a log line. The import now lives at module
+    level, so a failure is an import error at startup, and a filter that
+    explodes at runtime drops the attachments instead of keeping them."""
+
+    @pytest.mark.parametrize(
+        "modname",
+        [
+            "remedy.interfaces.routes.sessions.messages",
+            "remedy.interfaces.routes.sessions.stream",
+            "remedy.vision.service",
+        ],
+    )
+    def test_the_filter_is_bound_at_module_level(self, modname):
+        import importlib
+        import inspect
+
+        mod = importlib.import_module(modname)
+        assert callable(getattr(mod, "filter_jailed_attachments", None))
+        src = inspect.getsource(mod)
+        assert "    from remedy.interfaces.attachments import filter_jailed_attachments" not in src
+
+    def test_vision_decode_keeps_no_image_when_the_jail_explodes(self, monkeypatch, tmp_path):
+        from remedy.vision import service
+
+        img = tmp_path / "shot.png"
+        img.write_bytes(b"not really a png")
+
+        def _boom(*_a, **_kw):
+            raise RuntimeError("cannot resolve")
+
+        monkeypatch.setattr(service, "filter_jailed_attachments", _boom)
+        monkeypatch.setattr(
+            service, "decode_images", lambda *a, **kw: pytest.fail("decoded a jailed image")
+        )
+        out = service.decode_for_turn(
+            [{"name": "shot.png", "path": str(img), "mime": "image/png", "is_image": True}],
+            provider="openai",
+            model="gpt-4o",
+            cfg={"home_dir": str(tmp_path)},
+        )
+        assert out["mode"] == "text_only"
+        assert out["briefs"] == []

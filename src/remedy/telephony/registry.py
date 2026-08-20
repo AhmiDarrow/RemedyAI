@@ -71,7 +71,18 @@ def has_bluetooth_radio() -> bool | None:
         kernel32 = ctypes.WinDLL("kernel32")
         # Without an explicit restype ctypes truncates the returned HANDLE to a
         # 32-bit signed int, and the close below would be handed a bad handle.
+        # And without argtypes on the CLOSE calls, a 64-bit handle handed back
+        # as a C int raises ArgumentError — caught below as "I cannot tell" on
+        # exactly the machines that do have a radio.
+        bthprops.BluetoothFindFirstRadio.argtypes = [
+            ctypes.POINTER(_FindParams),
+            ctypes.POINTER(wintypes.HANDLE),
+        ]
         bthprops.BluetoothFindFirstRadio.restype = wintypes.HANDLE
+        bthprops.BluetoothFindRadioClose.argtypes = [wintypes.HANDLE]
+        bthprops.BluetoothFindRadioClose.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
         params = _FindParams(ctypes.sizeof(_FindParams))
         radio = wintypes.HANDLE()
         finder = bthprops.BluetoothFindFirstRadio(

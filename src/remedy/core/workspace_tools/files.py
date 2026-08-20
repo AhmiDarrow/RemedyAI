@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,8 @@ from remedy.core.workspace_tools.guards import (
 from remedy.core.workspace_tools.guards import (
     normalize_edits_arg as _normalize_edits_arg,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _record_undo(
@@ -62,8 +65,11 @@ def _record_undo(
             new_size=new_size,
             message_id=getattr(runtime, "_active_message_id", None),
         )
-    except Exception as exc:  # noqa: BLE001 — never block the write itself
-        return f" (no undo trail for this one: {exc})"
+    except Exception:  # noqa: BLE001 — never block the write itself
+        # The reason goes to the log, not the model: an exception text can
+        # carry paths and internals that do not belong in a tool reply.
+        logger.warning("undo trail could not be recorded for %s", target, exc_info=True)
+        return " (this write cannot be undone: the undo trail could not be recorded)"
     return ""
 
 

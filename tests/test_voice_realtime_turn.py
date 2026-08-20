@@ -27,6 +27,26 @@ def _quiet(n: int) -> list[bytes]:
     return [comfort_noise(FRAME, seed=i) for i in range(n)]
 
 
+class _Inline:
+    """An executor that runs the job on the spot: verdicts are deterministic,
+    and land on the very next frame, which is the earliest the real thread
+    could manage anyway."""
+
+    def __init__(self) -> None:
+        self.submitted = 0
+
+    def submit(self, fn, *args):
+        from concurrent.futures import Future
+
+        self.submitted += 1
+        fut: Future = Future()
+        try:
+            fut.set_result(fn(*args))
+        except BaseException as exc:  # noqa: BLE001 — mirrors a real executor
+            fut.set_exception(exc)
+        return fut
+
+
 def _feed(detector, frames: list[bytes], start: float = 0.0) -> list[tuple[float, TurnEvent]]:
     events = []
     t = start
@@ -150,7 +170,9 @@ def test_smart_turn_keeps_waiting_when_the_model_says_mid_sentence():
         def score(self, pcm: bytes) -> float:
             return 0.1  # "they are not done"
 
-    detector = _Unfinished(model_path="x", energy=EnergyTurnDetector(hangover_ms=200.0))
+    detector = _Unfinished(
+        model_path="x", executor=_Inline(), energy=EnergyTurnDetector(hangover_ms=200.0)
+    )
     frames = _quiet(5) + _frames(voiced_pcm(400)) + _quiet(15)
     assert [e for _, e in _feed(detector, frames)] == [TurnEvent.SPEECH_START]
 
@@ -164,7 +186,9 @@ def test_smart_turn_endpoints_when_the_model_says_finished():
         def score(self, pcm: bytes) -> float:
             return 0.95
 
-    detector = _Finished(model_path="x", energy=EnergyTurnDetector(hangover_ms=200.0))
+    detector = _Finished(
+        model_path="x", executor=_Inline(), energy=EnergyTurnDetector(hangover_ms=200.0)
+    )
     frames = _quiet(5) + _frames(voiced_pcm(400)) + _quiet(15)
     assert TurnEvent.ENDPOINT in [e for _, e in _feed(detector, frames)]
 
@@ -178,6 +202,7 @@ class _NeverFinished(SmartTurnDetector):
     """The model insists they are mid-sentence, every time it is asked."""
 
     def __init__(self, **kw) -> None:
+        kw.setdefault("executor", _Inline())
         super().__init__(**kw)
         self.asked = 0
 
@@ -311,6 +336,79 @@ def test_every_head_shape_becomes_a_probability(output, expect):
     assert d.score(voiced_pcm(500, 8000)) == pytest.approx(expect, abs=0.002)
 
 
+def test_a_mel_model_gets_log_mel_features_not_raw_samples():
+    """smart-turn v3 takes ``(1, 80, 800)`` log-mel. Reshaping raw samples to
+    ``(1, N)`` did not fail against it — it scored noise, every turn."""
+    import numpy as np
+
+    d = _wired(["batch", 80, 800], np.array([[0.9]], dtype=np.float32))
+    d.score(voiced_pcm(3000, 8000))
+    fed = d._session.fed
+    assert fed.shape == (1, 80, 800)
+    assert fed.dtype == np.float32
+    # Whisper-style normalisation: the floor sits 8 dB under the peak, at -1.
+    assert float(fed.max()) < 1.5
+    assert float(fed.min()) == pytest.approx(float(fed.max()) - 2.0)
+    # 3 s of audio in an 8 s window: the left (padded) part is the silence
+    # floor, the right part carries the speech.
+    assert float(fed[0, :, :400].max()) < float(fed[0, :, 500:].max())
+
+
+def test_log_mel_matches_whispers_recipe():
+    """Checked against ``transformers.WhisperFeatureExtractor`` when it is
+    installed (agreement to ~1e-6); otherwise the structural properties."""
+    import numpy as np
+
+    from remedy.voice.realtime.turn import log_mel, mel_filterbank
+
+    rng = np.random.default_rng(0)
+    x = (rng.standard_normal(16000 * 2) * 0.1).astype(np.float32)
+    mine = log_mel(x)
+    assert mine.shape == (80, 200)  # 10 ms hop, final frame dropped
+    fb = mel_filterbank()
+    assert fb.shape == (80, 201)
+    assert np.all(fb >= 0)
+    try:
+        from transformers import WhisperFeatureExtractor
+    except ImportError:
+        pytest.skip("transformers not installed; structural checks only")
+    fe = WhisperFeatureExtractor(feature_size=80)
+    ref = fe(x, sampling_rate=16000, return_tensors="np", padding=False)["input_features"][0]
+    assert np.abs(ref[:, : mine.shape[1]] - mine).max() < 1e-4
+
+
+def test_a_mel_model_with_a_free_frame_axis_gets_the_configured_window():
+    import numpy as np
+
+    d = _wired(["batch", 80, "frames"], np.array([[0.9]], dtype=np.float32))
+    d.window_ms = 2000.0
+    d.score(voiced_pcm(500, 8000))
+    assert d._session.fed.shape == (1, 80, 200)
+
+
+def test_a_model_with_an_input_rank_we_cannot_build_is_refused_not_fed(monkeypatch, caplog):
+    import logging
+    import sys
+    import types
+
+    class _Session:
+        def __init__(self, path, providers=None) -> None:
+            pass
+
+        def get_inputs(self):
+            return [_FakeInput("x", ["batch", 1, 80, 800])]
+
+        def run(self, *a, **k):
+            pytest.fail("a model with an unsupported input shape was run")
+
+    monkeypatch.setitem(sys.modules, "onnxruntime", types.SimpleNamespace(InferenceSession=_Session))
+    d = SmartTurnDetector(model_path="weird.onnx")
+    with caplog.at_level(logging.WARNING, logger="remedy.voice.realtime.turn"):
+        assert d.available is False
+    assert "cannot produce" in d.unavailable_reason
+    assert any("cannot produce" in r.getMessage() for r in caplog.records)
+
+
 def test_a_model_with_no_fixed_window_falls_back_to_the_configured_one():
     d = _wired(["batch", "sequence"], [[0.0, 1.0]])
     d.window_ms = 2000.0
@@ -324,15 +422,144 @@ def test_scoring_without_a_model_raises_rather_than_guessing():
         d.score(voiced_pcm(500, 8000))
 
 
-def test_a_model_that_misbehaves_never_hangs_the_call():
+def test_a_model_that_misbehaves_never_hangs_the_call(caplog):
     """``_complete`` still falls back to "finished" — a wobble must not leave
-    the far end waiting for someone who already stopped talking."""
+    the far end waiting for someone who already stopped talking. But it used
+    to do so silently, at debug level, with ``available`` still True: every
+    turn paid for a forward pass that always failed, and nobody was told."""
+    import logging
 
     class _Broken(SmartTurnDetector):
         def score(self, pcm: bytes) -> float:
             raise RuntimeError("inference exploded")
 
-    assert _Broken(model_path="x")._complete(voiced_pcm(500, 8000)) is True
+    d = _Broken(model_path="x")
+    d._tried = True
+    d._session = object()
+    assert d.available
+    with caplog.at_level(logging.WARNING, logger="remedy.voice.realtime.turn"):
+        assert d._complete(voiced_pcm(500, 8000)) is True
+    assert not d.available, "a failing model must be retired, not retried every turn"
+    assert "inference exploded" in d.unavailable_reason
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "inference exploded" in warnings[0].getMessage()
+
+
+def test_after_an_inference_failure_the_detector_is_an_explicit_energy_timer():
+    """The caller sees ``available=False`` and the next pause is not sent to
+    the model at all — the fallback is stated, not hidden."""
+
+    class _Broken(SmartTurnDetector):
+        def __init__(self, **kw) -> None:
+            super().__init__(**kw)
+            self.asked = 0
+
+        def score(self, pcm: bytes) -> float:
+            self.asked += 1
+            raise RuntimeError("inference exploded")
+
+    d = _Broken(model_path="x", executor=_Inline(), energy=EnergyTurnDetector(hangover_ms=200.0))
+    d._tried = True
+    d._session = object()
+    frames = _quiet(5) + _frames(voiced_pcm(400)) + _quiet(15)
+    events = [e for _, e in _feed(d, frames)]
+    assert TurnEvent.ENDPOINT in events
+    assert d.asked == 1
+    assert not d.available
+    # Second turn: never asked again.
+    events = [e for _, e in _feed(d, _frames(voiced_pcm(400)) + _quiet(15), start=1.0)]
+    assert TurnEvent.ENDPOINT in events
+    assert d.asked == 1
+
+
+def test_inference_runs_off_the_audio_loop():
+    """``feed`` is called every 20 ms; a forward pass is ~80 ms. Running it
+    inline stalled four frames at every pause, and barge-in with them."""
+    import threading
+    import time
+
+    started = threading.Event()
+    release = threading.Event()
+
+    class _Slow(SmartTurnDetector):
+        @property
+        def available(self) -> bool:
+            return True
+
+        def score(self, pcm: bytes) -> float:
+            started.set()
+            release.wait(5.0)
+            return 0.95
+
+    d = _Slow(model_path="x", energy=EnergyTurnDetector(hangover_ms=200.0))
+    frames = _quiet(5) + _frames(voiced_pcm(400)) + _quiet(10)
+    t0 = time.perf_counter()
+    events = [e for _, e in _feed(d, frames)]
+    elapsed = time.perf_counter() - t0
+    assert started.wait(2.0), "the model was never consulted"
+    assert TurnEvent.ENDPOINT not in events
+    assert elapsed < 0.5, f"feed blocked on inference for {elapsed:.2f}s"
+    assert d._pending is not None and not d._pending.done()
+    # The verdict is picked up on the first frame after it lands.
+    release.set()
+    d._pending.result(timeout=2.0)
+    assert d.feed(_quiet(1)[0], 1.0) is TurnEvent.ENDPOINT
+    assert d._pending is None
+    d.executor.shutdown(wait=True)
+
+
+def test_a_verdict_about_a_pause_they_talked_through_is_dropped():
+    """They resumed while the model was still thinking about the pause. Its
+    answer is about something that is over, and must not end the new turn."""
+    from concurrent.futures import Future
+
+    class _Manual:
+        def __init__(self) -> None:
+            self.futures: list[Future] = []
+
+        def submit(self, fn, *args):
+            fut: Future = Future()
+            self.futures.append(fut)
+            return fut
+
+    class _Always(SmartTurnDetector):
+        @property
+        def available(self) -> bool:
+            return True
+
+    ex = _Manual()
+    d = _Always(model_path="x", executor=ex, energy=EnergyTurnDetector(hangover_ms=200.0))
+    _feed(d, _quiet(5) + _frames(voiced_pcm(400)) + _quiet(10))
+    assert len(ex.futures) == 1 and d._pending is ex.futures[0]
+    events = [e for _, e in _feed(d, _frames(voiced_pcm(200)), start=1.0)]  # they resume
+    assert d._pending is None
+    ex.futures[0].set_result(True)  # "finished" — about the old pause
+    assert d.feed(_frames(voiced_pcm(20))[0], 2.0) is None
+    assert TurnEvent.ENDPOINT not in events
+
+
+def test_the_hold_clock_stops_when_they_resume_talking():
+    """``_held_ms`` kept counting through resumed speech, because energy never
+    re-fires onset while we are holding it in the speaking state. A talker
+    who paused once then spoke for a while had their *next* pause cut short:
+    the veto budget was already spent on their own words."""
+    detector = _NeverFinished(
+        model_path="x", max_wait_ms=600.0, energy=EnergyTurnDetector(hangover_ms=200.0)
+    )
+    # Pause 1: energy fires at 200 ms, the model says "not done", we hold.
+    _feed(detector, _quiet(30) + _frames(voiced_pcm(1000)) + _quiet(12))
+    assert detector._holding
+    assert detector._held_ms > 0
+    # They resume, for longer than max_wait_ms.
+    _feed(detector, _frames(voiced_pcm(1000)), start=2.0)
+    assert not detector._holding
+    assert detector._held_ms == 0.0, "time spent talking was charged to the model's veto"
+    # Pause 2: the model must still be allowed to hold for the full budget.
+    before = detector.asked
+    events = [e for _, e in _feed(detector, _quiet(12), start=3.0)]
+    assert detector.asked == before + 1
+    assert TurnEvent.ENDPOINT not in events
 
 
 def test_the_verdict_respects_the_threshold():

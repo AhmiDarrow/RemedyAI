@@ -6,6 +6,7 @@ Frontier C: red verify becomes a work queue, not a free-form prompt.
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -134,19 +135,47 @@ def _source_candidates(stem: str) -> list[str]:
     return out
 
 
-@lru_cache(maxsize=8)
+#: Seconds a source index stays trusted before the tree is walked again. Files
+#: are scaffolded mid-build; an index cached forever never learned about them.
+_SOURCE_INDEX_TTL = 5.0
+_source_index_cache: dict[str, tuple[float, tuple[str, ...]]] = {}
+
+
+def invalidate_source_index(root: Path | str | None = None) -> None:
+    """Forget the cached source tree (one root, or all of them).
+
+    Call after scaffolding files so the next guess sees them; otherwise the
+    TTL rebuilds the index on its own shortly after.
+    """
+    if root is None:
+        _source_index_cache.clear()
+    else:
+        _source_index_cache.pop(str(root), None)
+    _resolve_source.cache_clear()
+
+
 def _source_index(root_s: str) -> tuple[str, ...]:
-    """Every source file in the tree, once. Rebuilt per root, cached after."""
+    """Every source file in the tree, per root, rebuilt after a short TTL."""
+    now = time.monotonic()
+    hit = _source_index_cache.get(root_s)
+    if hit is not None and now - hit[0] < _SOURCE_INDEX_TTL:
+        return hit[1]
     root = Path(root_s)
     base = root / "src" if (root / "src").is_dir() else root
     try:
-        return tuple(
+        index = tuple(
             p.relative_to(root).as_posix()
             for p in base.rglob("*.py")
             if p.is_file() and "__pycache__" not in p.parts
         )
     except OSError:
-        return ()
+        index = ()
+    if len(_source_index_cache) >= 8:
+        _source_index_cache.pop(next(iter(_source_index_cache)))
+    _source_index_cache[root_s] = (now, index)
+    # A stale resolution would outlive the index it was computed from.
+    _resolve_source.cache_clear()
+    return index
 
 
 @lru_cache(maxsize=1024)
@@ -204,6 +233,18 @@ def format_repair_queue_message(queue: RepairQueue) -> dict[str, str]:
     return {"role": "user", "content": "\n".join(lines)}
 
 
+def _project_root(runtime: Any) -> Path:
+    """The project tree a repair runs in: ``runtime.effective_project_path()``
+    when the runtime has one, else the same walk-up ``_repo_root`` does."""
+    fn = getattr(runtime, "effective_project_path", None)
+    if callable(fn):
+        try:
+            return Path(fn())
+        except Exception:
+            pass
+    return _repo_root(None)
+
+
 def run_auto_repair_hops(
     runtime: Any,
     queue: RepairQueue,
@@ -221,6 +262,10 @@ def run_auto_repair_hops(
     """
     from remedy.core.build_live_hop import live_unit_hop
 
+    # The same root live_unit_hop resolves against. Guessing from Remedy's own
+    # __file__ and testing exists() against cwd aimed the repair at the wrong
+    # tree whenever the project was not also the working directory.
+    root = _project_root(runtime)
     results: list[dict[str, Any]] = []
     for t in queue.targets[:max_targets]:
         # Prefer non-test sources
@@ -230,8 +275,8 @@ def run_auto_repair_hops(
             # here and then thrown away, so the "prefer non-test sources"
             # strategy above never actually happened: a lone failing target got
             # its *test* rewritten, and any other target was skipped outright.
-            guess = _test_to_source_guess(path)
-            if guess and guess != path and Path(guess).exists():
+            guess = _test_to_source_guess(path, root)
+            if guess and guess != path and (root / guess).exists():
                 path = guess
             elif len(queue.targets) > 1 and not include_tests:
                 # Nothing to redirect to. Hopping the test itself is a last

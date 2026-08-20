@@ -117,3 +117,19 @@ def test_create_app_lifespan_registers_shutdown():
         r = client.get("/api/status")
         # status may 200 even without full runtime
         assert r.status_code in (200, 503, 500) or r.status_code < 600
+
+
+def test_lifespan_shutdown_closes_shared_llm_session(monkeypatch):
+    """API shutdown must close agent_llm's shared aiohttp session."""
+    from remedy.core import agent_llm
+
+    calls: list[str] = []
+
+    async def _fake_close():
+        calls.append("closed")
+
+    monkeypatch.setattr(agent_llm, "aclose_shared_session", _fake_close)
+    app = create_app(runtime=None, api_key="")
+    with TestClient(app):
+        pass
+    assert calls == ["closed"]

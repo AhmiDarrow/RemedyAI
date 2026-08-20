@@ -135,6 +135,26 @@ def test_collapse_keeps_outcome_not_just_first_line():
     assert any("app" in c and ".py" in c for c in collapsed)
 
 
+def test_offload_survives_a_lone_surrogate(tmp_path: Path):
+    """Subprocess output decoded with surrogateescape carries lone surrogates.
+    The atomic writer encodes strictly by default, so the offload raised and
+    silently fell back to keeping the whole fat body inline."""
+    fat = ("payload \udcff\n") * 2000
+    handle, path = offload_tool_body(
+        fat, session_id="s1", tool_name="bash_exec", home=tmp_path, min_chars=1000
+    )
+    assert path is not None, "offload silently failed"
+    assert "offloaded" in handle
+    assert Path(path).is_file()
+    meta = Path(path).with_suffix(".json")
+    assert meta.is_file()
+    import json
+
+    assert json.loads(meta.read_text(encoding="utf-8"))["chars"] == len(fat)
+    leftovers = [f for f in Path(path).parent.iterdir() if f.name.endswith(".tmp")]
+    assert not leftovers
+
+
 def test_offload_fat_tool_body(tmp_path: Path):
     fat = "payload\n" * 5000
     handle, path = offload_tool_body(

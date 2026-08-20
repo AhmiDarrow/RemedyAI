@@ -116,6 +116,8 @@ class VoicePipeline:
     _spoken_ms: float = field(default=0.0, init=False)
     #: Sub-frame tail of the last synthesis chunk, waiting for the next one.
     _carry: bytearray = field(default_factory=bytearray, init=False)
+    #: Has this turn's answer started a paced run on the wire yet?
+    _paced_run: bool = field(default=False, init=False)
     _stop: bool = field(default=False, init=False)
 
     # -- lifecycle -----------------------------------------------------------
@@ -253,6 +255,7 @@ class VoicePipeline:
         self._speaking_started = False
         self._spoken_ms = 0.0
         self._carry.clear()
+        self._paced_run = False
         self._commit = asyncio.Event()
         if self._backchannel is not None and not self._backchannel.done():
             # Recovering from a dead speculation can land here with a filler
@@ -288,6 +291,11 @@ class VoicePipeline:
             heard = await self.stt.final()
             self.stt.reset()
             if not heard.strip():
+                # Nothing was said, so there is nothing to answer — and nothing
+                # to score. A speculative record left behind here would sit in
+                # the metrics as a turn she never answered while the real
+                # endpoint, arriving moments later, opened a second one.
+                self._drop_turn_record()
                 self.state = PipelineState.LISTENING
                 return
 
@@ -323,7 +331,10 @@ class VoicePipeline:
         """Synthesize and play, but never before the turn is committed."""
         if self._over_speech_budget:
             return
-        async for pcm in self.tts.stream(text):
+        # A new synthesis request: its first chunk is warm-up (time-to-first-
+        # byte is paid per request), everything after it is owed on the clock.
+        self._paced_run = False
+        async for pcm in self._prefetched(self.tts.stream(text)):
             await self._commit.wait()
             if self._over_speech_budget:
                 # A model that will not stop must not be able to hold a live
@@ -346,6 +357,48 @@ class VoicePipeline:
             await self._playout(
                 b"", rec, backchannel=False, src_rate=self._tts_rate, flush=True
             )
+
+    async def _prefetched(self, chunks: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+        """Keep the synthesizer working while the previous chunk plays out.
+
+        Pulling the next chunk only after the current one has finished playing
+        serialises synthesis behind playout, and every per-chunk cost — even
+        the 40 ms a fast engine takes — lands on the wire as a hole between
+        chunks. The per-chunk pacer rebase used to hide exactly that. Run the
+        generator ahead into a short queue instead; the queue is bounded so a
+        runaway engine cannot pile up minutes of audio she will never say.
+        """
+        queue: asyncio.Queue[bytes | BaseException | None] = asyncio.Queue(maxsize=8)
+
+        async def _produce() -> None:
+            try:
+                async for pcm in chunks:
+                    await queue.put(pcm)
+            except asyncio.CancelledError:
+                raise
+            except BaseException as exc:  # noqa: BLE001 — re-raised on the consumer side
+                await queue.put(exc)
+                return
+            await queue.put(None)
+
+        producer = asyncio.get_running_loop().create_task(_produce())
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    return
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
+        finally:
+            if not producer.done():
+                producer.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await producer
+            aclose = getattr(chunks, "aclose", None)
+            if aclose is not None:
+                with contextlib.suppress(Exception):
+                    await aclose()
 
     async def _say_backchannel(self) -> None:
         """The noise a listening human makes. Deliberately not gated on commit."""
@@ -383,12 +436,18 @@ class VoicePipeline:
         flush: bool = True,
     ) -> None:
         """Send PCM as 20 ms frames, yielding between each so barge-in can land."""
-        # One chunk is one contiguous run. Whatever the engine spent producing
-        # it — a synthesis warm-up, a held commit, the gap after a barge-in — is
-        # not the transport failing to hold its cadence, and must not be
-        # reported as one. Audible gaps between chunks are real and are measured
-        # where they belong, as ``dead_air_ms`` below.
-        self.pacer.rebase()
+        # One synthesis request is one contiguous run, and it starts at its
+        # first chunk. Whatever the engine spent before that — warm-up, a held
+        # commit, the gap after a barge-in — is not the transport failing to
+        # hold its cadence, and must not be reported as one. But once she is
+        # talking, every frame is owed on a 20 ms clock: a synthesizer that
+        # stalls between chunks is heard as a stutter, and rebasing per chunk
+        # hid exactly that, letting a 700 ms-chunk engine pass the bench with
+        # ``late_frames == 0``. A backchannel is its own short run.
+        if backchannel or not self._paced_run:
+            self.pacer.rebase()
+        if not backchannel:
+            self._paced_run = True
         # The synthesizer need not speak at the line's rate — Chatterbox runs at
         # 24 kHz — so convert before framing. Framing 24 kHz audio into 8 kHz
         # frames would pace playout at a third of speed, overcount the speech

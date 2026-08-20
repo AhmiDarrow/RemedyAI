@@ -2182,6 +2182,19 @@ async def call_llm_stream(runtime, message: str,
                             if tool_msg:
                                 messages.append(tool_msg)
                                 batch_tool_msgs.append(tool_msg)
+                        # Same bookkeeping as the native batch below: the turn
+                        # state, the epoch's productivity and the batch count
+                        # all feed the stale-epoch / zero-tool drivers, which
+                        # otherwise still saw a turn with no tool batches.
+                        _rbdelta, _rpdelta = record_tool_batch_stats(
+                            turn=turn,
+                            fresh_calls=recovered,
+                            batch_tool_msgs=batch_tool_msgs,
+                            step=step,
+                        )
+                        tool_batches_this_turn += _rbdelta
+                        tool_batches_in_epoch += _rbdelta
+                        productive_in_epoch += _rpdelta
                         if (
                             not recovery_nudge_done
                             and batch_has_tool_errors(batch_tool_msgs)

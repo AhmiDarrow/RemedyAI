@@ -124,13 +124,29 @@ def test_a_balanced_file_passes(tmp_path, suffix):
     assert check_lang_syntax(f)["ok"] is True
 
 
-@pytest.mark.parametrize("suffix", ["ts", "tsx", "js", "jsx"])
+@pytest.mark.parametrize("suffix", ["ts", "js"])
 def test_an_unbalanced_file_fails(tmp_path, suffix):
     f = tmp_path / f"bad.{suffix}"
     f.write_text("function add(a, b) { return a + b;", encoding="utf-8")
     out = check_lang_syntax(f)
     assert out["ok"] is False
     assert out["error"]
+
+
+@pytest.mark.parametrize("suffix", ["tsx", "jsx"])
+def test_an_unbalanced_jsx_file_is_red_only_from_a_real_parser(tmp_path, suffix):
+    """JSX gets a verdict from a JSX-aware parser or no verdict at all."""
+    from remedy.core import build_lang_oracle as O
+
+    f = tmp_path / f"bad.{suffix}"
+    f.write_text("function add(a, b) { return a + b;", encoding="utf-8")
+    out = check_lang_syntax(f)
+    if O._jsx_checker():
+        assert out["ok"] is False
+        assert out["error"]
+    else:
+        assert out["ok"] is True
+        assert out["engine"].startswith("skip")
 
 
 def test_the_result_says_which_engine_judged_it(tmp_path):
@@ -162,10 +178,79 @@ def test_real_jsx_is_not_reported_as_broken(tmp_path):
     assert "node" not in out["engine"]
 
 
-def test_a_broken_jsx_file_is_still_caught(tmp_path):
+def test_a_broken_jsx_file_is_caught_when_a_parser_exists(tmp_path):
+    from remedy.core import build_lang_oracle as O
+
     f = tmp_path / "Broken.jsx"
     f.write_text("const A = () => { return <div>hi</div>;\n", encoding="utf-8")
-    assert check_lang_syntax(f)["ok"] is False
+    out = check_lang_syntax(f)
+    if O._jsx_checker():
+        assert out["ok"] is False
+    else:
+        assert out["ok"] is True
+        assert out["engine"].startswith("skip")
+
+
+@pytest.fixture
+def no_jsx_parser(monkeypatch):
+    from remedy.core import build_lang_oracle as O
+
+    monkeypatch.setattr(O, "_TOOLCHAIN", {"esbuild": None, "tsc": None})
+
+
+@pytest.mark.parametrize("suffix", ["jsx", "tsx"])
+def test_an_apostrophe_in_jsx_text_is_not_an_unterminated_string(tmp_path, suffix):
+    """``<p>Don't click {x}</p>`` is prose, not a string literal. The brace
+    heuristic saw ``'`` open a string that never closed and flagged a working
+    component — the exact false red this oracle must never produce."""
+    f = tmp_path / f"Hint.{suffix}"
+    f.write_text("const Hint = ({x}) => <p>Don't click {x}</p>;\n", encoding="utf-8")
+    out = check_lang_syntax(f)
+    assert out["ok"] is True, out
+    assert "brace" not in out["engine"]
+
+
+@pytest.mark.parametrize("suffix", ["jsx", "tsx"])
+def test_a_regex_literal_with_a_brace_in_jsx_is_not_unbalanced(tmp_path, suffix):
+    f = tmp_path / f"Re.{suffix}"
+    f.write_text(
+        "const hasBrace = (s) => /[{]/.test(s);\nexport default hasBrace;\n", encoding="utf-8"
+    )
+    out = check_lang_syntax(f)
+    assert out["ok"] is True, out
+    assert "brace" not in out["engine"]
+
+
+@pytest.mark.parametrize("suffix", ["jsx", "tsx"])
+def test_without_a_jsx_parser_the_file_is_skipped_not_red(tmp_path, suffix, no_jsx_parser):
+    """Same convention as an extension with no oracle: ok=True, engine "skip"."""
+    f = tmp_path / f"Broken.{suffix}"
+    f.write_text("const A = () => { return <div>hi</div>;\n", encoding="utf-8")
+    out = check_lang_syntax(f)
+    assert out["ok"] is True
+    assert out["engine"].startswith("skip")
+    assert out["error"] == ""
+
+
+def test_a_jsx_parser_when_present_gets_the_verdict(tmp_path, monkeypatch):
+    """With a JSX-aware parser on PATH its exit status is the answer."""
+    from remedy.core import build_lang_oracle as O
+
+    monkeypatch.setattr(O, "_TOOLCHAIN", {"esbuild": "/fake/esbuild", "tsc": None})
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **_):
+        calls.append(cmd)
+        return False, 'Expected "}" but found end of file'
+
+    monkeypatch.setattr(O, "_run", fake_run)
+    f = tmp_path / "Broken.jsx"
+    f.write_text("const A = () => { return <div>hi</div>;\n", encoding="utf-8")
+    out = check_lang_syntax(f)
+    assert out["ok"] is False
+    assert "end of file" in out["error"]
+    assert out["engine"] == "esbuild (jsx)"
+    assert calls and calls[0][0] == "/fake/esbuild" and calls[0][-1] == str(f)
 
 
 def test_plain_javascript_still_goes_to_a_real_parser_when_node_is_present(tmp_path):

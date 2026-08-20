@@ -14,6 +14,7 @@ from remedy.interfaces.api_models import (
 from remedy.interfaces.api_support import (
     load_config,
 )
+from remedy.interfaces.attachments import filter_jailed_attachments
 from remedy.models import (
     ChatMessageRole,
 )
@@ -198,12 +199,16 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         home_att = None
         with contextlib.suppress(Exception):
             home_att = load_config().get("home_dir")
-        with contextlib.suppress(Exception):
-            from remedy.interfaces.attachments import filter_jailed_attachments
-
+        # The import is at module level on purpose: inside the suppress, an
+        # import failure left every attachment unfiltered. A filter that
+        # fails at runtime drops them all — closed, not open.
+        try:
             att_dicts = filter_jailed_attachments(
                 att_dicts, home_dir=home_att, session_id=session_id
             )
+        except Exception:
+            logger.exception("attachment path jail failed; dropping attachments")
+            att_dicts = []
         user_text = (req.message or "").strip()
         display_content = user_text
         if att_dicts:

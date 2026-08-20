@@ -73,6 +73,7 @@ def test_tokens_atomic_write_no_tmp_left(tmp_path):
     path = go.tokens_path(tmp_path)
     assert path.is_file()
     assert not path.with_suffix(path.suffix + ".tmp").exists()
+    assert not list(path.parent.glob("*.tmp")), "a scratch file was left behind"
     loaded = go.load_tokens(tmp_path)
     assert loaded.access_token == "ya29.atomic"
     assert loaded.refresh_token == "1//rt"

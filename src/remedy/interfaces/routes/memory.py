@@ -789,7 +789,10 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
 
     # -- webhook -------------------------------------------------------------
     @app.post("/api/webhook/{source}")
-    async def receive_webhook(source: str, payload: WebhookPayload, request: Request):
+    async def receive_webhook(source: str, request: Request):
+        # The body is read by hand, *not* declared as a typed parameter:
+        # FastAPI would otherwise buffer and parse the whole thing before the
+        # handler ran, and the size cap below would be a no-op.
         if gateway is None:
             raise HTTPException(503, "Gateway not available")
         # Fail closed when local API auth is on: require Bearer or webhook secret.
@@ -831,6 +834,10 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         from remedy.interfaces.routes.webhooks import read_body_capped
 
         body = await read_body_capped(request)
+        try:
+            payload = WebhookPayload.model_validate_json(body)
+        except Exception as exc:
+            raise HTTPException(422, f"invalid webhook payload: {exc}") from None
         event = GatewayEvent(
             kind=EventKind.WEBHOOK,
             channel=ChannelKind.API,
