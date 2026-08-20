@@ -14,7 +14,6 @@ import importlib
 import json
 import logging
 import os
-import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -68,7 +67,17 @@ def _pulse_hq(stop: threading.Event) -> None:
             st["percent"] = round(min(92.0, p + 1.5), 1)
 
 
+def _managed() -> bool:
+    from remedy.voice.runtime import use_managed_runtime
+
+    return use_managed_runtime()
+
+
 def chatterbox_deps_available() -> bool:
+    if _managed():
+        from remedy.voice.runtime import pack_installed, runtime_ready
+
+        return runtime_ready() and pack_installed("hq")
     try:
         import chatterbox.tts  # noqa: F401
 
@@ -119,19 +128,9 @@ def _device() -> str:
     return "cpu"
 
 
-def _ensure_package() -> bool:
+def _ensure_package(home_dir: Path | str | None = None) -> bool:
     if chatterbox_deps_available():
         return True
-    if getattr(sys, "frozen", False):
-        logger.info("chatterbox: frozen sidecar has no HQ pack")
-        _install_state["chatterbox"] = {
-            "status": "error",
-            "error": (
-                "This copy of Remedy cannot add the high-quality voice from "
-                "Settings. Update Remedy Desktop and try Download again."
-            ),
-        }
-        return False
     if _skip_network():
         return False
     try:
@@ -142,18 +141,38 @@ def _ensure_package() -> bool:
         }
         from remedy.voice.service import run_pip_packages
 
-        run_pip_packages(
-            ("chatterbox-tts",),
-            _install_state,
-            "chatterbox",
-            cap=35.0,
-        )
-        importlib.invalidate_caches()
+        if _managed():
+            # Desktop: the pack lands in the managed runtime, downloading
+            # the runtime itself first if this is the owner's first pack.
+            from remedy.voice.runtime import mark_pack
+            from remedy.voice.service import _PACK_BASE_PACKAGES, _runtime_python
+
+            py = _runtime_python(home_dir, "chatterbox")
+            run_pip_packages(
+                _PACK_BASE_PACKAGES + ("chatterbox-tts",),
+                _install_state,
+                "chatterbox",
+                cap=35.0,
+                python=py,
+            )
+            from remedy.voice.bridge import get_bridge
+
+            get_bridge(home_dir).stop()  # stale imports from before pip
+            mark_pack("hq", bool(get_bridge(home_dir).probe().get("hq")), home_dir)
+        else:
+            run_pip_packages(
+                ("chatterbox-tts",),
+                _install_state,
+                "chatterbox",
+                cap=35.0,
+            )
+            importlib.invalidate_caches()
     except Exception as exc:
-        logger.warning("chatterbox: pip install failed: %s", exc)
+        from remedy.voice.service import _owner_pack_error
+
         _install_state["chatterbox"] = {
             "status": "error",
-            "error": "High-quality voice did not finish downloading.",
+            "error": _owner_pack_error(exc, what="High-quality voice"),
         }
         return False
     if not chatterbox_deps_available():
@@ -184,7 +203,7 @@ def get_chatterbox_engine(home_dir: Path | str | None = None) -> Any | None:
     with _engine_lock:
         if _engine is not None:
             return _engine
-        if not _ensure_package():
+        if not _ensure_package(home_dir):
             return None
         os.environ.setdefault("HF_HOME", str(_hf_home(home_dir)))
         os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(_hf_home(home_dir) / "hub"))
@@ -230,6 +249,9 @@ def install_chatterbox(home_dir: Path | str | None = None) -> None:
         }
         return
     _install_state["chatterbox"] = {"status": "downloading", "percent": 1.0}
+    if _managed():
+        _install_managed(home_dir)
+        return
     if get_chatterbox_engine(home_dir) is None:
         if _install_state.get("chatterbox", {}).get("status") != "error":
             _install_state["chatterbox"] = {
@@ -237,6 +259,45 @@ def install_chatterbox(home_dir: Path | str | None = None) -> None:
                 "error": "High-quality voice could not be loaded.",
             }
         raise RuntimeError("chatterbox install failed")
+
+
+def _install_managed(home_dir: Path | str | None) -> None:
+    """Desktop: pip the pack into the runtime, then let the worker pull weights."""
+    from remedy.voice.bridge import WorkerError, get_bridge
+    from remedy.voice.service import _owner_pack_error
+
+    if not _ensure_package(home_dir):
+        raise RuntimeError("chatterbox install failed")
+    _install_state["chatterbox"] = {
+        "status": "downloading",
+        "percent": 36.0,
+        "message": "Downloading Chatterbox",
+    }
+    stop = threading.Event()
+    pulse = threading.Thread(target=_pulse_hq, args=(stop,), daemon=True)
+    pulse.start()
+    try:
+        out = get_bridge(home_dir).warm_hq()
+    except WorkerError as exc:
+        _install_state["chatterbox"] = {
+            "status": "error",
+            "error": _owner_pack_error(exc, what="High-quality voice"),
+        }
+        raise RuntimeError("chatterbox install failed") from exc
+    finally:
+        stop.set()
+    st = out.get("state") if isinstance(out, dict) else None
+    if out.get("loaded") if isinstance(out, dict) else False:
+        _install_state["chatterbox"] = {"status": "done", "percent": 100.0}
+        return
+    err = str(st.get("error") or "") if isinstance(st, dict) else ""
+    _install_state["chatterbox"] = {
+        "status": "error",
+        "error": _owner_pack_error(
+            RuntimeError(err or "not loaded"), what="High-quality voice"
+        ),
+    }
+    raise RuntimeError("chatterbox install failed")
 
 
 def install_chatterbox_background(home_dir: Path | str | None = None) -> bool:
@@ -399,11 +460,14 @@ def hq_status(home_dir: Path | str | None = None) -> dict[str, Any]:
     hint = None
     hardware = _hardware_note()
     if not ready:
-        if getattr(sys, "frozen", False) and not deps:
-            reason = "This install does not include the high-quality voice pack yet."
-        elif not deps:
+        if not deps:
             reason = "High-quality voice is not on this computer yet."
-            hint = "pip install chatterbox-tts"
+            if _managed():
+                from remedy.voice.runtime import unsupported_reason
+
+                reason = unsupported_reason() or reason
+            else:
+                hint = "pip install chatterbox-tts"
         else:
             reason = "High-quality voice downloads when you turn it on (~1.1 GB)."
         if hardware:

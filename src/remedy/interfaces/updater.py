@@ -313,6 +313,19 @@ def run_update(check_only: bool = False) -> None:
     installed = _get_installed_version()
     console.print(f"  Installed: [bold]{installed}[/bold]")
 
+    # The Desktop sidecar cannot pip-upgrade itself; its updates arrive
+    # through the app (title bar -> About -> Check for updates).
+    if getattr(sys, "frozen", False):
+        latest = _get_latest_version()
+        if latest and _is_newer(latest, installed):
+            console.print(
+                f"  A newer Remedy Desktop ([bold cyan]{latest}[/bold cyan]) is out. "
+                "Update from the app: About Remedy -> Check for updates."
+            )
+        else:
+            console.print("  [green]Remedy Desktop is up to date.[/green]")
+        return
+
     # PyPI check
     console.print("  Checking PyPI... ", end="")
     latest = _get_latest_version()

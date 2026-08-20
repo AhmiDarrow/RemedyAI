@@ -240,7 +240,7 @@ def test_install_voice_pack_runs_extras_then_models(
     monkeypatch.setattr(svc, "tts_deps_available", lambda: False)
     monkeypatch.setattr(svc, "stt_deps_available", lambda: False)
 
-    def fake_pip() -> None:
+    def fake_pip(home_dir=None) -> None:
         called.append("pip")
         monkeypatch.setattr(svc, "tts_deps_available", lambda: True)
         monkeypatch.setattr(svc, "stt_deps_available", lambda: True)
