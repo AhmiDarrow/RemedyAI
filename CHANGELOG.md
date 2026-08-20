@@ -123,6 +123,14 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   and the readable one, carrying her relational memory and pledges in the
   clear, was not. `soul_export` now returns a message naming where exports go
   instead of raising.
+- **The safety-ceiling checkpoint now fires.** It sat at the tail of the
+  tool-batch section guarded by `is_final_step`, but that section is only
+  reached when `force_answer` is False — and at the ceiling `force_answer` is
+  always True, while the one path that clears it clears `is_final_step` in the
+  same statement. So the checkpoint meant to protect work at the riskiest
+  moment of a turn was never written. It fires on arrival at the ceiling now,
+  once per turn, which also covers the re-arm that pushes a turn *past* the
+  wall — more risk, not less.
 - **The L0 fast path never engaged.** `int(tier or 1)` collapses a real tier 0
   to 1, and the idiom appeared at all three levels: where the classified tier is
   stored, where it is read back, and in the loop's `== 0` guard — which was
