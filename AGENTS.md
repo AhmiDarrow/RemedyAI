@@ -207,7 +207,7 @@ AppImage — a red Linux job is a failed release even if Windows is green.
 
 | Item | Canonical form |
 |------|----------------|
-| Git tag | `v{X.Y.Z}` (e.g. `v0.26.2`) |
+| Git tag | `v{X.Y.Z}` (e.g. `v0.30.0`) |
 | Release title | `Remedy Desktop v{X.Y.Z}` |
 | Windows installer | **`Remedy.Desktop_{X.Y.Z}_x64-setup.exe`** |
 | Linux deb | **`Remedy.Desktop_{X.Y.Z}_amd64.deb`** |

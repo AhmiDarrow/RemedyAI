@@ -26,6 +26,17 @@ NSIS_DIR = (
 )
 
 
+# Heavy optional packages that must never be frozen into the sidecar.
+SIDECAR_EXCLUDES = (
+    "torch", "torchvision", "torchaudio", "functorch",
+    "chatterbox", "transformers", "tokenizers", "safetensors",
+    "faster_whisper", "ctranslate2", "kokoro_onnx", "onnxruntime",
+    "espeakng_loader", "phonemizer",
+    "cupy", "cv2", "scipy", "sklearn", "pandas", "matplotlib", "av",
+    "triton", "tensorboard", "numba", "llvmlite", "huggingface_hub", "hf_xet",
+)
+
+
 def _get_root_version() -> str:
     content = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     m = re.search(r'^version\s*=\s*"([^"]+)"', content, re.MULTILINE)
@@ -368,6 +379,13 @@ def build(cache_clean: bool = False, ci: bool = False):
 
     for hi in hidden_imports:
         cmd.extend(["--hidden-import", hi])
+
+    # Optional extras are runtime downloads, never sidecar payload. A dev
+    # machine with remedy-ai[voice]/[voice-hq] installed otherwise ships a
+    # 2.6 GB sidecar (torch alone is 3.8 GB unpacked) — CI builds from
+    # `uv sync --dev` and never sees them, so guard it here too.
+    for mod in SIDECAR_EXCLUDES:
+        cmd.extend(["--exclude-module", mod])
 
     # Entry point
     cmd.extend([
