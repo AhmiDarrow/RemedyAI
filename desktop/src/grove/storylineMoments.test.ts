@@ -39,6 +39,9 @@ describe('describeToolCall', () => {
       'Pressed “Sign in”',
     )
     expect(describeToolCall({ name: 'mail_send', args: {} })).toContain('go-ahead')
+    expect(
+      describeToolCall({ name: 'host_run', args: { command: 'exit /b 7' } }),
+    ).toBe('Ran a command on this PC')
   })
 
   it('never exposes typed text (secrets ride machine-side)', () => {

@@ -230,3 +230,12 @@ def test_sync_from_bills_creates_and_dedupes(home, monkeypatch) -> None:
     # idempotent
     R.sync_from_bills(home=home)
     assert len(R.list_reminders(home=home)) == 1
+
+
+def test_a_failed_reminder_save_is_not_silent(home, monkeypatch) -> None:
+    def boom(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(R, "write_json_atomic", boom)
+    with pytest.raises(OSError, match="disk full"):
+        R.add_reminder("pay the bill", time.time() + 60, home=home)

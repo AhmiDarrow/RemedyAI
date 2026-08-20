@@ -1,4 +1,4 @@
-"""REST API for local voice: speak-back (Kokoro TTS) + hearing (whisper STT).
+"""REST API for local voice: speak-back, hearing, and smart-turn install.
 
 All processing is on-device; audio never leaves this machine. When engines
 are missing the endpoints answer 503 with ``fallback`` hints so the desktop
@@ -92,7 +92,8 @@ def register_voice_routes(
             if not tts_deps_available():
                 return {
                     "ok": False,
-                    "error": "voice extra not installed — pip install remedy-ai[voice]",
+                    "error": "The voice pack is not installed on this computer.",
+                    "hint": "pip install remedy-ai[voice]",
                 }
             started = install_tts_background(_home(cfg))
             return {"ok": True, "started": started}
@@ -103,7 +104,8 @@ def register_voice_routes(
             if not stt_deps_available():
                 return {
                     "ok": False,
-                    "error": "voice extra not installed — pip install remedy-ai[voice]",
+                    "error": "The voice pack is not installed on this computer.",
+                    "hint": "pip install remedy-ai[voice]",
                 }
             import threading
 
@@ -120,11 +122,12 @@ def register_voice_routes(
             if not smart_turn_deps_available():
                 return {
                     "ok": False,
-                    "error": "onnxruntime not installed — pip install remedy-ai[voice]",
+                    "error": "The voice pack is not installed on this computer.",
+                    "hint": "pip install remedy-ai[voice]",
                 }
             started = install_smart_turn_background(_home(cfg))
             return {"ok": True, "started": started}
-        return {"ok": False, "error": f"unknown component {comp!r}"}
+        return {"ok": False, "error": f"Unknown voice piece {comp!r}."}
 
     @app.post("/api/voice/speak")
     async def voice_speak_route(req: SpeakRequest) -> Response:

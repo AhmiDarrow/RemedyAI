@@ -192,7 +192,7 @@ COMPONENTS: dict[str, Component] = {
         name="smart-turn",
         purpose="knowing when someone has finished speaking, so I do not talk over them",
         licence="BSD-2-Clause",
-        approx_mb=45,
+        approx_mb=9,
         source="the Pipecat project",
     ),
     "chatterbox": Component(
