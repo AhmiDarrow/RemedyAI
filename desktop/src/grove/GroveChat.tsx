@@ -405,7 +405,7 @@ export function GroveChat({
               : recording
                 ? 'Listening…'
                 : streaming
-                  ? 'Steer me — say it and I change course'
+                  ? 'Steer me — say it and I fold it in as I go'
                   : placeholder
           }
           disabled={!serverReady}
@@ -436,8 +436,8 @@ export function GroveChat({
             <button
               type="submit"
               className="grove-mic steer"
-              title="Steer — send now and she changes course"
-              aria-label="Steer: send now and change course"
+              title="Steer — she takes it in without stopping"
+              aria-label="Steer: she takes it in without stopping"
             >
               ↑
             </button>

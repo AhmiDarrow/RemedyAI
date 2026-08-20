@@ -30,11 +30,16 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - **No console windows.** pip, the runtime check and the voice worker are
   spawned hidden; engine progress bars (tqdm / Hugging Face) are off and
   worker chatter goes to the debug log, not the owner's log.
-- **Grove: every message steers.** Sending while Remedy is working used
-  to queue silently (Studio shows the queue; Grove never did, so it read
-  as "can't send"). In Grove a message sent mid-turn now stops the turn,
-  keeps what she had said as a paused moment, and she picks up from the
-  new message. The composer shows ⏸ and a ↑ Steer button while she works.
+- **Grove: every message steers — without stopping her.** Sending while
+  Remedy is working used to queue silently (Studio shows the queue; Grove
+  never did, so it read as "can't send"). There is now a real mid-turn
+  channel: `POST /api/sessions/{id}/steer` hands your words to the running
+  turn, and the ReAct loop folds them in at its next step (after the
+  current tool, or before it would have finished) as your message — no
+  stop, no restart, history in order. Works the same for every provider;
+  it is our loop, not the model API. Grove uses it for every send while
+  she works (⏸ and a ↑ Steer button show); with an attachment, or if the
+  turn ends in the same instant, it falls back to stop-and-send.
 - **`remedy update` / `remedy uninstall` know they are the Desktop
   sidecar**: update points at About → Check for updates instead of trying
   to pip-upgrade the frozen exe; uninstall clears data and leaves removing
