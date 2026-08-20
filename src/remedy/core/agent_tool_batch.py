@@ -468,7 +468,7 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             from remedy.core.metabolism.shadow import rehearse, should_shadow
             from remedy.core.turn_context import turn_session_id
 
-            tier = int(turn_tier(runtime, default=2) or 2)
+            tier = int(turn_tier(runtime, default=2))
             strict = bool(turn_shadow_strict(runtime))
             if not strict:
                 with suppress(Exception):
@@ -577,7 +577,7 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
         with suppress(Exception):
             from remedy.core.metabolism.tier import tier_policy
 
-            tpol = tier_policy(int(turn_tier(runtime, default=2) or 2))
+            tpol = tier_policy(int(turn_tier(runtime, default=2)))
             tcap = int(getattr(tpol, "max_tool_result_chars", 0) or 0)
             # tcap==0 means unlimited at tier; only tighten when tier sets a positive cap
             # AND global soft cap is also positive (local tight mode).
@@ -653,7 +653,7 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                 content=content_str or "",
                 tool_call_id=tc_id,
                 success=bool(effective_ok),
-                tier=int(turn_tier(runtime, default=2) or 2),
+                tier=int(turn_tier(runtime, default=2)),
                 action_ir=turn_action_ir(runtime),
                 shadow_outcome=shadow_outcome,
             )
@@ -825,7 +825,7 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                             tc_ex.get("id") or tc_ex.get("tool_call_id") or ""
                         ),
                         success=False,
-                        tier=int(turn_tier(runtime, default=2) or 2),
+                        tier=int(turn_tier(runtime, default=2)),
                         action_ir=turn_action_ir(runtime),
                         shadow_outcome="pass",
                     )

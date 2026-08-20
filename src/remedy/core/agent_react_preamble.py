@@ -379,8 +379,11 @@ def apply_metabolism_injects(
             take_pending_verify_remedy,
         )
 
+        # `or 1` here turned a classified L0_INSTANT (tier 0) into L1 at the
+        # moment it was stored, so the fast path could never fire.
+        _raw_tier = meta.get("tier")
         set_turn_tier(
-            int(meta.get("tier") or 1),
+            int(_raw_tier) if _raw_tier is not None else 1,
             runtime,
             label=str(meta.get("tier_label") or ""),
         )
