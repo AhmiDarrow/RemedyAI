@@ -34,7 +34,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from remedy.core.atomic_json import scratch_path
+from remedy.core.atomic_json import write_json_atomic
 from remedy.memory.soul.field import soul_dir
 
 CACHE_FILENAME = "embeddings.json"
@@ -178,9 +178,7 @@ def _save_cache(home: str | Path | None, cache: dict[str, Any]) -> None:
     p = _cache_path(home)
     with suppress(Exception):
         p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = scratch_path(p)
-        tmp.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(p)
+        write_json_atomic(p, cache, indent=None, ensure_ascii=False)
 
 
 def _model_invalidated(cache: dict[str, Any]) -> dict[str, Any]:

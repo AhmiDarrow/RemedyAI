@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from remedy.core.atomic_json import write_text_atomic
+
 logger = logging.getLogger(__name__)
 
 
@@ -275,10 +277,10 @@ class SessionUndoLog:
         try:
             p = self._path(session_id)
             if keep:
-                p.write_text(
+                write_text_atomic(
+                    p,
                     "\n".join(json.dumps(e.to_dict(), ensure_ascii=False) for e in keep)
                     + "\n",
-                    encoding="utf-8",
                 )
             elif p.exists():
                 p.unlink()

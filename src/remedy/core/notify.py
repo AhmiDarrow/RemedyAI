@@ -25,6 +25,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
+
 _lock = threading.RLock()
 
 _IMPORTANCE_RANK = {"low": 0, "normal": 1, "high": 2}
@@ -166,15 +168,10 @@ def _read_outbox(home: str | Path | None) -> list[Notification]:
 
 def _write_outbox(home: str | Path | None, items: list[Notification]) -> None:
     p = _outbox_path(home)
-    tmp = p.with_suffix(f".{os.getpid()}.tmp")
     # Keep the tail — an outbox is a feed, not an archive.
     payload = {"notifications": [n.to_dict() for n in items[-200:]]}
     with suppress(Exception):
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        os.replace(str(tmp), str(p))
-        return
-    with suppress(Exception):
-        tmp.unlink()
+        write_json_atomic(p, payload)
 
 
 def push_notification(

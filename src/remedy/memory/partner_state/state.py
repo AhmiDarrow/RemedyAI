@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
 from remedy.memory.partner_state.models import (
     GraphEdge,
     GraphNode,
@@ -149,7 +150,7 @@ class PartnerState:
                 "updated_at": self.updated_at.isoformat(),
             }
             with suppress(Exception):
-                path.write_text(json.dumps(data, indent=0, default=str), encoding="utf-8")
+                write_json_atomic(path, data, indent=0, default=str)
 
     def load(self) -> bool:
         path = self._path()

@@ -284,7 +284,7 @@ def test_the_model_gets_the_window_it_asked_for():
     """``score`` used to raise NotImplementedError, and ``_complete`` caught it
     and returned True — so a loaded model always said "finished" and semantic
     endpointing silently collapsed into the silence timer it exists to beat."""
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     d = _wired(["batch", 16000 * 8], np.array([[0.2, 2.4]], dtype=np.float32))
     d.score(voiced_pcm(3000, 8000))
@@ -298,7 +298,7 @@ def test_the_model_gets_the_window_it_asked_for():
 
 def test_short_audio_is_left_padded_so_the_end_stays_at_the_end():
     """The model judges the *end* of a turn; padding must not push it inward."""
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     d = _wired(["batch", 16000], np.array([[0.0, 0.0]], dtype=np.float32))
     d.score(voiced_pcm(100, 8000))
@@ -309,7 +309,7 @@ def test_short_audio_is_left_padded_so_the_end_stays_at_the_end():
 
 
 def test_long_audio_keeps_the_tail():
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     d = _wired(["batch", 8000], np.array([[0.0, 0.0]], dtype=np.float32))
     d.score(voiced_pcm(4000, 8000))
@@ -330,7 +330,7 @@ def test_long_audio_keeps_the_tail():
 def test_every_head_shape_becomes_a_probability(output, expect):
     """smart-turn has shipped with a 2-logit classifier and a single sigmoid;
     a model pinned later must not need a code change here."""
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     d = _wired(["batch", 4000], np.array(output, dtype=np.float32))
     assert d.score(voiced_pcm(500, 8000)) == pytest.approx(expect, abs=0.002)
@@ -339,7 +339,7 @@ def test_every_head_shape_becomes_a_probability(output, expect):
 def test_a_mel_model_gets_log_mel_features_not_raw_samples():
     """smart-turn v3 takes ``(1, 80, 800)`` log-mel. Reshaping raw samples to
     ``(1, N)`` did not fail against it — it scored noise, every turn."""
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     d = _wired(["batch", 80, 800], np.array([[0.9]], dtype=np.float32))
     d.score(voiced_pcm(3000, 8000))
@@ -357,7 +357,7 @@ def test_a_mel_model_gets_log_mel_features_not_raw_samples():
 def test_log_mel_matches_whispers_recipe():
     """Checked against ``transformers.WhisperFeatureExtractor`` when it is
     installed (agreement to ~1e-6); otherwise the structural properties."""
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     from remedy.voice.realtime.turn import log_mel, mel_filterbank
 
@@ -378,7 +378,7 @@ def test_log_mel_matches_whispers_recipe():
 
 
 def test_a_mel_model_with_a_free_frame_axis_gets_the_configured_window():
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     d = _wired(["batch", 80, "frames"], np.array([[0.9]], dtype=np.float32))
     d.window_ms = 2000.0
@@ -410,6 +410,7 @@ def test_a_model_with_an_input_rank_we_cannot_build_is_refused_not_fed(monkeypat
 
 
 def test_a_model_with_no_fixed_window_falls_back_to_the_configured_one():
+    pytest.importorskip("numpy")
     d = _wired(["batch", "sequence"], [[0.0, 1.0]])
     d.window_ms = 2000.0
     d.score(voiced_pcm(500, 8000))
@@ -563,7 +564,7 @@ def test_the_hold_clock_stops_when_they_resume_talking():
 
 
 def test_the_verdict_respects_the_threshold():
-    import numpy as np
+    np = pytest.importorskip("numpy")
 
     high = _wired(["batch", 4000], np.array([[0.0, 5.0]], dtype=np.float32))
     high.completion_threshold = 0.55

@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
+
 
 @dataclass
 class MissionStep:
@@ -92,9 +94,7 @@ class MissionStore:
         mission.updated_at = now
         # Validate id before write (UUIDs always pass; blocks forged objects)
         mission.id = validate_mission_id(mission.id)
-        self._path(mission.id).write_text(
-            json.dumps(mission.to_dict(), indent=2), encoding="utf-8"
-        )
+        write_json_atomic(self._path(mission.id), mission.to_dict())
         # Latest pointer per session (sanitize so session_id cannot path-escape)
         sid = sanitize_mission_session_id(mission.session_id)
         if sid:

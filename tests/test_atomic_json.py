@@ -21,6 +21,8 @@ import pytest
 
 from remedy.core.atomic_json import write_json_atomic, write_text_atomic
 
+_SRC = Path(__file__).resolve().parents[1] / "src" / "remedy"
+
 
 def test_writes_and_reads_back(tmp_path):
     p = tmp_path / "state.json"
@@ -310,10 +312,9 @@ class TestScratchNames:
 
     def test_no_module_still_uses_a_fixed_scratch_name(self):
         import ast
-        from pathlib import Path
 
         offenders = []
-        for path in sorted(Path("src/remedy").rglob("*.py")):
+        for path in sorted(_SRC.rglob("*.py")):
             if "bundled_skills" in path.parts:
                 continue
             try:
@@ -352,6 +353,92 @@ class TestScratchNames:
         ):
             ok = ast.parse(src).body[0].value
             assert not _is_fixed_tmp_name(ok.args[0]), src
+
+
+def _is_write_text_of_json_dumps(node) -> bool:
+    """``<anything>.write_text(json.dumps(...), ...)`` — the truncate-then-fill
+    pattern this module exists to replace."""
+    import ast
+
+    if not (isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "write_text"):
+        return False
+    if not node.args:
+        return False
+    first = node.args[0]
+    # json.dumps(...) directly, or json.dumps(...) + newline / [:n] around it.
+    for n in ast.walk(first):
+        if (isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "dumps"
+                and getattr(n.func.value, "id", "") == "json"):
+            return True
+    return False
+
+
+class TestNoBareJsonWrites:
+    """No module writes a JSON state file with ``write_text(json.dumps(...))``.
+
+    The sweep converted thirty-odd sites to ``write_json_atomic`` /
+    ``write_text_atomic``. Anything new has to be added here with a reason.
+    """
+
+    # file (relative to src/remedy) -> one-line reason it is left alone.
+    ALLOWED: dict[str, str] = {}
+
+    def test_no_module_writes_json_with_write_text(self):
+        import ast
+
+        offenders = []
+        for path in sorted(_SRC.rglob("*.py")):
+            if "bundled_skills" in path.parts:
+                continue
+            rel = path.relative_to(_SRC).as_posix()
+            if rel in self.ALLOWED:
+                continue
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+            except SyntaxError:  # pragma: no cover
+                continue
+            for n in ast.walk(tree):
+                if _is_write_text_of_json_dumps(n):
+                    offenders.append(f"{rel}:{n.lineno}")
+        assert not offenders, (
+            "write_text(json.dumps(...)) tears on a crash; use "
+            "atomic_json.write_json_atomic (or add to ALLOWED with a reason):\n  "
+            + "\n  ".join(offenders)
+        )
+
+    def test_the_allowlist_only_names_files_that_still_need_it(self):
+        """An entry that no longer matches is stale and should go."""
+        import ast
+
+        stale = []
+        for rel in self.ALLOWED:
+            path = _SRC / rel
+            if not path.is_file():
+                stale.append(rel)
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            if not any(_is_write_text_of_json_dumps(n) for n in ast.walk(tree)):
+                stale.append(rel)
+        assert not stale, f"allowlist entries no longer needed: {stale}"
+
+    def test_the_guard_sees_the_pattern(self):
+        import ast
+
+        for src in (
+            'p.write_text(json.dumps(d), encoding="utf-8")',
+            'p.write_text(json.dumps(d, indent=2) + "\\n")',
+            'p.write_text(json.dumps(d)[:100])',
+        ):
+            assert _is_write_text_of_json_dumps(ast.parse(src).body[0].value), src
+        for src in (
+            'p.write_text("plain")',
+            'p.write_text(body, encoding="utf-8")',
+            'write_json_atomic(p, d)',
+            'fh.write(json.dumps(d) + "\\n")',
+        ):
+            assert not _is_write_text_of_json_dumps(ast.parse(src).body[0].value), src
 
 
 def test_saving_a_project_profile_is_one_operation():
