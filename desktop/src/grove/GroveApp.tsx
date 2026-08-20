@@ -108,6 +108,8 @@ export interface GroveAppProps {
   userName: string
   partnerName: string
   onSwitchToStudio: () => void
+  /** Open Settings (Studio rail), typically at the Voice section. */
+  onOpenSettings?: () => void
   /** Goal room Remedy asked to open herself (app_control open_goal). */
   openGoalId?: string | null
   /** Ack once the requested goal has been opened (or found absent). */
@@ -116,6 +118,53 @@ export interface GroveAppProps {
 
 type GroveView = { kind: 'home' } | { kind: 'goal'; goal: LifeGoal }
 type RoomTab = 'alongside' | 'storyline'
+
+function GroveVoiceControls({
+  speakReplies,
+  speaking,
+  ttsReady,
+  compact,
+  onToggle,
+  onOpenSettings,
+}: {
+  speakReplies: boolean
+  speaking: boolean
+  ttsReady: boolean
+  compact?: boolean
+  onToggle: () => void
+  onOpenSettings?: () => void
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        className={`grove-voicetoggle${speakReplies ? ' on' : ''}${speaking ? ' speaking' : ''}`}
+        onClick={onToggle}
+        aria-pressed={speakReplies}
+        aria-label={speakReplies ? 'Speaking replies aloud' : 'Replies are silent'}
+        title={
+          speakReplies
+            ? ttsReady
+              ? 'Speaking replies aloud — click to go quiet'
+              : "Speaking with this computer's voices — download Remedy's voice in Voice settings for clearer speech"
+            : 'Click to have replies spoken aloud'
+        }
+      >
+        {compact ? (speakReplies ? '🔊' : '🔇') : speakReplies ? '🔊 aloud' : '🔇 quiet'}
+      </button>
+      {onOpenSettings ? (
+        <button
+          type="button"
+          className="grove-voicetoggle"
+          onClick={onOpenSettings}
+          title="Voice settings — speak, hear, download Remedy's voice"
+        >
+          Voice
+        </button>
+      ) : null}
+    </>
+  )
+}
 
 export function GroveApp({
   sessions,
@@ -132,6 +181,7 @@ export function GroveApp({
   userName,
   partnerName,
   onSwitchToStudio,
+  onOpenSettings,
   openGoalId,
   onGoalOpened,
 }: GroveAppProps) {
@@ -164,6 +214,7 @@ export function GroveApp({
   // Draft lives inside GroveChat now; mic transcripts send directly.
   const [, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
+  const [micErr, setMicErr] = useState('')
   const goalSessionsRef = useRef<Record<string, string>>(loadGoalSessions())
   const inputRef = useRef<HTMLInputElement | null>(null)
 
@@ -215,7 +266,11 @@ export function GroveApp({
       }
     } else {
       voice.stopSpeaking()
-      await voice.startRecording()
+      setMicErr('')
+      const ok = await voice.startRecording()
+      if (!ok) {
+        setMicErr('Microphone is blocked in this browser. Allow it for this site, or type instead.')
+      }
     }
   }, [voice])
 
@@ -472,22 +527,13 @@ export function GroveApp({
               📖 Storyline
             </button>
           </div>
-          <button
-            type="button"
-            className={`grove-voicetoggle${speakReplies ? ' on' : ''}${voice.speaking ? ' speaking' : ''}`}
-            onClick={toggleSpeakReplies}
-            aria-pressed={speakReplies}
-            aria-label={speakReplies ? 'Speaking replies aloud' : 'Replies are silent'}
-            title={
-              speakReplies
-                ? voice.status?.tts?.available
-                  ? "Speaking replies aloud — click to go quiet"
-                  : "Speaking with this computer's voices — download Remedy's voice in Settings for clearer speech"
-                : 'Click to have replies spoken aloud'
-            }
-          >
-            {speakReplies ? '🔊 aloud' : '🔇 quiet'}
-          </button>
+          <GroveVoiceControls
+            speakReplies={speakReplies}
+            speaking={voice.speaking}
+            ttsReady={Boolean(voice.status?.tts?.available)}
+            onToggle={toggleSpeakReplies}
+            onOpenSettings={onOpenSettings}
+          />
           <button
             type="button"
             className="grove-switch"
@@ -657,6 +703,11 @@ export function GroveApp({
               {plantError}
             </div>
           )}
+          {micErr ? (
+            <div className="grove-planterror" role="alert">
+              {micErr}
+            </div>
+          ) : null}
           <GroveChat
             messages={messages}
             partialText={partialText}
@@ -793,22 +844,14 @@ export function GroveApp({
             📖 Storyline
           </button>
         </div>
-        <button
-          type="button"
-          className={`grove-voicetoggle${speakReplies ? ' on' : ''}${voice.speaking ? ' speaking' : ''}`}
-          onClick={toggleSpeakReplies}
-          aria-pressed={speakReplies}
-          aria-label={speakReplies ? 'Speaking replies aloud' : 'Replies are silent'}
-          title={
-            speakReplies
-              ? voice.status?.tts?.available
-                ? "Speaking replies aloud — click to go quiet"
-                : "Speaking with this computer's voices — download Remedy's voice in Settings for clearer speech"
-              : 'Click to have replies spoken aloud'
-          }
-        >
-          {speakReplies ? '🔊' : '🔇'}
-        </button>
+        <GroveVoiceControls
+          speakReplies={speakReplies}
+          speaking={voice.speaking}
+          ttsReady={Boolean(voice.status?.tts?.available)}
+          compact
+          onToggle={toggleSpeakReplies}
+          onOpenSettings={onOpenSettings}
+        />
         <button type="button" className="grove-switch" onClick={onSwitchToStudio}>
           switch to <b>Studio</b>
         </button>
@@ -834,6 +877,11 @@ export function GroveApp({
             <span className="grip" />
           </div>
           <div className="grove-chatpane room">
+            {micErr ? (
+              <div className="grove-planterror" role="alert">
+                {micErr}
+              </div>
+            ) : null}
             {exchange.you || exchange.remedy || partialText ? null : (
               <div className="grove-room-hint">
                 {messagesLoading

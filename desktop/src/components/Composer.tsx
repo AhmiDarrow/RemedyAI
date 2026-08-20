@@ -80,6 +80,12 @@ interface ComposerProps {
   llmModel?: string
   /** Open Settings (optionally scrolled to vision later). */
   onOpenSettings?: () => void
+  /** Browser/WebUI + Grove share this: speak instead of typing. */
+  onMic?: () => void | Promise<void>
+  micSupported?: boolean
+  recording?: boolean
+  transcribing?: boolean
+  micError?: string
 }
 
 /** Imperative API so the image viewer can attach markup to the prompt rail. */
@@ -178,6 +184,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     llmProvider = '',
     llmModel = '',
     onOpenSettings,
+    onMic,
+    micSupported = false,
+    recording = false,
+    transcribing = false,
+    micError = '',
   },
   ref,
 ) {
@@ -1227,6 +1238,20 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         </div>
       )}
 
+      {micError && (
+        <div
+          className="mb-2 px-2 py-1.5 rounded text-xs"
+          role="alert"
+          style={{
+            color: 'var(--error)',
+            background: 'var(--error-bg, rgba(239,68,68,0.08))',
+            border: '1px solid var(--error)',
+          }}
+        >
+          {micError}
+        </div>
+      )}
+
       {uploadError && (
         <div
           className="mb-2 px-2 py-1.5 rounded text-xs"
@@ -1361,7 +1386,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                 ? 'Plan mode — explore & plan (Shift+Tab → Build)'
                 : streaming
                   ? 'Queue next message (Enter) · Ctrl+Enter interrupt…'
-                  : attachments.length
+                  : recording
+                    ? 'Listening…'
+                    : transcribing
+                      ? 'Hearing what you said…'
+                      : attachments.length
                     ? 'Add a note for these files…'
                     : 'Message Remedy — /command · @file · Shift+Tab Plan'
           }
@@ -1383,6 +1412,30 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             whiteSpace: 'pre-wrap',
           }}
         />
+
+        {micSupported && onMic ? (
+          <button
+            type="button"
+            onClick={() => void onMic()}
+            disabled={disabled || transcribing}
+            title={recording ? 'Stop and send what you said' : 'Speak instead of typing'}
+            aria-pressed={recording}
+            aria-label={recording ? 'Stop and send what you said' : 'Speak instead of typing'}
+            className="flex items-center justify-center rounded-xl flex-shrink-0"
+            style={{
+              width: 38,
+              height: 38,
+              background: recording
+                ? '#a33c2f'
+                : 'color-mix(in srgb, var(--bg-tertiary) 80%, transparent)',
+              border: '1px solid var(--border)',
+              color: recording ? '#fff' : 'var(--text-secondary)',
+              opacity: disabled || transcribing ? 0.5 : 1,
+            }}
+          >
+            🎙
+          </button>
+        ) : null}
 
         <button
           type="button"

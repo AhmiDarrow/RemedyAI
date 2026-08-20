@@ -77,6 +77,10 @@ interface StatusBarProps {
   onToggleTimeTravel?: () => void
   /** Switch back to the Grove partner surface (default home). */
   onOpenGrove?: () => void
+  /** Speak replies aloud (same setting as Grove). */
+  speakReplies?: boolean
+  speaking?: boolean
+  onToggleSpeak?: () => void
   /** Open multiprovider Usage & Continuity dashboard */
   onOpenUsage?: () => void
   /** Main chrome density: Simple hides power-user controls */
@@ -282,6 +286,9 @@ export function StatusBar({
   timeTravelOpen = false,
   onToggleTimeTravel,
   onOpenGrove,
+  speakReplies = false,
+  speaking = false,
+  onToggleSpeak,
   uiMode = 'simple',
   onUiModeChange,
 }: StatusBarProps) {
@@ -853,6 +860,21 @@ export function StatusBar({
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0 flex-nowrap">
+          {onToggleSpeak && (
+            <button
+              type="button"
+              className={`seg-btn${speakReplies ? ' is-active' : ''}${speaking ? ' speaking' : ''}`}
+              title={
+                speakReplies
+                  ? 'Speaking replies aloud — click to go quiet'
+                  : 'Speak replies aloud'
+              }
+              aria-pressed={speakReplies}
+              onClick={onToggleSpeak}
+            >
+              {speakReplies ? '🔊' : '🔇'}
+            </button>
+          )}
           {onOpenGrove && (
             <button
               type="button"
