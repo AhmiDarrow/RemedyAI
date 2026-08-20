@@ -225,6 +225,10 @@ _install_state: dict[str, Any] = {
 
 # Pins match pyproject optional-dependencies.voice — keep in lockstep.
 _VOICE_PACK_PACKAGES = ("kokoro-onnx>=0.3.0,<1", "faster-whisper>=1.0.0,<2")
+# The managed runtime (python-build-standalone + modern pip) ships no
+# setuptools; several voice dependencies still import ``pkg_resources``
+# (resemble-perth, Chatterbox's watermarker, is one). Harmless elsewhere.
+_PACK_BASE_PACKAGES = ("setuptools>=70,<81",)  # <81: pkg_resources still present
 
 
 def tts_paths(home_dir: Path | str | None = None) -> tuple[Path, Path]:
@@ -233,7 +237,21 @@ def tts_paths(home_dir: Path | str | None = None) -> tuple[Path, Path]:
     return d / "kokoro-v1.0.onnx", d / "voices-v1.0.bin"
 
 
+def _managed() -> bool:
+    from remedy.voice.runtime import use_managed_runtime
+
+    return use_managed_runtime()
+
+
+def _pack_in_runtime(pack: str) -> bool:
+    from remedy.voice.runtime import pack_installed, runtime_ready
+
+    return runtime_ready() and pack_installed(pack)
+
+
 def tts_deps_available() -> bool:
+    if _managed():
+        return _pack_in_runtime("voice")
     try:
         import kokoro_onnx  # noqa: F401
 
@@ -335,6 +353,18 @@ def synthesize(
     High-quality (Chatterbox) wins when the owner turned it on *and* it is
     ready; otherwise Kokoro. Grove and the phone pipeline share this path.
     """
+    if _managed():
+        if not tts_deps_available() or not tts_installed(home_dir):
+            return None
+        from remedy.voice.bridge import WorkerError, get_bridge
+
+        try:
+            return get_bridge(home_dir).synthesize(
+                text, gender=gender, voice=voice, speed=speed
+            )
+        except WorkerError as exc:
+            logger.warning("voice: managed synth failed: %s", exc)
+            return None
     cfg = load_voice_settings(home_dir)
     if str(cfg.get("tts_quality") or "standard") == "hq":
         from remedy.voice.chatterbox import chatterbox_ready
@@ -376,6 +406,8 @@ _VALID_STT = ("tiny", "base", "small", "medium", "large-v3", "large-v3-turbo")
 
 
 def stt_deps_available() -> bool:
+    if _managed():
+        return _pack_in_runtime("voice")
     try:
         import faster_whisper  # noqa: F401
 
@@ -446,10 +478,11 @@ def _owner_pack_error(exc: BaseException, *, what: str = "The voice pack") -> st
     msg = str(exc or "").strip()
     low = msg.lower()
     logger.warning("voice: %s install failed: %s", what, msg[:400])
-    if getattr(sys, "frozen", False) or low == "frozen":
-        return (
-            f"This copy of Remedy cannot add {what.lower()} from Settings. "
-            "Update Remedy Desktop and try Download again."
+    if low == "frozen" or "not available for this kind of computer" in low:
+        from remedy.voice.runtime import unsupported_reason
+
+        return unsupported_reason() or (
+            f"{what} cannot be set up on this computer yet."
         )
     if isinstance(exc, PermissionError) or "permission denied" in low or "access is denied" in low:
         return f"{what} could not be saved here. Check that Remedy's folder is writable."
@@ -486,20 +519,30 @@ def run_pip_packages(
     key: str,
     *,
     cap: float = 40.0,
+    python: str | Path | None = None,
 ) -> None:
-    """Install packages into this Python. Pulses *state[key]* while it runs."""
-    if getattr(sys, "frozen", False):
-        raise RuntimeError("frozen")
-    env = os.environ.copy()
+    """Install packages into *python* (default: this one). Pulses *state[key]*.
+
+    A frozen sidecar has no pip of its own; callers pass the managed
+    runtime's interpreter (see :func:`_runtime_python`).
+    """
+    if python is None:
+        if getattr(sys, "frozen", False):
+            raise RuntimeError("frozen")
+        python = sys.executable
+    py = str(python)
+    from remedy.voice.runtime import child_env
+
+    # Nothing from the sidecar's own environment may leak into the runtime.
+    env = child_env(None, with_source=False)
     env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
-    env["PYTHONUNBUFFERED"] = "1"
     attempts: list[list[str]] = [
-        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", *packages],
+        [py, "-m", "pip", "install", "--disable-pip-version-check", *packages],
     ]
     uv = shutil.which("uv")
     if uv:
         attempts.append(
-            [uv, "pip", "install", "--python", sys.executable, *packages]
+            [uv, "pip", "install", "--python", py, *packages]
         )
     stop = threading.Event()
     pulse = threading.Thread(
@@ -534,12 +577,48 @@ def run_pip_packages(
     raise RuntimeError(last_err or "Voice pack download failed.")
 
 
-def _pip_install_voice_extras() -> None:
-    """Install kokoro-onnx + faster-whisper into this Python.
+def _runtime_python(home_dir: Path | str | None, state_key: str) -> Path:
+    """The managed interpreter, downloading it first if needed.
 
-    Power users can still ``pip install remedy-ai[voice]``; this is the
-    in-app path the Download button uses. Frozen sidecars cannot pip.
+    Progress rides on *state_key* between 8 % and 20 % so the Download
+    button shows the runtime landing before pip starts.
     """
+    from remedy.voice.runtime import install_runtime
+
+    def _progress(pct: float, message: str) -> None:
+        st = _install_state.get(state_key)
+        if isinstance(st, dict):
+            st["percent"] = round(8.0 + pct * 0.12, 1)
+            st["message"] = message
+
+    return install_runtime(home_dir, progress=_progress)
+
+
+def _pip_install_voice_extras(home_dir: Path | str | None = None) -> None:
+    """Install kokoro-onnx + faster-whisper where this copy of Remedy runs them.
+
+    Dev / pip installs: this Python (power users can still
+    ``pip install remedy-ai[voice]``). Desktop: the managed runtime, which
+    is downloaded here on first use.
+    """
+    if _managed():
+        from remedy.voice.runtime import mark_pack
+
+        py = _runtime_python(home_dir, "pack")
+        run_pip_packages(
+            _PACK_BASE_PACKAGES + _VOICE_PACK_PACKAGES,
+            _install_state,
+            "pack",
+            cap=40.0,
+            python=py,
+        )
+        from remedy.voice.bridge import get_bridge
+
+        # A worker that was alive before pip ran has stale imports.
+        get_bridge(home_dir).stop()
+        probe = get_bridge(home_dir).probe()
+        mark_pack("voice", bool(probe.get("tts") and probe.get("stt")), home_dir)
+        return
     run_pip_packages(
         _VOICE_PACK_PACKAGES, _install_state, "pack", cap=40.0
     )
@@ -557,7 +636,7 @@ def install_voice_pack(home_dir: Path | str | None = None) -> None:
     }
     try:
         if not tts_deps_available() or not stt_deps_available():
-            _pip_install_voice_extras()
+            _pip_install_voice_extras(home_dir)
         if not tts_deps_available():
             raise RuntimeError("Speaking voice did not install.")
         _install_state["pack"]["percent"] = 25.0
@@ -642,11 +721,48 @@ def _stt_size(home_dir: Path | str | None = None) -> str:
     return size if size in _VALID_STT else "small"
 
 
+def _warm_stt_managed(home_dir: Path | str | None) -> bool:
+    """Desktop: whisper loads inside the managed runtime; mirror its state."""
+    from remedy.voice.bridge import WorkerError, get_bridge
+
+    size = _stt_size(home_dir)
+    with _stt_lock:
+        _install_state["stt"] = {"status": "loading", "model": size}
+        try:
+            out = get_bridge(home_dir).warm_stt()
+        except WorkerError as exc:
+            _install_state["stt"] = {
+                "status": "error",
+                "error": _owner_pack_error(exc, what="Hearing"),
+            }
+            return False
+        st = out.get("state") if isinstance(out, dict) else None
+        if isinstance(st, dict) and st.get("status") == "error":
+            _install_state["stt"] = {
+                "status": "error",
+                "error": _owner_pack_error(RuntimeError(str(st.get("error"))), what="Hearing"),
+            }
+            return False
+        loaded = bool(out.get("loaded")) if isinstance(out, dict) else False
+        _install_state["stt"] = (
+            {"status": "done", "model": size}
+            if loaded
+            else {"status": "error", "error": _owner_pack_error(RuntimeError("not loaded"), what="Hearing")}
+        )
+        return loaded
+
+
 def get_stt_model(home_dir: Path | str | None = None) -> Any | None:
-    """Lazy WhisperModel (downloads on first use into ~/.remedy/voice/stt)."""
+    """Lazy WhisperModel (downloads on first use into ~/.remedy/voice/stt).
+
+    Desktop (managed runtime): there is no in-process model; this warms the
+    worker's and returns a truthy handle so callers keep their shape.
+    """
     global _stt_model, _stt_model_size
     if not stt_deps_available():
         return None
+    if _managed():
+        return "managed" if _warm_stt_managed(home_dir) else None
     size = _stt_size(home_dir)
     with _stt_lock:
         if _stt_model is not None and _stt_model_size == size:
@@ -683,6 +799,16 @@ def transcribe_file(
     home_dir: Path | str | None = None,
 ) -> dict[str, Any] | None:
     """Audio file (wav/webm/ogg/mp3 — PyAV decodes) → {text, language, duration}."""
+    if _managed():
+        if not stt_deps_available():
+            return None
+        from remedy.voice.bridge import WorkerError, get_bridge
+
+        try:
+            return get_bridge(home_dir).transcribe(path, language=language)
+        except WorkerError as exc:
+            logger.warning("voice: managed transcribe failed: %s", exc)
+            return None
     model = get_stt_model(home_dir)
     if model is None:
         return None
@@ -761,6 +887,8 @@ def smart_turn_path(home_dir: Path | str | None = None) -> Path:
 
 
 def smart_turn_deps_available() -> bool:
+    if _managed():
+        return _pack_in_runtime("voice")  # kokoro-onnx brings onnxruntime
     try:
         import onnxruntime  # noqa: F401
 
@@ -852,6 +980,14 @@ _VOICE_PACK_REASON = "Remedy's voice is not on this computer yet."
 _VOICE_PACK_HINT = "pip install remedy-ai[voice]"
 
 
+def _pack_supported() -> bool:
+    if not _managed():
+        return True
+    from remedy.voice.runtime import unsupported_reason
+
+    return unsupported_reason() is None
+
+
 def _unavailable_reason(
     ok: bool, deps: bool, waiting: str
 ) -> tuple[str | None, str | None]:
@@ -860,7 +996,8 @@ def _unavailable_reason(
         return None, None
     if deps:
         return waiting, None
-    return _VOICE_PACK_REASON, _VOICE_PACK_HINT
+    # Desktop owners cannot pip; the Download button is the whole story.
+    return _VOICE_PACK_REASON, (None if _managed() else _VOICE_PACK_HINT)
 
 
 def voice_status(
@@ -944,6 +1081,9 @@ def voice_status(
         "pack": {
             "deps": bool(tts_deps and stt_ok),
             "install": _install_state.get("pack"),
+            # False only when this machine has no pinned voice runtime
+            # (Desktop on an unsupported platform): nothing to download.
+            "supported": _pack_supported(),
         },
         "hq": hq,
         "settings": cfg,

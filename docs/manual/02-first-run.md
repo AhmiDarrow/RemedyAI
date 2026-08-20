@@ -47,7 +47,10 @@ Optional default **project folder** — working directory for tools, shell, and 
 Vision, voice, and local helpers **download automatically** the first time
 Remedy starts. You can finish setup while they continue in the background.
 If the voice pack did not arrive, Settings → Voice has **Download Remedy's
-voice** (Advanced still shows the pip command).
+voice**. In Remedy Desktop the voice engines live in a small Python of their
+own under `~/.remedy/voice/runtime/` (downloaded and verified on first use,
+~70 MB); the high-quality voice lands there too when you turn it on. From a
+`pip` install, Advanced still shows the pip command.
 
 ### 6. Ready
 
