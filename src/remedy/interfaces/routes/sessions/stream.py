@@ -355,6 +355,12 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                                     )
                                     + "\n\n"
                                 )
+                        elif token.startswith("@@steered"):
+                            # The owner's mid-turn words were folded in.
+                            yield sse_event(
+                                "progress",
+                                {"type": "progress", "label": "Taking that in…"},
+                            )
                         elif token.startswith("@@thinking:"):
                             thought = token[len("@@thinking:") :]
                             if thought:

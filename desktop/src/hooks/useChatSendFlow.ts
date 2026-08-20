@@ -47,7 +47,7 @@ export function useChatSendFlow(opts: {
     sessionId?: string,
     attachments?: AttachmentMeta[],
     planMode?: boolean,
-    opts?: { mode?: 'after' | 'interrupt'; provider?: string },
+    opts?: { mode?: 'after' | 'interrupt' | 'steer'; provider?: string },
   ) => unknown
   runCommand: (
     command: string,
@@ -121,7 +121,7 @@ export function useChatSendFlow(opts: {
   const [concurrentConfirm, setConcurrentConfirm] = useState<{
     text: string
     attachments?: AttachmentMeta[]
-    opts?: { mode?: 'after' | 'interrupt' }
+    opts?: { mode?: 'after' | 'interrupt' | 'steer' }
   } | null>(null)
   const skipConcurrentConfirmRef = useRef(false)
 
@@ -289,7 +289,7 @@ export function useChatSendFlow(opts: {
         is_image?: boolean
         is_text?: boolean
       }[],
-      opts?: { mode?: 'after' | 'interrupt'; sessionId?: string },
+      opts?: { mode?: 'after' | 'interrupt' | 'steer'; sessionId?: string },
     ) => {
       // Clear edit prefill once the user sends (revised prompt is on its way).
       setEditDraft(null)
