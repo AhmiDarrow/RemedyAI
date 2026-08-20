@@ -262,13 +262,20 @@ class ImapSmtpMailProvider:
         try:
             conn.select("INBOX", readonly=True)
             criteria = _imap_criteria(query)
-            typ, data = conn.search(None, *criteria)
+            # UID SEARCH, not SEARCH. A plain search answers with *sequence
+            # numbers* — positions in the mailbox, which renumber on every
+            # expunge. Archiving one message therefore shifted every id the
+            # caller was still holding, and a later archive_message or
+            # mark_read acted on a different message than the one it named.
+            typ, data = conn.uid("SEARCH", *criteria)
             if typ != "OK":
                 return []
             ids = (data[0] or b"").split()
             for num in reversed(ids[-lim:]):  # newest first
-                typ, msg_data = conn.fetch(
-                    num, "(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM DATE MESSAGE-ID)])"
+                typ, msg_data = conn.uid(
+                    "FETCH",
+                    num,
+                    "(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM DATE MESSAGE-ID)])",
                 )
                 if typ != "OK" or not msg_data:
                     continue
@@ -303,7 +310,7 @@ class ImapSmtpMailProvider:
         conn = self._imap()
         try:
             conn.select("INBOX", readonly=True)
-            typ, msg_data = conn.fetch(mid.encode("ascii"), "(RFC822)")
+            typ, msg_data = conn.uid("FETCH", mid.encode("ascii"), "(RFC822)")
             # imaplib answers ('OK', [None]) for a message set the server
             # ignored, so `not msg_data` was False and the owner got a blank
             # message — "(no subject)" with an empty body — instead of being
@@ -448,7 +455,9 @@ class ImapSmtpMailProvider:
         try:
             conn.select("INBOX")
             op = "+FLAGS" if read else "-FLAGS"
-            typ, resp = conn.store(message_id.encode("ascii"), op, "\\Seen")
+            typ, resp = conn.uid(
+                "STORE", message_id.encode("ascii"), op, "\\Seen"
+            )
             # STORE against a message set the server ignored is an OK no-op
             # with an empty response, so trusting the return code alone told
             # the owner a message was marked when none was.
@@ -472,13 +481,13 @@ class ImapSmtpMailProvider:
             folder = f'"{self.account.archive_folder}"'
             # Copy into the archive, then flag+expunge from INBOX. (Plain COPY
             # works on every IMAP server; UID MOVE is not universal.)
-            typ, _resp = conn.copy(mid, folder)
+            typ, _resp = conn.uid("COPY", mid, folder)
             if typ != "OK":
                 raise RuntimeError(
                     f"Could not copy to {self.account.archive_folder!r} — "
                     "check the archive folder name for this mailbox."
                 )
-            conn.store(mid, "+FLAGS", "\\Deleted")
+            conn.uid("STORE", mid, "+FLAGS", "\\Deleted")
             with _Quiet():
                 conn.expunge()
         finally:

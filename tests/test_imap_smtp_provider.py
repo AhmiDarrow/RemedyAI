@@ -1043,3 +1043,85 @@ def test_a_store_the_server_answers_no_to_is_not_reported_as_marked(world, monke
     monkeypatch.setattr(cls, "store", patched)
     with pytest.raises(RuntimeError, match="not found"):
         provider().mark_read(seq(world, "plain"))
+
+
+# --- stable ids: the reason this provider speaks UID -------------------------
+# A plain IMAP SEARCH answers with sequence numbers, which are positions and
+# renumber on every expunge. Everything below fails if the provider goes back
+# to them: the ids a caller is holding would silently start pointing at
+# different messages.
+
+
+def uid_of(world_, key: str) -> str:
+    return world_.mailbox.uid_of(key)
+
+
+def test_a_listed_id_is_the_stable_uid(world):
+    """Documentation, not a discriminator: in an untouched mailbox a UID and a
+    position are numerically equal, so this cannot fail on its own. The tests
+    below are the ones that catch a regression."""
+    listed = {m.subject: m.id for m in provider().list_messages(limit=50)}
+    for key in ("plain", "threaded"):
+        msg = world.mailbox.by_key(key)
+        assert listed.get(msg.subject) == str(msg.uid)
+
+
+def test_archiving_one_message_does_not_move_the_others(world):
+    """The bug in one test. Archive shifts every later position by one; an id
+    captured before must still name the same message afterwards."""
+    before = provider().list_messages(limit=50)
+    assert len(before) >= 3
+    target = before[-1]           # oldest, so archiving it renumbers the rest
+    keep = before[0]              # an id the caller is still holding
+    keep_subject = keep.subject
+
+    provider().archive_message(target.id)
+
+    after = provider().get_message(keep.id)
+    assert after.subject == keep_subject, (
+        "the held id now points at a different message"
+    )
+
+
+def test_marking_read_after_an_archive_marks_the_message_that_was_named(world):
+    before = provider().list_messages(limit=50)
+    target, keep = before[-1], before[0]
+    kept_key = world.mailbox.by_uid(int(keep.id)).key
+    # Some of the sample mailbox is already read; only the *change* matters.
+    seen_before = {
+        m.key for m in world.mailbox.folder("INBOX") if "\\Seen" in m.flags
+    }
+
+    provider().archive_message(target.id)
+    provider().mark_read(keep.id)
+
+    seen_after = {
+        m.key for m in world.mailbox.folder("INBOX") if "\\Seen" in m.flags
+    }
+    newly_read = seen_after - seen_before
+    assert newly_read == {kept_key}, (
+        f"marked {newly_read or 'nothing'} instead of {kept_key!r}"
+    )
+
+
+def test_an_id_for_a_message_that_was_archived_is_reported_not_reused(world):
+    """A position frees up and gets reused; a UID never does."""
+    before = provider().list_messages(limit=50)
+    target = before[-1]
+    provider().archive_message(target.id)
+
+    with pytest.raises(RuntimeError, match="not found"):
+        provider().get_message(target.id)
+
+
+def test_every_read_and_write_goes_over_uid_commands(world):
+    """A single plain SEARCH/FETCH/STORE/COPY anywhere reintroduces the bug."""
+    p = provider()
+    listed = p.list_messages(limit=3)
+    p.get_message(listed[0].id)
+    p.mark_read(listed[0].id)
+    p.archive_message(listed[-1].id)
+
+    verbs = {cmd for cmd, _ in world.imap.uid_calls}
+    assert {"SEARCH", "FETCH", "STORE", "COPY"} <= verbs
+    assert world.imap.search_charsets == [], "a non-UID SEARCH was issued"
