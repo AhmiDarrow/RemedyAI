@@ -46,33 +46,55 @@ def op_ping(args: dict[str, Any]) -> dict[str, Any]:
     return {"pid": os.getpid(), "python": platform.python_version()}
 
 
+def _lane() -> str:
+    return os.environ.get("REMEDY_VOICE_LANE") or "voice"
+
+
 def op_probe(args: dict[str, Any]) -> dict[str, Any]:
-    """Which engines can this runtime import right now?"""
+    """Which engines can this lane import right now?
+
+    Only this lane's own engines are imported — importing whisper into the
+    hq lane (or torch into the voice lane) is exactly the DLL clash the
+    lanes exist to avoid.
+    """
+    out: dict[str, Any] = {"lane": _lane()}
+    if _lane() == "hq":
+        try:
+            import torch
+
+            out["torch"] = str(torch.__version__)
+            out["cuda"] = bool(torch.cuda.is_available())
+        except Exception:
+            out["torch"] = ""
+            out["cuda"] = False
+        try:
+            from remedy.voice.chatterbox import chatterbox_deps_available
+
+            out["hq"] = chatterbox_deps_available()
+        except Exception:
+            out["hq"] = False
+        return out
     from remedy.voice import service as svc
 
-    out: dict[str, Any] = {
-        "tts": svc.tts_deps_available(),
-        "stt": svc.stt_deps_available(),
-        "smart_turn": svc.smart_turn_deps_available(),
-    }
-    try:
-        from remedy.voice.chatterbox import chatterbox_deps_available
-
-        out["hq"] = chatterbox_deps_available()
-    except Exception:
-        out["hq"] = False
-    try:
-        import torch
-
-        out["torch"] = str(torch.__version__)
-        out["cuda"] = bool(torch.cuda.is_available())
-    except Exception:
-        out["torch"] = ""
-        out["cuda"] = False
+    out["tts"] = svc.tts_deps_available()
+    out["stt"] = svc.stt_deps_available()
+    out["smart_turn"] = svc.smart_turn_deps_available()
     return out
 
 
 def op_synthesize(args: dict[str, Any]) -> dict[str, Any] | None:
+    """Speak. In the hq lane this is Chatterbox directly (no Kokoro fallback
+    here — the sidecar falls back to the voice lane itself)."""
+    if _lane() == "hq":
+        from remedy.voice.chatterbox import synthesize as hq_synthesize
+
+        hq_out = hq_synthesize(
+            str(args.get("text") or ""), gender=args.get("gender"), home_dir=_home(args)
+        )
+        if hq_out is None:
+            return None
+        wav, sr = hq_out
+        return {"wav_b64": base64.b64encode(wav).decode("ascii"), "sample_rate": int(sr)}
     from remedy.voice.service import synthesize
 
     out = synthesize(
@@ -115,6 +137,41 @@ def op_warm_hq(args: dict[str, Any]) -> dict[str, Any]:
     return {"loaded": engine is not None, "state": st if isinstance(st, dict) else None}
 
 
+_hq_warm_thread: dict[str, Any] = {}
+
+
+def op_warm_hq_start(args: dict[str, Any]) -> dict[str, Any]:
+    """Begin loading Chatterbox in the background; poll ``hq_state``.
+
+    The wire is one request at a time, so a blocking warm would hide its
+    own progress. This returns at once and the sidecar mirrors
+    ``_install_state["chatterbox"]`` (real byte counts) until done/error.
+    """
+    import threading
+
+    from remedy.voice import chatterbox as hq
+
+    t = _hq_warm_thread.get("t")
+    if t is not None and t.is_alive():
+        return {"started": False}
+    home = _home(args)
+    hq._install_state["chatterbox"] = {"status": "downloading", "percent": 36.0, "message": "Downloading Chatterbox"}
+
+    def _run() -> None:
+        try:
+            if hq.get_chatterbox_engine(home) is None:
+                st = hq._install_state.get("chatterbox")
+                if not (isinstance(st, dict) and st.get("status") == "error"):
+                    hq._install_state["chatterbox"] = {"status": "error", "error": "not loaded"}
+        except Exception as exc:  # noqa: BLE001
+            hq._install_state["chatterbox"] = {"status": "error", "error": str(exc)[:300]}
+
+    t = threading.Thread(target=_run, daemon=True)
+    _hq_warm_thread["t"] = t
+    t.start()
+    return {"started": True}
+
+
 def op_hq_state(args: dict[str, Any]) -> dict[str, Any]:
     from remedy.voice import chatterbox as hq
 
@@ -145,6 +202,7 @@ OPS = {
     "transcribe": op_transcribe,
     "warm_stt": op_warm_stt,
     "warm_hq": op_warm_hq,
+    "warm_hq_start": op_warm_hq_start,
     "hq_state": op_hq_state,
     "turn_score": op_turn_score,
 }
@@ -174,6 +232,12 @@ def handle(line: str) -> dict[str, Any]:
 
 def main() -> int:
     os.environ["REMEDY_VOICE_WORKER"] = "1"
+    if _lane() == "hq":
+        # torch must own cuDNN in this process before anything else loads.
+        try:
+            import torch  # noqa: F401
+        except Exception as exc:  # noqa: BLE001 — reported per op later
+            logging.getLogger("remedy.voice.worker").warning("hq lane: torch import failed: %s", exc)
     logging.basicConfig(
         stream=sys.stderr,
         level=os.environ.get("REMEDY_VOICE_WORKER_LOG", "WARNING"),

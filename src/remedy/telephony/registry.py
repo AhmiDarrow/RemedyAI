@@ -151,7 +151,11 @@ def adb_devices() -> tuple[list[str], list[str]]:
     if not exe:
         return [], []
     try:
-        out = subprocess.run(  # noqa: S603 — fixed executable, no shell
+        from remedy.execution.process import run_hidden
+
+        # Status is polled from Settings: this probe must never flash a
+        # console (adb also starts its server as a child — keep that quiet).
+        out = run_hidden(
             [exe, "devices"],
             capture_output=True,
             text=True,
