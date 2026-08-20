@@ -4,6 +4,8 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-08-20
+
 ### Review fixes — forms, the phone line, and voice installs
 
 - **A card number typed through `computer_fill` stops for the owner**, the
@@ -39,6 +41,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   can no longer put an older voice snapshot back over a newer one.
 - **SmolVLM does not start after install when RMB is the chat provider** —
   the post-install start now sees the loaded config, not just a running RMB.
+- **The sidecar reports the version it was built as.** A frozen build used
+  to trust a stale `remedy-ai` dist-info swept in from the build machine
+  over its own bundled `pyproject.toml`.
+- **Optional extras never ride in the sidecar.** `build_desktop.py`
+  excludes torch / Chatterbox / whisper / Kokoro / onnxruntime and friends
+  explicitly, so a dev machine with `remedy-ai[voice]` installed builds the
+  same ~50 MB sidecar CI does instead of a 2.6 GB one.
 
 - **High-quality voice is a Settings choice.** Chatterbox (MIT, Resemble AI)
   is the human-bar engine for Grove *and* the phone pipeline. Turning it on

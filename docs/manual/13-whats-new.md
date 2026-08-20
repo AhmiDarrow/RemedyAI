@@ -2,11 +2,27 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.26.2**.
+Current series: **v0.30.0**.
 
 ## Contents
 
-- [0.26.2](#0262---host-in-remedys-hands) · [0.26.1](#0261---build-finishes) · [0.26.0](#0260---windows--linux-desktop) · [0.25.1](#0251---jail-stop-and-tab-isolation) · [0.25.0](#0250---stable-tabs--settings-chrome) · [0.24.0](#0240---host-bridge--first-home) · [0.23.2](#0232---defender-execution-false-positive) · [0.23.1](#0231---first-turn-agency) · [0.23.0](#0230---build-ability--companion) · [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+- [0.30.0](#0300---grove-voice-life-tasks-and-the-vault) · [0.26.2](#0262---host-in-remedys-hands) · [0.26.1](#0261---build-finishes) · [0.26.0](#0260---windows--linux-desktop) · [0.25.1](#0251---jail-stop-and-tab-isolation) · [0.25.0](#0250---stable-tabs--settings-chrome) · [0.24.0](#0240---host-bridge--first-home) · [0.23.2](#0232---defender-execution-false-positive) · [0.23.1](#0231---first-turn-agency) · [0.23.0](#0230---build-ability--companion) · [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+
+## 0.30.0 - Grove, voice, life tasks and the Vault
+
+Remedy has a new home: **Grove**, the partner surface, with Studio one tap
+away. She speaks and hears locally (Kokoro / faster-whisper, optional
+Chatterbox for a human-bar voice), downloads show in the title bar, and
+Settings stay on Grove. Life tasks — ordering, booking, paying — are whole
+jobs with observed success and non-waivable owner checkpoints; payment
+details live in the **Remedy Vault** and are never typed by guesswork.
+Reminders fire, mail and calendar work on an app password, documents are
+read. Telephony is bench-only (Phase 0): policy, transcripts and hard
+checkpoints are in code; nothing is called. A review pass fixed form
+filling, the phone checkpoints, and voice installs that could stall the
+server. mypy now covers the whole tree.
+
+PyPI **`remedy-ai==0.30.0`** · tag **v0.30.0**.
 
 ## 0.26.2 - Host in Remedy's hands
 
