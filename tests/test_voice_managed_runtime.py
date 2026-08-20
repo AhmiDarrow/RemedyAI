@@ -186,7 +186,18 @@ def test_bridge_round_trips_through_a_real_worker_process(home, monkeypatch):
         pong = b.call("ping", timeout=60)
         assert pong["pid"] != os.getpid()
         probe = b.probe()
-        assert set(probe) >= {"tts", "stt", "smart_turn", "hq"}
+        assert set(probe) >= {"tts", "stt", "smart_turn"}
+        assert probe["lane"] == "voice"
+        # The hq lane is a separate process that never imports whisper.
+        from remedy.voice.bridge import LANE_HQ, VoiceBridge as VB
+
+        hq = VB(home, LANE_HQ)
+        try:
+            p2 = hq.probe()
+            assert p2["lane"] == "hq" and "hq" in p2 and "stt" not in p2
+            assert hq.call("ping", timeout=60)["pid"] != pong["pid"]
+        finally:
+            hq.stop()
         # Ids advance and the same process answers.
         assert b.call("ping", timeout=60)["pid"] == pong["pid"]
     finally:
@@ -283,7 +294,7 @@ def test_desktop_synthesize_goes_through_the_bridge(home, monkeypatch):
         def transcribe(self, path, **kw):
             return {"text": "heard", "language": "en", "duration": 0.1}
 
-    monkeypatch.setattr(bridge, "get_bridge", lambda home_dir=None: FakeBridge())
+    monkeypatch.setattr(bridge, "get_bridge", lambda home_dir=None, lane="voice": FakeBridge())
     monkeypatch.setattr(svc, "get_tts_engine", lambda *a, **k: pytest.fail("in-process engine used"))
     assert svc.synthesize("hi", home_dir=home) == (b"RIFFfake", 24_000)
     assert svc.transcribe_file(home / "x.wav", home_dir=home)["text"] == "heard"
@@ -301,17 +312,15 @@ def test_desktop_pack_install_pips_into_the_runtime(home, monkeypatch):
         seen["python"] = python
         seen["packages"] = packages
 
-    stopped: list[bool] = []
+    stopped: list[str] = []
 
     class FakeBridge:
-        def stop(self):
-            stopped.append(True)
-
         def probe(self):
             return {"tts": True, "stt": True, "smart_turn": True, "hq": False}
 
     monkeypatch.setattr(svc, "run_pip_packages", fake_pip)
-    monkeypatch.setattr(bridge, "get_bridge", lambda home_dir=None: FakeBridge())
+    monkeypatch.setattr(bridge, "get_bridge", lambda home_dir=None, lane="voice": FakeBridge())
+    monkeypatch.setattr(bridge, "stop_lane", lambda home_dir, lane: stopped.append(lane))
     monkeypatch.setattr(svc, "install_tts", lambda h=None: None)
     monkeypatch.setattr(svc, "install_stt_background", lambda h=None: True)
     monkeypatch.setattr(svc, "install_smart_turn_background", lambda h=None: True)
@@ -320,8 +329,8 @@ def test_desktop_pack_install_pips_into_the_runtime(home, monkeypatch):
     assert seen["packages"] == svc._PACK_BASE_PACKAGES + svc._VOICE_PACK_PACKAGES
     assert rt.pack_installed("voice", home) is True
     assert svc._install_state["pack"]["status"] == "done"
-    # The worker is restarted after pip so it never serves stale imports.
-    assert stopped == [True]
+    # The voice lane is restarted after pip so it never serves stale imports.
+    assert stopped == ["voice"]
 
 
 def test_run_pip_packages_refuses_to_pip_a_frozen_sidecar_into_itself(monkeypatch):

@@ -29,7 +29,19 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   if pip goes silent for fifteen minutes.
 - **No console windows.** pip, the runtime check and the voice worker are
   spawned hidden; engine progress bars (tqdm / Hugging Face) are off and
-  worker chatter goes to the debug log, not the owner's log.
+  worker chatter goes to the debug log, not the owner's log. The flash on
+  opening Settings was the phone-line probe running `adb devices` in a
+  visible console — every status-path spawn now goes through the shared
+  hidden launcher (audited across the Settings endpoints).
+- **High-quality voice finishes, and shows its download.** Whisper's engine
+  (ctranslate2) and torch each bring a cuDNN; loaded into one process they
+  crashed the voice worker ("Could not load symbol cudnnGetLibConfig") the
+  moment HQ was turned on with the GPU build. Chatterbox now runs in its
+  own worker lane (torch first, never whisper); Kokoro / whisper /
+  smart-turn keep theirs. The 3 GB of weights download with a real byte
+  count ("Downloading Chatterbox · 1.99 of 2.97 GB") into
+  `~/.remedy/voice/chatterbox/`, not the owner's global Hugging Face
+  cache. First HQ sentence on an RTX 3080: ~5 s, then ~3 s.
 - **Grove: every message steers — without stopping her.** Sending while
   Remedy is working used to queue silently (Studio shows the queue; Grove
   never did, so it read as "can't send"). There is now a real mid-turn

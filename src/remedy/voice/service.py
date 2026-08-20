@@ -357,8 +357,21 @@ def synthesize(
     if _managed():
         if not tts_deps_available() or not tts_installed(home_dir):
             return None
-        from remedy.voice.bridge import WorkerError, get_bridge
+        from remedy.voice.bridge import LANE_HQ, WorkerError, get_bridge
 
+        # HQ runs in its own lane (torch) and only when ready; any failure
+        # falls through to Kokoro in the voice lane.
+        cfg_m = load_voice_settings(home_dir)
+        if str(cfg_m.get("tts_quality") or "standard") == "hq":
+            from remedy.voice.chatterbox import chatterbox_ready
+
+            if chatterbox_ready(home_dir):
+                try:
+                    hq_out = get_bridge(home_dir, LANE_HQ).synthesize(text, gender=gender)
+                    if hq_out is not None:
+                        return hq_out
+                except WorkerError as exc:
+                    logger.warning("voice: hq lane failed, using standard: %s", exc)
         try:
             return get_bridge(home_dir).synthesize(
                 text, gender=gender, voice=voice, speed=speed
@@ -705,10 +718,10 @@ def _pip_install_voice_extras(home_dir: Path | str | None = None) -> None:
             cap=40.0,
             python=py,
         )
-        from remedy.voice.bridge import get_bridge
+        from remedy.voice.bridge import LANE_VOICE, get_bridge, stop_lane
 
         # A worker that was alive before pip ran has stale imports.
-        get_bridge(home_dir).stop()
+        stop_lane(home_dir, LANE_VOICE)
         probe = get_bridge(home_dir).probe()
         mark_pack("voice", bool(probe.get("tts") and probe.get("stt")), home_dir)
         return

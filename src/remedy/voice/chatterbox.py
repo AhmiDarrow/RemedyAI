@@ -16,6 +16,7 @@ import logging
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -55,17 +56,6 @@ def _identity_dir(home_dir: Path | str | None = None) -> Path:
     d = chatterbox_home(home_dir) / "identity"
     d.mkdir(parents=True, exist_ok=True)
     return d
-
-
-def _pulse_hq(stop: threading.Event) -> None:
-    """Keep the title-bar percent moving while Hugging Face has no callback."""
-    while not stop.wait(1.2):
-        st = _install_state.get("chatterbox")
-        if not isinstance(st, dict) or st.get("status") != "downloading":
-            return
-        p = float(st.get("percent") or 36.0)
-        if p < 92.0:
-            st["percent"] = round(min(92.0, p + 1.5), 1)
 
 
 def _managed() -> bool:
@@ -154,9 +144,9 @@ def _needs_cuda_upgrade(home_dir: Path | str | None) -> bool:
     if not _managed() or not _wants_cuda_torch():
         return False
     try:
-        from remedy.voice.bridge import get_bridge
+        from remedy.voice.bridge import LANE_HQ, get_bridge
 
-        probe = get_bridge(home_dir).probe()
+        probe = get_bridge(home_dir, LANE_HQ).probe()
     except Exception:
         return False
     return bool(probe.get("hq")) and "+cpu" in str(probe.get("torch") or "")
@@ -202,10 +192,10 @@ def _ensure_package(home_dir: Path | str | None = None) -> bool:
                     floor=28.0,
                     extra_args=("--index-url", _CUDA_TORCH_INDEX),
                 )
-            from remedy.voice.bridge import get_bridge
+            from remedy.voice.bridge import LANE_HQ, get_bridge, stop_lane
 
-            get_bridge(home_dir).stop()  # stale imports from before pip
-            mark_pack("hq", bool(get_bridge(home_dir).probe().get("hq")), home_dir)
+            stop_lane(home_dir, LANE_HQ)  # stale imports from before pip
+            mark_pack("hq", bool(get_bridge(home_dir, LANE_HQ).probe().get("hq")), home_dir)
         else:
             run_pip_packages(
                 ("chatterbox-tts",),
@@ -244,6 +234,72 @@ def _mark_ready(home_dir: Path | str | None, *, sr: int) -> None:
     )
 
 
+# The files ChatterboxTTS.from_pretrained fetches, in its order. Fetching
+# them ourselves first gives the owner a real byte count instead of a pulse;
+# from_pretrained then finds every file already in the cache.
+_HQ_REPO = "ResembleAI/chatterbox"
+_HQ_FILES = ("ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt")
+_HQ_DL_FLOOR, _HQ_DL_CAP = 36.0, 92.0
+
+
+def _prefetch_weights() -> None:
+    """Download the HQ weights with progress in _install_state["chatterbox"].
+
+    Sizes come from the hub's metadata; bytes are read off the cache as
+    each file lands (the hub writes to a .incomplete blob next to the final
+    one), so the bar moves during a 1 GB file, not only between files.
+    """
+    from huggingface_hub import HfApi, hf_hub_download
+
+    st = _install_state.get("chatterbox")
+    if not isinstance(st, dict):
+        return
+    sizes: dict[str, int] = {}
+    try:
+        info = HfApi().model_info(_HQ_REPO, files_metadata=True)
+        for sib in info.siblings or []:
+            if sib.rfilename in _HQ_FILES and sib.size:
+                sizes[sib.rfilename] = int(sib.size)
+    except Exception:
+        sizes = {}
+    total = sum(sizes.get(f, 0) for f in _HQ_FILES) or 0
+    done_before = 0
+    stop = threading.Event()
+
+    def _watch(fname: str, size: int, start: int) -> None:
+        # Poll the hub cache for this file's growing blob.
+        cache = Path(os.environ.get("HUGGINGFACE_HUB_CACHE") or "")
+        while not stop.wait(0.5):
+            got = 0
+            try:
+                for p in cache.rglob("*.incomplete"):
+                    got = max(got, p.stat().st_size)
+            except OSError:
+                got = 0
+            if total:
+                frac = min(1.0, (start + min(got, size)) / total)
+                st["percent"] = round(_HQ_DL_FLOOR + (_HQ_DL_CAP - _HQ_DL_FLOOR) * frac, 1)
+            st["message"] = (
+                f"Downloading Chatterbox · {(start + min(got, size)) / 2**30:.2f} of {total / 2**30:.2f} GB"
+                if total
+                else f"Downloading Chatterbox · {fname}"
+            )
+
+    for fname in _HQ_FILES:
+        size = sizes.get(fname, 0)
+        stop.clear()
+        w = threading.Thread(target=_watch, args=(fname, size, done_before), daemon=True)
+        w.start()
+        try:
+            hf_hub_download(repo_id=_HQ_REPO, filename=fname)
+        finally:
+            stop.set()
+        done_before += size
+        if total:
+            st["percent"] = round(_HQ_DL_FLOOR + (_HQ_DL_CAP - _HQ_DL_FLOOR) * min(1.0, done_before / total), 1)
+    st["message"] = "Loading Chatterbox"
+
+
 def get_chatterbox_engine(home_dir: Path | str | None = None) -> Any | None:
     """Lazy ChatterboxTTS, downloading weights into ~/.remedy/voice/chatterbox."""
     global _engine
@@ -259,20 +315,11 @@ def get_chatterbox_engine(home_dir: Path | str | None = None) -> Any | None:
 
             _install_state["chatterbox"] = {
                 "status": "downloading",
-                "percent": 36.0,
+                "percent": _HQ_DL_FLOOR,
                 "message": "Downloading Chatterbox",
             }
-            stop = threading.Event()
-            pulse = threading.Thread(
-                target=_pulse_hq,
-                args=(stop,),
-                daemon=True,
-            )
-            pulse.start()
-            try:
-                model = ChatterboxTTS.from_pretrained(device=_device())
-            finally:
-                stop.set()
+            _prefetch_weights()
+            model = ChatterboxTTS.from_pretrained(device=_device())
             _engine = model
             sr = int(getattr(model, "sr", 24_000) or 24_000)
             _mark_ready(home_dir, sr=sr)
@@ -310,41 +357,51 @@ def install_chatterbox(home_dir: Path | str | None = None) -> None:
 
 def _install_managed(home_dir: Path | str | None) -> None:
     """Desktop: pip the pack into the runtime, then let the worker pull weights."""
-    from remedy.voice.bridge import WorkerError, get_bridge
+    from remedy.voice.bridge import LANE_HQ, WorkerError, get_bridge
     from remedy.voice.service import _owner_pack_error
 
     if not _ensure_package(home_dir):
         raise RuntimeError("chatterbox install failed")
     _install_state["chatterbox"] = {
         "status": "downloading",
-        "percent": 36.0,
+        "percent": _HQ_DL_FLOOR,
         "message": "Downloading Chatterbox",
     }
-    stop = threading.Event()
-    pulse = threading.Thread(target=_pulse_hq, args=(stop,), daemon=True)
-    pulse.start()
+    bridge = get_bridge(home_dir, LANE_HQ)
     try:
-        out = get_bridge(home_dir).warm_hq()
+        bridge.call("warm_hq_start", timeout=60)
+        # Mirror the worker's own progress (real bytes) until it settles.
+        deadline = time.monotonic() + 3 * 3600
+        while time.monotonic() < deadline:
+            time.sleep(1.0)
+            st = bridge.hq_state() or {}
+            status = str(st.get("status") or "")
+            if status == "downloading":
+                cur = _install_state.get("chatterbox")
+                if isinstance(cur, dict):
+                    if st.get("percent") is not None:
+                        cur["percent"] = float(st.get("percent") or 0.0)
+                    if st.get("message"):
+                        cur["message"] = str(st.get("message"))
+                continue
+            if status == "done":
+                _install_state["chatterbox"] = {"status": "done", "percent": 100.0}
+                return
+            if status == "error":
+                raise RuntimeError(str(st.get("error") or "not loaded"))
+        raise TimeoutError("High-quality voice took longer than three hours")
     except WorkerError as exc:
         _install_state["chatterbox"] = {
             "status": "error",
             "error": _owner_pack_error(exc, what="High-quality voice"),
         }
         raise RuntimeError("chatterbox install failed") from exc
-    finally:
-        stop.set()
-    st = out.get("state") if isinstance(out, dict) else None
-    if out.get("loaded") if isinstance(out, dict) else False:
-        _install_state["chatterbox"] = {"status": "done", "percent": 100.0}
-        return
-    err = str(st.get("error") or "") if isinstance(st, dict) else ""
-    _install_state["chatterbox"] = {
-        "status": "error",
-        "error": _owner_pack_error(
-            RuntimeError(err or "not loaded"), what="High-quality voice"
-        ),
-    }
-    raise RuntimeError("chatterbox install failed")
+    except (RuntimeError, TimeoutError) as exc:
+        _install_state["chatterbox"] = {
+            "status": "error",
+            "error": _owner_pack_error(exc, what="High-quality voice"),
+        }
+        raise RuntimeError("chatterbox install failed") from exc
 
 
 def install_chatterbox_background(home_dir: Path | str | None = None) -> bool:
