@@ -779,7 +779,10 @@ def test_marking_a_missing_message_read_is_not_reported_as_success(world):
     return code alone said a message was marked when none was."""
     with pytest.raises(RuntimeError, match="not found"):
         provider().mark_read("999")
-    assert world.imap.stores == [("999", "+FLAGS", "\\Seen")]
+    # The UID never resolved, so STORE saw an empty set — assert on what
+    # the provider actually asked for.
+    assert world.imap.uid_calls[-1][0] == "STORE"
+    assert world.imap.uid_calls[-1][1][0] == "999"
 
 
 def test_BUG_archiving_a_message_number_that_matched_nothing_reports_success(world):
@@ -791,13 +794,14 @@ def test_BUG_archiving_a_message_number_that_matched_nothing_reports_success(wor
     assert world.mailbox.keys("Archive") == []
 
 
-def test_BUG_message_ids_are_sequence_numbers_so_they_shift_under_the_caller(world):
-    """``list_messages`` labels them ``uid`` in ``raw`` but they are SELECT
-    sequence numbers, which renumber on expunge. Archive one message and every
-    id the caller is holding now points at a different message."""
+def test_message_ids_are_uids_and_do_not_shift_under_the_caller(world):
+    """``list_messages`` labelled them ``uid`` in ``raw`` but they were SELECT
+    sequence numbers — positions, which renumber on expunge. Archiving one
+    message moved every id the caller was still holding onto the message next
+    door, so a later archive or mark-read acted on the wrong mail."""
     listed = {m.subject: m.id for m in provider().list_messages()}
-    assert listed["Café ☕ — réunion demain"] == "2"
+    held = listed["Café ☕ — réunion demain"]
 
-    provider().archive_message(listed["Invoice 4471"])  # seq 1 leaves the inbox
+    provider().archive_message(listed["Invoice 4471"])  # renumbers the rest
 
-    assert provider().get_message("2").subject == "Weekly digest"
+    assert provider().get_message(held).subject == "Café ☕ — réunion demain"
