@@ -281,7 +281,7 @@ def save_api_key(api_key: str, home: Path | None = None) -> XaiCredentials:
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """Never follow OAuth redirects (accounts.x.ai 307 → /sign-in is not the API)."""
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
 
 

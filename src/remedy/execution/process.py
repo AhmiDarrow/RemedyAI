@@ -10,6 +10,7 @@ import asyncio
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 # CREATE_NO_WINDOW — hide console windows for GUI / desktop tool runs.
@@ -65,7 +66,7 @@ def run_hidden(
     capture_output: bool = False,
     text: bool = False,
     timeout: float | None = DEFAULT_RUN_TIMEOUT_S,
-    cwd: str | None = None,
+    cwd: str | Path | None = None,
     env: Mapping[str, str] | None = None,
     check: bool = False,
     input: str | bytes | None = None,
@@ -90,7 +91,7 @@ def run_hidden(
 def popen_hidden(
     args: Sequence[str],
     *,
-    cwd: str | None = None,
+    cwd: str | Path | None = None,
     env: Mapping[str, str] | None = None,
     stdout: Any = None,
     stderr: Any = None,
@@ -116,7 +117,7 @@ async def create_hidden_subprocess_exec(
     stdout: Any = None,
     stderr: Any = None,
     stdin: Any = None,
-    cwd: str | None = None,
+    cwd: str | Path | None = None,
     env: Mapping[str, str] | None = None,
     **extra: Any,
 ) -> asyncio.subprocess.Process:

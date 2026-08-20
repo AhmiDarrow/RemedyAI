@@ -13,6 +13,7 @@ import platform
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -81,7 +82,7 @@ def _disk_for(path: Path) -> dict[str, Any]:
 def _process_stats() -> dict[str, Any]:
     out: dict[str, Any] = {"pid": os.getpid()}
     try:
-        import psutil  # type: ignore
+        import psutil
 
         p = psutil.Process(os.getpid())
         with contextlib.suppress(Exception):
@@ -127,7 +128,7 @@ def _process_stats() -> dict[str, Any]:
                 out["rss_mb"] = _mb(counters.WorkingSetSize)
         except Exception:
             pass
-    else:
+    elif sys.platform != "win32":
         with contextlib.suppress(Exception):
             import resource
 
@@ -175,7 +176,7 @@ def _hardware_stats() -> dict[str, Any]:
     mem_avail = None
     cpu_pct = None
     try:
-        import psutil  # type: ignore
+        import psutil
 
         vm = psutil.virtual_memory()
         mem_total = vm.total
@@ -307,7 +308,7 @@ def _http_latency_ms(url: str, timeout: float = 1.5) -> float | None:
     t0 = time.perf_counter()
     try:
         req = Request(probe, headers={"User-Agent": "RemedyAI-Diagnostics/1.0"})
-        with urlopen_no_redirect(req, timeout=timeout) as resp:  # type: ignore[union-attr]
+        with urlopen_no_redirect(req, timeout=timeout) as resp:
             _ = resp.read(64)
             if 200 <= getattr(resp, "status", 200) < 300:
                 return round((time.perf_counter() - t0) * 1000.0, 1)
@@ -578,7 +579,7 @@ def _providers_section(cfg: dict[str, Any]) -> dict[str, Any]:
                     }
                 )
 
-    active = {
+    active: dict[str, Any] = {
         "provider": str(cfg.get("llm_provider") or ""),
         "model": str(cfg.get("llm_model") or ""),
         "base_url": str(cfg.get("llm_base_url") or ""),

@@ -130,17 +130,8 @@ python_version = "3.12"
 ignore_missing_imports = true
 warn_unused_ignores = true
 check_untyped_defs = true
-# Typed packages (expand as remaining modules are annotated).
-files = [
-    "src/remedy/core",
-    "src/remedy/execution",
-    "src/remedy/tools",
-    "src/remedy/models.py",
-    "src/remedy/interfaces/api_models.py",
-    "src/remedy/interfaces/api_support.py",
-    "src/remedy/interfaces/attachments.py",
-    "src/remedy/interfaces/local_auth.py",
-]
+# The whole tree is checked; `exclude` lists the modules still typed gradually.
+files = ["src/remedy"]
 exclude = [
     "src/remedy/core/agent.py",  # orchestrator; type gradually
     "src/remedy/core/react_loop/loop.py",  # large ReAct stream; type gradually

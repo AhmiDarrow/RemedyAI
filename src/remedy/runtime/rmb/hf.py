@@ -352,7 +352,8 @@ def search_gguf_repos(query: str, *, limit: int = 12) -> list[dict[str, Any]]:
             except HfError:
                 continue
             seen.add(rid)
-            tags = row.get("tags") if isinstance(row.get("tags"), list) else []
+            tags_raw = row.get("tags")
+            tags: list[Any] = tags_raw if isinstance(tags_raw, list) else []
             out.append(
                 {
                     "id": rid,

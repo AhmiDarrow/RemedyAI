@@ -155,6 +155,16 @@ closed here, each with a test that fails on the old code.
   handles do not raise; `filter_jailed_attachments` is imported at module
   level and fails closed; relative soul exports land under `exports/` again.
 
+### Typing — mypy covers the whole tree
+
+- `[tool.mypy] files` was eight paths; the other ~230 modules were never
+  checked and carried 106 errors. All fixed with real narrowing (no new
+  `type: ignore`; platform-only branches use `sys.platform` guards so Linux
+  CI stays clean), and `files = ["src/remedy"]` so it stays at zero. Two were
+  latent bugs: `session_events` fell back to `dict(ev)` on a dataclass
+  (would raise), and the unauthenticated `/status` path passed a gateway
+  uptime straight into a `str` field. `run_hidden` accepts a `Path` cwd.
+
 ### Correctness — bugs found by driving the code, not reading it
 
 - **Clipboard reads no longer crash Remedy.** The Win32 backend declared no

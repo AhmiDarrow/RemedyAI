@@ -208,7 +208,7 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         if not _status_authed(request):
             return StatusResponse(
                 version=_remedy_version,
-                uptime=gw_stats.get("uptime", "N/A"),
+                uptime=str(gw_stats.get("uptime", "N/A")),
                 gateway={"running": bool(gw_stats.get("running"))},
             )
 
@@ -240,7 +240,7 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             with contextlib.suppress(Exception):
                 skills_count = len(runtime.skills.skills)
 
-        payload = {
+        payload: dict[str, Any] = {
             "version": _remedy_version,
             "uptime": gw_stats.get("uptime", "N/A"),
             "gateway": gw_stats,

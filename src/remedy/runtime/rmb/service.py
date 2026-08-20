@@ -148,7 +148,7 @@ def _health(base_url: str, timeout: float = _HEALTH_TIMEOUT_S) -> bool:
     for url in (health_url, models_url):
         try:
             req = Request(url, headers={"User-Agent": "RemedyAI-RMB/1.0"})
-            with urlopen_no_redirect(req, timeout=timeout) as resp:  # type: ignore[union-attr]
+            with urlopen_no_redirect(req, timeout=timeout) as resp:
                 status = int(getattr(resp, "status", 200) or 200)
                 if status == 503:
                     _last_health_detail = "loading"
@@ -1014,7 +1014,8 @@ def _live_process_has_mtp_flags(state: dict[str, Any] | None = None) -> bool:
     """
     st = state or {}
     # Prefer explicit state
-    ha = st.get("host_auto") if isinstance(st.get("host_auto"), dict) else {}
+    ha_raw = st.get("host_auto")
+    ha: dict[str, Any] = ha_raw if isinstance(ha_raw, dict) else {}
     if ha.get("mtp_armed"):
         return True
     # Managed child cmdline
@@ -1407,7 +1408,7 @@ def _build_cmd(
         binary
     ):
         try:
-            budget = int(profile.get("reasoning_budget"))
+            budget = int(profile.get("reasoning_budget") or 0)
         except (TypeError, ValueError):
             budget = 0
         cmd.extend(["--reasoning-budget", str(budget)])
@@ -1839,10 +1840,9 @@ def _start_rmb_server_impl(
             # Do NOT restart when the live process already has draft-mtp (host_auto
             # may be missing after API recycle) — mid-chat restart → 503 Loading.
             want_profile = detect_gguf_host_profile(want_model)
-            prev_auto = (
-                st_probe.get("host_auto")
-                if isinstance(st_probe.get("host_auto"), dict)
-                else {}
+            prev_auto_raw = st_probe.get("host_auto")
+            prev_auto: dict[str, Any] = (
+                prev_auto_raw if isinstance(prev_auto_raw, dict) else {}
             )
             live_mtp = _live_process_has_mtp_flags(st_probe)
             if live_mtp and not prev_auto.get("mtp_armed"):
@@ -2366,6 +2366,7 @@ def _start_rmb_server_impl(
             }
 
         retries += 1
+        assert nxt is not None  # guaranteed by can_retry above
         wait_plan = nxt
         logger.warning(
             "RMB start %s — retry %s/%s with %s",
@@ -3488,14 +3489,13 @@ def apply_rmb_settings(
                     disk["llm_model"] = chat_stem
                     disk["harness_min_context_pct"] = 0.55
                     disk["harness_max_context_pct"] = 0.78
-                    v = (
-                        dict(disk.get("vision") or {})
-                        if isinstance(disk.get("vision"), dict)
-                        else {}
+                    disk_vision = disk.get("vision")
+                    vis_cfg: dict[str, Any] = (
+                        dict(disk_vision) if isinstance(disk_vision, dict) else {}
                     )
-                    v["force_decode"] = False
-                    v["auto_start"] = False
-                    disk["vision"] = v
+                    vis_cfg["force_decode"] = False
+                    vis_cfg["auto_start"] = False
+                    disk["vision"] = vis_cfg
                 # When chat is already RMB, keep model/base_url + harness aligned
                 # with live host so next turn doesn't use stale config.
                 elif str(disk.get("llm_provider") or "").lower() == "rmb":
