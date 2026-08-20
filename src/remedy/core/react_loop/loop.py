@@ -343,6 +343,9 @@ async def call_llm_stream(runtime, message: str,
         # token-burn wall — then an honest stop, never a fake "I'll find…".
         zero_tool_drive_count = 0
         max_zero_tool_drives = 8
+        #: The safety-ceiling checkpoint fires once per turn, not once per
+        #: step that happens to be the last one after a re-arm.
+        step_wall_checkpointed = False
         thinking_choice_repaired = False
         green_gate_reopen_count = 0
         max_green_gate_reopens = 6
@@ -1066,6 +1069,23 @@ async def call_llm_stream(runtime, message: str,
                         force_answer_sticky = True
 
                 is_final_step = step >= max_total - 1
+                # Checkpoint on arrival at the absolute ceiling, once per turn.
+                # This used to sit at the tail of the tool-batch section, which
+                # is only reached when force_answer is False — and at the
+                # ceiling force_answer is always True, while the one path that
+                # clears it clears is_final_step in the same statement. So it
+                # never ran. Firing here also covers the re-arm below, which
+                # pushes the turn *past* the wall: that is more risk, not less.
+                if is_final_step and not step_wall_checkpointed:
+                    step_wall_checkpointed = True
+                    with suppress(Exception):
+                        md = runtime._maybe_auto_checkpoint(
+                            reason="step_wall",
+                            title="Absolute safety step ceiling",
+                            force=True,
+                        )
+                        if md:
+                            yield "@@checkpoint"
                 # Machine green verify → summary-only unless ship/play still needs tools
                 from remedy.core.turn_context import (
                     set_turn_build_verify_green,
@@ -3331,15 +3351,11 @@ async def call_llm_stream(runtime, message: str,
                         logger.info("Injected mission verify gate nudge")
                 with suppress(Exception):
                     runtime._maybe_auto_checkpoint(reason="auto")
-                if is_final_step:
-                    with suppress(Exception):
-                        md = runtime._maybe_auto_checkpoint(
-                            reason="step_wall",
-                            title="Absolute safety step ceiling",
-                            force=True,
-                        )
-                        if md:
-                            yield "@@checkpoint"
+                # The step-wall checkpoint used to sit here. It could never run:
+                # this section is only reached when force_answer is False, and
+                # at the ceiling force_answer is always True — while the one
+                # path that clears it clears is_final_step in the same
+                # statement. It now fires where is_final_step settles, above.
 
         # Exhausted absolute safety steps without a streamed answer.
         if not produced_user_text:
