@@ -61,6 +61,14 @@ def op_probe(args: dict[str, Any]) -> dict[str, Any]:
         out["hq"] = chatterbox_deps_available()
     except Exception:
         out["hq"] = False
+    try:
+        import torch
+
+        out["torch"] = str(torch.__version__)
+        out["cuda"] = bool(torch.cuda.is_available())
+    except Exception:
+        out["torch"] = ""
+        out["cuda"] = False
     return out
 
 

@@ -287,14 +287,14 @@ def install_runtime(
         if not py.is_file():
             raise RuntimeError("The voice runtime unpacked without a Python inside.")
         # Smoke: it must start and report the pinned version.
-        import subprocess
+        from remedy.execution.process import run_hidden
 
-        out = subprocess.run(
+        out = run_hidden(
             [str(py), "-c", "import sys; print(sys.version.split()[0])"],
             capture_output=True,
             text=True,
             timeout=60,
-            check=False,
+            env=child_env(home_dir, with_source=False),
         )
         got = (out.stdout or "").strip()
         if out.returncode != 0 or not got.startswith("3.12"):
@@ -380,6 +380,12 @@ def child_env(home_dir: Path | str | None = None, *, with_source: bool) -> dict[
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONNOUSERSITE"] = "1"
+    # No progress bars on stderr: they would flood the sidecar log and
+    # nobody is watching a terminal.
+    env["TQDM_DISABLE"] = "1"
+    env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+    env["HF_HUB_DISABLE_TELEMETRY"] = "1"
+    env["TOKENIZERS_PARALLELISM"] = "false"
     if with_source:
         env["PYTHONPATH"] = str(source_root_for_worker(home_dir))
     if home_dir:
