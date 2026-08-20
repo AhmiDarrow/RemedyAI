@@ -4,6 +4,7 @@ export type SettingsSectionId =
   | 'provider-catalog'
   | 'you-agent'
   | 'voice'
+  | 'phone'
   | 'workspace'
   | 'access'
   | 'security-power'
@@ -45,7 +46,12 @@ export const SETTINGS_SECTION_META: Record<
     title: 'Voice',
     summary: 'Speak, hear, turn-taking',
     keywords:
-      'voice speak hear mic kokoro whisper tts stt smart-turn turn-taking aloud quiet grove speech',
+      'voice speak hear mic kokoro whisper tts stt smart-turn turn-taking aloud quiet grove speech hq high-quality chatterbox human robot',
+  },
+  phone: {
+    title: 'Phone',
+    summary: 'A voice on the line',
+    keywords: 'phone call sip telephony baresip line dial talk hq chatterbox',
   },
   workspace: {
     title: 'Project workspace',

@@ -8,11 +8,15 @@ voices, /voice/transcribe returns 503 and the mic button explains itself.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import io
 import json
 import logging
 import os
+import shutil
 import struct
+import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -53,6 +57,8 @@ _DEFAULT_SETTINGS: dict[str, Any] = {
     "stt_model": "small",
     # None/"" = autodetect
     "language": "",
+    # standard = Kokoro (always downloaded). hq = Chatterbox (opt-in, ~1.1 GB).
+    "tts_quality": "standard",
 }
 
 
@@ -80,6 +86,8 @@ def save_voice_settings(
         cur["speed"] = min(2.0, max(0.5, float(cur.get("speed") or 1.0)))
     except (TypeError, ValueError):
         cur["speed"] = 1.0
+    q = str(cur.get("tts_quality") or "standard").strip().lower()
+    cur["tts_quality"] = "hq" if q in ("hq", "high", "chatterbox") else "standard"
     from remedy.core.atomic_json import write_text_atomic
 
     write_text_atomic(
@@ -206,8 +214,17 @@ _TTS_VOICES_URL = (
 )
 
 _tts_lock = threading.Lock()
+_pack_lock = threading.Lock()
 _tts_engine: Any | None = None
-_install_state: dict[str, Any] = {"tts": None, "stt": None, "smart-turn": None}
+_install_state: dict[str, Any] = {
+    "tts": None,
+    "stt": None,
+    "smart-turn": None,
+    "pack": None,
+}
+
+# Pins match pyproject optional-dependencies.voice — keep in lockstep.
+_VOICE_PACK_PACKAGES = ("kokoro-onnx>=0.3.0,<1", "faster-whisper>=1.0.0,<2")
 
 
 def tts_paths(home_dir: Path | str | None = None) -> tuple[Path, Path]:
@@ -244,9 +261,14 @@ def _download(url: str, dest: Path, state_key: str) -> None:
                 f.write(chunk)
                 done += len(chunk)
                 if total:
+                    pct = round(done * 100 / total, 1)
                     st = _install_state.get(state_key)
                     if isinstance(st, dict):
-                        st["percent"] = round(done * 100 / total, 1)
+                        st["percent"] = pct
+                    pack = _install_state.get("pack")
+                    if isinstance(pack, dict) and pack.get("status") == "downloading":
+                        pack["percent"] = round(25.0 + pct * 0.7, 1)
+                        pack["message"] = "Downloading Remedy's voice"
     tmp.replace(dest)
 
 
@@ -261,7 +283,10 @@ def install_tts(home_dir: Path | str | None = None) -> None:
             _download(_TTS_VOICES_URL, voices, "tts")
         _install_state["tts"] = {"status": "done", "percent": 100.0}
     except Exception as exc:
-        _install_state["tts"] = {"status": "error", "error": str(exc)[:300]}
+        _install_state["tts"] = {
+            "status": "error",
+            "error": _owner_pack_error(exc, what="Remedy's voice"),
+        }
         raise
 
 
@@ -305,11 +330,30 @@ def synthesize(
     speed: float | None = None,
     home_dir: Path | str | None = None,
 ) -> tuple[bytes, int] | None:
-    """Text → (wav_bytes, sample_rate); None when the engine is unavailable."""
+    """Text → (wav_bytes, sample_rate); None when the engine is unavailable.
+
+    High-quality (Chatterbox) wins when the owner turned it on *and* it is
+    ready; otherwise Kokoro. Grove and the phone pipeline share this path.
+    """
+    cfg = load_voice_settings(home_dir)
+    if str(cfg.get("tts_quality") or "standard") == "hq":
+        from remedy.voice.chatterbox import chatterbox_ready
+        from remedy.voice.chatterbox import synthesize as hq_synthesize
+
+        # Never pip/download inside a speak request: if the HQ voice is not
+        # ready yet, fall through to Kokoro (the install runs in its own
+        # thread, kicked by Settings).
+        if chatterbox_ready(home_dir):
+            try:
+                out = hq_synthesize(text, gender=gender, home_dir=home_dir)
+            except Exception as exc:
+                logger.warning("voice: hq synth failed, using standard: %s", exc)
+                out = None
+            if out is not None:
+                return out
     engine = get_tts_engine(home_dir)
     if engine is None:
         return None
-    cfg = load_voice_settings(home_dir)
     v = voice_for_gender(gender, voice or cfg.get("voice_override"))
     spd = float(speed or cfg.get("speed") or 1.0)
     clean = speakable_text(text)
@@ -323,7 +367,8 @@ def synthesize(
 # STT engine (faster-whisper) — lazy singleton
 # ---------------------------------------------------------------------------
 
-_stt_lock = threading.Lock()
+_stt_lock = threading.Lock()  # held while whisper loads (can be minutes)
+_stt_state_lock = threading.Lock()  # check-and-mark only — never blocks
 _stt_model: Any | None = None
 _stt_model_size: str | None = None
 
@@ -354,16 +399,260 @@ def stt_installed(home_dir: Path | str | None = None) -> bool:
         return False
 
 
+def install_stt_background(home_dir: Path | str | None = None) -> bool:
+    """Warm whisper in a daemon thread (first load downloads the model).
+
+    Only the cheap state lock is taken here; the load lock is held by the
+    worker for the whole download, and this is called from async routes.
+    """
+    if not stt_deps_available():
+        return False
+    size = _stt_size(home_dir)
+    with _stt_state_lock:
+        st = _install_state.get("stt")
+        if isinstance(st, dict) and st.get("status") in ("downloading", "loading"):
+            return False
+        if _stt_model is not None and _stt_model_size == size:
+            _install_state["stt"] = {"status": "done", "model": size}
+            return False
+        _install_state["stt"] = {"status": "downloading", "percent": 0.0}
+    t = threading.Thread(target=get_stt_model, args=(home_dir,), daemon=True)
+    t.start()
+    return True
+
+
+def _skip_first_run_download() -> bool:
+    """Tests must not pull hundreds of MB; production first-run always does."""
+    if os.environ.get("REMEDY_ENSURE_ASSETS") == "1":
+        return False
+    if os.environ.get("REMEDY_NO_FIRST_RUN_DOWNLOAD") == "1":
+        return True
+    return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
+_NETWORK_WORDS = (
+    "urlopen", "urllib", "timed out", "timeout", "connection", "ssl",
+    "name resolution", "getaddrinfo", "network", "unreachable", "http error",
+    "no matching distribution", "could not find a version", "remote end",
+)
+
+
+def _owner_pack_error(exc: BaseException, *, what: str = "The voice pack") -> str:
+    """Plain words for the Download button — never pip output or a code.
+
+    The raw message goes to the log; the owner sees one sentence they can
+    act on.
+    """
+    msg = str(exc or "").strip()
+    low = msg.lower()
+    logger.warning("voice: %s install failed: %s", what, msg[:400])
+    if getattr(sys, "frozen", False) or low == "frozen":
+        return (
+            f"This copy of Remedy cannot add {what.lower()} from Settings. "
+            "Update Remedy Desktop and try Download again."
+        )
+    if isinstance(exc, PermissionError) or "permission denied" in low or "access is denied" in low:
+        return f"{what} could not be saved here. Check that Remedy's folder is writable."
+    if "no space" in low or "disk full" in low:
+        return f"{what} needs more free disk space."
+    if "sha256" in low or "does not match" in low or "larger than the pinned" in low:
+        return f"{what} download did not check out. Try Download again."
+    if any(w in low for w in _NETWORK_WORDS):
+        return f"{what} could not be downloaded right now. Check the connection and try again."
+    return f"{what} did not finish downloading. Try again in a moment."
+
+
+def _pulse_install(
+    state: dict[str, Any],
+    key: str,
+    *,
+    cap: float,
+    stop: threading.Event,
+    step: float = 2.0,
+) -> None:
+    """Nudge percent so the title bar moves while pip/HF has no byte count."""
+    while not stop.wait(1.0):
+        st = state.get(key)
+        if not isinstance(st, dict) or st.get("status") != "downloading":
+            return
+        p = float(st.get("percent") or 0)
+        if p < cap:
+            st["percent"] = round(min(cap, p + step), 1)
+
+
+def run_pip_packages(
+    packages: tuple[str, ...],
+    state: dict[str, Any],
+    key: str,
+    *,
+    cap: float = 40.0,
+) -> None:
+    """Install packages into this Python. Pulses *state[key]* while it runs."""
+    if getattr(sys, "frozen", False):
+        raise RuntimeError("frozen")
+    env = os.environ.copy()
+    env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
+    attempts: list[list[str]] = [
+        [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", *packages],
+    ]
+    uv = shutil.which("uv")
+    if uv:
+        attempts.append(
+            [uv, "pip", "install", "--python", sys.executable, *packages]
+        )
+    stop = threading.Event()
+    pulse = threading.Thread(
+        target=_pulse_install,
+        args=(state, key),
+        kwargs={"cap": cap, "stop": stop},
+        daemon=True,
+    )
+    pulse.start()
+    last_err = ""
+    try:
+        for cmd in attempts:
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    check=False,
+                )
+                if proc.returncode == 0:
+                    return
+                last_err = (proc.stderr or proc.stdout or f"exit {proc.returncode}")[:400]
+                logger.warning("voice pip failed (%s): %s", cmd[0], last_err)
+            except Exception as exc:
+                last_err = str(exc)[:400]
+                logger.warning("voice pip error (%s): %s", cmd[0], last_err)
+    finally:
+        stop.set()
+    raise RuntimeError(last_err or "Voice pack download failed.")
+
+
+def _pip_install_voice_extras() -> None:
+    """Install kokoro-onnx + faster-whisper into this Python.
+
+    Power users can still ``pip install remedy-ai[voice]``; this is the
+    in-app path the Download button uses. Frozen sidecars cannot pip.
+    """
+    run_pip_packages(
+        _VOICE_PACK_PACKAGES, _install_state, "pack", cap=40.0
+    )
+    # pip wrote into site-packages behind this interpreter's back; the
+    # import system caches directory listings, so tell it to look again.
+    importlib.invalidate_caches()
+
+
+def install_voice_pack(home_dir: Path | str | None = None) -> None:
+    """Install the Python extras (if needed) then download model files."""
+    _install_state["pack"] = {
+        "status": "downloading",
+        "percent": 8.0,
+        "message": "Installing the voice pack",
+    }
+    try:
+        if not tts_deps_available() or not stt_deps_available():
+            _pip_install_voice_extras()
+        if not tts_deps_available():
+            raise RuntimeError("Speaking voice did not install.")
+        _install_state["pack"]["percent"] = 25.0
+        _install_state["pack"]["message"] = "Downloading Remedy's voice"
+        if not tts_installed(home_dir):
+            install_tts(home_dir)
+        if stt_deps_available() and not stt_installed(home_dir):
+            install_stt_background(home_dir)
+        if not smart_turn_installed(home_dir):
+            install_smart_turn_background(home_dir)
+        _install_state["pack"] = {
+            "status": "done",
+            "percent": 100.0,
+            "message": "Voice pack is ready",
+        }
+    except Exception as exc:
+        _install_state["pack"] = {
+            "status": "error",
+            "error": _owner_pack_error(exc),
+        }
+        raise
+
+
+def install_voice_pack_background(home_dir: Path | str | None = None) -> bool:
+    with _pack_lock:
+        st = _install_state.get("pack")
+        if isinstance(st, dict) and st.get("status") == "downloading":
+            return False
+        _install_state["pack"] = {
+            "status": "downloading",
+            "percent": 0.0,
+            "message": "Installing the voice pack",
+        }
+    t = threading.Thread(target=install_voice_pack, args=(home_dir,), daemon=True)
+    t.start()
+    return True
+
+
+def ensure_voice_assets(
+    home_dir: Path | str | None = None, *, force: bool = False
+) -> dict[str, Any]:
+    """Download TTS, STT, and smart-turn if missing. Never blocks the caller.
+
+    Model files are product dependencies, not Settings options. ``force`` is
+    for an explicit retry (HTTP install / Download button); first-run skips
+    inside pytest.
+    """
+    if not force and _skip_first_run_download():
+        return {"ok": True, "skipped": True, "reason": "tests_or_disabled"}
+    started: list[str] = []
+    already: list[str] = []
+    if not tts_deps_available() or not stt_deps_available():
+        install_voice_pack_background(home_dir)
+        started.append("pack")
+        logger.info("Voice pack ensure started (extras missing)")
+        return {"ok": True, "started": started, "already": already}
+    if tts_installed(home_dir):
+        already.append("tts")
+    else:
+        install_tts_background(home_dir)
+        started.append("tts")
+    if stt_installed(home_dir):
+        already.append("stt")
+    elif stt_deps_available():
+        install_stt_background(home_dir)
+        started.append("stt")
+    if smart_turn_installed(home_dir):
+        already.append("smart-turn")
+    else:
+        install_smart_turn_background(home_dir)
+        started.append("smart-turn")
+    logger.info(
+        "Voice assets ensure started=%s already=%s",
+        ",".join(started) or "-",
+        ",".join(already) or "-",
+    )
+    return {"ok": True, "started": started, "already": already}
+
+
+def _stt_size(home_dir: Path | str | None = None) -> str:
+    size = str(load_voice_settings(home_dir).get("stt_model") or "small")
+    return size if size in _VALID_STT else "small"
+
+
 def get_stt_model(home_dir: Path | str | None = None) -> Any | None:
     """Lazy WhisperModel (downloads on first use into ~/.remedy/voice/stt)."""
     global _stt_model, _stt_model_size
     if not stt_deps_available():
         return None
-    size = str(load_voice_settings(home_dir).get("stt_model") or "small")
-    if size not in _VALID_STT:
-        size = "small"
+    size = _stt_size(home_dir)
     with _stt_lock:
         if _stt_model is not None and _stt_model_size == size:
+            # install_stt_background may have just marked us "downloading";
+            # say done so status never sticks.
+            _install_state["stt"] = {"status": "done", "model": size}
             return _stt_model
         try:
             from faster_whisper import WhisperModel
@@ -380,7 +669,10 @@ def get_stt_model(home_dir: Path | str | None = None) -> Any | None:
             return _stt_model
         except Exception as exc:
             logger.warning("voice: whisper init failed: %s", exc)
-            _install_state["stt"] = {"status": "error", "error": str(exc)[:300]}
+            _install_state["stt"] = {
+                "status": "error",
+                "error": _owner_pack_error(exc, what="Hearing"),
+            }
             return None
 
 
@@ -535,7 +827,10 @@ def install_smart_turn(home_dir: Path | str | None = None) -> Path:
         return dest
     except Exception as exc:
         tmp.unlink(missing_ok=True)
-        _install_state["smart-turn"] = {"status": "error", "error": str(exc)[:300]}
+        _install_state["smart-turn"] = {
+            "status": "error",
+            "error": _owner_pack_error(exc, what="Turn-taking"),
+        }
         raise
 
 
@@ -553,14 +848,14 @@ def install_smart_turn_background(home_dir: Path | str | None = None) -> bool:
 # Status
 # ---------------------------------------------------------------------------
 
-_VOICE_PACK_REASON = "The voice pack is not installed on this computer."
+_VOICE_PACK_REASON = "Remedy's voice is not on this computer yet."
 _VOICE_PACK_HINT = "pip install remedy-ai[voice]"
 
 
 def _unavailable_reason(
     ok: bool, deps: bool, waiting: str
 ) -> tuple[str | None, str | None]:
-    """Owner-plain reason, plus an Advanced-only install hint."""
+    """Owner-plain reason, plus an Advanced-only command for power users."""
     if ok:
         return None, None
     if deps:
@@ -581,7 +876,7 @@ def voice_status(
     reason_tts, hint_tts = _unavailable_reason(
         tts_ok,
         tts_deps,
-        "Remedy's speaking voice is not downloaded yet.",
+        "Remedy's speaking voice is downloading with the rest of the install.",
     )
     reason_stt, hint_stt = _unavailable_reason(
         stt_ok,
@@ -591,13 +886,23 @@ def voice_status(
     reason_turn, hint_turn = _unavailable_reason(
         turn_ok,
         turn_deps,
-        "Turn-taking is not downloaded yet.",
+        "Turn-taking is downloading with the rest of the install.",
     )
+    from remedy.voice.chatterbox import hq_status
+
+    hq = hq_status(home_dir)
+    quality = str(cfg.get("tts_quality") or "standard")
+    using_hq = quality == "hq" and bool(hq.get("available"))
     return {
         "tts": {
-            "available": tts_ok,
+            "available": bool(using_hq or tts_ok),
             "enabled": bool(cfg.get("tts_enabled", True)),
-            "engine": "kokoro-82m" if tts_ok else None,
+            "engine": (
+                "chatterbox"
+                if using_hq
+                else ("kokoro-82m" if tts_ok else None)
+            ),
+            "quality": quality,
             "reason": reason_tts,
             "hint": hint_tts,
             "deps": tts_deps,
@@ -636,5 +941,10 @@ def voice_status(
             },
             "fallback": "energy",
         },
+        "pack": {
+            "deps": bool(tts_deps and stt_ok),
+            "install": _install_state.get("pack"),
+        },
+        "hq": hq,
         "settings": cfg,
     }

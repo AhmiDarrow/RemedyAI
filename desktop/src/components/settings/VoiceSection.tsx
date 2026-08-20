@@ -7,10 +7,12 @@ import {
   patchVoiceSettings,
   type VoiceStatus,
 } from '../../api/voice'
+import { clearOptimisticDownload, noteOptimisticDownload } from '../../downloads/live'
 import type { SettingsMode } from '../../utils/settingsMode'
 import { SettingsSection } from '../SettingsSection'
 import {
   FormActionButton,
+  FormDownloadProgress,
   FormHint,
   FormLabel,
   FormNotice,
@@ -41,10 +43,12 @@ export function VoiceSection({
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
 
-  const refresh = useCallback(() => {
-    getVoiceStatus()
-      .then(setStatus)
-      .catch(() => {})
+  const refresh = useCallback(async () => {
+    try {
+      setStatus(await getVoiceStatus({ timeout: 8000 }))
+    } catch {
+      /* keep last status */
+    }
   }, [])
 
   useEffect(() => {
@@ -52,9 +56,13 @@ export function VoiceSection({
   }, [refresh])
 
   const installing = Boolean(
-    status?.tts.install?.status === 'downloading'
+    busy
+    || status?.tts.install?.status === 'downloading'
     || status?.stt.install?.status === 'downloading'
-    || status?.smart_turn?.install?.status === 'downloading',
+    || status?.stt.install?.status === 'loading'
+    || status?.smart_turn?.install?.status === 'downloading'
+    || status?.hq?.install?.status === 'downloading'
+    || status?.pack?.install?.status === 'downloading',
   )
 
   useEffect(() => {
@@ -68,18 +76,50 @@ export function VoiceSection({
   const stt = status?.stt
   const turn = status?.smart_turn
   const ttsDownloading = tts?.install?.status === 'downloading'
-  const sttDownloading = stt?.install?.status === 'downloading'
+  const sttDownloading =
+    stt?.install?.status === 'downloading' || stt?.install?.status === 'loading'
   const turnDownloading = turn?.install?.status === 'downloading'
 
-  const startInstall = async (component: 'tts' | 'stt' | 'smart-turn') => {
+  const startInstall = async (
+    component: 'tts' | 'stt' | 'smart-turn' | 'chatterbox' | 'all',
+  ) => {
     setBusy(component)
     setMsg('')
+    const label =
+      component === 'chatterbox'
+        ? 'High-quality voice'
+        : component === 'smart-turn'
+          ? 'Turn-taking'
+          : component === 'stt'
+            ? 'Hearing'
+            : "Downloading Remedy's voice"
+    noteOptimisticDownload({ id: 'voice', label, percent: null })
     try {
       const r = await installVoice(component)
+      const st = await getVoiceStatus({ timeout: 8000 })
+      setStatus(st)
+      const still = [
+        st.pack?.install?.status,
+        st.tts.install?.status,
+        st.stt.install?.status,
+        st.smart_turn?.install?.status,
+        st.hq?.install?.status,
+      ].some((s) => s === 'downloading' || s === 'loading')
       if (!r.ok) {
-        setMsg([r.error, r.hint].filter(Boolean).join(' '))
+        setMsg(r.error || 'Download did not start.')
+        if (!still) clearOptimisticDownload('voice')
+      } else if (!still) {
+        clearOptimisticDownload('voice')
+        const err =
+          st.pack?.install?.error
+          || st.hq?.install?.error
+          || st.tts.install?.error
+          || st.stt.install?.error
+        if (err) setMsg(err)
+        else if (r.started === false) {
+          /* already in flight or already done — status will say */
+        }
       }
-      await refresh()
     } catch (err) {
       setMsg(err instanceof Error ? err.message : String(err))
     } finally {
@@ -97,9 +137,49 @@ export function VoiceSection({
   }
 
   const ttsReady = Boolean(tts?.available)
-  const pct = (side: { install?: { percent?: number } | null } | undefined) => {
-    const n = side?.install?.percent
-    return typeof n === 'number' && n > 0 ? ` ${Math.round(n)}%` : ''
+  const hq = status?.hq
+  const pack = status?.pack
+  const packMissing = tts?.deps === false || stt?.deps === false
+  const packDownloading = pack?.install?.status === 'downloading'
+  const packFailed = pack?.install?.status === 'error'
+  const hqOn = (status?.settings.tts_quality || 'standard') === 'hq'
+  const hqDownloading = hq?.install?.status === 'downloading'
+  const hqFailed = hq?.install?.status === 'error'
+  const hqReady = Boolean(hq?.available)
+  const ttsFailed = tts?.install?.status === 'error'
+  const sttFailed = stt?.install?.status === 'error'
+  const turnFailed = turn?.install?.status === 'error'
+
+  const assetLine = (
+    ready: boolean,
+    downloading: boolean,
+    failed: boolean,
+    label: string,
+    downloadingLabel: string,
+    retry: () => void,
+    retryDisabled: boolean,
+    downloadPercent?: number | null,
+  ) => {
+    if (ready) return <FormHint>{label} is ready on this computer.</FormHint>
+    if (downloading) {
+      return (
+        <FormDownloadProgress
+          label={downloadingLabel.replace(/\s+\d+%$/, '')}
+          percent={downloadPercent ?? null}
+        />
+      )
+    }
+    if (failed) {
+      return (
+        <div className="flex flex-wrap items-center gap-1.5 mb-2">
+          <FormNotice tone="warn">{label} did not finish downloading.</FormNotice>
+          <FormActionButton disabled={retryDisabled} onClick={retry}>
+            Retry
+          </FormActionButton>
+        </div>
+      )
+    }
+    return <FormHint>{label} downloads with Remedy — no extra step.</FormHint>
   }
 
   return (
@@ -111,33 +191,100 @@ export function VoiceSection({
         description={
           ttsReady
             ? "Grove uses Remedy's voice on this computer. Audio never leaves the machine."
-            : "Works now with this computer's voices. Download Remedy's voice below for clearer speech."
+            : "Works now with this computer's voices. Remedy's voice arrives with the rest of the install."
         }
       />
 
-      {!ttsReady ? (
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          <FormActionButton
-            variant="primary"
-            disabled={Boolean(busy) || ttsDownloading || tts?.deps === false}
-            onClick={() => void startInstall('tts')}
-          >
-            {ttsDownloading
-              ? `Downloading Remedy's voice…${pct(tts)}`
-              : "Download Remedy's voice (~340 MB)"}
-          </FormActionButton>
+      {packMissing ? (
+        <div className="flex flex-wrap items-center gap-1.5 mb-2">
+          {packDownloading || ttsDownloading || busy === 'all' || busy === 'tts' ? (
+            <FormDownloadProgress
+              label={pack?.install?.message || "Downloading Remedy's voice"}
+              percent={pack?.install?.percent ?? tts?.install?.percent ?? null}
+            />
+          ) : packFailed ? (
+            <>
+              <FormNotice tone="warn">
+                {pack?.install?.error || "Remedy's voice did not finish downloading."}
+              </FormNotice>
+              <FormActionButton
+                variant="primary"
+                disabled={Boolean(busy) || packDownloading}
+                onClick={() => void startInstall('all')}
+              >
+                Retry download
+              </FormActionButton>
+            </>
+          ) : (
+            <>
+              <FormNotice tone="warn">
+                {tts?.reason || stt?.reason || "Remedy's voice is not on this computer yet."}
+              </FormNotice>
+              <FormActionButton
+                variant="primary"
+                disabled={Boolean(busy) || packDownloading}
+                onClick={() => void startInstall('all')}
+              >
+                Download Remedy's voice
+              </FormActionButton>
+            </>
+          )}
         </div>
       ) : (
-        <FormHint>Remedy's speaking voice is ready on this computer.</FormHint>
+        assetLine(
+          ttsReady,
+          ttsDownloading,
+          ttsFailed,
+          "Remedy's speaking voice",
+          "Downloading Remedy's voice…",
+          () => void startInstall('tts'),
+          Boolean(busy) || ttsDownloading,
+          tts?.install?.percent,
+        )
       )}
 
-      {tts?.deps === false || stt?.deps === false ? (
-        <FormNotice tone="warn">
-          {tts?.reason || stt?.reason || 'The voice pack is not in this install.'}
-          {advanced && (tts?.hint || stt?.hint) ? (
-            <div className="mt-1 font-mono">{tts?.hint || stt?.hint}</div>
-          ) : null}
-        </FormNotice>
+      <FormToggle
+        checked={hqOn}
+        onChange={(on) => {
+          void (async () => {
+            await patch({ tts_quality: on ? 'hq' : 'standard' })
+            if (on) void startInstall('chatterbox')
+          })()
+        }}
+        label="High quality voice"
+        description={
+          hqReady
+            ? 'Grove and calls use Chatterbox — a voice that sounds like a person, not a robot. Stays on this computer.'
+            : hqDownloading
+              ? 'Downloading the human-sounding voice…'
+              : 'Sounds like a person, not a robot. About 1.1 GB from Resemble AI (MIT). Downloads when you turn this on. Standard voice keeps talking until it is ready.'
+        }
+      />
+      {hqDownloading ? (
+        <FormDownloadProgress
+          label={hq?.install?.message || 'High-quality voice'}
+          percent={hq?.install?.percent ?? null}
+        />
+      ) : null}
+      {hqOn && hqFailed ? (
+        <div className="flex flex-wrap items-center gap-1.5 mb-2">
+          <FormNotice tone="warn">
+            {hq?.install?.error || hq?.reason || 'High-quality voice did not finish downloading.'}
+          </FormNotice>
+          <FormActionButton
+            disabled={Boolean(busy) || hqDownloading}
+            onClick={() => void startInstall('chatterbox')}
+          >
+            Retry
+          </FormActionButton>
+        </div>
+      ) : null}
+      {hqOn && !hqReady && !hqDownloading && !hqFailed && hq?.reason ? (
+        <FormHint>{hq.reason}</FormHint>
+      ) : null}
+
+      {advanced && packMissing && (tts?.hint || stt?.hint) ? (
+        <FormHint className="font-mono">{tts?.hint || stt?.hint}</FormHint>
       ) : null}
 
       {advanced ? (
@@ -152,16 +299,16 @@ export function VoiceSection({
             onChange={(on) => void patch({ stt_enabled: on })}
             label="Hearing (whisper)"
           />
-          {!stt?.installed && stt?.deps !== false ? (
-            <FormActionButton
-              disabled={Boolean(busy) || sttDownloading}
-              onClick={() => void startInstall('stt')}
-            >
-              {sttDownloading
-                ? `Warming hearing…${pct(stt)}`
-                : 'Download hearing (whisper)'}
-            </FormActionButton>
-          ) : null}
+          {assetLine(
+            Boolean(stt?.installed),
+            sttDownloading,
+            sttFailed,
+            'Hearing',
+            'Warming hearing…',
+            () => void startInstall('stt'),
+            Boolean(busy) || sttDownloading || stt?.deps === false,
+            stt?.install?.percent,
+          )}
           {(stt?.models?.length ?? 0) > 0 ? (
             <>
               <FormLabel>Hearing model</FormLabel>
@@ -199,26 +346,18 @@ export function VoiceSection({
           <FormLabel>Turn-taking (live calls)</FormLabel>
           <FormHint>
             About 9 MB, BSD-2, from Pipecat. So Remedy does not talk over you.
-            Falls back to energy detection until downloaded.
+            Falls back to energy detection until it arrives with the install.
           </FormHint>
-          {turn?.available ? (
-            <FormHint>Turn-taking is ready.</FormHint>
-          ) : (
-            <FormActionButton
-              disabled={Boolean(busy) || turnDownloading || turn?.deps === false}
-              onClick={() => void startInstall('smart-turn')}
-            >
-              {turnDownloading
-                ? `Downloading turn-taking…${pct(turn)}`
-                : 'Download turn-taking (~9 MB)'}
-            </FormActionButton>
+          {assetLine(
+            Boolean(turn?.available),
+            turnDownloading,
+            turnFailed,
+            'Turn-taking',
+            'Downloading turn-taking…',
+            () => void startInstall('smart-turn'),
+            Boolean(busy) || turnDownloading,
+            turn?.install?.percent,
           )}
-          {turn?.deps === false && turn.reason ? (
-            <FormNotice tone="warn">
-              {turn.reason}
-              {turn.hint ? <div className="mt-1 font-mono">{turn.hint}</div> : null}
-            </FormNotice>
-          ) : null}
         </>
       ) : (
         <FormHint>

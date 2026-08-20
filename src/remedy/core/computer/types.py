@@ -27,6 +27,8 @@ COMPUTER_TOOL_NAMES = frozenset(
         "computer_find",
         "computer_act",
         "computer_press_hold",
+        "computer_select",
+        "computer_fill",
     }
 )
 
@@ -62,6 +64,8 @@ class ComputerAction(StrEnum):
     PAGE_TEXT = "page_text"
     FIND = "find"
     ACT = "act"
+    SELECT = "select"
+    FILL = "fill"
 
 
 def action_from_tool(name: str) -> ComputerAction | None:
@@ -82,6 +86,8 @@ def action_from_tool(name: str) -> ComputerAction | None:
         "computer_page_text": ComputerAction.PAGE_TEXT,
         "computer_find": ComputerAction.FIND,
         "computer_act": ComputerAction.ACT,
+        "computer_select": ComputerAction.SELECT,
+        "computer_fill": ComputerAction.FILL,
     }
     return mapping.get(name)
 

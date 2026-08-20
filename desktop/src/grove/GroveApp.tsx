@@ -108,8 +108,6 @@ export interface GroveAppProps {
   userName: string
   partnerName: string
   onSwitchToStudio: () => void
-  /** Open Settings (Studio rail), typically at the Voice section. */
-  onOpenSettings?: () => void
   /** Goal room Remedy asked to open herself (app_control open_goal). */
   openGoalId?: string | null
   /** Ack once the requested goal has been opened (or found absent). */
@@ -125,44 +123,30 @@ function GroveVoiceControls({
   ttsReady,
   compact,
   onToggle,
-  onOpenSettings,
 }: {
   speakReplies: boolean
   speaking: boolean
   ttsReady: boolean
   compact?: boolean
   onToggle: () => void
-  onOpenSettings?: () => void
 }) {
   return (
-    <>
-      <button
-        type="button"
-        className={`grove-voicetoggle${speakReplies ? ' on' : ''}${speaking ? ' speaking' : ''}`}
-        onClick={onToggle}
-        aria-pressed={speakReplies}
-        aria-label={speakReplies ? 'Speaking replies aloud' : 'Replies are silent'}
-        title={
-          speakReplies
-            ? ttsReady
-              ? 'Speaking replies aloud — click to go quiet'
-              : "Speaking with this computer's voices — download Remedy's voice in Voice settings for clearer speech"
-            : 'Click to have replies spoken aloud'
-        }
-      >
-        {compact ? (speakReplies ? '🔊' : '🔇') : speakReplies ? '🔊 aloud' : '🔇 quiet'}
-      </button>
-      {onOpenSettings ? (
-        <button
-          type="button"
-          className="grove-voicetoggle"
-          onClick={onOpenSettings}
-          title="Voice settings — speak, hear, download Remedy's voice"
-        >
-          Voice
-        </button>
-      ) : null}
-    </>
+    <button
+      type="button"
+      className={`grove-voicetoggle${speakReplies ? ' on' : ''}${speaking ? ' speaking' : ''}`}
+      onClick={onToggle}
+      aria-pressed={speakReplies}
+      aria-label={speakReplies ? 'Speaking replies aloud' : 'Replies are silent'}
+      title={
+        speakReplies
+          ? ttsReady
+            ? 'Speaking replies aloud — click to go quiet'
+            : "Speaking with this computer's voices — Remedy's voice downloads with the rest of the install"
+          : 'Click to have replies spoken aloud'
+      }
+    >
+      {compact ? (speakReplies ? '🔊' : '🔇') : speakReplies ? '🔊 aloud' : '🔇 quiet'}
+    </button>
   )
 }
 
@@ -181,7 +165,6 @@ export function GroveApp({
   userName,
   partnerName,
   onSwitchToStudio,
-  onOpenSettings,
   openGoalId,
   onGoalOpened,
 }: GroveAppProps) {
@@ -532,7 +515,6 @@ export function GroveApp({
             speaking={voice.speaking}
             ttsReady={Boolean(voice.status?.tts?.available)}
             onToggle={toggleSpeakReplies}
-            onOpenSettings={onOpenSettings}
           />
           <button
             type="button"
@@ -850,7 +832,6 @@ export function GroveApp({
           ttsReady={Boolean(voice.status?.tts?.available)}
           compact
           onToggle={toggleSpeakReplies}
-          onOpenSettings={onOpenSettings}
         />
         <button type="button" className="grove-switch" onClick={onSwitchToStudio}>
           switch to <b>Studio</b>

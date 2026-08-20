@@ -69,6 +69,8 @@ _MUTATION_COMPUTER_TOOLS = frozenset(
         "computer_type",
         "computer_drag",
         "computer_press_hold",
+        "computer_select",
+        "computer_fill",
     }
 )
 # Page-context signals that we're on a checkout / payment surface. When the
@@ -171,7 +173,7 @@ def raw_secret_checkpoint(tool_name: str, typed_text: str) -> str | None:
     money details never get typed without the owner's explicit go-ahead.
     """
     tool = (tool_name or "").strip()
-    if tool not in ("computer_type", "computer_act"):
+    if tool not in ("computer_type", "computer_act", "computer_fill"):
         return None
     if "{{vault:" in (typed_text or "") or "{{ vault:" in (typed_text or ""):
         return None  # vault handle — its own owner moment, bound to the site
@@ -360,6 +362,8 @@ class ApprovalQueue:
             "computer_drag",
             "computer_act",
             "computer_app",
+            "computer_select",
+            "computer_fill",
             # NOT computer_press_hold, deliberately: a press-and-hold is how a
             # CAPTCHA challenge is answered, and prompting on every one makes
             # them unusable. It is still in _MUTATION_COMPUTER_TOOLS, so the

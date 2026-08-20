@@ -1,6 +1,7 @@
 # Telephony — her voice on the wire
 
-**Status:** Phase 0 built and passing; Phases 1-4 planned
+**Status:** Phase 0 built and passing; HQ TTS (Chatterbox) wired for Grove
+and the duplex pipeline; Phases 1–4 (a real PSTN/SIP/VM line) still planned
 **Code:** `src/remedy/telephony/`, `src/remedy/voice/realtime/`
 **Tests:** `tests/test_telephony_*.py`, `tests/test_voice_realtime_*.py`, `tests/test_terms.py` (111)
 **Bench:** `python -m remedy.telephony.bench`
@@ -108,15 +109,14 @@ src/remedy/telephony/
     bringup.py        conversational provisioning (probe -> ask -> verify)
   policy.py           per-contact identity / disclosure / voice policy
   transcript.py       live transcript -> session events + memory
+  checkpoints.py      never speak card/SSN/2FA or agree to pay on a live line
 
 src/remedy/voice/
   realtime/
     pipeline.py       duplex loop: capture -> vad -> turn -> stt -> llm -> tts
     turn.py           smart-turn v3.2 endpointing + silero onset
-    stt_stream.py     streaming partials
-    tts_stream.py     streaming synthesis, first-syllable-out
-    barge_in.py       playout cancel on owner/counterpart onset
-    engines/          kokoro | chatterbox | orpheus — pinned in runtime.catalog
+    stt_stream.py     WhisperStream — live STT for the duplex loop
+    tts.py            LocalTts — Kokoro or Chatterbox HQ (same path as Grove)
   identity.py         her voice: timbre seed, prosody profile, evolution
   clone.py            task-scoped owner clone, consent-gated, expiring
 ```
@@ -254,8 +254,8 @@ Ordered as the owner chose: prove the voice first, then talk, then listen.
 
 **Phase 0 — Bench. Done (Aug 2026).** `fake.py` transport, 8 kHz narrowband
 simulation, the full duplex pipeline, and the human-bar harness. No telephony,
-no hardware, no minutes. `sip_direct.py` still to land here as the loopback path
-and the optional unbundled no-PSTN mode. Results below.
+no hardware, no minutes. `sip_direct.py` is the loopback path (UDP PCM on
+127.0.0.1, nobody is called). Results below.
 
 **Phase 1 — A line that does not depend on anything nearby.** The setup
 conversation (`offer_lines`) plus the first two backends: `vm_voip` (Android VM

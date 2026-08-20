@@ -5,6 +5,8 @@ simulated line**: no hardware, no phone number, no minutes, nobody called.
 
 That is deliberate. The hard part of a phone call is not the words — it is the
 timing. Phase 0 proves the timing before a single component is downloaded.
+A **loopback line** (`sip_direct`) can exercise the same path on this PC
+without calling anyone. A real number still needs a SIP trunk or a phone.
 
 ## What "passes for human" means here
 
@@ -57,7 +59,7 @@ size before downloading:
 |---|---|--:|
 | baresip | the SIP engine | ~6 MB, BSD-3 |
 | smart-turn | knowing when you have finished speaking | ~9 MB, BSD-2 |
-| Chatterbox | a voice that does not sound synthetic on a phone | ~1.1 GB, MIT |
+| Chatterbox | a voice that does not sound synthetic (Grove HQ + phone) | ~1.1 GB, MIT |
 | Android image | running a calling app here | ~2.6 GB, its publisher's terms |
 
 ## Before any real call
@@ -80,9 +82,12 @@ Full text: `docs/TELEPHONY_TERMS.md`. Design and measurements:
 
 ## What is not built yet
 
-Phase 0 is the bench. A real line, ring handling, answering when you are busy,
-and your own number over the phone bridge are Phases 1 to 3, and none of them
-are here.
+A **real phone number** (SIP trunk, Android VM, or a cable to your handset),
+ring handling, and answering when you are busy. Those are Phases 1 to 3.
+
+What *is* here besides the bench: high-quality voice, a loopback line on this
+PC, call policy and transcripts, and you can ask Remedy in chat to walk through
+the phone terms and pick a line — she will not pretend a number exists yet.
 
 ## See also
 

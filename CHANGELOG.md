@@ -4,6 +4,56 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Review fixes — forms, the phone line, and voice installs
+
+- **A card number typed through `computer_fill` stops for the owner**, the
+  same as `computer_type` — the raw-card checkpoint now sees every value a
+  fill will type.
+- **A missed field label no longer types into whatever has focus.**
+  `computer_fill` reports the row it could not find instead of saying ok.
+- **Dropdowns honour the label.** `computer_select hint="State"` finds the
+  `<select>` by its label; a stale ref is reported, two matching dropdowns
+  are reported as ambiguous instead of silently picking the first, and an
+  empty choice is refused. A browser script that throws is now a failure on
+  both the desktop and the host side (it used to read as ok in the SPA).
+- **She can say "I agree, that sounds frustrating" on a call.** The hard
+  checkpoints only stop actual secrets ("the code is 4829…", "the CVV is…")
+  and actual agreements ("I agree to the charge"), not ordinary talk about
+  codes or agreeing with someone.
+- **Picking a phone line checks the line exists**, from Settings as well as
+  from the `phone_choose_line` tool.
+- **Voice installs never stall the server.** Starting a second install (or
+  flipping HQ on) while one is downloading no longer blocks every request
+  until it finishes; a speak request never runs pip or downloads weights —
+  HQ is used once it is ready, Kokoro until then; hearing no longer sticks
+  at "downloading" when whisper was already warm; an HQ failure falls back
+  to Kokoro instead of a 500; the smart-turn Download fetches the voice
+  pack when `onnxruntime` is missing (like Kokoro/whisper do) instead of a
+  model that cannot load; pip output and tracebacks are never shown in
+  Settings — one plain sentence per failure, details in the log.
+- **A voice identity tuned to 0 stays at 0** after a restart (it reloaded
+  as the default), and a hand-edited identity file cannot crash the voice.
+- **Phone hearing keeps its timing.** Turning a long utterance into a WAV
+  now happens off the event loop, so the call's audio loop is not starved.
+- **Title-bar downloads stop flickering** — a slow vision/Hugging Face poll
+  can no longer put an older voice snapshot back over a newer one.
+- **SmolVLM does not start after install when RMB is the chat provider** —
+  the post-install start now sees the loaded config, not just a running RMB.
+
+- **High-quality voice is a Settings choice.** Chatterbox (MIT, Resemble AI)
+  is the human-bar engine for Grove *and* the phone pipeline. Turning it on
+  downloads weights into `~/.remedy/voice/chatterbox/`. Until they land,
+  Kokoro keeps speaking. Male HQ clones a short identity clip so the partner
+  gender still matches.
+- **Telephony has an HTTP surface.** `GET /api/telephony/status` reports
+  terms, the spoken line menu, and that a real PSTN line is not on this
+  computer yet (Phase 0). Terms accept/withdraw and line pick are recorded.
+  `sip_direct` is a 127.0.0.1 loopback (nobody is called). Voice identity
+  and a task-scoped owner-clone grant now have on-disk homes. Call policy,
+  transcripts, and hard checkpoints (no card numbers / codes / agreements
+  on a live line) are in code. `phone_status` / `phone_agree_terms` /
+  `phone_choose_line` are conversational setup — not a wizard.
+
 ### Continuity, voice, and the phone line
 
 - **Checkpoints survive a crash.** Plans, todos, vault items, and similar
@@ -16,13 +66,22 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - **Turn-taking can be downloaded.** Settings → Voice (Advanced) fetches
   the ~9 MB smart-turn model (BSD-2) so live calls know when you have
   finished speaking. `/api/voice/install` still works for the same job.
-- **Voice lives in Settings.** Simple: speak-replies plus one download
-  for Remedy's voice. Advanced: hearing, speed, and turn-taking. Grove's
-  quiet/aloud toggle still works with this computer's voices until then.
-- **WebUI has the same voice.** Grove's Voice button opens Settings.
-  Studio (browser) speaks replies and has a mic; a blocked microphone
-  explains itself instead of failing silently. CLI is unchanged — no
-  voice there.
+- **Voice lives in Settings.** Simple: speak-replies, plus **High quality
+  voice** (Chatterbox, opt-in ~1.1 GB) so Grove does not sound like a robot.
+  Kokoro still downloads with Remedy. If the voice pack is missing, Settings
+  shows **Download Remedy's voice** — not a pip command. Advanced still
+  shows `pip install remedy-ai[voice]` for power users. Hearing, speed, and
+  turn-taking stay under Advanced. Grove's quiet/aloud toggle still works
+  with this computer's voices until Kokoro is ready.
+- **Downloads show in the title bar.** Voice, local vision, and Hugging Face
+  pulls use the empty strip next to the logo — a thin bar and a percent.
+  Settings still shows the same bar on the section you started from.
+- **WebUI has the same voice.** Grove's 🔊/🔇 toggle stays on Grove.
+  Settings opens in Grove from the logo menu (no hop to Studio). Studio
+  (browser) speaks replies and has a mic; a blocked microphone explains
+  itself instead of failing silently. CLI is unchanged — no voice there.
+- **Settings stay on Grove.** The logo-menu Settings item (and Ctrl+,)
+  open a Settings sheet on Grove instead of a hidden Studio rail.
 
 ### Voice — Remedy speaks and hears (local, optional)
 

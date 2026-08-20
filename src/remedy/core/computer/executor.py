@@ -283,6 +283,8 @@ class ComputerExecutor:
                     ComputerAction.TYPE,
                     ComputerAction.KEY,
                     ComputerAction.SCROLL,
+                    ComputerAction.SELECT,
+                    ComputerAction.FILL,
                 )
                 and last_t == "browser"
             ):
@@ -1326,6 +1328,8 @@ class ComputerExecutor:
             ComputerAction.FIND,
             ComputerAction.PRESS_HOLD,
             ComputerAction.DRAG,
+            ComputerAction.SELECT,
+            ComputerAction.FILL,
         ):
             payload.setdefault("ui", {})
             if isinstance(payload.get("ui"), dict):
@@ -1338,6 +1342,7 @@ class ComputerExecutor:
             ComputerAction.PAGE_TEXT,
             ComputerAction.SNAPSHOT,
             ComputerAction.FIND,
+            ComputerAction.SELECT,
         ) and self.bridge.navigate_needs_settle():
             slept = self.bridge.settle_after_navigate(min_s=0.6, max_s=1.2)
             # Best-effort ready probe via host job (ignore failures).
@@ -1380,6 +1385,8 @@ class ComputerExecutor:
                 ComputerAction.DRAG,
                 ComputerAction.PRESS_HOLD,
                 ComputerAction.ACT,
+                ComputerAction.SELECT,
+                ComputerAction.FILL,
             ):
                 # Optimistic enqueue — host poller may still be alive on disk.
                 # PRESS_HOLD/DRAG belong here too: they enqueue exactly like
@@ -1477,6 +1484,25 @@ class ComputerExecutor:
                     )
             except Exception:
                 pass
+
+        if act is ComputerAction.FILL:
+            return self._computer_fill(kwargs)
+
+        if act is ComputerAction.SELECT:
+            choice = str(
+                kwargs.get("value")
+                or kwargs.get("option")
+                or kwargs.get("text")
+                or ""
+            ).strip()
+            payload["action"] = "select"
+            payload["value"] = choice
+            payload["text"] = choice
+            if kwargs.get("ref"):
+                payload["ref"] = str(kwargs.get("ref") or "")
+            hint = str(kwargs.get("hint") or "").strip()
+            if hint:
+                payload["hint"] = hint
 
         # Compound act: navigate → wait → click/type chain (research: fewer observe steps)
         if act is ComputerAction.ACT:
@@ -2034,6 +2060,96 @@ class ComputerExecutor:
             action="act",
             message="SUCCESS: " + " | ".join(log),
             extra={"steps": log, "click": click or None},
+        )
+
+    def _computer_fill(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Fill several form fields in one call (label or ref + value/select)."""
+        raw = kwargs.get("fields")
+        if raw is None:
+            raw = kwargs.get("text") or []
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except json.JSONDecodeError:
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="fill",
+                    message='fields= must be a JSON list of {ref or text, value or select}',
+                )
+        if not isinstance(raw, list) or not raw:
+            return public_result(
+                ok=False,
+                target="browser",
+                action="fill",
+                message="computer_fill needs fields=[{ref or text, value or select}, …]",
+            )
+        results: list[dict[str, Any]] = []
+        for i, row in enumerate(raw):
+            if not isinstance(row, dict):
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="fill",
+                    message=f"field {i} is not an object",
+                    extra={"filled": results},
+                )
+            ref = str(row.get("ref") or "").strip()
+            label = str(row.get("text") or row.get("label") or "").strip()
+            option = str(row.get("select") or row.get("option") or "").strip()
+            value = str(row.get("value") or row.get("type") or "").strip()
+            if option:
+                r = self._run_browser(
+                    ComputerAction.SELECT,
+                    ref=ref or None,
+                    value=option,
+                    text=option,
+                    hint=label or None,
+                )
+            elif value:
+                if label and not ref:
+                    # A missed label must not fall through to typing into
+                    # whatever happens to have focus.
+                    clicked = self._run_browser(ComputerAction.CLICK, text=label)
+                    if not clicked.get("ok"):
+                        fail = dict(clicked)
+                        fail["message"] = (
+                            f"field {i}: could not find a field labelled "
+                            f"{label!r} ({clicked.get('message') or 'no match'})"
+                        )
+                        fail["filled"] = results
+                        return fail
+                r = self._run_browser(
+                    ComputerAction.TYPE,
+                    text=value,
+                    ref=ref or None,
+                )
+            else:
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="fill",
+                    message=f"field {i} needs value= or select=",
+                    extra={"filled": results},
+                )
+            results.append(
+                {
+                    "i": i,
+                    "ok": bool(r.get("ok")),
+                    "message": r.get("message"),
+                    "ref": ref or None,
+                }
+            )
+            if not r.get("ok"):
+                fail = dict(r)
+                fail["filled"] = results
+                return fail
+        return public_result(
+            ok=True,
+            target="browser",
+            action="fill",
+            message=f"Filled {len(results)} field(s)",
+            extra={"fields": results},
         )
 
     def _computer_act(

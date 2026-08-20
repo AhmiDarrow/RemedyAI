@@ -6,6 +6,9 @@ from remedy.voice.realtime.pipeline import (
     PipelineState,
     VoicePipeline,
 )
+from remedy.voice.realtime.stt_stream import WhisperStream
+from remedy.voice.realtime.tts import LocalTts
+from remedy.voice.realtime.tts_stream import iter_frames
 from remedy.voice.realtime.turn import (
     EnergyTurnDetector,
     SmartTurnDetector,
@@ -18,10 +21,13 @@ __all__ = [
     "CallMetrics",
     "EnergyTurnDetector",
     "HumanBar",
+    "LocalTts",
+    "iter_frames",
     "PipelineConfig",
     "PipelineState",
     "SmartTurnDetector",
     "TurnEvent",
     "VoicePipeline",
+    "WhisperStream",
     "make_detector",
 ]

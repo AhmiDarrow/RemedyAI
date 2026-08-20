@@ -133,7 +133,8 @@ def test_status_says_why_when_only_the_runtime_is_missing(tmp_path, monkeypatch,
     st = service.voice_status(tmp_path)["smart_turn"]
     assert st["installed"] is True
     assert st["available"] is False
-    assert "voice pack" in st["reason"]
+    assert "not on this computer" in (st["reason"] or "").lower()
+    assert "pip" not in (st["reason"] or "").lower()
     assert st["hint"] == "pip install remedy-ai[voice]"
 
 

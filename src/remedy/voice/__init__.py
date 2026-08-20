@@ -4,8 +4,9 @@ Speak-back (TTS) and hearing (STT) are optional, local-first, and
 license-clean for Remedy's commercial terms:
 
 * **TTS — Kokoro-82M** (model Apache-2.0) via ``kokoro-onnx`` (MIT):
-  near-SOTA quality per byte, CPU-realtime, with distinct female / male /
-  neutral voices mapped from the owner's existing ``agent_gender`` setting.
+  everyday / low-VRAM, female / male / neutral from ``agent_gender``.
+  **HQ** is Chatterbox (MIT, Resemble AI) when Settings → Voice → High
+  quality voice is on — same engine the phone pipeline uses.
 * **STT — faster-whisper** (MIT, CTranslate2): Whisper quality on CPU;
   model size configurable (``small`` default, up to ``large-v3-turbo``).
 

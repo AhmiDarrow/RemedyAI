@@ -25,19 +25,18 @@ export function rustBrowserActionOk(res: unknown): boolean {
   if (
     s.startsWith('missing-ref:')
     || s.startsWith('no-match:')
+    || s.startsWith('no-option:')
+    || s.startsWith('not-select:')
     || s.startsWith('no element')
+    || s.startsWith('ambiguous:')
     || s.startsWith('error:')
   ) {
     return false
   }
-  // Rust click uses "ok:…"; type/key/scroll often "ok", "ok-fallback",
-  // or "browser:{act}:ok".
-  return (
-    s === 'ok'
-    || s.startsWith('ok:')
-    || s.startsWith('ok-')
-    || /:ok(?:-fallback)?$/i.test(s)
-  )
+  // Rust click uses "ok:…"; type/key/scroll return "ok" or "ok-fallback".
+  // An empty eval result is minted as "browser:{act}:no-result" by the host
+  // (the script threw) and must read as failure.
+  return s === 'ok' || s.startsWith('ok:') || s.startsWith('ok-')
 }
 
 async function readEmbedBounds(): Promise<{
@@ -308,7 +307,7 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
     }
   }
 
-  if (['click', 'type', 'key', 'scroll', 'drag', 'click_ref'].includes(action)) {
+  if (['click', 'type', 'key', 'scroll', 'drag', 'click_ref', 'select'].includes(action)) {
     const ref = p.ref != null ? String(p.ref) : null
     const text = p.text != null ? String(p.text) : null
     // Atomic click-by-visible-text (preferred for "click Membership options")
