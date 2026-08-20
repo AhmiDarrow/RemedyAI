@@ -217,8 +217,8 @@ def register_voice_routes(
         if result is None:
             return Response(
                 content=(
-                    '{"error":"local STT unavailable — install the voice extra '
-                    'and let the model download","fallback":"none"}'
+                    '{"error":"Hearing is not ready yet. Open Settings → Voice '
+                    'to download it.","fallback":"none"}'
                 ),
                 status_code=503,
                 media_type="application/json",
