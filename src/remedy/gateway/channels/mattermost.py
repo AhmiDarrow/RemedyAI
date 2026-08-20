@@ -123,7 +123,14 @@ class MattermostChannel(HttpSessionMixin, ChannelAdapter):
             post = json.loads((data.get("data") or {}).get("post") or "{}")
         except Exception:
             return
-        if post.get("props", {}).get("from_bot"):
+        # A post that is valid JSON but not an object — or whose "props" is
+        # JSON null — used to raise straight out of the handler. _ws_loop
+        # caught it, slept 3s and reconnected, forever: a trivial denial of
+        # service from anyone who can post in a watched channel.
+        if not isinstance(post, dict):
+            return
+        props = post.get("props")
+        if isinstance(props, dict) and props.get("from_bot"):
             return
         text = (post.get("message") or "").strip()
         if not text:

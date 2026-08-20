@@ -534,15 +534,16 @@ def test_skipped_sections_leave_no_provider_in_the_saved_config(
     capsys.readouterr()
 
 
-def test_the_wizard_targets_the_real_home_regardless_of_remedy_home(
+def test_the_wizard_targets_the_home_it_was_pointed_at(
     monkeypatch, capsys, written, tmp_path
 ):
-    """Documents current behaviour: run_wizard hardcodes ~/.remedy and ignores
-    $REMEDY_HOME, so it always aims at the live install."""
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path / "elsewhere"))
+    """It hardcoded ~/.remedy, so `remedy setup` on a portable or --home
+    install configured the real user home instead of its own."""
+    elsewhere = tmp_path / "elsewhere"
+    monkeypatch.setenv("REMEDY_HOME", str(elsewhere))
     patch_prompts(monkeypatch)
     W.run_wizard(quick=True)
-    assert written["home_dir"] == W.Path("~/.remedy").expanduser().as_posix()
+    assert written["home_dir"] == elsewhere.resolve().as_posix()
     capsys.readouterr()
 
 

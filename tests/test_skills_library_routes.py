@@ -224,14 +224,16 @@ def test_the_catalog_is_read_from_the_runtime_home(client, monkeypatch, home):
     assert calls[0]["home"] == home
 
 
-def test_without_a_runtime_the_home_falls_back_to_the_real_user_home(monkeypatch):
-    """Documents current behaviour: REMEDY_HOME is NOT consulted here (see BUGS)."""
+def test_without_a_runtime_the_home_still_honours_remedy_home(monkeypatch, tmp_path):
+    """It went straight to ~/.remedy, so a portable install read its catalog
+    from — and installed skills into — the real user home."""
     calls = patch_catalog(monkeypatch, result=catalog())
-    monkeypatch.setenv("REMEDY_HOME", str(Path(tempfile.gettempdir()) / "not-used"))
+    elsewhere = tmp_path / "portable-home"
+    monkeypatch.setenv("REMEDY_HOME", str(elsewhere))
     app = FastAPI()
     register_skills_library_routes(app)
     TestClient(app).get("/api/skills/library/catalog")
-    assert calls[0]["home"] == Path.home() / ".remedy"
+    assert calls[0]["home"] == elsewhere.resolve()
 
 
 # --- search -------------------------------------------------------------------
@@ -776,10 +778,11 @@ def test_the_temp_extract_directory_is_always_removed(client, monkeypatch):
     assert not any(Path(p).exists() for p in made)
 
 
-def test_every_submission_leaks_a_sandbox_directory(client, monkeypatch):
-    """Documents a live leak (see BUGS): SkillValidator() builds a SkillExecutor,
-    whose constructor mkdtemps a sandbox nobody ever removes — one per request,
-    even though only validate_metadata() is called and it never runs anything."""
+def test_a_submission_does_not_leak_a_sandbox_directory(client, monkeypatch):
+    """SkillValidator() used to build a SkillExecutor eagerly, and its
+    constructor mkdtemps a sandbox nobody removes — one orphaned directory per
+    request, even though submit only calls validate_metadata(), which never
+    runs a script. The executor is built on first use now."""
     leaked: list[str] = []
     real = tempfile.mkdtemp
 
@@ -793,8 +796,7 @@ def test_every_submission_leaks_a_sandbox_directory(client, monkeypatch):
     try:
         for _ in range(3):
             assert submit(client, make_zip({"s/SKILL.md": GOOD_SKILL_MD})).status_code == 200
-        assert len(leaked) == 3
-        assert all(Path(p).is_dir() for p in leaked)
+        assert leaked == [], "a sandbox was created for a metadata-only check"
     finally:
         for p in leaked:
             with contextlib.suppress(OSError):

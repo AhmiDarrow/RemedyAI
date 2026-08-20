@@ -48,7 +48,16 @@ def _llm_timeout(bind: Any) -> aiohttp.ClientTimeout:
             getattr(bind, "model", None),
             base_url=getattr(bind, "base_url", None),
         ):
-            total = float(os.environ.get("REMEDY_LOCAL_LLM_TIMEOUT", "300"))
+            total = 300.0
+            # Parsed separately: this used to sit inside the same try, so a
+            # malformed override ("300s", "") threw *after* we had decided the
+            # model is local and left `total` on the 120s cloud wall — the one
+            # case the longer wall exists for, broken by the very setting meant
+            # to tune it.
+            raw_override = os.environ.get("REMEDY_LOCAL_LLM_TIMEOUT")
+            if raw_override:
+                with contextlib.suppress(TypeError, ValueError):
+                    total = float(raw_override)
     except Exception:
         pass
     return aiohttp.ClientTimeout(total=total, connect=30)
@@ -205,8 +214,14 @@ def slim_tools_for_local(
     for i, t in enumerate(tools):
         if not isinstance(t, dict):
             continue
-        fn = t.get("function") if isinstance(t.get("function"), dict) else t
-        name = str((fn or {}).get("name") or "")
+        # Only shapes the emit pass below can actually keep. Scoring used to
+        # accept a flat {"name": ...} tool that emit then discarded, so it won
+        # a high-priority slot and vanished — the returned list came back
+        # shorter than max_tools with valid tools left behind.
+        fn = t.get("function") if isinstance(t.get("function"), dict) else None
+        if not isinstance(fn, dict):
+            continue
+        name = str(fn.get("name") or "")
         try:
             pri = _LOCAL_TOOL_PRIORITY.index(name)
         except ValueError:

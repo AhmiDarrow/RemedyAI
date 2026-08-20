@@ -55,10 +55,17 @@ def register_skills_library_routes(
     app: FastAPI, *, runtime=None, gateway=None, memory=None
 ) -> None:
     def _home() -> Path:
-        return Path(
-            getattr(getattr(runtime, "config", None), "home_dir", None)
-            or Path.home() / ".remedy"
-        ).expanduser()
+        # Falls back through REMEDY_HOME, not straight to ~/.remedy. Every
+        # route here reads from this path and /library/install *writes* to it,
+        # so a portable or --home install (which sets REMEDY_HOME) was reading
+        # and writing the real user home instead of its own. The rest of the
+        # interfaces layer already resolves it this way.
+        explicit = getattr(getattr(runtime, "config", None), "home_dir", None)
+        if explicit:
+            return Path(str(explicit)).expanduser()
+        from remedy.interfaces.config import get_home_dir
+
+        return get_home_dir()
 
     @app.get("/api/skills/library/catalog")
     async def library_catalog(refresh: bool = Query(default=False)) -> dict[str, Any]:

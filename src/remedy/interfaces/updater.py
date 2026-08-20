@@ -204,8 +204,16 @@ def _parse_version(v: str) -> tuple[int, ...]:
                 s = s.split(sep, 1)[0]
         parts: list[int] = []
         for p in s.split("."):
-            # Allow "10" or empty
-            num = "".join(ch for ch in p if ch.isdigit())
+            # Leading digits only. Joining *every* digit in the segment turned
+            # a PEP 440 prerelease written without a separator into a bigger
+            # number than the release it precedes: "1.2.3rc1" became (1, 2, 31),
+            # so `remedy update` offered a release candidate as an upgrade from
+            # the finished release. "3rc1" -> 3, "dev4" -> 0.
+            num = ""
+            for ch in p:
+                if not ch.isdigit():
+                    break
+                num += ch
             parts.append(int(num) if num else 0)
         # Normalize to at least 3 components for stable ordering
         while len(parts) < 3:

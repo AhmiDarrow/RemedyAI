@@ -231,9 +231,15 @@ def _spawn_conpty_sync(
     return _ConPTYProcess(
         pid=int(pi.dwProcessId),
         process_handle=int(pi.hProcess),
-        stdin_handle=int(h_con_in),
-        stdout_handle=int(h_con_out),
-        pc_handle=int(h_pc) if h_pc.value else 0,
+        # .value, not int(): these are ctypes HANDLE/c_void_p, and int() on one
+        # raises ValueError. That was the LAST statement of the spawn, after
+        # CreateProcessW had already succeeded — so every ConPTY attempt raised,
+        # leaving the child, its process handle, the pseudoconsole and both
+        # parent pipe ends behind. _try_conpty_exec swallowed it and fell back
+        # to plain pipes, so ConPTY had never once worked.
+        stdin_handle=int(h_con_in.value or 0),
+        stdout_handle=int(h_con_out.value or 0),
+        pc_handle=int(h_pc.value or 0),
     )
 
 
