@@ -82,6 +82,10 @@ import { getStreamJob, subscribeStreamJobs } from './sessions/streamJobs'
 import { exportSession, importSession } from './api/messages'
 import { getServerUrl } from './api/client'
 import { getSettings, updateSettings } from './api/settings'
+import { patchVoiceSettings } from './api/voice'
+import { useVoice } from './voice/useVoice'
+import type { GenderRole } from './voice/pickVoice'
+import { saveLastSettingsSection } from './utils/settingsSearch'
 import { subscribeXaiOAuth } from './api/xaiOAuth'
 
 import { tauriInvoke, tauriListen } from './api/tauri'
@@ -350,6 +354,8 @@ export default function App() {
   const [showSetupWizard, setShowSetupWizard] = useState(false)
   const [showUpdateScreen, setShowUpdateScreen] = useState(false)
   const [userName, setUserName] = useState('')
+  const [voiceGender, setVoiceGender] = useState<GenderRole>('female')
+  const [studioMicErr, setStudioMicErr] = useState('')
   /** Partner display name (settings.name) for assistant avatar initials */
   const [partnerName, setPartnerName] = useState('Remedy')
   const [askUserName, setAskUserName] = useState(false)
@@ -1016,6 +1022,69 @@ export default function App() {
     setOpenTabs,
   })
 
+  // Studio/WebUI voice: Grove has its own instance and unmounts off-surface.
+  const studioVoice = useVoice({
+    gender: voiceGender,
+    enabled: surface === 'studio' && serverState === 'ready',
+  })
+  const studioSpeakReplies = studioVoice.status?.settings?.speak_replies ?? false
+  const studioSpeakPrevRef = useRef(false)
+  useEffect(() => {
+    if (serverState !== 'ready') return
+    getSettings()
+      .then((s) => {
+        const g = String(s.agent_gender || 'female').toLowerCase()
+        setVoiceGender(g === 'male' ? 'male' : g === 'neutral' ? 'neutral' : 'female')
+      })
+      .catch(() => {})
+  }, [serverState])
+  useEffect(() => {
+    if (surface !== 'studio') {
+      studioSpeakPrevRef.current = streaming
+      return
+    }
+    if (studioSpeakPrevRef.current && !streaming && studioSpeakReplies) {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i]
+        if (m.role === 'assistant' && (m.content || '').trim() && !m.reverted) {
+          void studioVoice.speak(m.content)
+          break
+        }
+      }
+    }
+    studioSpeakPrevRef.current = streaming
+  }, [surface, streaming, studioSpeakReplies, messages, studioVoice])
+  const toggleStudioSpeak = useCallback(() => {
+    const next = !studioSpeakReplies
+    if (!next) studioVoice.stopSpeaking()
+    patchVoiceSettings({ speak_replies: next })
+      .then(() => studioVoice.refreshStatus())
+      .catch(() => {})
+  }, [studioSpeakReplies, studioVoice])
+  const handleStudioMic = useCallback(async () => {
+    if (studioVoice.transcribing) return
+    if (studioVoice.recording) {
+      const text = await studioVoice.stopRecording()
+      if (text.trim()) {
+        await handleSend(text)
+      }
+    } else {
+      studioVoice.stopSpeaking()
+      setStudioMicErr('')
+      const ok = await studioVoice.startRecording()
+      if (!ok) {
+        setStudioMicErr(
+          'Microphone is blocked in this browser. Allow it for this site, or type instead.',
+        )
+      }
+    }
+  }, [studioVoice, handleSend])
+  const openVoiceSettings = useCallback(() => {
+    saveLastSettingsSection('voice')
+    switchSurface('studio')
+    openSettingsInRail()
+  }, [switchSurface, openSettingsInRail])
+
   const paletteCommands: CommandItem[] = useMemo(() => {
     const items: CommandItem[] = [
       { id: 'new', label: 'New Session', description: 'Start a new chat session', category: 'session', action: handleNewSession },
@@ -1563,6 +1632,7 @@ export default function App() {
           userName={userName}
           partnerName={partnerName}
           onSwitchToStudio={() => switchSurface('studio')}
+          onOpenSettings={openVoiceSettings}
           openGoalId={pendingGroveGoal}
           onGoalOpened={() => setPendingGroveGoal(null)}
         />
@@ -1802,6 +1872,11 @@ export default function App() {
               llmProvider={barProvider || llmProvider}
               llmModel={barModel || model}
               onOpenSettings={openSettingsInRail}
+              onMic={() => void handleStudioMic()}
+              micSupported={studioVoice.micSupported}
+              recording={studioVoice.recording}
+              transcribing={studioVoice.transcribing}
+              micError={studioMicErr}
               ensureSession={async () => {
                 if (activeIdRef.current) return activeIdRef.current
                 const s = await create(undefined, undefined, { focus: false })
@@ -1984,6 +2059,9 @@ export default function App() {
           timeTravelOpen={timeTravelOpen}
           onToggleTimeTravel={() => setTimeTravelOpen((v) => !v)}
           onOpenGrove={() => switchSurface('grove')}
+          speakReplies={studioSpeakReplies}
+          speaking={studioVoice.speaking}
+          onToggleSpeak={toggleStudioSpeak}
         />
       )}
 

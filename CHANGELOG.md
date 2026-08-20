@@ -19,6 +19,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - **Voice lives in Settings.** Simple: speak-replies plus one download
   for Remedy's voice. Advanced: hearing, speed, and turn-taking. Grove's
   quiet/aloud toggle still works with this computer's voices until then.
+- **WebUI has the same voice.** Grove's Voice button opens Settings.
+  Studio (browser) speaks replies and has a mic; a blocked microphone
+  explains itself instead of failing silently. CLI is unchanged — no
+  voice there.
 
 ### Voice — Remedy speaks and hears (local, optional)
 
