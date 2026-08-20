@@ -786,17 +786,15 @@ async def test_an_empty_round_on_a_work_turn_is_re_driven_with_tools_still_armed
 
 
 @pytest.mark.asyncio
-async def test_the_step_wall_checkpoint_never_fires_today(tmp_path):
-    """DOCUMENTS A DEAD BRANCH — loop.py:3327-3335.
+async def test_the_step_wall_checkpoint_fires_when_the_ceiling_is_reached(tmp_path):
+    """The checkpoint that protects work at the riskiest moment of a turn.
 
-    The step-wall checkpoint sits at the end of the tool-batch section, guarded
-    by ``is_final_step``. But a tool batch is only reached when ``force_answer``
-    is False, and the only place that clears ``force_answer`` after the ceiling
-    set it (loop.py:1117-1119) clears ``is_final_step`` in the same breath. Every
-    other clearer (2131, 2362) ends its step with ``continue``. So the branch is
-    unreachable and the ceiling checkpoint that is meant to protect work at the
-    riskiest moment is never written. This test pins today's behaviour; it should
-    start failing when the guard is fixed.
+    It used to sit at the tail of the tool-batch section, guarded by
+    ``is_final_step``. A tool batch is only reached when ``force_answer`` is
+    False, and at the ceiling ``force_answer`` is always True — while the one
+    path that clears it clears ``is_final_step`` in the same statement. So the
+    branch was unreachable and the ceiling checkpoint was never written. It
+    fires on arrival at the ceiling now, once per turn.
     """
     runtime = make_runtime(tmp_path)
     runtime._max_react_steps = 1
@@ -815,7 +813,29 @@ async def test_the_step_wall_checkpoint_never_fires_today(tmp_path):
         chunks = await drain(runtime, "add one")
 
     assert registry.calls_to("add") == [RecordedToolCall("add", {"a": 1})]
-    assert [c.get("reason") for c in checkpoints] == ["auto"]
+    reasons = [c.get("reason") for c in checkpoints]
+    assert "step_wall" in reasons, "the ceiling checkpoint was still never written"
+    assert reasons.count("step_wall") == 1, "the ceiling checkpoint fired twice"
+    assert "@@checkpoint" in chunks
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_never_reaches_the_ceiling_is_not_checkpointed_for_it(
+    tmp_path,
+):
+    """The wall checkpoint is forced, so firing it on an ordinary short turn
+    would write a snapshot on every exchange."""
+    runtime = make_runtime(tmp_path)
+    runtime._max_react_steps = 8
+    FakeToolRegistry().install(runtime)
+    checkpoints: list[dict[str, Any]] = []
+    runtime._maybe_auto_checkpoint = lambda **kw: checkpoints.append(kw) or None
+
+    fake = FakeLLM([text_turn("A short answer.")])
+    with fake.patch():
+        chunks = await drain(runtime, "hello")
+
+    assert "step_wall" not in [c.get("reason") for c in checkpoints]
     assert "@@checkpoint" not in chunks
 
 
