@@ -86,7 +86,7 @@ def schedule_post_turn_prep(
                 user_text=message or "",
                 recent_tool_texts=recent_tools,
                 allow_verify=bool(
-                    turn_metabolism_allow_verify(runtime) or int(turn_tier(runtime) or 1) >= 2
+                    turn_metabolism_allow_verify(runtime) or int(turn_tier(runtime)) >= 2
                 ),
                 home=home,
             )

@@ -123,6 +123,28 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   and the readable one, carrying her relational memory and pledges in the
   clear, was not. `soul_export` now returns a message naming where exports go
   instead of raising.
+- **The L0 fast path never engaged.** `int(tier or 1)` collapses a real tier 0
+  to 1, and the idiom appeared at all three levels: where the classified tier is
+  stored, where it is read back, and in the loop's `== 0` guard — which was
+  therefore False for every possible value. `L0_INSTANT`, the tier whose whole
+  purpose is answering status and identity questions without a frontier call,
+  could not be observed by anyone downstream, so every one of those questions
+  paid for a provider round.
+- **A tool rescued out of text markup counts as tool evidence.** Only the native
+  batch incremented `tools_executed_this_turn`, so a recovered call left the
+  turn believing nothing had run: the zero-tool driver spent its full budget of
+  extra round-trips and the turn ended by saying "no tools ran" about a tool
+  that had just run and returned a real result.
+- **The mail provider stops reporting success for operations the server
+  refused.** `verify()` ignored SELECT's return code — the connect flow's only
+  check — so a mailbox whose INBOX was refused still reported "IMAP + SMTP
+  verified". `create_draft` ignored APPEND's, so a Drafts folder named
+  differently (Gmail's `[Gmail]/Drafts`, any localised name) answered
+  `NO [TRYCREATE]` and the owner was told the draft was saved when it existed
+  nowhere. `mark_read` ignored STORE's. `get_message` treated imaplib's
+  `('OK', [None])` for an ignored message set as a hit and returned a blank
+  "(no subject)" message rather than saying the message is not there. And a
+  refused login left its TLS socket open, once per retry of a wrong password.
 - **ConPTY had never once worked.** `_spawn_conpty_sync` ended by calling
   `int()` on a `wintypes.HANDLE`, which raises `ValueError` — on the *last*
   statement, after `CreateProcessW` had already succeeded. Every attempt threw,

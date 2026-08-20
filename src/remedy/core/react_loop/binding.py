@@ -47,7 +47,7 @@ def resolve_and_apply_tools(
         message=message or "",
         all_tools=turn.all_tools,
         plan_mode=plan_mode,
-        turn_tier=int(turn_tier(runtime) or 1),
+        turn_tier=int(turn_tier(runtime)),
         open_tasks=open_tasks_for_wall or None,
         history=history,
         pure_action_kick=bool(pure_action_kick),

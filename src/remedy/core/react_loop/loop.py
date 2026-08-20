@@ -591,7 +591,7 @@ async def call_llm_stream(runtime, message: str,
             and not browse_pre_url
             and not page_interaction
             and not clear_goals_only
-            and int(_turn_tier_of(runtime) or 1) == 0
+            and int(_turn_tier_of(runtime)) == 0
         ):
             with suppress(Exception):
                 from remedy.core.metabolism.l0 import try_l0_system_reply
@@ -1199,7 +1199,7 @@ async def call_llm_stream(runtime, message: str,
                     from remedy.core.metabolism.turn import mark_model_call
 
                     if (
-                        int(_turn_tier_of(runtime) or 1) >= 2
+                        int(_turn_tier_of(runtime)) >= 2
                         and tool_batches_this_turn > 0
                     ):
                         led = get_evidence_ledger(sid_mm)
@@ -2144,6 +2144,13 @@ async def call_llm_stream(runtime, message: str,
                                 reasoning_content=reasoning_out or None,
                             )
                         )
+                        # These tools really run, so they are real evidence.
+                        # Only the native batch below bumped this counter, so a
+                        # recovered call left _work_unfinished() reporting zero
+                        # tools: the zero-tool driver then spent its whole
+                        # budget of extra round-trips and the turn ended with
+                        # "no tools ran" about a tool that had just run.
+                        tools_executed_this_turn += len(recovered)
                         batch_tool_msgs: list[dict[str, Any]] = []
                         async for event, tool_msg in execute_tool_calls(runtime,
                             recovered,
