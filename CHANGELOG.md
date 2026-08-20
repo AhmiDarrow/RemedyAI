@@ -123,6 +123,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   and the readable one, carrying her relational memory and pledges in the
   clear, was not. `soul_export` now returns a message naming where exports go
   instead of raising.
+- **A failed pseudo-console teardown no longer strands the process handle.**
+  `_close` covered two independent closes with one `suppress`, so a throwing
+  `ClosePseudoConsole` skipped `CloseHandle` — and the field was zeroed anyway,
+  leaving nothing able to close it: a leaked kernel object per failed teardown.
+- **A timed-out signal-cli child is reaped.** `kill()` only signals; without the
+  wait the child stayed a zombie, and the receive loop polls every ten seconds.
 - **The safety-ceiling checkpoint now fires.** It sat at the tail of the
   tool-batch section guarded by `is_final_step`, but that section is only
   reached when `force_answer` is False — and at the ceiling `force_answer` is
