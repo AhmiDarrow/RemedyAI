@@ -22,6 +22,7 @@ Design notes:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
@@ -32,6 +33,8 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
+
+logger = logging.getLogger(__name__)
 
 # A session with no heartbeat for this long is considered gone (crash/idle).
 BEACON_TTL = 180.0
@@ -164,8 +167,11 @@ def _read_beacons(home: str | Path | None) -> dict[str, SessionBeacon]:
 def _write_beacons(home: str | Path | None, beacons: dict[str, SessionBeacon]) -> None:
     p = _registry_path(home)
     payload = {"beacons": {sid: b.to_dict() for sid, b in beacons.items()}}
-    with suppress(Exception):
+    try:
         write_json_atomic(p, payload, indent=None)
+    except Exception:
+        # Liveness is best-effort: a missed heartbeat must not crash a turn.
+        logger.warning("could not save coordination beacons to %s", p, exc_info=True)
 
 
 def _prune(beacons: dict[str, SessionBeacon], now: float) -> None:

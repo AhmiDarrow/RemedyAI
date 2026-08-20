@@ -41,10 +41,12 @@ An owner who never uses the phone features never downloads any of them.
 
 ### smart-turn (semantic endpointing)
 
-- **Project:** [pipecat-ai/smart-turn](https://huggingface.co/pipecat-ai/smart-turn-v2)
+- **Project:** [pipecat-ai/smart-turn-v3](https://huggingface.co/pipecat-ai/smart-turn-v3)
 - **Use:** deciding when a speaker has finished, so she does not talk over people
 - **License:** **BSD-2-Clause**
-- **Redistribution:** not bundled; fetched to `~/.remedy/voice` on request
+- **Pin:** `smart-turn-v3.2-cpu.onnx` (~8.7 MB, int8) at revision
+  `f766f81d3cfdf7737ac64aad813d91bbfd56bf93`
+- **Redistribution:** not bundled; fetched to `~/.remedy/voice/models/smart-turn` on request
 
 ### Chatterbox (TTS + zero-shot voice cloning)
 

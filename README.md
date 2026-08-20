@@ -351,7 +351,7 @@ WebUI is the **same SPA** as desktop (`desktop/dist`). After UI changes:
 ```bash
 git clone https://github.com/AhmiDarrow/RemedyAI.git && cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # ~7753 tests
+uv run pytest -q          # ~7757 tests
 cd desktop && npm test && npm run build
 python scripts/check_docs.py
 cd desktop && npm run tauri:dev   # full shell (set REMEDY_DEV_ROOT to repo)

@@ -133,7 +133,8 @@ def test_status_says_why_when_only_the_runtime_is_missing(tmp_path, monkeypatch,
     st = service.voice_status(tmp_path)["smart_turn"]
     assert st["installed"] is True
     assert st["available"] is False
-    assert "onnxruntime" in st["reason"]
+    assert "voice pack" in st["reason"]
+    assert st["hint"] == "pip install remedy-ai[voice]"
 
 
 def test_make_detector_picks_up_the_model_on_the_next_call(tmp_path, monkeypatch, pin):

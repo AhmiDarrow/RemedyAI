@@ -3,6 +3,7 @@ export type SettingsSectionId =
   | 'provider'
   | 'provider-catalog'
   | 'you-agent'
+  | 'voice'
   | 'workspace'
   | 'access'
   | 'security-power'
@@ -39,6 +40,12 @@ export const SETTINGS_SECTION_META: Record<
     title: 'You & Agent',
     summary: 'Names & persona',
     keywords: 'user name agent persona identity wipe memory forget whoami soul',
+  },
+  voice: {
+    title: 'Voice',
+    summary: 'Speak, hear, turn-taking',
+    keywords:
+      'voice speak hear mic kokoro whisper tts stt smart-turn turn-taking aloud quiet grove speech',
   },
   workspace: {
     title: 'Project workspace',
