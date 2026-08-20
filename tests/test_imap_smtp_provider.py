@@ -379,6 +379,34 @@ def test_a_message_id_the_server_rejects_is_reported_as_not_found(strict):
     assert strict.imap.leaked_connections == []
 
 
+def test_a_lenient_server_answering_ok_with_nothing_is_still_not_found(world):
+    """The realistic case, and the one that was broken. Most servers answer
+    ('OK', [None]) for a message set they ignored rather than NO, so the
+    not-found branch never fired and the owner got a blank message —
+    "(no subject)" with an empty body — for mail that does not exist."""
+    with pytest.raises(RuntimeError, match="not found"):
+        provider().get_message("999")
+    assert world.imap.leaked_connections == []
+
+
+def test_marking_a_message_that_is_not_there_is_not_reported_as_success(world):
+    """STORE against an ignored message set is an OK no-op, so trusting the
+    return code alone told the owner a message was marked when none was."""
+    with pytest.raises(RuntimeError, match="not found"):
+        provider().mark_read("999")
+    assert world.imap.leaked_connections == []
+
+
+def test_a_drafts_folder_the_server_refuses_is_not_reported_as_saved(world):
+    """A mailbox whose Drafts folder is named differently answers NO
+    [TRYCREATE]; the draft exists nowhere and the owner used to be told it was
+    saved."""
+    world.imap.fail("append", "NO [TRYCREATE] Mailbox does not exist")
+    with pytest.raises(Exception, match="draft|TRYCREATE|Drafts"):
+        provider().create_draft(to="b@x.test", subject="Later", body="Half written")
+    assert world.imap.leaked_connections == []
+
+
 def test_a_non_ascii_message_id_fails_loudly_and_still_closes_the_connection(world):
     """Sequence numbers are ASCII digits; anything else is a caller bug and
     must not be smuggled onto the wire."""
@@ -846,13 +874,21 @@ def test_a_failed_logout_does_not_turn_a_good_result_into_an_error(world):
     assert provider().list_messages(limit=1)
 
 
-def test_BUG_a_refused_smtp_login_leaves_the_connection_open(world):
-    """``_smtp`` builds the connection, then raises out of ``login`` without
-    quitting it — the socket is only reclaimed when the object is collected."""
+def test_a_refused_smtp_login_closes_the_connection_it_opened(world):
+    """``_smtp`` used to build the connection then raise out of ``login``
+    without quitting it, so the TLS socket was held by the server until GC —
+    once per retry of a wrong app password."""
     world.smtp.fail_at_login()
     with pytest.raises(RuntimeError):
         provider().send_message(to="b@x.test", subject="Hi", body="Hello")
-    assert len(world.smtp.leaked_connections) == 1
+    assert world.smtp.leaked_connections == []
+
+
+def test_a_refused_imap_login_closes_the_connection_it_opened(world):
+    world.imap.fail_at_login()
+    with pytest.raises(RuntimeError):
+        provider().list_messages(limit=1)
+    assert world.imap.leaked_connections == []
 
 
 # --- credential storage ------------------------------------------------------
@@ -958,3 +994,52 @@ def test_a_saved_mailbox_comes_back_as_a_ready_provider(tmp_path):
     assert mail.account.address == "owner@fastmail.com"
     assert mail.account.smtp_port == 465
     assert mail.account.is_ready()
+
+
+# --- servers that answer NO without raising ---------------------------------
+# The doubles' fail() makes an op *raise*; a real server more often answers a
+# bad status on a good socket. These drive that path directly, so the
+# return-code checks are proven reachable rather than assumed.
+
+
+def _answering(op: str, status: str = "NO", data=None):
+    """Make one IMAP verb answer *status* on an otherwise healthy connection.
+
+    Patched on the *connection* class (FakeIMAP4SSL), which is what the
+    provider holds — FakeIMAPServer is the mailbox behind it.
+    """
+    from tests.harness.fake_mail import FakeIMAP4SSL
+
+    real = getattr(FakeIMAP4SSL, op)
+
+    def patched(self, *a, **kw):
+        real(self, *a, **kw)
+        return status, (data if data is not None else [b""])
+
+    return FakeIMAP4SSL, patched
+
+
+def test_a_drafts_folder_the_server_answers_no_to_is_not_reported_as_saved(
+    world, monkeypatch
+):
+    cls, patched = _answering("append")
+    monkeypatch.setattr(cls, "append", patched)
+    with pytest.raises(RuntimeError, match="draft"):
+        provider().create_draft(to="b@x.test", subject="Later", body="Half written")
+
+
+def test_an_inbox_the_server_answers_no_to_is_not_reported_as_verified(
+    world, monkeypatch
+):
+    """verify() is the connect flow's only check."""
+    cls, patched = _answering("select")
+    monkeypatch.setattr(cls, "select", patched)
+    with pytest.raises(RuntimeError, match="INBOX"):
+        provider().verify()
+
+
+def test_a_store_the_server_answers_no_to_is_not_reported_as_marked(world, monkeypatch):
+    cls, patched = _answering("store")
+    monkeypatch.setattr(cls, "store", patched)
+    with pytest.raises(RuntimeError, match="not found"):
+        provider().mark_read(seq(world, "plain"))

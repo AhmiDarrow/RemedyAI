@@ -319,7 +319,7 @@ def apply_auto_harness_send_policy(
         full_snap = t0 >= TurnTier.L2_AGENCY
         from remedy.core.turn_context import set_turn_tier, turn_tier
 
-        set_turn_tier(int(turn_tier(runtime, default=pre_tier) or pre_tier), runtime)
+        set_turn_tier(int(turn_tier(runtime, default=pre_tier)), runtime)
         runtime._turn_tier_preclassified = pre_tier
     snap = build_context_snapshot(
         messages=messages,
