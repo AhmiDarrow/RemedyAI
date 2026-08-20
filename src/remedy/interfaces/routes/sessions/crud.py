@@ -118,6 +118,7 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         # Omit project_path (None) → inherit global settings project if set.
         # Explicit "" / "." → no-project session (root / full access) — default for New Session.
         # New Project folder is first-run only (config init), never forced onto every session.
+        raw_project: str | None
         if req.project_path is not None:
             raw_project = req.project_path
         else:

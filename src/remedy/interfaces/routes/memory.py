@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from contextlib import suppress
 from pathlib import Path
+from typing import Any
 
 # suppress used by archive-unused / packs
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -100,7 +101,7 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
     # -- skills --------------------------------------------------------------
     def _skill_info(s) -> SkillInfo:
         meta = s.manifest.metadata or {}
-        snap = {}
+        snap: dict[str, Any] = {}
         with suppress(Exception):
             if hasattr(runtime.skills, "health_snapshot"):
                 snap = runtime.skills.health_snapshot(s.manifest.name) or {}

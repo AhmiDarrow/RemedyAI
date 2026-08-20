@@ -55,6 +55,11 @@ def _effective_http_bootstrap_display(raw: dict[str, Any]) -> bool:
     return _http_bootstrap_default()
 
 
+def _int_or(value: Any, default: int) -> int:
+    """``int(value)`` unless the setting is absent (``None``) -> ``default``."""
+    return default if value is None else int(value)
+
+
 def _memory_encrypt_status_public(raw: dict[str, Any]) -> str:
     """Return off | sqlcipher | unavailable for Settings honesty."""
     if not bool(raw.get("memory_encrypt", False)):
@@ -194,7 +199,8 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
     home = raw.get("home_dir")
     home_path = Path(home).expanduser() if home else None
     key = resolve_provider_api_key(raw, provider, home=home_path)
-    vision = raw.get("vision") if isinstance(raw.get("vision"), dict) else {}
+    vision_raw = raw.get("vision")
+    vision: dict[str, Any] = vision_raw if isinstance(vision_raw, dict) else {}
     from remedy.vision.catalog import DEFAULT_MODEL_ID
 
     out: dict[str, Any] = {
@@ -242,27 +248,11 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         ),
         "build_os_advanced": bool(raw.get("build_os_advanced", False)),
         "rmb_enabled": bool(raw.get("rmb_enabled", True)),
-        "retention_session_days": int(
-            raw.get("retention_session_days")
-            if raw.get("retention_session_days") is not None
-            else 180
-        ),
-        "retention_attachment_days": int(
-            raw.get("retention_attachment_days")
-            if raw.get("retention_attachment_days") is not None
-            else 90
-        ),
-        "retention_computer_shot_days": int(
-            raw.get("retention_computer_shot_days")
-            if raw.get("retention_computer_shot_days") is not None
-            else 14
-        ),
-        "retention_undo_days": int(
-            raw.get("retention_undo_days") if raw.get("retention_undo_days") is not None else 30
-        ),
-        "retention_log_days": int(
-            raw.get("retention_log_days") if raw.get("retention_log_days") is not None else 30
-        ),
+        "retention_session_days": _int_or(raw.get("retention_session_days"), 180),
+        "retention_attachment_days": _int_or(raw.get("retention_attachment_days"), 90),
+        "retention_computer_shot_days": _int_or(raw.get("retention_computer_shot_days"), 14),
+        "retention_undo_days": _int_or(raw.get("retention_undo_days"), 30),
+        "retention_log_days": _int_or(raw.get("retention_log_days"), 30),
         "memory_encrypt": bool(raw.get("memory_encrypt", False)),
         # Honesty: requested flag vs actual SQLCipher availability.
         "memory_encrypt_status": _memory_encrypt_status_public(raw),
@@ -852,7 +842,7 @@ async def _apply_settings_update_inner(
         changes.append("messengers")
 
     snap = public_settings_snapshot(cfg)
-    out = {
+    out: dict[str, Any] = {
         "status": "saved",
         "changes": changes,
         "config_path": str(config_path),

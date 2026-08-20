@@ -7,6 +7,7 @@ import contextlib
 import json
 import logging
 import mimetypes
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -102,8 +103,8 @@ def decode_image(
     t0 = _time.perf_counter()
     try:
         # Never follow Location off-loopback (SSRF via poisoned base or 3xx).
-        with urlopen_no_redirect(req, timeout=timeout_s) as resp:  # type: ignore[union-attr]
-            payload = json.loads(resp.read().decode("utf-8"))  # type: ignore[union-attr]
+        with urlopen_no_redirect(req, timeout=timeout_s) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
     except HTTPError as e:
         err_body = ""
         with contextlib.suppress(Exception):
@@ -160,7 +161,7 @@ def _record_decode_metric(*, ok: bool, seconds: float) -> None:
 
 
 def decode_images(
-    paths: list[str | Path],
+    paths: Sequence[str | Path],
     *,
     base_url: str,
     timeout_s: float = 90.0,

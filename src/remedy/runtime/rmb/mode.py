@@ -78,7 +78,8 @@ def is_local_agent_mode(
         return True
 
     # custom/local explicitly aimed at configured RMB base
-    rmb = cfg.get("rmb") if isinstance(cfg.get("rmb"), dict) else {}
+    rmb_raw = cfg.get("rmb")
+    rmb: dict[str, Any] = rmb_raw if isinstance(rmb_raw, dict) else {}
     rmb_url = str(rmb.get("base_url") or "").strip()
     if prov in ("custom", "local") and url and rmb_url:
         if url.rstrip("/") == rmb_url.rstrip("/") or is_rmb_base_url(url):
@@ -90,7 +91,8 @@ def is_local_agent_mode(
 def rmb_chat_base_url(cfg: dict[str, Any] | None = None) -> str:
     """Canonical OpenAI /v1 base for the RMB chat host."""
     cfg = cfg if isinstance(cfg, dict) else {}
-    rmb = cfg.get("rmb") if isinstance(cfg.get("rmb"), dict) else {}
+    rmb_raw = cfg.get("rmb")
+    rmb: dict[str, Any] = rmb_raw if isinstance(rmb_raw, dict) else {}
     if rmb.get("base_url"):
         return str(rmb["base_url"]).rstrip("/")
     try:

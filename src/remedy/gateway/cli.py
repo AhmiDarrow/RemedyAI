@@ -65,10 +65,11 @@ async def run_gateway(
     runtime = BasicRuntime(config)
     memory = MemoryStore(db_path)
     await memory.initialize()
-    runtime.memory = memory  # type: ignore[attr-defined]
+    runtime.memory = memory
     await runtime.start()
 
-    gw_cfg = cfg.get("gateway") if isinstance(cfg.get("gateway"), dict) else {}
+    gw_raw = cfg.get("gateway")
+    gw_cfg: dict = gw_raw if isinstance(gw_raw, dict) else {}
     rate = int(gw_cfg.get("rate_limit") or 120)
     hb = float(gw_cfg.get("heartbeat_interval") or heartbeat)
 

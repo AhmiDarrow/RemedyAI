@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -78,12 +79,13 @@ def detect_nvidia() -> bool:
         ):
             if Path(name).is_file():
                 return True
-        try:
-            import ctypes
+        if sys.platform == "win32":
+            try:
+                import ctypes
 
-            return bool(ctypes.windll.LoadLibrary("nvml.dll"))  # type: ignore[attr-defined]
-        except Exception:
-            pass
+                return bool(ctypes.windll.LoadLibrary("nvml.dll"))
+            except Exception:
+                pass
     else:
         if Path("/usr/bin/nvidia-smi").is_file() or Path("/usr/local/bin/nvidia-smi").is_file():
             return True

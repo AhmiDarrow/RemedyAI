@@ -733,7 +733,8 @@ def _plan_from_last_good(
             return None
     try:
         ctx = max(_MIN_PLAN_CTX, int(last_good.get("ctx_size") or 0))
-        ngl = int(last_good.get("n_gpu_layers") if last_good.get("n_gpu_layers") is not None else -1)
+        ngl_raw = last_good.get("n_gpu_layers")
+        ngl = int(ngl_raw) if ngl_raw is not None else -1
     except (TypeError, ValueError):
         return None
     cache_type = str(last_good.get("cache_type") or "")
@@ -802,7 +803,8 @@ def plan_from_state(
     except (TypeError, ValueError):
         ctx = 8192
     try:
-        ngl = int(state.get("n_gpu_layers") if state.get("n_gpu_layers") is not None else -1)
+        ngl_raw = state.get("n_gpu_layers")
+        ngl = int(ngl_raw) if ngl_raw is not None else -1
     except (TypeError, ValueError):
         ngl = -1
     if ngl < 0 and not hw.usable_gpu:
@@ -822,7 +824,8 @@ def plan_from_state(
     except (TypeError, ValueError):
         threads = 0
     try:
-        reuse = int(state.get("cache_reuse") if state.get("cache_reuse") is not None else 256)
+        reuse_raw = state.get("cache_reuse")
+        reuse = int(reuse_raw) if reuse_raw is not None else 256
     except (TypeError, ValueError):
         reuse = 256
     kv = estimate_kv_mb(ctx, arch, cache_type, 1)
@@ -992,7 +995,7 @@ def probe_live_n_ctx(base_url: str, *, timeout: float = 1.8) -> int | None:
     for url in urls:
         try:
             req = Request(url, headers={"User-Agent": "RemedyAI-RMB/1.0"})
-            with urlopen_no_redirect(req, timeout=timeout) as resp:  # type: ignore[union-attr]
+            with urlopen_no_redirect(req, timeout=timeout) as resp:
                 raw = resp.read(65_536).decode("utf-8", errors="ignore")
             data = _json.loads(raw or "{}")
         except (URLError, OSError, ValueError, TimeoutError):
@@ -1030,7 +1033,8 @@ def probe_live_n_ctx(base_url: str, *, timeout: float = 1.8) -> int | None:
                         n = 0
                     if n >= 512:
                         return n
-                meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+                meta_raw = row.get("meta")
+                meta: dict[str, Any] = meta_raw if isinstance(meta_raw, dict) else {}
                 for key in ("n_ctx_train", "n_ctx", "context_length"):
                     try:
                         n = int(meta.get(key) or 0)

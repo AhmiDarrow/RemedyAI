@@ -375,7 +375,7 @@ def create_app(
         redoc_url=None if _disable_api_docs else "/redoc",
         openapi_url=None if _disable_api_docs else "/openapi.json",
     )
-    app.state.disable_api_docs = _disable_api_docs  # type: ignore[attr-defined]
+    app.state.disable_api_docs = _disable_api_docs
 
     # CORS: REMEDY_CORS_ORIGINS env wins, then config.toml `cors_origins`, else safe defaults.
     # NEVER allow "*" when API auth is enabled — any website could read loopback bootstrap.
@@ -491,7 +491,7 @@ def create_app(
         return host.startswith("127.") or host == "::ffff:127.0.0.1"
 
     if api_key:
-        app.state.api_key = api_key  # type: ignore[attr-defined]
+        app.state.api_key = api_key
 
         @app.middleware("http")
         async def require_auth(request: Request, call_next):
@@ -781,7 +781,7 @@ def _mount_web_ui(app: FastAPI) -> None:
         async def webui_missing():
             return HTMLResponse(_WEBUI_MISSING_HTML)
 
-        app.state.webui_dir = None  # type: ignore[attr-defined]
+        app.state.webui_dir = None
         return
 
     assets = web_dir / "assets"
@@ -829,7 +829,7 @@ def _mount_web_ui(app: FastAPI) -> None:
         return _spa_file(full_path)
 
     # Stash for CLI banner
-    app.state.webui_dir = str(web_dir)  # type: ignore[attr-defined]
+    app.state.webui_dir = str(web_dir)
     logger.info("WebUI mounted from %s (open http://127.0.0.1:7400/)", web_dir)
 
 

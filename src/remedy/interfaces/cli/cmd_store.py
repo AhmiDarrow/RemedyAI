@@ -152,11 +152,11 @@ async def _cmd_handoff(args, db_path: Path) -> None:
             _print_handoffs(notes)
 
         elif args.handoff_cmd == "show":
-            note = await store.get_handoff(args.id)
-            if note is None:
+            found = await store.get_handoff(args.id)
+            if found is None:
                 console.print(f"[red]Handoff not found: {args.id}[/red]")
                 raise SystemExit(1)
-            console.print_json(json.dumps(note.model_dump(mode="json"), default=str))
+            console.print_json(json.dumps(found.model_dump(mode="json"), default=str))
 
 
 async def _cmd_migrate(args) -> None:
