@@ -220,13 +220,15 @@ export function VoiceSection({
               <FormNotice tone="warn">
                 {tts?.reason || stt?.reason || "Remedy's voice is not on this computer yet."}
               </FormNotice>
-              <FormActionButton
-                variant="primary"
-                disabled={Boolean(busy) || packDownloading}
-                onClick={() => void startInstall('all')}
-              >
-                Download Remedy's voice
-              </FormActionButton>
+              {pack?.supported === false ? null : (
+                <FormActionButton
+                  variant="primary"
+                  disabled={Boolean(busy) || packDownloading}
+                  onClick={() => void startInstall('all')}
+                >
+                  Download Remedy's voice
+                </FormActionButton>
+              )}
             </>
           )}
         </div>

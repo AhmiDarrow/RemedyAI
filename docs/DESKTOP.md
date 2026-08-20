@@ -41,6 +41,27 @@ have the installed release running, quit it first (they share port `7400` and
 `desktop/resources/local/` is a **staging area only** (gitignored weights). It is
 **not** listed in `tauri.conf.json` `bundle.resources` — so normal NSIS builds stay small.
 
+### Voice runtime (0.30+)
+
+The frozen sidecar has no `pip`, and Chatterbox pulls torch, so voice works
+the same way as vision: nothing heavy in the installer, a pinned runtime in
+the owner's home.
+
+| Item | Policy |
+|------|--------|
+| Installer | **Does not** include kokoro-onnx / faster-whisper / onnxruntime / chatterbox / torch (`scripts/build_desktop.py` excludes them explicitly) |
+| Runtime | `~/.remedy/voice/runtime/python/` — pinned python-build-standalone CPython 3.12 (`remedy/voice/runtime.py`, sha256-verified, ~70 MB) |
+| Packs | `pip install` into that runtime: **voice** (`kokoro-onnx`, `faster-whisper`) on first Download; **hq** (`chatterbox-tts`) when HQ is turned on |
+| Inference | `remedy/voice/worker.py` runs inside the runtime (JSON lines over stdin/stdout); `remedy/voice/bridge.py` is the sidecar client. Models (`tts/`, `stt/`, `models/smart-turn/`, `chatterbox/`) stay where they were. |
+| Dev | In-process as before. `REMEDY_VOICE_MANAGED=1` forces the Desktop path from a checkout; `REMEDY_VOICE_PYTHON=…` points it at any interpreter (tests use this). |
+| Marker | `runtime/runtime.json` — `{ok, python, packs: {voice, hq}}`; `voice_status` reads it instead of importing engines |
+
+The worker imports the bundled `remedy` *source* (`sys._MEIPASS`, from
+`--add-data src/remedy`), so the runtime never needs `remedy-ai` installed
+and versions cannot drift. Only stdlib-backed modules may be imported on
+the worker path (`remedy.voice.*`, `remedy.core.atomic_json`,
+`remedy.telephony.narrowband`).
+
 
 ### Skills panel (0.10.30+; HITL + packs in 0.10.44)
 
