@@ -16,6 +16,7 @@ from remedy.interfaces.api_support import (
 )
 from remedy.interfaces.attachments import filter_jailed_attachments
 from remedy.models import (
+    ChatMessage,
     ChatMessageRole,
 )
 
@@ -107,6 +108,34 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         if open_todo_count(items) == 0:
             return {"todos": []}
         return {"todos": todos_public(items)}
+
+    @app.post("/api/sessions/{session_id}/steer")
+    async def steer_message(session_id: str, req: SendMessageRequest):
+        """Say something to a turn that is already running.
+
+        The text joins the live ReAct loop at its next step (no stop, no
+        restart) and is persisted as the owner's message so the transcript
+        reads in order. ``{"steered": false}`` means no turn was running —
+        send it as a normal message instead.
+        """
+        text = str(req.message or "").strip()
+        if not text:
+            raise HTTPException(400, "Message is empty")
+        from remedy.core.turn_context import push_nudge
+
+        if not push_nudge(session_id, text):
+            return {"steered": False}
+        if memory is not None:
+            with contextlib.suppress(Exception):
+                if await memory.get_chat_session(session_id) is not None:
+                    await memory.add_chat_message(
+                        ChatMessage(
+                            session_id=session_id,
+                            role=ChatMessageRole.USER,
+                            content=text,
+                        )
+                    )
+        return {"steered": True}
 
     @app.post("/api/sessions/{session_id}/messages")
     async def send_message(session_id: str, req: SendMessageRequest):

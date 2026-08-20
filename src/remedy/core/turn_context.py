@@ -120,6 +120,11 @@ _stream_epochs: dict[str, int] = {}
 _reset_epochs: dict[str, int] = {}
 # Next-turn injects keyed by session (never a process-global leftover).
 _pending_verify_by_session: dict[str, Any] = {}
+# Mid-turn steering: owner messages sent while a turn runs. The ReAct loop
+# drains these between steps and folds them in as user messages, so the
+# owner can redirect without stopping her (Grove's "every message steers").
+_nudges_by_session: dict[str, list[str]] = {}
+_NUDGE_MAX = 8
 _build_protocol_by_session: dict[str, str] = {}
 _frontier_continue_by_session: dict[str, Any] = {}
 _lock = threading.Lock()
@@ -406,6 +411,51 @@ def kill_session_processes(session_id: str) -> int:
     return n
 
 
+def session_turn_running(session_id: str) -> bool:
+    """Is a ReAct turn live for this session right now?"""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return False
+    with _lock:
+        return bool(_registry.get(sid)) or sid in _stream_claims
+
+
+def push_nudge(session_id: str, text: str) -> bool:
+    """Queue an owner message for the running turn. False when no turn runs.
+
+    The caller then sends it as an ordinary message instead. At most
+    ``_NUDGE_MAX`` are held; older ones are kept (they were said first).
+    """
+    sid = str(session_id or "").strip()
+    body = str(text or "").strip()
+    if not sid or not body:
+        return False
+    with _lock:
+        if not (_registry.get(sid) or sid in _stream_claims):
+            return False
+        lst = _nudges_by_session.setdefault(sid, [])
+        if len(lst) >= _NUDGE_MAX:
+            return False
+        lst.append(body)
+        return True
+
+
+def drain_nudges(session_id: str | None) -> list[str]:
+    """Take every queued nudge for *session_id* (empty when none)."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return []
+    with _lock:
+        return list(_nudges_by_session.pop(sid, []) or [])
+
+
+def clear_nudges(session_id: str | None) -> None:
+    sid = str(session_id or "").strip()
+    if sid:
+        with _lock:
+            _nudges_by_session.pop(sid, None)
+
+
 def abort_session(session_id: str, *, epoch: int | None = None) -> int:
     """Signal in-flight turns and kill their shell children. Returns events notified.
 
@@ -514,6 +564,8 @@ def release_session_stream_claim(session_id: str, *, epoch: int | None = None) -
         if epoch is not None and int(_stream_epochs.get(sid, 0) or 0) != int(epoch):
             return
         _stream_claims.discard(sid)
+        # A nudge nobody drained belongs to a turn that is over.
+        _nudges_by_session.pop(sid, None)
 
 
 def is_session_streaming(session_id: str) -> bool:

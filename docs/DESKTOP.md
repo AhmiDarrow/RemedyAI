@@ -202,6 +202,17 @@ CLI and web UI remain available as power-user features.
 
 ## API Contract (v1)
 
+### Steering a running turn
+
+`POST /api/sessions/{id}/steer` `{message}` → `{steered: true|false}`.
+`true`: a turn was live; the text was queued (`turn_context.push_nudge`),
+persisted as a user message, and the ReAct loop appends it as a user
+message at its next step boundary (`_take_nudges` at the top of each step
+and again before a plain answer would end the turn; the stream emits a
+`progress` event "Taking that in…"). `false`: no turn running — send it
+as a normal message. Text only; attachments need a turn of their own.
+Grove sends with `mode: 'steer'`; Studio keeps its queue/interrupt modes.
+
 ### Sessions
 
 | Method | Path | Purpose |
