@@ -206,16 +206,11 @@ class GoogleTokens:
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
-    """Write via temp + replace so a crash cannot leave a half-written auth file."""
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    try:
-        tmp.write_bytes(data)
-        tmp.replace(path)
-    except Exception:
-        with contextlib.suppress(OSError):
-            if tmp.exists():
-                tmp.unlink()
-        raise
+    """Write via the shared atomic helper (unique scratch name, cleaned up on
+    failure) so a crash cannot leave a half-written auth file."""
+    from remedy.core.atomic_json import write_bytes_atomic
+
+    write_bytes_atomic(path, data)
 
 
 def _write_sealed(path: Path, plain: bytes) -> str:

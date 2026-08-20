@@ -89,6 +89,72 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   Explorer/list drag-drop registers; horizontal scroll (`dx`) implemented
   via MOUSEEVENTF_HWHEEL.
 
+### Correctness — a second pass over the 2026-08-19 fixes
+
+A review of the previous day's fixes found eight that had regressed something
+that used to work, and a dozen that were claimed but not finished. All are
+closed here, each with a test that fails on the old code.
+
+- **`error_journal` word boundaries were literal backspace bytes.** The
+  regex meant `` but the file contained 0x08, so the `dns`/`ssl`/`socket`
+  and HTTP-status alternatives never matched and `ssl.SSLError`, `gaierror`
+  and `429` were filed as code bugs. Real boundaries now, and a test that the
+  source contains no control characters.
+- **`looks_like_secret` no longer refuses ordinary hyphenated words.**
+  `task-tracking-app`, `ask-me-anything` and `risk-tolerance-level` all
+  matched the `sk-` prefix; `/remember` and `/pin` turned them away. The
+  prefix alternatives now need a non-alphanumeric on their left.
+- **`.jsx`/`.tsx` went from "always red" to "red on any apostrophe".** The
+  brace-balance heuristic read `Don't` as an unterminated string. JSX now
+  uses `esbuild` or `tsc` when present and is otherwise skipped, never judged
+  by a parser that cannot read it.
+- **ConPTY sessions return what the command printed.** The pseudo-console
+  echoes input and speaks VT, so the DONE sentinel matched its own echo and
+  `run("echo hello")` came back as escape codes with exit 0. The sentinel is
+  only accepted in its expanded numeric form, VT is stripped, the echoed
+  command line is dropped, lines are submitted with CR, the child gets no
+  inherited std handles (`STARTF_USESTDHANDLES`), and a failing
+  `CreatePseudoConsole` closes its four pipe ends.
+- **CalDAV follows same-origin redirects again.** Every 3xx had become a hard
+  failure, including the trailing-slash 301 Apache, Radicale and Nextcloud
+  all send. Up to three hops are followed, each re-checked against the
+  configured origin; the origin compare now ignores userinfo and default
+  ports.
+- **Atomic writes are thread-safe and survive an open reader.** The scratch
+  name carries the thread id as well as the pid; `os.replace` retries
+  briefly on the Windows sharing violation a polling reader causes;
+  `default=str` no longer silently stringifies unserialisable payloads. The
+  seven credential-file writers still using a fixed `.tmp` name
+  (`local_auth`, `secret_store`, `api_support`, `xai_auth`,
+  `google_oauth`) now use the shared helper with their modes preserved, and
+  the guard test sees through `suffix + ".tmp"`. Offload writes tolerate
+  lone surrogates again.
+- **A slow-loading model tier can come up.** `start_tier` killed any child
+  not ready in 30 s on every attempt. It now leaves a live, loading child
+  registered and reports `starting`; the next call waits on it instead of
+  spawning a twin.
+- **Voice: no phantom turns, no hidden stalls.** An empty speculative
+  transcript left its turn record behind to be scored as unanswered;
+  per-chunk pacer rebasing hid gaps between TTS chunks. Synthesis now runs
+  ahead of playout, stalls between chunks count, and the smart-turn detector
+  builds log-mel input for rank-3 models, runs inference off the audio loop,
+  and goes explicitly unavailable on failure instead of answering "endpoint".
+- **Finished what was started.** `remedy auth apikey` goes through
+  `set_provider_key` (subscription tokens refused with a reason, keys filed
+  under their issuer); the webhook body cap runs before FastAPI parses the
+  body; the shared LLM session is closed at API shutdown; tier 0 is not
+  read as tier 1 in tool disarming; recovered tool batches count as batches;
+  `time_travel` refuses a restore when the secret-path check errors;
+  `calendar_update_event` and `mail_disconnect` are approval-gated;
+  switching mailboxes leaves no stale "connected" row; `archive_message`
+  requires a COPYUID; `mark_read` tolerates a silent no-op STORE;
+  `list_dir` hides credential dotfiles; `run_auto_repair_hops` resolves
+  against the project root, not Remedy's own tree; `DockerSandbox.cleanup`
+  kills a hung prune; `secret_equals` is False for two empty secrets;
+  `BluetoothFindRadioClose`/`AvRevert…` declare HANDLE argtypes so 64-bit
+  handles do not raise; `filter_jailed_attachments` is imported at module
+  level and fails closed; relative soul exports land under `exports/` again.
+
 ### Correctness — bugs found by driving the code, not reading it
 
 - **Clipboard reads no longer crash Remedy.** The Win32 backend declared no

@@ -90,3 +90,87 @@ async def test_reset_still_does_what_it_always_did():
     clock.advance(5.0)
     await pacer.wait()
     assert pacer.late_frames == 0, "the first frame after a reset is never late"
+
+
+# ---------------------------------------------------------------------------
+# audio_priority — the MMCSS handle must survive the round trip
+# ---------------------------------------------------------------------------
+
+
+class _StrictFunction:
+    """ctypes' real rule: with no ``argtypes`` an int is marshalled as a C
+    ``int``, and a 64-bit HANDLE value raises ``ArgumentError``."""
+
+    def __init__(self, name: str, impl, calls: list) -> None:
+        self.name = name
+        self.impl = impl
+        self.calls = calls
+        self.argtypes = None
+        self.restype = None
+
+    def __call__(self, *args):
+        import ctypes
+
+        if self.argtypes is None:
+            for a in args:
+                if isinstance(a, int) and not (-(2**31) <= a < 2**31):
+                    raise ctypes.ArgumentError(f"{self.name}: int too long to convert")
+        self.calls.append((self.name, args))
+        return self.impl(*args)
+
+
+class _StrictDLL:
+    def __init__(self, impls: dict, calls: list) -> None:
+        self._fns = {n: _StrictFunction(n, f, calls) for n, f in impls.items()}
+
+    def __getattr__(self, name: str):
+        try:
+            return self._fns[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+
+_MMCSS_HANDLE = 0x1_0000_0040  # does not fit a C int
+
+
+def _install_avrt(monkeypatch):
+    import ctypes
+    import sys
+
+    calls: list = []
+    avrt = _StrictDLL(
+        {
+            "AvSetMmThreadCharacteristicsW": lambda name, pidx: _MMCSS_HANDLE,
+            "AvRevertMmThreadCharacteristics": lambda h: 1,
+        },
+        calls,
+    )
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(ctypes, "WinDLL", lambda name, **kw: avrt, raising=False)
+    return avrt, calls
+
+
+def test_audio_priority_actually_leaves_the_pro_audio_class_afterwards(monkeypatch):
+    """``AvRevertMmThreadCharacteristics`` had no argtypes, so the 64-bit
+    HANDLE from the (correctly typed) set call raised ArgumentError inside a
+    ``suppress`` — the thread silently stayed in the media class forever."""
+    from remedy.telephony.timing import audio_priority
+
+    _avrt, calls = _install_avrt(monkeypatch)
+    with audio_priority() as task:
+        assert task == "Pro Audio"
+    assert ("AvRevertMmThreadCharacteristics", (_MMCSS_HANDLE,)) in calls
+
+
+def test_the_avrt_functions_declare_handle_argtypes(monkeypatch):
+    from ctypes import wintypes
+
+    from remedy.telephony.timing import audio_priority
+
+    avrt, _calls = _install_avrt(monkeypatch)
+    with audio_priority():
+        pass
+    assert avrt.AvRevertMmThreadCharacteristics.argtypes == [wintypes.HANDLE]
+    assert avrt.AvRevertMmThreadCharacteristics.restype is wintypes.BOOL
+    assert avrt.AvSetMmThreadCharacteristicsW.restype is wintypes.HANDLE
+    assert avrt.AvSetMmThreadCharacteristicsW.argtypes is not None

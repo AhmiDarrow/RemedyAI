@@ -347,6 +347,14 @@ def create_app(
                     logger.debug("Gateway stop on shutdown failed", exc_info=True)
             logger.info("API shutdown: stopping vision decoder if running")
             _shutdown_vision_decoder()
+            # The shared aiohttp session behind every LLM call: nothing else
+            # ever closed it, so its connection pool outlived the server.
+            try:
+                from remedy.core.agent_llm import aclose_shared_session
+
+                await aclose_shared_session()
+            except Exception:
+                logger.debug("shared LLM session close on shutdown failed", exc_info=True)
 
     # Packaged desktop sidecar / opt-in: hide Swagger/ReDoc + default OpenAPI
     # JSON (S-AUTH-05). Dev/serve keep docs; set REMEDY_DISABLE_API_DOCS=0 to

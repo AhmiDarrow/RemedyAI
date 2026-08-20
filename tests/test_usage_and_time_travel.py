@@ -237,3 +237,33 @@ def test_time_travel_message_id_fallback_to_timestamp(tmp_path: Path):
     )
     assert result["restored"] >= 1
     assert f.read_text(encoding="utf-8") == "v1"
+
+
+def test_a_failing_secret_path_check_refuses_the_restore(tmp_path, monkeypatch):
+    """The protected-path guard was wrapped in ``except Exception: pass``, so a
+    guard that could not run fell through to "allowed" — and the only thing
+    between a restore and ~/.remedy/auth was the weaker path-parts check."""
+    from remedy.core import security
+
+    def boom(path):
+        raise RuntimeError("auth roots unavailable")
+
+    monkeypatch.setattr(security, "is_protected_secret_path", boom)
+    home = tmp_path / "home"
+    home.mkdir()
+    log = SessionUndoLog(home)
+    ordinary = tmp_path / "work" / "notes.txt"
+    assert log._is_restore_forbidden(ordinary) is True
+
+    ordinary.parent.mkdir(parents=True)
+    ordinary.write_text("v1", encoding="utf-8")
+    assert (
+        log.record_file_write(
+            session_id="s-strict",
+            path=ordinary,
+            previous_content="v1",
+            existed=True,
+            new_size=2,
+        )
+        is None
+    )

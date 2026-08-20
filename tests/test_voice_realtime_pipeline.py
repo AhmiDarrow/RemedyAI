@@ -461,3 +461,91 @@ async def test_a_failing_backchannel_does_not_sink_the_turn(caplog):
     assert filler.calls >= 1, "the backchannel never fired"
     assert p.state is not PipelineState.THINKING
     assert call.audible_ms > 0, "the answer never went out"
+
+
+class TwoFinalsStt:
+    """First final is empty (a speculation that heard nothing), the next is real."""
+
+    def __init__(self) -> None:
+        self.finals = 0
+
+    def feed(self, pcm: bytes, at: float) -> None:
+        return None
+
+    async def final(self) -> str:
+        self.finals += 1
+        return "" if self.finals == 1 else "hello there"
+
+    def reset(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_an_empty_speculative_final_does_not_leave_an_unanswered_turn():
+    """The empty-text path went back to LISTENING without dropping its record,
+    so the real endpoint opened a second record and the first one scored as a
+    turn she never answered."""
+    call = RecordingCall()
+    p = _build(call, stt=TwoFinalsStt(), filler_audio=None)
+    await _drive(p, voiced_pcm(400))
+    await _drive(p, _quiet(160))
+    await asyncio.sleep(0.02)  # the speculative turn runs and hears nothing
+    await _drive(p, _quiet(440))  # the real endpoint
+    await asyncio.sleep(0.3)
+    assert call.audible_ms > 0
+    report = p.metrics.summary()
+    assert (report["turns"], report["unanswered"]) == (1, 0)
+
+
+class StallingTts:
+    """Chunks separated by real silence on the engine's side."""
+
+    sample_rate = 8000
+
+    def __init__(self, gaps_s: list[float], chunk_ms: int = 60) -> None:
+        self.gaps_s = gaps_s
+        self.chunk_ms = chunk_ms
+
+    async def stream(self, text: str) -> AsyncIterator[bytes]:
+        for i, gap in enumerate(self.gaps_s):
+            await asyncio.sleep(gap)
+            yield voiced_pcm(self.chunk_ms, self.sample_rate, f0=200.0, seed=i)
+
+
+@pytest.mark.asyncio
+async def test_tts_stalls_between_chunks_count_as_late_frames():
+    """Rebasing the pacer per chunk forgave every inter-chunk hole, so an
+    engine that stutters passed the playout gate clean."""
+    call = RecordingCall()
+    p = _build(call, tts=StallingTts(gaps_s=[0.0, 0.4, 0.4]), filler_audio=None)
+    await _drive(p, voiced_pcm(400))
+    await _drive(p, _quiet(600))
+    await asyncio.sleep(1.3)
+    assert call.audible_ms > 0
+    assert p.pacer.late_frames >= 2
+    assert p.pacer.worst_late_ms > 40.0
+
+
+@pytest.mark.asyncio
+async def test_a_slow_first_chunk_is_warm_up_not_a_late_frame():
+    call = RecordingCall()
+    p = _build(call, tts=StallingTts(gaps_s=[0.4, 0.0, 0.0]), filler_audio=None)
+    await _drive(p, voiced_pcm(400))
+    await _drive(p, _quiet(600))
+    await asyncio.sleep(1.0)
+    assert call.audible_ms > 0
+    assert p.pacer.late_frames == 0
+    assert p.pacer.worst_late_ms == 0.0
+
+
+@pytest.mark.asyncio
+async def test_synthesis_keeps_ahead_of_playout_when_it_can():
+    """A 40 ms per-chunk cost on 200 ms chunks is only a hole on the wire if
+    the next chunk is not requested until the current one has played out."""
+    call = RecordingCall()
+    p = _build(call, tts=StallingTts(gaps_s=[0.0, 0.04, 0.04, 0.04], chunk_ms=200), filler_audio=None)
+    await _drive(p, voiced_pcm(400))
+    await _drive(p, _quiet(600))
+    await asyncio.sleep(1.2)
+    assert call.audible_ms >= 780
+    assert p.pacer.late_frames == 0, f"worst {p.pacer.worst_late_ms:.0f} ms"

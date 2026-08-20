@@ -779,18 +779,21 @@ def test_marking_a_missing_message_read_is_not_reported_as_success(world):
     return code alone said a message was marked when none was."""
     with pytest.raises(RuntimeError, match="not found"):
         provider().mark_read("999")
-    # The UID never resolved, so STORE saw an empty set — assert on what
-    # the provider actually asked for.
-    assert world.imap.uid_calls[-1][0] == "STORE"
-    assert world.imap.uid_calls[-1][1][0] == "999"
+    # The UID never resolved, so STORE saw an empty set; the provider then
+    # asks FETCH whether the message exists at all before deciding.
+    kinds = [c[0] for c in world.imap.uid_calls]
+    assert "STORE" in kinds
+    assert world.imap.uid_calls[kinds.index("STORE")][1][0] == "999"
+    assert world.imap.uid_calls[-1][0] == "FETCH"
 
 
-def test_BUG_archiving_a_message_number_that_matched_nothing_reports_success(world):
-    """COPY of an empty message set is an OK no-op on Dovecot and Gmail, and the
-    provider only checks the return code, so nothing is archived and the owner
-    is told it was."""
+def test_archiving_a_message_number_that_matched_nothing_is_not_reported_as_success(world):
+    """COPY of an empty message set is an OK no-op on Dovecot and Gmail. The
+    provider used to check only the return code, so nothing was archived and
+    the owner was told it was. It now requires a COPYUID (or FETCH data)."""
     out = provider().archive_message("999")
-    assert out["ok"] is True
+    assert out["ok"] is False
+    assert "not found" in out["message"]
     assert world.mailbox.keys("Archive") == []
 
 

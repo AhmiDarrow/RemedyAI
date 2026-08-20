@@ -461,8 +461,14 @@ class ImapSmtpMailProvider:
             # STORE against a message set the server ignored is an OK no-op
             # with an empty response, so trusting the return code alone told
             # the owner a message was marked when none was.
-            if typ != "OK" or not any(resp or []):
+            if typ != "OK":
                 raise RuntimeError(f"Message {message_id} not found")
+            if not any(resp or []):
+                # Some servers also stay silent when the flag did not change
+                # (already read). Only a UID that does not fetch is missing.
+                ftyp, fresp = conn.uid("FETCH", message_id, "(FLAGS)")
+                if ftyp != "OK" or not any(fresp or []):
+                    raise RuntimeError(f"Message {message_id} not found")
         finally:
             with _Quiet():
                 conn.logout()
@@ -481,13 +487,36 @@ class ImapSmtpMailProvider:
             folder = f'"{self.account.archive_folder}"'
             # Copy into the archive, then flag+expunge from INBOX. (Plain COPY
             # works on every IMAP server; UID MOVE is not universal.)
-            typ, _resp = conn.uid("COPY", mid, folder)
+            typ, resp = conn.uid("COPY", mid, folder)
             if typ != "OK":
+                # A strict server answers NO for a message that is not there
+                # too; blaming the folder name then sends the owner hunting
+                # for a setting that is fine.
+                ftyp, fresp = conn.uid("FETCH", mid, "(FLAGS)")
+                if ftyp != "OK" or not any(fresp or []):
+                    return {
+                        "ok": False,
+                        "message_id": message_id,
+                        "message": f"Message {message_id} not found",
+                    }
                 raise RuntimeError(
                     f"Could not copy to {self.account.archive_folder!r} — "
                     "check the archive folder name for this mailbox."
                 )
-            conn.uid("STORE", mid, "+FLAGS", "\\Deleted")
+            # UID COPY of a message set the server ignored is an OK no-op, so
+            # a stale id was reported "Archived". A real copy answers with a
+            # COPYUID code (UIDPLUS); without that, the STORE below returns
+            # FETCH data only for a message that exists.
+            copied = _has_copyuid(resp) or _has_copyuid(
+                (getattr(conn, "untagged_responses", None) or {}).get("COPYUID")
+            )
+            styp, sresp = conn.uid("STORE", mid, "+FLAGS", "\\Deleted")
+            if not copied and (styp != "OK" or not any(sresp or [])):
+                return {
+                    "ok": False,
+                    "message_id": message_id,
+                    "message": f"Message {message_id} not found",
+                }
             with _Quiet():
                 conn.expunge()
         finally:
@@ -498,6 +527,18 @@ class ImapSmtpMailProvider:
             "message_id": message_id,
             "message": f"Archived to {self.account.archive_folder}",
         }
+
+
+def _has_copyuid(resp: Any) -> bool:
+    """True when an IMAP response carries a ``COPYUID`` code (UIDPLUS)."""
+    for part in resp or []:
+        if isinstance(part, tuple):
+            part = b"".join(p for p in part if isinstance(p, bytes))
+        if isinstance(part, str):
+            part = part.encode("utf-8", "replace")
+        if isinstance(part, bytes) and b"COPYUID" in part.upper():
+            return True
+    return False
 
 
 def _now():
@@ -624,6 +665,14 @@ def _provider_id(address: str) -> str:
     }.get(canonical, canonical or "mail")
 
 
+def _drop_imap_accounts(store: Any, *, keep: str = "") -> None:
+    """Remove every ``imap_*`` linked-account row except *keep*."""
+    for acct in list(store.list_accounts()):
+        acct_id = str(getattr(acct, "id", "") or "")
+        if acct_id.startswith("imap_") and acct_id != keep:
+            store.remove_account(acct_id)
+
+
 def _record_linked_account(
     address: str, preset: dict[str, Any], *, home: Path | str | None = None
 ) -> list[str]:
@@ -645,7 +694,11 @@ def _record_linked_account(
     if caldav_url_for(address):
         caps.append("calendar")
     try:
-        get_assistant_store(home).upsert_account(
+        store = get_assistant_store(home)
+        # One credential slot, so one row: the previous mailbox's row would
+        # otherwise stay "connected" with no password behind it.
+        _drop_imap_accounts(store, keep=f"imap_{_provider_id(address)}")
+        store.upsert_account(
             LinkedAccount(
                 id=f"imap_{_provider_id(address)}",
                 provider=_provider_id(address),
@@ -676,7 +729,10 @@ def clear_mail_credentials(home: Path | str | None = None) -> dict[str, Any]:
     try:
         from remedy.assistant.store import get_assistant_store
 
-        get_assistant_store(home).remove_account(f"imap_{_provider_id(addr)}")
+        # Every app-password mailbox row, not only the one derived from the
+        # current address: there is a single credential slot, so a row left
+        # by an earlier mailbox would stay "connected" with no password.
+        _drop_imap_accounts(get_assistant_store(home))
     except Exception as exc:  # noqa: BLE001 — the credential is already gone
         logger.warning("could not clear the linked mail account: %s", exc)
     return {

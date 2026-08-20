@@ -397,6 +397,26 @@ def test_marking_a_message_that_is_not_there_is_not_reported_as_success(world):
     assert world.imap.leaked_connections == []
 
 
+def test_marking_an_already_read_message_on_a_silent_server_is_still_success(
+    monkeypatch,
+):
+    """Servers that suppress the FETCH for a flag that did not change answer
+    ('OK', [None]) for a real message. Treating that as "not found" told the
+    owner a message they had just opened did not exist."""
+    world_ = install_fake_mail(
+        monkeypatch,
+        imap=FakeIMAPServer(sample_mailbox(), silent_noop_store=True),
+    )
+    uid = world_.mailbox.uid_of("plain")
+    world_.mailbox.by_key("plain").flags.add("\\Seen")
+    out = provider().mark_read(uid)
+    assert out["ok"] is True
+    # ...while a message that is not there is still not "marked".
+    with pytest.raises(RuntimeError, match="not found"):
+        provider().mark_read("999")
+    assert world_.imap.leaked_connections == []
+
+
 def test_a_drafts_folder_the_server_refuses_is_not_reported_as_saved(world):
     """A mailbox whose Drafts folder is named differently answers NO
     [TRYCREATE]; the draft exists nowhere and the owner used to be told it was
@@ -781,6 +801,22 @@ def test_archiving_copies_before_it_deletes_and_then_expunges(world):
     assert world.imap.ops.index("store") < world.imap.ops.index("expunge")
     assert "plain" in world.mailbox.keys("Archive")
     assert "plain" not in world.mailbox.keys("INBOX")
+
+
+def test_archiving_a_message_that_is_not_there_is_not_reported_as_archived(world):
+    """UID COPY of an ignored message set is an OK no-op with no COPYUID, so
+    a stale id came back "Archived to Archive" and the owner believed it."""
+    out = provider().archive_message("999")
+    assert out["ok"] is False
+    assert "not found" in out["message"]
+    assert world.imap.expunged == []
+    assert world.imap.leaked_connections == []
+
+
+def test_archiving_a_message_that_is_not_there_on_a_strict_server(strict):
+    out = provider().archive_message("999")
+    assert out["ok"] is False
+    assert "not found" in out["message"]
 
 
 def test_an_archive_folder_this_mailbox_does_not_have_is_reported_and_nothing_is_lost(

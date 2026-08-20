@@ -240,22 +240,17 @@ def _persist(
         return
     path = dest if dest is not None else token_path(home)
     try:
-        # Atomic-ish write so a crash cannot leave an empty/half token file.
-        tmp = path.with_suffix(path.suffix + ".tmp")
+        # Atomic write (unique scratch name, cleaned up on failure) so a crash
+        # cannot leave an empty/half token file.
+        from remedy.core.atomic_json import write_bytes_atomic
+
         data = _encode_token_bytes(token.strip())
-        tmp.write_bytes(data)
-        tmp.replace(path)
+        write_bytes_atomic(path, data, mode=0o600)
         from remedy.interfaces.secret_store import _harden_path
 
         _harden_path(path, is_dir=False)
     except OSError as exc:
         logger.warning("Could not persist local API token: %s", exc)
-        try:
-            tmp = path.with_suffix(path.suffix + ".tmp")
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
 
 
 def _encode_token_bytes(token: str) -> bytes:

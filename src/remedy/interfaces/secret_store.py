@@ -354,11 +354,11 @@ def save_provider_keys(keys: dict[str, str], home: Path | str | None = None) -> 
     path = store_path(home)
     cleaned = _normalize_keys(keys)
     data = _encode_store_file(cleaned)
-    # Atomic-ish write
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_bytes(data)
-    _harden_path(tmp, is_dir=False)
-    tmp.replace(path)
+    # Atomic write onto a unique scratch name; the scratch file is hardened
+    # before the rename so the store never exists with loose permissions.
+    from remedy.core.atomic_json import write_bytes_atomic
+
+    write_bytes_atomic(path, data, mode=0o600)
     _harden_path(path, is_dir=False)
     parent_key = str(path.parent.resolve()) if path.parent.exists() else str(path.parent)
     _harden_path(path.parent, is_dir=True)

@@ -39,6 +39,30 @@ _MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 #: Error bodies are quoted into messages, so they stay small.
 _MAX_ERROR_BYTES = 64 * 1024
 
+# Same-origin redirects are followed, but only this many deep.
+_MAX_REDIRECTS = 3
+_REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
+
+_DEFAULT_PORTS = {"https": 443, "http": 80}
+
+
+def _origin(parts: urllib.parse.SplitResult) -> tuple[str, str, int | None]:
+    """(scheme, host, effective port) — the identity credentials may go to.
+
+    Compared on these, not on the raw netloc: ``https://h`` and
+    ``https://h:443/`` are the same server, and ``https://me%40x:pw@h`` in the
+    configured URL is still just ``h``. Userinfo is ignored on both sides.
+    """
+    scheme = (parts.scheme or "").lower()
+    host = (parts.hostname or "").lower()
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    if port is None:
+        port = _DEFAULT_PORTS.get(scheme)
+    return scheme, host, port
+
 CALDAV_PRESETS: dict[str, str] = {
     "gmail.com": "https://www.google.com/calendar/dav/{email}/events/",
     "googlemail.com": "https://www.google.com/calendar/dav/{email}/events/",
@@ -221,9 +245,8 @@ class CalDavCalendarProvider:
 
     def _require_same_origin(self, target: str) -> None:
         """Every request carries the app password; none may leave the host."""
-        base = urllib.parse.urlsplit(self.account.url)
         got = urllib.parse.urlsplit(str(target or ""))
-        if (got.scheme, got.netloc.lower()) != (base.scheme, base.netloc.lower()):
+        if _origin(got) != _origin(urllib.parse.urlsplit(self.account.url)):
             raise RuntimeError(
                 "Refusing to send calendar credentials to "
                 f"{got.netloc or str(target)[:40]!r} — that is not your calendar host."
@@ -239,43 +262,57 @@ class CalDavCalendarProvider:
         content_type: str = "application/xml; charset=utf-8",
     ) -> tuple[int, str]:
         target = url or self.account.url
-        self._require_same_origin(target)
-        req = urllib.request.Request(
-            target,
-            data=body,
-            method=method,
-            headers={
-                "Authorization": self._auth_header(),
-                "Depth": depth,
-                "Content-Type": content_type,
-                "User-Agent": "Remedy-Calendar/1.0",
-            },
-        )
-        try:
-            # Never follow Location: urllib carries the Authorization header
-            # across a redirect, so a 302 would hand the app password to
-            # whatever host the calendar server named.
-            with urlopen_no_redirect(req, timeout=30) as resp:
-                # Bounded: a calendar answer is kilobytes, and a hostile or
-                # broken server should not be able to hand us a body larger
-                # than memory. 32 MiB is far past any real REPORT.
-                body = resp.read(_MAX_RESPONSE_BYTES)
-                return resp.status, body.decode("utf-8", "replace")
-        except urllib.error.HTTPError as e:
-            detail = e.read(_MAX_ERROR_BYTES).decode("utf-8", "replace")
-            if e.code in (401, 403):
-                raise RuntimeError(
-                    "The calendar rejected that app password. Same password as "
-                    "mail; make sure 2-step verification is on and the calendar "
-                    "is enabled for this account."
-                ) from e
-            if e.code == 404:
-                raise RuntimeError(
-                    "Calendar not found at that address — check the account."
-                ) from e
-            raise RuntimeError(f"CalDAV {e.code}: {detail[:200]}") from e
-        except Exception as e:  # network / TLS
-            raise RuntimeError(f"Calendar unreachable: {e}") from e
+        # Bounded redirect chase. urllib carries the Authorization header
+        # across a redirect, so ``urlopen_no_redirect`` refuses to follow any
+        # Location on its own; we follow it here only after the new URL has
+        # passed the same-origin check the first one did. Calendar servers do
+        # redirect (a PROPFIND on the bare host to the principal path, a
+        # trailing-slash canonicalisation), so "every 3xx is fatal" broke
+        # legitimate accounts; "follow anything" leaked the app password.
+        for _hop in range(_MAX_REDIRECTS + 1):
+            self._require_same_origin(target)
+            req = urllib.request.Request(
+                target,
+                data=body,
+                method=method,
+                headers={
+                    "Authorization": self._auth_header(),
+                    "Depth": depth,
+                    "Content-Type": content_type,
+                    "User-Agent": "Remedy-Calendar/1.0",
+                },
+            )
+            try:
+                with urlopen_no_redirect(req, timeout=30) as resp:
+                    # Bounded: a calendar answer is kilobytes, and a hostile or
+                    # broken server should not be able to hand us a body larger
+                    # than memory. 32 MiB is far past any real REPORT.
+                    data = resp.read(_MAX_RESPONSE_BYTES)
+                    return resp.status, data.decode("utf-8", "replace")
+            except urllib.error.HTTPError as e:
+                detail = e.read(_MAX_ERROR_BYTES).decode("utf-8", "replace")
+                location = e.headers.get("Location") if e.headers is not None else None
+                if e.code in _REDIRECT_CODES and location:
+                    if _hop >= _MAX_REDIRECTS:
+                        raise RuntimeError(
+                            f"CalDAV {e.code}: too many redirects (more than {_MAX_REDIRECTS})"
+                        ) from e
+                    target = urllib.parse.urljoin(target, location)
+                    continue  # re-checked at the top of the loop
+                if e.code in (401, 403):
+                    raise RuntimeError(
+                        "The calendar rejected that app password. Same password as "
+                        "mail; make sure 2-step verification is on and the calendar "
+                        "is enabled for this account."
+                    ) from e
+                if e.code == 404:
+                    raise RuntimeError(
+                        "Calendar not found at that address — check the account."
+                    ) from e
+                raise RuntimeError(f"CalDAV {e.code}: {detail[:200]}") from e
+            except Exception as e:  # network / TLS
+                raise RuntimeError(f"Calendar unreachable: {e}") from e
+        raise RuntimeError("CalDAV: redirect loop")  # pragma: no cover
 
     def verify(self) -> dict[str, Any]:
         status, _ = self._dav(
@@ -308,7 +345,7 @@ class CalDavCalendarProvider:
             raise ValueError("An event id is required")
         if "://" in eid or eid.lower().startswith(("http:", "https:")):
             got = urllib.parse.urlsplit(eid)
-            if (got.scheme, got.netloc.lower()) != (base.scheme, base.netloc.lower()):
+            if _origin(got) != _origin(base):
                 raise RuntimeError(
                     "Refusing to send calendar credentials to "
                     f"{got.netloc or eid[:40]!r} — that is not your calendar host."

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -170,6 +171,11 @@ class SmartTurnDetector:
     #: The line is 8 kHz, so every window is resampled before it goes in.
     model_sample_rate: int = 16000
     energy: EnergyTurnDetector = field(default_factory=EnergyTurnDetector)
+    #: Where inference runs. ``feed`` is called from the audio loop every 20 ms
+    #: and a forward pass takes ~80 ms, so it must not run inline: four frames
+    #: would queue behind it and barge-in would land late. Anything with a
+    #: ``submit(fn, *args) -> Future`` works; tests inject a synchronous one.
+    executor: Any = None
 
     _session: Any = field(default=None, init=False)
     _tried: bool = field(default=False, init=False)
@@ -177,6 +183,8 @@ class SmartTurnDetector:
     _buffer: bytearray = field(default_factory=bytearray, init=False)
     _held_ms: float = field(default=0.0, init=False)
     _holding: bool = field(default=False, init=False)
+    #: The verdict we are waiting on, if the model is thinking right now.
+    _pending: Future | None = field(default=None, init=False)
 
     @property
     def speaking(self) -> bool:
@@ -216,6 +224,15 @@ class SmartTurnDetector:
         except Exception as exc:  # noqa: BLE001 — any load failure degrades
             self._unavailable = f"smart-turn model failed to load: {exc}"
             self._session = None
+            return
+        shape = self._input_shape()
+        if len(shape) not in (2, 3):
+            self._unavailable = (
+                f"smart-turn model wants input shape {shape}, which this build "
+                "cannot produce (expected raw (1, N) or log-mel (1, 80, frames))"
+            )
+            logger.warning("turn-taking: %s; using energy endpointing", self._unavailable)
+            self._session = None
 
     def reset(self) -> None:
         self.energy.reset()
@@ -223,9 +240,14 @@ class SmartTurnDetector:
         self._release()
 
     def _release(self) -> None:
-        """Stop counting against ``max_wait_ms``; the model is not holding us."""
+        """Stop counting against ``max_wait_ms``; the model is not holding us.
+
+        Any verdict still in flight is about a pause that is over, so it is
+        dropped unread rather than allowed to end a turn that resumed.
+        """
         self._held_ms = 0.0
         self._holding = False
+        self._pending = None
 
     def _endpoint(self) -> TurnEvent:
         self._buffer.clear()
@@ -236,12 +258,26 @@ class SmartTurnDetector:
     def _window_bytes(self) -> int:
         return max(1, int(self.window_ms * self.sample_rate / 1000.0)) * 2
 
+    def _submit(self, pcm: bytes) -> Future:
+        if self.executor is None:
+            self.executor = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="remedy-smart-turn"
+            )
+        return self.executor.submit(self._complete, pcm)
+
     def feed(self, pcm: bytes, at: float) -> TurnEvent | None:
         event = self.energy.feed(pcm, at)
         if self.energy.speaking or event is TurnEvent.ENDPOINT:
             self._buffer.extend(pcm)
             if len(self._buffer) > self._window_bytes:
                 del self._buffer[: len(self._buffer) - self._window_bytes]
+        if self._holding and self.energy.voiced:
+            # They resumed. Energy never re-fires onset here — we forced it to
+            # stay in the speaking state to hold the turn — so this is the only
+            # place that can notice, and the clock must stop: otherwise time
+            # they spent *talking* counts against how long the model may hold
+            # their next pause.
+            self._release()
         if self._holding:
             # Only the time we have spent overruling energy counts here.
             self._held_ms += self.energy.frame_ms
@@ -250,25 +286,46 @@ class SmartTurnDetector:
             self._buffer.extend(pcm)
             self._release()
             return event
+        if self._pending is not None:
+            # A verdict may have landed since the last frame.
+            if self._held_ms >= self.max_wait_ms:
+                return self._endpoint()
+            if not self._pending.done():
+                return None
+            finished, self._pending = self._pending.result(), None
+            if finished:
+                return self._endpoint()
+            # "Still mid-sentence": keep holding; energy will ask again after
+            # its next hangover, and ``max_wait_ms`` bounds the whole wait.
+            return None
         if event is not TurnEvent.ENDPOINT:
             return None
         # Energy says the turn ended. Ask the model whether the thought did.
         if self._held_ms >= self.max_wait_ms or not self.available:
             return self._endpoint()
-        if self._complete(bytes(self._buffer)):
-            return self._endpoint()
-        # Mid-sentence pause: keep listening, and start the clock on how long we
-        # are willing to be held there.
+        # The answer arrives on a later frame; until then keep listening, and
+        # start the clock on how long we are willing to be held there.
+        self._pending = self._submit(bytes(self._buffer))
         self._holding = True
         self.energy._speaking = True  # noqa: SLF001 — same conceptual object
         self.energy._silent_ms = 0.0  # noqa: SLF001
         return None
 
     def _complete(self, pcm: bytes) -> bool:
+        """Did they finish? Runs on the worker thread.
+
+        A failure is not a wobble to retry every turn: it is logged once, at a
+        level someone will see, and the model is retired for the rest of the
+        detector's life so the caller falls back to the timer *knowingly*.
+        """
         try:
             score = self.score(pcm)
-        except Exception:  # noqa: BLE001 — a model wobble must not hang a call
-            logger.debug("smart-turn inference failed; falling back to energy")
+        except Exception as exc:  # noqa: BLE001 — a model failure must not hang a call
+            self._session = None
+            self._unavailable = f"smart-turn inference failed: {exc}"
+            logger.warning(
+                "turn-taking: %s; falling back to energy endpointing", self._unavailable
+            )
             return True
         return score >= self.completion_threshold
 
@@ -277,29 +334,51 @@ class SmartTurnDetector:
     def _model_input(self, pcm: bytes) -> Any:
         """Line audio -> exactly the tensor this model asked for.
 
-        Shapes are read off the session rather than hard-coded: smart-turn has
-        shipped as v2 and v3 with different fixed windows, and a model pinned
-        later must not need a code change here.
+        The shape is read off the session rather than hard-coded, because two
+        generations of smart-turn take different things:
+
+        * v1/v2 (Wav2Vec2) take raw samples, ``(1, N)`` at 16 kHz;
+        * v3 (Whisper encoder) takes an 80-bin log-mel spectrogram,
+          ``(1, 80, frames)`` — 800 frames for its 8 s window.
+
+        Passing raw samples to a mel model does not fail; it scores noise. So
+        the rank decides, and a rank nothing here can build is refused in
+        ``_ensure`` rather than fed.
         """
         import numpy as np
 
         wide = resample(pcm, self.sample_rate, self.model_sample_rate)
         samples = np.frombuffer(wide, dtype="<i2").astype(np.float32) / 32768.0
 
+        shape = self._input_shape()
+        if len(shape) == 3:
+            n_mels = shape[-2] if isinstance(shape[-2], int) and shape[-2] > 0 else _N_MELS
+            frames = shape[-1] if isinstance(shape[-1], int) and shape[-1] > 0 else None
+            if frames is None:
+                frames = int(self.model_sample_rate * self.window_ms / 1000.0) // _HOP
+            samples = self._fit(samples, frames * _HOP)
+            return log_mel(samples, n_mels=n_mels, n_frames=frames)[None, :, :]
+
         want = None
-        with suppress(Exception):
-            shape = self._session.get_inputs()[0].shape
-            tail = shape[-1]
-            if isinstance(tail, int) and tail > 0:
-                want = tail
+        tail = shape[-1] if shape else None
+        if isinstance(tail, int) and tail > 0:
+            want = tail
         if want is None:
             want = int(self.model_sample_rate * self.window_ms / 1000.0)
+        return self._fit(samples, want).reshape(1, -1)
+
+    def _input_shape(self) -> list:
+        with suppress(Exception):
+            return list(self._session.get_inputs()[0].shape)
+        return []
+
+    @staticmethod
+    def _fit(samples: Any, want: int) -> Any:
+        import numpy as np
 
         if samples.size >= want:
-            samples = samples[-want:]  # the *end* of the turn is what is judged
-        else:
-            samples = np.pad(samples, (want - samples.size, 0))
-        return samples.reshape(1, -1)
+            return samples[-want:]  # the *end* of the turn is what is judged
+        return np.pad(samples, (want - samples.size, 0))
 
     @staticmethod
     def _probability(raw: Any) -> float:
@@ -335,6 +414,93 @@ class SmartTurnDetector:
         if not outputs:
             raise ValueError("model returned no outputs")
         return self._probability(outputs[0])
+
+
+# -- Whisper-style log-mel, in numpy ------------------------------------------
+#
+# smart-turn v3 sits on a Whisper encoder and is fed what Whisper is fed: 80
+# mel bins from a 400-point STFT hopped every 160 samples (25 ms / 10 ms at
+# 16 kHz), log10, clamped to 8 dB below the loudest bin, then mapped into
+# roughly [-1, 1]. That is ~40 lines, and pulling in torch or librosa for it on
+# a phone line would be absurd.
+
+_N_FFT = 400
+_HOP = 160
+_N_MELS = 80
+_mel_filters: dict[tuple[int, int, int], Any] = {}
+
+
+def _hz_to_mel(hz: Any) -> Any:
+    """Slaney scale: linear to 1 kHz, logarithmic above (what Whisper uses)."""
+    import numpy as np
+
+    hz = np.asarray(hz, dtype=np.float64)
+    mel = hz / (200.0 / 3.0)
+    high = hz >= 1000.0
+    logstep = np.log(6.4) / 27.0
+    return np.where(high, 15.0 + np.log(np.maximum(hz, 1e-9) / 1000.0) / logstep, mel)
+
+
+def _mel_to_hz(mel: Any) -> Any:
+    import numpy as np
+
+    mel = np.asarray(mel, dtype=np.float64)
+    hz = mel * (200.0 / 3.0)
+    high = mel >= 15.0
+    logstep = np.log(6.4) / 27.0
+    return np.where(high, 1000.0 * np.exp(logstep * (mel - 15.0)), hz)
+
+
+def mel_filterbank(sample_rate: int = 16000, n_fft: int = _N_FFT, n_mels: int = _N_MELS) -> Any:
+    """Slaney-normalised triangular filters, ``(n_mels, n_fft // 2 + 1)``."""
+    import numpy as np
+
+    key = (sample_rate, n_fft, n_mels)
+    cached = _mel_filters.get(key)
+    if cached is not None:
+        return cached
+    fft_freqs = np.linspace(0.0, sample_rate / 2.0, n_fft // 2 + 1)
+    mel_pts = np.linspace(_hz_to_mel(0.0), _hz_to_mel(sample_rate / 2.0), n_mels + 2)
+    hz_pts = _mel_to_hz(mel_pts)
+    weights = np.zeros((n_mels, len(fft_freqs)), dtype=np.float64)
+    for i in range(n_mels):
+        lo, mid, hi = hz_pts[i], hz_pts[i + 1], hz_pts[i + 2]
+        up = (fft_freqs - lo) / max(mid - lo, 1e-9)
+        down = (hi - fft_freqs) / max(hi - mid, 1e-9)
+        weights[i] = np.maximum(0.0, np.minimum(up, down))
+        weights[i] *= 2.0 / (hi - lo)  # Slaney: equal area per band
+    out = weights.astype(np.float32)
+    _mel_filters[key] = out
+    return out
+
+
+def log_mel(
+    samples: Any, *, n_mels: int = _N_MELS, n_frames: int | None = None, sample_rate: int = 16000
+) -> Any:
+    """float32 16 kHz samples -> ``(n_mels, frames)`` Whisper-style features."""
+    import numpy as np
+
+    x = np.asarray(samples, dtype=np.float32).reshape(-1)
+    pad = _N_FFT // 2
+    if x.size <= pad:
+        x = np.pad(x, (0, pad + 1 - x.size))
+    x = np.pad(x, (pad, pad), mode="reflect")
+    n = 1 + (x.size - _N_FFT) // _HOP
+    idx = np.arange(_N_FFT)[None, :] + _HOP * np.arange(n)[:, None]
+    window = np.hanning(_N_FFT + 1)[:-1].astype(np.float32)  # periodic Hann
+    spec = np.fft.rfft(x[idx] * window, axis=1)
+    power = (spec.real**2 + spec.imag**2).T  # (bins, frames)
+    power = power[:, :-1]  # Whisper drops the final frame
+    mel = mel_filterbank(sample_rate, _N_FFT, n_mels) @ power
+    log_spec = np.log10(np.maximum(mel, 1e-10))
+    log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
+    log_spec = (log_spec + 4.0) / 4.0
+    if n_frames is not None:
+        if log_spec.shape[1] >= n_frames:
+            log_spec = log_spec[:, -n_frames:]
+        else:
+            log_spec = np.pad(log_spec, ((0, 0), (n_frames - log_spec.shape[1], 0)))
+    return log_spec.astype(np.float32)
 
 
 #: Where a fetched smart-turn model lands, following the same

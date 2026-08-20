@@ -7,6 +7,7 @@ from typing import Any
 
 from remedy.core.errors import format_tool_error
 from remedy.core.repo_search import _SKIP_DIR_NAMES
+from remedy.core.security import is_credential_filename
 from remedy.core.workspace_tools.guards import (
     junk_write_guard,
     note_path,
@@ -187,7 +188,13 @@ def register_search_tools(runtime: Any) -> None:
             # could read them only by guessing the name. Only the machine
             # noise directories (.git, __pycache__, node_modules, …) are
             # withheld, matching what repo_search and file_glob already skip.
-            visible = [p for p in entries if p.name not in _SKIP_DIR_NAMES]
+            # Credential files (.env, .npmrc, .pypirc, .ssh/, *.pem, …) are
+            # withheld too: a listing should not advertise where keys live.
+            visible = [
+                p
+                for p in entries
+                if p.name not in _SKIP_DIR_NAMES and not is_credential_filename(p.name)
+            ]
             total = len(visible)
             page = visible[off : off + lim]
             for p in page:
