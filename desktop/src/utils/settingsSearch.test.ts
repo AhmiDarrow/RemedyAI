@@ -34,6 +34,13 @@ describe('settings search', () => {
     expect(sectionMatchesSearch('appearance', m.title, m.summary, m.keywords)).toBe(true)
   })
 
+  it('matches voice section by keyword', () => {
+    const m = SETTINGS_SECTION_META.voice
+    expect(sectionMatchesSearch('kokoro', m.title, m.summary, m.keywords)).toBe(true)
+    expect(sectionMatchesSearch('aloud', m.title, m.summary, m.keywords)).toBe(true)
+    expect(sectionMatchesSearch('xyzzy-nope', m.title, m.summary, m.keywords)).toBe(false)
+  })
+
   it('matches privacy section by keyword', () => {
     const m = SETTINGS_SECTION_META.privacy
     expect(sectionMatchesSearch('email', m.title, m.summary, m.keywords)).toBe(true)

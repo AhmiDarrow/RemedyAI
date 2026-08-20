@@ -12,6 +12,7 @@ import {
   FormToggle,
 } from './formUi'
 import { Field, PERSONAS } from './shared'
+import { VoiceSection } from './VoiceSection'
 import { TOOL_PROCESS_MODES } from '../../utils/toolLabels'
 import { isLinuxDesktop } from '../../utils/platform'
 
@@ -155,6 +156,7 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
     setToolProcess,
     onToolProcessChange,
     handleBrowseProject,
+    settingsMode = 'simple',
   } = p
 
   return (
@@ -231,6 +233,11 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
         </FormHint>
         <PersonaWipeControl />
       </SettingsSection>
+
+      <VoiceSection
+        sectionProps={sectionProps('voice')}
+        settingsMode={settingsMode}
+      />
 
       {/* Project */}
       <SettingsSection

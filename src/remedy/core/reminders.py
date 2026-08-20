@@ -15,6 +15,7 @@ idiom as the build ledger.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
@@ -26,6 +27,8 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
+
+logger = logging.getLogger(__name__)
 
 _lock = threading.RLock()
 
@@ -238,8 +241,11 @@ def _read(home: str | Path | None) -> list[Reminder]:
 def _write(home: str | Path | None, items: list[Reminder]) -> None:
     p = _store_path(home)
     payload = {"reminders": [r.to_dict() for r in items]}
-    with suppress(Exception):
+    try:
         write_json_atomic(p, payload)
+    except Exception:
+        logger.exception("could not save reminders to %s", p)
+        raise
 
 
 def add_reminder(

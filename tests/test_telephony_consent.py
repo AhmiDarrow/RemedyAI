@@ -109,7 +109,7 @@ def test_download_is_offered_before_it_happens():
     said = consent.offer_download(["baresip", "smart-turn"])
     assert "BSD-3-Clause" in said and "BSD-2-Clause" in said
     assert said.rstrip().endswith("?")
-    assert "51 MB" in said  # 6 + 45, totalled honestly
+    assert "15 MB" in said  # 6 + 9, totalled honestly
 
 
 def test_unknown_components_are_ignored_rather_than_guessed():

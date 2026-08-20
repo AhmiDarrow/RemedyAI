@@ -16,6 +16,7 @@ Quiet hours **defer** rather than discard — a 3am reminder surfaces at 7am.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
@@ -26,6 +27,8 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
+
+logger = logging.getLogger(__name__)
 
 _lock = threading.RLock()
 
@@ -170,8 +173,11 @@ def _write_outbox(home: str | Path | None, items: list[Notification]) -> None:
     p = _outbox_path(home)
     # Keep the tail — an outbox is a feed, not an archive.
     payload = {"notifications": [n.to_dict() for n in items[-200:]]}
-    with suppress(Exception):
+    try:
         write_json_atomic(p, payload)
+    except Exception:
+        logger.exception("could not save notifications to %s", p)
+        raise
 
 
 def push_notification(

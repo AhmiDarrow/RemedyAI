@@ -4,26 +4,21 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
-### Continuity, voice, and the phone line (leftovers from 2026-08-20)
+### Continuity, voice, and the phone line
 
-- **State files no longer tear on a crash.** Remaining `write_text(json.dumps(...))`
-  sites (todos, missions, vault, organism vitals, the computer-host job
-  queue, voice settings, host dialect/census, …) now go through
-  `write_json_atomic` / `write_text_atomic`. A kill mid-write leaves the
-  previous good file, not half a JSON document.
-- **Phone-line anti-aliasing matches the decimation.** The 5-tap binomial
-  used for 24 kHz → 8 kHz let 4–12 kHz content fold back as tones nobody
-  spoke. Downsampling now uses a windowed-sinc low-pass designed for the
-  actual ratio (2× / 3× / 6×), with ≥40 dB stopband above the 8 kHz Nyquist.
-- **`exit` in a host session no longer times out.** `run("exit /b 7")`
-  used to wait for a sentinel the dead shell would never print. The session
-  now notices the child has gone, returns the shell's code with a clear
-  message, and the next `run()` respawns rather than writing to a closed pipe.
-- **Smart-turn can actually be installed.** `/api/voice/install` with
-  `component=smart-turn` fetches the pinned pipecat v3.2 CPU ONNX
-  (`pipecat-ai/smart-turn-v3` @ `f766f81d…`, BSD-2-Clause, ~8 MB), verifies
-  size + sha256, and drops it where `make_detector` already looks — so the
-  next call picks it up without a restart.
+- **Checkpoints survive a crash.** Plans, todos, vault items, and similar
+  files are saved so a kill mid-write leaves the last good copy, not a
+  broken file.
+- **Phone audio stays clear.** Speech sent down a phone line no longer
+  lets leftover high frequencies come back as fake tones.
+- **A command that exits the shell is reported, not hung.** The next
+  command starts a fresh shell instead of writing into a dead one.
+- **Turn-taking can be downloaded.** Settings → Voice (Advanced) fetches
+  the ~9 MB smart-turn model (BSD-2) so live calls know when you have
+  finished speaking. `/api/voice/install` still works for the same job.
+- **Voice lives in Settings.** Simple: speak-replies plus one download
+  for Remedy's voice. Advanced: hearing, speed, and turn-taking. Grove's
+  quiet/aloud toggle still works with this computer's voices until then.
 
 ### Voice — Remedy speaks and hears (local, optional)
 
@@ -42,8 +37,8 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   at the non-waivable payment/credential checkpoints.
 - Ships as the **`remedy-ai[voice]`** extra — base install stays light.
   Engines lazy-load; `/api/voice/status` reports availability + reasons;
-  `POST /api/voice/install` downloads Kokoro model files (~340 MB) /
-  warms the whisper model into `~/.remedy/voice/`.
+  `POST /api/voice/install` downloads Kokoro (~340 MB), warms whisper, or
+  fetches the pinned smart-turn v3.2 CPU model (~8 MB) into `~/.remedy/voice/`.
 - Grove gains a 🔊 aloud / 🔇 quiet toggle (persisted server-side as
   `speak_replies`) and pulsing mic buttons on both talkbars.
 

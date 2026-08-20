@@ -553,6 +553,20 @@ def install_smart_turn_background(home_dir: Path | str | None = None) -> bool:
 # Status
 # ---------------------------------------------------------------------------
 
+_VOICE_PACK_REASON = "The voice pack is not installed on this computer."
+_VOICE_PACK_HINT = "pip install remedy-ai[voice]"
+
+
+def _unavailable_reason(
+    ok: bool, deps: bool, waiting: str
+) -> tuple[str | None, str | None]:
+    """Owner-plain reason, plus an Advanced-only install hint."""
+    if ok:
+        return None, None
+    if deps:
+        return waiting, None
+    return _VOICE_PACK_REASON, _VOICE_PACK_HINT
+
 
 def voice_status(
     home_dir: Path | str | None = None, *, agent_gender: str | None = None
@@ -563,23 +577,21 @@ def voice_status(
     turn_deps = smart_turn_deps_available()
     turn_installed = smart_turn_installed(home_dir)
     turn_ok = turn_deps and turn_installed
-    reason_turn = (
-        None
-        if turn_ok
-        else (
-            "onnxruntime not installed (pip install remedy-ai[voice])"
-            if not turn_deps
-            else "smart-turn model not downloaded yet"
-        )
+    tts_deps = tts_deps_available()
+    reason_tts, hint_tts = _unavailable_reason(
+        tts_ok,
+        tts_deps,
+        "Remedy's speaking voice is not downloaded yet.",
     )
-    reason_tts = (
-        None
-        if tts_ok
-        else (
-            "voice extra not installed (pip install remedy-ai[voice])"
-            if not tts_deps_available()
-            else "Kokoro model files not downloaded yet"
-        )
+    reason_stt, hint_stt = _unavailable_reason(
+        stt_ok,
+        stt_ok,  # STT is ready as soon as the pack is importable
+        "Hearing is not ready yet.",
+    )
+    reason_turn, hint_turn = _unavailable_reason(
+        turn_ok,
+        turn_deps,
+        "Turn-taking is not downloaded yet.",
     )
     return {
         "tts": {
@@ -587,7 +599,8 @@ def voice_status(
             "enabled": bool(cfg.get("tts_enabled", True)),
             "engine": "kokoro-82m" if tts_ok else None,
             "reason": reason_tts,
-            "deps": tts_deps_available(),
+            "hint": hint_tts,
+            "deps": tts_deps,
             "installed": tts_installed(home_dir),
             "install": _install_state.get("tts"),
             "voice": voice_for_gender(agent_gender, cfg.get("voice_override")),
@@ -598,11 +611,9 @@ def voice_status(
             "available": stt_ok,
             "enabled": bool(cfg.get("stt_enabled", True)),
             "engine": "faster-whisper" if stt_ok else None,
-            "reason": (
-                None
-                if stt_ok
-                else "voice extra not installed (pip install remedy-ai[voice])"
-            ),
+            "reason": reason_stt,
+            "hint": hint_stt,
+            "deps": stt_ok,
             "model": cfg.get("stt_model") or "small",
             "models": list(_VALID_STT),
             "installed": stt_installed(home_dir),
@@ -612,6 +623,7 @@ def voice_status(
             "available": turn_ok,
             "engine": "smart-turn-v3" if turn_ok else None,
             "reason": reason_turn,
+            "hint": hint_turn,
             "deps": turn_deps,
             "installed": turn_installed,
             "install": _install_state.get("smart-turn"),
