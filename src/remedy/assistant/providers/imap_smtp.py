@@ -187,33 +187,57 @@ class ImapSmtpMailProvider:
 
     def _imap(self) -> imaplib.IMAP4_SSL:
         a = self.account
+        conn = None
         try:
             conn = imaplib.IMAP4_SSL(a.imap_host, a.imap_port, timeout=30)
             conn.login(a.address, a.password)
             return conn
         except Exception as exc:
+            # Close what we opened. A login failure used to let the socket
+            # escape unclosed — held by the server until GC, once per retry of
+            # a wrong app password.
+            if conn is not None:
+                with _Quiet():
+                    conn.logout()
             raise _friendly_error(exc, a.address) from exc
 
     def _smtp(self) -> smtplib.SMTP | smtplib.SMTP_SSL:
         a = self.account
+        srv_open: smtplib.SMTP | smtplib.SMTP_SSL | None = None
         try:
             if int(a.smtp_port) == 465:
                 srv: smtplib.SMTP | smtplib.SMTP_SSL = smtplib.SMTP_SSL(
                     a.smtp_host, a.smtp_port, timeout=30
                 )
+                srv_open = srv
             else:
                 srv = smtplib.SMTP(a.smtp_host, a.smtp_port, timeout=30)
+                srv_open = srv
                 srv.starttls()
+            srv_open = srv
             srv.login(a.address, a.password)
             return srv
         except Exception as exc:
+            # Same as _imap: do not leave the TLS socket open behind a refused
+            # login.
+            if srv_open is not None:
+                with _Quiet():
+                    srv_open.quit()
             raise _friendly_error(exc, a.address) from exc
 
     def verify(self) -> dict[str, Any]:
         """Prove both directions work — used by the connect flow."""
         conn = self._imap()
         try:
-            conn.select("INBOX", readonly=True)
+            # The connect flow's only check. It used to ignore this, so a
+            # mailbox whose INBOX the server refused still reported
+            # "IMAP + SMTP verified".
+            typ, _ = conn.select("INBOX", readonly=True)
+            if typ != "OK":
+                raise RuntimeError(
+                    "Signed in, but the server refused to open INBOX — "
+                    "check the mailbox name and permissions."
+                )
         finally:
             with _Quiet():
                 conn.logout()
@@ -280,7 +304,17 @@ class ImapSmtpMailProvider:
         try:
             conn.select("INBOX", readonly=True)
             typ, msg_data = conn.fetch(mid.encode("ascii"), "(RFC822)")
-            if typ != "OK" or not msg_data:
+            # imaplib answers ('OK', [None]) for a message set the server
+            # ignored, so `not msg_data` was False and the owner got a blank
+            # message — "(no subject)" with an empty body — instead of being
+            # told the message is not there.
+            if (
+                typ != "OK"
+                or not msg_data
+                or not any(
+                    isinstance(part, tuple) and len(part) > 1 for part in msg_data
+                )
+            ):
                 raise RuntimeError(f"Message {mid} not found")
             raw = b""
             for part in msg_data:
@@ -383,9 +417,18 @@ class ImapSmtpMailProvider:
         conn = self._imap()
         try:
             folder = self.account.drafts_folder
-            conn.append(
+            # A mailbox whose Drafts folder is named differently (Gmail's
+            # "[Gmail]/Drafts", any localised name) answers NO [TRYCREATE].
+            # Ignoring that told the owner the draft was saved when no draft
+            # existed anywhere.
+            typ, _resp = conn.append(
                 f'"{folder}"', "\\Draft", imaplib.Time2Internaldate(_now()), msg.as_bytes()
             )
+            if typ != "OK":
+                raise RuntimeError(
+                    f"Could not save the draft to {folder!r} — "
+                    "check the drafts folder name for this mailbox."
+                )
         finally:
             with _Quiet():
                 conn.logout()
@@ -405,7 +448,12 @@ class ImapSmtpMailProvider:
         try:
             conn.select("INBOX")
             op = "+FLAGS" if read else "-FLAGS"
-            conn.store(message_id.encode("ascii"), op, "\\Seen")
+            typ, resp = conn.store(message_id.encode("ascii"), op, "\\Seen")
+            # STORE against a message set the server ignored is an OK no-op
+            # with an empty response, so trusting the return code alone told
+            # the owner a message was marked when none was.
+            if typ != "OK" or not any(resp or []):
+                raise RuntimeError(f"Message {message_id} not found")
         finally:
             with _Quiet():
                 conn.logout()

@@ -729,55 +729,56 @@ def test_a_hand_built_mailbox_can_be_installed_instead_of_the_sample(monkeypatch
 # --- provider behaviour that is wrong but current ----------------------------
 
 
-def test_BUG_a_rejected_login_leaves_the_connection_open(world):
-    """``_imap`` and ``_smtp`` build the connection, then let the login error
-    escape without closing it. Against a real server that is a TLS socket held
-    until garbage collection — once per retry of a wrong app password."""
+def test_a_rejected_login_closes_the_connection_it_opened(world):
+    """``_imap`` and ``_smtp`` used to build the connection then let the login
+    error escape without closing it. Against a real server that is a TLS socket
+    held until garbage collection — once per retry of a wrong app password."""
     world.imap.fail_at_login()
     with pytest.raises(RuntimeError):
         provider().list_messages()
-    assert len(world.imap.leaked_connections) == 1
-    assert world.imap.logouts == 0
+    assert world.imap.leaked_connections == []
 
     world.smtp.fail_at_login()
     with pytest.raises(RuntimeError):
         provider().send_message(to="a@example.com", subject="s", body="b")
-    assert len(world.smtp.leaked_connections) == 1
-    assert world.smtp.quits == 0
+    assert world.smtp.leaked_connections == []
 
 
-def test_BUG_a_message_id_that_does_not_exist_returns_an_empty_message(world):
-    """imaplib answers ('OK', [None]); ``get_message`` treats that as a hit and
-    parses zero bytes, so a deleted or mistyped id yields a blank message
-    instead of "Message 999 not found"."""
-    got = provider().get_message("999")
-    assert got.id == "999"
-    assert got.subject == "(no subject)"
-    assert got.from_addr == "" and got.snippet == ""
+def test_a_message_id_that_does_not_exist_is_reported_as_not_found(world):
+    """imaplib answers ('OK', [None]) for a message set the server ignored, so
+    ``get_message`` treated that as a hit and parsed zero bytes — a deleted or
+    mistyped id yielded a blank "(no subject)" message instead of an error."""
+    with pytest.raises(RuntimeError, match="not found"):
+        provider().get_message("999")
+    assert world.imap.leaked_connections == []
 
-
-def test_BUG_a_draft_appended_to_a_missing_folder_still_reports_success(world):
-    """APPEND answered NO — the draft does not exist anywhere — and the owner
-    is told it was saved."""
-    out = provider("owner@gmail.com").create_draft(to="a@example.com", subject="s", body="b")
-    assert out["ok"] is True
-    assert "Draft saved" in out["message"]
+def test_a_draft_appended_to_a_missing_folder_is_not_reported_as_saved(world):
+    """APPEND answers NO [TRYCREATE] for a Drafts folder named differently —
+    Gmail's "[Gmail]/Drafts", any localised name. The return code used to be
+    ignored, so the owner was told the draft was saved when it existed
+    nowhere."""
+    with pytest.raises(RuntimeError, match="draft"):
+        provider("owner@gmail.com").create_draft(
+            to="a@example.com", subject="s", body="b"
+        )
     assert world.imap.appends[0].folder == "[Gmail]/Drafts"
     assert "[Gmail]/Drafts" not in world.mailbox.folders
 
 
-def test_BUG_verify_reports_success_when_the_inbox_cannot_be_selected(world):
-    """SELECT's return code is never read, so "IMAP + SMTP verified" is claimed
-    for a mailbox whose INBOX the server refused."""
+def test_verify_does_not_claim_success_when_the_inbox_cannot_be_selected(world):
+    """verify() is the connect flow's only check. SELECT's return code was
+    never read, so "IMAP + SMTP verified" was claimed for a mailbox whose
+    INBOX the server refused."""
     world.mailbox.folders.pop("INBOX")
-    out = provider().verify()
-    assert out["ok"] is True
-    assert "verified" in out["message"]
+    with pytest.raises(RuntimeError, match="INBOX"):
+        provider().verify()
 
 
-def test_BUG_marking_a_missing_message_read_reports_success(world):
-    out = provider().mark_read("999")
-    assert out == {"ok": True, "message_id": "999", "message": "Marked read"}
+def test_marking_a_missing_message_read_is_not_reported_as_success(world):
+    """STORE against a message set the server ignored is an OK no-op, so the
+    return code alone said a message was marked when none was."""
+    with pytest.raises(RuntimeError, match="not found"):
+        provider().mark_read("999")
     assert world.imap.stores == [("999", "+FLAGS", "\\Seen")]
 
 

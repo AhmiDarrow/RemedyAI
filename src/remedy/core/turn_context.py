@@ -598,11 +598,20 @@ def set_turn_tool_choice_required_blocked(value: bool, runtime: Any = None) -> N
 
 
 def turn_tier(runtime: Any = None, default: int = 1) -> int:
+    """The tier this turn was classified as. 0 (L0_INSTANT) is a real value.
+
+    ``or default`` here collapsed a genuine tier 0 to the default, and every
+    caller repeated the same idiom — so L0_INSTANT, the tier whose whole point
+    is answering without spending a frontier call, could never be observed by
+    anyone downstream. Only a *missing* tier falls back.
+    """
     flags = _react_flags()
     if flags is not None:
-        return int(flags.turn_tier or default)
+        from_flags = flags.turn_tier
+        return int(from_flags) if from_flags is not None else int(default)
     if runtime is not None:
-        return int(getattr(runtime, "_turn_tier", default) or default)
+        from_runtime: Any = getattr(runtime, "_turn_tier", None)
+        return int(from_runtime) if from_runtime is not None else int(default)
     return int(default)
 
 
