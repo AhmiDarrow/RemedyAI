@@ -213,7 +213,15 @@ class DockerSandbox(Sandbox):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            # Prune is best-effort housekeeping; never let it stall shutdown.
-            await asyncio.wait_for(proc.wait(), timeout=30.0)
+            # Prune is best-effort housekeeping; never let it stall shutdown —
+            # and a prune that hangs must not be left running either.
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=30.0)
+            except TimeoutError:
+                with contextlib.suppress(ProcessLookupError, OSError):
+                    proc.kill()
+                with contextlib.suppress(Exception):
+                    await proc.wait()
+                logger.warning("docker container prune timed out after 30s; killed it")
         except Exception:
             pass

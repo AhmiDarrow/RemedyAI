@@ -289,3 +289,45 @@ class TestStatusCodesNeedContext:
             "a real crash was filed as environmental because its traceback "
             "mentioned line 401"
         )
+
+
+class TestWordBoundariesAreRealWordBoundaries:
+    r"""The ``\b`` anchors in ``_ENVIRONMENTAL`` were once literal 0x08 backspace
+    bytes, so ``\bssl\b`` could only match the byte sequence BS-s-s-l-BS: the
+    ssl/dns/socket/HTTP-status branches were silently dead. Each sample below
+    carries NO other environmental keyword, so it only passes if the boundary
+    branch itself matches."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "ssl.SSLError: [SSL] record layer failure (_ssl.c:2580)",
+            "socket.gaierror: [Errno 11001] name lookup failed",
+            "aiohttp.ClientResponseError: 429, message='Too Many Requests'",
+            "HTTP 403",
+            "HTTP/1.1 401",
+            "dns lookup for api.example failed",
+        ],
+    )
+    def test_boundary_branches_match(self, text):
+        assert EJ.classify(text) == EJ.STATUS_ENVIRONMENTAL
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            'ValueError: bad value\n  File "file.py", line 401, in run',
+            'IndexError: list index\n  File "file.py", line 429',
+            "AttributeError: module has no attribute sslify_url",
+            "NameError: name 'websocket_frames' is not defined",
+        ],
+    )
+    def test_boundary_branches_do_not_overreach(self, text):
+        assert EJ.classify(text) == EJ.STATUS_OPEN
+
+    def test_module_source_contains_no_control_characters(self):
+        import re
+        from pathlib import Path
+
+        raw = Path(EJ.__file__).read_bytes()
+        stray = re.findall(rb"[\x00-\x08\x0b\x0c\x0e-\x1f]", raw)
+        assert not stray, f"control bytes in source: {sorted(set(stray))}"

@@ -263,3 +263,49 @@ async def test_the_scratch_directory_is_cleaned_up_even_on_failure(monkeypatch, 
 
     assert made
     assert not os.path.exists(made[0]), "the scratch mount was left behind"
+
+
+# --- cleanup ------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cleanup_kills_a_prune_that_hangs(monkeypatch):
+    """wait_for cancels the *await*, not the process. A hung ``docker
+    container prune`` was left running (and its pipes open) after cleanup
+    returned, the same leak the execute/availability paths already fixed."""
+    import asyncio
+
+    class HangingProc:
+        def __init__(self) -> None:
+            self.killed = False
+            self.waits = 0
+
+        async def wait(self):
+            self.waits += 1
+            if not self.killed:
+                await asyncio.sleep(3600)
+            return -9
+
+        def kill(self):
+            self.killed = True
+
+    proc = HangingProc()
+
+    async def fake_exec(*argv, **kw):
+        return proc
+
+    monkeypatch.setattr(
+        "remedy.execution.process.create_hidden_subprocess_exec", fake_exec
+    )
+
+    real_wait_for = asyncio.wait_for
+
+    async def quick_wait_for(aw, timeout):
+        # Shorten only cleanup's 30s prune budget; leave every other wait alone.
+        return await real_wait_for(aw, timeout=0.01 if timeout == 30.0 else timeout)
+
+    monkeypatch.setattr(asyncio, "wait_for", quick_wait_for)
+
+    await real_wait_for(DockerSandbox().cleanup(), timeout=5.0)
+    assert proc.killed, "the hung prune was not killed"
+    assert proc.waits >= 2, "the killed prune was not reaped"

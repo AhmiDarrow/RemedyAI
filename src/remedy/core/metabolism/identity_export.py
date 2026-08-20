@@ -53,8 +53,13 @@ def _safe_export_path(dest: Path | str, *, home: Path | str | None = None) -> Pa
     if home is not None:
         root = (Path(home).expanduser().resolve() / "exports").resolve()
         root.mkdir(parents=True, exist_ok=True)
-        # If dest is bare filename, force under exports
-        if not path.is_absolute() and path.parent == Path("."):
+        # Any relative dest lands under exports, flattened to its file name
+        # (``sub/x.json`` -> ``exports/x.json``, as it always did). Resolving
+        # a relative subdirectory against the CWD instead made every such
+        # export fail the jail check below.
+        if not path.is_absolute():
+            if ".." in path.parts or not path.name:
+                raise ValueError(f"export path must stay under {root}")
             path = root / path.name
         try:
             resolved = path.resolve()

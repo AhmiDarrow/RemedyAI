@@ -94,8 +94,9 @@ def test_the_owner_is_told_when_undo_is_unavailable(monkeypatch):
     warn = files_mod._record_undo(
         _Runtime(), sid="s1", target=None, previous="old", existed=True, new_size=3
     )
-    assert "no undo trail" in warn
-    assert "read-only" in warn
+    assert "cannot be undone" in warn
+    # The raw exception is logged, not echoed into the tool reply.
+    assert "read-only" not in warn
 
 
 def test_a_working_undo_log_adds_no_noise(tmp_path):

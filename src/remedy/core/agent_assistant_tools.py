@@ -351,8 +351,41 @@ def register_assistant_tools(runtime: Any) -> None:
         path back out, so the only way to unlink a mailbox was deleting keys by
         hand.
         """
-        from remedy.assistant.providers.imap_smtp import clear_mail_credentials
+        from remedy.assistant.providers.imap_smtp import (
+            ADDRESS_KEY,
+            clear_mail_credentials,
+        )
+        from remedy.core.approvals import APPROVALS
+        from remedy.core.turn_context import turn_session_id
+        from remedy.interfaces.secret_store import get_provider_secret
 
+        # Forgetting the app password is not reversible from here: the owner
+        # has to generate and paste a new one. Ask mode asks first — when
+        # there is something to lose.
+        label = ""
+        with contextlib.suppress(Exception):
+            label = (get_provider_secret(ADDRESS_KEY, home=home) or "").strip()
+        if not label:
+            return json.dumps(clear_mail_credentials(home=home), indent=2)
+        summary = f"mail_disconnect {label[:100]}"
+        ask_reason = APPROVALS.needs_ask(summary, tool_name="mail_disconnect")
+        sid = turn_session_id(runtime)
+        if ask_reason and not APPROVALS.is_approved(
+            "mail_disconnect", summary, session_id=sid
+        ):
+            item = APPROVALS.create(
+                tool_name="mail_disconnect",
+                command=summary,
+                reason=ask_reason,
+                session_id=sid,
+            )
+            return (
+                f"APPROVAL_REQUIRED id={item.id}\n"
+                f"reason={ask_reason}\n"
+                f"mailbox={label}\n"
+                "Do not invent success. Tell the user this needs approval "
+                f"(or /approve {item.id}), then retry."
+            )
         return json.dumps(clear_mail_credentials(home=home), indent=2)
 
     async def mail_status() -> str:
@@ -430,8 +463,13 @@ def register_assistant_tools(runtime: Any) -> None:
         description: str = "",
         location: str = "",
     ) -> str:
-        """Reschedule or edit an existing calendar event (only what you pass)."""
+        """Reschedule or edit an existing calendar event (only what you pass).
+
+        Asks first in Ask mode: a reschedule notifies every attendee.
+        """
         from remedy.assistant.privacy import consent_ok
+        from remedy.core.approvals import APPROVALS
+        from remedy.core.turn_context import turn_session_id
 
         cal = _calendar_provider()
         if cal is not None and getattr(cal, "provider_id", "") != "caldav":
@@ -452,6 +490,37 @@ def register_assistant_tools(runtime: Any) -> None:
             return json.dumps(
                 {"ok": False, "message": "This calendar provider cannot update events."},
                 indent=2,
+            )
+        eid = event_id.strip()
+        label = eid
+        with contextlib.suppress(Exception):
+            ev0 = cal.get_event(eid)
+            label = f"{ev0.title} @ {ev0.start}"
+        changes = ", ".join(
+            k for k, v in (
+                ("title", title), ("start", start), ("end", end),
+                ("description", description), ("location", location),
+            ) if (v or "").strip()
+        ) or "no fields"
+        summary = f"calendar_update_event {label[:100]} ({changes})"
+        ask_reason = APPROVALS.needs_ask(summary, tool_name="calendar_update_event")
+        sid = turn_session_id(runtime)
+        if ask_reason and not APPROVALS.is_approved(
+            "calendar_update_event", summary, session_id=sid
+        ):
+            item = APPROVALS.create(
+                tool_name="calendar_update_event",
+                command=summary,
+                reason=ask_reason,
+                session_id=sid,
+            )
+            return (
+                f"APPROVAL_REQUIRED id={item.id}\n"
+                f"reason={ask_reason}\n"
+                f"event={label}\n"
+                f"changes={changes}\n"
+                "Do not invent success. Tell the user this needs approval "
+                f"(or /approve {item.id}), then retry."
             )
         try:
             ev = fn(

@@ -43,6 +43,7 @@ _WINDLL_ATTR = "windll"
 _WINDLL_FACTORY_ATTRS = ("WinDLL", "OleDLL")
 
 __all__ = [
+    "CONPTY_PRELUDE",
     "CONTROL_TYPE_IDS",
     "CallLog",
     "CallRecord",
@@ -57,6 +58,7 @@ __all__ = [
     "FakeWinDLL",
     "FakeWindow",
     "build_fake_comtypes",
+    "fake_cmd_shell",
     "install_fake_win32",
     "uia_element",
 ]
@@ -1155,6 +1157,10 @@ class FakeConsoleHost:
         fail_create_process: bool = False,
         fail_attribute_list: bool = False,
         last_error: int = 0,
+        echo: bool = False,
+        shell: Callable[[str], str] | None = None,
+        vt_prelude: bytes = b"",
+        newline_submits: bool = False,
     ) -> None:
         self._next = first_handle
         self.pid = pid
@@ -1163,6 +1169,20 @@ class FakeConsoleHost:
         self.fail_create_process = fail_create_process
         self.fail_attribute_list = fail_attribute_list
         self.last_error = last_error
+        # A real pseudoconsole ECHOES what is typed into it, renders line ends
+        # as cursor moves as often as CRLF, and opens with a burst of VT mode
+        # switches. ``echo`` turns that on for the input pipe of every
+        # pseudoconsole created here; ``shell`` is the child — a callable that
+        # gets each typed line and returns what it prints.
+        self.echo = echo
+        self.shell = shell
+        self.vt_prelude = vt_prelude
+        # A console submits on CR only; a shell reading a PIPE takes LF. Set
+        # this to model the pipe-fed shell with the same in-memory machinery.
+        self.newline_submits = newline_submits
+        self._console_lines: dict[int, bytearray] = {}
+        self._prelude_sent: set[int] = set()
+        self._rows: dict[int, int] = {}
 
         self.kinds: dict[int, str] = {}
         self.closed: list[int] = []
@@ -1260,9 +1280,58 @@ class FakeConsoleHost:
                 "flags": int(flags or 0),
             }
         )
-        if self.create_pseudoconsole_hr == 0 and phpc is not None:
+        if self.create_pseudoconsole_hr != 0:
+            # restype=HRESULT: ctypes does not hand a failing HRESULT back, it
+            # raises OSError — the double must do the same or a dead "if hr"
+            # branch in the code under test looks alive.
+            raise OSError(None, "CreatePseudoConsole failed", None, self.create_pseudoconsole_hr)
+        if phpc is not None:
             set_out(phpc, self._handle("pseudoconsole"))
-        return self.create_pseudoconsole_hr
+        return 0
+
+    # -- the console the child is "attached" to ----------------------------
+    def _console_for_input(self, pipe: FakePipe) -> tuple[int, FakePipe] | None:
+        for idx, pc in enumerate(self.pseudoconsoles):
+            if pc["input"] in (pipe.read_handle, pipe.write_handle):
+                out = self.pipe_for(pc["output"])
+                if out is not None:
+                    return idx, out
+        return None
+
+    def _console_type(self, pipe: FakePipe, chunk: bytes) -> None:
+        """What conhost does with typed bytes: echo them, feed the child."""
+        found = self._console_for_input(pipe)
+        if found is None:
+            return
+        idx, out = found
+        if idx not in self._prelude_sent:
+            self._prelude_sent.add(idx)
+            if self.vt_prelude:
+                out.push(self.vt_prelude)
+        buf = self._console_lines.setdefault(idx, bytearray())
+        # Cooked console input is submitted by Enter, which is CR. A bare LF
+        # is not a line end to conhost — it is typed into the current line
+        # and, as observed live, not even echoed — so LF is dropped here.
+        if self.newline_submits:
+            buf.extend(chunk.replace(b"\r\n", b"\r").replace(b"\n", b"\r"))
+        else:
+            buf.extend(chunk.replace(b"\n", b""))
+        while b"\r" in buf:
+            line, _, rest = bytes(buf).partition(b"\r")
+            buf[:] = rest
+            text = line.decode("utf-8", errors="replace")
+            if self.echo:
+                # Echo the typed line, then move the cursor to the next row
+                # instead of writing CRLF — exactly the rendering that glued
+                # ``echo hello`` to the next line in the real stream.
+                row = self._rows.get(idx, 1) + 1
+                self._rows[idx] = row
+                out.push(b"\x1b[?25l" + text.encode("utf-8") + f"\x1b[{row};1H".encode() + b"\x1b[?25h")
+            if self.shell is not None:
+                produced = self.shell(text)
+                if produced:
+                    out.push(produced.encode("utf-8"))
+                    self._rows[idx] = self._rows.get(idx, 1) + produced.count("\n")
 
     def ClosePseudoConsole(self, hpc: Any) -> int:  # noqa: N802 - Win32 spelling
         h = handle_value(hpc)
@@ -1298,6 +1367,8 @@ class FakeConsoleHost:
         pipe.writes.append(chunk)
         if pwritten is not None:
             set_out(pwritten, len(chunk))
+        if self.echo or self.shell is not None:
+            self._console_type(pipe, chunk)
         return 1
 
     def ReadFile(  # noqa: N802 - Win32 spelling
@@ -1367,9 +1438,18 @@ class FakeConsoleHost:
         flags: Any = 0,
         env: Any = None,
         cwd: Any = None,
-        _psiex: Any = None,
+        psiex: Any = None,
         ppi: Any = None,
     ) -> int:
+        startup_flags = 0
+        std_handles: tuple[Any, Any, Any] | None = None
+        si = deref(psiex) if psiex is not None else None
+        si = getattr(si, "StartupInfo", si)
+        if si is not None:
+            with contextlib.suppress(Exception):
+                startup_flags = int(si.dwFlags or 0)
+            with contextlib.suppress(Exception):
+                std_handles = (si.hStdInput, si.hStdOutput, si.hStdError)
         self.spawns.append(
             {
                 "app": getattr(app, "value", app),
@@ -1378,6 +1458,8 @@ class FakeConsoleHost:
                 "flags": int(flags or 0),
                 "inherit": bool(inherit),
                 "env": getattr(env, "value", env),
+                "startup_flags": startup_flags,
+                "std_handles": std_handles,
             }
         )
         if self.fail_create_process:
@@ -1396,6 +1478,41 @@ class FakeConsoleHost:
     def TerminateProcess(self, handle: Any, code: Any = 1) -> int:  # noqa: N802
         self.terminated.append((handle_value(handle), int(code)))
         return 1
+
+
+#: The VT burst a real pseudoconsole emits before the child's first byte:
+#: win32-input-mode on, focus events on, cursor hidden, clear, reset, home.
+CONPTY_PRELUDE = b"\x1b[?9001h\x1b[?1004h\x1b[?25l\x1b[2J\x1b[m\x1b[H"
+
+
+def fake_cmd_shell(cwd: str = "C:\\work") -> Callable[[str], str]:
+    """Just enough of ``cmd.exe`` for the host session: ``echo``, ``cd``,
+    ``%ERRORLEVEL%``, ``&``-joined commands and ``exit N``. Everything else
+    (``chcp`` and friends) prints nothing. Lines end CRLF, as cmd's do.
+    """
+    state = {"errorlevel": 0}
+
+    def run(line: str) -> str:
+        out: list[str] = []
+        for raw in line.split("&"):
+            part = raw.strip().lstrip("@")
+            lower = part.lower()
+            if lower.startswith("echo "):
+                text = part[5:].strip()
+                if text.lower() in ("on", "off"):
+                    continue
+                out.append(text.replace("%ERRORLEVEL%", str(state["errorlevel"])))
+            elif lower == "cd":
+                out.append(cwd)
+            elif lower.startswith("exit "):
+                with contextlib.suppress(ValueError):
+                    state["errorlevel"] = int(part.split()[1])
+            elif part and not lower.startswith("chcp"):
+                out.append(f"'{part.split()[0]}' is not recognized as an internal or external command,")
+                state["errorlevel"] = 9009
+        return "".join(o + "\r\n" for o in out)
+
+    return run
 
 
 # --------------------------------------------------------------------------

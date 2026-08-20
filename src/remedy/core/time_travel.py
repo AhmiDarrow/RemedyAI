@@ -82,14 +82,15 @@ class SessionUndoLog:
 
     @staticmethod
     def _is_restore_forbidden(path: Path | str) -> bool:
-        """Refuse restores that would touch auth secrets or the undo store itself."""
-        try:
-            from remedy.core.security import is_protected_secret_path
+        """Refuse restores that would touch auth secrets or the undo store itself.
 
-            if is_protected_secret_path(path):
-                return True
-        except Exception:
-            pass
+        Fail closed: the strict check answers "protected" when it cannot run,
+        so an error never falls through to "allowed".
+        """
+        from remedy.core.security import is_protected_secret_path_strict
+
+        if is_protected_secret_path_strict(path):
+            return True
         try:
             p = Path(path).expanduser()
             try:

@@ -60,6 +60,32 @@ def test_secret_guard():
     assert extract_heuristic_facts("remember that password: hunter2 api_key=sk-abc1234567890") == []
 
 
+@pytest.mark.parametrize(
+    "phrase",
+    [
+        "I am building a task-tracking-app for my team",
+        "let's do an ask-me-anything session on Friday",
+        "my risk-tolerance-level is fairly low",
+        "the kiosk-mode-settings page is broken",
+    ],
+)
+def test_hyphenated_words_containing_sk_are_not_secrets(phrase):
+    assert not looks_like_secret(phrase)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "sk-proj-abc123XYZ789defGHI456jklMNO",
+        "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789",
+        "OPENAI_API_KEY=sk-proj-abc123XYZ789defGHI456",
+        "xai-abcdefghijklmnop0123",
+    ],
+)
+def test_real_prefixed_keys_are_still_secrets(key):
+    assert looks_like_secret(key)
+
+
 def test_force_cannot_bypass_secret_guard():
     """force=True relaxes stability only — never stores credential-shaped text."""
     profile = UserProfile()

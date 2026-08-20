@@ -1338,3 +1338,44 @@ async def test_a_turn_that_produced_nothing_at_all_still_ends_with_words(tmp_pat
     assert "continue" in reply
     # It never pretends the file was written.
     assert "notes.txt" not in reply
+
+
+# --------------------------------------------------------------------------
+# tools recovered from a text dump are booked like a native batch
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_tools_recovered_from_a_text_dump_count_as_a_real_batch(tmp_path):
+    """A model that writes ``list_dir("one")`` as prose still gets its tool run.
+    That run must be booked exactly like a native batch — turn state, batch
+    count and epoch productivity — or the zero-tool drivers keep insisting no
+    tools ran about a tool that just ran."""
+    from remedy.core.react_loop import loop as loop_mod
+
+    runtime = make_runtime(tmp_path)
+    registry = FakeToolRegistry().install(runtime)
+    registry.add("list_dir", description="list a directory", results=["a.txt"])
+    fake = FakeLLM(
+        [
+            text_turn('Let me look.\nlist_dir("one")'),
+            text_turn("Explored."),
+        ],
+        when_exhausted=text_turn("kept going"),
+    )
+    booked: list[list[str]] = []
+    real_stats = loop_mod.record_tool_batch_stats
+
+    def _spy(*, turn, fresh_calls, batch_tool_msgs, step):
+        booked.append([c["function"]["name"] for c in fresh_calls])
+        return real_stats(
+            turn=turn, fresh_calls=fresh_calls, batch_tool_msgs=batch_tool_msgs, step=step
+        )
+
+    with fake.patch(force_tools=True), patch.object(
+        loop_mod, "record_tool_batch_stats", _spy
+    ):
+        await drain(runtime, "look around the project")
+
+    assert [c.name for c in registry.calls] == ["list_dir"]
+    assert booked == [["list_dir"]]

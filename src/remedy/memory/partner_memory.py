@@ -180,12 +180,14 @@ _SECRET_RE = re.compile(
     r"api[_-]?key|secret[_-]?key|secret[_-]?access[_-]?key"
     r"|password\s*[:=]|passwd\s*[:=]|bearer\s+[a-z0-9\-._~+/]+=*"
     # OpenAI / Anthropic / xAI / OpenRouter / Mistral / DeepSeek style
-    r"|sk-[a-z0-9_-]{10,}|xai-[a-z0-9_-]{10,}"
+    # Left boundary: "task-tracking-app" and "risk-tolerance" contain "sk-"
+    # mid-word and must not be mistaken for a key.
+    r"|(?<![a-z0-9])sk-[a-z0-9_-]{10,}|(?<![a-z0-9])xai-[a-z0-9_-]{10,}"
     # GitHub: classic PAT, OAuth, server-to-server, refresh, fine-grained
     r"|gh[pousr]_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}"
     # GitLab / HuggingFace / Slack / Google / AWS / Stripe / SendGrid / Twilio
-    r"|glpat-[a-z0-9_-]{10,}|hf_[a-z0-9]{20,}"
-    r"|xox[abposr]-[a-z0-9-]{10,}|xapp-[a-z0-9-]{10,}"
+    r"|(?<![a-z0-9])glpat-[a-z0-9_-]{10,}|hf_[a-z0-9]{20,}"
+    r"|(?<![a-z0-9])xox[abposr]-[a-z0-9-]{10,}|(?<![a-z0-9])xapp-[a-z0-9-]{10,}"
     r"|AIza[a-z0-9_-]{30,}"
     r"|AKIA[a-z0-9]{16}|ASIA[a-z0-9]{16}"
     r"|sk_live_[a-z0-9]{20,}|rk_live_[a-z0-9]{20,}"
