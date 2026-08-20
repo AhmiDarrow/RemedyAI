@@ -121,7 +121,10 @@ def test_status_reports_reasons_when_engines_missing(tmp_path: Path, monkeypatch
     monkeypatch.setattr(svc, "stt_deps_available", lambda: False)
     st = voice_status(tmp_path, agent_gender="male")
     assert st["tts"]["available"] is False
-    assert "remedy-ai[voice]" in st["tts"]["reason"]
+    assert "voice pack" in st["tts"]["reason"]
+    assert st["tts"]["hint"] == "pip install remedy-ai[voice]"
+    assert "smart_turn" in st
+    assert "voice pack" in st["smart_turn"]["reason"]
     assert st["tts"]["fallback"] == "browser"
     assert st["tts"]["voice"] == "am_michael"
     assert st["stt"]["available"] is False
@@ -169,7 +172,7 @@ def test_api_voice_status_shape(client: TestClient):
     r = client.get("/api/voice/status")
     assert r.status_code == 200
     data = r.json()
-    assert "tts" in data and "stt" in data and "settings" in data
+    assert "tts" in data and "stt" in data and "smart_turn" in data and "settings" in data
     assert isinstance(data["tts"]["voices"], list)
 
 
@@ -197,6 +200,15 @@ def test_api_transcribe_rejects_empty_and_degrades(client: TestClient):
     assert r2.status_code in (200, 503)
     if r2.status_code == 503:
         assert "error" in r2.json()
+
+
+def test_api_voice_install_unknown_is_plain(client: TestClient):
+    r = client.post("/api/voice/install", json={"component": "nope"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False
+    assert "Unknown voice piece" in body["error"]
+    assert "nope" in body["error"]
 
 
 def test_api_voice_settings_patch(client: TestClient):

@@ -56,7 +56,7 @@ size before downloading:
 | | | |
 |---|---|--:|
 | baresip | the SIP engine | ~6 MB, BSD-3 |
-| smart-turn | knowing when you have finished speaking | ~45 MB, BSD-2 |
+| smart-turn | knowing when you have finished speaking | ~9 MB, BSD-2 |
 | Chatterbox | a voice that does not sound synthetic on a phone | ~1.1 GB, MIT |
 | Android image | running a calling app here | ~2.6 GB, its publisher's terms |
 

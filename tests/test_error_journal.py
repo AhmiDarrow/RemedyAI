@@ -331,3 +331,12 @@ class TestWordBoundariesAreRealWordBoundaries:
         raw = Path(EJ.__file__).read_bytes()
         stray = re.findall(rb"[\x00-\x08\x0b\x0c\x0e-\x1f]", raw)
         assert not stray, f"control bytes in source: {sorted(set(stray))}"
+
+
+def test_a_failed_journal_save_is_not_silent(tmp_path, monkeypatch):
+    def boom(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(EJ, "write_json_atomic", boom)
+    with pytest.raises(OSError, match="disk full"):
+        EJ.record_fault("tool", "the command failed", home=tmp_path)

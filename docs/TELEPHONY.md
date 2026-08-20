@@ -47,7 +47,7 @@ choice before any design starts.
 | baresip + libre | SIP stack | BSD-3 | Adopted |
 | aiortc, pylibsrtp | RTP/SRTP/jitter/codecs | BSD | Adopted |
 | Pipecat | realtime voice orchestration | BSD-2 | Reference architecture |
-| smart-turn v2/v3 | semantic endpointing | BSD-2 | Adopted — the anti-robotic piece |
+| smart-turn v3.2 | semantic endpointing (CPU int8 ONNX, ~8 MB) | BSD-2 | Adopted — the anti-robotic piece |
 | silero-vad | speech onset | MIT | Adopted |
 | Kokoro-82M | TTS (already shipped) | Apache-2.0 | Kept as the low-VRAM tier |
 | Chatterbox-Turbo | TTS + zero-shot clone | MIT | Adopted as the human-bar tier |
@@ -112,7 +112,7 @@ src/remedy/telephony/
 src/remedy/voice/
   realtime/
     pipeline.py       duplex loop: capture -> vad -> turn -> stt -> llm -> tts
-    turn.py           smart-turn v2 endpointing + silero onset
+    turn.py           smart-turn v3.2 endpointing + silero onset
     stt_stream.py     streaming partials
     tts_stream.py     streaming synthesis, first-syllable-out
     barge_in.py       playout cancel on owner/counterpart onset

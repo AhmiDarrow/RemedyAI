@@ -480,7 +480,9 @@ export function GroveApp({
             aria-label={speakReplies ? 'Speaking replies aloud' : 'Replies are silent'}
             title={
               speakReplies
-                ? 'Speaking replies aloud — click to go quiet'
+                ? voice.status?.tts?.available
+                  ? "Speaking replies aloud — click to go quiet"
+                  : "Speaking with this computer's voices — download Remedy's voice in Settings for clearer speech"
                 : 'Click to have replies spoken aloud'
             }
           >
@@ -799,7 +801,9 @@ export function GroveApp({
           aria-label={speakReplies ? 'Speaking replies aloud' : 'Replies are silent'}
           title={
             speakReplies
-              ? 'Speaking replies aloud — click to go quiet'
+              ? voice.status?.tts?.available
+                ? "Speaking replies aloud — click to go quiet"
+                : "Speaking with this computer's voices — download Remedy's voice in Settings for clearer speech"
               : 'Click to have replies spoken aloud'
           }
         >

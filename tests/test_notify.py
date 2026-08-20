@@ -275,3 +275,14 @@ def test_a_failing_messenger_never_stops_the_durable_outbox(tmp_path):
 
     out = notify.deliver_due(home=tmp_path, messenger_send=_explode)
     assert isinstance(out["delivered"], list)
+
+
+def test_a_failed_notification_save_is_not_silent(tmp_path, monkeypatch):
+    from remedy.core import notify
+
+    def boom(*_a, **_k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(notify, "write_json_atomic", boom)
+    with pytest.raises(OSError, match="disk full"):
+        notify.push_notification("hello", home=tmp_path, dedupe_window_s=0)

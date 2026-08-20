@@ -11,6 +11,8 @@ export interface VoiceSideStatus {
   enabled: boolean
   engine: string | null
   reason: string | null
+  hint?: string | null
+  deps?: boolean
   fallback?: string
   voice?: string
   voices?: string[]
@@ -20,9 +22,28 @@ export interface VoiceSideStatus {
   install?: { status?: string; percent?: number; error?: string } | null
 }
 
+export interface VoiceSmartTurnStatus {
+  available: boolean
+  engine: string | null
+  reason: string | null
+  hint?: string | null
+  deps?: boolean
+  installed?: boolean
+  install?: { status?: string; percent?: number; error?: string } | null
+  path?: string | null
+  fallback?: string
+  source?: {
+    repo: string
+    revision: string
+    filename: string
+    licence: string
+  }
+}
+
 export interface VoiceStatus {
   tts: VoiceSideStatus
   stt: VoiceSideStatus
+  smart_turn?: VoiceSmartTurnStatus
   settings: {
     tts_enabled: boolean
     stt_enabled: boolean
@@ -47,8 +68,10 @@ export async function patchVoiceSettings(
   })
 }
 
-export async function installVoice(component: 'tts' | 'stt'): Promise<{ ok: boolean; error?: string }> {
-  return apiFetch<{ ok: boolean; error?: string }>('/voice/install', {
+export async function installVoice(
+  component: 'tts' | 'stt' | 'smart-turn',
+): Promise<{ ok: boolean; error?: string; hint?: string }> {
+  return apiFetch<{ ok: boolean; error?: string; hint?: string }>('/voice/install', {
     method: 'POST',
     body: JSON.stringify({ component }),
   })

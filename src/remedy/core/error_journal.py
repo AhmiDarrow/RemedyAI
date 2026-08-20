@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import threading
@@ -35,6 +36,8 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
+
+logger = logging.getLogger(__name__)
 
 _lock = threading.RLock()
 
@@ -180,8 +183,11 @@ def _read(home: str | Path | None) -> list[Fault]:
 def _write(home: str | Path | None, faults: list[Fault]) -> None:
     p = _store_path(home)
     keep = sorted(faults, key=lambda f: f.last_seen, reverse=True)[:MAX_FAULTS]
-    with suppress(Exception):
+    try:
         write_json_atomic(p, {"faults": [f.to_dict() for f in keep]})
+    except Exception:
+        logger.exception("could not save error journal to %s", p)
+        raise
 
 
 def record_fault(
