@@ -371,7 +371,13 @@ export function GroveApp({
         } else {
           sid = await ensureHomeSession()
         }
-        await handleSend(t, attachments, sid ? { sessionId: sid } : undefined)
+        // Grove has no queue UI: a message sent while she is working steers
+        // her — the running turn stops (its partial reply stays as a stopped
+        // moment) and the new message goes now. Idle sends are unaffected.
+        await handleSend(t, attachments, {
+          ...(sid ? { sessionId: sid } : {}),
+          mode: 'interrupt',
+        })
         setDraft('')
       } finally {
         setBusy(false)

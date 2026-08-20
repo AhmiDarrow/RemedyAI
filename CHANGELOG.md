@@ -18,6 +18,23 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - **Honest words when something is off.** A computer with no pinned
   runtime (not Windows x64 / Linux x64 / Linux arm64) is told so, and the
   Download button is not offered; no Desktop owner sees a pip command.
+- **High-quality voice uses the GPU.** PyPI's torch is CPU-only, which
+  made every Chatterbox sentence a 20–40 s wait on a machine with an RTX
+  card; with an NVIDIA GPU the runtime now gets the CUDA 12.4 build of
+  torch and the voice answers in seconds. `REMEDY_VOICE_CPU_ONLY=1`
+  opts out.
+- **Downloads no longer "stick at 35 %".** pip had a ten-minute wall-clock
+  limit that a 2 GB torch wheel walked straight through. It now streams
+  pip's own progress ("Fetching torch · 1.2 of 2.5 GB") and only gives up
+  if pip goes silent for fifteen minutes.
+- **No console windows.** pip, the runtime check and the voice worker are
+  spawned hidden; engine progress bars (tqdm / Hugging Face) are off and
+  worker chatter goes to the debug log, not the owner's log.
+- **Grove: every message steers.** Sending while Remedy is working used
+  to queue silently (Studio shows the queue; Grove never did, so it read
+  as "can't send"). In Grove a message sent mid-turn now stops the turn,
+  keeps what she had said as a paused moment, and she picks up from the
+  new message. The composer shows ⏸ and a ↑ Steer button while she works.
 - **`remedy update` / `remedy uninstall` know they are the Desktop
   sidecar**: update points at About → Check for updates instead of trying
   to pip-upgrade the frozen exe; uninstall clears data and leaves removing

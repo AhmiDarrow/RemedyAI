@@ -544,7 +544,10 @@
   pointer-events: none;
   font-size: 0.9rem;
 }
-.grove-mic.stop { font-size: 0.9rem; }
+.grove-mic.stop { font-size: 0.9rem; background: var(--bg-tertiary); color: var(--text-secondary); }
+.grove-mic.stop:hover { background: var(--bg-hover, var(--bg-tertiary)); }
+/* Steer: the primary action while she works — same accent as Send. */
+.grove-mic.steer { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
 
 /* Narrow windows: stack cards over chat, divider still drags (vertical feel kept simple) */
 @media (max-width: 860px) {
