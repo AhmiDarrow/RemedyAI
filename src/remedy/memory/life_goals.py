@@ -9,17 +9,15 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import re
 import threading
-import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from remedy.core.atomic_json import scratch_path
+from remedy.core.atomic_json import write_json_atomic
 
 HORIZONS = ("week", "season", "life")
 STATUSES = ("open", "active", "paused", "done", "dropped")
@@ -213,24 +211,7 @@ class LifeGoalStore:
             "last_steps": self.last_steps[-12:],
             "goals": [g.to_public() for g in goals[:_MAX_GOALS]],
         }
-        tmp = scratch_path(self.path)
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        last: OSError | None = None
-        for i in range(16):
-            try:
-                os.replace(tmp, self.path)
-                return
-            except PermissionError as e:
-                # Windows: dest briefly locked by a concurrent read / indexer.
-                last = e
-                time.sleep(0.015 * (i + 1))
-            except OSError as e:
-                last = e
-                if getattr(e, "winerror", None) not in (5, 32):
-                    raise
-                time.sleep(0.015 * (i + 1))
-        if last is not None:
-            raise last
+        write_json_atomic(self.path, payload)
 
     def list(self, *, include_closed: bool = False) -> list[LifeGoal]:
         with _lock:

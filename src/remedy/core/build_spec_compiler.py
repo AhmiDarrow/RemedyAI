@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_text_atomic
 from remedy.core.builds.reducer import BuildSpec, Signature, UnitSpec
 from remedy.core.relpath import norm_rel
 
@@ -245,7 +246,7 @@ def save_locked_spec(root: Path | str, compiled: dict[str, Any]) -> Path:
     d = root / ".remedy-build"
     d.mkdir(parents=True, exist_ok=True)
     path = d / "locked_spec.json"
-    path.write_text(json.dumps(compiled, indent=2)[:100_000], encoding="utf-8")
+    write_text_atomic(path, json.dumps(compiled, indent=2)[:100_000])
     return path
 
 

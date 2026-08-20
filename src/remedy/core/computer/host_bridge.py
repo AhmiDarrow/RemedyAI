@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import re
 import threading
 import time
@@ -19,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from remedy.core.atomic_json import scratch_path
+from remedy.core.atomic_json import write_json_atomic
 
 _SECRET_FIELD_TOKEN_RE = re.compile(
     r"(?i)(^|[^a-z])(pass|token|pin|otp)([^a-z]|$)"
@@ -614,27 +613,7 @@ class ComputerHostBridge:
 
     def _write(self, job: ComputerJob) -> None:
         job.updated_at = _now()
-        path = self._path(job.id)
-        data = json.dumps(job.to_dict(), indent=2)
-        # Atomic-ish write so wait() never reads a half-written file
-        tmp = scratch_path(path)
-        tmp.write_text(data, encoding="utf-8")
-        last: OSError | None = None
-        for i in range(16):
-            try:
-                os.replace(tmp, path)
-                return
-            except PermissionError as e:
-                # Windows: dest can be briefly locked by wait() read_text / AV.
-                last = e
-                time.sleep(0.015 * (i + 1))
-            except OSError as e:
-                last = e
-                if getattr(e, "winerror", None) not in (5, 32):
-                    raise
-                time.sleep(0.015 * (i + 1))
-        if last is not None:
-            raise last
+        write_json_atomic(self._path(job.id), job.to_dict())
 
     def _read(self, job_id: str) -> ComputerJob | None:
         path = self._path(job_id)
@@ -656,9 +635,7 @@ class ComputerHostBridge:
         with self._lock:
             self._ui_command = cmd
             with contextlib.suppress(OSError):
-                self._ui_path.write_text(
-                    json.dumps(cmd, indent=2), encoding="utf-8"
-                )
+                write_json_atomic(self._ui_path, cmd)
 
     def peek_ui_command(self) -> dict[str, Any] | None:
         with self._lock:
@@ -1279,9 +1256,7 @@ class ComputerHostBridge:
                         # whose JSON id ≠ filename must still get scrubbed here
                         # (otherwise the plaintext lingers forever).
                         with contextlib.suppress(OSError):
-                            path.write_text(
-                                json.dumps(job.to_dict()), encoding="utf-8"
-                            )
+                            write_json_atomic(path, job.to_dict(), indent=None)
                         n += 1
                     continue
                 path.unlink(missing_ok=True)

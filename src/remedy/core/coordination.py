@@ -31,6 +31,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remedy.core.atomic_json import write_json_atomic
+
 # A session with no heartbeat for this long is considered gone (crash/idle).
 BEACON_TTL = 180.0
 # A path claim not refreshed by a write for this long is released.
@@ -162,13 +164,8 @@ def _read_beacons(home: str | Path | None) -> dict[str, SessionBeacon]:
 def _write_beacons(home: str | Path | None, beacons: dict[str, SessionBeacon]) -> None:
     p = _registry_path(home)
     payload = {"beacons": {sid: b.to_dict() for sid, b in beacons.items()}}
-    tmp = p.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
     with suppress(Exception):
-        tmp.write_text(json.dumps(payload), encoding="utf-8")
-        os.replace(str(tmp), str(p))
-        return
-    with suppress(Exception):
-        tmp.unlink()
+        write_json_atomic(p, payload, indent=None)
 
 
 def _prune(beacons: dict[str, SessionBeacon], now: float) -> None:

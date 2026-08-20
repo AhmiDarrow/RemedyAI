@@ -39,7 +39,6 @@ except the sheath's own test/run scripts when explicitly asked.
 
 from __future__ import annotations
 
-import json
 import re
 import subprocess
 import sys
@@ -50,7 +49,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from remedy.core.atomic_json import scratch_path
+from remedy.core.atomic_json import write_json_atomic
 
 MYELIN_DIRNAME = "myelin"
 LEDGER_FILENAME = "ledger.json"
@@ -178,16 +177,7 @@ def save_ledger(ledger: dict[str, Any], home: str | Path | None = None) -> None:
         )[:MAX_PATHWAYS]
         ledger["pathways"] = dict(keep)
     p = _ledger_path(home)
-    tmp = scratch_path(p)
-    tmp.write_text(json.dumps(ledger, ensure_ascii=False, indent=2), encoding="utf-8")
-    for _ in range(3):
-        try:
-            tmp.replace(p)
-            return
-        except OSError:
-            time.sleep(0.02)
-    with suppress(OSError):
-        tmp.unlink()
+    write_json_atomic(p, ledger, ensure_ascii=False)
 
 
 def observe_pathway(user_text: str, home: str | Path | None = None) -> str:
@@ -268,20 +258,7 @@ def load_sheath(slug: str, home: str | Path | None = None) -> Sheath | None:
 def save_sheath(sheath: Sheath, home: str | Path | None = None) -> Path:
     d = sheath_path(sheath.slug, home)
     d.mkdir(parents=True, exist_ok=True)
-    meta = d / "sheath.json"
-    tmp = scratch_path(d / "sheath.json")
-    tmp.write_text(
-        json.dumps(sheath.to_dict(), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    for _ in range(3):
-        try:
-            tmp.replace(meta)
-            return d
-        except OSError:
-            time.sleep(0.02)
-    with suppress(OSError):
-        tmp.unlink()
+    write_json_atomic(d / "sheath.json", sheath.to_dict(), ensure_ascii=False)
     return d
 
 

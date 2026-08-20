@@ -6,6 +6,7 @@ checked against the standard rather than against the stdlib.
 
 from __future__ import annotations
 
+import math
 import struct
 
 import pytest
@@ -106,3 +107,62 @@ def test_rms_separates_silence_from_speech():
 
 def test_rms_of_empty_is_zero():
     assert nb.rms(b"") == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Anti-alias filter before decimation
+# ---------------------------------------------------------------------------
+
+
+def _tone(freq: float, rate: int, ms: int, amp: int = 10000) -> bytes:
+    n = rate * ms // 1000
+    return _pcm([int(round(amp * math.sin(2 * math.pi * freq * i / rate))) for i in range(n)])
+
+
+def _middle_rms(pcm: bytes) -> float:
+    """RMS of the middle 80% — the edge padding's transient is not the filter."""
+    s = struct.unpack(f"<{len(pcm) // 2}h", pcm)
+    trim = len(s) // 10
+    core = s[trim : len(s) - trim]
+    return (sum(x * x for x in core) / len(core)) ** 0.5
+
+
+def _db(ratio: float) -> float:
+    return 20 * math.log10(max(ratio, 1e-12))
+
+
+@pytest.mark.parametrize(
+    ("src_rate", "alias_hz"),
+    [(16000, 6000), (24000, 6000), (48000, 6000), (48000, 12000)],
+)
+def test_decimation_attenuates_content_above_the_target_nyquist(src_rate, alias_hz):
+    """A tone above 4 kHz would fold back into the voice band at 8 kHz. The old
+    5-tap binomial let a 6 kHz tone through the 24 kHz path nearly intact."""
+    tone = _tone(alias_hz, src_rate, 200)
+    before = _middle_rms(tone)
+    after = _middle_rms(nb.resample(tone, src_rate, nb.PHONE_RATE))
+    assert _db(after / before) <= -40
+
+
+@pytest.mark.parametrize("src_rate", [16000, 24000, 48000])
+def test_decimation_passes_the_voice_band_within_1_db(src_rate):
+    tone = _tone(1000, src_rate, 200)
+    before = _middle_rms(tone)
+    after = _middle_rms(nb.resample(tone, src_rate, nb.PHONE_RATE))
+    assert abs(_db(after / before)) <= 1.0
+
+
+@pytest.mark.parametrize("src_rate", [16000, 24000, 48000])
+def test_decimation_output_length_matches_the_rate_ratio(src_rate):
+    pcm = _pcm([0] * (src_rate * 20 // 1000))  # one 20 ms frame
+    assert len(nb.resample(pcm, src_rate, nb.PHONE_RATE)) == nb.frame_bytes(nb.PHONE_RATE)
+
+
+def test_lowpass_taps_scale_with_the_decimation_factor():
+    """The filter is designed for the ratio it is used at, not for 2x only."""
+    two, three, six = (len(nb._lowpass_taps(r)) for r in (2.0, 3.0, 6.0))
+    assert two < three < six
+    for r in (2.0, 3.0, 6.0):
+        taps = nb._lowpass_taps(r)
+        assert len(taps) % 2 == 1
+        assert abs(sum(taps) - 1.0) < 1e-9

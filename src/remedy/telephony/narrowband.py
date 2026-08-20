@@ -12,7 +12,9 @@ tests on it, so the codec lives here rather than in a shim that vanishes.
 from __future__ import annotations
 
 import array
+import math
 import struct
+from functools import lru_cache
 
 # G.711 constants (ITU-T / the classic Sun reference implementation)
 _BIAS = 0x84
@@ -90,21 +92,81 @@ def ulaw_to_pcm(ulaw: bytes) -> bytes:
 # Rate conversion (band-limited enough to be honest, cheap enough for 20 ms)
 # ---------------------------------------------------------------------------
 
-# Half-band-ish FIR, normalized. Anti-alias before decimation so the bench does
-# not punish a voice for artifacts our own resampler invented.
+# Short smoothing kernel for the *up*-sampling paths: after interpolation the
+# only thing to remove is the staircase, and a binomial does that.
 _LOWPASS = (0.0625, 0.25, 0.375, 0.25, 0.0625)
+
+# Anti-alias design for the *down*-sampling paths. Cutoff sits at this fraction
+# of the target rate's Nyquist; the transition band runs from there up to the
+# target Nyquist itself, so everything that would fold back is in the stopband.
+_CUTOFF_OF_NYQUIST = 0.8
+# Hamming window: ~53 dB stopband, main-lobe width 3.3 / N in cycles per sample.
+_HAMMING_TRANSITION = 3.3
+
+
+@lru_cache(maxsize=16)
+def _lowpass_taps(ratio: float) -> tuple[float, ...]:
+    """Windowed-sinc low-pass for decimating by *ratio* (src_rate / dst_rate).
+
+    The old 5-tap binomial was designed for 2x and left 4-12 kHz content
+    almost untouched on the 24 kHz -> 8 kHz path, so it aliased into the band
+    as tones nobody spoke. This one is parameterised by the ratio: 2x gets
+    67 taps, 3x 99, 6x 199 -- each with the cutoff at 0.8 x the target Nyquist
+    and at least 40 dB of attenuation above the target Nyquist.
+    """
+    if ratio <= 1.0:
+        return (1.0,)
+    nyquist = 0.5 / ratio  # target Nyquist, in cycles per source sample
+    cutoff = _CUTOFF_OF_NYQUIST * nyquist
+    transition = nyquist - cutoff
+    n = int(math.ceil(_HAMMING_TRANSITION / transition)) | 1  # odd, symmetric
+    half = n // 2
+    taps: list[float] = []
+    for k in range(n):
+        m = k - half
+        ideal = 2.0 * cutoff if m == 0 else math.sin(2.0 * math.pi * cutoff * m) / (math.pi * m)
+        window = 0.54 - 0.46 * math.cos(2.0 * math.pi * k / (n - 1))
+        taps.append(ideal * window)
+    total = sum(taps)  # unity DC gain, so a level survives the trip
+    return tuple(t / total for t in taps)
 
 
 def _convolve(samples: list[int], taps: tuple[float, ...]) -> list[int]:
+    return _fir_at(samples, taps, range(len(samples)))
+
+
+def _fir_at(samples: list[int], taps: tuple[float, ...], positions: range) -> list[int]:
+    """FIR output at *positions* only -- decimation never computes the samples
+    it is about to throw away. Edges are padded by repeating the end samples."""
     n = len(taps)
     half = n // 2
     padded = [samples[0]] * half + samples + [samples[-1]] * half
     out: list[int] = []
-    for i in range(len(samples)):
-        acc = 0.0
-        for k in range(n):
-            acc += padded[i + k] * taps[k]
+    for i in positions:
+        acc = sum(a * b for a, b in zip(padded[i : i + n], taps, strict=True))
         out.append(int(max(-32768, min(32767, round(acc)))))
+    return out
+
+
+def _decimate(samples: list[int], ratio: float, n_out: int) -> list[int]:
+    """Band-limit to the target rate, then keep every *ratio*-th sample.
+
+    Integer ratios pick filtered samples directly. Others (44.1 kHz -> 8 kHz)
+    filter at the dense rate and linearly interpolate between the survivors.
+    """
+    taps = _lowpass_taps(ratio)
+    step = len(samples) / n_out
+    if abs(step - round(step)) < 1e-9:
+        m = int(round(step))
+        return _fir_at(samples, taps, range(0, m * n_out, m))
+    dense = _fir_at(samples, taps, range(len(samples)))
+    out: list[int] = []
+    for i in range(n_out):
+        pos = i * step
+        lo = int(pos)
+        hi = min(lo + 1, len(dense) - 1)
+        frac = pos - lo
+        out.append(int(round(dense[lo] + (dense[hi] - dense[lo]) * frac)))
     return out
 
 
@@ -124,7 +186,7 @@ def downsample_2x(pcm: bytes) -> bytes:
     s = _unpack(pcm)
     if not s:
         return b""
-    return _pack(_convolve(s, _LOWPASS)[::2])
+    return _pack(_decimate(s, 2.0, (len(s) + 1) // 2))
 
 
 def upsample_2x(pcm: bytes) -> bytes:
@@ -161,12 +223,12 @@ def resample(pcm: bytes, src_rate: int, dst_rate: int) -> bytes:
     s = _unpack(pcm)
     if not s:
         return b""
+    n_out = max(1, round(len(s) * dst_rate / src_rate))
     if dst_rate < src_rate:
         # Band-limit *before* decimating, or everything above the new Nyquist
         # folds back down as tones that were never spoken.
-        s = _convolve(s, _LOWPASS)
+        return _pack(_decimate(s, src_rate / dst_rate, n_out))
 
-    n_out = max(1, round(len(s) * dst_rate / src_rate))
     step = len(s) / n_out
     out: list[int] = []
     for i in range(n_out):
@@ -175,10 +237,8 @@ def resample(pcm: bytes, src_rate: int, dst_rate: int) -> bytes:
         hi = min(lo + 1, len(s) - 1)
         frac = pos - lo
         out.append(int(round(s[lo] + (s[hi] - s[lo]) * frac)))
-    if dst_rate > src_rate:
-        # Smooth the staircase the interpolation left behind.
-        out = _convolve(out, _LOWPASS)
-    return _pack(out)
+    # Smooth the staircase the interpolation left behind.
+    return _pack(_convolve(out, _LOWPASS))
 
 
 def to_phone(pcm: bytes, sample_rate: int) -> bytes:
