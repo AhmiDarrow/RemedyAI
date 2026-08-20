@@ -356,6 +356,11 @@ class ApprovalQueue:
             "computer_drag",
             "computer_act",
             "computer_app",
+            # NOT computer_press_hold, deliberately: a press-and-hold is how a
+            # CAPTCHA challenge is answered, and prompting on every one makes
+            # them unusable. It is still in _MUTATION_COMPUTER_TOOLS, so the
+            # payment-surface checkpoint stops it on a checkout page.
+            # See test_press_hold_is_mutation_not_high_impact.
         }
     )
     # GitHub write for self-improve PRs — Auto / thumbs-up must never waive these.
