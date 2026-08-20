@@ -312,3 +312,57 @@ def test_auto_repair_hops_the_source_not_the_test(monkeypatch):
     run_auto_repair_hops(object(), q, use_llm=False, max_targets=3)
     assert hopped, "no hop was attempted at all"
     assert hopped[0] == "src/remedy/telephony/line.py"
+
+
+def test_auto_repair_hops_resolve_against_the_project_not_the_cwd(monkeypatch, tmp_path):
+    """A project that is not the working directory (the normal desktop case)
+    must still have its failing test mapped to *its* source file. The guess
+    used to be rooted at Remedy's own tree and checked with exists() in cwd."""
+    from remedy.core import build_live_hop
+    from remedy.core.build_repair_queue import (
+        invalidate_source_index,
+        queue_from_error_vector,
+        run_auto_repair_hops,
+    )
+
+    proj = tmp_path / "proj"
+    (proj / "src" / "widgets").mkdir(parents=True)
+    (proj / "src" / "widgets" / "gear.py").write_text("def spin(): pass" + chr(10))
+    (proj / "tests").mkdir()
+    (proj / "tests" / "test_widgets_gear.py").write_text("def test_spin(): pass" + chr(10))
+    invalidate_source_index()
+    assert Path.cwd().resolve() != proj.resolve()
+
+    class _RT:
+        def effective_project_path(self):
+            return proj
+
+    hopped: list[str] = []
+
+    def _fake_hop(runtime, *, path, symbol, use_llm, max_repairs, tests=""):
+        hopped.append(path)
+        return {"ok": True}
+
+    monkeypatch.setattr(build_live_hop, "live_unit_hop", _fake_hop)
+    q = queue_from_error_vector(
+        {"failing_nodes": ["tests/test_widgets_gear.py::test_spin"]}, root=proj
+    )
+    run_auto_repair_hops(_RT(), q, use_llm=False, max_targets=3)
+    assert hopped == ["src/widgets/gear.py"]
+
+
+def test_the_source_index_learns_about_scaffolded_files(tmp_path):
+    """Files written mid-build must become guessable without a restart."""
+    from remedy.core.build_repair_queue import (
+        _test_to_source_guess,
+        invalidate_source_index,
+    )
+
+    proj = tmp_path / "proj"
+    (proj / "src" / "pkg").mkdir(parents=True)
+    (proj / "src" / "pkg" / "__init__.py").write_text("")
+    invalidate_source_index()
+    assert _test_to_source_guess("tests/test_pkg_newthing.py", proj) == "pkg_newthing.py"
+    (proj / "src" / "pkg" / "newthing.py").write_text("x = 1" + chr(10))
+    invalidate_source_index(proj)
+    assert _test_to_source_guess("tests/test_pkg_newthing.py", proj) == "src/pkg/newthing.py"

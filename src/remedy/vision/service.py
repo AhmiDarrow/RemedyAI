@@ -8,6 +8,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from remedy.interfaces.attachments import filter_jailed_attachments
 from remedy.vision import progress as prog
 from remedy.vision.capabilities import resolve_supports_vision
 from remedy.vision.catalog import (
@@ -641,13 +642,14 @@ def decode_for_turn(
         pass
 
     # Path jail: only decode images under the attachments tree (forged paths drop).
-    with suppress(Exception):
-        from remedy.interfaces.attachments import filter_jailed_attachments
-
-        home = None
-        if isinstance(cfg, dict):
-            home = cfg.get("home_dir")
+    # Module-level import on purpose: inside the suppress, an import failure
+    # left forged paths in. A runtime failure decodes nothing — closed.
+    home = cfg.get("home_dir") if isinstance(cfg, dict) else None
+    try:
         atts = filter_jailed_attachments(atts, home_dir=home)
+    except Exception:
+        logger.exception("attachment path jail failed; decoding no images")
+        atts = []
     images = []
     for a in atts:
         mime = str(a.get("mime") or "")

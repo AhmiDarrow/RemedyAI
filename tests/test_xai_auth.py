@@ -178,8 +178,43 @@ class TestXaiCredentialsStore:
         xai_auth.save_api_key("xai-atomic", home=tmp_path)
         path = xai_auth.auth_path(home=tmp_path)
         assert path.exists()
-        assert not path.with_suffix(path.suffix + ".tmp").exists()
+        assert [f.name for f in path.parent.iterdir()] == [path.name], (
+            "a scratch file was left behind"
+        )
         assert xai_auth.load_credentials(home=tmp_path).api_key == "xai-atomic"
+
+    def test_save_uses_a_unique_scratch_name(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """``path.with_suffix(path.suffix + ".tmp")`` gave every writer the
+        same scratch file; two saves at once published interleaved bytes."""
+        import os
+
+        seen: list[str] = []
+        real_replace = os.replace
+
+        def _spy(src, dst):
+            seen.append(Path(src).name)
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(os, "replace", _spy)
+        monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+        xai_auth.save_api_key("xai-unique", home=tmp_path)
+        path = xai_auth.auth_path(home=tmp_path)
+        assert seen
+        assert seen[-1] != path.name + ".tmp"
+        assert str(os.getpid()) in seen[-1]
+
+    def test_clear_removes_a_stale_unique_scratch_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+        path = xai_auth.auth_path(home=tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stale = path.with_name(f".{path.name}.12345.678.tmp")
+        stale.write_text("{partial", encoding="utf-8")
+        xai_auth.clear_credentials(home=tmp_path)
+        assert not stale.exists()
 
     def test_clear_also_removes_stale_tmp(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

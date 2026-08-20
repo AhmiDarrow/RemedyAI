@@ -83,6 +83,27 @@ def test_an_empty_key_is_refused(tmp_path):
     assert secret_store.get_provider_secret("openai", tmp_path) is None
 
 
+def test_a_claude_subscription_token_is_refused_with_a_reason(tmp_path, capsys):
+    """``sk-ant-oat…`` is a Claude Max / Claude Code OAuth token, not a console
+    key. The desktop Settings refuse it; the CLI went straight to the store."""
+    from remedy.interfaces.anthropic_auth import SUBSCRIPTION_TOKEN_MESSAGE
+
+    token = "sk-ant-oat01-" + "a" * 40
+    with pytest.raises(SystemExit):
+        _run(tmp_path, provider="anthropic", auth_cmd="apikey", api_key=token)
+    out = capsys.readouterr().out.replace("\n", "")
+    assert SUBSCRIPTION_TOKEN_MESSAGE.split(".")[0][:30] in out
+    assert secret_store.get_provider_secret("anthropic", tmp_path) is None
+
+
+def test_a_key_is_filed_under_the_provider_that_issued_it(tmp_path, capsys):
+    """``remedy auth apikey openai gsk_…`` stores a Groq key under groq."""
+    _run(tmp_path, provider="openai", auth_cmd="apikey", api_key="gsk_groq_key_123")
+    assert secret_store.get_provider_secret("groq", tmp_path) == "gsk_groq_key_123"
+    assert secret_store.get_provider_secret("openai", tmp_path) is None
+    assert "groq" in capsys.readouterr().out.lower()
+
+
 def test_an_unknown_provider_says_what_is_known(tmp_path, capsys):
     with pytest.raises(SystemExit):
         _run(tmp_path, provider="nope", auth_cmd="status")

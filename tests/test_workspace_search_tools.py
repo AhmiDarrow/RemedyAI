@@ -95,6 +95,26 @@ async def test_list_dir_still_hides_machine_noise(tree):
 
 
 @pytest.mark.asyncio
+async def test_list_dir_hides_credential_files_but_not_their_templates(tree):
+    """Showing dotfiles must not mean advertising where the keys live."""
+    root = tree.root
+    for name in (".env", ".env.production", ".npmrc", ".pypirc", ".netrc",
+                 ".git-credentials", "id_rsa", "id_rsa.pub", "server.pem", "tls.key"):
+        (root / name).write_text("secret" + chr(10), encoding="utf-8")
+    (root / ".ssh").mkdir()
+    (root / ".aws").mkdir()
+    (root / ".env.example").write_text("KEY=" + chr(10), encoding="utf-8")
+    out = await tools(tree)["list_dir"]()
+    names = {line.split(" ", 1)[1].strip() for line in out.splitlines() if " " in line}
+    hidden = {".env", ".env.production", ".npmrc", ".pypirc", ".netrc",
+              ".git-credentials", "id_rsa", "id_rsa.pub", "server.pem", "tls.key",
+              ".ssh", ".aws"}
+    assert not (names & hidden), names & hidden
+    assert ".env.example" in names
+    assert ".gitignore" in names
+
+
+@pytest.mark.asyncio
 async def test_list_dir_on_a_missing_path_says_where_to_look(tree):
     out = await tools(tree)["list_dir"](path="nope")
     assert "NOT_FOUND" in out

@@ -808,6 +808,65 @@ async def test_cancelling_an_appointment_is_gated_in_ask_mode(
 
 
 @pytest.mark.asyncio
+async def test_rescheduling_an_appointment_is_gated_in_ask_mode(
+    tools, monkeypatch, approvals
+):
+    """A reschedule notifies every attendee, so Ask mode stops it first.
+
+    calendar_update_event had no gate at all: the edit went straight to the
+    provider in every mode.
+    """
+    approvals.set_mode("ask")
+    cal = _FullCalendar(provider_id="caldav")
+    _install_calendar(monkeypatch, cal, caldav=True)
+    out = await tools["calendar_update_event"](event_id="e1", start="2026-09-03T09:00:00Z")
+    assert out.startswith("APPROVAL_REQUIRED id=")
+    assert "start" in out
+    assert not [c for c in cal.calls if c[0] == "update"], "the event was edited anyway"
+
+
+@pytest.mark.asyncio
+async def test_auto_mode_reschedules_without_a_prompt(tools, monkeypatch, approvals):
+    approvals.set_mode("auto")
+    cal = _FullCalendar(provider_id="caldav")
+    _install_calendar(monkeypatch, cal, caldav=True)
+    out = await _json(tools, "calendar_update_event", event_id="e1", title="Dentist (moved)")
+    assert out["ok"] is True
+    assert [c for c in cal.calls if c[0] == "update"]
+
+
+@pytest.mark.asyncio
+async def test_disconnecting_a_mailbox_is_gated_in_ask_mode(
+    tools, monkeypatch, approvals, home
+):
+    """mail_disconnect deletes the stored app password; the owner has to go
+    and generate a new one. It had no gate: the model could unlink the mailbox
+    in any mode."""
+    from remedy.interfaces.secret_store import get_provider_secret, set_provider_secret
+
+    approvals.set_mode("ask")
+    set_provider_secret("mail_address", "someone@fastmail.com", home)
+    set_provider_secret("mail_app_password", "hunter2-app-password", home)
+    out = await tools["mail_disconnect"]()
+    assert out.startswith("APPROVAL_REQUIRED id=")
+    assert "someone@fastmail.com" in out
+    assert "hunter2-app-password" not in out
+    assert get_provider_secret("mail_app_password", home=home) == "hunter2-app-password"
+
+
+@pytest.mark.asyncio
+async def test_auto_mode_disconnects_without_a_prompt(tools, approvals, home):
+    from remedy.interfaces.secret_store import get_provider_secret, set_provider_secret
+
+    approvals.set_mode("auto")
+    set_provider_secret("mail_address", "someone@fastmail.com", home)
+    set_provider_secret("mail_app_password", "hunter2-app-password", home)
+    out = await _json(tools, "mail_disconnect")
+    assert out["ok"] is True
+    assert not (get_provider_secret("mail_app_password", home=home) or "")
+
+
+@pytest.mark.asyncio
 async def test_a_cancel_survives_a_provider_that_cannot_describe_the_event(
     tools, monkeypatch, approvals
 ):
@@ -917,6 +976,50 @@ async def test_disconnecting_an_unconnected_mailbox_is_not_an_error(tools):
     out = await _json(tools, "mail_disconnect")
     assert out["ok"] is True
     assert "no mailbox" in out["message"].lower()
+
+
+def test_switching_mailboxes_leaves_no_stale_connected_row(home):
+    """Connect Gmail, then Outlook: there is one credential slot, so the
+    ``imap_google`` row must go. It used to stay "connected" for ever, and
+    disconnect only removed the row for the *current* address."""
+    from remedy.assistant.providers.imap_smtp import (
+        clear_mail_credentials,
+        save_mail_credentials,
+    )
+    from remedy.assistant.store import get_assistant_store
+
+    store = get_assistant_store(home)
+    assert save_mail_credentials("me@gmail.com", "abcdefghijklmnop", home)["ok"]
+    assert save_mail_credentials("me@outlook.com", "abcdefghijklmnop", home)["ok"]
+    ids = sorted(a.id for a in store.list_accounts() if a.id.startswith("imap_"))
+    assert ids == ["imap_microsoft"], ids
+    out = clear_mail_credentials(home)
+    assert out["ok"] and out["address"] == "me@outlook.com"
+    assert [a for a in store.list_accounts() if a.id.startswith("imap_")] == []
+
+
+def test_disconnect_clears_every_app_password_row_even_a_foreign_one(home):
+    """A row from an earlier mailbox whose address no longer matches the
+    stored one is cleared too — the credential behind it is gone either way."""
+    import time
+
+    from remedy.assistant.models import LinkedAccount
+    from remedy.assistant.providers.imap_smtp import clear_mail_credentials
+    from remedy.assistant.store import get_assistant_store
+    from remedy.interfaces.secret_store import set_provider_secret
+
+    store = get_assistant_store(home)
+    store.upsert_account(
+        LinkedAccount(
+            id="imap_google", provider="google", email="old@gmail.com",
+            capabilities=["mail"], status="connected",
+            last_sync=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        )
+    )
+    set_provider_secret("mail_address", "me@outlook.com", home)
+    set_provider_secret("mail_app_password", "abcdefghijklmnop", home)
+    assert clear_mail_credentials(home)["ok"]
+    assert [a for a in store.list_accounts() if a.id.startswith("imap_")] == []
 
 
 @pytest.mark.asyncio

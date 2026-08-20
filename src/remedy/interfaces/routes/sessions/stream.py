@@ -19,6 +19,7 @@ from remedy.interfaces.api_support import (
     load_config,
     sse_headers,
 )
+from remedy.interfaces.attachments import filter_jailed_attachments
 from remedy.interfaces.routes.sessions.stream_tokens import (
     parse_tool_call_token,
     sse_event,
@@ -79,12 +80,16 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             home_att = None
             with contextlib.suppress(Exception):
                 home_att = load_config().get("home_dir")
-            with contextlib.suppress(Exception):
-                from remedy.interfaces.attachments import filter_jailed_attachments
-
+            # Module-level import on purpose: inside the suppress, an import
+            # failure left every attachment unfiltered. A runtime failure
+            # drops them all — closed, not open.
+            try:
                 att_dicts = filter_jailed_attachments(
                     att_dicts, home_dir=home_att, session_id=session_id
                 )
+            except Exception:
+                logger.exception("attachment path jail failed; dropping attachments")
+                att_dicts = []
             user_text = (req.message or "").strip()
             if not user_text and not att_dicts:
                 raise HTTPException(400, "Message or attachment required")

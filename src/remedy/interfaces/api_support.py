@@ -408,12 +408,11 @@ def _write_config(path: Path, cfg: dict[str, Any]) -> None:
         lines.append("\n")
     content = "".join(lines)
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Atomic replace — concurrent settings applies must not interleave writes.
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    with contextlib.suppress(OSError):
-        tmp.chmod(0o600)
-    os.replace(tmp, path)
+    # Atomic replace onto a unique scratch name — concurrent settings applies
+    # must not interleave writes or share a temp file.
+    from remedy.core.atomic_json import write_text_atomic
+
+    write_text_atomic(path, content, mode=0o600)
     with contextlib.suppress(OSError):
         path.chmod(0o600)
     # Drop mtime cache so the next GET sees the write immediately.

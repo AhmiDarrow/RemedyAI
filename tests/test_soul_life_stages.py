@@ -159,3 +159,24 @@ def test_local_enrich_graceful_without_server(tmp_path):
     assert result.get("ok")
     # local_enrich may fail ok=False but dream continues
     assert "local_enrich" in result
+
+
+def test_a_relative_export_with_a_subdirectory_lands_under_exports(tmp_path, monkeypatch):
+    """``export_soul_plain("sub/x.json")`` used to land at ``exports/x.json``.
+    Resolving the relative path against the CWD instead made it fail the
+    exports jail — from a CWD that is not the home, every such export raised."""
+    import pytest
+
+    elsewhere = tmp_path / "cwd"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    clear_soul_cache()
+    path = export_soul_plain("sub/x.json", home=tmp_path)
+    assert path == (tmp_path / "exports" / "x.json").resolve()
+    assert path.is_file()
+    assert not (elsewhere / "sub").exists()
+    # Escapes are still refused, relative and absolute alike.
+    with pytest.raises(ValueError):
+        export_soul_plain("../x.json", home=tmp_path)
+    with pytest.raises(ValueError):
+        export_soul_plain(tmp_path / "outside.json", home=tmp_path)

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import time
 from pathlib import Path
 from typing import Any
 
-from remedy.core.atomic_json import write_text_atomic
+from remedy.core.atomic_json import write_json_atomic, write_text_atomic
 
 
 def _offload_root(home: Path | str | None = None) -> Path:
@@ -41,7 +40,10 @@ def offload_tool_body(
         h = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
         path = root / f"{sid}_{h}.txt"
         if not path.is_file():
-            write_text_atomic(path, text)
+            # errors="replace": tool output can carry lone surrogates (undecodable
+            # bytes from a subprocess); a strict encode would raise and the
+            # offload would silently fall back to keeping the whole text inline.
+            write_text_atomic(path, text, errors="replace")
         # First line outcome + handle
         first = text.strip().split("\n", 1)[0][:160]
         handle = (
@@ -58,7 +60,7 @@ def offload_tool_body(
         }
         meta_path = path.with_suffix(".json")
         if not meta_path.is_file():
-            meta_path.write_text(json.dumps(meta), encoding="utf-8")
+            write_json_atomic(meta_path, meta, indent=None)
         return handle, str(path)
     except Exception:
         return text, None

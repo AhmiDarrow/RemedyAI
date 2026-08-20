@@ -169,6 +169,25 @@ def start_tier(
             "tier": tier_name,
         }
 
+    host = DEFAULT_HOST
+    port = tier.port
+
+    # A child we already spawned may still be loading its weights. Spawning a
+    # second one would double the VRAM and race for the port; killing the first
+    # because it is slow would mean a tier that needs longer than wait_s can
+    # never come up. So wait on the one we have, and only ever spawn when the
+    # slot is empty or holds a corpse.
+    existing = _tier_procs.get(tier_name)
+    if existing is not None:
+        if existing.poll() is None:
+            return _await_ready(tier_name, existing, host, port, wait_s, already_running=True)
+        logger.info(
+            "MDL tier %s exited (code %s) before becoming ready; respawning",
+            tier_name,
+            existing.returncode,
+        )
+        _tier_procs[tier_name] = None
+
     binary = Path(runtime_binary)
     if not binary.is_file():
         return {"ok": False, "error": f"llama-server binary not found: {runtime_binary}"}
@@ -176,9 +195,6 @@ def start_tier(
     mpath = Path(model_path)
     if not mpath.is_file():
         return {"ok": False, "error": f"Model file not found: {model_path}"}
-
-    host = DEFAULT_HOST
-    port = tier.port
 
     cmd: list[str] = [
         str(binary),
@@ -210,39 +226,59 @@ def start_tier(
     except OSError as e:
         return {"ok": False, "error": f"Failed to start tier {tier_name}: {e}"}
 
+    return _await_ready(tier_name, proc, host, port, wait_s, already_running=False)
+
+
+def _await_ready(
+    tier_name: str,
+    proc: subprocess.Popen[Any],
+    host: str,
+    port: int,
+    wait_s: float,
+    *,
+    already_running: bool,
+) -> dict[str, Any]:
+    """Wait up to ``wait_s`` for a registered child to answer its health probe.
+
+    A child that *exits* is a failure and its slot is cleared. A child that is
+    merely still loading when the clock runs out stays registered and is
+    reported as ``starting`` rather than failed, so the next call picks it up
+    where this one left off instead of spawning a twin beside it.
+    """
     deadline = time.time() + wait_s
-    while time.time() < deadline:
-        proc = _tier_procs.get(tier_name)
-        if proc is None:
+    while True:
+        current = _tier_procs.get(tier_name)
+        if current is None:
             return {"ok": False, "error": f"Tier {tier_name} proc cleared during start"}
+        if current is not proc:
+            # Someone else replaced the slot; that start owns the wait now.
+            return {"ok": False, "error": f"Tier {tier_name} restarted concurrently"}
         if proc.poll() is not None:
             _tier_procs[tier_name] = None
             return {
                 "ok": False,
                 "error": f"Tier {tier_name} exited early (code {proc.returncode})",
             }
-        if _port_open(host, port):
-            if _health(get_tier_base_url(tier_name), timeout=0.6):
-                mark_tier_used(tier_name)
-                return {
-                    "ok": True,
-                    "already_running": False,
-                    "base_url": get_tier_base_url(tier_name),
-                    "tier": tier_name,
-                    "pid": proc.pid,
-                }
+        if _port_open(host, port) and _health(get_tier_base_url(tier_name), timeout=0.6):
+            mark_tier_used(tier_name)
+            return {
+                "ok": True,
+                "already_running": already_running,
+                "base_url": get_tier_base_url(tier_name),
+                "tier": tier_name,
+                "pid": proc.pid,
+            }
+        if time.time() >= deadline:
+            break
         time.sleep(0.4)
 
-    # Reporting failure while leaving the child alive and registered means a
-    # server that merely loads slower than wait_s keeps ~1GB of VRAM and shows
-    # up as running on the next port probe, with nothing to reconcile it.
-    with contextlib.suppress(Exception):
-        stop_tier(tier_name)
     return {
         "ok": False,
-        "error": f"Tier {tier_name} did not become healthy within {wait_s}s",
+        "starting": True,
+        "pid": proc.pid,
+        "tier": tier_name,
+        "error": f"Tier {tier_name} still loading after {wait_s}s; not ready yet",
     }
-
 
 def ensure_tier(
     tier_name: str,

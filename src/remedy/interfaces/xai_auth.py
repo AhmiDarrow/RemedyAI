@@ -99,16 +99,11 @@ def _coerce_expires_at(value: Any) -> float | None:
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
-    """Write *data* via temp file + replace so a crash cannot leave a half-written auth file."""
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    try:
-        tmp.write_bytes(data)
-        tmp.replace(path)
-    except Exception:
-        with contextlib.suppress(OSError):
-            if tmp.exists():
-                tmp.unlink()
-        raise
+    """Write *data* via the shared atomic helper (unique scratch name, cleaned
+    up on failure) so a crash cannot leave a half-written auth file."""
+    from remedy.core.atomic_json import write_bytes_atomic
+
+    write_bytes_atomic(path, data)
 
 
 @dataclass
@@ -266,11 +261,12 @@ def clear_credentials(home: Path | None = None) -> None:
     with contextlib.suppress(OSError):
         if path.exists():
             path.unlink()
-    # Drop any half-written temp from a crashed save.
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    # Drop any half-written scratch file from a crashed save — the shared
+    # helper's ``.<name>.<pid>.<tid>.tmp`` names and the legacy ``.tmp``.
     with contextlib.suppress(OSError):
-        if tmp.exists():
-            tmp.unlink()
+        for tmp in (*path.parent.glob(f".{path.name}.*.tmp"), Path(str(path) + ".tmp")):
+            if tmp.exists():
+                tmp.unlink()
 
 
 def save_api_key(api_key: str, home: Path | None = None) -> XaiCredentials:

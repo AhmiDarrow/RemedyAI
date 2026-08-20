@@ -350,6 +350,10 @@ class ApprovalQueue:
             # prompt at all.
             "mail_reply",
             "calendar_cancel_event",
+            # Rescheduling notifies every attendee; disconnecting deletes the
+            # stored app password. Both acted silently in every mode.
+            "calendar_update_event",
+            "mail_disconnect",
             "computer_click",
             "computer_type",
             "computer_key",
@@ -445,6 +449,11 @@ class ApprovalQueue:
             elif tool == "calendar_cancel_event":
                 reason = "Cancelling an appointment requires approval "
                 reason += "(calendar_cancel_event)"
+            elif tool == "calendar_update_event":
+                reason = "Rescheduling an appointment requires approval "
+                reason += "(calendar_update_event)"
+            elif tool == "mail_disconnect":
+                reason = "Disconnecting the mailbox requires approval (mail_disconnect)"
             elif tool.startswith("computer_"):
                 reason = f"Computer control requires approval ({tool})"
         if not reason and c and _ASK_PATTERNS.search(c):

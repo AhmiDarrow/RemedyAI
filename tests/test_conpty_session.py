@@ -37,9 +37,18 @@ from remedy.execution.host.conpty import (
     spawn_conpty,
     spawn_conpty_supported,
 )
+from remedy.execution.host.session import (
+    HostSession,
+    _sentinel_done,
+    _split_sentinel,
+    _wrap_with_sentinel,
+    strip_vt,
+)
 from tests.harness.fake_win32 import (
+    CONPTY_PRELUDE,
     FakeConsoleHost,
     FakeWinDLL,
+    fake_cmd_shell,
     handle_value,
     install_fake_win32,
 )
@@ -56,6 +65,7 @@ windows_only = pytest.mark.skipif(
 _EXTENDED_STARTUPINFO_PRESENT = 0x00080000
 _CREATE_UNICODE_ENVIRONMENT = 0x00000400
 _PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016
+_STARTF_USESTDHANDLES = 0x00000100
 
 
 # ---------------------------------------------------------------------------
@@ -985,6 +995,221 @@ async def test_a_spawned_session_round_trips_a_command_through_the_double() -> N
     assert host.written(stdin_h) == b"ver\r\n"
     assert host.terminated == [(host.process_handle, 1)]
     assert host.double_closed == []
+
+
+# ---------------------------------------------------------------------------
+# The session on top of a pseudoconsole — echo, VT noise, the sentinel
+# ---------------------------------------------------------------------------
+
+
+def _echoing_host(cwd: str = "C:\\work") -> FakeConsoleHost:
+    # pid=0: should a test time out, kill_process_tree must not taskkill a
+    # real process that happens to own the fake's pid.
+    return FakeConsoleHost(
+        pid=0, echo=True, shell=fake_cmd_shell(cwd), vt_prelude=CONPTY_PRELUDE
+    )
+
+
+async def _conpty_session(host: FakeConsoleHost) -> tuple[HostSession, Any]:
+    """A ``HostSession(use_conpty=True)`` whose child is the fake console."""
+    proc = conpty._spawn_conpty_sync(["cmd.exe", "/Q", "/K"], None, None)
+
+    async def override(_argv: list[str], *, cwd: Any = None, env: Any = None) -> Any:
+        return proc
+
+    spawn_conpty._override = override  # type: ignore[attr-defined]
+    sess = HostSession(host="cmd", use_conpty=True)
+    await sess.start()
+    assert sess._used_conpty is True
+    return sess, proc
+
+
+def _drop(sess: HostSession, proc: Any) -> None:
+    # Not sess.close(): kill_process_tree would run a real taskkill on the
+    # fake pid. The fake child is torn down directly.
+    sess._proc = None
+    sess.started = False
+    proc.kill()
+
+
+@windows_only
+@pytest.mark.asyncio
+async def test_a_conpty_session_returns_only_what_the_command_printed() -> None:
+    """Reproduced live: ``run("echo hello")`` came back with exit 0 and
+    ``stdout='\\x1b[?9001h…chcp 65001 >NUL & @echo offecho helloecho'``.
+
+    The pseudoconsole echoes what we type, so ``echo SENTINEL:%ERRORLEVEL%``
+    appeared in the stream BEFORE the command ran; ``_read_until`` matched the
+    echo, ``_split_sentinel`` read ``:%ERRORLEVEL%`` as exit 0, and the body
+    was escape codes plus the echoed boot and command lines.
+    """
+    host = _echoing_host()
+    with install_fake_win32(console=host):
+        sess, proc = await _conpty_session(host)
+        res = await sess.run("echo hello", timeout=5)
+        _drop(sess, proc)
+
+    assert res.timed_out is False
+    assert res.used_conpty is True
+    assert res.exit_code == 0
+    assert res.stdout == "hello"
+    assert res.cwd == "C:\\work"
+
+
+@windows_only
+@pytest.mark.asyncio
+async def test_a_conpty_session_presses_enter_not_linefeed() -> None:
+    """Live, with the echo bug fixed, every command still timed out: a
+    pseudoconsole is a keyboard, and cooked line input is submitted by CR.
+    The LF the pipe path writes was typed INTO the line, never submitted."""
+    host = _echoing_host()
+    with install_fake_win32(console=host):
+        sess, proc = await _conpty_session(host)
+        res = await sess.run("echo typed", timeout=2)
+        typed = host.written(proc.stdin._handle)
+        _drop(sess, proc)
+
+    assert res.timed_out is False
+    assert res.stdout == "typed"
+    assert b"\n" not in typed
+    assert typed.endswith(b"\r")
+
+
+@windows_only
+@pytest.mark.asyncio
+async def test_a_conpty_session_reports_the_real_exit_code_not_the_echo() -> None:
+    # The echo of the sentinel line carries the literal ``%ERRORLEVEL%``;
+    # reading it as 0 turned every failed command into a success.
+    host = _echoing_host()
+    with install_fake_win32(console=host):
+        sess, proc = await _conpty_session(host)
+        res = await sess.run("exit 3", timeout=5)
+        _drop(sess, proc)
+
+    assert res.timed_out is False
+    assert res.exit_code == 3
+    assert res.stdout == ""
+
+
+@windows_only
+@pytest.mark.asyncio
+async def test_a_conpty_session_keeps_multi_line_output_and_drops_the_boot_echo() -> None:
+    host = _echoing_host(cwd="D:\\proj")
+    with install_fake_win32(console=host):
+        sess, proc = await _conpty_session(host)
+        first = await sess.run("echo one & echo two", timeout=5)
+        second = await sess.run("echo three", timeout=5)
+        _drop(sess, proc)
+
+    assert first.stdout.splitlines() == ["one", "two"]
+    assert first.cwd == "D:\\proj"
+    assert second.stdout == "three"
+    assert "\x1b" not in first.stdout + second.stdout
+    assert "chcp" not in first.stdout
+
+
+@windows_only
+@pytest.mark.asyncio
+async def test_a_pipe_session_is_unaffected_by_the_stricter_sentinel() -> None:
+    # No echo, no VT: the plain-pipe shell path must keep working unchanged.
+    host = FakeConsoleHost(
+        pid=0, echo=False, shell=fake_cmd_shell("C:\\plain"), newline_submits=True
+    )
+    with install_fake_win32(console=host):
+        sess, proc = await _conpty_session(host)
+        sess._used_conpty = False
+        res = await sess.run("echo plain", timeout=5)
+        _drop(sess, proc)
+
+    assert res.exit_code == 0
+    assert res.stdout == "plain"
+    assert res.cwd == "C:\\plain"
+
+
+@pytest.mark.parametrize(
+    ("text", "code", "body"),
+    [
+        ("hi\r\nREMEDY_HOST_DONE_abc:0\r\n", 0, "hi"),
+        ("REMEDY_HOST_DONE_abc:12\r\n", 12, ""),
+        ("x\nREMEDY_HOST_DONE_abc:-1\n", -1, "x"),
+        # PowerShell: $LASTEXITCODE is null until a native command has run.
+        ("out\r\nREMEDY_HOST_DONE_abc:\r\n", 0, "out"),
+        # ConPTY renders the line end as a cursor move rather than CRLF.
+        ("hello\r\nREMEDY_HOST_DONE_abc:0\x1b[5;1H", 0, "hello"),
+    ],
+)
+def test_the_sentinel_is_read_in_its_expanded_form(text: str, code: int, body: str) -> None:
+    assert _split_sentinel(text, "REMEDY_HOST_DONE_abc") == (code, body)
+
+
+@pytest.mark.parametrize(
+    "echoed",
+    [
+        "echo REMEDY_HOST_DONE_abc:%ERRORLEVEL%\r\n",
+        'Write-Output "REMEDY_HOST_DONE_abc:$LASTEXITCODE"\r\n',
+        "echo REMEDY_HOST_DONE_abc:$?\n",
+    ],
+)
+def test_an_echoed_unexpanded_sentinel_is_not_a_completion(echoed: str) -> None:
+    assert _sentinel_done(echoed.encode(), b"REMEDY_HOST_DONE_abc") is False
+    assert _split_sentinel(echoed, "REMEDY_HOST_DONE_abc")[0] == -1
+    assert _sentinel_done((echoed + "REMEDY_HOST_DONE_abc:0\r\n").encode(), b"REMEDY_HOST_DONE_abc")
+
+
+def test_the_split_for_a_pseudoconsole_strips_vt_and_the_echoed_command() -> None:
+    sentinel = "REMEDY_HOST_DONE_abc"
+    wrapped = _wrap_with_sentinel("cmd", "echo hello", sentinel)
+    stream = (
+        CONPTY_PRELUDE.decode()
+        + "chcp 65001 >NUL & @echo off\x1b[2;1H"
+        + "echo hello\x1b[3;1Hhello\r\n"
+        + f"echo {sentinel}:%ERRORLEVEL%\x1b[5;1H"
+        + f"\x1b[?25h{sentinel}:0\r\n"
+    )
+    assert _split_sentinel(stream, sentinel, host="cmd", command=wrapped, conpty=True) == (
+        0,
+        "hello",
+    )
+
+
+def test_strip_vt_removes_every_kind_of_escape_sequence() -> None:
+    text = "\x1b]0;title\x07\x1b[?9001h\x1b[2J\x1b[31mred\x1b[m\x1b(B\x07done\x1b[1;1H"
+    assert strip_vt(text) == "reddone"
+
+
+# ---------------------------------------------------------------------------
+# _spawn_conpty_sync — standard handles and a failing CreatePseudoConsole
+# ---------------------------------------------------------------------------
+
+
+@windows_only
+def test_the_child_gets_no_standard_handles_from_the_parent(wired: Any) -> None:
+    """When Remedy's own stdio is redirected (service, launcher) the child
+    inherited it regardless of ``bInheritHandles=False``; its output landed on
+    the parent's stdout and every ``run()`` timed out. STARTF_USESTDHANDLES
+    with NULL handles leaves the pseudoconsole as the child's only stdio.
+    """
+    host, _fake = wired
+    conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+    spawn = host.spawns[0]
+    assert spawn["startup_flags"] & _STARTF_USESTDHANDLES
+    assert spawn["std_handles"] == (None, None, None)
+
+
+@windows_only
+def test_a_raising_createpseudoconsole_still_closes_all_four_pipe_ends() -> None:
+    """``restype = HRESULT`` makes ctypes RAISE on failure, so the ``if hr``
+    cleanup branch was dead and the four pipe handles leaked every time."""
+    host = FakeConsoleHost(create_pseudoconsole_hr=-2147024809)
+    with install_fake_win32(console=host) as fake:
+        with pytest.raises(OSError, match=r"CreatePseudoConsole failed hr=-2147024809"):
+            conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+        assert fake.log.count("CloseHandle") == 4
+
+    assert len(host.pipes) == 2
+    assert host.open_handles == [], f"leaked {host.open_handles}"
+    assert host.double_closed == []
+    assert host.spawns == []
 
 
 def test_ctypes_is_imported_lazily_so_the_module_loads_anywhere() -> None:

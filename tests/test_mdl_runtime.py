@@ -694,27 +694,112 @@ def test_an_open_port_alone_is_not_enough_to_declare_the_start_healthy(monkeypat
         wait_s=0.05,
     )
     assert out["ok"] is False
-    assert "did not become healthy" in out["error"]
+    assert out["starting"] is True
+    assert "not ready yet" in out["error"]
 
 
-def test_a_start_that_times_out_stops_the_child_it_started(monkeypatch, tmp_path):
-    """It used to neither kill the child nor clear the slot, so a server that
-    merely loaded slower than wait_s kept ~1GB of VRAM and still answered the
-    next port probe as running, with nothing to reconcile it."""
+def test_a_slow_tier_is_left_loading_and_picked_up_by_the_next_call_without_a_second_spawn(
+    monkeypatch, tmp_path
+):
+    """Every caller uses the default wait_s. Killing a child that was merely
+    still loading when the clock ran out meant a tier slower than wait_s could
+    never come up: each attempt spawned, waited, killed, and reported failure.
+    The child stays registered as "starting"; the next call waits on *it*."""
     monkeypatch.setattr(mr, "is_tier_running", lambda n: False)
-    monkeypatch.setattr(mr, "_port_open", lambda *a, **k: False)
     monkeypatch.setattr(time, "sleep", lambda s: None)
-    proc = FakeProc(alive=True)
-    _popen_recorder(monkeypatch, proc=proc)
+    probes = {"n": 0}
+
+    def _port_open(*a, **k):
+        probes["n"] += 1
+        return probes["n"] > 3  # ready only on the second start_tier call
+
+    monkeypatch.setattr(mr, "_port_open", _port_open)
+    monkeypatch.setattr(mr, "_health", lambda *a, **k: True)
+    proc = FakeProc(alive=True, pid=991)
+    spawns = []
+
+    def _popen(cmd, **kwargs):
+        spawns.append(cmd)
+        return proc
+
+    monkeypatch.setattr(subprocess, "Popen", _popen)
+    kw = {"model_path": str(_model(tmp_path)), "runtime_binary": str(_binary(tmp_path))}
+
+    first = mr.start_tier("medium", wait_s=0.0, **kw)
+    assert first["ok"] is False
+    assert first["starting"] is True
+    assert first["pid"] == 991
+    assert not (proc.terminated or proc.killed), "a loading child was killed"
+    assert mr._tier_procs["medium"] is proc, "the loading child must stay registered"
+
+    second = mr.start_tier("medium", wait_s=5.0, **kw)
+    assert second["ok"] is True
+    assert second["pid"] == 991
+    assert second["already_running"] is True
+    assert len(spawns) == 1, "a second llama-server was spawned beside the first"
+    assert mr._tier_last_used["medium"] > 0
+
+
+def test_a_registered_child_that_died_while_loading_is_cleared_and_respawned(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(mr, "is_tier_running", lambda n: False)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    monkeypatch.setattr(mr, "_port_open", lambda *a, **k: True)
+    monkeypatch.setattr(mr, "_health", lambda *a, **k: True)
+    corpse = FakeProc(alive=False, returncode=-9, pid=1)
+    mr._tier_procs["medium"] = corpse
+    fresh = FakeProc(alive=True, pid=2)
+    rec = _popen_recorder(monkeypatch, proc=fresh)
     out = mr.start_tier(
         "medium",
         model_path=str(_model(tmp_path)),
         runtime_binary=str(_binary(tmp_path)),
-        wait_s=0.05,
     )
+    assert out["ok"] is True
+    assert out["pid"] == 2
+    assert "cmd" in rec
+    assert mr._tier_procs["medium"] is fresh
+
+
+def test_a_child_that_exits_during_a_later_wait_is_reported_and_unregistered(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(mr, "is_tier_running", lambda n: False)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    monkeypatch.setattr(mr, "_port_open", lambda *a, **k: False)
+    proc = FakeProc(alive=True)
+    _popen_recorder(monkeypatch, proc=proc)
+    kw = {"model_path": str(_model(tmp_path)), "runtime_binary": str(_binary(tmp_path))}
+    assert mr.start_tier("full", wait_s=0.0, **kw)["starting"] is True
+    proc._alive = False
+    proc.returncode = 7
+    out = mr.start_tier("full", wait_s=0.0, **kw)
     assert out["ok"] is False
-    assert proc.terminated or proc.killed, "the leaked server was left running"
-    assert mr._tier_procs.get("medium") is None, "the slot still claims a server"
+    assert "exited early (code 7)" in out["error"]
+    assert mr._tier_procs["full"] is None
+
+
+def test_there_is_never_more_than_one_popen_per_tier(monkeypatch, tmp_path):
+    """Repeated starts against a tier that never becomes ready must not stack
+    up servers — that was the VRAM leak the old timeout-kill existed to stop."""
+    monkeypatch.setattr(mr, "is_tier_running", lambda n: False)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    monkeypatch.setattr(mr, "_port_open", lambda *a, **k: False)
+    spawned = []
+
+    def _popen(cmd, **kwargs):
+        spawned.append(FakeProc(alive=True, pid=100 + len(spawned)))
+        return spawned[-1]
+
+    monkeypatch.setattr(subprocess, "Popen", _popen)
+    kw = {"model_path": str(_model(tmp_path)), "runtime_binary": str(_binary(tmp_path))}
+    for _ in range(5):
+        out = mr.start_tier("medium", wait_s=0.0, **kw)
+        assert out["ok"] is False and out["starting"] is True
+    assert len(spawned) == 1
+    assert mr._tier_procs["medium"] is spawned[0]
+    assert not spawned[0].terminated and not spawned[0].killed
 
 
 def test_a_slot_cleared_by_a_concurrent_stop_aborts_the_start(monkeypatch, tmp_path):

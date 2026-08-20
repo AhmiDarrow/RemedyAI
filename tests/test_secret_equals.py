@@ -23,8 +23,10 @@ from remedy.core.security import secret_equals
         ("tok-abc", "tok-xyz", False),
         ("tok", "tok-abc", False),          # shorter
         ("tok-abc-extra", "tok-abc", False),  # longer
-        ("", "", True),
+        ("", "", False),   # an unset secret never matches
         ("", "x", False),
+        ("x", "", False),
+        (b"", b"", False),
         (b"abc", b"abc", True),
         (b"abc", "abc", True),
         ("tökén", "tökén", True),
@@ -36,8 +38,10 @@ def test_it_answers_correctly(a, b, expect):
 
 
 @pytest.mark.parametrize(("a", "b"), [(None, None), (None, "x"), ("x", None)])
-def test_none_never_raises(a, b):
-    assert secret_equals(a, b) is (a is None and b is None)
+def test_none_never_raises_and_never_matches(a, b):
+    """``(None, None)`` answered True — an auth check that passed when the
+    expected secret was unset and the client sent nothing."""
+    assert secret_equals(a, b) is False
 
 
 def test_a_hostile_type_is_false_not_a_crash():

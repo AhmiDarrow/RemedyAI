@@ -113,6 +113,32 @@ def test_resolve_tools_l1_strips_pure_chat():
     assert d.reason == "l1_pure_chat"
 
 
+def test_resolve_tools_tier0_is_not_treated_as_l1(monkeypatch):
+    """Tier 0 must not take the L1-only chat strip (``int(0 or 1)`` was 1).
+
+    The early bare-greeting strip uses the same classifier, so it is stubbed to
+    pass the first call and flag the second: that isolates the tier-gated
+    branch, which is the only place the tier is consulted.
+    """
+    from remedy.core import react_policy
+
+    calls = {"n": 0}
+
+    def _chat_only(_msg):
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    monkeypatch.setattr(react_policy, "is_chat_only_message", _chat_only)
+    all_t = [_tool("file_write"), _tool("bash_exec")]
+    calls["n"] = 0
+    d1 = resolve_tools(message="ok so", all_tools=all_t, turn_tier=1)
+    assert d1.reason == "l1_pure_chat"
+    calls["n"] = 0
+    d0 = resolve_tools(message="ok so", all_tools=all_t, turn_tier=0)
+    assert d0.reason != "l1_pure_chat"
+    assert d0.tools is not None
+
+
 def test_resolve_tools_greeting_disarms_leftover_build():
     """Bare Hi must not inherit a previous coding turn's tools."""
     all_t = [_tool("file_write"), _tool("bash_exec")]

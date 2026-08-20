@@ -193,3 +193,110 @@ def test_probing_everything_shells_out_to_adb_once(monkeypatch):
     calls.clear()
     registry.line_options()
     assert len(calls) == 1, f"adb ran {len(calls)} times"
+
+
+# ---------------------------------------------------------------------------
+# ctypes marshalling — the probe on a machine that HAS a radio
+# ---------------------------------------------------------------------------
+
+
+class _StrictFunction:
+    """A ctypes foreign function as ctypes actually behaves: with no
+    ``argtypes`` every Python int is marshalled as a C ``int``, and one that
+    does not fit 32 bits raises ``ArgumentError``."""
+
+    def __init__(self, name: str, impl, calls: list) -> None:
+        self.name = name
+        self.impl = impl
+        self.calls = calls
+        self.argtypes = None
+        self.restype = None
+
+    def __call__(self, *args):
+        import ctypes
+
+        if self.argtypes is None:
+            for a in args:
+                if isinstance(a, int) and not (-(2**31) <= a < 2**31):
+                    raise ctypes.ArgumentError(
+                        f"argument 1: OverflowError: int too long to convert ({self.name})"
+                    )
+        elif len(self.argtypes) != len(args):
+            raise ctypes.ArgumentError(f"{self.name}: wrong number of arguments")
+        self.calls.append((self.name, args))
+        return self.impl(*args)
+
+
+class _StrictDLL:
+    def __init__(self, impls: dict, calls: list) -> None:
+        self._fns = {n: _StrictFunction(n, f, calls) for n, f in impls.items()}
+
+    def __getattr__(self, name: str):
+        try:
+            return self._fns[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+
+_RADIO_FINDER = 0x1_0000_0010  # a handle that does not fit a C int
+_RADIO_HANDLE = 0x2_0000_0020
+
+
+def _install_radio_machine(monkeypatch):
+    """A fake Windows with one Bluetooth radio, behind strict ctypes rules."""
+    import ctypes
+
+    calls: list = []
+
+    def find_first(params, pradio):
+        pradio._obj.value = _RADIO_HANDLE
+        return _RADIO_FINDER
+
+    dlls = {
+        "bthprops.cpl": _StrictDLL(
+            {
+                "BluetoothFindFirstRadio": find_first,
+                "BluetoothFindRadioClose": lambda h: 1,
+            },
+            calls,
+        ),
+        "kernel32": _StrictDLL({"CloseHandle": lambda h: 1}, calls),
+    }
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(ctypes, "WinDLL", lambda name, **kw: dlls[name], raising=False)
+    return calls
+
+
+def test_a_machine_with_a_radio_is_reported_as_having_one(monkeypatch):
+    """``BluetoothFindRadioClose`` had no argtypes. Once the finder's restype
+    became a 64-bit HANDLE, handing it back as a C int raised ArgumentError,
+    the blanket catch turned that into None — "I could not tell" — on exactly
+    the machines that do have a radio."""
+    calls = _install_radio_machine(monkeypatch)
+    assert has_bluetooth_radio() is True
+    assert ("BluetoothFindRadioClose", (_RADIO_FINDER,)) in calls
+
+
+def test_the_radio_probe_closes_both_handles_it_opened(monkeypatch):
+    calls = _install_radio_machine(monkeypatch)
+    has_bluetooth_radio()
+    names = [name for name, _ in calls]
+    assert names == ["BluetoothFindFirstRadio", "CloseHandle", "BluetoothFindRadioClose"]
+    close_args = dict(calls)["CloseHandle"]
+    assert getattr(close_args[0], "value", close_args[0]) == _RADIO_HANDLE
+
+
+def test_every_bluetooth_function_declares_handle_argtypes(monkeypatch):
+    import ctypes
+    from ctypes import wintypes
+
+    _install_radio_machine(monkeypatch)
+    has_bluetooth_radio()
+    bth = ctypes.WinDLL("bthprops.cpl")
+    k32 = ctypes.WinDLL("kernel32")
+    assert bth.BluetoothFindRadioClose.argtypes == [wintypes.HANDLE]
+    assert bth.BluetoothFindRadioClose.restype is wintypes.BOOL
+    assert bth.BluetoothFindFirstRadio.restype is wintypes.HANDLE
+    assert bth.BluetoothFindFirstRadio.argtypes is not None
+    assert len(bth.BluetoothFindFirstRadio.argtypes) == 2
+    assert k32.CloseHandle.argtypes == [wintypes.HANDLE]

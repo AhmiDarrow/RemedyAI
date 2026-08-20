@@ -699,12 +699,15 @@ class FakeIMAP4SSL:
         if msg is None:
             return "OK", [None]
         wanted = _flag_set(flags)
+        before = set(msg.flags)
         if cmd.startswith("+"):
             msg.flags |= wanted
         elif cmd.startswith("-"):
             msg.flags -= wanted
         else:
             msg.flags = wanted
+        if self.server.silent_noop_store and msg.flags == before:
+            return "OK", [None]
         return "OK", [f"{seq} (FLAGS ({' '.join(sorted(msg.flags))}))".encode()]
 
     def copy(self, message_set: Any, new_mailbox: Any) -> tuple[str, list[Any]]:
@@ -780,12 +783,17 @@ class FakeIMAPServer(_Faultable):
         *,
         accounts: dict[str, str] | None = None,
         strict_message_set: bool = False,
+        silent_noop_store: bool = False,
     ) -> None:
         super().__init__()
         self.mailbox = mailbox if mailbox is not None else sample_mailbox()
         # None accepts any credential; a dict checks address → password.
         self.accounts = accounts
         self.strict_message_set = strict_message_set
+        #: Some servers send no untagged FETCH when a STORE changed nothing
+        #: (the flag was already set), so the reply is ``('OK', [None])`` for
+        #: a message that very much exists.
+        self.silent_noop_store = silent_noop_store
         self.search_result: tuple[str, list[bytes]] | None = None
 
         self.connections: list[tuple[str, int, float | None]] = []

@@ -464,7 +464,10 @@ def resolve_tools(
             return ToolsDecision(None, False, "non_work", pack="none")
 
     # L1 may strip *only* proven social/meta chat. Any other ask stays armed.
-    if int(turn_tier or 1) == 1 and not browse_pre_url and not page_interaction:
+    # ``int(turn_tier or 1)`` read tier 0 as tier 1, so L0 turns got the
+    # L1-only chat strip and lost their tools.
+    tier = 1 if turn_tier is None else int(turn_tier)
+    if tier == 1 and not browse_pre_url and not page_interaction:
         chat_only = False
         with suppress(Exception):
             from remedy.core.react_policy import is_chat_only_message

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import sys
 import uuid
@@ -19,6 +20,16 @@ from typing import Any
 
 _SENTINEL_PREFIX = "REMEDY_HOST_DONE_"
 _SESSIONS_GUARD = asyncio.Lock()
+
+# Every escape sequence a pseudoconsole can emit: OSC (title etc.), CSI
+# (cursor moves, colours, private modes such as ?9001h / ?25l), two-byte
+# ESC sequences, and the stray C0 controls (BEL, BS) that are not text.
+_VT_RE = re.compile(
+    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC ... BEL | ST
+    r"|\x1b\[[0-?]*[ -/]*[@-~]"  # CSI
+    r"|\x1b[ -/]*[@-~]"  # ESC + intermediate* + final
+    r"|[\x07\x08]"
+)
 
 _PROMPT_MARKERS = (
     b"password:",
@@ -119,7 +130,13 @@ class HostSession:
 
                 unregister_turn_process(self._proc)
         text = raw.decode("utf-8", errors="replace")
-        code, body = _split_sentinel(text, sentinel)
+        code, body = _split_sentinel(
+            text,
+            sentinel,
+            host=self.host,
+            command=wrapped,
+            conpty=bool(getattr(self, "_used_conpty", False)),
+        )
         cwd = ""
         if timed_out:
             # Do not leave the timed-out command running in the shared shell.
@@ -165,7 +182,13 @@ class HostSession:
             self.started = False
             self._stdout_pending = None
             return ""
-        _code, body = _split_sentinel(raw.decode("utf-8", errors="replace"), sentinel)
+        _code, body = _split_sentinel(
+            raw.decode("utf-8", errors="replace"),
+            sentinel,
+            host=self.host,
+            command=wrapped,
+            conpty=bool(getattr(self, "_used_conpty", False)),
+        )
         del _code
         lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
         return lines[-1] if lines else ""
@@ -199,6 +222,11 @@ class HostSession:
         data = text.encode("utf-8", errors="replace")
         if not data.endswith(b"\n"):
             data += b"\n"
+        if getattr(self, "_used_conpty", False):
+            # A pseudoconsole is a keyboard, not a pipe: cooked line input is
+            # submitted by Enter (CR). A bare LF is just typed into the line,
+            # so the shell never ran anything and every run() timed out.
+            data = data.replace(b"\r\n", b"\n").replace(b"\n", b"\r")
         proc.stdin.write(data)
         await proc.stdin.drain()
 
@@ -246,7 +274,7 @@ class HostSession:
             # command that merely printed a prompt-like word (cat a file with
             # "password:", git output with "are you sure") is never mistaken
             # for a live prompt.
-            if marker in buf:
+            if _sentinel_done(bytes(buf), marker):
                 return bytes(buf), False, interactive
             # A real interactive prompt is the CURRENT unterminated line: the
             # process is blocked on stdin, so the marker sits AFTER the last
@@ -303,25 +331,100 @@ def _wrap_with_sentinel(host: str, command: str, sentinel: str) -> str:
     return f"{command}\necho {sentinel}:$?\n"
 
 
-def _split_sentinel(text: str, sentinel: str) -> tuple[int, str]:
-    idx = text.find(sentinel)
-    if idx < 0:
-        return -1, text
-    body = text[:idx]
-    rest = text[idx + len(sentinel) :]
-    code = 0
-    if rest.startswith(":"):
-        num = ""
-        for ch in rest[1:]:
-            if ch.isdigit() or ch == "-":
-                num += ch
-            else:
-                break
-        try:
-            code = int(num) if num else 0
-        except ValueError:
-            code = 0
-    # drop the rest of the sentinel line from body already sliced
+def _sentinel_pattern(sentinel: bytes | str) -> re.Pattern[Any]:
+    """Match the sentinel only in its EXPANDED form: ``SENTINEL:<digits>`` at
+    the end of a line.
+
+    A pseudoconsole echoes what we type, so ``echo SENTINEL:%ERRORLEVEL%``
+    (or ``"SENTINEL:$LASTEXITCODE"``) appears in the stream before the command
+    has run. Requiring the character after the colon to be a digit or a line
+    end (``
+``, ``
+``, or the ESC that ConPTY uses instead of a newline)
+    rejects the echo, whose next character is ``%`` or ``$``. The digits may
+    be empty: PowerShell's ``$LASTEXITCODE`` is null until a native command
+    has run.
+    """
+    if isinstance(sentinel, bytes):
+        return re.compile(re.escape(sentinel) + rb":(-?\d*)(?=[\r\n\x1b])")
+    return re.compile(re.escape(sentinel) + r":(-?\d*)(?=[\r\n\x1b])")
+
+
+def _sentinel_done(buf: bytes, sentinel: bytes) -> bool:
+    return _sentinel_pattern(sentinel).search(buf) is not None
+
+
+def strip_vt(text: str) -> str:
+    """Remove every terminal escape sequence a pseudoconsole may have added."""
+    return _VT_RE.sub("", text)
+
+
+def _find_ignoring_whitespace(haystack: str, needle: str, start: int = 0) -> tuple[int, int]:
+    """``(start, end)`` of *needle* in *haystack*, ignoring whitespace in both.
+
+    ConPTY may re-wrap an echoed command at the screen width or replace its
+    newlines with cursor moves, so the echo is the typed text modulo
+    whitespace. Returns ``(-1, -1)`` when absent.
+    """
+    want = "".join(needle.split())
+    if not want:
+        return -1, -1
+    chars: list[str] = []
+    index: list[int] = []
+    for i in range(start, len(haystack)):
+        ch = haystack[i]
+        if not ch.isspace():
+            chars.append(ch)
+            index.append(i)
+    pos = "".join(chars).find(want)
+    if pos < 0:
+        return -1, -1
+    return index[pos], index[pos + len(want) - 1] + 1
+
+
+def _strip_echo(body: str, command: str) -> str:
+    """Drop the console's echo of what we typed, keeping only what it printed.
+
+    *command* is the full wrapped text we sent: the owner's command followed
+    by the sentinel line. The echo of the sentinel line comes AFTER the
+    command's output, so everything from it on is cut; the echo of the command
+    itself (and anything before it: the boot commands, a prompt) is cut too.
+    """
+    lines = [ln for ln in command.splitlines() if ln.strip()]
+    if not lines:
+        return body
+    typed = "\n".join(lines[:-1]) if len(lines) > 1 else ""
+    sentinel_line = lines[-1]
+    s, _e = _find_ignoring_whitespace(body, sentinel_line)
+    if s >= 0:
+        body = body[:s]
+    if typed:
+        _s, e = _find_ignoring_whitespace(body, typed)
+        if e >= 0:
+            body = body[e:]
+    return body
+
+
+def _split_sentinel(
+    text: str,
+    sentinel: str,
+    *,
+    host: str = "",
+    command: str = "",
+    conpty: bool = False,
+) -> tuple[int, str]:
+    del host  # the sentinel grammar is the same for every host
+    m = _sentinel_pattern(sentinel).search(text)
+    if m is None:
+        return -1, strip_vt(text).strip() if conpty else text
+    num = m.group(1)
+    try:
+        code = int(num) if num else 0
+    except ValueError:
+        code = 0
+    body = text[: m.start()]
+    if conpty:
+        body = _strip_echo(strip_vt(body), command)
     return code, body.strip()
 
 

@@ -186,7 +186,15 @@ def audio_priority() -> Iterator[str]:
     task_index = wintypes.DWORD(0)
     # Without an explicit restype ctypes truncates the returned HANDLE to a
     # 32-bit signed int, and the revert below would be handed a bad handle.
+    avrt.AvSetMmThreadCharacteristicsW.argtypes = [
+        wintypes.LPCWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
     avrt.AvSetMmThreadCharacteristicsW.restype = wintypes.HANDLE
+    # The revert takes that HANDLE back; without argtypes ctypes would marshal
+    # a 64-bit value as a C int and raise instead of leaving the class.
+    avrt.AvRevertMmThreadCharacteristics.argtypes = [wintypes.HANDLE]
+    avrt.AvRevertMmThreadCharacteristics.restype = wintypes.BOOL
     handle = avrt.AvSetMmThreadCharacteristicsW(
         ctypes.c_wchar_p("Pro Audio"), ctypes.byref(task_index)
     )

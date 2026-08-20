@@ -107,6 +107,27 @@ def brace_balance(text: str) -> tuple[bool, str]:
     return True, ""
 
 
+def _is_tsc_project_noise(err: str) -> bool:
+    """tsc on a lone file without a tsconfig errors on imports, not syntax."""
+    return "Cannot find module" in err or "TS2307" in err or "TS6059" in err
+
+
+def _jsx_checker() -> str | None:
+    """A parser that actually understands JSX, or None.
+
+    esbuild parses .jsx/.tsx natively and is the cheapest; tsc with
+    ``--jsx preserve`` is the fallback. Node is deliberately not here.
+    """
+    return _which("esbuild") or _which("tsc")
+
+
+def _jsx_command(checker: str, p: Path) -> list[str]:
+    if Path(checker).stem.lower() == "esbuild":
+        # Transform to stdout (discarded); a parse failure is a non-zero exit.
+        return [checker, "--log-level=error", str(p)]
+    return [checker, "--noEmit", "--pretty", "false", "--allowJs", "--jsx", "preserve", str(p)]
+
+
 def check_lang_syntax(path: str | Path) -> dict[str, Any]:
     """Return {ok, path, error, engine} for one file."""
     p = Path(path)
@@ -135,18 +156,26 @@ def check_lang_syntax(path: str | Path) -> dict[str, Any]:
         out["engine"] = "json"
         return out
 
-    if suffix == ".jsx":
-        # NOT node --check: node cannot parse .jsx at all. It rejects the
-        # *extension* with ERR_UNKNOWN_FILE_EXTENSION before it looks at a
-        # single character, so every .jsx file came back red no matter what was
-        # in it — and the "error" handed to the model was a Node internals
-        # traceback about file formats, which reads as "your code is broken"
-        # and sends it rewriting a working component. Structural check instead,
-        # the same fallback .tsx already uses.
-        ok, err = brace_balance(text)
+    if suffix in {".jsx", ".tsx"}:
+        # NOT node --check: node cannot parse .jsx at all (it rejects the
+        # *extension* with ERR_UNKNOWN_FILE_EXTENSION). And NOT brace_balance:
+        # JSX text is prose, so the apostrophe in ``<p>Don't click {x}</p>``
+        # opened a "string" that never closed, and a regex like ``/[{]/`` was
+        # an unbalanced brace — working components came back red with an
+        # error that sent the model rewriting them. Only a real JSX-aware
+        # parser gets a verdict; without one the file is skipped, the same
+        # way an extension without an oracle is skipped.
+        checker = _jsx_checker()
+        if checker is None:
+            out["engine"] = "skip (no jsx parser)"
+            return out
+        ok, err = _run(_jsx_command(checker, p))
+        if not ok and _is_tsc_project_noise(err):
+            out["engine"] = "skip (tsc import-noise)"
+            return out
         out["ok"] = ok
-        out["error"] = err
-        out["engine"] = "brace (jsx)"
+        out["error"] = "" if ok else err
+        out["engine"] = f"{Path(checker).stem} (jsx)"
         return out
 
     if suffix in {".js", ".mjs", ".cjs"}:
@@ -163,13 +192,13 @@ def check_lang_syntax(path: str | Path) -> dict[str, Any]:
         out["engine"] = "brace"
         return out
 
-    if suffix in {".ts", ".tsx"}:
+    if suffix == ".ts":
         tsc = _which("tsc")
         if tsc:
             ok, err = _run([tsc, "--noEmit", "--pretty", "false", "--allowJs", "false", str(p)])
             # tsc on a single file without tsconfig often errors on imports —
             # fall back to brace if the only issue is project config.
-            if not ok and ("Cannot find module" in err or "TS2307" in err or "TS6059" in err):
+            if not ok and _is_tsc_project_noise(err):
                 ok, err = brace_balance(text)
                 out["engine"] = "brace (tsc import-noise)"
             else:
