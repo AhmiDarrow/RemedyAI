@@ -43,7 +43,7 @@ It does **not** replace your configured Grok / Claude / GPT / Ollama chat model.
 
 ## Delivery (not in the installer)
 
-Weights download on first setup or from **Settings → Advanced → Local model** (~1.6 GB). Same model files on every PC for a given Remedy release. The **llama-server** binary is OS-specific: Windows downloads the pinned CPU/CUDA zip; Linux downloads the pinned Ubuntu CPU/Vulkan `tar.gz` and marks it executable.
+Weights download automatically the first time Remedy starts (~1.6 GB). Same model files on every PC for a given Remedy release. The **llama-server** binary is OS-specific: Windows downloads the pinned CPU/CUDA zip; Linux downloads the pinned Ubuntu CPU/Vulkan `tar.gz` and marks it executable. Settings shows progress; **Retry download** is only if that first pull failed.
 
 ---
 
@@ -84,7 +84,7 @@ See [Security & data](04-security-and-data).
 
 | Symptom | Try |
 |---------|-----|
-| Not installed | Settings → Advanced → Local model → Install |
+| Not installed | Wait for the first-run download, or Settings → Retry download |
 | Stuck downloading | Check disk space; resume install |
 | GPU runtime issues | CPU runtime still works; GPU is optional |
 | Wrong model name in old docs | Product default is **SmolVLM2 2.2B**, not a retired Qwen 3B pin |

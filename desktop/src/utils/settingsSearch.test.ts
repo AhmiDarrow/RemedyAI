@@ -38,6 +38,7 @@ describe('settings search', () => {
     const m = SETTINGS_SECTION_META.voice
     expect(sectionMatchesSearch('kokoro', m.title, m.summary, m.keywords)).toBe(true)
     expect(sectionMatchesSearch('aloud', m.title, m.summary, m.keywords)).toBe(true)
+    expect(sectionMatchesSearch('chatterbox', m.title, m.summary, m.keywords)).toBe(true)
     expect(sectionMatchesSearch('xyzzy-nope', m.title, m.summary, m.keywords)).toBe(false)
   })
 

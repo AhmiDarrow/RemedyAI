@@ -77,7 +77,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [xaiVerifyUrl, setXaiVerifyUrl] = useState('')
   const [xaiLoginMsg, setXaiLoginMsg] = useState('')
   const [oauthBrowserOpen, setOauthBrowserOpen] = useState(false)
-  const [enableVision, setEnableVision] = useState(true)
+  const enableVision = true
   const [visionStatus, setVisionStatus] = useState<VisionStatus | null>(null)
   const [visionInstallMsg, setVisionInstallMsg] = useState('')
   const [visionInstalling, setVisionInstalling] = useState(false)
@@ -173,7 +173,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       .then((s) => {
         if (!cancelled) {
           setVisionStatus(s)
-          if (s.installed) setEnableVision(true)
+          if (s.installed) { /* vision is always on */ }
         }
       })
       .catch(() => {
@@ -628,7 +628,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     workspace: 'Folder',
     persona: 'Style',
     messengers: 'Chat apps',
-    vision: 'Vision',
+    vision: 'On this PC',
     finish: 'Ready',
   }
 
@@ -1131,45 +1131,31 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
             <div className="space-y-4">
               <div>
                 <div className="text-base font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
-                  Local vision
+                  What Remedy needs
                 </div>
                 <p className="text-sm leading-snug" style={mutedStyles}>
-                  One-time download of pinned{' '}
-                  <strong style={{ color: 'var(--text-secondary)' }}>SmolVLM2 2.2B</strong> (~
-                  {formatDownloadGb(visionStatus?.model?.approx_download_bytes)}) for screenshots and
-                  OCR. Same files on every PC. After install, the local server{' '}
-                  <strong style={{ color: 'var(--text-secondary)' }}>starts with Remedy</strong>.
+                  Vision, voice, and local helpers download automatically on this computer.
+                  Nothing to opt into — Remedy starts the downloads herself.
                 </p>
               </div>
-              <label
-                className="flex items-start gap-3 px-4 py-3.5 rounded-lg cursor-pointer text-left"
+              <div
+                className="px-4 py-3.5 rounded-lg text-left"
                 style={{
-                  background: enableVision
-                    ? 'color-mix(in srgb, var(--accent) 12%, var(--bg-primary))'
-                    : 'var(--bg-tertiary)',
-                  border: enableVision ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                  background: 'color-mix(in srgb, var(--accent) 12%, var(--bg-primary))',
+                  border: '1.5px solid var(--accent)',
                 }}
               >
-                <input
-                  type="checkbox"
-                  checked={enableVision}
-                  onChange={(e) => setEnableVision(e.target.checked)}
-                  className="mt-1 w-4 h-4"
-                  style={{ accentColor: 'var(--accent)' }}
-                />
-                <span>
-                  <span className="block text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
-                    {visionStatus?.installed
-                      ? 'Keep local model on (starts with Remedy)'
-                      : 'Install local model on finish'}
-                  </span>
-                  <span className="block text-sm mt-0.5" style={mutedStyles}>
-                    {visionStatus?.installed
-                      ? 'Already on this machine — auto-starts when Remedy launches.'
-                      : 'Download starts after setup · progress in the status dock · then auto-starts every launch.'}
-                  </span>
+                <span className="block text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
+                  {visionStatus?.installed
+                    ? 'Local vision is ready'
+                    : 'Downloading local vision, voice, and helpers'}
                 </span>
-              </label>
+                <span className="block text-sm mt-0.5" style={mutedStyles}>
+                  {visionStatus?.installed
+                    ? 'Already on this machine — starts with Remedy.'
+                    : `Pinned SmolVLM2 2.2B (~${formatDownloadGb(visionStatus?.model?.approx_download_bytes)}) plus Remedy's voice. You can keep going — this continues in the background.`}
+                </span>
+              </div>
               {visionInstallMsg ? (
                 <div className="text-sm" style={{ color: 'var(--accent)' }}>
                   {visionInstallMsg}

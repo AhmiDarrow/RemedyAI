@@ -313,6 +313,49 @@
 }
 .grove-voicetoggle.on { color: var(--text-primary); border-color: var(--accent); }
 .grove-voicetoggle.speaking { animation: grove-blink 1.2s infinite; }
+
+/* Settings overlay — stays on Grove; Studio still uses the workspace rail. */
+.grove-settings-backdrop {
+  position: fixed;
+  top: 36px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 79;
+  background: color-mix(in srgb, var(--bg-primary) 48%, transparent);
+}
+.grove-settings-sheet {
+  position: fixed;
+  top: 36px;
+  right: 0;
+  bottom: 0;
+  z-index: 80;
+  width: min(520px, 96vw);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: color-mix(in srgb, var(--bg-secondary) 96%, var(--bg-primary));
+  border-left: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.22);
+}
+.grove-settings-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+.grove-settings-sheet-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .grove-micbtn {
   width: 38px;
   height: 38px;

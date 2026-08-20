@@ -5,6 +5,7 @@ abstraction, a simulated phone circuit, and the measured human bar, all with no
 hardware and no minutes spent.
 """
 
+from remedy.telephony.backends.sip_direct import SipDirectBackend
 from remedy.telephony.line import (
     AudioFrame,
     Call,
@@ -32,6 +33,7 @@ __all__ = [
     "LineOption",
     "choose",
     "chosen",
+    "SipDirectBackend",
     "offer",
     "precise_timing",
     "silence",

@@ -53,7 +53,13 @@ export function describeToolCall(call: ToolCall): string | null {
         ? `Pressed “${str('text')}”`
         : 'Clicked on the page'
     case 'computer_type':
-      return 'Typed into the focused field'
+      return 'Typed into a field'
+    case 'computer_select':
+      return str('value') || str('text')
+        ? `Chose “${str('value') || str('text')}”`
+        : 'Chose a dropdown option'
+    case 'computer_fill':
+      return 'Filled in a form'
     case 'computer_key':
       return str('key') ? `Pressed ${str('key')}` : 'Pressed a key'
     case 'computer_app':

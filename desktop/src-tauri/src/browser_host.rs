@@ -2115,7 +2115,7 @@ fn computer_host_loop(app: AppHandle) {
         let only = if spa_can_claim {
             "navigate,ready"
         } else {
-            "navigate,snapshot,a11y,page_text,ready,click,type,key,scroll,drag,press_hold"
+            "navigate,snapshot,a11y,page_text,ready,click,type,key,scroll,drag,press_hold,select"
         };
         if let Ok(resp) = auth_req(agent.get(
             &api_url(&format!("/api/computer/jobs/next?only={only}")),
@@ -2144,7 +2144,7 @@ fn computer_host_loop(app: AppHandle) {
                     if matches!(
                         action,
                         "snapshot" | "a11y" | "page_text" | "ready" | "click"
-                            | "type" | "key" | "scroll" | "drag" | "press_hold"
+                            | "type" | "key" | "scroll" | "drag" | "press_hold" | "select"
                     ) {
                         let app2 = app.clone();
                         let agent2 = agent.clone();
@@ -2462,9 +2462,16 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
 
     // type / key / scroll / drag — Rust drives these too when the SPA is down
     // (desktop minimized). browser_agent_action already implements them.
-    if matches!(action.as_str(), "type" | "key" | "scroll" | "drag") {
+    if matches!(action.as_str(), "type" | "key" | "scroll" | "drag" | "select") {
         let text = payload.get("text").and_then(|t| t.as_str()).map(String::from);
-        let key = payload.get("key").and_then(|t| t.as_str()).map(String::from);
+        // select: the field label travels as `hint`; browser_agent_action has
+        // no hint slot, so ride it in `key` (unused by select).
+        let key = if action == "select" {
+            payload.get("hint").and_then(|t| t.as_str()).map(String::from)
+        } else {
+            payload.get("key").and_then(|t| t.as_str()).map(String::from)
+        };
+        let r#ref = payload.get("ref").and_then(|t| t.as_str()).map(String::from);
         let x = payload.get("x").and_then(|v| v.as_f64());
         let y = payload.get("y").and_then(|v| v.as_f64());
         let x2 = payload.get("x2").and_then(|v| v.as_f64());
@@ -2482,12 +2489,13 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
             None,
             dy,
             None,
-            None,
+            r#ref,
         ) {
             Ok(raw) => {
-                let ok = !raw.starts_with("no-")
-                    && !raw.starts_with("missing")
-                    && !raw.starts_with("error");
+                // Match SPA rustBrowserActionOk: success is ok / ok:… / ok-fallback.
+                // "not-select:" used to pass the old "doesn't start with no-/missing"
+                // check and get reported as success.
+                let ok = raw.starts_with("ok");
                 complete_job(
                     agent,
                     &id,
@@ -2959,6 +2967,8 @@ pub fn browser_agent_action(
     let text_cdp = text.clone();
     #[cfg(windows)]
     let key_cdp = key.clone();
+    #[cfg(windows)]
+    let ref_cdp = r#ref.clone();
 
     // Press-and-hold: Remedy as the owner's authorized hands for an
     // accessibility gesture (press-and-hold verification, hold-to-confirm).
@@ -3239,10 +3249,21 @@ pub fn browser_agent_action(
                 .replace('\'', "\\'")
                 .replace('\n', "\\n")
                 .replace('\r', "\\r");
+            let locate = if let Some(rf) = r#ref.clone().filter(|s| !s.is_empty()) {
+                let er = rf.replace('\\', "\\\\").replace('\'', "\\'");
+                format!(
+                    "{dom}\n  const el=window.__rmdyFind('{er}')||document.activeElement||document.body;\n  if(!window.__rmdyFind('{er}')) return 'missing-ref:{er}';",
+                    dom = REMEDY_DOM_JS,
+                    er = er
+                )
+            } else {
+                "const el=document.activeElement||document.body;".into()
+            };
             format!(
                 r#"(function(){{
+  {locate}
   const t='{escaped}';
-  const el=document.activeElement||document.body;
+  try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}
   if(el && (el.isContentEditable || /^(INPUT|TEXTAREA)$/.test(el.tagName))){{
     const start=el.selectionStart??el.value?.length??0;
     const end=el.selectionEnd??start;
@@ -3261,7 +3282,80 @@ pub fn browser_agent_action(
     document.activeElement?.dispatchEvent(new KeyboardEvent('keyup',{{key:ch,bubbles:true}}));
   }}
   return 'ok-fallback';
-}})()"#
+}})()"#,
+                locate = locate,
+                escaped = escaped
+            )
+        }
+        "select" => {
+            let want = text.unwrap_or_default();
+            if want.trim().is_empty() {
+                return Err("select needs the option to choose (value=)".to_string());
+            }
+            let esc = |s: &str| {
+                s.replace('\\', "\\\\")
+                    .replace('\'', "\\'")
+                    .replace('\n', "\\n")
+            };
+            let escaped = esc(&want);
+            let er = esc(&r#ref.clone().unwrap_or_default());
+            // Field label (computer_select hint= / computer_fill text=) rides
+            // in `key`; see handle_job.
+            let hint = esc(&key.clone().unwrap_or_default());
+            format!(
+                r#"(function(){{
+  {dom}
+  const want='{escaped}';
+  const w=want.toLowerCase();
+  const hint='{hint}'.trim().toLowerCase();
+  const hasOpt=(s)=>{{
+    for(const opt of s.options){{
+      const tv=(opt.text||'').trim();
+      if(!tv && !opt.value) continue;
+      if(opt.value===want || tv===want || tv.toLowerCase()===w) return opt;
+    }}
+    return null;
+  }};
+  const labelOf=(s)=>{{
+    let t=(s.getAttribute('aria-label')||'')+' ';
+    if(s.id){{ const l=document.querySelector('label[for="'+CSS.escape(s.id)+'"]'); if(l) t+=(l.textContent||'')+' '; }}
+    const wrap=s.closest('label'); if(wrap) t+=(wrap.textContent||'')+' ';
+    const lb=s.getAttribute('aria-labelledby');
+    if(lb){{ for(const i of lb.split(/\s+/)){{ const n=document.getElementById(i); if(n) t+=(n.textContent||'')+' '; }} }}
+    t+=(s.name||'')+' '+(s.id||'');
+    return t.replace(/\s+/g,' ').trim().toLowerCase();
+  }};
+  let el=null;
+  if('{er}'){{
+    el=window.__rmdyFind('{er}');
+    if(!el) return 'missing-ref:{er}';
+  }} else {{
+    const nodes=Array.from(document.querySelectorAll('select'));
+    if(hint){{
+      el=nodes.find(s=>labelOf(s).indexOf(hint)>=0)||null;
+      if(!el) return 'no-match:'+hint;
+    }} else if(nodes.length===1){{
+      el=nodes[0];
+    }} else {{
+      const cands=nodes.filter(hasOpt);
+      if(cands.length===1) el=cands[0];
+      else if(cands.length>1) return 'ambiguous:'+cands.length+' dropdowns offer '+want+' - pass ref or hint';
+    }}
+  }}
+  if(!el) return 'no element';
+  const tag=(el.tagName||'').toLowerCase();
+  if(tag!=='select') return 'not-select:'+tag;
+  const opt=hasOpt(el);
+  if(!opt) return 'no-option:'+want;
+  el.value=opt.value;
+  el.dispatchEvent(new Event('input',{{bubbles:true}}));
+  el.dispatchEvent(new Event('change',{{bubbles:true}}));
+  return 'ok:'+el.value;
+}})()"#,
+                dom = REMEDY_DOM_JS,
+                escaped = escaped,
+                er = er,
+                hint = hint
             )
         }
         "key" => {
@@ -3324,7 +3418,7 @@ pub fn browser_agent_action(
         // 18s) at 2 host attempts each.
         "snapshot" | "a11y" | "page_text" => 9,
         "click" | "click_ref" | "click_text" | "type" | "type_text" | "key" | "scroll"
-        | "drag" => 8,
+        | "drag" | "select" => 8,
         "ready" => 2,
         _ => 4,
     };
@@ -3335,19 +3429,37 @@ pub fn browser_agent_action(
         if matches!(act.as_str(), "type" | "type_text") {
             if let Some(txt) = text_cdp.as_deref().filter(|s| !s.is_empty()) {
                 let (ftx, frx) = std::sync::mpsc::channel::<String>();
-                let focus_js = "(function(){const el=document.activeElement;\
+                // Field-targeted type: focus the snapshot ref first. Typing
+                // into whatever happens to be focused was the old hole —
+                // computer_type ref=eN would land in the wrong box and still
+                // report ok:trusted-type.
+                let focus_js = if let Some(rf) = ref_cdp.as_deref().filter(|s| !s.is_empty()) {
+                    let er = rf.replace('\\', "\\\\").replace('\'', "\\'");
+                    format!(
+                        "(function(){{{dom}\
+const el=window.__rmdyFind('{er}');\
+if(!el) return 'rm-missing-ref';\
+try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}\
+return (el.isContentEditable||/^(INPUT|TEXTAREA)$/.test(el.tagName))\
+?'rm-editable':'rm-not-editable';}})()",
+                        dom = REMEDY_DOM_JS,
+                        er = er
+                    )
+                } else {
+                    "(function(){const el=document.activeElement;\
 return (el&&(el.isContentEditable||/^(INPUT|TEXTAREA)$/.test(el.tagName)))\
-?'rm-editable':'rm-not-editable';})()";
+?'rm-editable':'rm-not-editable';})()"
+                        .into()
+                };
                 if wv
-                    .eval_with_callback(focus_js, move |r| {
+                    .eval_with_callback(&focus_js, move |r| {
                         let _ = ftx.send(r);
                     })
                     .is_ok()
                 {
                     if let Ok(chk) = frx.recv_timeout(Duration::from_secs(2)) {
-                        if chk.trim().trim_matches('"') == "rm-editable"
-                            && cdp_insert_text(&wv, txt).is_ok()
-                        {
+                        let flag = chk.trim().trim_matches('"');
+                        if flag == "rm-editable" && cdp_insert_text(&wv, txt).is_ok() {
                             log::info!("browser agent action {act} → ok:trusted-type");
                             return Ok("ok:trusted-type".into());
                         }
@@ -3491,8 +3603,11 @@ return (el&&(el.isContentEditable||/^(INPUT|TEXTAREA)$/.test(el.tagName)))\
     // compares against bare `ok`, so scroll/type/key read as failures
     // ("browser:scroll failed: \"ok\"") — unquote JSON strings here.
     let raw = serde_json::from_str::<String>(&raw).unwrap_or(raw);
+    // Every action script returns an explicit string; an empty/null result
+    // means the injected script threw (hostile page, missing helper), so it
+    // is a failure — never mint an ok for it.
     Ok(if raw.is_empty() || raw == "null" || raw == "undefined" {
-        format!("browser:{act}:ok")
+        format!("browser:{act}:no-result")
     } else {
         raw
     })

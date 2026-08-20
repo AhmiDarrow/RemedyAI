@@ -384,6 +384,7 @@ def _run_install(
     runtime_id: str,
     home_dir: str | Path | None,
     enable: bool,
+    cfg: dict[str, Any] | None = None,
 ) -> None:
     try:
         model = get_model_spec(model_id)
@@ -466,21 +467,41 @@ def _run_install(
             f"Installed {model.name} (llama.cpp {runtime.tag}) — starts with Remedy"
         )
         # Start with Remedy: launch llama-server as soon as install finishes
+        # unless RMB already owns the GPU host.
         if enable:
+            # The guard needs the loaded config to see llm_provider=rmb;
+            # with None it only notices an RMB that is already running.
+            skip_start = False
             try:
-                from remedy.vision.runtime import start_server
+                from remedy.runtime.rmb.mode import should_skip_vision_stack
 
-                prog.update(message="Starting local model server…")
-                started = start_server(home_dir=home_dir, n_gpu_layers=-1, wait_s=90.0)
-                if started.get("ok"):
-                    logger.info("Local model server started after install")
-                else:
-                    logger.warning(
-                        "Install ok but server start deferred: %s",
-                        started.get("error"),
-                    )
+                guard_cfg = cfg
+                if guard_cfg is None:
+                    from remedy.interfaces.api_support import load_config
+
+                    guard_cfg = load_config()
+                skip_start = bool(should_skip_vision_stack(guard_cfg))
             except Exception:
-                logger.exception("Post-install auto-start failed (will retry on next launch)")
+                skip_start = False
+            if skip_start:
+                logger.info(
+                    "Skipping SmolVLM start after install — RMB exclusive host"
+                )
+            else:
+                try:
+                    from remedy.vision.runtime import start_server
+
+                    prog.update(message="Starting local model server…")
+                    started = start_server(home_dir=home_dir, n_gpu_layers=-1, wait_s=90.0)
+                    if started.get("ok"):
+                        logger.info("Local model server started after install")
+                    else:
+                        logger.warning(
+                            "Install ok but server start deferred: %s",
+                            started.get("error"),
+                        )
+                except Exception:
+                    logger.exception("Post-install auto-start failed (will retry on next launch)")
     except InstallCancelled:
         logger.info("Vision install cancelled")
         prog.cancelled()
@@ -496,8 +517,13 @@ def start_install(
     home_dir: str | Path | None = None,
     enable: bool = True,
     prefer_cuda: bool = False,
+    cfg: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Start background install. Returns current progress snapshot."""
+    """Start background install. Returns current progress snapshot.
+
+    *cfg* (the loaded Remedy config) lets the post-install start honour the
+    RMB-exclusive-host guard; without it only a running RMB is detected.
+    """
     global _install_thread
     mid = (model_id or DEFAULT_MODEL_ID).strip() or DEFAULT_MODEL_ID
     get_model_spec(mid)  # validate
@@ -519,6 +545,7 @@ def start_install(
                 "runtime_id": rid,
                 "home_dir": home_dir,
                 "enable": enable,
+                "cfg": cfg,
             },
             name="remedy-vision-install",
             daemon=True,

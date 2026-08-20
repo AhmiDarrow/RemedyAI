@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import Sequence
 from contextlib import suppress
@@ -183,8 +184,8 @@ def get_status(
                 f"{model_public.get('name', 'SmolVLM2 2.2B')} starts with Remedy when ready."
                 if installed
                 else (
-                    "Local model not installed yet. Open Settings → Vision & nano swarm "
-                    f"to download pinned {model_public.get('name', 'SmolVLM2 2.2B')} "
+                    "Local vision is downloading with Remedy — "
+                    f"pinned {model_public.get('name', 'SmolVLM2 2.2B')} "
                     "(one-time; then starts with Remedy)."
                 )
             )
@@ -306,6 +307,37 @@ def maybe_autostart_local_model(
         return {"ok": False, "error": str(e)}
 
 
+def _skip_first_run_download() -> bool:
+    if os.environ.get("REMEDY_ENSURE_ASSETS") == "1":
+        return False
+    if os.environ.get("REMEDY_NO_FIRST_RUN_DOWNLOAD") == "1":
+        return True
+    return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
+def maybe_ensure_local_model(
+    cfg: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """First-run: download pinned vision if missing, then autostart when present.
+
+    Vision is a product dependency, not a Settings option. Tests skip the
+    network pull unless ``REMEDY_ENSURE_ASSETS=1``.
+    """
+    if _skip_first_run_download():
+        return maybe_autostart_local_model(cfg)
+    home = _home_from_cfg(cfg)
+    vcfg = vision_section_from_config(cfg)
+    mid = str(vcfg.get("model_id") or DEFAULT_MODEL_ID)
+    if is_installed(mid, home):
+        return maybe_autostart_local_model(cfg)
+    logger.info("Local vision not on disk — starting first-run download")
+    try:
+        return start_install(cfg=cfg)
+    except Exception as e:
+        logger.warning("maybe_ensure_local_model failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
 def start_install(
     *,
     cfg: dict[str, Any] | None = None,
@@ -357,6 +389,7 @@ def start_install(
         home_dir=home,
         enable=True,
         prefer_cuda=prefer_cuda,
+        cfg=cfg,
     )
     result["health"] = health
     result["warnings"] = list(health.get("warnings") or [])
