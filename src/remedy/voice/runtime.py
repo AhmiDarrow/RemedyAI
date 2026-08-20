@@ -386,6 +386,12 @@ def child_env(home_dir: Path | str | None = None, *, with_source: bool) -> dict[
     env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
     env["HF_HUB_DISABLE_TELEMETRY"] = "1"
     env["TOKENIZERS_PARALLELISM"] = "false"
+    # Weights live in Remedy's home, never the owner's global HF cache.
+    # huggingface_hub reads these at import, so they must be set before
+    # the worker starts — setdefault inside the engine is too late.
+    hf = _voice_home(home_dir) / "chatterbox" / "hf"
+    env["HF_HOME"] = str(hf)
+    env["HUGGINGFACE_HUB_CACHE"] = str(hf / "hub")
     if with_source:
         env["PYTHONPATH"] = str(source_root_for_worker(home_dir))
     if home_dir:
