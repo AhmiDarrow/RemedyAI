@@ -123,6 +123,41 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   and the readable one, carrying her relational memory and pledges in the
   clear, was not. `soul_export` now returns a message naming where exports go
   instead of raising.
+- **ConPTY had never once worked.** `_spawn_conpty_sync` ended by calling
+  `int()` on a `wintypes.HANDLE`, which raises `ValueError` — on the *last*
+  statement, after `CreateProcessW` had already succeeded. Every attempt threw,
+  leaving a running child, its process handle, the pseudoconsole and both
+  parent pipe ends behind, and the session layer swallowed it and fell back to
+  plain pipes. The only visible symptom was that the pseudo-console terminal
+  silently never engaged.
+- **One crafted Mattermost post took the channel down indefinitely.** The `try`
+  in `_on_event` wrapped only `json.loads`, so a post that parsed but was not
+  an object — or whose `props` was JSON null — raised straight out of the
+  handler. `_ws_loop` read that as a disconnect, slept three seconds and
+  reconnected, forever: a denial of service available to anyone who can write
+  in a watched channel.
+- **`remedy setup` and the skills library honour `REMEDY_HOME`.** Both resolved
+  `~/.remedy` directly, so a portable or `--home` install configured, read from
+  and installed skills into the real user home instead of its own.
+- **A prerelease no longer reads as newer than its release.** `_parse_version`
+  joined every digit in a segment, so `1.2.3rc1` became `(1, 2, 31)` and
+  `remedy update` offered a release candidate as an upgrade from the finished
+  release.
+- **A local model keeps its longer timeout when the override is malformed.**
+  The `float()` sat inside the same `try` that had already decided the model
+  was local, so a bad `REMEDY_LOCAL_LLM_TIMEOUT` left it on the 120s *cloud*
+  wall — the one case the longer wall exists for, broken by the setting meant
+  to tune it.
+- **Tool slimming no longer spends budget on shapes it cannot emit.** Scoring
+  accepted a flat `{"name": …}` tool that the emit pass then dropped, so it won
+  a high-priority slot and vanished, leaving valid tools behind.
+- **Validating a skill's metadata no longer leaks a sandbox directory.**
+  `SkillValidator()` built a `SkillExecutor` eagerly, and its constructor
+  `mkdtemp`s a directory nobody removes — one orphaned per
+  `POST /api/skills/library/submit`, which only ever checks metadata.
+- **The vision state cache hands out a copy on both paths.** The cache-miss
+  path returned the live cached dict while the hit path returned a copy, so one
+  caller mutating its result rewrote what every later `is_running()` read.
 - **`mail_reply` and `calendar_cancel_event` were never gated.** Both build a
   full APPROVAL_REQUIRED item, and calendar_cancel_event's own tool description
   promises "asks the owner first in Ask mode" — but neither name was listed in
