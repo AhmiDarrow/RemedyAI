@@ -44,7 +44,17 @@ class SkillValidator:
     runtime tests."""
 
     def __init__(self, executor: SkillExecutor | None = None) -> None:
-        self.executor = executor or SkillExecutor()
+        # Built on first use, not on construction. SkillExecutor.__init__
+        # mkdtemps a sandbox and nothing removes it, and the common caller —
+        # validate_metadata, which never runs a script — leaked one directory
+        # per call. POST /api/skills/library/submit does exactly that.
+        self._executor = executor
+
+    @property
+    def executor(self) -> SkillExecutor:
+        if self._executor is None:
+            self._executor = SkillExecutor()
+        return self._executor
 
     def validate_metadata(self, skill: Skill) -> ValidationResult:
         """Validate SKILL.md metadata completeness."""

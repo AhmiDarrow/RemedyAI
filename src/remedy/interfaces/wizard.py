@@ -190,7 +190,11 @@ def run_wizard(
 
     # -- Step 4: Runtime Settings ---------------------------------------------
     console.rule("[bold]Step 4: Runtime Settings")
-    config["home_dir"] = Path("~/.remedy").expanduser().as_posix()
+    # REMEDY_HOME, not a hardcoded ~/.remedy: `remedy setup` on a portable or
+    # --home install used to configure the real user home regardless.
+    from remedy.interfaces.config import get_home_dir as _home_dir
+
+    config["home_dir"] = _home_dir().as_posix()
 
     if quick:
         config["log_level"] = "INFO"
@@ -580,8 +584,10 @@ def _write_config(config: dict) -> Path:
     the last table and can corrupt the file).
     """
     from remedy.interfaces.api_support import _write_config as api_write
+    from remedy.interfaces.config import get_home_dir as _home_dir
 
-    home = Path(config.get("home_dir", "~/.remedy")).expanduser()
+    raw_home = config.get("home_dir")
+    home = Path(str(raw_home)).expanduser() if raw_home else _home_dir()
     home.mkdir(parents=True, exist_ok=True)
     cfg_path = home / "config.toml"
 
@@ -609,5 +615,8 @@ def _write_config(config: dict) -> Path:
 
 
 def _db_path(config: dict) -> Path:
-    home = Path(config.get("home_dir", "~/.remedy")).expanduser()
+    from remedy.interfaces.config import get_home_dir as _home_dir
+
+    raw_home = config.get("home_dir")
+    home = Path(str(raw_home)).expanduser() if raw_home else _home_dir()
     return home / "memory.db"

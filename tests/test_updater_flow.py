@@ -158,16 +158,22 @@ def test_is_newer_is_strict_and_never_upgrades_sideways(latest, installed, newer
     assert upd._is_newer(latest, installed) is newer
 
 
-def test_a_pep440_prerelease_without_a_dash_is_read_as_a_newer_release():
-    """Documents current behaviour: '0.19.0rc1' parses as 0.19.1, not 0.19.0.
+@pytest.mark.parametrize(
+    "raw", ["0.19.0rc1", "0.19.0b2", "0.19.0a1", "0.19.0-rc1", "0.19.0+build7"]
+)
+def test_a_prerelease_never_reads_as_newer_than_its_release(raw):
+    """Only ``-``/``+`` suffixes were stripped, and every digit in a segment was
+    joined — so "0.19.0rc1" became (0, 19, 1) and `remedy update` offered a
+    release candidate as an upgrade from the finished release."""
+    assert upd._parse_version(raw) == (0, 19, 0)
+    assert upd._is_newer(raw, "0.19.0") is False
 
-    Only ``-``/``+`` suffixes are stripped, so the digits of an attached
-    prerelease tag leak into the patch component. See BUGS in the report.
-    """
-    assert upd._parse_version("0.19.0rc1") == (0, 19, 1)
-    assert upd._is_newer("0.19.0rc1", "0.19.0") is True
-    # The dashed spelling is handled correctly, for contrast.
-    assert upd._is_newer("0.19.0-rc1", "0.19.0") is False
+
+def test_a_real_upgrade_is_still_recognised():
+    """The guard must not have made every comparison say no."""
+    assert upd._is_newer("0.19.1", "0.19.0") is True
+    assert upd._is_newer("0.20.0", "0.19.9") is True
+    assert upd._is_newer("0.19.10", "0.19.9") is True
 
 
 # --------------------------------------------------------------------------

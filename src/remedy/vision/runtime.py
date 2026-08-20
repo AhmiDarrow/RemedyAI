@@ -105,7 +105,9 @@ def _load_vision_json_cached(home_dir: str | Path | None = None) -> dict[str, An
     _vision_json_cache["mtime"] = mtime
     _vision_json_cache["size"] = size
     _vision_json_cache["data"] = state
-    return state
+    # Hand out a copy, exactly as the cache-hit path above does: a caller that
+    # mutates its result must not rewrite what every later is_running() reads.
+    return dict(state)
 
 
 def is_running(

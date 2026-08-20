@@ -195,13 +195,20 @@ def test_the_local_wall_can_be_raised_by_environment(monkeypatch):
     assert agent_llm._llm_timeout(bind).total == 600.0
 
 
-def test_a_garbage_local_timeout_override_silently_falls_back_to_120(monkeypatch):
-    """Documents current behaviour, not desired behaviour: the float() raises
-    inside the same try that decided the model was local, so a local host ends
-    up with the *cloud* wall instead of the 300s default."""
-    monkeypatch.setenv("REMEDY_LOCAL_LLM_TIMEOUT", "not-a-number")
+@pytest.mark.parametrize("garbage", ["not-a-number", "300s", "  ", "1e"])
+def test_a_garbage_local_timeout_override_keeps_the_local_wall(monkeypatch, garbage):
+    """The float() used to raise inside the same try that had already decided
+    the model was local, so a local host got the 120s *cloud* wall — the one
+    case the longer wall exists for, broken by the setting meant to tune it."""
+    monkeypatch.setenv("REMEDY_LOCAL_LLM_TIMEOUT", garbage)
     bind = SimpleNamespace(provider="ollama", model="q", base_url="")
-    assert agent_llm._llm_timeout(bind).total == 120.0
+    assert agent_llm._llm_timeout(bind).total == 300.0
+
+
+def test_a_valid_local_timeout_override_is_honoured(monkeypatch):
+    monkeypatch.setenv("REMEDY_LOCAL_LLM_TIMEOUT", "600")
+    bind = SimpleNamespace(provider="ollama", model="q", base_url="")
+    assert agent_llm._llm_timeout(bind).total == 600.0
 
 
 def test_a_binding_missing_every_field_is_treated_as_cloud():
@@ -404,14 +411,23 @@ def test_a_tool_with_a_blank_name_is_dropped():
     assert [t["function"]["name"] for t in agent_llm.slim_tools_for_local(tools)] == ["file_read"]
 
 
-def test_flat_shaped_tools_are_ranked_and_then_silently_dropped():
-    """The scoring pass reads the name off a flat ``{"name": ...}`` dict, but the
-    emit pass only accepts the nested ``{"function": {...}}`` shape, so a flat
-    tool consumes a slot in the budget and then vanishes."""
+def test_flat_shaped_tools_do_not_spend_slots_they_cannot_use():
+    """Scoring used to read the name off a flat ``{"name": ...}`` dict while
+    emit accepted only the nested ``{"function": {...}}`` shape, so a flat tool
+    won a slot and then vanished — the returned list came back short with valid
+    tools left behind. They are skipped during scoring now."""
     flat = [{"name": f"unk_{i}", "parameters": {}} for i in range(8)]
-    out = agent_llm.slim_tools_for_local([*flat, _tool("list_dir")], max_tools=8)
-    assert [t["function"]["name"] for t in out] == ["list_dir"]
-    assert len(out) == 1, "seven budget slots were spent on tools that were then dropped"
+    real = [_tool(n) for n in ("list_dir", "file_read", "repo_search")]
+    out = agent_llm.slim_tools_for_local([*flat, *real], max_tools=8)
+    names = [t["function"]["name"] for t in out]
+    assert set(names) == {"list_dir", "file_read", "repo_search"}, (
+        "valid tools were dropped to make room for shapes that cannot be emitted"
+    )
+
+
+def test_a_flat_tool_is_never_emitted():
+    out = agent_llm.slim_tools_for_local([{"name": "flat", "parameters": {}}], max_tools=8)
+    assert out == []
 
 
 # ---------------------------------------------------------------------------
