@@ -66,7 +66,7 @@ class LocalJobQueue:
                         self._cond.wait()
                     job = self._pending.pop(0)
                     self._current = job
-                    done_event: threading.Event = job.payload.setdefault(  # type: ignore[assignment]
+                    done_event: threading.Event = job.payload.setdefault(
                         "_done_event", threading.Event()
                     )
                     result_box: dict[str, Any] = job.payload.setdefault("_result_box", {})

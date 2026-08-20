@@ -340,7 +340,8 @@ def apply_host_profile_to_state(
     if prof.get("force_parallel_1"):
         state["parallel"] = 1
     # Merge, keep runtime-only keys (mtp_armed) already on disk
-    prev = state.get("host_auto") if isinstance(state.get("host_auto"), dict) else {}
+    prev_raw = state.get("host_auto")
+    prev: dict[str, Any] = prev_raw if isinstance(prev_raw, dict) else {}
     keep_runtime = {
         k: prev[k]
         for k in ("mtp_armed", "mtp_soft_disabled", "binary_supports_mtp", "cmd_flags")

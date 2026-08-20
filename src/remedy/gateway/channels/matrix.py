@@ -29,7 +29,7 @@ def _load_matrix_since(home: str | None) -> str:
         return ""
 
 
-def _save_matrix_since(home: str | None, since: str) -> None:
+def _save_matrix_since(home: str | None, since: str | None) -> None:
     if not since:
         return
     path = _matrix_home(home) / "locks" / "matrix_since.txt"

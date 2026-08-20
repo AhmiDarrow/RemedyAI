@@ -264,10 +264,10 @@ def activate_local_bundle(
             nvidia_detected = False
 
     rid = prefer_runtime_id(nvidia_detected=bool(nvidia_detected))
-    bin_path = runtime_binary_from_bundle(rid, paths.get("bundle_root"))  # type: ignore[arg-type]
+    bin_path = runtime_binary_from_bundle(rid, paths.get("bundle_root"))
     if bin_path is None:
         rid = default_runtime_id(prefer_gpu=False)
-        bin_path = runtime_binary_from_bundle(rid, paths.get("bundle_root"))  # type: ignore[arg-type]
+        bin_path = runtime_binary_from_bundle(rid, paths.get("bundle_root"))
     if bin_path is None:
         # Legacy flat runtime under this home
         try:
@@ -280,7 +280,7 @@ def activate_local_bundle(
         # Last try: vision/runtime next to models
         try:
             rt = runtime_dir(home_dir)
-            bin_path = _find_llama_binary([rt, paths["bundle_root"] / "runtime"])  # type: ignore[index]
+            bin_path = _find_llama_binary([rt, paths["bundle_root"] / "runtime"])
         except Exception:
             bin_path = None
     if bin_path is None:
@@ -331,5 +331,5 @@ def ensure_vision_json_from_bundle(
         home_dir, nvidia_detected=nvidia_detected, enabled=enabled
     )
     if result.get("ok"):
-        return result.get("state")  # type: ignore[return-value]
+        return result.get("state")
     return None

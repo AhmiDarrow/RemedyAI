@@ -31,7 +31,7 @@ async def reload_messenger_channels(gateway: Any, cfg: dict | None = None) -> li
             except Exception:
                 logger.debug("stop %s failed", val, exc_info=True)
         with contextlib.suppress(Exception):
-            gateway._channels.pop(kind, None)  # type: ignore[attr-defined]
+            gateway._channels.pop(kind, None)
 
     registered = register_messenger_channels(gateway, cfg)
     if getattr(gateway, "running", False):

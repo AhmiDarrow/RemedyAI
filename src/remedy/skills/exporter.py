@@ -14,6 +14,7 @@ import zipfile
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -41,7 +42,7 @@ class SkillExporter:
         dest = self.output_dir / f"hermes_{skill.manifest.name}"
         dest.mkdir(parents=True, exist_ok=True)
 
-        fm = {
+        fm: dict[str, Any] = {
             "name": skill.manifest.name,
             "description": skill.manifest.description,
             "version": skill.manifest.version,
@@ -107,7 +108,7 @@ class SkillExporter:
                 shutil.copy2(str(src), str(target))
 
     def _build_frontmatter(self, skill: Skill) -> dict:
-        fm = {
+        fm: dict[str, Any] = {
             "name": skill.manifest.name,
             "description": skill.manifest.description,
             "version": skill.manifest.version,

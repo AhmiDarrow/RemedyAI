@@ -15,9 +15,15 @@ import json
 import logging
 import os
 import time
+from typing import TYPE_CHECKING
 
 from remedy.gateway.router import ChannelAdapter
 from remedy.models import ChannelKind, EventKind, GatewayEvent
+
+if TYPE_CHECKING:
+    import aiohttp
+
+    from remedy.gateway.poll_lock import MessengerPollLock
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +55,9 @@ class TelegramChannel(ChannelAdapter):
         self._home_dir = home_dir
         self._poll_task: asyncio.Task | None = None
         self._lock_retry_task: asyncio.Task | None = None
-        self._poll_lock = None  # MessengerPollLock
+        self._poll_lock: MessengerPollLock | None = None
         self._last_update_id: int = 0
-        self._session = None  # aiohttp.ClientSession
+        self._session: aiohttp.ClientSession | None = None
         self._api_base = (
             f"https://api.telegram.org/bot{self.bot_token}" if self.bot_token else ""
         )

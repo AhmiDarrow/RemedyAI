@@ -78,12 +78,12 @@ async def _cmd_skill(args) -> None:
         count = registry.discover(args.path, recurse=not args.no_recurse)
         console.print(f"[green]Discovered {count} skill(s) from {args.path}[/green]")
     elif args.skill_cmd == "info":
-        skill = registry.get(args.name)
-        if skill is None:
+        found = registry.get(args.name)
+        if found is None:
             console.print(f"[red]Skill not found: {args.name}[/red]")
             console.print("Run 'remedy skill discover <path>' first.")
             raise SystemExit(1)
-        m = skill.manifest
+        m = found.manifest
         console.print(Panel(
             f"[bold]{m.name}[/bold] v{m.version}\n"
             f"{m.description}\n\n"
@@ -92,21 +92,21 @@ async def _cmd_skill(args) -> None:
             f"[dim]Path: {m.path}[/dim]",
             title="Skill Info",
         ))
-        if skill.instructions:
+        if found.instructions:
             console.print("\n[bold]Instructions:[/bold]")
-            console.print(skill.instructions[:500])
+            console.print(found.instructions[:500])
     elif args.skill_cmd == "load":
-        skill = registry.load_single(args.path)
-        console.print(f"[green]Loaded:[/green] {skill.manifest.name} v{skill.manifest.version}")
+        loaded = registry.load_single(args.path)
+        console.print(f"[green]Loaded:[/green] {loaded.manifest.name} v{loaded.manifest.version}")
 
     elif args.skill_cmd == "run":
-        skill = registry.get(args.name)
-        if skill is None:
+        found = registry.get(args.name)
+        if found is None:
             console.print(f"[red]Skill not found: {args.name}[/red]")
             raise SystemExit(1)
         executor = SkillExecutor()
         failed = False
-        if args.script and skill.source_skill_dir:
+        if args.script and found.source_skill_dir:
             from remedy.skills.script_path import (
                 SkillScriptJailError,
                 resolve_jailed_skill_script,
@@ -114,7 +114,7 @@ async def _cmd_skill(args) -> None:
 
             try:
                 script_path = resolve_jailed_skill_script(
-                    skill.source_skill_dir, args.script
+                    found.source_skill_dir, args.script
                 )
             except SkillScriptJailError as exc:
                 console.print(
@@ -127,8 +127,8 @@ async def _cmd_skill(args) -> None:
             result = await executor.run_script(script_path)
             _print_exec_result(result)
             failed = not bool(getattr(result, "success", result.exit_code == 0))
-        elif skill.scripts and skill.source_skill_dir:
-            results = await executor.run_all_scripts(skill.scripts, Path(skill.source_skill_dir))
+        elif found.scripts and found.source_skill_dir:
+            results = await executor.run_all_scripts(found.scripts, Path(found.source_skill_dir))
             for name, res in results.items():
                 console.print(f"\n[bold]Script: {name}[/bold]")
                 _print_exec_result(res)
@@ -136,7 +136,7 @@ async def _cmd_skill(args) -> None:
                     failed = True
         else:
             console.print("[yellow]No scripts to run. Running instruction code blocks...[/yellow]")
-            blocks = await executor.run_instructions(skill.instructions)
+            blocks = await executor.run_instructions(found.instructions)
             for i, res in enumerate(blocks):
                 console.print(f"\n[bold]Block {i+1}[/bold]")
                 _print_exec_result(res)
@@ -146,17 +146,17 @@ async def _cmd_skill(args) -> None:
             raise SystemExit(1)
 
     elif args.skill_cmd == "test":
-        skill = registry.get(args.name)
-        if skill is None:
+        found = registry.get(args.name)
+        if found is None:
             console.print(f"[red]Skill not found: {args.name}[/red]")
             raise SystemExit(1)
         validator = SkillValidator()
         checks = [
-            validator.validate_metadata(skill),
-            validator.validate_dependencies(skill),
-            validator.validate_scripts(skill),
+            validator.validate_metadata(found),
+            validator.validate_dependencies(found),
+            validator.validate_scripts(found),
         ]
-        test_result = await validator.run_tests(skill)
+        test_result = await validator.run_tests(found)
         checks.append(test_result)
 
         for r in checks:
@@ -167,8 +167,8 @@ async def _cmd_skill(args) -> None:
             for warn in r.warnings:
                 console.print(f"  [yellow]Warning:[/yellow] {warn}")
             for tr in r.test_results:
-                res = "[green]PASS[/green]" if tr["success"] else "[red]FAIL[/red]"
-                console.print(f"  Test {tr['file']}: {res}")
+                mark = "[green]PASS[/green]" if tr["success"] else "[red]FAIL[/red]"
+                console.print(f"  Test {tr['file']}: {mark}")
 
         score = validator.compute_score(checks)
         console.print(f"\n[bold]Compliance Score: {score:.0%}[/bold]")
@@ -176,21 +176,21 @@ async def _cmd_skill(args) -> None:
             raise SystemExit(1)
 
     elif args.skill_cmd == "export":
-        skill = registry.get(args.name)
-        if skill is None:
+        found = registry.get(args.name)
+        if found is None:
             console.print(f"[red]Skill not found: {args.name}[/red]")
             raise SystemExit(1)
         exporter = SkillExporter(Path(args.output))
         if args.fmt == "native":
-            dest = exporter.export_native(skill)
+            dest = exporter.export_native(found)
         elif args.fmt == "hermes":
-            dest = exporter.export_hermes(skill)
+            dest = exporter.export_hermes(found)
         elif args.fmt == "openclaw":
-            dest = exporter.export_openclaw(skill)
+            dest = exporter.export_openclaw(found)
         elif args.fmt == "zip":
-            dest = exporter.export_zip(skill, format="native")
+            dest = exporter.export_zip(found, format="native")
         else:
-            dest = exporter.export_native(skill)
+            dest = exporter.export_native(found)
         console.print(f"[green]Exported to:[/green] {dest}")
 
     if args.skill_cmd in ("list", "discover", "load"):

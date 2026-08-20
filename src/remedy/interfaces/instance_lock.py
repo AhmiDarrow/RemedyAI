@@ -32,7 +32,7 @@ def _pid_alive(pid: int) -> bool:
             import ctypes
             from ctypes import wintypes
 
-            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            kernel32 = ctypes.windll.kernel32
             handle = kernel32.OpenProcess(0x1000, False, pid)
             if not handle:
                 return False
@@ -108,8 +108,8 @@ def try_acquire_serve_lock(home: Path | str | None = None) -> tuple[bool, str]:
     try:
         # Exclusive create
         flags = os.O_CREAT | os.O_EXCL | os.O_RDWR
-        if hasattr(os, "O_BINARY"):
-            flags |= os.O_BINARY  # type: ignore[attr-defined]
+        if sys.platform == "win32":
+            flags |= os.O_BINARY
         fd = os.open(str(path), flags, 0o600)
         fh = os.fdopen(fd, "r+", encoding="utf-8")
         fh.write(f"{os.getpid()} {time.time():.3f}\n")

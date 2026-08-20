@@ -38,7 +38,7 @@ def register_session_event_routes(app: FastAPI) -> None:
                         continue
                     if ev is None:
                         break
-                    payload = ev.to_dict() if hasattr(ev, "to_dict") else dict(ev)
+                    payload = ev.to_dict() if hasattr(ev, "to_dict") else dict(vars(ev))
                     etype = str(payload.get("type") or "session_updated")
                     yield f"event: {etype}\ndata: {json.dumps(payload)}\n\n"
             finally:
