@@ -13,6 +13,7 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -513,6 +514,11 @@ def _pulse_install(
             st["percent"] = round(min(cap, p + step), 1)
 
 
+_PIP_IDLE_TIMEOUT_S = 900.0  # no output for 15 min = something is wrong
+_PIP_PROGRESS_RE = re.compile(r"^Progress\s+(\d+)\s+of\s+(\d+)", re.I)
+_PIP_COLLECT_RE = re.compile(r"^(?:Collecting|Downloading)\s+(\S+)", re.I)
+
+
 def run_pip_packages(
     packages: tuple[str, ...],
     state: dict[str, Any],
@@ -520,8 +526,16 @@ def run_pip_packages(
     *,
     cap: float = 40.0,
     python: str | Path | None = None,
+    floor: float | None = None,
+    extra_args: tuple[str, ...] = (),
 ) -> None:
-    """Install packages into *python* (default: this one). Pulses *state[key]*.
+    """Install packages into *python* (default: this one), with real progress.
+
+    pip streams ``--progress-bar raw`` lines ("Progress X of Y") which map
+    onto *state[key]* between *floor* and *cap*; between downloads a slow
+    pulse keeps the bar honest. There is no wall-clock limit — a 2 GB torch
+    wheel on a slow line is normal — only an idle one: fifteen minutes with
+    no output at all fails the install.
 
     A frozen sidecar has no pip of its own; callers pass the managed
     runtime's interpreter (see :func:`_runtime_python`).
@@ -536,14 +550,20 @@ def run_pip_packages(
     # Nothing from the sidecar's own environment may leak into the runtime.
     env = child_env(None, with_source=False)
     env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
+    env["PIP_NO_INPUT"] = "1"
     attempts: list[list[str]] = [
-        [py, "-m", "pip", "install", "--disable-pip-version-check", *packages],
+        [
+            py, "-m", "pip", "install", "--disable-pip-version-check",
+            "--progress-bar", "raw", *extra_args, *packages,
+        ],
     ]
     uv = shutil.which("uv")
     if uv:
-        attempts.append(
-            [uv, "pip", "install", "--python", py, *packages]
-        )
+        attempts.append([uv, "pip", "install", "--python", py, *extra_args, *packages])
+
+    st = state.get(key)
+    lo = float(floor if floor is not None else (st.get("percent") if isinstance(st, dict) else 0.0) or 0.0)
+    lo = min(lo, cap)
     stop = threading.Event()
     pulse = threading.Thread(
         target=_pulse_install,
@@ -552,22 +572,27 @@ def run_pip_packages(
         daemon=True,
     )
     pulse.start()
+
+    def _set(pct: float | None = None, message: str | None = None) -> None:
+        cur = state.get(key)
+        if not isinstance(cur, dict):
+            return
+        if pct is not None:
+            # Per-file progress: the bar restarts at *lo* for each wheel and
+            # the message names the file, so a 2 GB torch after a 2 MB
+            # helper reads as what it is instead of a bar stuck at the cap.
+            cur["percent"] = round(min(cap, max(lo, pct)), 1)
+        if message:
+            cur["message"] = message
+
     last_err = ""
     try:
         for cmd in attempts:
             try:
-                proc = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=600,
-                    env=env,
-                    stdin=subprocess.DEVNULL,
-                    check=False,
-                )
-                if proc.returncode == 0:
+                rc, tail = _stream_pip(cmd, env, _set, lo, cap)
+                if rc == 0:
                     return
-                last_err = (proc.stderr or proc.stdout or f"exit {proc.returncode}")[:400]
+                last_err = ("\n".join(tail[-8:]) or f"exit {rc}")[:400]
                 logger.warning("voice pip failed (%s): %s", cmd[0], last_err)
             except Exception as exc:
                 last_err = str(exc)[:400]
@@ -575,6 +600,74 @@ def run_pip_packages(
     finally:
         stop.set()
     raise RuntimeError(last_err or "Voice pack download failed.")
+
+
+def _stream_pip(
+    cmd: list[str],
+    env: dict[str, str],
+    set_state: Any,
+    lo: float,
+    cap: float,
+) -> tuple[int, list[str]]:
+    """Run one pip command hidden, mapping its raw progress onto the bar.
+
+    Returns ``(returncode, last_output_lines)``. Raises ``TimeoutError``
+    when pip goes silent for :data:`_PIP_IDLE_TIMEOUT_S`.
+    """
+    from remedy.execution.process import hidden_subprocess_kwargs
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        **hidden_subprocess_kwargs(),
+    )
+    tail: list[str] = []
+    box: dict[str, Any] = {"last": time.monotonic(), "done": False}
+    stdout = proc.stdout
+    assert stdout is not None
+
+    current = {"name": ""}
+
+    def _reader() -> None:
+        for raw in stdout:
+            line = raw.strip()
+            box["last"] = time.monotonic()
+            if not line:
+                continue
+            tail.append(line)
+            del tail[:-30]
+            m = _PIP_PROGRESS_RE.match(line)
+            if m:
+                done_b, total_b = int(m.group(1)), int(m.group(2))
+                if total_b > 0:
+                    frac = min(1.0, done_b / total_b)
+                    name = current["name"] or "the voice pack"
+                    if total_b >= 50 << 20:
+                        msg = f"Fetching {name} · {done_b / 2**30:.1f} of {total_b / 2**30:.1f} GB"
+                    else:
+                        msg = f"Fetching {name}"
+                    set_state(lo + (cap - lo) * frac, msg)
+                continue
+            m = _PIP_COLLECT_RE.match(line)
+            if m:
+                current["name"] = re.split(r"[-=<>\[ ]", m.group(1), maxsplit=1)[0]
+                set_state(None, f"Fetching {current['name']}")
+        box["done"] = True
+
+    t = threading.Thread(target=_reader, daemon=True)
+    t.start()
+    while not box["done"]:
+        t.join(5.0)
+        if not box["done"] and time.monotonic() - box["last"] > _PIP_IDLE_TIMEOUT_S:
+            proc.kill()
+            raise TimeoutError("pip produced no output for 15 minutes")
+    return proc.wait(timeout=60), tail
 
 
 def _runtime_python(home_dir: Path | str | None, state_key: str) -> Path:

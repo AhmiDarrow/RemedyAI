@@ -325,6 +325,7 @@ export function GroveChat({
             <>
               <code>Enter</code> send · <code>Shift+Enter</code> new line ·{' '}
               <code>📎</code> attach{micSupported ? <> · <code>🎙</code> speak</> : null}
+              {' '}· while she works, <code>Enter</code> steers
             </>
           }
           sessionId={sessionKey}
@@ -398,7 +399,15 @@ export function GroveChat({
             }
           }}
           aria-label="Talk to Remedy"
-          placeholder={!serverReady ? 'Connecting…' : recording ? 'Listening…' : placeholder}
+          placeholder={
+            !serverReady
+              ? 'Connecting…'
+              : recording
+                ? 'Listening…'
+                : streaming
+                  ? 'Steer me — say it and I change course'
+                  : placeholder
+          }
           disabled={!serverReady}
         />
         {micSupported && onMic && (
@@ -414,15 +423,25 @@ export function GroveChat({
           </button>
         )}
         {streaming ? (
-          <button
-            type="button"
-            className="grove-mic stop"
-            onClick={onStop}
-            title="Pause"
-            aria-label="Pause"
-          >
-            ⏸
-          </button>
+          <>
+            <button
+              type="button"
+              className="grove-mic stop"
+              onClick={onStop}
+              title="Pause"
+              aria-label="Pause"
+            >
+              ⏸
+            </button>
+            <button
+              type="submit"
+              className="grove-mic steer"
+              title="Steer — send now and she changes course"
+              aria-label="Steer: send now and change course"
+            >
+              ↑
+            </button>
+          </>
         ) : (
           <button type="submit" className="grove-mic" title="Send" aria-label="Send">
             ↑

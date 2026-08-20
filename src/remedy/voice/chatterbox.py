@@ -14,6 +14,7 @@ import importlib
 import json
 import logging
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -128,11 +129,44 @@ def _device() -> str:
     return "cpu"
 
 
+# chatterbox-tts pins torch 2.6.0; these are the same version built for CUDA 12.4.
+_CUDA_TORCH_INDEX = "https://download.pytorch.org/whl/cu124"
+_CUDA_TORCH_PACKAGES = ("torch==2.6.0+cu124", "torchaudio==2.6.0+cu124")
+
+
+def _wants_cuda_torch() -> bool:
+    """An NVIDIA card on a platform the cu124 wheels cover."""
+    if sys.platform not in ("win32", "linux"):
+        return False
+    if os.environ.get("REMEDY_VOICE_CPU_ONLY") == "1":
+        return False
+    try:
+        from remedy.runtime.gpu_probe import probe_primary_vram
+
+        is_nvidia, total_mb, _free, _name, _vendor = probe_primary_vram()
+    except Exception:
+        return False
+    return bool(is_nvidia and total_mb >= 4096)
+
+
+def _needs_cuda_upgrade(home_dir: Path | str | None) -> bool:
+    """HQ is installed on a CPU torch while this machine has an NVIDIA card."""
+    if not _managed() or not _wants_cuda_torch():
+        return False
+    try:
+        from remedy.voice.bridge import get_bridge
+
+        probe = get_bridge(home_dir).probe()
+    except Exception:
+        return False
+    return bool(probe.get("hq")) and "+cpu" in str(probe.get("torch") or "")
+
+
 def _ensure_package(home_dir: Path | str | None = None) -> bool:
-    if chatterbox_deps_available():
+    if chatterbox_deps_available() and not _needs_cuda_upgrade(home_dir):
         return True
     if _skip_network():
-        return False
+        return chatterbox_deps_available()
     try:
         _install_state["chatterbox"] = {
             "status": "downloading",
@@ -152,9 +186,22 @@ def _ensure_package(home_dir: Path | str | None = None) -> bool:
                 _PACK_BASE_PACKAGES + ("chatterbox-tts",),
                 _install_state,
                 "chatterbox",
-                cap=35.0,
+                cap=28.0,
                 python=py,
             )
+            # PyPI's Windows/Linux torch is CPU-only. With an NVIDIA card the
+            # human-bar voice is ~20x faster on CUDA, so swap the wheels.
+            if _wants_cuda_torch():
+                _install_state["chatterbox"]["message"] = "Fetching the GPU build of torch"
+                run_pip_packages(
+                    _CUDA_TORCH_PACKAGES,
+                    _install_state,
+                    "chatterbox",
+                    cap=35.0,
+                    python=py,
+                    floor=28.0,
+                    extra_args=("--index-url", _CUDA_TORCH_INDEX),
+                )
             from remedy.voice.bridge import get_bridge
 
             get_bridge(home_dir).stop()  # stale imports from before pip
@@ -307,7 +354,9 @@ def install_chatterbox_background(home_dir: Path | str | None = None) -> bool:
         st = _install_state.get("chatterbox")
         if isinstance(st, dict) and st.get("status") == "downloading":
             return False
-        if _engine is not None or chatterbox_installed(home_dir):
+        if (_engine is not None or chatterbox_installed(home_dir)) and not _needs_cuda_upgrade(
+            home_dir
+        ):
             _install_state["chatterbox"] = {"status": "done", "percent": 100.0}
             return False
         _install_state["chatterbox"] = {"status": "downloading", "percent": 0.0}

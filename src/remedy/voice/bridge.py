@@ -13,7 +13,6 @@ import contextlib
 import json
 import logging
 import subprocess
-import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -48,9 +47,8 @@ class VoiceBridge:
             raise WorkerError("Remedy's voice runtime is not set up yet.")
         env = rt.child_env(self.home_dir, with_source=True)
         env["REMEDY_VOICE_WORKER"] = "1"
-        creation = 0
-        if sys.platform == "win32":
-            creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        from remedy.execution.process import hidden_subprocess_kwargs
+
         proc = subprocess.Popen(
             [str(py), "-m", "remedy.voice.worker"],
             stdin=subprocess.PIPE,
@@ -58,8 +56,9 @@ class VoiceBridge:
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
+            errors="replace",
             env=env,
-            creationflags=creation,
+            **hidden_subprocess_kwargs(),
         )
         t = threading.Thread(target=self._pump_stderr, args=(proc,), daemon=True)
         t.start()
@@ -73,8 +72,14 @@ class VoiceBridge:
             assert proc.stderr is not None
             for line in proc.stderr:
                 line = line.rstrip()
-                if line:
-                    logger.info("voice worker: %s", line)
+                if not line:
+                    continue
+                # Engines chatter (deprecations, library notices); only the
+                # worker's own warnings are worth the owner's log.
+                if "remedy.voice" in line or "Traceback" in line or "Error" in line:
+                    logger.warning("voice worker: %s", line)
+                else:
+                    logger.debug("voice worker: %s", line)
         except Exception:
             pass
 
@@ -158,9 +163,9 @@ class VoiceBridge:
 
     # -- typed helpers -------------------------------------------------------
 
-    def probe(self) -> dict[str, bool]:
+    def probe(self) -> dict[str, Any]:
         out = self.call("probe", timeout=60)
-        return {k: bool(v) for k, v in (out or {}).items()}
+        return dict(out or {})
 
     def synthesize(
         self,
