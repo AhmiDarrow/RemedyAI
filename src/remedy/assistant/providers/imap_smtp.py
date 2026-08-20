@@ -310,7 +310,7 @@ class ImapSmtpMailProvider:
         conn = self._imap()
         try:
             conn.select("INBOX", readonly=True)
-            typ, msg_data = conn.uid("FETCH", mid.encode("ascii"), "(RFC822)")
+            typ, msg_data = conn.uid("FETCH", _uid_set(mid), "(RFC822)")
             # imaplib answers ('OK', [None]) for a message set the server
             # ignored, so `not msg_data` was False and the owner got a blank
             # message — "(no subject)" with an empty body — instead of being
@@ -456,7 +456,7 @@ class ImapSmtpMailProvider:
             conn.select("INBOX")
             op = "+FLAGS" if read else "-FLAGS"
             typ, resp = conn.uid(
-                "STORE", message_id.encode("ascii"), op, "\\Seen"
+                "STORE", _uid_set(message_id), op, "\\Seen"
             )
             # STORE against a message set the server ignored is an OK no-op
             # with an empty response, so trusting the return code alone told
@@ -483,7 +483,7 @@ class ImapSmtpMailProvider:
         conn = self._imap()
         try:
             conn.select("INBOX")
-            mid = message_id.encode("ascii")
+            mid = _uid_set(message_id)
             folder = f'"{self.account.archive_folder}"'
             # Copy into the archive, then flag+expunge from INBOX. (Plain COPY
             # works on every IMAP server; UID MOVE is not universal.)
@@ -527,6 +527,16 @@ class ImapSmtpMailProvider:
             "message_id": message_id,
             "message": f"Archived to {self.account.archive_folder}",
         }
+
+
+def _uid_set(message_id: str) -> str:
+    """A UID message set for ``IMAP4.uid``: ASCII digits only.
+
+    imaplib takes ``str`` here and encodes it itself, so anything non-ASCII
+    is a caller bug that must fail loudly before it reaches the wire.
+    """
+    message_id.encode("ascii")
+    return message_id
 
 
 def _has_copyuid(resp: Any) -> bool:

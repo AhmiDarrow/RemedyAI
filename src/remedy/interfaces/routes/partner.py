@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from contextlib import suppress
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -443,7 +444,7 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         pending = APPROVALS.list_pending()
         goals_open = 0
         harness = "auto"
-        scope = "project"
+        scope: Any = "project"
         brief_intent = ""
         organism: dict = {}
         with suppress(Exception):
@@ -469,11 +470,10 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                         not in (TaskStatus.COMPLETED, TaskStatus.CANCELLED, TaskStatus.FAILED)
                     ]
                 )
-            scope = getattr(runtime, "_access_scope", None) or getattr(
+            scope_src = getattr(runtime, "_access_scope", None) or getattr(
                 runtime, "access_scope", lambda: "project"
             )
-            if callable(scope):
-                scope = scope()
+            scope = scope_src() if callable(scope_src) else scope_src
             harness = getattr(runtime, "_harness_mode", "auto")
             brief = getattr(runtime, "_session_brief", None)
             if brief is not None:

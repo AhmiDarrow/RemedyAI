@@ -55,7 +55,7 @@ def _health(base_url: str, timeout: float = _HEALTH_TIMEOUT_S) -> bool:
     url = base + "/models"
     try:
         req = Request(url, headers={"User-Agent": "RemedyAI-vision/1.0"})
-        with urlopen_no_redirect(req, timeout=timeout) as resp:  # type: ignore[union-attr]
+        with urlopen_no_redirect(req, timeout=timeout) as resp:
             return 200 <= getattr(resp, "status", 200) < 300
     except Exception:
         # Some builds only expose /v1/models
@@ -66,7 +66,7 @@ def _health(base_url: str, timeout: float = _HEALTH_TIMEOUT_S) -> bool:
                 else base + "/models"
             )
             req = Request(alt, headers={"User-Agent": "RemedyAI-vision/1.0"})
-            with urlopen_no_redirect(req, timeout=timeout) as resp:  # type: ignore[union-attr]
+            with urlopen_no_redirect(req, timeout=timeout) as resp:
                 return 200 <= getattr(resp, "status", 200) < 300
         except Exception:
             return False

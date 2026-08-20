@@ -137,7 +137,8 @@ def resolve_supports_vision(
 ) -> bool:
     """Full resolve with config.toml overrides and catalog flags."""
     cfg = config or {}
-    vision_cfg = cfg.get("vision") if isinstance(cfg.get("vision"), dict) else {}
+    vision_raw = cfg.get("vision")
+    vision_cfg: dict[str, Any] = vision_raw if isinstance(vision_raw, dict) else {}
     # Per-model map: vision.chat_model_vision = { "deepseek-chat": false }
     overrides = vision_cfg.get("chat_model_vision") or cfg.get("chat_model_vision")
     mid = (model or "").strip()

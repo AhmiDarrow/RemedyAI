@@ -360,12 +360,12 @@ async def handle_messenger_event(
         with suppress(Exception):
             from remedy.core.turn_context import in_active_turn
 
-            runtime._origin_channel = channel  # type: ignore[attr-defined]
+            runtime._origin_channel = channel
             if not in_active_turn():
-                runtime._session_id = session.id  # type: ignore[attr-defined]
+                runtime._session_id = session.id
         if full:
             with suppress(Exception):
-                runtime._last_assistant_text = full[-12000:]  # type: ignore[attr-defined]
+                runtime._last_assistant_text = full[-12000:]
         if not used_stream_response:
             with suppress(Exception):
                 from remedy.core.agent_post_turn import schedule_post_turn_prep

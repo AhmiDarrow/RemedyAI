@@ -13,7 +13,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ def _pid_alive(pid: int) -> bool:
             import ctypes
             from ctypes import wintypes
 
-            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            kernel32 = ctypes.windll.kernel32
             access = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION
             handle = kernel32.OpenProcess(access, False, pid)
             if not handle:
@@ -92,7 +92,7 @@ class MessengerPollLock:
         base = Path(home).expanduser() if home else Path.home() / ".remedy"
         self.path = base / "locks" / f"{channel}_getupdates.lock"
         self.channel = channel
-        self._fh = None  # keep open so Windows exclusive share holds
+        self._fh: TextIO | None = None  # keep open so Windows exclusive share holds
         self.held = False
 
     def __enter__(self) -> MessengerPollLock:

@@ -93,8 +93,12 @@ def mark_tier_used(tier_name: str) -> None:
         _tier_last_used[tier_name] = time.time()
 
 
-def tier_idle_stop(tier_name: str, idle_s: float = IDLE_STOP_S) -> bool:
-    """Stop a tier if it has been idle for idle_s and is not resident."""
+def tier_idle_stop(tier_name: str, idle_s: float = IDLE_STOP_S) -> bool | dict[str, Any]:
+    """Stop a tier if it has been idle for idle_s and is not resident.
+
+    Returns False when nothing was done, else ``stop_tier``'s result dict
+    (callers and tests rely on the dict being passed through verbatim).
+    """
     tier = MDL_TIERS.get(tier_name)
     if tier is None:
         return False

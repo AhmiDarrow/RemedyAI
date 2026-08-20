@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+from typing import Any
 
 from fastapi import FastAPI
 
@@ -23,6 +24,11 @@ from remedy.interfaces.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _int_or(value: Any, default: int) -> int:
+    """``int(value)`` unless the setting is absent (``None``) -> ``default``."""
+    return default if value is None else int(value)
 
 
 def _normalize_tool_process(cfg: dict | None = None, raw: object = None) -> str:
@@ -200,31 +206,11 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             ),
             "build_os_advanced": bool(cfg.get("build_os_advanced", False)),
             "rmb_enabled": bool(cfg.get("rmb_enabled", True)),
-            "retention_session_days": int(
-                cfg.get("retention_session_days")
-                if cfg.get("retention_session_days") is not None
-                else 180
-            ),
-            "retention_attachment_days": int(
-                cfg.get("retention_attachment_days")
-                if cfg.get("retention_attachment_days") is not None
-                else 90
-            ),
-            "retention_computer_shot_days": int(
-                cfg.get("retention_computer_shot_days")
-                if cfg.get("retention_computer_shot_days") is not None
-                else 14
-            ),
-            "retention_undo_days": int(
-                cfg.get("retention_undo_days")
-                if cfg.get("retention_undo_days") is not None
-                else 30
-            ),
-            "retention_log_days": int(
-                cfg.get("retention_log_days")
-                if cfg.get("retention_log_days") is not None
-                else 30
-            ),
+            "retention_session_days": _int_or(cfg.get("retention_session_days"), 180),
+            "retention_attachment_days": _int_or(cfg.get("retention_attachment_days"), 90),
+            "retention_computer_shot_days": _int_or(cfg.get("retention_computer_shot_days"), 14),
+            "retention_undo_days": _int_or(cfg.get("retention_undo_days"), 30),
+            "retention_log_days": _int_or(cfg.get("retention_log_days"), 30),
             "memory_encrypt": bool(cfg.get("memory_encrypt", False)),
             "allow_skill_creation": bool(cfg.get("allow_skill_creation", True)),
             "auto_approve_threshold": float(cfg.get("auto_approve_threshold", 0.8)),

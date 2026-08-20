@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -71,7 +72,7 @@ def _cached_system_health(
         and _health_cache.get("value") is not None
         and (now - float(_health_cache.get("ts") or 0)) < _HEALTH_CACHE_TTL_S
     ):
-        return dict(_health_cache["value"])  # type: ignore[arg-type]
+        return dict(_health_cache["value"])
     health = system_health(model_id=model_id, runtime_id=runtime_id, home_dir=home_dir)
     _health_cache["ts"] = now
     _health_cache["key"] = key
@@ -495,7 +496,7 @@ def stop(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 def _decode_images_queued(
-    paths: list[Path],
+    paths: Sequence[str | Path],
     *,
     base_url: str,
     timeout_s: float,
