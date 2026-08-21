@@ -13,7 +13,7 @@ def test_identity_defaults_and_roundtrip(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
     ident = load(tmp_path)
     assert ident.gender == "female"
-    assert ident.pace == pytest.approx(0.96)
+    assert ident.pace == pytest.approx(0.97)
     ident.gender = "male"
     ident.pace = 1.4  # clamp
     save(ident, tmp_path)
@@ -26,8 +26,8 @@ def test_evolve_is_bounded_and_journaled(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
     evolve(tmp_path, pace=0.5, pitch_semitones=9)
     ident = load(tmp_path)
-    assert ident.pace == 1.15
-    assert ident.pitch_semitones == 2.0
+    assert ident.effective()["pace"] == 1.15
+    assert ident.effective()["pitch_semitones"] == 2.0
     assert ident.journal and ident.journal[-1]["change"] == "evolve"
 
 
@@ -57,8 +57,8 @@ def test_identity_load_survives_junk_numbers(tmp_path):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps({"warmth": "warm", "pace": None}), encoding="utf-8")
     ident = load(tmp_path)
-    assert ident.warmth == pytest.approx(0.62)
-    assert ident.pace == pytest.approx(0.96)
+    assert ident.warmth == pytest.approx(0.5)
+    assert ident.pace == pytest.approx(0.97)
 
 
 def test_an_owned_reference_only_speaks_for_its_own_gender(tmp_path):

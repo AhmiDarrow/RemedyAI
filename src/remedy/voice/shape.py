@@ -83,13 +83,13 @@ def shape_audio(
     except Exception as exc:  # noqa: BLE001 — shaping is never worth a silent reply
         logger.info("voice shape: pitch/pace skipped: %s", exc)
     try:
+        # Rumble and DC out first: below speech, it only muddies the level.
+        x = _highpass_vec(x, sr, 70.0)
         tilt = max(-1.0, min(1.0, (float(warmth) - 0.5) * 2.0))
         if abs(tilt) >= 1e-3:
-            lp = _lowpass_vec(x, sr, 1800.0)
-            x = x + (0.45 * tilt) * (lp - x)
-            peak = float(np.max(np.abs(x))) if len(x) else 0.0
-            if peak > 0.98:
-                x = x * (0.98 / peak)
+            # Gentle: acts above ~3 kHz (sheen), never the body of the voice.
+            lp = _lowpass_vec(x, sr, 3000.0)
+            x = x + (0.25 * tilt) * (lp - x)
     except Exception as exc:  # noqa: BLE001
         logger.info("voice shape: warmth skipped: %s", exc)
     return normalize_level(np.asarray(x, dtype=np.float32))
@@ -99,11 +99,35 @@ _TARGET_RMS = 0.1  # -20 dBFS: a normal conversational level for playback
 _PEAK_CAP = 0.95
 
 
+def _highpass_vec(x: Any, sr: int, fc: float) -> Any:
+    """Zero-phase one-pole high-pass (x minus its low-pass)."""
+    return (x - _lowpass_vec(x, sr, fc)).astype(x.dtype)
+
+
+def _soft_limit(x: Any, knee: float = 0.8, ceiling: float = _PEAK_CAP) -> Any:
+    """Round off only the peaks above *knee*; the body of the signal is untouched.
+
+    A hard gain cap lets one stray peak drop the whole utterance; a limiter
+    keeps the level and tames the peak.
+    """
+    import numpy as np
+
+    a = np.abs(x)
+    over = a > knee
+    if not np.any(over):
+        return x
+    span = ceiling - knee
+    shaped = knee + span * np.tanh((a[over] - knee) / span)
+    out = x.copy()
+    out[over] = np.sign(x[over]) * shaped
+    return out.astype(np.float32)
+
+
 def normalize_level(x: Any) -> Any:
     """Bring speech to a steady playback level (engines differ by 10+ dB).
 
-    RMS to about -20 dBFS, peaks capped, gain limited so silence or a
-    whisper is not blown up into noise.
+    RMS to about -20 dBFS; gain limited so silence or a whisper is not
+    blown up into noise; peaks above the knee are rounded, not clipped.
     """
     import numpy as np
 
@@ -112,11 +136,8 @@ def normalize_level(x: Any) -> Any:
     rms = float(np.sqrt(np.mean(np.square(x, dtype=np.float64))))
     if rms < 1e-4:
         return x
-    gain = min(8.0, _TARGET_RMS / rms)
-    peak = float(np.max(np.abs(x))) * gain
-    if peak > _PEAK_CAP:
-        gain *= _PEAK_CAP / peak
-    return (x * gain).astype(np.float32)
+    gain = min(6.0, _TARGET_RMS / rms)
+    return _soft_limit((x * gain).astype(np.float32))
 
 
 def sampling_for(articulation: float) -> dict[str, float]:
@@ -139,10 +160,11 @@ def apply_identity(
         ident = load(home_dir)
     except Exception:
         return _floats(samples)
+    eff = ident.effective()
     return shape_audio(
         samples,
         sr,
-        pace=ident.pace,
-        pitch_semitones=ident.pitch_semitones,
-        warmth=ident.warmth,
+        pace=eff["pace"],
+        pitch_semitones=eff["pitch_semitones"],
+        warmth=eff["warmth"],
     )

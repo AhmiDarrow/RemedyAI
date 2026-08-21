@@ -604,7 +604,7 @@ def synthesize(
     try:
         with _engine_lock:
             _select_speaker(model, prompt)
-            wav = model.generate(clean, **sampling_for(ident.articulation))
+            wav = model.generate(clean, **sampling_for(ident.effective()["articulation"]))
     except Exception as exc:
         logger.warning("chatterbox: generate failed: %s", exc)
         return None
