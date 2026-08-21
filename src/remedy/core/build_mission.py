@@ -46,9 +46,8 @@ def ensure_build_mission(
 
     steps = [
         "Scout codebase (batch reads)",
-        "Implement changes (file_write / file_edit)",
-        "Verify with project tests",
-        "Repair until green",
+        "Implement the owner's goal (file_write / file_edit)",
+        "Verify with project tests only after that work is on disk",
     ]
     m = create_mission(
         goal,
@@ -67,8 +66,29 @@ def ensure_build_mission(
     }
 
 
+def _mission_step_is_verify(title: str) -> bool:
+    """True for checklist rows that *are* the test run, not product work."""
+    t = (title or "").lower()
+    return any(
+        k in t
+        for k in (
+            "verify",
+            "pytest",
+            "npm test",
+            "run tests",
+            "run the tests",
+            "test suite",
+            "tests green",
+        )
+    )
+
+
 def note_mission_verify(runtime: Any, state: Any, *, ok: bool, output: str = "") -> None:
-    """Update bound mission verify_status after auto-verify."""
+    """Update bound mission verify_status after auto-verify.
+
+    A green suite is a checkpoint, not the whole mission. Session 765c marked
+    "Implement the owner's goal" done on the first ``npm test`` pass.
+    """
     mid = getattr(state, "mission_id", None)
     if not mid:
         return
@@ -83,10 +103,13 @@ def note_mission_verify(runtime: Any, state: Any, *, ok: bool, output: str = "")
         m.verify_status = "passed" if ok else "failed"
         m.last_verify_output = (output or "")[:4000]
         if ok:
-            m.status = "completed"
             for s in m.steps:
-                if s.status in ("pending", "active"):
+                if s.status in ("pending", "active") and _mission_step_is_verify(
+                    s.title
+                ):
                     s.status = "done"
+            if m.steps and all(s.status in ("done", "skipped") for s in m.steps):
+                m.status = "completed"
         else:
             m.retries = int(m.retries or 0) + 1
         store.save(m)

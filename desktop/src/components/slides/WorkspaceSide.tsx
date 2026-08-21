@@ -9,7 +9,8 @@ import {
 } from '../../workspace/layoutPrefs'
 
 const RAIL_W = 36
-const THIN_W = 10
+/** Ultra-slim click strip — ≥12px so it is a real hit target. */
+const THIN_W = 12
 /** Double-click resize handle resets to this default body width. */
 const DEFAULT_BODY_W = 300
 
@@ -18,8 +19,8 @@ const DEFAULT_BODY_W = 300
  *
  * Modes:
  * - thin  — narrow strip; click expands to icons
- * - icons — icon rail only; click icon opens panel
- * - open  — icons + panel body; header × minimizes to thin
+ * - icons — icon rail only; click icon opens panel; ✕ collapses to thin
+ * - open  — icons + panel body; header ✕ / rail ✕ collapse to thin
  */
 export function WorkspaceSide({
   side,
@@ -88,12 +89,15 @@ export function WorkspaceSide({
   }, [resizing])
 
   if (thin) {
+    const expandLabel = side === 'left' ? 'Expand left rail' : 'Expand right rail'
     return (
       <button
         type="button"
         className="workspace-thin-rail flex h-full min-h-0 shrink-0 items-center justify-center"
+        data-side={side}
         style={{
           width: THIN_W,
+          minWidth: THIN_W,
           background: 'var(--bg-tertiary)',
           borderRight: side === 'left' ? '1px solid var(--border)' : undefined,
           borderLeft: side === 'right' ? '1px solid var(--border)' : undefined,
@@ -101,17 +105,17 @@ export function WorkspaceSide({
           cursor: 'pointer',
           padding: 0,
         }}
-        title={side === 'left' ? 'Expand left rail' : 'Expand right rail'}
-        aria-label={side === 'left' ? 'Expand left rail' : 'Expand right rail'}
+        title={`${expandLabel} (click)`}
+        aria-label={expandLabel}
         onClick={() => onRailMode('icons')}
       >
         <span
+          className="workspace-thin-rail-grip"
+          aria-hidden
           style={{
-            fontSize: 9,
-            writingMode: 'vertical-rl',
-            transform: side === 'right' ? 'rotate(180deg)' : undefined,
+            fontSize: 10,
+            lineHeight: 1,
             letterSpacing: '0.04em',
-            opacity: 0.85,
           }}
         >
           {side === 'left' ? '›' : '‹'}
@@ -199,24 +203,23 @@ export function WorkspaceSide({
         )
       })}
       <div className="flex-1 min-h-0" aria-hidden />
-      {open && (
-        <button
-          type="button"
-          title="Minimize to thin edge"
-          aria-label="Minimize rail"
-          className="slide-rail-btn flex items-center justify-center mt-auto"
-          style={{
-            background: 'transparent',
-            color: 'var(--text-muted)',
-            border: 'none',
-            cursor: 'pointer',
-            fontSize: 12,
-          }}
-          onClick={() => onRailMode('thin')}
-        >
-          −
-        </button>
-      )}
+      <button
+        type="button"
+        title="Collapse rail"
+        aria-label="Collapse rail"
+        data-rail-collapse
+        className="slide-rail-btn slide-rail-collapse flex items-center justify-center mt-auto"
+        style={{
+          background: 'transparent',
+          color: 'var(--text-muted)',
+          border: 'none',
+          cursor: 'pointer',
+          fontSize: 11,
+        }}
+        onClick={() => onRailMode('thin')}
+      >
+        ✕
+      </button>
     </div>
   )
 
@@ -316,8 +319,8 @@ export function WorkspaceSide({
               onClick: onFullscreen,
             })}
           {chromeBtn({
-            title: 'Minimize to thin rail',
-            label: '×',
+            title: 'Collapse rail',
+            label: '✕',
             onClick: () => onRailMode('thin'),
           })}
         </div>

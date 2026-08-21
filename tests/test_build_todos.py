@@ -52,6 +52,21 @@ def test_upsert_merge_and_replace(tmp_path):
     assert loaded[0].id == "x"
 
 
+def test_verify_rows_are_not_feature_work():
+    from remedy.core.build_todos import TodoItem, open_feature_todo_count, todo_is_verify_row
+
+    assert todo_is_verify_row("npm test green")
+    assert todo_is_verify_row("run tests")
+    assert not todo_is_verify_row("Verify critical fixes")
+    assert not todo_is_verify_row("Audio: HPSS/lead emphasis + stronger pitch path")
+    items = [
+        TodoItem(id="1", content="Audio: HPSS", status="in_progress"),
+        TodoItem(id="11", content="npm test green", status="pending"),
+        TodoItem(id="6", content="README refresh", status="completed"),
+    ]
+    assert open_feature_todo_count(items) == 1
+
+
 def test_open_count_and_format():
     rt = SimpleNamespace(effective_project_path=lambda: None, config=None)
     items = upsert_todos(
@@ -139,30 +154,51 @@ def test_open_todos_block_done_after_writes():
     assert build_blocks_final_answer(st) is False
 
 
-def test_done_build_closes_whole_checklist(tmp_path):
-    """phase="done" closes every remaining row — even wording that matches
-    no file/verify heuristic (the RemedyPDF-update stale-list bug)."""
+def test_done_summary_blocks_on_open_list_not_on_unverified_writes():
+    from remedy.core.build_engine import build_blocks_done_summary
+
+    open_list = BuildTurnState(active=True, write_steps=2, open_todo_count=1)
+    open_list.last_verify_ok = True
+    assert build_blocks_done_summary(open_list) is True
+    unverified = BuildTurnState(active=True, write_steps=2, open_todo_count=0)
+    unverified.last_verify_ok = None
+    assert build_blocks_done_summary(unverified) is False
+
+
+def test_open_todos_block_a_scout_only_done():
+    """A checklist with no writes yet is not 'say go' — it is unfinished work."""
+    st = BuildTurnState(active=True, write_steps=0, open_todo_count=3)
+    assert build_blocks_final_answer(st) is True
+    from remedy.core.build_engine import unfinished_green_gate_message
+
+    msg = unfinished_green_gate_message(st)
+    assert "say go" in msg["content"].lower() or "TODO GATE" in msg["content"]
+
+
+def test_done_phase_does_not_fake_complete_unrelated_rows(tmp_path):
+    """Session 765c: phase=done + green tests crossed off work that was not done."""
     from remedy.core.build_todos import sync_todos_with_build
 
     rt = _rt(tmp_path)
     upsert_todos(
         rt,
         [
-            {"id": "a", "content": "RemedyPDF update polish pass", "status": "in_progress"},
+            {"id": "a", "content": "Verify critical fixes", "status": "in_progress"},
             {"id": "b", "content": "double-check export margins", "status": "pending"},
+            {"id": "c", "content": "npm test green", "status": "pending"},
         ],
         merge=False,
     )
-    assert open_todo_count(load_todos(rt)) == 2
-    state = BuildTurnState(goal="remedypdf update", project_path=str(tmp_path))
+    state = BuildTurnState(goal="fix issues 1-10", project_path=str(tmp_path))
     state.phase = "done"
-    state.last_verify_ok = True  # a GREEN-verified done build owns its checklist
+    state.last_verify_ok = True
+    state.write_steps = 2
     items = sync_todos_with_build(rt, state)
-    assert open_todo_count(items) == 0
-    # save_todos drops fully-closed lists: disk file gone, next load empty
-    assert not (tmp_path / ".remedy-build" / "todos.json").is_file()
-    assert load_todos(rt) == []
-    assert state.open_todo_count == 0
+    by_id = {t.id: t for t in items}
+    assert by_id["a"].status == "in_progress"
+    assert by_id["b"].status == "pending"
+    assert by_id["c"].status == "completed"
+    assert open_todo_count(items) == 2
 
 
 def test_done_without_green_verify_keeps_open_rows(tmp_path):
@@ -181,6 +217,82 @@ def test_done_without_green_verify_keeps_open_rows(tmp_path):
     state.last_verify_ok = False
     items = sync_todos_with_build(rt, state)
     assert open_todo_count(items) == 1
+
+
+def test_filename_stem_completes_matching_todo(tmp_path):
+    """``audioToMidi.ts`` must check off a row that names audioToMidi.
+
+    Session 765c: the Build list stayed on 'Read audioToMidi…' while she
+    edited that file — the matcher required the extension in the row text.
+    """
+    from remedy.core.build_todos import sync_todos_with_build
+
+    rt = _rt(tmp_path)
+    upsert_todos(
+        rt,
+        [
+            {"id": "1", "content": "Read audioToMidi, theory fretting, tabEdit", "status": "in_progress"},
+            {"id": "2", "content": "Patch audioToMidi quantize", "status": "pending"},
+            {"id": "3", "content": "Melody-band + octave repair", "status": "pending"},
+            {"id": "5", "content": "npm test green", "status": "pending"},
+        ],
+        merge=False,
+    )
+    state = BuildTurnState(goal="do all of those things", project_path=str(tmp_path))
+    state.write_steps = 1
+    state.write_set = [str(tmp_path / "src" / "lib" / "audioToMidi.ts")]
+    state.paths_touched = list(state.write_set)
+    items = sync_todos_with_build(rt, state)
+    by_id = {t.id: t for t in items}
+    assert by_id["1"].status == "completed"  # "Read …" prefix + filename stem
+    assert by_id["2"].status == "completed"  # filename stem only, no "read"
+    # Next unmatched open row becomes in_progress so the live list moves.
+    assert by_id["3"].status == "in_progress"
+    assert by_id["5"].status == "pending"
+
+
+def test_verify_green_completes_the_test_row_not_the_whole_list(tmp_path):
+    from remedy.core.build_todos import sync_todos_with_build
+
+    rt = _rt(tmp_path)
+    upsert_todos(
+        rt,
+        [
+            {"id": "2", "content": "Melody-band + octave repair", "status": "in_progress"},
+            {"id": "5", "content": "npm test green", "status": "pending"},
+        ],
+        merge=False,
+    )
+    state = BuildTurnState(goal="g", project_path=str(tmp_path))
+    state.phase = "implement"
+    state.last_verify_ok = True
+    items = sync_todos_with_build(rt, state)
+    by_id = {t.id: t for t in items}
+    assert by_id["5"].status == "completed"
+    assert by_id["2"].status == "in_progress"
+
+
+def test_sync_with_runtime_queues_a_live_todos_event(tmp_path):
+    from remedy.core.build_todos import sync_todos_with_build
+
+    rt = _rt(tmp_path)
+    upsert_todos(
+        rt,
+        [
+            {"id": "1", "content": "Read audioToMidi helpers", "status": "in_progress"},
+            {"id": "2", "content": "Melody-band pass", "status": "pending"},
+        ],
+        merge=False,
+    )
+    take_todos_event(rt)  # drop the upsert event
+    state = BuildTurnState(goal="g", project_path=str(tmp_path))
+    state.write_steps = 2
+    state.write_set = ["src/lib/audioToMidi.ts"]
+    sync_todos_with_build(rt, state)
+    tok = take_todos_event(rt)
+    assert tok and tok.startswith("@@todos:")
+    assert "completed" in tok
+    assert "Melody-band" in tok
 
 
 def test_unfinished_build_keeps_open_rows(tmp_path):

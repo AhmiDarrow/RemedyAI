@@ -68,6 +68,10 @@ def progress_marker(
 
 _WRITE_TOOLS = frozenset({"file_write", "file_edit", "file_edit_batch", "apply_patch"})
 _READ_TOOLS = frozenset({"file_read", "list_dir", "repo_search"})
+# Provider-history bookkeeping keys a model may copy back into a fresh call.
+_HISTORY_REPLAY_KEYS = frozenset(
+    {"_history_summarized", "_body_omitted", "_content_chars", "history_note"}
+)
 # Non-idempotent tools: shell/host execution and verify/build runs whose result
 # legitimately changes between steps (re-running `pytest` after a fix). Their
 # result-cache entry is fine WITHIN a batch (distributes to duplicate calls),
@@ -249,10 +253,13 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
         # Refuse corrupted / history-summarized args before they hit the disk.
         # Note: live stream cut-offs used to surface as the same HISTORY_STUB
         # message — distinguish stream budget vs real history stubs for the model.
+        # History-replay flags on *write* tools are handled below (soft-skip when
+        # the real file is already on disk); only corrupted JSON / non-write
+        # tools take this hard-fail path.
         if isinstance(args, dict) and (
             args.get("_invalid_json")
             or args.get("_truncated")
-            or args.get("_history_summarized")
+            or (args.get("_history_summarized") and name not in _WRITE_TOOLS)
         ):
             tname = (name or "").strip().lower()
             # Salvage path-only tools (file_read/list_dir) instead of hard-fail
@@ -355,31 +362,53 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             )
             path_arg = str(args.get("path") or args.get("file") or "").strip()
             content_arg = args.get("content")
-            # Empty content + history flags: model replaying omitted body
-            is_stub = looks_like_history_stub_text(blob) or looks_like_history_stub_text(
+            # Keys the provider-history sanitizer used to emit (old sessions /
+            # other models may still replay them). They are never tool params.
+            replay_flags = bool(
+                args.get("_history_summarized")
+                or args.get("_body_omitted")
+                or "omitted" in str(args.get("history_note") or "").lower()
+                or "summarized" in str(args.get("history_note") or "").lower()
+            )
+            stub_text = looks_like_history_stub_text(blob) or looks_like_history_stub_text(
                 content_arg if isinstance(content_arg, str) else None
             )
-            if not is_stub and name == "file_write" and (
-                args.get("_body_omitted") or args.get("_history_summarized")
-            ):
-                is_stub = True
+            # file_write with REAL non-empty source + stray history keys: the
+            # model copied the flags but wrote new code. Strip the flags, write.
             if (
-                not is_stub
-                and name == "file_write"
+                name == "file_write"
+                and not stub_text
                 and isinstance(content_arg, str)
-                and not content_arg.strip()
-                and path_arg
-                and (
-                    args.get("_history_summarized")
-                    or args.get("_body_omitted")
-                    or "omitted" in str(args.get("history_note") or "").lower()
-                )
+                and content_arg.strip()
             ):
-                is_stub = True
+                args = {
+                    k: v
+                    for k, v in args.items()
+                    if k not in _HISTORY_REPLAY_KEYS
+                }
+                is_stub = False
+            else:
+                # Empty content + history flags: model replaying omitted body
+                is_stub = stub_text or (name == "file_write" and replay_flags)
+                if (
+                    not is_stub
+                    and name == "file_write"
+                    and isinstance(content_arg, str)
+                    and not content_arg.strip()
+                    and path_arg
+                    and replay_flags
+                ):
+                    is_stub = True
             if is_stub:
                 # Soft-success if real file already on disk — breaks ×N fail loops
+                min_chars = 0
+                with suppress(Exception):
+                    min_chars = int(args.get("_content_chars") or 0)
                 skip_msg = resolve_stub_write_skip(
-                    runtime, path_arg, tool_name=name or "file_write"
+                    runtime,
+                    path_arg,
+                    tool_name=name or "file_write",
+                    min_chars=min_chars,
                 )
                 if skip_msg:
                     result_cache[fp] = skip_msg

@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from remedy.home import default_home
 from remedy.memory.life_goals import LifeGoal, LifeGoalStore
 
 _IRREVERSIBLE = re.compile(
@@ -220,7 +221,7 @@ def resolve_life_notes_dir(
     root: Path | None = Path(documents_root) if documents_root else None
     if root is None:
         try:
-            default = (Path.home() / ".remedy").resolve()
+            default = default_home().resolve()
             if store.home.resolve() == default:
                 cand = Path.home() / "Documents"
                 if cand.is_dir():

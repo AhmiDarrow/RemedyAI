@@ -441,6 +441,12 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
             notes.append(f"{head} → python slice")
             return _python_line_slice(slice_files[0], n, tail=(head == "tail")), notes
 
+    if head == "wc":
+        wc_files = [_unquote(t) for t in toks[1:] if not t.startswith("-")]
+        if wc_files and any(t in ("-l", "--lines") for t in toks[1:]):
+            notes.append("wc -l → python line count")
+            return _python_line_count(wc_files[0]), notes
+
     if head == "find":
         name_pat = ""
         start = "."
@@ -481,8 +487,19 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
     return s, notes
 
 
+def _python_exe() -> str:
+    """A real CPython, not the frozen sidecar (``remedy-desktop.exe -c`` is not Python)."""
+    if getattr(sys, "frozen", False):
+        import shutil
+
+        found = shutil.which("python") or shutil.which("python3")
+        if found:
+            return found
+    return sys.executable or "python"
+
+
 def _python_line_slice(path: str, n: int, *, tail: bool) -> str:
-    exe = sys.executable or "python"
+    exe = _python_exe()
     win_p = path.replace("/", "\\") if ("/" in path or os.name == "nt") else path
     # Keep the one-liner free of nested double quotes.
     op = f"p[-{int(n)}:]" if tail else f"p[:{int(n)}]"
@@ -493,6 +510,47 @@ def _python_line_slice(path: str, n: int, *, tail: bool) -> str:
         + f"print(''.join({op}),end='')"
     )
     return f"{_q(exe)} -c {_q(code)}"
+
+
+def _python_line_count(path: str) -> str:
+    exe = _python_exe()
+    win_p = path.replace("/", "\\") if ("/" in path or os.name == "nt") else path
+    code = (
+        "p=open(r'''"
+        + win_p.replace("'''", "")
+        + "''',encoding='utf-8',errors='replace').read().splitlines();"
+        + "print(len(p))"
+    )
+    return f"{_q(exe)} -c {_q(code)}"
+
+
+def rewrite_posix_argv(argv: list[str]) -> tuple[list[str], list[str]]:
+    """Rewrite a few POSIX argv heads host_run otherwise execs as-is.
+
+    ``host_run(argv=['wc','-l','file'])`` never went through the command-string
+    translator, so Windows spent hops on ``'wc' is not recognized``.
+    """
+    if not argv:
+        return argv, []
+    notes: list[str] = []
+    head = str(argv[0] or "").replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if head.endswith(".exe"):
+        head = head[:-4]
+    rest = [str(a) for a in argv[1:]]
+    if head == "wc" and any(t in ("-l", "--lines") for t in rest):
+        files = [t for t in rest if not t.startswith("-")]
+        if files:
+            notes.append("wc -l → python line count")
+            exe = _python_exe()
+            win_p = files[0].replace("/", "\\") if ("/" in files[0] or os.name == "nt") else files[0]
+            code = (
+                "p=open(r'''"
+                + win_p.replace("'''", "")
+                + "''',encoding='utf-8',errors='replace').read().splitlines();"
+                + "print(len(p))"
+            )
+            return [exe, "-c", code], notes
+    return argv, notes
 
 
 def _find_rg() -> str:

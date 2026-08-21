@@ -12,6 +12,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from remedy.core.atomic_json import scratch_path
+from remedy.home import default_home
 from remedy.skills.library.keys import (
     CATALOG_PUBLIC_KEY_B64,
     DEFAULT_CATALOG_SIG_URL,
@@ -62,7 +63,7 @@ class SkillsCatalog(BaseModel):
 
 def _home_cache_dir(home: Path | None = None) -> Path:
     if home is None:
-        home = Path.home() / ".remedy"
+        home = default_home()
     return Path(home).expanduser() / "cache" / "skills"
 
 

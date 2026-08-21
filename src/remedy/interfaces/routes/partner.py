@@ -10,6 +10,8 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from remedy.home import default_home
+
 # Status-bar poll extras (swarm/health + approval config). Not session-scoped.
 _SWARM_POLL_TTL = 12.0
 _CFG_SYNC_TTL = 30.0
@@ -261,7 +263,6 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         return {"ok": True}
 
     def _plan_store():
-        from pathlib import Path
 
         from remedy.core.plan_store import PlanStore
 
@@ -275,7 +276,7 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                 home = load_config().get("home_dir")
             except Exception:
                 home = None
-        return PlanStore(home or Path.home() / ".remedy")
+        return PlanStore(home or default_home())
 
     @app.get("/api/plans")
     async def list_plans(session_id: str | None = None, limit: int = 30):
@@ -360,7 +361,6 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
 
     @app.get("/api/checkpoints")
     async def list_checkpoints(session_id: str | None = None, limit: int = 20):
-        from pathlib import Path
 
         from remedy.core.checkpoint import CheckpointStore
 
@@ -374,13 +374,12 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                 home = load_config().get("home_dir")
             except Exception:
                 home = None
-        store = CheckpointStore(home or Path.home() / ".remedy")
+        store = CheckpointStore(home or default_home())
         items = store.list_for_session(session_id, limit=min(max(limit, 1), 50))
         return {"checkpoints": [c.to_dict() for c in items]}
 
     @app.get("/api/checkpoints/latest")
     async def latest_checkpoint(session_id: str | None = None):
-        from pathlib import Path
 
         from remedy.core.checkpoint import CheckpointStore
 
@@ -394,7 +393,7 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                 home = load_config().get("home_dir")
             except Exception:
                 home = None
-        store = CheckpointStore(home or Path.home() / ".remedy")
+        store = CheckpointStore(home or default_home())
         cp = store.latest(session_id)
         if cp is None:
             return {"checkpoint": None}
@@ -691,7 +690,7 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             home = getattr(getattr(runtime, "config", None), "home_dir", None)
         # Always constrain export under home/exports (fail closed path jail)
         if home is None:
-            home = Path.home() / ".remedy"
+            home = default_home()
         payload = collect_default_payload(home)
         dest = (req.dest or "").strip()
         if not dest:

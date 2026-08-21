@@ -16,6 +16,7 @@ from typing import Any
 from uuid import uuid4
 
 from remedy.core.atomic_json import write_text_atomic
+from remedy.home import default_home
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ def _now() -> str:
 
 
 def undo_root(home_dir: Path | str | None = None) -> Path:
-    home = Path(home_dir).expanduser() if home_dir else Path.home() / ".remedy"
+    home = Path(home_dir).expanduser() if home_dir else default_home()
     root = home / "undo"
     root.mkdir(parents=True, exist_ok=True)
     return root
@@ -75,7 +76,7 @@ class SessionUndoLog:
     MAX_PREV_CHARS = 400_000
 
     def __init__(self, home_dir: Path | str | None = None) -> None:
-        self.home = Path(home_dir).expanduser() if home_dir else Path.home() / ".remedy"
+        self.home = Path(home_dir).expanduser() if home_dir else default_home()
         self.root = undo_root(self.home)
 
     def _path(self, session_id: str) -> Path:

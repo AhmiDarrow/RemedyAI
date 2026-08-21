@@ -18,6 +18,7 @@ from remedy.core.react_stream import (
     build_runtime_system_block,
     should_enable_tools,
 )
+from remedy.home import default_home
 
 
 @dataclass
@@ -110,11 +111,10 @@ def append_plan_and_computer_addenda(
     runtime: Any,
 ) -> str:
     with suppress(Exception):
-        from pathlib import Path
 
         from remedy.core.plan_store import PlanStore
 
-        home = getattr(runtime.config, "home_dir", None) or (Path.home() / ".remedy")
+        home = getattr(runtime.config, "home_dir", None) or default_home()
         store = PlanStore(home)
         plan = store.latest_for_session(session_id)
         if plan is not None:

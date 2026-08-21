@@ -8,6 +8,7 @@ Persisted under ``{project}/.remedy-build/todos.json``.
 from __future__ import annotations
 
 import json
+import re
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -186,6 +187,7 @@ def upsert_todos(
         st = get_build_state(runtime)
         if st is not None:
             st.open_todo_count = open_todo_count(out)
+            st.open_feature_todo_count = open_feature_todo_count(out)
     return out
 
 
@@ -222,6 +224,70 @@ def take_todos_event(runtime: Any) -> str | None:
     if isinstance(tok, str) and tok.startswith("@@todos:"):
         return tok
     return None
+
+
+def _write_match_tokens(paths: list[str] | None) -> list[str]:
+    """Filenames + stems the checklist can match (``audioToMidi.ts`` → audiotomidi)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in paths or []:
+        name = str(raw or "").replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower()
+        if not name or name in {"ledger.json", "todos.json"}:
+            continue
+        if name not in seen:
+            seen.add(name)
+            out.append(name)
+        stem = name.rsplit(".", 1)[0] if "." in name else name
+        for suffix in (".test", ".spec", "_test", "_spec"):
+            if stem.endswith(suffix):
+                stem = stem[: -len(suffix)]
+                break
+        compact = stem.replace("-", "").replace("_", "")
+        for tok in (stem, compact):
+            if len(tok) >= 6 and tok not in seen:
+                seen.add(tok)
+                out.append(tok)
+    return out
+
+
+def todo_is_verify_row(content: str) -> bool:
+    """True for checklist rows that *are* the test run, not product work.
+
+    "Verify critical fixes" is product work — it must not complete just because
+    ``npm test`` is already green from an earlier hop (session 765c 22:45).
+    """
+    low = (content or "").lower().strip()
+    if low in {"verify", "tests", "test", "verify green"}:
+        return True
+    if low.startswith("verify green"):
+        return True
+    return any(
+        k in low
+        for k in (
+            "npm test",
+            "pytest",
+            "cargo test",
+            "go test",
+            "vitest",
+            "tests green",
+            "test green",
+            "run tests",
+            "run the tests",
+            "run the suite",
+        )
+    )
+
+
+def open_feature_todo_count(items: list[TodoItem] | None) -> int:
+    """Pending product work — excludes 'npm test green' rows."""
+    n = 0
+    for t in items or []:
+        if t.status not in {"pending", "in_progress"}:
+            continue
+        if todo_is_verify_row(t.content):
+            continue
+        n += 1
+    return n
 
 
 def open_todo_count(items: list[TodoItem] | None) -> int:
@@ -271,6 +337,7 @@ def sync_todos_with_build(runtime: Any, state: Any = None) -> list[TodoItem]:
     if not items:
         if state is not None:
             state.open_todo_count = 0
+            state.open_feature_todo_count = 0
         return items
 
     missing: list[str] = []
@@ -286,64 +353,109 @@ def sync_todos_with_build(runtime: Any, state: Any = None) -> list[TodoItem]:
     files_ok = bool(named) and not missing
     phase = str(getattr(state, "phase", "") or "")
 
-    write_names: list[str] = []
-    for raw in list(getattr(state, "write_set", None) or []) + list(
-        getattr(state, "paths_touched", None) or []
-    ):
-        name = str(raw or "").replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower()
-        if name and name not in write_names:
-            write_names.append(name)
+    write_names = _write_match_tokens(
+        list(getattr(state, "write_set", None) or [])
+        + list(getattr(state, "paths_touched", None) or [])
+    )
 
     changed = False
     for t in items:
         if t.status in {"completed", "cancelled"}:
             continue
-        low = (t.content or "").lower()
+        raw_low = (t.content or "").lower()
+        compact_todo = raw_low.replace("-", "").replace("_", "")
         done = False
-        if wrote and any(
-            k in low
-            for k in ("scout", "explore", "research", "lock buildspec", "gather")
+        # Prefix only — "research" inside "go back through the reviews" must not close.
+        if wrote and raw_low.startswith(
+            ("read ", "scout", "explore", "research", "gather", "lock buildspec")
         ):
             done = True
-        if any(n and n in low for n in write_names if n not in {"ledger.json", "todos.json"}):
-            done = True
+        # Filename as a whole token (``tabScore.ts`` / tabscore), not a short
+        # substring of an unrelated feature row.
+        for n in write_names:
+            if not n:
+                continue
+            if re.search(rf"(?<![a-z0-9]){re.escape(n)}(?![a-z0-9])", compact_todo):
+                done = True
+                break
         if named and root is not None:
             for n in named:
-                if n.lower() in low:
+                if n.lower() in raw_low:
                     cand = root / n
                     with suppress(OSError):
                         if cand.is_file() and cand.stat().st_size > 8:
                             done = True
-        if "verify" in low or "green" in low:
-            if verify_ok or (files_ok and (verify_ok or phase in {"done", "ship"})):
-                done = True
-        if "tdd" in low or "failing test" in low:
-            if files_ok or verify_ok:
-                done = True
-        if files_ok and any(k in low for k in ("implement", "write ", "create ", "file_write")):
+        # Only the actual test-run row — never "Verify critical fixes".
+        if todo_is_verify_row(t.content) and verify_ok:
             done = True
         if done:
             t.status = "completed"
             changed = True
 
-    # A GREEN-verified finished build owns its checklist: only when the build
-    # actually declared done with a passing verify and nothing missing do we
-    # close every remaining row (heuristic misses like "RemedyPDF update" name
-    # no file and used to linger). Requiring verify_ok keeps the checklist from
-    # claiming work done when the build reached "done" WITHOUT a green verify.
-    if phase == "done" and verify_ok and not missing:
-        for t in items:
-            if t.status in {"pending", "in_progress"}:
-                t.status = "completed"
-                changed = True
+    # Keep exactly one in_progress row so the on-screen Build list moves.
+    if wrote or changed:
+        if not any(t.status == "in_progress" for t in items):
+            for t in items:
+                if t.status == "pending":
+                    t.status = "in_progress"
+                    changed = True
+                    break
 
     if changed:
         save_todos(items, runtime, root=root)
         items = load_todos(runtime, root=root)
     n_open = open_todo_count(items)
+    n_feature = open_feature_todo_count(items)
     if state is not None:
         state.open_todo_count = n_open
+        state.open_feature_todo_count = n_feature
+        if (
+            n_open == 0
+            and getattr(state, "last_verify_ok", None) is True
+            and bool(getattr(state, "drive_to_done", False))
+        ):
+            state.drive_to_done = False
     return items
+
+
+def seed_review_finding_todos(
+    runtime: Any,
+    items: list[str],
+    *,
+    root: Path | str | None = None,
+) -> int:
+    """Replace ``rf-*`` checklist rows with this review's numbered findings."""
+    cleaned: list[str] = []
+    for raw in items or []:
+        content = str(raw or "").strip()
+        if len(content) < 8:
+            continue
+        cleaned.append(content[:240])
+        if len(cleaned) >= 12:
+            break
+    if not cleaned:
+        return 0
+    current = load_todos(runtime, root=root)
+    keep = [
+        t
+        for t in current
+        if not str(t.id).startswith("rf-") or t.status in {"completed", "cancelled"}
+    ]
+    rows: list[dict[str, Any]] = [
+        {"id": t.id, "content": t.content, "status": t.status} for t in keep
+    ]
+    for i, content in enumerate(cleaned, 1):
+        rows.append({"id": f"rf-{i}", "content": content, "status": "pending"})
+    upsert_todos(runtime, rows, merge=False, root=root)
+    return len(cleaned)
+
+
+def has_open_review_finding_todos(runtime: Any = None) -> bool:
+    items = load_todos(runtime)
+    return any(
+        str(t.id).startswith("rf-") and t.status in {"pending", "in_progress"}
+        for t in items
+    )
 
 
 def seed_drive_todos(

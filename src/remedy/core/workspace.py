@@ -12,6 +12,7 @@ from pathlib import Path
 
 from remedy.core.errors import SecurityError
 from remedy.core.security import refuse_protected_secret_path, safe_path
+from remedy.home import default_home
 
 # Skip noise when listing a workspace root for the agent system prompt.
 _SKIP_DIR_NAMES = {
@@ -306,28 +307,103 @@ def write_roots_for_scope(
 ) -> list[Path]:
     """Roots the agent may **create / edit / shell-cwd** under.
 
-    When a real project folder is set, mutations stay inside the focus tree:
+    The owner's configured ``access_scope`` is authoritative for writes:
 
-    - ``project`` / ``untrusted`` / ``full`` → **project root only**.
-      ``full`` still expands *read* roots and absolute *reads*; it must not
-      defeat the project write jail (view/research outside is OK; edits
-      outside are not).
+    - ``project`` / ``untrusted`` → **project root only**.
     - ``home`` → project + user home (intentional multi-folder edits).
+    - ``full`` → project + user home as the *listed* roots; absolute paths
+      anywhere the OS user may write are additionally allowed by
+      :func:`resolve_under_roots(access_scope="full")` and by the shell jail
+      (``access_scope="full"`` is machine-wide, the same as Approvals → Full).
 
-    Profile work folders (Desktop/Documents/Downloads) are **never** write
-    roots while a project is bound — use relative paths under the project
-    or raise scope to ``home`` only when home-wide edits are intended.
+    Profile work folders (Desktop/Documents/Downloads) are **not** write
+    roots under ``project`` scope — use relative paths under the project, or
+    raise scope to ``home`` / ``full`` when edits outside are intended.
+    Auth secrets and Remedy's own installed runtime are refused at every scope.
     """
     primary = _primary_project_root(project_root)
     scope = normalize_access_scope(scope)
-    if scope == "home":
+    if scope in ("home", "full"):
         roots: list[Path] = [primary]
         h = _home_root(home=home)
         if h not in roots:
             roots.append(h)
         return roots
-    # project | untrusted | full (with a project bound) → project only
+    # project | untrusted → project only
     return [primary]
+
+
+def _remedy_home_for_runtime_check() -> Path | None:
+    try:
+        from remedy.core.security import get_home_dir
+
+        return get_home_dir()
+    except Exception:
+        return None
+
+
+def is_remedy_installed_code_path(path: Path | str | None) -> bool:
+    """True when *path* is Remedy's own installed code (never a tool write target).
+
+    Covers the managed voice runtime (``<REMEDY_HOME>/voice/runtime/**`` and
+    any ``…/.remedy/voice/runtime/**``), the frozen sidecar itself and its
+    ``_internal`` tree (``sys.executable`` when frozen) and a PyInstaller
+    ``_MEIPASS`` extract. Reads are fine; patching the installed app from a session is not
+    (the session's project is the place to edit code).
+    """
+    if path is None:
+        return False
+    try:
+        p = Path(path).expanduser()
+        try:
+            p = p.resolve(strict=False)
+        except (OSError, RuntimeError):
+            p = p.absolute()
+    except (TypeError, ValueError, RuntimeError):
+        return False
+    parts = [str(x).lower() for x in p.parts]
+    for i in range(len(parts) - 2):
+        if parts[i] == ".remedy" and parts[i + 1] == "voice" and parts[i + 2] == "runtime":
+            return True
+    candidates: list[Path] = []
+    rh = _remedy_home_for_runtime_check()
+    if rh is not None:
+        candidates.append(rh / "voice" / "runtime")
+    import sys as _sys
+
+    if getattr(_sys, "frozen", False) and _sys.executable:
+        # PyInstaller onedir: the exe itself + its ``_internal`` tree (not the
+        # whole folder — a project may legitimately sit beside the exe).
+        exe = Path(_sys.executable)
+        candidates.append(exe)
+        candidates.append(exe.parent / "_internal")
+    meipass = getattr(_sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(str(meipass)))
+    for c in candidates:
+        try:
+            cr = c.expanduser().resolve(strict=False)
+        except (OSError, RuntimeError):
+            cr = c.expanduser().absolute()
+        try:
+            if p == cr or p.is_relative_to(cr):
+                return True
+        except (ValueError, TypeError):
+            continue
+    return False
+
+
+def refuse_remedy_installed_code_path(path: Path | str | None) -> None:
+    """Raise a clear SecurityError for writes into Remedy's own installed code."""
+    if is_remedy_installed_code_path(path):
+        raise SecurityError(
+            "That's Remedy's own installed code (frozen sidecar / managed voice "
+            "runtime). It is never writable from a session at any access scope "
+            "or approval mode — edit the project tree instead; the installed "
+            f"copy is read-only: {path}",
+            rule="remedy_installed_code",
+            detail={"path": str(path)},
+        )
 
 
 def resolve_under_roots(
@@ -335,11 +411,14 @@ def resolve_under_roots(
     roots: list[Path],
     *,
     access_scope: str = "project",
+    for_write: bool = False,
 ) -> Path:
     """Resolve a path that must stay under one of *roots* (or full-user on full).
 
     ``access_scope=full`` allows any absolute path the process can resolve
-    under the current user (still no silent admin elevation).
+    under the current user (still no silent admin elevation). Auth secrets
+    are refused always; with *for_write* Remedy's own installed code is
+    refused too (see :func:`refuse_remedy_installed_code_path`).
     """
     scope = normalize_access_scope(access_scope)
     if not roots:
@@ -348,6 +427,8 @@ def resolve_under_roots(
     if not user_path or user_path in (".", "./"):
         out = ensure_project_dir(primary)
         refuse_protected_secret_path(out)
+        if for_write:
+            refuse_remedy_installed_code_path(out)
         return out
 
     candidate = Path(user_path).expanduser()
@@ -359,6 +440,8 @@ def resolve_under_roots(
         # Always refuse auth secrets — including under access_scope=full and
         # when a junction/symlink resolves into ~/.remedy/auth.
         refuse_protected_secret_path(resolved)
+        if for_write:
+            refuse_remedy_installed_code_path(resolved)
         if scope == "full":
             # Block a few clearly dangerous locations
             parts_lower = {p.lower() for p in resolved.parts}
@@ -383,12 +466,13 @@ def resolve_under_roots(
             except ValueError:
                 continue
         raise SecurityError(
-            f"Path outside allowed roots ({scope}): {user_path}",
+            _outside_roots_message(user_path, roots, scope, for_write=for_write),
             rule="path_traversal",
             detail={
                 "input": user_path,
                 "roots": [str(r) for r in roots],
                 "scope": scope,
+                "for_write": for_write,
             },
         )
 
@@ -399,6 +483,8 @@ def resolve_under_roots(
         except OSError:
             resolved = (primary / candidate).expanduser().absolute()
         refuse_protected_secret_path(resolved)
+        if for_write:
+            refuse_remedy_installed_code_path(resolved)
         parts_lower = {p.lower() for p in resolved.parts}
         if any(x in parts_lower for x in ("$recycle.bin", "system volume information")):
             raise SecurityError(
@@ -412,13 +498,91 @@ def resolve_under_roots(
     last_err: Exception | None = None
     for root in roots:
         try:
-            return safe_path(user_path, base_dir=root)
+            out = safe_path(user_path, base_dir=root)
         except Exception as e:
             last_err = e
             continue
+        if for_write:
+            refuse_remedy_installed_code_path(out)
+        return out
     if last_err:
         raise last_err
-    return safe_path(user_path, base_dir=primary)
+    out = safe_path(user_path, base_dir=primary)
+    if for_write:
+        refuse_remedy_installed_code_path(out)
+    return out
+
+
+def _outside_roots_message(
+    user_path: str, roots: list[Path], scope: str, *, for_write: bool
+) -> str:
+    """Denial text that matches the owner's *actual* configuration.
+
+    Never tells the model to "raise access_scope" when the scope already
+    covers the machine; under ``home`` it names ``full`` as the next step.
+    """
+    roots_s = ", ".join(str(r) for r in roots[:4])
+    kind = "write" if for_write else "read"
+    if scope == "home":
+        hint = (
+            "access_scope=home covers the project and the user home; this path is "
+            "outside both. Only access_scope=full (or Approvals → Full) allows it."
+        )
+    elif scope == "untrusted":
+        hint = "access_scope=untrusted keeps every path inside the project folder."
+    else:
+        hint = (
+            f"access_scope={scope} keeps {kind}s inside the project folder. "
+            "Use a path under the focus folder, or ask the owner to raise "
+            "access_scope to home/full if edits outside are intended."
+        )
+    return (
+        f"Path outside allowed {kind} roots ({scope}): {user_path}. "
+        f"Allowed {kind} roots: [{roots_s}]. {hint}"
+    )
+
+
+def resolve_read_path(
+    user_path: str,
+    *,
+    roots: list[Path],
+    access_scope: str,
+) -> Path:
+    """Reads are never jailed (contract in ``shell_write_jail``).
+
+    Any absolute path the OS user can open is readable at every access scope
+    except ``untrusted`` (an explicit sandbox). Relative paths resolve under
+    the project root. Auth secrets are refused always.
+    """
+    scope = normalize_access_scope(access_scope)
+    if scope == "untrusted":
+        return resolve_under_roots(user_path or ".", roots, access_scope="untrusted")
+    return resolve_under_roots(user_path or ".", roots, access_scope="full")
+
+
+def resolve_write_path(
+    user_path: str,
+    *,
+    roots: list[Path],
+    access_scope: str,
+    approval_mode: str,
+    project_bound: bool,
+) -> Path:
+    """Writes are jailed to the write roots the owner's scope selects.
+
+    - Approvals → Full, ``access_scope=full``, or no project bound →
+      machine-wide (auth secrets + Remedy's installed code still refused).
+    - ``home`` → project + home.  ``project`` / ``untrusted`` → project only.
+    """
+    scope = normalize_access_scope(access_scope)
+    approval = (approval_mode or "").strip().lower()
+    if approval == "full" or scope == "full" or not project_bound:
+        return resolve_under_roots(
+            user_path or ".", roots, access_scope="full", for_write=True
+        )
+    return resolve_under_roots(
+        user_path or ".", roots, access_scope=scope, for_write=True
+    )
 
 
 def list_workspace_entries(project_root: Path, *, limit: int = 40) -> list[dict[str, str]]:
@@ -473,11 +637,12 @@ def workspace_context_block(
         )
     elif scope == "project":
         lines.append(
-            "Relative paths resolve under the focus folder. You may **read/list** "
-            "Desktop/Documents/Downloads for research, but **file_write / file_edit "
-            "and shell workdir stay inside the focus folder only**. Raise access "
-            "scope in Settings (home/full) only when intentional multi-tree edits "
-            "are needed."
+            "Relative paths resolve under the focus folder. **Reads are never "
+            "jailed** — read/list/search any path on the machine (Downloads, "
+            "Documents, other trees) and copy files *into* the project from "
+            "anywhere; but **file_write / file_edit and mutating shell commands "
+            "stay inside the focus folder only**. Only the owner raises access "
+            "scope in Settings (home/full) when multi-tree edits are intended."
         )
     elif scope == "home":
         lines.append(
@@ -491,10 +656,10 @@ def workspace_context_block(
         )
     else:
         lines.append(
-            "Access scope is full for **reads** across the user machine "
-            "(no silent admin elevation). **Writes/edits and shell workdir "
-            "still stay inside the focus folder** when one is set — raise "
-            "scope to home only for intentional home-wide edits."
+            "Access scope is **full**: reads and writes across the user machine "
+            "(no silent admin elevation). Prefer the focus folder for this "
+            "project's edits. Never writable: Remedy's auth secrets and "
+            "Remedy's own installed code (frozen sidecar / ~/.remedy/voice/runtime)."
         )
     if extra_roots:
         lines.append("Read roots: " + ", ".join(str(r) for r in extra_roots[:6]))
@@ -537,7 +702,7 @@ def new_project_dir() -> Path:
         docs = Path.home() / "Documents" / "Remedy Projects" / "New Project"
         return docs
     except OSError:
-        return Path.home() / ".remedy" / "projects" / "New Project"
+        return default_home() / "projects" / "New Project"
 
 
 def ensure_new_project_seed() -> Path:

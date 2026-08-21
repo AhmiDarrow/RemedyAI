@@ -28,6 +28,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from remedy.home import default_home
 from remedy.memory.middleman import MemoryItem, content_key, tokenize
 
 _SCHEMA = """
@@ -488,7 +489,7 @@ def _default_home() -> Path | None:
 
         return get_home_dir()
     except Exception:
-        return Path.home() / ".remedy"
+        return default_home()
 
 
 def configure_cas(home: str | Path | None) -> EternalCAS | None:

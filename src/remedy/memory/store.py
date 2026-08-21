@@ -17,6 +17,12 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from remedy.core.security import sanitize_search_query
+from remedy.memory.inline_images import (
+    extract_inline_images,
+    has_inline_image,
+    heal_inline_images,
+    strip_inline_images,
+)
 from remedy.memory.profile import UserProfile
 from remedy.models import (
     ChatMessage,
@@ -30,6 +36,10 @@ from remedy.models import (
 
 # Cap persisted tool bodies so mail/page text does not accumulate unbounded in memory.db.
 _TOOL_RESULT_CONTENT_MAX = 4_000
+# Cap the *count* of persisted tool calls/results per message, applied to both
+# lists with the same number so they stay 1:1. (The old results-only ``[:80]``
+# slice left a 255-calls / 80-results turn in chat_messages on 2026-08-20.)
+_TOOL_ITEMS_MAX = 2_000
 
 
 def _cap_tool_results_for_storage(results: list[Any] | None) -> list[Any]:
@@ -42,12 +52,16 @@ def _cap_tool_results_for_storage(results: list[Any] | None) -> list[Any]:
         sanitize_message = None  # type: ignore[assignment]
 
     out: list[Any] = []
-    for item in results[:80]:
+    for item in results[:_TOOL_ITEMS_MAX]:
         if not isinstance(item, dict):
             out.append(item)
             continue
         row = dict(item)
         content = row.get("content")
+        if isinstance(content, str):
+            # Never persist base64 image payloads (a single PNG is ~1M tokens).
+            content = strip_inline_images(content)
+            row["content"] = content
         if isinstance(content, str) and len(content) > _TOOL_RESULT_CONTENT_MAX:
             row["content"] = content[: _TOOL_RESULT_CONTENT_MAX - 1] + "…"
             row["content_truncated"] = True
@@ -597,22 +611,33 @@ class MemoryStore:
         else:
             params = [query, limit]
 
-        try:
-            with self._locked():
-                db = self._ensure_db()
-                rows = db.execute(
-                f"""
+        sql = f"""
                 SELECT memory_entries.* FROM memory_entries
                 JOIN memory_fts ON memory_entries.rowid = memory_fts.rowid
                 WHERE memory_fts MATCH ? {type_filter}
                 ORDER BY rank
                 LIMIT ?
-                """,
-                    params,
-                ).fetchall()
+                """
+        try:
+            with self._locked():
+                db = self._ensure_db()
+                try:
+                    rows = db.execute(sql, params).fetchall()
+                except sqlite3.OperationalError as exc:
+                    # ``.`` / ``;`` / ``:`` in free text are fts5 syntax errors. Retry
+                    # with every token quoted before ever touching the slow LIKE scan
+                    # (that fallback stalled the loop 4x in one session).
+                    if "fts5: syntax error" not in str(exc) and "no such" in str(exc):
+                        raise
+                    from remedy.memory.fts_query import fts5_match_query
+
+                    match_q = fts5_match_query(query)
+                    if not match_q:
+                        return []
+                    rows = db.execute(sql, [match_q, *params[1:]]).fetchall()
             return [self._row_to_entry(r) for r in rows]
         except sqlite3.OperationalError as exc:
-            # Invalid MATCH syntax or missing FTS — degrade gracefully (no recursion).
+            # Missing FTS table etc. — degrade gracefully (no recursion).
             logger = logging.getLogger(__name__)
             logger.debug(
                 "FTS MATCH failed (%s); falling back to LIKE for query=%r",
@@ -1212,8 +1237,19 @@ class MemoryStore:
         safe_results = _cap_tool_results_for_storage(
             list(msg.tool_results) if msg.tool_results else []
         )
+        safe_calls = list(msg.tool_calls or [])[:_TOOL_ITEMS_MAX]
         # Keep in-memory object aligned with what we persist.
         msg.tool_results = safe_results
+        msg.tool_calls = safe_calls
+        if isinstance(msg.content, str) and msg.content:
+            # Embedded images go to disk under the Remedy home; the row keeps a
+            # path reference so history replay never carries the payload.
+            cleaned, _saved = extract_inline_images(
+                msg.content, home_dir=self._db_path.parent
+            )
+            msg.content = cleaned
+        if isinstance(msg.thinking, str) and msg.thinking:
+            msg.thinking = strip_inline_images(msg.thinking)
         with self._locked():
             db = self._ensure_db()
             db.execute(
@@ -1222,7 +1258,7 @@ class MemoryStore:
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     str(msg.id), msg.session_id, msg.role.value, msg.content,
-                    msg.thinking, json.dumps(msg.tool_calls),
+                    msg.thinking, json.dumps(safe_calls),
                     json.dumps(safe_results), msg.model, msg.agent,
                     msg.tokens, msg.created_at.isoformat(), int(msg.reverted),
                 ),
@@ -1267,7 +1303,10 @@ class MemoryStore:
             )
             params.extend([limit, offset])
             rows = db.execute(sql, params).fetchall()
-            return [self._row_to_message(r) for r in rows]
+            msgs = [self._row_to_message(r) for r in rows]
+        for msg in msgs:
+            self._heal_message_inline_images(msg)
+        return msgs
 
     async def get_chat_message(self, msg_id: str) -> ChatMessage | None:
         with self._locked():
@@ -1277,7 +1316,56 @@ class MemoryStore:
             ).fetchone()
             if row is None:
                 return None
-            return self._row_to_message(row)
+            msg = self._row_to_message(row)
+        self._heal_message_inline_images(msg)
+        return msg
+
+    def _heal_message_inline_images(self, msg: ChatMessage) -> None:
+        """Extract leftover data-URIs on read; persist only when files landed."""
+        home = self._db_path.parent
+        new_content = msg.content
+        new_thinking = msg.thinking
+        new_results = list(msg.tool_results or [])
+        changed = False
+        if isinstance(new_content, str) and has_inline_image(new_content):
+            cleaned, _saved, ok = heal_inline_images(new_content, home_dir=home)
+            if ok:
+                new_content = cleaned
+                changed = True
+        if isinstance(new_thinking, str) and has_inline_image(new_thinking):
+            cleaned, _saved, ok = heal_inline_images(new_thinking, home_dir=home)
+            if ok:
+                new_thinking = cleaned
+                changed = True
+        for i, item in enumerate(new_results):
+            if not isinstance(item, dict):
+                continue
+            body = item.get("content")
+            if isinstance(body, str) and has_inline_image(body):
+                cleaned, _saved, ok = heal_inline_images(body, home_dir=home)
+                if ok:
+                    row = dict(item)
+                    row["content"] = cleaned
+                    new_results[i] = row
+                    changed = True
+        if not changed:
+            return
+        msg.content = new_content
+        msg.thinking = new_thinking
+        msg.tool_results = new_results
+        with self._locked():
+            db = self._ensure_db()
+            db.execute(
+                "UPDATE chat_messages SET content = ?, thinking = ?, tool_results = ? "
+                "WHERE id = ?",
+                (
+                    new_content,
+                    new_thinking,
+                    json.dumps(new_results),
+                    str(msg.id),
+                ),
+            )
+            db.commit()
 
     def _sync_session_message_count(
         self, db: sqlite3.Connection, session_id: str

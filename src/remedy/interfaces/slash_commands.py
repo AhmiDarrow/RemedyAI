@@ -11,6 +11,7 @@ import contextlib
 import logging
 from typing import Any
 
+from remedy.home import default_home
 from remedy.interfaces.config import PROVIDER_CATALOG, load_config
 
 logger = logging.getLogger(__name__)
@@ -616,7 +617,6 @@ async def handle_slash_command(
         return {"text": "Runtime not available."}
 
     if stripped in ("/plans", "/plan") or stripped.startswith("/plan "):
-        from pathlib import Path
 
         from remedy.core.plan_store import PlanStore
 
@@ -632,7 +632,7 @@ async def handle_slash_command(
                 home = load_config().get("home_dir")
             except Exception:
                 home = None
-        store = PlanStore(home or Path.home() / ".remedy")
+        store = PlanStore(home or default_home())
         rest = raw[len("/plan") :].strip() if stripped.startswith("/plan") else ""
         if stripped == "/plans" or rest.lower() in ("", "list"):
             plans = store.list_plans(limit=20)

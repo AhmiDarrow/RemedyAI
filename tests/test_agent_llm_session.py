@@ -20,8 +20,10 @@ from remedy.core import agent_llm
 @pytest.fixture(autouse=True)
 def _clean_session():
     agent_llm._shared_session = None
+    agent_llm._shared_loop = None
     yield
     agent_llm._shared_session = None
+    agent_llm._shared_loop = None
 
 
 @pytest.mark.asyncio
@@ -64,3 +66,25 @@ async def test_closing_twice_is_harmless():
     await agent_llm.aclose_shared_session()
     agent_llm.close_shared_session()
     assert agent_llm._shared_session is None
+
+
+def test_a_new_event_loop_gets_its_own_session():
+    """The session is loop-bound: a fresh loop must not reuse (or leak) the old one."""
+
+    async def _grab():
+        return agent_llm.get_shared_session()
+
+    first = asyncio.run(_grab())
+    second = asyncio.run(_grab())
+    assert second is not first
+    assert first.closed, "the stale session must be closed when the loop moves on"
+    asyncio.run(agent_llm.aclose_shared_session())
+    assert second.closed
+
+
+@pytest.mark.asyncio
+async def test_pool_shape_is_shared_by_every_request_path():
+    s = agent_llm.get_shared_session()
+    assert s.connector.limit == agent_llm.SESSION_CONNECTOR_LIMIT
+    assert s.timeout.total == agent_llm.SESSION_DEFAULT_TIMEOUT.total
+    await agent_llm.aclose_shared_session()

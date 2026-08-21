@@ -169,6 +169,7 @@ export function ProcessTrace({
   const { setScroller, setContent, showJump, jumpLatest } = useStickToBottom({
     followActive: follow,
     alwaysOfferJump: follow || full,
+    startAtBottom: live,
     deps: [stepSig, mode, collapsed, full, showAllMin],
   })
 

@@ -20,6 +20,7 @@ from remedy.assistant.models import (
     _now,
 )
 from remedy.core.atomic_json import write_json_atomic
+from remedy.home import default_home
 
 _STORE_NAME = "assistant.json"
 _lock = threading.Lock()
@@ -29,7 +30,7 @@ _singleton: AssistantStore | None = None
 def _home(home: Path | str | None = None) -> Path:
     if home is not None and str(home).strip():
         return Path(home).expanduser().resolve()
-    return (Path.home() / ".remedy").resolve()
+    return default_home().resolve()
 
 
 class AssistantStore:

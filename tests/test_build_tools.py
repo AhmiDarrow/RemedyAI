@@ -354,3 +354,14 @@ def test_every_build_tool_is_registered(build):
 def test_the_schemas_are_objects(build):
     for name, schema in build["rt"].tool_registry.schemas.items():
         assert schema.get("type") == "object", name
+
+
+@pytest.mark.asyncio
+async def test_a_real_json_array_for_todos_json_is_accepted(build):
+    # grok-4.5 sends ``todos_json`` as a JSON array, not a string — this used to
+    # die with ``'list' object has no attribute 'strip'`` on every call.
+    out = await build["tools"]["todo_write"](
+        todos_json=[{"id": "1", "content": "Scout", "status": "pending"}]
+    )
+    assert "Scout" in out
+    assert "strip" not in out

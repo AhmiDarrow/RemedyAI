@@ -16,6 +16,8 @@ import sys
 import time
 from pathlib import Path
 
+from remedy.home import default_home
+
 logger = logging.getLogger(__name__)
 
 STALE_LOCK_SECONDS = 120.0
@@ -53,7 +55,7 @@ def _pid_alive(pid: int) -> bool:
 
 
 def lock_path(home: Path | str | None = None) -> Path:
-    base = Path(home).expanduser() if home else Path.home() / ".remedy"
+    base = Path(home).expanduser() if home else default_home()
     return base / "locks" / _LOCK_NAME
 
 

@@ -496,6 +496,13 @@ def should_auto_verify(state: Any) -> bool:
     # C/C++ partner tasks: verify after the first source write (compile+run)
     if has_c:
         need = 1
+    else:
+        vcmd = str(getattr(state, "verify_command", "") or "").lower()
+        if any(
+            tok in vcmd
+            for tok in ("npm test", "pytest", "cargo test", "vitest", "go test")
+        ):
+            need = max(need, 2)
 
     # Source-write helpers (BuildTurnState methods if present)
     source_pending: list[str] = []
@@ -514,6 +521,12 @@ def should_auto_verify(state: Any) -> bool:
     # Hard rule: no source mutation this turn → never auto-verify
     # (stops continue/proceed thrash re-running npm test for ~30–60s silence)
     if writes <= 0 and not source_pending:
+        return False
+    # Product work still on the Build list: do not run the existing suite.
+    # First file_edit of a 10-item feature is not "fix npm test" — the suite
+    # cannot pass the *goal* until the slice exists. C one-file still verifies
+    # immediately (compile+run IS the build).
+    if not has_c and int(getattr(state, "open_feature_todo_count", 0) or 0) > 0:
         return False
     if not write_set and not source_pending and writes <= last_green_ws and green_ok:
         return False
@@ -551,6 +564,7 @@ def should_auto_verify(state: Any) -> bool:
     if (
         source_pending
         and writes > last_green_ws
+        and writes >= need
         and getattr(state, "last_verify_ok", None) is not True
     ):
         return True
@@ -582,6 +596,19 @@ def format_auto_verify_message(
                 f"{summary}\n"
                 "Stop auto-loop thrash. Fix the last error vector carefully, "
                 "then run one manual verify."
+            ),
+        }
+    feature_open = int(getattr(state, "open_feature_todo_count", 0) or 0) if state is not None else 0
+    if not ok and feature_open > 0:
+        return {
+            "role": "user",
+            "content": (
+                "[Build engine · AUTO VERIFY · RED · slice not done]\n"
+                f"Machine ran `{cmd}` while {feature_open} Build item(s) are still open.\n"
+                "That is expected — the feature is not built yet. "
+                "Do NOT stop to patch the suite. Finish the current checklist "
+                "item, then the next. Tests run when the slice is in place.\n"
+                f"{summary}"
             ),
         }
     if ok:

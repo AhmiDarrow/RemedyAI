@@ -7,8 +7,10 @@ and builtins. Tracks invocation history and tool metadata.
 from __future__ import annotations
 
 import inspect
+import json
 from collections import defaultdict
 from collections.abc import Callable
+from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any
 
@@ -53,6 +55,72 @@ def _filter_handler_arguments(
     if not allowed:
         return {}
     return {k: v for k, v in arguments.items() if k in allowed}
+
+
+_STR_ANNOTATIONS = {"str", "str | None", "Optional[str]", "typing.Optional[str]"}
+_BOOL_ANNOTATIONS = {"bool", "bool | None"}
+_INT_ANNOTATIONS = {"int", "int | None", "float", "float | None"}
+
+
+def _annotation_name(p: inspect.Parameter) -> str:
+    ann = p.annotation
+    if ann is inspect.Parameter.empty:
+        # Fall back to the default's type so ``todos_json: str = ""`` and
+        # un-annotated ``goal=""`` behave the same.
+        if isinstance(p.default, bool):
+            return "bool"
+        if isinstance(p.default, str):
+            return "str"
+        if isinstance(p.default, int | float):
+            return "int"
+        return ""
+    if isinstance(ann, str):
+        return ann.replace("typing.", "").strip()
+    return getattr(ann, "__name__", str(ann)).replace("typing.", "")
+
+
+def _coerce_handler_arguments(
+    handler: Callable[..., Any],
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Coerce JSON-typed LLM values onto the handler's declared scalar types.
+
+    Models routinely send a real JSON array/object for a ``str`` parameter that
+    expects JSON text (``todo_write(todos_json=[...])``, ``mission_start(steps=[...])``)
+    and strings for ``bool``/``int``. Before this, such calls died inside the
+    tool with ``'list' object has no attribute 'strip'`` on every call.
+    """
+    try:
+        sig = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return arguments
+    out = dict(arguments)
+    for name, p in sig.parameters.items():
+        if name not in out:
+            continue
+        val = out[name]
+        if val is None:
+            continue
+        ann = _annotation_name(p)
+        if ann in _STR_ANNOTATIONS:
+            if isinstance(val, list | dict):
+                try:
+                    out[name] = json.dumps(val, ensure_ascii=False, default=str)
+                except Exception:
+                    out[name] = str(val)
+            elif isinstance(val, bool):
+                out[name] = "true" if val else "false"
+            elif isinstance(val, int | float):
+                out[name] = str(val)
+        elif ann in _BOOL_ANNOTATIONS:
+            if isinstance(val, str):
+                out[name] = val.strip().lower() in ("1", "true", "yes", "on", "y")
+            elif isinstance(val, int | float):
+                out[name] = bool(val)
+        elif ann in _INT_ANNOTATIONS and isinstance(val, str):
+            with suppress(ValueError):
+                out[name] = float(val) if "." in val else int(val)
+    return out
 
 
 class ToolRegistry:
@@ -147,6 +215,7 @@ class ToolRegistry:
         # LLM tool-calls routinely include extra keys; strip unknowns before invoke
         # so handlers without **kwargs do not raise TypeError mid-turn.
         arguments = _filter_handler_arguments(handler, arguments)
+        arguments = _coerce_handler_arguments(handler, arguments)
         if inspect.iscoroutinefunction(handler):
             return await handler(**arguments)
         return handler(**arguments)

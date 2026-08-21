@@ -18,6 +18,7 @@ from typing import Any
 from uuid import uuid4
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.home import default_home
 
 HORIZONS = ("week", "season", "life")
 STATUSES = ("open", "active", "paused", "done", "dropped")
@@ -53,7 +54,7 @@ def _home(home_dir: str | Path | None) -> Path:
             return Path(str(h)).expanduser()
     except Exception:
         pass
-    return Path.home() / ".remedy"
+    return default_home()
 
 
 @dataclass

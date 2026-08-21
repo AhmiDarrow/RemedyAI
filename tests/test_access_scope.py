@@ -65,20 +65,26 @@ def test_write_roots_project_are_project_only(tmp_path: Path):
     assert len(resolved) == 1
 
 
-def test_write_roots_full_with_project_still_project_only(tmp_path: Path):
-    """full scope must not open Desktop writes when a project is bound."""
+def test_write_roots_full_with_project_are_machine_wide(tmp_path: Path):
+    """The owner's access_scope=full is authoritative for writes (not silently project)."""
     home = tmp_path / "homeuser"
     home.mkdir()
     desk = home / "Desktop"
     desk.mkdir()
     proj = tmp_path / "proj"
     proj.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
     wroots = write_roots_for_scope("full", proj, home=home)
-    assert [r.resolve() for r in wroots] == [proj.resolve()]
-    with pytest.raises(SecurityError):
-        resolve_under_roots(
-            str(desk / "escape.txt"), wroots, access_scope="project"
-        )
+    assert [r.resolve() for r in wroots] == [proj.resolve(), home.resolve()]
+    out = resolve_under_roots(
+        str(elsewhere / "y.txt"), wroots, access_scope="full", for_write=True
+    )
+    assert out == (elsewhere / "y.txt").resolve()
+    out = resolve_under_roots(
+        str(desk / "escape.txt"), wroots, access_scope="full", for_write=True
+    )
+    assert out == (desk / "escape.txt").resolve()
 
 
 def test_write_roots_untrusted_project_only(tmp_path: Path):

@@ -30,9 +30,6 @@ def _make_runtime(proj: Path, *, scope: str = "project", home: Path | None = Non
         effective_access_scope,
     )
     from remedy.core.workspace import (
-        resolve_under_roots as _ru,
-    )
-    from remedy.core.workspace import (
         write_roots_for_scope as _wr,
     )
 
@@ -57,21 +54,24 @@ def _make_runtime(proj: Path, *, scope: str = "project", home: Path | None = Non
             return False
 
         def resolve_tool_path(self, path: str, *, for_write: bool = False) -> Path:
-            # Mirror Agent: Full (warn) may leave the focus folder; Ask/Auto stay jailed.
+            # Same helpers as Agent.resolve_tool_path (workspace.resolve_*).
+            from remedy.core.workspace import resolve_read_path, resolve_write_path
+
             if for_write:
                 from remedy.core.approvals import APPROVALS, normalize_approval_mode
 
-                roots = self.write_roots()
                 approval = normalize_approval_mode(
                     getattr(self, "_approval_mode", None) or APPROVALS.mode
                 )
-                if approval == "full":
-                    return _ru(path or ".", roots, access_scope="full")
-                scope = self.access_scope()
-                enforce = "home" if scope == "home" else "project"
-                return _ru(path or ".", roots, access_scope=enforce)
-            return _ru(
-                path or ".", self.allowed_roots(), access_scope=self.access_scope()
+                return resolve_write_path(
+                    path or ".",
+                    roots=self.write_roots(),
+                    access_scope=self.access_scope(),
+                    approval_mode=approval,
+                    project_bound=not self.project_path_is_unset(),
+                )
+            return resolve_read_path(
+                path or ".", roots=self.allowed_roots(), access_scope=self.access_scope()
             )
 
         def _track_artifact(self, _p: str) -> None:
@@ -151,8 +151,8 @@ def test_home_scope_allows_write_under_home(tmp_path: Path):
     assert p == (desk / "x.txt").resolve()
 
 
-def test_full_scope_with_project_still_blocks_write_outside(tmp_path: Path):
-    """full access expands reads, not project write jail."""
+def test_full_scope_with_project_writes_machine_wide(tmp_path: Path):
+    """access_scope=full with a project bound: writes anywhere (auth/sidecar still refused)."""
     home = tmp_path / "home"
     home.mkdir()
     desk = home / "Desktop"
@@ -163,13 +163,38 @@ def test_full_scope_with_project_still_blocks_write_outside(tmp_path: Path):
     outside.mkdir()
     target = outside / "y.txt"
     rt = _make_runtime(proj, scope="full", home=home)
-    # Reads may still be broad under full; writes stay in project.
-    with pytest.raises(SecurityError):
-        rt.resolve_tool_path(str(target), for_write=True)
-    with pytest.raises(SecurityError):
-        rt.resolve_tool_path(str(desk / "nope.txt"), for_write=True)
+    assert rt.resolve_tool_path(str(target), for_write=True) == target.resolve()
+    assert rt.resolve_tool_path(str(desk / "ok.txt"), for_write=True) == (
+        desk / "ok.txt"
+    ).resolve()
     ok = rt.resolve_tool_path("in_proj.txt", for_write=True)
     assert ok == (proj / "in_proj.txt").resolve()
+    # Remedy's own installed code: refused with its own message, not the jail's.
+    sidecar = home / ".remedy" / "voice" / "runtime" / "app" / "remedy" / "core" / "x.py"
+    with pytest.raises(SecurityError) as ei:
+        rt.resolve_tool_path(str(sidecar), for_write=True)
+    assert "Remedy's own installed code" in str(ei.value)
+    # …and it is still readable.
+    assert rt.resolve_tool_path(str(sidecar), for_write=False) == sidecar.resolve()
+
+
+def test_project_scope_denial_names_project_not_full(tmp_path: Path):
+    """Denial text matches the configured scope; home says 'full' is next."""
+    home = tmp_path / "home"
+    home.mkdir()
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    outside = tmp_path / "elsewhere" / "y.txt"
+    rt = _make_runtime(proj, scope="project", home=home)
+    with pytest.raises(SecurityError) as ei:
+        rt.resolve_tool_path(str(outside), for_write=True)
+    msg = str(ei.value)
+    assert "(project)" in msg and "access_scope=project" in msg
+    rt = _make_runtime(proj, scope="home", home=home)
+    with pytest.raises(SecurityError) as ei:
+        rt.resolve_tool_path(str(outside), for_write=True)
+    msg = str(ei.value)
+    assert "(home)" in msg and "access_scope=full" in msg
 
 
 @pytest.mark.asyncio

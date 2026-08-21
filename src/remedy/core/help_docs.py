@@ -16,6 +16,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from remedy.home import default_home
+
 # Safe article id: slug, no path traversal
 _ARTICLE_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,80}$")
 
@@ -56,7 +58,7 @@ def _candidate_help_dirs() -> list[Path]:
             break
 
     # Optional staged copy for packaged installs
-    home = Path(os.environ.get("REMEDY_HOME") or Path.home() / ".remedy")
+    home = Path(os.environ.get("REMEDY_HOME") or default_home())
     _add(home / "help" / "manual")
     _add(home / "help" / "articles")
 

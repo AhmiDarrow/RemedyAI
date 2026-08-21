@@ -14,6 +14,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from remedy.home import default_home
+
 logger = logging.getLogger(__name__)
 
 
@@ -30,7 +32,7 @@ def _home(runtime: Any = None) -> Path:
             home = load_config().get("home_dir")
     if home:
         return Path(home).expanduser()
-    return Path.home() / ".remedy"
+    return default_home()
 
 
 def _purge_session_plans(session_id: str, home: Path) -> int:

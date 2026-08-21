@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,95 @@ from remedy.core.workspace_tools.guards import (
     parent_hint,
     reserved_guard,
     track_read,
+)
+
+_PY_EXE_STEM_RE = re.compile(r"^python(?:w)?\d*(?:\.\d+)*$")
+
+
+def _is_python_binary(path_str: str) -> bool:
+    """True when *path_str* names a real CPython launcher (python / python3.12 / pythonw)."""
+    import os
+
+    name = os.path.basename((path_str or "").strip().strip("\"'")).lower()
+    if name.endswith(".exe"):
+        name = name[:-4]
+    return bool(_PY_EXE_STEM_RE.match(name))
+
+
+def resolve_python_interpreter() -> list[str] | None:
+    """Return the argv prefix for a real Python 3 interpreter, or ``None``.
+
+    In the frozen Desktop build ``sys.executable`` is ``remedy-desktop.exe``;
+    running ``remedy-desktop.exe script.py`` prints the sidecar's usage and
+    exits 2. Resolution order: ``REMEDY_PYTHON`` (file path or bare name),
+    ``sys.executable`` when it really is Python, then PATH (``python``,
+    ``py -3``, ``python3``), then the usual Windows install dirs.
+    """
+    import glob
+    import os
+    import shutil
+    import sys
+
+    override = (os.environ.get("REMEDY_PYTHON") or "").strip().strip("\"'")
+    if override:
+        if os.path.isfile(override):
+            return [override]
+        found = shutil.which(override)
+        if found:
+            return [found]
+
+    frozen = bool(getattr(sys, "frozen", False))
+    exe = sys.executable or ""
+    if not frozen and exe and _is_python_binary(exe):
+        return [exe]
+
+    def _usable(p: str | None) -> bool:
+        # Skip the Microsoft Store execution alias (opens the Store, exit 9009).
+        return bool(p) and _is_python_binary(p) and "windowsapps" not in p.lower()
+
+    found = shutil.which("python")
+    if _usable(found):
+        return [str(found)]
+    found = shutil.which("py")
+    if found:
+        return [found, "-3"]
+    found = shutil.which("python3")
+    if _usable(found):
+        return [str(found)]
+
+    if os.name == "nt":
+        patterns: list[str] = []
+        local = os.environ.get("LOCALAPPDATA") or ""
+        if local:
+            patterns.append(os.path.join(local, "Programs", "Python", "Python3*", "python.exe"))
+        for base in (
+            os.environ.get("PROGRAMFILES") or r"C:\Program Files",
+            os.environ.get("PROGRAMFILES(X86)") or r"C:\Program Files (x86)",
+        ):
+            patterns.append(os.path.join(base, "Python3*", "python.exe"))
+        patterns.append(r"C:\Python3*\python.exe")
+        hits: list[str] = []
+        for pat in patterns:
+            hits.extend(p for p in glob.glob(pat) if os.path.isfile(p))
+        if hits:
+            # Highest version first (Python313 before Python39).
+            def _ver(p: str) -> tuple[int, ...]:
+                m = re.search(r"Python(\d)(\d+)", p, re.I)
+                return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+            hits.sort(key=_ver, reverse=True)
+            return [hits[0]]
+
+    # Last resort: a non-frozen sys.executable that is Python under another name.
+    if not frozen and exe and not _is_python_binary(exe):
+        stem = os.path.basename(exe).lower()
+        if "remedy" not in stem:
+            return [exe]
+    return None
+
+
+_NO_PYTHON_MSG = (
+    "no Python interpreter found on this host; install Python 3 or set REMEDY_PYTHON"
 )
 
 
@@ -117,6 +207,46 @@ def _cwd_in_write_roots(here: Path | str, roots: list[Path]) -> bool:
     return False
 
 
+def _runtime_scope(runtime: Any) -> str:
+    try:
+        return str(runtime.access_scope() or "project")
+    except Exception:
+        return "project"
+
+
+def _machine_wide(runtime: Any) -> bool:
+    """Writes are not jailed: Approvals → Full or the owner's access_scope=full."""
+    from remedy.core.shell_write_jail import is_machine_wide
+
+    return is_machine_wide(_runtime_scope(runtime))
+
+
+def _widen_hint(runtime: Any) -> str:
+    """Suggestion text that matches the owner's actual configuration.
+
+    Never tells the model to raise access_scope / Approvals when the scope it
+    has already covers the machine.
+    """
+    from remedy.core.approvals import is_full_approval
+
+    scope = _runtime_scope(runtime)
+    if scope == "full" or is_full_approval():
+        return (
+            "Writes are machine-wide already; only Remedy's auth secrets and "
+            "Remedy's own installed code are refused."
+        )
+    if scope == "home":
+        return (
+            "access_scope=home covers the project and the user home; paths "
+            "outside both need access_scope=full (or Approvals → Full)."
+        )
+    return (
+        "Pass a path under the project folder (access_scope=project). Ask the "
+        "owner to raise access_scope to home/full (or Approvals → Full) only "
+        "if edits outside the project are intended."
+    )
+
+
 async def _run_host_session(
     *,
     command: str,
@@ -164,10 +294,10 @@ async def _run_host_session(
             tool_name="bash_exec",
             suggestion="Retry without session=true, or close the session.",
         )
-    from remedy.core.approvals import is_full_approval
+    from remedy.core.shell_write_jail import is_machine_wide
 
     jail_cwd = Path(here)
-    full = is_full_approval()
+    full = is_machine_wide(access_scope)
     if not full and not _cwd_in_write_roots(jail_cwd, roots):
         await close_shared_session(session_id=session_id)
         return format_tool_error(
@@ -304,6 +434,14 @@ def register_shell_tools(runtime: Any) -> None:
                 tool_name="bash_exec",
                 suggestion="Pass a non-empty shell command string.",
             )
+        with suppress(Exception):
+            from remedy.core.build_verify_gate import maybe_short_circuit_verify
+
+            cached = maybe_short_circuit_verify(
+                runtime, command=command, argv=_argv
+            )
+            if cached:
+                return cached
         danger = check_dangerous_command(["bash", "-c", command])
         if danger:
             suggestion = (
@@ -370,9 +508,15 @@ def register_shell_tools(runtime: Any) -> None:
                     tool_name="bash_exec",
                     suggestion="Use a normal directory for workdir.",
                 )
+            from remedy.core.shell_write_jail import looks_like_mutation
+
+            # Shell cwd is a mutation surface only for mutating commands —
+            # a read-only command (dir / git status / python -c "print")
+            # may run from any folder the owner can read.
             try:
-                # Shell cwd is a mutation surface — jail to write roots.
-                cwd = runtime.resolve_tool_path(wd_raw, for_write=True)
+                cwd = runtime.resolve_tool_path(
+                    wd_raw, for_write=looks_like_mutation(command)
+                )
                 if cwd.is_file():
                     cwd = cwd.parent
             except Exception as e:
@@ -381,8 +525,8 @@ def register_shell_tools(runtime: Any) -> None:
                     code="BAD_WORKDIR",
                     tool_name="bash_exec",
                     suggestion=(
-                        "Pass a workdir under the project folder (project scope). "
-                        "Raise access_scope to home/full for shell outside the project."
+                        "A mutating command needs its workdir under the write roots. "
+                        + _widen_hint(runtime)
                     ),
                 )
         try:
@@ -444,10 +588,9 @@ def register_shell_tools(runtime: Any) -> None:
                 code="WRITE_JAIL",
                 tool_name="bash_exec",
                 suggestion=(
-                    "Stay inside the focus project. Prefer file_write/file_edit. "
+                    "Prefer file_write/file_edit under the focus project. "
                     "Do not retarget sibling folders (SecretFolder vs SecretSticky). "
-                    "To edit another tree, switch session project explicitly with the user. "
-                    "Or set Approvals → Full (warn) if you granted machine-wide control."
+                    + _widen_hint(runtime)
                 ),
             )
         with suppress(Exception):
@@ -472,7 +615,7 @@ def register_shell_tools(runtime: Any) -> None:
             scan_script_source_for_outside_writes,
         )
 
-        _scan_bound = bound and not is_full_approval()
+        _scan_bound = bound and not is_full_approval() and not _machine_wide(runtime)
         _launch_argv = [str(a) for a in _argv] if _argv else None
         for tok in extract_script_launch_targets(command, argv=_launch_argv):
             try:
@@ -537,12 +680,15 @@ def register_shell_tools(runtime: Any) -> None:
                 )
                 if resolved_head:
                     argv_use[0] = resolved_head
+                from remedy.execution.host.translate import rewrite_posix_argv
+
+                argv_use, posix_notes = rewrite_posix_argv(argv_use)
                 prepared = PreparedCommand(
                     argv=argv_use,
                     display=" ".join(argv_use),
                     kind="argv",
                     ir=HostOp(kind="run", argv=argv_use),
-                    notes=["host_run argv"],
+                    notes=["host_run argv", *posix_notes],
                 )
             else:
                 prepared = prepare_host_command(command, project_path=root)
@@ -712,7 +858,6 @@ def register_shell_tools(runtime: Any) -> None:
         """
         import os
         import shlex
-        import sys
         from pathlib import Path as _P
 
         from remedy.core.project_fingerprint import path_env_with_local_bins
@@ -735,13 +880,15 @@ def register_shell_tools(runtime: Any) -> None:
                 suggestion="Use a normal .py path under the project.",
             )
         try:
-            target = runtime.resolve_tool_path(rel, for_write=True)
+            # Reading the script is never jailed; its writes are governed by
+            # the shell jail + body scan below.
+            target = runtime.resolve_tool_path(rel, for_write=False)
         except Exception as e:
             return format_tool_error(
                 f"invalid path: {e}",
                 code="BAD_PATH",
                 tool_name="run_python_file",
-                suggestion="Use a path under the project folder.",
+                suggestion="Pass the path of a .py file the owner can read.",
             )
         if not target.is_file():
             return format_tool_error(
@@ -775,7 +922,8 @@ def register_shell_tools(runtime: Any) -> None:
                     f"invalid workdir: {e}",
                     code="BAD_WORKDIR",
                     tool_name="run_python_file",
-                    suggestion="Pass workdir under the project.",
+                    suggestion="A script run needs its workdir under the write roots. "
+                    + _widen_hint(runtime),
                 )
         else:
             # Default cwd = project root (not script dir) for package imports
@@ -797,7 +945,15 @@ def register_shell_tools(runtime: Any) -> None:
             except Exception:
                 extra = args.split()
 
-        argv = [sys.executable, str(target), *extra]
+        py = resolve_python_interpreter()
+        if not py:
+            return format_tool_error(
+                _NO_PYTHON_MSG,
+                code="NO_PYTHON",
+                tool_name="run_python_file",
+                suggestion="Install Python 3 (python.org) or set REMEDY_PYTHON to python.exe.",
+            )
+        argv = [*py, str(target), *extra]
         try:
             roots = list(runtime.write_roots() or [])
         except Exception:
@@ -849,7 +1005,7 @@ def register_shell_tools(runtime: Any) -> None:
         src_hit = scan_script_source_for_outside_writes(
             target,
             write_roots=list(roots),
-            project_bound=bound and not is_full_approval(),
+            project_bound=bound and not is_full_approval() and not _machine_wide(runtime),
         )
         if src_hit:
             return format_tool_error(
@@ -884,7 +1040,7 @@ def register_shell_tools(runtime: Any) -> None:
         parts = [
             f"exit_code={result.exit_code}",
             f"cwd={cwd}",
-            f"python={sys.executable}",
+            f"python={' '.join(py)}",
             f"script={target}",
             f"timeout_s={timeout}",
         ]
@@ -1115,7 +1271,8 @@ def register_shell_tools(runtime: Any) -> None:
                     f"invalid workdir: {e}",
                     code="BAD_WORKDIR",
                     tool_name="host_script",
-                    suggestion="Pass workdir under the project folder.",
+                    suggestion="A script run needs its workdir under the write roots. "
+                    + _widen_hint(runtime),
                 )
         try:
             roots = list(runtime.write_roots() or [])
@@ -1132,20 +1289,28 @@ def register_shell_tools(runtime: Any) -> None:
         except Exception:
             scope = "project"
         from remedy.core.shell_write_jail import (
+            check_shell_secret_access,
             check_shell_write_jail,
+            inline_code_has_write,
             scan_script_source_for_outside_writes,
         )
 
         hs_warnings: list[str] = []
         try:
-            jail_hit = check_shell_write_jail(
-                text,
-                write_roots=list(roots),
-                cwd=cwd,
-                project_bound=bound,
-                access_scope=scope,
-                warnings=hs_warnings,
-            )
+            if kind == "python" and not inline_code_has_write(text):
+                # A Python body with no write/exec API is a read: the shell
+                # jail's command heuristics do not apply to source text. The
+                # body scan below still runs (auth paths, home construction).
+                jail_hit = check_shell_secret_access(text)
+            else:
+                jail_hit = check_shell_write_jail(
+                    text,
+                    write_roots=list(roots),
+                    cwd=cwd,
+                    project_bound=bound,
+                    access_scope=scope,
+                    warnings=hs_warnings,
+                )
         except Exception as exc:
             return format_tool_error(
                 f"shell write jail check failed (refused): {exc}",
@@ -1174,7 +1339,7 @@ def register_shell_tools(runtime: Any) -> None:
         src_hit = scan_script_source_for_outside_writes(
             launch.path,
             write_roots=list(roots),
-            project_bound=bound and not is_full_approval(),
+            project_bound=bound and not is_full_approval() and not _machine_wide(runtime),
         )
         if src_hit:
             return format_tool_error(

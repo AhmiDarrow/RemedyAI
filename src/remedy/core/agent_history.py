@@ -10,6 +10,7 @@ from remedy.core.react_policy import (
     HISTORY_MSG_LIMIT,
     HISTORY_MSG_SOFT_TRIM,
 )
+from remedy.memory.inline_images import strip_inline_images
 from remedy.models import ChatMessageRole
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,8 @@ async def load_session_history(
         role = msg.role.value if hasattr(msg.role, "value") else str(msg.role)
         if role not in ("user", "assistant"):
             continue
-        content = (msg.content or "").strip()
+        # Belt and braces: legacy rows may still carry base64 images.
+        content = strip_inline_images(msg.content or "").strip()
         if not content:
             continue
         # Strip internal tool markers from prior assistant bubbles.

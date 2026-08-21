@@ -189,7 +189,8 @@ def test_bridge_round_trips_through_a_real_worker_process(home, monkeypatch):
         assert set(probe) >= {"tts", "stt", "smart_turn"}
         assert probe["lane"] == "voice"
         # The hq lane is a separate process that never imports whisper.
-        from remedy.voice.bridge import LANE_HQ, VoiceBridge as VB
+        from remedy.voice.bridge import LANE_HQ
+        from remedy.voice.bridge import VoiceBridge as VB
 
         hq = VB(home, LANE_HQ)
         try:

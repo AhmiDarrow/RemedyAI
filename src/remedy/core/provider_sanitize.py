@@ -112,6 +112,10 @@ _WRITE_BODY_TOOLS = frozenset({"file_write", "write"})
 _EDIT_BODY_TOOLS = frozenset({"file_edit", "file_edit_batch", "apply_patch"})
 # Computer type/act often carry passwords or tokens — redact typed payloads in history.
 _COMPUTER_TYPE_TOOLS = frozenset({"computer_type", "computer_act"})
+_EDIT_HISTORY_NOTE = (
+    "large edit hunks summarized in chat history (already applied on disk). "
+    "Do NOT replay this call; file_read the path if you need the source."
+)
 
 _SECRET_KEY_RE = re.compile(
     r"(?i)(access_token|refresh_token|id_token|client_secret|authorization|"
@@ -236,12 +240,15 @@ def _rewrite_write_tool_args(parsed: Any, tool_name: str) -> Any:
             # Partner rule: NEVER put a copy-pasteable stub in ``content``.
             # Models re-emitted <<NOT_SOURCE_CODE history_stub…>> as file_write
             # bodies (HISTORY_STUB ×N fail loop). Omit body; keep path + size only.
+            # Also: NO private ``_*`` flags. Models (grok-4.5, 2026-08-20) copy
+            # whatever keys they see in history back into fresh tool calls; the
+            # private flag then tripped the execute guard seven times in a row.
+            # Ship path + empty body + one human note only. The execute side
+            # recognises the empty body + "omitted" note and soft-skips when the
+            # real file is already on disk.
             n = len(content)
             out.pop("content", None)
             out["content"] = ""  # empty, not a stub string
-            out["_content_chars"] = n
-            out["_history_summarized"] = True
-            out["_body_omitted"] = True
             out["history_note"] = (
                 f"file body omitted from chat history ({n} chars already on disk). "
                 "Do NOT re-file_write a history stub. "
@@ -255,12 +262,12 @@ def _rewrite_write_tool_args(parsed: Any, tool_name: str) -> Any:
             val = out.get(key)
             if isinstance(val, str) and len(val) > TOOL_ARGS_VALUE_MAX:
                 out[key] = _summarize_large_string(val, kind=key)
-                out["_history_summarized"] = True
+                out["history_note"] = _EDIT_HISTORY_NOTE
         # Multi-hunk / batch: edits may be a JSON string or list
         edits = out.get("edits")
         if isinstance(edits, str) and len(edits) > TOOL_ARGS_VALUE_MAX:
             out["edits"] = _summarize_large_string(edits, kind="edits")
-            out["_history_summarized"] = True
+            out["history_note"] = _EDIT_HISTORY_NOTE
         elif isinstance(edits, list):
             slim: list[Any] = []
             for item in edits[:40]:
@@ -272,7 +279,7 @@ def _rewrite_write_tool_args(parsed: Any, tool_name: str) -> Any:
                     val = row.get(key)
                     if isinstance(val, str) and len(val) > 400:
                         row[key] = _summarize_large_string(val, kind=key)
-                        out["_history_summarized"] = True
+                        out["history_note"] = _EDIT_HISTORY_NOTE
                 slim.append(row)
             out["edits"] = slim
         return out
@@ -292,7 +299,7 @@ def _rewrite_write_tool_args(parsed: Any, tool_name: str) -> Any:
             # password/passwd keys always redacted; type/text only when secret-like
             if key in ("password", "passwd") or secretish:
                 out[key] = f"<<redacted typed input chars={len(val)}>>"
-                out["_history_summarized"] = True
+                out["history_note"] = "typed payload redacted from chat history"
         return out
 
     return out

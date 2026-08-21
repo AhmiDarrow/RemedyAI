@@ -142,6 +142,10 @@ def register_memory_tools(runtime: Any) -> None:
             history,
             intent_hint=(focus or None),
         )
+        with suppress(Exception):
+            from remedy.memory.harness.hot_writes import sync_hot_writes_into_brief
+
+            sync_hot_writes_into_brief(runtime)
         brief = runtime._session_brief
         # Cumulative history thread entry (manual /compact) — always seal the
         # loop: cancelled missions must never be re-armed by continuity.

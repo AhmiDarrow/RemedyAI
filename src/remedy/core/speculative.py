@@ -10,6 +10,8 @@ import logging
 import threading
 from typing import Any
 
+from remedy.home import default_home
+
 logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
@@ -188,7 +190,7 @@ def _prep(
                 home = cfg.get("home_dir")
         except Exception:
             home = None
-        home_p = Path(home).expanduser() if home else Path.home() / ".remedy"
+        home_p = Path(home).expanduser() if home else default_home()
         idx = build_library_index(home_p)
         if idx.needs_refresh or len(idx) == 0:
             schedule_catalog_refresh(home_p)

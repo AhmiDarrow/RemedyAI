@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.home import default_home
 
 
 @dataclass
@@ -62,7 +63,7 @@ class MissionStore:
 
     def __init__(self, home: str | Path | None = None) -> None:
         if home is None:
-            home = Path.home() / ".remedy"
+            home = default_home()
         self.root = Path(home).expanduser() / "missions"
         self.root.mkdir(parents=True, exist_ok=True)
 
