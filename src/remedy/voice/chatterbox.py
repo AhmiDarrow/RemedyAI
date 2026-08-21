@@ -172,26 +172,33 @@ def _ensure_package(home_dir: Path | str | None = None) -> bool:
             from remedy.voice.service import _PACK_BASE_PACKAGES, _runtime_python
 
             py = _runtime_python(home_dir, "chatterbox")
-            run_pip_packages(
-                _PACK_BASE_PACKAGES + ("chatterbox-tts",),
-                _install_state,
-                "chatterbox",
-                cap=28.0,
-                python=py,
-            )
             # PyPI's Windows/Linux torch is CPU-only. With an NVIDIA card the
-            # human-bar voice is ~20x faster on CUDA, so swap the wheels.
+            # human-bar voice is ~20x faster on CUDA, so put the CUDA build
+            # in *first*: chatterbox-tts then finds torch==2.6.0 satisfied and
+            # never pulls the CPU wheel only to have it replaced.
+            floor = 5.0
             if _wants_cuda_torch():
                 _install_state["chatterbox"]["message"] = "Fetching the GPU build of torch"
                 run_pip_packages(
                     _CUDA_TORCH_PACKAGES,
                     _install_state,
                     "chatterbox",
-                    cap=35.0,
+                    cap=20.0,
                     python=py,
-                    floor=28.0,
+                    floor=floor,
                     extra_args=("--index-url", _CUDA_TORCH_INDEX),
+                    label="the GPU build of torch",
                 )
+                floor = 20.0
+            run_pip_packages(
+                _PACK_BASE_PACKAGES + ("chatterbox-tts",),
+                _install_state,
+                "chatterbox",
+                cap=35.0,
+                python=py,
+                floor=floor,
+                label="the high-quality voice pack",
+            )
             from remedy.voice.bridge import LANE_HQ, get_bridge, stop_lane
 
             stop_lane(home_dir, LANE_HQ)  # stale imports from before pip
@@ -372,6 +379,7 @@ def _install_managed(home_dir: Path | str | None) -> None:
         bridge.call("warm_hq_start", timeout=60)
         # Mirror the worker's own progress (real bytes) until it settles.
         deadline = time.monotonic() + 3 * 3600
+        t_start = time.monotonic()
         while time.monotonic() < deadline:
             time.sleep(1.0)
             st = bridge.hq_state() or {}
@@ -381,8 +389,12 @@ def _install_managed(home_dir: Path | str | None) -> None:
                 if isinstance(cur, dict):
                     if st.get("percent") is not None:
                         cur["percent"] = float(st.get("percent") or 0.0)
-                    if st.get("message"):
-                        cur["message"] = str(st.get("message"))
+                    msg = str(st.get("message") or "Downloading Chatterbox")
+                    # The load step has no bytes to show; keep the clock moving.
+                    if msg.startswith("Loading"):
+                        secs = int(time.monotonic() - t_start)
+                        msg = f"{msg} · {secs // 60}m{secs % 60:02d}s" if secs >= 60 else f"{msg} · {secs}s"
+                    cur["message"] = msg
                 continue
             if status == "done":
                 _install_state["chatterbox"] = {"status": "done", "percent": 100.0}
