@@ -30,10 +30,21 @@ def hf_ratio(x: "np.ndarray") -> float:
     return float(spec[freqs > 1800].sum() / (spec.sum() + 1e-9))
 
 
-def test_defaults_leave_audio_untouched():
-    x = tone()
+def test_defaults_only_level_the_audio():
+    x = tone() * 0.2  # a quiet engine
     y = shape_audio(x, SR, pace=1.0, pitch_semitones=0.0, warmth=0.5)
-    assert np.allclose(x, y)
+    # Same waveform, steadier level: a pure gain, no shaping.
+    assert np.allclose(y / (y[1000] / x[1000]), x, atol=1e-5)
+    rms = float(np.sqrt(np.mean(y.astype(np.float64) ** 2)))
+    assert 0.08 <= rms <= 0.12 and float(np.max(np.abs(y))) <= 0.95
+
+
+def test_level_never_amplifies_silence_or_clips():
+    from remedy.voice.shape import normalize_level
+
+    assert np.allclose(normalize_level(np.zeros(1000, dtype=np.float32)), 0.0)
+    loud = tone() * 0.99
+    assert float(np.max(np.abs(normalize_level(loud)))) <= 0.95
 
 
 def test_pace_changes_duration_not_pitch():
