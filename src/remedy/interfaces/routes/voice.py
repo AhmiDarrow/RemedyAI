@@ -25,6 +25,17 @@ logger = logging.getLogger(__name__)
 _MAX_AUDIO_BYTES = 25 * 1024 * 1024
 
 
+class VoiceIdentityPatch(BaseModel):
+    pace: float | None = None
+    pitch_semitones: float | None = None
+    warmth: float | None = None
+    articulation: float | None = None
+
+
+class VoiceIdentityRevert(BaseModel):
+    steps: int = 1
+
+
 class SpeakRequest(BaseModel):
     text: str
     voice: str | None = None
@@ -141,6 +152,35 @@ def register_voice_routes(
             started = await asyncio.to_thread(install_chatterbox_background, _home(cfg))
             return {"ok": True, "started": started}
         return {"ok": False, "error": f"Unknown voice piece {comp!r}."}
+
+    @app.get("/api/voice/identity")
+    async def voice_identity_route() -> dict[str, Any]:
+        from remedy.voice.identity import load
+
+        return load(_home(load_config())).public()
+
+    @app.post("/api/voice/identity/adjust")
+    async def voice_identity_adjust_route(patch: VoiceIdentityPatch) -> dict[str, Any]:
+        """Nudge the voice traits by small deltas (clamped, journaled)."""
+        from remedy.voice.identity import evolve
+
+        home = _home(load_config())
+        ident = await asyncio.to_thread(
+            evolve,
+            home,
+            pace=patch.pace,
+            pitch_semitones=patch.pitch_semitones,
+            warmth=patch.warmth,
+            articulation=patch.articulation,
+        )
+        return ident.public()
+
+    @app.post("/api/voice/identity/revert")
+    async def voice_identity_revert_route(req: VoiceIdentityRevert) -> dict[str, Any]:
+        from remedy.voice.identity import revert
+
+        ident = await asyncio.to_thread(revert, _home(load_config()), steps=req.steps)
+        return ident.public()
 
     @app.post("/api/voice/speak")
     async def voice_speak_route(req: SpeakRequest) -> Response:

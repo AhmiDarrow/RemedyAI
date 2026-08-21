@@ -23,17 +23,26 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   card; with an NVIDIA GPU the runtime now gets the CUDA 12.4 build of
   torch and the voice answers in seconds. `REMEDY_VOICE_CPU_ONLY=1`
   opts out.
-- **The high-quality voice is a human voice now, and it is quick.** What
-  shipped as HQ was Chatterbox cloning a Kokoro clip — Kokoro's synthetic
-  timbre with better prosody, at 4–5 s a sentence and 20 s for the first.
-  Three changes: (1) each gender clones a real, public-domain human
-  reference (LibriVox readers Karen Savage and Stewart Wills, 12 s each,
-  bundled with attribution); (2) the engine is Chatterbox **Turbo** —
-  1.5–2 s a sentence on an RTX 3080; (3) the engines warm at startup and
-  speak one quiet word, so the first reply does not pay the 15 s warm-up.
-  Replies are also spoken sentence by sentence: the first sentence plays
-  while the rest synthesizes. Rehearsed from an empty home: HQ in 5 min
-  (3.8 GB shown as it downloads), then 1.5 s per sentence.
+- **Remedy has one voice.** No standard/high-quality switch, no voice
+  picker, no speed slider. Her voice is Chatterbox **Nano** cloning a
+  bundled public-domain human reference per gender (LibriVox readers Kara
+  Shallenberg and Stewart Wills, 12 s each, attribution in
+  THIRD_PARTY.md), shaped by her voice identity. Nano runs on CPU (about
+  real time on eight cores) or GPU (~2.5 s for a three-sentence reply on
+  an RTX 3080), so every computer gets the same voice. One "Download
+  Remedy's voice" brings all of it; the quick first voice answers until
+  the full one has arrived, then steps aside. The engines warm at startup
+  and speak one quiet word, so the first reply does not pay the warm-up.
+  Replies are spoken sentence by sentence: the first sentence plays while
+  the rest synthesizes.
+- **Her voice identity is audible, and it evolves.** The identity's four
+  traits (pace, pitch, warmth, articulation) were stored but never
+  reached the audio. They now shape every utterance on every engine
+  (time-stretch, formant-preserving pitch shift, a zero-phase spectral
+  tilt, sampling steadiness), within small clamped ranges so she stays
+  herself. She can adjust them when asked — `voice_identity`,
+  `voice_adjust`, `voice_revert` — and every step is journaled and
+  undoable; `GET/POST /api/voice/identity[/adjust|/revert]` for the UI.
 - **One toggle could silently mute her.** Settings → Voice → Advanced had
   "Speaking (Kokoro)", which read like "use Kokoro" but was the master
   switch for *all* local speech — off, every reply went to this computer's

@@ -11,17 +11,17 @@
 
 ## Chatterbox (high-quality voice)
 
-- **Project:** [Resemble AI Chatterbox](https://github.com/resemble-ai/chatterbox) — `chatterbox-tts` (Turbo model `ResembleAI/chatterbox-turbo`)
-- **Use:** Optional human-bar voice for Grove and calls; runs in the managed voice runtime
+- **Project:** [Resemble AI Chatterbox](https://github.com/resemble-ai/chatterbox) — `chatterbox-tts` 0.1.7 from PyPI plus the pinned GitHub source (commit `5de7a54a`, laid over with `--no-deps`); Nano model `ResembleAI/chatterbox-nano`
+- **Use:** Remedy's voice (Grove and calls); runs in the managed voice runtime, CPU or GPU
 - **License:** **MIT** (code); model weights per the Hugging Face model card
 - **Redistribution:** Downloaded at first use into `~/.remedy/voice/chatterbox/`, never bundled
 
 ## Reference voices (LibriVox)
 
-- **Files:** `src/remedy/voice/references/female.wav` (Karen Savage, *Pride and Prejudice*), `male.wav` (Stewart Wills, *Moby Dick*)
-- **Use:** 12-second speech samples the high-quality voice clones so each gender has a steady human voice
+- **Files:** `src/remedy/voice/references/female.wav` (Kara Shallenberg, *The Secret Garden*), `male.wav` (Stewart Wills, *Moby Dick*)
+- **Use:** 12-second speech samples Remedy's voice clones, one per gender
 - **License:** **Public domain** (LibriVox; archive.org items carry the public-domain mark)
-- **Source:** https://archive.org/details/pride_and_prejudice_librivox · https://archive.org/details/moby_dick_librivox
+- **Source:** https://archive.org/details/secret_garden_librivox · https://archive.org/details/moby_dick_librivox
 
 ## llama.cpp
 

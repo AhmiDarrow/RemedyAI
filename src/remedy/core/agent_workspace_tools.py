@@ -86,6 +86,12 @@ def register_workspace_tools(runtime: Any) -> None:
         register_telephony_tools(runtime)
     except Exception:
         pass
+    try:
+        from remedy.core.agent_voice_tools import register_voice_tools
+
+        register_voice_tools(runtime)
+    except Exception:
+        pass
     # Per-turn tool trace for auto-learn (reset each stream_response)
     runtime._turn_tool_steps = []
     runtime._learning_loop = None
