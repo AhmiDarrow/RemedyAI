@@ -117,13 +117,31 @@ export async function speakToUrl(
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ text, voice: opts?.voice, speed: opts?.speed }),
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      reportVoiceClientIssue(`speak HTTP ${res.status}; using the system voice`)
+      return null
+    }
     const blob = await res.blob()
-    if (!blob.size) return null
+    if (!blob.size) {
+      reportVoiceClientIssue('speak returned no audio; using the system voice')
+      return null
+    }
     return URL.createObjectURL(blob)
-  } catch {
+  } catch (e) {
+    reportVoiceClientIssue(`speak fetch failed: ${String(e)}; using the system voice`)
     return null
   }
+}
+
+/** Tell the server why playback failed (lands in remedy.log). Fire and forget. */
+export function reportVoiceClientIssue(message: string): void {
+  void ensureApiToken().then(() =>
+    fetch(`${getApiBase()}/voice/client-log`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ message }),
+    }).catch(() => {}),
+  )
 }
 
 /** Transcribe a recorded clip locally; null when STT is unavailable. */
