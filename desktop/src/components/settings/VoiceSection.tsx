@@ -16,7 +16,6 @@ import {
   FormHint,
   FormLabel,
   FormNotice,
-  FormRange,
   FormSelect,
   FormToggle,
 } from './formUi'
@@ -87,7 +86,7 @@ export function VoiceSection({
     setMsg('')
     const label =
       component === 'chatterbox'
-        ? 'High-quality voice'
+        ? "Remedy's voice"
         : component === 'smart-turn'
           ? 'Turn-taking'
           : component === 'stt'
@@ -142,10 +141,28 @@ export function VoiceSection({
   const packMissing = tts?.deps === false || stt?.deps === false
   const packDownloading = pack?.install?.status === 'downloading'
   const packFailed = pack?.install?.status === 'error'
-  const hqOn = (status?.settings.tts_quality || 'standard') === 'hq'
   const hqDownloading = hq?.install?.status === 'downloading'
-  const hqFailed = hq?.install?.status === 'error'
   const hqReady = Boolean(hq?.available)
+  const hqFailed = hq?.install?.status === 'error'
+  // One voice, two parts: "ready" as soon as she can speak with her own voice
+  // at all; the full voice follows in the background.
+  const voiceReady = ttsReady || hqReady
+  const voiceDownloading =
+    packDownloading || ttsDownloading || hqDownloading || busy === 'all' || busy === 'tts'
+  const voiceFailed = !voiceReady && (packFailed || ttsFailed || hqFailed)
+  const voiceError =
+    pack?.install?.error ||
+    tts?.install?.error ||
+    hq?.install?.error ||
+    "Remedy's voice did not finish downloading."
+  const voiceProgressLabel =
+    (packDownloading || ttsDownloading ? pack?.install?.message : null) ||
+    hq?.install?.message ||
+    "Downloading Remedy's voice"
+  const voiceProgressPercent =
+    packDownloading || ttsDownloading
+      ? (pack?.install?.percent ?? tts?.install?.percent ?? null)
+      : (hq?.install?.percent ?? null)
   const ttsFailed = tts?.install?.status === 'error'
   const sttFailed = stt?.install?.status === 'error'
   const turnFailed = turn?.install?.status === 'error'
@@ -188,7 +205,7 @@ export function VoiceSection({
         <div className="flex flex-wrap items-center gap-1.5 mb-2">
           <FormNotice tone="warn">
             Remedy's own voice is switched off — this computer's built-in voice is reading
-            replies, so there is no high-quality voice and no gender.
+            replies instead of Remedy's own voice.
           </FormNotice>
           <FormActionButton variant="primary" onClick={() => void patch({ tts_enabled: true })}>
             Use Remedy's voice
@@ -206,94 +223,48 @@ export function VoiceSection({
         }
       />
 
-      {packMissing ? (
-        <div className="flex flex-wrap items-center gap-1.5 mb-2">
-          {packDownloading || ttsDownloading || busy === 'all' || busy === 'tts' ? (
-            <FormDownloadProgress
-              label={pack?.install?.message || "Downloading Remedy's voice"}
-              percent={pack?.install?.percent ?? tts?.install?.percent ?? null}
-            />
-          ) : packFailed ? (
-            <>
-              <FormNotice tone="warn">
-                {pack?.install?.error || "Remedy's voice did not finish downloading."}
-              </FormNotice>
-              <FormActionButton
-                variant="primary"
-                disabled={Boolean(busy) || packDownloading}
-                onClick={() => void startInstall('all')}
-              >
-                Retry download
-              </FormActionButton>
-            </>
-          ) : (
-            <>
-              <FormNotice tone="warn">
-                {tts?.reason || stt?.reason || "Remedy's voice is not on this computer yet."}
-              </FormNotice>
-              {pack?.supported === false ? null : (
-                <FormActionButton
-                  variant="primary"
-                  disabled={Boolean(busy) || packDownloading}
-                  onClick={() => void startInstall('all')}
-                >
-                  Download Remedy's voice
-                </FormActionButton>
-              )}
-            </>
-          )}
-        </div>
-      ) : (
-        assetLine(
-          ttsReady,
-          ttsDownloading,
-          ttsFailed,
-          "Remedy's speaking voice",
-          "Downloading Remedy's voice…",
-          () => void startInstall('tts'),
-          Boolean(busy) || ttsDownloading,
-          tts?.install?.percent,
-        )
-      )}
-
-      <FormToggle
-        checked={hqOn}
-        onChange={(on) => {
-          void (async () => {
-            await patch({ tts_quality: on ? 'hq' : 'standard' })
-            if (on) void startInstall('chatterbox')
-          })()
-        }}
-        label="High quality voice"
-        description={
-          hqReady
-            ? 'Grove and calls use Chatterbox — a voice that sounds like a person, not a robot. Stays on this computer.'
-            : hqDownloading
-              ? 'Downloading the human-sounding voice…'
-              : 'Sounds like a person, not a robot. About 1.1 GB from Resemble AI (MIT). Downloads when you turn this on. Standard voice keeps talking until it is ready.'
-        }
-      />
-      {hqDownloading ? (
+      {/* Remedy has one voice. It arrives in two parts (the quick first
+          voice, then the full one); the owner sees one line for both. */}
+      {voiceReady ? (
+        <FormHint>Remedy's voice is ready on this computer.</FormHint>
+      ) : voiceDownloading ? (
         <FormDownloadProgress
-          label={hq?.install?.message || 'High-quality voice'}
-          percent={hq?.install?.percent ?? null}
+          label={voiceProgressLabel}
+          percent={voiceProgressPercent}
         />
-      ) : null}
-      {hqOn && hqFailed ? (
+      ) : voiceFailed ? (
         <div className="flex flex-wrap items-center gap-1.5 mb-2">
-          <FormNotice tone="warn">
-            {hq?.install?.error || hq?.reason || 'High-quality voice did not finish downloading.'}
-          </FormNotice>
+          <FormNotice tone="warn">{voiceError}</FormNotice>
           <FormActionButton
-            disabled={Boolean(busy) || hqDownloading}
-            onClick={() => void startInstall('chatterbox')}
+            variant="primary"
+            disabled={Boolean(busy)}
+            onClick={() => void startInstall('all')}
           >
-            Retry
+            Retry download
           </FormActionButton>
         </div>
-      ) : null}
-      {hqOn && !hqReady && !hqDownloading && !hqFailed && hq?.reason ? (
-        <FormHint>{hq.reason}</FormHint>
+      ) : (
+        <div className="flex flex-wrap items-center gap-1.5 mb-2">
+          <FormNotice tone="warn">
+            {tts?.reason || stt?.reason || "Remedy's voice is not on this computer yet."}
+          </FormNotice>
+          {pack?.supported === false ? null : (
+            <FormActionButton
+              variant="primary"
+              disabled={Boolean(busy)}
+              onClick={() => void startInstall('all')}
+            >
+              Download Remedy's voice
+            </FormActionButton>
+          )}
+        </div>
+      )}
+      {voiceReady && !hqReady ? (
+        <FormHint>
+          {hqDownloading
+            ? 'Her full voice is still arriving; she speaks with the first one meanwhile.'
+            : 'Her full voice is not here yet; she speaks with the first one meanwhile.'}
+        </FormHint>
       ) : null}
 
       {advanced && packMissing && (tts?.hint || stt?.hint) ? (
@@ -302,16 +273,6 @@ export function VoiceSection({
 
       {advanced ? (
         <>
-          <FormToggle
-            checked={Boolean(tts?.enabled ?? true)}
-            onChange={(on) => void patch({ tts_enabled: on })}
-            label="Use Remedy's own voice"
-            description={
-              tts?.enabled === false
-                ? "Off: this computer's built-in voice reads replies instead — no Kokoro, no high quality, no gender. Turn on to hear Remedy."
-                : 'On: Remedy speaks with her own voice (standard, or high quality when it is on). Off falls back to the built-in system voice.'
-            }
-          />
           <FormToggle
             checked={Boolean(stt?.enabled ?? true)}
             onChange={(on) => void patch({ stt_enabled: on })}
@@ -337,30 +298,6 @@ export function VoiceSection({
               />
             </>
           ) : null}
-          {(tts?.voices?.length ?? 0) > 0 ? (
-            <>
-              <FormLabel>Voice</FormLabel>
-              <FormSelect
-                value={status?.settings.voice_override || ''}
-                onChange={(v) => void patch({ voice_override: v })}
-                options={[
-                  { value: '', label: 'Follow partner gender' },
-                  ...(tts?.voices || []).map((v) => ({ value: v, label: v })),
-                ]}
-              />
-            </>
-          ) : null}
-          <FormLabel>
-            Speed ({(status?.settings.speed ?? 1).toFixed(1)}×)
-          </FormLabel>
-          <FormRange
-            min={50}
-            max={200}
-            step={10}
-            value={Math.round((status?.settings.speed ?? 1) * 100)}
-            onChange={(n) => void patch({ speed: n / 100 })}
-          />
-
           <FormLabel>Turn-taking (live calls)</FormLabel>
           <FormHint>
             About 9 MB, BSD-2, from Pipecat. So Remedy does not talk over you.
@@ -379,7 +316,7 @@ export function VoiceSection({
         </>
       ) : (
         <FormHint>
-          Hearing, speed, and live-call turn-taking live under Advanced.
+          Hearing and live-call turn-taking live under Advanced.
         </FormHint>
       )}
 
