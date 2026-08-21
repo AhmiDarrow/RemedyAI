@@ -92,7 +92,31 @@ def shape_audio(
                 x = x * (0.98 / peak)
     except Exception as exc:  # noqa: BLE001
         logger.info("voice shape: warmth skipped: %s", exc)
-    return np.asarray(x, dtype=np.float32)
+    return normalize_level(np.asarray(x, dtype=np.float32))
+
+
+_TARGET_RMS = 0.1  # -20 dBFS: a normal conversational level for playback
+_PEAK_CAP = 0.95
+
+
+def normalize_level(x: Any) -> Any:
+    """Bring speech to a steady playback level (engines differ by 10+ dB).
+
+    RMS to about -20 dBFS, peaks capped, gain limited so silence or a
+    whisper is not blown up into noise.
+    """
+    import numpy as np
+
+    if len(x) == 0:
+        return x
+    rms = float(np.sqrt(np.mean(np.square(x, dtype=np.float64))))
+    if rms < 1e-4:
+        return x
+    gain = min(8.0, _TARGET_RMS / rms)
+    peak = float(np.max(np.abs(x))) * gain
+    if peak > _PEAK_CAP:
+        gain *= _PEAK_CAP / peak
+    return (x * gain).astype(np.float32)
 
 
 def sampling_for(articulation: float) -> dict[str, float]:

@@ -23,6 +23,15 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   card; with an NVIDIA GPU the runtime now gets the CUDA 12.4 build of
   torch and the voice answers in seconds. `REMEDY_VOICE_CPU_ONLY=1`
   opts out.
+- **Her voice can be heard.** Three things kept the server's audio from
+  reaching the speakers: the desktop window did not allow programmatic
+  playback (WebView2 autoplay policy — now permitted for this window), a
+  refused playback went silent instead of falling back to the system
+  voice (it falls back again, and says so in the console), and the voice
+  came out 12 dB quieter than speech normally sits (every utterance is now
+  levelled to a conversational loudness with a peak cap). One speak-aloud
+  control: the status bar's 🔊, on both surfaces; Grove's own button is
+  gone.
 - **Grove has the status bar.** The same bar as Studio — provider and
   model, thinking level, approval mode, privacy, theme, usage, updates,
   speak-aloud — now sits under Grove too. Its Settings button opens

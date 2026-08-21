@@ -1043,6 +1043,7 @@ export default function App() {
     enabled: surface === 'studio' && serverState === 'ready',
   })
   const studioSpeakReplies = studioVoice.status?.settings?.speak_replies ?? false
+  const [groveSpeaking, setGroveSpeaking] = useState(false)
   const studioSpeakPrevRef = useRef(false)
   useEffect(() => {
     if (serverState !== 'ready') return
@@ -1657,6 +1658,7 @@ export default function App() {
           userName={userName}
           partnerName={partnerName}
           onSwitchToStudio={() => switchSurface('studio')}
+          onSpeakingChange={setGroveSpeaking}
           openGoalId={pendingGroveGoal}
           onGoalOpened={() => setPendingGroveGoal(null)}
         />
@@ -2127,7 +2129,7 @@ export default function App() {
           onToggleTimeTravel={() => setTimeTravelOpen((v) => !v)}
           onOpenGrove={() => switchSurface('grove')}
           speakReplies={studioSpeakReplies}
-          speaking={studioVoice.speaking}
+          speaking={surface === 'grove' ? groveSpeaking : studioVoice.speaking}
           onToggleSpeak={toggleStudioSpeak}
         />
 
