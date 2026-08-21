@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getVoiceStatus, speakToUrl, transcribeAudio, type VoiceStatus } from '../api/voice'
+import { getVoiceStatus, reportVoiceClientIssue, speakToUrl, transcribeAudio, type VoiceStatus } from '../api/voice'
 import { pickFallbackVoice, type GenderRole } from './pickVoice'
 
 /** Light markdown → speakable text for the browser-TTS fallback path.
@@ -219,23 +219,27 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoice {
           urlRef.current = url
           const audio = new Audio(url)
           audioRef.current = audio
-          const done = (ok: boolean) => {
+          const done = (ok: boolean, why?: string) => {
             if (urlRef.current === url) {
               URL.revokeObjectURL(url)
               urlRef.current = null
             }
+            if (!ok) lastPlayError = why || 'unknown'
             resolve(ok)
           }
           audio.onended = () => done(true)
-          audio.onerror = () => done(false)
-          audio.play().catch(() => done(false))
+          audio.onerror = () =>
+            done(false, `media error ${audio.error?.code ?? '?'}: ${audio.error?.message ?? ''}`)
+          audio.play().catch((e: unknown) => done(false, `play() rejected: ${String(e)}`))
         })
+      let lastPlayError = ''
       let url: string | null = first
       for (let i = 0; url; i += 1) {
         const ok = await playUrl(url)
         if (!ok && i === 0 && gen === speakGenRef.current) {
           // Playback refused (autoplay policy / decoder): never go silent.
-          console.warn("[voice] playback failed for Remedy's voice; using the system voice")
+          console.warn("[voice] playback failed for Remedy's voice; using the system voice", lastPlayError)
+          reportVoiceClientIssue(`playback failed (${lastPlayError}); using the system voice`)
           setSpeaking(false)
           speakViaBrowser(t)
           return
