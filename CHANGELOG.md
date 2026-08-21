@@ -23,6 +23,20 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   card; with an NVIDIA GPU the runtime now gets the CUDA 12.4 build of
   torch and the voice answers in seconds. `REMEDY_VOICE_CPU_ONLY=1`
   opts out.
+- **Her voice settles with the relationship, and stays when asked.** The
+  identity's baseline now drifts once a day in small, bounded, journaled
+  steps toward a target drawn from how long she has been with the owner
+  and how much they have talked, the chosen speaking style, and her own
+  recent stance; the owner's explicit asks live in a separate offset the
+  drift never erodes. `voice_hold` keeps a voice exactly as it is when the
+  owner likes it (drift pauses; their own later asks still apply) and
+  releases it again; `voice_identity` / `voice_adjust` / `voice_revert`
+  as before. Routes: `/api/voice/identity/hold`.
+- **Cleaner, steadier voice.** Reference windows were re-chosen for the
+  lowest measured reverb tail; the output chain now high-passes rumble,
+  tilts only above 3 kHz (the default is neutral), levels every
+  utterance to a conversational loudness and rounds peaks with a soft
+  limiter instead of a hard cap.
 - **Her voice can be heard.** Three things kept the server's audio from
   reaching the speakers: the desktop window did not allow programmatic
   playback (WebView2 autoplay policy — now permitted for this window), a

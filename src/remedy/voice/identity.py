@@ -40,14 +40,39 @@ class VoiceIdentity:
     reference_wav: str = ""
     # Defaults tuned for a steady, unhurried, even delivery; evolution moves
     # them in small steps inside the clamps below.
-    pace: float = 0.96
+    # Baseline: ships neutral-ish and drifts slowly with the relationship
+    # (remedy.voice.evolution). Pitch 0 and warmth 0.5 leave the reference
+    # clip's own character alone.
+    pace: float = 0.97
     pitch_semitones: float = 0.0
-    warmth: float = 0.62
-    articulation: float = 0.42
+    warmth: float = 0.5
+    articulation: float = 0.45
+    # The owner's explicit asks ("a little warmer"), kept apart from drift
+    # so the slow evolution never quietly undoes what they chose.
+    offset: dict[str, float] = field(default_factory=dict)
+    # "Keep this voice": when set, the slow drift pauses (the owner's own
+    # asks still apply, because they asked). Released with hold(on=False).
+    held: bool = False
     journal: list[dict[str, Any]] = field(default_factory=list)
+
+    def effective(self) -> dict[str, float]:
+        """Baseline + owner offset, clamped — what the engines actually use."""
+        vals = {
+            "pace": self.pace + float(self.offset.get("pace", 0.0)),
+            "pitch_semitones": self.pitch_semitones
+            + float(self.offset.get("pitch_semitones", 0.0)),
+            "warmth": self.warmth + float(self.offset.get("warmth", 0.0)),
+            "articulation": self.articulation + float(self.offset.get("articulation", 0.0)),
+        }
+        vals["pace"] = min(_PACE_MAX, max(_PACE_MIN, vals["pace"]))
+        vals["pitch_semitones"] = min(_PITCH_MAX, max(_PITCH_MIN, vals["pitch_semitones"]))
+        vals["warmth"] = min(1.0, max(0.0, vals["warmth"]))
+        vals["articulation"] = min(1.0, max(0.0, vals["articulation"]))
+        return vals
 
     def public(self) -> dict[str, Any]:
         d = asdict(self)
+        d["effective"] = self.effective()
         d["has_reference"] = bool(self.reference_wav) and Path(
             self.reference_wav
         ).is_file()
@@ -77,11 +102,19 @@ def load(home_dir: Path | str | None = None) -> VoiceIdentity:
     ident = VoiceIdentity(
         gender=str(raw.get("gender") or "female"),
         reference_wav=str(raw.get("reference_wav") or ""),
-        pace=_num(raw.get("pace"), 0.96),
+        pace=_num(raw.get("pace"), 0.97),
         pitch_semitones=_num(raw.get("pitch_semitones"), 0.0),
-        warmth=_num(raw.get("warmth"), 0.62),
-        articulation=_num(raw.get("articulation"), 0.42),
-        journal=list(raw.get("journal") or [])[-20:],
+        warmth=_num(raw.get("warmth"), 0.5),
+        articulation=_num(raw.get("articulation"), 0.45),
+        offset={
+            k: _num(v, 0.0)
+            for k, v in (raw.get("offset") or {}).items()
+            if k in ("pace", "pitch_semitones", "warmth", "articulation")
+        }
+        if isinstance(raw.get("offset"), dict)
+        else {},
+        held=bool(raw.get("held", False)),
+        journal=list(raw.get("journal") or [])[-40:],
     )
     return _clamp(ident)
 
@@ -127,27 +160,36 @@ def evolve(
     warmth: float | None = None,
     articulation: float | None = None,
 ) -> VoiceIdentity:
+    """The owner asked for a change: move their offset, not the baseline."""
     ident = load(home_dir)
-    before = ident.public()
-    if pace is not None:
-        ident.pace = ident.pace + float(pace)
-    if pitch_semitones is not None:
-        ident.pitch_semitones = ident.pitch_semitones + float(pitch_semitones)
-    if warmth is not None:
-        ident.warmth = ident.warmth + float(warmth)
-    if articulation is not None:
-        ident.articulation = ident.articulation + float(articulation)
-    ident = _clamp(ident)
+    before = dict(ident.offset)
+    for key, delta in (
+        ("pace", pace),
+        ("pitch_semitones", pitch_semitones),
+        ("warmth", warmth),
+        ("articulation", articulation),
+    ):
+        if delta is not None:
+            ident.offset[key] = float(ident.offset.get(key, 0.0)) + float(delta)
+    # Keep offsets within what the clamps could ever express.
+    ident.offset["pace"] = max(-0.3, min(0.3, ident.offset.get("pace", 0.0)))
+    ident.offset["pitch_semitones"] = max(-4.0, min(4.0, ident.offset.get("pitch_semitones", 0.0)))
+    ident.offset["warmth"] = max(-1.0, min(1.0, ident.offset.get("warmth", 0.0)))
+    ident.offset["articulation"] = max(-1.0, min(1.0, ident.offset.get("articulation", 0.0)))
     ident.journal.append(
-        {
-            "at": datetime.now(UTC).isoformat(),
-            "change": "evolve",
-            "before": {
-                k: before[k]
-                for k in ("pace", "pitch_semitones", "warmth", "articulation")
-            },
-        }
+        {"at": datetime.now(UTC).isoformat(), "change": "evolve", "before": before}
     )
+    return save(ident, home_dir)
+
+
+def hold(home_dir: Path | str | None = None, *, on: bool = True) -> VoiceIdentity:
+    """Freeze (or release) the slow evolution. Owner asks still work."""
+    ident = load(home_dir)
+    if ident.held != bool(on):
+        ident.held = bool(on)
+        ident.journal.append(
+            {"at": datetime.now(UTC).isoformat(), "change": "hold" if on else "release"}
+        )
     return save(ident, home_dir)
 
 
@@ -164,9 +206,7 @@ def revert(home_dir: Path | str | None = None, *, steps: int = 1) -> VoiceIdenti
         if idx is None:
             break
         before = ident.journal.pop(idx).get("before") or {}
-        for k in ("pace", "pitch_semitones", "warmth", "articulation"):
-            if k in before:
-                setattr(ident, k, float(before[k]))
+        ident.offset = {k: float(v) for k, v in before.items() if k in ("pace", "pitch_semitones", "warmth", "articulation")}
         n -= 1
     ident.journal.append({"at": datetime.now(UTC).isoformat(), "change": "revert"})
     return save(ident, home_dir)

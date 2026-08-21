@@ -402,15 +402,16 @@ def synthesize(
     from remedy.voice.shape import shape_audio
 
     ident = load_identity(home_dir)
+    eff = ident.effective()
     v = voice_for_gender(gender, voice or cfg.get("voice_override"))
-    spd = float(speed or ident.pace or 1.0)
+    spd = float(speed or eff["pace"] or 1.0)
     clean = speakable_text(text)
     if not clean:
         return None
     samples, sr = engine.create(clean, voice=v, speed=spd)
     # Pace already applied natively; pitch and warmth follow the identity.
     shaped = shape_audio(
-        samples, int(sr), pace=1.0, pitch_semitones=ident.pitch_semitones, warmth=ident.warmth
+        samples, int(sr), pace=1.0, pitch_semitones=eff["pitch_semitones"], warmth=eff["warmth"]
     )
     return encode_wav(shaped, int(sr)), int(sr)
 
@@ -856,6 +857,21 @@ def install_voice_pack(home_dir: Path | str | None = None) -> None:
             "error": _owner_pack_error(exc),
         }
         raise
+
+
+def start_voice_evolution(home_dir: Path | str | None = None, memory: Any = None) -> None:
+    """Daily drift of her voice baseline: now, then every six hours while up."""
+    if _skip_first_run_download() and os.environ.get("REMEDY_ENSURE_ASSETS") != "1":
+        return
+
+    def _loop() -> None:
+        from remedy.voice.evolution import daily_drift
+
+        while True:
+            daily_drift(home_dir, memory)
+            time.sleep(6 * 3600)
+
+    threading.Thread(target=_loop, name="remedy-voice-evolution", daemon=True).start()
 
 
 def warm_voice_engines(
