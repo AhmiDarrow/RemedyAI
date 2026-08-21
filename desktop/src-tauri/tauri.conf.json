@@ -26,7 +26,8 @@
         "dragDropEnabled": true,
         "decorations": true,
         "shadow": true,
-        "theme": "Dark"
+        "theme": "Dark",
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required"
       }
     ],
     "trayIcon": {

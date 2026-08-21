@@ -233,6 +233,13 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoice {
       let url: string | null = first
       for (let i = 0; url; i += 1) {
         const ok = await playUrl(url)
+        if (!ok && i === 0 && gen === speakGenRef.current) {
+          // Playback refused (autoplay policy / decoder): never go silent.
+          console.warn("[voice] playback failed for Remedy's voice; using the system voice")
+          setSpeaking(false)
+          speakViaBrowser(t)
+          return
+        }
         if (!ok || gen !== speakGenRef.current) break
         const upcoming: string | null = next ? await next : null
         if (gen !== speakGenRef.current) {

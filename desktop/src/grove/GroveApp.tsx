@@ -27,8 +27,7 @@ import { useSplit } from './useSplit'
 import type { SendAttachment } from '../components/Composer'
 import { messagesToMoments, latestExchange } from './storylineMoments'
 import { getSettings } from '../api/settings'
-import { patchVoiceSettings } from '../api/voice'
-import { useVoice, announceVoiceSettingsChanged } from '../voice/useVoice'
+import { useVoice } from '../voice/useVoice'
 import type { GenderRole } from '../voice/pickVoice'
 import type { ChatMessage, ChatSession } from '../types'
 import './grove.css'
@@ -108,6 +107,8 @@ export interface GroveAppProps {
   userName: string
   partnerName: string
   onSwitchToStudio: () => void
+  /** Mirror of this surface's playback state for the shared status bar. */
+  onSpeakingChange?: (speaking: boolean) => void
   /** Goal room Remedy asked to open herself (app_control open_goal). */
   openGoalId?: string | null
   /** Ack once the requested goal has been opened (or found absent). */
@@ -116,39 +117,6 @@ export interface GroveAppProps {
 
 type GroveView = { kind: 'home' } | { kind: 'goal'; goal: LifeGoal }
 type RoomTab = 'alongside' | 'storyline'
-
-function GroveVoiceControls({
-  speakReplies,
-  speaking,
-  ttsReady,
-  compact,
-  onToggle,
-}: {
-  speakReplies: boolean
-  speaking: boolean
-  ttsReady: boolean
-  compact?: boolean
-  onToggle: () => void
-}) {
-  return (
-    <button
-      type="button"
-      className={`grove-voicetoggle${speakReplies ? ' on' : ''}${speaking ? ' speaking' : ''}`}
-      onClick={onToggle}
-      aria-pressed={speakReplies}
-      aria-label={speakReplies ? 'Speaking replies aloud' : 'Replies are silent'}
-      title={
-        speakReplies
-          ? ttsReady
-            ? 'Speaking replies aloud — click to go quiet'
-            : "Speaking with this computer's voices — Remedy's voice downloads with the rest of the install"
-          : 'Click to have replies spoken aloud'
-      }
-    >
-      {compact ? (speakReplies ? '🔊' : '🔇') : speakReplies ? '🔊 aloud' : '🔇 quiet'}
-    </button>
-  )
-}
 
 export function GroveApp({
   sessions,
@@ -165,6 +133,7 @@ export function GroveApp({
   userName,
   partnerName,
   onSwitchToStudio,
+  onSpeakingChange,
   openGoalId,
   onGoalOpened,
 }: GroveAppProps) {
@@ -213,13 +182,10 @@ export function GroveApp({
   }, [])
   const voice = useVoice({ gender, enabled: serverReady })
   const speakReplies = voice.status?.settings?.speak_replies ?? false
-  const toggleSpeakReplies = useCallback(() => {
-    const next = !speakReplies
-    if (!next) voice.stopSpeaking()
-    patchVoiceSettings({ speak_replies: next })
-      .then(() => announceVoiceSettingsChanged())
-      .catch(() => {})
-  }, [speakReplies, voice])
+
+  useEffect(() => {
+    onSpeakingChange?.(voice.speaking)
+  }, [voice.speaking, onSpeakingChange])
 
   // Speak each finished reply aloud when the owner chose speak-back.
   const prevStreamingRef = useRef(false)
@@ -517,12 +483,6 @@ export function GroveApp({
               📖 Storyline
             </button>
           </div>
-          <GroveVoiceControls
-            speakReplies={speakReplies}
-            speaking={voice.speaking}
-            ttsReady={Boolean(voice.status?.tts?.available)}
-            onToggle={toggleSpeakReplies}
-          />
           <button
             type="button"
             className="grove-switch"
@@ -833,13 +793,6 @@ export function GroveApp({
             📖 Storyline
           </button>
         </div>
-        <GroveVoiceControls
-          speakReplies={speakReplies}
-          speaking={voice.speaking}
-          ttsReady={Boolean(voice.status?.tts?.available)}
-          compact
-          onToggle={toggleSpeakReplies}
-        />
         <button type="button" className="grove-switch" onClick={onSwitchToStudio}>
           switch to <b>Studio</b>
         </button>
