@@ -258,8 +258,9 @@ def create_app(
                 # the engines now (Kokoro; Chatterbox too when HQ is on) so
                 # the first sentence is not a twenty-second wait.
                 try:
-                    from remedy.voice.service import warm_voice_engines
+                    from remedy.voice.service import start_voice_evolution, warm_voice_engines
 
+                    start_voice_evolution(home0, memory)
                     warm_voice_engines(
                         home0,
                         gender=str(cfg0.get("agent_gender") or "female")

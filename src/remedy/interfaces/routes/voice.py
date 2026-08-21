@@ -40,6 +40,10 @@ class VoiceIdentityRevert(BaseModel):
     steps: int = 1
 
 
+class VoiceIdentityHold(BaseModel):
+    keep: bool = True
+
+
 class SpeakRequest(BaseModel):
     text: str
     voice: str | None = None
@@ -184,6 +188,13 @@ def register_voice_routes(
             warmth=patch.warmth,
             articulation=patch.articulation,
         )
+        return ident.public()
+
+    @app.post("/api/voice/identity/hold")
+    async def voice_identity_hold_route(req: VoiceIdentityHold) -> dict[str, Any]:
+        from remedy.voice.identity import hold
+
+        ident = await asyncio.to_thread(hold, _home(load_config()), on=req.keep)
         return ident.public()
 
     @app.post("/api/voice/identity/revert")
