@@ -328,6 +328,13 @@ def get_chatterbox_engine(home_dir: Path | str | None = None) -> Any | None:
             _prefetch_weights()
             model = ChatterboxTTS.from_pretrained(device=_device())
             _engine = model
+            # Chatterbox's generate() is stateful: a prompt replaces
+            # model.conds and a later call *without* one silently reuses
+            # them. Keep the built-in speaker so "female" can always be
+            # restored exactly, whatever was spoken last.
+            global _default_conds
+            _default_conds = getattr(model, "conds", None)
+            _prompt_conds.clear()
             sr = int(getattr(model, "sr", 24_000) or 24_000)
             _mark_ready(home_dir, sr=sr)
             _install_state["chatterbox"] = {"status": "done", "percent": 100.0}
@@ -471,8 +478,11 @@ def _bootstrap_identity(
 ) -> Path | None:
     """One-time: record a gender-matched clip with Kokoro for Chatterbox to clone.
 
-    Chatterbox's built-in speaker is the female default. Male HQ needs a prompt.
-    Cloning a short Kokoro line is better than speaking as the wrong gender.
+    Chatterbox's built-in speaker is not a dependable voice of either gender
+    (the same line measured 160 Hz one run and 111 Hz the next), so *every*
+    gender gets an explicit reference: a short Kokoro line in the matching
+    voice. Chatterbox keeps the timbre and adds its human prosody; the
+    voice is the same every time and changes when the owner changes it.
     """
     try:
         from remedy.core.agent_identity import normalize_agent_gender
@@ -483,8 +493,6 @@ def _bootstrap_identity(
     dest = _identity_dir(home_dir) / f"{g}.wav"
     if dest.is_file() and dest.stat().st_size > 64:
         return dest
-    if g == "female":
-        return None
     try:
         from remedy.voice.service import (
             encode_wav,
@@ -498,12 +506,9 @@ def _bootstrap_identity(
         vid = voice_for_gender(g)
         samples, sr = kokoro.create(_IDENTITY_LINE, voice=vid, speed=1.0)
         dest.write_bytes(encode_wav(samples, int(sr)))
-        try:
-            from remedy.voice.identity import set_reference
-
-            set_reference(dest, home_dir)
-        except Exception:
-            pass
+        # Deliberately *not* set_reference(): this is a gender stand-in, not
+        # her identity. Recording it as the reference made every gender —
+        # including the built-in female — speak from the male clip.
         return dest
     except Exception as exc:
         logger.info("chatterbox: identity bootstrap skipped: %s", exc)
@@ -528,24 +533,48 @@ def synthesize(
     prompt = identity_prompt_path(gender, home_dir)
     if prompt is None:
         prompt = _bootstrap_identity(gender, home_dir)
-    kwargs: dict[str, Any] = {}
-    if prompt is not None:
-        kwargs["audio_prompt_path"] = str(prompt)
     try:
-        try:
-            wav = model.generate(clean, **kwargs)
-        except TypeError as exc:
-            # Only an unknown-kwarg TypeError means "this build has no
-            # audio_prompt_path"; anything else is a real failure.
-            if not kwargs or "audio_prompt_path" not in str(exc):
-                raise
-            logger.info("chatterbox: no audio_prompt_path support; plain voice")
+        with _engine_lock:
+            _select_speaker(model, prompt)
             wav = model.generate(clean)
     except Exception as exc:
         logger.warning("chatterbox: generate failed: %s", exc)
         return None
     sr = int(getattr(model, "sr", 24_000) or 24_000)
     return encode_wav(_floats(wav), sr), sr
+
+
+#: The built-in speaker's conditionals, captured at load.
+_default_conds: Any = None
+#: Prepared conditionals per identity clip (path + mtime) — prepare once.
+_prompt_conds: dict[tuple[str, float], Any] = {}
+
+
+def _select_speaker(model: Any, prompt: Path | None) -> None:
+    """Make *this* utterance's speaker explicit, never "whatever was last".
+
+    No prompt → the built-in (female) speaker, restored from the snapshot
+    taken at load. A prompt → its conditionals, prepared once per file and
+    cached, so switching gender back and forth costs nothing after the
+    first time.
+    """
+    if prompt is None:
+        if _default_conds is not None:
+            model.conds = _default_conds
+        return
+    try:
+        key = (str(prompt), prompt.stat().st_mtime)
+    except OSError:
+        key = (str(prompt), 0.0)
+    conds = _prompt_conds.get(key)
+    if conds is None:
+        model.prepare_conditionals(str(prompt))
+        conds = model.conds
+        if len(_prompt_conds) >= 4:
+            _prompt_conds.clear()
+        _prompt_conds[key] = conds
+    else:
+        model.conds = conds
 
 
 def _hardware_note() -> str | None:

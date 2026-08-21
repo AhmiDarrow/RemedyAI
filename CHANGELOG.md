@@ -23,6 +23,17 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   card; with an NVIDIA GPU the runtime now gets the CUDA 12.4 build of
   torch and the voice answers in seconds. `REMEDY_VOICE_CPU_ONLY=1`
   opts out.
+- **The high-quality voice is actually hers, and changes with her gender.**
+  Three faults stacked up: Chatterbox's `generate()` silently reuses the
+  last speaker when no clip is passed; the male stand-in clip was being
+  recorded as *her* identity reference, so every gender — female included
+  — then spoke from the male clip; and the "built-in female" speaker it
+  was meant to fall back to is not a stable voice at all (the same line
+  measured 160 Hz one run, 111 Hz the next). Now both genders get an
+  explicit reference clip (a short Kokoro line in the matching voice),
+  the speaker is set on every utterance, and the owner's own reference
+  only speaks for its own gender. Measured: female 187–196 Hz, male
+  116–126 Hz, alternating without drift.
 - **A download always shows it is alive.** While pip resolves a hundred
   dependencies it prints almost nothing, so the bar sat on one word for
   minutes. The message now ticks every second with what is certain — the
