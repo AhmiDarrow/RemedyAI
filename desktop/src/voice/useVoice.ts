@@ -48,6 +48,30 @@ export interface UseVoice {
   refreshStatus: () => void
 }
 
+/** Split a reply into speakable chunks of one or two sentences (≤ ~220 chars). */
+export function splitForSpeech(text: string, max = 220): string[] {
+  const sentences = text
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?…])\s+(?=[A-Z0-9"'(\[])/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const out: string[] = []
+  let cur = ''
+  for (const s of sentences) {
+    if (!cur) cur = s
+    // The first chunk is one sentence so sound starts as soon as possible;
+    // later chunks pair short sentences to avoid choppy gaps.
+    else if ((out.length > 0 ? cur.length < 90 : cur.length < 40) && cur.length + 1 + s.length <= max)
+      cur = `${cur} ${s}`
+    else {
+      out.push(cur)
+      cur = s
+    }
+  }
+  if (cur) out.push(cur)
+  return out.length ? out : [text]
+}
+
 export function useVoice(opts: UseVoiceOptions = {}): UseVoice {
   const gender: GenderRole = opts.gender || 'female'
   const enabled = opts.enabled !== false
@@ -158,40 +182,52 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoice {
       if (!t || !enabled) return
       stopSpeaking()
       const gen = speakGenRef.current
-      const url = await speakToUrl(t)
+      // Pipeline by sentence: the first short chunk plays as soon as it is
+      // ready while the next one synthesizes. The high-quality engine runs
+      // faster than real time, so playback never waits once it has begun.
+      const chunks = splitForSpeech(t)
+      const first = await speakToUrl(chunks[0])
       // A newer speak/stop happened while we were synthesizing — drop this one.
       if (gen !== speakGenRef.current) {
-        if (url) URL.revokeObjectURL(url)
+        if (first) URL.revokeObjectURL(first)
         return
       }
-      if (url) {
-        urlRef.current = url
-        const audio = new Audio(url)
-        audioRef.current = audio
-        audio.onended = () => {
-          setSpeaking(false)
-          if (urlRef.current === url) {
-            URL.revokeObjectURL(url)
-            urlRef.current = null
-          }
-        }
-        audio.onerror = () => {
-          setSpeaking(false)
-          if (urlRef.current === url) {
-            URL.revokeObjectURL(url)
-            urlRef.current = null
-          }
-        }
-        setSpeaking(true)
-        try {
-          await audio.play()
-          return
-        } catch {
-          setSpeaking(false)
-        }
+      if (!first) {
+        // Local engine unavailable → OS voices, matched to the gender role.
+        speakViaBrowser(t)
+        return
       }
-      // Local engine unavailable → OS voices, matched to the gender role.
-      speakViaBrowser(t)
+      setSpeaking(true)
+      let next: Promise<string | null> | null = chunks.length > 1 ? speakToUrl(chunks[1]) : null
+      const playUrl = (url: string) =>
+        new Promise<boolean>((resolve) => {
+          urlRef.current = url
+          const audio = new Audio(url)
+          audioRef.current = audio
+          const done = (ok: boolean) => {
+            if (urlRef.current === url) {
+              URL.revokeObjectURL(url)
+              urlRef.current = null
+            }
+            resolve(ok)
+          }
+          audio.onended = () => done(true)
+          audio.onerror = () => done(false)
+          audio.play().catch(() => done(false))
+        })
+      let url: string | null = first
+      for (let i = 0; url; i += 1) {
+        const ok = await playUrl(url)
+        if (!ok || gen !== speakGenRef.current) break
+        const upcoming: string | null = next ? await next : null
+        if (gen !== speakGenRef.current) {
+          if (upcoming) URL.revokeObjectURL(upcoming)
+          break
+        }
+        url = upcoming
+        next = chunks.length > i + 2 ? speakToUrl(chunks[i + 2]) : null
+      }
+      if (gen === speakGenRef.current) setSpeaking(false)
     },
     [enabled, stopSpeaking, speakViaBrowser],
   )

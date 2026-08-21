@@ -105,11 +105,25 @@ def test_hq_status_shape(tmp_path: Path, monkeypatch):
     assert st["fallback"] == "kokoro"
 
 
-def test_identity_prompt_none_until_clip_exists(tmp_path: Path):
-    from remedy.voice.chatterbox import identity_prompt_path
+def test_every_gender_has_a_human_reference_out_of_the_box(tmp_path: Path):
+    """Chatterbox's built-in speaker is not a stable voice: each gender always
+    clones a shipped human clip, and an owner's own reference wins for its
+    gender only."""
+    from remedy.voice.chatterbox import bundled_reference, identity_prompt_path
+    from remedy.voice.identity import VoiceIdentity, save, set_reference
 
-    assert identity_prompt_path("male", tmp_path) is None
-    assert identity_prompt_path("female", tmp_path) is None
+    for g in ("female", "male", "neutral"):
+        p = identity_prompt_path(g, tmp_path)
+        assert p is not None and p == bundled_reference(g)
+        assert p.suffix == ".wav" and p.stat().st_size > 100_000
+    assert bundled_reference("female") != bundled_reference("male")
+
+    save(VoiceIdentity(gender="male"), tmp_path)
+    own = tmp_path / "me.wav"
+    own.write_bytes(b"RIFF" + bytes(200))
+    set_reference(own, tmp_path)
+    assert identity_prompt_path("male", tmp_path) == own
+    assert identity_prompt_path("female", tmp_path) == bundled_reference("female")
 
 
 def test_local_tts_streams_wav_pcm(tmp_path: Path, monkeypatch):

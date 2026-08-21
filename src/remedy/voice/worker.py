@@ -157,12 +157,19 @@ def op_warm_hq_start(args: dict[str, Any]) -> dict[str, Any]:
     home = _home(args)
     hq._install_state["chatterbox"] = {"status": "downloading", "percent": 36.0, "message": "Downloading Chatterbox"}
 
+    gender = args.get("gender")
+
     def _run() -> None:
         try:
             if hq.get_chatterbox_engine(home) is None:
                 st = hq._install_state.get("chatterbox")
                 if not (isinstance(st, dict) and st.get("status") == "error"):
                     hq._install_state["chatterbox"] = {"status": "error", "error": "not loaded"}
+                return
+            # First utterance pays for kernel warm-up and the reference
+            # conditionals (~15 s); do it now, quietly, not on her first reply.
+            if gender:
+                hq.synthesize("Ready.", gender=str(gender), home_dir=home)
         except Exception as exc:  # noqa: BLE001
             hq._install_state["chatterbox"] = {"status": "error", "error": str(exc)[:300]}
 
