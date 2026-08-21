@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from remedy.voice.identity import evolve, load, reference_wav, save, set_reference
 
 
@@ -11,7 +13,7 @@ def test_identity_defaults_and_roundtrip(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
     ident = load(tmp_path)
     assert ident.gender == "female"
-    assert ident.pace == 1.0
+    assert ident.pace == pytest.approx(0.96)
     ident.gender = "male"
     ident.pace = 1.4  # clamp
     save(ident, tmp_path)
@@ -55,8 +57,8 @@ def test_identity_load_survives_junk_numbers(tmp_path):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps({"warmth": "warm", "pace": None}), encoding="utf-8")
     ident = load(tmp_path)
-    assert ident.warmth == 0.5
-    assert ident.pace == 1.0
+    assert ident.warmth == pytest.approx(0.62)
+    assert ident.pace == pytest.approx(0.96)
 
 
 def test_an_owned_reference_only_speaks_for_its_own_gender(tmp_path):
