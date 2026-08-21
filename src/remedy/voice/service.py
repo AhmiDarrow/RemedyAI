@@ -845,6 +845,49 @@ def install_voice_pack(home_dir: Path | str | None = None) -> None:
         raise
 
 
+def warm_voice_engines(
+    home_dir: Path | str | None = None, *, gender: str | None = None
+) -> None:
+    """Load the speaking engines in the background so the first reply is quick.
+
+    Desktop: asks each lane's worker to load (Kokoro always; Chatterbox
+    when HQ is on and installed). Dev: loads Kokoro in-process. Never
+    blocks the caller and never installs anything.
+    """
+    if _skip_first_run_download() and os.environ.get("REMEDY_ENSURE_ASSETS") != "1":
+        return
+
+    def _run() -> None:
+        try:
+            if tts_deps_available() and tts_installed(home_dir):
+                if _managed():
+                    from remedy.voice.bridge import get_bridge
+
+                    get_bridge(home_dir).call("ping", timeout=60)
+                    get_bridge(home_dir).synthesize("Ready.", gender=gender or "female")
+                else:
+                    get_tts_engine(home_dir)
+            cfg = load_voice_settings(home_dir)
+            if str(cfg.get("tts_quality") or "standard") == "hq":
+                from remedy.voice.chatterbox import chatterbox_ready
+
+                if chatterbox_ready(home_dir):
+                    if _managed():
+                        from remedy.voice.bridge import LANE_HQ, get_bridge
+
+                        get_bridge(home_dir, LANE_HQ).call(
+                            "warm_hq_start", timeout=60, gender=gender or "female"
+                        )
+                    else:
+                        from remedy.voice.chatterbox import synthesize as hq_synth
+
+                        hq_synth("Ready.", gender=gender or "female", home_dir=home_dir)
+        except Exception as exc:  # noqa: BLE001 — warm-up is best effort
+            logger.info("voice warm-up skipped: %s", exc)
+
+    threading.Thread(target=_run, name="remedy-voice-warm", daemon=True).start()
+
+
 def install_voice_pack_background(home_dir: Path | str | None = None) -> bool:
     with _pack_lock:
         st = _install_state.get("pack")
