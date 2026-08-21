@@ -9,6 +9,20 @@
 - **Redistribution:** Downloaded at first use / prebundle into user vision dir
 - **Pin:** `remedy.runtime.catalog` (`smolvlm2-2.2b`)
 
+## Chatterbox (high-quality voice)
+
+- **Project:** [Resemble AI Chatterbox](https://github.com/resemble-ai/chatterbox) — `chatterbox-tts` (Turbo model `ResembleAI/chatterbox-turbo`)
+- **Use:** Optional human-bar voice for Grove and calls; runs in the managed voice runtime
+- **License:** **MIT** (code); model weights per the Hugging Face model card
+- **Redistribution:** Downloaded at first use into `~/.remedy/voice/chatterbox/`, never bundled
+
+## Reference voices (LibriVox)
+
+- **Files:** `src/remedy/voice/references/female.wav` (Karen Savage, *Pride and Prejudice*), `male.wav` (Stewart Wills, *Moby Dick*)
+- **Use:** 12-second speech samples the high-quality voice clones so each gender has a steady human voice
+- **License:** **Public domain** (LibriVox; archive.org items carry the public-domain mark)
+- **Source:** https://archive.org/details/pride_and_prejudice_librivox · https://archive.org/details/moby_dick_librivox
+
 ## llama.cpp
 
 - **Project:** [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp)
