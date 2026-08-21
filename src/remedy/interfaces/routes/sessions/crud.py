@@ -287,11 +287,18 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         }
 
     @app.post("/api/sessions/{session_id}/abort")
-    async def abort_session(session_id: str):
-        """Cooperatively stop in-flight generation for this session."""
-        from remedy.core.turn_context import abort_session as _abort_turn
+    async def abort_session(session_id: str, reason: str | None = None):
+        """Cooperatively stop in-flight generation for this session.
 
-        n = _abort_turn(session_id)
+        ``reason`` = ``stop`` (Stop button, default) or ``supersede`` (the
+        client is about to send the next message). The dying stream words its
+        durable assistant row from it.
+        """
+        from remedy.core.turn_context import abort_session as _abort_turn
+        from remedy.core.turn_context import normalize_abort_reason
+
+        reason_n = normalize_abort_reason(reason)
+        n = _abort_turn(session_id, reason=reason_n)
         with contextlib.suppress(Exception):
             from remedy.execution.host.session import close_shared_session
 
@@ -303,4 +310,9 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                 ss = getattr(runtime, "_streaming_sessions", None)
                 if isinstance(ss, set):
                     ss.discard(str(session_id))
-        return {"status": "aborted", "session_id": session_id, "notified": n}
+        return {
+            "status": "aborted",
+            "session_id": session_id,
+            "notified": n,
+            "reason": reason_n,
+        }

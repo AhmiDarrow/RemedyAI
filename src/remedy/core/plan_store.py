@@ -15,6 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.home import default_home
 
 # Lifecycle sets used by store + desktop Plan banner.
 PLAN_TERMINAL_STATUSES = frozenset({"done", "cancelled"})
@@ -141,7 +142,7 @@ class PlanStore:
     """Filesystem-backed plan store under ``{home}/plans``."""
 
     def __init__(self, home_dir: Path | str | None = None) -> None:
-        home = Path.home() / ".remedy" if home_dir is None else Path(home_dir).expanduser()
+        home = default_home() if home_dir is None else Path(home_dir).expanduser()
         self.home = home
         self.root = home / "plans"
         self.root.mkdir(parents=True, exist_ok=True)

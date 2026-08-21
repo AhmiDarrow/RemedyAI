@@ -8,6 +8,8 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
+from remedy.home import default_home
+
 
 class JobCompleteRequest(BaseModel):
     ok: bool = True
@@ -45,7 +47,6 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
     _ = gateway, memory
 
     def _bridge():
-        from pathlib import Path
 
         from remedy.core.computer.host_bridge import get_host_bridge
 
@@ -59,7 +60,7 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 home = load_config().get("home_dir")
             except Exception:
                 home = None
-        return get_host_bridge(home or Path.home() / ".remedy")
+        return get_host_bridge(home or default_home())
 
     def _home_dir():
         from pathlib import Path
@@ -76,7 +77,7 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 return Path(h)
         except Exception:
             pass
-        return Path.home() / ".remedy"
+        return default_home()
 
     @app.post("/api/computer/host/hello")
     async def computer_host_hello(req: HostHelloRequest | None = None):

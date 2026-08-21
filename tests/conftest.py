@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 # Default: existing API tests run without Bearer (local unit suite).
 # Explicit auth tests set REMEDY_API_AUTH=1 themselves.
 os.environ.setdefault("REMEDY_API_AUTH", "0")
@@ -31,3 +33,15 @@ if not os.environ.get("REMEDY_HOME"):
 os.environ["NO_COLOR"] = "1"
 os.environ.pop("FORCE_COLOR", None)
 os.environ.setdefault("TERM", "dumb")
+
+
+@pytest.fixture(autouse=True)
+def _reset_provider_breaker():
+    """The provider circuit breaker is process-global (by design: one bad
+    session must not hammer a dead endpoint). In the suite that state leaked
+    from one test's 503s into the next test's retry budget."""
+    from remedy.core.providers import clear_provider_quarantine
+
+    clear_provider_quarantine()
+    yield
+    clear_provider_quarantine()

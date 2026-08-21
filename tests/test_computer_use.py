@@ -1523,20 +1523,20 @@ def test_uia_module_soft_import():
         assert out is None or isinstance(out, list)
 
 
-def test_print_window_foreground():
+def test_print_window_foreground(tmp_path):
     import sys
 
     if sys.platform != "win32":
         pytest.skip("Windows only")
     import ctypes
-    from pathlib import Path
 
     from remedy.core.computer.desktop_win import print_window_png
 
     hwnd = int(ctypes.windll.user32.GetForegroundWindow() or 0)
     if not hwnd:
         pytest.skip("no foreground window")
-    out = Path.home() / ".remedy" / "computer" / "shots" / "_test_print.png"
+    out = tmp_path / "shots" / "_test_print.png"
+    out.parent.mkdir(parents=True, exist_ok=True)
     try:
         info = print_window_png(hwnd, out)
         assert info["width"] > 0

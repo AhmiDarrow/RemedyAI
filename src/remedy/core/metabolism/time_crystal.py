@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.home import default_home
 
 HORIZONS = ("turn", "session", "project_week", "life")
 # Bound fact list growth (was 300) — hot_block sort + inject size stay cheap.
@@ -256,7 +257,7 @@ def _crystal_root(home: Path | str | None = None) -> Path:
 
         return get_home_dir()
     except Exception:
-        return Path.home() / ".remedy"
+        return default_home()
 
 
 def _crystal_sid(session_id: str | None) -> str:

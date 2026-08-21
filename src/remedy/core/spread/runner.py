@@ -260,7 +260,7 @@ async def _job(
 async def _search_worker(
     runtime: Any, task: SpreadTask
 ) -> tuple[str, bool, dict[str, Any]]:
-    from remedy.core.repo_search import format_hits, search_repo
+    from remedy.core.repo_search import format_hits, search_repo_async
 
     root = runtime.effective_project_path()
     path = (task.path or ".").strip() or "."
@@ -280,7 +280,7 @@ async def _search_worker(
         scope = runtime.access_scope()
     except Exception:
         pass
-    hits, engine = search_repo(
+    hits, engine = await search_repo_async(
         root,
         query,
         path=search_path,

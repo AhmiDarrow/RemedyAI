@@ -64,11 +64,43 @@ export function isAuthenticatedApiUrl(src: string): boolean {
     const host = (u.hostname || '').toLowerCase()
     const loopback =
       host === '127.0.0.1' || host === 'localhost' || host === '::1'
-    if (!loopback) return false
+    // WebUI opened on a LAN address: its own origin's /api/* needs Bearer too.
+    const sameOrigin =
+      typeof window !== 'undefined'
+      && !!window.location?.origin
+      && window.location.origin !== 'null'
+      && u.origin === window.location.origin
+    if (!loopback && !sameOrigin) return false
     return u.pathname.startsWith('/api/')
   } catch {
     return false
   }
+}
+
+/** Absolute filesystem path (drive letter or UNC) — revealable in a file manager. */
+export function isAbsoluteFsPath(src: string): boolean {
+  const s = normalizeLocalMediaPath(src)
+  return /^[A-Za-z]:[\\/]/.test(s) || s.startsWith('\\\\')
+}
+
+/** Collapse absolute …/.remedy/attachments/… to `attachments/…` (home-relative). */
+function mediaPathForApi(raw: string): string {
+  let path = normalizeLocalMediaPath(raw)
+  const att = path.match(/(?:^|[\\/])\.remedy[\\/]attachments[\\/](.+)$/i)
+  if (att) path = `attachments/${att[1]!.replace(/\\/g, '/')}`
+  return path
+}
+
+/**
+ * The `/api/media` request URL a local path resolves to (no fetch). Exposed for
+ * tests and diagnostics; `resolveChatMediaUrl` is what ChatImage uses.
+ */
+export function chatMediaRequestUrl(src: string): string | null {
+  const raw = (src || '').trim().replace(/^<|>$/g, '')
+  if (!raw || !isLocalMediaPath(raw)) return null
+  const path = mediaPathForApi(raw)
+  if (!path) return null
+  return `${getApiBase()}/media?path=${encodeURIComponent(path)}`
 }
 
 /** True when src looks like a local filesystem / project-relative path. */
@@ -148,11 +180,7 @@ function candidateCacheKeys(raw: string): string[] {
     return keys
   }
   if (isLocalMediaPath(raw)) {
-    let path = normalizeLocalMediaPath(raw)
-    const att = path.match(/(?:^|[\\/])\.remedy[\\/]attachments[\\/](.+)$/i)
-    if (att) {
-      path = `attachments/${att[1]!.replace(/\\/g, '/')}`
-    }
+    const path = mediaPathForApi(raw)
     if (path) keys.push(path)
   }
   return keys
@@ -301,20 +329,15 @@ export async function resolveChatMediaUrl(src: string): Promise<string> {
 
   if (!isLocalMediaPath(raw)) return ''
 
-  let path = normalizeLocalMediaPath(raw)
+  const path = mediaPathForApi(raw)
   if (!path) return ''
-
-  // Collapse absolute …/.remedy/attachments/… to attachments/… for /api/media
-  const att = path.match(/(?:^|[\\/])\.remedy[\\/]attachments[\\/](.+)$/i)
-  if (att) {
-    path = `attachments/${att[1]!.replace(/\\/g, '/')}`
-  }
 
   const hit = cacheGet(path)
   if (hit) return hit
 
   await ensureApiToken()
-  const url = `${getApiBase()}/media?path=${encodeURIComponent(path)}`
+  const url = chatMediaRequestUrl(raw)
+  if (!url) return ''
   return fetchAuthedBlob(url, path)
 }
 

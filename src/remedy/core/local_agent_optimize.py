@@ -224,16 +224,29 @@ def text_has_internal_repetition(text: str | None) -> bool:
         return False
     import re as _re
 
-    parts = [p.strip().lower() for p in _re.split(r"(?<=[.!?])\s+", t) if len(p.strip()) > 40]
+    # Include concatenated "Foo.Foo" (no space) — session 765c tuner stutter.
+    parts = [
+        _re.sub(r"[;:]+", ".", p.strip().lower())
+        for p in _re.split(r"(?<=[.!?])(?:\s+|(?=[A-Z]))", t)
+        if len(p.strip()) > 40
+    ]
     if len(parts) < 2:
         # Also catch paragraph repeats without punctuation
         chunks = [c.strip().lower() for c in t.split("\n\n") if len(c.strip()) > 50]
-        return bool(len(chunks) >= 2 and chunks[0] == chunks[1])
-    seen: set[str] = set()
-    for p in parts:
-        if p in seen:
+        if len(chunks) >= 2 and chunks[0] == chunks[1]:
             return True
-        seen.add(p)
+    else:
+        seen: set[str] = set()
+        for p in parts:
+            if p in seen:
+                return True
+            seen.add(p)
+    compact = _re.sub(r"\s+", " ", t)
+    compact = _re.sub(r"[;:]+", ".", compact).lower()
+    if len(compact) >= 160:
+        window = compact[:80]
+        if compact.count(window) >= 2:
+            return True
     return False
 
 

@@ -95,6 +95,7 @@ def _rt() -> SimpleNamespace:
         _llm_base_url="",
         _session_brief=None,
         config=None,
+        effective_project_path=lambda: "",
     )
 
 
@@ -132,6 +133,22 @@ def test_readonly_protocol_block_is_review() -> None:
     proto = build_protocol_block(st)
     assert "Read-only review" in proto
     assert "no file_write" in proto.lower() or "no verify" in proto.lower()
+
+
+def test_fix_issues_after_review_starts_implement(tmp_path) -> None:
+    from remedy.core.build_todos import seed_review_finding_todos
+
+    rt = _rt()
+    rt.effective_project_path = lambda: str(tmp_path)
+    seed_review_finding_todos(rt, ["MIDI warp ignores Drop D", "MusicXML tempo dropped"])
+    st = begin_build_turn(rt, "fix issues 1-10")
+    assert st is not None
+    assert st.read_only is False
+    assert st.require_green_to_finish is True
+    assert st.phase == "implement"
+    proto = build_protocol_block(st)
+    assert "IMPLEMENT" in proto
+    assert "whole-tree review" in proto.lower()
 
 
 def test_write_upgrades_readonly_to_build() -> None:

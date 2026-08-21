@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remedy.home import default_home
 from remedy.skills.library.catalog import (
     SkillCatalogEntry,
     SkillsCatalog,
@@ -139,7 +140,7 @@ def get_skills_catalog_cached(
 
     Returns (catalog_or_None, needs_refresh).
     """
-    home_p = Path(home).expanduser() if home else Path.home() / ".remedy"
+    home_p = Path(home).expanduser() if home else default_home()
     cache_dir = _home_cache_dir(home_p)
     cache_file = cache_dir / "catalog.json"
     cache_sig = cache_dir / "catalog.json.sig"
@@ -204,7 +205,7 @@ def build_library_index(
 ) -> LibraryIndex:
     """Build or return cached LibraryIndex from disk catalog."""
     global _index
-    home_p = Path(home).expanduser() if home else Path.home() / ".remedy"
+    home_p = Path(home).expanduser() if home else default_home()
     cache_file = _home_cache_dir(home_p) / "catalog.json"
     local = _repo_local_catalog()
     path_s = ""
@@ -455,7 +456,7 @@ def load_suggest_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
 
 def schedule_catalog_refresh(home: Path | str | None = None) -> None:
     """Background thread: refresh remote catalog into disk cache (never blocks caller)."""
-    home_p = Path(home).expanduser() if home else Path.home() / ".remedy"
+    home_p = Path(home).expanduser() if home else default_home()
 
     def _run() -> None:
         try:

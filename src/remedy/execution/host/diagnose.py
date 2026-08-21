@@ -71,11 +71,38 @@ def diagnose_host_failure(
     ):
         missing = _extract_missing(blob, cmd)
         hint = "Use host_which to resolve the binary, or host_run with a full path."
-        if missing in {"grep", "head", "tail", "cat", "ls", "rm", "mkdir", "find", "test"}:
-            hint = (
-                f"'{missing}' is POSIX. Prefer host_mkdir / host_run / repo_search, "
-                "or let the host bridge rewrite the command."
-            )
+        if missing in {
+            "grep",
+            "head",
+            "tail",
+            "cat",
+            "ls",
+            "rm",
+            "mkdir",
+            "find",
+            "test",
+            "wc",
+            "rg",
+            "ripgrep",
+            "awk",
+            "sed",
+        }:
+            if missing in {"rg", "ripgrep"}:
+                hint = (
+                    "Use repo_search instead of calling rg via host_run. "
+                    "The bundled ripgrep is for Remedy's search tool."
+                )
+            elif missing == "wc":
+                hint = (
+                    "'wc' is POSIX. Prefer file_read, or host_run a python "
+                    "one-liner to count lines. The host bridge rewrites "
+                    "`wc -l file` when it can."
+                )
+            else:
+                hint = (
+                    f"'{missing}' is POSIX. Prefer host_mkdir / host_run / repo_search, "
+                    "or let the host bridge rewrite the command."
+                )
         return HostDiagnosis(
             code="HOST_NOT_FOUND",
             message=f"Command not found on this host: {missing or 'unknown'}.",

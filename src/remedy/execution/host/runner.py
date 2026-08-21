@@ -322,6 +322,18 @@ def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
         if found:
             return found
     if key in {"python", "python3"}:
+        # Frozen Desktop: ``sys.executable`` is the sidecar, which would print
+        # its own usage and exit 2. Ask for a real interpreter instead.
+        try:
+            from remedy.core.workspace_tools.shell import resolve_python_interpreter
+
+            argv = resolve_python_interpreter()
+        except Exception:
+            argv = None
+        if argv and len(argv) == 1:
+            return argv[0]
+        if getattr(sys, "frozen", False):
+            return None
         return sys.executable
     return None
 

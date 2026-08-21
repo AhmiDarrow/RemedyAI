@@ -5,7 +5,9 @@ One tool surface for the organism: “what do we know / feel / still owe?”
 
 from __future__ import annotations
 
+import asyncio
 import re
+import time
 from contextlib import suppress
 from typing import Any
 
@@ -29,6 +31,12 @@ def _score(query_tokens: set[str], text: str) -> float:
     return hits / max(1.0, len(query_tokens) ** 0.5)
 
 
+#: Wall-clock budget for one recall (seconds). The semantic pass is skipped
+#: once the keyword pass has eaten most of it; the async wrapper enforces the
+#: whole thing as a hard ceiling.
+RECALL_BUDGET_S = 15.0
+
+
 def recall_unified(
     query: str = "",
     *,
@@ -36,8 +44,19 @@ def recall_unified(
     memory: Any = None,
     session_id: str | None = None,
     limit: int = 12,
+    profile: Any = None,
+    budget_s: float = RECALL_BUDGET_S,
 ) -> str:
-    """Return a ranked markdown brief for agent/tool use."""
+    """Return a ranked markdown brief for agent/tool use.
+
+    Synchronous and blocking (file reads, an optional local embedding call).
+    From the event loop, use :func:`recall_unified_async` — it runs this in a
+    worker thread under a hard time budget. *profile* is a pre-loaded partner
+    profile for callers that already awaited it; when given, *memory* is not
+    consulted.
+    """
+    t0 = time.monotonic()
+    budget = max(0.5, float(budget_s or RECALL_BUDGET_S))
     q = (query or "").strip()
     qtok = _tokens(q)
     hits: list[tuple[float, str, str]] = []  # score, source, line
@@ -91,10 +110,15 @@ def recall_unified(
                     hits.append((s, f"crystal:{f.horizon}", f.text))
 
     # Partner memory (sync profile if already loaded path — async store optional)
-    if memory is not None:
+    if profile is not None:
         with suppress(Exception):
-            import asyncio
+            from remedy.memory.partner_memory import rank_injectable_facts
 
+            for f in rank_injectable_facts(profile, query=q, limit=16):
+                s = _score(qtok, f.fact) + float(f.confidence) * 0.3
+                hits.append((s, f"fact:{f.category}", f.fact))
+    elif memory is not None:
+        with suppress(Exception):
             from remedy.memory.partner_memory import rank_injectable_facts
 
             async def _facts() -> None:
@@ -114,7 +138,7 @@ def recall_unified(
     # the full local soul set (not just lines the keyword gate admitted), so a
     # meaning-match that shares no tokens with the query can still surface.
     # Dedupe below merges a line found both ways, keeping the higher score.
-    if q:
+    if q and (time.monotonic() - t0) < budget * 0.6:
         with suppress(Exception):
             from remedy.memory.soul.semantic import semantic_scores
 
@@ -170,3 +194,46 @@ def recall_unified(
     for s, src, line in ranked:
         lines.append(f"- ({src} · {s:.2f}) {line[:220]}")
     return "\n".join(lines)
+
+
+async def recall_unified_async(
+    query: str = "",
+    *,
+    home: str | Any = None,
+    memory: Any = None,
+    session_id: str | None = None,
+    limit: int = 12,
+    budget_s: float = RECALL_BUDGET_S,
+) -> str:
+    """Event-loop-safe recall: partner profile awaited here, the rest in a thread.
+
+    The synchronous body reads the soul field, the time crystal and (when a
+    local embedder is configured) makes a blocking HTTP call — all of which
+    used to run on the event loop and stall every other request. A hard
+    ``budget_s`` ceiling turns a hung embedder into a short note, not a freeze.
+    """
+    profile = None
+    if memory is not None:
+        with suppress(Exception):
+            profile = await asyncio.wait_for(
+                memory.get_or_create_profile(), timeout=min(5.0, budget_s)
+            )
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                recall_unified,
+                query or "",
+                home=home,
+                memory=None,
+                session_id=session_id,
+                limit=limit,
+                profile=profile,
+                budget_s=budget_s,
+            ),
+            timeout=budget_s,
+        )
+    except TimeoutError:
+        return (
+            f"Recall timed out after {budget_s:.0f}s (the soul field or a local "
+            "embedder is slow). Try a shorter query or memory_search."
+        )

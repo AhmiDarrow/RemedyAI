@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.home import default_home
 
 _VITALS_NAME = "organism.json"
 # path -> (mtime, payload). Pulse/status polls hit RAM, not disk.
@@ -244,7 +245,7 @@ def organism_heartbeat(home: Any, *, session_id: str = "life") -> dict[str, Any]
 def _home_path(home: Any) -> Path:
     if home:
         return Path(home).expanduser()
-    return Path.home() / ".remedy"
+    return default_home()
 
 
 def load_vitals(home: Any = None) -> dict[str, Any]:

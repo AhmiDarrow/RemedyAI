@@ -671,6 +671,15 @@ export function MessageFeed({
         `${s.id}:${s.status}:${(s.resultText || '').length}:${(s.argsText || '').length}`,
     )
     .join('|')
+  // The owner's newest message: sending (or edit-resend) re-attaches the feed
+  // to the floor. Nothing else forces it — tokens, tools, images never do.
+  const lastUserMsgId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]!
+      if (m.role === 'user' && !m.reverted) return m.id
+    }
+    return null
+  }, [messages])
   const {
     setScroller,
     setContent,
@@ -679,6 +688,7 @@ export function MessageFeed({
   } = useStickToBottom({
     followActive: streaming,
     alwaysOfferJump: messages.length > 2 || streaming,
+    reattachKey: lastUserMsgId,
     deps: [
       messages.length,
       partialText,
@@ -693,6 +703,18 @@ export function MessageFeed({
   })
 
   const visible = useMemo(() => messages.filter((m) => !m.reverted), [messages])
+
+  // Unread delta for the jump pill: messages that landed since the user
+  // scrolled away (+1 while a reply is still streaming in).
+  const detachedAtCountRef = useRef<number | null>(null)
+  if (showJump && detachedAtCountRef.current === null) {
+    detachedAtCountRef.current = visible.length
+  } else if (!showJump && detachedAtCountRef.current !== null) {
+    detachedAtCountRef.current = null
+  }
+  const unread = showJump && detachedAtCountRef.current !== null
+    ? Math.max(0, visible.length - detachedAtCountRef.current) + (streaming && partialText ? 1 : 0)
+    : 0
 
   // Window long chats: only mount recent messages (virtualization lite) unless expanded.
   const WINDOW = 80
@@ -956,16 +978,22 @@ export function MessageFeed({
       <div aria-hidden className="h-px w-full" />
       </div>
 
+      {/* Sticky dock: the pill is a child of the scroller, so position:absolute
+          would scroll away with the content — sticky keeps it on the floor. */}
       {showJump && (
-        <button
-          type="button"
-          className="scroll-latest-fab"
-          onClick={jumpLatest}
-          title="Jump to latest and resume auto-scroll"
-          aria-label="Jump to latest"
-        >
-          ↓
-        </button>
+        <div className="scroll-latest-dock">
+          <button
+            type="button"
+            className="scroll-latest-fab scroll-latest-pill"
+            onClick={jumpLatest}
+            title="Jump to latest and resume auto-scroll"
+            aria-label={unread > 0 ? `Jump to latest, ${unread} new` : 'Jump to latest'}
+          >
+            {unread > 0 && <span className="scroll-latest-count">{unread} new</span>}
+            <span>Jump to latest</span>
+            <span aria-hidden>↓</span>
+          </button>
+        </div>
       )}
 
       <ImageLightbox

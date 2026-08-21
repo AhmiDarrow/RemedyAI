@@ -13,6 +13,8 @@ from ctypes import wintypes
 from pathlib import Path
 from typing import Any
 
+from remedy.home import default_home
+
 # Virtual-key codes (subset)
 _VK = {
     "enter": 0x0D,
@@ -156,7 +158,7 @@ def _capture_virtual_screen() -> tuple[bytes, int, int, int, int, int]:
 
 def _remedy_home() -> Path:
     env = (os.environ.get("REMEDY_HOME") or "").strip()
-    return Path(env).expanduser() if env else Path.home() / ".remedy"
+    return Path(env).expanduser() if env else default_home()
 
 
 def _default_shot_path(prefix: str = "desk") -> Path:

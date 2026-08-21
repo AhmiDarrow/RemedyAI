@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from remedy.memory.soul.dream import dream_cycle, reset_dream_cooldown
 from remedy.memory.soul.field import clear_soul_cache, load_soul_field, save_soul_field
 from remedy.memory.soul.recall import recall_unified
@@ -91,3 +93,25 @@ def test_recall_finds_pledge(tmp_path):
     )
     out = recall_unified("tests green", home=tmp_path, limit=8)
     assert "recall" in out.lower() or "pledge" in out.lower() or "tests" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_recall_unified_async_runs_off_loop_and_times_out(tmp_path, monkeypatch):
+    import asyncio
+
+    from remedy.memory.soul import recall as recall_mod
+
+    out = await recall_mod.recall_unified_async("tests", home=tmp_path, limit=5)
+    assert isinstance(out, str) and out
+
+    def _hang(*a, **k):
+        import time
+
+        time.sleep(2)
+        return "late"
+
+    monkeypatch.setattr(recall_mod, "recall_unified", _hang)
+    t0 = asyncio.get_running_loop().time()
+    out = await recall_mod.recall_unified_async("x", home=tmp_path, budget_s=0.2)
+    assert "timed out" in out
+    assert asyncio.get_running_loop().time() - t0 < 1.5

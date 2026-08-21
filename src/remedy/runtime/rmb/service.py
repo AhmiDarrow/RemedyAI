@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 from urllib.request import Request
 
+from remedy.home import default_home
 from remedy.runtime.rmb.autofit import (
     apply_plan_to_state,
     classify_start_failure,
@@ -726,8 +727,8 @@ def _resolve_occupied_port(
 def _model_search_roots(home_dir: str | Path | None) -> list[Path]:
     roots = [
         models_dir(home_dir),
-        Path.home() / ".remedy" / "models",
-        Path.home() / ".remedy" / "rmb" / "models",
+        default_home() / "models",
+        default_home() / "rmb" / "models",
         # Common user drop folders (Windows RMB package + Downloads)
         Path.home() / "Remedy Muscle Bridge" / "models",
         Path.home() / "Downloads",

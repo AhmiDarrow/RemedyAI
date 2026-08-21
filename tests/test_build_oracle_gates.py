@@ -672,6 +672,47 @@ def test_writes_past_the_threshold_with_no_verify_yet_do_auto_verify():
     assert should_auto_verify(st) is True
 
 
+def test_a_full_suite_oracle_waits_for_two_writes():
+    """One file_edit is not 'the build is ready for npm test'."""
+    st = BuildTurnState(
+        active=True,
+        write_steps=1,
+        require_verify_after_writes=1,
+        verify_command="npm test",
+    )
+    st.write_set = ["src/lib/audioToMidi.ts"]
+    assert should_auto_verify(st) is False
+    st.write_steps = 2
+    assert should_auto_verify(st) is True
+
+
+def test_an_open_feature_checklist_does_not_auto_run_the_suite():
+    """npm test after the first file_edit is not the job — the feature isn't built yet."""
+    st = BuildTurnState(
+        active=True,
+        write_steps=3,
+        verify_command="npm test",
+        open_todo_count=8,
+        open_feature_todo_count=7,
+    )
+    st.write_set = ["src/lib/audioToMidi.ts"]
+    assert should_auto_verify(st) is False
+    st.open_feature_todo_count = 0
+    st.open_todo_count = 1  # only "npm test green" left
+    assert should_auto_verify(st) is True
+
+
+def test_c_still_verifies_immediately_with_an_open_checklist():
+    st = BuildTurnState(
+        active=True,
+        write_steps=1,
+        verify_command="gcc -o a.exe a.c && a.exe",
+        open_feature_todo_count=4,
+    )
+    st.write_set = ["hello.c"]
+    assert should_auto_verify(st) is True
+
+
 def test_one_write_below_the_threshold_with_an_oracle_already_set_does_not():
     st = BuildTurnState(active=True, write_steps=1, verify_command="pytest -q")
     assert should_auto_verify(st) is False
@@ -886,6 +927,17 @@ def test_a_build_that_still_has_to_ship_keeps_its_tools_after_green():
     msg = format_auto_verify_message({"ok": True, "command": "pytest -q"}, state=st)
     assert "Tools stay on" in msg["content"]
     assert "may summarize DONE" not in msg["content"]
+
+
+def test_red_while_the_feature_is_open_does_not_become_a_repair_ticket():
+    st = BuildTurnState(active=True, open_feature_todo_count=4)
+    msg = format_auto_verify_message(
+        {"ok": False, "command": "npm test", "summary": "3 failed"},
+        state=st,
+    )
+    assert "slice not done" in msg["content"]
+    assert "Do NOT stop to patch the suite" in msg["content"]
+    assert "REPAIR TICKET" not in msg["content"]
 
 
 def test_a_red_result_becomes_a_scoped_repair_ticket():

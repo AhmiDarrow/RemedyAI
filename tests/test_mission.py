@@ -1,9 +1,11 @@
 """Mission store and advance."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from remedy.core.build_mission import note_mission_verify
 from remedy.core.errors import SecurityError
 from remedy.core.mission import (
     Mission,
@@ -142,3 +144,49 @@ def test_mission_poisoned_latest_pointer_ignored(tmp_path: Path) -> None:
     # Session pointer similarly ignored
     (missions / "latest-ok_session.txt").write_text("../auth/x", encoding="utf-8")
     assert store.latest(session_id="ok_session") is None
+
+
+def test_green_verify_does_not_complete_implement_steps(tmp_path: Path) -> None:
+    """First npm test pass is a checkpoint, not 'implement the goal' done."""
+    m = create_mission(
+        "Ship feature",
+        steps=[
+            "Scout codebase (batch reads)",
+            "Implement the owner's goal (file_write / file_edit)",
+            "Verify with project tests only after that work is on disk",
+        ],
+        verify_command="npm test",
+        home=tmp_path,
+    )
+    rt = SimpleNamespace(config=SimpleNamespace(home_dir=tmp_path))
+    st = SimpleNamespace(mission_id=m.id)
+    note_mission_verify(rt, st, ok=True, output="16/16 passed")
+    loaded = MissionStore(tmp_path).get(m.id)
+    assert loaded is not None
+    assert loaded.verify_status == "passed"
+    assert loaded.status == "active"
+    by_title = {s.title: s.status for s in loaded.steps}
+    assert by_title["Implement the owner's goal (file_write / file_edit)"] in (
+        "pending",
+        "active",
+    )
+    assert (
+        by_title["Verify with project tests only after that work is on disk"] == "done"
+    )
+
+
+def test_green_verify_completes_mission_only_when_every_step_is_done(
+    tmp_path: Path,
+) -> None:
+    m = create_mission(
+        "Tiny",
+        steps=["Verify with npm test"],
+        verify_command="npm test",
+        home=tmp_path,
+    )
+    rt = SimpleNamespace(config=SimpleNamespace(home_dir=tmp_path))
+    note_mission_verify(rt, SimpleNamespace(mission_id=m.id), ok=True, output="ok")
+    loaded = MissionStore(tmp_path).get(m.id)
+    assert loaded is not None
+    assert loaded.status == "completed"
+    assert loaded.steps[0].status == "done"

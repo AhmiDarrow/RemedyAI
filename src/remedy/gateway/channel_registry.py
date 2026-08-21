@@ -19,6 +19,7 @@ from remedy.gateway.channels import (
 )
 from remedy.gateway.messengers import parse_list_field, resolve_channel_secret
 from remedy.gateway.router import Gateway
+from remedy.home import default_home
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ def _home(cfg: dict[str, Any]) -> Path | None:
     if env:
         return Path(env).expanduser()
     # Default matches CLI/desktop --home fallback so dual instances share one lock.
-    return Path.home() / ".remedy"
+    return default_home()
 
 
 def _secret(cfg: dict, channel: str, key: str, home: Path | None, override: str = "") -> str:

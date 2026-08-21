@@ -302,3 +302,26 @@ def test_delete_releases_stream_claim(tmp_path: Path):
         from remedy.core.turn_context import release_session_stream_claim
 
         release_session_stream_claim(sid)
+
+
+def test_sse_keepalive_pings_while_the_inner_generator_is_blocked() -> None:
+    from remedy.interfaces.routes.sessions.stream import (
+        SSE_KEEPALIVE_COMMENT,
+        iter_sse_with_keepalive,
+    )
+
+    async def _slow() -> AsyncIterator[str]:
+        yield "event: start\n\n"
+        await asyncio.sleep(0.16)
+        yield "event: done\n\n"
+
+    async def _drain() -> list[str]:
+        out: list[str] = []
+        async for chunk in iter_sse_with_keepalive(_slow(), interval_s=0.05):
+            out.append(chunk)
+        return out
+
+    chunks = asyncio.run(_drain())
+    assert chunks[0].startswith("event: start")
+    assert chunks[-1].startswith("event: done")
+    assert SSE_KEEPALIVE_COMMENT in chunks

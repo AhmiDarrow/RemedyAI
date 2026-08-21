@@ -10,6 +10,8 @@ import json
 from contextlib import suppress
 from typing import Any
 
+from remedy.home import default_home
+
 
 def register_goal_and_plan_tools(runtime: Any) -> None:
     """Register goal_* and plan_* builtin tools on *runtime*."""
@@ -267,7 +269,6 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
         return await goal_complete(title=title, evidence=evidence)
 
     def _plan_store():
-        from pathlib import Path
 
         from remedy.core.plan_store import PlanStore
 
@@ -277,7 +278,7 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
                 from remedy.interfaces.config import load_config
 
                 home = load_config().get("home_dir")
-        return PlanStore(home or Path.home() / ".remedy")
+        return PlanStore(home or default_home())
 
     def _parse_plan_list_arg(value: Any, *, as_strings: bool = False) -> list[Any]:
         """Accept native JSON array (tool_calls) or a JSON/bullet string.

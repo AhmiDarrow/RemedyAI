@@ -241,11 +241,16 @@ def resolve_stub_write_skip(
     path: str,
     *,
     tool_name: str = "file_write",
+    min_chars: int = 0,
 ) -> str | None:
     """If *path* already has real source on disk, soft-skip a stub re-write.
 
     Returns a success message (not an error) so the ReAct loop does not spin
     HISTORY_STUB failures. Returns None when the caller should still refuse.
+
+    *min_chars*: size the history note claimed is on disk. A shorter real file
+    still skips (never overwrite real source with an empty body) but the
+    message says so, so the model can file_read and decide.
     """
     path = (path or "").strip()
     if not path:
@@ -268,10 +273,17 @@ def resolve_stub_write_skip(
     if looks_like_history_stub_text(existing):
         return None
     n = len(existing)
+    size_note = ""
+    if min_chars and n < int(min_chars):
+        size_note = (
+            f" Note: on-disk file is {n} chars, history said {int(min_chars)} — "
+            "file_read it if you need to verify."
+        )
     return (
         f"OK: skipped re-write of provider-history stub for {path} — "
         f"real file already on disk ({n} chars). "
         f"Continue with other files or file_edit; do not re-send history stubs."
+        f"{size_note}"
     )
 
 

@@ -11,13 +11,14 @@ from remedy.gateway.channels.allowlist import is_allowed, parse_ids
 from remedy.gateway.channels.base_http import HttpSessionMixin
 from remedy.gateway.channels.emit_util import emit_message
 from remedy.gateway.router import ChannelAdapter
+from remedy.home import default_home
 from remedy.models import ChannelKind
 
 logger = logging.getLogger(__name__)
 
 
 def _matrix_home(home: str | None) -> Path:
-    return Path(home).expanduser() if home else Path.home() / ".remedy"
+    return Path(home).expanduser() if home else default_home()
 
 
 def _load_matrix_since(home: str | None) -> str:

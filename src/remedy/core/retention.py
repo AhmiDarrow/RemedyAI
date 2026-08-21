@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.home import default_home
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ class RetentionPolicy:
 def _home_from_cfg(cfg: dict[str, Any] | None) -> Path:
     if isinstance(cfg, dict) and cfg.get("home_dir"):
         return Path(str(cfg["home_dir"])).expanduser().resolve()
-    return (Path.home() / ".remedy").expanduser().resolve()
+    return default_home().expanduser().resolve()
 
 
 def _purge_dir_by_mtime(

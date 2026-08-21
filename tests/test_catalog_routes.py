@@ -119,8 +119,9 @@ def http(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def home(tmp_path, monkeypatch):
-    """The custom-command routes read ~/.remedy directly -- redirect $HOME."""
+    """The custom-command routes read the Remedy home -- point it at tmp."""
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path / ".remedy"))
     return tmp_path
 
 

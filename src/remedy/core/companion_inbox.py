@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.home import default_home
 
 _WATCH_NAMES = ("Desktop", "Downloads")
 _INTERESTING = frozenset(
@@ -42,7 +43,7 @@ def _home(runtime: Any = None) -> Path:
         h = getattr(getattr(runtime, "config", None), "home_dir", None)
         if h:
             return Path(h)
-    return Path.home() / ".remedy"
+    return default_home()
 
 
 def _seen_path(runtime: Any = None) -> Path:

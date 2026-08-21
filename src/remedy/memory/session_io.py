@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from remedy.memory.inline_images import has_inline_image, strip_inline_images
+
 _ROLE_HEADER = re.compile(
     r"^=====\s*(USER|ASSISTANT|SYSTEM|TOOL)\s*=====\s*$",
     re.IGNORECASE,
@@ -116,20 +118,11 @@ def _export_content(
         return one_line
 
     # Fast path: already small and no data-URI marker.
-    if len(content) <= cap and "data:image" not in content and "base64," not in content:
+    if len(content) <= cap and not has_inline_image(content):
         return content.rstrip("\n")
 
     # Strip inline base64 images (common in comfyui / previews) — keep a stub.
-    cleaned = re.sub(
-        r"!\[[^\]]*\]\(data:image/[^)]+\)",
-        "![image omitted in export]",
-        content,
-    )
-    cleaned = re.sub(
-        r"data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]{200,}",
-        "[base64 image omitted]",
-        cleaned,
-    )
+    cleaned = strip_inline_images(content, min_bytes=0, stub="[image omitted in export]")
     if len(cleaned) <= cap:
         return cleaned.rstrip("\n")
     return (

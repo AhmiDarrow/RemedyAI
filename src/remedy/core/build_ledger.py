@@ -48,6 +48,7 @@ class BuildLedgerEntry:
     write_set: list[str] = field(default_factory=list)
     last_error_vector: dict[str, Any] | None = None
     last_scoped_command: str = ""
+    drive_to_done: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -78,6 +79,7 @@ class BuildLedgerEntry:
             write_set=_clean_path_list(raw.get("write_set") or []),
             last_error_vector=_compact_error_vector(vec) if vec else None,
             last_scoped_command=str(raw.get("last_scoped_command") or "")[:400],
+            drive_to_done=bool(raw.get("drive_to_done")),
         )
 
 
@@ -393,6 +395,12 @@ def _merge_turn_into_ledger_locked(
         entry.muscle_tier = mt
     if session_id:
         entry.session_id = session_id
+    if bool(getattr(state, "drive_to_done", False)):
+        entry.drive_to_done = True
+    if entry.phase == "done" and entry.last_verify_ok is True and not bool(
+        getattr(state, "drive_to_done", False)
+    ):
+        entry.drive_to_done = False
     # Body: unverified writes + last red ticket (or clear on green)
     if entry.last_verify_ok is True:
         entry.write_set = []

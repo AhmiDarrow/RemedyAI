@@ -279,3 +279,45 @@ async def test_revert_from_resyncs_message_count(store):
     live2 = await store.get_chat_messages(sid, limit=50)
     assert len(live2) == 1
     assert live2[0].content == "a1"
+
+
+@pytest.mark.asyncio
+async def test_chat_message_tool_calls_and_results_persist_one_to_one(store):
+    """Regression: results used to be sliced to 80 while calls were unbounded."""
+    from remedy.models import ChatMessage, ChatMessageRole, ChatSession
+
+    sid = "sess-tools-1"
+    await store.create_chat_session(ChatSession(id=sid, title="tools"))
+    n = 255
+    calls = [{"name": "file_read", "args": {"path": f"f{i}.py"}} for i in range(n)]
+    results = [{"name": "file_read", "output": f"ok {i}", "error": None} for i in range(n)]
+    msg = await store.add_chat_message(
+        ChatMessage(
+            session_id=sid,
+            role=ChatMessageRole.ASSISTANT,
+            content="used tools",
+            tool_calls=calls,
+            tool_results=results,
+        )
+    )
+    assert len(msg.tool_calls) == len(msg.tool_results) == n
+    rows = await store.get_chat_messages(sid)
+    row = [r for r in rows if r.id == msg.id][0]
+    assert len(row.tool_calls) == len(row.tool_results) == n
+
+
+@pytest.mark.asyncio
+async def test_fts5_punctuation_query_uses_quoted_retry_not_like(store, monkeypatch):
+    # "build_lang_oracle.py; rustc" is an fts5 syntax error raw — it must still
+    # hit FTS (quoted tokens), never the LIKE scan.
+    await store.upsert(MemoryEntry(title="Gate", content="bare rustc syntax gate on main.rs"))
+    called = {"like": False}
+
+    async def _no_like(*a, **k):
+        called["like"] = True
+        return []
+
+    monkeypatch.setattr(store, "_search_like", _no_like)
+    results = await store.search("rustc; main.rs")
+    assert called["like"] is False
+    assert len(results) == 1

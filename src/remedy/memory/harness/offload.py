@@ -8,11 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic, write_text_atomic
+from remedy.home import default_home
 
 
 def _offload_root(home: Path | str | None = None) -> Path:
     if home is None:
-        root = Path.home() / ".remedy" / "tool_offload"
+        root = default_home() / "tool_offload"
     else:
         root = Path(home).expanduser() / "tool_offload"
     root.mkdir(parents=True, exist_ok=True)

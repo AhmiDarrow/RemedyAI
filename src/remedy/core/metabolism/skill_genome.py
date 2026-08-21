@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remedy.home import default_home
+
 # Bound phenotype map growth across long-lived processes / skill churn.
 MAX_PHENOTYPES = 128
 
@@ -140,7 +142,7 @@ class SkillGenome:
                 )
                 if sig == self._persist_sig:
                     return None
-            root = Path(home).expanduser() if home else Path.home() / ".remedy"
+            root = Path(home).expanduser() if home else default_home()
             d = root / "skill_genome"
             d.mkdir(parents=True, exist_ok=True)
             path = d / "phenotypes.json"

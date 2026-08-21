@@ -73,8 +73,14 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await apiFetch(`/sessions/${sessionId}`, { method: 'DELETE' })
 }
 
-export async function abortSession(sessionId: string): Promise<void> {
-  await apiFetch(`/sessions/${sessionId}/abort`, { method: 'POST' })
+/** Stop the in-flight turn. `reason` tells the server how to word the
+ *  interrupted turn's saved row: 'stop' (Stop button) or 'supersede'
+ *  (the owner sent the next message while this one ran). */
+export async function abortSession(
+  sessionId: string,
+  reason: 'stop' | 'supersede' = 'stop',
+): Promise<void> {
+  await apiFetch(`/sessions/${sessionId}/abort?reason=${reason}`, { method: 'POST' })
 }
 
 /**

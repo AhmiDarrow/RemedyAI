@@ -8,6 +8,7 @@ from remedy.core.build_engine import (
     BuildTurnState,
     begin_build_turn,
     build_protocol_block,
+    can_machine_inject,
     get_build_state,
     looks_like_build_request,
     monologue_block_nudge,
@@ -61,6 +62,8 @@ def test_begin_build_turn_stamps_runtime():
     assert "RESEARCH" in proto
     assert "PLAN" in proto
     assert "BUILD" in proto
+    assert "Do **not** run the project test suite" in proto
+    assert "auto-verify after writes" not in proto.lower()
 
 
 def test_build_state_isolated_per_session():
@@ -280,6 +283,17 @@ def test_git_push_ok_marks_ship_pushed():
     assert st.ship_pushed is True
 
 
+def test_machine_inject_cap_rises_when_the_checklist_is_open():
+    open_st = BuildTurnState(active=True, open_todo_count=2)
+    for _ in range(12):
+        assert can_machine_inject(open_st) is True
+    assert can_machine_inject(open_st) is False
+    quiet = BuildTurnState(active=True)
+    for _ in range(4):
+        assert can_machine_inject(quiet) is True
+    assert can_machine_inject(quiet) is False
+
+
 def test_keep_agency_after_green_play():
     from remedy.core.build_engine import green_continue_message, keep_agency_after_green
 
@@ -294,6 +308,37 @@ def test_keep_agency_after_green_play():
     ) is False
 
 
+def test_keep_agency_after_green_when_the_job_is_not_done():
+    from remedy.core.build_engine import green_continue_message, keep_agency_after_green
+
+    todos = BuildTurnState(active=True, goal="add a helper function", open_todo_count=2)
+    todos.last_verify_ok = True
+    assert keep_agency_after_green(todos) is True
+    drive = BuildTurnState(active=True, goal="add a helper function", drive_to_done=True)
+    drive.last_verify_ok = True
+    assert keep_agency_after_green(drive) is True
+    msg = green_continue_message(drive, command="npm test")
+    assert "keep going" in msg["content"].lower()
+    assert "stop building" not in msg["content"].lower()
+    drive.advance_after_green()
+    assert drive.phase == "implement"
+
+
+def test_finish_everything_message_starts_a_drive_to_done():
+    from remedy.core.build_engine import keep_agency_after_green
+
+    rt = SimpleNamespace(
+        _llm_provider="xai",
+        _llm_model="grok-4",
+        _llm_base_url="",
+        _session_brief=None,
+    )
+    st = begin_build_turn(rt, "do all of those things")
+    assert st is not None
+    assert st.drive_to_done is True
+    assert keep_agency_after_green(st) is True
+
+
 def test_resolve_write_paths_skips_missing(tmp_path):
     (tmp_path / "ok.py").write_text("x=1\n", encoding="utf-8")
     rt = SimpleNamespace(
@@ -306,6 +351,21 @@ def test_resolve_write_paths_skips_missing(tmp_path):
     # Missing path is skipped, not a syntax red
     syn = check_paths_syntax(["nope.py"])
     assert syn == []
+
+
+def test_force_verify_waits_until_feature_items_are_done():
+    st = BuildTurnState(
+        active=True,
+        write_steps=2,
+        require_verify_after_writes=1,
+        open_feature_todo_count=3,
+        verify_command="npm test",
+    )
+    n = next_machine_nudge(st)
+    assert n is None or "FORCE VERIFY" not in (n.get("content") or "")
+    st.open_feature_todo_count = 0
+    n2 = next_machine_nudge(st)
+    assert n2 is not None and "FORCE VERIFY" in n2["content"]
 
 
 def test_monologue_block():
