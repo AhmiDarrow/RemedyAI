@@ -50,6 +50,35 @@ _activate_attempt: dict[str, float] = {"ts": 0.0, "ok": False}
 _ACTIVATE_RETRY_S = 60.0
 _idle_check_ts: float = 0.0
 _IDLE_CHECK_MIN_S = 15.0
+# get_status() timing: only a genuinely slow call (>= 1 s) is worth a WARN, and
+# only for a running service; a stopped service reporting "slow" is not
+# actionable. One WARN per (light, installed, running) state per 5 minutes.
+_STATUS_SLOW_WARN_MS = 1_000.0
+_STATUS_SLOW_WARN_INTERVAL_S = 300.0
+_status_slow_last_warn: dict[tuple[bool, bool, bool], float] = {}
+
+
+def _log_status_timing(
+    ms: float, *, light: bool, installed: bool, running: bool, now: float | None = None
+) -> None:
+    """Rate-limited slow-status logging (WARN only when running and >= 1 s)."""
+    level = logging.DEBUG
+    if ms >= _STATUS_SLOW_WARN_MS and running:
+        key = (bool(light), bool(installed), bool(running))
+        t = time.monotonic() if now is None else now
+        last = _status_slow_last_warn.get(key)
+        if last is None or (t - last) >= _STATUS_SLOW_WARN_INTERVAL_S:
+            _status_slow_last_warn[key] = t
+            level = logging.WARNING
+    logger.log(
+        level,
+        "vision get_status%s light=%s installed=%s running=%s (%.0fms)",
+        " slow" if ms >= _STATUS_SLOW_WARN_MS else "",
+        light,
+        installed,
+        running,
+        ms,
+    )
 
 
 def _home_from_cfg(cfg: dict[str, Any] | None) -> Path | None:
@@ -208,22 +237,7 @@ def get_status(
         out["catalog"] = None
 
     ms = (time.perf_counter() - t0) * 1000
-    if ms > 100:
-        logger.warning(
-            "vision get_status slow light=%s installed=%s running=%s (%.0fms)",
-            light,
-            installed,
-            running,
-            ms,
-        )
-    else:
-        logger.debug(
-            "vision get_status light=%s installed=%s running=%s (%.0fms)",
-            light,
-            installed,
-            running,
-            ms,
-        )
+    _log_status_timing(ms, light=light, installed=installed, running=running)
     return out
 
 

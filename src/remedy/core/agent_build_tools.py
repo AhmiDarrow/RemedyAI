@@ -467,7 +467,9 @@ def register_build_tools(runtime: Any) -> None:
         """Create or update the turn/project build checklist (Claude-class)."""
         from remedy.core.build_todos import format_todos_block, load_todos, upsert_todos
 
-        raw = (todos_json or "").strip()
+        if isinstance(todos_json, list | dict):
+            todos_json = json.dumps(todos_json, ensure_ascii=False, default=str)
+        raw = str(todos_json or "").strip()
         if not raw:
             items = load_todos(runtime)
             return format_todos_block(items) or "No todos yet. Pass todos_json=[{id,content,status}]."
@@ -586,8 +588,14 @@ def register_build_tools(runtime: Any) -> None:
             "type": "object",
             "properties": {
                 "todos_json": {
-                    "type": "string",
                     "description": 'JSON array e.g. [{"id":"1","content":"add parser","status":"in_progress"}]',
+                    "anyOf": [
+                        {"type": "string"},
+                        {
+                            "type": "array",
+                            "items": {"type": "object"},
+                        },
+                    ],
                 },
                 "merge": {
                     "type": "boolean",

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.home import default_home
 from remedy.vision.catalog import (
     DEFAULT_HOST,
     DEFAULT_MODEL_ID,
@@ -22,7 +23,7 @@ def remedy_home(home_dir: str | Path | None = None) -> Path:
     env = os.environ.get("REMEDY_HOME")
     if env:
         return Path(env).expanduser()
-    return Path.home() / ".remedy"
+    return default_home()
 
 
 def vision_root(home_dir: str | Path | None = None) -> Path:

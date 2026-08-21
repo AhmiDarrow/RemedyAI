@@ -10,6 +10,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from remedy.home import default_home
 from remedy.skills.library.catalog import SkillCatalogEntry, SkillsCatalog, get_skills_catalog
 from remedy.skills.library.security import is_allowed_download_url, is_safe_skill_name
 
@@ -147,7 +148,7 @@ async def install_skill_from_catalog(
 
     if home is None:
         home = Path(
-            getattr(getattr(runtime, "config", None), "home_dir", None) or Path.home() / ".remedy"
+            getattr(getattr(runtime, "config", None), "home_dir", None) or default_home()
         ).expanduser()
     dest_root = Path(home).expanduser() / "skills"
     dest_root.mkdir(parents=True, exist_ok=True)

@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from remedy.home import default_home
+
 _COMPANION_RE = re.compile(
     r"(?i)\b("
     r"clipboard|what'?s on (my |the )?(screen|clipboard|desk)|"
@@ -432,7 +434,7 @@ def recent_files(
 
 
 def _save_clip_image(png: bytes, home: Path | None) -> Path | None:
-    base = Path(home) if home else (Path.home() / ".remedy")
+    base = Path(home) if home else default_home()
     dest_dir = base / "computer" / "shots"
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"clip_{int(time.time() * 1000)}.png"

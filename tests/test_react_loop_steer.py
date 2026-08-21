@@ -44,7 +44,7 @@ async def drain(runtime: BasicRuntime, message: str, *, session_id: str) -> list
     try:
         return [chunk async for chunk in call_llm_stream(runtime, message, session_id=session_id)]
     finally:
-        tc.end_turn(*tokens)
+        tc.end_turn(session_id, *tokens)
 
 
 def user_texts(req: Any) -> list[str]:
@@ -70,7 +70,7 @@ def test_nudges_are_kept_in_order_and_capped():
         assert got == [f"n{i}" for i in range(tc._NUDGE_MAX)]
         assert tc.drain_nudges(sid) == []
     finally:
-        tc.end_turn(*tokens)
+        tc.end_turn(sid, *tokens)
 
 
 def test_blank_nudges_are_ignored():
@@ -80,7 +80,7 @@ def test_blank_nudges_are_ignored():
         assert tc.push_nudge(sid, "   ") is False
         assert tc.drain_nudges(sid) == []
     finally:
-        tc.end_turn(*tokens)
+        tc.end_turn(sid, *tokens)
 
 
 def test_releasing_the_stream_claim_drops_leftover_nudges():

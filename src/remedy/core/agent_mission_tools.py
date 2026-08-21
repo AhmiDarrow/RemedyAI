@@ -42,7 +42,9 @@ def register_mission_tools(runtime: Any) -> None:
         path: str = "",
     ) -> str:
         """Start a durable mission (checklist + optional verify command)."""
-        g = (goal or "").strip()
+        if isinstance(steps, list | dict):
+            steps = json.dumps(steps, ensure_ascii=False, default=str)
+        g = str(goal or "").strip()
         if not g:
             return format_tool_error(
                 "goal is required",
@@ -54,7 +56,7 @@ def register_mission_tools(runtime: Any) -> None:
                 ),
             )
         step_list: list[str] = []
-        raw = (steps or "").strip()
+        raw = str(steps or "").strip()
         if raw:
             try:
                 parsed = json.loads(raw)
@@ -228,8 +230,14 @@ def register_mission_tools(runtime: Any) -> None:
             "properties": {
                 "goal": {"type": "string"},
                 "steps": {
-                    "type": "string",
                     "description": "Newline list or JSON array of step titles",
+                    "anyOf": [
+                        {"type": "string"},
+                        {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    ],
                 },
                 "verify_command": {
                     "type": "string",

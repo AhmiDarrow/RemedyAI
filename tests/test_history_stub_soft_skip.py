@@ -16,7 +16,9 @@ def test_history_rewrite_does_not_put_stub_in_content():
     assert len(big) > FILE_WRITE_CONTENT_HISTORY_MAX
     out = _rewrite_write_tool_args({"path": "src/a.py", "content": big}, "file_write")
     assert out["content"] == ""
-    assert out.get("_history_summarized") is True
+    assert "omitted" in str(out.get("history_note") or "")
+    # No model-copyable private flags upstream (grok replayed them verbatim)
+    assert not [k for k in out if str(k).startswith("_")]
     assert "NOT_SOURCE_CODE" not in out["content"]
     assert "history_stub" not in out["content"]
 

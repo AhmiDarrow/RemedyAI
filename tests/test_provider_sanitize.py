@@ -241,7 +241,8 @@ def test_file_write_large_content_summarized_not_half_clipped():
         or "omitted" in note.lower()
         or "NOT_SOURCE_CODE" in content
     )
-    assert parsed.get("_content_chars") == len(body)
+    assert str(len(body)) in str(parsed.get("history_note") or "")
+    assert not [k for k in parsed if str(k).startswith("_")]
     # Must not be a bare mid-file clip of the original
     assert not content.startswith("line\nline\nline")
 
@@ -307,7 +308,8 @@ def test_sanitize_message_still_stubs_file_write_for_provider():
         or "omitted" in note.lower()
         or "NOT_SOURCE_CODE" in content
     )
-    assert out_args.get("_content_chars") == len(body)
+    assert str(len(body)) in str(out_args.get("history_note") or "")
+    assert not [k for k in out_args if str(k).startswith("_")]
     # Original message must remain full fidelity (sanitize copies)
     orig = json.loads(args)
     assert orig["content"] == body

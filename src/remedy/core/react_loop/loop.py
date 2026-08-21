@@ -12,7 +12,7 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 import aiohttp
@@ -105,6 +105,58 @@ from remedy.core.turn_context import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+_REAL_CLIENT_SESSION = aiohttp.ClientSession
+
+
+@asynccontextmanager
+async def _http_session(
+    timeout: aiohttp.ClientTimeout,
+) -> AsyncIterator[aiohttp.ClientSession]:
+    """Borrow the process-wide session; never close it when the turn ends.
+
+    Tests patch ``loop.aiohttp.ClientSession`` with fakes — honour that by
+    building a per-turn instance when the class is not the real one.
+    """
+    if aiohttp.ClientSession is not _REAL_CLIENT_SESSION:
+        async with aiohttp.ClientSession(timeout=timeout) as http:
+            yield http
+        return
+    from remedy.core.agent_llm import get_shared_session
+
+    yield get_shared_session()
+
+
+def _log_llm(
+    bind: Any,
+    runtime: Any,
+    turn: Any,
+    step: int,
+    t0: float,
+    status: str,
+    round_state: Any,
+    *,
+    error: BaseException | None = None,
+) -> None:
+    """One ``remedy.llm`` line per streamed provider round (never raises)."""
+    with suppress(Exception):
+        from remedy.core.llm_log import log_llm_call
+
+        acc = getattr(round_state, "tool_call_acc", None) or {}
+        log_llm_call(
+            provider=getattr(bind, "provider", None),
+            model=getattr(bind, "model", None),
+            session_id=getattr(turn, "session_id", None)
+            or getattr(runtime, "_session_id", None),
+            step=step,
+            latency_ms=(time.perf_counter() - t0) * 1000.0,
+            status=status,
+            finish_reason=getattr(round_state, "finish_reason", None),
+            tool_calls=len(acc),
+            usage=getattr(round_state, "last_usage", None),
+            error=error,
+        )
 
 
 def _browse_tool_ok(body: str) -> tuple[bool, bool]:
@@ -309,10 +361,6 @@ async def call_llm_stream(runtime, message: str,
         timeout = aiohttp.ClientTimeout(
             total=3_600, sock_read=900, connect=_connect_s
         )
-        connector = aiohttp.TCPConnector(
-            limit=24,
-            ttl_dns_cache=300,
-        )
         # Auto-continue after finish_reason=length / max_tokens until complete.
         # No artificial short-answer wall — keep going until the model finishes.
         # Cap length continuations — unbounded 10k burned huge token budgets.
@@ -363,6 +411,27 @@ async def call_llm_stream(runtime, message: str,
         # token-burn wall — then an honest stop, never a fake "I'll find…".
         zero_tool_drive_count = 0
         max_zero_tool_drives = 8
+        # A final that names its own open work ("Still open: …") under a
+        # finish-everything request is a hop boundary, not an answer. Bounded
+        # by progress: each continuation must move the build score, else stop.
+        open_work_continues = 0
+        max_open_work_continues = max(
+            1, int(getattr(runtime, "_max_open_work_continues", 24) or 24)
+        )
+        open_work_last_score = -1
+        open_work_last_batches = -1
+        finish_everything_requested = False
+        with suppress(Exception):
+            from remedy.core.react_open_work import message_asks_to_finish_everything
+
+            finish_everything_requested = message_asks_to_finish_everything(message or "")
+            if not finish_everything_requested:
+                from remedy.core.build_engine import get_build_state as _gbs_ow
+
+                _st_ow = _gbs_ow(runtime)
+                finish_everything_requested = bool(
+                    getattr(_st_ow, "drive_to_done", False)
+                )
         #: The safety-ceiling checkpoint fires once per turn, not once per
         #: step that happens to be the last one after a re-arm.
         step_wall_checkpointed = False
@@ -396,11 +465,17 @@ async def call_llm_stream(runtime, message: str,
             return False
 
         def _build_active() -> bool:
+            """Active build *of this session* — never a sibling tab's."""
             with suppress(Exception):
-                from remedy.core.build_engine import get_build_state
+                from remedy.core.build_engine import (
+                    build_state_owned_by,
+                    get_build_state,
+                )
 
                 bst = get_build_state(runtime)
-                return bool(bst is not None and getattr(bst, "active", False))
+                if bst is None or not getattr(bst, "active", False):
+                    return False
+                return build_state_owned_by(bst, str(session_id or ""))
             return False
 
         def _work_unfinished() -> bool:
@@ -513,6 +588,8 @@ async def call_llm_stream(runtime, message: str,
                 else begin_build_turn(runtime, message or "")
             )
             if build_state is not None and build_state.active:
+                if getattr(build_state, "drive_to_done", False):
+                    finish_everything_requested = True
                 proto = build_protocol_block(build_state)
                 if proto:
                     messages.append({"role": "system", "content": str(proto)})
@@ -889,9 +966,9 @@ async def call_llm_stream(runtime, message: str,
                 }
             )
 
-        async with aiohttp.ClientSession(
-            timeout=timeout, connector=connector
-        ) as http:
+        # One process-wide session (agent_llm owns its lifetime) — a fresh
+        # connector per turn leaked "Unclosed client session" on abort/reset.
+        async with _http_session(timeout) as http:
             for step in range(max_total):
                 # Mid-turn steering: anything the owner said while the last
                 # step ran goes in now, before she plans the next one.
@@ -1289,7 +1366,7 @@ async def call_llm_stream(runtime, message: str,
                  try:
                   for _local_http_attempt in range(8):
                    async with http.post(
-                    endpoint, headers=headers, json=body
+                    endpoint, headers=headers, json=body, timeout=timeout
                    ) as resp:
                     _llm_ms = (time.perf_counter() - _llm_t0) * 1000.0
                     if resp.status != 200:
@@ -1899,6 +1976,9 @@ async def call_llm_stream(runtime, message: str,
 
                        _rps(str(getattr(_bind, "provider", "") or ""))
                    _http_round_ok = True
+                   _log_llm(
+                       _bind, runtime, turn, step, _llm_t0, "ok", round_state
+                   )
                    break
                   else:
                     # for-loop exhausted without break (both attempts failed status)
@@ -1908,12 +1988,19 @@ async def call_llm_stream(runtime, message: str,
                     )
                     return
                  except asyncio.CancelledError:
+                    _log_llm(
+                        _bind, runtime, turn, step, _llm_t0, "aborted", round_state
+                    )
                     yield _stopped_note(
                         tools_executed_this_turn > 0 or tool_batches_this_turn > 0
                     )
                     yield "@@aborted\n"
                     return
                  except Exception as _stream_exc:
+                  _log_llm(
+                      _bind, runtime, turn, step, _llm_t0, "error", round_state,
+                      error=_stream_exc,
+                  )
                   if (
                     is_disconnect_error(_stream_exc)
                     and turn.allow_disconnect_retry()
@@ -2493,6 +2580,116 @@ async def call_llm_stream(runtime, message: str,
                                 max_agency_rearms,
                             )
                             continue
+                    # Self-declared open work after real tool work: under a
+                    # finish-everything request OR an active build, "Still
+                    # open: X" is the next hop, not the end of the turn.
+                    # force_answer_sticky is ignored here — GREEN · stop
+                    # building used to set it and then accept the partial.
+                    if (
+                        not tool_calls_list
+                        and all_tools
+                        and text_out
+                        and not is_final_step
+                        and tools_executed_this_turn > 0
+                    ):
+                        _ow_items: list[str] = []
+                        with suppress(Exception):
+                            from remedy.core.build_engine import (
+                                build_progress_score,
+                                get_build_state,
+                            )
+                            from remedy.core.react_open_work import (
+                                final_declares_open_work,
+                                open_work_continue_message,
+                                seed_open_work_todos,
+                            )
+
+                            _bst_ow = get_build_state(runtime)
+                            _read_only_review = bool(
+                                getattr(_bst_ow, "read_only", False)
+                                and int(getattr(_bst_ow, "write_steps", 0) or 0) == 0
+                            )
+                            if _read_only_review and text_out:
+                                with suppress(Exception):
+                                    from remedy.core.build_todos import (
+                                        seed_review_finding_todos,
+                                        take_todos_event,
+                                    )
+                                    from remedy.core.react_open_work import (
+                                        extract_review_findings,
+                                    )
+
+                                    _rf = extract_review_findings(text_out)
+                                    if _rf:
+                                        seed_review_finding_todos(runtime, _rf)
+                                        _rf_td = take_todos_event(runtime)
+                                        if _rf_td:
+                                            yield _rf_td
+                            _ow_active = bool(
+                                not _read_only_review
+                                and (
+                                    finish_everything_requested
+                                    or _build_active()
+                                    or getattr(_bst_ow, "drive_to_done", False)
+                                )
+                            )
+                            if (
+                                _ow_active
+                                and not message_asks_to_stop(message or "")
+                                and not (
+                                    looks_like_safety_refusal(text_out)
+                                    or looks_like_safety_refusal(reasoning_out)
+                                )
+                            ):
+                                _ow_items = final_declares_open_work(text_out)
+                            if _ow_items:
+                                _score_now = build_progress_score(_bst_ow)
+                                # Progress since the last continuation: the build
+                                # score climbed, or real tool batches ran. A model
+                                # that just re-narrates the same list stops here.
+                                _progressed = (
+                                    open_work_last_batches < 0
+                                    or _score_now > open_work_last_score
+                                    or tool_batches_this_turn > open_work_last_batches
+                                )
+                                if (
+                                    open_work_continues < max_open_work_continues
+                                    and _progressed
+                                ):
+                                    open_work_continues += 1
+                                    open_work_last_score = _score_now
+                                    open_work_last_batches = tool_batches_this_turn
+                                    with suppress(Exception):
+                                        seed_open_work_todos(runtime, _ow_items)
+                                    _rearm_agency_tools()
+                                    force_answer_sticky = False
+                                    set_turn_force_tool_choice(True)
+                                    messages.append(
+                                        {"role": "assistant", "content": text_out}
+                                    )
+                                    messages.append(open_work_continue_message(_ow_items))
+                                    with suppress(Exception):
+                                        from remedy.core.build_todos import (
+                                            take_todos_event,
+                                        )
+
+                                        _ow_td = take_todos_event(runtime)
+                                        if _ow_td:
+                                            yield _ow_td
+                                    yield (
+                                        "@@status:Open work remains — continuing "
+                                        f"({open_work_continues}/{max_open_work_continues})…\n"
+                                    )
+                                    logger.info(
+                                        "Open-work continue %d/%d (step %d): %s",
+                                        open_work_continues,
+                                        max_open_work_continues,
+                                        step + 1,
+                                        "; ".join(_ow_items)[:200],
+                                    )
+                                    _ow_items = ["__continue__"]
+                        if _ow_items == ["__continue__"]:
+                            continue
                     # Build engine: monologue without tools is illegal mid-build —
                     # but after tools already ran, a plain-language summary is OK
                     # (do not re-block legitimate finals as monologue).
@@ -2522,14 +2719,24 @@ async def call_llm_stream(runtime, message: str,
                                     step + 1,
                                 )
                                 continue
-                    # Build engine GREEN/SHIP GATE: refuse final without green (+ ship)
+                    # Build engine GREEN/SHIP/TODO GATE: refuse final without
+                    # green (+ ship) or with an open Build list. Must also run
+                    # when tools are still armed (keep_agency after green) —
+                    # otherwise "**Done**" with pending todos is accepted.
                     if (
                         not tool_calls_list
                         and text_out
-                        and (force_answer or force_answer_sticky or is_final_step)
+                        and not message_asks_to_stop(message or "")
+                        and (
+                            force_answer
+                            or force_answer_sticky
+                            or is_final_step
+                            or tools_executed_this_turn > 0
+                        )
                     ):
                         with suppress(Exception):
                             from remedy.core.build_engine import (
+                                build_blocks_done_summary,
                                 build_blocks_final_answer,
                                 format_ship_report_line,
                                 get_build_state,
@@ -2538,7 +2745,23 @@ async def call_llm_stream(runtime, message: str,
                             )
 
                             bst_g = get_build_state(runtime)
-                            if build_blocks_final_answer(bst_g) and bst_g is not None:
+                            _force_path = bool(
+                                force_answer or force_answer_sticky or is_final_step
+                            )
+                            _blocks = (
+                                build_blocks_final_answer(bst_g)
+                                if _force_path
+                                else build_blocks_done_summary(bst_g)
+                            )
+                            if _blocks and bst_g is not None:
+                                from remedy.core.build_engine import build_progress_score
+
+                                _score_g = build_progress_score(bst_g)
+                                _progressed_g = (
+                                    open_work_last_batches < 0
+                                    or _score_g > open_work_last_score
+                                    or tool_batches_this_turn > open_work_last_batches
+                                )
                                 if green_gate_cap_allows_final(
                                     bst_g,
                                     reopen_count=green_gate_reopen_count,
@@ -2552,13 +2775,19 @@ async def call_llm_stream(runtime, message: str,
                                     _sr = format_ship_report_line(bst_g)
                                     if _sr:
                                         yield _sr
-                                else:
+                                elif _force_path or _progressed_g:
+                                    if _progressed_g:
+                                        open_work_last_score = _score_g
+                                        open_work_last_batches = tool_batches_this_turn
                                     green_gate_reopen_count += 1
                                     if "green_gate" not in bst_g.nudges_emitted:
                                         bst_g.nudges_emitted.append("green_gate")
                                     _rearm_agency_tools()
                                     force_answer_sticky = False
                                     messages.append(unfinished_green_gate_message(bst_g))
+                                    yield (
+                                        "@@status:Build list still open — keep going\n"
+                                    )
                                     logger.info(
                                         "Build green-gate blocked final "
                                         "(step %d phase=%s %d/%d)",
@@ -2573,6 +2802,46 @@ async def call_llm_stream(runtime, message: str,
                                 _sr = format_ship_report_line(bst_g)
                                 if _sr:
                                     yield _sr
+                    # Scout-only final on a real build: do not ask the owner
+                    # to say go. Force the first write once.
+                    if (
+                        not tool_calls_list
+                        and text_out
+                        and tools_executed_this_turn > 0
+                        and not is_final_step
+                        and not force_answer_sticky
+                        and not message_asks_to_stop(message or "")
+                    ):
+                        with suppress(Exception):
+                            from remedy.core.build_engine import get_build_state as _gbs_sc
+
+                            bst_sc = _gbs_sc(runtime)
+                            if (
+                                bst_sc is not None
+                                and bst_sc.active
+                                and not getattr(bst_sc, "read_only", False)
+                                and int(bst_sc.write_steps or 0) == 0
+                                and "force_implement" not in (bst_sc.nudges_emitted or [])
+                            ):
+                                bst_sc.nudges_emitted.append("force_implement")
+                                bst_sc.phase = "implement"
+                                _rearm_agency_tools()
+                                force_answer_sticky = False
+                                set_turn_force_tool_choice(True)
+                                messages.append(
+                                    {
+                                        "role": "user",
+                                        "content": (
+                                            "[Build engine · FORCE IMPLEMENT] "
+                                            "Scout is enough. Do not ask the owner "
+                                            "to say go. NEXT step = file_write / "
+                                            "file_edit that changes the tree. "
+                                            "No plan monologue."
+                                        ),
+                                    }
+                                )
+                                yield "@@status:Build — implement now\n"
+                                continue
                     # --- Partner monologue loop breaker ---
                     # ANY step with tools armed, zero tool_calls, and text/reasoning
                     # is a monologue. Do not fall through to False-progress (that
@@ -2990,6 +3259,23 @@ async def call_llm_stream(runtime, message: str,
                                 logger.info(
                                     "Skip length-continue — repetitive monologue"
                                 )
+                                # Session 765c 20:54: stutter then Stop. If the
+                                # owner's job is still open, force tools — do
+                                # not end the turn on a looped status line.
+                                if _work_unfinished() and all_tools:
+                                    _rearm_agency_tools()
+                                    force_answer_sticky = False
+                                    messages.append(
+                                        {
+                                            "role": "user",
+                                            "content": (
+                                                "You started repeating yourself. "
+                                                "Stop restating status. Call tools "
+                                                "and do the next open item."
+                                            ),
+                                        }
+                                    )
+                                    continue
                                 return
                             length_continuations += 1
                             messages.append(

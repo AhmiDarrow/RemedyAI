@@ -20,6 +20,27 @@ function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
   return p.catch(() => fallback)
 }
 
+/** Idle (not running, no install in flight) vision status poll interval. */
+export const VISION_IDLE_POLL_MS = 15_000
+
+const VISION_ACTIVE_PHASES = new Set([
+  'downloading', 'download', 'extracting', 'extract', 'installing', 'install',
+  'verifying', 'unpacking', 'preparing', 'starting', 'loading',
+])
+
+/** True when the decoder is running or an install/download is in progress. */
+export function visionLooksActive(
+  vs: Parameters<typeof collectDownloadJobs>[0]['vision'],
+): boolean {
+  if (!vs) return false
+  if (vs.running) return true
+  const phase = (vs.progress?.phase || '').toLowerCase()
+  if (VISION_ACTIVE_PHASES.has(phase)) return true
+  const done = vs.progress?.bytes_done || 0
+  const total = vs.progress?.bytes_total || 0
+  return total > 0 && done < total && phase !== 'ready' && phase !== 'idle' && phase !== 'error'
+}
+
 export function useDownloadProgress(): {
   jobs: DownloadJob[]
   primary: DownloadJob | null
@@ -37,6 +58,11 @@ export function useDownloadProgress(): {
     let lastVision: Parameters<typeof collectDownloadJobs>[0]['vision'] = null
     let lastHf: Parameters<typeof collectDownloadJobs>[0]['hf'] = null
     let sideSeq = 0
+    // Vision status is cheap but not free (~150 ms of file probes when the
+    // local model is stopped). When nothing is downloading and the decoder
+    // is not running, ask at most every VISION_IDLE_POLL_MS instead of every
+    // tick — same in Tauri and the WebUI (shared hook).
+    let lastVisionAt = 0
 
     function publish(): number {
       const next = collectDownloadJobs({
@@ -59,12 +85,19 @@ export function useDownloadProgress(): {
         // Side polls must never block the voice bar.
         const mySeq = ++sideSeq
         void (async () => {
+          const now = Date.now()
+          const pollVision =
+            visionLooksActive(lastVision)
+            || now - lastVisionAt >= VISION_IDLE_POLL_MS
           const [vision, hfWrap] = await Promise.all([
-            safe(getVisionStatus({ timeout: 4000 }), null),
+            pollVision
+              ? safe(getVisionStatus({ timeout: 4000 }), null)
+              : Promise.resolve(lastVision),
             safe(getHfProgress(), null),
           ])
           // A newer side poll already landed — drop this older answer.
           if (cancelled || mySeq !== sideSeq) return
+          if (pollVision) lastVisionAt = now
           lastVision = vision
           lastHf = hfWrap?.progress || null
           publish()

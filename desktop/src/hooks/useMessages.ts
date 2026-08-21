@@ -595,9 +595,14 @@ export function useMessages(sessionId: string | null) {
         setStallSeconds(0)
       }
 
-      const finishOk = async (meta?: { aborted?: boolean }) => {
+      const finishOk = async (meta?: { aborted?: boolean; steered?: boolean }) => {
         if (doneReceived) return
         doneReceived = true
+        if (meta?.steered) {
+          // Words went to the still-running turn; that turn's own stream (or
+          // reattach) paints the reply. Nothing to commit here.
+          markJobUiCommitted(targetId)
+        }
         // Only flush RAF buffers for the focused turn — otherwise a detached
         // job finish injects ghost partials into the visible session.
         if (isFocusedTurn()) {
@@ -799,7 +804,10 @@ export function useMessages(sessionId: string | null) {
           if (isFocusedTurn()) appendPartialToken(token)
         },
         (doneMeta) => {
-          void finishOk({ aborted: Boolean(doneMeta?.aborted) })
+          void finishOk({
+            aborted: Boolean(doneMeta?.aborted),
+            steered: Boolean(doneMeta?.steered),
+          })
         },
         (errMsg) => {
           void finishErr(errMsg)

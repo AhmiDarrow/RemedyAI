@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.home import default_home
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ def rmb_home(home_dir: str | Path | None = None) -> Path:
 
             root = Path(get_home_dir())
         except Exception:
-            root = Path.home() / ".remedy"
+            root = default_home()
     d = root / "rmb"
     d.mkdir(parents=True, exist_ok=True)
     return d

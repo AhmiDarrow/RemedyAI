@@ -6,11 +6,14 @@ Language-agnostic: no exclusive file-extension allowlist. Prefer rg when availab
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from remedy.core.text_files import (
     DEFAULT_MAX_SEARCH_FILE_BYTES,
@@ -43,6 +46,65 @@ _SKIP_DIR_NAMES = {
 
 # Soft cap for pure-Python walk when scanning large trees without rg.
 _MAX_PYTHON_FILES = 8000
+
+# Hard wall-clock budget (seconds) for the pure-Python walk. The walk used to
+# run unbounded on the event loop: a home-dir search with no rg took 99 s and
+# froze every other request on the server. Now the walk stops here and says so.
+PYTHON_WALK_BUDGET_S = 20.0
+
+# Directories that are never worth walking from a huge root (OS/toolchain
+# trees with millions of files). Matched case-insensitively by basename;
+# ``_MEI*`` prefixes cover PyInstaller extraction dirs.
+_HUGE_ROOT_SKIP_NAMES = {
+    "appdata",
+    "$recycle.bin",
+    "windows",
+    "program files",
+    "program files (x86)",
+    "programdata",
+    ".cargo",
+    ".rustup",
+    ".npm",
+    ".nuget",
+    ".gradle",
+    ".m2",
+    ".conda",
+    "anaconda3",
+    "miniconda3",
+    "site-packages",
+    "library",
+    "system volume information",
+    "onedrive",
+}
+
+
+def is_huge_root(start: Path) -> bool:
+    """True when *start* is the user's home or a filesystem/drive root."""
+    try:
+        if not start.is_dir():
+            return False
+        r = start.resolve()
+    except Exception:
+        return False
+    try:
+        if r == Path.home().resolve():
+            return True
+    except Exception:
+        pass
+    # Drive root (``C:\``) or POSIX ``/`` — parent equals itself.
+    return r.parent == r
+
+
+def _should_skip_huge_dir(name: str) -> bool:
+    low = name.lower()
+    return low in _HUGE_ROOT_SKIP_NAMES or low.startswith("_mei")
+
+
+HUGE_ROOT_NO_RG_MESSAGE = (
+    "Refusing to walk a very large root ({root}) without ripgrep: the pure-Python "
+    "walk would stall the whole server. Pass path= to a specific project directory "
+    "(e.g. the repo you mean), or retry shortly once the bundled rg has installed."
+)
 
 # Empty-search recovery hint (models should re-scope, not invent symbols).
 EMPTY_SEARCH_HINT = (
@@ -133,6 +195,7 @@ def search_repo(
     home_dir: str | Path | None = None,
     allowed_roots: list[Path] | None = None,
     access_scope: str = "project",
+    python_budget_s: float = PYTHON_WALK_BUDGET_S,
 ) -> tuple[list[SearchHit], str]:
     """Search under *root*/*path* (or absolute *path*). Returns (hits, engine_label)."""
     display_root, start, err = _resolve_start(
@@ -147,12 +210,7 @@ def search_repo(
     max_matches = max(1, min(500, int(max_matches or 50)))
 
     # Warn when scanning a huge root without a narrow path (anti-thrash).
-    huge_note = ""
-    try:
-        if start.is_dir() and start.resolve() == Path.home().resolve():
-            huge_note = "huge-root"
-    except Exception:
-        pass
+    huge_note = "huge-root" if is_huge_root(start) else ""
 
     if not force_python:
         try:
@@ -162,6 +220,10 @@ def search_repo(
             if rg_path is None:
                 # Non-blocking: install in background; use Python this call.
                 schedule_ensure_rg(home_dir)
+                if huge_note:
+                    # Never walk home / a drive root in pure Python — that is
+                    # the 99 s server freeze. Refuse with a re-scope hint.
+                    return [], "error: " + HUGE_ROOT_NO_RG_MESSAGE.format(root=start)
             if rg_path is not None:
                 hits, rg_ok = _search_rg(
                     str(rg_path),
@@ -173,6 +235,7 @@ def search_repo(
                     case_insensitive=case_insensitive,
                     context_before=context_before,
                     context_after=context_after,
+                    huge_root=bool(huge_note),
                 )
                 if rg_ok:
                     label = engine_label(source)
@@ -182,7 +245,12 @@ def search_repo(
         except Exception:
             pass
 
-    hits = _search_python(
+    if huge_note and not force_python:
+        # rg exists but failed (bad pattern / timeout): still never walk a
+        # huge root synchronously in Python.
+        return [], "error: " + HUGE_ROOT_NO_RG_MESSAGE.format(root=start)
+
+    hits, truncated = _search_python(
         display_root,
         start,
         pattern,
@@ -191,11 +259,27 @@ def search_repo(
         case_insensitive=case_insensitive,
         context_before=context_before,
         context_after=context_after,
+        time_budget_s=python_budget_s,
+        huge_root=bool(huge_note),
     )
     label = "python"
     if huge_note:
         label = f"{label}+{huge_note}"
+    if truncated:
+        label = f"{label}+{truncated}"
     return hits, label
+
+
+async def search_repo_async(
+    root: Path, pattern: str, **kwargs: Any
+) -> tuple[list[SearchHit], str]:
+    """``search_repo`` off the event loop.
+
+    Both engines block (rg is a ``subprocess.run``; the fallback is an
+    ``os.walk`` + file reads), so the tool runs them in a worker thread and
+    the server keeps serving while a search runs.
+    """
+    return await asyncio.to_thread(search_repo, root, pattern, **kwargs)
 
 
 def _parse_rg_line(line: str) -> tuple[str, int, str] | None:
@@ -224,6 +308,7 @@ def _search_rg(
     case_insensitive: bool,
     context_before: int,
     context_after: int,
+    huge_root: bool = False,
 ) -> tuple[list[SearchHit], bool]:
     """Returns (hits, ok). ok=False means fall back to pure Python."""
     cmd = [
@@ -245,6 +330,10 @@ def _search_rg(
         cmd.extend(["--glob", glob])
     for d in _SKIP_DIR_NAMES:
         cmd.extend(["--glob", f"!{d}/**"])
+    if huge_root:
+        for d in sorted(_HUGE_ROOT_SKIP_NAMES):
+            cmd.extend(["--iglob", f"!{d}/**"])
+        cmd.extend(["--iglob", "!_MEI*/**"])
     cmd.extend(["--", pattern, str(start)])
     try:
         # Never flash a console on Windows (spread_run / search workers hit this often).
@@ -343,7 +432,16 @@ def _search_python(
     case_insensitive: bool,
     context_before: int = 0,
     context_after: int = 0,
-) -> list[SearchHit]:
+    time_budget_s: float = PYTHON_WALK_BUDGET_S,
+    huge_root: bool = False,
+) -> tuple[list[SearchHit], str]:
+    """Pure-Python walk. Returns (hits, truncation_note); note is "" when complete.
+
+    Bounded two ways: a file-count cap and a wall-clock budget that covers
+    both the walk and the file reads. Stopping early yields a
+    ``truncated:<why>`` note so the caller can say the result is partial.
+    """
+    deadline = time.monotonic() + max(0.5, float(time_budget_s or PYTHON_WALK_BUDGET_S))
     flags = re.IGNORECASE if case_insensitive else 0
     try:
         cre = re.compile(pattern, flags)
@@ -353,22 +451,26 @@ def _search_python(
     ignore_names = _load_gitignore_names(root if root.is_dir() else root.parent)
     # Cap walk when searching home-sized trees
     file_cap = _MAX_PYTHON_FILES
-    try:
-        if start.is_dir() and start.resolve() == Path.home().resolve():
-            file_cap = min(file_cap, 2000)
-    except Exception:
-        pass
+    if huge_root or is_huge_root(start):
+        huge_root = True
+        file_cap = min(file_cap, 2000)
 
+    truncated = ""
     hits: list[SearchHit] = []
     files: list[Path] = []
     if start.is_file():
         files = [start] if should_search_file(start) or glob else []
     else:
         for dirpath, dirnames, filenames in os.walk(start):
+            if time.monotonic() > deadline:
+                truncated = "truncated:time-budget"
+                break
             dirnames[:] = [
                 d
                 for d in dirnames
-                if not _should_skip_dir(d) and d not in ignore_names
+                if not _should_skip_dir(d)
+                and d not in ignore_names
+                and not (huge_root and _should_skip_huge_dir(d))
             ]
             for fn in filenames:
                 if fn in ignore_names:
@@ -380,14 +482,18 @@ def _search_python(
                     continue
                 files.append(p)
                 if len(files) > file_cap:
+                    truncated = "truncated:file-cap"
                     break
-            if len(files) > file_cap:
+            if truncated:
                 break
 
     ctx_b = max(0, min(5, int(context_before or 0)))
     ctx_a = max(0, min(5, int(context_after or 0)))
 
     for fp in files:
+        if time.monotonic() > deadline:
+            truncated = "truncated:time-budget"
+            break
         try:
             text = fp.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -410,8 +516,8 @@ def _search_python(
                     body = line[:400]
                 hits.append(SearchHit(path=rel, line=i, text=body))
                 if len(hits) >= max_matches:
-                    return hits
-    return hits
+                    return hits, ""
+    return hits, truncated
 
 
 def _record_search_metrics(engine: str, hit_count: int) -> None:
@@ -428,10 +534,28 @@ def _record_search_metrics(engine: str, hit_count: int) -> None:
         pass
 
 
+def _truncation_reason(engine: str) -> str:
+    m = re.search(r"truncated:([a-z-]+)", str(engine))
+    if not m:
+        return "limit reached"
+    return {
+        "time-budget": "time budget exhausted",
+        "file-cap": "file cap reached",
+    }.get(m.group(1), m.group(1))
+
+
 def format_hits(hits: list[SearchHit], *, engine: str, pattern: str) -> str:
     _record_search_metrics(engine, len(hits))
+    if not hits and str(engine).startswith("error: "):
+        return "Error: " + str(engine)[len("error: "):]
     if not hits:
         extra = ""
+        if "truncated:" in str(engine):
+            extra += (
+                "\nNote: the search stopped early ("
+                + _truncation_reason(engine)
+                + ") and may have missed files. Pass path= to a narrower directory."
+            )
         if "huge-root" in str(engine):
             extra = (
                 "\nNote: search started at a very large root (e.g. home). "
@@ -445,6 +569,12 @@ def format_hits(hits: list[SearchHit], *, engine: str, pattern: str) -> str:
     if "huge-root" in str(engine):
         lines.append(
             "(warning: large root — prefer absolute path= to the repo next time)"
+        )
+    if "truncated:" in str(engine):
+        lines.append(
+            "(partial: the walk stopped early — "
+            + _truncation_reason(engine)
+            + " — narrow path= to search the rest)"
         )
     for h in hits:
         if "\n" in h.text:

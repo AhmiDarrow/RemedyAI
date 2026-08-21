@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from remedy.home import default_home
+
 logger = logging.getLogger(__name__)
 
 # Per-file cap; total batch should stay under ~25 MiB for API sanity.
@@ -54,7 +56,7 @@ TEXT_LIKE = {
 def attachments_root(home_dir: str | Path | None = None) -> Path:
     if home_dir:
         return Path(home_dir).expanduser() / "attachments"
-    return Path.home() / ".remedy" / "attachments"
+    return default_home() / "attachments"
 
 
 def session_attachments_dir(session_id: str, home_dir: str | Path | None = None) -> Path:
@@ -111,7 +113,7 @@ def is_path_under_attachments(
         if home_dir is not None:
             _add(attachments_root(home_dir))
         _add(attachments_root(None))
-        _add(Path.home() / ".remedy" / "attachments")
+        _add(default_home() / "attachments")
     for root in roots:
         try:
             candidate.relative_to(root)
@@ -250,7 +252,7 @@ def chat_media_display_path(
     homes: list[Path] = []
     if home_dir is not None:
         homes.append(Path(home_dir).expanduser())
-    homes.append(Path.home() / ".remedy")
+    homes.appenddefault_home()
     for home in homes:
         try:
             root = (home / "attachments").resolve()

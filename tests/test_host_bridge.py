@@ -689,6 +689,29 @@ def test_head_tail_find_test_f_rewrite() -> None:
     assert "if exist" in tf.text
     br = translate_posix_to_host("[ -f app.py ]", host="cmd")
     assert "if exist" in br.text
+    wc = translate_posix_to_host("wc -l src/data/curriculum.ts", host="cmd")
+    assert wc.changed
+    assert "python" in wc.text.lower() or "-c" in wc.text
+    assert "len(p)" in wc.text
+
+
+def test_host_run_argv_rewrites_wc_dash_l() -> None:
+    from remedy.execution.host.translate import rewrite_posix_argv
+
+    out, notes = rewrite_posix_argv(["wc", "-l", "src/data/curriculum.ts"])
+    assert notes
+    assert out[0] != "wc"
+    assert "-c" in out
+    assert any("len(p)" in a for a in out)
+
+
+def test_diagnose_not_found_wc() -> None:
+    d = diagnose_host_failure(
+        "wc -l curriculum.ts",
+        stderr="'wc' is not recognized as an internal or external command",
+    )
+    assert d.code == "HOST_NOT_FOUND"
+    assert "POSIX" in d.hint or "wc" in d.hint.lower()
 
 
 def test_cleanup_host_script(tmp_path: Path) -> None:

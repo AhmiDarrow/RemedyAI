@@ -1,11 +1,14 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import {
+  isAbsoluteFsPath,
   isAuthenticatedApiUrl,
   isLocalMediaPath,
   isRemoteOrDataUrl,
+  normalizeLocalMediaPath,
   peekChatMediaUrl,
   resolveChatMediaUrl,
 } from '../utils/chatMedia'
+import { isTauri, tauriInvoke } from '../api/tauri'
 
 interface ChatImageProps {
   src?: string
@@ -133,12 +136,34 @@ export const ChatImage = memo(function ChatImage({ src, alt, onOpen }: ChatImage
   }, [resolved, alt])
 
   const label = alt || raw.split(/[/\\]/).pop() || 'image'
+  const shownPath = isRemoteOrDataUrl(raw)
+    ? raw.length > 96 ? `${raw.slice(0, 96)}…` : raw
+    : normalizeLocalMediaPath(raw)
+  const canReveal = isTauri() && isAbsoluteFsPath(raw)
 
-  // Failed load → quiet attachment chip (not a scary error wall).
+  const copyPath = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(shownPath)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1200)
+    } catch {
+      /* ignore */
+    }
+  }, [shownPath])
+
+  const revealPath = useCallback(async () => {
+    try {
+      await tauriInvoke('open_path', { path: normalizeLocalMediaPath(raw) })
+    } catch {
+      /* ignore */
+    }
+  }, [raw])
+
+  // Failed load → quiet attachment chip with the path (copy / reveal), not an error wall.
   if (error && !resolved) {
     return (
       <span
-        className="chat-img-chip inline-flex items-center gap-1.5 my-1 px-2.5 py-1 rounded-lg text-xs max-w-full"
+        className="chat-img-chip chat-img-broken inline-flex flex-wrap items-center gap-x-2 gap-y-1 my-1 px-2.5 py-1.5 rounded-lg text-xs max-w-full"
         style={{
           color: 'var(--text-secondary)',
           background: 'var(--bg-tertiary)',
@@ -147,8 +172,36 @@ export const ChatImage = memo(function ChatImage({ src, alt, onOpen }: ChatImage
         title={error}
       >
         <span aria-hidden>📎</span>
-        <span className="truncate">{label}</span>
+        <span className="font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+          {label}
+        </span>
         <span className="opacity-60">· not previewed</span>
+        <code
+          className="chat-img-broken-path"
+          style={{ color: 'var(--text-muted)', wordBreak: 'break-all' }}
+        >
+          {shownPath}
+        </code>
+        <span className="inline-flex items-center gap-1">
+          <button
+            type="button"
+            className="chat-img-broken-btn"
+            onClick={() => void copyPath()}
+            title="Copy path"
+          >
+            {copied ? 'Copied' : 'Copy path'}
+          </button>
+          {canReveal && (
+            <button
+              type="button"
+              className="chat-img-broken-btn"
+              onClick={() => void revealPath()}
+              title="Show in folder"
+            >
+              Open folder
+            </button>
+          )}
+        </span>
       </span>
     )
   }

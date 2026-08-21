@@ -7,11 +7,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from remedy.home import default_home
+
 
 def _home(home_dir: Path | str | None = None) -> Path:
     if home_dir is not None:
         return Path(home_dir).expanduser()
-    return Path.home() / ".remedy"
+    return default_home()
 
 
 def audit_path(home_dir: Path | str | None = None) -> Path:

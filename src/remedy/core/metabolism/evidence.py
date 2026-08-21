@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remedy.home import default_home
+
 # In-memory unit list bound (was 400 — tighter for long sessions).
 MAX_EVIDENCE_UNITS = 240
 # Fingerprint set can outlive unit drops; hard-bound to avoid unbounded RAM.
@@ -217,7 +219,7 @@ class EvidenceLedger:
         same JSONL rows on every end-turn when the ledger is quiet.
         """
         try:
-            root = Path(home).expanduser() if home else Path.home() / ".remedy"
+            root = Path(home).expanduser() if home else default_home()
             d = root / "evidence"
             d.mkdir(parents=True, exist_ok=True)
             sid = "".join(

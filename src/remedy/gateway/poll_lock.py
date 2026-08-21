@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 from typing import Any, TextIO
 
+from remedy.home import default_home
+
 logger = logging.getLogger(__name__)
 
 # If the lock owner stops heartbeating, another process may take over.
@@ -89,7 +91,7 @@ class MessengerPollLock:
     """
 
     def __init__(self, home: Path | str | None, channel: str = "telegram") -> None:
-        base = Path(home).expanduser() if home else Path.home() / ".remedy"
+        base = Path(home).expanduser() if home else default_home()
         self.path = base / "locks" / f"{channel}_getupdates.lock"
         self.channel = channel
         self._fh: TextIO | None = None  # keep open so Windows exclusive share holds
@@ -258,7 +260,7 @@ class MessengerPollLock:
 
 
 def load_update_offset(home: Path | str | None, channel: str = "telegram") -> int:
-    base = Path(home).expanduser() if home else Path.home() / ".remedy"
+    base = Path(home).expanduser() if home else default_home()
     path = base / "locks" / f"{channel}_offset.txt"
     try:
         return max(0, int(path.read_text(encoding="utf-8").strip()))
@@ -269,7 +271,7 @@ def load_update_offset(home: Path | str | None, channel: str = "telegram") -> in
 def save_update_offset(home: Path | str | None, offset: int, channel: str = "telegram") -> None:
     if offset <= 0:
         return
-    base = Path(home).expanduser() if home else Path.home() / ".remedy"
+    base = Path(home).expanduser() if home else default_home()
     path = base / "locks" / f"{channel}_offset.txt"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 from remedy.core.metabolism.redact import looks_like_secret_text
+from remedy.home import default_home
 
 # Hard cap on stored macros (evict lowest hits first when exceeded).
 MAX_CUA_MACROS = 64
@@ -173,7 +174,7 @@ class CuaMacroStore:
                 )
                 if sig == self._persist_sig:
                     return None
-            root = Path(home).expanduser() if home else Path.home() / ".remedy"
+            root = Path(home).expanduser() if home else default_home()
             d = root / "cua_macros"
             d.mkdir(parents=True, exist_ok=True)
             path = d / "macros.json"

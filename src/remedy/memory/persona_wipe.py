@@ -11,6 +11,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from remedy.home import default_home
+
 logger = logging.getLogger(__name__)
 
 CONFIRM_PHRASE = "WIPE"
@@ -25,7 +27,7 @@ def _home(home: Path | str | None = None) -> Path:
         h = (load_config() or {}).get("home_dir")
         if h:
             return Path(h).expanduser()
-    return Path.home() / ".remedy"
+    return default_home()
 
 
 def reset_soul_persona(home: Path | str | None = None) -> bool:

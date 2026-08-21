@@ -195,23 +195,20 @@ def register_comfyui_tools(runtime: Any) -> None:
                             img_path,
                             home_dir=home,
                         )
-                        md = comfy.markdown_for_image(
-                            meta, caption=text[:80], embed_data_uri=True
-                        )
+                        md = comfy.markdown_for_image(meta, caption=text[:80])
                         blocks.append(md)
                         image_blocks.append(md)
                         runtime._track_artifact(str(meta.get("path") or img_path))
                     else:
-                        # Still embed for display even without session id
+                        # No session — reference the comfy_out file directly.
                         meta = {
                             "name": img_path.name,
                             "path": str(img_path),
                             "mime": "image/png",
                             "view_url": "",
+                            "home_dir": str(home) if home else None,
                         }
-                        md = comfy.markdown_for_image(
-                            meta, caption=text[:80], embed_data_uri=True
-                        )
+                        md = comfy.markdown_for_image(meta, caption=text[:80])
                         blocks.append(md)
                         image_blocks.append(md)
                         runtime._track_artifact(str(img_path))

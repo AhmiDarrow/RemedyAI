@@ -380,9 +380,9 @@ def register_files_tools(runtime: Any) -> None:
                 code="PATH_DENIED",
                 tool_name="file_write",
                 suggestion=(
-                    "Writes stay inside the project folder under Ask/Auto. "
-                    "Use a path under the focus folder, or set Approvals → Full "
-                    "(warn) if you granted machine-wide control."
+                    "Writes follow the owner's access_scope (project | home | full); "
+                    "the error above names the configured scope and its roots. "
+                    "Use a path under the focus folder unless the owner widened it."
                 ),
             )
         sid = turn_session_id(runtime)
@@ -504,9 +504,9 @@ def register_files_tools(runtime: Any) -> None:
                 code="PATH_DENIED",
                 tool_name="file_edit",
                 suggestion=(
-                    "Edits stay inside the project folder under Ask/Auto. "
-                    "Use a path under the focus folder, or set Approvals → Full "
-                    "(warn) if you granted machine-wide control."
+                    "Writes follow the owner's access_scope (project | home | full); "
+                    "the error above names the configured scope and its roots. "
+                    "Use a path under the focus folder unless the owner widened it."
                 ),
             )
         sid = turn_session_id(runtime)

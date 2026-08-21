@@ -54,6 +54,12 @@ export type StreamDonePayload = {
   usage?: UsagePayload
   /** Cooperative Stop / server abort — not a successful completion. */
   aborted?: boolean
+  /**
+   * The server was still running this session's previous turn (our SSE had
+   * dropped, so the UI thought it was idle). The text was handed to that turn
+   * as mid-turn steering instead of killing it; no new assistant row follows.
+   */
+  steered?: boolean
 }
 
 export type StreamHandlers = {
@@ -152,9 +158,33 @@ export function streamMessage(
       }
       // Same-session already streaming (Stop+send / double-submit). The dying
       // turn keeps its claim until the generator finally runs — retry with backoff.
+      // reason=supersede: the server words the interrupted turn's durable row
+      // as "interrupted by your next message" instead of a plain Stop.
       if (res.status === 409 && !controller.signal.aborted) {
+        // The UI believed the session was idle but the server is still working
+        // (SSE dropped mid-turn — connection resets did exactly this during a
+        // 3 h build). Killing that turn is the last resort: first hand the words
+        // to the running turn as steering. Attachments need a turn of their own.
+        if (!attachments?.length) {
+          try {
+            const sr = await fetch(`${getApiBase()}/sessions/${sessionId}/steer`, {
+              method: 'POST',
+              headers: { ...authHeaders(), Accept: 'application/json', 'Content-Type': 'application/json' },
+              body: JSON.stringify({ message }),
+            })
+            if (sr.ok) {
+              const sj = (await sr.json().catch(() => ({}))) as { steered?: boolean }
+              if (sj?.steered) {
+                onDone({ request_id: '', steered: true })
+                return
+              }
+            }
+          } catch {
+            /* fall through to supersede */
+          }
+        }
         try {
-          await fetch(`${getApiBase()}/sessions/${sessionId}/abort`, {
+          await fetch(`${getApiBase()}/sessions/${sessionId}/abort?reason=supersede`, {
             method: 'POST',
             headers: { ...authHeaders(), Accept: 'application/json' },
           })

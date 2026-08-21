@@ -27,6 +27,16 @@ def test_internal_repetition():
     assert not text_has_internal_repetition("Just one sentence about building.")
 
 
+def test_concatenated_stutter_without_space_is_repetition():
+    """Session 765c 20:54: 'committing.Core lib is green.Core lib is green.'"""
+    t = (
+        "Core lib is green; wiring strobe + calibrate UI, expanding tests, then committing."
+        "Core lib is green. Wiring strobe + calibrate UI, expanding tests, then committing."
+        "Core engine is green. Wiring strobe + calibrate UI, expanding tests, then committing."
+    )
+    assert text_has_internal_repetition(t)
+
+
 def test_intent_monologue_detect():
     assert looks_like_intent_monologue(
         "I'll build RemedyPDF — a sleek PDF viewer. Let me start by laying out the architecture."

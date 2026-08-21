@@ -48,6 +48,7 @@ class SessionBrief(BaseModel):
     key_paths: list[str] = Field(default_factory=list)
     user_constraints: list[str] = Field(default_factory=list)
     next_steps: list[str] = Field(default_factory=list)
+    hot_writes: list[str] = Field(default_factory=list)
     notes: str = ""
     # Cumulative multi-compaction arc (Compaction Memory pattern)
     history_thread: list[HistoryThreadEntry] = Field(default_factory=list)
@@ -216,6 +217,13 @@ def brief_to_context_block(brief: SessionBrief | None, *, max_chars: int = 2200)
         lines.append("- Historical context (cumulative):")
         for ent in brief.history_thread[-6:]:
             lines.append(f"  · [C{ent.n}] {ent.summary}")
+    if getattr(brief, "hot_writes", None):
+        lines.append(
+            "- Hot writes (disk is source of truth — file_read these; "
+            "never restore an older version from chat):"
+        )
+        for a in list(brief.hot_writes)[-16:]:
+            lines.append(f"  · {a}")
     if brief.artifacts:
         lines.append("- Artifacts / files touched:")
         for a in brief.artifacts[-12:]:

@@ -5,6 +5,8 @@ from __future__ import annotations
 import contextlib
 from typing import Any
 
+from remedy.home import default_home
+
 
 def register_soul_tools(runtime: Any) -> None:
     """Register Soul Field tools on the runtime registry.
@@ -70,9 +72,9 @@ def register_soul_tools(runtime: Any) -> None:
     async def soul_recall(query: str = "", limit: int = 12) -> str:
         """Unified recall across Soul Field, Time Crystal, and Partner Memory."""
         from remedy.core.turn_context import turn_session_id
-        from remedy.memory.soul.recall import recall_unified
+        from remedy.memory.soul.recall import recall_unified_async
 
-        return recall_unified(
+        return await recall_unified_async(
             query or "",
             home=_home(),
             memory=getattr(runtime, "memory", None),
@@ -123,7 +125,7 @@ def register_soul_tools(runtime: Any) -> None:
         home = _home()
         d = (dest or "").strip()
         if not d:
-            d = str(Path(home or Path.home() / ".remedy") / "exports" / "soul-field.json")
+            d = str(Path(home or default_home()) / "exports" / "soul-field.json")
         try:
             if (passphrase or "").strip():
                 path = export_soul_encrypted(d, passphrase=passphrase, home=home)

@@ -128,6 +128,116 @@ def _jsx_command(checker: str, p: Path) -> list[str]:
     return [checker, "--noEmit", "--pretty", "false", "--allowJs", "--jsx", "preserve", str(p)]
 
 
+_RUST_DEP_NOISE = (
+    "E0432",  # unresolved import
+    "E0433",  # failed to resolve (use of undeclared crate/module)
+    "E0463",  # can't find crate
+    "E0583",  # file not found for module
+    "can't find crate",
+    "unresolved import",
+    "failed to resolve",
+    "file not found for module",
+    "failed to write",
+)
+
+
+def _cargo_root_for(p: Path) -> Path | None:
+    """Nearest ancestor holding a Cargo.toml (the crate this file belongs to)."""
+    for parent in [p.parent, *p.parent.parents]:
+        if (parent / "Cargo.toml").is_file():
+            return parent
+    return None
+
+
+def _is_rust_dep_noise(err: str) -> bool:
+    """Bare ``rustc`` on one file cannot see the crate graph — those errors are not syntax."""
+    e = err or ""
+    return any(tok in e for tok in _RUST_DEP_NOISE)
+
+
+def _check_rust(p: Path, text: str, out: dict[str, Any]) -> dict[str, Any]:
+    """Rust syntax gate.
+
+    Order of preference:
+    1. ``cargo check`` in the owning crate when Cargo.toml + cargo exist — the only
+       check that can resolve ``tauri``/plugins/``crate_lib`` paths.
+    2. Bare ``rustc --emit=metadata`` into a temp out-dir (never ``-o NUL`` — that
+       "failed to write NUL" on Windows and produced a permanent false red).
+       Crate-graph errors (unresolved import / can't find crate) are *noise* for a
+       single-file probe and fall back to brace balance.
+    3. Brace balance.
+    """
+    cargo_root = _cargo_root_for(p)
+    cargo = _which("cargo")
+    # A Tauri/desktop crate's first `cargo check` is a 30–120s compile, not a
+    # syntax probe. Session 765c: that hung the turn and false-red'd main.rs.
+    # Brace/rustc-dep-noise is enough to catch unmatched braces; full typecheck
+    # belongs to verify (`cargo check` / `tauri build`), not the write gate.
+    tauri_crate = False
+    if cargo_root is not None:
+        with suppress(OSError):
+            tauri_crate = "tauri" in (cargo_root / "Cargo.toml").read_text(
+                encoding="utf-8", errors="replace"
+            ).lower()
+    if cargo_root is not None and cargo and not tauri_crate:
+        ok, err = _run(
+            [cargo, "check", "--quiet", "--message-format=short"],
+            cwd=cargo_root,
+            timeout_s=float(os.environ.get("REMEDY_CARGO_CHECK_TIMEOUT_S", "120")),
+        )
+        if not ok and ("timed out" in err.lower() or "TimeoutExpired" in err):
+            # A slow first compile is not a syntax error — do not fail closed on it.
+            bok, berr = brace_balance(text)
+            out["ok"] = bok
+            out["error"] = berr
+            out["engine"] = "brace (cargo check timed out)"
+            return out
+        out["ok"] = ok
+        out["error"] = "" if ok else err
+        out["engine"] = "cargo check"
+        return out
+
+    rustc = _which("rustc")
+    if rustc:
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix="remedy-rustc-") as td:
+            ok, err = _run(
+                [
+                    rustc,
+                    "--edition",
+                    "2021",
+                    "--crate-type",
+                    "lib",
+                    "--emit=metadata",
+                    "--out-dir",
+                    td,
+                    str(p),
+                ]
+            )
+        if ok:
+            out["ok"] = True
+            out["error"] = ""
+            out["engine"] = "rustc --emit=metadata"
+            return out
+        if _is_rust_dep_noise(err):
+            bok, berr = brace_balance(text)
+            out["ok"] = bok
+            out["error"] = berr
+            out["engine"] = "brace (rustc dep-noise)"
+            return out
+        out["ok"] = False
+        out["error"] = err
+        out["engine"] = "rustc --emit=metadata"
+        return out
+
+    ok, err = brace_balance(text)
+    out["ok"] = ok
+    out["error"] = err
+    out["engine"] = "brace"
+    return out
+
+
 def check_lang_syntax(path: str | Path) -> dict[str, Any]:
     """Return {ok, path, error, engine} for one file."""
     p = Path(path)
@@ -213,21 +323,7 @@ def check_lang_syntax(path: str | Path) -> dict[str, Any]:
         return out
 
     if suffix == ".rs":
-        rustc = _which("rustc")
-        if rustc:
-            sink = "NUL" if os.name == "nt" else "/dev/null"
-            ok, err = _run(
-                [rustc, "--edition", "2021", "--crate-type", "lib", "--emit=metadata", "-o", sink, str(p)]
-            )
-            out["ok"] = ok
-            out["error"] = "" if ok else err
-            out["engine"] = "rustc --emit=metadata"
-            return out
-        ok, err = brace_balance(text)
-        out["ok"] = ok
-        out["error"] = err
-        out["engine"] = "brace"
-        return out
+        return _check_rust(p, text, out)
 
     if suffix == ".go":
         gofmt = _which("gofmt")
