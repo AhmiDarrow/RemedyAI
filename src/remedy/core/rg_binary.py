@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Any
 from urllib.request import Request, urlopen
 
+from remedy.home import default_home
+
 logger = logging.getLogger(__name__)
 
 # Pinned upstream release (bump deliberately).
@@ -62,7 +64,7 @@ def _home_bin_dir(home_dir: str | Path | None = None) -> Path:
         base = Path(home_dir).expanduser()
     else:
         env = (os.environ.get("REMEDY_HOME") or "").strip()
-        base = Path(env).expanduser() if env else Path.home() / ".remedy"
+        base = Path(env).expanduser() if env else default_home()
     return base / "bin"
 
 

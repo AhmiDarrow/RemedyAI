@@ -407,3 +407,127 @@ def test_a_broken_c_file_is_caught_through_the_same_entry_point(tmp_path):
     results = check_paths_syntax([str(src)])
     assert results
     assert results[0]["ok"] is False
+
+
+# --- Rust gate: cargo-first, never ``-o NUL``, dep errors are not syntax errors ---
+
+
+def _tauri_main_rs() -> str:
+    return (
+        "#![cfg_attr(not(debug_assertions), windows_subsystem = \"windows\")]\n"
+        "fn main() {\n    guitar_remedy_lib::run()\n}\n"
+    )
+
+
+def test_a_tauri_crate_does_not_use_cargo_check_as_a_syntax_gate(tmp_path, monkeypatch):
+    """Desktop crates take too long for a write-gate; unmatched braces still fail."""
+    import remedy.core.build_lang_oracle as oracle
+
+    (tmp_path / "Cargo.toml").write_text(
+        '[package]\nname="app"\n[dependencies]\ntauri = "2"\n',
+        encoding="utf-8",
+    )
+    f = tmp_path / "main.rs"
+    f.write_text(_tauri_main_rs(), encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def fake_which(name):
+        return {"cargo": "cargo", "rustc": "rustc"}.get(name)
+
+    def fake_run(cmd, *, cwd=None, timeout_s=20.0):
+        calls.append(list(cmd))
+        return False, (
+            "error[E0433]: failed to resolve: use of undeclared crate or module "
+            "`guitar_remedy_lib`"
+        )
+
+    monkeypatch.setattr(oracle, "_which", fake_which)
+    monkeypatch.setattr(oracle, "_run", fake_run)
+    out = oracle.check_lang_syntax(f)
+    assert out["ok"] is True
+    assert not any(c[:2] == ["cargo", "check"] for c in calls)
+    assert out["engine"].startswith("brace")
+
+
+def test_rust_in_a_cargo_crate_uses_cargo_check(tmp_path, monkeypatch):
+    import remedy.core.build_lang_oracle as oracle
+
+    (tmp_path / "Cargo.toml").write_text("[package]\nname='x'\n", encoding="utf-8")
+    src = tmp_path / "src"
+    src.mkdir()
+    f = src / "main.rs"
+    f.write_text(_tauri_main_rs(), encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def fake_which(name):
+        return {"cargo": "cargo", "rustc": "rustc"}.get(name)
+
+    def fake_run(cmd, *, cwd=None, timeout_s=20.0):
+        calls.append(list(cmd))
+        assert cwd == tmp_path
+        return True, ""
+
+    monkeypatch.setattr(oracle, "_which", fake_which)
+    monkeypatch.setattr(oracle, "_run", fake_run)
+    out = oracle.check_lang_syntax(f)
+    assert out["ok"] is True
+    assert out["engine"] == "cargo check"
+    assert calls and calls[0][:2] == ["cargo", "check"]
+    assert all("NUL" not in c for c in calls[0])
+
+
+def test_bare_rustc_never_writes_to_nul_and_dep_errors_are_noise(tmp_path, monkeypatch):
+    import remedy.core.build_lang_oracle as oracle
+
+    f = tmp_path / "main.rs"
+    f.write_text(_tauri_main_rs(), encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def fake_which(name):
+        return "rustc" if name == "rustc" else None
+
+    def fake_run(cmd, *, cwd=None, timeout_s=20.0):
+        calls.append(list(cmd))
+        return False, (
+            "error[E0433]: failed to resolve: use of undeclared crate or module "
+            "`guitar_remedy_lib`"
+        )
+
+    monkeypatch.setattr(oracle, "_which", fake_which)
+    monkeypatch.setattr(oracle, "_run", fake_run)
+    out = oracle.check_lang_syntax(f)
+    assert "-o" not in calls[0] and "NUL" not in calls[0]
+    assert "--out-dir" in calls[0]
+    assert out["ok"] is True, out
+    assert out["engine"].startswith("brace")
+
+
+def test_bare_rustc_real_syntax_error_still_fails(tmp_path, monkeypatch):
+    import remedy.core.build_lang_oracle as oracle
+
+    f = tmp_path / "lib.rs"
+    f.write_text("fn broken( {\n", encoding="utf-8")
+    monkeypatch.setattr(oracle, "_which", lambda n: "rustc" if n == "rustc" else None)
+    monkeypatch.setattr(
+        oracle, "_run", lambda cmd, *, cwd=None, timeout_s=20.0: (False, "error: expected pattern")
+    )
+    out = oracle.check_lang_syntax(f)
+    assert out["ok"] is False
+    assert out["engine"] == "rustc --emit=metadata"
+
+
+def test_cargo_check_timeout_does_not_fail_closed(tmp_path, monkeypatch):
+    import remedy.core.build_lang_oracle as oracle
+
+    (tmp_path / "Cargo.toml").write_text("[package]\nname='x'\n", encoding="utf-8")
+    f = tmp_path / "lib.rs"
+    f.write_text("pub fn ok() {}\n", encoding="utf-8")
+    monkeypatch.setattr(oracle, "_which", lambda n: "cargo")
+    monkeypatch.setattr(
+        oracle,
+        "_run",
+        lambda cmd, *, cwd=None, timeout_s=20.0: (False, "Command 'cargo' timed out after 120 seconds"),
+    )
+    out = oracle.check_lang_syntax(f)
+    assert out["ok"] is True
+    assert "timed out" in out["engine"]

@@ -15,6 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.home import default_home
 
 
 def _now() -> str:
@@ -90,7 +91,7 @@ class CheckpointStore:
     """Filesystem store under ``{home}/checkpoints``."""
 
     def __init__(self, home_dir: Path | str | None = None) -> None:
-        home = Path(home_dir).expanduser() if home_dir else Path.home() / ".remedy"
+        home = Path(home_dir).expanduser() if home_dir else default_home()
         self.home = home
         self.root = home / "checkpoints"
         self.root.mkdir(parents=True, exist_ok=True)

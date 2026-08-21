@@ -681,6 +681,11 @@ def test_policy_thinking_echo_is_detected():
         "This is pure chat - no tools needed."
     )
     assert collapse_repeated_sentences(repeated) == "This is pure chat - no tools needed."
+    glued = (
+        "This is pure chat - no tools needed."
+        "This is pure chat - no tools needed."
+    )
+    assert collapse_repeated_sentences(glued) == "This is pure chat - no tools needed."
     nudge = post_tools_user_summary_nudge()
     assert nudge["role"] == "user"
     assert "scratchpad" in nudge["content"].lower() or "user-facing" in nudge["content"].lower()

@@ -781,6 +781,8 @@ def attach_image_to_session(
         home_dir=home_dir,
     )
     name = meta.get("name") or Path(image_path).name
+    if home_dir is not None:
+        meta["home_dir"] = str(home_dir)
     meta["view_url"] = (
         f"http://127.0.0.1:7400/api/sessions/{session_id}/attachments/{name}"
     )
@@ -791,16 +793,20 @@ def markdown_for_image(
     meta: dict[str, Any],
     caption: str = "",
     *,
-    embed_data_uri: bool = True,
+    embed_data_uri: bool = False,
     max_embed_bytes: int = 2_500_000,
 ) -> str:
-    """Markdown for chat: data-URI and/or absolute path + session URL.
+    """Markdown for chat: file path reference + session URL — never base64.
 
-    Prefer paths the desktop chat media resolver can load with Bearer (absolute
-    disk path or loopback attachment URL). Keep a blank line after the image
-    block so following prose does not glue to the link.
+    The desktop chat media resolver loads ``attachments/<sid>/<file>`` (and
+    absolute paths under the Remedy home) through ``/api/media`` with Bearer,
+    so the bubble renders from disk. A data URI in the text would be persisted
+    and replayed as provider history (one PNG ≈ 1M tokens), so
+    ``embed_data_uri`` is ignored and kept only for call-site compatibility.
+    Keep a blank line after the image block so following prose does not glue
+    to the link.
     """
-    import base64
+    del embed_data_uri, max_embed_bytes  # never inline payloads into chat text
 
     url = meta.get("view_url") or ""
     path = meta.get("path") or ""
@@ -817,23 +823,17 @@ def markdown_for_image(
         or name
     )
     lines: list[str] = []
-    # Prefer inlined data URI for WebView reliability (CSP allows data:).
-    if embed_data_uri and path and Path(path).is_file():
+    if path:
         try:
-            raw = Path(path).read_bytes()
-            if len(raw) <= max_embed_bytes:
-                b64 = base64.b64encode(raw).decode("ascii")
-                mime = meta.get("mime") or "image/png"
-                lines.append(f"![{cap}](data:{mime};base64,{b64})")
-        except OSError:
-            pass
-    # Absolute path — desktop /api/media resolves under ~/.remedy
-    if not lines and path:
-        safe_path = str(path).replace("\\", "/")
-        if " " in safe_path or "(" in safe_path:
-            lines.append(f"![{cap}](<{safe_path}>)")
+            from remedy.interfaces.attachments import chat_media_display_path
+
+            src = chat_media_display_path(path, home_dir=meta.get("home_dir"))
+        except Exception:
+            src = str(path).replace("\\", "/")
+        if any(ch in src for ch in (" ", "(", ")", "[", "]")):
+            lines.append(f"![{cap}](<{src}>)")
         else:
-            lines.append(f"![{cap}]({safe_path})")
+            lines.append(f"![{cap}]({src})")
     if not lines and url:
         lines.append(f"![{cap}]({url})")
     lines.append(f"**{cap}**")

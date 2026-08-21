@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy import __version__ as _remedy_version
+from remedy.home import default_home
 
 logger = logging.getLogger(__name__)
 
@@ -346,9 +347,9 @@ def _remedy_section(
         with contextlib.suppress(Exception):
             skills_count = len(runtime.skills.skills)
 
-    home = Path(str(cfg.get("home_dir") or Path.home() / ".remedy"))
+    home = Path(str(cfg.get("home_dir") or default_home()))
     if not home.name or str(home) == str(Path.home()):
-        home = Path.home() / ".remedy"
+        home = default_home()
 
     proc = _process_stats()
     uptime_s = 0.0
@@ -491,7 +492,7 @@ def _providers_section(cfg: dict[str, Any]) -> dict[str, Any]:
         from remedy.interfaces.xai_auth import load_credentials
 
         home = cfg.get("home_dir") if isinstance(cfg, dict) else None
-        home_path = Path(str(home)) if home else Path.home() / ".remedy"
+        home_path = Path(str(home)) if home else default_home()
         xai_connected = bool(load_credentials(home_path).connected)
 
     enabled_raw = cfg.get("enabled_providers")

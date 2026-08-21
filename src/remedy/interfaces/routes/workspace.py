@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request
 
 from remedy.core.errors import SecurityError
+from remedy.home import default_home
 from remedy.interfaces.api_models import (
     ImportSessionRequest,
 )
@@ -129,7 +130,7 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
                     with contextlib.suppress(Exception):
                         home = Path(
                             load_config().get("home_dir")
-                            or (Path.home() / ".remedy")
+                            or default_home()
                         ).expanduser()
                         home_cand = (home / raw).resolve()
                         if home_cand.is_file():
@@ -143,7 +144,7 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
                     with contextlib.suppress(Exception):
                         home = Path(
                             load_config().get("home_dir")
-                            or (Path.home() / ".remedy")
+                            or default_home()
                         ).expanduser()
                         att = home / "attachments"
                         if att.is_dir():
@@ -178,11 +179,11 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
                 for r in runtime.allowed_roots() or []:
                     roots.append(Path(r).resolve())
         with contextlib.suppress(Exception):
-            home = Path(load_config().get("home_dir") or (Path.home() / ".remedy"))
+            home = Path(load_config().get("home_dir") or default_home())
             roots.append(home.expanduser().resolve())
         # Always allow default ~/.remedy (session attachments) even if home_dir differs
         with contextlib.suppress(Exception):
-            roots.append((Path.home() / ".remedy").resolve())
+            roots.append(default_home().resolve())
         # Always allow reading under the default project if configured
         with contextlib.suppress(Exception):
             pp = load_config().get("project_path")

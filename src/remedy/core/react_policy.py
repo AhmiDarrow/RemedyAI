@@ -897,16 +897,22 @@ def looks_like_policy_thinking(text: str) -> bool:
     return hits >= 2 or "system reminder" in low or "lean chat" in low
 
 
+# Split even when the model concatenates sentences without a space
+# ("committing.Core lib is green" — session 765c 20:54 stutter).
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])(?:\s+|(?=[A-Z]))")
+
+
 def collapse_repeated_sentences(text: str) -> str:
     """Drop consecutive duplicate sentences (thinking loops)."""
     raw = (text or "").strip()
     if not raw:
         return ""
-    parts = re.split(r"(?<=[.!?])\s+", raw)
+    parts = _SENTENCE_SPLIT_RE.split(raw)
     out: list[str] = []
     prev = ""
     for p in parts:
         key = re.sub(r"\s+", " ", p).strip().lower()
+        key = re.sub(r"[;:]+", ".", key)
         if key and key == prev:
             continue
         out.append(p)

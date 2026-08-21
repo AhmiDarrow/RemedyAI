@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy import __version__
+from remedy.home import default_home
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ def _home() -> Path:
             return Path(h).expanduser()
     except Exception:
         pass
-    return Path.home() / ".remedy"
+    return default_home()
 
 
 def _load_registry():

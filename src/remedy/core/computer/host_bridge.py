@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.home import default_home
 
 _SECRET_FIELD_TOKEN_RE = re.compile(
     r"(?i)(^|[^a-z])(pass|token|pin|otp)([^a-z]|$)"
@@ -269,7 +270,7 @@ def canonical_home(home_dir: Path | str | None = None) -> Path:
 
         return get_home_dir().resolve()
     except Exception:
-        return (Path.home() / ".remedy").resolve()
+        return default_home().resolve()
 
 
 def _root(home_dir: Path | str | None = None) -> Path:

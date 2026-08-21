@@ -32,6 +32,76 @@ logger = logging.getLogger(__name__)
 
 
 
+# Strong refs for detached persist tasks: a dying SSE generator spawns the DB
+# write as its own task so a closed client connection cannot drop the row.
+_PERSIST_TASKS: set[asyncio.Task] = set()
+
+STOP_NOTE = "*(Generation stopped. History is intact — send **continue** to resume.)*"
+SUPERSEDE_NOTE = (
+    "*(Interrupted by your next message — partial work above is saved. "
+    "Say **continue** to pick it up.)*"
+)
+# Comment-frame pings keep WebView2 / fetch from dropping a silent SSE while
+# host_run / the LLM is blocked. Session 765c: idle gaps aborted the turn as
+# "Generation stopped". SSE comments are ignored by the desktop parser.
+SSE_KEEPALIVE_INTERVAL_S = 12.0
+SSE_KEEPALIVE_COMMENT = ": keepalive\n\n"
+
+
+async def iter_sse_with_keepalive(
+    agen,
+    *,
+    interval_s: float | None = None,
+):
+    """Yield SSE comment pings while *agen* is blocked on LLM/tools."""
+    interval = float(
+        SSE_KEEPALIVE_INTERVAL_S if interval_s is None else interval_s
+    )
+    if interval <= 0:
+        async for chunk in agen:
+            yield chunk
+        return
+    it = agen.__aiter__()
+    pending = asyncio.ensure_future(anext(it))
+    try:
+        while True:
+            try:
+                chunk = await asyncio.wait_for(
+                    asyncio.shield(pending), timeout=interval
+                )
+            except TimeoutError:
+                yield SSE_KEEPALIVE_COMMENT
+                continue
+            except StopAsyncIteration:
+                return
+            yield chunk
+            pending = asyncio.ensure_future(anext(it))
+    finally:
+        if not pending.done():
+            pending.cancel()
+            with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+                await pending
+
+
+def interrupted_turn_note(reason: str | None) -> str:
+    """Durable-row footer for an interrupted turn, worded by abort reason."""
+    return SUPERSEDE_NOTE if str(reason or "").strip().lower() == "supersede" else STOP_NOTE
+
+
+def interrupted_turn_content(partial: str, reason: str | None, *, has_tools: bool) -> str:
+    """Partial text (if any) + the reason note. Tool-only turns keep a marker line."""
+    body = (partial or "").strip()
+    if body:
+        with contextlib.suppress(Exception):
+            from remedy.core.react_policy import collapse_repeated_sentences
+
+            body = collapse_repeated_sentences(body)
+    note = interrupted_turn_note(reason)
+    if not body:
+        return f"*(Used tools — see process.)*\n\n{note}" if has_tools else note
+    return f"{body}\n\n{note}"
+
+
 def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     """Register stream session routes."""
     _ = gateway  # may be unused in some modules
@@ -217,11 +287,50 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                 )
 
             async def event_stream():
+                from remedy.core.turn_context import (
+                    drop_turn_job,
+                    register_turn_job,
+                )
+
+                q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=512)
+
+                async def _job() -> None:
+                    try:
+                        async for chunk in _event_stream_body():
+                            try:
+                                q.put_nowait(chunk)
+                            except asyncio.QueueFull:
+                                with contextlib.suppress(Exception):
+                                    q.get_nowait()
+                                await q.put(chunk)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.exception("detached turn job failed")
+                    finally:
+                        with contextlib.suppress(Exception):
+                            await q.put(None)
+                        release_session_stream_claim(
+                            session_id, epoch=claim_epoch
+                        )
+                        drop_turn_job(session_id)
+
+                job = asyncio.create_task(_job())
+                register_turn_job(session_id, job)
+
+                async def _subscribe():
+                    while True:
+                        item = await q.get()
+                        if item is None:
+                            return
+                        yield item
+
                 try:
-                    async for _chunk in _event_stream_body():
+                    async for _chunk in iter_sse_with_keepalive(_subscribe()):
                         yield _chunk
-                finally:
-                    release_session_stream_claim(session_id, epoch=claim_epoch)
+                except asyncio.CancelledError:
+                    # Socket died. Stop is POST /abort (cancels the job).
+                    return
 
             async def _event_stream_body():
                 from remedy.core.metrics import default_registry
@@ -232,18 +341,84 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                     f"event: start\ndata: {json.dumps({'type': 'start', 'request_id': request_id, 'session_id': session_id})}\n\n"
                 )
 
-                try:
-                    full_response = ""
-                    full_thinking = ""
-                    collected_tool_calls: list[dict] = []
-                    collected_tool_results: list[dict] = []
-                    usage_acc: dict | None = None
-                    # Always enter stream_response: L0 (list skills / model / version /
-                    # whoami / status) works without a provider key. Non-L0 without a
-                    # key still gets a clear notice from the agent (streamed as text).
-                    aborted = False
-                    persist_done = False
+                full_response = ""
+                full_thinking = ""
+                collected_tool_calls: list[dict] = []
+                collected_tool_results: list[dict] = []
+                usage_acc: dict | None = None
+                # Always enter stream_response: L0 (list skills / model / version /
+                # whoami / status) works without a provider key. Non-L0 without a
+                # key still gets a clear notice from the agent (streamed as text).
+                aborted = False
+                persist_done = False
+                body_finished = False
 
+                async def _write_interrupted_row(
+                    content: str, thinking, calls, results
+                ) -> None:
+                    """Detached DB write — runs to completion even when the SSE
+                    generator that spawned it is already closed."""
+                    with contextlib.suppress(Exception):
+                        if session_reset_epoch(session_id) != reset_epoch_at_start:
+                            return
+                        still = await memory.get_chat_session(session_id)
+                        if still is None:
+                            return
+                        await memory.add_chat_message(
+                            ChatMessage(
+                                session_id=session_id,
+                                role=ChatMessageRole.ASSISTANT,
+                                content=content,
+                                thinking=thinking,
+                                tool_calls=calls,
+                                tool_results=results,
+                                model=sess_model
+                                or req.model
+                                or getattr(runtime, "_llm_model", None),
+                            )
+                        )
+
+                def _persist_interrupted(kind: str) -> asyncio.Task | None:
+                    """Always leave a durable assistant row for an interrupted
+                    turn (Stop, superseding message, disconnect, generator close).
+                    Snapshots state synchronously and spawns the write as its own
+                    task so it survives the connection going away."""
+                    nonlocal persist_done
+                    if persist_done or memory is None:
+                        return None
+                    persist_done = True
+                    reason = None
+                    with contextlib.suppress(Exception):
+                        from remedy.core.turn_context import peek_abort_reason
+
+                        reason = peek_abort_reason(session_id)
+                    calls = list(collected_tool_calls)
+                    results = list(collected_tool_results)
+                    content = interrupted_turn_content(
+                        full_response, reason, has_tools=bool(calls or results)
+                    )
+                    thinking = (full_thinking or "").strip() or None
+                    logger.info(
+                        "stream %s persisting interrupted turn session=%s reason=%s "
+                        "text=%d tool_calls=%d",
+                        kind,
+                        session_id,
+                        reason or "stop",
+                        len((full_response or "").strip()),
+                        len(calls),
+                    )
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        return None
+                    task = loop.create_task(
+                        _write_interrupted_row(content, thinking, calls, results)
+                    )
+                    _PERSIST_TASKS.add(task)
+                    task.add_done_callback(_PERSIST_TASKS.discard)
+                    return task
+
+                try:
                     async for token in runtime.stream_response(
                         user_text or "(see attached files)",
                         session_id=session_id,
@@ -255,6 +430,13 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                         if isinstance(token, str) and token.startswith("@@aborted"):
                             status = "aborted"
                             aborted = True
+                            # Durable row FIRST: the client that called /abort may
+                            # already have dropped this connection, in which case
+                            # the yield below raises GeneratorExit.
+                            _t = _persist_interrupted("aborted")
+                            if _t is not None:
+                                with contextlib.suppress(BaseException):
+                                    await asyncio.shield(_t)
                             # Cooperative stop — not an error. Client Stop / abort.
                             yield (
                                 "event: aborted\ndata: "
@@ -382,11 +564,14 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                             except Exception:
                                 pass
                         elif token.startswith("@@image_markdown:"):
-                            # ComfyUI (etc.): image markdown with data-URI — show immediately.
+                            # ComfyUI (etc.): image markdown (path/URL ref) — show immediately.
                             md = token[len("@@image_markdown:"):]
                             if md:
-                                full_response += ("\n\n" if full_response else "") + md
                                 yield await _sse_stream_text(md, event="token")
+                                # Never let a data-URI into persisted/provider history.
+                                from remedy.memory.inline_images import strip_inline_images
+
+                                full_response += ("\n\n" if full_response else "") + strip_inline_images(md)
                         elif token == "@@tool_calls":
                             pass
                         elif isinstance(token, str) and token.startswith("@@todos:"):
@@ -485,10 +670,17 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
 
                     has_tools = bool(collected_tool_calls or collected_tool_results)
                     persist_text = (full_response or "").strip()
+                    if persist_text:
+                        with contextlib.suppress(Exception):
+                            from remedy.core.react_policy import (
+                                collapse_repeated_sentences,
+                            )
+
+                            persist_text = collapse_repeated_sentences(persist_text)
                     if not persist_text and has_tools:
                         persist_text = "*(Used tools — see process.)*"
 
-                    if persist_text and memory:
+                    if persist_text and memory and not persist_done:
                         if session_reset_epoch(session_id) != reset_epoch_at_start:
                             persist_done = True
                             still = None
@@ -572,6 +764,7 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                     }
                     if isinstance(final_usage, dict) and not aborted:
                         done_payload["usage"] = final_usage
+                    body_finished = True
                     yield f"event: done\ndata: {json.dumps(done_payload)}\n\n"
 
                 except asyncio.CancelledError:
@@ -588,47 +781,11 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                             _task.uncancel()
                     # Persist whatever we already streamed. Fetch abort used to
                     # drop the assistant row so reload showed only the user turn.
-                    # Skip if the cooperative @@aborted path already wrote a row.
-                    if memory is not None and not persist_done:
-                        if session_reset_epoch(session_id) != reset_epoch_at_start:
-                            persist_done = True
-                        note = ""
-                        thinking = None
-                        calls: list = []
-                        results: list = []
-                        with contextlib.suppress(Exception):
-                            note = (full_response or "").strip()
-                        with contextlib.suppress(Exception):
-                            thinking = (full_thinking or "").strip() or None
-                        with contextlib.suppress(Exception):
-                            calls = list(collected_tool_calls)
-                        with contextlib.suppress(Exception):
-                            results = list(collected_tool_results)
-                        if not note:
-                            note = (
-                                "*(Generation stopped. History is intact — "
-                                "send **continue** to resume.)*"
-                            )
-                        with contextlib.suppress(Exception):
-                            still = (
-                                None
-                                if persist_done
-                                else await memory.get_chat_session(session_id)
-                            )
-                            if still is not None:
-                                await memory.add_chat_message(
-                                    ChatMessage(
-                                        session_id=session_id,
-                                        role=ChatMessageRole.ASSISTANT,
-                                        content=note,
-                                        thinking=thinking,
-                                        tool_calls=calls,
-                                        tool_results=results,
-                                        model=sess_model
-                                        or req.model
-                                        or getattr(runtime, "_llm_model", None),
-                                    )
-                                )
+                    # Detached + shielded: a second cancel cannot kill the write.
+                    _t = _persist_interrupted("cancelled")
+                    if _t is not None:
+                        with contextlib.suppress(BaseException):
+                            await asyncio.shield(_t)
                     with contextlib.suppress(Exception):
                         from remedy.core.turn_context import abort_session as _abort_turn
 
@@ -641,6 +798,8 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                     raise
                 except Exception as e:
                     status = "error"
+                    body_finished = True
+                    persist_done = True
                     logger.exception("SSE stream error")
                     # Never stream raw exception text — may embed keys / tokens.
                     try:
@@ -680,6 +839,16 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                                     )
                                 )
                 finally:
+                    # GeneratorExit (client closed the SSE mid-yield) skips every
+                    # except-branch above. Never lose partial text / tool calls.
+                    if not body_finished and not persist_done and (
+                        aborted
+                        or (full_response or "").strip()
+                        or collected_tool_calls
+                        or collected_tool_results
+                    ):
+                        with contextlib.suppress(Exception):
+                            _persist_interrupted("closed")
                     default_registry.counter(
                         "remedy_chat_requests_total", path="session_stream", status=status
                     ).inc()

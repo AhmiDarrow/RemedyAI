@@ -8,6 +8,7 @@ from typing import Any
 
 from remedy.core.errors import SecurityError
 from remedy.core.workspace import is_forbidden_project_path, is_unset_project_path
+from remedy.home import default_home
 
 
 def refuse_jail_path(runtime: Any) -> Path:
@@ -15,7 +16,7 @@ def refuse_jail_path(runtime: Any) -> Path:
     home = None
     with suppress(Exception):
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
-    root = Path(home).expanduser() if home else Path.home() / ".remedy"
+    root = Path(home).expanduser() if home else default_home()
     refuse = root / "refused-project"
     with suppress(Exception):
         refuse.mkdir(parents=True, exist_ok=True)

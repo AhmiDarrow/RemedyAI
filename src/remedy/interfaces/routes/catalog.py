@@ -12,6 +12,7 @@ import yaml
 from fastapi import FastAPI, HTTPException
 
 from remedy.core.security import safe_path
+from remedy.home import default_home
 from remedy.interfaces.api_models import (
     CommandRequest,
 )
@@ -543,7 +544,7 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
     # -- custom commands (markdown-based, ~/.remedy/commands/) ----------------
     @app.get("/api/commands/custom")
     async def list_custom_commands():
-        cmd_dir = Path.home() / ".remedy" / "commands"
+        cmd_dir = default_home() / "commands"
         if not cmd_dir.exists():
             return {"commands": []}
         commands: list[dict] = []
@@ -570,7 +571,7 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
 
     @app.get("/api/commands/custom/{name}")
     async def get_custom_command(name: str):
-        cmd_dir = Path.home() / ".remedy" / "commands"
+        cmd_dir = default_home() / "commands"
         # safe_path(user_input, base_dir) — never invert (was always traversal).
         stem = Path(str(name or "")).name.strip()
         if not stem or stem in (".", "..") or "/" in stem or "\\" in stem:
@@ -586,7 +587,7 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
     # -- custom agents (markdown-based, ~/.remedy/agents/) -------------------
     @app.get("/api/agents/custom")
     async def list_custom_agents():
-        agent_dir = Path.home() / ".remedy" / "agents"
+        agent_dir = default_home() / "agents"
         if not agent_dir.exists():
             return {"agents": []}
         agents: list[dict] = []
@@ -609,7 +610,7 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
 
     @app.get("/api/agents/custom/{name}")
     async def get_custom_agent(name: str):
-        agent_dir = Path.home() / ".remedy" / "agents"
+        agent_dir = default_home() / "agents"
         stem = Path(str(name or "")).name.strip()
         if not stem or stem in (".", "..") or "/" in stem or "\\" in stem:
             raise HTTPException(400, "Invalid agent name")

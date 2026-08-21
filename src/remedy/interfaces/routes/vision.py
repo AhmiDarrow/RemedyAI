@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from remedy.home import default_home
 from remedy.interfaces.api_support import load_config
 
 logger = logging.getLogger(__name__)
@@ -191,10 +192,10 @@ def register_vision_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                 from remedy.interfaces.config import load_config as _lc
 
                 home = Path(
-                    str((_lc() or {}).get("home_dir") or (Path.home() / ".remedy"))
+                    str((_lc() or {}).get("home_dir") or default_home())
                 ).expanduser()
             except Exception:
-                home = Path.home() / ".remedy"
+                home = default_home()
             p = home / "tmp_e2e_vision.png"
             if not p.is_file():
                 try:

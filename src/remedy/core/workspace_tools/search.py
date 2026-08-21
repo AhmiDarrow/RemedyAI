@@ -44,11 +44,15 @@ def register_search_tools(runtime: Any) -> None:
         context_after: int = 0,
         symbol: str = "",
     ) -> str:
-        """Search text under path (any language). Prefer absolute path when multi-tree."""
+        """Search text under path (any language). Prefer absolute path when multi-tree.
+
+        Both engines block (rg subprocess, or the os.walk fallback), so the
+        search runs in a worker thread — the event loop stays free.
+        """
         from remedy.core.repo_search import (
             SearchHit,
             format_hits,
-            search_repo,
+            search_repo_async,
             symbol_search_patterns,
         )
 
@@ -85,7 +89,7 @@ def register_search_tools(runtime: Any) -> None:
             seen_hits: set[tuple[str, int]] = set()
             engine_used = "python"
             for pat in symbol_search_patterns(sym):
-                hits, engine = search_repo(
+                hits, engine = await search_repo_async(
                     root,
                     pat,
                     path=search_path,
@@ -97,6 +101,8 @@ def register_search_tools(runtime: Any) -> None:
                     home_dir=home,
                 )
                 engine_used = engine
+                if str(engine).startswith("error"):
+                    break
                 for h in hits:
                     key = (h.path, h.line)
                     if key not in seen_hits:
@@ -121,7 +127,7 @@ def register_search_tools(runtime: Any) -> None:
                 ),
             )
 
-        hits, engine = search_repo(
+        hits, engine = await search_repo_async(
             root,
             pattern.strip(),
             path=search_path,
@@ -270,7 +276,9 @@ def register_search_tools(runtime: Any) -> None:
             cap = max(1, min(400, int(max_results or 80)))
         except (TypeError, ValueError):
             cap = 80
-        hits = glob_files(target, pat, max_results=cap)
+        import asyncio
+
+        hits = await asyncio.to_thread(glob_files, target, pat, max_results=cap)
         _note_path(target)
         return format_glob_hits(hits, pattern=pat, truncated=len(hits) >= cap)
 

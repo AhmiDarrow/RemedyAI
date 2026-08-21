@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.home import default_home
 
 _lock = threading.RLock()  # RLock: load_project_profile → load_all re-entrancy
 # Hot-path cache: profiles.json rarely changes mid-turn; avoid re-read + parse.
@@ -32,7 +33,7 @@ def _home() -> Path:
     env = os.environ.get("REMEDY_HOME")
     if env:
         return Path(env).expanduser()
-    return Path.home() / ".remedy"
+    return default_home()
 
 
 def project_id(project_path: str | None) -> str:

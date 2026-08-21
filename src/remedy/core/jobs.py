@@ -44,7 +44,7 @@ async def run_explore_job(
 ) -> JobResult:
     """Read-only survey: tree + fingerprint + orientation + optional search."""
     from remedy.core.project_fingerprint import fingerprint_path, orientation_block
-    from remedy.core.repo_search import format_hits, search_repo
+    from remedy.core.repo_search import format_hits, search_repo_async
 
     root = runtime.effective_project_path()
     try:
@@ -139,7 +139,7 @@ async def run_explore_job(
                 scope = runtime.access_scope()
             except Exception:
                 pass
-            hits, engine = search_repo(
+            hits, engine = await search_repo_async(
                 root,
                 query.strip(),
                 path=search_path,

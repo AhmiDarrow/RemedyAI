@@ -81,7 +81,14 @@ _EXPLORE_TOOLS = frozenset(
     }
 )
 _VERIFY_TOOLS = frozenset(
-    {"bash_exec", "shell_exec", "job_run", "mission_verify", "mission_update"}
+    {
+        "bash_exec",
+        "shell_exec",
+        "job_run",
+        "host_run",
+        "mission_verify",
+        "mission_update",
+    }
 )
 _SHIP_TOOLS = frozenset(
     {
@@ -192,7 +199,8 @@ def looks_like_ship_goal(goal: str) -> bool:
 _CONTINUATION_RE = re.compile(
     r"(?i)^\s*(continue|keep\s+going|carry\s+on|go\s+on|go\s+ahead|resume|"
     r"pick\s+up(\s+where.*)?|proceed|finish\s+(it|up|this)|finish|keep\s+at\s+it|"
-    r"more|next)\s*[.!…]*\s*$"
+    r"more|next|go|do\s+it|do\s+them|do\s+that|do\s+this|"
+    r"yes\s+do\s+it)\s*[.!…]*\s*$"
 )
 
 
@@ -205,6 +213,45 @@ def _is_generic_continuation(goal: str) -> bool:
     if not g:
         return True
     return bool(_CONTINUATION_RE.match(g))
+
+
+#: A *different* chat session may resume this project's active build only when
+#: the message is a bare "continue"-style continuation AND the build was touched
+#: this recently. Anything older or more specific starts its own build.
+CROSS_SESSION_RESUME_WINDOW_S = 30 * 60.0
+
+
+def ledger_resume_allowed(
+    led: Any,
+    *,
+    session_id: str,
+    generic_continuation: bool,
+    now: float | None = None,
+) -> bool:
+    """May *this* session pick up the ledger entry's phase / paths / error set?
+
+    Same session → always. Another session → only a generic continuation
+    ("continue" / "proceed" / "next") within ``CROSS_SESSION_RESUME_WINDOW_S``
+    of the ledger's last update. A fresh chat asking a new question never
+    inherits a sibling's implement/repair phase.
+    """
+    if led is None:
+        return False
+    led_sid = str(getattr(led, "session_id", "") or "").strip()
+    sid = str(session_id or "").strip()
+    if not sid or not led_sid:
+        # Anonymous runtime (CLI / unit fakes) or legacy ledger with no stamp:
+        # there is no sibling session to isolate from — keep old behaviour.
+        return True
+    if led_sid == sid:
+        return True
+    if not generic_continuation:
+        return False
+    ts = float(getattr(led, "updated_ts", 0.0) or 0.0)
+    if ts <= 0:
+        return False
+    t = time.time() if now is None else float(now)
+    return (t - ts) <= CROSS_SESSION_RESUME_WINDOW_S
 
 
 def _is_filesystem_path(path: str) -> bool:
@@ -305,6 +352,9 @@ class BuildTurnState:
     auto_verify_ran: bool = False
     project_path: str = ""
     resumed: bool = False
+    #: Chat session that started / continued this build. A sibling tab (or a
+    #: fresh chat after a long build) must never see this state as *its* build.
+    session_id: str = ""
     # Unverified mutation set (paths written since last green verify)
     write_set: list[str] = field(default_factory=list)
     required_files: list[str] = field(default_factory=list)
@@ -332,6 +382,13 @@ class BuildTurnState:
     away_mode: bool = False
     machine_injects: int = 0
     open_todo_count: int = 0
+    #: Open checklist rows that are product work, not "npm test green".
+    #: While this is > 0, auto-verify must not hijack the turn into fixing
+    #: the existing suite before the feature exists.
+    open_feature_todo_count: int = 0
+    #: Owner asked for the whole job (or we inherited that from the ledger).
+    #: Green tests are a checkpoint — tools stay on until the goal is actually done.
+    drive_to_done: bool = False
     # Auto-verify cooldown: only re-run after *source* writes past this watermark
     write_steps_at_last_green: int = 0
     # Ship phase (push / gh release)
@@ -479,14 +536,18 @@ class BuildTurnState:
         return not (needs_release and not self.ship_released)
 
     def advance_after_green(self) -> None:
-        """After green verify: ship phase if required, else done."""
+        """After green verify: ship if required, else stay in implement when
+        the owner's job is not actually finished, else done."""
         if self.missing_required_files():
             self.phase = "implement"
             return
         if self.ship_required and not self.ship_complete():
             self.phase = "ship"
-        else:
-            self.phase = "done"
+            return
+        if int(self.open_todo_count or 0) > 0 or bool(self.drive_to_done):
+            self.phase = "implement"
+            return
+        self.phase = "done"
 
     def ship_report(self) -> dict[str, Any]:
         """End-of-turn observability snapshot for UI/stream."""
@@ -534,6 +595,8 @@ class BuildTurnState:
             "auto_drive_ran": self.auto_drive_ran,
             "auto_repair_cycles": self.auto_repair_cycles,
             "open_todo_count": self.open_todo_count,
+            "open_feature_todo_count": self.open_feature_todo_count,
+            "drive_to_done": self.drive_to_done,
         }
 
 
@@ -585,13 +648,34 @@ def begin_build_turn(
         from remedy.core.away_mode import looks_like_away_request
 
         away = looks_like_away_request(message)
-    wants = force or looks_like_build_request(message) or away
+    finish_everything = False
+    with suppress(Exception):
+        from remedy.core.react_open_work import message_asks_to_finish_everything
+
+        finish_everything = message_asks_to_finish_everything(message)
+    prior_drive = False
+    prior_active = False
+    with suppress(Exception):
+        prev = get_build_state(runtime)
+        if prev is not None and getattr(prev, "active", False):
+            prior_active = True
+            prior_drive = bool(getattr(prev, "drive_to_done", False))
+    # A bare "keep going"/"proceed" is a continuation, not a new job — only
+    # resume an already-active drive. Stronger phrasing ("do all of those
+    # things", "until none remain") starts a finish-everything build even
+    # without a prior turn.
+    continuation = _is_generic_continuation(message)
+    strong_finish = finish_everything and not continuation
+    wants = force or looks_like_build_request(message) or away or strong_finish
+    if not wants and continuation and (prior_drive or prior_active):
+        wants = True
     if not force:
         with suppress(Exception):
             from remedy.core.react_policy import is_chat_only_message
 
             if is_chat_only_message(message):
                 return None
+    implement_from_review = False
     if not wants:
         # Still enable light supervision if open mission/tasks look like build
         with suppress(Exception):
@@ -599,6 +683,17 @@ def begin_build_turn(
             intent = str(getattr(brief, "intent", "") or "")
             if _BUILD_RE.search(intent):
                 wants = True
+    if not wants:
+        # "fix issues 1-10" after a review: those findings are the Build list.
+        with suppress(Exception):
+            from remedy.core.build_todos import has_open_review_finding_todos
+            from remedy.core.intent_policy import _CHANGE_VERB_RE
+
+            if _CHANGE_VERB_RE.search(message or "") and has_open_review_finding_todos(
+                runtime
+            ):
+                wants = True
+                implement_from_review = True
     if not wants:
         # Leftover open Build still drives the host this turn (no Ask pause).
         enable_build_host_drive(runtime)
@@ -624,19 +719,22 @@ def begin_build_turn(
         read_only = looks_like_readonly_request(goal_txt) and not looks_like_ship_goal(
             goal_txt
         )
+    if implement_from_review:
+        read_only = False
     st = BuildTurnState(
         active=True,
-        phase="scout",
+        phase="implement" if implement_from_review else "scout",
         goal=goal_txt,
         muscle_tier=muscle.label,
         max_serial_explore=explore_cap,
         read_only=read_only,
         require_green_to_finish=not read_only,
-        # Partner: always auto-verify after the first write (C hello.c must compile
-        # immediately; waiting for 2 writes left simple 1-file tasks unverified).
-        require_verify_after_writes=1,
+        # Full suites (npm test / pytest) wait for a real slice. C one-file
+        # still verifies on the first write via should_auto_verify(has_c).
+        require_verify_after_writes=2,
         ship_required=looks_like_ship_goal(goal_txt),
         away_mode=away,
+        drive_to_done=bool(finish_everything or (prior_drive and not read_only)),
         required_files=[
             m.group(1).replace("\\", "/")
             for m in _NAMED_FILE_RE.finditer(goal_txt)
@@ -650,6 +748,10 @@ def begin_build_turn(
         st.oracle_ok = bool(st.verify_command)
     with suppress(Exception):
         st.project_path = str(runtime.effective_project_path() or "")
+    with suppress(Exception):
+        from remedy.core.turn_context import turn_session_id
+
+        st.session_id = str(turn_session_id(runtime) or "").strip()
     # Resume mid-ship from disk ledger — only when a real project is bound.
     # Unbound/home-dir runtimes (incl. unit-test fakes) must NOT inherit a
     # stale cross-session ledger: that re-arms auto-verify with a real
@@ -692,6 +794,18 @@ def begin_build_turn(
             with suppress(Exception):
                 led = load_ledger(st.project_path or None, home=home, goal=None)
                 _cross_goal = led is not None
+        # Session scoping: another chat's build is resumed only by a bare
+        # "continue" shortly after it was touched. A new question in a fresh
+        # tab keeps the project's verify command but starts at scout.
+        if led is not None and not ledger_resume_allowed(
+            led,
+            session_id=st.session_id,
+            generic_continuation=_resume_goal is None,
+        ):
+            if led.verify_command and not st.verify_command:
+                st.verify_command = led.verify_command
+                st.oracle_ok = True
+            led = None
         if led is not None:
             # Always carry oracle / verify command (same project → same tests).
             if led.verify_command and not st.verify_command:
@@ -708,6 +822,8 @@ def begin_build_turn(
                 )
                 if led.last_verify_summary:
                     st.last_verify_summary = led.last_verify_summary
+            if not _cross_goal and getattr(led, "drive_to_done", False):
+                st.drive_to_done = True
         if led is not None and (
             led.phase not in ("done",)
             or (led.last_verify_ok is not True and led.write_steps > 0)
@@ -758,6 +874,16 @@ def begin_build_turn(
                 ]
                 if writes:
                     st.write_set = writes[-40:]
+    with suppress(Exception):
+        from remedy.core.build_todos import (
+            load_todos,
+            open_feature_todo_count,
+            open_todo_count,
+        )
+
+        _items = load_todos(runtime)
+        st.open_todo_count = open_todo_count(_items)
+        st.open_feature_todo_count = open_feature_todo_count(_items)
     with suppress(Exception):
         runtime._build_turn = st
     with suppress(Exception):
@@ -903,8 +1029,23 @@ def build_protocol_block(state: BuildTurnState) -> str:
             "a full build with the green gate)."
             f"{_coworkers_block()}"
         )
+    if (
+        not getattr(state, "read_only", False)
+        and str(getattr(state, "phase", "") or "") == "implement"
+        and int(getattr(state, "open_todo_count", 0) or 0) > 0
+    ):
+        return (
+            "[Task loop — IMPLEMENT the open Build list · hard rule]\n"
+            f"Goal: {state.goal or '(user request)'}\n"
+            "The numbered review findings are already on the Build checklist. "
+            "Implement them with file_write / file_edit. Read only the files those "
+            "items name. Do **not** start a whole-tree review as this hop. "
+            "Do **not** claim Issues 1–10 fixed while checklist rows are still open. "
+            "The full test suite waits until those product items exist."
+            f"{_coworkers_block()}"
+        )
     oracle = (
-        f"Oracle verify_command=`{state.verify_command}`"
+        f"Oracle (run AFTER product Build items are done): `{state.verify_command}`"
         if state.verify_command
         else "Oracle: NO verify command yet (fail closed until tests exist)"
     )
@@ -929,19 +1070,24 @@ def build_protocol_block(state: BuildTurnState) -> str:
         "2) PLAN: short checklist via open tasks / mission_start — machine-side, "
         "not a long essay unless the user asked plan-only.\n"
         "3) BUILD (implement): file_write for new files, file_edit multi-hunk for "
-        "changes; then VERIFY (bash_exec / job_run kind=verify / mission_verify); "
-        "REPAIR until green → DONE. Static HTML: files on disk is verify — do not "
-        "run pytest. To show the page: host_run `python -m http.server` in the "
-        "project folder, then computer_navigate http://127.0.0.1:8000/ ."
+        "changes. Do **not** run the project test suite (`npm test` / `pytest`) "
+        "until the current product checklist items are actually built — a red "
+        "suite mid-slice is noise, not the job. Static HTML: files on disk is "
+        "verify — do not run pytest. To show the page: host_run "
+        "`python -m http.server` in the project folder, then computer_navigate "
+        "http://127.0.0.1:8000/ ."
         f"{ship}\n"
         "YOU DRIVE THIS PC this turn (Ask is skipped; jail/auth/Plan stay). "
         "Do not call help_list or goal_add. Do not ask permission. "
         "Use file_read / file_write / host_run / bash_exec now. "
-        "Machine loop: todo_write a short checklist, then write and verify. "
-        "The machine will force implement after scout and auto-verify after writes. "
+        "Machine loop: todo_write a short checklist covering the WHOLE goal, "
+        "then implement item by item. Green tests are a checkpoint **after** "
+        "the slice exists — do not stop to report or to chase the suite after "
+        "one hop while checklist items remain. "
+        "The machine will force implement after scout. It will not auto-run "
+        "the existing suite while product Build items are still open. "
         "Never monologue a plan without tool_calls. Never explore one file per step. "
-        f"Serial explore cap before forced implement: {state.max_serial_explore}. "
-        f"Writes before auto-verify: {state.require_verify_after_writes}."
+        f"Serial explore cap before forced implement: {state.max_serial_explore}."
         f"{_coworkers_block()}"
     )
 
@@ -951,29 +1097,53 @@ def _tool_name(tc: dict[str, Any]) -> str:
     return str((fn or {}).get("name") or tc.get("name") or "").strip().lower()
 
 
-def _args_path(tc: dict[str, Any]) -> str:
+def _args_obj(tc: dict[str, Any]) -> dict[str, Any]:
     fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
-    raw = (fn or {}).get("arguments") or "{}"
-    try:
-        import json
+    raw = tc.get("arguments") or tc.get("args") or (fn or {}).get("arguments") or {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        with suppress(Exception):
+            import json
 
-        obj = json.loads(raw) if isinstance(raw, str) else dict(raw)
-        if isinstance(obj, dict):
-            for k in ("path", "file", "filepath", "target", "workdir"):
-                if obj.get(k):
-                    return str(obj[k])[:240]
-            cmd = str(obj.get("command") or "")
-            if cmd:
-                return cmd[:120]
-    except Exception:
-        pass
+            obj = json.loads(raw)
+            if isinstance(obj, dict):
+                return obj
+    return {}
+
+
+def _args_path(tc: dict[str, Any]) -> str:
+    obj = _args_obj(tc)
+    for k in ("path", "file", "filepath", "target", "workdir"):
+        if obj.get(k):
+            return str(obj[k])[:240]
+    argv = obj.get("argv")
+    if isinstance(argv, (list, tuple)) and argv:
+        return " ".join(str(a) for a in argv)[:120]
+    cmd = str(obj.get("command") or "")
+    if cmd:
+        return cmd[:120]
     return ""
+
+
+def _tool_command_blob(tc: dict[str, Any]) -> str:
+    """Command text for verify classification — argv list becomes ``npm test``."""
+    obj = _args_obj(tc)
+    argv = obj.get("argv")
+    if isinstance(argv, (list, tuple)) and argv:
+        return " ".join(str(a) for a in argv).lower()
+    cmd = str(obj.get("command") or "")
+    if cmd:
+        return cmd.lower()
+    raw = str((tc.get("function") or {}).get("arguments") or "")
+    return (raw + " " + _args_path(tc)).lower()
 
 
 def observe_tool_batch(
     state: BuildTurnState,
     tool_calls: list[dict[str, Any]] | None,
     tool_messages: list[dict[str, Any]] | None = None,
+    runtime: Any = None,
 ) -> None:
     """Update phase counters from a completed tool batch."""
     if not state.active:
@@ -998,12 +1168,8 @@ def observe_tool_batch(
             any_verify = True
             if tid:
                 verify_ids.add(tid)
-        elif n in ("bash_exec", "shell_exec", "job_run"):
-            blob = (
-                _args_path(tc)
-                + " "
-                + str((tc.get("function") or {}).get("arguments") or "")
-            ).lower()
+        elif n in ("bash_exec", "shell_exec", "job_run", "host_run"):
+            blob = _tool_command_blob(tc)
             if _blob_is_verify_command(blob):
                 any_verify = True
                 if tid:
@@ -1085,6 +1251,10 @@ def observe_tool_batch(
             tid = str(tc.get("id") or tc.get("tool_call_id") or "")
             if _tool_name(tc) in _WRITE_TOOLS and not (tid and tid in empty_write_ids):
                 state.mark_write(p)
+                with suppress(Exception):
+                    from remedy.memory.harness.hot_writes import record_hot_write
+
+                    record_hot_write(runtime, p, tool=_tool_name(tc))
                 if _is_source_path(p):
                     source_write_this_batch = True
                 # Successful write of a previously empty path
@@ -1095,7 +1265,9 @@ def observe_tool_batch(
     with suppress(Exception):
         from remedy.core.build_todos import sync_todos_with_build
 
-        sync_todos_with_build(None, state)
+        # Pass runtime so save_todos can queue @@todos for the live Build list.
+        # runtime=None used to update disk and leave the on-screen checklist stuck.
+        sync_todos_with_build(runtime, state)
 
     # Body coordination heartbeat — every tool wave keeps this muscle's beacon
     # fresh so a live build never loses its claims mid-work. Mid-turn the true
@@ -1198,6 +1370,11 @@ def observe_tool_batch(
             continue
         low = content[:800].lower()
         if "approval_required" in low or "write_jail" in low:
+            continue
+        if "verify_deferred" in low or "verify_cached" in low:
+            # Cached/deferred suite is not a new red or a fresh green.
+            if "verify_cached" in low and "exit_code=0" in low:
+                saw_green = True
             continue
         if "started background" in low:
             continue
@@ -1370,12 +1547,15 @@ def next_machine_nudge(state: BuildTurnState) -> dict[str, str] | None:
 
         return oracle_missing_nudge(state)
 
-    # Writes without verify (model path — auto-verify may also run)
+    # Writes without verify (model path — auto-verify may also run).
+    # Skip while product checklist items remain — the suite is not the job yet.
+    _feature_open = int(getattr(state, "open_feature_todo_count", 0) or 0)
     if (
         state.write_steps >= state.require_verify_after_writes
         and state.verify_steps == 0
         and not state.auto_verify_ran
         and "force_verify" not in state.nudges_emitted
+        and (_wrote_c_source(state) or _feature_open <= 0)
     ):
         state.nudges_emitted.append("force_verify")
         state.phase = "verify"
@@ -1492,12 +1672,24 @@ def get_build_state(runtime: Any) -> BuildTurnState | None:
         return None
     key = _session_build_key(runtime)
     m = _build_turns_map(runtime)
-    if m is not None:
-        st = m.get(key)
-        return st if isinstance(st, BuildTurnState) else None
     # Legacy tests / pre-map runtimes stamp a single slot.
-    st = getattr(runtime, "_build_turn", None)
-    return st if isinstance(st, BuildTurnState) else None
+    st = m.get(key) if m is not None else getattr(runtime, "_build_turn", None)
+    if not isinstance(st, BuildTurnState):
+        return None
+    return st if build_state_owned_by(st, key) else None
+
+
+def build_state_owned_by(state: Any, session_id: str | None) -> bool:
+    """True when *state* was started by *session_id* (or either is unstamped)."""
+    if state is None:
+        return False
+    st_sid = str(getattr(state, "session_id", "") or "").strip()
+    sid = str(session_id or "").strip()
+    if sid == "_anon":
+        sid = ""
+    if not st_sid or not sid:
+        return True
+    return st_sid == sid
 
 
 def should_force_tools_for_build(runtime: Any, message: str) -> bool:
@@ -1517,9 +1709,14 @@ def should_force_tools_for_build(runtime: Any, message: str) -> bool:
 
 
 def build_has_open_drive(state: BuildTurnState | None) -> bool:
-    """Open checklist or unfinished ship — do not surrender at the reopen cap."""
+    """Open checklist, unfinished ship, or a finish-everything drive.
+
+    Do not surrender at the reopen cap while the owner's job is still open.
+    """
     if state is None or not getattr(state, "active", False):
         return False
+    if bool(getattr(state, "drive_to_done", False)):
+        return True
     return int(getattr(state, "open_todo_count", 0) or 0) > 0 or (
         bool(getattr(state, "ship_required", False)) and not state.ship_complete()
     )
@@ -1588,6 +1785,12 @@ def build_blocks_final_answer(state: BuildTurnState | None) -> bool:
     # Empty writes / named goal files still missing — never claim done.
     if state.empty_write_paths or state.missing_required_files():
         return True
+    open_n = int(getattr(state, "open_todo_count", 0) or 0)
+    # Checklist already started (or finish-everything drive) — "say go" / Done
+    # with open rows is not a finished build. Session 765c ended "**Done**"
+    # with four pending Build-list items.
+    if open_n > 0:
+        return True
     # Never started writing — monologue block handles; allow chat abandon
     if state.write_steps == 0 and state.verify_steps == 0 and not state.ship_required:
         return False
@@ -1606,16 +1809,36 @@ def build_blocks_final_answer(state: BuildTurnState | None) -> bool:
     if state.ship_required and state.last_verify_ok is True and not state.ship_complete():
         return True
     if state.last_verify_ok is True and not state.write_set and state.ship_complete():
-        # Still refuse DONE while the machine checklist is open
-        return int(getattr(state, "open_todo_count", 0) or 0) > 0
+        return False
     # Wrote code or failed verify → cannot finish without green
     if state.write_steps > 0 and state.last_verify_ok is not True:
         return True
     if state.source_writes_pending() and state.last_verify_ok is not True:
         return True
-    if int(getattr(state, "open_todo_count", 0) or 0) > 0 and state.write_steps > 0:
-        return True
     return state.syntax_ok is False
+
+
+def build_blocks_done_summary(state: BuildTurnState | None) -> bool:
+    """Keep-agency path: refuse a 'Done' summary while required work remains.
+
+    Unlike ``build_blocks_final_answer`` this does **not** trap a write that
+    has not verified yet — tools are still on, so she can keep going. It
+    catches the session-765c failure: '**Done**' with an open Build list
+    (or missing files / unfinished ship).
+    """
+    if state is None or not state.active:
+        return False
+    if not state.require_green_to_finish:
+        return False
+    if state.empty_write_paths or (
+        hasattr(state, "missing_required_files") and state.missing_required_files()
+    ):
+        return True
+    if int(getattr(state, "open_todo_count", 0) or 0) > 0:
+        return True
+    if state.ship_required and not state.ship_complete():
+        return True
+    return False
 
 
 def unfinished_green_gate_message(state: BuildTurnState) -> dict[str, str]:
@@ -1636,14 +1859,26 @@ def unfinished_green_gate_message(state: BuildTurnState) -> dict[str, str]:
                 "Refactor-only: do not rewrite green code to thrash auto-verify."
             ),
         }
-    if int(getattr(state, "open_todo_count", 0) or 0) > 0 and state.last_verify_ok is True:
+    if int(getattr(state, "open_todo_count", 0) or 0) > 0:
+        if int(state.write_steps or 0) == 0:
+            return {
+                "role": "user",
+                "content": (
+                    "[Build engine · TODO GATE · refuse scout-only DONE]\n"
+                    f"{state.open_todo_count} checklist item(s) still pending. "
+                    "Do not ask the owner to say go. Implement the first open "
+                    "item now (file_write / file_edit), todo_write it in_progress, "
+                    "then the next. Tools stay on."
+                ),
+            }
         return {
             "role": "user",
             "content": (
                 "[Build engine · TODO GATE · refuse DONE]\n"
                 f"{state.open_todo_count} checklist item(s) still pending. "
-                "todo_write them completed (or cancelled with a reason), then summarize. "
-                "Do not claim finished with open todos."
+                "todo_write the one you just finished as completed, put the "
+                "next in_progress, and keep building. Do not claim finished "
+                "with an open Build list."
             ),
         }
     if has_c:
@@ -1679,16 +1914,27 @@ _PLAY_AFTER_GREEN_RE = re.compile(
 def can_machine_inject(
     state: BuildTurnState | None,
     *,
-    cap: int = 4,
+    cap: int | None = None,
     consume: bool = True,
 ) -> bool:
     """Bound stacked machine nudges so one batch cannot flood the turn.
 
     Peek with ``consume=False`` so a no-op (auto-drive declined) does not
-    burn a slot and starve later repair/observe.
+    burn a slot and starve later repair/observe. A finish-everything drive
+    or open checklist gets a higher cap so keep-going turns are not muted
+    after four machine cards.
     """
     if state is None:
         return False
+    if cap is None:
+        cap = (
+            12
+            if (
+                bool(getattr(state, "drive_to_done", False))
+                or int(getattr(state, "open_todo_count", 0) or 0) > 0
+            )
+            else 4
+        )
     n = int(getattr(state, "machine_injects", 0) or 0)
     if n >= cap:
         return False
@@ -1701,20 +1947,37 @@ def keep_agency_after_green(
     state: BuildTurnState | None,
     user_message: str = "",
 ) -> bool:
-    """True when green verify must NOT strip tools (ship / play / iterate)."""
+    """True when green verify must NOT strip tools.
+
+    Tests passing is a checkpoint. Tools come off only when nothing remains:
+    no open todos, no unfinished ship, no finish-everything drive, no play/
+    visual follow-up. Session 765c: one file_edit → npm test green →
+    ``GREEN · stop building`` → "**Still open:** …" nine hops in a row.
+    """
     if state is None or not state.active:
         return False
     if state.ship_required and not state.ship_complete():
         return True
-    if getattr(state, "away_mode", False) and int(getattr(state, "open_todo_count", 0) or 0) > 0:
+    if int(getattr(state, "open_todo_count", 0) or 0) > 0:
         return True
+    if bool(getattr(state, "drive_to_done", False)):
+        return True
+    if state.empty_write_paths or (
+        hasattr(state, "missing_required_files") and state.missing_required_files()
+    ):
+        return True
+    blob = f"{state.goal or ''} {user_message or ''}"
+    with suppress(Exception):
+        from remedy.core.react_open_work import message_asks_to_finish_everything
+
+        if message_asks_to_finish_everything(blob):
+            return True
     with suppress(Exception):
         from remedy.core.companion_observe import write_set_looks_visual
 
         if write_set_looks_visual(list(state.write_set or []), state.goal or ""):
             if not getattr(state, "visual_observe_ran", False):
                 return True
-    blob = f"{state.goal or ''} {user_message or ''}"
     return bool(_PLAY_AFTER_GREEN_RE.search(blob))
 
 
@@ -1723,6 +1986,28 @@ def green_continue_message(state: BuildTurnState, *, command: str = "") -> dict[
     cmd = command or state.verify_command or ""
     if keep_agency_after_green(state):
         if not (state.ship_required and not state.ship_complete()):
+            open_n = int(getattr(state, "open_todo_count", 0) or 0)
+            if open_n > 0 or bool(getattr(state, "drive_to_done", False)):
+                extra = (
+                    f"{open_n} checklist item(s) still open. "
+                    if open_n > 0
+                    else "The owner's goal is not finished. "
+                )
+                return {
+                    "role": "user",
+                    "content": (
+                        "[Build engine · GREEN · keep going]\n"
+                        f"Machine verify passed: `{cmd}`.\n"
+                        "That is a checkpoint, not the finish line. "
+                        f"{extra}"
+                        "Do **not** rewrite working tests. Do **not** stop to report. "
+                        "todo_write the item you just finished as completed, then "
+                        "the next open item as in_progress, so the Build list on "
+                        "screen moves. Then implement, verify, next — until the "
+                        "owner's goal is actually done.\n"
+                        "Tools stay on."
+                    ),
+                }
             return {
                 "role": "user",
                 "content": (

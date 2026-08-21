@@ -14,6 +14,8 @@ import {
 } from './workspace/layoutPrefs'
 import { SLIDE_META, type SlideId } from './workspace/types'
 import { PlanBanner } from './components/PlanBanner'
+import { ConfirmDialog } from './components/ConfirmDialog'
+import { cancelPlan, type TaskPlan } from './api/plans'
 import { LibrarySuggestChip } from './components/LibrarySuggestChip'
 import { TokenCostTicker } from './components/TokenCostTicker'
 import {
@@ -275,6 +277,23 @@ export default function App() {
     },
     [activeId],
   )
+  /** Latest actionable plan for the active session (reported by PlanBanner). */
+  const currentPlanRef = useRef<TaskPlan | null>(null)
+  const onPlanChange = useCallback((p: TaskPlan | null) => {
+    currentPlanRef.current = p
+  }, [])
+  /** Leaving Plan mode with a draft on file asks Keep draft / Discard. */
+  const [planLeaveConfirm, setPlanLeaveConfirm] = useState<TaskPlan | null>(null)
+  const togglePlanMode = useCallback(() => {
+    if (!activeId) return
+    const cur = Boolean(planModeBySession[activeId])
+    const draft = currentPlanRef.current
+    if (cur && draft?.id && String(draft.status || 'draft').toLowerCase() === 'draft') {
+      setPlanLeaveConfirm(draft)
+      return
+    }
+    setPlanMode(!cur)
+  }, [activeId, planModeBySession, setPlanMode])
   const [panel, setPanel] = useState<'memory' | 'skills' | 'settings' | null>(null)
   const {
     wsLayout,
@@ -1046,6 +1065,26 @@ export default function App() {
   })
   const studioSpeakReplies = studioVoice.status?.settings?.speak_replies ?? false
   const [groveSpeaking, setGroveSpeaking] = useState(false)
+  // Plan card live refresh: bump when a plan_* tool finishes in the stream
+  // or the turn ends (plan_save / plan_step_status land in the store).
+  const planToolDone = useMemo(
+    () =>
+      processSteps.filter(
+        (st) => /^plan_/i.test(st.name || '') && st.status !== 'running',
+      ).length,
+    [processSteps],
+  )
+  const [planRefreshSignal, setPlanRefreshSignal] = useState(0)
+  const planToolDonePrevRef = useRef(planToolDone)
+  const planStreamPrevRef = useRef(streaming)
+  useEffect(() => {
+    const toolBump = planToolDone !== planToolDonePrevRef.current
+    const turnEnded = planStreamPrevRef.current && !streaming
+    planToolDonePrevRef.current = planToolDone
+    planStreamPrevRef.current = streaming
+    if (toolBump || turnEnded) setPlanRefreshSignal((n) => n + 1)
+  }, [planToolDone, streaming])
+
   const studioSpeakPrevRef = useRef(false)
   useEffect(() => {
     if (serverState !== 'ready') return
@@ -1131,7 +1170,7 @@ export default function App() {
         action: () => void handleImport(),
       },
       { id: 'palette', label: 'Command palette', description: 'Open this palette', category: 'general', action: () => setPaletteOpen(true) },
-      { id: 'plan', label: 'Toggle Plan / Build', description: 'Switch between plan and build', category: 'general', action: () => setPlanMode((p) => !p) },
+      { id: 'plan', label: 'Toggle Plan / Build', description: 'Switch between plan and build', category: 'general', action: () => togglePlanMode() },
       { id: 'memory', label: 'Memory', description: 'Toggle memory panel', category: 'panel', action: () => setPanel((p) => (p === 'memory' ? null : 'memory')) },
       { id: 'skills', label: 'Skills', description: 'Toggle skills panel', category: 'panel', action: () => setPanel((p) => (p === 'skills' ? null : 'skills')) },
       { id: 'settings', label: 'Settings', description: 'Open Settings', category: 'panel', action: () => openSettings() },
@@ -1197,12 +1236,12 @@ export default function App() {
     activeId,
     openHelp,
     openSettings,
-    setPlanMode,
+    togglePlanMode,
   ])
 
   // Wire global shortcuts from hotkeys.ts (single source of truth for labels + keys).
   const globalShortcuts: ShortcutDef[] = useMemo(() => {
-    const togglePlan = () => setPlanMode((p) => !p)
+    const togglePlan = () => togglePlanMode()
     // Studio-only shortcuts are no-ops in Grove — they mutate the hidden
     // Studio layout / plan mode with no visible effect and would confuse a
     // partner-surface user (reviewer: Grove polish #1).
@@ -1257,7 +1296,7 @@ export default function App() {
       })
     }
     return out
-  }, [handleNewSession, openHelp, helpOpen, groveSettingsOpen, openSettings, setPlanMode, bumpFontScale, setFontScale, surface])
+  }, [handleNewSession, openHelp, helpOpen, groveSettingsOpen, openSettings, togglePlanMode, bumpFontScale, setFontScale, surface])
 
   useKeyboardShortcuts(globalShortcuts)
 
@@ -1736,7 +1775,7 @@ export default function App() {
                 ? sessions.find((s) => s.id === activeId)?.message_count
                 : messages.length
             }
-            onTogglePlanMode={() => setPlanMode((p) => !p)}
+            onTogglePlanMode={togglePlanMode}
           />
 
           <div style={{ position: 'relative', zIndex: 6 }}>
@@ -1744,19 +1783,30 @@ export default function App() {
             <PlanBanner
               planMode={planMode}
               sessionId={activeId}
-              onApproveBuild={() => {
+              streaming={streaming}
+              refreshSignal={planRefreshSignal}
+              onPlanChange={onPlanChange}
+              onApproveBuild={({ edit }) => {
                 // Leave Plan mode → Build. Banner hides once status is
                 // approved/active so the plan card does not stick over chat
                 // while implementation is in motion (re-open Plan via Ctrl+B).
                 setPlanMode(false)
-                setEditDraft({
-                  text: 'Implement the approved plan. Follow the saved steps carefully.',
-                  key: Date.now(),
-                })
+                const text = 'Implement the approved plan. Follow the saved steps carefully.'
+                if (edit) {
+                  // Shift+click: pre-fill so the owner can add to it.
+                  setEditDraft({ text, key: Date.now() })
+                  return
+                }
+                // One click = sent. handleSend treats "implement" as a build
+                // kick so the turn runs with Build tools even before the
+                // planMode state above has re-rendered.
+                void handleSend(text)
               }}
               onRequestChanges={(hint) => {
                 setPlanMode(true)
+                // Composer focuses + places the caret at the end on editDraft.
                 setEditDraft({ text: hint, key: Date.now() })
+                composerRef.current?.focus()
               }}
               onCancelled={() => {
                 // Durable cancel already persisted; leave Plan mode so tools unlock.
@@ -1893,7 +1943,7 @@ export default function App() {
               onUpdateQueued={updateQueued}
               disabled={serverState !== 'ready'}
               planMode={planMode}
-              onTogglePlanMode={() => setPlanMode((p) => !p)}
+              onTogglePlanMode={togglePlanMode}
               agents={agentDefs}
               editDraft={editDraft}
               sessionId={activeId}
@@ -2070,7 +2120,7 @@ export default function App() {
           theme={theme}
           onThemeChange={setTheme}
           planMode={planMode}
-          onTogglePlanMode={() => setPlanMode((p) => !p)}
+          onTogglePlanMode={togglePlanMode}
           panel={
             wsLayout.right === 'settings' && wsLayout.rightRail === 'open'
               ? 'settings'
@@ -2208,6 +2258,36 @@ export default function App() {
         if (!pending) return
         skipConcurrentConfirmRef.current = true
         void handleSend(pending.text, pending.attachments, pending.opts)
+      }}
+    />
+
+    <ConfirmDialog
+      open={Boolean(planLeaveConfirm)}
+      title="Leave Plan mode?"
+      body={
+        planLeaveConfirm
+          ? `The draft plan "${planLeaveConfirm.title}" is still waiting for approval.
+
+Keep it and you can Approve → Build later from the plan card. Discard cancels it for good.`
+          : ''
+      }
+      confirmLabel="Discard"
+      cancelLabel="Keep draft"
+      danger
+      onCancel={() => {
+        // Keep draft: leave Plan mode, plan stays on file (card shows "Plan ready").
+        setPlanLeaveConfirm(null)
+        setPlanMode(false)
+      }}
+      onConfirm={() => {
+        const p = planLeaveConfirm
+        setPlanLeaveConfirm(null)
+        if (p?.id) {
+          void cancelPlan(p.id).catch(() => {})
+          currentPlanRef.current = null
+          setPlanRefreshSignal((n) => n + 1)
+        }
+        setPlanMode(false)
       }}
     />
 

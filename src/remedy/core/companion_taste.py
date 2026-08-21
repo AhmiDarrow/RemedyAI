@@ -14,6 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.home import default_home
 
 _TASTE_HINT = re.compile(
     r"(?i)\b("
@@ -29,7 +30,7 @@ def _home(runtime: Any = None) -> Path:
         h = getattr(getattr(runtime, "config", None), "home_dir", None)
         if h:
             return Path(h)
-    return Path.home() / ".remedy"
+    return default_home()
 
 
 def _path(runtime: Any = None) -> Path:

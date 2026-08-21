@@ -18,6 +18,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from remedy.home import default_home
+
 logger = logging.getLogger(__name__)
 
 
@@ -95,7 +97,7 @@ class LocalComputerHost:
             "home": str(
                 Path(self.home_dir).expanduser()
                 if self.home_dir
-                else Path.home() / ".remedy"
+                else default_home()
             ),
         }
 

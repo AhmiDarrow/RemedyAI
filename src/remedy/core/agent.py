@@ -41,6 +41,7 @@ from remedy.core.react_policy import (
     tool_content_is_error,
 )
 from remedy.core.runtime import AgentRuntime
+from remedy.core.tool_timeouts import tool_timeout_for
 from remedy.core.workspace import (
     allowed_roots_for_scope,
     effective_access_scope,
@@ -49,7 +50,6 @@ from remedy.core.workspace import (
     is_unset_project_path,
     normalize_access_scope,
     resolve_project_path,
-    resolve_under_roots,
     write_roots_for_scope,
 )
 from remedy.memory.store import MemoryStore
@@ -334,62 +334,60 @@ class BasicRuntime(AgentRuntime):
         )
 
     def write_roots(self) -> list[Path]:
-        """Mutation roots — project-only under project/untrusted scope."""
+        """Mutation roots — follow the owner's access_scope (project|home|full)."""
         return write_roots_for_scope(
             self.access_scope(), self.effective_project_path()
         )
 
-    def resolve_tool_path(self, path: str, *, for_write: bool = False) -> Path:
-        """Resolve a tool path under read roots, or write roots when *for_write*.
+    def _effective_write_approval(self) -> str:
+        """Approval mode that governs this turn's writes.
 
-        Reads/research may use broader roots (e.g. Desktop under project scope).
-        Writes/edits/shell cwd must pass ``for_write=True`` so a bound project
-        cannot be escaped via profile folders or a lingering ``full`` scope
-        absolute-path bypass.
+        In-flight turns keep the mode from begin_turn. A mid-turn Settings
+        switch to Full must not lift this turn's jail.
         """
-        if for_write:
-            roots = self.write_roots()
-            scope = self.access_scope()
-            from remedy.core.approvals import APPROVALS, normalize_approval_mode
+        from remedy.core.approvals import APPROVALS, normalize_approval_mode
 
-            # In-flight turns keep the mode from begin_turn. A mid-turn
-            # Settings switch to Full must not lift this turn's jail.
-            try:
-                from remedy.core.turn_context import current_turn_approval_mode
+        try:
+            from remedy.core.turn_context import current_turn_approval_mode
 
-                snapped = current_turn_approval_mode()
-            except Exception:
-                snapped = None
-            if snapped:
-                approval = normalize_approval_mode(snapped)
-            else:
-                approval = normalize_approval_mode(APPROVALS.mode)
-                if approval != "full":
-                    approval = normalize_approval_mode(
-                        getattr(self, "_approval_mode", None)
-                    )
-            # Full (warn): owner granted machine-wide control — do not jail
-            # writes to the focus folder. Auth secrets still refuse below.
-            if approval == "full":
-                return resolve_under_roots(
-                    path or ".", roots or [self.effective_project_path()],
-                    access_scope="full",
-                )
-            # With a real project bound, never apply the full absolute bypass
-            # for mutations — enforce write_roots membership strictly.
-            if not self.project_path_is_unset():
-                enforce = "home" if scope == "home" else "project"
-                return resolve_under_roots(
-                    path or ".", roots, access_scope=enforce
-                )
-            # No project → full machine writes (owner PC mode).
-            return resolve_under_roots(
-                path or ".", roots, access_scope="full"
+            snapped = current_turn_approval_mode()
+        except Exception:
+            snapped = None
+        if snapped:
+            return normalize_approval_mode(snapped)
+        approval = normalize_approval_mode(APPROVALS.mode)
+        if approval != "full":
+            approval = normalize_approval_mode(
+                getattr(self, "_approval_mode", None)
             )
-        return resolve_under_roots(
+        return approval
+
+    def resolve_tool_path(self, path: str, *, for_write: bool = False) -> Path:
+        """Resolve a tool path: reads are never jailed; writes follow write roots.
+
+        Contract (see ``shell_write_jail`` module docstring): reads resolve
+        anywhere the OS user can open (except ``untrusted`` scope); writes /
+        edits / shell cwd for mutations pass ``for_write=True`` and are jailed
+        to :meth:`write_roots` — project → project only, home → project +
+        home, full (or Approvals → Full, or no project bound) → machine-wide.
+        Auth secrets and Remedy's own installed code are refused always.
+        """
+        from remedy.core.workspace import resolve_read_path, resolve_write_path
+
+        scope = self.access_scope()
+        if for_write:
+            roots = self.write_roots() or [self.effective_project_path()]
+            return resolve_write_path(
+                path or ".",
+                roots=roots,
+                access_scope=scope,
+                approval_mode=self._effective_write_approval(),
+                project_bound=not self.project_path_is_unset(),
+            )
+        return resolve_read_path(
             path or ".",
-            self.allowed_roots(),
-            access_scope=self.access_scope(),
+            roots=self.allowed_roots(),
+            access_scope=scope,
         )
 
     def set_project_path(self, path: str | Path | None, *, as_default: bool = False) -> Path:
@@ -753,10 +751,19 @@ class BasicRuntime(AgentRuntime):
             # First positional must NOT be called "name" — many tools take a
             # `name` argument (skill_activate, skill_run) and would raise
             # TypeError: multiple values for argument 'name'.
-            result = await self.tool_registry.execute(
+            # Per-tool wall clock: a handler that blocks forever (a runaway
+            # walk, a hung embedder) used to hang the whole turn. Tools that
+            # carry their own, longer timeouts (host_run, builds, jobs) are
+            # left alone — see ``tool_timeout_for``.
+            _budget = tool_timeout_for(name, self.tool_registry)
+            _coro = self.tool_registry.execute(
                 tool_name=name,
                 **(tool_call.arguments or {}),
             )
+            if _budget:
+                result = await asyncio.wait_for(_coro, timeout=_budget)
+            else:
+                result = await _coro
             # Workspace tools often return Error-prefixed strings on soft failure;
             # still count as handler success, but surface metrics for recovery telemetry.
             if isinstance(result, str) and tool_content_is_error(result):
@@ -770,6 +777,27 @@ class BasicRuntime(AgentRuntime):
                 call_id=tool_call.id,
                 success=True,
                 data=result,
+                duration_ms=(_time.perf_counter() - t0) * 1000,
+            )
+        except TimeoutError:
+            default_registry.counter("remedy_tool_errors_total", tool=name).inc()
+            default_registry.counter("remedy_tool_timeouts_total", tool=name).inc()
+            default_registry.histogram(
+                "remedy_tool_duration_seconds", tool=name
+            ).observe(_time.perf_counter() - t0)
+            logger.warning("Tool %s timed out after %.0fs", name, _budget)
+            return ToolResult(
+                call_id=tool_call.id,
+                success=False,
+                error=format_tool_error(
+                    f"{name} did not finish within {_budget:.0f}s and was cancelled",
+                    code="TOOL_TIMEOUT",
+                    tool_name=name,
+                    suggestion=(
+                        "Narrow the request (smaller path=, fewer results, a "
+                        "shorter query) or use a tool with an explicit timeout."
+                    ),
+                ),
                 duration_ms=(_time.perf_counter() - t0) * 1000,
             )
         except SecurityError as e:

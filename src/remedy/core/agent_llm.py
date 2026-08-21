@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -23,18 +24,74 @@ def _sleev_force(runtime: Any) -> bool:
         return bool(getattr(runtime, "_sleev_force_direct", False))
 
 # Shared session for LLM API calls — avoids per-call TLS handshake overhead.
+#
+# This module OWNS the one aiohttp session every LLM request path uses. The
+# ReAct loop used to build its own ``ClientSession`` + ``TCPConnector`` per
+# turn next to this one; with two pools in play a turn aborted mid-request
+# left the per-turn pool half-closed ("Unclosed client session",
+# ``ConnectionResetError`` at step boundaries). One owner, one close.
 _shared_session: aiohttp.ClientSession | None = None
+_shared_loop: asyncio.AbstractEventLoop | None = None
+
+#: Pool shape shared by every request path. Per-request ``timeout=`` always
+#: overrides the session default; the default is a generous ceiling so a
+#: caller that forgets still cannot hang forever.
+SESSION_CONNECTOR_LIMIT = 24
+SESSION_DNS_TTL_S = 300
+SESSION_DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=3_600, sock_read=900, connect=60)
 
 
-def _get_shared_session() -> aiohttp.ClientSession:
-    """Return a shared aiohttp session, creating it lazily if needed."""
-    global _shared_session
-    if _shared_session is None or _shared_session.closed:
-        # Default 120s: local RMB first tool-prime prefill can exceed 60s.
-        _shared_session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=120),
-        )
+def get_shared_session() -> aiohttp.ClientSession:
+    """Return the process-wide aiohttp session, creating it lazily.
+
+    A session is bound to the loop that created it. When the loop changed
+    (tests, a restarted server loop) the stale session is closed on its own
+    loop where possible and a fresh one is built for the current loop.
+    """
+    global _shared_session, _shared_loop
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    sess = _shared_session
+    if sess is not None and not sess.closed and (loop is None or _shared_loop is loop):
+        return sess
+    if sess is not None and not sess.closed:
+        _close_on_owner_loop(sess, _shared_loop)
+    _shared_session = aiohttp.ClientSession(
+        timeout=SESSION_DEFAULT_TIMEOUT,
+        connector=aiohttp.TCPConnector(
+            limit=SESSION_CONNECTOR_LIMIT,
+            ttl_dns_cache=SESSION_DNS_TTL_S,
+        ),
+    )
+    _shared_loop = loop
     return _shared_session
+
+
+# Back-compat name for older call sites.
+_get_shared_session = get_shared_session
+
+
+def _close_on_owner_loop(
+    sess: aiohttp.ClientSession, owner: asyncio.AbstractEventLoop | None
+) -> None:
+    """Close *sess* on the loop that owns it; detach the connector otherwise."""
+    try:
+        if owner is not None and not owner.is_closed():
+            if owner.is_running():
+                fut = asyncio.run_coroutine_threadsafe(sess.close(), owner)
+                with contextlib.suppress(Exception):
+                    fut.result(timeout=2.0)
+                return
+            owner.run_until_complete(sess.close())
+            return
+    except Exception:
+        pass
+    # Owner loop gone: the session cannot be closed cleanly; detach so the
+    # connector does not try to finalize on a dead loop.
+    with contextlib.suppress(Exception):
+        sess.detach()
 
 
 def _llm_timeout(bind: Any) -> aiohttp.ClientTimeout:
@@ -69,12 +126,24 @@ _closing: set[asyncio.Task] = set()
 
 
 async def aclose_shared_session() -> None:
-    """Close the shared session. Await this on shutdown."""
-    global _shared_session
+    """Close the shared session. Await this on shutdown (API lifespan does)."""
+    global _shared_session, _shared_loop
     session, _shared_session = _shared_session, None
-    if session is not None and not session.closed:
-        with contextlib.suppress(Exception):
-            await session.close()
+    owner, _shared_loop = _shared_loop, None
+    if session is None or session.closed:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if owner is not None and loop is not owner:
+        _close_on_owner_loop(session, owner)
+        return
+    with contextlib.suppress(Exception):
+        await session.close()
+
+
+aclose = aclose_shared_session
 
 
 def close_shared_session() -> None:
@@ -90,8 +159,9 @@ def close_shared_session() -> None:
 
     Prefer ``aclose_shared_session`` where you can await.
     """
-    global _shared_session
+    global _shared_session, _shared_loop
     session, _shared_session = _shared_session, None
+    _shared_loop = None
     if session is None or session.closed:
         return
     try:
@@ -326,13 +396,80 @@ def tools_for_binding(
 async def post_chat(
     runtime: Any,
     body: dict[str, Any],
+    *,
+    step: int | None = None,
 ) -> dict[str, Any] | str:
     """POST chat completions; one xAI re-auth attempt on 401/403.
 
     Uses per-turn ``LlmBinding`` (ContextVar) so concurrent multi-provider
     turns do not share host/key/model. May update ``runtime._llm_api_key``
     and the turn binding after a successful OAuth refresh.
+
+    Every outcome — success, HTTP error, abort, exception — emits one
+    ``remedy.llm`` line (see :mod:`remedy.core.llm_log`).
     """
+    import time as _time
+
+    from remedy.core.llm_binding import get_llm_binding
+    from remedy.core.llm_log import count_tool_calls, log_llm_call
+
+    bind = get_llm_binding(runtime)
+    sid = None
+    with contextlib.suppress(Exception):
+        from remedy.core.turn_context import turn_session_id
+
+        sid = turn_session_id(runtime)
+    t0 = _time.perf_counter()
+    fields: dict[str, Any] = {
+        "provider": bind.provider,
+        "model": bind.model,
+        "session_id": sid,
+        "step": step,
+    }
+    try:
+        result = await _post_chat_inner(runtime, body)
+    except asyncio.CancelledError:
+        log_llm_call(
+            **fields, status="aborted", latency_ms=(_time.perf_counter() - t0) * 1000
+        )
+        raise
+    except Exception as exc:
+        log_llm_call(
+            **fields,
+            status="error",
+            latency_ms=(_time.perf_counter() - t0) * 1000,
+            error=exc,
+        )
+        raise
+    latency = (_time.perf_counter() - t0) * 1000
+    if isinstance(result, dict):
+        adapter = None
+        with contextlib.suppress(Exception):
+            adapter = get_llm_binding(runtime).adapter()
+        finish = None
+        with contextlib.suppress(Exception):
+            finish = adapter.extract_finish_reason(result) if adapter else None
+        log_llm_call(
+            **fields,
+            status="ok",
+            latency_ms=latency,
+            finish_reason=finish,
+            tool_calls=count_tool_calls(result, adapter),
+            usage=result.get("usage"),
+        )
+    else:
+        m = re.search(r"HTTP (\d{3})", str(result or ""))
+        status = f"http_{m.group(1)}" if m else "error"
+        if "[auth required]" in str(result or ""):
+            status = "http_401"
+        log_llm_call(**fields, status=status, latency_ms=latency)
+    return result
+
+
+async def _post_chat_inner(
+    runtime: Any,
+    body: dict[str, Any],
+) -> dict[str, Any] | str:
     from remedy.core.llm_binding import LlmBinding, get_llm_binding, set_llm_binding
     from remedy.core.provider_sanitize import sanitize_chat_body
 
@@ -369,6 +506,8 @@ async def post_chat(
 
     session = _get_shared_session()
     timeout = _llm_timeout(bind)
+    # ``async with`` on both posts: a CancelledError mid-body releases the
+    # connection back to the pool instead of leaving it half-read.
     async with (
         session.post(
             endpoint,

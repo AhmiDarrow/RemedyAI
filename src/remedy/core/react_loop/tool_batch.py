@@ -95,7 +95,13 @@ async def apply_build_engine_after_batch(
 
         bst = get_build_state(runtime)
         if bst is not None and bst.active:
-            observe_tool_batch(bst, fresh_calls, batch_tool_msgs)
+            observe_tool_batch(bst, fresh_calls, batch_tool_msgs, runtime=runtime)
+            with _soft("todos-flush"):
+                from remedy.core.build_todos import take_todos_event
+
+                _td = take_todos_event(runtime)
+                if _td:
+                    yield _td
             # Explore thrash + zero writes → machine starts TDD / hops
             # instead of only injecting a FORCE IMPLEMENT essay.
             with _soft("auto-implement-drive"):
@@ -162,6 +168,20 @@ async def apply_build_engine_after_batch(
                     if tests or rev.get("cone"):
                         bst.nudges_emitted.append("write_review")
                         mapped = ", ".join(str(t) for t in tests[:8]) or "(none yet)"
+                        feature_open = int(
+                            getattr(bst, "open_feature_todo_count", 0) or 0
+                        )
+                        if feature_open > 0:
+                            review_next = (
+                                f"{feature_open} product Build item(s) still open. "
+                                "Keep implementing the current item. Do **not** run "
+                                "npm test / pytest until that work is in place."
+                            )
+                        else:
+                            review_next = (
+                                "Prefer a scoped verify on those tests "
+                                "(not a whole-repo suite, not a monologue)."
+                            )
                         messages.append(
                             {
                                 "role": "user",
@@ -169,8 +189,7 @@ async def apply_build_engine_after_batch(
                                     "[Build engine · WRITE REVIEW]\n"
                                     f"{rev.get('message')}\n"
                                     f"Mapped tests: {mapped}\n"
-                                    "Prefer a scoped verify on those tests "
-                                    "(not a whole-repo suite, not a monologue)."
+                                    f"{review_next}"
                                 ),
                             }
                         )
@@ -251,6 +270,12 @@ async def apply_build_engine_after_batch(
                 messages.append(
                     format_auto_verify_message(av, state=bst)
                 )
+                with _soft("todos-flush-verify"):
+                    from remedy.core.build_todos import take_todos_event as _take_td
+
+                    _td2 = _take_td(runtime)
+                    if _td2:
+                        yield _td2
                 if av.get("oracle_missing"):
                     pass
                 elif av.get("capped"):
@@ -291,7 +316,12 @@ async def apply_build_engine_after_batch(
 
                             if keep_agency_after_green(bst):
                                 rearm_agency()
-                                yield "@@status:Build green — play/iterate\n"
+                                if int(getattr(bst, "open_todo_count", 0) or 0) > 0 or bool(
+                                    getattr(bst, "drive_to_done", False)
+                                ):
+                                    yield "@@status:Build green — keep going\n"
+                                else:
+                                    yield "@@status:Build green — play/iterate\n"
                     ship_line = format_ship_report_line(bst)
                     if ship_line:
                         yield ship_line
@@ -379,6 +409,9 @@ async def apply_build_engine_after_batch(
                             runtime, bst, use_llm=should_use_live_llm(runtime)
                         )
                         if hopped:
+                            live_h = get_build_state(runtime)
+                            if live_h is not None:
+                                bst = live_h
                             hmsg = format_drive_message(hopped)
                             if hmsg is not None:
                                 messages.append(hmsg)

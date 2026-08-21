@@ -15,7 +15,7 @@ from remedy.voice.shape import apply_identity, sampling_for, shape_audio  # noqa
 SR = 24_000
 
 
-def tone(seconds: float = 1.0, hz: float = 180.0) -> "np.ndarray":
+def tone(seconds: float = 1.0, hz: float = 180.0) -> np.ndarray:
     t = np.arange(int(SR * seconds)) / SR
     # a voiced-ish signal: fundamental plus harmonics
     return (0.5 * np.sin(2 * math.pi * hz * t)
@@ -24,7 +24,7 @@ def tone(seconds: float = 1.0, hz: float = 180.0) -> "np.ndarray":
             + 0.10 * np.sin(2 * math.pi * 3200.0 * t)).astype(np.float32)
 
 
-def hf_ratio(x: "np.ndarray") -> float:
+def hf_ratio(x: np.ndarray) -> float:
     spec = np.abs(np.fft.rfft(x))
     freqs = np.fft.rfftfreq(len(x), 1 / SR)
     return float(spec[freqs > 1800].sum() / (spec.sum() + 1e-9))
@@ -89,7 +89,7 @@ def test_shaping_never_raises_on_junk():
 def test_sampling_is_steadier_at_low_articulation():
     lo, hi = sampling_for(0.0), sampling_for(1.0)
     assert lo["temperature"] < hi["temperature"]
-    assert 0.5 <= lo["temperature"] and hi["temperature"] <= 1.1
+    assert lo["temperature"] >= 0.5 and hi["temperature"] <= 1.1
 
 
 def test_apply_identity_reads_the_stored_identity(tmp_path: Path):
@@ -257,7 +257,7 @@ async def test_she_changes_her_voice_when_asked_in_conversation(tmp_path: Path):
         with fake.patch(force_tools=True):
             chunks = [c async for c in call_llm_stream(runtime, "could you speak a little warmer and slower?", session_id=sid)]
     finally:
-        tc.end_turn(*tokens)
+        tc.end_turn(None, *tokens)
     after = vid.load(home).effective()
     assert after["warmth"] > before["warmth"] and after["pace"] < before["pace"]
     assert any("Adjusted" in t for t in fake.requests[1].tool_result_texts)

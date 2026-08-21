@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.home import default_home
 
 # Bound IR step list growth on long agency turns (memory + to_public cost).
 MAX_IR_STEPS = 96
@@ -162,7 +163,7 @@ class ActionIR:
     def persist(self, home: Path | str | None = None) -> Path | None:
         """Write redacted IR to disk for soak/replay. Fail soft."""
         try:
-            root = Path(home).expanduser() if home else Path.home() / ".remedy"
+            root = Path(home).expanduser() if home else default_home()
             d = root / "action_ir"
             d.mkdir(parents=True, exist_ok=True)
             sid = "".join(

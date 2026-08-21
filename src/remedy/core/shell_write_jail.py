@@ -1,12 +1,32 @@
-"""Shell write jail — keep ``bash_exec`` mutations inside project write roots.
+"""Shell write jail — keep shell *mutations* inside the owner's write roots.
 
-File tools already use :meth:`resolve_tool_path(for_write=True)`. The shell only
-had a *cwd* jail; agents could still ``Set-Content C:\\…\\OtherProject\\…`` and
-cross-contaminate sibling trees (SecretFolder vs SecretSticky).
+Contract (shared with ``Agent.resolve_tool_path`` / ``workspace.resolve_*``):
 
-When a project is bound, mutation-class shell commands that target paths outside
-write roots — or that hide the target path (env expansion / Join-Path / python
--c) while still looking like a write — are refused.
+* **Reads are never jailed.** ``file_read`` / ``list_dir`` / ``file_glob`` /
+  ``repo_search`` / a non-mutating shell command / a read-only ``workdir`` all
+  work on any path the OS user can open, at every access scope and approval
+  mode (``untrusted`` scope is the one explicit sandbox). The *source* operand
+  of a copy (``copy`` / ``cp`` / ``Copy-Item`` / ``robocopy`` / ``xcopy`` /
+  ``shutil.copy*``) is a read — only the destination is checked.
+* **Writes are jailed to ``write_roots``**, and the write roots follow the
+  owner's configured ``access_scope``: ``project`` (and ``untrusted``) →
+  project folder only; ``home`` → project + user home; ``full`` → the whole
+  machine. Approvals → Full means the same as ``access_scope=full``; so does
+  an unbound (empty) project path.
+* **Always refused, at every scope and mode:** Remedy's auth secrets
+  (``~/.remedy/auth`` / ``$REMEDY_HOME/auth``) for read *and* write, and
+  writes into Remedy's own installed code (frozen sidecar / managed voice
+  runtime under ``~/.remedy/voice/runtime``) — the message says so plainly
+  instead of pointing at the project jail.
+
+Denials name the scope that is actually configured and never ask the model to
+"raise access_scope" when the scope already covers the path's location.
+
+Mechanics: file tools resolve through :meth:`resolve_tool_path(for_write=True)`.
+The shell classifies each command with :func:`looks_like_mutation`; only
+mutation-class commands have their destination operands resolved against the
+write roots, and destinations that are hidden (env expansion / Join-Path /
+``python -c`` with constructed paths) fail closed while a project is bound.
 """
 
 from __future__ import annotations
@@ -32,7 +52,7 @@ _MUTATION_HINT_RE = re.compile(
     r"|\b(?:xcopy|robocopy)\b"
     # Short aliases as whole tokens (not inside .md): include sc (Set-Content)
     # cmd `move` / PS `ac` `ri` `mi` `cpi` `si` are real write verbs.
-    r"|(?:^|[\s;&|(])(?:sc|ni|cp|copy|move|mv|rm|rd|ren|del|erase|md|tee|xcopy|robocopy|ac|ri|mi|cpi|si)"
+    r"|(?:^|[\s;&|(\"'])(?:sc|ni|cp|copy|move|mv|rm|rd|ren|del|erase|md|tee|xcopy|robocopy|ac|ri|mi|cpi|si)"
     r"(?=[\s]|$)"
     r"|\becho\b(?=[^\n]*>)|\bprintf\b(?=[^\n]*>)|\bcat\b(?=[^\n]*>)"
     r"|\bgit\s+checkout\b|\bgit\s+restore\b|\bgit\s+clean\b|\bgit\s+reset\b"
@@ -53,7 +73,7 @@ _MUTATION_HINT_RE = re.compile(
 # `dir 1> C:\Users\Public\pwn.txt` is a mutation. `2>&1` is a dup, not a dest.
 _REDIRECT_WRITE_RE = re.compile(r"(?<!&)\d*>{1,2}(?!&)\s*")
 _REDIRECT_DEVNULL_RE = re.compile(
-    r"(?ix)(?:\d*>{1,2})\s*(?:nul|null|/dev/null|con)\b"
+    r"(?ix)(?:\d*>{1,2})\s*(?:nul|null|\$null|/dev/null|con)\b"
 )
 
 # Path-like tokens that cannot be proven under write roots (obfuscation).
@@ -120,6 +140,129 @@ _READONLY_ONESHOT_RE = re.compile(
     r"""['\"]\s*console\.log\s*\([^'\"]*\)\s*['\"]"""
     r")"
 )
+
+# Write / mutation / opaque-exec hints inside inline interpreter code
+# (``python -c``, ``node -e``, ``php -r``, host_script bodies). Read-only code
+# (print / re.search / json.loads / read_text) has none of these and must not
+# be jailed merely because an interpreter runs it.
+_INLINE_CODE_WRITE_RE = re.compile(
+    r"(?ix)"
+    r"(?:"
+    # Python
+    r"open\s*\([^\n]*?['\"][rbt]{0,2}[wax+][rwaxbt+]{0,2}['\"]"
+    r"|open\s*\([^\n]*?mode\s*="
+    r"|\.write_text\s*\(|\.write_bytes\s*\(|\.touch\s*\(|\.mkdir\s*\("
+    r"|\.unlink\s*\(|\.rmdir\s*\(|\.rename\s*\(|\.symlink_to\s*\(|\.hardlink_to\s*\("
+    r"|\)\s*\.replace\s*\("
+    r"|(?<!stdout)(?<!stderr)\.write\s*\("
+    r"|\.writelines\s*\(|\.truncate\s*\("
+    r"|\bos\s*\.\s*(?:remove|unlink|rename|renames|replace|makedirs|mkdir|rmdir"
+    r"|removedirs|chmod|chown|symlink|link|truncate|system|popen|spawn\w*|exec\w*|startfile)\b"
+    r"|\bshutil\s*\.\s*(?:copy\w*|move|rmtree|make_archive|unpack_archive|chown)\b"
+    r"|\bsubprocess\b|\bos\.popen\b|\bpopen\s*\(|\bctypes\b"
+    r"|\burlretrieve\b|\bextractall\s*\(|\bextract\s*\("
+    r"|\bpip\s+install\b|\bpip\.main\b|\bpip\._internal\b"
+    r"|\bexec\s*\(|\beval\s*\(|\bcompile\s*\(|__import__\s*\(|\bimportlib\b"
+    r"|\bbase64\b|\bcodecs\.decode\b|\bbytes\.fromhex\b|\bchr\s*\("
+    r"|\bsqlite3\.connect\b|\bzipfile\.ZipFile\s*\([^\n]*?['\"][wax]['\"]"
+    # Node
+    r"|\b(?:write|append)File(?:Sync)?\s*\(|\bmkdir(?:Sync)?\s*\(|\brm(?:dir)?(?:Sync)?\s*\("
+    r"|\bunlink(?:Sync)?\s*\(|\brename(?:Sync)?\s*\(|\bcopyFile(?:Sync)?\s*\("
+    r"|\bcreateWriteStream\s*\(|\bopenSync\s*\([^\n]*?['\"][wax]|\btruncate(?:Sync)?\s*\("
+    r"|\bchild_process\b|\bexecSync\s*\(|\bspawn(?:Sync)?\s*\(|\bexecFile(?:Sync)?\s*\("
+    r"|\bnew\s+Function\s*\(|\bprocess\.binding\b|\bfs\.promises\b"
+    # Ruby / PHP / Perl
+    r"|\bFile\s*\.\s*(?:write|open|delete|unlink|rename|new)\b|\bFileUtils\b|\bIO\.write\b"
+    r"|\bfile_put_contents\b|\bfopen\s*\([^\n]*?['\"][wax]|\bfwrite\s*\("
+    r"|\bunlink\s*\(|\bmkdir\s*\(|\brename\s*\(|\bcopy\s*\(|\bmove_uploaded_file\b"
+    r"|\bsystem\s*\(|\bshell_exec\b|\bpassthru\b|\bproc_open\b|`[^`\n]+`"
+    # Shell-ish (powershell -Command / nested) — redirection to a file
+    r"|(?<!&)\d*>{1,2}(?!&)"
+    r")"
+)
+
+# PowerShell verbs that mutate state but are not file cmdlets in _MUTATION_HINT_RE.
+_PS_INLINE_MUTATION_RE = re.compile(
+    r"(?ix)\b(?:start-process|invoke-item|stop-process|stop-service|start-service"
+    r"|set-itemproperty|remove-itemproperty|new-itemproperty|set-executionpolicy"
+    r"|register-\w+|unregister-\w+|set-acl|install-module|install-package|save-module"
+    r"|new-scheduledtask|set-service|clear-content|rename-computer|restart-computer)\b"
+)
+
+# Flag that introduces the inline payload: everything after it is code.
+_ONESHOT_PAYLOAD_FLAG_RE = re.compile(
+    r"(?ix)"
+    r"(?:\b(?:pythonw?(?:\d+(?:\.\d+)*)?|py(?!test))(?:\.exe)?\s+(?:-\w+\s+)*(-c)\b"
+    r"|\b(?:nodejs|node)(?:\.exe)?\s+(?:-\w+\s+)*(-e)\b"
+    r"|\b(?:powershell|pwsh)(?:\.exe)?[^\n]*?(-(?:command|c))\b"
+    r"|\b(?:php|ruby|perl)(?:\.exe)?\s+(?:-\w+\s+)*(-[re])\b"
+    r")"
+)
+
+
+def inline_code_has_write(code: str) -> bool:
+    """True when inline interpreter code (or a script body) may write/mutate.
+
+    Redirection to ``nul`` / ``/dev/null`` does not count. Anything that hides
+    behaviour (exec / eval / base64 / subprocess / child_process) counts as a
+    write so the jail stays fail-closed for obfuscated payloads.
+    """
+    text = code or ""
+    if not text.strip():
+        return False
+    stripped = _REDIRECT_DEVNULL_RE.sub("", text)
+    if _INLINE_CODE_WRITE_RE.search(stripped):
+        return True
+    if _MUTATION_HINT_RE.search(stripped):
+        return True
+    if _OPAQUE_MUTATION_RE.search(stripped):
+        return True
+    return bool(_PS_INLINE_MUTATION_RE.search(stripped))
+
+
+def _oneshot_payload(command: str) -> str | None:
+    """Return the inline code for ``python -c`` / ``node -e`` / ``pwsh -Command``.
+
+    ``None`` when *command* has no one-shot, or the one-shot reads stdin
+    (``python -``) — then the whole command is the payload.
+    """
+    cmd = command or ""
+    m = _ONESHOT_PAYLOAD_FLAG_RE.search(cmd)
+    if m:
+        return cmd[m.end() :]
+    if _INTERPRETER_ONESHOT_RE.search(cmd):
+        return cmd
+    return None
+
+
+def oneshot_is_readonly(command: str) -> bool:
+    """True when the command is an interpreter one-shot whose code cannot write."""
+    payload = _oneshot_payload(command)
+    if payload is None:
+        return False
+    return not inline_code_has_write(payload)
+
+
+def _strip_readonly_oneshot(command: str) -> str:
+    """Replace ``python -c "<readonly code>"`` with a neutral token.
+
+    What remains (``> C:\\x``, ``; copy a b``) is checked as a normal command.
+    """
+    cmd = command or ""
+    m = _ONESHOT_PAYLOAD_FLAG_RE.search(cmd)
+    if not m:
+        # stdin form (``… | python -``): payload was the whole command
+        return ""
+    i = m.end()
+    while i < len(cmd) and cmd[i] in " \t":
+        i += 1
+    head = cmd[: m.start()] + "readonly-oneshot "
+    if i < len(cmd) and cmd[i] in "\"'":
+        j = cmd.find(cmd[i], i + 1)
+        if j > 0:
+            return head + cmd[j + 1 :]
+    return head
+
 
 # Python dest construction that hides an absolute write (host_script / -c).
 _PY_CONSTRUCTED_DEST_RE = re.compile(
@@ -376,17 +519,39 @@ def _is_sidecar_argv_leftover(token: str, command: str = "") -> bool:
 # Absolute Windows / Unix path tokens in a command line.
 # Drive-letter must accept C:/ as well as C:\ — POSIX slashes are absolute on Windows.
 # Every Windows root-relative (\Temp\…, /Temp/…) resolves to the current drive.
+# A drive letter only counts at a token boundary: ``https://x`` must not yield
+# ``s:/x``; ``@scope/pkg`` / ``src/main.rs`` / ``scripts\x.py`` must not yield a
+# root-relative ``/pkg`` / ``/main.rs`` / ``\x.py`` (2026-08 live false positives).
 _ABS_PATH_RE = re.compile(
     r"(?:"
     # C:\Program Files\… (space in folder) then other drive/UNC tokens
-    r'(?:[A-Za-z]:[\\/]Program Files(?: \(x86\))?[^\s\'"<>|;,&]*)'
-    r"|(?:[A-Za-z]:[\\/]|\\\\)[^\s'\"<>|;,&]+"
-    r"|/(?:Users|home|tmp|var|etc|opt|mnt|media)/[^\s'\"<>|;,&]+"
-    # Root-relative: \Temp\pwn.txt / \Users\… (not UNC \\, not single-letter /c flags)
-    r"|\\(?![\\])[^\s'\"<>|;,&]+"
-    r"|/(?![\\/])(?![A-Za-z](?:[\s'\"<>|;,&]|$))[^\s'\"<>|;,&]+"
+    r'(?<![A-Za-z0-9_.@~/\\-])(?:[A-Za-z]:[\\/]Program Files(?: \(x86\))?[^\s\'"<>|;,&]*)'
+    r"|(?<![A-Za-z0-9_.@~/\\-])[A-Za-z]:[\\/][^\s'\"<>|;,&]+"
+    r"|(?<![^\s'\"=(>:,])\\\\[^\s'\"<>|;,&]+"
+    r"|(?<![^\s'\"=(>:,])/(?:Users|home|tmp|var|etc|opt|mnt|media|usr|bin|sbin|lib|lib64"
+    r"|dev|srv|sys|run|proc|root|boot|private)(?:/[^\s'\"<>|;,&]*)?(?=[\s'\"<>|;,&]|$)"
+    # Root-relative: \Temp\pwn.txt / \Users\… (not UNC \\, not /c or /ad style switches)
+    r"|(?<![^\s'\"=(>:,])\\(?![\\])[^\s'\"<>|;,&]+"
+    r"|(?<![^\s'\"=(>:,])/(?![\\/])(?![A-Za-z]{1,5}(?:[\s'\"<>|;,&:]|$))"
+    r"(?![A-Z]+(?:[\s'\"<>|;,&:]|$))[^\s'\"<>|;,&]+"
     r")"
 )
+
+# Regex / escape-sequence debris that merely *looks* like ``X:\…`` inside quoted
+# code: ``y:\s*(\d+``, ``C:\bm\(``, ``C:\n``. Never a write destination.
+_REGEX_FRAGMENT_CHARS_RE = re.compile(r"[()+?{}]")
+_DRIVE_ESCAPE_FRAGMENT_RE = re.compile(r"^[A-Za-z]:\\[sdwbntrvfSDWB](?:$|[*+?{])")
+
+
+def _looks_like_regex_fragment(tok: str) -> bool:
+    t = tok or ""
+    if not t:
+        return False
+    if "program files" in t.lower():
+        return False
+    if _REGEX_FRAGMENT_CHARS_RE.search(t):
+        return True
+    return bool(_DRIVE_ESCAPE_FRAGMENT_RE.match(t))
 
 # Relative escapes that leave cwd.
 _REL_ESCAPE_RE = re.compile(
@@ -467,6 +632,8 @@ def extract_path_candidates(command: str) -> list[str]:
         c = _clean_token(s)
         if len(c) < 2:
             return
+        if _looks_like_regex_fragment(c):
+            return
         key = c.lower()
         if key in seen:
             return
@@ -491,7 +658,10 @@ _SCRIPT_LAUNCH_RE = re.compile(
     r"|\b(?:nodejs|node)(?:\.exe)?\s+(?!-e\b)[^\n|&;]+"
     r"|\b(?:ruby|perl|php|lua|bash|sh|zsh|pwsh|powershell)(?:\.exe)?\s+"
     r"(?:-[Ff]ile\s+|[^\n|&;-][^\n|&;]*)"
-    r"|\b(?:cmd)(?:\.exe)?\s+/[Cc]\s+"
+    # cmd /c is a launch only when the nested command is a script file;
+    # ``cmd /c "dir …"`` / ``cmd /c "netstat …"`` are plain reads.
+    r"|\b(?:cmd)(?:\.exe)?\s+/[CcKk]\s+[\"']?[^\s\"'|&;]*"
+    r"\.(?:py|js|mjs|cjs|ps1|bat|cmd|exe|vbs|sh|rb|pl|php|lua)\b"
     r"|(?:^|[\s;&|(])(?:\.\\|\./|/|[A-Za-z]:[\\/])[^\s|&;]+\.(?:py|js|mjs|cjs|ps1|bat|cmd|exe|vbs|sh|rb|pl|php|lua)\b"
     r")"
 )
@@ -762,9 +932,14 @@ def looks_like_mutation(command: str) -> bool:
         return False
     if leftover:
         c = " ; ".join(leftover)
-    if _MUTATION_HINT_RE.search(c):
-        return True
     if _INTERPRETER_ONESHOT_RE.search(c):
+        # ``python -c "print(...)"`` / ``node -e "console.log(...)"`` with no
+        # write API in the payload is a read. Drop the payload and keep
+        # checking the rest (redirects, chained copy/del, …).
+        if not oneshot_is_readonly(c):
+            return True
+        c = _strip_readonly_oneshot(c)
+    if _MUTATION_HINT_RE.search(c):
         return True
     if _SCRIPT_LAUNCH_RE.search(c):
         return True
@@ -846,6 +1021,8 @@ def path_outside_write_roots(
         # a check that could not run let the shell write the keys.
         if is_protected_secret_path_strict(cand):
             return cand
+        if _is_installed_code(cand):
+            return cand
         if _under_any(cand, roots):
             return None
         return cand
@@ -875,10 +1052,210 @@ def path_outside_write_roots(
 
     if is_protected_secret_path_strict(cand):
         return cand
+    if _is_installed_code(cand):
+        return cand
 
     if _under_any(cand, roots):
         return None
     return cand
+
+
+def _is_installed_code(path: Path | str) -> bool:
+    """Remedy's own installed code — conservative (an error means "yes")."""
+    try:
+        from remedy.core.workspace import is_remedy_installed_code_path
+
+        return is_remedy_installed_code_path(path)
+    except Exception:  # noqa: BLE001 — refuse rather than let a write through
+        return True
+
+
+def installed_code_refusal(path: Path | str) -> str:
+    return (
+        "shell write jail: that's Remedy's own installed code (frozen sidecar / "
+        f"managed voice runtime): {path}. It is never writable from a session at "
+        "any access scope or approval mode — reads are fine; edit the project "
+        "tree instead."
+    )
+
+
+def check_shell_installed_code_write(command: str) -> str | None:
+    """Refuse a *mutation* whose destination is Remedy's installed code.
+
+    Runs even under Full / access_scope=full where the dest scan is skipped.
+    """
+    cmd = command or ""
+    if not cmd.strip() or not looks_like_mutation(cmd):
+        return None
+    for part in _split_statements(cmd):
+        rest = _rest_after_first_token(part)
+        sources = copy_source_operands(part)
+        if sources:
+            rest = strip_copy_sources(rest, sources)
+        for tok in extract_path_candidates(rest):
+            if _is_installed_code_token(tok):
+                return installed_code_refusal(tok)
+    return None
+
+
+def _is_installed_code_token(tok: str) -> bool:
+    raw = _clean_token(tok)
+    if not raw or "$" in raw or "%" in raw:
+        return False
+    if _is_windows_abs_path(raw) and os.name != "nt":
+        # Linux CI: a C:\ path cannot be resolved; match by segments only.
+        low = raw.replace("/", "\\").lower()
+        return "\\.remedy\\voice\\runtime" in low
+    try:
+        from remedy.core.workspace import is_remedy_installed_code_path
+
+        return is_remedy_installed_code_path(raw)
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Copy-class commands: the source operand is a *read*.
+# ---------------------------------------------------------------------------
+_COPY_HEADS_CMD = frozenset({"copy", "xcopy", "robocopy"})
+_COPY_HEADS_POSIX = frozenset({"cp"})
+_COPY_HEADS_PS = frozenset({"copy-item", "cpi"})
+_PS_COPY_SWITCHES = frozenset(
+    {
+        "-recurse", "-force", "-confirm", "-whatif", "-passthru", "-container",
+        "-usetransaction", "-verbose", "-debug", "-erroraction", "-r", "-f",
+    }
+)
+_PS_COPY_SOURCE_PARAMS = frozenset({"-path", "-literalpath", "-lp", "-pspath"})
+_PS_COPY_DEST_PARAMS = frozenset({"-destination", "-dest", "-d"})
+_PS_COPY_VALUE_PARAMS = frozenset(
+    {
+        "-filter", "-include", "-exclude", "-credential", "-fromsession",
+        "-tosession", "-erroraction", "-warningaction", "-errorvariable",
+        "-outvariable", "-informationaction",
+    }
+)
+_PY_SHUTIL_COPY_SRC_RE = re.compile(
+    r"""(?ix)\bshutil\s*\.\s*copy(?:2|file|tree|mode|stat)?\s*\(\s*
+        (?:[rbu]{0,2})(['"])(?P<src>.+?)\1\s*,"""
+)
+
+
+def strip_copy_sources(text: str, sources: set[str]) -> str:
+    """Remove copy *source* operands from *text* so dest scanning never sees them.
+
+    Whole-operand matches only (followed by whitespace / quote / ``,`` / ``)``
+    / end) so a source that is a prefix of the destination leaves the
+    destination intact. Sources with spaces are removed as a whole, so their
+    whitespace-split fragments (``…\\Downloads\\Born``) never surface.
+    """
+    out = _normalize_command_for_paths(text or "")
+    for src in sorted(sources, key=len, reverse=True):
+        if not src:
+            continue
+        pat = re.compile(
+            re.escape(src) + r"(?=$|[\s'\",)\]])", re.IGNORECASE
+        )
+        out = pat.sub(" ", out)
+    return out
+
+
+def _shell_tokens(part: str) -> list[str]:
+    """Quote-aware whitespace split (keeps quoted paths with spaces whole)."""
+    out: list[str] = []
+    buf: list[str] = []
+    quote = ""
+    for ch in part or "":
+        if quote:
+            if ch == quote:
+                quote = ""
+            else:
+                buf.append(ch)
+            continue
+        if ch in "'\"":
+            quote = ch
+            continue
+        if ch in " \t":
+            if buf:
+                out.append("".join(buf))
+                buf = []
+            continue
+        buf.append(ch)
+    if buf:
+        out.append("".join(buf))
+    return out
+
+
+def copy_source_operands(part: str) -> set[str]:
+    """Lower-cased source operands of a copy-class statement (reads, not writes).
+
+    ``copy SRC DST`` / ``xcopy SRC DST /flags`` / ``robocopy SRC DST [files]`` /
+    ``cp [-r] SRC... DST`` / ``Copy-Item [-Path] SRC [-Destination] DST`` /
+    ``shutil.copy*(SRC, DST)``. Move/rename are not copies — the source is
+    deleted, so it stays a write. Auth secrets are checked separately and stay
+    refused even as a copy source.
+    """
+    text = _normalize_command_for_paths(part or "")
+    out: set[str] = set()
+    for m in _PY_SHUTIL_COPY_SRC_RE.finditer(text):
+        out.add(_clean_token(m.group("src")).lower())
+    toks = _shell_tokens(text)
+    if not toks:
+        return out
+    head = toks[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if head.endswith(".exe"):
+        head = head[:-4]
+    args = toks[1:]
+    if head in _COPY_HEADS_CMD:
+        positional = [a for a in args if not a.startswith("/")]
+        if head == "robocopy":
+            if positional:
+                out.add(_clean_token(positional[0]).lower())
+        elif len(positional) >= 2:
+            for a in positional[:-1]:
+                out.add(_clean_token(a).lower())
+    elif head in _COPY_HEADS_POSIX:
+        positional = [a for a in args if not a.startswith("-")]
+        if len(positional) >= 2:
+            for a in positional[:-1]:
+                out.add(_clean_token(a).lower())
+    elif head in _COPY_HEADS_PS:
+        positional: list[str] = []
+        i = 0
+        while i < len(args):
+            a = args[i]
+            low = a.lower()
+            if low.startswith("-"):
+                name, eq, val = low.partition(":")
+                if name in _PS_COPY_SOURCE_PARAMS:
+                    if eq:
+                        out.add(_clean_token(a.partition(":")[2]).lower())
+                    elif i + 1 < len(args):
+                        out.add(_clean_token(args[i + 1]).lower())
+                        i += 1
+                elif name in _PS_COPY_DEST_PARAMS or name in _PS_COPY_VALUE_PARAMS:
+                    if not eq:
+                        i += 1
+                elif name in _PS_COPY_SWITCHES:
+                    pass
+                else:
+                    i += 1
+                i += 1
+                continue
+            positional.append(a)
+            i += 1
+        if positional and not (out & {p.lower() for p in positional}):
+            # First positional is -Path when no named -Path was given; with a
+            # named -Destination every positional is a source.
+            named_dest = any(
+                a.lower().partition(":")[0] in _PS_COPY_DEST_PARAMS for a in args
+            )
+            srcs = positional if named_dest else positional[:-1]
+            if not srcs and positional and named_dest:
+                srcs = positional
+            for a in srcs:
+                out.add(_clean_token(a).lower())
+    return out
 
 
 # Home/profile construction in launched script text.
@@ -1147,6 +1524,12 @@ _IN_PROJECT_CWD_HEADS = frozenset(
         "remove-item",
         "rename-item",
         "tee-object",
+        # Downloads land in cwd unless -o/-OutFile says otherwise (checked
+        # as dest tokens / opaque hints before this allow applies).
+        "curl",
+        "wget",
+        "iwr",
+        "invoke-webrequest",
     }
 )
 
@@ -1163,6 +1546,9 @@ def _command_head(command: str) -> str:
 def _is_known_in_project_mutation(command: str) -> bool:
     """True for npm/git/pytest/verify/relative FS verbs — cwd-allow when in roots."""
     if _is_build_verify_statement(command) or _command_head(command) in _IN_PROJECT_CWD_HEADS:
+        return True
+    # ``.\hello.exe`` / ``./a.out`` — a build artifact launched from cwd.
+    if re.match(r"^\s*[\"']?\.[\\/](?!\.)[^\s\"']+", command or ""):
         return True
     return bool(re.search(r"(?i)\b(?:python\S*)\s+-m\s+", command or ""))
 
@@ -1225,23 +1611,114 @@ def check_shell_write_jail(
 ) -> str | None:
     """Return a block reason if *command* would mutate outside write roots.
 
-    Returns ``None`` when allowed. ``approval_mode=full`` is owner control:
-    only auth-secret access is blocked (no dest scan, no script-body jail).
+    Returns ``None`` when allowed. ``approval_mode=full`` **or**
+    ``access_scope=full`` is owner control over the whole machine: only
+    auth-secret access and writes into Remedy's installed code are blocked
+    (no dest scan, no script-body jail).
     """
-    _ = access_scope  # roots are authoritative; keep param for API stability
     _ = warnings  # kept for callers; Full no longer emits per-command warn text
     mode = _resolve_approval_mode(approval_mode)
-    # Full: auth-only. Skip the mutation/dest regex walk — this is the hot path.
-    if mode == "full":
+    scope = _norm_scope(access_scope)
+    # Full: auth + installed code only. Skip the dest regex walk — hot path.
+    if mode == "full" or scope == "full":
         secret_hit = check_shell_secret_access(command or "")
         if secret_hit:
             return secret_hit
-        return None
+        return check_shell_installed_code_write(command or "")
     return _evaluate_shell_write_jail(
         command,
         write_roots=write_roots,
         cwd=cwd,
         project_bound=project_bound,
+        access_scope=scope,
+    )
+
+
+def _norm_scope(raw: str) -> str:
+    try:
+        from remedy.core.workspace import normalize_access_scope
+
+        return normalize_access_scope(raw or "project")
+    except Exception:
+        return (raw or "project").strip().lower()
+
+
+def is_machine_wide(access_scope: str = "", approval_mode: str = "") -> bool:
+    """True when writes are not jailed: Approvals → Full or access_scope=full."""
+    return _resolve_approval_mode(approval_mode) == "full" or _norm_scope(access_scope) == "full"
+
+
+def _quoted_metachar_break(command: str, *, strict: bool) -> bool:
+    """Detect ``&`` / ``|`` / ``^`` riding inside (or after a broken) quote.
+
+    Walks the string tracking quote state instead of regex-matching across
+    unrelated quoted spans (``… | Where { $_.Name -like "*.mp3" }`` is clean).
+    With ``strict=False`` only an *unbalanced* quote followed by a
+    metacharacter counts; with ``strict=True`` any quoted metacharacter does.
+    """
+    s = command or ""
+    quote = ""
+    quoted_meta = False
+    meta_after_open = False
+    for ch in s:
+        if quote:
+            if ch == quote:
+                quote = ""
+                continue
+            if ch in "&|^":
+                quoted_meta = True
+                meta_after_open = True
+            continue
+        if ch in "\"'":
+            quote = ch
+            meta_after_open = False
+    if quote and meta_after_open:
+        return True
+    return strict and quoted_meta
+
+
+# Download flags whose operand is the written file.
+_DOWNLOAD_OUT_RE = re.compile(
+    r"""(?ix)(?:(?<=\s)-o|(?<=\s)-O|--output|-outfile|--output-document)
+    (?:\s+|=)("[^"]*"|'[^']*'|\S+)"""
+)
+_DOWNLOAD_HEAD_RE = re.compile(r"(?i)\b(?:curl|wget|iwr|invoke-webrequest)\b")
+
+
+def _download_outputs_are_relative(command: str) -> bool:
+    """True when every ``curl -o`` / ``wget -O`` / ``-OutFile`` operand is a plain
+    relative file name (no drive, no ``..``, no variable) — it lands in cwd."""
+    cmd = command or ""
+    if not _DOWNLOAD_HEAD_RE.search(cmd):
+        return False
+    outs = [_clean_token(m.group(1)) for m in _DOWNLOAD_OUT_RE.finditer(cmd)]
+    if not outs:
+        return False
+    for o in outs:
+        if not o or o.startswith("-"):
+            return False
+        if any(ch in o for ch in "$%~"):
+            return False
+        if ".." in o or _is_windows_abs_path(o) or o.startswith("/"):
+            return False
+        if re.match(r"^[A-Za-z]:", o):
+            return False
+    return True
+
+
+def _scope_hint(access_scope: str) -> str:
+    """How to widen the jail — accurate for the scope that is configured."""
+    if access_scope == "home":
+        return (
+            "access_scope=home covers the project and the user home; this path is "
+            "outside both. Only access_scope=full (or Approvals → Full) allows it."
+        )
+    if access_scope == "untrusted":
+        return "access_scope=untrusted keeps every write inside the project folder."
+    return (
+        "access_scope=project keeps writes inside the project folder; ask the "
+        "owner to raise access_scope to home/full (or Approvals → Full) only if "
+        "edits outside the project are intended."
     )
 
 
@@ -1251,11 +1728,15 @@ def _evaluate_shell_write_jail(
     write_roots: list[Path],
     cwd: Path | None,
     project_bound: bool,
+    access_scope: str = "project",
 ) -> str | None:
     cmd = command or ""
     secret_hit = check_shell_secret_access(cmd)
     if secret_hit:
         return secret_hit
+    code_hit = check_shell_installed_code_write(cmd)
+    if code_hit:
+        return code_hit
     if not project_bound:
         return None
     if not write_roots:
@@ -1280,19 +1761,18 @@ def _evaluate_shell_write_jail(
             "DestinationPath under the project)."
         )
 
-    # Quote-break / cmd chaining after a rewrite (`cat foo"&calc`).
-    if (
-        re.search(r'"[^"\n]*[&|^]', cmd)
-        or re.search(r'[&|^][^"\n]*"', cmd)
-        or re.search(r"'[^'\n]*[&|^]", cmd)
-        or re.search(r"[&|^][^'\n]*'", cmd)
-    ):
+    # Quote-break / cmd chaining after a rewrite (`cat foo"&calc`). An
+    # unbalanced quote followed by a metacharacter always fails closed; a
+    # metacharacter inside balanced quotes only matters for mutations
+    # (``cmd /c "netstat -ano | findstr :5173"`` is a read).
+    is_mutation = looks_like_mutation(cmd)
+    if _quoted_metachar_break(cmd, strict=is_mutation):
         return (
             "shell write jail: quoted operand contains cmd metacharacters "
             f"under write roots [{roots_s}]. Prefer file_write/file_edit."
         )
 
-    if not looks_like_mutation(cmd):
+    if not is_mutation:
         return None
 
     def _cwd_in_roots() -> bool:
@@ -1305,7 +1785,15 @@ def _evaluate_shell_write_jail(
         except Exception:
             return False
 
-    readonly_oneshot = bool(_READONLY_ONESHOT_RE.search(cmd) and _cwd_in_roots())
+    readonly_oneshot = bool(
+        (_READONLY_ONESHOT_RE.search(cmd) or oneshot_is_readonly(cmd)) and _cwd_in_roots()
+    )
+
+    # ``curl -o out.mp3 https://…`` with a plain relative file lands in cwd;
+    # the download verbs stay opaque only for hidden destinations.
+    opaque_cmd = cmd
+    if _cwd_in_roots() and _download_outputs_are_relative(cmd):
+        opaque_cmd = _DOWNLOAD_HEAD_RE.sub("download", cmd)
 
     # `echo pwn > $HOME\…` / `'pwn' > "$USERPROFILE\…"` — dest is opaque.
     if _REDIRECT_DOLLAR_DEST_RE.search(cmd):
@@ -1323,17 +1811,30 @@ def _evaluate_shell_write_jail(
             "under the focus folder with file_write/file_edit."
         )
 
-    candidates = extract_path_candidates(cmd)
+    # Copy *sources* are reads: only the destination must be in-root.
+    # (Auth secrets were already refused by check_shell_secret_access.)
+    copy_sources: set[str] = set()
+    for part in _split_statements(cmd):
+        copy_sources |= copy_source_operands(part)
+    scan_cmd = strip_copy_sources(cmd, copy_sources) if copy_sources else cmd
+    candidates = extract_path_candidates(scan_cmd)
     offenders: list[str] = []
     # Dest checks use each statement *after* argv[0], so invoking
     # python.exe is not a write, but copy … python.exe still is.
-    for part in _split_statements(cmd):
+    for part in _split_statements(scan_cmd):
         rest = _rest_after_first_token(part)
         if not rest.strip():
             continue
+        # The script a launcher runs is *read*; its body is scanned below
+        # (``_jail_script_launch_bodies``) instead of being treated as a dest.
+        launch_targets = {
+            _clean_token(t).lower() for t in extract_script_launch_targets(part)
+        }
         for token in extract_path_candidates(rest):
             # Only skip unquoted sidecar split leftovers, never cmd.exe dests.
             if _is_sidecar_argv_leftover(token, cmd):
+                continue
+            if launch_targets and _clean_token(token).lower() in launch_targets:
                 continue
             outside = path_outside_write_roots(
                 token, write_roots=roots, cwd=cwd
@@ -1344,7 +1845,7 @@ def _evaluate_shell_write_jail(
     # Mutation + opaque path construction → deny even if another candidate is
     # in-root (e.g. `copy C:\proj\a $env:USERPROFILE\Desktop\b`). Opaque dests
     # are not extractable as path tokens, so mixed forms must fail closed.
-    if not offenders and _OPAQUE_PATH_HINT_RE.search(cmd) and not readonly_oneshot:
+    if not offenders and _OPAQUE_PATH_HINT_RE.search(opaque_cmd) and not readonly_oneshot:
         return (
             "shell write jail: mutation uses opaque path construction "
             "($env:/%VAR%/Join-Path/process.env/curl -o/etc.) that cannot be "
@@ -1356,10 +1857,17 @@ def _evaluate_shell_write_jail(
     # Oneshot: fail closed when payload remains after subtracting in-root dests
     # (in-root decoy + Path('C:/')/'Users'/… must not slip).
     if not offenders and _INTERPRETER_ONESHOT_RE.search(cmd) and not readonly_oneshot:
-        remaining = cmd
+        remaining = scan_cmd
         for tok in candidates:
             if path_outside_write_roots(tok, write_roots=roots, cwd=cwd) is None:
                 remaining = remaining.replace(tok, "")
+        # The interpreter that runs the one-shot (``C:\Python312\python.exe -c``
+        # / the argv[0] host_run passes) is invoked, not written.
+        for part in _split_statements(scan_cmd):
+            m = _FIRST_TOKEN_RE.match(part)
+            head = _clean_token(m.group(1) or m.group(2) or m.group(3) or "") if m else ""
+            if head and is_runtime_executable_path(head):
+                remaining = remaining.replace(head, "")
         leftover = bool(
             extract_path_candidates(remaining)
             or _OPAQUE_PATH_HINT_RE.search(remaining)
@@ -1378,7 +1886,7 @@ def _evaluate_shell_write_jail(
     # of the launched file passes.
     if not offenders and not candidates:
         if (
-            _OPAQUE_PATH_HINT_RE.search(cmd)
+            _OPAQUE_PATH_HINT_RE.search(opaque_cmd)
             or _PY_CONSTRUCTED_DEST_RE.search(cmd)
             or _INTERPRETER_ONESHOT_RE.search(cmd)
         ) and not readonly_oneshot:
@@ -1439,10 +1947,12 @@ def _evaluate_shell_write_jail(
             )
     except Exception:
         pass
+    for o in offenders:
+        if _is_installed_code_token(o):
+            return installed_code_refusal(o)
     return (
-        f"shell write jail: mutation targets path outside project write roots: {bad}. "
-        f"Allowed write roots: [{roots_s}]. "
-        "Use file_write/file_edit under the focus folder, or raise access_scope "
-        "to home only if multi-tree edits are intended. Do not write sibling "
+        f"shell write jail: mutation targets path outside write roots ({access_scope}): "
+        f"{bad}. Allowed write roots: [{roots_s}]. {_scope_hint(access_scope)} "
+        "Use file_write/file_edit under the focus folder. Do not write sibling "
         "projects (e.g. SecretFolder vs SecretSticky) from this session."
     )

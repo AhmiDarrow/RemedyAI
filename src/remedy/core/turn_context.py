@@ -22,6 +22,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# ReAct lives in a Task that outlives the SSE socket (disconnect ≠ Stop).
+_turn_jobs: dict[str, asyncio.Task] = {}
+
 
 @dataclass(frozen=True)
 class TurnWorkspace:
@@ -125,6 +128,12 @@ _pending_verify_by_session: dict[str, Any] = {}
 # owner can redirect without stopping her (Grove's "every message steers").
 _nudges_by_session: dict[str, list[str]] = {}
 _NUDGE_MAX = 8
+# sid → why the last abort happened ("stop" = Stop button, "supersede" = the
+# owner sent the next message while this turn ran). The dying stream reads it
+# to word the durable assistant row.
+_abort_reasons: dict[str, str] = {}
+ABORT_REASON_STOP = "stop"
+ABORT_REASON_SUPERSEDE = "supersede"
 _build_protocol_by_session: dict[str, str] = {}
 _frontier_continue_by_session: dict[str, Any] = {}
 _lock = threading.Lock()
@@ -333,6 +342,12 @@ def end_turn(
     *tokens: Token | None,
 ) -> None:
     """Unregister abort event and reset contextvars (zip-order with begin_turn)."""
+    if isinstance(session_id, Token):
+        # ``end_turn(*tokens)`` without the session id: a misaligned reset would
+        # silently fail on every var and leak this turn's flags into the caller's
+        # context (the suite inherited one turn's RMB wait budget that way).
+        tokens = (session_id, *tokens)
+        session_id = _turn_session_id.get()
     sid = str(session_id or "").strip() or None
     ev = _turn_abort.get()
     if sid and ev is not None:
@@ -456,12 +471,79 @@ def clear_nudges(session_id: str | None) -> None:
             _nudges_by_session.pop(sid, None)
 
 
-def abort_session(session_id: str, *, epoch: int | None = None) -> int:
+def normalize_abort_reason(reason: str | None) -> str:
+    r = str(reason or "").strip().lower()
+    return ABORT_REASON_SUPERSEDE if r in ("supersede", "superseded", "resend", "next_message") else ABORT_REASON_STOP
+
+
+def set_abort_reason(session_id: str, reason: str | None) -> None:
+    sid = str(session_id or "").strip()
+    if not sid:
+        return
+    with _lock:
+        _abort_reasons[sid] = normalize_abort_reason(reason)
+
+
+def peek_abort_reason(session_id: str | None) -> str | None:
+    """Reason recorded by the last ``abort_session`` for *session_id* (or None)."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return None
+    with _lock:
+        return _abort_reasons.get(sid)
+
+
+def clear_abort_reason(session_id: str | None) -> None:
+    sid = str(session_id or "").strip()
+    if sid:
+        with _lock:
+            _abort_reasons.pop(sid, None)
+
+
+def register_turn_job(session_id: str, task: asyncio.Task) -> None:
+    """Hold a strong ref so a dropped SSE cannot GC the ReAct worker."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return
+    with _lock:
+        prev = _turn_jobs.get(sid)
+        _turn_jobs[sid] = task
+    if prev is not None and prev is not task and not prev.done():
+        prev.cancel()
+
+
+def drop_turn_job(session_id: str, task: asyncio.Task | None = None) -> None:
+    sid = str(session_id or "").strip()
+    if not sid:
+        return
+    with _lock:
+        cur = _turn_jobs.get(sid)
+        if task is None or cur is task:
+            _turn_jobs.pop(sid, None)
+
+
+def cancel_turn_job(session_id: str) -> None:
+    """Cancel the detached ReAct worker (Stop / supersede). Disconnect must not."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return
+    with _lock:
+        t = _turn_jobs.get(sid)
+    if t is not None and not t.done():
+        t.cancel()
+
+
+def abort_session(
+    session_id: str, *, epoch: int | None = None, reason: str | None = None
+) -> int:
     """Signal in-flight turns and kill their shell children. Returns events notified.
 
     Keeps the stream *claim* until the dying generator releases it so Stop+send
     cannot overlap a still-running ReAct loop. Pass ``epoch`` from the stream
     that is dying — a stale CancelledError must not abort a newer claim.
+    ``reason`` ("stop" | "supersede") is remembered for the dying stream's
+    durable assistant row; an internal disconnect abort passes None and keeps
+    whatever the client said.
     """
     sid = str(session_id or "").strip()
     if not sid:
@@ -470,6 +552,8 @@ def abort_session(session_id: str, *, epoch: int | None = None) -> int:
         cur = int(_stream_epochs.get(sid, 0) or 0)
         if epoch is not None and cur != int(epoch):
             return 0
+        if reason is not None:
+            _abort_reasons[sid] = normalize_abort_reason(reason)
         events = list(_registry.pop(sid, []) or [])
         # Claim stays until release_session_stream_claim (stream finally).
     for ev in events:
@@ -503,6 +587,8 @@ def abort_session(session_id: str, *, epoch: int | None = None) -> int:
         from remedy.core.coordination import unregister as _coord_unregister
 
         _coord_unregister(sid)
+    # Stop / supersede cancel the detached worker. A dropped SSE must not.
+    cancel_turn_job(sid)
     return len(events)
 
 
@@ -523,6 +609,9 @@ def try_claim_session_stream(session_id: str) -> bool:
             return False
         _stream_claims.add(sid)
         _stream_epochs[sid] = int(_stream_epochs.get(sid, 0) or 0) + 1
+        # A fresh turn starts with no abort verdict; the previous stream read
+        # its reason synchronously before releasing the claim.
+        _abort_reasons.pop(sid, None)
         return True
 
 

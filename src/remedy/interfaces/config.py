@@ -24,6 +24,7 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
+from remedy.home import default_home
 from remedy.models import AgentConfig, ChannelKind
 
 CONFIG_PATHS = [
@@ -1215,7 +1216,7 @@ def create_default_config(home_dir: Path | None = None) -> Path:
 
 def config_path_for_home(home_dir: str | Path | None = None) -> Path:
     """Return the canonical config.toml path for a home directory."""
-    hd = Path(home_dir or Path.home() / ".remedy").expanduser()
+    hd = Path(home_dir or default_home()).expanduser()
     return hd / "config.toml"
 
 

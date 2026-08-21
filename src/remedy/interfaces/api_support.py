@@ -38,6 +38,7 @@ def sse_headers() -> dict[str, str]:
 
 
 # Slash commands live in slash_commands.py (re-exported for compatibility).
+from remedy.home import default_home  # noqa: E402
 from remedy.interfaces.slash_commands import (  # noqa: E402
     _BUILTIN_AGENTS,
     _BUILTIN_COMMANDS,
@@ -63,7 +64,7 @@ def _default_config_path() -> Path:
     env_home = str(os.environ.get("REMEDY_HOME") or "").strip()
     if env_home:
         return Path(env_home).expanduser().resolve() / "config.toml"
-    return Path.home() / ".remedy" / "config.toml"
+    return default_home() / "config.toml"
 
 
 def _find_config_path() -> Path | None:

@@ -12,6 +12,8 @@ import re
 import threading
 from typing import Any
 
+from remedy.home import default_home
+
 logger = logging.getLogger(__name__)
 
 _JSON_RE = re.compile(r"\{[\s\S]*\}")
@@ -65,7 +67,7 @@ def _local_base_url() -> str:
         home = cfg.get("home_dir")
         from pathlib import Path
 
-        h = Path(home).expanduser() if home else Path.home() / ".remedy"
+        h = Path(home).expanduser() if home else default_home()
         side = load_vision_json(h)
         v = vision_section_from_config(cfg)
         return str(side.get("base_url") or v.get("base_url") or "http://127.0.0.1:8740/v1")
