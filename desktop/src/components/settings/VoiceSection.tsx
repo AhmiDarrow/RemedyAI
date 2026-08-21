@@ -184,6 +184,17 @@ export function VoiceSection({
 
   return (
     <SettingsSection {...sectionProps}>
+      {tts?.enabled === false ? (
+        <div className="flex flex-wrap items-center gap-1.5 mb-2">
+          <FormNotice tone="warn">
+            Remedy's own voice is switched off — this computer's built-in voice is reading
+            replies, so there is no high-quality voice and no gender.
+          </FormNotice>
+          <FormActionButton variant="primary" onClick={() => void patch({ tts_enabled: true })}>
+            Use Remedy's voice
+          </FormActionButton>
+        </div>
+      ) : null}
       <FormToggle
         checked={speakReplies}
         onChange={(on) => void patch({ speak_replies: on })}
@@ -294,7 +305,12 @@ export function VoiceSection({
           <FormToggle
             checked={Boolean(tts?.enabled ?? true)}
             onChange={(on) => void patch({ tts_enabled: on })}
-            label="Speaking (Kokoro)"
+            label="Use Remedy's own voice"
+            description={
+              tts?.enabled === false
+                ? "Off: this computer's built-in voice reads replies instead — no Kokoro, no high quality, no gender. Turn on to hear Remedy."
+                : 'On: Remedy speaks with her own voice (standard, or high quality when it is on). Off falls back to the built-in system voice.'
+            }
           />
           <FormToggle
             checked={Boolean(stt?.enabled ?? true)}
