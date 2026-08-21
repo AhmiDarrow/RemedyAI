@@ -23,6 +23,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   card; with an NVIDIA GPU the runtime now gets the CUDA 12.4 build of
   torch and the voice answers in seconds. `REMEDY_VOICE_CPU_ONLY=1`
   opts out.
+- **One toggle could silently mute her.** Settings → Voice → Advanced had
+  "Speaking (Kokoro)", which read like "use Kokoro" but was the master
+  switch for *all* local speech — off, every reply went to this computer's
+  built-in voice (no high quality, no gender) with nothing saying so. It is
+  now "Use Remedy's own voice" with a plain description, turning the
+  high-quality voice on turns speech back on, and the Voice page shows a
+  notice with a one-tap fix whenever her voice is off.
 - **The high-quality voice is actually hers, and changes with her gender.**
   Three faults stacked up: Chatterbox's `generate()` silently reuses the
   last speaker when no clip is passed; the male stand-in clip was being
