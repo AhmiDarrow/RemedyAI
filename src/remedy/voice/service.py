@@ -541,6 +541,7 @@ def run_pip_packages(
     python: str | Path | None = None,
     floor: float | None = None,
     extra_args: tuple[str, ...] = (),
+    label: str = "the voice pack",
 ) -> None:
     """Install packages into *python* (default: this one), with real progress.
 
@@ -591,10 +592,9 @@ def run_pip_packages(
         if not isinstance(cur, dict):
             return
         if pct is not None:
-            # Per-file progress: the bar restarts at *lo* for each wheel and
-            # the message names the file, so a 2 GB torch after a 2 MB
-            # helper reads as what it is instead of a bar stuck at the cap.
-            cur["percent"] = round(min(cap, max(lo, pct)), 1)
+            # Climbs with cumulative bytes; never backwards within the stage.
+            prev = float(cur.get("percent") or 0.0)
+            cur["percent"] = round(min(cap, max(lo, pct, prev if prev <= cap else lo)), 1)
         if message:
             cur["message"] = message
 
@@ -602,7 +602,7 @@ def run_pip_packages(
     try:
         for cmd in attempts:
             try:
-                rc, tail = _stream_pip(cmd, env, _set, lo, cap)
+                rc, tail = _stream_pip(cmd, env, _set, lo, cap, label=label)
                 if rc == 0:
                     return
                 last_err = ("\n".join(tail[-8:]) or f"exit {rc}")[:400]
@@ -615,17 +615,41 @@ def run_pip_packages(
     raise RuntimeError(last_err or "Voice pack download failed.")
 
 
+def _human_bytes(n: float) -> str:
+    if n >= 2**30:
+        return f"{n / 2**30:.2f} GB"
+    return f"{n / 2**20:.0f} MB"
+
+
+def _human_secs(s: float) -> str:
+    s = int(s)
+    return f"{s // 60}m{s % 60:02d}s" if s >= 60 else f"{s}s"
+
+
+_PIP_SIZE_RE = re.compile(r"^Downloading\s+\S+\s+\(([\d.]+)\s*(kB|MB|GB|bytes)\)", re.I)
+_PIP_LOG_RE = re.compile(r"^(Collecting|Downloading|Installing|Successfully|Building|ERROR|WARNING)", re.I)
+_UNIT = {"bytes": 1, "kb": 1000, "mb": 1000**2, "gb": 1000**3}
+
+
 def _stream_pip(
     cmd: list[str],
     env: dict[str, str],
     set_state: Any,
     lo: float,
     cap: float,
+    *,
+    label: str = "the voice pack",
 ) -> tuple[int, list[str]]:
-    """Run one pip command hidden, mapping its raw progress onto the bar.
+    """Run one pip command hidden, keeping the owner's bar honest and alive.
 
-    Returns ``(returncode, last_output_lines)``. Raises ``TimeoutError``
-    when pip goes silent for :data:`_PIP_IDLE_TIMEOUT_S`.
+    pip (``--progress-bar raw``) prints ``Progress X of Y`` while a wheel
+    downloads and very little while it resolves a hundred dependencies.
+    The owner must never wonder whether anything is happening, so a ticker
+    rewrites the message every second with what is known for certain: the
+    current package, bytes fetched so far, and time elapsed. The percent
+    climbs with cumulative bytes (never backwards). Returns
+    ``(returncode, last_output_lines)``; raises ``TimeoutError`` when pip
+    is silent for :data:`_PIP_IDLE_TIMEOUT_S`.
     """
     from remedy.execution.process import hidden_subprocess_kwargs
 
@@ -641,13 +665,42 @@ def _stream_pip(
         **hidden_subprocess_kwargs(),
     )
     tail: list[str] = []
-    box: dict[str, Any] = {"last": time.monotonic(), "done": False}
+    started = time.monotonic()
+    box: dict[str, Any] = {
+        "last": started,
+        "done": False,
+        "name": "",
+        "phase": "Fetching",
+        "file_done": 0,  # bytes of the current file so far
+        "file_total": 0,
+        "cum_done": 0,  # bytes of files already completed
+        "files": 0,
+    }
     stdout = proc.stdout
     assert stdout is not None
+    lock = threading.Lock()
 
-    current = {"name": ""}
+    def _publish() -> None:
+        with lock:
+            cum = box["cum_done"] + box["file_done"]
+            name = box["name"]
+            phase = box["phase"]
+            ft, fd = box["file_total"], box["file_done"]
+        elapsed = time.monotonic() - started
+        parts = [f"{phase} {name}" if name else f"Preparing {label}"]
+        if ft >= 50 * 1000**2 and fd:
+            parts.append(f"{_human_bytes(fd)} of {_human_bytes(ft)}")
+        if cum:
+            parts.append(f"{_human_bytes(cum)} so far")
+        parts.append(_human_secs(elapsed))
+        # Bytes climb, so the bar climbs: a gentle curve through the stage
+        # (no known total across a hundred wheels), never backwards.
+        span = cap - lo
+        pct = lo + span * (1.0 - 1.0 / (1.0 + cum / (600 * 1000**2)))
+        set_state(pct, " · ".join(parts))
 
     def _reader() -> None:
+        last_log = 0.0
         for raw in stdout:
             line = raw.strip()
             box["last"] = time.monotonic()
@@ -658,29 +711,51 @@ def _stream_pip(
             m = _PIP_PROGRESS_RE.match(line)
             if m:
                 done_b, total_b = int(m.group(1)), int(m.group(2))
-                if total_b > 0:
-                    frac = min(1.0, done_b / total_b)
-                    name = current["name"] or "the voice pack"
-                    if total_b >= 50 << 20:
-                        msg = f"Fetching {name} · {done_b / 2**30:.1f} of {total_b / 2**30:.1f} GB"
-                    else:
-                        msg = f"Fetching {name}"
-                    set_state(lo + (cap - lo) * frac, msg)
+                with lock:
+                    box["file_done"] = done_b
+                    box["file_total"] = max(box["file_total"], total_b)
+                    if total_b and done_b >= total_b:
+                        box["cum_done"] += total_b
+                        box["file_done"] = 0
+                        box["file_total"] = 0
+                        box["files"] += 1
                 continue
+            m = _PIP_SIZE_RE.match(line)
+            if m:
+                with lock:
+                    box["file_total"] = int(float(m.group(1)) * _UNIT[m.group(2).lower()])
             m = _PIP_COLLECT_RE.match(line)
             if m:
-                current["name"] = re.split(r"[-=<>\[ ]", m.group(1), maxsplit=1)[0]
-                set_state(None, f"Fetching {current['name']}")
+                with lock:
+                    box["name"] = re.split(r"[-=<>\[ ]", m.group(1), maxsplit=1)[0]
+                    box["phase"] = "Fetching"
+            elif line.lower().startswith("installing collected"):
+                with lock:
+                    box["name"] = label
+                    box["phase"] = "Installing"
+            elif line.lower().startswith("building wheel"):
+                with lock:
+                    box["phase"] = "Building"
+            if _PIP_LOG_RE.match(line) and time.monotonic() - last_log > 2.0:
+                logger.info("voice pip: %s", line[:160])
+                last_log = time.monotonic()
         box["done"] = True
 
     t = threading.Thread(target=_reader, daemon=True)
     t.start()
     while not box["done"]:
-        t.join(5.0)
+        t.join(1.0)
+        _publish()
         if not box["done"] and time.monotonic() - box["last"] > _PIP_IDLE_TIMEOUT_S:
             proc.kill()
             raise TimeoutError("pip produced no output for 15 minutes")
-    return proc.wait(timeout=60), tail
+    rc = proc.wait(timeout=60)
+    if rc == 0:
+        with lock:
+            box["cum_done"] += box["file_done"]
+            box["file_done"] = 0
+        set_state(cap, None)
+    return rc, tail
 
 
 def _runtime_python(home_dir: Path | str | None, state_key: str) -> Path:

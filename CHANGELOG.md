@@ -23,6 +23,14 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   card; with an NVIDIA GPU the runtime now gets the CUDA 12.4 build of
   torch and the voice answers in seconds. `REMEDY_VOICE_CPU_ONLY=1`
   opts out.
+- **A download always shows it is alive.** While pip resolves a hundred
+  dependencies it prints almost nothing, so the bar sat on one word for
+  minutes. The message now ticks every second with what is certain — the
+  current package, bytes fetched so far, elapsed time ("Fetching numpy ·
+  312 MB so far · 2m10s") — and the bar climbs with cumulative bytes.
+  On NVIDIA machines the CUDA torch goes in *before* chatterbox-tts so
+  the CPU torch is never downloaded only to be replaced. Rehearsed from
+  an empty home: voice pack 47 s, HQ 4½ min, longest silent stretch 7 s.
 - **Downloads no longer "stick at 35 %".** pip had a ten-minute wall-clock
   limit that a 2 GB torch wheel walked straight through. It now streams
   pip's own progress ("Fetching torch · 1.2 of 2.5 GB") and only gives up
