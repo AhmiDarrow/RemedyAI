@@ -1038,9 +1038,11 @@ export default function App() {
   })
 
   // Studio/WebUI voice: Grove has its own instance and unmounts off-surface.
+  // Feeds the status bar on both surfaces (the 🔊 state must be live on
+  // Grove too); Studio's auto-speak effect below is what stays Studio-only.
   const studioVoice = useVoice({
     gender: voiceGender,
-    enabled: surface === 'studio' && serverState === 'ready',
+    enabled: serverState === 'ready',
   })
   const studioSpeakReplies = studioVoice.status?.settings?.speak_replies ?? false
   const [groveSpeaking, setGroveSpeaking] = useState(false)

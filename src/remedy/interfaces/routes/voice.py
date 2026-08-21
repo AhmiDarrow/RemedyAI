@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 _MAX_AUDIO_BYTES = 25 * 1024 * 1024
 
 
+class VoiceClientLog(BaseModel):
+    message: str = ""
+
+
 class VoiceIdentityPatch(BaseModel):
     pace: float | None = None
     pitch_semitones: float | None = None
@@ -152,6 +156,13 @@ def register_voice_routes(
             started = await asyncio.to_thread(install_chatterbox_background, _home(cfg))
             return {"ok": True, "started": started}
         return {"ok": False, "error": f"Unknown voice piece {comp!r}."}
+
+    @app.post("/api/voice/client-log")
+    async def voice_client_log_route(req: VoiceClientLog) -> dict[str, Any]:
+        """The desktop reports why it could not play her voice, so the
+        answer is in remedy.log instead of a devtools console nobody opens."""
+        logger.warning("voice client: %s", str(req.message or "")[:400])
+        return {"ok": True}
 
     @app.get("/api/voice/identity")
     async def voice_identity_route() -> dict[str, Any]:

@@ -339,7 +339,13 @@ def source_root_for_worker(home_dir: Path | str | None = None) -> Path:
     src = Path(meipass) / "remedy"
     app = runtime_dir(home_dir) / "app"
     stamp = app / "version.txt"
-    want = str(remedy.__version__)
+    # Version alone is not enough: a patched sidecar of the same version
+    # must not keep running yesterday's worker code. Key on the binary too.
+    try:
+        exe = Path(sys.executable).stat()
+        want = f"{remedy.__version__}:{int(exe.st_mtime)}:{exe.st_size}"
+    except OSError:
+        want = str(remedy.__version__)
     try:
         have = stamp.read_text(encoding="utf-8").strip()
     except OSError:
