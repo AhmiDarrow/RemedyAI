@@ -143,6 +143,7 @@ export function VoiceSection({
   const packFailed = pack?.install?.status === 'error'
   const hqDownloading = hq?.install?.status === 'downloading'
   const hqReady = Boolean(hq?.available)
+  const ttsFailed = tts?.install?.status === 'error'
   const hqFailed = hq?.install?.status === 'error'
   // One voice, two parts: "ready" as soon as she can speak with her own voice
   // at all; the full voice follows in the background.
@@ -163,7 +164,6 @@ export function VoiceSection({
     packDownloading || ttsDownloading
       ? (pack?.install?.percent ?? tts?.install?.percent ?? null)
       : (hq?.install?.percent ?? null)
-  const ttsFailed = tts?.install?.status === 'error'
   const sttFailed = stt?.install?.status === 'error'
   const turnFailed = turn?.install?.status === 'error'
 
