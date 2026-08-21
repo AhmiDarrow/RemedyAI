@@ -49,6 +49,13 @@ export interface UseVoice {
 }
 
 /** Split a reply into speakable chunks of one or two sentences (≤ ~220 chars). */
+/** Window event fired after voice settings change so every useVoice() re-reads. */
+export const VOICE_SETTINGS_CHANGED = 'remedy:voice-settings-changed'
+
+export function announceVoiceSettingsChanged(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(VOICE_SETTINGS_CHANGED))
+}
+
 export function splitForSpeech(text: string, max = 220): string[] {
   const sentences = text
     .replace(/\s+/g, ' ')
@@ -105,6 +112,14 @@ export function useVoice(opts: UseVoiceOptions = {}): UseVoice {
 
   useEffect(() => {
     refreshStatus()
+  }, [refreshStatus])
+
+  // Several surfaces hold their own copy of the voice status (Grove, the
+  // status bar). Any of them announces a settings change; all refresh.
+  useEffect(() => {
+    const onChanged = () => refreshStatus()
+    window.addEventListener(VOICE_SETTINGS_CHANGED, onChanged)
+    return () => window.removeEventListener(VOICE_SETTINGS_CHANGED, onChanged)
   }, [refreshStatus])
 
   const stopSpeaking = useCallback(() => {

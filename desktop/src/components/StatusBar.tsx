@@ -77,6 +77,10 @@ interface StatusBarProps {
   onToggleTimeTravel?: () => void
   /** Switch back to the Grove partner surface (default home). */
   onOpenGrove?: () => void
+  /** Which surface the bar sits under; on Grove the surface button offers Studio. */
+  surface?: 'grove' | 'studio'
+  /** Switch to the Studio workbench (shown on Grove). */
+  onOpenStudio?: () => void
   /** Speak replies aloud (same setting as Grove). */
   speakReplies?: boolean
   speaking?: boolean
@@ -286,6 +290,8 @@ export function StatusBar({
   timeTravelOpen = false,
   onToggleTimeTravel,
   onOpenGrove,
+  surface = 'studio',
+  onOpenStudio,
   speakReplies = false,
   speaking = false,
   onToggleSpeak,
@@ -875,7 +881,16 @@ export function StatusBar({
               {speakReplies ? '🔊' : '🔇'}
             </button>
           )}
-          {onOpenGrove && (
+          {surface === 'grove' && onOpenStudio ? (
+            <button
+              type="button"
+              className="seg-btn"
+              title="Studio — the full workbench (files, shell, browser rail)"
+              onClick={onOpenStudio}
+            >
+              ▣ Studio
+            </button>
+          ) : onOpenGrove ? (
             <button
               type="button"
               className="seg-btn"
@@ -884,7 +899,7 @@ export function StatusBar({
             >
               ✦ Grove
             </button>
-          )}
+          ) : null}
           {onUiModeChange && (
             <button
               type="button"
