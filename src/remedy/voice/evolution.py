@@ -28,7 +28,9 @@ logger = logging.getLogger(__name__)
 # Fraction of the remaining distance covered per daily step: ~weeks to settle.
 _STEP = 0.12
 # Per-trait caps on how far the baseline may drift from the shipped default.
-_REACH = {"pace": 0.04, "pitch_semitones": 0.4, "warmth": 0.12, "articulation": 0.12}
+# Pace and pitch stay where they are: on her engine they cost a phase-vocoder
+# pass, which is audible. Drift moves only warmth and articulation.
+_REACH = {"pace": 0.0, "pitch_semitones": 0.0, "warmth": 0.12, "articulation": 0.12}
 
 
 def familiarity(days_together: float, exchanges: int) -> float:

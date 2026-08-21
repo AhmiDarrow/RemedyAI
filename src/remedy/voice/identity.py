@@ -43,10 +43,10 @@ class VoiceIdentity:
     # Baseline: ships neutral-ish and drifts slowly with the relationship
     # (remedy.voice.evolution). Pitch 0 and warmth 0.5 leave the reference
     # clip's own character alone.
-    pace: float = 0.97
+    pace: float = 1.0
     pitch_semitones: float = 0.0
     warmth: float = 0.5
-    articulation: float = 0.45
+    articulation: float = 0.5
     # The owner's explicit asks ("a little warmer"), kept apart from drift
     # so the slow evolution never quietly undoes what they chose.
     offset: dict[str, float] = field(default_factory=dict)
@@ -102,10 +102,10 @@ def load(home_dir: Path | str | None = None) -> VoiceIdentity:
     ident = VoiceIdentity(
         gender=str(raw.get("gender") or "female"),
         reference_wav=str(raw.get("reference_wav") or ""),
-        pace=_num(raw.get("pace"), 0.97),
+        pace=_num(raw.get("pace"), 1.0),
         pitch_semitones=_num(raw.get("pitch_semitones"), 0.0),
         warmth=_num(raw.get("warmth"), 0.5),
-        articulation=_num(raw.get("articulation"), 0.45),
+        articulation=_num(raw.get("articulation"), 0.5),
         offset={
             k: _num(v, 0.0)
             for k, v in (raw.get("offset") or {}).items()
