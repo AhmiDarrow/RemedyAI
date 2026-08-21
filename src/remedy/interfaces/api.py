@@ -254,6 +254,20 @@ def create_app(
                         logger.info("Voice assets first-run download: %s", vr.get("started"))
                 except Exception:
                     logger.exception("Voice assets first-run ensure failed")
+                # Her voice should be ready before she is asked to speak: load
+                # the engines now (Kokoro; Chatterbox too when HQ is on) so
+                # the first sentence is not a twenty-second wait.
+                try:
+                    from remedy.voice.service import warm_voice_engines
+
+                    warm_voice_engines(
+                        home0,
+                        gender=str(cfg0.get("agent_gender") or "female")
+                        if isinstance(cfg0, dict)
+                        else None,
+                    )
+                except Exception:
+                    logger.exception("Voice warm-up failed")
 
                 # Vision files always download on first run. llama-server start
                 # is skipped when RMB already owns the GPU host.

@@ -241,11 +241,13 @@ def _mark_ready(home_dir: Path | str | None, *, sr: int) -> None:
     )
 
 
-# The files ChatterboxTTS.from_pretrained fetches, in its order. Fetching
-# them ourselves first gives the owner a real byte count instead of a pulse;
-# from_pretrained then finds every file already in the cache.
-_HQ_REPO = "ResembleAI/chatterbox"
-_HQ_FILES = ("ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json", "conds.pt")
+# Chatterbox Turbo: the same voice quality at roughly half the latency
+# (2.3 s vs 4.5 s per sentence on an RTX 3080). from_pretrained calls
+# snapshot_download with these patterns; fetching the same files ourselves
+# first gives the owner a real byte count instead of a pulse, and the
+# library then finds everything already in the cache.
+_HQ_REPO = "ResembleAI/chatterbox-turbo"
+_HQ_SUFFIXES = (".safetensors", ".json", ".txt", ".pt", ".model")
 _HQ_DL_FLOOR, _HQ_DL_CAP = 36.0, 92.0
 
 
@@ -262,14 +264,21 @@ def _prefetch_weights() -> None:
     if not isinstance(st, dict):
         return
     sizes: dict[str, int] = {}
+    files: list[str] = []
     try:
         info = HfApi().model_info(_HQ_REPO, files_metadata=True)
         for sib in info.siblings or []:
-            if sib.rfilename in _HQ_FILES and sib.size:
-                sizes[sib.rfilename] = int(sib.size)
+            if sib.rfilename.endswith(_HQ_SUFFIXES):
+                files.append(sib.rfilename)
+                if sib.size:
+                    sizes[sib.rfilename] = int(sib.size)
     except Exception:
         sizes = {}
-    total = sum(sizes.get(f, 0) for f in _HQ_FILES) or 0
+    if not files:
+        return  # offline or hub unreachable: let from_pretrained try itself
+    # Big files last so the bar is busiest when the most is left to say.
+    files.sort(key=lambda f: sizes.get(f, 0))
+    total = sum(sizes.values())
     done_before = 0
     stop = threading.Event()
 
@@ -292,7 +301,7 @@ def _prefetch_weights() -> None:
                 else f"Downloading Chatterbox · {fname}"
             )
 
-    for fname in _HQ_FILES:
+    for fname in files:
         size = sizes.get(fname, 0)
         stop.clear()
         w = threading.Thread(target=_watch, args=(fname, size, done_before), daemon=True)
@@ -318,7 +327,7 @@ def get_chatterbox_engine(home_dir: Path | str | None = None) -> Any | None:
         os.environ.setdefault("HF_HOME", str(_hf_home(home_dir)))
         os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(_hf_home(home_dir) / "hub"))
         try:
-            from chatterbox.tts import ChatterboxTTS
+            from chatterbox.tts_turbo import ChatterboxTurboTTS
 
             _install_state["chatterbox"] = {
                 "status": "downloading",
@@ -326,7 +335,7 @@ def get_chatterbox_engine(home_dir: Path | str | None = None) -> Any | None:
                 "message": "Downloading Chatterbox",
             }
             _prefetch_weights()
-            model = ChatterboxTTS.from_pretrained(device=_device())
+            model = ChatterboxTurboTTS.from_pretrained(device=_device())
             _engine = model
             # Chatterbox's generate() is stateful: a prompt replaces
             # model.conds and a later call *without* one silently reuses
@@ -369,6 +378,15 @@ def install_chatterbox(home_dir: Path | str | None = None) -> None:
         raise RuntimeError("chatterbox install failed")
 
 
+def _owner_gender() -> str:
+    try:
+        from remedy.interfaces.api_support import load_config
+
+        return str(load_config().get("agent_gender") or "female")
+    except Exception:
+        return "female"
+
+
 def _install_managed(home_dir: Path | str | None) -> None:
     """Desktop: pip the pack into the runtime, then let the worker pull weights."""
     from remedy.voice.bridge import LANE_HQ, WorkerError, get_bridge
@@ -383,7 +401,7 @@ def _install_managed(home_dir: Path | str | None) -> None:
     }
     bridge = get_bridge(home_dir, LANE_HQ)
     try:
-        bridge.call("warm_hq_start", timeout=60)
+        bridge.call("warm_hq_start", timeout=60, gender=_owner_gender())
         # Mirror the worker's own progress (real bytes) until it settles.
         deadline = time.monotonic() + 3 * 3600
         t_start = time.monotonic()
@@ -452,15 +470,41 @@ def _floats(wav: Any) -> Any:
     return wav
 
 
+_REFERENCES_DIR = Path(__file__).resolve().parent / "references"
+
+
+def bundled_reference(gender: str | None) -> Path | None:
+    """The shipped human reference for *gender* (public-domain LibriVox)."""
+    try:
+        from remedy.core.agent_identity import normalize_agent_gender
+
+        g = normalize_agent_gender(gender)
+    except Exception:
+        g = (gender or "female").strip().lower() or "female"
+    if g == "neutral":
+        g = "female"
+    p = _REFERENCES_DIR / f"{g}.wav"
+    return p if p.is_file() and p.stat().st_size > 64 else None
+
+
 def identity_prompt_path(
     gender: str | None, home_dir: Path | str | None = None
 ) -> Path | None:
-    """Existing identity clip for this gender, or None (use Chatterbox default)."""
+    """The clip Chatterbox clones for this utterance.
+
+    Order: the owner's own reference (for its gender) → the bundled human
+    voice → a Kokoro stand-in recorded earlier (only if the bundle is
+    somehow missing). Never Chatterbox's built-in speaker, which is not a
+    stable voice of either gender.
+    """
     from remedy.voice.identity import reference_wav
 
     owned = reference_wav(gender, home_dir)
     if owned is not None:
         return owned
+    shipped = bundled_reference(gender)
+    if shipped is not None:
+        return shipped
     try:
         from remedy.core.agent_identity import normalize_agent_gender
 
