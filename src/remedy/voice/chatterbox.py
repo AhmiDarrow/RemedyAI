@@ -65,14 +65,17 @@ def _managed() -> bool:
 
 
 def chatterbox_deps_available() -> bool:
+    """Importable *and* new enough to load Nano."""
     if _managed():
         from remedy.voice.runtime import pack_installed, runtime_ready
 
         return runtime_ready() and pack_installed("hq")
     try:
-        import chatterbox.tts  # noqa: F401
+        import inspect
 
-        return True
+        from chatterbox.tts_turbo import ChatterboxTurboTTS
+
+        return "nano" in inspect.signature(ChatterboxTurboTTS.from_pretrained).parameters
     except Exception:
         return False
 
@@ -161,7 +164,7 @@ def _ensure_package(home_dir: Path | str | None = None) -> bool:
         _install_state["chatterbox"] = {
             "status": "downloading",
             "percent": 5.0,
-            "message": "Installing the high-quality voice pack",
+            "message": "Installing Remedy's voice",
         }
         from remedy.voice.service import run_pip_packages
 
@@ -191,13 +194,23 @@ def _ensure_package(home_dir: Path | str | None = None) -> bool:
                 )
                 floor = 20.0
             run_pip_packages(
-                _PACK_BASE_PACKAGES + ("chatterbox-tts",),
+                _PACK_BASE_PACKAGES + ("chatterbox-tts==0.1.7",),
+                _install_state,
+                "chatterbox",
+                cap=31.0,
+                python=py,
+                floor=floor,
+                label="Remedy's voice",
+            )
+            run_pip_packages(
+                (_CHATTERBOX_SRC_ZIP,),
                 _install_state,
                 "chatterbox",
                 cap=35.0,
                 python=py,
-                floor=floor,
-                label="the high-quality voice pack",
+                floor=31.0,
+                extra_args=("--no-deps", "--force-reinstall"),
+                label="Remedy's voice",
             )
             from remedy.voice.bridge import LANE_HQ, get_bridge, stop_lane
 
@@ -216,13 +229,13 @@ def _ensure_package(home_dir: Path | str | None = None) -> bool:
 
         _install_state["chatterbox"] = {
             "status": "error",
-            "error": _owner_pack_error(exc, what="High-quality voice"),
+            "error": _owner_pack_error(exc, what="Remedy's voice"),
         }
         return False
     if not chatterbox_deps_available():
         _install_state["chatterbox"] = {
             "status": "error",
-            "error": "High-quality voice did not finish downloading.",
+            "error": "Remedy's voice did not finish downloading.",
         }
         return False
     return True
@@ -246,7 +259,14 @@ def _mark_ready(home_dir: Path | str | None, *, sr: int) -> None:
 # snapshot_download with these patterns; fetching the same files ourselves
 # first gives the owner a real byte count instead of a pulse, and the
 # library then finds everything already in the cache.
-_HQ_REPO = "ResembleAI/chatterbox-turbo"
+_HQ_REPO = "ResembleAI/chatterbox-nano"
+# Nano needs the current chatterbox source (PyPI 0.1.7 predates the loader).
+# PyPI 0.1.7 brings the dependencies (same pins); the pinned GitHub archive
+# is then laid over it with --no-deps — no git needed on the owner's PC.
+_CHATTERBOX_SRC_SHA = "5de7a54aa4e5e2baadb0182dde554908b48b85c2"
+_CHATTERBOX_SRC_ZIP = (
+    f"https://github.com/resemble-ai/chatterbox/archive/{_CHATTERBOX_SRC_SHA}.zip"
+)
 _HQ_SUFFIXES = (".safetensors", ".json", ".txt", ".pt", ".model")
 _HQ_DL_FLOOR, _HQ_DL_CAP = 36.0, 92.0
 
@@ -335,7 +355,7 @@ def get_chatterbox_engine(home_dir: Path | str | None = None) -> Any | None:
                 "message": "Downloading Chatterbox",
             }
             _prefetch_weights()
-            model = ChatterboxTurboTTS.from_pretrained(device=_device())
+            model = ChatterboxTurboTTS.from_pretrained(device=_device(), nano=True)
             _engine = model
             # Chatterbox's generate() is stateful: a prompt replaces
             # model.conds and a later call *without* one silently reuses
@@ -373,7 +393,7 @@ def install_chatterbox(home_dir: Path | str | None = None) -> None:
         if _install_state.get("chatterbox", {}).get("status") != "error":
             _install_state["chatterbox"] = {
                 "status": "error",
-                "error": "High-quality voice could not be loaded.",
+                "error": "Remedy's voice could not be loaded.",
             }
         raise RuntimeError("chatterbox install failed")
 
@@ -426,17 +446,17 @@ def _install_managed(home_dir: Path | str | None) -> None:
                 return
             if status == "error":
                 raise RuntimeError(str(st.get("error") or "not loaded"))
-        raise TimeoutError("High-quality voice took longer than three hours")
+        raise TimeoutError("Remedy's voice took longer than three hours")
     except WorkerError as exc:
         _install_state["chatterbox"] = {
             "status": "error",
-            "error": _owner_pack_error(exc, what="High-quality voice"),
+            "error": _owner_pack_error(exc, what="Remedy's voice"),
         }
         raise RuntimeError("chatterbox install failed") from exc
     except (RuntimeError, TimeoutError) as exc:
         _install_state["chatterbox"] = {
             "status": "error",
-            "error": _owner_pack_error(exc, what="High-quality voice"),
+            "error": _owner_pack_error(exc, what="Remedy's voice"),
         }
         raise RuntimeError("chatterbox install failed") from exc
 
@@ -577,15 +597,20 @@ def synthesize(
     prompt = identity_prompt_path(gender, home_dir)
     if prompt is None:
         prompt = _bootstrap_identity(gender, home_dir)
+    from remedy.voice.identity import load as load_identity
+    from remedy.voice.shape import apply_identity, sampling_for
+
+    ident = load_identity(home_dir)
     try:
         with _engine_lock:
             _select_speaker(model, prompt)
-            wav = model.generate(clean)
+            wav = model.generate(clean, **sampling_for(ident.articulation))
     except Exception as exc:
         logger.warning("chatterbox: generate failed: %s", exc)
         return None
     sr = int(getattr(model, "sr", 24_000) or 24_000)
-    return encode_wav(_floats(wav), sr), sr
+    shaped = apply_identity(_floats(wav), sr, home_dir)
+    return encode_wav(shaped, sr), sr
 
 
 #: The built-in speaker's conditionals, captured at load.
@@ -621,38 +646,16 @@ def _select_speaker(model: Any, prompt: Path | None) -> None:
         model.conds = conds
 
 
-def _hardware_note() -> str | None:
-    """Plain words when this PC cannot hold the GPU human-bar."""
-    try:
-        from remedy.runtime.gpu_probe import probe_primary_vram
-
-        _nvidia, total, _free, name, vendor = probe_primary_vram()
-    except Exception:
-        return None
-    if total >= 4000:
-        return None
-    if total <= 0:
-        return (
-            "This computer has no dedicated GPU, so the high-quality voice "
-            "runs on the CPU and takes longer. It will still sound like a person."
-        )
-    label = name or vendor or "this GPU"
-    return (
-        f"{label} has about {total} MB of memory, under the 4 GB the "
-        "high-quality voice prefers. It will run slower, not quieter."
-    )
-
-
 def hq_status(home_dir: Path | str | None = None) -> dict[str, Any]:
     deps = chatterbox_deps_available()
     installed = chatterbox_installed(home_dir)
     ready = deps and (installed or _engine is not None)
     reason = None
     hint = None
-    hardware = _hardware_note()
+    hardware = None  # Nano runs on CPU; no GPU caveat to show
     if not ready:
         if not deps:
-            reason = "High-quality voice is not on this computer yet."
+            reason = "Remedy's voice is still arriving."
             if _managed():
                 from remedy.voice.runtime import unsupported_reason
 
@@ -660,7 +663,7 @@ def hq_status(home_dir: Path | str | None = None) -> dict[str, Any]:
             else:
                 hint = "pip install chatterbox-tts"
         else:
-            reason = "High-quality voice downloads when you turn it on (~1.1 GB)."
+            reason = "Remedy's voice is still arriving."
         if hardware:
             reason = f"{reason} {hardware}"
     elif hardware:

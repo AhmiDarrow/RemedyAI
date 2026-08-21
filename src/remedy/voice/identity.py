@@ -38,10 +38,12 @@ def identity_path(home_dir: Path | str | None = None) -> Path:
 class VoiceIdentity:
     gender: str = "female"
     reference_wav: str = ""
-    pace: float = 1.0
+    # Defaults tuned for a steady, unhurried, even delivery; evolution moves
+    # them in small steps inside the clamps below.
+    pace: float = 0.96
     pitch_semitones: float = 0.0
-    warmth: float = 0.5
-    articulation: float = 0.5
+    warmth: float = 0.62
+    articulation: float = 0.42
     journal: list[dict[str, Any]] = field(default_factory=list)
 
     def public(self) -> dict[str, Any]:
@@ -75,10 +77,10 @@ def load(home_dir: Path | str | None = None) -> VoiceIdentity:
     ident = VoiceIdentity(
         gender=str(raw.get("gender") or "female"),
         reference_wav=str(raw.get("reference_wav") or ""),
-        pace=_num(raw.get("pace"), 1.0),
+        pace=_num(raw.get("pace"), 0.96),
         pitch_semitones=_num(raw.get("pitch_semitones"), 0.0),
-        warmth=_num(raw.get("warmth"), 0.5),
-        articulation=_num(raw.get("articulation"), 0.5),
+        warmth=_num(raw.get("warmth"), 0.62),
+        articulation=_num(raw.get("articulation"), 0.42),
         journal=list(raw.get("journal") or [])[-20:],
     )
     return _clamp(ident)
@@ -146,6 +148,27 @@ def evolve(
             },
         }
     )
+    return save(ident, home_dir)
+
+
+def revert(home_dir: Path | str | None = None, *, steps: int = 1) -> VoiceIdentity:
+    """Walk back the last *steps* evolutions using their journaled ``before``."""
+    ident = load(home_dir)
+    n = max(1, int(steps))
+    while n > 0:
+        idx = next(
+            (i for i in range(len(ident.journal) - 1, -1, -1)
+             if ident.journal[i].get("change") == "evolve"),
+            None,
+        )
+        if idx is None:
+            break
+        before = ident.journal.pop(idx).get("before") or {}
+        for k in ("pace", "pitch_semitones", "warmth", "articulation"):
+            if k in before:
+                setattr(ident, k, float(before[k]))
+        n -= 1
+    ident.journal.append({"at": datetime.now(UTC).isoformat(), "change": "revert"})
     return save(ident, home_dir)
 
 

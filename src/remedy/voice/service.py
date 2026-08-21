@@ -363,19 +363,17 @@ def synthesize(
             return None
         from remedy.voice.bridge import LANE_HQ, WorkerError, get_bridge
 
-        # HQ runs in its own lane (torch) and only when ready; any failure
-        # falls through to Kokoro in the voice lane.
-        cfg_m = load_voice_settings(home_dir)
-        if str(cfg_m.get("tts_quality") or "standard") == "hq":
-            from remedy.voice.chatterbox import chatterbox_ready
+        # Her voice runs in its own lane; until it has finished arriving the
+        # quick first voice answers, and any failure falls through to it.
+        from remedy.voice.chatterbox import chatterbox_ready
 
-            if chatterbox_ready(home_dir):
-                try:
-                    hq_out = get_bridge(home_dir, LANE_HQ).synthesize(text, gender=gender)
-                    if hq_out is not None:
-                        return hq_out
-                except WorkerError as exc:
-                    logger.warning("voice: hq lane failed, using standard: %s", exc)
+        if chatterbox_ready(home_dir):
+            try:
+                hq_out = get_bridge(home_dir, LANE_HQ).synthesize(text, gender=gender)
+                if hq_out is not None:
+                    return hq_out
+            except WorkerError as exc:
+                logger.warning("voice: full voice lane failed, using first voice: %s", exc)
         try:
             return get_bridge(home_dir).synthesize(
                 text, gender=gender, voice=voice, speed=speed
@@ -384,31 +382,37 @@ def synthesize(
             logger.warning("voice: managed synth failed: %s", exc)
             return None
     cfg = load_voice_settings(home_dir)
-    if str(cfg.get("tts_quality") or "standard") == "hq":
-        from remedy.voice.chatterbox import chatterbox_ready
-        from remedy.voice.chatterbox import synthesize as hq_synthesize
+    from remedy.voice.chatterbox import chatterbox_ready
+    from remedy.voice.chatterbox import synthesize as hq_synthesize
 
-        # Never pip/download inside a speak request: if the HQ voice is not
-        # ready yet, fall through to Kokoro (the install runs in its own
-        # thread, kicked by Settings).
-        if chatterbox_ready(home_dir):
-            try:
-                out = hq_synthesize(text, gender=gender, home_dir=home_dir)
-            except Exception as exc:
-                logger.warning("voice: hq synth failed, using standard: %s", exc)
-                out = None
-            if out is not None:
-                return out
+    # Never pip/download inside a speak request: until her voice has
+    # finished arriving, the quick first voice answers.
+    if chatterbox_ready(home_dir):
+        try:
+            out = hq_synthesize(text, gender=gender, home_dir=home_dir)
+        except Exception as exc:
+            logger.warning("voice: full voice failed, using first voice: %s", exc)
+            out = None
+        if out is not None:
+            return out
     engine = get_tts_engine(home_dir)
     if engine is None:
         return None
+    from remedy.voice.identity import load as load_identity
+    from remedy.voice.shape import shape_audio
+
+    ident = load_identity(home_dir)
     v = voice_for_gender(gender, voice or cfg.get("voice_override"))
-    spd = float(speed or cfg.get("speed") or 1.0)
+    spd = float(speed or ident.pace or 1.0)
     clean = speakable_text(text)
     if not clean:
         return None
     samples, sr = engine.create(clean, voice=v, speed=spd)
-    return encode_wav(samples, sr), int(sr)
+    # Pace already applied natively; pitch and warmth follow the identity.
+    shaped = shape_audio(
+        samples, int(sr), pace=1.0, pitch_semitones=ident.pitch_semitones, warmth=ident.warmth
+    )
+    return encode_wav(shaped, int(sr)), int(sr)
 
 
 # ---------------------------------------------------------------------------
@@ -730,8 +734,12 @@ def _stream_pip(
                     box["file_total"] = int(float(m.group(1)) * _UNIT[m.group(2).lower()])
             m = _PIP_COLLECT_RE.match(line)
             if m:
+                name = re.split(r"[-=<>\[ ]", m.group(1), maxsplit=1)[0]
+                # A source archive (URL / commit hash) is not a name to show.
+                if name.endswith((".zip", ".tar.gz")) or re.fullmatch(r"[0-9a-f]{12,}", name):
+                    name = label
                 with lock:
-                    box["name"] = re.split(r"[-=<>\[ ]", m.group(1), maxsplit=1)[0]
+                    box["name"] = name
                     box["phase"] = "Fetching"
             elif line.lower().startswith("installing collected"):
                 with lock:
@@ -832,6 +840,11 @@ def install_voice_pack(home_dir: Path | str | None = None) -> None:
             install_stt_background(home_dir)
         if not smart_turn_installed(home_dir):
             install_smart_turn_background(home_dir)
+        # Her full voice follows in the background (its own progress line).
+        from remedy.voice.chatterbox import chatterbox_ready, install_chatterbox_background
+
+        if not chatterbox_ready(home_dir):
+            install_chatterbox_background(home_dir)
         _install_state["pack"] = {
             "status": "done",
             "percent": 100.0,
@@ -867,10 +880,9 @@ def warm_voice_engines(
                     get_bridge(home_dir).synthesize("Ready.", gender=gender or "female")
                 else:
                     get_tts_engine(home_dir)
-            cfg = load_voice_settings(home_dir)
-            if str(cfg.get("tts_quality") or "standard") == "hq":
-                from remedy.voice.chatterbox import chatterbox_ready
+            from remedy.voice.chatterbox import chatterbox_ready
 
+            if True:
                 if chatterbox_ready(home_dir):
                     if _managed():
                         from remedy.voice.bridge import LANE_HQ, get_bridge
