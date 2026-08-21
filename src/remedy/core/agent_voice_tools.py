@@ -35,9 +35,10 @@ def register_voice_tools(runtime: Any) -> None:
         return str(h2) if h2 else None
 
     def _describe(ident: Any) -> str:
+        e = ident.effective()
         return (
-            f"pace {ident.pace:.2f}, pitch {ident.pitch_semitones:+.2f} st, "
-            f"warmth {ident.warmth:.2f}, articulation {ident.articulation:.2f}"
+            f"pace {e['pace']:.2f}, pitch {e['pitch_semitones']:+.2f} st, "
+            f"warmth {e['warmth']:.2f}, articulation {e['articulation']:.2f}"
         )
 
     async def voice_identity() -> str:
@@ -49,7 +50,12 @@ def register_voice_tools(runtime: Any) -> None:
             return format_tool_error(str(e), code="VOICE_IDENTITY", tool_name="voice_identity")
         ref = "own reference clip" if ident.reference_wav else "the built-in reference"
         steps = len([j for j in ident.journal if j.get("change") == "evolve"])
-        return f"My voice: {_describe(ident)}; {ref}; {steps} adjustment(s) so far."
+        drifts = len([j for j in ident.journal if j.get("change") == "drift"])
+        kept = " Kept as is at your request." if ident.held else ""
+        return (
+            f"My voice: {_describe(ident)}; {ref}; {steps} adjustment(s) you asked for, "
+            f"{drifts} small daily settlings of my own.{kept}"
+        )
 
     async def voice_adjust(
         pace: int = 0,
@@ -74,6 +80,21 @@ def register_voice_tools(runtime: Any) -> None:
         except Exception as e:
             return format_tool_error(str(e), code="VOICE_ADJUST", tool_name="voice_adjust")
         return f"Adjusted. My voice is now {_describe(ident)}. It takes effect on my next reply."
+
+    async def voice_hold(keep: bool = True) -> str:
+        """Keep the voice exactly as it is (or release it to settle again)."""
+        try:
+            from remedy.voice.identity import hold
+
+            ident = hold(_home(), on=bool(keep))
+        except Exception as e:
+            return format_tool_error(str(e), code="VOICE_HOLD", tool_name="voice_hold")
+        if ident.held:
+            return (
+                f"Kept. My voice stays exactly like this — {_describe(ident)} — "
+                "until you say otherwise."
+            )
+        return f"Released. My voice can settle slowly again from {_describe(ident)}."
 
     async def voice_revert(steps: int = 1) -> str:
         """Undo the last N adjustments (default 1)."""
@@ -109,6 +130,14 @@ def register_voice_tools(runtime: Any) -> None:
                 "articulation": {"type": "integer", "minimum": -3, "maximum": 3},
             },
         },
+    )
+    runtime.tool_registry.register_builtin_handler(
+        "voice_hold",
+        "When the owner likes my voice as it is and wants it kept: keep=true "
+        "freezes it (no slow settling; their own later asks still apply). "
+        "keep=false lets it settle again.",
+        voice_hold,
+        {"type": "object", "properties": {"keep": {"type": "boolean"}}},
     )
     runtime.tool_registry.register_builtin_handler(
         "voice_revert",
