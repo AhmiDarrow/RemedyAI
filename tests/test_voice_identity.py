@@ -13,7 +13,7 @@ def test_identity_defaults_and_roundtrip(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
     ident = load(tmp_path)
     assert ident.gender == "female"
-    assert ident.pace == pytest.approx(0.97)
+    assert ident.pace == pytest.approx(1.0)
     ident.gender = "male"
     ident.pace = 1.4  # clamp
     save(ident, tmp_path)
@@ -58,7 +58,7 @@ def test_identity_load_survives_junk_numbers(tmp_path):
     p.write_text(json.dumps({"warmth": "warm", "pace": None}), encoding="utf-8")
     ident = load(tmp_path)
     assert ident.warmth == pytest.approx(0.5)
-    assert ident.pace == pytest.approx(0.97)
+    assert ident.pace == pytest.approx(1.0)
 
 
 def test_an_owned_reference_only_speaks_for_its_own_gender(tmp_path):

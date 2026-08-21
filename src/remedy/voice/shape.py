@@ -71,12 +71,15 @@ def shape_audio(
     x = _floats(samples)
     if len(x) < 64:
         return x
+    # Pitch shift and time-stretch are phase-vocoder operations: on speech
+    # they smear into a metallic, room-like sound. They run only when the
+    # owner has asked for a real change; the baseline never touches them.
     try:
-        if abs(float(pitch_semitones)) >= 0.05:
+        if abs(float(pitch_semitones)) >= 0.25:
             import librosa
 
             x = librosa.effects.pitch_shift(x, sr=sr, n_steps=float(pitch_semitones))
-        if abs(float(pace) - 1.0) >= 0.01:
+        if abs(float(pace) - 1.0) >= 0.05:
             import librosa
 
             x = librosa.effects.time_stretch(x, rate=float(pace))
@@ -147,7 +150,8 @@ def sampling_for(articulation: float) -> dict[str, float]:
     Kept inside the range where the model stays clean.
     """
     a = max(0.0, min(1.0, float(articulation)))
-    return {"temperature": round(0.55 + 0.5 * a, 3), "top_p": round(0.85 + 0.1 * a, 3)}
+    # 0.5 is exactly the engine's own defaults (temperature 0.8, top_p 0.95).
+    return {"temperature": round(0.6 + 0.4 * a, 3), "top_p": round(0.9 + 0.1 * a, 3)}
 
 
 def apply_identity(
