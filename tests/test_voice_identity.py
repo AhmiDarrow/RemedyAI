@@ -57,3 +57,36 @@ def test_identity_load_survives_junk_numbers(tmp_path):
     ident = load(tmp_path)
     assert ident.warmth == 0.5
     assert ident.pace == 1.0
+
+
+def test_an_owned_reference_only_speaks_for_its_own_gender(tmp_path):
+    """Flipping the partner's gender must change the voice, reference or not."""
+    from remedy.voice.identity import VoiceIdentity, reference_wav, save, set_reference
+
+    save(VoiceIdentity(gender="male"), tmp_path)
+    clip = tmp_path / "owner.wav"
+    clip.write_bytes(b"RIFF" + b"\0" * 200)
+    set_reference(clip, tmp_path)
+    assert reference_wav("male", tmp_path) == clip
+    assert reference_wav(None, tmp_path) == clip
+    # Asked for the other gender: the owned clip is not it.
+    assert reference_wav("female", tmp_path) is None
+
+
+def test_gender_bootstrap_never_becomes_her_identity(tmp_path, monkeypatch):
+    from remedy.voice import chatterbox as hq
+    from remedy.voice import service as svc
+    from remedy.voice.identity import load
+
+    class _Kokoro:
+        def create(self, text, voice, speed):
+            return [0.0, 0.1, -0.1] * 400, 24_000
+
+    monkeypatch.setattr(svc, "get_tts_engine", lambda home_dir=None: _Kokoro())
+    for g in ("female", "male"):
+        p = hq._bootstrap_identity(g, tmp_path)
+        assert p is not None and p.name == f"{g}.wav" and p.stat().st_size > 64
+    # Both genders have their own clip; neither was recorded as the reference.
+    assert load(tmp_path).reference_wav == ""
+    assert hq.identity_prompt_path("female", tmp_path).name == "female.wav"
+    assert hq.identity_prompt_path("male", tmp_path).name == "male.wav"
