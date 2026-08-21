@@ -58,6 +58,7 @@ def test_pace_changes_duration_not_pitch():
     x = tone(2.0)
     slower = shape_audio(x, SR, pace=0.9)
     quicker = shape_audio(x, SR, pace=1.1)
+    assert len(shape_audio(x, SR, pace=0.98)) == len(x)  # tiny asks do not stretch
     assert len(slower) > len(x) * 1.05
     assert len(quicker) < len(x) * 0.95
 
@@ -116,11 +117,10 @@ def test_owner_asks_move_the_offset_and_revert_walks_back(tmp_path: Path):
     assert back.journal[-1]["change"] == "revert"
 
 
-def test_default_identity_is_unhurried_and_even():
+def test_default_identity_is_a_clean_baseline():
     d = vid.VoiceIdentity()
-    assert d.pace < 1.0
-    assert d.articulation < 0.5
-    assert d.warmth == 0.5
+    assert d.pace == 1.0 and d.pitch_semitones == 0.0 and d.warmth == 0.5
+    assert sampling_for(d.articulation) == {"temperature": 0.8, "top_p": 0.95}
 
 
 # -- slow evolution ------------------------------------------------------------
@@ -145,7 +145,8 @@ def test_drift_is_daily_bounded_and_respects_the_owner(tmp_path: Path):
         evo.drift_once(tmp_path, days_together=400 + day, exchanges=5000, style="playful", today=f"2027-01-{day:02d}")
     final = vid.load(tmp_path)
     assert final.warmth <= vid.VoiceIdentity.warmth + evo._REACH["warmth"] + 1e-6
-    assert final.pitch_semitones <= vid.VoiceIdentity.pitch_semitones + evo._REACH["pitch_semitones"] + 1e-6
+    assert final.pitch_semitones == vid.VoiceIdentity.pitch_semitones  # drift never moves pitch
+    assert final.pace == vid.VoiceIdentity.pace  # nor pace
     assert final.journal[-1]["change"] == "drift" and "signals" in final.journal[-1]
 
 
