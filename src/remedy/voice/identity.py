@@ -152,13 +152,19 @@ def evolve(
 def reference_wav(
     gender: str | None = None, home_dir: Path | str | None = None
 ) -> Path | None:
-    """Engine-independent clip for cloning, if one exists."""
+    """Engine-independent clip for cloning, if one exists.
+
+    An owned reference is *her* voice and carries the identity's gender; it
+    is only used when the requested gender matches (or none was asked), so
+    flipping the partner's gender in Settings always changes the voice.
+    """
     ident = load(home_dir)
-    if ident.reference_wav:
+    want = (gender or "").strip().lower()
+    if ident.reference_wav and (not want or want == (ident.gender or "").strip().lower()):
         p = Path(ident.reference_wav)
         if p.is_file() and p.stat().st_size > 64:
             return p
-    g = (gender or ident.gender or "female").strip().lower()
+    g = (want or ident.gender or "female").strip().lower()
     fallback = _home(home_dir) / "chatterbox" / "identity" / f"{g}.wav"
     if fallback.is_file() and fallback.stat().st_size > 64:
         return fallback
