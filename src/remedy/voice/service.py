@@ -89,6 +89,10 @@ def save_voice_settings(
         cur["speed"] = 1.0
     q = str(cur.get("tts_quality") or "standard").strip().lower()
     cur["tts_quality"] = "hq" if q in ("hq", "high", "chatterbox") else "standard"
+    # Asking for the high-quality voice is asking to hear her: a stale
+    # "tts_enabled: false" would otherwise route HQ to the system voice.
+    if "tts_quality" in (patch or {}) and cur["tts_quality"] == "hq":
+        cur["tts_enabled"] = True
     from remedy.core.atomic_json import write_text_atomic
 
     write_text_atomic(
