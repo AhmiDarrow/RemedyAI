@@ -28,7 +28,7 @@ import type { SendAttachment } from '../components/Composer'
 import { messagesToMoments, latestExchange } from './storylineMoments'
 import { getSettings } from '../api/settings'
 import { patchVoiceSettings } from '../api/voice'
-import { useVoice } from '../voice/useVoice'
+import { useVoice, announceVoiceSettingsChanged } from '../voice/useVoice'
 import type { GenderRole } from '../voice/pickVoice'
 import type { ChatMessage, ChatSession } from '../types'
 import './grove.css'
@@ -217,7 +217,7 @@ export function GroveApp({
     const next = !speakReplies
     if (!next) voice.stopSpeaking()
     patchVoiceSettings({ speak_replies: next })
-      .then(() => voice.refreshStatus())
+      .then(() => announceVoiceSettingsChanged())
       .catch(() => {})
   }, [speakReplies, voice])
 

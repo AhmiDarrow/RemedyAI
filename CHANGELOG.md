@@ -23,6 +23,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   card; with an NVIDIA GPU the runtime now gets the CUDA 12.4 build of
   torch and the voice answers in seconds. `REMEDY_VOICE_CPU_ONLY=1`
   opts out.
+- **Grove has the status bar.** The same bar as Studio — provider and
+  model, thinking level, approval mode, privacy, theme, usage, updates,
+  speak-aloud — now sits under Grove too. Its Settings button opens
+  Grove's settings sheet and its surface button offers Studio; the
+  speak-aloud toggle is one setting everywhere (every surface re-reads it
+  when any of them changes it).
 - **Remedy has one voice.** No standard/high-quality switch, no voice
   picker, no speed slider. Her voice is Chatterbox **Nano** cloning a
   bundled public-domain human reference per gender (LibriVox readers Kara

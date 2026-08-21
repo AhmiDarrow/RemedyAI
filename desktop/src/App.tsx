@@ -84,7 +84,7 @@ import { exportSession, importSession } from './api/messages'
 import { getServerUrl } from './api/client'
 import { getSettings, updateSettings } from './api/settings'
 import { patchVoiceSettings } from './api/voice'
-import { useVoice } from './voice/useVoice'
+import { useVoice, announceVoiceSettingsChanged } from './voice/useVoice'
 import type { GenderRole } from './voice/pickVoice'
 import { saveLastSettingsSection } from './utils/settingsSearch'
 import { subscribeXaiOAuth } from './api/xaiOAuth'
@@ -1073,7 +1073,7 @@ export default function App() {
     const next = !studioSpeakReplies
     if (!next) studioVoice.stopSpeaking()
     patchVoiceSettings({ speak_replies: next })
-      .then(() => studioVoice.refreshStatus())
+      .then(() => announceVoiceSettingsChanged())
       .catch(() => {})
   }, [studioSpeakReplies, studioVoice])
   const handleStudioMic = useCallback(async () => {
@@ -2022,8 +2022,12 @@ export default function App() {
         </>
       ) : null}
 
-      {surface !== 'grove' && (
+      {/* One status bar for both surfaces: provider/model, thinking, approval,
+          privacy, theme, usage, updates, voice. On Grove the Settings toggle
+          opens Grove's own sheet and the surface button offers Studio. */}
       <StatusBar
+          surface={surface === 'grove' ? 'grove' : 'studio'}
+          onOpenStudio={() => switchSurface('studio')}
           sessionId={activeId}
           streaming={streaming}
           model={barModel}
@@ -2071,6 +2075,11 @@ export default function App() {
                 : panel
           }
           onTogglePanel={(p) => {
+            if (p === 'settings' && surface === 'grove') {
+              // Grove has no rail: Settings is a sheet over the surface.
+              openSettings()
+              return
+            }
             if (p === 'settings') {
               // Toggle right-rail settings; never collapse chat.
               setPanel(null)
@@ -2121,7 +2130,6 @@ export default function App() {
           speaking={studioVoice.speaking}
           onToggleSpeak={toggleStudioSpeak}
         />
-      )}
 
         <Suspense fallback={null}>
           <UsageDashboard
