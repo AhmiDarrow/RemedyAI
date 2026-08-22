@@ -686,6 +686,25 @@ def test_policy_thinking_echo_is_detected():
         "This is pure chat - no tools needed."
     )
     assert collapse_repeated_sentences(glued) == "This is pure chat - no tools needed."
+    cycle = (
+        "Core is green. Wiring UI + tests, then commit."
+        "Core is green. Wiring UI + tests, then commit."
+        "Core is green. Wiring UI + tests, then commit."
+    )
+    collapsed = collapse_repeated_sentences(cycle)
+    assert collapsed.lower().count("core is green") == 1
+    assert "wiring ui" in collapsed.lower()
+    from remedy.core.react_policy import clip_appended_source_dump
+
+    dumped = (
+        "**Nothing to commit** — tree is already clean.\n"
+        "All local work is saved. Say when you want the next product hop or a push."
+        "█/* ── Dark Forest tokens */\n:root {\n  --bg: #050a08;\n}\n"
+    )
+    clipped = clip_appended_source_dump(dumped)
+    assert "Nothing to commit" in clipped
+    assert ":root" not in clipped
+    assert "█" not in clipped
     nudge = post_tools_user_summary_nudge()
     assert nudge["role"] == "user"
     assert "scratchpad" in nudge["content"].lower() or "user-facing" in nudge["content"].lower()
