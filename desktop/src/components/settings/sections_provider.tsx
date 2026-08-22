@@ -1,7 +1,12 @@
 /** Settings form sections — provider. */
 import type { ReactNode } from 'react'
 import { connectReasonLabel, type ConnectedProvider } from '../../api/providers'
-import { modelOptionLabel, providerNeedsKey } from '../../api/modelDiscovery'
+import {
+  CUSTOM_TEMPLATE_ID,
+  isSavedEndpointId,
+  modelOptionLabel,
+  providerNeedsKey,
+} from '../../api/modelDiscovery'
 import type { SettingsFormProps } from './formTypes'
 import { SettingsSection } from '../SettingsSection'
 import {
@@ -58,6 +63,14 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
     discoveryBusy = false,
     customName = '',
     setCustomName,
+    savedEndpoints = [],
+    endpointBusy = false,
+    endpointMsg = null,
+    endpointConfirmDelete = false,
+    onSaveEndpoint,
+    onUpdateEndpoint,
+    onDeleteEndpoint,
+    onCancelDeleteEndpoint,
     handleProviderChange,
     onTestConnection,
     testBusy = false,
@@ -74,6 +87,20 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
 
   const sleevInstalled = Boolean(sleevStatus?.installed)
   const needsKey = providerNeedsKey(provider, activeMeta, baseUrl)
+  const isTemplate = provider === CUSTOM_TEMPLATE_ID
+  const isSavedEndpoint = isSavedEndpointId(provider)
+  const canSaveEndpoint = Boolean(customName.trim() && baseUrl.trim()) && !endpointBusy
+  const endpointMsgNode = endpointMsg ? (
+    <div
+      className="text-[11px] mb-1.5"
+      style={{
+        color: endpointMsg.kind === 'error' ? 'var(--warning)' : 'var(--success)',
+      }}
+      title={endpointMsg.text}
+    >
+      {endpointMsg.text}
+    </div>
+  ) : null
   const modelListId = `settings-model-ids-${provider || 'none'}`
   const sleevGateway =
     (sleevGatewayUrl || '').trim()
@@ -109,6 +136,12 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
           {showAdvanced && advancedProviders.map((p) => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
+          {savedEndpoints.length > 0 && (
+            <option value="__saved_endpoints__" disabled>— Saved endpoints —</option>
+          )}
+          {savedEndpoints.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
         </FormSelect>
         {!showAdvanced && advancedProviders.length > 0 && (
           <FormLinkButton onClick={() => setShowAdvanced(true)}>
@@ -138,9 +171,15 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
           <FormNotice>{activeMeta.limits_blurb}</FormNotice>
         )}
 
-        {provider === 'custom' && (
+        {isTemplate && (
+          <FormHint>
+            Fill in a name, base URL and (if needed) key, then Save endpoint. It
+            becomes its own provider and this template resets for the next one.
+          </FormHint>
+        )}
+        {isTemplate && (
           <Field
-            label="Name"
+            label="Save as…"
             value={customName}
             onChange={(v) => setCustomName?.(v)}
             placeholder="e.g. LM Studio / llama.cpp"
@@ -301,6 +340,68 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
                 This provider needs an API key before chat will work. Paste it,
                 Test, then Save.
               </FormNotice>
+            )}
+            {isTemplate && onSaveEndpoint && (
+              <div className="mb-2">
+                <FormActionButton
+                  variant="primary"
+                  disabled={!canSaveEndpoint}
+                  title={
+                    canSaveEndpoint
+                      ? 'Save this endpoint as its own provider'
+                      : 'Enter a name and base URL first'
+                  }
+                  onClick={() => onSaveEndpoint()}
+                >
+                  {endpointBusy ? 'Saving…' : 'Save endpoint'}
+                </FormActionButton>
+                <div className="mt-1.5">{endpointMsgNode}</div>
+              </div>
+            )}
+            {isSavedEndpoint && (
+              <div className="mb-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {onUpdateEndpoint && (
+                    <FormActionButton
+                      variant="primary"
+                      disabled={endpointBusy || !baseUrl.trim()}
+                      onClick={() => onUpdateEndpoint()}
+                    >
+                      {endpointBusy ? 'Saving…' : 'Update endpoint'}
+                    </FormActionButton>
+                  )}
+                  {onDeleteEndpoint && !endpointConfirmDelete && (
+                    <FormActionButton
+                      variant="danger"
+                      disabled={endpointBusy}
+                      onClick={() => onDeleteEndpoint()}
+                    >
+                      Remove endpoint
+                    </FormActionButton>
+                  )}
+                  {onDeleteEndpoint && endpointConfirmDelete && (
+                    <>
+                      <span className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>
+                        Remove {activeMeta?.name || provider}?
+                      </span>
+                      <FormActionButton
+                        variant="danger"
+                        disabled={endpointBusy}
+                        onClick={() => onDeleteEndpoint()}
+                      >
+                        {endpointBusy ? 'Removing…' : 'Yes, remove'}
+                      </FormActionButton>
+                      <FormActionButton
+                        disabled={endpointBusy}
+                        onClick={() => onCancelDeleteEndpoint?.()}
+                      >
+                        Keep
+                      </FormActionButton>
+                    </>
+                  )}
+                </div>
+                <div className="mt-1.5">{endpointMsgNode}</div>
+              </div>
             )}
             {onTestConnection && (
               <div className="flex items-center gap-2 mb-2">
