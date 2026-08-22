@@ -56,3 +56,27 @@ def test_compile_only_drops_run_half():
     )
     # pytest stays pytest
     assert compile_only_verify_command("pytest -q") == "pytest -q"
+
+
+# --- engines: headless verification must stay synchronous --------------------
+
+
+def test_headless_engine_commands_are_not_gui_launches(tmp_path: Path):
+    # These print and exit; backgrounding them returns nothing to the agent.
+    for cmd in (
+        r".\Godot_v4.3-stable_win64_console.exe --headless --path . --quit-after 1",
+        r".\Godot_v4.3_console.exe --headless --path . -s tools/smoke_boot.gd",
+        "godot4 --headless --check-only -s player.gd",
+        r".\Godot.exe --headless --export-release Windows build/game.exe",
+        r".\Godot.exe --headless --import --path .",
+        "godot --version",
+        "luac -p main.lua",
+        "cargo check",
+    ):
+        assert not command_looks_like_gui_launch(cmd, tmp_path), cmd
+
+
+def test_windowed_engine_launches_are_backgrounded(tmp_path: Path):
+    assert command_looks_like_gui_launch(r".\Godot_v4.3.exe --path .", tmp_path)
+    assert command_looks_like_gui_launch("love .", tmp_path)
+    assert command_looks_like_gui_launch("lovec.exe .", tmp_path)

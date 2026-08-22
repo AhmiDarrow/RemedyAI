@@ -106,3 +106,18 @@ def test_observe_deferred_is_not_red() -> None:
         ],
     )
     assert st.last_verify_ok is not False
+
+
+def test_engine_commands_count_as_full_suite_verify() -> None:
+    for cmd in (
+        r".\Godot_v4.3-stable_win64_console.exe --headless --path . --quit-after 1",
+        r".\Godot_v4.3_console.exe --headless --path . -s tools/smoke_boot.gd",
+        "godot4 --headless --path . --quit-after 1",
+        "cargo check",
+        "npm run build",
+        "luac -p main.lua",
+    ):
+        assert is_full_suite_verify(cmd), cmd
+    # A windowed run never exits — not a suite.
+    assert not is_full_suite_verify(r".\Godot_v4.3.exe --path .")
+    assert not is_full_suite_verify("godot --headless --path .")

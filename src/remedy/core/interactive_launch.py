@@ -43,6 +43,21 @@ _PY_FILE_RE = re.compile(
     r"\b(?:python|python3|py)\s+(?:-[uE]\s+)*([^\s|&;]+\.py)\b"
 )
 
+# Engine invocations that run to completion and print: headless verify,
+# parse-only checks, exports, imports. These must stay synchronous so the
+# output reaches the agent — backgrounding them returns nothing.
+_HEADLESS_ENGINE_RE = re.compile(
+    r"(?ix)"
+    r"(?:"
+    r"--headless\b|--check-only\b|--export-(?:release|debug|pack)\b|"
+    r"--import\b|--quit-after\b|--version\b|--doctool\b|"
+    r"\bluac\s+-p\b|\bcargo\s+check\b"
+    r")"
+)
+
+# Windowed engine launches that do not exit on their own.
+_ENGINE_WINDOW_RE = re.compile(r"(?ix)(?:^|[\s;&|])(?:love|lovec)(?:\.exe)?\s+\.")
+
 
 def source_looks_like_gui(text: str | None) -> bool:
     return bool(_GUI_SRC_RE.search(text or ""))
@@ -86,6 +101,10 @@ def command_looks_like_gui_launch(
     cmd = command or ""
     if not cmd.strip():
         return False
+    if _HEADLESS_ENGINE_RE.search(cmd):
+        return False
+    if _ENGINE_WINDOW_RE.search(cmd):
+        return True
     if source_looks_like_gui(cmd):
         return True
     base = Path(cwd) if cwd else None

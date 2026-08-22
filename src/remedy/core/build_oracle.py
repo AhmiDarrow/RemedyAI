@@ -336,7 +336,12 @@ async def run_auto_verify(
             if adapted and adapted != run_cmd:
                 run_cmd = adapted
                 scoped = True
-        if re.search(r"(?i)\.exe\b", run_cmd) and "pytest" not in run_cmd.lower():
+        low_cmd = run_cmd.lower()
+        if "--headless" in low_cmd or "--check-only" in low_cmd:
+            # Headless engine runs (Godot imports assets on first run) take
+            # well over the GUI-exe clamp; give them a real budget.
+            verify_timeout = max(float(verify_timeout or 0), 180.0)
+        elif re.search(r"(?i)\.exe\b", run_cmd) and "pytest" not in low_cmd:
             verify_timeout = 20.0
 
     result = await run_verify_job(runtime, command=run_cmd, timeout=verify_timeout)
