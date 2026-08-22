@@ -174,20 +174,12 @@ def builder_system_addendum(profile: MuscleProfile) -> str:
     )
     parallel = profile.max_parallel_tools
     return (
-        f"[Builder muscle — {profile.label} · {profile.provider or 'provider'}"
+        f"[Builder · {profile.label} · {profile.provider or 'provider'}"
         f"{(' / ' + profile.model) if profile.model else ''} · "
         f"parallel≤{parallel}]\n"
-        "Default task loop: **RESEARCH → PLAN → BUILD**.\n"
-        "  RESEARCH (batch 4–12 reads) → PLAN (short checklist / mission) → "
-        "BUILD (file_write/file_edit → VERIFY → REPAIR → DONE).\n"
-        "Hard rules: no monologue without tool_calls; no one-file-per-step explore; "
-        "no claim shipped without a green verify signal; recover on Error with "
-        "path:line edits. "
-        "After writing a runnable (game, GUI, CLI): compile/run it, then if it "
-        "has a window **play it** with computer_app + computer_snapshot "
-        "target=desktop + click/type, then file_edit and repeat. "
-        "Use subgoal_open / mission_start for multi-phase unattended work. "
-        "Soul Field is identity; tools are how you research and build."
+        "You can design and ship full systems with tools. Prefer action over "
+        "narration. After a runnable with a window: run it, computer_snapshot "
+        "the desktop, play it, file_edit what you see."
         f"{spread} "
         "Run until the request is finished."
     )

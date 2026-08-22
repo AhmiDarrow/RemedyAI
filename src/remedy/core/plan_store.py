@@ -469,6 +469,17 @@ Risks: …
 """.strip()
 
 
+# Unique host-safety + history-stub rules. Frontier muscle already has the
+# coding rhythm in schemas + the build engine; dumping a 16-point syllabus
+# makes Grok recap it in thinking. Local muscle still gets the long form.
+FRONTIER_BUILD_MODE_ADDENDUM = """
+## Build
+Prefer action. Batch independent reads. file_edit existing files; file_write new files with the full source.
+History stubs are not disk — file_read a path before you edit it.
+Never kill app.exe or port 7400 (that's this agent).
+If a plan is active, mark steps with plan_step_status as you finish them.
+""".strip()
+
 BUILD_MODE_SYSTEM_ADDENDUM = """
 ## Build mode — seamless coding agency
 

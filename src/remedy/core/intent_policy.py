@@ -96,13 +96,8 @@ _PACKS: dict[str, dict[str, Any]] = {
     "task": {
         "id": "task",
         "system": (
-            "[Default task loop] RESEARCH → PLAN → BUILD until done.\n"
-            "1) RESEARCH: batch list_dir / file_read / repo_search / memory_search "
-            "(and web when needed) in one step — gather ground truth.\n"
-            "2) PLAN: set brief open_tasks or mission_start checklist (short, concrete).\n"
-            "3) BUILD: file_write / file_edit, then verify (bash_exec / mission_verify); "
-            "repair until green. Never monologue a plan and stop. Never claim done "
-            "without a tool result or verify signal."
+            "[Work] Tools until the goal is done. Don't write a plan and stop. "
+            "Don't claim finished without a tool result."
         ),
         "prefer_tools": True,
         "suggest_tools": [
@@ -123,15 +118,9 @@ _PACKS: dict[str, dict[str, Any]] = {
     "build": {
         "id": "build",
         "system": (
-            "[Continuity · Build engine] User wants software built or shipped. "
-            "Default loop: RESEARCH → PLAN → BUILD.\n"
-            "RESEARCH = SCOUT (parallel file_read/list_dir/repo_search in ONE step). "
-            "PLAN = short checklist (brief/mission). "
-            "BUILD = IMPLEMENT (file_write / multi-hunk file_edit) → VERIFY "
-            "(bash_exec tests / job_run kind=verify / mission_verify) → REPAIR until "
-            "green → DONE. Never monologue a plan without tool_calls. Never claim "
-            "done without verify. spread_run for multi-module surveys; mission_start "
-            "for unattended end-to-end; subgoal_open for phases. Soul keeps identity."
+            "[Build] Implement with file_write / file_edit. Verify after the product "
+            "work exists. Don't stop to report after one hop. Don't claim done "
+            "without a tool result."
         ),
         "prefer_tools": True,
         "suggest_tools": [
@@ -183,17 +172,8 @@ _PACKS: dict[str, dict[str, Any]] = {
     "review": {
         "id": "review",
         "system": (
-            "[Read-only review] The user asked you to review / analyze / explain — "
-            "not to change code. RESEARCH → SYNTHESIZE → DELIVER.\n"
-            "1) RESEARCH: batch file_read / list_dir / repo_search in ONE step — "
-            "gather ground truth. One good sweep is enough; do not re-scout for "
-            "marginal detail.\n"
-            "2) SYNTHESIZE: strengths, risks, and concrete file:line findings, "
-            "ranked by impact.\n"
-            "3) DELIVER the written review. This is DONE when the findings are "
-            "delivered — a read-only review needs NO file_write and NO verify "
-            "signal, and you should not loop for 'a few more details'. Only start "
-            "editing if the user explicitly asked you to fix or change something."
+            "[Read-only] Scout once, deliver findings, stop. No file_write unless "
+            "they asked to change something."
         ),
         "prefer_tools": True,
         "suggest_tools": [
@@ -207,15 +187,9 @@ _PACKS: dict[str, dict[str, Any]] = {
     "tool": {
         "id": "tool",
         "system": (
-            "[Continuity] User wants work done on the machine or project. "
-            "Default: RESEARCH → PLAN → BUILD.\n"
-            "RESEARCH with tools first (repo_search, file_read, list_dir — batch "
-            "independent calls in ONE step). PLAN briefly (open tasks / mission). "
-            "BUILD with file_edit (multi-hunk via edits=) / file_write / bash_exec "
-            "(timeout_seconds/workdir). "
-            "When ≥2 independent modules/paths, use spread_run. "
-            "Prefer installed skill_activate; if [Library] pack is not installed — "
-            "tell the user, do not invent its body. Run until finished."
+            "[Work] Tools until the goal is done. Batch independent reads. "
+            "file_edit existing files, file_write new ones. Don't invent a skill "
+            "that is not installed. Run until finished."
         ),
         "prefer_tools": True,
         "suggest_tools": [
@@ -232,26 +206,10 @@ _PACKS: dict[str, dict[str, Any]] = {
     "autonomous": {
         "id": "autonomous",
         "system": (
-            "[Continuity · Work alone] The user stepped away or asked you to handle "
-            "this end-to-end without check-ins. Act with high agency:\n"
-            "1) mission_start with goal, checklist steps, and verify_command "
-            "(stack fingerprint may auto-fill; e.g. pytest -q or Godot headless smoke).\n"
-            "2) Prefer file_edit / multi-hunk edits=; repo_search for discovery; "
-            "file_write only for new files. Use absolute paths when juggling trees. "
-            "Batch many independent reads in one step — serial one-file-per-step is too slow.\n"
-            "3) Cover ground fast: spread_run when ≥2 independent trees/modules; "
-            "else job_run kind=explore|verify|diff for a single survey.\n"
-            "4) mission_update after each step; mission_verify before claiming done "
-            "(do not claim complete if verify failed).\n"
-            "5) On failure: read errors (path:line), file_edit fixes, re-verify "
-            "(raise timeout_seconds for long builds).\n"
-            "6) Run until finished — same class of agency as a long Build session. "
-            "Soft epochs only compact context; never stop for a step/tool budget.\n"
-            "7) Prefer build_drive / isolated hops over plan essays. "
-            "companion_context if the work needs the screen or clipboard.\n"
-            "Do not stop at a question when you can pick a reasonable default. "
-            "Escalate only for secrets, paid APIs, or irreversible destroy. "
-            "Summarize only when the work is actually done."
+            "[Work alone] The owner stepped away. Finish the goal with tools. "
+            "mission_start a checklist with verify_command; mark steps as you go; "
+            "mission_verify before claiming done. Pick reasonable defaults. "
+            "Escalate only for secrets, paid APIs, or irreversible destroy."
         ),
         "prefer_tools": True,
         "suggest_tools": [
@@ -396,6 +354,14 @@ def format_policy_block(pack: dict[str, Any] | None) -> str:
         except Exception:
             pass
     tools = pack.get("suggest_tools") or []
-    if tools and text:
+    # Work packs already have the full tool catalog on the request. Dumping
+    # 15 names here makes frontier models recap the catalog in thinking.
+    # Memory / skill packs still need the hint (those tools are easy to miss).
+    if tools and text and str(pack.get("id") or "") not in {
+        "task",
+        "build",
+        "review",
+        "autonomous",
+    }:
         text += " Suggested tools when needed: " + ", ".join(str(t) for t in tools) + "."
     return text
