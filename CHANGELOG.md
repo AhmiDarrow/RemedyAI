@@ -4,6 +4,28 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Game dev studio
+
+- Engine detection (Godot 4 incl. C#, Phaser/Pixi, Bevy, Pygame/Arcade,
+  Love2D, Unity, Unreal) with binary discovery from env/PATH/project
+  root/install dirs; `engine:` and `studio:` lines in the turn context.
+- Headless engine commands are verification, not GUI launches: no more
+  backgrounded `--headless` runs with no output, no 20 s clamp on them.
+- Offline oracles for `.gd` (tokenizer), `.tscn/.tres` (resource refs),
+  `.lua`; `godot --check-only` when an engine is present.
+- Native tools: `game_project_info`, `godot_run`, `godot_check`,
+  `godot_export`, `godot_import`, `game_playtest`.
+- Bundled packs: `game-dev-studio`, `godot-4`, `game-assets`, `web-games`,
+  `bevy`, `pygame-arcade`, `love2d`, `unity`, `unreal`,
+  `engine-mcp-bridge`. Skills declare `triggers:`; references are listed
+  with sizes and inlined INDEX-first.
+- MCP client bridge: `mcp_servers` entries are connected and their tools
+  registered as `mcp_<server>_<tool>`; `mcp_status` reports state.
+- Learning loop: auto-suggested activations and turn outcomes are
+  recorded; `allow_skill_creation` gates creation; never-used learned
+  skills retire after 21 days (files kept).
+- Manual chapter 26 — Game dev.
+
 ### Building stays the job — not a syllabus
 
 Frontier muscle (Grok / Claude / GPT-class) was being taught RESEARCH →
