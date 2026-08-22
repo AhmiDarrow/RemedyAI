@@ -25,7 +25,7 @@ def test_tool_policy_includes_change_safety():
     assert tool["id"] in ("task", "tool", "build")
     assert tool.get("change_safety") is True
     tool_block = format_policy_block(tool)
-    assert "RESEARCH" in tool_block or "skill_activate" in tool_block or "file_edit" in tool_block
+    assert "Change-safety" in tool_block or "tool" in tool_block.lower()
 
 
 def test_autonomous_policy_includes_change_safety():

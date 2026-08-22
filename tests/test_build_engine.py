@@ -59,11 +59,23 @@ def test_begin_build_turn_stamps_runtime():
     assert st.active
     assert rt._build_turn is st
     proto = build_protocol_block(st)
-    assert "RESEARCH" in proto
-    assert "PLAN" in proto
-    assert "BUILD" in proto
-    assert "Do **not** run the project test suite" in proto
+    # Grok-class muscle gets a status card, not a RESEARCH→PLAN→BUILD syllabus.
+    assert "[Build]" in proto
+    assert "Don't run the full test suite" in proto or "npm test" in proto
+    assert "RESEARCH → PLAN → BUILD" not in proto
     assert "auto-verify after writes" not in proto.lower()
+
+
+def test_local_muscle_still_gets_the_teaching_loop():
+    st = BuildTurnState(
+        active=True,
+        phase="scout",
+        muscle_tier="tiny",
+        goal="implement greet",
+    )
+    proto = build_protocol_block(st)
+    assert "RESEARCH → PLAN → BUILD" in proto
+    assert "Do **not** run the project test suite" in proto
 
 
 def test_build_state_isolated_per_session():

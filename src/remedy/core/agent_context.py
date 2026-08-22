@@ -19,6 +19,7 @@ async def build_turn_context(runtime: Any) -> str:
     from remedy.core.workspace import workspace_context_block
 
     parts: list[str] = []
+    chat_only = False
 
     # Hard isolation banner — model must not continue other tabs' work
     with suppress(Exception):
@@ -66,14 +67,13 @@ async def build_turn_context(runtime: Any) -> str:
             )
             if soul:
                 parts.append(soul)
-        chat_only = False
         with suppress(Exception):
             from remedy.core.react_policy import runtime_turn_is_chat_only
 
             chat_only = runtime_turn_is_chat_only(runtime)
 
         # Capable muscle — skip the builder contract on greetings (it primes
-        # a resume dump). Work turns still get the full RESEARCH→PLAN→BUILD.
+        # a resume dump). Work turns get a short builder card, not a syllabus.
         if not chat_only:
             build_add = builder_system_addendum(muscle)
             if build_add:
@@ -383,35 +383,32 @@ async def build_turn_context(runtime: Any) -> str:
         if lines:
             parts.append("Recent memory (optional):\n" + "\n".join(lines[-4:]))
 
-    tools = runtime.tool_registry.tools
-    if tools:
-        names = ", ".join(t.name for t in tools)
-        parts.append(f"Built-in tools (executable): {names}.")
-
-    # Self-setup: user can ask Remedy to configure itself in chat
-    parts.append(
-        "Self-configuration: when the user asks you to set up, enable, disable, "
-        "change, or configure Remedy (web tools, approval mode, model/provider, "
-        "vision, persona, their name, project folder, access scope, messengers, "
-        "assistant prefs, etc.), call update_settings (or get_settings first). "
-        "Apply the change yourself — do not only point them at Settings UI. "
-        "Examples: update_settings(setup=\"web tools\"), "
-        "update_settings(approval_mode=\"auto\"), "
-        "update_settings(user_name=\"…\", thinking_level=\"medium\")."
-    )
-    parts.append(
-        "Durable memory: when the user says remember / note that / don't forget / "
-        "store in memory, ALWAYS call memory_save(content=…) with the fact "
-        "(in addition to any automatic silent save). Confirm briefly what was stored. "
-        "Never store secrets or API keys."
-    )
-    parts.append(
-        "Owner's manual / F1 Help: you CAN and SHOULD read it. Call help_list to "
-        "see article ids (same chapters as in-app F1), then help_read(id=…) for the "
-        "full markdown (e.g. computer-use-soak, 19-metabolism, 00-overview). "
-        "Never claim F1/help is outside access scope — help_read bypasses project "
-        "jail for these read-only manuals. file_read on absolute help paths also works."
-    )
+    # Schemas already go on the request. Dumping 80 names here makes frontier
+    # models recap the catalog in thinking. Chat-only turns skip the lectures.
+    if not chat_only:
+        parts.append(
+            "Self-configuration: when the user asks you to set up, enable, disable, "
+            "change, or configure Remedy (web tools, approval mode, model/provider, "
+            "vision, persona, their name, project folder, access scope, messengers, "
+            "assistant prefs, etc.), call update_settings (or get_settings first). "
+            "Apply the change yourself — do not only point them at Settings UI. "
+            "Examples: update_settings(setup=\"web tools\"), "
+            "update_settings(approval_mode=\"auto\"), "
+            "update_settings(user_name=\"…\", thinking_level=\"medium\")."
+        )
+        parts.append(
+            "Durable memory: when the user says remember / note that / don't forget / "
+            "store in memory, ALWAYS call memory_save(content=…) with the fact "
+            "(in addition to any automatic silent save). Confirm briefly what was stored. "
+            "Never store secrets or API keys."
+        )
+        parts.append(
+            "Owner's manual / F1 Help: you CAN and SHOULD read it. Call help_list to "
+            "see article ids (same chapters as in-app F1), then help_read(id=…) for the "
+            "full markdown (e.g. computer-use-soak, 19-metabolism, 00-overview). "
+            "Never claim F1/help is outside access scope — help_read bypasses project "
+            "jail for these read-only manuals. file_read on absolute help paths also works."
+        )
 
     # Skills catalog (progressive disclosure stage 1) — ranked, not full bodies.
     # Prefer warm rank cache from speculative prep / prior turns (skip re-rank).

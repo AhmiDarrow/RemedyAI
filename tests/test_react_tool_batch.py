@@ -141,6 +141,19 @@ def test_the_budget_boundary_still_injects():
     assert len(msgs) == 1
 
 
+def test_phase_nudge_skips_when_build_engine_is_active():
+    from types import SimpleNamespace
+
+    from remedy.core.build_engine import BuildTurnState
+
+    msgs: list[dict] = []
+    rt = SimpleNamespace(_build_turn=BuildTurnState(active=True))
+    TB.inject_phase_nudge(
+        Turn(nudge={"role": "user", "content": "PLAN"}), msgs, runtime=rt
+    )
+    assert msgs == []
+
+
 def test_a_turn_that_cannot_produce_a_nudge_is_survivable():
     class Broken(Turn):
         def phase_nudge(self):

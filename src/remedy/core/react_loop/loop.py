@@ -3509,7 +3509,7 @@ async def call_llm_stream(runtime, message: str,
                 tool_batches_this_turn += _bdelta
                 tool_batches_in_epoch += _bdelta
                 productive_in_epoch += _pdelta
-                inject_phase_nudge(turn, messages)
+                inject_phase_nudge(turn, messages, runtime=runtime)
                 # Machine build engine: syntax gate + auto-verify + force nudges
                 async for _bst_ev in apply_build_engine_after_batch(
                     runtime=runtime,

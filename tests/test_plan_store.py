@@ -183,6 +183,12 @@ def test_update_step_status_by_id_and_index(tmp_path: Path):
     assert u4.status == "done"
     assert "file_edit" in BUILD_MODE_SYSTEM_ADDENDUM
     assert "plan_step_status" in BUILD_MODE_SYSTEM_ADDENDUM
+    from remedy.core.plan_store import FRONTIER_BUILD_MODE_ADDENDUM
+
+    assert "plan_step_status" in FRONTIER_BUILD_MODE_ADDENDUM
+    assert "file_edit" in FRONTIER_BUILD_MODE_ADDENDUM
+    assert "7400" in FRONTIER_BUILD_MODE_ADDENDUM
+    assert "1. **Explore" not in FRONTIER_BUILD_MODE_ADDENDUM
 
 
 def test_plans_api(tmp_path: Path, monkeypatch):
