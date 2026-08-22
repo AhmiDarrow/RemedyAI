@@ -1147,7 +1147,21 @@ def get_provider(provider_name: str) -> ProviderAdapter:
 
     Falls back to OpenAI-compatible for unknown providers.
     """
-    cls = _PROVIDERS.get(provider_name.lower(), OpenAIProvider)
+    name = provider_name.lower()
+    cls = _PROVIDERS.get(name)
+    if cls is None:
+        # Saved custom endpoints carry the API flavour their host speaks.
+        try:
+            from remedy.interfaces.user_providers import adapter_flavour
+
+            flavour = adapter_flavour(name)
+        except Exception:
+            flavour = None
+        cls = {
+            "anthropic": AnthropicProvider,
+            "ollama": LlamaCppProvider,
+            "gemini": GoogleProvider,
+        }.get(flavour or "", OpenAIProvider)
     return cls()
 
 

@@ -168,6 +168,16 @@ export interface SettingsFormProps {
   discoveryBusy?: boolean
   customName?: string
   setCustomName?: Dispatch<SetStateAction<string>>
+  /** Endpoints saved from the Custom template (`user_defined` catalog rows). */
+  savedEndpoints?: ProviderInfo[]
+  endpointBusy?: boolean
+  endpointMsg?: { kind: 'ok' | 'error'; text: string } | null
+  /** Inline "really remove?" state for the selected saved endpoint. */
+  endpointConfirmDelete?: boolean
+  onSaveEndpoint?: () => void
+  onUpdateEndpoint?: () => void
+  onDeleteEndpoint?: () => void
+  onCancelDeleteEndpoint?: () => void
   handleProviderChange: (p: string) => void
   handleBrowseProject: () => void
   themeId: ThemeId

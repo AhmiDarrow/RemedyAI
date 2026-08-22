@@ -400,6 +400,12 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
             _load_config_cache[cache_key[0]] = (cache_key[1], cache_key[2], parsed)
             while len(_load_config_cache) > 8:
                 _load_config_cache.pop(next(iter(_load_config_cache)))
+    if isinstance(parsed, dict):
+        # Saved custom endpoints become catalog providers (CLI / gateway path).
+        with suppress(Exception):
+            from remedy.interfaces.user_providers import sync_catalog
+
+            sync_catalog(parsed)
     return _copy.deepcopy(parsed) if isinstance(parsed, dict) else parsed
 
 
@@ -741,6 +747,9 @@ def normalize_llm_settings(
     # Demo is *not* flexible — guest gateway junk (image/video/foreign) is clamped
     # to the curated allowlist so free-setup never silently hits blocked models.
     _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "poe", "rmb", "llamacpp"})
+    if (PROVIDER_CATALOG.get(prov) or {}).get("user_defined"):
+        # Saved custom endpoints host whatever the user's server serves.
+        _FLEXIBLE = _FLEXIBLE | {prov}
 
     model_owner = infer_provider_from_model(mid)
     if live_ok and prov != "demo":
@@ -816,7 +825,11 @@ def validate_provider_model(provider: str | None, model: str | None) -> str:
             f"Unknown demo model {mid!r}. Guest free chat allows: {sample}."
         )
     _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "poe", "rmb", "llamacpp"})
-    if prov in _FLEXIBLE or prov not in PROVIDER_CATALOG:
+    if (
+        prov in _FLEXIBLE
+        or prov not in PROVIDER_CATALOG
+        or (PROVIDER_CATALOG.get(prov) or {}).get("user_defined")
+    ):
         return mid
     # The provider's own endpoint listed it → valid, whatever the catalog says.
     live = _live_models_for(prov)
@@ -1463,6 +1476,10 @@ def classify_provider_connection(
             pass
     if keys.get(pid) or keys_set.get(pid):
         return True, "api_key"
+    user_meta = PROVIDER_CATALOG.get(pid) or {}
+    if user_meta.get("user_defined") and "none" in (user_meta.get("auth") or []):
+        # A saved keyless endpoint (local server / open proxy) is ready as-is.
+        return True, "saved_endpoint"
     resolved = ""
     with suppress(Exception):
         resolved = str(resolve_provider_api_key(cfg, pid) or "").strip()
@@ -1496,6 +1513,14 @@ def provider_credentials_ready(config: dict[str, Any] | None = None) -> bool:
             return True
     if provider == "ollama":
         return True
+    user_meta = PROVIDER_CATALOG.get(provider) or {}
+    if user_meta.get("user_defined"):
+        if "none" in (user_meta.get("auth") or []):
+            return True
+        with suppress(Exception):
+            if str(resolve_provider_api_key(raw, provider) or "").strip():
+                return True
+        return False
     if provider == "demo":
         # Air-gapped / enterprise builds can disable guest demo.
         return os.environ.get("REMEDY_DEMO_DISABLED", "").strip().lower() not in (
@@ -1574,6 +1599,8 @@ def public_provider_catalog(config: dict[str, Any] | None = None) -> list[dict[s
                 "badge": meta.get("badge"),
                 "limits_blurb": meta.get("limits_blurb"),
                 "privacy_note": meta.get("privacy_note"),
+                "user_defined": bool(meta.get("user_defined", False)),
+                "flavour": meta.get("flavour"),
             }
         )
     return items

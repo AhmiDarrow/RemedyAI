@@ -21,6 +21,10 @@ export interface ProviderInfo {
   badge?: string | null
   limits_blurb?: string | null
   privacy_note?: string | null
+  /** Saved "Custom endpoint" entry (id `custom-<slug>`); editable / deletable. */
+  user_defined?: boolean
+  /** Wire flavour the backend detected for a saved endpoint. */
+  flavour?: 'openai' | 'anthropic' | 'ollama' | 'gemini' | null
 }
 
 export interface FreeProviderOption {
@@ -180,6 +184,68 @@ export async function probeProvider(input: {
     body: JSON.stringify(input),
     timeout: 12_000,
   })
+}
+
+export interface SaveCustomProviderRequest {
+  name: string
+  base_url: string
+  api_key?: string
+  /** Omit to let the backend detect by probing. */
+  flavour?: string
+  /** False for keyless local servers. Backend default: true iff api_key given. */
+  requires_key?: boolean
+  /** Pass to replace / edit an existing saved endpoint. */
+  id?: string
+}
+
+export interface SaveCustomProviderResponse {
+  ok: boolean
+  id: string
+  provider: ProviderInfo
+  discovery: {
+    attempted: boolean
+    ok: boolean
+    status: number | null
+    error: string | null
+    url: string
+    flavour: string | null
+    cached: boolean
+  }
+  models: ProviderModel[]
+  note: string | null
+}
+
+/** Body for `POST /api/providers/custom` — drops empty optional fields. */
+export function customProviderBody(req: SaveCustomProviderRequest): SaveCustomProviderRequest {
+  const body: SaveCustomProviderRequest = {
+    name: req.name.trim(),
+    base_url: req.base_url.trim(),
+  }
+  const key = (req.api_key || '').trim()
+  if (key) body.api_key = key
+  if (req.flavour) body.flavour = req.flavour
+  if (req.requires_key !== undefined) body.requires_key = req.requires_key
+  if (req.id) body.id = req.id
+  return body
+}
+
+/** Save (or, with `id`, update) a user-defined endpoint as its own provider. */
+export async function saveCustomProvider(
+  req: SaveCustomProviderRequest,
+): Promise<SaveCustomProviderResponse> {
+  return apiFetch<SaveCustomProviderResponse>('/providers/custom', {
+    method: 'POST',
+    body: JSON.stringify(customProviderBody(req)),
+    // The backend probes the endpoint to detect its flavour and list models.
+    timeout: 20_000,
+  })
+}
+
+export async function deleteCustomProvider(id: string): Promise<{ ok: boolean; id: string }> {
+  return apiFetch<{ ok: boolean; id: string }>(
+    `/providers/custom/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+  )
 }
 
 export function connectReasonLabel(reason: string | undefined, connected: boolean): string {

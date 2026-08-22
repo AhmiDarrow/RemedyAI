@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { connectReasonLabel, OFFLINE_PROVIDERS } from './providers'
+import { connectReasonLabel, customProviderBody, OFFLINE_PROVIDERS } from './providers'
 
 describe('connectReasonLabel', () => {
   it('explains why a provider is or is not ready', () => {
@@ -31,5 +31,39 @@ describe('OFFLINE_PROVIDERS', () => {
       expect(ids).toContain(id)
       expect(OFFLINE_PROVIDERS.find((p) => p.id === id)?.show_base_url).toBe(true)
     }
+  })
+})
+
+describe('customProviderBody', () => {
+  it('sends name + base_url and drops empty optionals', () => {
+    expect(
+      customProviderBody({ name: ' LM Studio ', base_url: ' http://127.0.0.1:1234/v1 ', api_key: '  ' }),
+    ).toEqual({ name: 'LM Studio', base_url: 'http://127.0.0.1:1234/v1' })
+  })
+
+  it('passes key, requires_key, flavour and id through when set', () => {
+    expect(
+      customProviderBody({
+        name: 'Remote',
+        base_url: 'https://host.example/v1',
+        api_key: 'sk-1',
+        requires_key: true,
+        flavour: 'anthropic',
+        id: 'custom-remote',
+      }),
+    ).toEqual({
+      name: 'Remote',
+      base_url: 'https://host.example/v1',
+      api_key: 'sk-1',
+      flavour: 'anthropic',
+      requires_key: true,
+      id: 'custom-remote',
+    })
+  })
+
+  it('keeps an explicit requires_key=false for keyless local servers', () => {
+    const body = customProviderBody({ name: 'x', base_url: 'http://127.0.0.1:1/v1', requires_key: false })
+    expect(body.requires_key).toBe(false)
+    expect('api_key' in body).toBe(false)
   })
 })
