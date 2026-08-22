@@ -12,7 +12,7 @@ from remedy.skills.registry import SkillRegistry
 def test_bundled_skills_exist():
     dirs = iter_bundled_skill_dirs()
     names = {d.name for d in dirs}
-    assert len(dirs) >= 14  # engineering + companion + comfyui + github
+    assert len(dirs) >= 24  # engineering + companion + comfyui + github + game dev
     assert "project-overview" in names
     assert "code-review" in names
     assert "memory-backup" in names
@@ -31,6 +31,20 @@ def test_bundled_skills_exist():
         "self-dev-loop",
     ):
         assert self_dev in names
+    # Game dev studio packs (extra ability, never identity)
+    for game in (
+        "game-dev-studio",
+        "godot-4",
+        "game-assets",
+        "web-games",
+        "bevy",
+        "pygame-arcade",
+        "love2d",
+        "unity",
+        "unreal",
+        "engine-mcp-bridge",
+    ):
+        assert game in names
     for d in dirs:
         assert (d / "SKILL.md").is_file()
     comfy = bundled_skills_dir() / "comfyui"
@@ -54,8 +68,8 @@ def test_discover_defaults_loads_bundled(tmp_path: Path):
     home = tmp_path / "home"
     home.mkdir()
     n = reg.discover_defaults(home_dir=home)
-    assert n >= 14
-    assert reg.count >= 14
+    assert n >= 24
+    assert reg.count >= 24
     assert reg.get("project-overview") is not None
     assert reg.get("remember-me") is not None
     assert reg.get("comfyui") is not None
@@ -118,3 +132,54 @@ def test_seeded_skill_refreshes_on_bundled_version_bump(tmp_path: Path):
     )
     assert _refresh_seeded_skill_from_bundled(bundled, user) is False
     assert "Locked" in (user / "SKILL.md").read_text(encoding="utf-8")
+
+
+GAME_SKILLS = (
+    "game-dev-studio",
+    "godot-4",
+    "game-assets",
+    "web-games",
+    "bevy",
+    "pygame-arcade",
+    "love2d",
+    "unity",
+    "unreal",
+    "engine-mcp-bridge",
+)
+
+
+def test_game_skills_have_triggers_index_and_budgeted_references():
+    import re
+
+    from remedy.skills.loader import load_skill_from_dir
+
+    for name in GAME_SKILLS:
+        d = bundled_skills_dir() / name
+        skill = load_skill_from_dir(d)
+        m = skill.manifest
+        assert m.triggers, f"{name}: no triggers — it can never auto-suggest"
+        for pat in m.triggers:
+            re.compile(pat, re.IGNORECASE)
+        assert len(skill.instructions) <= 6_000, f"{name}: body too long for injection"
+        refs = {Path(r).name for r in skill.references}
+        assert "INDEX.md" in refs, f"{name}: references/INDEX.md missing"
+        index = (d / "references" / "INDEX.md").read_text(encoding="utf-8")
+        for r in skill.references:
+            p = d / r
+            assert p.stat().st_size <= 3_200, f"{name}: {r} exceeds the inline budget"
+            if Path(r).name != "INDEX.md":
+                assert Path(r).name in index, f"{name}: {r} not listed in INDEX.md"
+    assert (bundled_skills_dir() / "game-assets" / "scripts" / "sheet_tools.py").is_file()
+
+
+def test_godot_skill_declares_the_engine_for_local_discovery():
+    from remedy.core.local_discover import parse_skill_local_spec
+    from remedy.skills.loader import load_skill_from_dir
+
+    skill = load_skill_from_dir(bundled_skills_dir() / "godot-4")
+    spec = parse_skill_local_spec("godot-4", skill.manifest.raw_frontmatter)
+    assert spec is not None
+    ids = {b.id for b in spec.binaries}
+    assert "godot" in ids
+    godot = next(b for b in spec.binaries if b.id == "godot")
+    assert "GODOT" in godot.env
