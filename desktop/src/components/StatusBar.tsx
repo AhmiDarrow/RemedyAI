@@ -201,12 +201,8 @@ function visionLine(vs: VisionStatus | null): string {
     const label = msg || `Local model ${phase || 'installing'}…`
     return pct != null ? `${label} ${pct}%` : label
   }
-  if (vs.enabled && vs.running) return 'Vision ready'
-  if (vs.enabled && vs.installed && !vs.running) {
-    return 'Vision idle'
-  }
-  if (vs.enabled && !vs.installed) return 'Vision setup pending'
-  if (phase === 'ready' && vs.ready) return 'Vision ready'
+  // Idle / ready / setup-pending are not worth a permanent label; the dock
+  // only speaks while something is installing or has gone wrong.
   return ''
 }
 
@@ -330,28 +326,13 @@ export function StatusBar({
             } else if (p.open_goals > 0) {
               bits.push(`${p.open_goals} life`)
             }
-            const casN = Number(p.organism?.cas_count || p.cas?.count || 0)
-            if (casN > 0) bits.push(`${casN} mem`)
-            // Somatic / organism mood (Soul Field) + lean metabolism
-            const soma = p.soma
-            if (soma?.label) {
-              const emoji = soma.emoji ? `${soma.emoji} ` : ''
-              bits.push(`${emoji}${soma.label}`)
-            }
-            const meta = p.metabolism
-            if (meta && typeof meta === 'object') {
-              const eu = Number((meta as { evidence_units?: number }).evidence_units || 0)
-              const du = Number((meta as { decision_units?: number }).decision_units || 0)
-              const tier = (meta as { tier_label?: string; tier?: number }).tier_label
-                || ((meta as { tier?: number }).tier != null
-                  ? `L${(meta as { tier?: number }).tier}`
-                  : '')
-              if (tier) bits.push(String(tier))
-              if (eu > 0 || du > 0) bits.push(`EU ${eu}·DU ${du}`)
-            }
+            // Only things the owner can act on live here. Memory counts,
+            // organism mood (◆ Focused) and metabolism tiers (L1, EU·DU)
+            // are internals — they read as warnings and confuse people.
             setAlerts(bits.join(' · '))
             setAccessScope(String(p.access_scope || ''))
             // Tray tooltip mirrors organism mood when running under Tauri
+            const soma = p.soma
             if (soma?.tray_tooltip) {
               try {
                 const { invoke } = await import('@tauri-apps/api/core')
@@ -520,14 +501,7 @@ export function StatusBar({
     const pct = visionPct(vision)
     const phase = (vision?.progress?.phase || '').toLowerCase()
     const busy = visionIsBusy(vision)
-    const show =
-      busy
-      || phase === 'error'
-      || phase === 'cancelled'
-      || (vision?.enabled && !vision.ready)
-      || (vision?.enabled && vision.installed) // show idle or running
-      || (vision?.enabled && vision.running)
-      || (phase === 'ready' && vision?.ready)
+    const show = busy || phase === 'error' || phase === 'cancelled'
     return { line, pct, phase, busy, show }
   }, [vision])
 
