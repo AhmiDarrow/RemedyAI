@@ -289,3 +289,144 @@ def test_a_broken_pregate_does_not_block_learning(monkeypatch):
         steps=work("repo_search", "file_write", "bash_exec", "file_read"),
     )
     assert loop.calls
+
+
+# --- Settings toggle: creation off, evaluation still on ------------------------
+
+
+class _Refiner:
+    def __init__(self) -> None:
+        self.executions: list[tuple] = []
+
+    def record_execution(self, name, success, duration_ms=0.0, session_id="", error=None):
+        self.executions.append((name, success, session_id, error))
+
+
+class _Registry:
+    def __init__(self, auto: set[str], curated: set[str] = frozenset()) -> None:
+        from remedy.models import Skill, SkillManifest
+
+        self._skills = {}
+        for n in auto:
+            self._skills[n] = Skill(
+                manifest=SkillManifest(
+                    name=n, description="auto learned skill", metadata={"auto_generated": True}
+                ),
+                instructions="x",
+            )
+        for n in curated:
+            self._skills[n] = Skill(
+                manifest=SkillManifest(name=n, description="curated bundled skill"),
+                instructions="x",
+            )
+
+    def get(self, name):
+        return self._skills.get(name)
+
+
+class _RecordingLoop:
+    def __init__(self, auto: set[str], curated: set[str] = frozenset()) -> None:
+        self.refiner = _Refiner()
+        self.registry = _Registry(auto, curated)
+
+
+def test_creation_disabled_skips_learning_but_not_evaluation():
+    from remedy.core.agent_learn import record_skill_turn_outcome
+
+    loop = Loop()
+    auto_learn_from_turn(
+        learning_loop=loop,
+        message="m",
+        session_id="s",
+        steps=work("repo_search", "file_write", "bash_exec", "file_read"),
+        allow_creation=False,
+    )
+    assert loop.calls == []
+    rec = _RecordingLoop(auto={"learned-one"})
+    out = record_skill_turn_outcome(
+        rec,
+        skills=["learned-one"],
+        steps=work("repo_search", "file_write", "bash_exec", "file_read"),
+        aborted=False,
+        session_id="s",
+    )
+    assert out == {"learned-one": True}
+
+
+# --- closed-loop outcome grading ---------------------------------------------
+
+
+def test_outcome_success_records_execution():
+    from remedy.core.agent_learn import record_skill_turn_outcome
+
+    loop = _RecordingLoop(auto={"learned-one"})
+    out = record_skill_turn_outcome(
+        loop,
+        skills=["learned-one", "learned-one"],
+        steps=work("repo_search", "file_write", "bash_exec"),
+        aborted=False,
+        session_id="sess-1",
+    )
+    assert out == {"learned-one": True}
+    assert loop.refiner.executions == [("learned-one", True, "sess-1", None)]
+
+
+def test_outcome_aborted_records_failure():
+    from remedy.core.agent_learn import record_skill_turn_outcome
+
+    loop = _RecordingLoop(auto={"learned-one"})
+    out = record_skill_turn_outcome(
+        loop, skills=["learned-one"], steps=work("repo_search"), aborted=True, session_id="s"
+    )
+    assert out == {"learned-one": False}
+    name, ok, _sid, err = loop.refiner.executions[0]
+    assert (name, ok, err) == ("learned-one", False, "turn aborted")
+
+
+def test_outcome_mostly_failed_turn_records_failure():
+    from remedy.core.agent_learn import record_skill_turn_outcome
+
+    loop = _RecordingLoop(auto={"learned-one"})
+    steps = work("a", success=True) + work("b", "c", "d", success=False)
+    out = record_skill_turn_outcome(
+        loop, skills=["learned-one"], steps=steps, aborted=False, session_id="s"
+    )
+    assert out == {"learned-one": False}
+
+
+def test_outcome_short_turn_records_nothing():
+    from remedy.core.agent_learn import record_skill_turn_outcome
+
+    loop = _RecordingLoop(auto={"learned-one"})
+    out = record_skill_turn_outcome(
+        loop,
+        skills=["learned-one"],
+        steps=work("file_read", "file_read"),
+        aborted=False,
+        session_id="s",
+    )
+    assert out == {}
+    assert loop.refiner.executions == []
+
+
+def test_outcome_curated_skill_not_recorded():
+    from remedy.core.agent_learn import record_skill_turn_outcome
+
+    loop = _RecordingLoop(auto={"learned-one"}, curated={"change-safety"})
+    out = record_skill_turn_outcome(
+        loop,
+        skills=["change-safety", "learned-one"],
+        steps=work("repo_search", "file_write", "bash_exec"),
+        aborted=False,
+        session_id="s",
+    )
+    assert out == {"learned-one": True}
+    assert [e[0] for e in loop.refiner.executions] == ["learned-one"]
+
+
+def test_outcome_with_no_loop_or_no_skills_is_a_noop():
+    from remedy.core.agent_learn import record_skill_turn_outcome
+
+    assert record_skill_turn_outcome(None, skills=["x"], steps=[], aborted=True, session_id="s") == {}
+    loop = _RecordingLoop(auto={"x"})
+    assert record_skill_turn_outcome(loop, skills=[], steps=[], aborted=True, session_id="s") == {}
