@@ -10,8 +10,9 @@ const src = readFileSync(
 
 describe('MessageFeed live chrome order', () => {
   it('re-pins the feed on composer submit, not only Jump to latest', () => {
-    expect(src).toContain('stickNonce')
-    expect(src).toContain('reattachKey:')
+    expect(src).toContain("reattachKey: `${lastUserMsgId ?? ''}:${stickNonce}`")
+    // Session switches floor via the scroller mount, not the reattach key.
+    expect(src).not.toMatch(/reattachKey:.*sessionId/)
   })
 
   it('renders thinking/answer before live todos and process chips', () => {

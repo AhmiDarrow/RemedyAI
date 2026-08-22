@@ -50,7 +50,7 @@ export interface GroveChatProps {
   placeholder: string
   /** Send with full attachments — same signature as Studio's flow. */
   onSend: (text: string, attachments?: SendAttachment[]) => Promise<void> | void
-  stickNonce?: number
+  stickNonce: number
   onStop: () => void
   /** Ensure the surface's session exists (goal room binds its own). */
   ensureSessionId: () => Promise<string | null>
@@ -76,7 +76,7 @@ export function GroveChat({
   serverReady,
   placeholder,
   onSend,
-  stickNonce = 0,
+  stickNonce,
   onStop,
   ensureSessionId,
   sessionKey,
