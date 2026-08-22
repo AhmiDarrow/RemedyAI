@@ -5,8 +5,13 @@ Hints only — never gates search or requires a project root.
 
 from __future__ import annotations
 
+import json
+import re
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from remedy.core import game_engines
 
 # Orientation files (read path only + tiny excerpt when small).
 _ORIENT_NAMES = (
@@ -32,6 +37,8 @@ class StackFingerprint:
     markers: list[str] = field(default_factory=list)
     suggest_verify: str | None = None
     hints: list[str] = field(default_factory=list)
+    # Game engine signals (name, version, binary, lang, verify) — only known keys.
+    engine: dict[str, str] = field(default_factory=dict)
 
     def context_lines(self) -> list[str]:
         if not self.stacks and not self.hints:
@@ -39,6 +46,11 @@ class StackFingerprint:
         lines = [f"Stack fingerprint ({self.path}):"]
         if self.stacks:
             lines.append("  stacks: " + ", ".join(self.stacks))
+        if self.engine.get("name"):
+            lines.append("  engine: " + game_engines.engine_summary(self))
+            skill = game_engines.engine_skill(self.engine["name"])
+            skills = f"{skill}, game-dev-studio" if skill else "game-dev-studio"
+            lines.append(f"  studio: game project — skills: {skills}")
         if self.suggest_verify:
             lines.append(f"  suggested verify: {self.suggest_verify}")
         for h in self.hints[:6]:
@@ -70,37 +82,14 @@ def fingerprint_path(root: Path | str | None) -> StackFingerprint:
     if has("project.godot"):
         fp.stacks.append("godot")
         fp.markers.append("project.godot")
-        local_godot = _find_local_godot(path)
-        smoke = _find_godot_smoke_script(path)
-        if local_godot and smoke:
-            fp.hints.append(
-                f"Godot: {local_godot.name} + smoke {smoke.as_posix()} "
-                "(raise bash timeout_seconds for headless)"
-            )
-            fp.suggest_verify = (
-                f'.\\{local_godot.name} --headless --path . -s {smoke.as_posix()}'
-            )
-        elif local_godot:
-            fp.hints.append(
-                f"Godot binary nearby: {local_godot.name} — "
-                f"prefer tools/smoke_*.gd or tools/diag_*.gd with -s; "
-                f"fallback --quit-after 1"
-            )
-            fp.suggest_verify = (
-                f'.\\{local_godot.name} --headless --path . --quit-after 1'
-            )
-        else:
-            fp.hints.append(
-                "Godot project: use local Godot*_console.exe if present; "
-                "not required on PATH"
-            )
-            fp.suggest_verify = None
+        _fingerprint_godot(path, fp)
 
     # Node
     if has("package.json"):
         fp.stacks.append("node")
         fp.markers.append("package.json")
         fp.hints.append("Node: prefer npm/pnpm/yarn scripts from package.json")
+        _fingerprint_web_game(path, fp)
         if not fp.suggest_verify:
             if has("pnpm-lock.yaml"):
                 fp.suggest_verify = "pnpm test"
@@ -121,12 +110,23 @@ def fingerprint_path(root: Path | str | None) -> StackFingerprint:
                 fp.suggest_verify = "uv run pytest -q"
             else:
                 fp.suggest_verify = "pytest -q"
+    _fingerprint_python_game(path, fp)
 
     # Rust
     if has("Cargo.toml"):
         fp.stacks.append("rust")
         fp.markers.append("Cargo.toml")
         fp.hints.append("Rust: cargo test / cargo check")
+        if _cargo_has_dep(path / "Cargo.toml", "bevy"):
+            fp.stacks.append("bevy")
+            fp.engine.setdefault("name", "bevy")
+            fp.engine.setdefault("lang", "rust")
+            fp.hints.append(
+                "Bevy: cargo check is the fast gate; enable the bevy/dynamic_linking "
+                "feature for quicker dev rebuilds"
+            )
+            if not fp.suggest_verify:
+                fp.suggest_verify = "cargo check"
         if not fp.suggest_verify:
             fp.suggest_verify = "cargo test"
 
@@ -151,6 +151,25 @@ def fingerprint_path(root: Path | str | None) -> StackFingerprint:
         if not fp.suggest_verify:
             fp.suggest_verify = "just test"
 
+    # LÖVE
+    if has("main.lua"):
+        fp.stacks.append("love2d")
+        fp.markers.append("main.lua")
+        _fingerprint_love(path, fp)
+
+    # Unity
+    if (path / "ProjectSettings" / "ProjectVersion.txt").is_file():
+        fp.stacks.append("unity")
+        fp.markers.append("ProjectSettings/ProjectVersion.txt")
+        _fingerprint_unity(path, fp)
+
+    # Unreal
+    uprojects = _safe_glob(path, "*.uproject")
+    if uprojects:
+        fp.stacks.append("unreal")
+        fp.markers.append(uprojects[0].name)
+        _fingerprint_unreal(path, uprojects[0], fp)
+
     # .NET
     if any(path.glob("*.sln")) or any(path.glob("*.csproj")):
         fp.stacks.append("dotnet")
@@ -173,50 +192,269 @@ def fingerprint_path(root: Path | str | None) -> StackFingerprint:
     return fp
 
 
-def _find_local_godot(root: Path) -> Path | None:
+def _safe_glob(root: Path, pattern: str) -> list[Path]:
     try:
-        for p in sorted(root.glob("Godot*.exe")):
-            if p.is_file() and "console" in p.name.lower():
-                return p
-        for p in sorted(root.glob("Godot*.exe")):
-            if p.is_file():
-                return p
+        return sorted(p for p in root.glob(pattern) if p.is_file())
     except OSError:
-        pass
-    return None
+        return []
+
+
+def _read_small(p: Path, limit: int = 12_000) -> str:
+    try:
+        with p.open("r", encoding="utf-8", errors="replace") as fh:
+            return fh.read(limit)
+    except OSError:
+        return ""
+
+
+def _find_local_godot(root: Path) -> Path | None:
+    return game_engines.find_repo_godot(root)
 
 
 def _find_godot_smoke_script(root: Path) -> Path | None:
-    """Prefer tools/smoke_*.gd or tools/diag_*.gd for real verify."""
-    tools = root / "tools"
-    if not tools.is_dir():
-        return None
-    patterns = ("smoke_*.gd", "diag_*.gd", "boot_*.gd", "validate_*.gd")
-    found: list[Path] = []
-    try:
-        for pat in patterns:
-            found.extend(tools.glob(pat))
-    except OSError:
-        return None
-    # Prefer shorter names / smoke over diag
-    def rank(p: Path) -> tuple[int, str]:
-        n = p.name.lower()
-        if n.startswith("smoke"):
-            return (0, n)
-        if n.startswith("boot"):
-            return (1, n)
-        if n.startswith("diag"):
-            return (2, n)
-        return (3, n)
+    return game_engines.find_godot_smoke_script(root)
 
-    found = [p for p in found if p.is_file()]
-    if not found:
-        return None
-    best = sorted(found, key=rank)[0]
+
+_GODOT_CONFIG_VERSION_RE = re.compile(r"^\s*config_version\s*=\s*(\d+)", re.M)
+_GODOT_FEATURES_RE = re.compile(
+    r"^\s*config/features\s*=\s*PackedStringArray\(([^)]*)\)", re.M
+)
+_GODOT_SRC_CAP = 400
+
+
+def _godot_source_langs(root: Path) -> tuple[int, int]:
+    """(gd_count, cs_count) over a capped walk skipping .godot/ and addons/."""
+    gd = cs = 0
+    seen = 0
     try:
-        return best.relative_to(root)
+        for p in root.rglob("*"):
+            parts = p.parts[len(root.parts) :]
+            if any(part in (".godot", "addons", ".git") for part in parts[:-1]):
+                continue
+            if not p.is_file():
+                continue
+            seen += 1
+            if p.suffix == ".gd":
+                gd += 1
+            elif p.suffix == ".cs":
+                cs += 1
+            if seen >= _GODOT_SRC_CAP:
+                break
+    except OSError:
+        pass
+    return gd, cs
+
+
+def _fingerprint_godot(path: Path, fp: StackFingerprint) -> None:
+    text = _read_small(path / "project.godot")
+    fp.engine["name"] = "godot"
+    version = ""
+    features: list[str] = []
+    m = _GODOT_FEATURES_RE.search(text)
+    if m:
+        features = re.findall(r'"([^"]*)"', m.group(1))
+        for f in features:
+            if re.fullmatch(r"\d+(?:\.\d+)*", f):
+                version = f
+                break
+    if not version:
+        m = _GODOT_CONFIG_VERSION_RE.search(text)
+        if m:
+            version = {"5": "4", "4": "3"}.get(m.group(1), "")
+    if version:
+        fp.engine["version"] = version
+    csharp = "C#" in features or bool(_safe_glob(path, "*.csproj"))
+    gd, cs = _godot_source_langs(path)
+    if gd and cs:
+        lang = "mixed"
+    elif csharp or cs:
+        lang = "csharp"
+    else:
+        lang = "gdscript"
+    fp.engine["lang"] = lang
+
+    binary = game_engines.find_engine_binary("godot", project_root=path, version=version or None)
+    smoke = _find_godot_smoke_script(path)
+    if binary is not None:
+        fp.engine["binary"] = str(binary)
+        verify = game_engines.godot_verify_command(path, binary)
+        if verify:
+            fp.engine["verify"] = verify
+        if smoke:
+            fp.hints.append(
+                f"Godot: {binary.name} + smoke {smoke.as_posix()} "
+                "(raise bash timeout_seconds for headless)"
+            )
+        else:
+            fp.hints.append(
+                f"Godot binary: {binary.name} — "
+                "prefer tools/smoke_*.gd or tools/diag_*.gd with -s; "
+                "fallback --quit-after 1"
+            )
+        fp.suggest_verify = verify
+    else:
+        fp.hints.append(
+            "Godot project: binary not found — set GODOT or drop Godot*_console.exe "
+            "in the repo root; not required on PATH"
+        )
+        fp.suggest_verify = None
+
+
+def _package_deps(path: Path) -> set[str]:
+    try:
+        data = json.loads(_read_small(path / "package.json", 64_000))
+    except (ValueError, OSError):
+        return set()
+    if not isinstance(data, dict):
+        return set()
+    deps: set[str] = set()
+    for key in ("dependencies", "devDependencies"):
+        block = data.get(key)
+        if isinstance(block, dict):
+            deps.update(str(k).lower() for k in block)
+    return deps
+
+
+def _fingerprint_web_game(path: Path, fp: StackFingerprint) -> None:
+    deps = _package_deps(path)
+    name = ""
+    if "phaser" in deps:
+        name = "phaser"
+    elif "pixi.js" in deps:
+        name = "pixi"
+    if not name:
+        return
+    fp.stacks.append(name)
+    fp.engine.setdefault("name", name)
+    fp.engine.setdefault("lang", "javascript")
+    fp.hints.append(
+        f"{name}: `npm run dev` starts a dev server — run it in the background "
+        "(never block on it); keep npm test as the gate"
+    )
+
+
+def _cargo_has_dep(cargo: Path, dep: str) -> bool:
+    text = _read_small(cargo, 64_000)
+    in_deps = False
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("["):
+            in_deps = s.startswith("[dependencies") or s.startswith("[dev-dependencies")
+            continue
+        if in_deps and re.match(rf"^{re.escape(dep)}\s*=", s):
+            return True
+    return False
+
+
+def _python_declared_deps(path: Path) -> str:
+    text = ""
+    for name in ("pyproject.toml", "requirements.txt", "requirements-dev.txt"):
+        p = path / name
+        if p.is_file():
+            text += _read_small(p, 32_000).lower() + "\n"
+    return text
+
+
+def _fingerprint_python_game(path: Path, fp: StackFingerprint) -> None:
+    from remedy.core.interactive_launch import _GUI_SRC_RE
+
+    deps = _python_declared_deps(path)
+    name = ""
+    main: Path | None = None
+    if re.search(r"\bpygame(?:-ce)?\b", deps):
+        name = "pygame"
+    elif re.search(r"\barcade\b", deps):
+        name = "arcade"
+    for py in _safe_glob(path, "*.py")[:40]:
+        src = _read_small(py)
+        if not _GUI_SRC_RE.search(src):
+            continue
+        if re.search(r"^\s*(?:import|from)\s+pygame\b", src, re.M):
+            name = name or "pygame"
+            main = main or py
+        elif re.search(r"^\s*(?:import|from)\s+arcade\b", src, re.M):
+            name = name or "arcade"
+            main = main or py
+    if not name:
+        return
+    if "python" not in fp.stacks:
+        fp.stacks.append("python")
+    fp.stacks.append(name)
+    fp.engine.setdefault("name", name)
+    fp.engine.setdefault("lang", "python")
+    fp.hints.append(
+        f"{name}: windowed game — run it in the background, never block the gate on it"
+    )
+    has_tests = (path / "tests").is_dir() or bool(_safe_glob(path, "test_*.py"))
+    if not has_tests:
+        if main is None:
+            for cand in ("main.py", "game.py", "app.py"):
+                if (path / cand).is_file():
+                    main = path / cand
+                    break
+        if main is not None:
+            fp.suggest_verify = f"python -m py_compile {main.name}"
+
+
+def _fingerprint_love(path: Path, fp: StackFingerprint) -> None:
+    fp.engine.setdefault("name", "love2d")
+    fp.engine.setdefault("lang", "lua")
+    binary = game_engines.find_engine_binary("love2d", project_root=path)
+    if binary is not None:
+        fp.engine["binary"] = str(binary)
+    if shutil.which("luac"):
+        verify = "luac -p main.lua"
+        fp.engine["verify"] = verify
+        if not fp.suggest_verify:
+            fp.suggest_verify = verify
+        fp.hints.append(
+            "LÖVE: luac -p main.lua is the syntax gate; `love .` runs windowed (background)"
+        )
+    else:
+        fp.hints.append(
+            "LÖVE: no luac on PATH — install Lua for a `luac -p main.lua` gate; "
+            "`love .` runs windowed (background)"
+        )
+
+
+def _fingerprint_unity(path: Path, fp: StackFingerprint) -> None:
+    fp.engine.setdefault("name", "unity")
+    fp.engine.setdefault("lang", "csharp")
+    text = _read_small(path / "ProjectSettings" / "ProjectVersion.txt")
+    m = re.search(r"^m_EditorVersion:\s*(\S+)", text, re.M)
+    version = m.group(1) if m else ""
+    if version:
+        fp.engine["version"] = version
+    binary = game_engines.find_engine_binary("unity", project_root=path, version=version or None)
+    if binary is not None:
+        fp.engine["binary"] = str(binary)
+    exe = f'"{binary}"' if binary is not None else "Unity"
+    fp.hints.append(
+        f"Unity {version or ''}: no cheap gate — compile check is "
+        f"{exe} -batchmode -nographics -quit -projectPath . -logFile - (slow; background)"
+    )
+
+
+def _fingerprint_unreal(path: Path, uproject: Path, fp: StackFingerprint) -> None:
+    fp.engine.setdefault("name", "unreal")
+    fp.engine.setdefault("lang", "cpp")
+    assoc = ""
+    try:
+        data = json.loads(_read_small(uproject, 64_000))
+        assoc = str(data.get("EngineAssociation", "") or "") if isinstance(data, dict) else ""
     except ValueError:
-        return Path("tools") / best.name
+        assoc = ""
+    if assoc:
+        fp.engine["version"] = assoc
+    binary = game_engines.find_engine_binary("unreal", project_root=path, version=assoc or None)
+    if binary is not None:
+        fp.engine["binary"] = str(binary)
+    runuat = f'"{binary}"' if binary is not None else "RunUAT"
+    fp.hints.append(
+        f"Unreal {assoc or ''}: no cheap gate — "
+        f"{runuat} BuildCookRun -project={uproject.name} -build (very slow; background); "
+        "set UE_ROOT if the engine is elsewhere"
+    )
 
 
 def orientation_block(root: Path | str | None, *, max_chars: int = _BLOCK_CHAR_CAP) -> str:

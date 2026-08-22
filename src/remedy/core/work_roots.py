@@ -21,7 +21,10 @@ _MARKER_FILES = (
     "AGENTS.md",
     ".git",
     "Makefile",
+    "main.lua",  # LÖVE
+    "ProjectSettings",  # Unity (directory)
 )
+_MARKER_GLOBS = ("*.uproject",)  # Unreal
 
 
 def _is_work_root(path: Path) -> bool:
@@ -30,6 +33,12 @@ def _is_work_root(path: Path) -> bool:
     for name in _MARKER_FILES:
         try:
             if (path / name).exists():
+                return True
+        except OSError:
+            continue
+    for pattern in _MARKER_GLOBS:
+        try:
+            if any(path.glob(pattern)):
                 return True
         except OSError:
             continue

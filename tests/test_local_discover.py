@@ -297,3 +297,36 @@ def test_urlopen_no_redirect_rejects_3xx_family() -> None:
         assert _H.follow_hits == 0
     finally:
         httpd.shutdown()
+
+
+def test_discover_binaries_glob_dirs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from remedy.core import local_discover
+
+    monkeypatch.setattr(local_discover.shutil, "which", lambda _n: None)
+    exe = tmp_path / "Programs" / "Godot" / "Godot_v4.3_console.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"MZ")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    spec = BinarySpec(id="godot", names=["godot4"], glob_dirs=["%LOCALAPPDATA%/Programs/Godot/*.exe"])
+    result = discover_binaries(spec)
+    assert result["ok"] and result["source"] == "glob"
+    assert Path(result["path"]) == exe
+    monkeypatch.delenv("LOCALAPPDATA")
+    assert discover_binaries(spec)["ok"] is False
+
+
+def test_work_root_markers_for_games(tmp_path: Path) -> None:
+    from remedy.core.work_roots import discover_work_root
+
+    love = tmp_path / "love"
+    (love / "src").mkdir(parents=True)
+    (love / "main.lua").write_text("", encoding="utf-8")
+    assert discover_work_root(love / "src") == love
+    unity = tmp_path / "unity"
+    (unity / "ProjectSettings").mkdir(parents=True)
+    (unity / "Assets").mkdir()
+    assert discover_work_root(unity / "Assets") == unity
+    ue = tmp_path / "ue"
+    (ue / "Source").mkdir(parents=True)
+    (ue / "Game.uproject").write_text("{}", encoding="utf-8")
+    assert discover_work_root(ue / "Source") == ue
