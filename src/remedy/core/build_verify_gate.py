@@ -21,7 +21,14 @@ _FULL_SUITE_RE = re.compile(
     r"|vitest(?:\s+run)?"
     r"|pytest(?:\s+-q)?"
     r"|cargo\s+test"
+    r"|cargo\s+check"
     r"|go\s+test(?:\s+\./\.\.\.)?"
+    r"|npm\s+run\s+(?:test|build)"
+    r"|luac\s+-p\s+\S+"
+    # Headless Godot smoke: `.\Godot_x_console.exe --headless --path . --quit-after 1`
+    # or `… -s tools/smoke_boot.gd` (absolute / relative binary path allowed).
+    r"|(?:[\w.:\\/-]*[\\/])?godot[\w.-]*(?:\.exe)?\s+--headless\b[^\n]*?"
+    r"(?:--quit-after\s+\d+|-s\s+\S+\.gd)"
     r")\s*$"
 )
 

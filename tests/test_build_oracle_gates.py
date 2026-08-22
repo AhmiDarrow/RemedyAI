@@ -1008,3 +1008,25 @@ def test_the_exit_line_regex_matches_an_unprefixed_stdout_line():
     assert pattern.search("verify exit_code=0") is not None
     assert pattern.search("exit_code=0") is not None  # stdout, not the runner
     assert pattern.search("verify exit_code=-1") is None
+
+
+# --- run_auto_verify: engine timeouts ---------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_headless_engine_verify_gets_a_real_budget_not_the_exe_clamp(rt, verify):
+    """First headless Godot runs import assets; the 20 s GUI-exe clamp made
+    them a spurious RED."""
+    st = BuildTurnState(
+        active=True,
+        verify_command=r".\Godot_v4.3_console.exe --headless --path . --quit-after 1",
+    )
+    await run_auto_verify(rt, st)
+    assert verify.timeout >= 180.0
+
+
+@pytest.mark.asyncio
+async def test_a_windowed_exe_verify_keeps_the_short_clamp(rt, verify):
+    st = BuildTurnState(active=True, verify_command=r".\snake.exe")
+    await run_auto_verify(rt, st)
+    assert verify.timeout == 20.0
