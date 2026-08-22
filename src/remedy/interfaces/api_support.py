@@ -6,6 +6,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -174,6 +175,16 @@ def invalidate_config_cache() -> None:
     _config_cache["data"] = None
 
 
+def _sync_user_providers(cfg: dict[str, Any]) -> None:
+    """Saved custom endpoints become catalog providers the moment config loads."""
+    try:
+        from remedy.interfaces.user_providers import sync_catalog
+
+        sync_catalog(cfg)
+    except Exception as exc:  # pragma: no cover - never block config loads
+        logger.debug("user provider sync: %s", exc)
+
+
 def _load_config_cached() -> dict[str, Any]:
     """load_config() with a cheap mtime/size cache to avoid re-reading every request.
 
@@ -181,6 +192,7 @@ def _load_config_cached() -> dict[str, Any]:
     """
     path = _find_config_path()
     if path is None:
+        _sync_user_providers({})
         return {}
     try:
         st = path.stat()
@@ -196,11 +208,15 @@ def _load_config_cached() -> dict[str, Any]:
         and _config_cache["size"] == size
         and isinstance(_config_cache["data"], dict)
     ):
+        _sync_user_providers(_config_cache["data"])
         return dict(_config_cache["data"])
     data = _load_toml_config(path) or {}
     if not isinstance(data, dict):
         data = {}
     _config_cache.update({"path": str(path), "mtime": mtime, "size": size, "data": data})
+    # Fresh read (first load or the file changed): saved custom endpoints
+    # become catalog providers right here, so every route sees them.
+    _sync_user_providers(data)
     return dict(data)
 
 
@@ -441,6 +457,17 @@ def _serialize_toml(value: Any) -> str:
     if isinstance(value, list):
         items = ", ".join(_serialize_toml(v) for v in value)
         return f"[{items}]"
+    if isinstance(value, dict):
+        # Inline table — lets one-level tables hold records (custom_providers).
+        items = ", ".join(
+            f"{_toml_key(k)} = {_serialize_toml(v)}" for k, v in value.items() if v is not None
+        )
+        return "{" + items + "}"
     return json.dumps(str(value))
+
+
+def _toml_key(key: Any) -> str:
+    k = str(key)
+    return k if re.fullmatch(r"[A-Za-z0-9_-]+", k) else json.dumps(k)
 
 

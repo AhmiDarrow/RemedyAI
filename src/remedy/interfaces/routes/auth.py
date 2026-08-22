@@ -30,6 +30,20 @@ class XaiApiKeyRequest(BaseModel):
     api_key: str = Field(..., min_length=1)
 
 
+class CustomProviderRequest(BaseModel):
+    """Save the Custom endpoint form as a provider of its own."""
+
+    name: str = Field(..., min_length=1, max_length=80)
+    base_url: str = Field(..., min_length=1)
+    api_key: str | None = None
+    #: openai | anthropic | ollama | gemini; omitted → detected by probing.
+    flavour: str | None = None
+    #: False when the host takes no key (local server, open proxy).
+    requires_key: bool | None = None
+    #: Replace an existing saved endpoint instead of creating another.
+    id: str | None = None
+
+
 class ProviderProbeRequest(BaseModel):
     provider: str = Field(..., min_length=1)
     api_key: str | None = None
@@ -83,6 +97,105 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         """Known providers with base URL, models, and auth modes."""
         cfg = load_config()
         return {"providers": public_provider_catalog(cfg)}
+
+    @app.post("/api/providers/custom")
+    async def save_custom_provider(req: CustomProviderRequest):
+        """Custom endpoint → named provider (``custom-<slug>``).
+
+        The template row stays blank; the saved entry shows up in every
+        picker like a built-in. Keys go to the secure store under the new
+        id; config.toml keeps only name/url/flavour.
+        """
+        from remedy.interfaces.model_discovery import discover_models
+        from remedy.interfaces.secret_store import set_provider_secret
+        from remedy.interfaces.user_providers import (
+            USER_PROVIDER_PREFIX,
+            upsert_spec,
+        )
+
+        name = str(req.name or "").strip()
+        base = str(req.base_url or "").strip().rstrip("/")
+        key = str(req.api_key or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name required")
+        if not base or "://" not in base:
+            raise HTTPException(status_code=400, detail="base_url must be a full URL")
+        pid = str(req.id or "").strip().lower() or None
+        if pid and not pid.startswith(USER_PROVIDER_PREFIX):
+            raise HTTPException(status_code=400, detail="not a saved custom endpoint")
+
+        flavour = (req.flavour or "").strip().lower() or None
+        probe_note: str | None = None
+        disc = await discover_models(base, key, provider_hint="custom", timeout=6.0)
+        if disc.ok:
+            detected = {"lmstudio": "openai", "llamacpp": "openai"}.get(
+                disc.flavour or "", disc.flavour or "openai"
+            )
+            flavour = flavour or detected
+        else:
+            probe_note = disc.error
+        flavour = flavour or "openai"
+        cfg = load_config()
+        requires_key = req.requires_key
+        if requires_key is None:
+            if key:
+                requires_key = True
+            elif pid:
+                # Editing without retyping the key keeps the stored requirement.
+                from remedy.interfaces.user_providers import specs_from_config
+
+                prev = specs_from_config(cfg).get(pid) or {}
+                requires_key = prev.get("auth", "api_key") == "api_key"
+            else:
+                requires_key = False
+
+        try:
+            cfg, pid = upsert_spec(
+                cfg,
+                name=name,
+                base_url=base,
+                flavour=flavour,
+                auth="api_key" if requires_key else "none",
+                pid=pid,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if key:
+            # Direct store write: no owner inference — a key pasted for *this*
+            # endpoint belongs to this endpoint, whatever it looks like.
+            set_provider_secret(pid, key, home=_home_from_config(cfg))
+        _write_config(_find_config_path() or _default_config_path(), cfg)
+
+        entry = next(
+            (p for p in public_provider_catalog(cfg) if p["id"] == pid), None
+        )
+        return {
+            "ok": True,
+            "id": pid,
+            "provider": entry,
+            "discovery": disc.as_dict(),
+            "models": [
+                {"id": m["id"], "name": m.get("name") or m["id"]}
+                for m in disc.models
+                if m.get("chat", True)
+            ],
+            "note": probe_note,
+        }
+
+    @app.delete("/api/providers/custom/{pid}")
+    async def delete_custom_provider(pid: str):
+        from remedy.interfaces.secret_store import clear_provider_secret
+        from remedy.interfaces.user_providers import is_user_provider, remove_spec
+
+        pid = str(pid or "").strip().lower()
+        if not is_user_provider(pid):
+            raise HTTPException(status_code=404, detail="no such saved endpoint")
+        cfg = load_config()
+        cfg = remove_spec(cfg, pid)
+        with contextlib.suppress(Exception):
+            clear_provider_secret(pid, home=_home_from_config(cfg))
+        _write_config(_find_config_path() or _default_config_path(), cfg)
+        return {"ok": True, "id": pid}
 
     @app.get("/api/providers/connected")
     async def list_connected_providers():
