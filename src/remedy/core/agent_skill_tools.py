@@ -165,6 +165,13 @@ def register_skill_tools(runtime: Any) -> None:
                     nm,
                     session_id=str(getattr(runtime, "_session_id", "") or ""),
                 )
+        # Remember for end-of-turn outcome grading (agent_learn.record_skill_turn_outcome)
+        with suppress(Exception):
+            activated = getattr(runtime, "_turn_activated_skills", None)
+            if activated is None:
+                activated = []
+                runtime._turn_activated_skills = activated
+            activated.append(nm)
         # Skill genome phenotype (activation success = body loaded)
         with suppress(Exception):
             from remedy.core.metabolism.skill_genome import get_skill_genome

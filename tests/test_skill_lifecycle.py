@@ -242,3 +242,133 @@ def test_learn_rejects_failed_overall(ll):
     # build_trace may still set overall from steps — override
     trace.overall_success = False
     assert ll.learn_from_trace(trace) is None
+
+
+# --- never-used auto-learned skills age out ----------------------------------
+
+
+def _unused_skill(status: SkillStatus, created_days_ago: int | None, **meta) -> Skill:
+    from datetime import timedelta
+
+    md = {"auto_generated": True, "effort_weight": 0.1, **meta}
+    if created_days_ago is not None:
+        md["created_at"] = (datetime.now(UTC) - timedelta(days=created_days_ago)).isoformat()
+    return Skill(
+        manifest=SkillManifest(
+            name="unused-skill",
+            description="An auto-learned skill nobody ever used",
+            version="0.1.0",
+            kind=SkillKind.NATIVE,
+            status=status,
+            metadata=md,
+        ),
+        instructions="# x\n" + ("step\n" * 10),
+    )
+
+
+def test_stale_unused_auto_skill_demotes_to_disabled():
+    from remedy.core.learning.lifecycle import STALE_UNUSED_DAYS
+
+    policy = SkillLifecyclePolicy()
+    skill = _unused_skill(SkillStatus.DISCOVERED, STALE_UNUSED_DAYS + 1)
+    h = policy.health_from_stats(skill, total=0, successes=0, failures=0, sessions=0)
+    assert h.activations == 0 and h.created_at is not None
+    dec = policy.evaluate_health(h)
+    assert dec.action == "demote"
+    assert dec.new_status == SkillStatus.DISABLED
+    assert "never used" in dec.reason
+
+
+def test_recently_created_unused_skill_holds():
+    policy = SkillLifecyclePolicy()
+    skill = _unused_skill(SkillStatus.DISCOVERED, 2)
+    h = policy.health_from_stats(skill, total=0, successes=0, failures=0, sessions=0)
+    assert policy.evaluate_health(h).action == "hold"
+
+
+def test_activated_unused_skill_is_not_stale():
+    policy = SkillLifecyclePolicy()
+    skill = _unused_skill(SkillStatus.VALIDATED, 60)
+    h = policy.health_from_stats(
+        skill, total=0, successes=0, failures=0, sessions=0, activations=1
+    )
+    assert policy.evaluate_health(h).action == "hold"
+
+
+def test_unused_skill_without_any_creation_date_holds():
+    policy = SkillLifecyclePolicy()
+    skill = _unused_skill(SkillStatus.DISCOVERED, None)
+    h = policy.health_from_stats(skill, total=0, successes=0, failures=0, sessions=0)
+    assert h.created_at is None
+    assert policy.evaluate_health(h).action == "hold"
+
+
+def test_created_at_falls_back_to_skill_md_mtime(tmp_path):
+    import os
+    from datetime import timedelta
+
+    from remedy.core.learning.lifecycle import STALE_UNUSED_DAYS
+
+    d = tmp_path / "unused-skill"
+    d.mkdir()
+    md = d / "SKILL.md"
+    md.write_text("---\nname: unused-skill\n---\nbody\n", encoding="utf-8")
+    old = (datetime.now(UTC) - timedelta(days=STALE_UNUSED_DAYS + 5)).timestamp()
+    os.utime(md, (old, old))
+    skill = _unused_skill(SkillStatus.DISCOVERED, None, skill_path=str(md))
+    policy = SkillLifecyclePolicy()
+    h = policy.health_from_stats(skill, total=0, successes=0, failures=0, sessions=0)
+    assert h.created_at is not None
+    assert policy.evaluate_health(h).action == "demote"
+
+
+def test_stale_disabled_prunes_via_status_changed_at():
+    from datetime import timedelta
+
+    from remedy.core.learning.lifecycle import PRUNE_DISABLED_AFTER_DAYS
+
+    policy = SkillLifecyclePolicy()
+    changed = (datetime.now(UTC) - timedelta(days=PRUNE_DISABLED_AFTER_DAYS + 1)).isoformat()
+    skill = _unused_skill(SkillStatus.DISABLED, 90, lifecycle_changed_at=changed)
+    h = policy.health_from_stats(skill, total=0, successes=0, failures=0, sessions=0)
+    assert h.status_changed_at is not None and h.last_failure_at is None
+    dec = policy.evaluate_health(h)
+    assert dec.action == "prune"
+    assert dec.new_status == SkillStatus.DEPRECATED
+
+
+def test_freshly_disabled_skill_is_not_pruned_yet():
+    policy = SkillLifecyclePolicy()
+    skill = _unused_skill(
+        SkillStatus.DISABLED, 90, lifecycle_changed_at=datetime.now(UTC).isoformat()
+    )
+    h = policy.health_from_stats(skill, total=0, successes=0, failures=0, sessions=0)
+    assert policy.evaluate_health(h).action == "hold"
+
+
+def test_tick_demotes_then_retires_stale_unused_skill(tmp_path):
+    """Path for old never-used skills: DISABLED, then DEPRECATED; files stay on disk."""
+    from datetime import timedelta
+
+    from remedy.core.learning.lifecycle import STALE_UNUSED_DAYS
+
+    loop = LearningLoop(skills_dir=tmp_path / "skills", memory=None)
+    skill = _unused_skill(SkillStatus.DISCOVERED, STALE_UNUSED_DAYS + 1)
+    path = loop._write_skill_md(skill)
+    skill.manifest.metadata["skill_path"] = str(path)
+
+    assert loop.auto_refine_skill(skill) is True
+    assert skill.manifest.status == SkillStatus.DISABLED
+    assert skill.manifest.metadata.get("lifecycle_changed_at")
+    assert path.exists()
+
+    # Nothing happens until the disabled window elapses...
+    assert loop.auto_refine_skill(skill) is False
+    # ...then it retires — still on disk, just hidden.
+    skill.manifest.metadata["lifecycle_changed_at"] = (
+        datetime.now(UTC) - timedelta(days=400)
+    ).isoformat()
+    assert loop.auto_refine_skill(skill) is True
+    assert skill.manifest.status == SkillStatus.DEPRECATED
+    assert path.exists()
+    assert "status: deprecated" in path.read_text(encoding="utf-8")
