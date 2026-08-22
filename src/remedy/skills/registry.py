@@ -570,6 +570,38 @@ class SkillRegistry:
         scored.sort(key=lambda x: (-x[1], x[0].manifest.name.lower()))
         return scored[:limit]
 
+    def triggered_skills(self, text: str, *, limit: int = 3) -> list[str]:
+        """Names of usable skills whose frontmatter ``triggers`` match *text*.
+
+        Ordered by how early the match sits in the message (an engine named
+        up front beats a generic word at the end), then by name. Disabled,
+        deprecated and quarantined skills never trigger.
+        """
+        q = (text or "").strip()
+        if not q:
+            return []
+        hits: list[tuple[int, str]] = []
+        for skill in self._skills.values():
+            m = skill.manifest
+            if not m.triggers:
+                continue
+            if m.status in (SkillStatus.DISABLED, SkillStatus.DEPRECATED):
+                continue
+            if (m.metadata or {}).get("quarantine"):
+                continue
+            best: int | None = None
+            for pat in m.triggers:
+                try:
+                    mt = re.search(pat, q, re.IGNORECASE)
+                except re.error:
+                    continue
+                if mt and (best is None or mt.start() < best):
+                    best = mt.start()
+            if best is not None:
+                hits.append((best, m.name))
+        hits.sort(key=lambda t: (t[0], t[1].lower()))
+        return [n for _, n in hits[:limit]]
+
     def skill_body(self, name: str, *, include_references: bool = False) -> str | None:
         """Full SKILL.md body for progressive disclosure activation."""
         skill = self.get(name)
@@ -583,6 +615,9 @@ class SkillRegistry:
             f"**Version:** {m.version}",
             f"**Description:** {m.description}",
         ]
+        if skill.source_skill_dir:
+            # So the model can file_read any reference the inline budget skips.
+            header.append(f"**Path:** {skill.source_skill_dir}")
         if m.tags:
             header.append(f"**Tags:** {', '.join(m.tags)}")
         if m.tools:
@@ -611,16 +646,54 @@ class SkillRegistry:
             )
         header.append(body)
         if include_references and skill.source_skill_dir and skill.references:
-            base = Path(skill.source_skill_dir)
-            for rel in skill.references[:3]:
-                p = base / rel
-                if p.is_file():
-                    try:
-                        text = p.read_text(encoding="utf-8")[:3000]
-                        header.append(f"\n\n## Reference: {rel}\n\n{text}")
-                    except OSError:
-                        pass
+            header.append(self._references_block(skill))
         return "\n".join(header)
+
+    @staticmethod
+    def _references_block(skill: Skill) -> str:
+        """Every reference listed with its size; INDEX.md inlined first, then
+        the next few — the rest are a ``file_read`` away via **Path**."""
+        try:
+            from remedy.core.react_policy import SKILL_REF_CHAR_CAP, SKILL_REF_INLINE_MAX
+
+            ref_cap, ref_max = int(SKILL_REF_CHAR_CAP), int(SKILL_REF_INLINE_MAX)
+        except Exception:
+            ref_cap, ref_max = 4_000, 5
+        base = Path(skill.source_skill_dir or "")
+        refs = list(skill.references)
+        refs.sort(key=lambda r: (0 if Path(r).name.upper() == "INDEX.MD" else 1, r.lower()))
+        lines = ["\n\n## References (on disk)"]
+        for rel in refs:
+            p = base / rel
+            try:
+                size = p.stat().st_size if p.is_file() else 0
+            except OSError:
+                size = 0
+            lines.append(f"- {Path(rel).as_posix()} ({size} bytes)")
+        inlined = 0
+        for rel in refs:
+            if inlined >= ref_max:
+                break
+            p = base / rel
+            if not p.is_file():
+                continue
+            try:
+                text = p.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if len(text) > ref_cap:
+                text = (
+                    text[:ref_cap]
+                    + f"\n…[truncated at {ref_cap} chars — file_read {rel} for the rest]"
+                )
+            lines.append(f"\n\n## Reference: {Path(rel).as_posix()}\n\n{text}")
+            inlined += 1
+        if inlined < len(refs):
+            lines.append(
+                f"\n\n_{len(refs) - inlined} more reference(s) not inlined — "
+                f"file_read them from the skill path above._"
+            )
+        return "\n".join(lines)
 
     def mark_activated(self, name: str) -> None:
         self._activation_counts[name] = self._activation_counts.get(name, 0) + 1

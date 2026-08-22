@@ -114,6 +114,13 @@ class SkillManifest(BaseModel):
     repository: str | None = Field(default=None)
     requires: list[str] = Field(default_factory=list, description="Dependencies (pip packages)")
     tools: list[str] = Field(default_factory=list, description="MCP tool names this skill uses")
+    triggers: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Regexes (case-insensitive) over the owner's message; a match "
+            "auto-injects this skill's body without a skill_activate hop"
+        ),
+    )
     raw_frontmatter: dict[str, Any] = Field(default_factory=dict)
 
     # File-system metadata (populated at load time)
