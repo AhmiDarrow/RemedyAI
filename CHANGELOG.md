@@ -20,6 +20,13 @@ catalog into context.
 Long builds also keep going when the SSE pane blinks (Stop is still
 Stop), don’t auto-complete product todos from leftover green tests, and
 don’t spawn `npm test` while feature checklist items are still open.
+A finished hop that lists “git commit if you want / no push” is not
+open work (that used to re-arm and dump a source file into chat). Status
+mantras that cycle two sentences, and a CSS/source paste after
+“Nothing to commit”, are clipped.
+
+Enter in chat jumps to the latest message. Jump to latest stays for when
+you scroll up while she is still streaming.
 
 ### Remedy Desktop gets a real voice
 

@@ -75,6 +75,8 @@ from remedy.core.react_policy import (
     post_tools_user_summary_nudge,
     recovery_nudge_message,
     speed_batch_nudge_message,
+    clip_appended_source_dump,
+    collapse_repeated_sentences,
     strip_stream_status_noise,
     strip_tool_markup,
     turn_has_unfinished_work,
@@ -2208,6 +2210,9 @@ async def call_llm_stream(runtime, message: str,
                 # Drop auth/provider status lines if they leaked into model content
                 if text_out:
                     text_out = strip_stream_status_noise(str(text_out))
+                    with suppress(Exception):
+                        text_out = collapse_repeated_sentences(text_out)
+                        text_out = clip_appended_source_dump(text_out)
                 if text_out and not tool_calls_list:
                     with suppress(Exception):
                         assistant_text_acc.append(str(text_out)[:8000])
