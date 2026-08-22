@@ -252,6 +252,15 @@ const META: HelpArticleMeta[] = [
       'Several Remedy sessions on one repo without overwriting each other: per-path claims that lapse when a session dies.',
   },
   {
+    id: '26-game-dev',
+    title: 'Game dev (studio)',
+    category: 'Daily use',
+    order: 6.8,
+    tags: ['game', 'godot', 'unity', 'unreal', 'phaser', 'bevy', 'pygame', 'love2d', 'playtest', 'mcp'],
+    summary:
+      'Godot, web, Bevy, Pygame and Love2D projects: engine detection, headless verification, playtesting, export, and the optional live-editor MCP bridge.',
+  },
+  {
     id: '21-personal-assistant',
     title: 'Personal assistant',
     category: 'Daily use',

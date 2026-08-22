@@ -50,6 +50,10 @@ disabled / deprecated
 - When a bundled skill’s frontmatter **version** is newer than your seeded copy under
   `~/.remedy/skills/`, Remedy refreshes that pack on next discover (add `.user_locked` in
   the skill folder to keep a hand-edited copy).
+- A skill can declare **triggers** (regexes over your message) in its frontmatter; a match
+  injects its procedure for that turn without an activation hop. Learned skills are graded by
+  how the turn went; unused ones retire after three weeks, and *Allow skill creation* in Settings
+  stops new ones being written.
 
 ## Bundled highlights
 
@@ -61,6 +65,10 @@ disabled / deprecated
 | **comfyui** | Local image gen bootstrap + generate into chat |
 | **code-review** / **write-tests** | Engineering loops |
 | **session-handoff** | End-of-session notes so the next agent continues cleanly |
+| **game-dev-studio** / **godot-4** | Studio loop (GDD → vertical slice → playtest) and Godot 4: headless verify, scene checks, export, playtest — see [Game dev](26-game-dev.md) |
+| **web-games** / **bevy** / **pygame-arcade** / **love2d** | Engine packs for Phaser/Pixi, Bevy, Pygame/Arcade, Love2D |
+| **unity** / **unreal** | Knowledge-only: project layout, batchmode / UAT, test runners |
+| **game-assets** / **engine-mcp-bridge** | ComfyUI game art with honest limits; when to use a live-editor MCP server |
 
 ## ComfyUI (bundled)
 
