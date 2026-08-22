@@ -7,6 +7,56 @@ compound actions, re-observe after failure — not vision thrash.
 
 from __future__ import annotations
 
+import re
+
+# When this matches, the full playbook is worth the tokens. Coding "implement X"
+# must not pay for grocery/CUA liturgy on every turn.
+_CU_HINT_RE = re.compile(
+    r"(?i)("
+    r"\bcomputer_"
+    r"|\bscreenshot\b"
+    r"|\bbrowser\b"
+    r"|\bon (?:my |the )?screen\b"
+    r"|\bplay (?:it|the (?:game|app|exe|program))\b"
+    r"|\bfill (?:out|in)(?: the)? form\b"
+    r"|\bcheckout\b|\badd to cart\b"
+    r"|https?://"
+    r"|\bgoto\b"
+    r"|\bgo to (?:http|www|gmail|google|amazon|walmart|target)\b"
+    r"|\bdesktop app\b"
+    r"|\bclick the\b"
+    r"|\btype (?:into|in) the\b"
+    r")"
+)
+
+
+def needs_computer_use_guidance(message: str) -> bool:
+    """True when this turn should load the computer-use playbook.
+
+    The playbook is unique operational knowledge (SoM, vault, retail URLs).
+    It is also thousands of tokens. Coding turns keep every computer_* tool
+    on the API — they just do not recap the shopping/CUA syllabus.
+    """
+    m = (message or "").strip()
+    if not m:
+        return False
+    try:
+        from remedy.core.computer.browse_intent import (
+            is_open_only_browse,
+            is_pure_action_kick,
+            parse_browse_navigate_url,
+            wants_page_interaction,
+        )
+
+        if wants_page_interaction(m) or is_pure_action_kick(m) or is_open_only_browse(m):
+            return True
+        if parse_browse_navigate_url(m):
+            return True
+    except Exception:
+        pass
+    return bool(_CU_HINT_RE.search(m))
+
+
 COMPUTER_USE_SYSTEM_ADDENDUM = """
 ## Computer use (full PC + Browser rail) — FAST & ACCURATE
 

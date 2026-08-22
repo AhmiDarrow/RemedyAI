@@ -25,7 +25,7 @@ def test_policy_packs_for_intents():
     assert build["id"] == "build"
     tool = policy_for_intent("chat", user_text="please fix the login bug")
     assert tool["id"] in ("task", "tool", "build")
-    assert "RESEARCH" in (tool.get("system") or "")
+    assert "tool" in (tool.get("system") or "").lower()
 
 
 def test_remedies_trigger_on_re_explain():

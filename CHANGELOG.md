@@ -4,6 +4,23 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Building stays the job — not a syllabus
+
+Frontier muscle (Grok / Claude / GPT-class) was being taught RESEARCH →
+PLAN → BUILD in the standing prompt, policy packs, builder card, and a
+16-point coding lesson on every turn, including “hi”. She spent thinking
+reciting the process instead of opening the next file. The machine still
+owns the schedule (checklist, force-implement, verify gate, don’t claim
+done). Grok now gets a short status card; local/small models keep the
+teaching loop. The computer-use playbook loads when the turn is actually
+computer-use (browser, shop, play the game), not while editing source.
+Tools stay on the function-calling API; we stopped dumping the 80-name
+catalog into context.
+
+Long builds also keep going when the SSE pane blinks (Stop is still
+Stop), don’t auto-complete product todos from leftover green tests, and
+don’t spawn `npm test` while feature checklist items are still open.
+
 ### Remedy Desktop gets a real voice
 
 - **Voice works in the installed app.** The Desktop sidecar could never

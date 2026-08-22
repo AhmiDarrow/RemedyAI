@@ -2,7 +2,7 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.30.0**.
+Current series: **v0.30.0** (local builds after that tag keep long jobs going and stop teaching Grok a syllabus she already knows).
 
 ## Contents
 

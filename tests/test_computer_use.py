@@ -1394,6 +1394,13 @@ def test_computer_guidance_present():
     assert "target" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "play" in COMPUTER_USE_SYSTEM_ADDENDUM.lower()
     assert "target=desktop" in COMPUTER_USE_SYSTEM_ADDENDUM
+    from remedy.core.computer.guidance import needs_computer_use_guidance
+
+    assert needs_computer_use_guidance("goto gmail and sign in")
+    assert needs_computer_use_guidance("play the game")
+    assert needs_computer_use_guidance("click the Submit button")
+    assert not needs_computer_use_guidance("implement a calculator")
+    assert not needs_computer_use_guidance("hi")
 
 
 def test_hello_alone_not_host_connected(tmp_path: Path):

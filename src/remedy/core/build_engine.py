@@ -1013,9 +1013,26 @@ def _coworkers_block() -> str:
     return ""
 
 
+def _frontier_muscle(state: BuildTurnState) -> bool:
+    return str(getattr(state, "muscle_tier", "") or "").strip().lower() == "frontier"
+
+
 def build_protocol_block(state: BuildTurnState) -> str:
-    """Hard system block injected at turn start for build supervision."""
+    """Hard system block injected at turn start for build supervision.
+
+    Frontier muscle already knows how to build. A labeled RESEARCH→PLAN→BUILD
+    syllabus makes Grok recite the process in thinking instead of doing the
+    next file. Local muscle still gets the teaching loop. The machine schedule
+    (todos, force-implement, verify gate) is unchanged either way.
+    """
     if getattr(state, "read_only", False) and int(getattr(state, "write_steps", 0) or 0) == 0:
+        if _frontier_muscle(state):
+            return (
+                f"[Review] {state.goal or '(user request)'}\n"
+                "Scout once (batch reads), deliver findings, stop. "
+                "No file_write unless they asked to change something."
+                f"{_coworkers_block()}"
+            )
         return (
             "[Read-only review — RESEARCH → SYNTHESIZE → DELIVER]\n"
             f"Goal: {state.goal or '(user request)'}\n"
@@ -1044,6 +1061,34 @@ def build_protocol_block(state: BuildTurnState) -> str:
             "The full test suite waits until those product items exist."
             f"{_coworkers_block()}"
         )
+    if _frontier_muscle(state):
+        open_n = int(getattr(state, "open_todo_count", 0) or 0)
+        bits = [f"[Build] {state.goal or '(user request)'}"]
+        if state.verify_command:
+            bits.append(
+                f"Tests after the product work exists: `{state.verify_command}`"
+            )
+        if open_n > 0:
+            bits.append(
+                f"{open_n} checklist items open — do the next one with tools, "
+                "then the next. Don't stop to report."
+            )
+        else:
+            bits.append(
+                "Use tools until the goal is actually done. Don't stop to report "
+                "after one hop."
+            )
+        bits.append(
+            "Don't run the full test suite (`npm test` / `pytest`) until the "
+            "current product items exist. Green tests are a checkpoint, not the finish."
+        )
+        if state.ship_required:
+            bits.append(
+                "After green: git_status → git_push → gh_release if asked. "
+                "Don't rewrite green code to re-test."
+            )
+        bits.append("You drive this PC. Jail and auth stay.")
+        return "\n".join(bits) + _coworkers_block()
     oracle = (
         f"Oracle (run AFTER product Build items are done): `{state.verify_command}`"
         if state.verify_command
