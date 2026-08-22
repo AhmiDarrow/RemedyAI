@@ -111,8 +111,20 @@ def discover_verify_command(runtime: Any, *, path: str = "") -> str:
                         cmd = "pytest -q"
             if not cmd and (p / "package.json").exists():
                 cmd = "npm test"
+            if not cmd and (p / "project.godot").exists():
+                from remedy.core import game_engines
+
+                binary = game_engines.find_engine_binary("godot", project_root=p)
+                cmd = game_engines.godot_verify_command(p, binary) or ""
+            if not cmd and (p / "main.lua").exists():
+                import shutil
+
+                if shutil.which("luac"):
+                    cmd = "luac -p main.lua"
             if not cmd and (p / "Cargo.toml").exists():
-                cmd = "cargo test"
+                from remedy.core.project_fingerprint import _cargo_has_dep
+
+                cmd = "cargo check" if _cargo_has_dep(p / "Cargo.toml", "bevy") else "cargo test"
             if not cmd and (p / "go.mod").exists():
                 cmd = "go test ./..."
             if not cmd:
