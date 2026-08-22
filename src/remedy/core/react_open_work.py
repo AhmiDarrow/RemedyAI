@@ -49,6 +49,18 @@ _OPEN_WORK_OPTIONAL_RE = re.compile(
     r"still\s+(?:open\s+)?\(?optional\)?|\boptional\b",
     re.IGNORECASE,
 )
+# Owner-choice leftovers, not product work. Session 765c 03:12: "Still open:
+# local git commit if you want this hop saved · no push" re-armed a finished
+# hop, then a 94s generation dumped index.css into the chat.
+_OPEN_WORK_OWNER_CHOICE_RE = re.compile(
+    r"(?i)("
+    r"if you want this hop saved"
+    r"|local git commit"
+    r"|no push"
+    r"|say when you want"
+    r"|when you want (?:the )?next"
+    r")"
+)
 _UNCHECKED_BOX_RE = re.compile(r"^\s*[-*]\s*\[\s\]\s+\S", re.MULTILINE)
 
 OPEN_WORK_CONTINUE_NUDGE = (
@@ -85,6 +97,8 @@ def final_declares_open_work(text: str | None) -> list[str]:
         line_end = t.find("\n", m.end())
         line = t[line_start : line_end if line_end != -1 else len(t)].strip()
         if _OPEN_WORK_OPTIONAL_RE.search(line):
+            continue
+        if _OPEN_WORK_OWNER_CHOICE_RE.search(line):
             continue
         found.append(line[:160])
     for m in _UNCHECKED_BOX_RE.finditer(t):

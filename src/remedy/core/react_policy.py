@@ -889,21 +889,58 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])(?:\s+|(?=[A-Z]))")
 
 
 def collapse_repeated_sentences(text: str) -> str:
-    """Drop consecutive duplicate sentences (thinking loops)."""
+    """Drop duplicate / cycling sentences (thinking loops).
+
+    Consecutive copies *and* A-B-A-B status mantras (session 765c tuner:
+    ``Core is green. Wiring UI + tests, then commit.`` × 80). A sliding
+    window of recent fingerprints keeps a real review that reuses a phrase
+    several paragraphs later.
+    """
     raw = (text or "").strip()
     if not raw:
         return ""
     parts = _SENTENCE_SPLIT_RE.split(raw)
     out: list[str] = []
-    prev = ""
+    recent: list[str] = []
     for p in parts:
         key = re.sub(r"\s+", " ", p).strip().lower()
         key = re.sub(r"[;:]+", ".", key)
-        if key and key == prev:
+        if not key:
+            out.append(p)
+            continue
+        if key in recent:
             continue
         out.append(p)
-        prev = key
+        recent.append(key)
+        if len(recent) > 6:
+            recent.pop(0)
     return " ".join(out).strip()
+
+
+_SOURCE_DUMP_HEAD_RE = re.compile(
+    r"(?i)nothing to commit|\*\*\s*done|\*\*\s*fixed|all local work is saved"
+)
+_SOURCE_DUMP_BODY_RE = re.compile(
+    r"(?:\n(?:/\*\s*──|:root\s*\{)|█)"
+)
+
+
+def clip_appended_source_dump(text: str) -> str:
+    """Drop a source file pasted after a finished report.
+
+    Session 765c 03:15: ``**Nothing to commit**`` then a full-block cursor
+    and ``index.css`` (:root tokens) — 18k of CSS after a clean git status.
+    """
+    raw = text or ""
+    if not raw:
+        return ""
+    cut = raw.find("█")
+    if cut >= 0:
+        return raw[:cut].rstrip()
+    m = _SOURCE_DUMP_BODY_RE.search(raw)
+    if m and m.start() > 80 and _SOURCE_DUMP_HEAD_RE.search(raw[:1500]):
+        return raw[: m.start()].rstrip()
+    return raw
 
 
 def looks_like_leaked_scratchpad(text: str) -> bool:
