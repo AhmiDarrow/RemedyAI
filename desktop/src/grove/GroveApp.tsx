@@ -102,7 +102,7 @@ export interface GroveAppProps {
     attachments?: SendAttachment[],
     opts?: { mode?: 'after' | 'interrupt' | 'steer'; sessionId?: string },
   ) => Promise<void> | void
-  stickNonce?: number
+  stickNonce: number
   stop: () => void
   serverReady: boolean
   userName: string
@@ -129,7 +129,7 @@ export function GroveApp({
   streaming,
   messagesLoading,
   handleSend,
-  stickNonce = 0,
+  stickNonce,
   stop,
   serverReady,
   userName,

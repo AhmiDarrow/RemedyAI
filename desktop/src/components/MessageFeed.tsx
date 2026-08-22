@@ -93,7 +93,8 @@ interface MessageFeedProps {
    * feed to the floor even when the user was reading history — Jump to latest
    * stays for scroll-up *during* a stream with no new prompt.
    */
-  stickNonce?: number
+  /** Bumped by the send flow when a prompt actually goes out — re-pins the feed. */
+  stickNonce: number
 }
 
 /** Initials for avatar: "Alex" → A, "Mary Jane" → MJ */
@@ -659,7 +660,7 @@ export function MessageFeed({
   onLoadOlder,
   projectPath = null,
   sessionId = null,
-  stickNonce = 0,
+  stickNonce,
 }: MessageFeedProps) {
   const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null)
   const openLightbox = useCallback((src: string, alt?: string) => {
@@ -678,8 +679,10 @@ export function MessageFeed({
         `${s.id}:${s.status}:${(s.resultText || '').length}:${(s.argsText || '').length}`,
     )
     .join('|')
-  // The owner's newest message: sending (or edit-resend) re-attaches the feed
-  // to the floor. Nothing else forces it — tokens, tools, images never do.
+  // The owner's newest message (or a submit that is still in flight — the
+  // stickNonce) re-attaches the feed to the floor. Nothing else forces it —
+  // tokens, tools, images never do; a session switch floors via the new
+  // scroller mount, not via this key.
   const lastUserMsgId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i]!
@@ -695,7 +698,7 @@ export function MessageFeed({
   } = useStickToBottom({
     followActive: streaming,
     alwaysOfferJump: messages.length > 2 || streaming,
-    reattachKey: `${sessionId ?? ''}:${lastUserMsgId ?? ''}:${stickNonce}`,
+    reattachKey: `${lastUserMsgId ?? ''}:${stickNonce}`,
     deps: [
       messages.length,
       partialText,
