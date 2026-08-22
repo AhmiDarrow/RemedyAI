@@ -46,6 +46,7 @@ class MCPClient:
         command: str,
         args: list[str] | None = None,
         env: dict[str, str] | None = None,
+        cwd: str | None = None,
     ) -> bool:
         """Spawn an MCP server subprocess and handshake."""
         if server_name in self._servers:
@@ -64,6 +65,7 @@ class MCPClient:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                cwd=cwd or None,
                 env=safe_env,
             )
 

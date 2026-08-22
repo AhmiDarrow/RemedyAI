@@ -362,9 +362,32 @@ def create_app(
         except Exception:
             logger.debug("self-inject scheduler setup skipped", exc_info=True)
 
+        # User-listed MCP servers: spawn on the live loop, once, in the
+        # background so a slow npx install never delays the API coming up.
+        _mcp_task: Any = None
+        if runtime is not None and getattr(runtime, "_mcp_bridge", None) is not None:
+            try:
+                import asyncio as _asyncio_mcp
+
+                from remedy.core.agent_mcp_bridge import ensure_connected
+
+                _mcp_task = _asyncio_mcp.create_task(ensure_connected(runtime))
+            except Exception:
+                logger.debug("MCP bridge startup skipped", exc_info=True)
+
         try:
             yield
         finally:
+            if _mcp_task is not None:
+                with suppress(Exception):
+                    _mcp_task.cancel()
+            if runtime is not None and getattr(runtime, "_mcp_bridge", None) is not None:
+                try:
+                    from remedy.core.agent_mcp_bridge import shutdown_mcp_bridge
+
+                    await shutdown_mcp_bridge(runtime)
+                except Exception:
+                    logger.debug("MCP bridge shutdown failed", exc_info=True)
             if _vigil_thread is not None:
                 with suppress(Exception):
                     _vigil_thread._vigil_stop.set()  # type: ignore[attr-defined]
