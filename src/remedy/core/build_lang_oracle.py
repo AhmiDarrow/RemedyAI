@@ -33,6 +33,11 @@ LANG_SUFFIXES = frozenset(
         ".cc",
         ".cxx",
         ".hpp",
+        # Game engines (Godot text resources, GDScript, Lua)
+        ".gd",
+        ".tscn",
+        ".tres",
+        ".lua",
     }
 )
 
@@ -367,7 +372,70 @@ def check_lang_syntax(path: str | Path) -> dict[str, Any]:
         out["engine"] = "brace"
         return out
 
+    if suffix == ".gd":
+        return _check_gdscript(p, text, out)
+
+    if suffix in {".tscn", ".tres"}:
+        from remedy.core.godot_scene import check_scene
+
+        res = check_scene(p, text)
+        out["ok"] = bool(res.get("ok"))
+        out["error"] = str(res.get("error") or "")
+        out["engine"] = str(res.get("engine") or "tscn-parse")
+        return out
+
+    if suffix == ".lua":
+        luac = _which("luac") or _which("luac5.4") or _which("luac5.1") or _which("luajit")
+        if luac:
+            args = [luac, "-bl" if Path(luac).stem == "luajit" else "-p", str(p)]
+            ok, err = _run(args)
+            out["ok"] = ok
+            out["error"] = "" if ok else err
+            out["engine"] = f"{Path(luac).name} -p"
+            return out
+        # `love` cannot parse-only and Lua's `end` blocks defeat brace_balance
+        # — do not false-red a file nobody can judge here.
+        out["engine"] = "skip (no luac)"
+        return out
+
     out["engine"] = "skip"
+    return out
+
+
+def _godot_binary() -> str | None:
+    if "godot" not in _TOOLCHAIN:
+        found: str | None = None
+        with suppress(Exception):
+            from remedy.core.game_engines import find_engine_binary
+
+            hit = find_engine_binary("godot")
+            found = str(hit) if hit else None
+        if found is None:
+            found = _which("godot4") or _which("godot")
+        _TOOLCHAIN["godot"] = found
+    return _TOOLCHAIN["godot"]
+
+
+def _check_gdscript(p: Path, text: str, out: dict[str, Any]) -> dict[str, Any]:
+    """``godot --check-only`` when an engine is around, tokenizer otherwise."""
+    from remedy.core.godot_scene import check_gdscript_text, project_root_for
+
+    godot = _godot_binary()
+    root = project_root_for(p)
+    if godot and root is not None:
+        ok, err = _run(
+            [godot, "--headless", "--path", str(root), "--check-only", "-s", str(p)],
+            cwd=root,
+            timeout_s=45.0,
+        )
+        out["ok"] = ok
+        out["error"] = "" if ok else err
+        out["engine"] = "godot --check-only"
+        return out
+    ok, err = check_gdscript_text(text)
+    out["ok"] = ok
+    out["error"] = err
+    out["engine"] = "gd-tokenizer (fallback)" if not godot else "gd-tokenizer (no project.godot)"
     return out
 
 
