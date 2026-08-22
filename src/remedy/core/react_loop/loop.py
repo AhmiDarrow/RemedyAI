@@ -18,6 +18,11 @@ from typing import Any
 import aiohttp
 
 from remedy.core.agent_tool_batch import execute_tool_calls
+from remedy.core.llm_pacing import RATE_LIMIT_MAX_RETRIES as _RATE_LIMIT_MAX_RETRIES
+from remedy.core.llm_pacing import is_rate_limited as _is_rate_limited
+from remedy.core.llm_pacing import pace_before_request as _pace_before_request
+from remedy.core.llm_pacing import rate_limit_wait as _rate_limit_wait
+from remedy.core.llm_pacing import sleep_abortable as _sleep_abortable
 from remedy.core.provider_sanitize import sanitize_chat_body
 from remedy.core.react_loop.binding import (
     provider_bits as _provider_bits_fn,
@@ -65,6 +70,8 @@ from remedy.core.react_policy import (
     batch_has_empty_or_spam_write,
     batch_has_empty_search,
     batch_has_tool_errors,
+    clip_appended_source_dump,
+    collapse_repeated_sentences,
     epoch_continue_message,
     is_serial_explore_batch,
     looks_like_false_progress,
@@ -75,8 +82,6 @@ from remedy.core.react_policy import (
     post_tools_user_summary_nudge,
     recovery_nudge_message,
     speed_batch_nudge_message,
-    clip_appended_source_dump,
-    collapse_repeated_sentences,
     strip_stream_status_noise,
     strip_tool_markup,
     turn_has_unfinished_work,
@@ -95,6 +100,7 @@ from remedy.core.react_stream import (
     repair_tool_arguments_in_messages,
     strip_broken_tool_call_turns,
 )
+from remedy.core.turn_context import current_abort_event as _current_abort_event
 from remedy.core.turn_context import (
     set_turn_force_tool_choice,
     set_turn_thinking_level,
@@ -1363,10 +1369,20 @@ async def call_llm_stream(runtime, message: str,
                 _llm_t0 = time.perf_counter()
                 # Local hosts: more attempts (refit + RMB load + disconnect)
                 _local_ctx_retried = False
+                # Same-request 429 retries this round (Retry-After honoured).
+                _rate_limit_retries = 0
+                _rate_limit_waited_s = 0.0
                 _http_round_ok = False
                 while not _http_round_ok:
                  try:
                   for _local_http_attempt in range(8):
+                   # Hosted gateways with a declared minimum request interval
+                   # (catalog ``min_request_interval_s``) — space consecutive
+                   # rounds so a tool result does not trip the limiter.
+                   await _pace_before_request(
+                       str(getattr(_bind, "provider", "") or ""),
+                       _current_abort_event(),
+                   )
                    async with http.post(
                     endpoint, headers=headers, json=body, timeout=timeout
                    ) as resp:
@@ -1383,6 +1399,51 @@ async def call_llm_stream(runtime, message: str,
                         logger.error(
                             "LLM API error %d: %s", resp.status, safe_err[:500]
                         )
+                        # Transient 429 (not quota/billing): honour Retry-After
+                        # and re-send the *same* request a few times before any
+                        # breaker / recovery / force-answer path sees it. Local
+                        # hosts have their own wait-and-retry path below.
+                        _is_local_429 = False
+                        with suppress(Exception):
+                            from remedy.core.local_agent_optimize import (
+                                is_local_binding as _ilb_429,
+                            )
+
+                            _is_local_429 = _ilb_429(
+                                _bind.provider, _bind.model, _bind.base_url
+                            )
+                        _ra_wait: float | None = None
+                        if (
+                            _is_rate_limited(resp.status, text)
+                            and not _is_local_429
+                            and _rate_limit_retries < _RATE_LIMIT_MAX_RETRIES
+                        ):
+                            # None → no Retry-After hint and no catalog
+                            # interval: leave it to the breaker/recovery paths.
+                            _ra_wait = _rate_limit_wait(
+                                str(getattr(_bind, "provider", "") or ""),
+                                getattr(resp, "headers", None),
+                                text,
+                            )
+                        if _ra_wait is not None:
+                            _rate_limit_retries += 1
+                            _rate_limit_waited_s += _ra_wait
+                            logger.warning(
+                                "HTTP 429 from %s — waiting %.1fs (retry_after) "
+                                "and retrying same request (%d/%d)",
+                                _bind.provider,
+                                _ra_wait,
+                                _rate_limit_retries,
+                                _RATE_LIMIT_MAX_RETRIES,
+                            )
+                            yield (
+                                f"@@status:Rate limited — waiting {_ra_wait:.0f}s "
+                                f"and retrying ({_rate_limit_retries}/"
+                                f"{_RATE_LIMIT_MAX_RETRIES})…\n"
+                            )
+                            # CancelledError propagates to the turn-abort handler.
+                            await _sleep_abortable(_ra_wait, _current_abort_event())
+                            continue  # same body, next HTTP attempt
                         # Circuit breaker: 3 consecutive API/billing errors in a
                         # session quarantine the provider (xAI 403 → auto-skip).
                         with suppress(Exception):
@@ -1789,6 +1850,13 @@ async def call_llm_stream(runtime, message: str,
                                 status=resp.status,
                                 safe_err=safe_err,
                             )
+                            if int(resp.status or 0) == 429 and _rate_limit_retries > 0:
+                                yield (
+                                    f"(Already waited ~{_rate_limit_waited_s:.0f}s "
+                                    f"across {_rate_limit_retries} retries as the "
+                                    "provider's retry_after asked — it is still "
+                                    "rate-limiting.)\n"
+                                )
                             return
                         api_soft_failures += 1
                         if _soft_act == "retry_with_tools":
@@ -1911,6 +1979,13 @@ async def call_llm_stream(runtime, message: str,
                             502: "the provider had a server error",
                             503: "the provider is temporarily unavailable",
                         }.get(int(resp.status or 0), "the provider returned an error")
+                        if int(resp.status or 0) == 429 and _rate_limit_retries > 0:
+                            _hint += (
+                                f" (already waited ~{_rate_limit_waited_s:.0f}s "
+                                f"across {_rate_limit_retries} retr"
+                                f"{'y' if _rate_limit_retries == 1 else 'ies'} "
+                                "as the provider asked)"
+                            )
                         yield (
                             f"\nThe model provider stopped responding — {_hint}. "
                             "You can switch model in Settings and resend, or try "
@@ -3766,6 +3841,10 @@ async def call_llm_stream(runtime, message: str,
                     "Refusing to send chat to provider: sanitization failed."
                 ) from sanitize_exc
             try:
+                await _pace_before_request(
+                    str(getattr(_bind, "provider", "") or ""),
+                    _current_abort_event(),
+                )
                 async with aiohttp.ClientSession(
                     timeout=aiohttp.ClientTimeout(total=900, sock_read=900)
                 ) as http2, http2.post(

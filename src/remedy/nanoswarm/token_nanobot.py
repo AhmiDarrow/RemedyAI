@@ -45,7 +45,7 @@ _PROVIDER_FAMILY: dict[str, str] = {
     "anthropic": "anthropic-like",
     "deepseek": "deepseek-like",
     "ollama": "local",
-    "demo": "local",
+    "demo": "openai-compat",  # hosted OpenAI-compatible gateway, not on-device
     "custom": "openai-compat",
 }
 
@@ -89,14 +89,18 @@ _LOCAL_SIZE_WINDOWS: list[tuple[re.Pattern[str], int]] = [
 ]
 
 # Providers that are definitively local (their model runs on-device).
-_LOCAL_PROVIDERS = frozenset({"ollama", "demo", "local", "llamacpp", "rmb", "llama"})
+_LOCAL_PROVIDERS = frozenset({"ollama", "local", "llamacpp", "rmb", "llama"})
 
 # Cloud providers that may still serve a local-family model name (e.g. Groq).
 # ``custom`` is *not* always cloud — loopback + .rmb4 models are local (below).
 _CLOUD_PROVIDERS = frozenset(
     {"openai", "anthropic", "google", "deepseek", "xai", "groq", "mistral",
-     "openrouter", "poe"}
+     "openrouter", "poe", "demo"}
 )
+
+# Hosted gateways with a smaller accepted prompt than the model's native
+# window (the free demo gateway rejects ~50k-token prompts). Budget below it.
+_PROVIDER_WINDOW_CAP: dict[str, int] = {"demo": 32_768}
 
 # Live discovery cache: key → (monotonic_ts, window). Filled from GET /v1/models
 # (RMB advertises context_window) or env override. Avoids budgeting at 128k
@@ -353,10 +357,15 @@ def resolve_context_window(
     blob = f"{p} {ml}".strip()
     if not blob:
         return fallback
-    for pat, win in _WINDOW_RULES:
+    win = fallback
+    for pat, rule_win in _WINDOW_RULES:
         if pat.search(blob):
-            return win
-    return fallback
+            win = rule_win
+            break
+    cap = _PROVIDER_WINDOW_CAP.get(p)
+    if cap is not None:
+        win = min(win, cap)
+    return win
 
 
 def _weights_for_family(family: str) -> dict[str, float]:

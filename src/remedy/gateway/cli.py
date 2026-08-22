@@ -20,6 +20,15 @@ from remedy.models import ChannelKind, EventKind, GatewayEvent
 console = Console()
 
 
+def _default_model(provider: Any) -> str:
+    try:
+        from remedy.interfaces.config import default_model_for_provider
+
+        return default_model_for_provider(str(provider or ""))
+    except Exception:
+        return ""
+
+
 def _load_cfg() -> dict[str, Any]:
     try:
         from remedy.interfaces.api_support import load_config
@@ -47,7 +56,7 @@ async def run_gateway(
         memory_db_path=str(db_path),
         home_dir=str(cfg.get("home_dir") or home),
         llm_provider=str(cfg.get("llm_provider") or "openai"),
-        llm_model=str(cfg.get("llm_model") or "gpt-4o-mini"),
+        llm_model=str(cfg.get("llm_model") or _default_model(cfg.get("llm_provider"))),
         llm_base_url=str(cfg.get("llm_base_url") or "https://api.openai.com/v1"),
         llm_api_key=str(cfg.get("llm_api_key") or ""),
         name=str(cfg.get("name") or "Remedy"),

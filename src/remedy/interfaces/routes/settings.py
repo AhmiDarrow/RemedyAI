@@ -18,6 +18,7 @@ from remedy.interfaces.api_support import (
     load_config,
 )
 from remedy.interfaces.config import (
+    default_model_for_provider,
     needs_first_run_setup,
     normalize_llm_settings,
     provider_credentials_ready,
@@ -102,7 +103,10 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         # Return configured values; soft-normalize only for response display.
         # Never write disk from GET (avoids races with PUT and Ollama false-heals).
         raw_provider = cfg.get("llm_provider", os.environ.get("REMEDY_LLM_PROVIDER", "openai"))
-        raw_model = cfg.get("llm_model", os.environ.get("REMEDY_LLM_MODEL", "gpt-4o-mini"))
+        raw_model = cfg.get(
+            "llm_model",
+            os.environ.get("REMEDY_LLM_MODEL", default_model_for_provider(raw_provider)),
+        )
         raw_url = cfg.get("llm_base_url", os.environ.get("REMEDY_LLM_BASE_URL", "https://api.openai.com/v1"))
         provider, model, base_url = normalize_llm_settings(raw_provider, raw_model, raw_url)
         # Preserve flexible-provider models (ollama/custom/openrouter) as stored.
