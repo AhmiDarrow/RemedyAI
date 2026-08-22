@@ -1,6 +1,7 @@
 /** Settings form sections — provider. */
 import type { ReactNode } from 'react'
 import { connectReasonLabel, type ConnectedProvider } from '../../api/providers'
+import { modelOptionLabel, providerNeedsKey } from '../../api/modelDiscovery'
 import type { SettingsFormProps } from './formTypes'
 import { SettingsSection } from '../SettingsSection'
 import {
@@ -52,6 +53,9 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
     activeMeta,
     showBaseUrl,
     providerModels,
+    modelHint = { kind: 'none', text: '' },
+    modelFreeText = false,
+    discoveryBusy = false,
     customName = '',
     setCustomName,
     handleProviderChange,
@@ -69,6 +73,8 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
   } = p
 
   const sleevInstalled = Boolean(sleevStatus?.installed)
+  const needsKey = providerNeedsKey(provider, activeMeta, baseUrl)
+  const modelListId = `settings-model-ids-${provider || 'none'}`
   const sleevGateway =
     (sleevGatewayUrl || '').trim()
     || String(sleevStatus?.gateway_url || 'http://127.0.0.1:17321')
@@ -145,14 +151,58 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
         )}
         <FormLabel>Model</FormLabel>
         <FormSelect value={model} onChange={setModel}>
-          {providerModels.length === 0 && <option value={model}>{model}</option>}
+          {providerModels.length === 0 && (
+            <option value={model}>{model || (discoveryBusy ? 'Looking for models…' : '— none found —')}</option>
+          )}
           {providerModels.every((m) => m.id !== model) && model && (
             <option value={model}>{model} (current)</option>
           )}
           {providerModels.map((m) => (
-            <option key={m.id} value={m.id}>{m.name}</option>
+            <option key={m.id} value={m.id}>{modelOptionLabel(m)}</option>
           ))}
         </FormSelect>
+        {modelFreeText && (
+          <div className="mb-2">
+            <FormLabel>Model id</FormLabel>
+            <input
+              type="text"
+              list={modelListId}
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="Type a model id the endpoint serves"
+              spellCheck={false}
+              className="w-full rounded px-2 py-1.5 text-xs outline-none"
+              style={{
+                background: 'var(--bg-tertiary)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border)',
+              }}
+            />
+            <datalist id={modelListId}>
+              {providerModels.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </datalist>
+          </div>
+        )}
+        {modelHint.kind !== 'none' && (
+          <div
+            className="text-[11px] mb-1.5"
+            style={{
+              color:
+                modelHint.kind === 'error'
+                  ? 'var(--warning)'
+                  : 'var(--text-secondary)',
+              opacity: modelHint.kind === 'ok' ? 0.8 : 1,
+            }}
+            title={modelHint.text}
+          >
+            {modelHint.text}
+          </div>
+        )}
+        {discoveryBusy && modelHint.kind === 'none' && (
+          <FormHint>Looking for models…</FormHint>
+        )}
         <FormHint>
           Models for <strong>{activeMeta?.name || provider}</strong>
           {showBaseUrl ? ' · custom base URL enabled' : ''}.
@@ -223,7 +273,7 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
           <>
             <Field
               label={
-                provider === 'xai'
+                provider === 'xai' || !needsKey
                   ? apiKeySet
                     ? 'API key (optional — change?)'
                     : 'API key (optional)'
@@ -246,7 +296,7 @@ export function SettingsSections_provider(p: SettingsFormProps): ReactNode {
               }
               password
             />
-            {!apiKeySet && !apiKey.trim() && provider !== 'xai' && (
+            {!apiKeySet && !apiKey.trim() && provider !== 'xai' && needsKey && (
               <FormNotice>
                 This provider needs an API key before chat will work. Paste it,
                 Test, then Save.

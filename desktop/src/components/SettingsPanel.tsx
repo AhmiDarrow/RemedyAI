@@ -23,15 +23,25 @@ import {
   subscribeXaiOAuth,
   xaiModelAfterOauth,
 } from '../api/xaiOAuth'
-import { apiFetch } from '../api/client'
 import {
   listProviders,
   listConnectedProviders,
   probeProvider,
-  FALLBACK_PROVIDERS,
+  OFFLINE_PROVIDERS,
   type ProviderInfo,
   type ConnectedProvider,
 } from '../api/providers'
+import {
+  allowsFreeTextModel,
+  createRequestGeneration,
+  discoveryHint,
+  fetchModels,
+  mergeModelOptions,
+  pickDefaultModel,
+  showsBaseUrl,
+  type DiscoveryStatus,
+  type ModelOption,
+} from '../api/modelDiscovery'
 import type { ThemeId } from '../themes'
 import type { UpdateInfo } from '../api/updates'
 import type { ModelInfo } from '../App'
@@ -41,7 +51,6 @@ import {
 
   type ToolProcessMode,
 } from '../utils/toolLabels'
-import { demoModelOptions } from '../utils/demoModels'
 import { PERSONAS, pickProjectFolder } from './settings/shared'
 import { SettingsFormSections } from './settings/FormSections'
 import {
@@ -124,9 +133,10 @@ export function SettingsPanel({
   const [saved, setSaved] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
-  const [provider, setProvider] = useState('openai')
-  const [model, setModel] = useState('gpt-4o-mini')
-  const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1')
+  // Unknown until GET /settings answers — never a seeded provider/model.
+  const [provider, setProvider] = useState('')
+  const [model, setModel] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [apiKeySet, setApiKeySet] = useState(false)
   const [projectPath, setProjectPath] = useState('.')
@@ -172,7 +182,7 @@ export function SettingsPanel({
     () => toolProcessMode || 'off',
   )
   const [statusMessage, setStatusMessage] = useState('')
-  const [catalog, setCatalog] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS)
+  const [catalog, setCatalog] = useState<ProviderInfo[]>(OFFLINE_PROVIDERS)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [xaiAuth, setXaiAuth] = useState<XaiAuthStatus | null>(null)
   const [xaiLoginBusy, setXaiLoginBusy] = useState(false)
@@ -193,8 +203,16 @@ export function SettingsPanel({
   const [testMsg, setTestMsg] = useState<string | null>(null)
   const [testOk, setTestOk] = useState<boolean | null>(null)
   const [liveModelsByProvider, setLiveModelsByProvider] = useState<
-    Record<string, Array<{ id: string; name: string; provider?: string }>>
+    Record<string, ModelOption[]>
   >({})
+  /** Result of the last GET /models discovery for the active provider. */
+  const [discovery, setDiscovery] = useState<DiscoveryStatus | null>(null)
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null)
+  const [discoveryBusy, setDiscoveryBusy] = useState(false)
+  /** Stale-response guard: only the newest /models request may apply. */
+  const discoveryGenRef = useRef(createRequestGeneration())
+  /** Bumped after a successful Test to force a fresh discovery. */
+  const [discoveryNonce, setDiscoveryNonce] = useState(0)
   const [providerSearch, setProviderSearch] = useState('')
   const [enabledProviders, setEnabledProviders] = useState<string[] | null>(null)
   const [enabledModels, setEnabledModels] = useState<Record<string, string[]>>({})
@@ -223,46 +241,50 @@ export function SettingsPanel({
     () => catalog.filter((p) => p.advanced),
     [catalog],
   )
-  const activeMeta = catalog.find((p) => p.id === provider) || FALLBACK_PROVIDERS[0]
-  const showBaseUrl = Boolean(activeMeta?.show_base_url || provider === 'custom')
+  const activeMeta = useMemo<ProviderInfo>(
+    () =>
+      catalog.find((p) => p.id === provider)
+      || OFFLINE_PROVIDERS.find((p) => p.id === provider)
+      || {
+        id: provider,
+        name: provider,
+        base_url: '',
+        models: [],
+        default_model: '',
+        auth: [],
+        oauth: false,
+        env_keys: [],
+        show_base_url: true,
+        advanced: false,
+      },
+    [catalog, provider],
+  )
+  const showBaseUrl = showsBaseUrl(provider, activeMeta)
 
-  // Prefer live discovered models; fall back to catalog models for this provider.
-  // Demo: ALWAYS full curated set — never partial/live llm7 dumps.
-  const providerModels = useMemo(() => {
-    if (provider === 'demo') {
-      return demoModelOptions(activeMeta?.models || []).map((m) => ({
-        ...m,
-        provider: 'demo' as const,
-      }))
-    }
-    const live = liveModelsByProvider[provider]
-    if (live && live.length > 0) return live
-    const fromApi = models.filter(
-      (m) => m.provider === provider,
-    )
-    if (fromApi.length > 0) return fromApi
-    return (activeMeta?.models || []).map((m) => ({
+  // Precedence: live discovery → session/app model list → backend catalog rows
+  // (marked as catalog so the picker can label them).
+  const providerModels = useMemo<ModelOption[]>(() => {
+    if (!provider) return []
+    const live = liveModelsByProvider[provider] || []
+    const fromApi: ModelOption[] = models
+      .filter((m) => m.provider === provider)
+      .map((m) => ({ id: m.id, name: m.name, provider, source: m.source }))
+    const fromCatalog: ModelOption[] = (activeMeta?.models || []).map((m) => ({
       id: m.id,
       name: m.name,
       provider,
+      source: 'catalog' as const,
     }))
+    return mergeModelOptions(live, fromApi, fromCatalog)
   }, [models, provider, activeMeta, liveModelsByProvider])
-
-  // Snap invalid Demo selection once (seedance/deepseek junk) — never fight user picks.
-  useEffect(() => {
-    if (provider !== 'demo') return
-    if (!model) {
-      setModel(providerModels[0]?.id || 'codestral-latest')
-      return
-    }
-    const allowed = new Set(providerModels.map((m) => m.id))
-    if (!allowed.has(model)) {
-      setModel(providerModels[0]?.id || 'codestral-latest')
-    }
-    // Intentionally only re-run when provider changes or model becomes invalid —
-    // not when providerModels array identity changes every parent render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable snap, avoid stutter loops
-  }, [provider, model])
+  const modelHint = useMemo(() => {
+    if (discoveryError) return { kind: 'error' as const, text: discoveryError }
+    return discoveryHint(
+      discovery,
+      (liveModelsByProvider[provider] || []).filter((m) => m.source !== 'catalog').length,
+    )
+  }, [discovery, discoveryError, liveModelsByProvider, provider])
+  const modelFreeText = allowsFreeTextModel(provider, discovery) || Boolean(discoveryError)
 
   const stopVisionPoll = useCallback(() => {
     if (visionPollRef.current) {
@@ -347,9 +369,9 @@ export function SettingsPanel({
       )
       if (s.skills_active_budget) setSkillsBudget(s.skills_active_budget)
       setSettings(s)
-      const prov = s.llm_provider || 'openai'
-      const nextModel = s.llm_model || 'gpt-4o-mini'
-      const nextBase = s.llm_base_url || 'https://api.openai.com/v1'
+      const prov = s.llm_provider || ''
+      const nextModel = s.llm_model || ''
+      const nextBase = s.llm_base_url || ''
       setProvider(prov)
       setModel(nextModel)
       setBaseUrl(nextBase)
@@ -534,7 +556,11 @@ export function SettingsPanel({
         setProvider('xai')
         setBaseUrl('https://api.x.ai/v1')
         setModel((prev) => {
-          const nextModel = xaiModelAfterOauth(prev)
+          // Discovery refines this once /models answers; catalog default is the fallback.
+          const nextModel = xaiModelAfterOauth(
+            prev,
+            catalog.find((x) => x.id === 'xai')?.default_model || '',
+          )
           loadedLlmRef.current = {
             provider: 'xai',
             model: nextModel,
@@ -551,7 +577,7 @@ export function SettingsPanel({
         setXaiLoginMsg(e.error || 'Sign-in failed or expired')
       }
     })
-  }, [onSettingsSaved, load])
+  }, [onSettingsSaved, load, catalog])
 
   // Lazy-load vision status only when Local vision is expanded (faster Settings open).
   useEffect(() => {
@@ -758,31 +784,51 @@ export function SettingsPanel({
     }
   }
 
+  // Live model discovery: refetch (debounced) whenever the provider, base URL or
+  // API key changes, and after a successful Test. Unsaved form values ride along
+  // so the backend can list models from the endpoint the user is about to save.
   useEffect(() => {
     const pid = provider
-    if (!pid || pid === 'demo') return
-    let cancelled = false
-    void apiFetch<{ models?: Array<{ id: string; name?: string; provider?: string }> }>(
-      `/models?provider=${encodeURIComponent(pid)}`,
-    )
-      .then((data) => {
-        if (cancelled) return
-        const rows = (data.models || [])
-          .filter((m) => m.id)
-          .map((m) => ({
+    if (!open || !pid) return
+    const gen = discoveryGenRef.current.next()
+    const timer = window.setTimeout(() => {
+      setDiscoveryBusy(true)
+      void fetchModels(pid, { base_url: baseUrl, api_key: apiKey })
+        .then((data) => {
+          if (!discoveryGenRef.current.isCurrent(gen)) return
+          const rows: ModelOption[] = data.models.map((m) => ({
             id: m.id,
-            name: m.name || m.id,
+            name: m.name,
             provider: m.provider || pid,
+            source: m.source,
           }))
-        if (rows.length) {
           setLiveModelsByProvider((prev) => ({ ...prev, [pid]: rows }))
-        }
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [provider])
+          setDiscovery(data.discovery || null)
+          setDiscoveryError(null)
+          if (data.discovery?.ok || (!data.discovery && rows.length)) {
+            setModel((cur) => pickDefaultModel(cur, rows, data.default))
+          } else {
+            // Discovery failed: keep the user's pick; catalog default only if empty.
+            setModel((cur) => cur || data.default || activeMeta?.default_model || '')
+          }
+        })
+        .catch((e: unknown) => {
+          if (!discoveryGenRef.current.isCurrent(gen)) return
+          setDiscovery(null)
+          setDiscoveryError(
+            `Couldn't list models: ${e instanceof Error ? e.message : String(e)} — showing catalog defaults`,
+          )
+          // Last resort: the backend catalog default, only when nothing is selected.
+          setModel((cur) => cur || activeMeta?.default_model || '')
+        })
+        .finally(() => {
+          if (discoveryGenRef.current.isCurrent(gen)) setDiscoveryBusy(false)
+        })
+    }, 400)
+    return () => window.clearTimeout(timer)
+    // activeMeta only feeds the last-resort default; it must not retrigger fetches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, provider, baseUrl, apiKey, discoveryNonce])
 
   const handleProviderChange = (p: string) => {
     const prev = provider
@@ -797,12 +843,16 @@ export function SettingsPanel({
       const baseIsUntouched =
         !baseUrl || (prevPreset ? baseUrl === prevPreset.base_url : true)
       if (baseIsUntouched) setBaseUrl(preset.base_url)
-      setModel(conn?.last_model || preset.default_model)
     }
+    // Model comes from discovery (see the /models effect); keep the provider's
+    // remembered model meanwhile so the picker is never cross-wired.
+    setModel(conn?.last_model || '')
+    setDiscovery(null)
+    setDiscoveryError(null)
     const stored = Boolean(providerKeysSet[p] || conn?.connected)
     if (p === 'xai') {
       setApiKeySet(Boolean(xaiAuth?.connected || stored))
-    } else if (p === 'demo' || p === 'ollama' || p === 'rmb') {
+    } else if (preset?.auth?.length && !preset.auth.includes('api_key')) {
       setApiKeySet(false)
     } else {
       setApiKeySet(stored)
@@ -824,7 +874,16 @@ export function SettingsPanel({
       })
       setTestOk(Boolean(res.ok))
       if (res.ok) {
-        const n = Number(res.models || 0)
+        const seen: ModelOption[] = (res.model_list || [])
+          .filter((m) => m && m.id)
+          .map((m) => ({ id: m.id, name: m.name || m.id, provider, source: 'endpoint' as const }))
+        if (seen.length) {
+          // Populate the picker immediately; the discovery refetch below confirms.
+          setLiveModelsByProvider((prev) => ({ ...prev, [provider]: seen }))
+          setModel((cur) => pickDefaultModel(cur, seen, ''))
+        }
+        setDiscoveryNonce((n) => n + 1)
+        const n = Number(res.models ?? seen.length)
         const ms = res.latency_ms != null ? ` · ${res.latency_ms} ms` : ''
         setTestMsg(
           n > 0
@@ -1142,9 +1201,12 @@ export function SettingsPanel({
               settingsMode={settingsMode}
               primaryProviders={primaryProviders}
               advancedProviders={advancedProviders}
-              activeMeta={activeMeta ?? FALLBACK_PROVIDERS[0]}
+              activeMeta={activeMeta}
               showBaseUrl={showBaseUrl}
               providerModels={providerModels}
+              modelHint={modelHint}
+              modelFreeText={modelFreeText}
+              discoveryBusy={discoveryBusy}
               customName={customName}
               setCustomName={setCustomName}
               handleProviderChange={handleProviderChange}

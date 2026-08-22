@@ -3,6 +3,8 @@
 import { pollXaiLogin, startXaiLogin, type XaiAuthStatus, type XaiLoginPoll, type XaiLoginStart } from './auth'
 import { closeBrowserRail, openUrlInBrowserRail } from './computer'
 import { updateSettings } from './settings'
+import { fetchModels, pickDefaultModel } from './modelDiscovery'
+import { listProviders } from './providers'
 
 export const XAI_OAUTH_EVENT = 'remedy:xai-oauth'
 const SESSION_KEY = 'remedy.xaiOauthSession'
@@ -16,9 +18,39 @@ export type XaiOAuthEvent = {
   error?: string
 }
 
-export function xaiModelAfterOauth(current: string | undefined): string {
+/**
+ * Model to keep after an xAI sign-in: an existing grok model stays; anything
+ * else becomes the provider default resolved from discovery / the live catalog
+ * (never a hardcoded id). Empty when nothing is known yet.
+ */
+export function xaiModelAfterOauth(
+  current: string | undefined,
+  providerDefault?: string | null,
+): string {
   const m = (current || '').trim()
-  return m.toLowerCase().startsWith('grok') ? m : 'grok-4.3'
+  if (m.toLowerCase().startsWith('grok')) return m
+  return (providerDefault || '').trim()
+}
+
+/** Best-known xAI default: endpoint discovery first, then the backend catalog. */
+export async function resolveXaiDefaultModel(current?: string): Promise<string> {
+  try {
+    const data = await fetchModels('xai')
+    const picked = pickDefaultModel(
+      xaiModelAfterOauth(current, ''),
+      data.models,
+      data.default,
+    )
+    if (picked) return picked
+  } catch {
+    /* discovery unavailable — fall through to catalog */
+  }
+  try {
+    const cat = await listProviders()
+    return cat.find((p) => p.id === 'xai')?.default_model || ''
+  } catch {
+    return ''
+  }
 }
 
 /** Only the *this* device-code session is done — not a pre-existing API key. */
@@ -73,10 +105,13 @@ function writeStoredSession(id: string | null): void {
 }
 
 async function persistXaiProvider(): Promise<void> {
-  const model = xaiModelAfterOauth(preferredModel)
+  const model = xaiModelAfterOauth(
+    preferredModel,
+    await resolveXaiDefaultModel(preferredModel),
+  )
   await updateSettings({
     llm_provider: 'xai',
-    llm_model: model,
+    ...(model ? { llm_model: model } : {}),
     llm_base_url: 'https://api.x.ai/v1',
   })
 }

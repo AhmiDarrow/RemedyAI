@@ -234,6 +234,7 @@ export default function App() {
     llmProvider,
     setLlmProvider,
     models,
+    modelsError,
     connectedProviders,
     setConnectedProviders,
     sessionLlmMap,
@@ -2096,6 +2097,7 @@ export default function App() {
           }}
           provider={barProvider}
           connectedProviders={connectedProviders}
+          modelsError={modelsError}
           onProviderModelChange={onProviderModelChange}
           onModelChange={onModelChange}
           onOpenUsage={() => setUsageOpen(true)}
