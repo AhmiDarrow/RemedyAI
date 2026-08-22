@@ -531,3 +531,77 @@ def test_cargo_check_timeout_does_not_fail_closed(tmp_path, monkeypatch):
     out = oracle.check_lang_syntax(f)
     assert out["ok"] is True
     assert "timed out" in out["engine"]
+
+
+# --- game engines ---------------------------------------------------------------
+
+
+@pytest.fixture()
+def no_engines(monkeypatch):
+    """No Godot / luac on this box — fallbacks must decide, never a real engine."""
+    from remedy.core import build_lang_oracle as mod
+
+    monkeypatch.setattr(mod, "_TOOLCHAIN", {"godot": None, "luac": None, "luac5.4": None,
+                                             "luac5.1": None, "luajit": None})
+    monkeypatch.setattr(mod.shutil, "which", lambda *_a, **_k: None)
+    return mod
+
+
+def test_gdscript_falls_back_to_the_tokenizer_without_godot(tmp_path, no_engines):
+    good = tmp_path / "player.gd"
+    good.write_text("extends Node\n\nfunc _ready() -> void:\n\tprint(\"hi\")\n", encoding="utf-8")
+    res = check_lang_syntax(good)
+    assert res["ok"] and res["engine"].startswith("gd-tokenizer")
+    bad = tmp_path / "broken.gd"
+    bad.write_text("func _ready()\n\tprint(\"hi\"\n", encoding="utf-8")
+    res = check_lang_syntax(bad)
+    assert not res["ok"] and "without ':'" in res["error"]
+
+
+def test_gdscript_uses_godot_check_only_when_present(tmp_path, monkeypatch):
+    from remedy.core import build_lang_oracle as mod
+
+    (tmp_path / "project.godot").write_text("config_version=5\n", encoding="utf-8")
+    script = tmp_path / "player.gd"
+    script.write_text("extends Node\n", encoding="utf-8")
+    monkeypatch.setattr(mod, "_TOOLCHAIN", {"godot": str(tmp_path / "Godot_console.exe")})
+    calls = []
+
+    def fake_run(cmd, *, cwd=None, timeout_s=20.0):
+        calls.append((cmd, cwd, timeout_s))
+        return False, "SCRIPT ERROR: Parse Error: Expected ':'"
+
+    monkeypatch.setattr(mod, "_run", fake_run)
+    res = check_lang_syntax(script)
+    assert res["engine"] == "godot --check-only"
+    assert not res["ok"] and "Parse Error" in res["error"]
+    cmd, cwd, timeout = calls[0]
+    assert "--headless" in cmd and "--check-only" in cmd and cmd[-1] == str(script)
+    assert cwd == tmp_path and timeout >= 30
+
+
+def test_scene_files_are_checked_offline(tmp_path, no_engines):
+    (tmp_path / "project.godot").write_text("config_version=5\n", encoding="utf-8")
+    scene = tmp_path / "main.tscn"
+    scene.write_text(
+        '[gd_scene format=3]\n'
+        '[ext_resource type="Script" path="res://missing.gd" id="1"]\n'
+        '[node name="Main" type="Node2D"]\nscript = ExtResource("1")\n',
+        encoding="utf-8",
+    )
+    res = check_lang_syntax(scene)
+    assert res["engine"] == "tscn-parse"
+    assert not res["ok"] and "missing resource res://missing.gd" in res["error"]
+
+
+def test_lua_is_skipped_not_false_red_without_luac(tmp_path, no_engines):
+    f = tmp_path / "main.lua"
+    f.write_text("function love.draw()\n  love.graphics.print('hi')\nend\n", encoding="utf-8")
+    res = check_lang_syntax(f)
+    assert res["ok"] and res["engine"] == "skip (no luac)"
+
+
+def test_engine_suffixes_are_registered():
+    from remedy.core.build_lang_oracle import LANG_SUFFIXES
+
+    assert {".gd", ".tscn", ".tres", ".lua"} <= LANG_SUFFIXES
