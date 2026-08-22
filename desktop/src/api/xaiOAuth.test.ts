@@ -7,10 +7,15 @@ describe('xaiModelAfterOauth', () => {
     expect(xaiModelAfterOauth('Grok-4')).toBe('Grok-4')
   })
 
-  it('falls back when the current model is not grok', () => {
-    expect(xaiModelAfterOauth('claude-opus-5')).toBe('grok-4.3')
-    expect(xaiModelAfterOauth('')).toBe('grok-4.3')
-    expect(xaiModelAfterOauth(undefined)).toBe('grok-4.3')
+  it('falls back to the provider default from discovery / catalog, never a hardcoded id', () => {
+    expect(xaiModelAfterOauth('claude-opus-5', 'grok-9')).toBe('grok-9')
+    expect(xaiModelAfterOauth('', 'grok-9')).toBe('grok-9')
+    expect(xaiModelAfterOauth(undefined, 'grok-9')).toBe('grok-9')
+  })
+
+  it('is empty when no default is known yet', () => {
+    expect(xaiModelAfterOauth('claude-opus-5')).toBe('')
+    expect(xaiModelAfterOauth(undefined, null)).toBe('')
   })
 })
 

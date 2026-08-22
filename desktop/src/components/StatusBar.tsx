@@ -17,12 +17,7 @@ import {
   type ToolProcessMode,
 } from '../utils/toolLabels'
 import type { UiMode } from '../utils/uiMode'
-import {
-  coerceDemoModel,
-  DEMO_DEFAULT_MODEL,
-  demoModelOptions,
-  isDemoModelAllowed,
-} from '../utils/demoModels'
+import { mergeModelOptions, modelOptionLabel, type ModelOption } from '../api/modelDiscovery'
 
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
 export type ApprovalMode = 'ask' | 'auto' | 'full'
@@ -50,6 +45,8 @@ interface StatusBarProps {
   provider?: string
   /** Connected+enabled providers for the main-screen picker */
   connectedProviders?: ConnectedProvider[]
+  /** Last model-list failure (network or endpoint discovery) — shown as a hint. */
+  modelsError?: string | null
   onProviderModelChange?: (provider: string, model: string) => void
   thinkingLevel: ThinkingLevel
   onThinkingLevelChange?: (level: ThinkingLevel) => void
@@ -99,86 +96,41 @@ const THINKING_OPTIONS: { id: ThinkingLevel; label: string }[] = [
   { id: 'high', label: 'High' },
 ]
 
-/** Hard fallbacks when connected catalog is empty (never demo ids on real providers). */
-const PROVIDER_FALLBACK_MODELS: Record<string, { id: string; name: string }[]> = {
-  deepseek: [
-    { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
-    { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
-  ],
-  xai: [
-    { id: 'grok-4.5', name: 'Grok 4.5' },
-    { id: 'grok-4.3', name: 'Grok 4.3' },
-    { id: 'grok-4', name: 'Grok 4' },
-  ],
-  openai: [{ id: 'gpt-4o-mini', name: 'GPT-4o Mini' }],
-  google: [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' }],
-  groq: [{ id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B' }],
-  anthropic: [
-    { id: 'claude-sonnet-5', name: 'Claude Sonnet 5' },
-    { id: 'claude-opus-5', name: 'Claude Opus 5' },
-    { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
-  ],
-  mistral: [{ id: 'mistral-small-latest', name: 'Mistral Small' }],
-  ollama: [{ id: 'llama3.2', name: 'Llama 3.2' }],
-  poe: [
-    { id: 'Claude-Sonnet-4.6', name: 'Claude Sonnet 4.6' },
-    { id: 'Claude-Opus-4.7', name: 'Claude Opus 4.7' },
-    { id: 'GPT-5.4', name: 'GPT-5.4' },
-    { id: 'Gemini-3.1-Pro', name: 'Gemini 3.1 Pro' },
-    { id: 'Grok-4', name: 'Grok 4' },
-  ],
-}
-
-/** Models for the active provider: live endpoint list first, catalog as fallback. */
+/**
+ * Models for the active provider: live GET /models rows (tagged with this
+ * provider) first, then the connected/session catalog. No client-side model
+ * tables — when both are empty the picker is empty and the bar shows why.
+ */
 function modelOptionsForProvider(
   provider: string | undefined,
   connected: ConnectedProvider[],
   models: ModelInfo[],
-): { id: string; name: string }[] {
-  const pid = (provider || '').trim() || 'openai'
-  if (pid === 'demo') {
-    return demoModelOptions(
-      connected.find((p) => p.id === 'demo')?.models
-        || models.filter((m) => m.provider === 'demo'),
-    )
-  }
-
-  // Prefer live GET /models (tagged with this provider) — intelligent endpoint discovery.
-  const live = models
+): ModelOption[] {
+  const pid = (provider || '').trim()
+  if (!pid) return []
+  const live: ModelOption[] = models
     .filter((m) => m.provider === pid)
-    .map((m) => ({ id: m.id, name: m.name || m.id }))
-
-  const fromConn = (connected.find((p) => p.id === pid)?.models || []).map((m) => ({
-    id: m.id,
-    name: m.name || m.id,
-  }))
-
-  const seen = new Set<string>()
-  let list: { id: string; name: string }[] = []
+    .map((m) => ({ id: m.id, name: m.name || m.id, source: m.source }))
+  const fromConn: ModelOption[] = (connected.find((p) => p.id === pid)?.models || []).map(
+    (m) => ({ id: m.id, name: m.name || m.id }),
+  )
   // RMB: prefer connected/discovered GGUFs first (live /models is often a full path)
-  const ordered =
-    pid === 'rmb' ? [...fromConn, ...live] : [...live, ...fromConn]
-  for (const m of ordered) {
-    if (!m.id || seen.has(m.id)) continue
-    // Drop guest-demo ids that leaked into non-demo providers
-    // Drop demo-tagged names that leaked onto non-demo providers (parens or suffix).
-    if (isDemoModelAllowed(m.id) || /\(demo\)|\bdemo\s*$/i.test(m.name || '')) continue
-    // Normalize RMB full paths → stem ids for a clean picker
-    let id = m.id
-    let name = m.name || m.id
-    if (pid === 'rmb' && (id.includes('\\') || id.includes('/') || id.toLowerCase().endsWith('.gguf'))) {
+  const merged =
+    pid === 'rmb' ? mergeModelOptions(fromConn, live) : mergeModelOptions(live, fromConn)
+  if (pid !== 'rmb') return merged
+  // Normalize RMB full paths → stem ids for a clean picker
+  return mergeModelOptions(
+    merged.map((m) => {
+      const id = m.id
+      if (!(id.includes('\\') || id.includes('/') || id.toLowerCase().endsWith('.gguf'))) return m
       const base = id.replace(/^.*[\\/]/, '').replace(/\.gguf$/i, '')
-      id = base
-      name = m.name?.includes('.gguf') ? m.name.replace(/^.*[\\/]/, '') : base
-    }
-    if (seen.has(id)) continue
-    seen.add(id)
-    list.push({ id, name })
-  }
-  if (list.length === 0) {
-    list = PROVIDER_FALLBACK_MODELS[pid] || []
-  }
-  return list
+      return {
+        ...m,
+        id: base,
+        name: m.name?.includes('.gguf') ? m.name.replace(/^.*[\\/]/, '') : base,
+      }
+    }),
+  )
 }
 
 function pickModelForProvider(
@@ -266,6 +218,7 @@ export function StatusBar({
   onModelChange,
   provider = '',
   connectedProviders = [],
+  modelsError = null,
   onProviderModelChange,
   thinkingLevel,
   onThinkingLevelChange,
@@ -308,20 +261,9 @@ export function StatusBar({
   // Body coordination: the OTHER live muscles (sibling sessions) building now.
   const [siblings, setSiblings] = useState<CoordinationBeacon[]>([])
 
-  // Display provider: only treat as Demo when the *model id* is a curated guest id
-  // AND the parent still says another provider (cross-wire). Never flip a real
-  // connected provider (e.g. custom OpenAI-compatible) just because its model
-  // name happens to match the demo allowlist.
-  const effectiveProvider = useMemo(() => {
-    const p = (provider || '').trim()
-    if (!p || p === 'demo') return p
-    if (!isDemoModelAllowed(model)) return p
-    // If the provider is a real connected provider, keep its name — don't
-    // override to 'demo' just because the model id overlaps the allowlist.
-    const isConnected = connectedProviders.some((cp) => cp.id === p)
-    if (isConnected) return p
-    return 'demo'
-  }, [provider, model, connectedProviders])
+  // The parent owns provider identity; the client no longer second-guesses it
+  // from model ids (the demo allowlist lives in the backend only).
+  const effectiveProvider = (provider || '').trim()
 
   const modelOpts = useMemo(
     () => modelOptionsForProvider(effectiveProvider, connectedProviders, models),
@@ -941,21 +883,16 @@ export function StatusBar({
                 }
                 onChange={(pid) => {
                   const p = connectedProviders.find((x) => x.id === pid)
-                  // Never keep a demo model when switching to DeepSeek/xAI (etc.).
-                  const preferred =
-                    pid === 'demo'
-                      ? (isDemoModelAllowed(model) ? model : p?.last_model || DEMO_DEFAULT_MODEL)
-                      : p?.last_model || p?.default_model || undefined
+                  // Never carry the previous provider's model across; prefer the
+                  // provider's remembered model, then the backend catalog default.
+                  const preferred = p?.last_model || p?.default_model || undefined
                   const nextModel = pickModelForProvider(
                     pid,
                     preferred,
                     connectedProviders,
                     models,
                   )
-                  onProviderModelChange(
-                    pid,
-                    nextModel || (pid === 'demo' ? DEMO_DEFAULT_MODEL : ''),
-                  )
+                  onProviderModelChange(pid, nextModel || '')
                 }}
                 options={[
                   ...(effectiveProvider === 'demo'
@@ -978,9 +915,18 @@ export function StatusBar({
                   ...(safeModel && !modelOpts.some((m) => m.id === safeModel)
                     ? [{ value: safeModel, label: safeModel }]
                     : []),
-                  ...modelOpts.map((m) => ({ value: m.id, label: m.name })),
+                  ...modelOpts.map((m) => ({ value: m.id, label: modelOptionLabel(m) })),
                 ]}
               />
+              {modelsError && (
+                <span
+                  className="px-1 text-[10px] flex-shrink-0"
+                  style={{ color: 'var(--warning)', cursor: 'help' }}
+                  title={modelsError}
+                >
+                  ⚠ models
+                </span>
+              )}
             </>
           ) : models.length > 0 && onModelChange ? (
             <FormSelect
@@ -988,17 +934,9 @@ export function StatusBar({
               className="mb-0 max-w-[140px]"
               disabled={streaming}
               title={streaming ? 'Stop generation to switch model' : 'Active model'}
-              value={
-                provider === 'demo' && !isDemoModelAllowed(model)
-                  ? DEMO_DEFAULT_MODEL
-                  : model
-              }
-              onChange={(id) => onModelChange(
-                provider === 'demo' ? coerceDemoModel(id) : id,
-              )}
-              options={models
-                .filter((m) => provider !== 'demo' || isDemoModelAllowed(m.id))
-                .map((m) => ({ value: m.id, label: m.name }))}
+              value={model}
+              onChange={(id) => onModelChange(id)}
+              options={models.map((m) => ({ value: m.id, label: modelOptionLabel(m) }))}
             />
           ) : (
             <span className="truncate max-w-[8rem]" title={model}>
