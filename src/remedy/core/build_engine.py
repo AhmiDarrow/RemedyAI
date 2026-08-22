@@ -47,6 +47,9 @@ _BUILD_RE = re.compile(
     # Simple C / compile tasks (partner e2e)
     r"compile|gcc|clang|\.c\b|hello\.c|main\.c|"
     r"pygame|play\s+(it|the\s+game)|try\s+it|"
+    # Game dev (Godot / engines) — build loop, not chat
+    r"godot|gdscript|platformer|roguelike|game\s+loop|sprite\s*sheet|tileset|"
+    r"level\s+design|vertical\s+slice|"
     r"we need (a |an |to )|"
     r"landing\s+page|web\s*page|product\s+page|marketing\s+page|"
     r"launch\s+(the\s+)?(site|server|app|page|preview)|"
@@ -124,7 +127,12 @@ _VERIFY_CMD_RE = re.compile(
     r"\bcl\.exe\b|"
     r"\bdotnet\s+(?:test|build|run)\b|"
     r"\bpython\s+-m\s+(?:pytest|unittest|py_compile)\b|"
-    r"\buv\s+run\s+pytest\b"
+    r"\buv\s+run\s+pytest\b|"
+    # Game engines: headless runs / parse checks / exports are verification.
+    r"\bgodot[\w.-]*(?:\.exe)?\b[^\n]*--(?:headless|check-only|export-(?:release|debug|pack)|import)\b|"
+    r"\bluac\s+-p\b|\bbusted\b|"
+    r"\bgut(?:_cmdln)?\b|\bgdunit4?\b|"
+    r"\bnpm\s+run\s+(?:test|build)\b"
     r")"
 )
 _NOT_VERIFY_CMD_RE = re.compile(
@@ -169,6 +177,13 @@ _SOURCE_WRITE_SUFFIXES = frozenset(
         ".html",
         ".htm",
         ".css",
+        # Game engines
+        ".gd",
+        ".tscn",
+        ".tres",
+        ".gdshader",
+        ".gdextension",
+        ".lua",
     }
 )
 
