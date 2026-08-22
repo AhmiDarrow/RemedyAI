@@ -70,6 +70,19 @@ def test_a_complete_final_has_no_open_work():
     assert final_declares_open_work("") == []
 
 
+def test_owner_choice_git_commit_is_not_open_work():
+    """Session 765c 03:12: leftover 'commit if you want / no push' re-armed a done hop."""
+    final = (
+        "**Done — missing extensions + free Basic Pitch**\n"
+        "- **Verify:** `npm test` green\n"
+        "- **Still open:** local git commit if you want this hop saved · **no push**"
+    )
+    assert final_declares_open_work(final) == []
+    assert final_declares_open_work(
+        "**Partial**\n- **Still open:** Upload UI (download MIDI)"
+    )
+
+
 def test_continue_message_lists_the_items():
     m = open_work_continue_message(["- **Still open:** Upload UI"])
     assert m["role"] == "user"
