@@ -13,7 +13,7 @@ import {
   listProviders,
   listFreeProviders,
   detectOllama,
-  FALLBACK_PROVIDERS,
+  OFFLINE_PROVIDERS,
   type ProviderInfo,
   type FreeProviderOption,
 } from '../api/providers'
@@ -25,7 +25,7 @@ import {
 } from '../api/vision'
 import type { MessengerInfo } from '../api/settings'
 import { MessengersWizardStep } from './setup/MessengersWizardStep'
-import { demoModelOptions } from '../utils/demoModels'
+import { mergeModelOptions, showsBaseUrl } from '../api/modelDiscovery'
 import { isLinuxDesktop } from '../utils/platform'
 
 const PERSONAS = [
@@ -53,12 +53,12 @@ const STEPS: Step[] = [
 
 export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [step, setStep] = useState<Step>('welcome')
-  const [catalog, setCatalog] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS)
+  const [catalog, setCatalog] = useState<ProviderInfo[]>(OFFLINE_PROVIDERS)
   const [freeOptions, setFreeOptions] = useState<FreeProviderOption[]>([])
   const [provider, setProvider] = useState('demo')
   const [apiKey, setApiKey] = useState('')
-  const [model, setModel] = useState('gpt-4o-mini')
-  const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1')
+  const [model, setModel] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
   const [projectPath, setProjectPath] = useState('')
   const [persona, setPersona] = useState('balanced')
   const [userName, setUserName] = useState('')
@@ -99,16 +99,14 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       ),
     [freeOptions],
   )
-  const activeMeta = catalog.find((p) => p.id === provider) || FALLBACK_PROVIDERS[0]
-  const showBaseUrl = Boolean(activeMeta?.show_base_url || provider === 'custom')
-  // Demo: full curated set. Ollama: live models pulled on the local server only
-  // (curated guesses were never installed and produced dead sessions).
-  const modelOptions =
-    provider === 'demo'
-      ? demoModelOptions(activeMeta?.models).map((m) => m.id)
-      : provider === 'ollama' && ollamaModels.length
-        ? ollamaModels
-        : (activeMeta?.models || []).map((m) => m.id)
+  const activeMeta = catalog.find((p) => p.id === provider) || OFFLINE_PROVIDERS[0]
+  const showBaseUrl = showsBaseUrl(provider, activeMeta)
+  // Backend catalog rows only (no client-side model tables). Ollama: models
+  // pulled on the local server come first — guessed names produced dead sessions.
+  const modelOptions = mergeModelOptions(
+    provider === 'ollama' ? ollamaModels.map((id) => ({ id, name: id })) : [],
+    activeMeta?.models || [],
+  ).map((m) => m.id)
 
   const closeOauthBrowser = useCallback(() => {
     setOauthBrowserOpen(false)
@@ -579,11 +577,12 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         /* best effort */
       }
       // Zero-setup: skip lands on Demo so chat works without a key.
-      const demo = catalog.find((p) => p.id === 'demo') || FALLBACK_PROVIDERS.find((p) => p.id === 'demo')
+      // Model: the backend catalog default (server picks when empty).
+      const demo = catalog.find((p) => p.id === 'demo') || OFFLINE_PROVIDERS.find((p) => p.id === 'demo')
       await updateSettings({
         setup_completed: true,
         llm_provider: 'demo',
-        llm_model: demo?.default_model || 'codestral-latest',
+        ...(demo?.default_model ? { llm_model: demo.default_model } : {}),
         llm_base_url: demo?.base_url || 'https://api.llm7.io/v1',
       })
       closeOauthBrowser()

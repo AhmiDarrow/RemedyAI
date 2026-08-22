@@ -155,7 +155,17 @@ export interface SettingsFormProps {
   advancedProviders: ProviderInfo[]
   activeMeta: ProviderInfo
   showBaseUrl: boolean
-  providerModels: Array<{ id: string; name: string; provider?: string }>
+  providerModels: Array<{
+    id: string
+    name: string
+    provider?: string
+    source?: 'endpoint' | 'catalog'
+  }>
+  /** One-line discovery result shown next to the model picker. */
+  modelHint?: { kind: 'ok' | 'error' | 'none'; text: string }
+  /** Offer a free-text model id (local/custom endpoints, or discovery failed). */
+  modelFreeText?: boolean
+  discoveryBusy?: boolean
   customName?: string
   setCustomName?: Dispatch<SetStateAction<string>>
   handleProviderChange: (p: string) => void

@@ -4,7 +4,12 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { apiFetch } from '../api/client'
+import {
+  fetchModels,
+  pickDefaultModel,
+  type DiscoveryStatus,
+  type ModelSource,
+} from '../api/modelDiscovery'
 import {
   listConnectedProviders,
   setSessionLlm as applySessionLlm,
@@ -18,6 +23,8 @@ export interface ModelInfo {
   name: string
   provider: string
   default: boolean
+  /** 'endpoint' = listed live by the provider; 'catalog' = backend default row. */
+  source?: ModelSource
 }
 
 export interface SessionLlmBind {
@@ -34,9 +41,13 @@ export function useSessionLlm(opts: {
 }) {
   const { activeId, sessions, streaming, runningCount = 0 } = opts
 
-  const [model, setModel] = useState('gpt-4o-mini')
-  const [llmProvider, setLlmProvider] = useState('openai')
+  // Unknown until settings / session binds load — never a seeded provider/model.
+  const [model, setModel] = useState('')
+  const [llmProvider, setLlmProvider] = useState('')
   const [models, setModels] = useState<ModelInfo[]>([])
+  /** Last `/models` failure (network or discovery); the bar shows it as a hint. */
+  const [modelsError, setModelsError] = useState<string | null>(null)
+  const [modelsDiscovery, setModelsDiscovery] = useState<DiscoveryStatus | null>(null)
   const [connectedProviders, setConnectedProviders] = useState<ConnectedProvider[]>(
     [],
   )
@@ -115,56 +126,40 @@ export function useSessionLlm(opts: {
   /** Refresh model list via GET /models[?provider=…] (live endpoint discovery). */
   const refreshModels = useCallback(
     async (opts?: { selectDefault?: boolean; provider?: string }) => {
+      const want = (opts?.provider || llmProvider || '').toLowerCase()
       try {
-        const q = opts?.provider
-          ? `?provider=${encodeURIComponent(opts.provider)}`
-          : ''
-        const data = await apiFetch<{
-          models: ModelInfo[]
-          default: string
-          provider?: string
-        }>(`/models${q}`)
-        let list = data.models || []
-        const activeProv = (
-          data.provider ||
-          opts?.provider ||
-          llmProvider ||
-          ''
-        ).toLowerCase()
-        if (activeProv === 'demo') {
-          const { demoModelOptions, isDemoModelAllowed, DEMO_DEFAULT_MODEL } =
-            await import('../utils/demoModels')
-          list = demoModelOptions(list).map((m) => ({
-            id: m.id,
-            name: m.name,
-            provider: 'demo',
-            default: Boolean((m as ModelInfo).default),
-          }))
-          setModels(list)
-          if (opts?.selectDefault) {
-            const def =
-              list.find((m) => m.id === data.default && isDemoModelAllowed(m.id)) ??
-              list.find((m) => m.id === DEMO_DEFAULT_MODEL) ??
-              list[0]
-            if (def) setModel(def.id)
-          }
-          return { ...data, models: list, provider: 'demo' }
-        }
+        const data = await fetchModels(want || undefined)
+        const activeProv = data.provider || want
+        const list: ModelInfo[] = data.models.map((m) => ({
+          id: m.id,
+          name: m.name,
+          provider: m.provider || activeProv,
+          default: Boolean(m.default),
+          source: m.source,
+        }))
         setModels((prev) => {
           const others = prev.filter((m) => m.provider && m.provider !== activeProv)
-          const tagged = list.map((m) => ({
-            ...m,
-            provider: m.provider || activeProv,
-          }))
-          return [...tagged, ...others]
+          return [...list, ...others]
         })
+        const disc = data.discovery || null
+        setModelsDiscovery(disc)
+        setModelsError(
+          disc && disc.attempted && !disc.ok
+            ? `Couldn't list models from ${disc.url || activeProv}: ${
+                disc.error || (disc.status != null ? `HTTP ${disc.status}` : 'no response')
+              }`
+            : null,
+        )
         if (opts?.selectDefault) {
-          const def = list.find((m) => m.id === data.default) ?? list[0]
-          if (def) setModel(def.id)
+          const next = pickDefaultModel('', list, data.default)
+          if (next) setModel(next)
         }
         return { ...data, models: list }
       } catch (e: unknown) {
-        console.warn('Model refresh failed:', e instanceof Error ? e.message : e)
+        // Keep the prior list; surface the failure instead of only logging it.
+        const msg = e instanceof Error ? e.message : String(e)
+        setModelsError(`Model list unavailable${want ? ` for ${want}` : ''}: ${msg}`)
+        console.warn('Model refresh failed:', msg)
         return null
       }
     },
@@ -338,6 +333,8 @@ export function useSessionLlm(opts: {
     setLlmProvider,
     models,
     setModels,
+    modelsError,
+    modelsDiscovery,
     connectedProviders,
     setConnectedProviders,
     sessionLlmMap,
