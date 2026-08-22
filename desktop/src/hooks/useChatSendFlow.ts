@@ -113,6 +113,8 @@ export function useChatSendFlow(opts: {
   } = opts
 
   const notifyArmRef = useRef<string | null>(null)
+  const [stickNonce, setStickNonce] = useState(0)
+  const bumpStick = useCallback(() => setStickNonce((n) => n + 1), [])
   const activeIdRef = useRef(activeId)
   activeIdRef.current = activeId
   const [editDraft, setEditDraft] = useState<{ text: string; key: number } | null>(
@@ -131,6 +133,7 @@ export function useChatSendFlow(opts: {
 
   const handleCommand = useCallback(
     async (command: string) => {
+      bumpStick()
       const stripped = command.trim().toLowerCase()
       // Client-side session file export / import (download + file picker).
       if (stripped === '/export' || stripped === '/export-session') {
@@ -272,6 +275,7 @@ export function useChatSendFlow(opts: {
       refreshSessions,
       setActiveId,
       stop,
+      bumpStick,
       clearQueue,
       clearLocalHistory,
       reloadMessages,
@@ -291,6 +295,7 @@ export function useChatSendFlow(opts: {
       }[],
       opts?: { mode?: 'after' | 'interrupt' | 'steer'; sessionId?: string },
     ) => {
+      bumpStick()
       // Clear edit prefill once the user sends (revised prompt is on its way).
       setEditDraft(null)
       if (text.startsWith('/') && !attachments?.length) {
@@ -405,6 +410,7 @@ export function useChatSendFlow(opts: {
       barProvider,
       barModel,
       setSessionBind,
+      bumpStick,
     ],
   )
 
@@ -431,6 +437,7 @@ export function useChatSendFlow(opts: {
   const handleRegenerate = useCallback(
     async (assistantMsgId: string) => {
       if (!activeId || streaming) return
+      bumpStick()
       const idx = messages.findIndex((m) => m.id === assistantMsgId)
       if (idx < 0) return
       let userIdx = -1
@@ -454,7 +461,7 @@ export function useChatSendFlow(opts: {
         provider: bind?.provider,
       })
     },
-    [activeId, streaming, messages, beginEdit, send, model, sessionLlmMap, planMode],
+    [activeId, streaming, messages, beginEdit, send, model, sessionLlmMap, planMode, bumpStick],
   )
 
   // Notify only when a turn we started on *this* session ends — not on tab switch.
@@ -491,5 +498,6 @@ export function useChatSendFlow(opts: {
     handleSend,
     handleEditUserMessage,
     handleRegenerate,
+    stickNonce,
   }
 }

@@ -1023,6 +1023,7 @@ export default function App() {
     handleSend,
     handleEditUserMessage,
     handleRegenerate,
+    stickNonce,
   } = useChatSendFlow({
     activeId,
     setActiveId,
@@ -1694,6 +1695,7 @@ export default function App() {
           streaming={streaming}
           messagesLoading={messagesLoading}
           handleSend={handleSend}
+          stickNonce={stickNonce}
           stop={stop}
           serverReady={serverState === 'ready'}
           userName={userName}
@@ -1849,6 +1851,7 @@ export default function App() {
               hasOlder={messagesHasOlder}
               loadingOlder={messagesLoadingOlder}
               onLoadOlder={() => void loadOlderMessages()}
+              stickNonce={stickNonce}
               projectPath={
                 (activeId && sessions.find((s) => s.id === activeId)?.project_path)
                 || null
