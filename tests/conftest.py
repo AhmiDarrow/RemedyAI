@@ -45,3 +45,15 @@ def _reset_provider_breaker():
     clear_provider_quarantine()
     yield
     clear_provider_quarantine()
+
+
+@pytest.fixture(autouse=True)
+def _reset_live_model_registry():
+    """Ids a provider's endpoint listed are remembered process-wide so the
+    validator can accept them; one test's mocked listing must not make another
+    test's "garbage id" suddenly valid."""
+    from remedy.interfaces.model_discovery import forget_live_models
+
+    forget_live_models()
+    yield
+    forget_live_models()

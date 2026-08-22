@@ -83,6 +83,31 @@ def observe_provider_usage(
         pass
 
 
+def _endpoint_price(
+    provider: str, model: str | None
+) -> tuple[float, float, float | None] | None:
+    """OpenRouter's ``/models`` quotes USD per token as strings; prefer it."""
+    if provider != "openrouter":
+        return None
+    try:
+        from remedy.interfaces.model_discovery import live_known_models
+
+        row = live_known_models(provider).get((model or "").strip())
+    except Exception:
+        return None
+    pricing = row.get("pricing") if isinstance(row, dict) else None
+    if not isinstance(pricing, dict):
+        return None
+    try:
+        pin = float(pricing.get("prompt")) * 1_000_000.0
+        pout = float(pricing.get("completion")) * 1_000_000.0
+    except (TypeError, ValueError):
+        return None
+    if pin < 0 or pout < 0:
+        return None
+    return pin, pout, None
+
+
 def price_per_mtok(
     model: str | None, provider: str | None = None
 ) -> tuple[float, float, float | None]:
@@ -96,6 +121,9 @@ def price_per_mtok(
     # Poe uses subscription points; rough mid-tier USD estimate for UI only.
     if pl == "poe" or "api.poe.com" in blob.lower():
         return 3.0, 15.0, None
+    live = _endpoint_price(pl, model)
+    if live is not None:
+        return live
     for pat, pin, pout, phit in _PRICE_TABLE:
         if pat.search(blob):
             return pin, pout, phit

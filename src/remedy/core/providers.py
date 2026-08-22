@@ -340,7 +340,13 @@ class OpenAIProvider(ProviderAdapter):
         msg = choice.get("message") or choice.get("delta") or {}
         # Keep reasoning_content separately — DeepSeek thinking + tool_calls
         # requires it to be passed back on subsequent requests.
-        reasoning_raw = msg.get("reasoning_content") or msg.get("reasoning") or ""
+        # gpt-oss style hosts use ``reasoning`` (str / {"text"} / list of blocks).
+        try:
+            from remedy.core.react_stream import reasoning_delta_text
+
+            reasoning_raw: Any = reasoning_delta_text(msg)
+        except Exception:
+            reasoning_raw = msg.get("reasoning_content") or msg.get("reasoning") or ""
         if not isinstance(reasoning_raw, str):
             reasoning_raw = str(reasoning_raw) if reasoning_raw is not None else ""
         # Full reasoning — never slice/shorten provider thinking.
@@ -722,7 +728,7 @@ class DeepSeekProvider(OpenAIProvider):
     """DeepSeek V4 APIs (OpenAI-compatible + reasoning_content)."""
 
     provider_name = "deepseek"
-    default_base_url = "https://api.deepseek.com"
+    default_base_url = "https://api.deepseek.com/v1"
     # DeepSeek rejects oversized max_tokens (HTTP 400). Cap to documented limits.
     # V4 Pro/Flash allow large max output; legacy chat was ~8k.
     DEEPSEEK_MAX_OUTPUT = 8192
