@@ -24,18 +24,25 @@ import {
   xaiModelAfterOauth,
 } from '../api/xaiOAuth'
 import {
+  deleteCustomProvider,
   listProviders,
   listConnectedProviders,
   probeProvider,
+  saveCustomProvider,
   OFFLINE_PROVIDERS,
   type ProviderInfo,
   type ConnectedProvider,
 } from '../api/providers'
 import {
+  afterCustomSave,
+  afterEndpointDelete,
   allowsFreeTextModel,
   createRequestGeneration,
+  CUSTOM_TEMPLATE_ID,
   discoveryHint,
   fetchModels,
+  isLocalUrl,
+  isSavedEndpointId,
   mergeModelOptions,
   pickDefaultModel,
   showsBaseUrl,
@@ -232,13 +239,20 @@ export function SettingsPanel({
     onPanelOpenChange,
   } = useSettingsPanelState()
   const [customName, setCustomName] = useState('')
+  const [endpointBusy, setEndpointBusy] = useState(false)
+  const [endpointMsg, setEndpointMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+  const [endpointConfirmDelete, setEndpointConfirmDelete] = useState(false)
 
   const primaryProviders = useMemo(
-    () => catalog.filter((p) => !p.advanced),
+    () => catalog.filter((p) => !p.advanced && !p.user_defined),
     [catalog],
   )
   const advancedProviders = useMemo(
-    () => catalog.filter((p) => p.advanced),
+    () => catalog.filter((p) => p.advanced && !p.user_defined),
+    [catalog],
+  )
+  const savedEndpoints = useMemo(
+    () => catalog.filter((p) => Boolean(p.user_defined)),
     [catalog],
   )
   const activeMeta = useMemo<ProviderInfo>(
@@ -667,7 +681,7 @@ export function SettingsPanel({
             llm_base_url: baseUrl,
           }
         : {}),
-      custom_llm_name: provider === 'custom' ? customName.trim() : undefined,
+      custom_llm_name: provider === CUSTOM_TEMPLATE_ID ? customName.trim() : undefined,
       project_path: projectPath,
       browser_home_url: browserHomeUrl.trim() || 'https://github.com/AhmiDarrow/RemedyAI',
       persona,
@@ -860,6 +874,118 @@ export function SettingsPanel({
     setApiKey('')
     setTestMsg(null)
     setTestOk(null)
+    setEndpointMsg(null)
+    setEndpointConfirmDelete(false)
+  }
+
+  /** Refresh the catalog + connected list after a saved endpoint changes. */
+  const refreshProviderLists = async () => {
+    const [providers, connected] = await Promise.all([
+      listProviders(),
+      listConnectedProviders().catch(() => null),
+    ])
+    setCatalog(providers)
+    if (connected?.providers) setConnectedList(connected.providers)
+    return connected
+  }
+
+  /**
+   * "Custom endpoint" is a template: saving turns the form's name / base URL /
+   * key into its own provider (`custom-<slug>`) and blanks the template. With
+   * `existingId` the saved endpoint is updated in place instead.
+   */
+  const handleSaveEndpoint = async (existingId?: string) => {
+    const name = (existingId ? activeMeta.name : customName).trim()
+    const url = baseUrl.trim()
+    if (!name || !url || endpointBusy) return
+    setEndpointBusy(true)
+    setEndpointMsg(null)
+    const key = apiKey.trim()
+    try {
+      const res = await saveCustomProvider({
+        name,
+        base_url: url,
+        api_key: key || undefined,
+        // Keyless local servers must not nag for a key. Editing keeps the
+        // stored requirement unless a key is typed.
+        requires_key: !key && isLocalUrl(url) ? false : key ? true : undefined,
+        id: existingId,
+      })
+      const next = afterCustomSave(res)
+      await refreshProviderLists()
+      const rows: ModelOption[] = (res.models || [])
+        .filter((m) => m && m.id)
+        .map((m) => ({ id: m.id, name: m.name || m.id, provider: res.id, source: 'endpoint' as const }))
+      setLiveModelsByProvider((prev) => ({ ...prev, [res.id]: rows }))
+      setProvider(next.provider)
+      setModel(next.model)
+      setBaseUrl(next.baseUrl || url)
+      setApiKey('')
+      setApiKeySet(Boolean(key) || (existingId ? apiKeySet : false))
+      if (!existingId) setCustomName('')
+      setDiscovery(res.discovery || null)
+      setDiscoveryError(null)
+      setTestMsg(null)
+      setTestOk(null)
+      setEndpointConfirmDelete(false)
+      setEndpointMsg(
+        next.hint
+          ? { kind: 'error', text: next.hint }
+          : {
+              kind: 'ok',
+              text: existingId
+                ? `Updated ${name}`
+                : `Saved ${name}${rows.length ? ` · ${rows.length} model${rows.length === 1 ? '' : 's'}` : ''}`,
+            },
+      )
+    } catch (e: unknown) {
+      setEndpointMsg({
+        kind: 'error',
+        text: e instanceof Error ? e.message : 'Could not save endpoint',
+      })
+    } finally {
+      setEndpointBusy(false)
+    }
+  }
+
+  const handleDeleteEndpoint = async () => {
+    const id = provider
+    if (!isSavedEndpointId(id) || endpointBusy) return
+    if (!endpointConfirmDelete) {
+      setEndpointConfirmDelete(true)
+      return
+    }
+    setEndpointBusy(true)
+    setEndpointMsg(null)
+    try {
+      await deleteCustomProvider(id)
+      const connected = await refreshProviderLists()
+      setLiveModelsByProvider((prev) => {
+        const out = { ...prev }
+        delete out[id]
+        return out
+      })
+      const active = loadedLlmRef.current.provider
+      const nextId = afterEndpointDelete(
+        id,
+        active,
+        connected?.connected || connectedList.filter((p) => p.connected),
+      )
+      handleProviderChange(nextId)
+      if (active === id) {
+        // The removed endpoint was the chat provider — the next Save moves it.
+        loadedLlmRef.current = { provider: '', model: '', baseUrl: '' }
+      }
+      setEndpointMsg({ kind: 'ok', text: `Removed ${activeMeta.name}` })
+    } catch (e: unknown) {
+      setEndpointMsg({
+        kind: 'error',
+        text: e instanceof Error ? e.message : 'Could not remove endpoint',
+      })
+    } finally {
+      setEndpointBusy(false)
+      setEndpointConfirmDelete(false)
+    }
   }
 
   const handleTestConnection = async () => {
@@ -1209,6 +1335,14 @@ export function SettingsPanel({
               discoveryBusy={discoveryBusy}
               customName={customName}
               setCustomName={setCustomName}
+              savedEndpoints={savedEndpoints}
+              endpointBusy={endpointBusy}
+              endpointMsg={endpointMsg}
+              endpointConfirmDelete={endpointConfirmDelete}
+              onSaveEndpoint={() => { void handleSaveEndpoint() }}
+              onUpdateEndpoint={() => { void handleSaveEndpoint(provider) }}
+              onDeleteEndpoint={() => { void handleDeleteEndpoint() }}
+              onCancelDeleteEndpoint={() => setEndpointConfirmDelete(false)}
               handleProviderChange={handleProviderChange}
               handleBrowseProject={() => { void handleBrowseProject() }}
               themeId={themeId}

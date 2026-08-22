@@ -25,7 +25,7 @@ import {
 } from '../api/vision'
 import type { MessengerInfo } from '../api/settings'
 import { MessengersWizardStep } from './setup/MessengersWizardStep'
-import { mergeModelOptions, showsBaseUrl } from '../api/modelDiscovery'
+import { isCustomLikeProvider, mergeModelOptions, showsBaseUrl } from '../api/modelDiscovery'
 import { isLinuxDesktop } from '../utils/platform'
 
 const PERSONAS = [
@@ -315,7 +315,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       const noKeyOk =
         provider === 'ollama' ||
         provider === 'demo' ||
-        provider === 'custom' ||
+        isCustomLikeProvider(provider) ||
         /^(https?:\/\/)?(127\.0\.0\.1|localhost|\[::1\])/i.test(baseUrl)
       const xaiOk = provider === 'xai' && (xaiConnected || !!apiKey.trim())
       if (!noKeyOk && !apiKey.trim() && !xaiOk) {
@@ -934,7 +934,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                     <option value={model}>{model}</option>
                   )}
                 </select>
-                {(provider === 'ollama' || provider === 'custom' || provider === 'openrouter') && (
+                {(provider === 'ollama' || isCustomLikeProvider(provider) || provider === 'openrouter') && (
                   <input
                     type="text"
                     value={model}

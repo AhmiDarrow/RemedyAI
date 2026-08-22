@@ -179,6 +179,69 @@ export function isLocalUrl(url: string | null | undefined): boolean {
   }
 }
 
+/** Id of the "Custom endpoint" template row. */
+export const CUSTOM_TEMPLATE_ID = 'custom'
+const SAVED_ENDPOINT_PREFIX = 'custom-'
+
+/** `custom-<slug>` — an endpoint the owner saved from the Custom template. */
+export function isSavedEndpointId(id: string | null | undefined): boolean {
+  const p = (id || '').toLowerCase()
+  return p.startsWith(SAVED_ENDPOINT_PREFIX) && p.length > SAVED_ENDPOINT_PREFIX.length
+}
+
+/** The template itself or a saved endpoint — both are flexible endpoints. */
+export function isCustomLikeProvider(id: string | null | undefined): boolean {
+  const p = (id || '').toLowerCase()
+  return p === CUSTOM_TEMPLATE_ID || isSavedEndpointId(p)
+}
+
+/**
+ * Form state after `POST /providers/custom` succeeds: select the new provider,
+ * its first model (backend default first); the caller blanks the template.
+ */
+export function afterCustomSave(
+  res: {
+    id: string
+    provider?: { base_url?: string; default_model?: string } | null
+    models?: ReadonlyArray<{ id: string; name?: string }> | null
+    discovery?: { attempted: boolean; ok: boolean } | null
+    note?: string | null
+  },
+): {
+  provider: string
+  model: string
+  baseUrl: string
+  hint: string | null
+} {
+  const models = res.models || []
+  const model = pickDefaultModel('', models, res.provider?.default_model || '')
+  const d = res.discovery
+  const failed = Boolean(d?.attempted && !d.ok)
+  const hint = res.note || (failed ? 'Saved, but the endpoint did not list any models yet.' : null)
+  return {
+    provider: res.id,
+    model,
+    baseUrl: res.provider?.base_url || '',
+    hint,
+  }
+}
+
+/**
+ * Provider to land on after a saved endpoint is removed: the active chat
+ * provider unless it was the removed one, then the first connected provider,
+ * then the Custom template.
+ */
+export function afterEndpointDelete(
+  removedId: string,
+  activeProvider: string | null | undefined,
+  connected: ReadonlyArray<{ id: string; connected?: boolean }>,
+): string {
+  const active = (activeProvider || '').trim()
+  if (active && active !== removedId) return active
+  const first = connected.find((p) => p.id !== removedId && p.connected !== false)
+  return first?.id || CUSTOM_TEMPLATE_ID
+}
+
 /** Providers whose endpoint list is often partial or absent — allow a typed id. */
 export const FREE_TEXT_MODEL_PROVIDERS = new Set(['ollama', 'custom', 'llamacpp', 'rmb'])
 
@@ -187,7 +250,7 @@ export function allowsFreeTextModel(
   discovery?: DiscoveryStatus | null,
 ): boolean {
   const p = (provider || '').toLowerCase()
-  if (FREE_TEXT_MODEL_PROVIDERS.has(p)) return true
+  if (FREE_TEXT_MODEL_PROVIDERS.has(p) || isSavedEndpointId(p)) return true
   return Boolean(discovery?.attempted && !discovery.ok)
 }
 
@@ -199,7 +262,11 @@ export function showsBaseUrl(
   meta?: { show_base_url?: boolean } | null,
 ): boolean {
   const p = (provider || '').toLowerCase()
-  return ALWAYS_BASE_URL_PROVIDERS.has(p) || Boolean(meta?.show_base_url)
+  return (
+    ALWAYS_BASE_URL_PROVIDERS.has(p)
+    || isSavedEndpointId(p)
+    || Boolean(meta?.show_base_url)
+  )
 }
 
 /** Whether the key field should nag; key-less auth or a local URL never does. */
@@ -212,7 +279,7 @@ export function providerNeedsKey(
   const auth = meta?.auth || []
   if (auth.length && !auth.includes('api_key')) return false
   if (auth.includes('none')) return false
-  if (p === 'custom' || p === 'llamacpp') return !isLocalUrl(baseUrl)
+  if (isCustomLikeProvider(p) || p === 'llamacpp') return !isLocalUrl(baseUrl)
   if (p === 'demo' || p === 'ollama' || p === 'rmb') return false
   return true
 }

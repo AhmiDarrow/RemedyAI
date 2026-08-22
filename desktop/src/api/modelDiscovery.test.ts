@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  afterCustomSave,
+  afterEndpointDelete,
   allowsFreeTextModel,
   createRequestGeneration,
   discoveryHint,
+  isCustomLikeProvider,
   isLocalUrl,
+  isSavedEndpointId,
   mergeModelOptions,
   modelOptionLabel,
   modelsQuery,
@@ -155,5 +159,84 @@ describe('local endpoints', () => {
     expect(showsBaseUrl('ollama', { show_base_url: false })).toBe(true)
     expect(showsBaseUrl('rmb', { show_base_url: true })).toBe(true)
     expect(showsBaseUrl('openai', { show_base_url: false })).toBe(false)
+  })
+})
+
+describe('saved custom endpoints (custom-<slug>)', () => {
+  it('recognises saved ids but not the template or other providers', () => {
+    expect(isSavedEndpointId('custom-lm-studio')).toBe(true)
+    expect(isSavedEndpointId('custom')).toBe(false)
+    expect(isSavedEndpointId('custom-')).toBe(false)
+    expect(isSavedEndpointId('openai')).toBe(false)
+    expect(isSavedEndpointId('')).toBe(false)
+    expect(isCustomLikeProvider('custom')).toBe(true)
+    expect(isCustomLikeProvider('custom-lm-studio')).toBe(true)
+    expect(isCustomLikeProvider('ollama')).toBe(false)
+  })
+
+  it('treats saved ids like the custom template for URL, key and model rules', () => {
+    expect(showsBaseUrl('custom-lm-studio', { show_base_url: false })).toBe(true)
+    expect(allowsFreeTextModel('custom-lm-studio', okDiscovery)).toBe(true)
+    expect(providerNeedsKey('custom-lm-studio', { auth: ['api_key'] }, 'http://127.0.0.1:1234/v1')).toBe(false)
+    expect(providerNeedsKey('custom-remote', { auth: ['api_key'] }, 'https://host.example/v1')).toBe(true)
+    expect(providerNeedsKey('custom-remote', { auth: ['none'] }, 'https://host.example/v1')).toBe(false)
+  })
+})
+
+describe('afterCustomSave', () => {
+  const base = {
+    id: 'custom-lm-studio',
+    provider: { base_url: 'http://127.0.0.1:1234/v1', default_model: '' },
+  }
+
+  it('selects the new provider and its first model', () => {
+    const out = afterCustomSave({
+      ...base,
+      models: [{ id: 'a' }, { id: 'b' }],
+      discovery: { attempted: true, ok: true },
+      note: null,
+    })
+    expect(out).toEqual({
+      provider: 'custom-lm-studio',
+      model: 'a',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      hint: null,
+    })
+  })
+
+  it('prefers the backend default model when present', () => {
+    const out = afterCustomSave({
+      ...base,
+      provider: { ...base.provider, default_model: 'b' },
+      models: [{ id: 'a' }, { id: 'b' }],
+    })
+    expect(out.model).toBe('b')
+  })
+
+  it('surfaces the note (or a fallback) when discovery failed but it saved anyway', () => {
+    expect(
+      afterCustomSave({ ...base, models: [], discovery: { attempted: true, ok: false }, note: 'No /models' }).hint,
+    ).toBe('No /models')
+    const out = afterCustomSave({ ...base, models: [], discovery: { attempted: true, ok: false } })
+    expect(out.model).toBe('')
+    expect(out.hint).toMatch(/did not list/)
+  })
+})
+
+describe('afterEndpointDelete', () => {
+  const connected = [
+    { id: 'custom-x', connected: true },
+    { id: 'ollama', connected: false },
+    { id: 'openai', connected: true },
+  ]
+  it('keeps the active provider when it was not the removed one', () => {
+    expect(afterEndpointDelete('custom-x', 'xai', connected)).toBe('xai')
+  })
+  it('falls back to the first connected provider when the active one was removed', () => {
+    expect(afterEndpointDelete('custom-x', 'custom-x', connected)).toBe('openai')
+  })
+  it('lands on the custom template when nothing else is connected', () => {
+    expect(afterEndpointDelete('custom-x', 'custom-x', [])).toBe('custom')
+    expect(afterEndpointDelete('custom-x', '', [{ id: 'custom-x', connected: true }])).toBe('custom')
   })
 })
