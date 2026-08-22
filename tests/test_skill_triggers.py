@@ -81,3 +81,42 @@ def test_skill_body_without_references_flag_stays_lean(tmp_path):
     reg = SkillRegistry()
     reg.register(load_skill_from_dir(_skill(tmp_path, "godot-4", refs={"INDEX.md": "map"})))
     assert "## Reference" not in reg.skill_body("godot-4")
+
+
+# --- domain packs must not crowd the stage-1 catalog ---------------------------
+
+
+def test_domain_packs_only_compete_for_catalog_slots_on_their_own_asks(tmp_path):
+    """With dozens of field packs installed, an unrelated turn must still see the
+    general procedures — otherwise every "hi" renders a directory of fields."""
+    reg = SkillRegistry()
+    general = ("change-safety", "write-tests")
+    for name in general:
+        reg.register(load_skill_from_dir(_skill(tmp_path, name)))
+    for name, trig in (
+        ("godot-4", r"\bgodot\b"),
+        ("bioinformatics", r"\b(fastq|rna-?seq)\b"),
+        ("clinical-research", r"\b(randomised|randomized) (controlled )?trial\b"),
+    ):
+        reg.register(load_skill_from_dir(_skill(tmp_path, name, triggers=[trig])))
+
+    def catalog(query: str, limit: int = 10) -> list[str]:
+        return [s.manifest.name for s, _ in reg.match_skills(query, limit=limit)]
+
+    def is_domain(name: str) -> bool:
+        return bool(reg.get(name).manifest.triggers)
+
+    # Unrelated / empty asks: every general procedure outranks every field pack,
+    # so the packs fall off first when slots are scarce.
+    for q in ("", "fix the login bug", "what's for dinner"):
+        ranked = catalog(q)
+        ranks = [is_domain(n) for n in ranked]
+        assert ranks == sorted(ranks), f"{q!r}: a field pack outranked a general one ({ranked})"
+        assert set(catalog(q, limit=len(general))) == set(general), q
+
+    # The pack whose domain it is ranks first; its neighbours stay out.
+    assert catalog("port the godot player controller")[0] == "godot-4"
+    assert catalog("align these fastq reads")[0] == "bioinformatics"
+    assert catalog("design a randomised controlled trial")[0] == "clinical-research"
+    top2 = catalog("port the godot player controller", limit=2)
+    assert [n for n in top2 if is_domain(n)] == ["godot-4"]

@@ -555,6 +555,13 @@ class SkillRegistry:
                         score -= 0.22
                     elif effort < 0.62:
                         score -= 0.14
+            # Domain packs (godot-4, bioinformatics, clinical-research …) declare
+            # triggers so they surface exactly when the ask is theirs. On an empty
+            # or unrelated query they must not take stage-1 catalog slots from the
+            # general procedures — with dozens of field packs installed, otherwise
+            # every "hi" turn renders a directory of fields nobody asked about.
+            if m.triggers:
+                score += 0.25 if self._trigger_hit(m.triggers, query) is not None else -0.30
             # Project-scoped skills: metadata.project_path or tag matching folder name
             if proj:
                 bound = str(meta.get("project_path") or meta.get("project") or "").lower()
@@ -569,6 +576,22 @@ class SkillRegistry:
 
         scored.sort(key=lambda x: (-x[1], x[0].manifest.name.lower()))
         return scored[:limit]
+
+    @staticmethod
+    def _trigger_hit(triggers: list[str], text: str) -> int | None:
+        """Earliest match position of any trigger regex in *text*, else None."""
+        q = (text or "").strip()
+        if not q or not triggers:
+            return None
+        best: int | None = None
+        for pat in triggers:
+            try:
+                mt = re.search(pat, q, re.IGNORECASE)
+            except re.error:
+                continue
+            if mt and (best is None or mt.start() < best):
+                best = mt.start()
+        return best
 
     def triggered_skills(self, text: str, *, limit: int = 3) -> list[str]:
         """Names of usable skills whose frontmatter ``triggers`` match *text*.
@@ -589,14 +612,7 @@ class SkillRegistry:
                 continue
             if (m.metadata or {}).get("quarantine"):
                 continue
-            best: int | None = None
-            for pat in m.triggers:
-                try:
-                    mt = re.search(pat, q, re.IGNORECASE)
-                except re.error:
-                    continue
-                if mt and (best is None or mt.start() < best):
-                    best = mt.start()
+            best = self._trigger_hit(m.triggers, q)
             if best is not None:
                 hits.append((best, m.name))
         hits.sort(key=lambda t: (t[0], t[1].lower()))
