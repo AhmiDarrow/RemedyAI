@@ -46,236 +46,62 @@ export interface OllamaDetect {
   tags_url?: string
 }
 
-/** Fallback when server is offline — keep aligned with backend PROVIDER_CATALOG. */
-export const FALLBACK_PROVIDERS: ProviderInfo[] = [
-  {
-    id: 'demo',
-    name: 'Demo (Free)',
-    base_url: 'https://api.llm7.io/v1',
-    // Curated guest chat only — never mirror the full llm7 /models dump.
-    models: [
-      { id: 'codestral-latest', name: 'Codestral demo' },
-      { id: 'gemini-3.1-flash-lite', name: 'Gemini Flash Lite demo' },
-      { id: 'gpt-oss:20b', name: 'GPT-OSS 20B demo' },
-    ],
-    default_model: 'codestral-latest',
-    auth: ['none'],
-    oauth: false,
-    env_keys: [],
-    show_base_url: false,
-    advanced: false,
-    free_tier: 'instant',
-    badge: 'No signup',
-    limits_blurb:
-      'Rate-limited guest chat (curated models only). Add a real provider for agents / vision.',
-    privacy_note: 'Chat goes to a third-party free API (not Remedy cloud).',
-  },
-  {
-    id: 'openai',
-    name: 'OpenAI',
-    base_url: 'https://api.openai.com/v1',
-    models: [
-      { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
-      { id: 'gpt-4o', name: 'GPT-4o' },
-    ],
-    default_model: 'gpt-4o-mini',
-    auth: ['api_key'],
-    oauth: false,
-    env_keys: ['OPENAI_API_KEY'],
-    show_base_url: false,
-    advanced: false,
-    free_tier: 'none',
-  },
-  {
-    id: 'anthropic',
-    name: 'Anthropic',
-    base_url: 'https://api.anthropic.com/v1',
-    models: [
-      { id: 'claude-opus-5', name: 'Claude Opus 5' },
-      { id: 'claude-sonnet-5', name: 'Claude Sonnet 5' },
-      { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
-      { id: 'claude-opus-4-8', name: 'Claude Opus 4.8' },
-      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
-    ],
-    default_model: 'claude-sonnet-5',
-    auth: ['api_key'],
-    oauth: false,
-    env_keys: ['ANTHROPIC_API_KEY'],
-    show_base_url: false,
-    advanced: false,
-    key_docs_url: 'https://console.anthropic.com/settings/keys',
-    limits_blurb:
-      'Uses prepaid Anthropic API credits (console.anthropic.com), not your Claude Pro / Max weekly limit.',
-  },
-  {
-    id: 'google',
-    name: 'Google AI (Gemini)',
-    base_url: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    models: [{ id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' }],
-    default_model: 'gemini-2.5-flash',
-    auth: ['api_key'],
-    oauth: false,
-    env_keys: ['GOOGLE_API_KEY'],
-    show_base_url: false,
-    advanced: false,
-    free_tier: 'free_key',
-    badge: 'Free key',
-    key_docs_url: 'https://aistudio.google.com/app/apikey',
-  },
-  {
-    id: 'deepseek',
-    name: 'DeepSeek',
-    base_url: 'https://api.deepseek.com/v1',
-    models: [
-      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
-      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
-    ],
-    default_model: 'deepseek-v4-flash',
-    auth: ['api_key'],
-    oauth: false,
-    env_keys: ['DEEPSEEK_API_KEY'],
-    show_base_url: false,
-    advanced: false,
-  },
-  {
-    id: 'xai',
-    name: 'xAI (Grok)',
-    base_url: 'https://api.x.ai/v1',
-    models: [
-      { id: 'grok-4.5', name: 'Grok 4.5' },
-      { id: 'grok-4.3', name: 'Grok 4.3' },
-      { id: 'grok-4', name: 'Grok 4' },
-    ],
-    default_model: 'grok-4.5',
-    auth: ['oauth', 'api_key'],
-    oauth: true,
-    env_keys: ['XAI_API_KEY'],
-    show_base_url: false,
-    advanced: false,
-  },
-  {
-    id: 'groq',
-    name: 'Groq',
-    base_url: 'https://api.groq.com/openai/v1',
-    models: [{ id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B' }],
-    default_model: 'llama-3.3-70b-versatile',
-    auth: ['api_key'],
-    oauth: false,
-    env_keys: ['GROQ_API_KEY'],
-    show_base_url: false,
-    advanced: false,
-    free_tier: 'free_key',
-    badge: 'Free key',
-    key_docs_url: 'https://console.groq.com/keys',
-  },
-  {
-    id: 'mistral',
-    name: 'Mistral',
-    base_url: 'https://api.mistral.ai/v1',
-    models: [{ id: 'mistral-small-latest', name: 'Mistral Small' }],
-    default_model: 'mistral-small-latest',
-    auth: ['api_key'],
-    oauth: false,
-    env_keys: ['MISTRAL_API_KEY'],
-    show_base_url: false,
-    advanced: false,
-    free_tier: 'free_key',
-    badge: 'Free key',
-    key_docs_url: 'https://console.mistral.ai/api-keys',
-  },
-  {
-    id: 'openrouter',
-    name: 'OpenRouter',
-    base_url: 'https://openrouter.ai/api/v1',
-    models: [
-      { id: 'openrouter/auto', name: 'OpenRouter Auto' },
-      { id: 'openai/gpt-oss-20b:free', name: 'GPT-OSS 20B (free)' },
-    ],
-    default_model: 'openrouter/auto',
-    auth: ['api_key'],
-    oauth: false,
-    env_keys: ['OPENROUTER_API_KEY'],
-    show_base_url: false,
-    advanced: false,
-    free_tier: 'free_key',
-    badge: 'Free key',
-    key_docs_url: 'https://openrouter.ai/keys',
-  },
-  {
-    id: 'poe',
-    name: 'Poe',
-    base_url: 'https://api.poe.com/v1',
-    models: [
-      { id: 'Claude-Sonnet-4.6', name: 'Claude Sonnet 4.6' },
-      { id: 'Claude-Opus-4.7', name: 'Claude Opus 4.7' },
-      { id: 'GPT-5.4', name: 'GPT-5.4' },
-      { id: 'Gemini-3.1-Pro', name: 'Gemini 3.1 Pro' },
-      { id: 'Grok-4', name: 'Grok 4' },
-    ],
-    default_model: 'Claude-Sonnet-4.6',
-    auth: ['api_key'],
-    oauth: false,
-    env_keys: ['POE_API_KEY'],
-    show_base_url: false,
-    advanced: false,
-    free_tier: 'none',
-    badge: 'Multi-model',
-    limits_blurb:
-      'One key for many frontier bots via Poe. Uses subscription points / add-on balance.',
-    key_docs_url: 'https://poe.com/api_key',
-  },
-  {
-    id: 'ollama',
-    name: 'Ollama (local)',
-    base_url: 'http://127.0.0.1:11434/v1',
-    // No curated models — the local server's pulled models are fetched live
-    // (detectOllama / GET /api/models?provider=ollama). Guessing model names
-    // produced dead sessions for users who never pulled them.
+/**
+ * Minimal offline stub so the Settings UI can render while the server is down.
+ * Ids, names, base URLs and auth flags only — NO model lists and NO default
+ * model live in the client. The backend catalog (`GET /api/providers`) is the
+ * single source of truth; `GET /api/models` discovers models.
+ */
+function offlineStub(
+  id: string,
+  name: string,
+  base_url: string,
+  auth: string[],
+  extra: Partial<ProviderInfo> = {},
+): ProviderInfo {
+  return {
+    id,
+    name,
+    base_url,
     models: [],
     default_model: '',
-    auth: ['none'],
-    oauth: false,
+    auth,
+    oauth: auth.includes('oauth'),
     env_keys: [],
     show_base_url: false,
     advanced: false,
-    free_tier: 'local',
-    badge: 'Local',
-    key_docs_url: 'https://ollama.com/download',
-  },
-  {
-    id: 'rmb',
-    name: 'RMB (local agent)',
-    base_url: 'http://127.0.0.1:8787/v1',
-    models: [
-      { id: 'Qwen2.5-Coder-7B-Instruct-Q4_K_M', name: 'Qwen2.5 Coder 7B' },
-      { id: 'Qwen2.5-Coder-14B-Instruct-Q4_K_M', name: 'Qwen2.5 Coder 14B' },
-      { id: 'default', name: 'Default (loaded model)' },
-    ],
-    default_model: 'Qwen2.5-Coder-7B-Instruct-Q4_K_M',
-    auth: ['none'],
-    oauth: false,
-    env_keys: [],
+    ...extra,
+  }
+}
+
+export const OFFLINE_PROVIDERS: ProviderInfo[] = [
+  offlineStub('demo', 'Demo (Free)', 'https://api.llm7.io/v1', ['none']),
+  offlineStub('openai', 'OpenAI', 'https://api.openai.com/v1', ['api_key']),
+  offlineStub('anthropic', 'Anthropic', 'https://api.anthropic.com/v1', ['api_key']),
+  offlineStub(
+    'google',
+    'Google AI (Gemini)',
+    'https://generativelanguage.googleapis.com/v1beta/openai',
+    ['api_key'],
+  ),
+  offlineStub('deepseek', 'DeepSeek', 'https://api.deepseek.com/v1', ['api_key']),
+  offlineStub('xai', 'xAI (Grok)', 'https://api.x.ai/v1', ['oauth', 'api_key']),
+  offlineStub('groq', 'Groq', 'https://api.groq.com/openai/v1', ['api_key']),
+  offlineStub('mistral', 'Mistral', 'https://api.mistral.ai/v1', ['api_key']),
+  offlineStub('openrouter', 'OpenRouter', 'https://openrouter.ai/api/v1', ['api_key']),
+  offlineStub('poe', 'Poe', 'https://api.poe.com/v1', ['api_key']),
+  offlineStub('ollama', 'Ollama (local)', 'http://127.0.0.1:11434/v1', ['none'], {
     show_base_url: true,
-    advanced: false,
-    free_tier: 'local',
-    badge: 'Local · Agent',
-    limits_blurb:
-      'Built-in local agent host (llama.cpp) for coding + tools. Manage in Settings → RMB.',
-  },
-  {
-    id: 'custom',
-    name: 'Custom / OpenAI-compatible',
-    base_url: 'http://127.0.0.1:5001/v1',
-    models: [{ id: 'default', name: 'Default' }],
-    default_model: 'default',
-    auth: ['api_key'],
-    oauth: false,
-    env_keys: [],
+  }),
+  offlineStub('llamacpp', 'llama.cpp (local)', 'http://127.0.0.1:8080/v1', ['none'], {
     show_base_url: true,
-    // Always primary (not behind Advanced) — LM Studio / llama.cpp / KoboldCpp
-    // local hosts. KoboldCpp serves the OpenAI API at /v1 (not /api/v1).
-    advanced: false,
-  },
+  }),
+  offlineStub('rmb', 'RMB (local agent)', 'http://127.0.0.1:8787/v1', ['none'], {
+    show_base_url: true,
+  }),
+  offlineStub('custom', 'Custom / OpenAI-compatible', 'http://127.0.0.1:5001/v1', ['api_key'], {
+    show_base_url: true,
+  }),
 ]
 
 export async function listProviders(): Promise<ProviderInfo[]> {
@@ -285,7 +111,7 @@ export async function listProviders(): Promise<ProviderInfo[]> {
   } catch {
     // offline
   }
-  return FALLBACK_PROVIDERS
+  return OFFLINE_PROVIDERS
 }
 
 export async function listFreeProviders(): Promise<FreeProviderOption[]> {
@@ -293,25 +119,9 @@ export async function listFreeProviders(): Promise<FreeProviderOption[]> {
     const res = await apiFetch<{ options: FreeProviderOption[] }>('/providers/free')
     if (res?.options?.length) return res.options
   } catch {
-    // offline — derive from fallback catalog
+    // offline — the stub carries no free-tier metadata; let the caller cope.
   }
-  return FALLBACK_PROVIDERS.filter(
-    (p) => p.free_tier && p.free_tier !== 'none',
-  ).map((p) => ({
-    id: p.id,
-    tier: p.free_tier || 'free_key',
-    title: p.name,
-    blurb: p.limits_blurb || '',
-    badge: p.badge,
-    name: p.name,
-    base_url: p.base_url,
-    auth: p.auth,
-    key_docs_url: p.key_docs_url,
-    limits_blurb: p.limits_blurb,
-    privacy_note: p.privacy_note,
-    default_model: p.default_model,
-    free_tier: p.free_tier,
-  }))
+  return []
 }
 
 export async function detectOllama(): Promise<OllamaDetect> {
@@ -355,6 +165,8 @@ export interface ProviderProbeResult {
   status?: number | null
   latency_ms?: number | null
   models?: number
+  /** Models the probe saw at the endpoint — populates pickers immediately. */
+  model_list?: ProviderModel[]
   error?: string | null
 }
 
