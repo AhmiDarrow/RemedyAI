@@ -717,6 +717,7 @@ export function GroveApp({
                 onStop={stop}
                 ensureSessionId={ensureHomeSession}
                 sessionKey={activeId}
+                stickNonce={stickNonce}
                 onSpecialSend={async (t) => {
                   if (/^i want to /i.test(t)) {
                     return plantGoal(t.replace(/^i want to /i, ''))
