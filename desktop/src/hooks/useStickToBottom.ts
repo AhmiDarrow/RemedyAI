@@ -161,17 +161,25 @@ export function useStickToBottom(options: Options = {}) {
     }
   }, [scrollerEl, attach, detach])
 
-  // Owner sent something (or the caller otherwise asked) → follow again.
-  const firstReattachRef = useRef(true)
-  useEffect(() => {
-    if (firstReattachRef.current) {
-      firstReattachRef.current = false
-      return
-    }
+  /**
+   * Owner sent a prompt (reattachKey changed). Pin *before paint* — a
+   * post-paint effect loses the race: the new bubble grows the scroller,
+   * onScroll sees we are still far from the floor, detaches, and the
+   * delayed pin no-ops. Then the owner is stuck with Jump to latest.
+   */
+  const prevReattachRef = useRef(reattachKey)
+  useLayoutEffect(() => {
     if (reattachKey === undefined) return
+    if (prevReattachRef.current === reattachKey) return
+    prevReattachRef.current = reattachKey
     attach()
-    pinToBottom(false)
-  }, [reattachKey, attach, pinToBottom])
+    const el = scrollerRef.current
+    if (!el) return
+    const max = Math.max(0, el.scrollHeight - el.clientHeight)
+    el.scrollTop = max
+    expectedTopRef.current = el.scrollTop
+    lockUntilRef.current = performance.now() + 280
+  }, [reattachKey, attach])
 
   // New scroller (mount / session switch) starts at the floor.
   useLayoutEffect(() => {
@@ -214,7 +222,15 @@ export function useStickToBottom(options: Options = {}) {
   // look like gestures once content keeps growing underneath it.
   const jumpLatest = useCallback(() => {
     attach()
-    pinToBottom(false)
+    const el = scrollerRef.current
+    if (el) {
+      const max = Math.max(0, el.scrollHeight - el.clientHeight)
+      el.scrollTop = max
+      expectedTopRef.current = el.scrollTop
+      lockUntilRef.current = performance.now() + 280
+    } else {
+      pinToBottom(false)
+    }
   }, [attach, pinToBottom])
 
   const showJump = detached && (followActive || alwaysOfferJump)

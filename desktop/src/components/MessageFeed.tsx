@@ -88,6 +88,12 @@ interface MessageFeedProps {
   projectPath?: string | null
   /** Focused session — close the image viewer on switch so a revoked/stale src cannot linger. */
   sessionId?: string | null
+  /**
+   * Bumps on every composer submit (Enter, send, steer, queue). Forces the
+   * feed to the floor even when the user was reading history — Jump to latest
+   * stays for scroll-up *during* a stream with no new prompt.
+   */
+  stickNonce?: number
 }
 
 /** Initials for avatar: "Alex" → A, "Mary Jane" → MJ */
@@ -653,6 +659,7 @@ export function MessageFeed({
   onLoadOlder,
   projectPath = null,
   sessionId = null,
+  stickNonce = 0,
 }: MessageFeedProps) {
   const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null)
   const openLightbox = useCallback((src: string, alt?: string) => {
@@ -688,7 +695,7 @@ export function MessageFeed({
   } = useStickToBottom({
     followActive: streaming,
     alwaysOfferJump: messages.length > 2 || streaming,
-    reattachKey: lastUserMsgId,
+    reattachKey: `${sessionId ?? ''}:${lastUserMsgId ?? ''}:${stickNonce}`,
     deps: [
       messages.length,
       partialText,

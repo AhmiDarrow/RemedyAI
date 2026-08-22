@@ -9,6 +9,11 @@ const src = readFileSync(
 )
 
 describe('MessageFeed live chrome order', () => {
+  it('re-pins the feed on composer submit, not only Jump to latest', () => {
+    expect(src).toContain('stickNonce')
+    expect(src).toContain('reattachKey:')
+  })
+
   it('renders thinking/answer before live todos and process chips', () => {
     const dock = src.indexOf('className="live-stream-dock"')
     const reply = src.indexOf('id: \'streaming\'', dock)
