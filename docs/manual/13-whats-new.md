@@ -6,7 +6,26 @@ Current series: **v0.30.0** (local builds after that tag keep long jobs going an
 
 ## Contents
 
-- [0.30.0](#0300---grove-voice-life-tasks-and-the-vault) · [0.26.2](#0262---host-in-remedys-hands) · [0.26.1](#0261---build-finishes) · [0.26.0](#0260---windows--linux-desktop) · [0.25.1](#0251---jail-stop-and-tab-isolation) · [0.25.0](#0250---stable-tabs--settings-chrome) · [0.24.0](#0240---host-bridge--first-home) · [0.23.2](#0232---defender-execution-false-positive) · [0.23.1](#0231---first-turn-agency) · [0.23.0](#0230---build-ability--companion) · [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+- [Game dev studio](#game-dev-studio-local-builds-after-0300) · - [0.30.0](#0300---grove-voice-life-tasks-and-the-vault) · [0.26.2](#0262---host-in-remedys-hands) · [0.26.1](#0261---build-finishes) · [0.26.0](#0260---windows--linux-desktop) · [0.25.1](#0251---jail-stop-and-tab-isolation) · [0.25.0](#0250---stable-tabs--settings-chrome) · [0.24.0](#0240---host-bridge--first-home) · [0.23.2](#0232---defender-execution-false-positive) · [0.23.1](#0231---first-turn-agency) · [0.23.0](#0230---build-ability--companion) · [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+
+## Game dev studio (local builds after 0.30.0)
+
+Remedy works game projects like a small studio. She recognises **Godot 4**,
+Phaser/PixiJS, Bevy, Pygame/Arcade and Love2D projects (Unity and Unreal
+are known, not driven), finds the engine from your environment or the
+project folder, verifies every change with the engine itself — headless
+runs, `--check-only` on scripts, scene references checked offline — plays
+the build with screenshots and key presses, lists and runs export presets,
+and keeps a design document and a cut list. Headless engine runs used to
+be mistaken for GUI launches and returned nothing; that is fixed. A new
+set of packs (`game-dev-studio`, `godot-4`, `game-assets`, engine packs,
+`engine-mcp-bridge`) route themselves from what you say. Optional: list a
+Godot MCP server in `config.toml` for live editor control.
+
+Skills she learns are now actually graded by how the turn went; unused
+ones retire after three weeks, and *Allow skill creation* in Settings is
+a real switch. Providers discover models from their endpoints and a saved
+custom endpoint becomes a provider of its own. See [Game dev](26-game-dev.md).
 
 ## 0.30.0 - Grove, voice, life tasks and the Vault
 

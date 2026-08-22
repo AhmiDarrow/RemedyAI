@@ -205,6 +205,7 @@ You → Desktop (chat + Files / Terminal / Browser / Scratch)
 | [Shortcuts](12-reference-shortcuts) | Keyboard |
 | [What’s new](13-whats-new) | Recent changes |
 | [Free providers](15-free-providers) | Free / demo options |
+| [Game dev](26-game-dev) | Godot, web, Bevy, Pygame, Love2D studio |
 
 ---
 
