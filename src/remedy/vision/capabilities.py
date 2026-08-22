@@ -112,6 +112,22 @@ def supports_vision(
     return False
 
 
+def endpoint_vision_flag(provider: str | None, model: str | None) -> bool | None:
+    """What the provider's own endpoint said about image input, if anything.
+
+    OpenRouter / Mistral / xAI / Ollama ``/api/show`` / LM Studio describe
+    modalities; that beats every name heuristic below.
+    """
+    try:
+        from remedy.interfaces.model_discovery import live_known_models
+    except Exception:
+        return None
+    row = live_known_models(provider).get((model or "").strip())
+    if isinstance(row, dict) and isinstance(row.get("vision"), bool):
+        return bool(row["vision"])
+    return None
+
+
 def catalog_vision_flag(provider: str | None, model: str | None) -> bool | None:
     """Look up optional ``vision`` flag from PROVIDER_CATALOG model entries."""
     try:
@@ -150,5 +166,7 @@ def resolve_supports_vision(
     elif vision_cfg.get("force_native") is True:
         override = True
 
-    hint = catalog_vision_flag(provider, model)
+    hint = endpoint_vision_flag(provider, model)
+    if hint is None:
+        hint = catalog_vision_flag(provider, model)
     return supports_vision(provider, model, catalog_hint=hint, config_override=override)

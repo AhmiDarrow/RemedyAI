@@ -167,6 +167,14 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                     models = filtered
                 # else: keep full catalog; live /api/models is still authoritative
 
+            # Ollama: what is actually pulled on this machine (not a curated guess).
+            if pid == "ollama" and ollama.get("available"):
+                names = [str(n) for n in (ollama.get("models") or []) if n]
+                if names:
+                    models = [
+                        {"id": n, "name": n, "provider": "ollama", "source": "endpoint"}
+                        for n in names
+                    ]
             # RMB: inject discovered GGUFs so status-bar model picker can load them
             if pid == "rmb":
                 try:
@@ -300,15 +308,14 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         """Check that a provider answers /models. Does not persist the key."""
         import time as _time
 
-        import aiohttp
-
         from remedy.interfaces.config import (
             PROVIDER_CATALOG,
-            _is_local_url,
-            anthropic_auth_headers,
-            anthropic_models_url,
             infer_key_owner,
             resolve_provider_api_key,
+        )
+        from remedy.interfaces.model_discovery import (
+            discover_models,
+            ollama_base_url_from_env,
         )
 
         pid = str(req.provider or "").strip().lower()
@@ -365,6 +372,7 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                     "status": None,
                     "latency_ms": None,
                     "models": 0,
+                    "model_list": [],
                     "error": (
                         "Refused: won't send the stored API key to a custom URL "
                         "that isn't this provider's own endpoint. Paste the key "
@@ -383,6 +391,7 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                     "status": None,
                     "latency_ms": None,
                     "models": 0,
+                    "model_list": [],
                     "error": (
                         "That is a Claude Code / Max login token, not a Console API key. "
                         "Anthropic does not allow those tokens in Remedy. "
@@ -390,119 +399,83 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                         "or switch provider."
                     ),
                 }
-        if pid == "demo":
-            return {
-                "ok": True,
-                "provider": pid,
-                "base_url": base,
-                "status": 200,
-                "latency_ms": 0,
-                "models": len(list(meta.get("models") or [])),
-                "error": None,
-            }
-        if pid == "ollama":
-            det = detect_ollama()
-            ok = bool(det.get("available"))
+        def _result(
+            *,
+            ok: bool,
+            status: int | None = None,
+            latency_ms: float | None = None,
+            models: list[dict[str, Any]] | None = None,
+            error: str | None = None,
+            base_url: str = "",
+            flavour: str | None = None,
+        ) -> dict[str, Any]:
+            rows = [
+                {"id": str(m.get("id")), "name": str(m.get("name") or m.get("id"))}
+                for m in (models or [])
+                if m.get("id")
+            ]
             return {
                 "ok": ok,
                 "provider": pid,
-                "base_url": det.get("base_url") or base,
-                "status": 200 if ok else None,
-                "latency_ms": None,
-                "models": len(list(det.get("models") or [])),
-                "error": None if ok else "Ollama is not running on this machine.",
-            }
-        if not base:
-            return {
-                "ok": False,
-                "provider": pid,
-                "base_url": "",
-                "status": None,
-                "latency_ms": None,
-                "models": 0,
-                "error": "No base URL for this provider.",
-            }
-        needs_key = pid not in ("rmb", "llamacpp", "custom", "ollama", "demo")
-        if needs_key and (not key or key in ("local", "unused")):
-            return {
-                "ok": False,
-                "provider": pid,
-                "base_url": base,
-                "status": None,
-                "latency_ms": None,
-                "models": 0,
-                "error": "No API key stored. Paste a key and Test, then Save.",
+                "base_url": base_url or base,
+                "status": status,
+                "latency_ms": latency_ms,
+                "models": len(rows),
+                "model_list": rows,
+                "flavour": flavour,
+                "error": error,
             }
 
-        if pid == "anthropic":
-            models_url = anthropic_models_url(base)
-            headers = anthropic_auth_headers(key)
-        else:
-            models_url = base.rstrip("/") + "/models"
-            headers = {}
-            if key and key not in ("local", "unused"):
-                headers["Authorization"] = f"Bearer {key}"
-        verify_ssl = not _is_local_url(base)
-        timeout = aiohttp.ClientTimeout(total=6.0, connect=3.0)
+        if not base:
+            return _result(ok=False, error="No base URL for this provider.")
+        keyless = "none" in (meta.get("auth") or []) or pid in (
+            "rmb", "llamacpp", "custom", "ollama", "demo"
+        )
+        if not keyless and (not key or key in ("local", "unused")):
+            return _result(
+                ok=False, error="No API key stored. Paste a key and Test, then Save."
+            )
+        if pid == "ollama" and not base_from_request:
+            base = ollama_base_url_from_env() or base
+
         t0 = _time.perf_counter()
-        try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(
-                    models_url, headers=headers, ssl=verify_ssl
-                ) as resp:
-                    ms = round((_time.perf_counter() - t0) * 1000.0, 1)
-                    if not resp.ok:
-                        detail = ""
-                        with contextlib.suppress(Exception):
-                            body = await resp.json()
-                            if isinstance(body, dict):
-                                err = body.get("error")
-                                if isinstance(err, dict):
-                                    detail = str(err.get("message") or "")
-                                elif err:
-                                    detail = str(err)
-                        return {
-                            "ok": False,
-                            "provider": pid,
-                            "base_url": base,
-                            "status": int(resp.status),
-                            "latency_ms": ms,
-                            "models": 0,
-                            "error": detail
-                            or f"Provider returned HTTP {resp.status}. Check the key / URL.",
-                        }
-                    payload = await resp.json()
-                    data = payload.get("data", []) if isinstance(payload, dict) else []
-                    n = len(data) if isinstance(data, list) else 0
-                    return {
-                        "ok": True,
-                        "provider": pid,
-                        "base_url": base,
-                        "status": int(resp.status),
-                        "latency_ms": ms,
-                        "models": n,
-                        "error": None,
-                    }
-        except TimeoutError:
-            return {
-                "ok": False,
-                "provider": pid,
-                "base_url": base,
-                "status": None,
-                "latency_ms": None,
-                "models": 0,
-                "error": "Timed out reaching the provider. Check the URL / network.",
-            }
-        except Exception as exc:
-            return {
-                "ok": False,
-                "provider": pid,
-                "base_url": base,
-                "status": None,
-                "latency_ms": None,
-                "models": 0,
-                "error": f"Could not reach provider: {type(exc).__name__}",
-            }
+        disc = await discover_models(base, key, provider_hint=pid, timeout=6.0)
+        ms = round((_time.perf_counter() - t0) * 1000.0, 1)
+        if disc.ok:
+            rows = [m for m in disc.models if m.get("chat", True)]
+            if pid == "demo":
+                # Curated guest allowlist, validated against the gateway.
+                allowed = {str(m.get("id")) for m in (meta.get("models") or [])}
+                rows = [m for m in rows if m.get("id") in allowed] or [
+                    {"id": m["id"], "name": m.get("name")} for m in (meta.get("models") or [])
+                ]
+            return _result(
+                ok=True,
+                status=disc.status or 200,
+                latency_ms=ms,
+                models=rows,
+                base_url=base,
+                flavour=disc.flavour,
+            )
+        err = disc.error or "Provider did not answer."
+        if pid == "ollama" and disc.status is None:
+            err = "Ollama is not running on this machine."
+        elif disc.status is None and "timed out" in err:
+            err = "Timed out reaching the provider. Check the URL / network."
+        elif disc.status is None:
+            err = f"Could not reach provider: {err}"
+        elif disc.status in (401, 403):
+            err = f"Provider rejected the key (HTTP {disc.status}): {err}"
+        else:
+            err = f"Provider returned HTTP {disc.status}: {err}"
+        return _result(
+            ok=False,
+            status=disc.status,
+            latency_ms=ms if disc.status is not None else None,
+            base_url=base,
+            flavour=disc.flavour,
+            error=err,
+        )
 
     @app.get("/api/auth/xai")
     async def xai_auth_status():

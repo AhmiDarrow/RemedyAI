@@ -494,6 +494,10 @@ def infer_provider_from_model(model_id: str) -> str | None:
         return "openai"
     if mid.startswith("gemini") or mid.startswith("models/gemini"):
         return "google"
+    # Open-weight DeepSeek releases (R1 distills, coder) are served by Groq,
+    # Ollama, OpenRouter… — not by DeepSeek's own closed API.
+    if mid.startswith(("deepseek-r1", "deepseek-coder", "deepseek-v2", "deepseek-llm")):
+        return "ollama"
     if mid.startswith("deepseek"):
         return "deepseek"
     if mid.startswith("grok") or mid.startswith("xai/"):
@@ -641,6 +645,46 @@ _LEGACY_MODEL_ALIASES: dict[str, str] = {
 }
 
 
+def _live_models_for(provider: str) -> dict[str, dict[str, Any]]:
+    """Ids the provider's own endpoint listed recently (process-local)."""
+    try:
+        from remedy.interfaces.model_discovery import live_known_models
+
+        return live_known_models(provider)
+    except Exception:  # pragma: no cover - defensive
+        return {}
+
+
+def default_model_for_provider(provider: str | None) -> str:
+    """Best default model id for *provider* without guessing a foreign one.
+
+    Order: a chat model the endpoint actually listed → first curated catalog
+    entry → "" (local hosts with nothing pulled yet). The old behaviour of
+    falling back to ``gpt-4o-mini`` for every provider put an OpenAI id in
+    front of Ollama users.
+    """
+    prov = (provider or "").strip().lower()
+    live = _live_models_for(prov)
+    if live:
+        try:
+            from remedy.interfaces.model_discovery import choose_default
+
+            picked = choose_default(list(live.values()))
+            if picked:
+                return picked
+        except Exception:  # pragma: no cover - defensive
+            pass
+    catalog = PROVIDER_CATALOG.get(prov) or {}
+    models = list(catalog.get("models") or [])
+    if models:
+        return str(models[0]["id"])
+    if prov not in PROVIDER_CATALOG and prov != "custom":
+        # Unknown label: behaves like "custom" (OpenAI-compatible, any id).
+        custom = list((PROVIDER_CATALOG.get("custom") or {}).get("models") or [])
+        return str(custom[0]["id"]) if custom else ""
+    return ""
+
+
 def normalize_llm_settings(
     provider: str | None,
     model: str | None,
@@ -667,14 +711,20 @@ def normalize_llm_settings(
     catalog = PROVIDER_CATALOG.get(prov) or PROVIDER_CATALOG["custom"]
     default_url = str(catalog.get("base_url") or "")
     default_models = list(catalog.get("models") or [])
-    default_model = str(default_models[0]["id"]) if default_models else "gpt-4o-mini"
+    default_model = default_model_for_provider(prov)
 
     url = (base_url or "").strip() or default_url
     mid = (model or "").strip() or default_model
 
-    # Map retired provider model ids before ownership checks.
+    # What the provider's endpoint itself listed is authoritative: such an id
+    # is never aliased away or snapped to the catalog default.
+    live = _live_models_for(prov)
+    live_ok = bool(mid) and mid in live
+
+    # Map retired provider model ids before ownership checks — only when the
+    # endpoint did not just tell us the old id is still served.
     alias = _LEGACY_MODEL_ALIASES.get(mid.lower())
-    if alias:
+    if alias and not live_ok:
         mid = alias
 
     # If URL clearly belongs to another known provider, snap to this provider's URL.
@@ -693,7 +743,9 @@ def normalize_llm_settings(
     _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "poe", "rmb", "llamacpp"})
 
     model_owner = infer_provider_from_model(mid)
-    if model_owner and model_owner != prov and prov not in _FLEXIBLE and prov != "demo":
+    if live_ok and prov != "demo":
+        pass
+    elif model_owner and model_owner != prov and prov not in _FLEXIBLE and prov != "demo":
         mid = default_model
     elif prov == "demo" and default_models:
         known = {m["id"] for m in default_models}
@@ -766,13 +818,20 @@ def validate_provider_model(provider: str | None, model: str | None) -> str:
     _FLEXIBLE = frozenset({"openrouter", "custom", "ollama", "poe", "rmb", "llamacpp"})
     if prov in _FLEXIBLE or prov not in PROVIDER_CATALOG:
         return mid
-    # Apply legacy aliases first
+    # The provider's own endpoint listed it → valid, whatever the catalog says.
+    live = _live_models_for(prov)
+    if mid in live:
+        return mid
+    # Apply legacy aliases only for ids the endpoint did not vouch for.
     mid = _LEGACY_MODEL_ALIASES.get(mid.lower(), mid)
+    if mid in live:
+        return mid
     catalog = PROVIDER_CATALOG.get(prov) or {}
     known = {m["id"] for m in (catalog.get("models") or [])}
     if mid in known or _native_model_id_for_provider(prov, mid):
         return mid
-    sample = ", ".join(sorted(known)[:8]) or "(none)"
+    listed = sorted(live) if live else sorted(known)
+    sample = ", ".join(listed[:8]) or "(none)"
     raise ValueError(
         f"Unknown model {mid!r} for provider {prov!r}. "
         f"Pick a listed model (e.g. {sample})."
@@ -993,7 +1052,7 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
         llm_model=_resolve_str(
             config.get("llm_model"),
             "REMEDY_LLM_MODEL",
-            "gpt-4o-mini",
+            default_model_for_provider(llm_provider),
         ),
         llm_base_url=llm_base_url,
         sleev_enabled=bool(config.get("sleev_enabled", False)),
@@ -1521,42 +1580,14 @@ def public_provider_catalog(config: dict[str, Any] | None = None) -> list[dict[s
 
 
 def detect_ollama(base_url: str | None = None, timeout: float = 1.5) -> dict[str, Any]:
-    """Probe local Ollama (tags API). Returns available flag + model names."""
-    import json
-    import urllib.error
-    import urllib.request
+    """Probe Ollama (tags API). Returns available flag + model names.
 
-    url = (base_url or PROVIDER_CATALOG["ollama"]["base_url"] or "").rstrip("/")
-    # Native tags endpoint (strip /v1 if present)
-    tags_url = url.removesuffix("/v1") + "/api/tags"
-    models: list[str] = []
-    try:
-        req = urllib.request.Request(
-            tags_url,
-            headers={"Accept": "application/json", "User-Agent": "Remedy/detect-ollama"},
-            method="GET",
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = json.loads(resp.read().decode("utf-8") or "{}")
-        for m in body.get("models") or []:
-            name = m.get("name") or m.get("model") or ""
-            if name:
-                # Prefer short name without :latest
-                short = name.removesuffix(":latest")
-                models.append(short)
-        return {
-            "available": True,
-            "base_url": PROVIDER_CATALOG["ollama"]["base_url"],
-            "models": models,
-            "tags_url": tags_url,
-        }
-    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, ValueError):
-        return {
-            "available": False,
-            "base_url": PROVIDER_CATALOG["ollama"]["base_url"],
-            "models": [],
-            "tags_url": tags_url,
-        }
+    Host resolution: explicit arg → ``OLLAMA_HOST`` → catalog default, and the
+    returned ``base_url`` is the one that actually answered.
+    """
+    from remedy.interfaces.model_discovery import detect_ollama_sync
+
+    return detect_ollama_sync(base_url, timeout=timeout)
 
 
 def apply_env_provider_bootstrap(config: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1598,10 +1629,12 @@ def apply_env_provider_bootstrap(config: dict[str, Any] | None = None) -> dict[s
             ollama = detect_ollama()
             if ollama.get("available"):
                 models = ollama.get("models") or []
-                mid = models[0] if models else "llama3.2"
+                # Only what is pulled; never guess a tag that is not installed.
                 cfg["llm_provider"] = "ollama"
-                cfg["llm_model"] = mid
-                cfg["llm_base_url"] = PROVIDER_CATALOG["ollama"]["base_url"]
+                cfg["llm_model"] = models[0] if models else ""
+                cfg["llm_base_url"] = str(
+                    ollama.get("base_url") or PROVIDER_CATALOG["ollama"]["base_url"]
+                )
                 return cfg
 
     # Map other env API keys → provider when still on default.

@@ -29,10 +29,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from remedy.interfaces.model_discovery import DiscoveryResult, looks_like_chat_model
 from remedy.interfaces.routes import catalog as catalog_mod
 from remedy.interfaces.routes.catalog import (
     _demo_model_allowed,
-    _looks_like_media_model,
     register_catalog_routes,
 )
 
@@ -58,7 +58,7 @@ class _FakeResponse:
     def ok(self):
         return 200 <= self.status < 400
 
-    async def json(self):
+    async def json(self, **_kw):
         return self._payload
 
     async def __aenter__(self):
@@ -111,6 +111,12 @@ def http(monkeypatch):
 
         def get(self, url, headers=None, ssl=None):
             fake.requests.append({"url": url, "headers": headers or {}, "ssl": ssl})
+            return fake.respond(url)
+
+        def post(self, url, json=None, headers=None, ssl=None):
+            fake.requests.append(
+                {"url": url, "headers": headers or {}, "ssl": ssl, "json": json}
+            )
             return fake.respond(url)
 
     monkeypatch.setattr(aiohttp, "ClientSession", _Session)
@@ -224,12 +230,12 @@ def test_demo_ignores_catalog_entries_without_an_id():
     ],
 )
 def test_media_only_bots_are_recognised(mid):
-    assert _looks_like_media_model(mid) is True
+    assert looks_like_chat_model(mid) is False
 
 
 @pytest.mark.parametrize("mid", ["claude-opus-5", "gpt-4o", "grok-4", "", "llama3"])
 def test_chat_models_are_not_mistaken_for_media(mid):
-    assert _looks_like_media_model(mid) is False
+    assert looks_like_chat_model(mid) is True
 
 
 # --- /api/commands and /api/agents -------------------------------------------
@@ -471,17 +477,47 @@ def test_live_models_can_be_switched_off_by_env(build, http, monkeypatch, off):
     assert http.requests == []
 
 
-def test_demo_is_never_probed_live(build, http):
+def test_demo_is_probed_without_a_bearer_and_only_curated_ids_surface(build, http):
+    """The guest gateway lists image/video/paid ids; we validate the curated
+    allowlist against it instead of dumping it into the picker."""
+    http.on(
+        "llm7.io",
+        payload={
+            "data": [
+                {"id": "codestral-latest"},
+                {"id": "gpt-oss:20b"},
+                {"id": "flux-schnell"},
+                {"id": "claude-opus-5"},
+            ]
+        },
+    )
     client = build(runtime=Runtime("demo", "codestral-latest", "", "unused"))
     body = models(client)
-    assert http.requests == []
+    assert http.urls == ["https://api.llm7.io/v1/models"]
+    assert "Authorization" not in http.requests[0]["headers"]
     assert body["provider"] == "demo"
+    ids = [m["id"] for m in body["models"]]
+    assert "flux-schnell" not in ids and "claude-opus-5" not in ids
+    # gemini-3.1-flash-lite is curated but the gateway stopped serving it.
+    assert ids == ["codestral-latest", "gpt-oss:20b"]
+    assert body["discovery"]["ok"] is True
+
+
+def test_demo_falls_back_to_the_curated_list_when_the_gateway_is_down(build, http):
+    http.on("llm7.io", error=OSError("down"))
+    client = build(runtime=Runtime("demo", "codestral-latest", "", "unused"))
+    body = models(client)
+    ids = [m["id"] for m in body["models"]]
+    assert "codestral-latest" in ids and "gemini-3.1-flash-lite" in ids
+    assert body["discovery"]["ok"] is False
+    assert body["default"] == "codestral-latest"
 
 
 def test_a_local_endpoint_is_probed_without_a_key_and_without_ssl_checks(build, http):
     client = build(runtime=Runtime("custom", "", "http://127.0.0.1:5001/v1", ""))
     models(client)
-    assert http.urls == ["http://127.0.0.1:5001/v1/models"]
+    # A local custom host is also asked for LM Studio's richer listing.
+    assert http.urls[0] == "http://127.0.0.1:5001/v1/models"
     assert http.requests[0]["ssl"] is False
     assert "Authorization" not in http.requests[0]["headers"]
 
@@ -505,7 +541,7 @@ def test_anthropic_is_probed_with_its_own_header_not_a_bearer_token(build, http)
     )
     client = build(runtime=Runtime("anthropic", "claude-opus-5", None, "sk-ant"))
     body = models(client)
-    assert http.urls == ["https://api.anthropic.com/v1/models"]
+    assert http.urls == ["https://api.anthropic.com/v1/models?limit=1000"]
     assert http.requests[0]["headers"]["x-api-key"] == "sk-ant"
     assert "Authorization" not in http.requests[0]["headers"]
     assert "claude-x" in ids(body)
@@ -586,6 +622,31 @@ def test_a_foreign_model_id_is_dropped_from_a_closed_provider(build, http):
     assert "deepseek-r2" in got  # native prefix is trusted
 
 
+def test_open_weight_ids_served_by_a_closed_provider_are_kept(build, http):
+    """Groq/Google really serve llama/qwen/gemma ids; a prefix guess must not
+    throw away what the provider's own endpoint returned."""
+    http.on(
+        "/models",
+        payload={
+            "data": [
+                {"id": "qwen-qwq-32b"},
+                {"id": "gemma2-9b-it"},
+                {"id": "deepseek-r1-distill-llama-70b"},
+                {"id": "llama-3.3-70b-versatile"},
+            ]
+        },
+    )
+    client = build(runtime=Runtime("groq", "llama-3.3-70b-versatile", None, "sk-real"))
+    got = ids(models(client))
+    for mid in (
+        "qwen-qwq-32b",
+        "gemma2-9b-it",
+        "deepseek-r1-distill-llama-70b",
+        "llama-3.3-70b-versatile",
+    ):
+        assert mid in got
+
+
 def test_a_multi_vendor_gateway_keeps_foreign_ids(build, http):
     http.on(
         "/models",
@@ -633,8 +694,8 @@ def test_an_advertised_context_window_is_cached(build, http, monkeypatch, field)
     http.on("/models", payload={"data": [{"id": "big", field: 32768}]})
     client = build(runtime=Runtime("custom", "", "https://box.test/v1", "sk-real"))
     entry = next(m for m in models(client)["models"] if m["id"] == "big")
-    # The merge step rebuilds each row, so the window is cached but not returned.
-    assert "context_window" not in entry
+    # Returned to the picker *and* cached for budgeting.
+    assert entry["context_window"] == 32768
     assert seen == [("https://box.test/v1", "big", 32768)]
 
 
@@ -678,8 +739,8 @@ def test_a_successful_probe_survives_well_past_a_minute(build, http):
     client = build(runtime=Runtime("custom", "", "https://box.test/v1", "sk-real"))
     models(client)
     cache = client.app.state._model_discovery_cache
-    for key, (_, lst, ok) in list(cache.items()):
-        cache[key] = (time.time() - 100.0, lst, ok)
+    for key, (_, disc) in list(cache.items()):
+        cache[key] = (time.time() - 100.0, disc)
     models(client)
     assert len(http.requests) == 1
 
@@ -690,21 +751,39 @@ def test_an_empty_probe_is_retried_soon_rather_than_locked_in(build, http):
     client = build(runtime=Runtime("custom", "", "https://box.test/v1", "sk-real"))
     models(client)
     cache = client.app.state._model_discovery_cache
-    for key, (_, lst, ok) in list(cache.items()):
-        cache[key] = (time.time() - 30.0, lst, ok)
+    for key, (_, disc) in list(cache.items()):
+        cache[key] = (time.time() - 30.0, disc)
+    first_round = len(http.requests)
     models(client)
-    assert len(http.requests) == 2
+    # Probed again (every flavour tried again), not served from the cache.
+    assert len(http.requests) == 2 * first_round
 
 
-def test_a_legacy_two_field_cache_entry_is_still_honoured(build, http):
-    """Older entries were ``(when, list)`` with no ok flag -- must not IndexError."""
+def test_a_cached_discovery_result_is_served_without_a_probe(build, http):
     client = build(runtime=Runtime("custom", "", "https://box.test/v1", "sk-real"))
+    disc = DiscoveryResult(
+        attempted=True, ok=True, status=200, url="https://box.test/v1/models",
+        flavour="openai", models=[{"id": "cached-one", "name": "cached-one"}],
+    )
     client.app.state._model_discovery_cache = {
-        "custom|https://box.test/v1|True": (time.time(), [{"id": "cached-one"}])
+        "custom|https://box.test/v1|7:real": (time.time(), disc)
     }
     body = models(client)
     assert "cached-one" in ids(body)
+    assert body["discovery"]["cached"] is True
     assert http.requests == []
+
+
+def test_a_stale_shaped_cache_entry_is_ignored_not_crashed_on(build, http):
+    """Entries from an older process layout must simply trigger a fresh probe."""
+    http.on("/models", payload={"data": [{"id": "fresh"}]})
+    client = build(runtime=Runtime("custom", "", "https://box.test/v1", "sk-real"))
+    client.app.state._model_discovery_cache = {
+        "custom|https://box.test/v1|7:real": (time.time(), [{"id": "cached-one"}])
+    }
+    body = models(client)
+    assert "fresh" in ids(body)
+    assert len(http.requests) >= 1
 
 
 # --- /api/models: single-flight ----------------------------------------------
@@ -729,7 +808,12 @@ def test_a_probe_already_in_flight_is_joined_rather_than_repeated(build, http):
     """Boot and the status bar ask at once; one HTTP call must serve both."""
     client = build(runtime=Runtime("custom", "", "https://box.test/v1", "sk-real"))
     client.app.state._model_discovery_inflight = {
-        "custom|https://box.test/v1|True": _Ready([{"id": "shared-probe"}])
+        "custom|https://box.test/v1|7:real": _Ready(
+            DiscoveryResult(
+                attempted=True, ok=True, status=200, url="x", flavour="openai",
+                models=[{"id": "shared-probe", "name": "shared-probe"}],
+            )
+        )
     }
     body = models(client)
     assert "shared-probe" in ids(body)
@@ -739,7 +823,7 @@ def test_a_probe_already_in_flight_is_joined_rather_than_repeated(build, http):
 def test_a_failed_in_flight_probe_degrades_to_the_catalog(build, http):
     client = build(runtime=Runtime("custom", "", "https://box.test/v1", "sk-real"))
     client.app.state._model_discovery_inflight = {
-        "custom|https://box.test/v1|True": _Ready(error=RuntimeError("peer gave up"))
+        "custom|https://box.test/v1|7:real": _Ready(error=RuntimeError("peer gave up"))
     }
     body = models(client)
     assert body["models"]

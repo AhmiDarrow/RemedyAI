@@ -24,7 +24,7 @@ from remedy.home import default_home
 logger = logging.getLogger(__name__)
 
 _LOCAL_PROVIDER_IDS = frozenset(
-    {"rmb", "ollama", "llamacpp", "demo", "kobold", "lmstudio", "local"}
+    {"rmb", "ollama", "llamacpp", "kobold", "lmstudio", "local"}
 )
 
 # Short TTL cache for expensive OS probes (auto-refresh every ~8s in UI).

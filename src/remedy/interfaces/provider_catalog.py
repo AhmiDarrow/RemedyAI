@@ -33,10 +33,12 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
         ),
         "privacy_note": "Chat is sent to a free third-party API (not Remedy cloud). Prefer Ollama for private local use.",
         "key_docs_url": "https://llm7.io/",
-        # Curated guest-chat allowlist only. Never merge live /models (that dumps
-        # image/video ids, promo names, and paid-key models like deepseek-*).
-        # live_models: False → catalog.py skips endpoint discovery for demo.
-        "live_models": False,
+        # Curated guest-chat allowlist. The gateway's /models is probed to
+        # *validate* these ids (an id it stopped serving is dropped), never to
+        # dump its image/video/paid-key ids into the picker.
+        # llm7 guest traffic is limited to ~1 request/second (HTTP 429 with
+        # retry_after otherwise); consecutive agent rounds are paced to this.
+        "min_request_interval_s": 1.1,
         "models": [
             {
                 "id": "codestral-latest",

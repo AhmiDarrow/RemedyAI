@@ -188,6 +188,8 @@ class Turn:
     raw_lines: list[bytes] | None = None
     content_type: str | None = None
     model: str = DEFAULT_MODEL
+    #: Extra response headers (e.g. ``Retry-After`` on a 429).
+    headers: dict[str, str] | None = None
 
     @property
     def is_error(self) -> bool:
@@ -293,6 +295,7 @@ class Turn:
                 status=self.status,
                 text_body=self.error_body,
                 content_type=self.content_type or JSON_CONTENT_TYPE,
+                headers=self.headers,
             )
         if stream:
             return FakeResponse(
@@ -396,9 +399,14 @@ def tools_turn(
     return Turn(text=text, tool_calls=built, chunk_size=chunk_size)
 
 
-def error_turn(status: int = 500, body: str = "upstream exploded") -> Turn:
+def error_turn(
+    status: int = 500,
+    body: str = "upstream exploded",
+    *,
+    headers: dict[str, str] | None = None,
+) -> Turn:
     """A non-200 provider response. The loop must surface it, never swallow it."""
-    return Turn(status=status, error_body=body)
+    return Turn(status=status, error_body=body, headers=headers)
 
 
 def empty_turn(*, finish_reason: str = "stop") -> Turn:
@@ -459,9 +467,10 @@ class FakeResponse:
         payload: dict[str, Any] | None = None,
         text_body: str = "",
         content_type: str = SSE_CONTENT_TYPE,
+        headers: dict[str, str] | None = None,
     ) -> None:
         self.status = status
-        self.headers = {"Content-Type": content_type}
+        self.headers = {"Content-Type": content_type, **(headers or {})}
         self.content = _LineStream(lines or [])
         self._payload = payload if payload is not None else {}
         self._text = text_body
