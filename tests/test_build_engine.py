@@ -406,3 +406,39 @@ def test_force_tools_for_build():
         _build_turn=None,
     )
     assert should_force_tools_for_build(rt2, "build a web scraper") is True
+
+
+# --- game engines -------------------------------------------------------------
+
+
+def test_game_dev_requests_enter_the_build_loop():
+    for text in (
+        "make a tiny platformer in godot",
+        "write the player controller in gdscript",
+        "get the vertical slice playable",
+        "add a tileset for the cave level",
+    ):
+        assert looks_like_build_request(text), text
+
+
+def test_engine_verification_commands_are_recognised():
+    from remedy.core.build_engine import _VERIFY_CMD_RE
+
+    for cmd in (
+        r".\Godot_v4.3_console.exe --headless --path . --quit-after 1",
+        "godot4 --headless --check-only -s player.gd",
+        r".\Godot.exe --headless --export-release Windows out/game.exe",
+        "luac -p main.lua",
+        "busted spec",
+        "npm run build",
+    ):
+        assert _VERIFY_CMD_RE.search(cmd), cmd
+    for cmd in ("cat main.gd", "godot --version", r".\Godot.exe --path .", "love ."):
+        assert not _VERIFY_CMD_RE.search(cmd), cmd
+
+
+def test_engine_source_writes_invalidate_a_green_verify():
+    from remedy.core.build_engine import _SOURCE_WRITE_SUFFIXES
+
+    for suf in (".gd", ".tscn", ".tres", ".gdshader", ".gdextension", ".lua"):
+        assert suf in _SOURCE_WRITE_SUFFIXES, suf
