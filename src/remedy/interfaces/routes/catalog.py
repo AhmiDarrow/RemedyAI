@@ -7,7 +7,6 @@ import time
 from contextlib import suppress
 from pathlib import Path
 
-import aiohttp
 import yaml
 from fastapi import FastAPI, HTTPException
 
@@ -26,6 +25,12 @@ from remedy.interfaces.config import (
     _is_local_url,
     catalog_models_for_provider,
     normalize_llm_settings,
+)
+from remedy.interfaces.model_discovery import (
+    DiscoveryResult,
+    choose_default,
+    discover_models,
+    ollama_base_url_from_env,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,33 +65,6 @@ def _demo_model_allowed(mid: str, catalog: list[dict]) -> bool:
     return not any(s in low for s in _DEMO_BLOCK_SUBSTR)
 
 
-def _looks_like_media_model(mid: str) -> bool:
-    """True for image/video/audio-only bot ids (keep chat pickers clean)."""
-    low = (mid or "").lower()
-    return any(
-        s in low
-        for s in (
-            "imagine-image",
-            "imagine-video",
-            "gpt-image",
-            "flux",
-            "dall-e",
-            "dalle",
-            "stable-diffusion",
-            "sdxl",
-            "kling",
-            "seedance",
-            "veo",
-            "sora",
-            "runway",
-            "tts",
-            "whisper",
-            "embedding",
-            "moderation",
-        )
-    )
-
-
 def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     """Register routes (closes over runtime/gateway/memory)."""
     # -- commands (slash palette) --------------------------------------------
@@ -103,17 +81,30 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
 
     # -- models & agents -----------------------------------------------------
     @app.get("/api/models")
-    async def list_models(provider: str | None = None):
+    async def list_models(
+        provider: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ):
         """List models for a provider (default: currently configured).
 
         Query ``?provider=deepseek`` (etc.) discovers against that provider's
         base_url + stored key without changing the active runtime selection.
-        Live GET {base}/models is preferred; curated catalog is fallback only.
+        ``?base_url=`` / ``?api_key=`` are unsaved overrides so the Settings
+        form can list models before Save. Live discovery is the source of
+        truth; the curated catalog is fallback only, and ``discovery`` in the
+        response says what was tried and why it fell back.
         """
         from remedy.interfaces.config import (
+            _CLOSED_PROVIDERS,
             PROVIDER_CATALOG,
+            _native_model_id_for_provider,
+            infer_provider_from_model,
             resolve_provider_api_key,
         )
+
+        override_url = (base_url or "").strip()
+        override_key = (api_key or "").strip()
 
         cfg = load_config()
         active_provider = (
@@ -141,6 +132,13 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             configured_provider = req_provider
             meta = PROVIDER_CATALOG.get(req_provider) or {}
             base_url = str(meta.get("base_url") or "")
+            if req_provider == "ollama":
+                base_url = ollama_base_url_from_env() or base_url
+            # The saved URL for the active provider beats the catalog default
+            # (custom Ollama host, proxy) — otherwise the picker probes one
+            # host while chat talks to another.
+            if req_provider == str(active_provider or "").lower() and active_url:
+                base_url = str(active_url)
             last_by = cfg.get("last_model_by_provider") or {}
             if isinstance(last_by, dict) and last_by.get(req_provider):
                 configured_id = str(last_by.get(req_provider) or "")
@@ -168,6 +166,9 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                         resolve_provider_api_key(cfg, configured_provider) or ""
                     )
 
+        # Whether the id came from config/runtime (a real selection) rather
+        # than from normalization filling a blank with a catalog placeholder.
+        explicit_id = bool(configured_id)
         # Soft-normalize for closed providers only when shaping default id display
         # — never persist from GET.
         _np, _nm, _nu = normalize_llm_settings(configured_provider, configured_id, base_url)
@@ -179,11 +180,19 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             configured_id = _nm
 
         catalog = catalog_models_for_provider(configured_provider)
+        catalog_meta = PROVIDER_CATALOG.get(configured_provider) or {}
+
+        # Unsaved overrides from the Settings form (list before Save).
+        if override_url:
+            base_url = override_url
+        if override_key:
+            api_key = override_key
 
         # Discovery cache (process-local).
         # Success TTL is long (lists rarely change). Empty/failed probes use a short
         # TTL so a boot-time timeout does not lock every provider to curated stubs.
-        cache_key = f"{configured_provider}|{base_url}|{bool(api_key)}"
+        key_sig = f"{len(api_key)}:{api_key[-4:]}" if api_key else "-"
+        cache_key = f"{configured_provider}|{base_url}|{key_sig}"
         cache = getattr(app.state, "_model_discovery_cache", None)
         if cache is None:
             app.state._model_discovery_cache = {}
@@ -193,327 +202,186 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             app.state._model_discovery_inflight = {}
             inflight = app.state._model_discovery_inflight
         now = time.time()
-        cached = cache.get(cache_key)
-        discovered: list[dict] = []
-        from_cache = False
-        if cached:
-            cached_at, cached_list, cached_ok = cached[0], cached[1], (
-                cached[2] if len(cached) > 2 else bool(cached[1])
-            )
-            ttl = 180.0 if cached_ok else 12.0
-            if (now - cached_at) < ttl:
-                from_cache = True
-                discovered = list(cached_list)
 
-        verify_ssl = not _is_local_url(base_url)
-
-        # Live GET {base_url}/models is the source of truth for OpenAI-compatible
-        # providers (DeepSeek, xAI, OpenAI, Groq, Poe, …). Curated catalogs are
-        # fallback only when discovery fails or returns empty.
-        #
+        # Live discovery is the source of truth; curated catalog is fallback.
         # Opt out: REMEDY_LIVE_MODELS=0. Force on: REMEDY_LIVE_MODELS=1.
         live_env = str(os.environ.get("REMEDY_LIVE_MODELS", "")).strip().lower()
         live_off = live_env in ("0", "false", "no", "off")
         live_force = live_env in ("1", "true", "yes", "on")
-        # Anthropic chat is Messages API; model *list* is GET /v1/models
-        # with x-api-key (handled separately). Other providers use OpenAI /models.
-        openai_compat = configured_provider != "anthropic"
-        # Demo uses a public gateway whose /models lists image/video, promo, and
-        # paid-key models that fail with the guest dummy key — never auto-merge.
-        demo_live_blocked = configured_provider == "demo" and not live_force
-        want_live = (
-            (not live_off)
-            and (not demo_live_blocked)
-            and (
-                live_force
-                or openai_compat
-                or configured_provider == "anthropic"
-                or _is_local_url(base_url)
-                or configured_provider in ("ollama", "openrouter", "custom", "poe")
-            )
+        keyless = "none" in (catalog_meta.get("auth") or []) or configured_provider in (
+            "ollama", "rmb", "llamacpp", "demo"
         )
+        real_key = bool(api_key) and api_key not in ("local", "unused", "none")
         # Skip remote discovery without a key (would 401 and burn the timeout).
-        # Demo: dummy "unused" key would otherwise enable full gateway dump.
-        can_live = bool(base_url) and (not demo_live_blocked) and (
-            configured_provider == "ollama"
-            or _is_local_url(base_url)
-            or (api_key and api_key != "local" and api_key != "unused")
-            or live_force
+        can_live = bool(base_url) and (
+            live_force or keyless or _is_local_url(base_url) or real_key
         )
 
-        async def _discover_openai_compat() -> list[dict]:
-            """GET {base}/models once; empty list means soft-fail (use catalog)."""
-            found: list[dict] = []
-            models_url = base_url.rstrip("/") + "/models"
-            headers: dict[str, str] = {}
-            if api_key and api_key != "local":
-                headers["Authorization"] = f"Bearer {api_key}"
-            # 4.5s: boot piles several discoveries; 1.8s timed out under load and
-            # then cached empty results → "stuck on curated DeepSeek stubs".
-            timeout = aiohttp.ClientTimeout(total=4.5, connect=2.5)
-            try:
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.get(
-                        models_url, headers=headers, ssl=verify_ssl
-                    ) as resp:
-                        if not resp.ok:
-                            logger.info(
-                                "Model discovery HTTP %s for %s",
-                                resp.status,
-                                models_url,
-                            )
-                            return found
-                        body = await resp.json()
-                        for m in body.get("data", []) or []:
-                            mid = m.get("id", m.get("name", ""))
-                            if not mid:
-                                continue
-                            entry = {
-                                "id": mid,
-                                "name": mid,
-                                "provider": configured_provider,
-                                "default": False,
-                                "source": "endpoint",
-                            }
-                            # RMB / local hosts advertise real n_ctx — cache for
-                            # Memory Harness + local max_tokens budgeting.
-                            ctx = (
-                                m.get("context_window")
-                                or m.get("context_length")
-                                or m.get("max_model_len")
-                                or m.get("n_ctx")
-                            )
-                            if ctx is None and isinstance(m.get("meta"), dict):
-                                ctx = m["meta"].get("context_window")
-                            if ctx is not None:
-                                try:
-                                    ctx_i = int(ctx)
-                                    entry["context_window"] = ctx_i
-                                    from remedy.nanoswarm.token_nanobot import (
-                                        cache_context_window,
-                                    )
+        disc = DiscoveryResult(
+            attempted=False, url=base_url, error="no key" if base_url else "no base URL"
+        )
+        if not live_off and can_live:
+            cached = cache.get(cache_key)
+            if cached and isinstance(cached[1], DiscoveryResult):
+                ttl = 180.0 if cached[1].ok else 12.0
+                if (now - cached[0]) < ttl:
+                    disc = DiscoveryResult(**{**cached[1].__dict__})
+                    disc.models = [dict(r) for r in cached[1].models]
+                    disc.loaded = list(cached[1].loaded)
+                    disc.cached = True
+            if not disc.cached:
+                import asyncio
 
-                                    cache_context_window(base_url, mid, ctx_i)
-                                except (TypeError, ValueError):
-                                    pass
-                            found.append(entry)
-            except Exception as exc:
-                logger.info(
-                    "Model discovery failed for %s (%s): %s: %s",
-                    configured_provider,
-                    models_url,
-                    type(exc).__name__,
-                    exc or repr(exc),
-                )
-            return found
-
-        async def _discover_anthropic() -> list[dict]:
-            from remedy.interfaces.config import (
-                anthropic_auth_headers,
-                anthropic_models_url,
-                parse_anthropic_models_payload,
-            )
-
-            models_url = anthropic_models_url(base_url)
-            headers = anthropic_auth_headers(api_key)
-            timeout = aiohttp.ClientTimeout(total=6.0, connect=3.0)
-            try:
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.get(
-                        models_url, headers=headers, ssl=verify_ssl
-                    ) as resp:
-                        if not resp.ok:
-                            logger.info(
-                                "Anthropic model discovery HTTP %s for %s",
-                                resp.status,
-                                models_url,
-                            )
-                            return []
-                        body = await resp.json()
-                        return parse_anthropic_models_payload(body)
-            except Exception as exc:
-                logger.info(
-                    "Anthropic model discovery failed (%s): %s: %s",
-                    models_url,
-                    type(exc).__name__,
-                    exc or repr(exc),
-                )
-                return []
-
-        # OpenAI-compatible /models (DeepSeek, xAI, OpenAI, Ollama /v1, OpenRouter, Poe, …)
-        if (
-            not from_cache
-            and want_live
-            and can_live
-            and openai_compat
-            and base_url
-        ):
-            # Single-flight: parallel status-bar/boot fetches share one probe.
-            import asyncio
-
-            existing = inflight.get(cache_key)
-            if existing is not None:
-                try:
-                    discovered = list(await existing)
-                except Exception:
-                    discovered = []
-            else:
-                loop = asyncio.get_event_loop()
-                fut: asyncio.Future = loop.create_future()
-                inflight[cache_key] = fut
-                try:
-                    result = await _discover_openai_compat()
-                    if not fut.done():
-                        fut.set_result(result)
-                    discovered = list(result)
-                except Exception as exc:
-                    if not fut.done():
-                        fut.set_result([])
-                    discovered = []
+                existing = inflight.get(cache_key)
+                if existing is not None:
+                    try:
+                        disc = await existing
+                    except Exception:
+                        disc = DiscoveryResult(
+                            attempted=True, url=base_url, error="discovery failed"
+                        )
+                else:
+                    loop = asyncio.get_event_loop()
+                    fut: asyncio.Future = loop.create_future()
+                    inflight[cache_key] = fut
+                    try:
+                        disc = await discover_models(
+                            base_url, api_key, provider_hint=configured_provider
+                        )
+                    except Exception as exc:  # pragma: no cover - never raises
+                        disc = DiscoveryResult(
+                            attempted=True, url=base_url, error=f"{type(exc).__name__}: {exc}"
+                        )
+                    finally:
+                        if not fut.done():
+                            fut.set_result(disc)
+                        inflight.pop(cache_key, None)
+                    cache[cache_key] = (now, disc)
+                if not disc.ok:
                     logger.info(
-                        "Model discovery inflight error for %s: %s: %s",
+                        "Model discovery failed for %s (%s): %s %s",
                         configured_provider,
-                        type(exc).__name__,
-                        exc or repr(exc),
+                        disc.url,
+                        disc.status or "",
+                        disc.error or "",
                     )
-                finally:
-                    inflight.pop(cache_key, None)
 
-        if (
-            not from_cache
-            and want_live
-            and can_live
-            and configured_provider == "anthropic"
-            and api_key
-        ):
-            import asyncio
+        discovered: list[dict] = []
+        if disc.ok:
+            for r in disc.models:
+                row = dict(r)
+                row["provider"] = configured_provider
+                row["default"] = False
+                discovered.append(row)
+                ctx = row.get("context_window")
+                if isinstance(ctx, int) and ctx > 0:
+                    with suppress(Exception):
+                        from remedy.nanoswarm.token_nanobot import cache_context_window
 
-            existing = inflight.get(cache_key)
-            if existing is not None:
-                try:
-                    discovered = list(await existing)
-                except Exception:
-                    discovered = []
-            else:
-                loop = asyncio.get_event_loop()
-                fut = loop.create_future()
-                inflight[cache_key] = fut
-                try:
-                    result = await _discover_anthropic()
-                    if not fut.done():
-                        fut.set_result(result)
-                    discovered = list(result)
-                except Exception as exc:
-                    if not fut.done():
-                        fut.set_result([])
-                    discovered = []
-                    logger.info(
-                        "Anthropic discovery inflight error: %s: %s",
-                        type(exc).__name__,
-                        exc or repr(exc),
-                    )
-                finally:
-                    inflight.pop(cache_key, None)
+                        cache_context_window(base_url, str(row["id"]), ctx)
 
-        # Ollama native tags API
-        if not from_cache and (configured_provider == "ollama" or "11434" in (base_url or "")):
-            try:
-                ollama_url = base_url.rstrip("/").removesuffix("/v1") + "/api/tags"
-                async with aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=3.0)
-                ) as session:
-                    async with session.get(ollama_url) as resp:
-                        if resp.ok:
-                            body = await resp.json()
-                            for m in body.get("models", []):
-                                mid = m.get("name", "")
-                                if not mid:
-                                    continue
-                                name = mid.rstrip(":latest") if mid.endswith(":latest") else mid
-                                if not any(d["id"] == name for d in discovered):
-                                    discovered.append(
-                                        {
-                                            "id": name,
-                                            "name": name,
-                                            "provider": "ollama",
-                                            "default": False,
-                                            "source": "endpoint",
-                                        }
-                                    )
-            except Exception as exc:
-                logger.debug("Ollama discovery failed: %s", exc)
-
-        if not from_cache:
-            # Cache successes long; empty probes short so we retry soon.
-            ok = bool(discovered)
-            cache[cache_key] = (now, list(discovered), ok)
-
-        # Merge: **live endpoint first**, then curated catalog as fallback/enrichment.
-        # Demo: catalog-only allowlist (ignore gateway dump).
-        if configured_provider == "demo":
-            discovered = []
+        # Merge. Live endpoint rows win (catalog names/flags enrich them). The
+        # curated catalog is used only when discovery did not succeed — a row the
+        # provider's own endpoint no longer lists is most likely retired.
+        catalog_by_id = {str(c.get("id")): c for c in catalog if c.get("id")}
+        catalog_flags = {
+            str(m.get("id")): m
+            for m in (catalog_meta.get("models") or [])
+            if isinstance(m, dict) and m.get("id")
+        }
         seen: set[str] = set()
         merged: list[dict] = []
-        # Prefer friendly catalog names when id matches a live discovery.
-        catalog_names = {
-            str(c.get("id")): str(c.get("name") or c.get("id"))
-            for c in catalog
-            if c.get("id")
-        }
-        for m in discovered + catalog:
-            mid = str(m.get("id") or "")
-            if not mid or mid in seen:
-                continue
-            # On closed providers, drop discovered ids that clearly belong elsewhere
-            # (e.g. Claude id on DeepSeek). Trust ids that start with native prefixes.
-            if configured_provider not in ("openrouter", "custom", "ollama", "demo", "poe"):
-                from remedy.interfaces.config import (
-                    _native_model_id_for_provider,
-                    infer_provider_from_model,
-                )
-
-                owner = infer_provider_from_model(mid)
-                if (
-                    owner
-                    and owner != configured_provider
-                    and not _native_model_id_for_provider(configured_provider, mid)
-                ):
+        if configured_provider == "demo":
+            # Demo: curated allowlist, validated against the gateway when reachable.
+            live_ids = {str(r["id"]) for r in discovered}
+            for c in catalog:
+                mid = str(c.get("id") or "")
+                if not mid or not _demo_model_allowed(mid, catalog):
                     continue
-            # Demo: never list image/video/embedding or non-allowlisted gateway junk
-            if configured_provider == "demo" and not _demo_model_allowed(mid, catalog):
-                continue
-            # Soft-hide pure media bots on multi-model gateways (Poe/xAI imagine)
-            if configured_provider in ("poe", "xai", "openrouter") and _looks_like_media_model(
-                mid
-            ):
-                continue
-            seen.add(mid)
-            display = catalog_names.get(mid) or m.get("name") or mid
-            merged.append(
-                {
+                if disc.ok and live_ids and mid not in live_ids:
+                    logger.info("Demo model %s no longer served by the gateway", mid)
+                    continue
+                seen.add(mid)
+                merged.append(
+                    {**c, "default": False, "source": "endpoint" if disc.ok else "catalog"}
+                )
+            if not merged:
+                merged = [{**c, "default": False, "source": "catalog"} for c in catalog]
+        else:
+            rows = discovered if disc.ok else []
+            for m in rows:
+                mid = str(m.get("id") or "")
+                if not mid or mid in seen:
+                    continue
+                # Endpoint said it is not a chat model (embeddings, tts, image…)
+                # or the id plainly looks like one when the host says nothing.
+                if not m.get("chat", True):
+                    continue
+                # A closed vendor's list will not carry another closed vendor's
+                # ids (a Claude id on DeepSeek means a misconfigured proxy and
+                # would 404 on the first chat). Open-weight families (llama,
+                # qwen, gemma…) are served by Groq/Google for real — keep them.
+                if configured_provider in _CLOSED_PROVIDERS:
+                    owner = infer_provider_from_model(mid)
+                    if (
+                        owner
+                        and owner != configured_provider
+                        and owner in _CLOSED_PROVIDERS
+                        and not _native_model_id_for_provider(configured_provider, mid)
+                    ):
+                        continue
+                seen.add(mid)
+                cat = catalog_by_id.get(mid) or {}
+                flags = catalog_flags.get(mid) or {}
+                row = {
+                    **m,
                     "id": mid,
-                    "name": display,
+                    "name": str(cat.get("name") or m.get("name") or mid),
                     "provider": configured_provider,
                     "default": False,
-                    "source": m.get("source") or ("catalog" if mid in catalog_names else "endpoint"),
+                    "source": "endpoint",
                 }
-            )
+                if "vision" not in row and "vision" in flags:
+                    row["vision"] = bool(flags.get("vision"))
+                merged.append(row)
+            if not merged:
+                for c in catalog:
+                    mid = str(c.get("id") or "")
+                    if not mid or mid in seen:
+                        continue
+                    seen.add(mid)
+                    flags = catalog_flags.get(mid) or {}
+                    row = {**c, "default": False, "source": "catalog"}
+                    if "vision" in flags:
+                        row["vision"] = bool(flags.get("vision"))
+                    merged.append(row)
 
         if not merged:
-            merged = catalog_models_for_provider(configured_provider) or [
+            merged = [
                 {
                     "id": configured_id or "default",
                     "name": configured_id or "default",
                     "provider": configured_provider,
                     "default": True,
+                    "source": "config",
                 }
             ]
 
-        if configured_id and not any(m["id"] == configured_id for m in merged):
-            # Demo: do not surface a leftover foreign id (e.g. deepseek-*) as the selection.
-            if configured_provider != "demo" or _demo_model_allowed(
-                configured_id, catalog
-            ):
+        ids = {str(m["id"]) for m in merged}
+        flexible = configured_provider in (
+            "openrouter", "custom", "ollama", "poe", "rmb", "llamacpp"
+        )
+        if configured_id and configured_id not in ids:
+            # Keep the saved selection visible when we could not verify it, or
+            # when the provider accepts arbitrary ids (local GGUF stems, bots).
+            keep = explicit_id and ((not disc.ok) or flexible)
+            if configured_provider == "demo":
+                keep = (
+                    explicit_id
+                    and _demo_model_allowed(configured_id, catalog)
+                    and not disc.ok
+                )
+            if keep:
                 merged.insert(
                     0,
                     {
@@ -521,20 +389,31 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                         "name": configured_id,
                         "provider": configured_provider,
                         "default": True,
+                        "source": "config",
                     },
                 )
-            else:
-                configured_id = (merged[0]["id"] if merged else "codestral-latest")
+                ids.add(configured_id)
 
-        default_id = configured_id or (merged[0]["id"] if merged else "default")
+        last_by = cfg.get("last_model_by_provider") or {}
+        preferred = [
+            configured_id,
+            str(last_by.get(configured_provider) or "") if isinstance(last_by, dict) else "",
+            str(catalog[0]["id"]) if catalog else "",
+        ]
+        default_id = (
+            choose_default(merged, preferred=preferred, loaded=disc.loaded) or "default"
+        )
         for m in merged:
             m["default"] = m["id"] == default_id
+            m.pop("chat", None)
 
         return {
             "models": merged,
             "default": default_id,
             "provider": configured_provider,
             "base_url": base_url,
+            "discovery": disc.as_dict(),
+            "loaded": list(disc.loaded),
         }
 
     @app.get("/api/agents")

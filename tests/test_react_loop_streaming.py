@@ -1200,3 +1200,296 @@ async def test_a_failed_wait_after_a_local_disconnect_still_retries_the_round(
     assert fake.requests[1].stream is False
     assert "second try worked" in answer(chunks)
     assert "probe socket died" not in "".join(chunks)
+
+
+# --------------------------------------------------------------------------
+# hosted gateways that rate-limit (429 + Retry-After) and pace requests
+# --------------------------------------------------------------------------
+
+SLEEP = "remedy.core.react_loop.loop._sleep_abortable"
+CATALOG = "remedy.interfaces.provider_catalog.PROVIDER_CATALOG"
+
+
+def make_demo_runtime(tmp_path: Path, **overrides: Any) -> BasicRuntime:
+    """The free demo gateway: hosted, OpenAI-compatible, ~1 request/second."""
+    overrides.setdefault("llm_provider", "demo")
+    overrides.setdefault("llm_model", "codestral-latest")
+    overrides.setdefault("llm_api_key", "unused")
+    overrides.setdefault("llm_base_url", "https://demo.invalid/v1")
+    return make_runtime(tmp_path, **overrides)
+
+
+@pytest.fixture
+def _instant_sleep():
+    """Retry-After waits are honoured but must not slow the suite down."""
+    waits: list[float] = []
+
+    async def fake_sleep(seconds, abort_ev=None):
+        waits.append(seconds)
+
+    with patch(SLEEP, fake_sleep):
+        yield waits
+
+
+@pytest.mark.asyncio
+async def test_a_429_with_retry_after_header_is_waited_out_and_the_same_request_resent(
+    tmp_path, _instant_sleep
+):
+    """The gateway said *come back in 3s*. Doing exactly that — same body, no
+    tool stripping, no force-answer — is what turns a failed turn into a slow one."""
+    runtime = make_demo_runtime(tmp_path)
+    registry = FakeToolRegistry().install(runtime)
+    registry.add("add", description="add", results=["5"])
+    fake = FakeLLM(
+        [
+            tool_turn("add", {"a": 2, "b": 3}),
+            error_turn(
+                429,
+                '{"code":"rate_limit_exceeded","retry_after":1}',
+                headers={"Retry-After": "3"},
+            ),
+            text_turn("The sum is 5."),
+        ]
+    )
+
+    with fake.patch(force_tools=True):
+        chunks = await drain(runtime, "run the add tool")
+
+    assert fake.request_count == 3
+    # Header wins over the body; the retry carried the identical request.
+    assert _instant_sleep == [3.0]
+    assert fake.requests[2].body == fake.requests[1].body
+    assert "Rate limited — waiting 3s" in statuses(chunks)
+    assert "The sum is 5." in answer(chunks)
+    assert "stopped responding" not in answer(chunks)
+
+
+@pytest.mark.asyncio
+async def test_a_429_retry_after_in_the_json_body_is_honoured_without_a_header(
+    tmp_path, _instant_sleep
+):
+    runtime = make_demo_runtime(tmp_path)
+    FakeToolRegistry().install(runtime)
+    fake = FakeLLM(
+        [
+            error_turn(429, '{"code":"rate_limit_exceeded","retry_after":1}'),
+            text_turn("hello back"),
+        ]
+    )
+
+    with fake.patch(), patch(NO_TOOLS, return_value=False):
+        chunks = await drain(runtime, "say hello")
+
+    assert fake.request_count == 2
+    assert _instant_sleep == [1.0]
+    assert "hello back" in answer(chunks)
+
+
+@pytest.mark.asyncio
+async def test_a_gateway_that_keeps_rate_limiting_stops_and_says_how_long_it_waited(
+    tmp_path, _instant_sleep
+):
+    """Bounded retries: after the budget the person gets a plain explanation
+    that names the wait already spent, not an endless spinner."""
+    runtime = make_demo_runtime(tmp_path)
+    FakeToolRegistry().install(runtime)
+    fake = FakeLLM(
+        [],
+        when_exhausted=error_turn(
+            429,
+            '{"code":"rate_limit_exceeded","retry_after":2}',
+        ),
+    )
+
+    with fake.patch(), patch(NO_TOOLS, return_value=False):
+        chunks = await drain(runtime, "say hello")
+
+    from remedy.core.llm_pacing import RATE_LIMIT_MAX_RETRIES
+
+    assert len(_instant_sleep) == RATE_LIMIT_MAX_RETRIES
+    assert all(w == 2.0 for w in _instant_sleep)
+    whole = "".join(chunks)
+    assert "waited" in whole and "retr" in whole
+    assert "Local host error" not in statuses(chunks)
+
+
+@pytest.mark.asyncio
+async def test_a_429_on_a_local_host_takes_the_local_wait_path_not_retry_after(
+    tmp_path, _instant_sleep
+):
+    runtime = make_local_runtime(tmp_path)
+    FakeToolRegistry().install(runtime)
+    fake = FakeLLM([error_turn(429, "busy"), text_turn("local answer")])
+
+    with fake.patch(), patch(NO_TOOLS, return_value=False):
+        chunks = await drain(runtime, "say hello")
+
+    assert _instant_sleep == []
+    assert "local answer" in answer(chunks)
+
+
+@pytest.mark.asyncio
+async def test_a_quota_429_is_billing_not_a_rate_limit_and_is_not_retried(
+    tmp_path, _instant_sleep
+):
+    runtime = make_runtime(tmp_path)
+    FakeToolRegistry().install(runtime)
+    fake = FakeLLM(
+        [error_turn(429, '{"error":{"code":"insufficient_quota","message":"x"}}')]
+    )
+
+    with fake.patch(), patch(NO_TOOLS, return_value=False):
+        chunks = await drain(runtime, "say hello")
+
+    assert fake.request_count == 1
+    assert _instant_sleep == []
+    low = answer(chunks).lower()
+    assert "billing" in low or "credit" in low or "quota" in low
+
+
+@pytest.mark.asyncio
+async def test_the_demo_gateway_is_not_treated_as_a_local_host_after_an_error(
+    tmp_path, _instant_sleep
+):
+    """A 500 from the hosted demo gateway must not poll the RMB readiness
+    probe six times at 45s each — that is the local-host path."""
+    runtime = make_demo_runtime(tmp_path)
+    FakeToolRegistry().install(runtime)
+    fake = FakeLLM([error_turn(500, "upstream hiccup"), text_turn("recovered")])
+
+    with fake.patch(), patch(NO_TOOLS, return_value=False), patch(
+        RMB_WAIT, return_value={"ok": False, "ready": False}
+    ) as rmb_wait:
+        chunks = await drain(runtime, "say hello")
+
+    assert rmb_wait.call_count == 0
+    assert "Local host error" not in statuses(chunks)
+    assert "recovered" in answer(chunks)
+
+
+@pytest.mark.asyncio
+async def test_consecutive_rounds_to_a_paced_provider_are_spaced_apart(tmp_path):
+    """Catalog ``min_request_interval_s`` spaces tool-result → next-round POSTs."""
+    from remedy.core import llm_pacing
+
+    runtime = make_demo_runtime(tmp_path)
+    registry = FakeToolRegistry().install(runtime)
+    registry.add("add", description="add", results=["5"])
+    fake = FakeLLM([tool_turn("add", {"a": 2, "b": 3}), text_turn("The sum is 5.")])
+    slept: list[float] = []
+
+    async def fake_sleep(seconds, abort_ev=None):
+        slept.append(seconds)
+
+    llm_pacing.reset_pacing()
+    try:
+        with fake.patch(force_tools=True), patch(
+            CATALOG, {"demo": {"min_request_interval_s": 1.1}}
+        ), patch.object(llm_pacing, "sleep_abortable", fake_sleep):
+            chunks = await drain(runtime, "run the add tool")
+    finally:
+        llm_pacing.reset_pacing()
+
+    assert fake.request_count == 2
+    assert len(slept) == 1 and 0.0 < slept[0] <= 1.1
+    assert "The sum is 5." in answer(chunks)
+
+
+@pytest.mark.asyncio
+async def test_an_unpaced_provider_never_sleeps_between_rounds(tmp_path):
+    from remedy.core import llm_pacing
+
+    runtime = make_runtime(tmp_path)
+    registry = FakeToolRegistry().install(runtime)
+    registry.add("add", description="add", results=["5"])
+    fake = FakeLLM([tool_turn("add", {"a": 2, "b": 3}), text_turn("The sum is 5.")])
+    slept: list[float] = []
+
+    async def fake_sleep(seconds, abort_ev=None):
+        slept.append(seconds)
+
+    with fake.patch(force_tools=True), patch(
+        CATALOG, {"openai": {"label": "OpenAI"}}
+    ), patch.object(llm_pacing, "sleep_abortable", fake_sleep):
+        await drain(runtime, "run the add tool")
+
+    assert slept == []
+
+
+# --------------------------------------------------------------------------
+# ``reasoning`` deltas (gpt-oss) are thinking, same as ``reasoning_content``
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_gpt_oss_style_reasoning_deltas_stream_as_thinking_then_the_answer(
+    tmp_path,
+):
+    """gpt-oss streams ``reasoning`` (not ``reasoning_content``) before any
+    content. Ignoring it leaves the UI blank for the whole think phase."""
+    runtime = make_demo_runtime(tmp_path, llm_model="gpt-oss:20b")
+    FakeToolRegistry().install(runtime)
+    lines = [
+        b'data: {"choices":[{"index":0,"delta":{"role":"assistant","reasoning":"Let me "}}]}\n\n',
+        b'data: {"choices":[{"index":0,"delta":{"reasoning":"think."}}]}\n\n',
+        b'data: {"choices":[{"index":0,"delta":{"content":"Four."}}]}\n\n',
+        b'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+        b"data: [DONE]\n\n",
+    ]
+    fake = FakeLLM([raw_turn(lines)])
+
+    with fake.patch(), patch(NO_TOOLS, return_value=False):
+        chunks = await drain(runtime, "what is 2+2")
+
+    thinking = [c for c in chunks if c.startswith("@@thinking:")]
+    assert [t[len("@@thinking:") :] for t in thinking] == ["Let me ", "think."]
+    assert answer(chunks) == "Four."
+    # Thinking arrived before the first answer token.
+    assert chunks.index(thinking[0]) < chunks.index("Four.")
+
+
+def test_reasoning_delta_text_accepts_every_host_shape():
+    from remedy.core.react_stream import reasoning_delta_text
+
+    assert reasoning_delta_text({"reasoning_content": "a"}) == "a"
+    assert reasoning_delta_text({"reasoning": "b"}) == "b"
+    assert reasoning_delta_text({"reasoning": {"text": "c"}}) == "c"
+    assert reasoning_delta_text({"reasoning": [{"text": "d"}, "e"]}) == "de"
+    assert reasoning_delta_text({"reasoning_content": None, "reasoning": "f"}) == "f"
+    assert reasoning_delta_text({"content": "x"}) == ""
+    assert reasoning_delta_text(None) == ""
+
+
+def test_openai_adapter_extracts_reasoning_key_from_a_json_completion():
+    from remedy.core.providers import OpenAIProvider
+
+    parsed = OpenAIProvider().extract_response(
+        {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "", "reasoning": "why"},
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+    )
+    assert parsed["reasoning_content"] == "why"
+
+
+@pytest.mark.asyncio
+async def test_a_bare_429_without_any_hint_is_not_retried_in_place(
+    tmp_path, _instant_sleep
+):
+    """No Retry-After, no catalog interval: the pre-existing breaker /
+    recovery paths own the error — one request, no sleeps."""
+    runtime = make_runtime(tmp_path)
+    FakeToolRegistry().install(runtime)
+    fake = FakeLLM([], when_exhausted=error_turn(429, "rate limited"))
+
+    with fake.patch(), patch(NO_TOOLS, return_value=False), patch(
+        CATALOG, {"openai": {"label": "OpenAI"}}
+    ):
+        chunks = await drain(runtime, "say hello")
+
+    assert _instant_sleep == []
+    assert "Rate limited — waiting" not in statuses(chunks)

@@ -120,6 +120,41 @@ def want_sse_stream_parse(
     return bool(use_openai_sse) or "event-stream" in ct
 
 
+def reasoning_delta_text(delta: dict[str, Any] | None) -> str:
+    """Thinking text carried by one delta/message, whatever key the host uses.
+
+    DeepSeek streams ``reasoning_content``; gpt-oss / OpenRouter-style hosts
+    stream ``reasoning`` (sometimes as ``{"text": …}`` or a list of such
+    blocks). Returns ``""`` when there is none.
+    """
+    if not isinstance(delta, dict):
+        return ""
+    for key in ("reasoning_content", "reasoning", "reasoning_text"):
+        raw = delta.get(key)
+        if raw is None or raw == "":
+            continue
+        if isinstance(raw, str):
+            return raw
+        if isinstance(raw, dict):
+            inner = raw.get("text") or raw.get("content") or raw.get("summary")
+            if isinstance(inner, str) and inner:
+                return inner
+            continue
+        if isinstance(raw, list):
+            parts: list[str] = []
+            for item in raw:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    inner = item.get("text") or item.get("content") or item.get("summary")
+                    if isinstance(inner, str):
+                        parts.append(inner)
+            joined = "".join(parts)
+            if joined:
+                return joined
+    return ""
+
+
 def apply_openai_sse_chunk(
     state: StreamRoundState,
     chunk: dict[str, Any],
@@ -152,9 +187,10 @@ def apply_openai_sse_chunk(
         ):
             # Mark so callers know we suppressed junk (recovery will run later).
             state.suppressed_tool_markup = True
-    # DeepSeek thinking mode streams reasoning_content alongside (or before) content.
-    # Must accumulate independently — not only in the no-content branch.
-    reason_delta = delta.get("reasoning_content") or delta.get("reasoning")
+    # DeepSeek thinking mode streams reasoning_content alongside (or before)
+    # content; gpt-oss streams ``reasoning``. Must accumulate independently —
+    # not only in the no-content branch — so the UI shows thinking live.
+    reason_delta = reasoning_delta_text(delta)
     if reason_delta:
         state.reasoning_parts.append(reason_delta)
     for tc in delta.get("tool_calls") or []:
@@ -192,8 +228,8 @@ def apply_openai_completion_message(
             live = content
         elif stream_live and looks_like_pseudo_tools(acc):
             state.suppressed_tool_markup = True
-    reason = msg.get("reasoning_content") or msg.get("reasoning") or ""
-    if isinstance(reason, str) and reason.strip():
+    reason = reasoning_delta_text(msg)
+    if reason.strip():
         state.reasoning_parts.append(reason.strip())
     raw_tcs = msg.get("tool_calls")
     if isinstance(raw_tcs, list) and raw_tcs:

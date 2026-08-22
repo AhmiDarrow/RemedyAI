@@ -72,7 +72,10 @@ def test_demo_in_catalog():
     assert meta.get("free_tier") == "instant"
     assert meta.get("auth") == ["none"]
     assert "llm7.io" in str(meta.get("base_url") or "")
-    assert meta.get("live_models") is False
+    # The gateway is probed to validate the curated ids, and guest traffic is
+    # paced (llm7 allows ~1 request/second).
+    assert "live_models" not in meta
+    assert float(meta.get("min_request_interval_s") or 0) >= 1.0
     ids = [m["id"] for m in (meta.get("models") or [])]
     assert "codestral-latest" in ids
     # Never ship image/promo/foreign paid brands in the curated demo list
@@ -214,11 +217,96 @@ def test_probe_demo_and_missing_key(monkeypatch):
             probe = route.endpoint
             break
     assert probe is not None
+
+    from remedy.interfaces.model_discovery import DiscoveryResult
+
+    calls = []
+
+    async def fake_discover(base_url, api_key="", **kw):
+        calls.append((base_url, api_key, kw.get("provider_hint")))
+        return DiscoveryResult(
+            attempted=True, ok=True, status=200, url=base_url + "/models",
+            flavour="openai",
+            models=[
+                {"id": "codestral-latest", "name": "codestral-latest", "chat": True},
+                {"id": "gpt-oss:20b", "name": "gpt-oss:20b", "chat": True},
+                {"id": "flux-schnell", "name": "flux-schnell", "chat": False},
+                {"id": "claude-opus-5", "name": "claude-opus-5", "chat": True},
+            ],
+        )
+
+    monkeypatch.setattr("remedy.interfaces.model_discovery.discover_models", fake_discover)
     demo = asyncio.run(probe(ProviderProbeRequest(provider="demo")))
+    # The gateway is really contacted now (no hardcoded "ok") …
+    assert calls and calls[0][2] == "demo"
     assert demo["ok"] is True
+    # … and only the curated ids it still serves come back.
+    assert [m["id"] for m in demo["model_list"]] == ["codestral-latest", "gpt-oss:20b"]
+    assert demo["models"] == 2
     missing = asyncio.run(probe(ProviderProbeRequest(provider="openai")))
     assert missing["ok"] is False
+    assert missing["model_list"] == []
     assert "key" in (missing.get("error") or "").lower()
+
+
+def test_probe_reports_why_discovery_failed(monkeypatch):
+    import asyncio
+
+    from fastapi import FastAPI
+
+    from remedy.interfaces.model_discovery import DiscoveryResult
+    from remedy.interfaces.routes.auth import ProviderProbeRequest, register_auth_routes
+
+    monkeypatch.setattr("remedy.interfaces.routes.auth.load_config", lambda: {})
+
+    async def fake_discover(base_url, api_key="", **kw):
+        return DiscoveryResult(
+            attempted=True, ok=False, status=401, url=base_url + "/models",
+            flavour="openai", error="Incorrect API key provided",
+        )
+
+    monkeypatch.setattr("remedy.interfaces.model_discovery.discover_models", fake_discover)
+    app = FastAPI()
+    register_auth_routes(app)
+    probe = next(r.endpoint for r in app.routes if getattr(r, "path", "") == "/api/providers/probe")
+    res = asyncio.run(probe(ProviderProbeRequest(provider="openai", api_key="sk-bad")))
+    assert res["ok"] is False
+    assert res["status"] == 401
+    assert "Incorrect API key" in res["error"]
+    assert res["model_list"] == []
+
+
+def test_probe_returns_the_models_it_listed(monkeypatch):
+    import asyncio
+
+    from fastapi import FastAPI
+
+    from remedy.interfaces.model_discovery import DiscoveryResult
+    from remedy.interfaces.routes.auth import ProviderProbeRequest, register_auth_routes
+
+    monkeypatch.setattr("remedy.interfaces.routes.auth.load_config", lambda: {})
+
+    async def fake_discover(base_url, api_key="", **kw):
+        assert base_url == "http://127.0.0.1:1234/v1"
+        return DiscoveryResult(
+            attempted=True, ok=True, status=200, url=base_url + "/models",
+            flavour="lmstudio",
+            models=[
+                {"id": "qwen2.5-coder-7b", "name": "Qwen Coder", "chat": True},
+                {"id": "nomic-embed-text", "name": "nomic", "chat": False},
+            ],
+        )
+
+    monkeypatch.setattr("remedy.interfaces.model_discovery.discover_models", fake_discover)
+    app = FastAPI()
+    register_auth_routes(app)
+    probe = next(r.endpoint for r in app.routes if getattr(r, "path", "") == "/api/providers/probe")
+    res = asyncio.run(
+        probe(ProviderProbeRequest(provider="custom", base_url="http://127.0.0.1:1234/v1"))
+    )
+    assert res["ok"] is True
+    assert res["flavour"] == "lmstudio"
+    assert res["model_list"] == [{"id": "qwen2.5-coder-7b", "name": "Qwen Coder"}]
 
 
 def test_stored_key_marks_provider_connected():
