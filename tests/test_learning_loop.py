@@ -103,3 +103,70 @@ class TestLearningLoop:
         errors = engine._extract_error_patterns(trace)
         assert len(errors) == 1
         assert "permission denied" in errors[0]
+
+
+class TestClosedLoopSignals:
+    """Activation from auto-suggest, and creation stamps, feed the lifecycle."""
+
+    def test_record_skill_activation_from_auto_suggest_path(self, ll):
+        from types import SimpleNamespace
+
+        reg_marks: list[str] = []
+        reg = SimpleNamespace(mark_activated=reg_marks.append)
+        runtime = SimpleNamespace(skills=reg, _session_id="sess-9")
+        runtime._get_learning_loop = lambda: ll
+
+        # Same three calls the auto-suggest injection site makes after a match.
+        name = "deploy-checklist"
+        runtime.skills.mark_activated(name)
+        runtime._get_learning_loop().record_skill_activation(
+            name, session_id=str(getattr(runtime, "_session_id", "") or "")
+        )
+        runtime._turn_auto_suggested_skill = name
+
+        assert reg_marks == [name]
+        stats = ll.get_skill_stats(name)
+        assert stats.activations == 1
+        assert stats.activation_sessions == {"sess-9": 1}
+        assert stats.total_executions == 0  # activation is not execution
+        assert runtime._turn_auto_suggested_skill == name
+
+    def test_persisted_skill_carries_created_at(self, ll):
+        from datetime import datetime
+        from uuid import uuid4
+
+        trace = ExecutionTrace(
+            task_id=uuid4(),
+            title="write then test a module",
+            session_id="s1",
+            steps=[
+                TraceStep(0, "file_write", {}, "ok", True),
+                TraceStep(1, "bash_exec", {}, "ok", True),
+                TraceStep(2, "file_read", {}, "ok", True),
+                TraceStep(3, "bash_exec", {}, "ok", True),
+            ],
+            overall_success=True,
+        )
+        refl = ll.reflection.reflect(trace)
+        assert refl.generated_skill is not None
+        skill = ll._persist_generated_skill(refl, trace, confidence=0.6)
+        stamp = skill.manifest.metadata["created_at"]
+        assert datetime.fromisoformat(stamp).tzinfo is not None
+
+    def test_auto_refine_stamps_lifecycle_changed_at(self, ll):
+        from remedy.models import Skill, SkillManifest, SkillStatus
+
+        skill = Skill(
+            manifest=SkillManifest(
+                name="shaky-skill",
+                description="A learned skill that keeps failing",
+                status=SkillStatus.VALIDATED,
+                metadata={"auto_generated": True},
+            ),
+            instructions="x",
+        )
+        for _ in range(3):
+            ll.record_skill_feedback("shaky-skill", False)
+        assert ll.auto_refine_skill(skill) is True
+        assert skill.manifest.status == SkillStatus.DISABLED
+        assert skill.manifest.metadata["lifecycle_changed_at"]
