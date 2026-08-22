@@ -92,6 +92,20 @@ def register_workspace_tools(runtime: Any) -> None:
         register_voice_tools(runtime)
     except Exception:
         pass
+    try:
+        from remedy.core.agent_game_tools import register_game_tools
+
+        register_game_tools(runtime)
+    except Exception:
+        pass
+    # Optional MCP client bridge: user-listed servers (config mcp_servers)
+    # surface as mcp_<server>_<tool>; nothing spawns until first use.
+    try:
+        from remedy.core.agent_mcp_bridge import register_mcp_bridge
+
+        register_mcp_bridge(runtime)
+    except Exception:
+        pass
     # Per-turn tool trace for auto-learn (reset each stream_response)
     runtime._turn_tool_steps = []
     runtime._learning_loop = None
