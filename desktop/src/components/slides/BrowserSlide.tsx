@@ -365,6 +365,11 @@ export function BrowserSlide() {
       browserStackProbeHostCoverage(el)
       void pushBounds()
     }, 200)
+    // Status-bar selects / Theme menu portal to <body> and open upward over
+    // the host — probe on mount so the native child hides before it paints
+    // over the menu (the interval alone leaves a ~200ms covered flash).
+    const portalMo = new MutationObserver(() => browserStackProbeHostCoverage(el))
+    portalMo.observe(document.body, { childList: true })
     // Popout/fullscreen layout can settle over several frames
     let n = 0
     let raf = 0
@@ -379,6 +384,7 @@ export function BrowserSlide() {
       io.disconnect()
       unlistenRestored?.()
       window.clearInterval(coverIv)
+      portalMo.disconnect()
       window.removeEventListener('resize', onWin)
       window.removeEventListener('remedy:browser-resync-bounds', onResync)
       window.cancelAnimationFrame(raf)
