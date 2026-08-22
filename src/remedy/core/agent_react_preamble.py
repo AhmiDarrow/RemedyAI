@@ -109,6 +109,7 @@ def append_plan_and_computer_addenda(
     session_id: str | None,
     plan_mode: bool,
     runtime: Any,
+    message: str = "",
 ) -> str:
     with suppress(Exception):
 
@@ -124,10 +125,26 @@ def append_plan_and_computer_addenda(
 
             context = (context or "") + "\n\n" + PLAN_MODE_SYSTEM_ADDENDUM
         else:
+            chat_only = False
             with suppress(Exception):
-                from remedy.core.plan_store import BUILD_MODE_SYSTEM_ADDENDUM
+                from remedy.core.react_policy import is_chat_only_message
 
-                context = (context or "") + "\n\n" + BUILD_MODE_SYSTEM_ADDENDUM
+                chat_only = is_chat_only_message(message or "")
+            if not chat_only:
+                with suppress(Exception):
+                    from remedy.core.muscle_profile import muscle_from_runtime
+                    from remedy.core.plan_store import (
+                        BUILD_MODE_SYSTEM_ADDENDUM,
+                        FRONTIER_BUILD_MODE_ADDENDUM,
+                    )
+
+                    muscle = muscle_from_runtime(runtime)
+                    add = (
+                        FRONTIER_BUILD_MODE_ADDENDUM
+                        if muscle.is_frontier
+                        else BUILD_MODE_SYSTEM_ADDENDUM
+                    )
+                    context = (context or "") + "\n\n" + add
         with suppress(Exception):
             from remedy.core.build_todos import format_todos_block, load_todos
 
@@ -179,9 +196,14 @@ def append_plan_and_computer_addenda(
             if ib:
                 context = (context or "") + "\n\n" + ib
         with suppress(Exception):
-            from remedy.core.computer.guidance import COMPUTER_USE_SYSTEM_ADDENDUM
+            from remedy.core.computer.guidance import (
+                COMPUTER_USE_SYSTEM_ADDENDUM,
+                needs_computer_use_guidance,
+            )
 
-            context = (context or "") + "\n\n" + COMPUTER_USE_SYSTEM_ADDENDUM
+            um = message or str(getattr(runtime, "_last_user_text", "") or "")
+            if needs_computer_use_guidance(um):
+                context = (context or "") + "\n\n" + COMPUTER_USE_SYSTEM_ADDENDUM
         # Skill memory: steer toward the click approach that has worked on the
         # current site (learned from past actions, per host).
         with suppress(Exception):
@@ -438,7 +460,11 @@ async def prepare_turn_preamble(
     await distill_user_message(runtime, message, session_id)
     context = await runtime._build_context()
     context = append_plan_and_computer_addenda(
-        context, session_id=session_id, plan_mode=plan_mode, runtime=runtime
+        context,
+        session_id=session_id,
+        plan_mode=plan_mode,
+        runtime=runtime,
+        message=message or "",
     )
     history = await runtime._load_session_history(session_id, message)
 

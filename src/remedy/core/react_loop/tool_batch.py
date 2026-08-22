@@ -57,9 +57,24 @@ def record_tool_batch_stats(
     return 1, productive
 
 
-def inject_phase_nudge(turn: Any, messages: list[dict[str, Any]]) -> None:
-    """Task-loop phase nudge (RESEARCH → PLAN → BUILD) when inject budget allows."""
+def inject_phase_nudge(
+    turn: Any,
+    messages: list[dict[str, Any]],
+    runtime: Any = None,
+) -> None:
+    """Task-loop phase nudge when inject budget allows.
+
+    Skip when the build engine is already supervising — extra PLAN/BUILD
+    user cards make frontier models reciting the curriculum instead of
+    calling tools.
+    """
     with _soft("phase-nudge"):
+        if runtime is not None:
+            from remedy.core.build_engine import get_build_state
+
+            bst = get_build_state(runtime)
+            if bst is not None and getattr(bst, "active", False):
+                return
         pn = turn.phase_nudge()
         if pn and turn.inject_count <= turn.max_injects:
             messages.append(pn)
