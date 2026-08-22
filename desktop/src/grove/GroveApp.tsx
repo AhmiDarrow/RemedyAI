@@ -102,6 +102,7 @@ export interface GroveAppProps {
     attachments?: SendAttachment[],
     opts?: { mode?: 'after' | 'interrupt' | 'steer'; sessionId?: string },
   ) => Promise<void> | void
+  stickNonce?: number
   stop: () => void
   serverReady: boolean
   userName: string
@@ -128,6 +129,7 @@ export function GroveApp({
   streaming,
   messagesLoading,
   handleSend,
+  stickNonce = 0,
   stop,
   serverReady,
   userName,
@@ -667,6 +669,7 @@ export function GroveApp({
             serverReady={serverReady}
             placeholder="Tell me anything — a goal, an errand, a receipt, a bug…"
             onSend={sendFromGrove}
+            stickNonce={stickNonce}
             onStop={stop}
             ensureSessionId={ensureHomeSession}
             sessionKey={activeId}
@@ -854,6 +857,7 @@ export function GroveApp({
                 },
               ]}
               onSend={sendFromGrove}
+              stickNonce={stickNonce}
               onStop={stop}
               ensureSessionId={() => ensureGoalSession(goal)}
               sessionKey={activeId}
