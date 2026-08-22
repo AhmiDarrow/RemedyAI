@@ -56,6 +56,15 @@ export function useStickToBottom(options: Options = {}) {
   const lockUntilRef = useRef(0)
   const pinRafRef = useRef<number | null>(null)
 
+  /**
+   * Set by an instant pin. Until then, scroll events that still sit at the
+   * floor are echoes of our write (layout may shift the clamp by a few px
+   * while a bubble mounts); events that land clearly above the floor are a
+   * real gesture and still detach — scrollbar drag and touch never emit
+   * wheel/keydown, so they must not be blanket-ignored.
+   */
+  const instantPinUntilRef = useRef(0)
+
   const [detached, setDetachedState] = useState(false)
   const detachedRef = useRef(false)
   const setDetached = useCallback((next: boolean) => {
@@ -126,15 +135,38 @@ export function useStickToBottom(options: Options = {}) {
     [],
   )
 
+  /**
+   * Instant pin: attach and write scrollTop synchronously. Shared by the
+   * reattachKey effect (Enter) and the Jump pill so the two never diverge.
+   */
+  const pinNow = useCallback(() => {
+    attach()
+    const el = scrollerRef.current
+    if (!el) return
+    const max = Math.max(0, el.scrollHeight - el.clientHeight)
+    el.scrollTop = max
+    // Read back — the browser clamps, and we compare echoes by value.
+    expectedTopRef.current = el.scrollTop
+    instantPinUntilRef.current = performance.now() + 280
+  }, [attach])
+
   useEffect(() => {
     const el = scrollerEl
     if (!el) return
 
     const onScroll = () => {
+      // Smooth glide: every intermediate event is ours.
       if (performance.now() < lockUntilRef.current) return
       const expected = expectedTopRef.current
       if (expected != null && Math.abs(el.scrollTop - expected) <= 1) {
         // Echo of our own pin (or a clamp onto it) — not a gesture.
+        return
+      }
+      if (
+        performance.now() < instantPinUntilRef.current
+        && distanceFromBottom(el) <= NEAR_PX
+      ) {
+        // Just pinned and still at the floor: layout settling, not a gesture.
         return
       }
       expectedTopRef.current = null
@@ -172,14 +204,8 @@ export function useStickToBottom(options: Options = {}) {
     if (reattachKey === undefined) return
     if (prevReattachRef.current === reattachKey) return
     prevReattachRef.current = reattachKey
-    attach()
-    const el = scrollerRef.current
-    if (!el) return
-    const max = Math.max(0, el.scrollHeight - el.clientHeight)
-    el.scrollTop = max
-    expectedTopRef.current = el.scrollTop
-    lockUntilRef.current = performance.now() + 280
-  }, [reattachKey, attach])
+    pinNow()
+  }, [reattachKey, pinNow])
 
   // New scroller (mount / session switch) starts at the floor.
   useLayoutEffect(() => {
@@ -220,18 +246,7 @@ export function useStickToBottom(options: Options = {}) {
 
   // Instant, not smooth: a smooth glide emits intermediate scroll events that
   // look like gestures once content keeps growing underneath it.
-  const jumpLatest = useCallback(() => {
-    attach()
-    const el = scrollerRef.current
-    if (el) {
-      const max = Math.max(0, el.scrollHeight - el.clientHeight)
-      el.scrollTop = max
-      expectedTopRef.current = el.scrollTop
-      lockUntilRef.current = performance.now() + 280
-    } else {
-      pinToBottom(false)
-    }
-  }, [attach, pinToBottom])
+  const jumpLatest = pinNow
 
   const showJump = detached && (followActive || alwaysOfferJump)
 
