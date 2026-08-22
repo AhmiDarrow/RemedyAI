@@ -42,12 +42,15 @@ TOOL_TIMEOUTS: dict[str, float | None] = {
     "web_search": 180.0,
     "local_discover": 300.0,
     "companion_design": 600.0,
+    "game_playtest": 300.0,
 }
 
 #: Name prefixes that get one shared budget.
 PREFIX_TIMEOUTS: tuple[tuple[str, float | None], ...] = (
     ("computer_", 300.0),
     ("mcp_", 300.0),
+    # godot_run clamps its own timeout to 600 s; check/export/import run longer batches.
+    ("godot_", 900.0),
 )
 
 

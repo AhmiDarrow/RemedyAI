@@ -67,7 +67,15 @@ _EXPLORE_TOOLS = frozenset(
 )
 _WRITE_TOOLS = frozenset({"file_write", "file_edit", "file_edit_batch", "apply_patch"})
 _VERIFY_TOOLS = frozenset(
-    {"bash_exec", "shell_exec", "job_run", "mission_verify", "mission_update"}
+    {
+        "bash_exec",
+        "shell_exec",
+        "job_run",
+        "mission_verify",
+        "mission_update",
+        "godot_run",
+        "godot_check",
+    }
 )
 
 
