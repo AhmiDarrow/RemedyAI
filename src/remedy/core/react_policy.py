@@ -260,6 +260,9 @@ else:
 
 # Skill body inject cap (progressive disclosure stage 2) — full docs when needed
 SKILL_BODY_CHAR_CAP = 120_000 if _FULL else 48_000
+# References inlined by skill_activate(include_references=True): INDEX.md first.
+SKILL_REF_INLINE_MAX = 8 if _FULL else 5
+SKILL_REF_CHAR_CAP = 6_000 if _FULL else 4_000
 
 # Messages that look like they need filesystem / shell / computer tools.
 _TOOL_HINT_RE = re.compile(
