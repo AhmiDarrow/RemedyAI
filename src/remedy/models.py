@@ -373,7 +373,8 @@ class AgentConfig(BaseModel):
     skills_dir: list[str] = Field(default_factory=list)
     memory_db_path: str | None = Field(default=None)
     enabled_channels: list[ChannelKind] = Field(default_factory=list)
-    mcp_servers: list[str] = Field(default_factory=list)
+    # "name=command args…", a bare command, or {name, command, args?, env?, cwd?}
+    mcp_servers: list[str | dict[str, Any]] = Field(default_factory=list)
     allow_skill_creation: bool = Field(default=True)
     auto_approve_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
     log_level: str = Field(default="INFO")
