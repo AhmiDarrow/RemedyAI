@@ -57,6 +57,9 @@ class BinarySpec:
     id: str
     names: list[str] = field(default_factory=list)  # PATH basenames
     env: list[str] = field(default_factory=list)
+    # "dir/pattern" globs tried after PATH; dirs may use env vars (%LOCALAPPDATA%)
+    # or ~ and are expanded at lookup time.
+    glob_dirs: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -105,6 +108,7 @@ def parse_skill_local_spec(name: str, frontmatter: dict[str, Any] | None) -> Loc
                 id=str(item["id"]),
                 names=list(item.get("names") or [item["id"]]),
                 env=list(item.get("env") or []),
+                glob_dirs=list(item.get("glob_dirs") or item.get("globs") or []),
             )
         )
     if not services and not binaries:
@@ -520,7 +524,32 @@ def discover_binaries(spec: BinarySpec) -> dict[str, Any]:
         found = shutil.which(name)
         if found:
             return {"id": spec.id, "path": found, "source": "path", "ok": True}
-    return {"id": spec.id, "path": "", "source": "", "ok": False, "tried": list(spec.names)}
+    for pattern in spec.glob_dirs:
+        hit = _first_glob_hit(pattern)
+        if hit is not None:
+            return {"id": spec.id, "path": str(hit), "source": "glob", "ok": True}
+    return {
+        "id": spec.id,
+        "path": "",
+        "source": "",
+        "ok": False,
+        "tried": list(spec.names) + list(spec.glob_dirs),
+    }
+
+
+def _first_glob_hit(pattern: str) -> Path | None:
+    """First file matching *pattern* (env vars / ~ expanded; never a literal home)."""
+    expanded = os.path.expandvars(os.path.expanduser(pattern.strip()))
+    if not expanded or "%" in expanded or "$" in expanded:
+        return None  # unexpanded variable → that location does not exist here
+    try:
+        base = Path(expanded)
+        anchor = Path(base.anchor) if base.anchor else Path(".")
+        rel = base.relative_to(anchor) if base.anchor else base
+        hits = sorted(p for p in anchor.glob(rel.as_posix()) if p.is_file())
+    except (OSError, ValueError):
+        return None
+    return hits[0] if hits else None
 
 
 # ---------------------------------------------------------------------------
