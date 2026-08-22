@@ -1169,6 +1169,8 @@ class BasicRuntime(AgentRuntime):
         finally:
             self._streaming_sessions.discard(sid_key)
             steps_snap = list(current_turn_tool_steps(self))
+            # Captured before end_turn() resets the turn contextvars.
+            aborted_snap = is_turn_aborted()
             # Write turn-local continuity back into session caches / live store
             # so the next turn for this session resumes the same brief/partner.
             with suppress(Exception):
@@ -1219,6 +1221,17 @@ class BasicRuntime(AgentRuntime):
                     self._turn_tool_steps = steps_snap
                     self._maybe_auto_learn_from_turn(message, session_id)
                 self._turn_tool_steps = []
+            # Closed loop: grade the skills this turn used (auto-suggested or
+            # skill_activate'd) by how the turn went. Runs even when aborted so
+            # an interrupted turn counts as a failure for the skill on probation.
+            if not plan_mode and not internal:
+                with suppress(Exception):
+                    self._record_skill_turn_outcome(
+                        steps_snap, session_id, aborted=aborted_snap
+                    )
+            with suppress(Exception):
+                self.__dict__.pop("_turn_auto_suggested_skill", None)
+                self.__dict__.pop("_turn_activated_skills", None)
 
     @property
     def _streaming(self) -> bool:
@@ -1257,6 +1270,36 @@ class BasicRuntime(AgentRuntime):
             message=message,
             session_id=session_id,
             steps=list(current_turn_tool_steps(self)),
+            # Settings toggle: creation off still lets evaluation run
+            allow_creation=bool(getattr(self.config, "allow_skill_creation", True)),
+        )
+
+    def _record_skill_turn_outcome(
+        self,
+        steps: list,
+        session_id: str | None,
+        *,
+        aborted: bool,
+    ) -> None:
+        """Grade auto-learned skills used this turn; clears the per-turn lists."""
+        from remedy.core.agent_learn import record_skill_turn_outcome
+
+        names: list[str] = []
+        auto = self.__dict__.pop("_turn_auto_suggested_skill", None)
+        if auto:
+            names.append(str(auto))
+        for n in list(self.__dict__.pop("_turn_activated_skills", None) or []):
+            if n and str(n) not in names:
+                names.append(str(n))
+        if not names:
+            return
+        record_skill_turn_outcome(
+            self._get_learning_loop(),
+            skills=names,
+            steps=list(steps or []),
+            aborted=bool(aborted),
+            session_id=str(session_id or ""),
+            registry=getattr(self, "skills", None),
         )
 
     def _maybe_auto_checkpoint(

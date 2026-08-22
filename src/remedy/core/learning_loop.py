@@ -8,6 +8,7 @@ philosophy.
 from __future__ import annotations
 
 import contextlib
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
@@ -32,6 +33,10 @@ from remedy.models import (
     TaskStatus,
 )
 from remedy.skills.validator import SkillValidator
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 class LearningLoop:
@@ -309,6 +314,7 @@ class LearningLoop:
             consecutive_failures=self.refiner.failure_streak(name),
             last_success_at=self.refiner.last_success_at(name),
             last_failure_at=self.refiner.last_failure_at(name),
+            activations=int(getattr(stats, "activations", 0) or 0),
         )
         decision = self.lifecycle.evaluate_health(health)
         self._last_decision = decision
@@ -322,6 +328,8 @@ class LearningLoop:
         skill.manifest.metadata = dict(skill.manifest.metadata or {})
         skill.manifest.metadata["lifecycle_last"] = decision.reason
         skill.manifest.metadata["lifecycle_action"] = decision.action
+        # Anchors the stale-DISABLED prune when no failure was ever recorded.
+        skill.manifest.metadata["lifecycle_changed_at"] = _utcnow_iso()
         self.refiner.adjust_confidence(skill, name)
         self.history.record_status_change(name, old_status, decision.new_status)
         # Persist status change when skill is on disk
@@ -330,7 +338,7 @@ class LearningLoop:
                 self._write_skill_md(skill)
         return True
 
-    def tick_learned_skills(self, *, limit: int = 32) -> list[dict]:
+    def tick_learned_skills(self, *, limit: int = 64) -> list[dict]:
         """Unattended promote / demote / prune of auto-generated skills.
 
         No LLM. Uses accumulated ``skill_stats`` + lifecycle policy. Safe to
@@ -413,6 +421,7 @@ class LearningLoop:
             consecutive_failures=self.refiner.failure_streak(name),
             last_success_at=self.refiner.last_success_at(name),
             last_failure_at=self.refiner.last_failure_at(name),
+            activations=int(getattr(stats, "activations", 0) or 0),
         )
         decision = self.lifecycle.evaluate_health(health)
         if decision.action != "prune" and skill.manifest.status != SkillStatus.DISABLED:
@@ -425,6 +434,8 @@ class LearningLoop:
 
         old = skill.manifest.status
         skill.manifest.status = SkillStatus.DEPRECATED
+        skill.manifest.metadata = dict(skill.manifest.metadata or {})
+        skill.manifest.metadata["lifecycle_changed_at"] = _utcnow_iso()
         self.history.record_status_change(name, old, SkillStatus.DEPRECATED)
         if remove_files:
             path = skill.manifest.path or skill.manifest.metadata.get("skill_path")
@@ -704,6 +715,7 @@ class LearningLoop:
             status=status,
             metadata={
                 "auto_generated": True,
+                "created_at": _utcnow_iso(),
                 "source_trace_id": str(gs.source_trace_id or ""),
                 "source_trace_ids": [str(gs.source_trace_id or trace.task_id)],
                 "source_task": gs.source_task_title,

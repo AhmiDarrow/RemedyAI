@@ -101,6 +101,8 @@ PROBATION_MIN_EXECUTIONS = 3
 # Prune candidates after this many total failures with zero success, or stale disabled
 PRUNE_ZERO_SUCCESS_MIN_N = 3
 PRUNE_DISABLED_AFTER_DAYS = 30
+# Auto-generated skill never executed nor activated since creation → DISABLED
+STALE_UNUSED_DAYS = 21
 
 # Effort bands (0.0 – 1.0)
 # HIGH is reachable with a few failed approaches + recoveries (not only extreme traces).
@@ -149,6 +151,41 @@ class EffortScore:
         return self.score >= EFFORT_HIGH
 
 
+def _parse_dt(value: Any) -> datetime | None:
+    """ISO-8601 string (or datetime) → aware UTC datetime; None when absent/bad."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+def _skill_md_mtime(skill: Skill) -> datetime | None:
+    """SKILL.md mtime as a creation fallback for skills written before created_at."""
+    meta = skill.manifest.metadata or {}
+    raw = meta.get("skill_path") or skill.manifest.path
+    if not raw:
+        return None
+    try:
+        from pathlib import Path
+
+        p = Path(str(raw))
+        if p.is_dir():
+            p = p / "SKILL.md"
+        if not p.is_file():
+            return None
+        return datetime.fromtimestamp(p.stat().st_mtime, tz=UTC)
+    except (OSError, ValueError):
+        return None
+
+
 @dataclass
 class SkillHealth:
     """Runtime health snapshot for a learned skill."""
@@ -165,6 +202,10 @@ class SkillHealth:
     auto_generated: bool = False
     # 0–1 from creation metadata; protects hard-won skills
     effort_weight: float = 0.0
+    # Progressive-disclosure activations (skill_activate / auto-suggest inject)
+    activations: int = 0
+    created_at: datetime | None = None
+    status_changed_at: datetime | None = None
 
     @property
     def success_rate(self) -> float:
@@ -474,6 +515,13 @@ class SkillLifecyclePolicy:
             return int(PRUNE_DISABLED_AFTER_DAYS * 1.5)
         return PRUNE_DISABLED_AFTER_DAYS
 
+    def _scaled_stale_unused_days(self, effort: float) -> int:
+        if effort >= EFFORT_HIGH:
+            return STALE_UNUSED_DAYS * 3  # 63d
+        if effort >= EFFORT_MEDIUM:
+            return int(STALE_UNUSED_DAYS * 1.5)
+        return STALE_UNUSED_DAYS
+
     # -- evolution gates -----------------------------------------------------
 
     def evaluate_health(self, health: SkillHealth) -> LifecycleDecision:
@@ -486,6 +534,7 @@ class SkillLifecyclePolicy:
         promote_n = self._scaled_promote_min_n(effort)
         prune_n = self._scaled_prune_zero_n(effort)
         prune_days = self._scaled_prune_days(effort)
+        stale_unused_days = self._scaled_stale_unused_days(effort)
 
         # Hard demote on failure streak (effort raises the bar)
         if health.consecutive_failures >= demote_streak:
@@ -569,8 +618,30 @@ class SkillLifecyclePolicy:
                 effort=effort,
             )
 
-        if status == SkillStatus.DISABLED and health.last_failure_at:
-            age = datetime.now(UTC) - health.last_failure_at
+        # Auto-learned and never touched since creation: not evidence of value.
+        # Demote (not delete) so the stale-DISABLED rule below can retire it.
+        if (
+            health.auto_generated
+            and health.total == 0
+            and health.activations == 0
+            and health.created_at is not None
+            and status in (SkillStatus.DISCOVERED, SkillStatus.VALIDATED)
+        ):
+            unused_age = datetime.now(UTC) - health.created_at
+            if unused_age >= timedelta(days=stale_unused_days):
+                return LifecycleDecision(
+                    "demote",
+                    f"{name}: never used in {unused_age.days}d — demoting "
+                    f"(threshold {stale_unused_days}d, effort={effort:.2f})",
+                    new_status=SkillStatus.DISABLED,
+                    confidence=0.0,
+                    effort=effort,
+                    details={"unused_days": unused_age.days},
+                )
+
+        stale_anchor = health.last_failure_at or health.status_changed_at
+        if status == SkillStatus.DISABLED and stale_anchor:
+            age = datetime.now(UTC) - stale_anchor
             # If hard-won and we ever had successes, never prune on time alone
             if (
                 age >= timedelta(days=prune_days)
@@ -622,9 +693,13 @@ class SkillLifecyclePolicy:
         consecutive_failures: int = 0,
         last_success_at: datetime | None = None,
         last_failure_at: datetime | None = None,
+        activations: int = 0,
     ) -> SkillHealth:
         meta = skill.manifest.metadata or {}
         effort = float(meta.get("effort_weight") or meta.get("effort") or 0.0)
+        created_at = _parse_dt(meta.get("created_at"))
+        if created_at is None:
+            created_at = _skill_md_mtime(skill)
         return SkillHealth(
             skill_name=skill.manifest.name,
             status=skill.manifest.status,
@@ -637,4 +712,7 @@ class SkillLifecyclePolicy:
             last_failure_at=last_failure_at,
             auto_generated=bool(meta.get("auto_generated")),
             effort_weight=effort,
+            activations=int(activations or 0),
+            created_at=created_at,
+            status_changed_at=_parse_dt(meta.get("lifecycle_changed_at")),
         )
