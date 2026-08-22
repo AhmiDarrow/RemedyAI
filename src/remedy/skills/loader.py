@@ -53,6 +53,24 @@ def _parse_status(raw: Any) -> SkillStatus:
     return SkillStatus.DISCOVERED
 
 
+def _parse_triggers(raw: Any, path: Path) -> list[str]:
+    """Frontmatter ``triggers:`` — a list of regexes; bad ones fail the load."""
+    if raw is None:
+        return []
+    items = raw if isinstance(raw, list) else [raw]
+    out: list[str] = []
+    for item in items:
+        pat = str(item or "").strip()
+        if not pat:
+            continue
+        try:
+            re.compile(pat, re.IGNORECASE)
+        except re.error as exc:
+            raise SkillLoadError(f"Invalid trigger regex {pat!r} in {path}: {exc}") from exc
+        out.append(pat)
+    return out
+
+
 def _build_manifest(frontmatter: dict, kind: SkillKind, path: Path) -> SkillManifest:
     """Build a SkillManifest from parsed frontmatter, filling defaults."""
     if "name" not in frontmatter:
@@ -96,6 +114,7 @@ def _build_manifest(frontmatter: dict, kind: SkillKind, path: Path) -> SkillMani
         repository=frontmatter.get("repository"),
         requires=frontmatter.get("requires", []) or [],
         tools=frontmatter.get("tools", []) or [],
+        triggers=_parse_triggers(frontmatter.get("triggers"), path),
         raw_frontmatter=frontmatter,
         path=str(path.parent),
         metadata=meta,

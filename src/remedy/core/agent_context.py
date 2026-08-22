@@ -510,7 +510,38 @@ async def build_turn_context(runtime: Any) -> str:
             with suppress(Exception):
                 tq = (task_q or "").lower()
                 preferred: list[str] = []
-                if _re.search(
+                # Skills declare their own triggers (frontmatter ``triggers:``);
+                # a game project's engine skill comes first when the ask is
+                # about the game at all, so "add a double jump" lands on
+                # godot-4 without naming the engine. Anything the packs do not
+                # claim falls through to the legacy review/ship/refactor map.
+                triggered: list[str] = []
+                with suppress(Exception):
+                    if hasattr(reg, "triggered_skills"):
+                        triggered = list(reg.triggered_skills(tq))
+                with suppress(Exception):
+                    from remedy.core.project_fingerprint import fingerprint_path
+
+                    # Fresh each turn (stat calls only) — never stale after a
+                    # project switch.
+                    focus_fp = fingerprint_path(runtime.effective_project_path())
+                    engine = (getattr(focus_fp, "engine", None) or {}).get("name")
+                    if engine and (
+                        triggered
+                        or _re.search(
+                            r"\b(game|level|player|enemy|sprite|scene|playtest|juice|"
+                            r"jump|collision|tilemap|spawn|score|hud|menu)\b",
+                            tq,
+                        )
+                    ):
+                        from remedy.core.game_engines import engine_skill
+
+                        es = engine_skill(engine)
+                        if es and hasattr(reg, "get") and reg.get(es) is not None:
+                            triggered = [es] + [t for t in triggered if t != es]
+                if triggered:
+                    preferred = triggered
+                elif _re.search(
                     r"\b(review|audit|blast.?radius|neighbors|code review)\b", tq
                 ):
                     preferred = [
@@ -623,6 +654,19 @@ async def build_turn_context(runtime: Any) -> str:
                             with suppress(Exception):
                                 if hasattr(reg, "mark_activated"):
                                     reg.mark_activated(m.name)
+                            # Closed loop: an injected procedure is an activation
+                            # (stats row) and the turn outcome grades it later.
+                            with suppress(Exception):
+                                loop = runtime._get_learning_loop()
+                                if loop is not None:
+                                    loop.record_skill_activation(
+                                        m.name,
+                                        session_id=str(
+                                            getattr(runtime, "_session_id", "") or ""
+                                        ),
+                                    )
+                            with suppress(Exception):
+                                runtime._turn_auto_suggested_skill = m.name
             with suppress(Exception):
                 from remedy.core.metrics import default_registry
 
