@@ -1,0 +1,31 @@
+{
+  "status": "ok",
+  "message-type": "work-list",
+  "message": {
+    "items": [
+      {
+        "DOI": "10.1038/nature14539",
+        "type": "journal-article",
+        "title": ["Deep learning"],
+        "author": [
+          {"family": "LeCun", "given": "Yann", "ORCID": "http://orcid.org/0000-0002-0000-0000"},
+          {"family": "Bengio", "given": "Yoshua"},
+          {"family": "Hinton", "given": "Geoffrey"}
+        ],
+        "container-title": ["Nature"],
+        "issued": {"date-parts": [[2015, 5]]},
+        "volume": "521",
+        "issue": "7553",
+        "page": "436-444",
+        "publisher": "Springer Science and Business Media LLC",
+        "abstract": "<jats:title>Abstract</jats:title><jats:p>Deep learning allows computational models.</jats:p>",
+        "URL": "http://dx.doi.org/10.1038/nature14539",
+        "is-referenced-by-count": 60123,
+        "subject": ["Multidisciplinary"],
+        "link": [
+          {"URL": "https://example.org/nature14539.pdf", "content-type": "application/pdf"}
+        ]
+      }
+    ]
+  }
+}

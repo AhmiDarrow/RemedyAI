@@ -104,3 +104,36 @@ async def test_a_trigger_routes_outside_any_game_project(reg):
 async def test_no_trigger_and_no_engine_injects_nothing_from_these(reg):
     ctx = await build_turn_context(_runtime("what time is it", reg, _Loop()))
     assert "BODY-OF-" not in ctx
+
+
+@pytest.mark.asyncio
+async def test_the_project_research_packs_win_for_a_research_ish_ask(tmp_path):
+    """A notebook project + 'add a figure' injects research-method, no name needed."""
+    r = SkillRegistry()
+    r.register(_mk(tmp_path, "research-method", [r"\bpreregister\b"]))
+    r.register(_mk(tmp_path, "statistics", [r"\banova\b"]))
+    proj = tmp_path / "study"
+    nbs = proj / "notebooks"
+    nbs.mkdir(parents=True)
+    (nbs / "01-explore.ipynb").write_text('{"cells": []}', encoding="utf-8")
+    loop = _Loop()
+    rt = _runtime(
+        "add a figure for the main result", r, loop, project=str(proj)
+    )
+    ctx = await build_turn_context(rt)
+    assert "BODY-OF-research-method" in ctx
+    assert loop.activations[0][0] == "research-method"
+
+
+@pytest.mark.asyncio
+async def test_a_coding_ask_in_a_research_project_does_not_force_the_pack(tmp_path):
+    r = SkillRegistry()
+    r.register(_mk(tmp_path, "research-method", [r"\bpreregister\b"]))
+    proj = tmp_path / "study"
+    nbs = proj / "notebooks"
+    nbs.mkdir(parents=True)
+    (nbs / "01-explore.ipynb").write_text('{"cells": []}', encoding="utf-8")
+    ctx = await build_turn_context(
+        _runtime("fix the login bug", r, _Loop(), project=str(proj))
+    )
+    assert "BODY-OF-research-method" not in ctx

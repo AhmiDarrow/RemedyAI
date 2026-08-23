@@ -29,6 +29,7 @@ Open **Help** ( **F1** or **Ctrl+/** ) for a searchable wiki UI that loads these
 | [24-telephony.md](24-telephony.md) | Telephony (Phase 0 bench) |
 | [25-coordination.md](25-coordination.md) | Coordination — several sessions, one repo |
 | [26-game-dev.md](26-game-dev.md) | Game dev — Remedy as a studio (Godot, web, Bevy, Pygame, Love2D; Unity/Unreal knowledge) |
+| [27-research.md](27-research.md) | Research — papers, analysis, citations (notebooks, R, Julia, literature, ledger) |
 | [18-agency.md](18-agency.md) | Coding agency (Build-class tools) |
 | [19-metabolism.md](19-metabolism.md) | Partner Metabolism L0–L3 (**0.20.0**, Advanced) |
 | [07-skills.md](07-skills.md) | Skills & Library |

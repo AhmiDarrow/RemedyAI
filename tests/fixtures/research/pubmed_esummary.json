@@ -1,0 +1,27 @@
+{
+  "header": {"type": "esummary", "version": "0.3"},
+  "result": {
+    "uids": ["26017442"],
+    "26017442": {
+      "uid": "26017442",
+      "pubdate": "2015 May 28",
+      "source": "Nature",
+      "fulljournalname": "Nature",
+      "authors": [
+        {"name": "LeCun Y", "authtype": "Author"},
+        {"name": "Bengio Y", "authtype": "Author"},
+        {"name": "Hinton G", "authtype": "Author"}
+      ],
+      "title": "Deep learning.",
+      "volume": "521",
+      "issue": "7553",
+      "pages": "436-44",
+      "articleids": [
+        {"idtype": "pubmed", "value": "26017442"},
+        {"idtype": "doi", "value": "10.1038/nature14539"},
+        {"idtype": "pmc", "value": "PMC1234567"}
+      ],
+      "pubtype": ["Journal Article", "Review"]
+    }
+  }
+}

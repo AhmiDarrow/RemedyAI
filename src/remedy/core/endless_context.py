@@ -78,6 +78,11 @@ EXPAND_TOOL_PACK: tuple[str, ...] = (
     "godot_run",
     "godot_check",
     "game_playtest",
+    "analysis_run",
+    "lit_search",
+    "cite_check",
+    "manuscript_build",
+    "power_analysis",
 )
 
 _HEAD_DROP_MARKERS: tuple[str, ...] = (

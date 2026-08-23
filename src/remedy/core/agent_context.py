@@ -539,6 +539,37 @@ async def build_turn_context(runtime: Any) -> str:
                         es = engine_skill(engine)
                         if es and hasattr(reg, "get") and reg.get(es) is not None:
                             triggered = [es] + [t for t in triggered if t != es]
+                    # Research project: same idea as the engine skill — "add a
+                    # figure for the main result" lands on research-method (and
+                    # the field pack the fingerprint named) without the owner
+                    # having to name either.
+                    packs = [
+                        str(p)
+                        for p in (
+                            (getattr(focus_fp, "research", None) or {}).get("packs")
+                            or []
+                        )
+                    ]
+                    if packs and (
+                        triggered
+                        or _re.search(
+                            r"\b(paper|manuscript|hypothesis|literature|citation|"
+                            r"preregister|notebook|dataset|doi|arxiv|pubmed|"
+                            r"p-?value|effect size|sample size|power analysis|"
+                            r"anova|regression|checklist|consort|prisma|"
+                            r"analyse|analyze|figure|table|reproducib)\b",
+                            tq,
+                        )
+                    ):
+                        kept = [
+                            p
+                            for p in packs
+                            if hasattr(reg, "get") and reg.get(p) is not None
+                        ]
+                        if kept:
+                            triggered = kept + [
+                                t for t in triggered if t not in kept
+                            ]
                 if triggered:
                     preferred = triggered
                 elif _re.search(

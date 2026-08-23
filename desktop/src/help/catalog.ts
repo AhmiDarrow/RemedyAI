@@ -261,6 +261,25 @@ const META: HelpArticleMeta[] = [
       'Godot, web, Bevy, Pygame and Love2D projects: engine detection, headless verification, playtesting, export, and the optional live-editor MCP bridge.',
   },
   {
+    id: '27-research',
+    title: 'Research (papers & analysis)',
+    category: 'Daily use',
+    order: 6.85,
+    tags: [
+      'research',
+      'paper',
+      'citation',
+      'notebook',
+      'statistics',
+      'power',
+      'manuscript',
+      'literature',
+      'reproducibility',
+    ],
+    summary:
+      'Notebooks, R, Julia, manuscripts: literature search, a citation library that has to resolve, analysis in your environment with a run ledger, power and effect sizes, reporting checklists.',
+  },
+  {
     id: '21-personal-assistant',
     title: 'Personal assistant',
     category: 'Daily use',
