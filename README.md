@@ -354,7 +354,7 @@ WebUI is the **same SPA** as desktop (`desktop/dist`). After UI changes:
 ```bash
 git clone https://github.com/AhmiDarrow/RemedyAI.git && cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # ~8704 tests
+uv run pytest -q          # ~8730 tests
 cd desktop && npm test && npm run build
 python scripts/check_docs.py
 cd desktop && npm run tauri:dev   # full shell (set REMEDY_DEV_ROOT to repo)
@@ -382,9 +382,14 @@ Signing: [AGENTS.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/AGENTS.m
 
 | Who | Terms |
 |-----|--------|
-| Solo / small indies (&lt; $1M revenue **and** &lt; 20 FTE) | Free under LICENSE |
-| Personal / education / research | Free |
-| Larger orgs, SaaS, commercial resale | Written license — **ahmitdarrow@gmail.com** |
+| Solo / small indies (&lt; $1M revenue **and** &lt; 20 FTE) | Free under LICENSE (this copy) |
+| Personal / education / research | Free (this copy) |
+| Larger orgs, SaaS, commercial resale, or a paid deal | Written license — **ahmitdarrow@gmail.com** |
+
+Use is at your own risk; the LICENSE is the binding document for warranty,
+liability, and owner responsibility (including third-party sites and
+accounts). Third-party components have their own licences
+(`desktop/public/THIRD_PARTY_NOTICES.txt`).
 
 Copyright © 2025–2026 **Ahmi Darrow**.
 

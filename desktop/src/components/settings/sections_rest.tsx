@@ -18,6 +18,7 @@ import { ThemeColorDot } from '../ThemeSwitcher'
 import { HOTKEYS } from '../../hotkeys'
 import { MessengersSection } from './MessengersSection'
 import { AssistantSection } from './AssistantSection'
+import { LicenseText, ThirdPartyNotices } from './ThirdPartyNotices'
 import { getServerUrl } from '../../api/client'
 
 export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
@@ -202,9 +203,14 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
             {' '}(subject: RemedyAI commercial license).
           </p>
           <p style={{ margin: 0, color: 'var(--text-muted)' }}>
-            Copyright (c) 2025–2026 Ahmi Darrow. Binding terms in repo LICENSE; summary in COMMERCIAL.md.
-            No license keys or phone-home in the app.
+            Copyright (c) 2025–2026 Ahmi Darrow. Binding terms below and in repo LICENSE;
+            summary in COMMERCIAL.md. The Windows installer shows the same terms before
+            install. This build has no license keys or phone-home. Paid commercial
+            licenses are available; the free grant is for qualifying users of this copy.
+            You are responsible for how you use Remedy, including sites and accounts
+            you point it at.
           </p>
+          <LicenseText />
           {onOpenHelp ? (
             <button
               type="button"
@@ -215,6 +221,7 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
               Open Security &amp; data (includes bootstrap / power notes) →
             </button>
           ) : null}
+          <ThirdPartyNotices />
         </div>
       </SettingsSection>
 

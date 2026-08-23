@@ -96,6 +96,16 @@ def sync_versions() -> str:
             cargo_toml.write_text(text, encoding="utf-8")
             changes.append(f"Cargo.toml: {m.group(1)} -> {v}")
 
+    # The shipped notices file names the build it belongs to. A bump changes
+    # no attribution, so restamp it here rather than failing the freshness gate.
+    try:
+        from gen_third_party_notices import restamp_version
+
+        if restamp_version(v):
+            changes.append(f"THIRD_PARTY_NOTICES.txt: -> {v}")
+    except Exception as exc:
+        print(f"WARNING: could not restamp third-party notices ({exc})")
+
     if changes:
         print(f"Synced version to {v}:")
         for c in changes:
@@ -104,6 +114,28 @@ def sync_versions() -> str:
         print(f"Version {v} already synced across all configs.")
 
     return v
+
+
+def check_third_party_notices() -> None:
+    """Fail the build when a shipped dependency is missing from the notices.
+
+    MIT / BSD / ISC / Apache-2.0 / OFL-1.1 all require their notice to travel
+    with the binary, so a dependency added without regenerating the file is a
+    licence problem, not a cosmetic one.
+    """
+    script = ROOT / "scripts" / "gen_third_party_notices.py"
+    if not script.exists():
+        print("WARNING: gen_third_party_notices.py missing — notices not verified")
+        return
+    proc = subprocess.run(
+        [sys.executable, str(script), "--check"],
+        cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    sys.stdout.write(proc.stdout)
+    if proc.returncode != 0:
+        sys.stderr.write(proc.stderr)
+        print("ERROR: third-party notices are out of date — regenerate before building.")
+        sys.exit(1)
 
 
 def ensure_pyinstaller():
@@ -331,6 +363,8 @@ def build(cache_clean: bool = False, ci: bool = False):
                 f"pyproject.toml version={v}. Bump with scripts/sync_version.py first."
             )
             sys.exit(1)
+
+    check_third_party_notices()
 
     ensure_pyinstaller()
 

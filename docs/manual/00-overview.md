@@ -225,11 +225,14 @@ You → Desktop (chat + Files / Terminal / Browser / Scratch)
 
 | Who | Terms |
 |-----|--------|
-| Solo / small indies (&lt; $1M revenue **and** &lt; 20 FTE) | Free to use and modify |
-| Personal / education / research | Free |
-| Larger orgs, SaaS, commercial resale | Written license — **ahmitdarrow@gmail.com** |
+| Solo / small indies (&lt; $1M revenue **and** &lt; 20 FTE) | Free to use and modify (this copy) |
+| Personal / education / research | Free (this copy) |
+| Larger orgs, SaaS, commercial resale, or a paid deal | Written license — **ahmitdarrow@gmail.com** |
 
-Binding: repo `LICENSE` · Summary: `COMMERCIAL.md`.
+Binding: repo `LICENSE` (also shown by the Windows installer, and under
+Settings → License) · Summary: `COMMERCIAL.md`. You are responsible for how
+you use Remedy, including sites and accounts you point it at. The free grant
+is not a promise Remedy stays free; paid licenses are available.
 
 ---
 

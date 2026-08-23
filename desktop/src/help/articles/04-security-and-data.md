@@ -143,7 +143,7 @@ Commands: `/approve`, `/deny` (when an id is shown). Status bar thumbs toggle As
 
 ## License (not a security control)
 
-Remedy is **source-available** (see repo `LICENSE` / `COMMERCIAL.md`). Free for solo and small indies under the published threshold; larger commercial use needs written permission. This is **not** enforced by license keys in the app — ownership and terms live in the license text.
+Remedy is **source-available** (see repo `LICENSE` / `COMMERCIAL.md`). Free for solo and small indies under the published threshold **for this copy**; larger commercial use, resale, or a paid deal needs written permission. This build has **no** license keys — ownership and terms live in the license text. Paid licenses are available; the free grant is not a promise later versions stay free. You are responsible for how you use Remedy, including sites and accounts you point it at.
 
 ## Skills security
 
