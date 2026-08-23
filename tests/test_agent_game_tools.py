@@ -330,7 +330,7 @@ def test_timeouts_resolve(rt: _Rt):
     assert tool_timeout_for("godot_run", reg) == 900.0
     assert tool_timeout_for("godot_check", reg) == 900.0
     assert tool_timeout_for("godot_export", reg) == 900.0
-    assert tool_timeout_for("game_playtest", reg) == 300.0
+    assert tool_timeout_for("game_playtest", reg) is None
     assert tool_timeout_for("game_project_info", reg) == 30.0
 
 

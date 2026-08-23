@@ -2698,15 +2698,18 @@ def register_research_tools(runtime: Any) -> None:
                         "kind": "key",
                         "key": key,
                         "identifier": identifier,
-                        "status": "OK",
-                        "evidence": "identifier resolved, but the registry returned no title to compare",
+                        "status": "RESOLVER_ONLY",
+                        "evidence": (
+                            "identifier exists at the resolver, but no title came back "
+                            "to compare — not verified"
+                        ),
                         "resolved_title": "",
                         "library_title": library_title,
                         "similarity": 0.0,
                         "line": line,
                     }
                 )
-                verified_now[key] = (identifier, _iso_now())
+                unresolved.append(identifier)
                 continue
             similarity = round(jaccard(resolved_title, library_title), 3)
             resolved_family = _fold(first_author_family(resolved_rec))
@@ -2887,6 +2890,7 @@ def register_research_tools(runtime: Any) -> None:
             + counts.get("DOI_UNRESOLVED", 0)
             + counts.get("ID_UNRESOLVED", 0)
             + counts.get("URL_DEAD", 0)
+            + counts.get("RESOLVER_ONLY", 0)
         )
         soft_fail = (
             counts.get("MISMATCH", 0)
