@@ -15,9 +15,15 @@ from remedy.core.hive.policy import (
     reset_hive_depth,
     set_hive_depth,
 )
-from remedy.core.hive.runner import run_forager, set_pulse_impl
+from remedy.core.hive.pulse import (
+    resume_posts,
+    run_post_pulse,
+    stop_all_posts,
+)
+from remedy.core.hive.runner import cancel_children, run_forager, set_pulse_impl
 from remedy.core.hive.store import HiveStore
 from remedy.core.hive.types import (
+    CADENCE_POST,
     PACKET_CHAR_CAP,
     ReturnPacket,
     is_hive_session_id,
@@ -219,3 +225,131 @@ async def test_hive_spawn_collect_tools(hive_home: Path):
 
 def test_hive_depth_default_zero():
     assert hive_depth() == 0
+
+
+def _runtime(hive_home: Path, session_id: str = "owner-sess"):
+    from remedy.core.agent_hive_tools import register_hive_tools
+    from remedy.skills.tool_registry import ToolRegistry
+
+    rt = SimpleNamespace(
+        tool_registry=ToolRegistry(),
+        config=SimpleNamespace(home_dir=str(hive_home)),
+        _session_id=session_id,
+    )
+    rt.effective_project_path = lambda: hive_home  # type: ignore[method-assign]
+    register_hive_tools(rt)
+    return rt
+
+
+@pytest.mark.asyncio
+async def test_post_pulse_once(hive_home: Path):
+    async def pulse(_rt, daughter):
+        return ReturnPacket(
+            goal=daughter.goal,
+            done=False,
+            outcome="watched the inbox",
+            evidence=["inbox"],
+            confidence=0.7,
+        )
+
+    set_pulse_impl(pulse)
+    try:
+        store = HiveStore(hive_home)
+        d = store.hire("watch mail", cadence=CADENCE_POST, pulse_s=30)
+        rt = SimpleNamespace(config=SimpleNamespace(home_dir=str(hive_home)))
+        pkt = await run_post_pulse(rt, d)
+        assert "inbox" in pkt.outcome or "watched" in pkt.outcome
+        fresh = store.get(d.id)
+        assert fresh is not None
+        assert fresh.status == "asleep"
+        assert int((fresh.journal or {}).get("pulse_count") or 0) == 1
+        assert fresh.next_pulse_at
+        dumped = (hive_home / "hive" / "posts" / f"{d.id}.json").read_text(
+            encoding="utf-8"
+        )
+        assert "tool_calls" not in dumped
+        assert "watched the inbox" in dumped
+    finally:
+        set_pulse_impl(None)
+
+
+@pytest.mark.asyncio
+async def test_journal_survives_restart(hive_home: Path):
+    async def pulse(_rt, daughter):
+        return ReturnPacket(goal=daughter.goal, done=False, outcome="tick", confidence=0.5)
+
+    set_pulse_impl(pulse)
+    try:
+        store = HiveStore(hive_home)
+        d = store.hire("stand", cadence=CADENCE_POST, pulse_s=30)
+        rt = SimpleNamespace(config=SimpleNamespace(home_dir=str(hive_home)))
+        await run_post_pulse(rt, d)
+        store2 = HiveStore(hive_home)
+        got = store2.get(d.id)
+        assert got is not None
+        assert got.cadence == CADENCE_POST
+        assert int((got.journal or {}).get("pulse_count") or 0) == 1
+        notes = (got.journal or {}).get("notes") or []
+        assert notes and "tick" in str(notes[0].get("outcome"))
+        n = resume_posts(rt)
+        assert n >= 1
+        stop_all_posts()
+    finally:
+        set_pulse_impl(None)
+        stop_all_posts()
+
+
+@pytest.mark.asyncio
+async def test_hive_assign_replaces_charter(hive_home: Path):
+    async def pulse(_rt, daughter):
+        return ReturnPacket(goal=daughter.goal, done=False, outcome=daughter.goal[:40])
+
+    set_pulse_impl(pulse)
+    try:
+        rt = _runtime(hive_home)
+        out = await rt.tool_registry.execute(
+            "hive_spawn", goal="watch logs", cadence="post", pulse_s=120
+        )
+        assert "HIVE_POST_UNAVAILABLE" not in out
+        assert "cadence=post" in out
+        hid = out.split("hive_id=", 1)[1].split()[0]
+        assigned = await rt.tool_registry.execute(
+            "hive_assign", hive_id=hid, goal="watch errors only"
+        )
+        assert "charter replaced" in assigned
+        store = HiveStore(hive_home)
+        got = store.get(hid)
+        assert got is not None
+        assert got.goal == "watch errors only"
+        assert "watch errors only" in str((got.journal or {}).get("charter"))
+        forager = store.hire("one shot")
+        bad = await rt.tool_registry.execute(
+            "hive_assign", hive_id=forager.id, goal="nope"
+        )
+        assert "HIVE_NOT_POST" in bad
+    finally:
+        set_pulse_impl(None)
+        stop_all_posts()
+
+
+@pytest.mark.asyncio
+async def test_stop_does_not_retire_posts(hive_home: Path):
+    store = HiveStore(hive_home)
+    post = store.hire(
+        "stand forever",
+        cadence=CADENCE_POST,
+        parent_session_id="owner-sess",
+        pulse_s=30,
+    )
+    forager = store.hire("quick", parent_session_id="owner-sess")
+    n = cancel_children("owner-sess")
+    # Forager is pending so cancel_children aborts it; post is skipped.
+    assert n >= 1
+    still = store.get(post.id)
+    assert still is not None
+    assert still.status not in ("cancelled", "retired")
+    assert still.cadence == CADENCE_POST
+    gone = store.get(forager.id)
+    assert gone is not None
+    # Forager abort is async via task; status may still be pending if never scheduled.
+    assert gone.cadence == "forager"
