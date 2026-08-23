@@ -32,7 +32,8 @@ def test_ensure_voice_assets_force_starts_missing(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
         "remedy.voice.service.smart_turn_installed", lambda *a, **k: False
     )
-    monkeypatch.setattr("remedy.voice.service.stt_deps_available", lambda: False)
+    monkeypatch.setattr("remedy.voice.service.tts_deps_available", lambda: True)
+    monkeypatch.setattr("remedy.voice.service.stt_deps_available", lambda: True)
     monkeypatch.setattr(
         "remedy.voice.service.install_tts_background",
         lambda *a, **k: started.append("tts") or True,
@@ -41,6 +42,10 @@ def test_ensure_voice_assets_force_starts_missing(tmp_path: Path, monkeypatch):
         "remedy.voice.service.install_smart_turn_background",
         lambda *a, **k: started.append("smart-turn") or True,
     )
+    monkeypatch.setattr(
+        "remedy.voice.service.install_voice_pack_background",
+        lambda *a, **k: started.append("pack") or True,
+    )
     from remedy.voice.service import ensure_voice_assets
 
     r = ensure_voice_assets(tmp_path, force=True)
@@ -48,6 +53,22 @@ def test_ensure_voice_assets_force_starts_missing(tmp_path: Path, monkeypatch):
     assert r["started"] == ["tts", "smart-turn"]
     assert "stt" in r["already"]
     assert started == ["tts", "smart-turn"]
+
+
+def test_ensure_voice_assets_missing_extras_starts_pack(tmp_path: Path, monkeypatch):
+    started: list[str] = []
+    monkeypatch.setattr("remedy.voice.service.tts_deps_available", lambda: False)
+    monkeypatch.setattr("remedy.voice.service.stt_deps_available", lambda: False)
+    monkeypatch.setattr(
+        "remedy.voice.service.install_voice_pack_background",
+        lambda *a, **k: started.append("pack") or True,
+    )
+    from remedy.voice.service import ensure_voice_assets
+
+    r = ensure_voice_assets(tmp_path, force=True)
+    assert r["ok"] is True
+    assert r["started"] == ["pack"]
+    assert started == ["pack"]
 
 
 def test_ensure_voice_assets_no_op_when_present(tmp_path: Path, monkeypatch):

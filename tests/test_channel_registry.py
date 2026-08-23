@@ -9,8 +9,6 @@ secrets are present, and it is *absent* rather than half-alive when they are not
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from remedy.gateway.channel_registry import _home, register_messenger_channels
@@ -167,5 +165,7 @@ def test_home_falls_back_to_the_environment(tmp_path, monkeypatch):
 
 
 def test_home_last_resort_matches_the_cli_default(monkeypatch):
+    from remedy.home import default_home
+
     monkeypatch.delenv("REMEDY_HOME", raising=False)
-    assert _home({}) == Path.home() / ".remedy"
+    assert _home({}) == default_home()

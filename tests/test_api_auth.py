@@ -27,6 +27,8 @@ def test_client_gone_is_not_a_server_fault():
     wrapped.__cause__ = EndOfStream()
     assert _is_client_gone(wrapped) is True
     assert _is_client_gone(RuntimeError("boom")) is False
+    # A route that forgot to return is a server fault, not a hung-up client.
+    assert _is_client_gone(RuntimeError("No response returned.")) is False
 
 
 def test_ensure_token_generates_and_persists(tmp_path, auth_on):

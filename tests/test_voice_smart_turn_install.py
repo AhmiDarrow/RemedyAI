@@ -102,10 +102,12 @@ def test_install_is_idempotent_and_does_not_refetch(tmp_path, monkeypatch, pin):
 
 
 def test_status_reports_the_model_like_the_other_engines(tmp_path, monkeypatch, pin):
+    monkeypatch.setattr(service, "smart_turn_deps_available", lambda: True)
     before = service.voice_status(tmp_path)["smart_turn"]
     assert before["installed"] is False
     assert before["available"] is False
     assert before["reason"]
+    assert "download" not in (before["reason"] or "").lower()
     assert before["source"] == {
         "repo": pin.repo,
         "revision": pin.revision,
@@ -124,6 +126,19 @@ def test_status_reports_the_model_like_the_other_engines(tmp_path, monkeypatch, 
     assert after["engine"] == "smart-turn-v3"
     assert after["path"] == str(service.smart_turn_path(tmp_path))
     assert after["install"]["status"] == "done"
+
+
+def test_status_says_downloading_only_while_install_is_in_flight(
+    tmp_path, monkeypatch, pin
+):
+    monkeypatch.setattr(service, "smart_turn_deps_available", lambda: True)
+    service._install_state["smart-turn"] = {
+        "status": "downloading",
+        "percent": 12.0,
+    }
+    st = service.voice_status(tmp_path)["smart_turn"]
+    assert st["available"] is False
+    assert "download" in (st["reason"] or "").lower()
 
 
 def test_status_says_why_when_only_the_runtime_is_missing(tmp_path, monkeypatch, pin):

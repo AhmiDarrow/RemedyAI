@@ -33,6 +33,10 @@ def test_detects_build_requests():
     )
     assert not looks_like_build_request("thanks")
     assert not looks_like_build_request("what is a monad?")
+    assert not looks_like_build_request(
+        "could you explain how recursion works please"
+    )
+    assert not looks_like_build_request("can you tell me about your day")
 
 
 def test_begin_build_turn_greeting_ignores_leftover_brief():

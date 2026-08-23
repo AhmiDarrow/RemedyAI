@@ -189,6 +189,20 @@ def register_files_tools(runtime: Any) -> None:
                     f'Use list_dir("{path}") then file_read on a specific file inside it.'
                 ),
             )
+        from remedy.core.security import is_credential_filename
+
+        if is_credential_filename(target.name) or any(
+            is_credential_filename(part) for part in target.parts
+        ):
+            return format_tool_error(
+                "This file looks like credentials and will not be read.",
+                code="CREDENTIAL_FILE",
+                tool_name="file_read",
+                suggestion=(
+                    "Ask the owner to paste the value into a verified field, "
+                    "or read a non-secret template such as .env.example."
+                ),
+            )
         try:
             from remedy.core.text_files import is_probably_text
 

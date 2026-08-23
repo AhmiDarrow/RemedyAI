@@ -100,6 +100,7 @@ def register_messenger_channels(
                     guild_id=str(s.get("guild_id") or ""),
                     allow_ids=parse_list_field(s.get("allow_ids") or s.get("allow_chat_ids")),
                     allow_all=bool(s.get("allow_all")),
+                    home_dir=str(home) if home else None,
                 )
             )
             registered.append("discord")
@@ -119,6 +120,7 @@ def register_messenger_channels(
                     channel_id=str(s.get("channel_id") or ""),
                     allow_ids=parse_list_field(s.get("allow_ids") or s.get("allow_chat_ids")),
                     allow_all=bool(s.get("allow_all")),
+                    home_dir=str(home) if home else None,
                 )
             )
             registered.append("slack")
