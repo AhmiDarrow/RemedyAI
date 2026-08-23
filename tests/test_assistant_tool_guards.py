@@ -509,7 +509,8 @@ async def test_a_read_only_calendar_says_so_instead_of_pretending(
 async def test_a_draft_only_mailbox_says_so_instead_of_pretending(
     tools, monkeypatch, approvals, tool, kwargs, fragment
 ):
-    approvals.set_mode("auto")  # so mail_send reaches the capability check
+    approvals.set_mode("auto")
+    monkeypatch.setattr(approvals, "take_one_shot", lambda *a, **k: True)
     _install_mail(monkeypatch, _ReadOnlyMail(provider_id="imap"), imap=True)
     out = await _json(tools, tool, **kwargs)
     assert out["ok"] is False
@@ -561,6 +562,7 @@ async def test_a_mail_failure_is_reported_not_raised(
     tools, monkeypatch, approvals, tool, kwargs, fail, text
 ):
     approvals.set_mode("auto")
+    monkeypatch.setattr(approvals, "take_one_shot", lambda *a, **k: True)
     _install_mail(monkeypatch, _FullMail(provider_id="imap", fail=fail), imap=True)
     out = await _json(tools, tool, **kwargs)
     assert out["ok"] is False
@@ -698,6 +700,7 @@ async def test_a_send_result_carries_only_the_confirmation_fields(
     tools, monkeypatch, approvals
 ):
     approvals.set_mode("auto")
+    monkeypatch.setattr(approvals, "take_one_shot", lambda *a, **k: True)
     mail = _FullMail(provider_id="imap")
     mail.send_result = {
         "message_id": "m1",
@@ -717,6 +720,7 @@ async def test_a_reply_result_carries_only_the_confirmation_fields(
     tools, monkeypatch, approvals
 ):
     approvals.set_mode("auto")  # about the payload, not the gate
+    monkeypatch.setattr(approvals, "take_one_shot", lambda *a, **k: True)
     mail = _FullMail(provider_id="imap")
     mail.reply_result = {
         "message_id": "m2",
@@ -751,15 +755,16 @@ async def test_ask_mode_stops_a_send_and_never_hands_it_to_the_mailbox(
 
 
 @pytest.mark.asyncio
-async def test_auto_mode_lets_the_owner_send_without_a_prompt(
+async def test_auto_mode_still_stops_a_send(
     tools, monkeypatch, approvals
 ):
+    """Sending mail is irreversible — auto/full must not waive the checkpoint."""
     approvals.set_mode("auto")
     mail = _FullMail(provider_id="imap")
     _install_mail(monkeypatch, mail, imap=True)
-    out = await _json(tools, "mail_send", to="a@b.com", subject="hi", body="hello")
-    assert out["ok"] is True
-    assert mail.sent == [{"to": "a@b.com", "subject": "hi", "body": "hello"}]
+    out = await tools["mail_send"](to="a@b.com", subject="hi", body="hello")
+    assert out.startswith("APPROVAL_REQUIRED id=")
+    assert mail.sent == []
 
 
 @pytest.mark.asyncio

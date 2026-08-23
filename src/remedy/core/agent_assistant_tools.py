@@ -626,8 +626,15 @@ def register_assistant_tools(runtime: Any) -> None:
         # Sending on the owner's behalf always respects the approval gate.
         summary = f"mail_reply to message={mid} chars={len(body or '')}"
         ask_reason = APPROVALS.needs_ask(summary, tool_name="mail_reply")
+        from remedy.core.approvals import SENSITIVE_PREFIX
+
         sid = turn_session_id(runtime)
-        if ask_reason and not APPROVALS.is_approved("mail_reply", summary, session_id=sid):
+        granted = False
+        if ask_reason and ask_reason.startswith(SENSITIVE_PREFIX):
+            granted = APPROVALS.take_one_shot("mail_reply", summary, session_id=sid)
+        elif ask_reason:
+            granted = APPROVALS.is_approved("mail_reply", summary, session_id=sid)
+        if ask_reason and not granted:
             item = APPROVALS.create(
                 tool_name="mail_reply",
                 command=summary,
@@ -862,8 +869,8 @@ def register_assistant_tools(runtime: Any) -> None:
     ) -> str:
         """Send a message now, over IMAP/SMTP or Gmail.
 
-        High-impact: in Ask approval mode the user must confirm before send.
-        Auto mode (owner power) skips the prompt on trusted scopes.
+        Sending mail always needs the owner's go-ahead — no approval mode
+        waives it (same class as a purchase).
         """
         from remedy.assistant.privacy import consent_ok, redact_secrets
         from remedy.core.approvals import APPROVALS
@@ -888,12 +895,16 @@ def register_assistant_tools(runtime: Any) -> None:
         # Partner trust: never silent-send in Ask mode.
         summary = f"mail_send to={to_addr} subject={subj[:80]}"
         ask_reason = APPROVALS.needs_ask(summary, tool_name="mail_send")
+        from remedy.core.approvals import SENSITIVE_PREFIX
         from remedy.core.turn_context import turn_session_id
 
         sid = turn_session_id(runtime)
-        if ask_reason and not APPROVALS.is_approved(
-            "mail_send", summary, session_id=sid
-        ):
+        granted = False
+        if ask_reason and ask_reason.startswith(SENSITIVE_PREFIX):
+            granted = APPROVALS.take_one_shot("mail_send", summary, session_id=sid)
+        elif ask_reason:
+            granted = APPROVALS.is_approved("mail_send", summary, session_id=sid)
+        if ask_reason and not granted:
             item = APPROVALS.create(
                 tool_name="mail_send",
                 command=summary,
