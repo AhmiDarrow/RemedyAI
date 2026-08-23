@@ -648,6 +648,38 @@ async def test_a_blocked_empty_file_write_rearms_write_tools_instead_of_giving_u
     assert any("was **kept** (not wiped)" in t for t in nudges)
     # Tools must still be armed — the model has to be able to write for real.
     assert fake.requests[1].tools != []
+    # notes.txt was never actually written, so the claim that it was must not
+    # become the answer — that is the false success this guard exists to stop.
+    assert "Wrote it properly this time." not in answer(chunks)
+
+
+@pytest.mark.asyncio
+async def test_a_real_write_after_a_blocked_one_lets_the_answer_through(tmp_path):
+    """The empty-write guard must clear once the file is genuinely written."""
+    runtime = make_runtime(tmp_path)
+    registry = FakeToolRegistry().install(runtime)
+    registry.add(
+        "file_write",
+        description="write a file",
+        results=[
+            ToolFailure("EMPTY_SOURCE_WRITE: blank content refused"),
+            "wrote notes.txt",
+        ],
+    )
+    fake = FakeLLM(
+        [
+            tool_turn("file_write", {"path": "notes.txt", "content": ""}),
+            tool_turn("file_write", {"path": "notes.txt", "content": "real content"}),
+            text_turn("Wrote it properly this time."),
+        ],
+        when_exhausted=text_turn("kept going"),
+    )
+
+    with fake.patch(force_tools=True), patch(
+        "remedy.core.logging.hot_debug_enabled", return_value=True
+    ):
+        chunks = await drain(runtime, "create a file called notes.txt in the project")
+
     assert "Wrote it properly this time." in answer(chunks)
 
 

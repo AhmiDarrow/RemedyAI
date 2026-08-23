@@ -66,6 +66,13 @@ async def test_web_fetch_returns_markdown(monkeypatch):
         "remedy.core.agent_web_tools._web_enabled", lambda runtime: True
     )
 
+    async def _no_rail(url: str) -> str:
+        return ""
+
+    # Without this the short extract trips the thin-body path and the test
+    # silently fetches the real network (green offline, red online).
+    monkeypatch.setattr("remedy.core.agent_web_tools._rail_page_text", _no_rail)
+
     runtime = MagicMock()
     runtime.tool_registry = ToolRegistry()
     register_web_tools(runtime)
@@ -76,6 +83,38 @@ async def test_web_fetch_returns_markdown(monkeypatch):
     assert "bad()" not in out
     assert "chrome" not in out
     assert "URL: https://example.com/guide" in out
+
+
+@pytest.mark.asyncio
+async def test_a_thin_extract_beats_a_thinner_browser_read(monkeypatch):
+    """A short page is not an empty shell — the browser only wins if it has more."""
+    from unittest.mock import MagicMock
+
+    from remedy.core.agent_web_tools import register_web_tools
+    from remedy.skills.tool_registry import ToolRegistry
+
+    html = (
+        b"<!doctype html><html><head><title>Guide</title></head>"
+        b"<body><article><h1>Guide</h1><p>Hello world.</p></article></body></html>"
+    )
+    monkeypatch.setattr(
+        "remedy.core.agent_web_tools._pinned_fetch",
+        lambda url, **k: (url, html, "utf-8"),
+    )
+    monkeypatch.setattr("remedy.core.agent_web_tools._web_enabled", lambda runtime: True)
+
+    async def _thin_rail(url: str) -> str:
+        return "Just this"
+
+    monkeypatch.setattr("remedy.core.agent_web_tools._rail_page_text", _thin_rail)
+
+    runtime = MagicMock()
+    runtime.tool_registry = ToolRegistry()
+    register_web_tools(runtime)
+    out = await runtime.tool_registry.execute("web_fetch", url="https://example.com/g")
+    assert "Hello world" in out
+    assert "Just this" not in out
+    assert "in-app browser" not in out
 
 
 def test_jwks_host_allowlist():

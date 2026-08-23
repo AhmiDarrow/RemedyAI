@@ -1607,7 +1607,7 @@ def pdf_to_text(data: bytes, *, max_chars: int = 40_000) -> tuple[str, str, bool
     try:  # pure-python, lazily imported: present in many project envs, optional here
         import io
 
-        from pypdf import PdfReader  # type: ignore[import-not-found]
+        from pypdf import PdfReader
 
         reader = PdfReader(io.BytesIO(data))
         pages = []
@@ -1704,7 +1704,7 @@ def extract_citations(text: str, *, suffix: str = "") -> dict[str, list[dict[str
         {"url": m.group(0).rstrip(".,;)"), "line": _line_of(body, m.start())}
         for m in _URL_RE.finditer(body)
     ]
-    url_span = " ".join(u["url"] for u in urls)
+    url_span = " ".join(str(u["url"]) for u in urls)
     dois: list[dict[str, Any]] = []
     seen_dois: set[str] = set()
     for m in _DOI_RE.finditer(body):

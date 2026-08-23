@@ -242,9 +242,9 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
             from PIL import Image
 
             with Image.open(candidate) as im:
-                im = im.convert("RGBA") if im.mode not in ("RGB", "RGBA") else im
+                flat = im.convert("RGBA") if im.mode not in ("RGB", "RGBA") else im
                 buf = BytesIO()
-                im.save(buf, format="PNG", optimize=True)
+                flat.save(buf, format="PNG", optimize=True)
             return Response(
                 content=buf.getvalue(),
                 media_type="image/png",

@@ -1,6 +1,7 @@
 # Post-processing with scripts/sheet_tools.py
 
-Pillow only, no network. Run via `skill_run` (`sheet_tools.py`) or
+Pillow only, no network. If Pillow is missing:
+`pip install "remedy-ai[game-assets]"`. Run via `skill_run` (`sheet_tools.py`) or
 `python scripts/sheet_tools.py ...`. Paths must be inside the working
 tree (`--allow-outside` overrides); outputs are overwritten only with
 `--force`. Both are global flags, placed before the subcommand.

@@ -157,21 +157,26 @@ async def _post_loop(runtime: Any, daughter_id: str) -> None:
         _post_tasks.pop(daughter_id, None)
 
 
-def schedule_post(runtime: Any, daughter: HiveDaughter) -> None:
-    """Start (or replace) the standing loop for this post."""
+def schedule_post(runtime: Any, daughter: HiveDaughter) -> bool:
+    """Start (or replace) the standing loop for this post.
+
+    False when there is no running loop — the post is not standing and the
+    caller must not claim it is.
+    """
     if daughter.cadence != CADENCE_POST:
-        return
+        return False
     if daughter.id in _post_tasks and not _post_tasks[daughter.id].done():
-        return
+        return True
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        return
+        return False
     if not daughter.next_pulse_at:
         mark_next_pulse(daughter, due_now=True)
         _store_for(runtime).save(daughter)
     task = loop.create_task(_post_loop(runtime, daughter.id))
     _post_tasks[daughter.id] = task
+    return True
 
 
 def cancel_post(daughter_id: str) -> bool:

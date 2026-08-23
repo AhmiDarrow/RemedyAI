@@ -9,8 +9,17 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
-from PIL import Image
+try:
+    from PIL import Image
+except ModuleNotFoundError:  # owner-facing: say the fix, not a traceback
+    sys.exit(
+        "This script needs Pillow. Install it with:\n"
+        "  pip install \"remedy-ai[game-assets]\"\n"
+        "or:\n"
+        "  pip install pillow"
+    )
 
 ALLOW_OUTSIDE = False
 FORCE = False
@@ -46,6 +55,21 @@ def _outdir(path: str) -> Path:
     return p
 
 
+def _pixels(img: Image.Image) -> Any:
+    """``Image.load()`` is Optional in the stubs; a failure here is unrecoverable."""
+    px = img.load()
+    if px is None:
+        sys.exit("could not load image pixels")
+    return px
+
+
+def _rgba_at(img: Image.Image, xy: tuple[int, int]) -> tuple[int, int, int, int]:
+    v = img.getpixel(xy)
+    if not isinstance(v, tuple) or len(v) < 4:
+        sys.exit("expected an RGBA image")
+    return int(v[0]), int(v[1]), int(v[2]), int(v[3])
+
+
 def _hex(s: str) -> tuple[int, int, int]:
     s = s.lstrip("#")
     if len(s) != 6:
@@ -58,9 +82,9 @@ def _hex(s: str) -> tuple[int, int, int]:
 
 def cmd_alpha_key(a: argparse.Namespace) -> None:
     img = _in(a.input)
-    key = img.getpixel((0, 0))[:3] if a.color == "auto" else _hex(a.color)
+    key = _rgba_at(img, (0, 0))[:3] if a.color == "auto" else _hex(a.color)
     tol = a.tolerance
-    px = img.load()
+    px = _pixels(img)
     w, h = img.size
     for y in range(h):
         for x in range(w):
@@ -92,7 +116,7 @@ def cmd_downscale(a: argparse.Namespace) -> None:
         nh, nw = a.height, max(1, round(w * a.height / h))
     else:
         sys.exit("give --factor, --width or --height")
-    img.resize((nw, nh), Image.NEAREST).save(_out(a.output))
+    img.resize((nw, nh), Image.Resampling.NEAREST).save(_out(a.output))
     print(f"downscale: {w}x{h} -> {nw}x{nh} (nearest) -> {a.output}")
 
 
@@ -103,7 +127,9 @@ def cmd_quantize(a: argparse.Namespace) -> None:
     dither = Image.Dither.FLOYDSTEINBERG if a.dither else Image.Dither.NONE
     if a.palette:
         pal_src = _in(a.palette).convert("RGB")
-        colors = sorted({c for _, c in pal_src.getcolors(1 << 24) or []})
+        colors = sorted(
+            {c for _, c in pal_src.getcolors(1 << 24) or [] if isinstance(c, tuple)}
+        )
         if not colors:
             sys.exit("palette image has no colours")
         colors = colors[:256]

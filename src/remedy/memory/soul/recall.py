@@ -114,9 +114,9 @@ def recall_unified(
         with suppress(Exception):
             from remedy.memory.partner_memory import rank_injectable_facts
 
-            for f in rank_injectable_facts(profile, query=q, limit=16):
-                s = _score(qtok, f.fact) + float(f.confidence) * 0.3
-                hits.append((s, f"fact:{f.category}", f.fact))
+            for pf in rank_injectable_facts(profile, query=q, limit=16):
+                s = _score(qtok, pf.fact) + float(pf.confidence) * 0.3
+                hits.append((s, f"fact:{pf.category}", pf.fact))
     elif memory is not None:
         with suppress(Exception):
             from remedy.memory.partner_memory import rank_injectable_facts

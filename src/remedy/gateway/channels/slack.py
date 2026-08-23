@@ -7,12 +7,16 @@ import contextlib
 import json
 import logging
 from collections import OrderedDict
+from typing import TYPE_CHECKING
 
 from remedy.gateway.channels.allowlist import is_allowed, parse_ids
 from remedy.gateway.channels.base_http import HttpSessionMixin
 from remedy.gateway.channels.emit_util import emit_message
 from remedy.gateway.router import ChannelAdapter
 from remedy.models import ChannelKind
+
+if TYPE_CHECKING:
+    from remedy.gateway.poll_lock import MessengerPollLock
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +44,7 @@ class SlackChannel(HttpSessionMixin, ChannelAdapter):
         self._home_dir = home_dir
         self._ws_task: asyncio.Task | None = None
         self._lock_retry_task: asyncio.Task | None = None
-        self._poll_lock = None
+        self._poll_lock: MessengerPollLock | None = None
         # Ordered dedupe of event ids (oldest dropped first — not set-order).
         self._seen: OrderedDict[str, None] = OrderedDict()
 
