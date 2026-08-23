@@ -108,8 +108,9 @@ async def build_turn_context(runtime: Any) -> str:
                     # resume and drive it to green on her own, without asking.
                     with suppress(Exception):
                         from remedy.core.build_ledger import should_auto_resume_drive
+                        from remedy.core.turn_context import current_last_user_text
 
-                        um = str(getattr(runtime, "_last_user_text", "") or "")
+                        um = current_last_user_text(runtime)
                         if should_auto_resume_drive(um, proj or None, home=home):
                             parts.append(
                                 "[Auto-resume] You have an unfinished RED build and "
@@ -169,7 +170,9 @@ async def build_turn_context(runtime: Any) -> str:
                 except Exception:
                     pass
             # Prefer query-aware ranking when last user message is known
-            q = str(getattr(runtime, "_last_user_text", "") or "")
+            from remedy.core.turn_context import current_last_user_text
+
+            q = current_last_user_text(runtime)
             project_path = None
             with suppress(Exception):
                 project_path = str(runtime.effective_project_path() or "") or None
@@ -338,7 +341,9 @@ async def build_turn_context(runtime: Any) -> str:
         except Exception:
             pass
         _budget = max(180, int(_win * _frac))
-        _query = str(getattr(runtime, "_last_user_text", "") or "")
+        from remedy.core.turn_context import current_last_user_text
+
+        _query = current_last_user_text(runtime)
         _paths = []
         _brief = getattr(runtime, "_session_brief", None)
         if _brief is not None:
@@ -425,9 +430,11 @@ async def build_turn_context(runtime: Any) -> str:
             task_q = ""
             top_ranked: list[tuple[Any, float]] = []
             with suppress(Exception):
+                from remedy.core.turn_context import current_last_user_text
+
                 task_q = str(
                     getattr(runtime, "_turn_user_text", None)
-                    or getattr(runtime, "_last_user_text", None)
+                    or current_last_user_text(runtime)
                     or ""
                 ).strip()[:240]
             # Greets / one-word acks are not skill-ranking queries — keep warm cache.

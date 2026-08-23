@@ -88,6 +88,8 @@ class TurnReactFlags:
     skip_ask: bool = False
     # Snapshot at begin_turn — live Settings Full must not lift this turn's jail.
     approval_mode: str = ""
+    # This turn's user text — never a process-wide runtime field (concurrent tabs).
+    last_user_text: str = ""
 
 
 _turn_react_flags: ContextVar[TurnReactFlags | None] = ContextVar(
@@ -712,6 +714,34 @@ def turn_force_tool_choice(runtime: Any = None) -> bool:
     if runtime is not None:
         return bool(getattr(runtime, "_force_tool_choice", False))
     return False
+
+
+def current_last_user_text(runtime: Any = None) -> str:
+    """User text for this coroutine turn (ContextVar first).
+
+    Concurrent tabs share one BasicRuntime; a process-wide
+    ``runtime._last_user_text`` would leak tab A's prompt into tab B's context.
+    Inside an active turn, only this turn's stamp is returned — even when empty.
+    """
+    flags = _react_flags()
+    if flags is not None and in_active_turn():
+        return str(getattr(flags, "last_user_text", "") or "")
+    if flags is not None and str(getattr(flags, "last_user_text", "") or ""):
+        return str(flags.last_user_text)
+    if runtime is not None:
+        return str(getattr(runtime, "_last_user_text", "") or "")
+    return ""
+
+
+def set_turn_last_user_text(text: str, runtime: Any = None) -> None:
+    """Stamp this turn's user text; mirror onto runtime for legacy readers."""
+    clipped = (text or "")[:4000]
+    flags = _react_flags()
+    if flags is not None:
+        flags.last_user_text = clipped
+    if runtime is not None:
+        with contextlib.suppress(Exception):
+            runtime._last_user_text = clipped
 
 
 def set_turn_force_tool_choice(value: bool, runtime: Any = None) -> None:

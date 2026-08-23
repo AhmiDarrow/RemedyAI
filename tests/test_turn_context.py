@@ -12,6 +12,7 @@ import pytest
 from remedy.core.turn_context import (
     abort_session,
     begin_turn,
+    current_last_user_text,
     current_plan_mode,
     current_turn_approval_mode,
     current_turn_tool_steps,
@@ -21,6 +22,7 @@ from remedy.core.turn_context import (
     is_turn_aborted,
     register_turn_process,
     release_session_stream_claim,
+    set_turn_last_user_text,
     stream_claim_epoch,
     try_claim_session_stream,
     turn_session_id,
@@ -102,6 +104,23 @@ async def test_turn_workspace_isolated():
     assert current_turn_workspace().active_path == "/proj-a"
     end_turn("a", *t1)
     assert current_turn_workspace() is None
+
+
+def test_last_user_text_is_per_turn_not_runtime():
+    """A sibling tab's prompt must not leak into this turn's context."""
+    from types import SimpleNamespace
+
+    runtime = SimpleNamespace(_last_user_text="tab-A secret prompt")
+    toks = begin_turn("tab-b", project_raw=None, active_path=".")
+    try:
+        assert current_last_user_text(runtime) == ""
+        set_turn_last_user_text("tab-B actual prompt", runtime)
+        assert current_last_user_text(runtime) == "tab-B actual prompt"
+        assert runtime._last_user_text == "tab-B actual prompt"
+    finally:
+        end_turn("tab-b", *toks)
+    # Outside a turn, the runtime field is the legacy fallback.
+    assert current_last_user_text(runtime) == "tab-B actual prompt"
 
 
 def test_create_session_integrity_race(tmp_path):

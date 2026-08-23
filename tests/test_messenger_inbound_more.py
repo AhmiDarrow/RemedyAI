@@ -115,7 +115,9 @@ def test_a_cursor_that_cannot_be_written_is_reported_not_raised(tmp_path):
 
 
 def test_the_home_directory_defaults_to_the_dot_remedy_folder():
-    assert _matrix_home(None) == Path.home() / ".remedy"
+    from remedy.home import default_home
+
+    assert _matrix_home(None) == default_home()
 
 
 def test_a_tilde_home_is_expanded():

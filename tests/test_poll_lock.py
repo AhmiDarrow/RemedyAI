@@ -104,6 +104,33 @@ def test_inprocess_dual_acquire_refused(tmp_path):
     b.release()
 
 
+def test_discord_second_instance_does_not_start_gateway(tmp_path):
+    import asyncio
+
+    from remedy.gateway.channels.discord import DiscordChannel
+
+    class _GW:
+        async def emit(self, event):
+            return None
+
+    async def _run():
+        a = DiscordChannel(_GW(), bot_token="tok", home_dir=str(tmp_path))
+        b = DiscordChannel(_GW(), bot_token="tok", home_dir=str(tmp_path))
+        await a.start()
+        try:
+            assert a._ws_task is not None
+            await b.start()
+            try:
+                assert b._ws_task is None
+                assert b._lock_retry_task is not None
+            finally:
+                await b.stop()
+        finally:
+            await a.stop()
+
+    asyncio.run(_run())
+
+
 def test_try_acquire_idempotent_when_held(tmp_path):
     lock = MessengerPollLock(tmp_path, "discord")
     assert lock.try_acquire() is True

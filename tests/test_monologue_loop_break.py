@@ -27,6 +27,19 @@ def test_internal_repetition():
     assert not text_has_internal_repetition("Just one sentence about building.")
 
 
+def test_collapse_hides_stutter_that_raw_detector_still_sees():
+    """Loop must fingerprint the pre-collapse blob or looping mantras never trip."""
+    from remedy.core.react_policy import collapse_repeated_sentences
+
+    t = (
+        "Core lib is green. Wiring strobe + calibrate UI, then committing. "
+        * 6
+    )
+    assert text_has_internal_repetition(t)
+    collapsed = collapse_repeated_sentences(t)
+    assert not text_has_internal_repetition(collapsed)
+
+
 def test_concatenated_stutter_without_space_is_repetition():
     """Session 765c 20:54: 'committing.Core lib is green.Core lib is green.'"""
     t = (
