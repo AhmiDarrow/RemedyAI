@@ -573,6 +573,11 @@ def abort_session(
             loop = None
         if loop is not None:
             loop.create_task(close_shared_session(sid))
+    # Foragers hired by this owner turn die with Stop. Standing posts stay (PR2).
+    with contextlib.suppress(Exception):
+        from remedy.core.hive.runner import cancel_children
+
+        cancel_children(sid)
     # Cancel in-flight computer-use browser jobs for *this session only*
     # so Stop on one tab does not clobber a concurrent sibling stream.
     with contextlib.suppress(Exception):
