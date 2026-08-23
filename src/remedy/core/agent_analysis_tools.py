@@ -326,9 +326,8 @@ def _resolve_read(runtime: Any, raw: str) -> Path:
 
 
 def _allowed_write_roots(runtime: Any) -> list[Path]:
+    # Write roots only — allowed_roots() is view-only (Desktop/Documents/Downloads).
     roots = [_project_root(runtime), *_write_roots(runtime)]
-    with suppress(Exception):
-        roots.extend(Path(p) for p in (runtime.allowed_roots() or []))
     out: list[Path] = []
     for r in roots:
         with suppress(OSError):
@@ -1841,6 +1840,19 @@ def register_analysis_tools(runtime: Any) -> None:
                     "rewrite your code."
                 )
 
+        from remedy.core.shell_write_jail import scan_script_source_for_outside_writes
+
+        src_hit = scan_script_source_for_outside_writes(
+            script, write_roots=_allowed_write_roots(runtime), project_bound=True
+        )
+        if src_hit:
+            return format_tool_error(
+                src_hit,
+                code="WRITE_JAIL",
+                tool_name=tool,
+                suggestion="Keep writes inside the project, or use bash_exec after an approval.",
+            )
+
         command = _argv_text(argv)
         blocked = _approval_block(runtime, tool, command)
         if blocked:
@@ -2046,7 +2058,12 @@ def register_analysis_tools(runtime: Any) -> None:
     ) -> str:
         """List / show / verify / diff / prune recorded analysis runs."""
         tool = "analysis_ledger"
-        project = _root_for(path) if (path or "").strip() else _project_root(runtime)
+        if (path or "").strip():
+            project = _resolve_write(runtime, path, tool, default=_project_root(runtime))
+            if isinstance(project, str):
+                return project
+        else:
+            project = _project_root(runtime)
         runs_dir = runs_dir_for_project(project)
         rows = _read_ledger(runs_dir)
         act = (action or "list").strip().lower()
@@ -2168,7 +2185,15 @@ def register_analysis_tools(runtime: Any) -> None:
                         "state": state,
                     }
                 )
-            status = "MISSING" if missing else ("DRIFTED" if drift else "INTACT")
+            unverifiable = sum(1 for f in files if f.get("state") == "UNVERIFIABLE")
+            if missing:
+                status = "MISSING"
+            elif drift:
+                status = "DRIFTED"
+            elif unverifiable:
+                status = "INCOMPLETE"
+            else:
+                status = "INTACT"
             return _dump(
                 {
                     "action": "verify",
