@@ -577,24 +577,30 @@ fn find_webui_dir() -> Option<PathBuf> {
 
     let mut candidates: Vec<PathBuf> = Vec::new();
 
-    // Next to main exe / sidecar (packaged: resources/webui or sibling webui)
-    if let Some(dir) = current_exe_dir() {
-        candidates.extend([
-            dir.join("webui"),
-            dir.join("ui"),
-            dir.join("resources").join("webui"),
-            dir.join("desktop").join("dist"),
-        ]);
-    }
-
-    // Dev: cwd is often desktop/ or repo root when running tauri dev
+    // Dev live SPA first — staged sidecar webui/ is often stale.
     if let Ok(cwd) = env::current_dir() {
         candidates.extend([
             cwd.join("dist"),
             cwd.join("desktop").join("dist"),
             cwd.join("..").join("dist"),
-            cwd.join("webui"),
         ]);
+    }
+    if let Ok(root) = env::var("REMEDY_DEV_ROOT") {
+        candidates.push(PathBuf::from(root).join("desktop").join("dist"));
+    }
+
+    // Next to main exe / sidecar (packaged: resources/webui or sibling webui)
+    if let Some(dir) = current_exe_dir() {
+        candidates.extend([
+            dir.join("desktop").join("dist"),
+            dir.join("webui"),
+            dir.join("ui"),
+            dir.join("resources").join("webui"),
+        ]);
+    }
+
+    if let Ok(cwd) = env::current_dir() {
+        candidates.push(cwd.join("webui"));
     }
 
     // Sidecar binary directory (externalBin lives next to main exe)
@@ -1992,6 +1998,9 @@ fn switch_to_web_ui(app: AppHandle) -> Result<String, String> {
                     .spawn()
             })
             .map_err(|e| format!("open browser failed: {e}"))?;
+        #[cfg(all(unix, not(target_os = "macos")))]
+        reap_detached(spawned);
+        #[cfg(not(all(unix, not(target_os = "macos"))))]
         drop(spawned);
     }
 
@@ -2468,27 +2477,16 @@ fn linux_on_host_resized(window: &tauri::Window, size: tauri::PhysicalSize<u32>)
     }
 }
 
-#[cfg(target_os = "linux")]
-fn linux_is_wslg() -> bool {
-    std::env::var_os("WSL_DISTRO_NAME").is_some()
-        || std::env::var_os("WSL_INTEROP").is_some()
-        || std::path::Path::new("/mnt/wslg").exists()
-}
-
-/// Close chrome: stay running. Windows tray hide; WSLg / no-tray minimize.
+/// Close chrome: stay running. Windows tray hide; Linux always minimize
+/// (AppIndicator is often invisible — hide() would drop the only restore surface).
 fn stay_ready_after_close(w: &tauri::WebviewWindow) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
-        if linux_is_wslg() {
-            // hide() tears down the WSLg RAIL host HWND — the Windows taskbar
-            // button vanishes and there is no Linux tray on the host. Minimize
-            // keeps the window recoverable from the Windows taskbar.
-            let _ = w.unmaximize();
-            w.minimize()
-                .map_err(|e| format!("minimize failed: {e}"))?;
-            log::info!("request_close: WSLg minimize to Windows taskbar");
-            return Ok(());
-        }
+        let _ = w.unmaximize();
+        w.minimize()
+            .map_err(|e| format!("minimize failed: {e}"))?;
+        log::info!("request_close: Linux minimize to taskbar");
+        return Ok(());
     }
     let has_tray = w.app_handle().tray_by_id("main").is_some();
     if !has_tray {
@@ -2507,11 +2505,9 @@ fn stay_ready_after_close(w: &tauri::WebviewWindow) -> Result<(), String> {
 fn stay_ready_fallback(w: &tauri::WebviewWindow) {
     #[cfg(target_os = "linux")]
     {
-        if linux_is_wslg() {
-            let _ = w.unmaximize();
-            let _ = w.minimize();
-            return;
-        }
+        let _ = w.unmaximize();
+        let _ = w.minimize();
+        return;
     }
     if w.app_handle().tray_by_id("main").is_none() {
         let _ = w.unmaximize();
@@ -2724,6 +2720,18 @@ fn fetch_latest_desktop() -> Result<(String, Option<String>, Option<String>), St
 }
 
 fn desktop_update_result(current: String) -> DesktopUpdateInfo {
+    #[cfg(not(target_os = "windows"))]
+    {
+        return DesktopUpdateInfo {
+            current_version: current.clone(),
+            latest_version: current,
+            update_available: false,
+            download_url: None,
+            release_notes: None,
+            error: None,
+        };
+    }
+    #[cfg(target_os = "windows")]
     match fetch_latest_desktop() {
         Ok((latest, download_url, notes)) => {
             let latest_norm = latest
@@ -3473,6 +3481,14 @@ static UPDATE_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// Sole relaunch owner: update script (+ NSIS marker /NOAUTOLAUNCH). No double window.
 #[tauri::command]
 fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app, download_url);
+        return Err(
+            "In-app updates are Windows-only. Install the Linux .deb or AppImage from GitHub Releases."
+                .into(),
+        );
+    }
     // Client may pass a URL from an earlier check; we always re-resolve the
     // signed asset from latest.json before download so naming/version races
     // (e.g. got v0.14.3 URL, expected v0.14.4) cannot fail after a multi-MB pull.
@@ -4564,10 +4580,24 @@ fn reclaim_desktop_instance() -> bool {
     false
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 fn acquire_desktop_single_instance() -> bool {
-    // Primary single-instance enforcement is Windows (named mutex) + Python
-    // serve lock. Non-Windows Desktop can rely on serve lock / port bind.
+    let path = remedy_home().join("desktop.pid");
+    if let Ok(s) = std::fs::read_to_string(&path) {
+        if let Ok(pid) = s.trim().parse::<u32>() {
+            if pid > 0 && std::path::Path::new(&format!("/proc/{pid}")).exists() {
+                log::warn!("desktop already running (pid {pid}); refusing second instance");
+                return false;
+            }
+        }
+    }
+    let _ = std::fs::create_dir_all(remedy_home());
+    let _ = std::fs::write(&path, format!("{}\n", std::process::id()));
+    true
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn acquire_desktop_single_instance() -> bool {
     true
 }
 
@@ -4947,16 +4977,23 @@ pub fn run() {
             if let Ok(resource) = app.path().resource_dir() {
                 env::set_var("REMEDY_RESOURCES", &resource);
                 log::info!("REMEDY_RESOURCES={}", resource.display());
-                let candidates = [
-                    resource.join("webui"),
-                    resource.join("dist"),
-                    resource.clone(),
-                ];
-                for c in candidates {
-                    if c.join("index.html").is_file() {
-                        env::set_var("REMEDY_WEBUI_DIR", &c);
-                        log::info!("REMEDY_WEBUI_DIR={}", c.display());
-                        break;
+                if env::var_os("REMEDY_WEBUI_DIR").is_none() {
+                    if let Some(live) = find_webui_dir() {
+                        env::set_var("REMEDY_WEBUI_DIR", &live);
+                        log::info!("REMEDY_WEBUI_DIR={}", live.display());
+                    } else {
+                        let candidates = [
+                            resource.join("webui"),
+                            resource.join("dist"),
+                            resource.clone(),
+                        ];
+                        for c in candidates {
+                            if c.join("index.html").is_file() {
+                                env::set_var("REMEDY_WEBUI_DIR", &c);
+                                log::info!("REMEDY_WEBUI_DIR={}", c.display());
+                                break;
+                            }
+                        }
                     }
                 }
                 // Optional offline override only (prod: first-run download into ~/.remedy/vision)
