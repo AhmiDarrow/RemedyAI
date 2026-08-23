@@ -16,6 +16,7 @@ from remedy.core.hive.policy import (
 )
 from remedy.core.hive.store import HiveStore, get_hive_store
 from remedy.core.hive.types import (
+    CADENCE_POST,
     STATUS_CANCELLED,
     STATUS_PENDING,
     STATUS_REPORTED,
@@ -53,10 +54,22 @@ async def _default_llm_pulse(runtime: Any, daughter: HiveDaughter) -> ReturnPack
     chunks: list[str] = []
     aborted = False
     try:
+        extra = ""
+        if daughter.cadence == CADENCE_POST:
+            notes = (daughter.journal or {}).get("notes") or []
+            recent = [
+                str(n.get("outcome") or "").strip()
+                for n in notes[-4:]
+                if isinstance(n, dict) and str(n.get("outcome") or "").strip()
+            ]
+            if recent:
+                extra = "\n\nJournal of prior pulses:\n" + "\n".join(
+                    f"- {line}" for line in recent
+                )
         charter = (
             "You are a hive daughter of Remedy. You do not speak to the owner. "
             "Report a compact outcome. Prefer tools over essays.\n\n"
-            f"Job: {daughter.goal}"
+            f"Job: {daughter.goal}{extra}"
         )
         async for chunk in call_llm_stream(
             runtime, charter, session_id=daughter.session_id
@@ -85,8 +98,12 @@ async def _default_llm_pulse(runtime: Any, daughter: HiveDaughter) -> ReturnPack
     return packet_from_outcome(daughter.goal, "".join(chunks), aborted=aborted)
 
 
-async def run_forager(runtime: Any, daughter: HiveDaughter) -> ReturnPacket:
-    """One isolated forage: own turn ContextVars, depth=1, then a packet."""
+def _cancelled(packet: ReturnPacket) -> bool:
+    return any("cancelled" in str(b).lower() for b in (packet.blockers or []))
+
+
+async def run_isolated_pulse(runtime: Any, daughter: HiveDaughter) -> ReturnPacket:
+    """One isolated ReAct pulse. Caller owns the status transition after return."""
     from remedy.core.turn_context import abort_session, begin_turn, end_turn, is_turn_aborted
 
     if hive_depth() >= 1:
@@ -122,10 +139,21 @@ async def run_forager(runtime: Any, daughter: HiveDaughter) -> ReturnPacket:
         reset_hive_depth(depth_tok)
         with suppress(Exception):
             abort_session(daughter.session_id)
-    daughter.packet = packet.to_dict()
-    daughter.status = STATUS_CANCELLED if packet.blockers and "cancelled" in str(packet.blockers) else STATUS_REPORTED
-    if packet.blockers and any("cancelled" in str(b).lower() for b in packet.blockers):
+    return packet
+
+
+async def run_forager(runtime: Any, daughter: HiveDaughter) -> ReturnPacket:
+    """One isolated forage: own turn ContextVars, depth=1, then a packet."""
+    try:
+        packet = await run_isolated_pulse(runtime, daughter)
+    except asyncio.CancelledError:
+        packet = packet_from_outcome(daughter.goal, "", aborted=True)
+        daughter.packet = packet.to_dict()
         daughter.status = STATUS_CANCELLED
+        _store_for(runtime).save(daughter)
+        raise
+    daughter.packet = packet.to_dict()
+    daughter.status = STATUS_CANCELLED if _cancelled(packet) else STATUS_REPORTED
     _store_for(runtime).save(daughter)
     return packet
 

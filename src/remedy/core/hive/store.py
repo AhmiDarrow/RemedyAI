@@ -134,7 +134,13 @@ class HiveStore:
         return [d for d in self.list_all() if d.status not in dead]
 
     def live_pulses(self) -> list[HiveDaughter]:
-        return [d for d in self.live() if d.status in (STATUS_PENDING, STATUS_RUNNING)]
+        """Foragers currently pending/running — posts have their own cap."""
+        return [
+            d
+            for d in self.live()
+            if d.cadence == CADENCE_FORAGER
+            and d.status in (STATUS_PENDING, STATUS_RUNNING)
+        ]
 
     def live_posts(self) -> list[HiveDaughter]:
         dead = {STATUS_RETIRED, "cancelled"}

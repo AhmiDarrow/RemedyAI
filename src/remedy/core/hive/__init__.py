@@ -7,6 +7,7 @@ from remedy.core.hive.policy import (
     hive_depth,
     is_mother_only_tool,
 )
+from remedy.core.hive.pulse import resume_posts, stop_all_posts
 from remedy.core.hive.store import HiveStore, get_hive_store
 from remedy.core.hive.types import (
     ReturnPacket,
@@ -21,4 +22,6 @@ __all__ = [
     "hive_depth",
     "is_hive_session_id",
     "is_mother_only_tool",
+    "resume_posts",
+    "stop_all_posts",
 ]
