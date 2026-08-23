@@ -42,13 +42,26 @@ def test_non_submit_key_on_payment_surface_is_fine():
 
 
 def test_resolved_label_defers_to_text_classifier():
-    # A readable label goes through the text classifier, not this fallback.
+    # A readable non-submit label still goes through the text classifier.
     assert (
         payment_surface_checkpoint(
-            "computer_click", label_resolved=True, page_context=CHECKOUT
+            "computer_click",
+            label_resolved=True,
+            page_context=CHECKOUT,
+            label="Membership options",
         )
         is None
     )
+
+
+def test_submit_shaped_label_on_payment_surface_is_checkpointed():
+    r = payment_surface_checkpoint(
+        "computer_click",
+        label_resolved=True,
+        page_context=CHECKOUT,
+        label="Submit",
+    )
+    assert r and r.startswith(SENSITIVE_PREFIX)
 
 
 def test_coordinate_click_on_normal_page_is_not_checkpointed():
@@ -117,42 +130,73 @@ def test_coding_tools_never_sensitive():
     )
 
 
-# --- effortless in auto/full: the standing grant is the countersignature ---
+# --- no mode waives money / credentials (AGENTS.md Q3) ---
 
 
-def test_auto_full_mode_skips_payment_surface_heads_up():
-    """Owner who granted auto/full uses the PC effortlessly — no per-action
-    roadblock on checkout. Only the cautious `ask` default gets the heads-up."""
+def test_auto_full_mode_still_stops_payment_surface_and_raw_card():
+    """auto/full skip ordinary computer Ask prompts. They do not skip a
+    checkout pixel-click, Enter on a payment form, or a raw PAN."""
     from remedy.core.agent_computer_tools import _computer_approval_gate
     from remedy.core.approvals import APPROVALS
 
     runtime = type("R", (), {})()
     prev = APPROVALS.mode
     try:
-        APPROVALS.set_mode("full")
-        # Coordinate click on a checkout page: no block in full mode.
-        assert (
-            _computer_approval_gate(
+        for mode in ("full", "auto"):
+            APPROVALS.set_mode(mode)
+            out = _computer_approval_gate(
                 runtime, "computer_click", "click x=100 y=200",
                 page_context=CHECKOUT, label_resolved=False,
             )
-            is None
-        )
-        # Raw card typed in full mode: effortless, no block.
-        assert (
-            _computer_approval_gate(
+            assert out and "APPROVAL_REQUIRED" in out, mode
+            out = _computer_approval_gate(
                 runtime, "computer_type", "type chars=19",
                 typed_text="4242 4242 4242 4242",
             )
-            is None
-        )
-        APPROVALS.set_mode("auto")
-        assert (
-            _computer_approval_gate(
+            assert out and "APPROVAL_REQUIRED" in out, mode
+            out = _computer_approval_gate(
                 runtime, "computer_key", "key='enter'",
                 page_context=CHECKOUT, label_resolved=False, key="enter",
             )
-            is None
+            assert out and "APPROVAL_REQUIRED" in out, mode
+    finally:
+        APPROVALS.set_mode(prev)
+
+
+def test_computer_fill_vault_handle_is_checkpointed():
+    from remedy.core.agent_computer_tools import _computer_approval_gate
+    from remedy.core.approvals import APPROVALS, SENSITIVE_PREFIX
+
+    runtime = type("R", (), {})()
+    prev = APPROVALS.mode
+    try:
+        APPROVALS.set_mode("full")
+        out = _computer_approval_gate(
+            runtime,
+            "computer_fill",
+            "fill form fields vault=card-visa",
+            typed_text="{{vault:card-visa}}",
         )
+        assert out and "APPROVAL_REQUIRED" in out
+        assert SENSITIVE_PREFIX in out
+    finally:
+        APPROVALS.set_mode(prev)
+
+
+def test_mail_send_asks_in_every_mode(monkeypatch):
+    from remedy.core.approvals import APPROVALS, SENSITIVE_PREFIX
+
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"access_scope": "project"},
+    )
+    prev = APPROVALS.mode
+    try:
+        for mode in ("ask", "auto", "full"):
+            APPROVALS.set_mode(mode)
+            reason = APPROVALS.needs_ask(
+                "mail_send to=a@b.com subject=hi", tool_name="mail_send"
+            )
+            assert reason and reason.startswith(SENSITIVE_PREFIX), mode
     finally:
         APPROVALS.set_mode(prev)
