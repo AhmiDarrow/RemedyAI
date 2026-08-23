@@ -617,11 +617,17 @@ pub struct BrowserBounds {
 const UA_FALLBACK_MAJOR: &str = "131";
 
 fn engine_major() -> String {
-    tauri::webview_version()
+    let m = tauri::webview_version()
         .ok()
         .and_then(|v| v.split('.').next().map(str::to_string))
-        .filter(|m| !m.is_empty() && m.chars().all(|c| c.is_ascii_digit()))
-        .unwrap_or_else(|| UA_FALLBACK_MAJOR.to_string())
+        .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
+        .unwrap_or_else(|| UA_FALLBACK_MAJOR.to_string());
+    // WebKitGTK reports 2.x — that is not a Chrome major. Using it produces
+    // "Chrome/2.0.0.0" which anti-bot walls reject immediately.
+    match m.parse::<u32>() {
+        Ok(n) if n >= 80 => m,
+        _ => UA_FALLBACK_MAJOR.to_string(),
+    }
 }
 
 fn ua_mobile() -> String {
@@ -635,6 +641,13 @@ fn ua_mobile() -> String {
 /// so desktop mode is not an override at all.
 fn ua_desktop() -> String {
     let m = engine_major();
+    #[cfg(target_os = "linux")]
+    {
+        return format!(
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{m}.0.0.0 Safari/537.36"
+        );
+    }
+    #[cfg(not(target_os = "linux"))]
     format!(
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{m}.0.0.0 Safari/537.36 Edg/{m}.0.0.0"
     )

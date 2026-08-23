@@ -1,6 +1,7 @@
 import { getServerUrl } from '../api/client'
 import { useEffect, useState } from 'react'
 import { isTauri, tauriInvoke } from '../api/tauri'
+import { isLinuxDesktop } from '../utils/platform'
 
 export interface QuitServerWarningProps {
   open: boolean
@@ -58,10 +59,14 @@ export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerW
           </p>
           <p>
             To keep chatting in the browser, use <strong>Switch to WebUI</strong> —
-            that hides the desktop to the tray and leaves the server running.
+            {isLinuxDesktop()
+              ? ' that minimizes the desktop and leaves the server running.'
+              : ' that hides the desktop to the tray and leaves the server running.'}
           </p>
           <p style={{ color: 'var(--text-muted)' }}>
-            Window ✕ always hides to tray. Use tray <strong>Quit</strong> for a full stop.
+            {isLinuxDesktop()
+              ? 'Window ✕ minimizes to the taskbar. Quit from this dialog or the app menu for a full stop.'
+              : 'Window ✕ always hides to tray. Use tray Quit for a full stop.'}
           </p>
         </div>
         <label className="flex items-start gap-2 mb-4 cursor-pointer text-xs">
