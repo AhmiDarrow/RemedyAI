@@ -43,3 +43,4 @@ Then this does nothing and costs nothing. It is not a mode to enable.
 
 - [Chat, rails, Plan/Build](05-chat-and-sessions.md)
 - [Coding agency](18-agency.md) — the write jail and access scope
+- [Hive](28-hive.md) — daughters Remedy hires (they use the same claims)
