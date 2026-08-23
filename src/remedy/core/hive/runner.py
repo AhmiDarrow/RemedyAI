@@ -25,6 +25,7 @@ from remedy.core.hive.types import (
     ReturnPacket,
     packet_from_outcome,
 )
+from remedy.core.turn_context import set_turn_max_react_steps
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +50,12 @@ async def _default_llm_pulse(runtime: Any, daughter: HiveDaughter) -> ReturnPack
     from remedy.core.react_loop.loop import call_llm_stream
     from remedy.core.turn_context import is_turn_aborted
 
-    old_max = getattr(runtime, "_max_react_steps", None)
-    runtime._max_react_steps = max(1, min(MAX_BUDGET_STEPS, int(daughter.budget_steps or 8)))
+    # Scope the budget to this pulse's turn. Writing it onto ``runtime`` would
+    # clobber the mother, who keeps working while her daughter forages (and two
+    # concurrent pulses would restore each other's value out of order).
+    set_turn_max_react_steps(
+        max(1, min(MAX_BUDGET_STEPS, int(daughter.budget_steps or 8)))
+    )
     chunks: list[str] = []
     aborted = False
     try:
@@ -89,12 +94,6 @@ async def _default_llm_pulse(runtime: Any, daughter: HiveDaughter) -> ReturnPack
             outcome=f"pulse failed: {exc}"[:400],
             blockers=["pulse_failed"],
         )
-    finally:
-        if old_max is None:
-            with suppress(Exception):
-                delattr(runtime, "_max_react_steps")
-        else:
-            runtime._max_react_steps = old_max
     return packet_from_outcome(daughter.goal, "".join(chunks), aborted=aborted)
 
 
@@ -196,14 +195,19 @@ async def _run_and_store(runtime: Any, daughter_id: str) -> None:
         _tasks.pop(daughter_id, None)
 
 
-def schedule_forager(runtime: Any, daughter: HiveDaughter) -> None:
-    """Start the forage on the running loop; mother keeps talking."""
+def schedule_forager(runtime: Any, daughter: HiveDaughter) -> bool:
+    """Start the forage on the running loop; mother keeps talking.
+
+    False when there is no running loop — the caller must say so rather than
+    report a daughter that was never actually started.
+    """
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        return
+        return False
     task = loop.create_task(_run_and_store(runtime, daughter.id))
     _tasks[daughter.id] = task
+    return True
 
 
 def cancel_forager(daughter_id: str) -> bool:

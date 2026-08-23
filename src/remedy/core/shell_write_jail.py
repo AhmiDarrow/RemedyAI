@@ -1220,7 +1220,7 @@ def copy_source_operands(part: str) -> set[str]:
             for a in positional[:-1]:
                 out.add(_clean_token(a).lower())
     elif head in _COPY_HEADS_PS:
-        positional: list[str] = []
+        positional = []
         i = 0
         while i < len(args):
             a = args[i]

@@ -39,7 +39,9 @@ _EXT = {"jpeg": "jpg", "svg+xml": "svg"}
 
 
 def has_inline_image(text: str | None) -> bool:
-    return bool(text) and "data:image/" in text and "base64," in text
+    if not text:
+        return False
+    return "data:image/" in text and "base64," in text
 
 
 def _b64_len(b64: str) -> int:

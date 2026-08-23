@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any
 
 from remedy.core.errors import format_tool_error
@@ -29,6 +30,21 @@ from remedy.core.hive.types import (
     ReturnPacket,
     assign_charter,
 )
+
+
+def _unstarted(daughter: Any, store: Any, tool_name: str) -> str:
+    """No running loop — retire the row instead of reporting a phantom daughter."""
+    from remedy.core.hive.types import STATUS_CANCELLED
+
+    daughter.status = STATUS_CANCELLED
+    with suppress(Exception):
+        store.save(daughter)
+    return format_tool_error(
+        "Could not start the daughter: no running event loop in this context.",
+        code="HIVE_NOT_STARTED",
+        tool_name=tool_name,
+        suggestion="Retry from a live session turn.",
+    )
 
 
 def _store(runtime: Any):
@@ -130,7 +146,8 @@ def register_hive_tools(runtime: Any) -> None:
         if cad == CADENCE_POST:
             mark_next_pulse(daughter, due_now=True)
             store.save(daughter)
-            schedule_post(runtime, daughter)
+            if not schedule_post(runtime, daughter):
+                return _unstarted(daughter, store, "hive_spawn")
             return (
                 f"hive_id={daughter.id} cadence=post status={daughter.status} "
                 f"pulse_s={daughter.pulse_s}\n"
@@ -138,7 +155,8 @@ def register_hive_tools(runtime: Any) -> None:
                 "Owner Stop does not retire her. hive_assign to change the job; "
                 "hive_retire when the post is done."
             )
-        schedule_forager(runtime, daughter)
+        if not schedule_forager(runtime, daughter):
+            return _unstarted(daughter, store, "hive_spawn")
         return (
             f"hive_id={daughter.id} cadence={daughter.cadence} status={daughter.status}\n"
             "She reports to you, not the owner. Call hive_collect when you want the packet."

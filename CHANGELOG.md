@@ -4,6 +4,35 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed — review sweep
+
+- **Hive: a daughter's step budget no longer lands on the mother's runtime.**
+  A forage wrote `_max_react_steps` onto the shared runtime object, so the
+  mother — who is told to keep working while her daughter forages — had her
+  own ReAct ceiling cut to the daughter's budget (and two concurrent pulses
+  restored each other's value out of order, stranding the small one). The
+  ceiling is now a per-turn `TurnReactFlags` field, and the system prompt
+  advertises the same number the loop enforces.
+- **Hive: `hive_spawn` no longer reports a daughter that never started.**
+  With no running event loop the scheduler returned silently while the tool
+  still replied `status=pending`. It now retires the row and says so.
+- **`web_fetch` stops discarding a good extract.** Any page under 80
+  characters was treated as a JS shell, so the in-app browser result replaced
+  a perfectly good HTTP extract and was labelled "empty or script-only". The
+  browser is still tried for thin pages but only wins when it returns more,
+  and the label now matches the reason.
+- **`sheet_tools.py` says what to install.** The bundled game-assets script
+  imported Pillow at module scope with no guard and no declared dependency;
+  it now names the fix, and `remedy-ai[game-assets]` declares it.
+- Lint/type gates are green again: dead locals left behind by the
+  "stop false stops" build change, and 43 mypy errors (loose `.get()`
+  narrowing, a shadowed loop variable, `float(None)`, Pillow typing).
+- Tests: `web_fetch` no longer reaches the real network when the browser rail
+  is available (it passed offline and failed online); the vision home-fallback
+  test now asserts `default_home()` instead of the retired
+  `Path.home()/.remedy`.
+
+
 ### Hive — daughters that report to Remedy
 
 - Remedy can hire silent **foragers** (one bounded job) and **standing posts**
