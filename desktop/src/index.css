@@ -253,6 +253,83 @@
   --chat-system-border: #1e4a55;
 }
 
+/* ---- colorblind-safe variants (keep in sync with themes.ts) ---- */
+
+/* Deuteranopia: signals avoid the red-green axis (teal / vermillion / yellow). */
+:root[data-theme="deutan"] {
+  --bg-primary: #0b0f14;
+  --bg-secondary: #121821;
+  --bg-tertiary: #1a2330;
+  --border: #2c3a4a;
+  --accent: #1d7fc4;
+  --accent-hover: #14689f;
+  --text-primary: #e9f0f6;
+  --text-secondary: #a9b9c7;
+  --text-muted: #7b8b99;
+  --success: #2fb5a0;
+  --error: #d9601c;
+  --warning: #f2d24b;
+  --chat-user-bg: #1d7fc4;
+  --chat-user-fg: #ffffff;
+  --chat-user-border: #1d7fc4;
+  --chat-assistant-bg: #121821;
+  --chat-assistant-fg: #e9f0f6;
+  --chat-assistant-border: #2c3a4a;
+  --chat-system-bg: #1a2330;
+  --chat-system-fg: #d9601c;
+  --chat-system-border: #2c3a4a;
+}
+
+/* Protanopia: red reads dark, so error is orange and success is blue. */
+:root[data-theme="protan"] {
+  --bg-primary: #0d1013;
+  --bg-secondary: #151a1f;
+  --bg-tertiary: #1e252c;
+  --border: #303a44;
+  --accent: #0f8f75;
+  --accent-hover: #0b7360;
+  --text-primary: #eef1f4;
+  --text-secondary: #adb8c2;
+  --text-muted: #7f8a94;
+  --success: #4aa8e0;
+  --error: #f0803a;
+  --warning: #f5e05f;
+  --chat-user-bg: #0f8f75;
+  --chat-user-fg: #ffffff;
+  --chat-user-border: #0f8f75;
+  --chat-assistant-bg: #151a1f;
+  --chat-assistant-fg: #eef1f4;
+  --chat-assistant-border: #303a44;
+  --chat-system-bg: #1e252c;
+  --chat-system-fg: #f0803a;
+  --chat-system-border: #303a44;
+}
+
+/* Tritanopia: blue/yellow collapse, so signals ride the red-green axis. */
+:root[data-theme="tritan"] {
+  --bg-primary: #12100f;
+  --bg-secondary: #1b1817;
+  --bg-tertiary: #262120;
+  --border: #3a3231;
+  --accent: #d63a72;
+  --accent-hover: #b62a5d;
+  --text-primary: #f3efee;
+  --text-secondary: #c0b6b3;
+  --text-muted: #8e8481;
+  --success: #3fae4a;
+  --error: #cf3b30;
+  --warning: #e8842a;
+  --chat-user-bg: #d63a72;
+  --chat-user-fg: #ffffff;
+  --chat-user-border: #d63a72;
+  --chat-assistant-bg: #1b1817;
+  --chat-assistant-fg: #f3efee;
+  --chat-assistant-border: #3a3231;
+  --chat-system-bg: #262120;
+  --chat-system-fg: #cf3b30;
+  --chat-system-border: #3a3231;
+}
+
 /* ---- base reset ---- */
 
 .sr-only {

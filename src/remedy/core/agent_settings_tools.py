@@ -225,6 +225,9 @@ def register_settings_tools(runtime: Any) -> None:
         approval_mode: str | None = None,
         tool_process: str | None = None,
         web_tools_enabled: bool | str | None = None,
+        web_respect_robots: bool | str | None = None,
+        web_search_url: str | None = None,
+        web_search_scraping_ack: bool | str | None = None,
         http_bootstrap: bool | str | None = None,
         vision_enabled: bool | str | None = None,
         vision_model_id: str | None = None,
@@ -347,6 +350,9 @@ def register_settings_tools(runtime: Any) -> None:
             "approval_mode": approval_mode,
             "tool_process": tool_process,
             "web_tools_enabled": web_tools_enabled,
+            "web_respect_robots": web_respect_robots,
+            "web_search_url": web_search_url,
+            "web_search_scraping_ack": web_search_scraping_ack,
             "http_bootstrap": http_bootstrap,
             "vision_enabled": vision_enabled,
             "vision_model_id": vision_model_id,
@@ -799,6 +805,28 @@ def register_settings_tools(runtime: Any) -> None:
                 "web_tools_enabled": {
                     "type": "boolean",
                     "description": "Enable public web_fetch tool",
+                },
+                "web_respect_robots": {
+                    "type": "boolean",
+                    "description": (
+                        "Obey robots.txt on fetched pages (default true). "
+                        "Owner override only — say why before turning it off."
+                    ),
+                },
+                "web_search_url": {
+                    "type": "string",
+                    "description": (
+                        "Base URL of a search instance the owner runs (SearXNG "
+                        "with json in search.formats). Preferred over the "
+                        "DuckDuckGo HTML fallback when set."
+                    ),
+                },
+                "web_search_scraping_ack": {
+                    "type": "boolean",
+                    "description": (
+                        "Owner accepts the DuckDuckGo HTML fallback for search. "
+                        "Set only after they say so in their own words."
+                    ),
                 },
                 "http_bootstrap": {"type": "boolean"},
                 "vision_enabled": {"type": "boolean"},

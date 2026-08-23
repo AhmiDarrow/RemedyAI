@@ -9,6 +9,9 @@ export type ThemeId =
   | 'alien'
   | 'orange'
   | 'cyan'
+  | 'deutan'
+  | 'protan'
+  | 'tritan'
 
 /**
  * Default theme for first install / first run (no localStorage preference).
@@ -27,6 +30,9 @@ const THEME_ID_SET = new Set<string>([
   'alien',
   'orange',
   'cyan',
+  'deutan',
+  'protan',
+  'tritan',
 ])
 
 /** True if *id* is a known theme preference (including System). */
@@ -369,6 +375,87 @@ export const THEMES: Record<Exclude<ThemeId, 'system'>, Theme> = {
       '--error': '#fca5a5',
       '--warning': '#fde68a',
       ...chatFromPalette('dark', '#22d3ee', '#0f1c22', '#163038', '#1e4a55', '#d8eef2', '#fca5a5'),
+    },
+  },
+
+  /**
+   * Colorblind-safe: deuteranopia (green-blind / green-weak).
+   * Signals never rely on the red-green axis — success is teal, error is
+   * vermillion and warning is a bright yellow, so the pair separates by hue
+   * *and* by lightness. Accent is Okabe-Ito blue.
+   */
+  deutan: {
+    id: 'deutan',
+    name: 'Colorblind Deutan',
+    kind: 'dark',
+    colors: {
+      '--bg-primary': '#0b0f14',
+      '--bg-secondary': '#121821',
+      '--bg-tertiary': '#1a2330',
+      '--border': '#2c3a4a',
+      '--accent': '#1d7fc4',
+      '--accent-hover': '#14689f',
+      '--text-primary': '#e9f0f6',
+      '--text-secondary': '#a9b9c7',
+      '--text-muted': '#7b8b99',
+      '--success': '#2fb5a0',
+      '--error': '#d9601c',
+      '--warning': '#f2d24b',
+      ...chatFromPalette('dark', '#1d7fc4', '#121821', '#1a2330', '#2c3a4a', '#e9f0f6', '#d9601c'),
+    },
+  },
+
+  /**
+   * Colorblind-safe: protanopia (red-blind / red-weak).
+   * Reds go dark and dim for protans, so error is a light orange rather than
+   * a red, success is blue, and warning is a pale yellow — a blue/orange/
+   * yellow triad that survives the missing L-cone.
+   */
+  protan: {
+    id: 'protan',
+    name: 'Colorblind Protan',
+    kind: 'dark',
+    colors: {
+      '--bg-primary': '#0d1013',
+      '--bg-secondary': '#151a1f',
+      '--bg-tertiary': '#1e252c',
+      '--border': '#303a44',
+      '--accent': '#0f8f75',
+      '--accent-hover': '#0b7360',
+      '--text-primary': '#eef1f4',
+      '--text-secondary': '#adb8c2',
+      '--text-muted': '#7f8a94',
+      '--success': '#4aa8e0',
+      '--error': '#f0803a',
+      '--warning': '#f5e05f',
+      ...chatFromPalette('dark', '#0f8f75', '#151a1f', '#1e252c', '#303a44', '#eef1f4', '#f0803a'),
+    },
+  },
+
+  /**
+   * Colorblind-safe: tritanopia (blue-yellow blind).
+   * Blue reads as green and yellow reads as pink, so signals live on the
+   * intact red-green axis: green success, red error, orange warning. Accent
+   * is a rose that never collides with a surface tone.
+   */
+  tritan: {
+    id: 'tritan',
+    name: 'Colorblind Tritan',
+    kind: 'dark',
+    colors: {
+      '--bg-primary': '#12100f',
+      '--bg-secondary': '#1b1817',
+      '--bg-tertiary': '#262120',
+      '--border': '#3a3231',
+      '--accent': '#d63a72',
+      '--accent-hover': '#b62a5d',
+      '--text-primary': '#f3efee',
+      '--text-secondary': '#c0b6b3',
+      '--text-muted': '#8e8481',
+      '--success': '#3fae4a',
+      '--error': '#cf3b30',
+      '--warning': '#e8842a',
+      ...chatFromPalette('dark', '#d63a72', '#1b1817', '#262120', '#3a3231', '#f3efee', '#cf3b30'),
     },
   },
 } as const

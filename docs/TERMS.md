@@ -66,6 +66,13 @@ other people's data. Rules differ by country and by state. If you are unsure
 whether something is permitted where you are, assume it is not until you have
 checked.
 
+That includes **sites and accounts you point it at**. A site's terms may
+restrict automated access even where robots.txt allows it, and even for a
+logged-in account holder. Search fallbacks that read someone else's results
+page are used only if you accept them. Copyright and database rights follow
+the content out of the page. See [WEB_ETIQUETTE.md](./WEB_ETIQUETTE.md) for
+how the web tools behave; the LICENSE is what actually binds.
+
 Do not use Remedy to break into systems you do not own, to harass anyone, to
 impersonate anyone, or to do anything you would not put your own name to. It is
 acting as you, and to everyone on the receiving end, it *is* you.
@@ -88,11 +95,16 @@ Deleting `~/.remedy` deletes it. There is no copy elsewhere.
 
 ## 8. Features with their own terms
 
+Open-source components shipped in the installer are listed with their
+licences in Settings → License (`THIRD_PARTY_NOTICES.txt`). Their terms
+govern their code; Remedy's LICENSE does not replace them.
+
 Some capabilities carry extra risk and ask separately, on top of this:
 
 - **Telephony, voice, and SMS** — [TELEPHONY_TERMS.md](./TELEPHONY_TERMS.md).
   Notably: **Remedy is not an emergency service and must never be used to call
   one.**
+- **Web fetch / search** — off until you enable them; [WEB_ETIQUETTE.md](./WEB_ETIQUETTE.md).
 
 ## 9. Changes
 
