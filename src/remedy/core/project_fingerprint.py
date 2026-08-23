@@ -39,6 +39,9 @@ class StackFingerprint:
     hints: list[str] = field(default_factory=list)
     # Game engine signals (name, version, binary, lang, verify) — only known keys.
     engine: dict[str, str] = field(default_factory=dict)
+    # Research signals: kinds/markers/domains/packs (lists) + entry (str).
+    # Empty unless _fingerprint_research found something; see research_summary().
+    research: dict[str, list[str] | str] = field(default_factory=dict)
 
     def context_lines(self) -> list[str]:
         if not self.stacks and not self.hints:
@@ -51,6 +54,8 @@ class StackFingerprint:
             skill = game_engines.engine_skill(self.engine["name"])
             skills = f"{skill}, game-dev-studio" if skill else "game-dev-studio"
             lines.append(f"  studio: game project — skills: {skills}")
+        if self.research.get("kinds"):
+            lines.append("  research: " + research_summary(self))
         if self.suggest_verify:
             lines.append(f"  suggested verify: {self.suggest_verify}")
         for h in self.hints[:6]:
@@ -176,6 +181,9 @@ def fingerprint_path(root: Path | str | None) -> StackFingerprint:
         fp.hints.append("dotnet: dotnet test")
         if not fp.suggest_verify:
             fp.suggest_verify = "dotnet test"
+
+    # Research (notebooks / R / Julia / workflow / manuscript / data)
+    _fingerprint_research(path, fp)
 
     # Git (informational)
     if (path / ".git").exists():
@@ -455,6 +463,331 @@ def _fingerprint_unreal(path: Path, uproject: Path, fp: StackFingerprint) -> Non
         f"{runuat} BuildCookRun -project={uproject.name} -build (very slow; background); "
         "set UE_ROOT if the engine is elsewhere"
     )
+
+
+# --- research projects -------------------------------------------------------
+# A folder holding a paper, a notebook and a CSV is invisible to the markers
+# above. Detection here is a HINT, never a gate — the research packs must still
+# work in a bare folder. Every probe is a stat, one capped directory listing, or
+# a small capped read; no recursive walks.
+
+_RESEARCH_SCAN_DIRS = ("", "data", "data/raw", "raw", "datasets", "results")
+_RESEARCH_SCAN_CAP = 240  # entries listed per directory
+_RESEARCH_HIT_CAP = 6  # data files named in the record
+_NOTEBOOK_DIRS = ("", "notebooks", "analysis")
+_MANUSCRIPT_DIRS = ("", "paper", "manuscript")
+_TEX_READ_CAP = 6  # *.tex files opened looking for \documentclass
+
+# Declared-dependency sniffs (lowercased text).
+_SCIENCE_DEP_RE = re.compile(r"\b(numpy|pandas|scipy|scikit-learn)\b")
+_PY_DEP_FILES = (
+    "pyproject.toml",
+    "requirements.txt",
+    "requirements-dev.txt",
+    "environment.yml",
+    "environment.yaml",
+    "conda-lock.yml",
+    "conda-lock.yaml",
+)
+# Julia [deps] entries that mark a project as analysis rather than a library.
+_JULIA_SCI_RE = re.compile(
+    r"^\s*(DataFrames|CSV|Plots|Makie|Gadfly|StatsBase|StatsPlots|Distributions|"
+    r"StatsModels|HypothesisTests|GLM|DifferentialEquations|Turing|MCMCChains|"
+    r"Flux|JuMP|Pluto|Optim|Unitful)\s*=",
+    re.M,
+)
+_TEX_DOCUMENTCLASS_RE = re.compile(r"^\s*\\documentclass", re.M)
+_MAKE_DATA_TARGET_RE = re.compile(r"^(?:data|datasets?|data/\S+)\s*:(?!=)", re.M)
+_COMPRESSION_SUFFIXES = (".gz", ".bz2", ".zst", ".xz")
+
+# A data format that names its own field. Suffix -> the pack that fits.
+_DATA_DOMAINS: dict[str, str] = {
+    ".fastq": "bioinformatics",
+    ".fq": "bioinformatics",
+    ".fasta": "bioinformatics",
+    ".fa": "bioinformatics",
+    ".sam": "bioinformatics",
+    ".bam": "bioinformatics",
+    ".cram": "bioinformatics",
+    ".vcf": "bioinformatics",
+    ".bcf": "bioinformatics",
+    ".nii": "neuroscience",
+    ".nc": "earth-climate",
+    ".nc4": "earth-climate",
+    ".grib": "earth-climate",
+    ".grib2": "earth-climate",
+    ".grb": "earth-climate",
+    ".mzml": "chemistry-research",
+}
+# Bulk formats that say "data-heavy" without naming a field.
+_DATA_SUFFIXES = (".parquet", ".h5", ".hdf5", ".feather")
+# Kinds that imply a pack on their own. Domains (above) are stronger evidence.
+_KIND_PACKS: dict[str, str] = {"r": "statistics", "julia": "computational-science"}
+
+
+def _rel_name(root: Path, p: Path) -> str:
+    try:
+        return p.relative_to(root).as_posix()
+    except ValueError:
+        return p.name
+
+
+def _data_suffix(name: str) -> str:
+    """Lowercased suffix with one compression layer stripped (.nii.gz -> .nii)."""
+    low = name.lower()
+    for c in _COMPRESSION_SUFFIXES:
+        if low.endswith(c):
+            low = low[: -len(c)]
+            break
+    dot = low.rfind(".")
+    return low[dot:] if dot > 0 else ""
+
+
+def _scan_research_data(path: Path) -> tuple[list[str], list[str]]:
+    """(sample data files, domains) from capped listings of data-ish dirs."""
+    hits: list[str] = []
+    domains: list[str] = []
+    for rel in _RESEARCH_SCAN_DIRS:
+        d = path / rel if rel else path
+        try:
+            if not d.is_dir():
+                continue
+            for i, p in enumerate(d.iterdir()):
+                if i >= _RESEARCH_SCAN_CAP:
+                    break
+                suffix = _data_suffix(p.name)
+                if not suffix:
+                    continue
+                domain = _DATA_DOMAINS.get(suffix)
+                if domain is None and suffix not in _DATA_SUFFIXES:
+                    continue
+                if not p.is_file():
+                    continue
+                name = f"{rel}/{p.name}" if rel else p.name
+                if len(hits) < _RESEARCH_HIT_CAP and name not in hits:
+                    hits.append(name)
+                if domain and domain not in domains:
+                    domains.append(domain)
+        except OSError:
+            continue
+    return hits, domains
+
+
+def _looks_bids(path: Path) -> bool:
+    """dataset_description.json beside sub-*/ — the BIDS neuroimaging layout."""
+    for rel in ("", "data", "bids"):
+        d = path / rel if rel else path
+        try:
+            if not (d / "dataset_description.json").is_file():
+                continue
+            for i, sub in enumerate(d.glob("sub-*")):
+                if sub.is_dir():
+                    return True
+                if i >= 20:
+                    break
+        except OSError:
+            continue
+    return False
+
+
+def research_summary(fp: StackFingerprint) -> str:
+    """One-line ``research project (notebooks, data) — skills: …`` summary."""
+    rec = getattr(fp, "research", None) or {}
+    kinds = [str(k) for k in (rec.get("kinds") or [])]
+    if not kinds:
+        return ""
+    packs = [str(p) for p in (rec.get("packs") or [])]
+    head = "research project (" + ", ".join(kinds) + ")"
+    if packs:
+        head += " — skills: " + ", ".join(packs)
+    return head
+
+
+def _fingerprint_research(path: Path, fp: StackFingerprint) -> None:
+    """Record research signals on *fp* (kinds, markers, domain, packs)."""
+
+    def has(name: str) -> bool:
+        try:
+            return (path / name).exists()
+        except OSError:
+            return False
+
+    kinds: list[str] = []
+    markers: list[str] = []
+    domains: list[str] = []
+    stacks: list[str] = []
+    entry = ""
+
+    def note(kind: str, stack: str, found: list[str]) -> None:
+        if kind not in kinds:
+            kinds.append(kind)
+        if stack not in stacks:
+            stacks.append(stack)
+        for m in found:
+            if m and m not in markers:
+                markers.append(m)
+
+    # Notebooks — shallow glob, root + notebooks/ + analysis/.
+    notebooks: list[Path] = []
+    for rel in _NOTEBOOK_DIRS:
+        notebooks.extend(_safe_glob(path / rel if rel else path, "*.ipynb")[:5])
+    if notebooks:
+        note("notebooks", "notebook", [_rel_name(path, p) for p in notebooks[:3]])
+        entry = entry or _rel_name(path, notebooks[0])
+
+    # Python science env — supporting evidence, never a research verdict on its
+    # own (numpy in a pyproject does not make an engineering repo a study).
+    science_deps: list[str] = []
+    science_files: list[str] = []
+    for name in _PY_DEP_FILES:
+        p = path / name
+        try:
+            if not p.is_file():
+                continue
+        except OSError:
+            continue
+        found = _SCIENCE_DEP_RE.findall(_read_small(p, 32_000).lower())
+        if found:
+            science_files.append(name)
+            for dep in found:
+                if dep not in science_deps:
+                    science_deps.append(dep)
+
+    # R
+    r_markers = [n for n in ("DESCRIPTION", "renv.lock", ".Rprofile") if has(n)]
+    for pattern in ("*.Rproj", "*.Rmd", "*.rmd"):
+        for p in _safe_glob(path, pattern)[:2]:
+            if p.name not in r_markers:
+                r_markers.append(p.name)
+    if r_markers:
+        note("r", "r", r_markers)
+
+    # Julia — Project.toml whose deps are analysis packages.
+    proj = path / "Project.toml"
+    try:
+        julia = proj.is_file() and bool(_JULIA_SCI_RE.search(_read_small(proj, 32_000)))
+    except OSError:
+        julia = False
+    if julia:
+        found = ["Project.toml"] + (["Manifest.toml"] if has("Manifest.toml") else [])
+        note("julia", "julia", found)
+
+    # Workflow engines
+    wf = [
+        n
+        for n in ("Snakefile", "workflow/Snakefile", "nextflow.config", "main.nf")
+        if has(n)
+    ]
+    for rel in ("", "workflow"):
+        for p in _safe_glob(path / rel if rel else path, "*.cwl")[:2]:
+            wf.append(_rel_name(path, p))
+    for mk in ("Makefile", "makefile"):
+        if has(mk) and _MAKE_DATA_TARGET_RE.search(_read_small(path / mk, 32_000)):
+            wf.append(mk)
+            break
+    if wf:
+        note("workflow", "pipeline", wf)
+        entry = entry or wf[0]
+
+    # Manuscript
+    ms: list[str] = []
+    for rel in _MANUSCRIPT_DIRS:
+        d = path / rel if rel else path
+        for tex in _safe_glob(d, "*.tex")[:_TEX_READ_CAP]:
+            if _TEX_DOCUMENTCLASS_RE.search(_read_small(tex, 8_000)):
+                ms.append(_rel_name(path, tex))
+                break
+    for n in ("_quarto.yml", "_quarto.yaml"):
+        if has(n):
+            ms.append(n)
+    for rel in _MANUSCRIPT_DIRS:
+        d = path / rel if rel else path
+        for p in _safe_glob(d, "*.qmd")[:2] + _safe_glob(d, "*.bib")[:2]:
+            ms.append(_rel_name(path, p))
+    if ms:
+        note("manuscript", "manuscript", ms)
+
+    # Data-heavy layout
+    data_markers: list[str] = []
+    outdir = next((d for d in ("results", "figures", "outputs") if (path / d).is_dir()), "")
+    if (path / "data").is_dir() and outdir:
+        data_markers += ["data/", f"{outdir}/"]
+    data_markers += [n for n in ("dvc.yaml", "dvc.lock", ".dvc") if has(n)]
+    hits, found_domains = _scan_research_data(path)
+    data_markers += hits
+    domains += [d for d in found_domains if d not in domains]
+    if _looks_bids(path):
+        data_markers.append("dataset_description.json")
+        if "neuroscience" not in domains:
+            domains.append("neuroscience")
+    if data_markers:
+        note("data", "data", data_markers)
+
+    if not kinds:
+        return
+
+    # Analysis entry point — a real file, never a guessed command.
+    if not entry:
+        for cand in ("analysis.R", "analysis.py", "analyse.py", "analysis.jl", "main.R"):
+            if has(cand):
+                entry = cand
+                break
+        if not entry and ms:
+            entry = ms[0]
+
+    domains.sort()  # directory listing order is not stable across filesystems
+    packs = ["research-method"]
+    for d in domains:
+        if d not in packs:
+            packs.append(d)
+    for k in kinds:
+        p_name = _KIND_PACKS.get(k)
+        if p_name and p_name not in packs:
+            packs.append(p_name)
+    packs = packs[:3]  # registry.triggered_skills() surfaces 3 by default
+
+    fp.stacks.append("research")
+    fp.stacks.extend(stacks)
+    for m in markers:
+        if m not in fp.markers:
+            fp.markers.append(m)
+
+    record: dict[str, list[str] | str] = {
+        "kinds": kinds,
+        "markers": markers,
+        "domains": domains,
+        "packs": packs,
+    }
+    if entry:
+        record["entry"] = entry
+    if science_deps:
+        record["python_science"] = science_deps
+        for name in science_files:
+            if name not in fp.markers:
+                fp.markers.append(name)
+    fp.research = record
+
+    # Verify: the project's own test command only. A notebook has no cheap gate,
+    # so it is named as the entry point in a hint instead of being invented into
+    # a command (suggest_verify is executed verbatim by jobs.verify).
+    if not fp.suggest_verify:
+        if "r" in kinds and (path / "tests" / "testthat").is_dir():
+            fp.suggest_verify = "Rscript -e 'testthat::test_dir(\"tests\")'"
+        elif "julia" in kinds and (path / "test" / "runtests.jl").is_file():
+            fp.suggest_verify = "julia --project -e 'using Pkg; Pkg.test()'"
+        elif has("Snakefile") or has("workflow/Snakefile"):
+            # The workflow's own dry run — resolves the DAG, computes nothing.
+            fp.suggest_verify = "snakemake -n"
+
+    fp.hints.append(
+        "Research project: analysis_env first; every result through analysis_run "
+        "so it lands in the ledger; cite_check before the manuscript is done"
+    )
+    if entry and not fp.suggest_verify:
+        fp.hints.append(
+            f"Analysis lives in {entry} — no test command in this project; "
+            "run it through analysis_run rather than inventing a gate"
+        )
 
 
 def orientation_block(root: Path | str | None, *, max_chars: int = _BLOCK_CHAR_CAP) -> str:

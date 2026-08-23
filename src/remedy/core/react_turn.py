@@ -75,6 +75,11 @@ _VERIFY_TOOLS = frozenset(
         "mission_update",
         "godot_run",
         "godot_check",
+        "analysis_run",
+        "analysis_ledger",
+        "cite_check",
+        "manuscript_build",
+        "manuscript_check",
     }
 )
 

@@ -4,6 +4,26 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Research
+
+- Research-project fingerprint (notebooks, R/Julia, workflows, manuscripts,
+  data layouts, BIDS) with `research:` context lines and up to three
+  suggested packs; science Python deps alone are not a research project.
+- Native tools: `analysis_env` / `analysis_run` / `analysis_ledger`,
+  `data_profile` / `data_diff`, `lit_search` / `lit_fetch`, `cite_*`,
+  `power_analysis`, `stats_assumptions` / `stats_effect_size` /
+  `stats_multiplicity`, `manuscript_check` / `manuscript_build`.
+- Bundled packs: `research-method` plus thirteen field packs
+  (statistics, ml-research, clinical-research, life-sciences,
+  bioinformatics, neuroscience, chemistry, physics, earth-climate,
+  computational-science, materials, social-science, text-and-corpus).
+  Domain packs stay out of the per-turn catalog unless their triggers
+  match.
+- Auto-suggest: a research-shaped ask in a research project injects
+  `research-method` (and the field pack the fingerprint named) without
+  the owner naming either.
+- Manual chapter 27 — Research.
+
 ### Game dev studio
 
 - Engine detection (Godot 4 incl. C#, Phaser/Pixi, Bevy, Pygame/Arcade,
