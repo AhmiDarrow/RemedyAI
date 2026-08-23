@@ -18,6 +18,7 @@ import {
 } from '../utils/toolLabels'
 import type { UiMode } from '../utils/uiMode'
 import { mergeModelOptions, modelOptionLabel, type ModelOption } from '../api/modelDiscovery'
+import { isLinuxDesktop } from '../utils/platform'
 
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
 export type ApprovalMode = 'ask' | 'auto' | 'full'
@@ -480,7 +481,7 @@ export function StatusBar({
   const bodyTip = useMemo(() => {
     if (!siblings.length) return ''
     const lines = siblings.map((b) => {
-      const who = b.muscle || 'another muscle'
+      const who = b.muscle || 'another session'
       const where = b.project || '?'
       const goal = b.goal ? ` — ${b.goal}` : ''
       const held = b.held_files.length
@@ -488,7 +489,7 @@ export function StatusBar({
         : ''
       return `• ${who} · ${where}${goal} (${b.phase})${held}`
     })
-    return `Remedy's other muscles at work — their held files are protected from overwrites:\n${lines.join('\n')}`
+    return `Other Remedy sessions at work — their held files are protected from overwrites:\n${lines.join('\n')}`
   }, [siblings])
 
   const dotColor =
@@ -544,12 +545,10 @@ export function StatusBar({
           />
           <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>
             {status === 'connected'
-              ? version
-                ? `Server v${version}`
-                : 'Server online'
+              ? 'Connected'
               : status === 'checking'
-                ? 'Server…'
-                : 'Server offline'}
+                ? 'Connecting…'
+                : 'Offline'}
           </span>
         </div>
 
@@ -614,7 +613,7 @@ export function StatusBar({
             style={{ color: 'var(--warning)' }}
             title={alerts}
           >
-            ⚠ {alerts}
+            {alerts}
           </span>
         )}
 
@@ -646,10 +645,9 @@ export function StatusBar({
             title={bodyTip}
             aria-label={`${siblings.length} other Remedy session${siblings.length > 1 ? 's' : ''} working`}
           >
-            <span aria-hidden="true">🫀</span>
             {siblings.length === 1
-              ? `1 other muscle · ${siblings[0].muscle || siblings[0].project || 'working'}`
-              : `${siblings.length} other muscles working`}
+              ? `1 other session · ${siblings[0].muscle || siblings[0].project || 'working'}`
+              : `${siblings.length} other sessions working`}
           </span>
         )}
 
@@ -764,13 +762,17 @@ export function StatusBar({
             <SegButton
               active={false}
               onClick={openWebUi}
-              title="Hide desktop to tray and open the WebUI chat in your browser"
+              title={
+                isLinuxDesktop()
+                  ? 'Minimize the desktop and open the WebUI chat in your browser'
+                  : 'Hide desktop to tray and open the WebUI chat in your browser'
+              }
             >
               WebUI
             </SegButton>
           )}
 
-          {updateAvailable && (
+          {updateAvailable && !isLinuxDesktop() && (
             <button
               onClick={() => (onInstallUpdate ? onInstallUpdate() : onCheckUpdates())}
               className="px-2 py-0.5 rounded text-xs font-medium"

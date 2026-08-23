@@ -27,8 +27,12 @@ Logo menu / status bar **WebUI** / Settings → **Switch to WebUI**:
 2. Browser opens `http://127.0.0.1:7400/` (same chat + local API).  
 3. Tray → **Show Remedy** returns to the desktop shell.  
 
-**Title-bar ✕ (0.20.0+)** always hides to the tray (server stays up). Full **Quit** from
+**Windows title-bar ✕** hides to the tray (server stays up). Full **Quit** from
 the tray (or app menu) stops the server — the WebUI will stop working.
+
+**Linux / WSLg ✕** minimizes to the taskbar (there is no tray). Quit from the
+app menu or the quit dialog. In-app Update is Windows-only; Linux installs
+come from the GitHub Release `.deb` or AppImage on the same tag.
 
 ## Install an update
 
