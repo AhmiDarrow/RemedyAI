@@ -137,6 +137,20 @@ def test_two_sample_t_n64_d05_is_about_eighty_percent(rt: _Rt) -> None:
     assert 60 <= n["value"] <= 70
 
 
+def test_one_sided_wrong_tail_is_near_alpha(rt: _Rt) -> None:
+    payload = run_json(
+        rt,
+        "power_analysis",
+        test="one_proportion",
+        solve="power",
+        n=100,
+        effect_size=-0.2,
+        alpha=0.05,
+        alternative="greater",
+    )
+    assert payload["value"] < 0.15
+
+
 def test_power_refuses_an_unknown_test(rt: _Rt) -> None:
     assert "UNKNOWN_TEST" in run(rt, "power_analysis", test="magic")
 

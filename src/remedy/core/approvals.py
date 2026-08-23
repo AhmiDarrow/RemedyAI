@@ -388,6 +388,8 @@ class ApprovalQueue:
             "file_edit",
             "skill_run",
             "mail_send",
+            "analysis_run",
+            "manuscript_build",
             # mail_reply and calendar_cancel_event both build a full
             # APPROVAL_REQUIRED item and both say in their own tool description
             # that they ask first — but neither name was ever listed here, so
@@ -500,6 +502,10 @@ class ApprovalQueue:
                 reason = "File edit requires approval (file_edit)"
             elif tool == "skill_run":
                 reason = "Skill script execution requires approval (skill_run)"
+            elif tool == "analysis_run":
+                reason = "Running an analysis script requires approval (analysis_run)"
+            elif tool == "manuscript_build":
+                reason = "Compiling a manuscript requires approval (manuscript_build)"
             elif tool == "mail_send":
                 reason = "Sending email requires approval (mail_send)"
             elif tool == "mail_reply":

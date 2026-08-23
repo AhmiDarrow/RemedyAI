@@ -49,7 +49,7 @@ def _resolve_root(runtime: Any, path: str) -> Path:
     try:
         p = Path(runtime.resolve_tool_path(raw))
     except Exception:
-        p = Path(raw).expanduser()
+        return Path(runtime.effective_project_path())
     if p.is_file():
         p = p.parent
     return p
@@ -304,7 +304,7 @@ def register_game_tools(runtime: Any) -> None:
             argv += ["--quit-after", str(qa)]
         if extra_args.strip():
             try:
-                argv += shlex.split(extra_args)
+                extra = shlex.split(extra_args)
             except ValueError as exc:
                 return format_tool_error(
                     f"bad extra_args: {exc}",
@@ -312,6 +312,15 @@ def register_game_tools(runtime: Any) -> None:
                     tool_name="godot_run",
                     suggestion="Quote extra_args like a shell command line.",
                 )
+            blocked_flags = ("--path", "--export-release", "--export-debug", "--write-movie")
+            if any(a == f or a.startswith(f + "=") for a in extra for f in blocked_flags):
+                return format_tool_error(
+                    "extra_args cannot retarget --path or export/write-movie",
+                    code="BAD_ARGS",
+                    tool_name="godot_run",
+                    suggestion="Use path= / godot_export for those.",
+                )
+            argv += extra
         command = _argv_text(argv)
         blocked = _approval_block(runtime, "godot_run", command)
         if blocked:
@@ -416,8 +425,6 @@ def register_game_tools(runtime: Any) -> None:
         if not out.is_absolute():
             out = root / out
         allowed = [root, *_write_roots(runtime)]
-        with suppress(Exception):
-            allowed.extend(runtime.allowed_roots() or [])
         try:
             out_res = out.resolve(strict=False)
             inside = any(
@@ -553,6 +560,7 @@ def register_game_tools(runtime: Any) -> None:
 
     # Quick fingerprint: a short outer budget (table entries must stay >= default).
     game_project_info._remedy_timeout = 30.0  # type: ignore[attr-defined]
+    game_playtest._remedy_timeout = None  # type: ignore[attr-defined]
     reg = runtime.tool_registry
     reg.register_builtin_handler(
         "game_project_info",

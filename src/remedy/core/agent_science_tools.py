@@ -506,8 +506,16 @@ def power_for(
             p0, p1 = props[0], props[1]
             se0 = math.sqrt(max(1e-12, p0 * (1.0 - p0)))
             se1 = math.sqrt(max(1e-12, p1 * (1.0 - p1)))
-            return norm_cdf((abs(p1 - p0) * math.sqrt(n) - za * se0) / se1)
-        return norm_cdf(abs(effect_size) * math.sqrt(n) - za)
+            delta = p1 - p0
+            if alternative == "less":
+                delta = -delta
+            elif alternative == "two_sided":
+                delta = abs(delta)
+            return norm_cdf((delta * math.sqrt(n) - za * se0) / se1)
+        signed = effect_size if alternative != "two_sided" else abs(effect_size)
+        if alternative == "less":
+            signed = -signed
+        return norm_cdf(signed * math.sqrt(n) - za)
     if test == "two_proportions":
         za = _z_alpha(alpha, alternative)
         nb = n2 if n2 > 0 else n * (ratio if ratio > 0 else 1.0)
@@ -518,9 +526,17 @@ def power_for(
             se1 = math.sqrt(
                 max(1e-12, p1 * (1.0 - p1) / n + p2 * (1.0 - p2) / nb)
             )
-            return norm_cdf((abs(p1 - p2) - za * se0) / se1)
+            delta = p1 - p2
+            if alternative == "less":
+                delta = -delta
+            elif alternative == "two_sided":
+                delta = abs(delta)
+            return norm_cdf((delta - za * se0) / se1)
         se = math.sqrt(1.0 / n + 1.0 / nb)
-        return norm_cdf(abs(effect_size) / se - za)
+        signed = effect_size if alternative != "two_sided" else abs(effect_size)
+        if alternative == "less":
+            signed = -signed
+        return norm_cdf(signed / se - za)
     if test in ("chi_square_gof", "chi_square_independence"):
         dfree = float(df) if df > 0 else float(max(1, int(groups) - 1))
         total = n
@@ -529,19 +545,29 @@ def power_for(
     if test == "correlation":
         if n <= 4:
             return 0.0
-        r = min(max(abs(effect_size), 0.0), 0.999999)
+        r = min(max(effect_size, -0.999999), 0.999999)
+        if alternative == "two_sided":
+            r = abs(r)
+        elif alternative == "less":
+            r = -r
         zr = math.atanh(r)
         za = _z_alpha(alpha, alternative)
         return norm_cdf(zr * math.sqrt(n - 3.0) - za)
     if test == "log_rank":
-        hr = abs(effect_size)
-        if hr <= 0 or hr == 1.0:
+        hr = effect_size
+        if hr <= 0:
             return alpha
         p1 = 1.0 / (1.0 + (ratio if ratio > 0 else 1.0))
         p2 = 1.0 - p1
         za = _z_alpha(alpha, alternative)
-        # n is the number of EVENTS for this test.
-        return norm_cdf(abs(math.log(hr)) * math.sqrt(n * p1 * p2) - za)
+        logged = math.log(hr)
+        if alternative == "two_sided":
+            logged = abs(logged)
+        elif alternative == "less":
+            logged = -logged
+        if hr == 1.0:
+            return alpha
+        return norm_cdf(logged * math.sqrt(n * p1 * p2) - za)
     raise ValueError(f"unknown test: {test}")
 
 
@@ -2574,9 +2600,8 @@ def _resolve_read(runtime: Any, raw: str) -> Path:
 
 
 def _allowed_write_roots(runtime: Any) -> list[Path]:
+    # Write roots only — allowed_roots() is view-only (Desktop/Documents/Downloads).
     roots = [_project_root(runtime), *_write_roots(runtime)]
-    with suppress(Exception):
-        roots.extend(Path(p) for p in (runtime.allowed_roots() or []))
     out: list[Path] = []
     for r in roots:
         with suppress(OSError):
@@ -3205,6 +3230,14 @@ def register_science_tools(runtime: Any) -> None:
         extra: list[str] = []
         if extra_args.strip():
             extra = [a for a in re.split(r"\s+", extra_args.strip()) if a]
+            banned = ("-output-directory", "--output-dir", "--output-directory")
+            if any(a.startswith(b) for a in extra for b in banned):
+                return format_tool_error(
+                    "extra_args cannot retarget the output directory",
+                    code="BAD_ARGS",
+                    tool_name=tool,
+                    suggestion="Compile in the project folder; do not pass -output-directory.",
+                )
 
         def missing(name: str, install: str) -> str:
             return format_tool_error(
