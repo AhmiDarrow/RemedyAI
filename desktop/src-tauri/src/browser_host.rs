@@ -1084,9 +1084,302 @@ fn linux_place_embed(window: &tauri::Window, bounds: &BrowserBounds, allow_show:
     target_os = "netbsd",
     target_os = "openbsd"
 ))]
+const LINUX_OVERLAY_NAME: &str = "remedy-rail-overlay";
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+const LINUX_EMBED_NAME: &str = "remedy-browser-embed";
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
 fn linux_widget_is_webkit(w: &gtk::Widget) -> bool {
     use gtk::glib::prelude::ObjectExt;
     w.type_().name().contains("WebKitWebView")
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_find_embed_widget(window: &tauri::Window) -> Result<gtk::Widget, String> {
+    use gtk::prelude::*;
+
+    let vbox = window
+        .default_vbox()
+        .map_err(|e| format!("default_vbox: {e}"))?;
+    if let Some(overlay) = vbox
+        .children()
+        .into_iter()
+        .find(|c| c.widget_name() == LINUX_OVERLAY_NAME)
+        .and_then(|c| c.downcast::<gtk::Overlay>().ok())
+    {
+        let base = overlay.child();
+        for child in overlay.children() {
+            if base.as_ref() == Some(&child) {
+                continue;
+            }
+            if linux_widget_is_webkit(&child) || child.widget_name() == LINUX_EMBED_NAME {
+                return Ok(child);
+            }
+        }
+    }
+    vbox.children()
+        .into_iter()
+        .find(|c| c.widget_name() == LINUX_EMBED_NAME || linux_widget_is_webkit(c))
+        .ok_or_else(|| "browser embed widget not found".into())
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_on_embed<F, R>(wv: &tauri::Webview, f: F) -> Result<R, String>
+where
+    F: FnOnce(&gtk::Widget) -> Result<R, String> + Send + 'static,
+    R: Send + 'static,
+{
+    let window = wv.window();
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    window
+        .run_on_main_thread(move || {
+            let result = match linux_find_embed_widget(&window) {
+                Ok(widget) => f(&widget),
+                Err(e) => Err(e),
+            };
+            let _ = tx.send(result);
+        })
+        .map_err(|e| format!("linux main thread: {e}"))?;
+    rx.recv_timeout(Duration::from_secs(4))
+        .map_err(|_| "linux embed input timeout".to_string())?
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_dispatch_pointer(
+    widget: &gtk::Widget,
+    kind: &str,
+    x: f64,
+    y: f64,
+    button: u32,
+) -> Result<(), String> {
+    use gtk::gdk;
+    use gtk::glib::translate::ToGlibPtr;
+    use gtk::prelude::*;
+
+    let window = widget.window().ok_or_else(|| "embed GdkWindow missing".to_string())?;
+    let display = window.display();
+    let seat = display
+        .default_seat()
+        .ok_or_else(|| "no GDK seat".to_string())?;
+    let device = seat
+        .pointer()
+        .ok_or_else(|| "no pointer device".to_string())?;
+    let ty = match kind {
+        "mouseMoved" | "motion" => gdk::EventType::MotionNotify,
+        "mousePressed" | "press" => gdk::EventType::ButtonPress,
+        "mouseReleased" | "release" => gdk::EventType::ButtonRelease,
+        _ => return Err(format!("unknown linux pointer kind {kind}")),
+    };
+    let mut event = gdk::Event::new(ty);
+    let (ox, oy) = window.origin();
+    let win_ptr = window.to_glib_full();
+    unsafe {
+        if ty == gdk::EventType::MotionNotify {
+            let ptr = event.as_ptr() as *mut gdk::ffi::GdkEventMotion;
+            (*ptr).window = win_ptr;
+            (*ptr).send_event = 0;
+            (*ptr).x = x;
+            (*ptr).y = y;
+            (*ptr).x_root = x + f64::from(ox);
+            (*ptr).y_root = y + f64::from(oy);
+            (*ptr).state = if button == 0 {
+                gdk::ModifierType::empty().bits()
+            } else {
+                gdk::ModifierType::BUTTON1_MASK.bits()
+            };
+        } else {
+            let ptr = event.as_ptr() as *mut gdk::ffi::GdkEventButton;
+            (*ptr).window = win_ptr;
+            (*ptr).send_event = 0;
+            (*ptr).x = x;
+            (*ptr).y = y;
+            (*ptr).x_root = x + f64::from(ox);
+            (*ptr).y_root = y + f64::from(oy);
+            (*ptr).button = button.max(1);
+            (*ptr).state = if kind.contains("Released") || kind == "release" {
+                gdk::ModifierType::empty().bits()
+            } else {
+                gdk::ModifierType::BUTTON1_MASK.bits()
+            };
+        }
+    }
+    event.set_device(Some(&device));
+    widget.grab_focus();
+    if !widget.event(&event) {
+        log::debug!("linux pointer event not handled ({kind})");
+    }
+    Ok(())
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_dispatch_key(widget: &gtk::Widget, press: bool, keyval: u32) -> Result<(), String> {
+    use gtk::gdk;
+    use gtk::glib::translate::ToGlibPtr;
+    use gtk::prelude::*;
+
+    let window = widget.window().ok_or_else(|| "embed GdkWindow missing".to_string())?;
+    let display = window.display();
+    let seat = display
+        .default_seat()
+        .ok_or_else(|| "no GDK seat".to_string())?;
+    let device = seat
+        .keyboard()
+        .or_else(|| seat.pointer())
+        .ok_or_else(|| "no keyboard device".to_string())?;
+    let ty = if press {
+        gdk::EventType::KeyPress
+    } else {
+        gdk::EventType::KeyRelease
+    };
+    let mut event = gdk::Event::new(ty);
+    let win_ptr = window.to_glib_full();
+    unsafe {
+        let ptr = event.as_ptr() as *mut gdk::ffi::GdkEventKey;
+        (*ptr).window = win_ptr;
+        (*ptr).send_event = 0;
+        (*ptr).keyval = keyval;
+        (*ptr).hardware_keycode = 0;
+        (*ptr).state = gdk::ModifierType::empty().bits();
+        (*ptr).group = 0;
+        (*ptr).is_modifier = 0;
+    }
+    event.set_device(Some(&device));
+    widget.grab_focus();
+    let _ = widget.event(&event);
+    Ok(())
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_mouse(
+    wv: &tauri::Webview,
+    kind: &str,
+    x: f64,
+    y: f64,
+    button: &str,
+) -> Result<(), String> {
+    let kind_s = kind.to_string();
+    let btn: u32 = if button == "right" { 3 } else { 1 };
+    linux_on_embed(wv, move |widget| {
+        linux_dispatch_pointer(widget, &kind_s, x, y, btn)
+    })
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_click_trusted(wv: &tauri::Webview, x: f64, y: f64, button: &str) -> Result<(), String> {
+    let _ = linux_mouse(wv, "mouseMoved", x, y, "none");
+    linux_mouse(wv, "mousePressed", x, y, button)?;
+    linux_mouse(wv, "mouseReleased", x, y, button)
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_insert_text(wv: &tauri::Webview, text: &str) -> Result<(), String> {
+    use gtk::gdk::keys::Key;
+
+    let chars: Vec<u32> = text
+        .chars()
+        .map(|ch| {
+            if ch == '\n' || ch == '\r' {
+                gtk::gdk::keys::constants::Return.into()
+            } else if ch == '\t' {
+                gtk::gdk::keys::constants::Tab.into()
+            } else {
+                u32::from(Key::from_unicode(ch))
+            }
+        })
+        .filter(|k| *k != 0)
+        .collect();
+    linux_on_embed(wv, move |widget| {
+        for keyval in &chars {
+            linux_dispatch_key(widget, true, *keyval)?;
+            linux_dispatch_key(widget, false, *keyval)?;
+        }
+        Ok(())
+    })
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn linux_named_key(wv: &tauri::Webview, key: &str) -> Option<Result<(), String>> {
+    use gtk::gdk::keys::constants as k;
+    let keyval: u32 = match key {
+        "enter" | "return" | "Enter" => k::Return.into(),
+        "tab" | "Tab" => k::Tab.into(),
+        "esc" | "escape" | "Escape" => k::Escape.into(),
+        "backspace" | "Backspace" => k::BackSpace.into(),
+        "delete" | "del" | "Delete" => k::Delete.into(),
+        "ArrowLeft" => k::Left.into(),
+        "ArrowUp" => k::Up.into(),
+        "ArrowRight" => k::Right.into(),
+        "ArrowDown" => k::Down.into(),
+        "PageUp" => k::Page_Up.into(),
+        "PageDown" => k::Page_Down.into(),
+        "Home" => k::Home.into(),
+        "End" => k::End.into(),
+        _ => return None,
+    };
+    Some(linux_on_embed(wv, move |widget| {
+        linux_dispatch_key(widget, true, keyval)?;
+        linux_dispatch_key(widget, false, keyval)
+    }))
 }
 
 #[cfg(any(
@@ -1108,8 +1401,8 @@ fn linux_place_embed_gtk(
         .default_vbox()
         .map_err(|e| format!("default_vbox: {e}"))?;
 
-    const OVERLAY_NAME: &str = "remedy-rail-overlay";
-    const EMBED_NAME: &str = "remedy-browser-embed";
+    const OVERLAY_NAME: &str = LINUX_OVERLAY_NAME;
+    const EMBED_NAME: &str = LINUX_EMBED_NAME;
 
     let overlay = if let Some(existing) = vbox
         .children()
@@ -1248,13 +1541,14 @@ fn attach_fullscreen_handler(app: AppHandle, wv: tauri::Webview) {
 fn attach_fullscreen_handler(_app: AppHandle, _wv: tauri::Webview) {}
 
 // ---------------------------------------------------------------------------
-// Trusted input (CDP). Synthetic `el.dispatchEvent(new MouseEvent(...))`
+// Trusted input. Synthetic `el.dispatchEvent(new MouseEvent(...))`
 // carries `event.isTrusted === false` — the loudest bot signal retail
 // anti-fraud stacks (DataDome / PerimeterX / Akamai / Turnstile) key on, and
-// cart/checkout pages are the most guarded pages on the web. CDP input goes
-// through the renderer's real input pipeline (the same mechanism DevTools
-// and Playwright use), so pages see trusted events. Remedy shops *with* her
-// user present — trusted input + human-held checkout is the honest posture.
+// cart/checkout pages are the most guarded pages on the web.
+// Windows: WebView2 CDP (`Input.dispatchMouseEvent`) — DevTools/Playwright path.
+// Linux: GDK button/key events on the WebKitGTK embed — same OS input pipeline.
+// Pages see trusted events. Remedy shops *with* her user present — trusted
+// input + human-held checkout is the honest posture.
 // ---------------------------------------------------------------------------
 
 /// Resolve a viewport point for a gesture: explicit x/y if given, else locate
@@ -2984,11 +3278,8 @@ pub fn browser_agent_action(
     let act = action.to_lowercase();
     let jid_owned = job_id.clone().unwrap_or_default();
     let button_cdp = button.clone();
-    #[cfg(windows)]
     let text_cdp = text.clone();
-    #[cfg(windows)]
     let key_cdp = key.clone();
-    #[cfg(windows)]
     let ref_cdp = r#ref.clone();
 
     // Press-and-hold: Remedy as the owner's authorized hands for an
@@ -3008,9 +3299,30 @@ pub fn browser_agent_action(
             cdp_mouse(&wv, "mouseReleased", px, py, "left", 1)?;
             return Ok(format!("ok:press_hold:{}:{}:{}ms", px.round(), py.round(), hold_ms));
         }
-        #[cfg(not(windows))]
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        ))]
         {
-            // Best-effort synthetic pointer hold (may not pass trusted walls).
+            let _ = linux_mouse(&wv, "mouseMoved", px, py, "none");
+            linux_mouse(&wv, "mousePressed", px, py, "left")?;
+            std::thread::sleep(Duration::from_millis(hold_ms));
+            linux_mouse(&wv, "mouseReleased", px, py, "left")?;
+            return Ok(format!("ok:press_hold:{}:{}:{}ms", px.round(), py.round(), hold_ms));
+        }
+        #[cfg(not(any(
+            windows,
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        )))]
+        {
+            // Last-resort synthetic pointer hold (may not pass trusted walls).
             let js = format!(
                 r#"(function(){{
   const x={px}, y={py};
@@ -3448,9 +3760,16 @@ pub fn browser_agent_action(
         "ready" => 2,
         _ => 4,
     };
-    // Trusted typing / named keys first (Windows CDP — real input pipeline).
-    // Any failure falls through to the synthetic JS path below unchanged.
-    #[cfg(windows)]
+    // Trusted typing / named keys first (Windows CDP / Linux GDK — real
+    // input pipeline). Any failure falls through to the synthetic JS path.
+    #[cfg(any(
+        windows,
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
     {
         if matches!(act.as_str(), "type" | "type_text") {
             if let Some(txt) = text_cdp.as_deref().filter(|s| !s.is_empty()) {
@@ -3485,7 +3804,23 @@ return (el&&(el.isContentEditable||/^(INPUT|TEXTAREA)$/.test(el.tagName)))\
                 {
                     if let Ok(chk) = frx.recv_timeout(Duration::from_secs(2)) {
                         let flag = chk.trim().trim_matches('"');
-                        if flag == "rm-editable" && cdp_insert_text(&wv, txt).is_ok() {
+                        let typed = {
+                            #[cfg(windows)]
+                            {
+                                cdp_insert_text(&wv, txt).is_ok()
+                            }
+                            #[cfg(any(
+                                target_os = "linux",
+                                target_os = "dragonfly",
+                                target_os = "freebsd",
+                                target_os = "netbsd",
+                                target_os = "openbsd"
+                            ))]
+                            {
+                                linux_insert_text(&wv, txt).is_ok()
+                            }
+                        };
+                        if flag == "rm-editable" && typed {
                             log::info!("browser agent action {act} → ok:trusted-type");
                             return Ok("ok:trusted-type".into());
                         }
@@ -3495,7 +3830,23 @@ return (el&&(el.isContentEditable||/^(INPUT|TEXTAREA)$/.test(el.tagName)))\
         }
         if act == "key" {
             if let Some(k) = key_cdp.as_deref() {
-                if let Some(Ok(())) = cdp_named_key(&wv, k) {
+                let named = {
+                    #[cfg(windows)]
+                    {
+                        cdp_named_key(&wv, k)
+                    }
+                    #[cfg(any(
+                        target_os = "linux",
+                        target_os = "dragonfly",
+                        target_os = "freebsd",
+                        target_os = "netbsd",
+                        target_os = "openbsd"
+                    ))]
+                    {
+                        linux_named_key(&wv, k)
+                    }
+                };
+                if let Some(Ok(())) = named {
                     log::info!("browser agent action key → ok:trusted-key");
                     return Ok("ok:trusted-key".into());
                 }
@@ -3534,7 +3885,28 @@ return (el&&(el.isContentEditable||/^(INPUT|TEXTAREA)$/.test(el.tagName)))\
                         false
                     }
                 };
-                #[cfg(not(windows))]
+                #[cfg(any(
+                    target_os = "linux",
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "netbsd",
+                    target_os = "openbsd"
+                ))]
+                let trusted = match linux_click_trusted(&wv, cx, cy, &btn) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        log::warn!("linux trusted click failed — synthetic fallback: {e}");
+                        false
+                    }
+                };
+                #[cfg(not(any(
+                    windows,
+                    target_os = "linux",
+                    target_os = "dragonfly",
+                    target_os = "freebsd",
+                    target_os = "netbsd",
+                    target_os = "openbsd"
+                )))]
                 let trusted = false;
                 if !trusted {
                     let ev = if btn == "right" { "contextmenu" } else { "click" };

@@ -2,13 +2,18 @@
 
 Browser-target actions that need the embed are enqueued here. The desktop
 app claims jobs via HTTP and posts results. Desktop-target actions do not
-use this queue (they run in-process via Win32).
+use this queue (they run in-process via Win32). On-disk payloads are
+DPAPI-sealed on Windows so typed secrets are not plaintext in
+``computer/jobs``; the host still receives plaintext over authenticated
+loopback.
 """
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import json
+import logging
 import re
 import threading
 import time
@@ -20,6 +25,8 @@ from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
 from remedy.home import default_home
+
+logger = logging.getLogger(__name__)
 
 _SECRET_FIELD_TOKEN_RE = re.compile(
     r"(?i)(^|[^a-z])(pass|token|pin|otp)([^a-z]|$)"
@@ -97,6 +104,87 @@ _PAYLOAD_SECRET_KEYS = frozenset(
         "authorization",
     }
 )
+
+
+def _payload_has_secrets(payload: dict[str, Any] | None) -> bool:
+    """True when *payload* looks like it carries typed secrets."""
+    if not payload or not isinstance(payload, dict):
+        return False
+    for key, val in payload.items():
+        kl = str(key).lower().replace("-", "_")
+        if kl in _PAYLOAD_SECRET_KEYS or kl.endswith("_password") or kl.endswith("_secret"):
+            if isinstance(val, str) and val.strip():
+                return True
+            if isinstance(val, dict):
+                return True
+    return False
+
+
+def _job_dpapi_available() -> bool:
+    try:
+        from remedy.interfaces.secret_store import _dpapi_available
+
+        return bool(_dpapi_available())
+    except Exception:
+        return False
+
+
+def _job_dpapi_protect(plaintext: bytes) -> bytes:
+    from remedy.interfaces.secret_store import _dpapi_protect
+
+    return _dpapi_protect(plaintext)
+
+
+def _job_dpapi_unprotect(ciphertext: bytes) -> bytes:
+    from remedy.interfaces.secret_store import _dpapi_unprotect
+
+    return _dpapi_unprotect(ciphertext)
+
+
+def _seal_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """DPAPI-wrap the payload for disk. In-memory jobs stay plaintext.
+
+    The desktop host claims via authenticated loopback HTTP and receives
+    plaintext there. Other local accounts / casual copies of
+    ``computer/jobs/*.json`` must not see typed passwords.
+    """
+    if not payload or not isinstance(payload, dict):
+        return {}
+    if payload.get("_sealed"):
+        return payload
+    if not _job_dpapi_available():
+        return dict(payload)
+    plain = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    try:
+        cipher = _job_dpapi_protect(plain)
+    except Exception:
+        if _payload_has_secrets(payload):
+            raise
+        logger.warning("computer job DPAPI protect failed; writing non-secret payload plain")
+        return dict(payload)
+    return {
+        "_sealed": True,
+        "encoding": "dpapi",
+        "blob": base64.b64encode(cipher).decode("ascii"),
+    }
+
+
+def _unseal_payload(payload: Any) -> dict[str, Any]:
+    """Undo :func:`_seal_payload`. Unknown envelopes fail closed (empty)."""
+    if not payload or not isinstance(payload, dict):
+        return {}
+    if not payload.get("_sealed"):
+        return dict(payload)
+    enc = str(payload.get("encoding") or "").strip().lower()
+    blob = payload.get("blob")
+    if enc != "dpapi" or not isinstance(blob, str) or not blob.strip():
+        raise ValueError("computer job payload seal is unreadable")
+    cipher = base64.b64decode(blob)
+    plain = _job_dpapi_unprotect(cipher)
+    inner = json.loads(plain.decode("utf-8"))
+    if not isinstance(inner, dict):
+        raise ValueError("computer job payload seal is not an object")
+    return inner
 
 
 def _element_looks_like_secret_field(el: dict[str, Any]) -> bool:
@@ -277,6 +365,8 @@ def _root(home_dir: Path | str | None = None) -> Path:
     home = canonical_home(home_dir)
     p = home / "computer" / "jobs"
     p.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(OSError):
+        p.chmod(0o700)
     return p
 
 
@@ -311,6 +401,25 @@ class ComputerJob:
             updated_at=str(raw.get("updated_at") or _now()),
             session_id=sid,
         )
+
+
+def _job_from_disk(raw: dict[str, Any]) -> ComputerJob | None:
+    try:
+        payload = _unseal_payload(
+            raw.get("payload") if isinstance(raw.get("payload"), dict) else {}
+        )
+    except Exception:
+        logger.warning("computer job payload unseal failed id=%s", raw.get("id"))
+        return None
+    data = dict(raw)
+    data["payload"] = payload
+    return ComputerJob.from_dict(data)
+
+
+def _dump_job(path: Path, job: ComputerJob, *, indent: int | None = 2) -> None:
+    data = job.to_dict()
+    data["payload"] = _seal_payload(job.payload)
+    write_json_atomic(path, data, indent=indent, mode=0o600)
 
 
 class ComputerHostBridge:
@@ -614,7 +723,7 @@ class ComputerHostBridge:
 
     def _write(self, job: ComputerJob) -> None:
         job.updated_at = _now()
-        write_json_atomic(self._path(job.id), job.to_dict())
+        _dump_job(self._path(job.id), job)
 
     def _read(self, job_id: str) -> ComputerJob | None:
         path = self._path(job_id)
@@ -627,7 +736,7 @@ class ComputerHostBridge:
             return None
         if not isinstance(raw, dict):
             return None
-        return ComputerJob.from_dict(raw)
+        return _job_from_disk(raw)
 
     def set_ui_command(self, command: dict[str, Any]) -> None:
         """Ask Desktop to open the Browser rail / run UI (persisted for pollers)."""
@@ -803,7 +912,9 @@ class ComputerHostBridge:
                     continue
                 if not isinstance(raw, dict):
                     continue
-                job = ComputerJob.from_dict(raw)
+                job = _job_from_disk(raw)
+                if job is None:
+                    continue
                 if job.status != "pending":
                     continue
                 act = job.action.lower()
@@ -909,7 +1020,9 @@ class ComputerHostBridge:
                 continue
             if not isinstance(raw, dict):
                 continue
-            job = ComputerJob.from_dict(raw)
+            job = _job_from_disk(raw)
+            if job is None:
+                continue
             if job.action != action or job.status != "done":
                 continue
             if want_sid:
@@ -972,7 +1085,9 @@ class ComputerHostBridge:
                     continue
                 if not isinstance(raw, dict):
                     continue
-                job = ComputerJob.from_dict(raw)
+                job = _job_from_disk(raw)
+                if job is None:
+                    continue
                 if job.status not in ("pending", "running"):
                     continue
                 if want:
@@ -1220,11 +1335,12 @@ class ComputerHostBridge:
         desktop/browser screenshots under ``computer/shots/`` (S-COMP-02).
 
         **Stale-open scrub (S-COMP-03):** a pending/running job the host never
-        claimed can carry a plaintext typed payload (passwords need plaintext
-        while open). If such a job is older than *stale_open_ttl_s* (default 30
+        claimed can carry a typed payload (passwords need plaintext in memory
+        / over authenticated loopback while open; on disk they are DPAPI-sealed
+        on Windows). If such a job is older than *stale_open_ttl_s* (default 30
         minutes — a dead poller, not a slow one), it is expired: status →
-        ``cancelled``, payload secrets scrubbed. Plaintext secrets must never
-        sit on disk indefinitely.
+        ``cancelled``, payload secrets scrubbed. Secrets must never sit
+        recoverable on disk indefinitely.
         """
         cutoff = time.time() - max_age_s
         stale_cutoff = time.time() - max(float(stale_open_ttl_s), float(max_age_s))
@@ -1247,8 +1363,12 @@ class ComputerHostBridge:
                 ):
                     if mtime < stale_cutoff:
                         # Host is dead for this job — expire it and scrub the
-                        # typed payload so no plaintext secret outlives the TTL.
-                        job = ComputerJob.from_dict(raw)
+                        # typed payload so no recoverable secret outlives the TTL.
+                        job = _job_from_disk(raw)
+                        if job is None:
+                            path.unlink(missing_ok=True)
+                            n += 1
+                            continue
                         job.status = "cancelled"
                         job.error = (
                             "expired: host never claimed/finished this job; "
@@ -1257,9 +1377,9 @@ class ComputerHostBridge:
                         job.payload = _scrub_retained_payload(job.payload)
                         # Write back to THIS file, not _path(job.id): a file
                         # whose JSON id ≠ filename must still get scrubbed here
-                        # (otherwise the plaintext lingers forever).
+                        # (otherwise the payload lingers forever).
                         with contextlib.suppress(OSError):
-                            write_json_atomic(path, job.to_dict(), indent=None)
+                            _dump_job(path, job, indent=None)
                         n += 1
                     continue
                 path.unlink(missing_ok=True)
