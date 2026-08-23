@@ -69,6 +69,8 @@ disabled / deprecated
 | **web-games** / **bevy** / **pygame-arcade** / **love2d** | Engine packs for Phaser/Pixi, Bevy, Pygame/Arcade, Love2D |
 | **unity** / **unreal** | Knowledge-only: project layout, batchmode / UAT, test runners |
 | **game-assets** / **engine-mcp-bridge** | ComfyUI game art with honest limits; when to use a live-editor MCP server |
+| **research-method** / **statistics** | Research loop (question → literature → plan → ledger → cite_check) and the analysis itself — see [Research](27-research.md) |
+| **clinical-research** / **life-sciences** / **ml-research** | Field packs; each one activates `research-method` first |
 
 ## ComfyUI (bundled)
 
