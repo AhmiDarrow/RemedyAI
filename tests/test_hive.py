@@ -453,3 +453,51 @@ def test_hive_roster_api_has_no_transcript(hive_home: Path):
     fresh = store.get(d.id)
     assert fresh is not None
     assert fresh.status == "retired"
+
+
+@pytest.mark.asyncio
+async def test_a_daughters_step_budget_never_lands_on_the_mothers_runtime(
+    hive_home: Path,
+):
+    """The mother keeps working while a daughter forages — her ReAct ceiling
+    must not be replaced by the daughter's small budget (nor left behind)."""
+    from remedy.core.turn_context import turn_max_react_steps
+
+    seen: dict[str, int] = {}
+
+    async def pulse(runtime, daughter):
+        seen["in_turn"] = turn_max_react_steps(runtime)
+        seen["on_runtime"] = int(getattr(runtime, "_max_react_steps", 0) or 0)
+        return ReturnPacket(goal=daughter.goal, done=True, outcome="ok")
+
+    from remedy.core.hive.runner import _default_llm_pulse
+
+    set_pulse_impl(None)
+    try:
+        store = HiveStore(hive_home)
+        d = store.hire("scan the repo", budget_steps=3)
+        rt = SimpleNamespace(config=SimpleNamespace(home_dir=str(hive_home)))
+        rt._max_react_steps = 9999
+
+        async def _fake_stream(runtime, charter, session_id=""):
+            seen["in_turn"] = turn_max_react_steps(runtime)
+            seen["on_runtime"] = int(getattr(runtime, "_max_react_steps", 0) or 0)
+            yield "done"
+
+        import remedy.core.react_loop.loop as loop_mod
+
+        real = loop_mod.call_llm_stream
+        loop_mod.call_llm_stream = _fake_stream
+        try:
+            set_pulse_impl(_default_llm_pulse)
+            await run_forager(rt, d)
+        finally:
+            loop_mod.call_llm_stream = real
+
+        # The budget was scoped to the daughter's turn...
+        assert seen["in_turn"] == 3
+        # ...and the mother's shared runtime was never touched.
+        assert seen["on_runtime"] == 9999
+        assert rt._max_react_steps == 9999
+    finally:
+        set_pulse_impl(None)

@@ -325,8 +325,8 @@ def sync_todos_with_build(runtime: Any, state: Any = None) -> list[TodoItem]:
     """Close checklist rows the tree already satisfied — do not stall on ledger.
 
     Scout/explore complete after the first real write. File-named rows complete
-    when that file exists with content. Verify completes on green (or when the
-    required files are on disk and verify is not mid-hang).
+    when that file exists with content. Verify completes only on a green verify
+    — files-on-disk alone must not close it (that was the old false-stop).
     """
     root = None
     with suppress(Exception):
@@ -340,18 +340,13 @@ def sync_todos_with_build(runtime: Any, state: Any = None) -> list[TodoItem]:
             state.open_feature_todo_count = 0
         return items
 
-    missing: list[str] = []
     named: list[str] = []
     with suppress(Exception):
-        if state is not None and hasattr(state, "missing_required_files"):
-            missing = list(state.missing_required_files() or [])
         if state is not None and hasattr(state, "named_required_files"):
             named = list(state.named_required_files() or [])
 
     wrote = int(getattr(state, "write_steps", 0) or 0) > 0
     verify_ok = getattr(state, "last_verify_ok", None) is True
-    files_ok = bool(named) and not missing
-    phase = str(getattr(state, "phase", "") or "")
 
     write_names = _write_match_tokens(
         list(getattr(state, "write_set", None) or [])

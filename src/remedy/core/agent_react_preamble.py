@@ -21,6 +21,15 @@ from remedy.core.react_stream import (
 from remedy.home import default_home
 
 
+def _effective_max_steps(runtime: Any) -> int:
+    """This turn's step ceiling — a per-turn override wins over the shared runtime."""
+    from remedy.core.turn_context import turn_max_react_steps
+
+    return turn_max_react_steps(runtime) or int(
+        getattr(runtime, "_max_react_steps", 0) or 0
+    )
+
+
 @dataclass
 class BrowseIntentFlags:
     browse_pre_url: str | None = None
@@ -536,7 +545,7 @@ async def prepare_turn_preamble(
                 provider=_bind0.provider,
                 model=_bind0.model,
                 base_url=_bind0.base_url,
-                max_steps=runtime._max_react_steps,
+                max_steps=_effective_max_steps(runtime),
                 context=context,
                 user_message=str(message or ""),
             ),

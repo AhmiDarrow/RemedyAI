@@ -61,10 +61,14 @@ class ReturnPacket:
     @classmethod
     def from_dict(cls, raw: dict[str, Any] | None) -> ReturnPacket:
         d = raw if isinstance(raw, dict) else {}
-        ev = d.get("evidence") if isinstance(d.get("evidence"), list) else []
-        arts = d.get("artifacts") if isinstance(d.get("artifacts"), list) else []
-        blocks = d.get("blockers") if isinstance(d.get("blockers"), list) else []
-        qs = d.get("open_questions") if isinstance(d.get("open_questions"), list) else []
+        def _list(key: str) -> list[Any]:
+            got = d.get(key)
+            return got if isinstance(got, list) else []
+
+        ev = _list("evidence")
+        arts = _list("artifacts")
+        blocks = _list("blockers")
+        qs = _list("open_questions")
         try:
             conf = float(d.get("confidence") or 0.0)
         except (TypeError, ValueError):

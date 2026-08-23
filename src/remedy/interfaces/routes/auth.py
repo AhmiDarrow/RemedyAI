@@ -110,6 +110,7 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         from remedy.interfaces.secret_store import set_provider_secret
         from remedy.interfaces.user_providers import (
             USER_PROVIDER_PREFIX,
+            sync_catalog,
             upsert_spec,
         )
 
@@ -165,6 +166,10 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             # endpoint belongs to this endpoint, whatever it looks like.
             set_provider_secret(pid, key, home=_home_from_config(cfg))
         _write_config(_find_config_path() or _default_config_path(), cfg)
+        # PROVIDER_CATALOG is a process global that any config load can rewrite
+        # (a load that finds no file clears it outright). Re-assert it from the
+        # config we just wrote, or a save can answer ok=True with provider=None.
+        sync_catalog(cfg)
 
         entry = next(
             (p for p in public_provider_catalog(cfg) if p["id"] == pid), None
@@ -185,7 +190,11 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
     @app.delete("/api/providers/custom/{pid}")
     async def delete_custom_provider(pid: str):
         from remedy.interfaces.secret_store import clear_provider_secret
-        from remedy.interfaces.user_providers import is_user_provider, remove_spec
+        from remedy.interfaces.user_providers import (
+            is_user_provider,
+            remove_spec,
+            sync_catalog,
+        )
 
         pid = str(pid or "").strip().lower()
         if not is_user_provider(pid):
@@ -195,6 +204,9 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         with contextlib.suppress(Exception):
             clear_provider_secret(pid, home=_home_from_config(cfg))
         _write_config(_find_config_path() or _default_config_path(), cfg)
+        # Same reason as the save path: the delete must be visible in the
+        # catalog the moment we report it done.
+        sync_catalog(cfg)
         return {"ok": True, "id": pid}
 
     @app.get("/api/providers/connected")

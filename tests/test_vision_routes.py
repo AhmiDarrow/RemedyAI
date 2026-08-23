@@ -491,15 +491,24 @@ def test_an_uncreatable_self_test_image_is_reported_not_raised(
 def test_a_broken_home_config_does_not_escape_to_the_real_home(
     client, svc, tmp_path, monkeypatch
 ):
-    """When config lookup throws, the route falls back to Path.home()/.remedy."""
+    """When config lookup throws, the route falls back to default_home().
+
+    Remedy's home is default_home() — never Path.home()/.remedy — so patching
+    Path.home must NOT move the self-test image.
+    """
 
     def boom():
         raise RuntimeError("config unreadable")
 
+    fallback = tmp_path / "fallback-home"
+    fallback.mkdir()
     monkeypatch.setattr("remedy.interfaces.config.load_config", boom)
-    monkeypatch.setattr(Path, "home", lambda: tmp_path / "fake-home")
+    monkeypatch.setattr("remedy.interfaces.routes.vision.default_home", lambda: fallback)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "never-real-home")
     client.post("/api/vision/test", json={})
-    assert svc.one("decode_image")[0][0] == tmp_path / "fake-home" / ".remedy" / "tmp_e2e_vision.png"
+    used = svc.one("decode_image")[0][0]
+    assert used == fallback / "tmp_e2e_vision.png"
+    assert "never-real-home" not in str(used)
 
 
 def test_a_status_without_a_base_url_borrows_the_one_from_startup(client, svc, home):

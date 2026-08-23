@@ -62,7 +62,9 @@ def resolve_python_interpreter() -> list[str] | None:
 
     def _usable(p: str | None) -> bool:
         # Skip the Microsoft Store execution alias (opens the Store, exit 9009).
-        return bool(p) and _is_python_binary(p) and "windowsapps" not in p.lower()
+        if not p:
+            return False
+        return _is_python_binary(p) and "windowsapps" not in p.lower()
 
     found = shutil.which("python")
     if _usable(found):

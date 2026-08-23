@@ -1898,9 +1898,7 @@ def build_blocks_done_summary(state: BuildTurnState | None) -> bool:
         return True
     if int(getattr(state, "open_todo_count", 0) or 0) > 0:
         return True
-    if state.ship_required and not state.ship_complete():
-        return True
-    return False
+    return bool(state.ship_required and not state.ship_complete())
 
 
 def unfinished_green_gate_message(state: BuildTurnState) -> dict[str, str]:

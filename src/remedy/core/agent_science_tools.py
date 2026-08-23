@@ -1433,9 +1433,9 @@ def effect_size_core(
         cells = [a, b, c, d]
         if min(cells) < 0 or sum(cells) == 0:
             raise ValueError("cramers_v needs the 2x2 cells a,b,c,d")
-        n = float(sum(cells))
-        chi2 = n * (a * d - b * c) ** 2 / ((a + b) * (c + d) * (a + c) * (b + d))
-        est = math.sqrt(chi2 / n)
+        n_total = float(sum(cells))
+        chi2 = n_total * (a * d - b * c) ** 2 / ((a + b) * (c + d) * (a + c) * (b + d))
+        est = math.sqrt(chi2 / n_total)
         alpha = 1.0 - conf
         span = max(200.0, chi2 * 4.0 + 50.0)
         lam_low = _solve_ncp(lambda lam: ncchi2_cdf(chi2, 1.0, lam), 1.0 - alpha / 2.0, 0.0, span)
@@ -1443,10 +1443,10 @@ def effect_size_core(
         return {
             "kind": kind,
             "estimate": est,
-            "ci_low": math.sqrt(max(0.0, lam_low) / n),
-            "ci_high": math.sqrt(max(0.0, lam_high) / n),
+            "ci_low": math.sqrt(max(0.0, lam_low) / n_total),
+            "ci_high": math.sqrt(max(0.0, lam_high) / n_total),
             "se": None,
-            "n": {"total": int(n)},
+            "n": {"total": int(n_total)},
             "chi_square": chi2,
             "method": "Cramer's V (= phi for 2x2); CI by noncentral chi-square inversion",
             "accuracy": (
@@ -1619,15 +1619,15 @@ def condense_tex_log(text: str, *, max_errors: int = 25) -> dict[str, Any]:
             continue
 
         if "Citation" in line and "undefined" in line:
-            m = _UNDEF_CITE_RE.search(line)
-            key = next((g for g in (m.groups() if m else ()) if g), "")
+            mc = _UNDEF_CITE_RE.search(line)
+            key = next((g for g in (mc.groups() if mc else ()) if g), "")
             if key and key not in undefined_citations:
                 undefined_citations.append(key)
             warnings += 1
             continue
         if "Reference" in line and "undefined" in line:
-            m = _UNDEF_REF_RE.search(line)
-            key = next((g for g in (m.groups() if m else ()) if g), "")
+            mr = _UNDEF_REF_RE.search(line)
+            key = next((g for g in (mr.groups() if mr else ()) if g), "")
             if key and key not in undefined_references:
                 undefined_references.append(key)
             warnings += 1
@@ -2862,7 +2862,11 @@ def register_science_tools(runtime: Any) -> None:
         elif (values or "").strip():
             parsed = _parse_values(values)
             if isinstance(parsed, dict) and parsed and all(isinstance(v, list) for v in parsed.values()):
-                data = {str(k): [float(x) for x in v] for k, v in parsed.items()}
+                data = {
+                    str(k): [float(x) for x in v]
+                    for k, v in parsed.items()
+                    if isinstance(v, list)
+                }
             elif isinstance(parsed, list):
                 data = parsed
             else:
@@ -3004,7 +3008,11 @@ def register_science_tools(runtime: Any) -> None:
         elif (values or "").strip():
             parsed = _parse_values(values)
             if isinstance(parsed, dict) and parsed and all(isinstance(v, list) for v in parsed.values()):
-                groups_map = {str(n): [float(x) for x in v] for n, v in parsed.items()}
+                groups_map = {
+                    str(n): [float(x) for x in v]
+                    for n, v in parsed.items()
+                    if isinstance(v, list)
+                }
             elif isinstance(parsed, dict) and {"f", "df1", "df2"} <= set(parsed):
                 anova = {str(n): float(v) for n, v in parsed.items() if isinstance(v, int | float)}
         if (pairs or "").strip():
