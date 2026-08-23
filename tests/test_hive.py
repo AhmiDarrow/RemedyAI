@@ -353,3 +353,77 @@ async def test_stop_does_not_retire_posts(hive_home: Path):
     assert gone is not None
     # Forager abort is async via task; status may still be pending if never scheduled.
     assert gone.cadence == "forager"
+
+
+def test_spawn_continue_hint():
+    from remedy.core.hive.mother import SPAWN_CONTINUE_HINT, inject_spawn_continue
+
+    msgs: list[dict] = []
+    spawned = [{"function": {"name": "hive_spawn", "arguments": "{}"}}]
+    assert inject_spawn_continue(msgs, spawned) is True
+    assert msgs[-1]["role"] == "user"
+    assert SPAWN_CONTINUE_HINT in str(msgs[-1]["content"])
+    assert inject_spawn_continue(msgs, spawned) is False
+    other: list[dict] = []
+    assert inject_spawn_continue(other, [{"function": {"name": "file_read"}}]) is False
+    assigned: list[dict] = []
+    assert inject_spawn_continue(
+        assigned, [{"function": {"name": "hive_assign"}}]
+    ) is True
+
+
+def test_announce_registers_coordination_beacon(hive_home: Path):
+    from remedy.core.coordination import active_beacons
+    from remedy.core.hive.mother import announce_daughter, silence_daughter
+
+    store = HiveStore(hive_home)
+    d = store.hire("review auth.py", project_path=str(hive_home))
+    rt = SimpleNamespace(config=SimpleNamespace(home_dir=str(hive_home)))
+    announce_daughter(d, rt)
+    ids = {b.session_id for b in active_beacons(home=hive_home)}
+    assert d.session_id in ids
+    hive = [b for b in active_beacons(home=hive_home) if b.session_id == d.session_id][0]
+    assert hive.muscle == "hive"
+    assert "auth" in hive.goal
+    silence_daughter(d, rt)
+    ids = {b.session_id for b in active_beacons(home=hive_home)}
+    assert d.session_id not in ids
+
+
+@pytest.mark.asyncio
+async def test_collect_admits_evidence_to_mother(hive_home: Path):
+    from remedy.core.metabolism.evidence import get_evidence_ledger, reset_evidence_ledger
+
+    reset_evidence_ledger("owner-sess")
+
+    async def pulse(_rt, daughter):
+        return ReturnPacket(
+            goal=daughter.goal,
+            done=True,
+            outcome="auth is fine",
+            evidence=["src/auth.py"],
+            confidence=0.9,
+        )
+
+    set_pulse_impl(pulse)
+    try:
+        rt = _runtime(hive_home, "owner-sess")
+        out = await rt.tool_registry.execute("hive_spawn", goal="review auth.py")
+        hid = out.split("hive_id=", 1)[1].split()[0]
+        packet_text = ""
+        for _ in range(50):
+            col = await rt.tool_registry.execute("hive_collect", hive_id=hid)
+            if "still running" not in col:
+                packet_text = col
+                break
+            await asyncio.sleep(0.02)
+        else:
+            pytest.fail(packet_text or "collect never finished")
+        assert "auth is fine" in packet_text
+        led = get_evidence_ledger("owner-sess")
+        assert led.evidence_units >= 1
+        blob = " ".join(u.summary for u in led.units)
+        assert "hive" in blob.lower() or "auth" in blob.lower()
+    finally:
+        set_pulse_impl(None)
+        stop_all_posts()

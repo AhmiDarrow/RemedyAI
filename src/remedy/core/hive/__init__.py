@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from remedy.core.hive.mother import (
+    SPAWN_CONTINUE_HINT,
+    inject_spawn_continue,
+)
 from remedy.core.hive.policy import (
     filter_daughter_tools,
     hive_depth,
@@ -17,9 +21,11 @@ from remedy.core.hive.types import (
 __all__ = [
     "HiveStore",
     "ReturnPacket",
+    "SPAWN_CONTINUE_HINT",
     "filter_daughter_tools",
     "get_hive_store",
     "hive_depth",
+    "inject_spawn_continue",
     "is_hive_session_id",
     "is_mother_only_tool",
     "resume_posts",
