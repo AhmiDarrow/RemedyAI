@@ -69,7 +69,9 @@ def test_ask_mode_requires_mail_send(monkeypatch):
     assert reason is not None
     assert "mail" in reason.lower() or "email" in reason.lower()
     q.set_mode("auto")
-    assert q.needs_ask("mail_send to=a@b.com subject=hi", tool_name="mail_send") is None
+    auto = q.needs_ask("mail_send to=a@b.com subject=hi", tool_name="mail_send")
+    assert auto is not None
+    assert auto.startswith("Owner checkpoint")
 
 
 def test_untrusted_scope_asks_even_in_auto(monkeypatch):
@@ -401,12 +403,19 @@ def test_sensitive_grant_does_not_consume_on_other_origin(monkeypatch):
         )
         is False
     )
-    # Grant was dropped (not left for a later spoof) — same-site retry also asks.
+    # Mismatch must not consume the grant — the owner approved amazon, so the
+    # matching retry still works. Empty live origin also denies (fail closed).
+    assert (
+        q.take_one_shot(
+            "computer_click", cmd, session_id="s1", origin=""
+        )
+        is False
+    )
     assert (
         q.take_one_shot(
             "computer_click", cmd, session_id="s1", origin="https://www.amazon.com/checkout"
         )
-        is False
+        is True
     )
 
 
