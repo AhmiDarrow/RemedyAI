@@ -36,6 +36,12 @@ def register_workspace_tools(runtime: Any) -> None:
     except Exception:
         _log.exception("optional tool family failed to register")
     try:
+        from remedy.core.agent_hive_tools import register_hive_tools
+
+        register_hive_tools(runtime)
+    except Exception:
+        _log.exception("optional tool family failed to register")
+    try:
         from remedy.core.agent_web_tools import register_web_tools
 
         register_web_tools(runtime)
