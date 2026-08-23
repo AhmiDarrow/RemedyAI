@@ -761,6 +761,61 @@ def test_plan_mode_includes_read_computer_tools():
     )
 
 
+def test_pending_type_job_payload_is_sealed_on_disk(tmp_path: Path, monkeypatch):
+    """Typed secrets must not sit plaintext in computer/jobs while pending."""
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    monkeypatch.setattr(hb, "_job_dpapi_available", lambda: True)
+    box: dict[str, bytes] = {}
+
+    def _protect(plain: bytes) -> bytes:
+        box["plain"] = plain
+        return b"CIPHERTEXT"
+
+    monkeypatch.setattr(hb, "_job_dpapi_protect", _protect)
+    monkeypatch.setattr(hb, "_job_dpapi_unprotect", lambda _c: box["plain"])
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    job = b.enqueue("type", {"text": "s3cret-password", "ref": "e3"})
+    on_disk = json.loads((tmp_path / "computer" / "jobs" / f"{job.id}.json").read_text())
+    dumped = json.dumps(on_disk)
+    assert "s3cret-password" not in dumped
+    assert on_disk["payload"]["_sealed"] is True
+    assert on_disk["payload"]["encoding"] == "dpapi"
+    claimed = b.claim_next()
+    assert claimed is not None
+    assert claimed.payload.get("text") == "s3cret-password"
+
+
+def test_secret_job_fails_closed_when_seal_fails(tmp_path: Path, monkeypatch):
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    monkeypatch.setattr(hb, "_job_dpapi_available", lambda: True)
+    monkeypatch.setattr(
+        hb,
+        "_job_dpapi_protect",
+        lambda _b: (_ for _ in ()).throw(OSError("dpapi down")),
+    )
+    b = ComputerHostBridge(home_dir=tmp_path)
+    with pytest.raises(OSError):
+        b.enqueue("type", {"text": "s3cret-password"})
+    assert list((tmp_path / "computer" / "jobs").glob("*.json")) == []
+
+
+def test_navigate_job_writes_plain_when_dpapi_unavailable(tmp_path: Path, monkeypatch):
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    monkeypatch.setattr(hb, "_job_dpapi_available", lambda: False)
+    b = ComputerHostBridge(home_dir=tmp_path)
+    job = b.enqueue("navigate", {"url": "https://example.com"})
+    on_disk = json.loads((tmp_path / "computer" / "jobs" / f"{job.id}.json").read_text())
+    assert on_disk["payload"].get("url") == "https://example.com"
+    assert not on_disk["payload"].get("_sealed")
+
+
 def test_host_bridge_enqueue_claim_complete(tmp_path: Path):
     b = ComputerHostBridge(home_dir=tmp_path)
     job = b.enqueue("navigate", {"url": "https://example.com"})
@@ -2013,7 +2068,7 @@ def test_act_without_mutating_steps_skips_probe(tmp_path: Path, monkeypatch):
 
 
 def test_purge_scrubs_stale_pending_secret_jobs(tmp_path: Path, monkeypatch):
-    """A pending type-job the host never claimed must not keep plaintext
+    """A pending type-job the host never claimed must not keep recoverable
     secrets on disk past the stale TTL (S-COMP-03)."""
     import json as _json
     import os as _os
@@ -2026,11 +2081,18 @@ def test_purge_scrubs_stale_pending_secret_jobs(tmp_path: Path, monkeypatch):
     job = bridge.enqueue("type", {"ui": {"open_browser": True}, "text": "hunter2-secret"})
     path = bridge.root / f"{job.id}.json"
     assert path.is_file()
-    assert "hunter2-secret" in path.read_text(encoding="utf-8")
+    dumped = path.read_text(encoding="utf-8")
+    sealed = '"_sealed"' in dumped
+    if sealed:
+        assert "hunter2-secret" not in dumped
+    live = bridge._read(job.id)
+    assert live is not None and live.payload.get("text") == "hunter2-secret"
 
     # Fresh pending job: never touched (host may still claim it)
     bridge.purge_old(max_age_s=900.0, stale_open_ttl_s=1800.0)
-    assert "hunter2-secret" in path.read_text(encoding="utf-8")
+    assert path.is_file()
+    assert bridge._read(job.id) is not None
+    assert bridge._read(job.id).payload.get("text") == "hunter2-secret"
 
     # Backdate past the stale TTL → expired + scrubbed, file kept for audit
     old = _time.time() - 3600.0
@@ -2041,6 +2103,9 @@ def test_purge_scrubs_stale_pending_secret_jobs(tmp_path: Path, monkeypatch):
     assert raw["status"] == "cancelled"
     assert "hunter2-secret" not in path.read_text(encoding="utf-8")
     assert "expired" in str(raw.get("error") or "")
+    gone = bridge._read(job.id)
+    assert gone is not None
+    assert "hunter2-secret" not in str(gone.payload)
 
 
 def test_purge_still_never_touches_fresh_running_jobs(tmp_path: Path, monkeypatch):
@@ -2054,7 +2119,13 @@ def test_purge_still_never_touches_fresh_running_jobs(tmp_path: Path, monkeypatc
     bridge.purge_old(max_age_s=0.0, stale_open_ttl_s=1800.0)
     path = bridge.root / f"{job.id}.json"
     assert path.is_file()
-    assert "live-secret" in path.read_text(encoding="utf-8")
+    dumped = path.read_text(encoding="utf-8")
+    if '"_sealed"' in dumped:
+        assert "live-secret" not in dumped
+    still = bridge._read(job.id)
+    assert still is not None
+    assert still.status == "running"
+    assert still.payload.get("text") == "live-secret"
 
 
 # ---------------------------------------------------------------------------
