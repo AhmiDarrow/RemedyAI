@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <title type="html">ArXiv Query: search_query=all:sparse attention</title>
+  <totalResults xmlns="http://a9.com/-/spec/opensearch/1.1/">2</totalResults>
+  <entry>
+    <id>http://arxiv.org/abs/1706.03762v5</id>
+    <updated>2017-12-06T03:30:32Z</updated>
+    <published>2017-06-12T17:57:34Z</published>
+    <title>Attention Is All You Need</title>
+    <summary>  The dominant sequence transduction models are based on complex recurrent or
+convolutional neural networks.
+</summary>
+    <author><name>Ashish Vaswani</name></author>
+    <author><name>Noam Shazeer</name></author>
+    <link href="http://arxiv.org/abs/1706.03762v5" rel="alternate" type="text/html"/>
+    <link title="pdf" href="http://arxiv.org/pdf/1706.03762v5" rel="related" type="application/pdf"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2004.05150v2</id>
+    <updated>2020-12-02T21:39:19Z</updated>
+    <published>2020-04-10T17:54:09Z</published>
+    <title>Longformer: The Long-Document Transformer</title>
+    <summary>  Transformer-based models are unable to process long sequences due to their
+self-attention operation.
+</summary>
+    <author><name>Iz Beltagy</name></author>
+    <arxiv:journal_ref>arXiv preprint</arxiv:journal_ref>
+    <link href="http://arxiv.org/abs/2004.05150v2" rel="alternate" type="text/html"/>
+    <link title="pdf" href="http://arxiv.org/pdf/2004.05150v2" rel="related" type="application/pdf"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+  </entry>
+</feed>

@@ -98,6 +98,24 @@ def register_workspace_tools(runtime: Any) -> None:
         register_game_tools(runtime)
     except Exception:
         pass
+    try:
+        from remedy.core.agent_analysis_tools import register_analysis_tools
+
+        register_analysis_tools(runtime)
+    except Exception:
+        pass
+    try:
+        from remedy.core.agent_research_tools import register_research_tools
+
+        register_research_tools(runtime)
+    except Exception:
+        pass
+    try:
+        from remedy.core.agent_science_tools import register_science_tools
+
+        register_science_tools(runtime)
+    except Exception:
+        pass
     # Optional MCP client bridge: user-listed servers (config mcp_servers)
     # surface as mcp_<server>_<tool>; nothing spawns until first use.
     try:

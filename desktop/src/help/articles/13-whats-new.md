@@ -6,7 +6,19 @@ Current series: **v0.30.0** (local builds after that tag keep long jobs going an
 
 ## Contents
 
-- [Game dev studio](#game-dev-studio-local-builds-after-0300) · - [0.30.0](#0300---grove-voice-life-tasks-and-the-vault) · [0.26.2](#0262---host-in-remedys-hands) · [0.26.1](#0261---build-finishes) · [0.26.0](#0260---windows--linux-desktop) · [0.25.1](#0251---jail-stop-and-tab-isolation) · [0.25.0](#0250---stable-tabs--settings-chrome) · [0.24.0](#0240---host-bridge--first-home) · [0.23.2](#0232---defender-execution-false-positive) · [0.23.1](#0231---first-turn-agency) · [0.23.0](#0230---build-ability--companion) · [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+- [Research](#research-local-builds-after-0300) · [Game dev studio](#game-dev-studio-local-builds-after-0300) · - [0.30.0](#0300---grove-voice-life-tasks-and-the-vault) · [0.26.2](#0262---host-in-remedys-hands) · [0.26.1](#0261---build-finishes) · [0.26.0](#0260---windows--linux-desktop) · [0.25.1](#0251---jail-stop-and-tab-isolation) · [0.25.0](#0250---stable-tabs--settings-chrome) · [0.24.0](#0240---host-bridge--first-home) · [0.23.2](#0232---defender-execution-false-positive) · [0.23.1](#0231---first-turn-agency) · [0.23.0](#0230---build-ability--companion) · [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+
+## Research (local builds after 0.30.0)
+
+Point Remedy at a notebook, an R or Julia analysis, a Snakefile or a
+manuscript and she works the research loop: literature search, a citation
+library that has to resolve, analysis in *your* environment with a run
+ledger (so a figure can be checked against the data that produced it),
+a priori power and effect sizes, and reporting checklists (CONSORT,
+PRISMA, STROBE, ARRIVE, MDAR). Fourteen field packs
+(`research-method`, `statistics`, `ml-research`, `clinical-research`,
+…) route themselves from what you say and from the project files; an
+ordinary coding turn does not list them. See [Research](27-research.md).
 
 ## Game dev studio (local builds after 0.30.0)
 

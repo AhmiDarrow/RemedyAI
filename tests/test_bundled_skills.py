@@ -45,6 +45,24 @@ def test_bundled_skills_exist():
         "engine-mcp-bridge",
     ):
         assert game in names
+    # Research field packs (extra ability, never identity)
+    for research in (
+        "research-method",
+        "bioinformatics",
+        "chemistry-research",
+        "clinical-research",
+        "computational-science",
+        "earth-climate",
+        "life-sciences",
+        "materials-and-engineering",
+        "ml-research",
+        "neuroscience",
+        "physics-research",
+        "social-science",
+        "statistics",
+        "text-and-corpus-research",
+    ):
+        assert research in names
     for d in dirs:
         assert (d / "SKILL.md").is_file()
     comfy = bundled_skills_dir() / "comfyui"
@@ -81,6 +99,8 @@ def test_discover_defaults_loads_bundled(tmp_path: Path):
     assert reg.get("gauntlet-security") is not None
     assert reg.get("soak-product") is not None
     assert reg.get("stress-suite") is not None
+    assert reg.get("research-method") is not None
+    assert reg.get("statistics") is not None
     # Seeded into user skills dir for customization
     assert (home / "skills" / "project-overview" / "SKILL.md").is_file()
     assert (home / "skills" / "comfyui" / "SKILL.md").is_file()
