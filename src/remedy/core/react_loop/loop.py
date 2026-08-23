@@ -3607,16 +3607,27 @@ async def call_llm_stream(runtime, message: str,
 
                     steps_tc = current_turn_tool_steps(runtime)
                     if isinstance(steps_tc, list) and steps_tc:
+                        mutating = [
+                            s
+                            for s in steps_tc
+                            if isinstance(s, dict)
+                            and str(s.get("tool") or "").startswith("computer_")
+                        ]
+                        ok = bool(mutating) and all(
+                            s.get("success")
+                            and "APPROVAL_REQUIRED" not in str(s.get("result") or "")
+                            and "UNVERIFIED" not in str(s.get("result") or "")
+                            for s in mutating
+                        )
                         get_cua_macros().observe_chain(
                             [
                                 {
                                     "tool": s.get("tool"),
                                     "args": s.get("args") or {},
                                 }
-                                for s in steps_tc
-                                if isinstance(s, dict)
+                                for s in mutating
                             ],
-                            success=True,
+                            success=ok,
                         )
 
                 # Speed: denser parallel batches without reducing agency.
