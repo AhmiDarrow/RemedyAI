@@ -86,6 +86,30 @@ def _tool_names(fresh_calls: list[Any] | None) -> list[str]:
     return extract_tool_names(fresh_calls if isinstance(fresh_calls, list) else None)
 
 
+def retire_daughter(daughter_id: str, runtime: Any = None) -> HiveDaughter | None:
+    """Mother or inspector ends a daughter. Cancels a running pulse."""
+    hid = str(daughter_id or "").strip()
+    if not hid:
+        return None
+    from remedy.core.hive.pulse import cancel_post
+    from remedy.core.hive.runner import _store_for, cancel_forager
+    from remedy.core.hive.types import STATUS_RETIRED
+
+    store = _store_for(runtime)
+    d = store.get(hid)
+    if d is None:
+        return None
+    from remedy.core.turn_context import abort_session
+
+    abort_session(d.session_id)
+    cancel_forager(d.id)
+    cancel_post(d.id)
+    silence_daughter(d, runtime)
+    d.status = STATUS_RETIRED
+    store.save(d)
+    return d
+
+
 def inject_spawn_continue(
     messages: list[dict[str, Any]],
     fresh_calls: list[Any] | None,

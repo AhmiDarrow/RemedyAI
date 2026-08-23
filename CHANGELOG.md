@@ -4,6 +4,17 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Hive — daughters that report to Remedy
+
+- Remedy can hire silent **foragers** (one bounded job) and **standing posts**
+  (pulse on an interval, journal, survive Stop and serve restart). They have
+  their own session and never appear in the owner sidebar.
+- Daughters report a capped packet, not a transcript. After a hire the mother
+  keeps working; `hive_collect` admits the packet to her evidence ledger.
+- Depth 1, mother-only tools, coordination beacons so two pulses cannot
+  overwrite the same file. Money / credentials / send still stop at Remedy.
+- Advanced Diagnostics shows the hive roster. Manual chapter 28.
+
 ### Research
 
 - Research-project fingerprint (notebooks, R/Julia, workflows, manuscripts,

@@ -256,6 +256,7 @@ Format: [agentskills.io](https://agentskills.io) · Lifecycle: [SKILL_LIFECYCLE.
 - **Plans** — Plan mode outlines; Build executes with approvals  
 - **Game dev studio** — Godot 4, Phaser/Pixi, Bevy, Pygame, Love2D: engine detection, headless verification, playtesting, export; Unity/Unreal knowledge; optional MCP editor bridge ([manual](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/26-game-dev.md))  
 - **Research** — notebooks, R, Julia, manuscripts: literature search, a citation library that has to resolve, analysis in your environment with a run ledger, power and effect sizes, reporting checklists ([manual](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/27-research.md))  
+- **Hive** — silent daughters for independent work; they report packets to Remedy, never as extra chats ([manual](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/28-hive.md))  
 - **Time travel** — restore chat (+ best-effort files) to an earlier step  
 
 `/compact` · `/harness` · `/stretch` · `/whoami` · [Memory manual](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/06-memory-and-harness.md)
@@ -353,7 +354,7 @@ WebUI is the **same SPA** as desktop (`desktop/dist`). After UI changes:
 ```bash
 git clone https://github.com/AhmiDarrow/RemedyAI.git && cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # ~8663 tests
+uv run pytest -q          # ~8704 tests
 cd desktop && npm test && npm run build
 python scripts/check_docs.py
 cd desktop && npm run tauri:dev   # full shell (set REMEDY_DEV_ROOT to repo)

@@ -1186,7 +1186,7 @@ export default function App() {
       {
         id: 'diagnostics',
         label: 'Diagnostics',
-        description: 'Server, local host, hardware, providers',
+        description: 'Server, local host, hardware, hive',
         category: 'panel',
         action: () => setDiagnosticsOpen(true),
       },

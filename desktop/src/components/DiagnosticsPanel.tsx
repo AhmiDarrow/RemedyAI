@@ -9,6 +9,7 @@ import {
 } from '../api/diagnostics'
 import { formatCost, formatTokens } from '../utils/tokenCost'
 import { browserStackHold } from '../utils/browserStack'
+import { HiveInspector } from './HiveInspector'
 
 interface DiagnosticsPanelProps {
   open: boolean
@@ -310,7 +311,7 @@ export function DiagnosticsPanel({ open, onClose }: DiagnosticsPanelProps) {
               ) : null}
             </div>
             <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-              Remedy · RMB · hardware · cloud providers
+              Remedy · RMB · hardware · hive
               {data?.collect_ms != null ? ` · ${data.collect_ms} ms` : ''}
               {data?.checked_at ? ` · ${data.checked_at.replace('T', ' ').replace('Z', ' UTC')}` : ''}
             </div>
@@ -709,6 +710,8 @@ export function DiagnosticsPanel({ open, onClose }: DiagnosticsPanelProps) {
               </div>
             </>
           )}
+
+          <HiveInspector open={open} />
         </div>
       </div>
     </div>
