@@ -11,7 +11,13 @@ You can use and modify Remedy for free if **both** are true:
 
 Personal, educational, and research use is free.
 
-GitHub source is published for transparency, issue tracking, and community use under that free grant.
+GitHub source is published for transparency, issue tracking, and community use under that free grant. That grant is a limited license to qualifying users of **this copy**. It is not a promise that Remedy will stay free, and it does not stop the copyright holder from charging.
+
+## Charging / paid licenses
+
+The owner **can charge** for Remedy: commercial licenses, support, hosted service, paid editions, or a different license alongside this one. Pricing is agreed in writing per deal — no public price list is committed here.
+
+Copies already received under the free grant keep those terms. Later versions may narrow the free grant, add paid features, or add license checks.
 
 ## When to contact us
 
@@ -21,7 +27,9 @@ Please email for a commercial / enterprise discussion if:
 - You want to run **multi-tenant SaaS / managed hosting** based on Remedy, or
 - You want to **sell or commercially redistribute** Remedy (or a substantially similar product)
 
-There is **no** online license key or phone-home check today. Large-org use is on the honor system plus the LICENSE until a formal agreement exists.
+There is **no** online license key or phone-home check **in this build**. Large-org use is on the honor system plus the LICENSE until a formal agreement exists. Later builds may add entitlement checks.
+
+Use of the software is **at your own risk**. The LICENSE is the binding document for warranty, liability, owner responsibility, third-party services, and automated access. Third-party components have their own licences (Settings → License, and `desktop/public/THIRD_PARTY_NOTICES.txt`).
 
 ## Contact
 

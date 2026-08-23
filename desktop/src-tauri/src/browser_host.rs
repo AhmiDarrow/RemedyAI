@@ -654,8 +654,15 @@ fn ua_desktop() -> String {
 }
 
 /// CDP `Emulation.setUserAgentOverride` params so the client hints
-/// (Sec-CH-UA-Platform / -Mobile / brands) agree with the UA header. Without
-/// this the mobile UA says Android while hints say Windows — a bot tell.
+/// (Sec-CH-UA-Platform / -Mobile / brands) agree with the UA header.
+///
+/// This is ordinary device emulation — the same pairing Chrome DevTools sends
+/// for its device modes, and the same choice a phone browser's "Request
+/// desktop site" makes. The rail is a narrow viewport, so it asks for the
+/// mobile view by default and the owner can flip it. Without the matching
+/// hints the UA says Android while the hints still say Windows, and a site
+/// that trusts the hints serves a desktop layout into a phone-width viewport:
+/// the page is broken, not the request disguised.
 #[cfg(windows)]
 fn ua_override_params(desktop: bool) -> String {
     let m = engine_major();
