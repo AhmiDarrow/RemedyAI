@@ -878,7 +878,19 @@ class ComputerExecutor:
             # ref= → UIA ValuePattern.SetValue: sets the WHOLE value atomically
             # into that specific control — no focus races, verified read-back.
             set_ref = str(kwargs.get("ref") or "").strip()
-            if set_ref and not had_vault:
+            if had_vault and not set_ref:
+                return public_result(
+                    ok=False,
+                    target="desktop",
+                    action="type",
+                    message=(
+                        "Vault secrets only type into a named field. Pass ref= "
+                        "from computer_snapshot so the value lands in that control, "
+                        "not whatever currently has focus."
+                    ),
+                    extra={"length": reported_len, "needs": "ref"},
+                )
+            if set_ref:
                 el = self.bridge.get_element_by_ref(set_ref)
                 if el is not None and el.get("hwnd") and el.get("uia"):
                     from remedy.core.computer.desktop_uia import element_action
@@ -1965,7 +1977,7 @@ class ComputerExecutor:
         hold_wall = any(
             w in text_q.lower()
             for w in ("press & hold", "press and hold", "hold to confirm", "hold to verify",
-                      "activate and hold", "press hold")
+                      "activate and hold", "press hold", "i'm not a robot", "captcha")
         )
         if hold_wall:
             return public_result(
@@ -1973,14 +1985,11 @@ class ComputerExecutor:
                 target="browser",
                 action="click",
                 message=(
-                    "That is a press-and-hold verification. A plain click will not "
-                    "pass it — use computer_press_hold on the button (by text, ref, "
-                    "or x/y). You are the owner's authorized hands for this "
-                    "accessibility action; complete it on the rail. If it sits in a "
-                    "challenge iframe you can't reach by text, computer_screenshot to "
-                    "locate the button, then computer_press_hold x=… y=…."
+                    "That is a human-check wall (press-and-hold / CAPTCHA). Pause "
+                    "and hand it to the owner: describe what you see and wait. "
+                    "Do not complete the challenge yourself."
                 ),
-                extra={"text": text_q, "needs": "press_hold"},
+                extra={"text": text_q, "needs": "owner_handoff"},
             )
         return public_result(
             ok=False,
@@ -2148,8 +2157,11 @@ class ComputerExecutor:
             ok=True,
             target="browser",
             action="fill",
-            message=f"Filled {len(results)} field(s)",
-            extra={"fields": results},
+            message=(
+                f"Filled {len(results)} field(s). Values were not read back — "
+                "computer_page_text or snapshot before Submit."
+            ),
+            extra={"fields": results, "verified": False},
         )
 
     def _computer_act(
@@ -2293,21 +2305,23 @@ class ComputerExecutor:
                     **verify_extra,
                 },
             )
-        msg = "SUCCESS: " + " | ".join(log)
         observed = verify_extra.get("observed")
+        unverified = bool(verify_extra.get("unverified"))
+        prefix = "UNVERIFIED: " if unverified else "SUCCESS: "
+        msg = prefix + " | ".join(log)
         if isinstance(observed, dict) and (observed.get("url") or observed.get("title")):
             msg += (
                 f" | observed: {str(observed.get('title') or '')[:60]!r}"
                 f" @ {str(observed.get('url') or '')[:100]}"
             )
-        if verify_extra.get("unverified"):
+        if unverified:
             msg += (
                 " | note: outcome not verified (page probe unavailable) — "
-                "run computer_page_text or computer_snapshot before claiming the "
-                "goal is complete."
+                "do not claim the goal is complete. Run computer_page_text or "
+                "computer_snapshot first."
             )
         return public_result(
-            ok=True,
+            ok=not unverified,
             target="browser",
             action="act",
             message=msg,

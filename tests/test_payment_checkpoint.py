@@ -183,6 +183,30 @@ def test_computer_fill_vault_handle_is_checkpointed():
         APPROVALS.set_mode(prev)
 
 
+def test_enter_alias_is_a_submit_key_on_payment_surface():
+    r = payment_surface_checkpoint(
+        "computer_key", label_resolved=False, page_context=CHECKOUT, key="enter"
+    )
+    assert r and r.startswith(SENSITIVE_PREFIX)
+
+
+def test_challenge_wall_press_hold_is_an_owner_handoff():
+    from remedy.core.approvals import challenge_wall_checkpoint
+
+    r = challenge_wall_checkpoint(
+        "computer_press_hold",
+        "https://shop.example.com I'm not a robot",
+        label="Press & Hold",
+    )
+    assert r and r.startswith(SENSITIVE_PREFIX)
+    assert (
+        challenge_wall_checkpoint(
+            "computer_press_hold", "https://news.example.com/article", "Hold to reveal"
+        )
+        is None
+    )
+
+
 def test_mail_send_asks_in_every_mode(monkeypatch):
     from remedy.core.approvals import APPROVALS, SENSITIVE_PREFIX
 
