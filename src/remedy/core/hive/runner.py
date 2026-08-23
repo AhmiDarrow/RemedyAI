@@ -123,6 +123,10 @@ async def run_isolated_pulse(runtime: Any, daughter: HiveDaughter) -> ReturnPack
         project_raw=proj or None,
         active_path=proj or "",
     )
+    with suppress(Exception):
+        from remedy.core.hive.mother import pulse_heartbeat
+
+        pulse_heartbeat(daughter, runtime)
     daughter.status = STATUS_RUNNING
     _store_for(runtime).save(daughter)
     packet: ReturnPacket
@@ -155,6 +159,10 @@ async def run_forager(runtime: Any, daughter: HiveDaughter) -> ReturnPacket:
     daughter.packet = packet.to_dict()
     daughter.status = STATUS_CANCELLED if _cancelled(packet) else STATUS_REPORTED
     _store_for(runtime).save(daughter)
+    with suppress(Exception):
+        from remedy.core.hive.mother import silence_daughter
+
+        silence_daughter(daughter, runtime)
     return packet
 
 
