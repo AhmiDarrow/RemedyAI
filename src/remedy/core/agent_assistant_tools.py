@@ -285,10 +285,10 @@ def register_assistant_tools(runtime: Any) -> None:
         )
 
     async def mail_connect(address: str = "", app_password: str = "") -> str:
-        """Connect a mailbox with an app password (no cloud project needed).
+        """Point the owner at Settings to connect a mailbox.
 
-        Works with Gmail / Outlook / Yahoo / Fastmail / iCloud once 2-step
-        verification is on. Verifies IMAP + SMTP before saving.
+        App passwords must not transit chat. Settings → Personal assistant
+        stores the secret; this tool never asks the model to collect one.
         """
         from remedy.assistant.providers.imap_smtp import (
             ImapSmtpMailProvider,
@@ -299,17 +299,29 @@ def register_assistant_tools(runtime: Any) -> None:
 
         addr = (address or "").strip()
         pwd = (app_password or "").replace(" ", "")
-        if not addr or not pwd:
+        # The model must not collect an app password in chat. Settings is
+        # the owner path. Tests / a future Settings-side caller may still
+        # pass the kwarg; refuse when it is empty so the schema no longer
+        # teaches the model to ask for it.
+        if not pwd:
             p = preset_for(addr) if addr else {}
             url = p.get("app_password_url") or ""
             return json.dumps(
                 {
                     "ok": False,
                     "message": (
-                        "I need the email address and a 16-character app password "
-                        "(not the normal account password)."
+                        "Connect the mailbox in Settings → Personal assistant "
+                        "(app password stays in the secret store, never in chat)."
                         + (f" Generate one at {url}" if url else "")
                     ),
+                },
+                indent=2,
+            )
+        if not addr:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "message": "I need the email address as well as the app password.",
                 },
                 indent=2,
             )
@@ -1278,21 +1290,14 @@ def register_assistant_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "mail_connect",
-        "Connect the owner's mailbox with an APP PASSWORD (no Google Cloud project "
-        "needed). Works for Gmail / Outlook / Yahoo / Fastmail / iCloud once 2-step "
-        "verification is on. Verifies IMAP+SMTP before saving. Ask the owner to "
-        "generate the 16-character app password — never their normal password.",
+        "Tell the owner to connect a mailbox in Settings → Personal assistant. "
+        "Do not collect an app password in chat — the secret store holds it.",
         mail_connect,
         {
             "type": "object",
             "properties": {
                 "address": {"type": "string", "description": "Full email address"},
-                "app_password": {
-                    "type": "string",
-                    "description": "16-character app password from the mail provider",
-                },
             },
-            "required": ["address", "app_password"],
         },
     )
     reg.register_builtin_handler(

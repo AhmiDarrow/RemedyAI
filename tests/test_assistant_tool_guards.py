@@ -280,7 +280,7 @@ def test_every_documented_tool_is_registered_as_a_coroutine(registry):
         ("calendar_create_event", ["title", "start", "end"]),
         ("calendar_update_event", ["event_id"]),
         ("calendar_cancel_event", ["event_id"]),
-        ("mail_connect", ["address", "app_password"]),
+        ("mail_connect", None),
         ("mail_reply", ["message_id", "body"]),
         ("mail_get", ["message_id"]),
         ("mail_send", ["to"]),

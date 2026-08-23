@@ -1402,7 +1402,15 @@ fn cdp_insert_text(wv: &tauri::Webview, text: &str) -> Result<(), String> {
 /// shim needed). Returns None for keys we don't map; caller falls back.
 #[cfg(windows)]
 fn cdp_named_key(wv: &tauri::Webview, key: &str) -> Option<Result<(), String>> {
-    let (vk, text): (i32, &str) = match key {
+    let canon: &str = match key {
+        "enter" | "return" | "Enter" => "Enter",
+        "tab" | "Tab" => "Tab",
+        "esc" | "escape" | "Escape" => "Escape",
+        "backspace" | "Backspace" => "Backspace",
+        "delete" | "del" | "Delete" => "Delete",
+        other => other,
+    };
+    let (vk, text): (i32, &str) = match canon {
         "Enter" => (13, "\r"),
         "Tab" => (9, ""),
         "Escape" => (27, ""),
@@ -1420,8 +1428,8 @@ fn cdp_named_key(wv: &tauri::Webview, key: &str) -> Option<Result<(), String>> {
     };
     let down = json!({
         "type": if text.is_empty() { "rawKeyDown" } else { "keyDown" },
-        "key": key,
-        "code": key,
+        "key": canon,
+        "code": canon,
         "windowsVirtualKeyCode": vk,
         "nativeVirtualKeyCode": vk,
         "text": text,
@@ -1429,8 +1437,8 @@ fn cdp_named_key(wv: &tauri::Webview, key: &str) -> Option<Result<(), String>> {
     });
     let up = json!({
         "type": "keyUp",
-        "key": key,
-        "code": key,
+        "key": canon,
+        "code": canon,
         "windowsVirtualKeyCode": vk,
         "nativeVirtualKeyCode": vk,
     });
@@ -3360,7 +3368,12 @@ pub fn browser_agent_action(
         }
         "key" => {
             let k = key.unwrap_or_else(|| "Enter".into());
-            let escaped = k.replace('\\', "\\\\").replace('\'', "\\'");
+            let canon = match k.as_str() {
+                "enter" | "return" | "Enter" => "Enter",
+                "tab" | "Tab" => "Tab",
+                other => other,
+            };
+            let escaped = canon.replace('\\', "\\\\").replace('\'', "\\'");
             format!(
                 r#"(function(){{
   const key='{escaped}';
