@@ -252,7 +252,7 @@ def chat_media_display_path(
     homes: list[Path] = []
     if home_dir is not None:
         homes.append(Path(home_dir).expanduser())
-    homes.appenddefault_home()
+    homes.append(default_home())
     for home in homes:
         try:
             root = (home / "attachments").resolve()
