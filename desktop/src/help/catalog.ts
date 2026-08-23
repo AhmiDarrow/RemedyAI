@@ -280,6 +280,15 @@ const META: HelpArticleMeta[] = [
       'Notebooks, R, Julia, manuscripts: literature search, a citation library that has to resolve, analysis in your environment with a run ledger, power and effect sizes, reporting checklists.',
   },
   {
+    id: '28-hive',
+    title: 'Hive (daughters)',
+    category: 'How it works',
+    order: 7.7,
+    tags: ['hive', 'subagent', 'forager', 'post', 'mother', 'diagnostics'],
+    summary:
+      'Silent daughters Remedy hires for independent work. They report packets to her, never as extra chats. Standing posts survive Stop and restart.',
+  },
+  {
     id: '21-personal-assistant',
     title: 'Personal assistant',
     category: 'Daily use',

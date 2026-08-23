@@ -93,7 +93,7 @@ Full list: **[What’s new](13-whats-new)** · engineering: repo `CHANGELOG.md`.
 | **Metabolism** | **0.20.0+** turn tiers L0–L3, evidence ledger, shadow, Action IR, governor, portable identity |
 | **Messengers** | Telegram (live) + modular Discord / Slack / Mattermost / Matrix / WhatsApp / Teams / Google Chat / Signal |
 | **Skills** | Bundled + learned + **Library** (signed catalog); progressive disclosure (`skill_activate`) |
-| **Agency** | `file_edit`, repo search, shell (write jail), missions, `spread_run`, `web_search` / `web_fetch` |
+| **Agency** | `file_edit`, repo search, shell (write jail), missions, `spread_run`, hive daughters, `web_search` / `web_fetch` |
 | **Safety** | Loopback API + Bearer token, approvals, access scope, SSRF, secret redaction, quarantine until Trust |
 | **Web UI** | Same SPA at `http://127.0.0.1:7400/` (Switch to WebUI keeps the server alive in the tray) |
 

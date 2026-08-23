@@ -13,12 +13,11 @@ from remedy.core.hive.policy import (
     hive_depth,
 )
 from remedy.core.hive.pulse import (
-    cancel_post,
     clamp_pulse_s,
     mark_next_pulse,
     schedule_post,
 )
-from remedy.core.hive.runner import cancel_forager, schedule_forager
+from remedy.core.hive.runner import schedule_forager
 from remedy.core.hive.store import get_hive_store
 from remedy.core.hive.types import (
     CADENCE_FORAGER,
@@ -255,17 +254,16 @@ def register_hive_tools(runtime: Any) -> None:
                 code="HIVE_NOT_FOUND",
                 tool_name="hive_retire",
             )
-        from remedy.core.turn_context import abort_session
+        from remedy.core.hive.mother import retire_daughter
 
-        abort_session(d.session_id)
-        cancel_forager(d.id)
-        cancel_post(d.id)
-        from remedy.core.hive.mother import silence_daughter
-
-        silence_daughter(d, runtime)
-        d.status = STATUS_RETIRED
-        store.save(d)
-        return f"hive_id={d.id} status=retired"
+        retired = retire_daughter(d.id, runtime)
+        if retired is None:
+            return format_tool_error(
+                f"No daughter {hid}.",
+                code="HIVE_NOT_FOUND",
+                tool_name="hive_retire",
+            )
+        return f"hive_id={retired.id} status=retired"
 
     reg = runtime.tool_registry
     reg.register_builtin_handler(

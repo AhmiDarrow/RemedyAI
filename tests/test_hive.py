@@ -427,3 +427,29 @@ async def test_collect_admits_evidence_to_mother(hive_home: Path):
     finally:
         set_pulse_impl(None)
         stop_all_posts()
+
+
+def test_hive_roster_api_has_no_transcript(hive_home: Path):
+    from fastapi.testclient import TestClient
+
+    from remedy.interfaces.api import create_app
+
+    store = HiveStore(hive_home)
+    d = store.hire("review auth.py", parent_session_id="owner-1")
+    app = create_app(api_key="")
+    client = TestClient(app)
+    r = client.get("/api/hive/roster")
+    assert r.status_code == 200
+    body = r.json()
+    ids = {row["id"] for row in body.get("daughters") or []}
+    assert d.id in ids
+    for row in body["daughters"]:
+        assert "messages" not in row
+        assert "tool_calls" not in row
+        assert "goal" in row
+    retired = client.post("/api/hive/retire", json={"hive_id": d.id})
+    assert retired.status_code == 200
+    assert retired.json().get("ok") is True
+    fresh = store.get(d.id)
+    assert fresh is not None
+    assert fresh.status == "retired"
