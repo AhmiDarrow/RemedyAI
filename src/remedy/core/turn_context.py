@@ -84,6 +84,10 @@ class TurnReactFlags:
     turn_pure_action: bool = False
     turn_has_attachments: bool = False
     write_budget: int = 0
+    # Per-turn ReAct step ceiling (0 = use the runtime default). A hive daughter
+    # runs on the mother's runtime object; her small budget must not follow the
+    # context out and truncate the mother's own turn.
+    max_react_steps: int = 0
     sleev_force_direct: bool = False
     skip_ask: bool = False
     # Snapshot at begin_turn — live Settings Full must not lift this turn's jail.
@@ -998,6 +1002,21 @@ def set_turn_write_budget(value: int, runtime: Any = None) -> None:
         runtime._remedy_write_budget = max(
             int(getattr(runtime, "_remedy_write_budget", 0) or 0), n
         )
+
+
+def turn_max_react_steps(runtime: Any = None) -> int:
+    """This turn's ReAct step ceiling, or 0 when the runtime default applies."""
+    flags = _react_flags()
+    if flags is not None and int(flags.max_react_steps or 0) > 0:
+        return int(flags.max_react_steps)
+    return 0
+
+
+def set_turn_max_react_steps(value: int) -> None:
+    """Scope a step ceiling to this turn only. No-op outside an active turn."""
+    flags = _react_flags()
+    if flags is not None:
+        flags.max_react_steps = max(0, int(value or 0))
 
 
 def turn_sleev_force_direct(runtime: Any = None) -> bool:

@@ -395,7 +395,7 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                 ids.add(configured_id)
 
         last_by = cfg.get("last_model_by_provider") or {}
-        preferred = [
+        preferred: list[str | None] = [
             configured_id,
             str(last_by.get(configured_provider) or "") if isinstance(last_by, dict) else "",
             str(catalog[0]["id"]) if catalog else "",

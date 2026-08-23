@@ -14,6 +14,7 @@ import pytest
 from remedy.telephony.backends.fake import comfort_noise, voiced_pcm
 from remedy.telephony.line import AudioFrame, Call, CallDirection, CallState
 from remedy.telephony.narrowband import frame_bytes
+from remedy.telephony.timing import timing_is_trustworthy
 from remedy.voice.realtime.pipeline import (
     PipelineConfig,
     PipelineState,
@@ -526,6 +527,20 @@ async def test_tts_stalls_between_chunks_count_as_late_frames():
     assert p.pacer.worst_late_ms > 40.0
 
 
+async def _skip_if_the_machine_cannot_keep_time():
+    """A "no late frames" claim is only measurable on a host that keeps time.
+
+    Under a loaded suite the scheduler alone makes a 20 ms frame arrive late;
+    that says nothing about the pacer, so skip rather than fail.
+    """
+    ok, overshoot = await timing_is_trustworthy()
+    if not ok:
+        pytest.skip(
+            f"machine cannot hold a 20 ms frame right now "
+            f"(median overshoot {overshoot:.1f} ms) — pacing not measurable"
+        )
+
+
 @pytest.mark.asyncio
 async def test_a_slow_first_chunk_is_warm_up_not_a_late_frame():
     call = RecordingCall()
@@ -534,6 +549,7 @@ async def test_a_slow_first_chunk_is_warm_up_not_a_late_frame():
     await _drive(p, _quiet(600))
     await asyncio.sleep(1.0)
     assert call.audible_ms > 0
+    await _skip_if_the_machine_cannot_keep_time()
     assert p.pacer.late_frames == 0
     assert p.pacer.worst_late_ms == 0.0
 
@@ -548,4 +564,5 @@ async def test_synthesis_keeps_ahead_of_playout_when_it_can():
     await _drive(p, _quiet(600))
     await asyncio.sleep(1.2)
     assert call.audible_ms >= 780
+    await _skip_if_the_machine_cannot_keep_time()
     assert p.pacer.late_frames == 0, f"worst {p.pacer.worst_late_ms:.0f} ms"

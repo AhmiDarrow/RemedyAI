@@ -505,11 +505,20 @@ def register_web_tools(runtime: Any) -> None:
         if looks_like_html(raw):
             extracted = html_to_markdown(text, max_chars=cap)
             body = str(extracted.get("markdown") or "").strip()
-            if extracted.get("js_shell") or len(body) < 80:
+            # A thin extract is worth a second look, but the browser only
+            # wins when it actually returns more than the HTTP extract did
+            # — a short page is not the same thing as an empty shell.
+            shell = bool(extracted.get("js_shell")) or not body
+            if shell or len(body) < 80:
                 rail = await _rail_page_text(u)
-                if rail:
+                if rail and (shell or len(rail) > len(body)):
+                    why = (
+                        "HTTP body was empty or script-only"
+                        if shell
+                        else "HTTP extract was thin"
+                    )
                     return (
-                        f"URL: {shown}\nSource: in-app browser (HTTP body was empty or script-only)\n\n"
+                        f"URL: {shown}\nSource: in-app browser ({why})\n\n"
                         f"{rail[:cap]}"
                     )
             if body:

@@ -54,6 +54,11 @@ voice = [
     "kokoro-onnx>=0.3.0,<1",
     "faster-whisper>=1.0.0,<2",
 ]
+# Sprite-sheet post-processing for the bundled game-assets skill
+# (scripts/sheet_tools.py). Pillow only, no network.
+game-assets = [
+    "pillow>=10.0.0,<13",
+]
 # Human-bar TTS (Grove HQ + phone). Heavy: pulls torch. Not first-run.
 voice-hq = [
     "chatterbox-tts",

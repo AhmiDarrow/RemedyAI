@@ -99,8 +99,12 @@ def _endpoint_price(
     if not isinstance(pricing, dict):
         return None
     try:
-        pin = float(pricing.get("prompt")) * 1_000_000.0
-        pout = float(pricing.get("completion")) * 1_000_000.0
+        raw_in = pricing.get("prompt")
+        raw_out = pricing.get("completion")
+        if raw_in is None or raw_out is None:
+            return None
+        pin = float(raw_in) * 1_000_000.0
+        pout = float(raw_out) * 1_000_000.0
     except (TypeError, ValueError):
         return None
     if pin < 0 or pout < 0:

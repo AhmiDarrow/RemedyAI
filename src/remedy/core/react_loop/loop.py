@@ -105,6 +105,7 @@ from remedy.core.turn_context import (
     set_turn_force_tool_choice,
     set_turn_thinking_level,
     set_turn_tool_choice_required_blocked,
+    turn_max_react_steps,
     turn_sleev_force_direct,
     turn_thinking_level,
 )
@@ -520,7 +521,11 @@ async def call_llm_stream(runtime, message: str,
         # One OAuth/API re-auth attempt per turn (xAI 401 → refresh token).
         auth_refresh_done = False
         # Multi-epoch: soft walls compact; absolute total is safety only.
-        max_total = max(1, int(getattr(runtime, "_max_react_steps", 10_000) or 10_000))
+        # A per-turn ceiling (hive daughter) must not read from — or leak onto —
+        # the runtime the mother is still using.
+        max_total = turn_max_react_steps(runtime) or max(
+            1, int(getattr(runtime, "_max_react_steps", 10_000) or 10_000)
+        )
         epoch_size = max(
             16, int(getattr(runtime, "_epoch_react_steps", 256) or 256)
         )

@@ -737,9 +737,9 @@ def _fingerprint_research(path: Path, fp: StackFingerprint) -> None:
 
     domains.sort()  # directory listing order is not stable across filesystems
     packs = ["research-method"]
-    for d in domains:
-        if d not in packs:
-            packs.append(d)
+    for dom in domains:
+        if dom not in packs:
+            packs.append(dom)
     for k in kinds:
         p_name = _KIND_PACKS.get(k)
         if p_name and p_name not in packs:

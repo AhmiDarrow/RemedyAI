@@ -230,7 +230,8 @@ def _openai_row(m: dict[str, Any]) -> dict[str, Any] | None:
     if not mid:
         return None
     meta = m.get("meta") if isinstance(m.get("meta"), dict) else {}
-    arch = m.get("architecture") if isinstance(m.get("architecture"), dict) else {}
+    _arch_raw = m.get("architecture")
+    arch = _arch_raw if isinstance(_arch_raw, dict) else {}
     caps = m.get("capabilities") if isinstance(m.get("capabilities"), dict) else {}
 
     ctx = _first(
@@ -250,8 +251,10 @@ def _openai_row(m: dict[str, Any]) -> dict[str, Any] | None:
     reasoning: bool | None = None
     chat: bool | None = None
 
-    in_mods = arch.get("input_modalities") if isinstance(arch.get("input_modalities"), list) else None
-    out_mods = arch.get("output_modalities") if isinstance(arch.get("output_modalities"), list) else None
+    _in_raw = arch.get("input_modalities")
+    _out_raw = arch.get("output_modalities")
+    in_mods = _in_raw if isinstance(_in_raw, list) else None
+    out_mods = _out_raw if isinstance(_out_raw, list) else None
     if in_mods is None and isinstance(m.get("input_modalities"), list):
         in_mods = m["input_modalities"]
     if out_mods is None and isinstance(m.get("output_modalities"), list):
@@ -486,9 +489,11 @@ async def _probe_ollama(
         if short in names:
             continue
         names.append(short)
-        details = m.get("details") if isinstance(m.get("details"), dict) else {}
-        if details.get("family"):
-            families[short] = str(details["family"])
+        _details = m.get("details")
+        details = _details if isinstance(_details, dict) else {}
+        family = details.get("family")
+        if family:
+            families[short] = str(family)
         sz = _int_or_none(m.get("size"))
         if sz:
             sizes[short] = sz
@@ -526,10 +531,12 @@ async def _probe_ollama(
 
     for short in names:
         info = show_by.get(short) or {}
-        caps = info.get("capabilities") if isinstance(info.get("capabilities"), list) else []
+        _caps = info.get("capabilities")
+        caps = _caps if isinstance(_caps, list) else []
         caps_l = [str(c).lower() for c in caps]
         ctx = None
-        mi = info.get("model_info") if isinstance(info.get("model_info"), dict) else {}
+        _mi = info.get("model_info")
+        mi = _mi if isinstance(_mi, dict) else {}
         for k, v in mi.items():
             if str(k).endswith(".context_length"):
                 ctx = v
