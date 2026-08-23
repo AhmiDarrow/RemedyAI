@@ -46,7 +46,9 @@ Partner status may include swarm counters for advanced UIs.
 - **Learn only good traces** — pattern pre-gate rejects weak multi-tool noise  
 - **Spread when partitionable** — ContextSnapshot may add a **[Spread]** hint;
   the frontier then calls `spread_run` for parallel silent jobs (not multi-agent
-  chat). Local SmolVLM2 may refine the spread plan only if llama-server is already up.  
+  chat). Local SmolVLM2 may refine the spread plan only if llama-server is already up.
+  Independent work that needs its own memory uses the [hive](28-hive.md), not
+  another nano worker.  
 - **Library skill check** — Skill nanobot ranks the **cached** Skills Library index
   (never remote on the hot path). At most one soft Install tip; speculative prep
   refreshes the catalog in the background. 
