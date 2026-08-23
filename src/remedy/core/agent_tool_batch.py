@@ -83,6 +83,8 @@ _NO_CACHE_TOOLS = frozenset(
         "bash_exec", "shell_exec", "host_run", "host_script", "host_mkdir",
         "host_which", "mission_verify", "goal_verify", "myelin_verify",
         "write_set_verify", "build", "verify",
+        "analysis_run", "analysis_ledger", "manuscript_build", "cite_check",
+        "lit_search", "godot_run", "godot_check", "godot_export",
     }
 )
 
