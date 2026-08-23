@@ -375,9 +375,27 @@ def create_app(
             except Exception:
                 logger.debug("MCP bridge startup skipped", exc_info=True)
 
+        # Standing hive posts: wake their pulse loops so a serve restart does
+        # not drop the job. Foragers are one-shot and stay reported on disk.
+        if runtime is not None:
+            try:
+                from remedy.core.hive.pulse import resume_posts
+
+                n_posts = resume_posts(runtime)
+                if n_posts:
+                    logger.info("Hive standing posts resumed count=%s", n_posts)
+            except Exception:
+                logger.debug("hive post resume skipped", exc_info=True)
+
         try:
             yield
         finally:
+            try:
+                from remedy.core.hive.pulse import stop_all_posts
+
+                stop_all_posts()
+            except Exception:
+                logger.debug("hive post stop skipped", exc_info=True)
             if _mcp_task is not None:
                 with suppress(Exception):
                     _mcp_task.cancel()

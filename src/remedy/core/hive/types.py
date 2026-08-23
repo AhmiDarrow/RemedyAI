@@ -25,6 +25,7 @@ STATUS_CANCELLED = "cancelled"
 # Compact broadcast — not a transcript (Anthropic: multi-agent dumps explode).
 PACKET_CHAR_CAP = 2_000
 PACKET_LIST_CAP = 8
+JOURNAL_NOTES_CAP = 12
 
 
 def _now() -> str:
@@ -122,6 +123,45 @@ def _cap_packet(pkt: ReturnPacket) -> ReturnPacket:
 
 def cap_packet_dict(raw: dict[str, Any]) -> dict[str, Any]:
     return ReturnPacket.from_dict(raw).to_dict()
+
+
+def append_journal(daughter: HiveDaughter, packet: ReturnPacket) -> None:
+    """Stigmergy: compact notes the next pulse (and the mother) can see."""
+    j = dict(daughter.journal or {})
+    notes = [n for n in (j.get("notes") or []) if isinstance(n, dict)]
+    notes.append(
+        {
+            "at": _now(),
+            "outcome": str(packet.outcome or "")[:240],
+            "done": bool(packet.done),
+            "blockers": [str(b)[:120] for b in (packet.blockers or [])[:4]],
+        }
+    )
+    j["notes"] = notes[-JOURNAL_NOTES_CAP:]
+    try:
+        count = int(j.get("pulse_count") or 0)
+    except (TypeError, ValueError):
+        count = 0
+    j["pulse_count"] = count + 1
+    j["last_pulse_at"] = _now()
+    j["charter"] = daughter.goal[:800]
+    daughter.journal = j
+
+
+def assign_charter(daughter: HiveDaughter, goal: str) -> None:
+    """Replace a standing post's job. Next pulse uses the new charter."""
+    g = str(goal or "").strip()[:800]
+    if not g:
+        return
+    daughter.goal = g
+    j = dict(daughter.journal or {})
+    j["charter"] = g
+    j["assigned_at"] = _now()
+    notes = [n for n in (j.get("notes") or []) if isinstance(n, dict)]
+    notes.append({"at": _now(), "outcome": f"reassigned: {g[:200]}", "done": False, "blockers": []})
+    j["notes"] = notes[-JOURNAL_NOTES_CAP:]
+    daughter.journal = j
+    daughter.updated_at = _now()
 
 
 def packet_from_outcome(
@@ -236,4 +276,6 @@ class HiveDaughter:
             "blockers": list(pkt.blockers) if pkt else [],
             "updated_at": self.updated_at,
             "pulse_s": self.pulse_s,
+            "pulse_count": int((self.journal or {}).get("pulse_count") or 0),
+            "next_pulse_at": self.next_pulse_at,
         }

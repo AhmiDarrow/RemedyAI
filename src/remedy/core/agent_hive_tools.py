@@ -1,4 +1,4 @@
-"""Mother-only hive tools: hire / collect / roster / retire. Daughters never get these."""
+"""Mother-only hive tools: hire / collect / assign / roster / retire. Daughters never get these."""
 
 from __future__ import annotations
 
@@ -8,8 +8,15 @@ from remedy.core.errors import format_tool_error
 from remedy.core.hive.policy import (
     DEFAULT_BUDGET_STEPS,
     DEFAULT_LIVE_PULSES,
+    DEFAULT_POSTS,
     MAX_BUDGET_STEPS,
     hive_depth,
+)
+from remedy.core.hive.pulse import (
+    cancel_post,
+    clamp_pulse_s,
+    mark_next_pulse,
+    schedule_post,
 )
 from remedy.core.hive.runner import cancel_forager, schedule_forager
 from remedy.core.hive.store import get_hive_store
@@ -21,6 +28,7 @@ from remedy.core.hive.types import (
     STATUS_RETIRED,
     STATUS_RUNNING,
     ReturnPacket,
+    assign_charter,
 )
 
 
@@ -63,8 +71,8 @@ def register_hive_tools(runtime: Any) -> None:
     ) -> str:
         """Hire a daughter. She reports to Remedy, never the owner.
 
-        cadence=forager: one bounded job, then retire.
-        cadence=post: standing job (PR2) — rejected until posts are live.
+        cadence=forager: one bounded job, then report.
+        cadence=post: standing job; pulses on an interval (floor 30s) until retired.
         """
         if hive_depth() >= 1:
             return format_tool_error(
@@ -83,27 +91,29 @@ def register_hive_tools(runtime: Any) -> None:
         cad = str(cadence or CADENCE_FORAGER).strip().lower()
         if cad not in CADENCES:
             cad = CADENCE_FORAGER
-        if cad == CADENCE_POST:
-            return format_tool_error(
-                "Standing posts are not hired from this tool yet. Use cadence=forager.",
-                code="HIVE_POST_UNAVAILABLE",
-                tool_name="hive_spawn",
-                suggestion='hive_spawn(goal="…", cadence="forager")',
-            )
         store = _store(runtime)
-        live = store.live_pulses()
-        cap = DEFAULT_LIVE_PULSES
-        if len(live) >= cap:
-            return format_tool_error(
-                f"Hive is at capacity ({cap} live pulses). Collect or retire first.",
-                code="HIVE_CAP",
-                tool_name="hive_spawn",
-            )
+        if cad == CADENCE_POST:
+            if len(store.live_posts()) >= DEFAULT_POSTS:
+                return format_tool_error(
+                    f"Hive is at capacity ({DEFAULT_POSTS} standing posts). Retire one first.",
+                    code="HIVE_POST_CAP",
+                    tool_name="hive_spawn",
+                )
+        else:
+            live = store.live_pulses()
+            cap = DEFAULT_LIVE_PULSES
+            if len(live) >= cap:
+                return format_tool_error(
+                    f"Hive is at capacity ({cap} live pulses). Collect or retire first.",
+                    code="HIVE_CAP",
+                    tool_name="hive_spawn",
+                )
         try:
             budget = int(budget_steps or DEFAULT_BUDGET_STEPS)
         except (TypeError, ValueError):
             budget = DEFAULT_BUDGET_STEPS
         budget = max(1, min(MAX_BUDGET_STEPS, budget))
+        pulse = clamp_pulse_s(pulse_s) if cad == CADENCE_POST else 0
         daughter = store.hire(
             g,
             cadence=cad,
@@ -111,7 +121,19 @@ def register_hive_tools(runtime: Any) -> None:
             project_path=_project(runtime),
             approval_mode=_approval(runtime),
             budget_steps=budget,
+            pulse_s=pulse,
         )
+        if cad == CADENCE_POST:
+            mark_next_pulse(daughter, due_now=True)
+            store.save(daughter)
+            schedule_post(runtime, daughter)
+            return (
+                f"hive_id={daughter.id} cadence=post status={daughter.status} "
+                f"pulse_s={daughter.pulse_s}\n"
+                "Standing post — she reports to you on each pulse, never the owner. "
+                "Owner Stop does not retire her. hive_assign to change the job; "
+                "hive_retire when the post is done."
+            )
         schedule_forager(runtime, daughter)
         return (
             f"hive_id={daughter.id} cadence={daughter.cadence} status={daughter.status}\n"
@@ -135,10 +157,16 @@ def register_hive_tools(runtime: Any) -> None:
                 code="HIVE_NOT_FOUND",
                 tool_name="hive_collect",
             )
+        if d.packet:
+            pkt = ReturnPacket.from_dict(d.packet)
+            extra = ""
+            if d.cadence == CADENCE_POST:
+                count = int((d.journal or {}).get("pulse_count") or 0)
+                extra = f" pulse_count={count} next_pulse_at={d.next_pulse_at}"
+            return f"hive_id={d.id} status={d.status}{extra}\n{pkt.as_mother_text()}"
         if d.status in (STATUS_PENDING, STATUS_RUNNING):
             return f"hive_id={d.id} status={d.status} still running"
-        pkt = ReturnPacket.from_dict(d.packet)
-        return f"hive_id={d.id} status={d.status}\n{pkt.as_mother_text()}"
+        return f"hive_id={d.id} status={d.status} no packet yet"
 
     async def hive_status() -> str:
         """Compact roster for this hive — not owner-facing."""
@@ -149,8 +177,54 @@ def register_hive_tools(runtime: Any) -> None:
         lines = [f"{d.id[:8]} {d.cadence} {d.status} {d.goal[:80]}" for d in rows[:12]]
         return "hive roster\n" + "\n".join(lines)
 
+    async def hive_assign(hive_id: str = "", goal: str = "") -> str:
+        """Replace a standing post's charter. Next pulse uses the new job."""
+        hid = str(hive_id or "").strip()
+        g = str(goal or "").strip()
+        if not hid:
+            return format_tool_error(
+                "hive_assign needs hive_id.",
+                code="MISSING_ID",
+                tool_name="hive_assign",
+            )
+        if not g:
+            return format_tool_error(
+                "hive_assign needs a new goal.",
+                code="MISSING_GOAL",
+                tool_name="hive_assign",
+            )
+        store = _store(runtime)
+        d = store.get(hid)
+        if d is None:
+            return format_tool_error(
+                f"No daughter {hid}.",
+                code="HIVE_NOT_FOUND",
+                tool_name="hive_assign",
+            )
+        if d.cadence != CADENCE_POST:
+            return format_tool_error(
+                "hive_assign is for standing posts. Foragers finish their original job.",
+                code="HIVE_NOT_POST",
+                tool_name="hive_assign",
+            )
+        if d.status == STATUS_RETIRED:
+            return format_tool_error(
+                "That post is retired.",
+                code="HIVE_RETIRED",
+                tool_name="hive_assign",
+            )
+        assign_charter(d, g)
+        mark_next_pulse(d, due_now=True)
+        store.save(d)
+        schedule_post(runtime, d)
+        return (
+            f"hive_id={d.id} cadence=post charter replaced\n"
+            f"goal={d.goal}\n"
+            "Next pulse uses the new job. She still reports to you, not the owner."
+        )
+
     async def hive_retire(hive_id: str = "") -> str:
-        """End a forager. Cancels if still running."""
+        """End a forager or standing post. Cancels if still running."""
         hid = str(hive_id or "").strip()
         if not hid:
             return format_tool_error(
@@ -166,11 +240,11 @@ def register_hive_tools(runtime: Any) -> None:
                 code="HIVE_NOT_FOUND",
                 tool_name="hive_retire",
             )
-        if d.status in (STATUS_PENDING, STATUS_RUNNING):
-            from remedy.core.turn_context import abort_session
+        from remedy.core.turn_context import abort_session
 
-            abort_session(d.session_id)
-            cancel_forager(d.id)
+        abort_session(d.session_id)
+        cancel_forager(d.id)
+        cancel_post(d.id)
         d.status = STATUS_RETIRED
         store.save(d)
         return f"hive_id={d.id} status=retired"
@@ -179,8 +253,9 @@ def register_hive_tools(runtime: Any) -> None:
     reg.register_builtin_handler(
         "hive_spawn",
         "Hire a silent daughter to cover independent work. She reports a compact "
-        "packet to you, never to the owner. cadence=forager (one job then done). "
-        "Not a second chat. Daughters cannot hire.",
+        "packet to you, never to the owner. cadence=forager (one job then done) or "
+        "cadence=post (standing; pulses until retired). Not a second chat. "
+        "Daughters cannot hire. Owner Stop does not retire posts.",
         hive_spawn,
         {
             "type": "object",
@@ -193,6 +268,10 @@ def register_hive_tools(runtime: Any) -> None:
                 "budget_steps": {
                     "type": "integer",
                     "description": "Max ReAct steps for this pulse (1–16)",
+                },
+                "pulse_s": {
+                    "type": "integer",
+                    "description": "Post pulse interval in seconds (floor 30)",
                 },
             },
             "required": ["goal"],
@@ -219,8 +298,22 @@ def register_hive_tools(runtime: Any) -> None:
         {"type": "object", "properties": {}},
     )
     reg.register_builtin_handler(
+        "hive_assign",
+        "Replace a standing post's charter. Next pulse uses the new job. "
+        "Foragers cannot be reassigned.",
+        hive_assign,
+        {
+            "type": "object",
+            "properties": {
+                "hive_id": {"type": "string"},
+                "goal": {"type": "string", "description": "New standing job"},
+            },
+            "required": ["hive_id", "goal"],
+        },
+    )
+    reg.register_builtin_handler(
         "hive_retire",
-        "Retire a daughter. Cancels a running forage.",
+        "Retire a daughter (forager or standing post). Cancels a running pulse.",
         hive_retire,
         {
             "type": "object",
