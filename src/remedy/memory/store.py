@@ -1207,7 +1207,12 @@ class MemoryStore:
                 "SELECT * FROM chat_sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
                 (limit, offset),
             ).fetchall()
-        return [self._row_to_session(r) for r in rows]
+        # Hive sessions are mother-private — never the owner sidebar.
+        return [
+            self._row_to_session(r)
+            for r in rows
+            if not str(r["id"] or "").startswith("hive_")
+        ]
 
     async def find_session_by_external(
         self,
