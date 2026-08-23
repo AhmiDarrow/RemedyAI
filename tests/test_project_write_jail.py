@@ -315,6 +315,34 @@ async def test_file_read_tool_allows_desktop(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_file_read_refuses_credential_filenames(tmp_path: Path):
+    from remedy.core.agent_workspace_tools import register_workspace_tools
+    from remedy.skills.tool_registry import ToolRegistry
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    secret = proj / ".env"
+    secret.write_text("API_KEY=sk-leaked\n", encoding="utf-8")
+    example = proj / ".env.example"
+    example.write_text("API_KEY=\n", encoding="utf-8")
+
+    rt = _make_runtime(proj, scope="project", home=tmp_path / "home")
+    reg = ToolRegistry()
+    rt.tool_registry = reg  # type: ignore[attr-defined]
+    rt.config = SimpleNamespace(home_dir=str(tmp_path / "remedy_home"))  # type: ignore[attr-defined]
+    rt._session_id = "test-session"  # type: ignore[attr-defined]
+    register_workspace_tools(rt)
+
+    denied = await reg.execute("file_read", path=str(secret))
+    assert "CREDENTIAL_FILE" in denied
+    assert "sk-leaked" not in denied
+
+    ok = await reg.execute("file_read", path=str(example))
+    assert "CREDENTIAL_FILE" not in ok
+    assert "API_KEY=" in ok
+
+
+@pytest.mark.asyncio
 async def test_file_edit_tool_blocks_desktop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from remedy.core.agent_workspace_tools import register_workspace_tools
     from remedy.core.approvals import APPROVALS

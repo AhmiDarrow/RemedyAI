@@ -541,6 +541,26 @@ def register_settings_tools(runtime: Any) -> None:
 
         saved_cfg = _saved_settings_cfg()
 
+        # Web tools / HTTP bootstrap expand network reach — model cannot self-grant.
+        if "web_tools_enabled" in patch and _truthy(patch.get("web_tools_enabled")):
+            if not _truthy(saved_cfg.get("web_tools_enabled")):
+                locked = _approval_required(
+                    runtime,
+                    "widen_web_tools",
+                    "Enabling web tools requires approval",
+                )
+                if locked:
+                    return locked
+        if "http_bootstrap" in patch and _truthy(patch.get("http_bootstrap")):
+            if not _truthy(saved_cfg.get("http_bootstrap")):
+                locked = _approval_required(
+                    runtime,
+                    "widen_http_bootstrap",
+                    "Enabling HTTP bootstrap requires approval",
+                )
+                if locked:
+                    return locked
+
         # Foreign llm_base_url would hot-reload the stored provider key to that host.
         if "llm_base_url" in patch and _llm_base_url_needs_approval(
             str(patch.get("llm_base_url") or ""), patch, saved_cfg

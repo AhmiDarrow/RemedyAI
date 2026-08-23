@@ -132,6 +132,21 @@ def test_status_reports_reasons_when_engines_missing(tmp_path: Path, monkeypatch
     assert st["stt"]["available"] is False
 
 
+def test_transcribe_file_swallows_engine_errors(tmp_path: Path, monkeypatch):
+    import remedy.voice.service as svc
+
+    class Boom:
+        def transcribe(self, *a, **k):
+            raise RuntimeError("decoder exploded")
+
+    monkeypatch.setattr(svc, "_managed", lambda: False)
+    monkeypatch.setattr(svc, "get_stt_model", lambda home_dir=None: Boom())
+    monkeypatch.setattr(
+        svc, "load_voice_settings", lambda home_dir=None: {"language": ""}
+    )
+    assert svc.transcribe_file(tmp_path / "x.wav", home_dir=tmp_path) is None
+
+
 def test_synthesize_none_without_engine(tmp_path: Path, monkeypatch):
     import remedy.voice.service as svc
 
@@ -257,14 +272,13 @@ def test_install_voice_pack_runs_extras_then_models(
 def test_run_pip_packages_pulses_then_succeeds(monkeypatch: pytest.MonkeyPatch):
     import remedy.voice.service as svc
 
-    class _Proc:
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
-    monkeypatch.setattr(svc.subprocess, "run", lambda *a, **k: _Proc())
     monkeypatch.setattr(svc.shutil, "which", lambda _n: None)
     monkeypatch.setattr(svc.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(
+        svc,
+        "_stream_pip",
+        lambda *a, **k: (0, ["Successfully installed kokoro-onnx"]),
+    )
     state: dict = {"pack": {"status": "downloading", "percent": 5.0}}
     svc.run_pip_packages(("kokoro-onnx",), state, "pack", cap=40.0)
     assert state["pack"]["status"] == "downloading"

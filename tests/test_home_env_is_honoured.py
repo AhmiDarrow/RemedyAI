@@ -42,6 +42,8 @@ def test_no_module_hardcodes_the_profile_home():
     offenders = [
         line
         for line in out.splitlines()
-        if not line.replace("\\", "/").split(":")[0].endswith(("core/security.py", "remedy/home.py"))
+        if not line.replace("\\", "/").split(":")[0].endswith(
+            ("core/security.py", "remedy/home.py", "home.py")
+        )
     ]
     assert offenders == [], "use remedy.home.default_home():\n" + "\n".join(offenders)

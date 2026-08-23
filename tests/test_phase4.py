@@ -234,11 +234,19 @@ class TestChannelAdapters:
         result = asyncio.run(ch.send("test"))
         assert result is True
 
-    def test_discord_with_token_no_channel(self, gateway):
-        ch = DiscordChannel(gateway, bot_token="fake-token", channel_id="")
+    def test_discord_with_token_no_channel(self, gateway, tmp_path):
+        ch = DiscordChannel(
+            gateway,
+            bot_token="fake-token",
+            channel_id="",
+            home_dir=str(tmp_path),
+        )
         asyncio.run(ch.start())
-        result = asyncio.run(ch.send("test"))
-        assert result is False
+        try:
+            result = asyncio.run(ch.send("test"))
+            assert result is False
+        finally:
+            asyncio.run(ch.stop())
 
     def test_slack_stub_no_token(self, gateway):
         ch = SlackChannel(gateway, bot_token="")
@@ -247,11 +255,19 @@ class TestChannelAdapters:
         result = asyncio.run(ch.send("test"))
         assert result is True
 
-    def test_slack_with_token_no_channel(self, gateway):
-        ch = SlackChannel(gateway, bot_token="fake-token", channel_id="")
+    def test_slack_with_token_no_channel(self, gateway, tmp_path):
+        ch = SlackChannel(
+            gateway,
+            bot_token="fake-token",
+            channel_id="",
+            home_dir=str(tmp_path),
+        )
         asyncio.run(ch.start())
-        result = asyncio.run(ch.send("test"))
-        assert result is False
+        try:
+            result = asyncio.run(ch.send("test"))
+            assert result is False
+        finally:
+            asyncio.run(ch.stop())
 
     def test_web_channel_send(self, gateway):
         ch = WebChannel(gateway)

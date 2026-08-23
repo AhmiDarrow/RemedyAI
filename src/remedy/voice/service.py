@@ -1071,19 +1071,23 @@ def transcribe_file(
     cfg = load_voice_settings(home_dir)
     lang = (language or cfg.get("language") or "").strip() or None
     start = time.time()
-    segments, info = model.transcribe(
-        str(path),
-        language=lang,
-        vad_filter=True,
-        beam_size=5,
-    )
-    text = " ".join(s.text.strip() for s in segments).strip()
-    return {
-        "text": text,
-        "language": getattr(info, "language", lang) or "",
-        "duration": round(getattr(info, "duration", 0.0) or 0.0, 2),
-        "took_s": round(time.time() - start, 2),
-    }
+    try:
+        segments, info = model.transcribe(
+            str(path),
+            language=lang,
+            vad_filter=True,
+            beam_size=5,
+        )
+        text = " ".join(s.text.strip() for s in segments).strip()
+        return {
+            "text": text,
+            "language": getattr(info, "language", lang) or "",
+            "duration": round(getattr(info, "duration", 0.0) or 0.0, 2),
+            "took_s": round(time.time() - start, 2),
+        }
+    except Exception as exc:
+        logger.warning("voice: transcribe failed: %s", exc)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -1245,13 +1249,25 @@ def _pack_supported() -> bool:
 
 
 def _unavailable_reason(
-    ok: bool, deps: bool, waiting: str
+    ok: bool,
+    deps: bool,
+    waiting: str,
+    *,
+    install_key: str | None = None,
+    missing: str | None = None,
 ) -> tuple[str | None, str | None]:
-    """Owner-plain reason, plus an Advanced-only command for power users."""
+    """Owner-plain reason, plus an Advanced-only command for power users.
+
+    ``waiting`` is only for an in-flight download. Deps present but no file
+    is "not installed yet", not "downloading".
+    """
     if ok:
         return None, None
-    if deps:
+    st = _install_state.get(install_key) if install_key else None
+    if isinstance(st, dict) and st.get("status") in ("downloading", "loading"):
         return waiting, None
+    if deps:
+        return (missing or waiting), None
     # Desktop owners cannot pip; the Download button is the whole story.
     return _VOICE_PACK_REASON, (None if _managed() else _VOICE_PACK_HINT)
 
@@ -1270,16 +1286,22 @@ def voice_status(
         tts_ok,
         tts_deps,
         "Remedy's speaking voice is downloading with the rest of the install.",
+        install_key="tts",
+        missing="Remedy's speaking voice is not on this computer yet.",
     )
     reason_stt, hint_stt = _unavailable_reason(
         stt_ok,
         stt_ok,  # STT is ready as soon as the pack is importable
         "Hearing is not ready yet.",
+        install_key="stt",
+        missing="Hearing is not ready yet.",
     )
     reason_turn, hint_turn = _unavailable_reason(
         turn_ok,
         turn_deps,
         "Turn-taking is downloading with the rest of the install.",
+        install_key="smart-turn",
+        missing="Turn-taking is not on this computer yet.",
     )
     from remedy.voice.chatterbox import hq_status
 

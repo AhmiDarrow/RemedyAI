@@ -2282,9 +2282,13 @@ async def call_llm_stream(runtime, message: str,
 
                 # Finalize text. Live-stream already yielded tokens when tools off.
                 text_out = finalize_round_text(round_state, tool_calls_list)
+                # Stutter detectors must see the blob *before* collapse — otherwise
+                # a looping mantra is polished into one sentence and never trips.
+                stutter_src = str(text_out or "")
                 # Drop auth/provider status lines if they leaked into model content
                 if text_out:
                     text_out = strip_stream_status_noise(str(text_out))
+                    stutter_src = str(text_out or "")
                     with suppress(Exception):
                         text_out = collapse_repeated_sentences(text_out)
                         text_out = clip_appended_source_dump(text_out)
@@ -2927,12 +2931,17 @@ async def call_llm_stream(runtime, message: str,
                     # is a monologue. Do not fall through to False-progress (that
                     # path re-fed essays and then disconnected).
                     _reasoning_only = (reasoning_out or "").strip()
-                    _mono_text = (text_out or "").strip() or _reasoning_only[:500]
-                    # Local harness only — frontier models self-steer; don't thrash them
+                    _mono_text = (
+                        (stutter_src or text_out or "").strip() or _reasoning_only[:500]
+                    )
+                    # Local harness only — frontier models self-steer; don't thrash them.
+                    # Use all_tools (agency this turn), not the possibly-disarmed
+                    # per-round `tools` list — last/final steps used to skip the
+                    # breaker after verify-green emptied the pack.
                     if (
                         _harness_on
                         and not tool_calls_list
-                        and tools
+                        and all_tools
                         and tools_executed_this_turn <= 0
                         and _mono_text
                         and not force_answer_sticky
@@ -3016,13 +3025,13 @@ async def call_llm_stream(runtime, message: str,
                                         )
                                     )
                             # Internal stutter in one blob counts as multi-hit
-                            if text_out and mono_fp_hits == 1:
+                            if stutter_src and mono_fp_hits == 1:
                                 with suppress(Exception):
                                     from remedy.core.local_agent_optimize import (
                                         text_has_internal_repetition,
                                     )
 
-                                    if text_has_internal_repetition(text_out):
+                                    if text_has_internal_repetition(stutter_src):
                                         mono_fp_hits = 2
                             logger.info(
                                 "Monologue loop break hits=%d fp_nudge=%d step=%d",
@@ -3333,7 +3342,7 @@ async def call_llm_stream(runtime, message: str,
                                 )
 
                                 _skip_len = text_has_internal_repetition(
-                                    text_out or ""
+                                    stutter_src or text_out or ""
                                 )
                             if _skip_len:
                                 logger.info(

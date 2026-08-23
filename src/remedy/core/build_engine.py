@@ -633,7 +633,9 @@ def looks_like_build_request(message: str) -> bool:
     if len(msg) > 280 and ("```" in msg or msg.count("\n") >= 4):
         return True
     # Imperative short tasks with path/file cues
-    return bool(len(msg) > 24 and any(x in low for x in (".py", ".ts", ".js", ".rs", ".go", ".c", ".cpp", ".h", "src/", "test", "please ", "need you to", "can you", "could you", "gcc", "compile", "file_write", "program")))
+    # Path / compiler / write cues only — polite wrappers ("could you",
+    # "please") are not a build by themselves (trivia questions match them).
+    return bool(len(msg) > 24 and any(x in low for x in (".py", ".ts", ".js", ".rs", ".go", ".c", ".cpp", ".h", "src/", "test", "need you to", "gcc", "compile", "file_write", "program")))
 
 
 # Alias — product language is research → plan → build (tasks, not only “builds”)

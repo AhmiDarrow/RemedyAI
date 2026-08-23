@@ -624,7 +624,9 @@ def runtime_turn_is_chat_only(runtime: Any = None, message: str | None = None) -
     """
     msg = message
     if msg is None and runtime is not None:
-        msg = str(getattr(runtime, "_last_user_text", "") or "")
+        from remedy.core.turn_context import current_last_user_text
+
+        msg = current_last_user_text(runtime)
     if not (msg or "").strip():
         return False
     return is_chat_only_message(str(msg))
