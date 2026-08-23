@@ -157,23 +157,15 @@ def is_valid_navigate_url(url: str | None) -> bool:
         # Cloud metadata / wildcard-DNS-to-IMDS (not just the literal IP).
         if _is_blocked_metadata_host(host):
             return False
-        # Reject single-label hosts like "gmail" without a TLD (except localhost)
-        if host == "localhost":
+        # Remedy's own local API — never load /api/settings or keys into the rail.
+        if p.port == 7400:
+            return False
+        # Loopback (Comfy 8188, Ollama, LM Studio, …) is the owner's machine.
+        # RFC1918 / unspecified stay out — the rail is not a LAN scanner.
+        if host == "localhost" or host.endswith(".localhost"):
             return True
         if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host):
-            # Loopback + RFC1918 only. Public / link-local / metadata IPs
-            # (169.254.169.254, 8.8.8.8, 172.0.0.1) stay out of the rail.
-            if host.startswith("127.") or host == "0.0.0.0":
-                return True
-            if host.startswith("10.") or host.startswith("192.168."):
-                return True
-            if host.startswith("172."):
-                try:
-                    second = int(host.split(".")[1])
-                except (IndexError, ValueError):
-                    return False
-                return 16 <= second <= 31
-            return False
+            return host.startswith("127.")
         return bool(re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", host))
     except Exception:
         return False

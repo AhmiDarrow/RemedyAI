@@ -696,7 +696,7 @@ def test_decode_metrics_recorded():
     assert before is not None
 
 
-def test_vision_tool_registered():
+def test_vision_tool_registered(tmp_path: Path):
     from remedy.core.agent import BasicRuntime
     from remedy.models import AgentConfig
 
@@ -705,7 +705,7 @@ def test_vision_tool_registered():
         llm_provider="openai",
         llm_model="gpt-4o-mini",
         llm_api_key="sk-test",
-        home_dir=str(Path.home() / ".remedy"),
+        home_dir=str(tmp_path),
     )
     agent = BasicRuntime(config=cfg, memory=None)
     names: set[str] = set()

@@ -219,3 +219,32 @@ async def test_approved_base_url_does_not_unlock_other_host(
         messengers={"discord": {"allow_all": True}},
     )
     assert "APPROVAL_REQUIRED" in dc
+
+
+@pytest.mark.asyncio
+async def test_update_settings_web_tools_needs_approval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path / "home"))
+    from remedy.interfaces import api_support
+
+    api_support.invalidate_config_cache()
+    rt, home = _rt_with_settings(tmp_path)
+    monkeypatch.setenv("REMEDY_HOME", str(home))
+    api_support.invalidate_config_cache()
+
+    out = await rt.tool_registry.execute(
+        "update_settings",
+        web_tools_enabled=True,
+    )
+    assert "APPROVAL_REQUIRED" in out
+    text = (home / "config.toml").read_text(encoding="utf-8")
+    assert "web_tools_enabled" not in text or "true" not in text.lower()
+
+    boot = await rt.tool_registry.execute(
+        "update_settings",
+        http_bootstrap=True,
+    )
+    assert "APPROVAL_REQUIRED" in boot
+    text = (home / "config.toml").read_text(encoding="utf-8")
+    assert "http_bootstrap" not in text or "true" not in text.lower()

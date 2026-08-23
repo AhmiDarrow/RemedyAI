@@ -56,7 +56,9 @@ async def distill_user_message(
 ) -> None:
     """Partner-memory distill before tools/LLM (explicit remember is awaited)."""
     with suppress(Exception):
-        runtime._last_user_text = (message or "")[:4000]
+        from remedy.core.turn_context import set_turn_last_user_text
+
+        set_turn_last_user_text((message or "")[:4000], runtime)
     with suppress(Exception):
         from remedy.core.agent_post_turn import distill_user_message_now_async
         from remedy.memory.partner_memory import distill_user_text, is_explicit_remember_intent
@@ -157,8 +159,9 @@ def append_plan_and_computer_addenda(
                 gather_companion_snapshot,
                 looks_like_companion_request,
             )
+            from remedy.core.turn_context import current_last_user_text
 
-            um = str(getattr(runtime, "_last_user_text", "") or "")
+            um = current_last_user_text(runtime)
             if looks_like_companion_request(um):
                 snap = gather_companion_snapshot(runtime)
                 block = format_companion_block(snap)
@@ -177,8 +180,9 @@ def append_plan_and_computer_addenda(
                 context = (context or "") + "\n\n" + tblock
         with suppress(Exception):
             from remedy.core.away_mode import format_away_block, looks_like_away_request
+            from remedy.core.turn_context import current_last_user_text
 
-            um_a = str(getattr(runtime, "_last_user_text", "") or "")
+            um_a = current_last_user_text(runtime)
             if looks_like_away_request(um_a):
                 context = (context or "") + "\n\n" + format_away_block()
                 with suppress(Exception):
@@ -200,8 +204,9 @@ def append_plan_and_computer_addenda(
                 COMPUTER_USE_SYSTEM_ADDENDUM,
                 needs_computer_use_guidance,
             )
+            from remedy.core.turn_context import current_last_user_text
 
-            um = message or str(getattr(runtime, "_last_user_text", "") or "")
+            um = message or current_last_user_text(runtime)
             if needs_computer_use_guidance(um):
                 context = (context or "") + "\n\n" + COMPUTER_USE_SYSTEM_ADDENDUM
         # Skill memory: steer toward the click approach that has worked on the

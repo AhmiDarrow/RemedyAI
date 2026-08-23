@@ -51,8 +51,8 @@ def _is_client_gone(exc: BaseException) -> bool:
         name = type(cur).__name__
         if name in {"EndOfStream", "ClientDisconnect", "BrokenResourceError"}:
             return True
-        if "no response returned" in str(cur).lower():
-            return True
+        # Starlette "No response returned" is a *server* fault (a route forgot
+        # to return). Do not treat the phrase as a client disconnect.
         low = name.lower()
         if "endofstream" in low or "disconnect" in low:
             return True

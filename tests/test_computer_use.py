@@ -189,12 +189,17 @@ def test_normalize_url_rejects_task_text_leak():
     assert normalize_url("gmail sign in please") == "https://mail.google.com"
     # URL userinfo blocked (credentials never land in rail address bar)
     assert is_valid_navigate_url("https://user:pass@example.com/") is False
-    # IPv4: loopback + RFC1918 only (not IMDS / public / 172.0.0.0/8)
+    # Loopback is the owner's machine (Comfy 8188, Ollama, …). RFC1918 and
+    # Remedy's own API (:7400) stay out of the Browser rail.
     assert is_valid_navigate_url("http://127.0.0.1:8188/") is True
-    assert is_valid_navigate_url("http://10.0.0.5/") is True
-    assert is_valid_navigate_url("http://192.168.1.1/") is True
-    assert is_valid_navigate_url("http://172.16.0.1/") is True
-    assert is_valid_navigate_url("http://172.31.255.1/") is True
+    assert is_valid_navigate_url("http://127.0.0.1:11434/") is True
+    assert is_valid_navigate_url("http://localhost:8188/") is True
+    assert is_valid_navigate_url("http://127.0.0.1:7400/") is False
+    assert is_valid_navigate_url("http://localhost:7400/api/settings") is False
+    assert is_valid_navigate_url("http://10.0.0.5/") is False
+    assert is_valid_navigate_url("http://192.168.1.1/") is False
+    assert is_valid_navigate_url("http://172.16.0.1/") is False
+    assert is_valid_navigate_url("http://172.31.255.1/") is False
     assert is_valid_navigate_url("http://169.254.169.254/") is False
     assert is_valid_navigate_url("http://172.0.0.1/") is False
     assert is_valid_navigate_url("http://8.8.8.8/") is False
@@ -1969,7 +1974,7 @@ def test_act_verifies_expected_url_success(tmp_path: Path, monkeypatch):
 
 
 def test_act_unverified_when_probe_unavailable(tmp_path: Path, monkeypatch):
-    """Host can't be observed → success stays ok but is flagged unverified."""
+    """Host can't be observed → not success (do not claim an unobserved goal)."""
     ex = _fresh_executor(tmp_path, monkeypatch)
 
     monkeypatch.setattr(
@@ -1979,9 +1984,10 @@ def test_act_unverified_when_probe_unavailable(tmp_path: Path, monkeypatch):
     )
     monkeypatch.setattr(ex, "_page_probe", lambda **_k: {"ok": False})
     out = ex._computer_act({"click": "Next"}, hint="", req_target="browser")
-    assert out.get("ok") is True
+    assert out.get("ok") is False
     assert out.get("unverified") is True
-    assert "not verified" in str(out.get("message", ""))
+    assert "UNVERIFIED" in str(out.get("message", "")).upper()
+    assert "do not claim" in str(out.get("message", "")).lower()
 
 
 def test_act_without_mutating_steps_skips_probe(tmp_path: Path, monkeypatch):
