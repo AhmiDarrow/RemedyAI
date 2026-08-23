@@ -647,13 +647,13 @@ async def test_a_pixel_click_on_a_checkout_page_stops_in_ask_mode(tools):
 
 
 @pytest.mark.asyncio
-async def test_a_pixel_click_on_a_checkout_page_is_effortless_in_full_mode(tools):
-    """auto/full is a standing grant — the owner handed over the keys."""
+async def test_a_pixel_click_on_a_checkout_page_stops_in_full_mode(tools):
+    """auto/full skip ordinary computer Ask prompts, not a checkout pixel-click."""
     tools.approvals.set_mode("full")
     tools.ex.bridge = _Bridge(observed_url=CHECKOUT_URL)
     out = await tools.t["computer_click"](x=400, y=310)
-    assert "APPROVAL_REQUIRED" not in out
-    assert tools.ex.calls
+    assert SENSITIVE_PREFIX in out
+    assert tools.ex.calls == []
 
 
 @pytest.mark.asyncio

@@ -87,6 +87,15 @@ _PAYMENT_SURFACE_RE = re.compile(
 )
 # Keys that can submit a focused payment form.
 _SUBMIT_KEYS = frozenset({"enter", "return", "\n", "space", " "})
+# Checkout buttons whose copy is too short for _SENSITIVE_COMPUTER_RE
+# ("Submit", "Pay", "Confirm", "Continue") but still finalize a purchase
+# when the live page is already a payment surface.
+_SUBMIT_LABEL_RE = re.compile(
+    r"(?is)\b("
+    r"submit|pay(?:ment)?|confirm|continue|complete|checkout|"
+    r"place|buy|order|donate"
+    r")\b"
+)
 
 
 def looks_like_payment_surface(page_context: str) -> bool:
@@ -117,24 +126,37 @@ def payment_surface_checkpoint(
     label_resolved: bool,
     page_context: str,
     key: str = "",
+    label: str = "",
 ) -> str | None:
-    """Owner checkpoint for an *unclassifiable* mutation on a payment surface.
+    """Owner checkpoint for a mutation on a payment surface.
 
-    Fires when: a mutation computer tool acts by coordinates / bare submit
-    key / unresolved ref (``label_resolved`` is False) AND the current page
-    context looks like checkout/payment. Non-waivable, like the text
-    classifier — closes the 'click Place-Order by pixel' bypass without
-    adding friction to normal browsing.
+    Fires when the live page looks like checkout/payment AND either:
+
+    * the target is unclassifiable (coordinates / bare submit key /
+      unresolved ref), or
+    * the resolved label is submit-shaped (``Submit``, ``Pay``,
+      ``Confirm``, ``Continue``) — those words miss
+      :data:`_SENSITIVE_COMPUTER_RE` which wants ``place order`` /
+      ``pay now``.
+
+    Non-waivable, like the text classifier. Ordinary browsing clicks
+    on a non-payment page are unaffected.
     """
     tool = (tool_name or "").strip()
     if tool not in _MUTATION_COMPUTER_TOOLS:
         return None
-    if label_resolved:
-        return None  # a resolved label already went through the text classifier
-    if tool == "computer_key" and (key or "").strip().lower() not in _SUBMIT_KEYS:
-        return None  # non-submitting keystroke on a form field is fine
     if not looks_like_payment_surface(page_context):
         return None
+    if tool == "computer_key" and (key or "").strip().lower() not in _SUBMIT_KEYS:
+        return None  # non-submitting keystroke on a form field is fine
+    if label_resolved:
+        if _SUBMIT_LABEL_RE.search(label or ""):
+            return (
+                f"{SENSITIVE_PREFIX} — a purchase/payment page is open and this "
+                f"control ({(label or 'submit')!r}) can complete the payment. "
+                "Payment steps always need your go-ahead; confirm this is intended."
+            )
+        return None  # other readable labels still go through the text classifier
     return (
         f"{SENSITIVE_PREFIX} — a purchase/payment page is open and this action "
         "has no readable target (coordinate/key/ref). Payment steps always need "
@@ -364,6 +386,8 @@ class ApprovalQueue:
             "computer_app",
             "computer_select",
             "computer_fill",
+            # Close only is gated in the tool; list/focus never call the gate.
+            "computer_windows",
             # NOT computer_press_hold, deliberately: a press-and-hold is how a
             # CAPTCHA challenge is answered, and prompting on every one makes
             # them unusable. It is still in _MUTATION_COMPUTER_TOOLS, so the
@@ -397,6 +421,14 @@ class ApprovalQueue:
         sensitive = sensitive_computer_checkpoint(tool_name, command)
         if sensitive:
             return sensitive
+        tool_early = (tool_name or "").strip()
+        # Sending mail is irreversible and visible to a third party — same
+        # class as purchase. No approval mode may waive it.
+        if tool_early in ("mail_send", "mail_reply"):
+            return (
+                f"{SENSITIVE_PREFIX} — sending mail always needs your go-ahead "
+                "(no approval mode skips this)."
+            )
         # Re-sync mode when config explicitly sets approval_mode (desktop thumbs).
         # Scope always comes from config when available.
         untrusted = False
@@ -458,6 +490,8 @@ class ApprovalQueue:
                 reason += "(calendar_update_event)"
             elif tool == "mail_disconnect":
                 reason = "Disconnecting the mailbox requires approval (mail_disconnect)"
+            elif tool == "computer_windows":
+                reason = "Closing a window requires approval (computer_windows)"
             elif tool.startswith("computer_"):
                 reason = f"Computer control requires approval ({tool})"
         if not reason and c and _ASK_PATTERNS.search(c):
@@ -625,10 +659,20 @@ class ApprovalQueue:
             grants = self._one_shot.get(sid)
             if not grants or fp not in grants:
                 return False
-            granted = grants.pop(fp)
+            granted = grants.get(fp)
+            if granted is None:
+                return False
+            # Bound grant: live origin must be present AND match. An empty
+            # live host (probe failed / tool omitted page_context) is a
+            # deny, not a skip — consume-and-allow would send a card to
+            # the wrong site.
+            if granted:
+                if not live or granted != live:
+                    return False
+            grants.pop(fp, None)
             if not grants:
                 self._one_shot.pop(sid, None)
-            return not (granted and live and granted != live)
+            return True
 
     @staticmethod
     def plain_summary(item: PendingApproval) -> str:

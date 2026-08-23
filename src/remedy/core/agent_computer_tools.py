@@ -104,6 +104,7 @@ def _computer_approval_gate(
     label_resolved: bool = True,
     key: str = "",
     typed_text: str = "",
+    label: str = "",
 ) -> str | None:
     """Return APPROVAL_REQUIRED text when Ask mode blocks a mutation, else None."""
     from remedy.core.approvals import (
@@ -114,21 +115,18 @@ def _computer_approval_gate(
     from remedy.core.turn_context import turn_session_id
 
     ask_reason: str | None = None
-    # The payment-surface + raw-card heads-ups are for the CAUTIOUS DEFAULT
-    # only. When the owner has set auto/full, they have deliberately handed
-    # Remedy the keys to the machine — she uses the PC as if it were hers,
-    # effortlessly, with no per-action roadblocks (the standing grant is the
-    # countersignature). These extra checks apply solely in ``ask`` mode so a
-    # brand-new user still gets a money heads-up until they trust her fully.
-    if APPROVALS.mode == "ask":
-        ask_reason = payment_surface_checkpoint(
-            tool_name,
-            label_resolved=label_resolved,
-            page_context=page_context,
-            key=key,
-        )
-        if not ask_reason:
-            ask_reason = raw_secret_checkpoint(tool_name, typed_text)
+    # Money / credentials / irreversible-send: no approval mode may waive
+    # these (AGENTS.md Q3, LIFE_TASK §2.2). Run them BEFORE needs_ask so
+    # auto/full cannot skip a checkout pixel-click or a raw PAN.
+    ask_reason = payment_surface_checkpoint(
+        tool_name,
+        label_resolved=label_resolved,
+        page_context=page_context,
+        key=key,
+        label=label,
+    )
+    if not ask_reason:
+        ask_reason = raw_secret_checkpoint(tool_name, typed_text)
     if not ask_reason:
         ask_reason = APPROVALS.needs_ask(summary, tool_name=tool_name)
     if not ask_reason:
@@ -249,6 +247,7 @@ def register_computer_tools(runtime: Any) -> None:
             runtime, "computer_click", summary,
             page_context=_page_context(ex),
             label_resolved=_label_ok,
+            label=label,
         )
         if blocked:
             return blocked
@@ -452,6 +451,7 @@ def register_computer_tools(runtime: Any) -> None:
         )
         blocked = _computer_approval_gate(
             runtime, "computer_type", summary,
+            page_context=_page_context(ex),
             typed_text=text,
         )
         if blocked:
@@ -505,10 +505,19 @@ def register_computer_tools(runtime: Any) -> None:
         Example: [{\"text\":\"First name\",\"value\":\"Ada\"},
         {\"text\":\"State\",\"select\":\"California\"}]
         """
-        summary = "fill form fields"
-        # Join every typed value so the raw-secret checkpoint sees a card
-        # number whether it arrives via computer_type or computer_fill.
         typed = _fill_typed_text(fields)
+        vault_note = ""
+        try:
+            from remedy.core.vault import token_handles
+
+            handles = token_handles(typed)
+            if handles:
+                vault_note = f" vault={','.join(handles)}"
+        except Exception:
+            pass
+        # Unique fingerprint per origin+handles so one generic fill cannot
+        # authorize a later card fill (sensitive_computer_checkpoint sees vault=).
+        summary = f"fill form fields{vault_note}"
         blocked = _computer_approval_gate(
             runtime, "computer_fill", summary,
             page_context=_page_context(ex),
@@ -597,6 +606,12 @@ def register_computer_tools(runtime: Any) -> None:
         hint: str = "",
     ) -> str:
         """List / focus / minimize / maximize / restore / close / move / resize windows."""
+        mode_l = (mode or "list").strip().lower()
+        if mode_l == "close":
+            summary = f"close window title={title!r} hwnd={hwnd}"
+            blocked = _computer_approval_gate(runtime, "computer_windows", summary)
+            if blocked:
+                return blocked
         return await _run_computer(ex,
             ComputerAction.WINDOWS,
             target=target or "desktop",
