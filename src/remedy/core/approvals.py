@@ -102,6 +102,28 @@ def looks_like_payment_surface(page_context: str) -> bool:
     return bool(_PAYMENT_SURFACE_RE.search(page_context or ""))
 
 
+_CHALLENGE_WALL_RE = re.compile(
+    r"(?is)("
+    r"captcha|hcaptcha|recaptcha|turnstile|cloudflare|"
+    r"i.?m not a robot|press.?and.?hold|press.?&.?hold|"
+    r"human.?check|verify you are human"
+    r")"
+)
+
+
+def challenge_wall_checkpoint(tool_name: str, page_context: str, label: str = "") -> str | None:
+    """Owner handoff for CAPTCHA / press-and-hold walls (LIFE_TASK §7)."""
+    if (tool_name or "").strip() != "computer_press_hold":
+        return None
+    blob = f"{page_context or ''} {label or ''}"
+    if not _CHALLENGE_WALL_RE.search(blob):
+        return None
+    return (
+        f"{SENSITIVE_PREFIX} — a human-check wall is on screen. Pause and let "
+        "the owner complete it; do not press-and-hold or click the puzzle."
+    )
+
+
 def _origin_host(raw: str) -> str:
     """www-stripped hostname from a URL, host, or page-context blob."""
     s = (raw or "").strip()

@@ -779,10 +779,8 @@ async def test_a_press_hold_summary_prefers_the_control_it_found(tools):
 
 @pytest.mark.asyncio
 async def test_a_hold_gesture_on_an_ordinary_page_is_not_gated_in_ask_mode(tools):
-    """Deliberate, not a gap: a press-and-hold is how a CAPTCHA challenge is
-    answered, so prompting on every one would make them unusable. It stays in
-    _MUTATION_COMPUTER_TOOLS, so the payment-surface checkpoint still stops it
-    on a checkout page — see test_press_hold_is_mutation_not_high_impact.
+    """An ordinary hold button is not a human-check wall. CAPTCHA /
+    press-and-hold challenges still checkpoint (challenge_wall_checkpoint).
     """
     tools.ex.bridge = _Bridge(observed_url=NORMAL_URL)
     out = await tools.t["computer_press_hold"](text="Hold to reveal")

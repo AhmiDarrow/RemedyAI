@@ -75,6 +75,40 @@ def _page_origin(page_context: str) -> str:
     return _origin_host(page_context)
 
 
+_KEY_ALIASES = {
+    "enter": "Enter",
+    "return": "Enter",
+    "\n": "Enter",
+    "tab": "Tab",
+    "esc": "Escape",
+    "escape": "Escape",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "del": "Delete",
+    "space": " ",
+    "left": "ArrowLeft",
+    "right": "ArrowRight",
+    "up": "ArrowUp",
+    "down": "ArrowDown",
+    "home": "Home",
+    "end": "End",
+    "pageup": "PageUp",
+    "pagedown": "PageDown",
+}
+
+
+def _canonical_key(key: str) -> str:
+    raw = (key or "").strip()
+    if not raw:
+        return raw
+    # Combos (ctrl+s) keep the last token canonical so Enter aliases work.
+    if "+" in raw:
+        parts = raw.split("+")
+        parts[-1] = _KEY_ALIASES.get(parts[-1].lower(), parts[-1])
+        return "+".join(parts)
+    return _KEY_ALIASES.get(raw.lower(), raw)
+
+
 def _fill_typed_text(fields: list | str) -> str:
     """Concatenate the values a computer_fill call will type (for checkpoints)."""
     rows: Any = fields
@@ -109,6 +143,7 @@ def _computer_approval_gate(
     """Return APPROVAL_REQUIRED text when Ask mode blocks a mutation, else None."""
     from remedy.core.approvals import (
         APPROVALS,
+        challenge_wall_checkpoint,
         payment_surface_checkpoint,
         raw_secret_checkpoint,
     )
@@ -127,6 +162,8 @@ def _computer_approval_gate(
     )
     if not ask_reason:
         ask_reason = raw_secret_checkpoint(tool_name, typed_text)
+    if not ask_reason:
+        ask_reason = challenge_wall_checkpoint(tool_name, page_context, label)
     if not ask_reason:
         ask_reason = APPROVALS.needs_ask(summary, tool_name=tool_name)
     if not ask_reason:
@@ -352,6 +389,7 @@ def register_computer_tools(runtime: Any) -> None:
         done from an unverified result.
         """
         # Do not put typed secrets in the approval banner; only lengths / labels.
+        key = _canonical_key(key)
         type_note = f"type_chars={len(type)}" if type else "type=-"
         try:
             from remedy.core.vault import token_handles
@@ -540,6 +578,7 @@ def register_computer_tools(runtime: Any) -> None:
         hint: str = "",
     ) -> str:
         """Press a key or combo (enter, tab, ctrl+s, alt+f4, …)."""
+        key = _canonical_key(key)
         summary = f"key={key!r} target={target or 'auto'}"
         blocked = _computer_approval_gate(
             runtime, "computer_key", summary,
@@ -664,10 +703,8 @@ def register_computer_tools(runtime: Any) -> None:
         target: str = "auto",
         hint: str = "",
     ) -> str:
-        """Press and HOLD a control (press-and-hold verification, a hold button).
-
-        The owner's authorized hands for an accessibility gesture they may be
-        unable to perform. Locate by text/ref or pass x/y (from a screenshot).
+        """Press and HOLD a control (a hold button). Human-check walls
+        (CAPTCHA / I'm not a robot) are owner handoffs — do not complete them.
         """
         label = text or _resolve_ref_label(ex, ref)
         where = label or text or ref or f"({x},{y})"

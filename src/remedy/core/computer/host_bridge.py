@@ -1211,7 +1211,7 @@ class ComputerHostBridge:
         self,
         *,
         max_age_s: float = 900.0,
-        stale_open_ttl_s: float = 1800.0,
+        stale_open_ttl_s: float = 60.0,
     ) -> int:
         """Delete finished job files older than *max_age_s* (default 15 minutes).
 
