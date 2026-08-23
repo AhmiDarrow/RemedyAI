@@ -38,12 +38,14 @@ def _store(runtime: Any):
 
 
 def _parent_sid(runtime: Any) -> str:
+    sid = ""
     try:
         from remedy.core.turn_context import turn_session_id
 
-        return str(turn_session_id(runtime) or "")
+        sid = str(turn_session_id(runtime) or "")
     except Exception:
-        return str(getattr(runtime, "_session_id", "") or "")
+        sid = ""
+    return sid or str(getattr(runtime, "_session_id", "") or "")
 
 
 def _project(runtime: Any) -> str:
@@ -123,6 +125,9 @@ def register_hive_tools(runtime: Any) -> None:
             budget_steps=budget,
             pulse_s=pulse,
         )
+        from remedy.core.hive.mother import announce_daughter
+
+        announce_daughter(daughter, runtime)
         if cad == CADENCE_POST:
             mark_next_pulse(daughter, due_now=True)
             store.save(daughter)
@@ -163,6 +168,13 @@ def register_hive_tools(runtime: Any) -> None:
             if d.cadence == CADENCE_POST:
                 count = int((d.journal or {}).get("pulse_count") or 0)
                 extra = f" pulse_count={count} next_pulse_at={d.next_pulse_at}"
+            from remedy.core.hive.mother import admit_packet
+
+            admit_packet(
+                pkt,
+                parent_session_id=d.parent_session_id or _parent_sid(runtime),
+                hive_id=d.id,
+            )
             return f"hive_id={d.id} status={d.status}{extra}\n{pkt.as_mother_text()}"
         if d.status in (STATUS_PENDING, STATUS_RUNNING):
             return f"hive_id={d.id} status={d.status} still running"
@@ -216,6 +228,9 @@ def register_hive_tools(runtime: Any) -> None:
         assign_charter(d, g)
         mark_next_pulse(d, due_now=True)
         store.save(d)
+        from remedy.core.hive.mother import announce_daughter
+
+        announce_daughter(d, runtime)
         schedule_post(runtime, d)
         return (
             f"hive_id={d.id} cadence=post charter replaced\n"
@@ -245,6 +260,9 @@ def register_hive_tools(runtime: Any) -> None:
         abort_session(d.session_id)
         cancel_forager(d.id)
         cancel_post(d.id)
+        from remedy.core.hive.mother import silence_daughter
+
+        silence_daughter(d, runtime)
         d.status = STATUS_RETIRED
         store.save(d)
         return f"hive_id={d.id} status=retired"
