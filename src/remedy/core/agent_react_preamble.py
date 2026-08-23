@@ -643,6 +643,11 @@ async def prepare_turn_preamble(
         from remedy.core.agent_llm import tools_for_binding
 
         all_tools = tools_for_binding(all_tools, runtime) or all_tools
+    with suppress(Exception):
+        from remedy.core.hive.policy import filter_daughter_tools, hive_depth
+
+        if hive_depth() >= 1:
+            all_tools = filter_daughter_tools(all_tools)
 
     tools = select_tools_for_turn(
         runtime,
