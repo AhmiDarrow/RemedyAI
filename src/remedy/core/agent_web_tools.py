@@ -13,16 +13,35 @@ import ipaddress
 import re
 import socket
 import ssl
+import threading
+import time
 from contextlib import suppress
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
+from urllib.robotparser import RobotFileParser
 
 from remedy.core.errors import format_tool_error
 
 # Max redirect hops (owner still has full public-web fetch power when enabled).
 _MAX_REDIRECTS = 8
 _REDIRECT_STATUS = frozenset({301, 302, 303, 307, 308})
+
+
+def _remedy_version() -> str:
+    try:
+        from remedy import __version__
+
+        return str(__version__ or "0").strip() or "0"
+    except Exception:
+        return "0"
+
+
+# Say who is calling and where to complain. A bot that names itself can be
+# rate-limited or blocked on purpose by a site owner; an anonymous one leaves
+# them nothing to aim at but a block-everything rule.
+_ROBOTS_AGENT = "RemedyAI-WebFetch"
+USER_AGENT = f"{_ROBOTS_AGENT}/{_remedy_version()} (+https://github.com/AhmiDarrow/RemedyAI)"
 
 # DuckDuckGo HTML result anchors (lite SERP — no JS).
 _DDG_RESULT_A = re.compile(
@@ -55,15 +74,320 @@ def web_tools_enabled(runtime: Any = None) -> bool:
     return _web_enabled(runtime)
 
 
+# ---------------------------------------------------------------------------
+# Politeness: robots.txt and per-host pacing.
+#
+# robots.txt is not law, and Remedy fetches a page at a time on an owner's
+# instruction rather than crawling. It is still the only standing instruction
+# a site leaves for automated clients, so the default is to read it and obey
+# it — and to leave a gap between hits on the same host. An owner who needs a
+# page their own robots rule covers can set ``web_respect_robots = false``.
+# ---------------------------------------------------------------------------
+
+_ROBOTS_TTL = 3600.0
+_ROBOTS_MAX_HOSTS = 512
+_ROBOTS_BYTES = 200_000
+# Between two fetches of the same host, unless robots.txt asks for longer.
+_DEFAULT_CRAWL_DELAY = 1.0
+# A hostile or careless Crawl-delay must not hang a turn: past this we refuse
+# the fetch and say why instead of sleeping through the owner's whole turn.
+_MAX_POLITE_WAIT = 10.0
+
+_robots_cache: dict[str, tuple[float, RobotFileParser | None]] = {}
+_robots_lock = threading.Lock()
+_last_fetch_at: dict[str, float] = {}
+_pace_lock = threading.Lock()
+
+
+def _robots_respected(runtime: Any = None) -> bool:
+    """Default true; ``web_respect_robots = false`` in config turns it off."""
+    try:
+        from remedy.interfaces.config import load_config
+
+        cfg = load_config() or {}
+        if "web_respect_robots" in cfg:
+            return bool(cfg.get("web_respect_robots"))
+    except Exception:
+        pass
+    if runtime is not None:
+        val = getattr(getattr(runtime, "config", None), "web_respect_robots", None)
+        if val is not None:
+            return bool(val)
+    return True
+
+
+def _robots_key(parsed: Any) -> str:
+    scheme = (parsed.scheme or "https").lower()
+    host = (parsed.hostname or "").lower()
+    port = parsed.port
+    return f"{scheme}://{host}:{port}" if port else f"{scheme}://{host}"
+
+
+def _load_robots(origin: str) -> RobotFileParser | None:
+    """Fetch and parse ``origin/robots.txt``; None when there is no usable rule.
+
+    Fail-open: an unreachable or unparseable robots.txt means no stated rule,
+    which is how a normal browser and most crawlers treat it. A served 200 is
+    obeyed exactly.
+    """
+    now = time.monotonic()
+    with _robots_lock:
+        hit = _robots_cache.get(origin)
+        if hit and now - hit[0] < _ROBOTS_TTL:
+            return hit[1]
+
+    parser: RobotFileParser | None = None
+    try:
+        _final, raw, charset = _pinned_fetch(
+            f"{origin}/robots.txt", max_chars=_ROBOTS_BYTES, timeout=8.0
+        )
+        text = raw.decode(charset or "utf-8", errors="replace")
+        parser = RobotFileParser()
+        parser.parse(text.splitlines())
+    except Exception:
+        # No robots.txt, a 4xx, a timeout, or junk — nothing to obey.
+        parser = None
+
+    with _robots_lock:
+        if len(_robots_cache) >= _ROBOTS_MAX_HOSTS:
+            _robots_cache.clear()
+        _robots_cache[origin] = (now, parser)
+    return parser
+
+
+def _robots_gate(url: str) -> float:
+    """Raise ``ValueError('ROBOTS_BLOCKED …')`` when robots.txt says no.
+
+    Returns the crawl delay this host asks for (seconds, 0 when unstated).
+    """
+    parsed = urlparse(url)
+    origin = _robots_key(parsed)
+    parser = _load_robots(origin)
+    if parser is None:
+        return 0.0
+    try:
+        allowed = parser.can_fetch(_ROBOTS_AGENT, url)
+    except Exception:
+        return 0.0
+    if not allowed:
+        raise ValueError(f"ROBOTS_BLOCKED {parsed.hostname or origin}")
+    delay = 0.0
+    with suppress(Exception):
+        stated = parser.crawl_delay(_ROBOTS_AGENT)
+        if stated is not None:
+            delay = float(stated)
+    return delay
+
+
+def _pace_host(host: str, crawl_delay: float) -> None:
+    """Sleep just long enough that two hits on *host* are not back to back."""
+    wait_for = max(_DEFAULT_CRAWL_DELAY, float(crawl_delay or 0.0))
+    with _pace_lock:
+        last = _last_fetch_at.get(host)
+        now = time.monotonic()
+        remaining = 0.0 if last is None else wait_for - (now - last)
+        if remaining > _MAX_POLITE_WAIT:
+            raise ValueError(
+                f"ROBOTS_DELAY {host} asks for {wait_for:.0f}s between requests"
+            )
+        # Claim the slot before releasing the lock so parallel fetches of the
+        # same host queue up instead of all reading the same stale timestamp.
+        _last_fetch_at[host] = now + max(0.0, remaining)
+        if len(_last_fetch_at) > _ROBOTS_MAX_HOSTS:
+            for stale in [k for k, v in _last_fetch_at.items() if now - v > 600][:256]:
+                _last_fetch_at.pop(stale, None)
+    if remaining > 0:
+        time.sleep(remaining)
+
+
+def polite_fetch(
+    url: str,
+    *,
+    max_chars: int,
+    timeout: float = 25.0,
+    respect_robots: bool | None = None,
+    runtime: Any = None,
+) -> tuple[str, bytes, str]:
+    """``_pinned_fetch`` with robots.txt honoured and per-host pacing applied.
+
+    ``_pinned_fetch`` stays pure transport (SSRF, redirects, caps); policy
+    lives here so the two can be reasoned about — and tested — apart.
+    """
+    if respect_robots is None:
+        respect_robots = _robots_respected(runtime)
+    parsed = urlparse((url or "").strip())
+    host = (parsed.hostname or "").lower()
+    delay = _robots_gate(url) if respect_robots else 0.0
+    if host:
+        _pace_host(host, delay)
+    final_url, raw, charset = _pinned_fetch(url, max_chars=max_chars, timeout=timeout)
+    # A redirect can land on a host whose robots.txt was never consulted.
+    # The body is already in hand, but a disallowed page is not ours to read.
+    if respect_robots:
+        final_host = (urlparse(final_url).hostname or "").lower()
+        if final_host and final_host != host:
+            _robots_gate(final_url)
+    return final_url, raw, charset
+
+
+# ---------------------------------------------------------------------------
+# Search backends.
+#
+# There is no keyless, terms-clean, general web-result API to point at: the
+# ones with an index behind them (Brave, Mojeek, Marginalia) want a key, and
+# the keyless ones aggregate by scraping somebody else. So the order is:
+#
+#   1. an instance the owner runs themselves (SearXNG) — no third party in it
+#   2. reading DuckDuckGo's no-JavaScript results page — allowed by their
+#      robots.txt, self-identified and paced, but still automated use of a
+#      service that can throttle or refuse it, so the owner says yes once
+#
+# docs/WEB_ETIQUETTE.md carries the long version.
+# ---------------------------------------------------------------------------
+
+_DDG_HTML_ENDPOINT = "https://html.duckduckgo.com/html/"
+
+
+class SearchConsentError(RuntimeError):
+    """Raised when the scraping fallback is the only route and is un-acked."""
+
+
+def _cfg(key: str, runtime: Any = None) -> Any:
+    try:
+        from remedy.interfaces.config import load_config
+
+        cfg = load_config() or {}
+        if key in cfg:
+            return cfg.get(key)
+    except Exception:
+        pass
+    if runtime is not None:
+        return getattr(getattr(runtime, "config", None), key, None)
+    return None
+
+
+def _searxng_base(runtime: Any = None) -> str:
+    """Owner's own metasearch instance, when they run one."""
+    val = _cfg("web_search_url", runtime)
+    base = str(val or "").strip().rstrip("/")
+    return base if base.startswith(("http://", "https://")) else ""
+
+
+def _scraping_acked(runtime: Any = None) -> bool:
+    return bool(_cfg("web_search_scraping_ack", runtime))
+
+
+SCRAPING_ACK_PROMPT = (
+    "Web search has no key-free API to call, so the fallback reads "
+    "DuckDuckGo's no-JavaScript results page. Their robots.txt allows it, "
+    "Remedy names itself in the User-Agent and leaves a gap between requests "
+    "— but it is still automated use of somebody else's service: they may "
+    "throttle or block it at any time, and what you do with the results is "
+    "yours to answer for. Two ways forward: point Remedy at a search instance "
+    "you run yourself with update_settings(web_search_url=\"http://…\"), or "
+    "accept the fallback with update_settings(web_search_scraping_ack=true)."
+)
+
+
+def _searxng_rows(base: str, q: str, n: int, timeout: float) -> list[dict[str, str]]:
+    """Query a SearXNG instance's JSON API.
+
+    The instance admin must have ``json`` in ``search.formats`` — a stock
+    install answers 403 to ``format=json`` and we say so rather than guessing.
+    """
+    import json as _json
+
+    url = f"{base}/search?" + urlencode({"q": q, "format": "json"})
+    host = (urlparse(base).hostname or "").lower()
+    # A self-hosted instance usually lives on loopback or the LAN, which the
+    # SSRF guard exists to refuse. Opening that hole silently would undo the
+    # guard for anything that can write config, so the owner opens it by hand.
+    if _host_is_blocked(host):
+        if not bool(_cfg("web_search_url_allow_private")):
+            raise ValueError(
+                "SEARCH_PRIVATE_HOST "
+                f"{host} is a private/loopback address; set "
+                "web_search_url_allow_private=true to allow your own instance"
+            )
+        raw = _direct_fetch(url, timeout=timeout)
+        text = raw.decode("utf-8", errors="replace")
+    else:
+        _final, body, charset = polite_fetch(
+            url, max_chars=400_000, timeout=timeout, respect_robots=False
+        )
+        text = body.decode(charset or "utf-8", errors="replace")
+
+    try:
+        data = _json.loads(text)
+    except ValueError as exc:
+        # A stock SearXNG serves HTML and answers 403 to format=json until the
+        # admin puts json in search.formats. Say that instead of "bad JSON".
+        raise ValueError(
+            f"SEARCH_BACKEND {base} did not return JSON — add 'json' to "
+            f"search.formats in its settings.yml ({exc})"
+        ) from exc
+    rows: list[dict[str, str]] = []
+    for item in (data.get("results") or [])[: max(1, n)]:
+        target = str(item.get("url") or "").strip()
+        if not target.startswith(("http://", "https://")):
+            continue
+        rows.append(
+            {
+                "title": _strip_tags(str(item.get("title") or "")) or target,
+                "url": target,
+                "snippet": _strip_tags(str(item.get("content") or ""))[:300],
+            }
+        )
+    return rows
+
+
+def _direct_fetch(url: str, *, timeout: float) -> bytes:
+    """Plain fetch with no SSRF pin — only for an owner-declared private host."""
+    from urllib.request import Request, urlopen
+
+    req = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+    with urlopen(req, timeout=timeout) as resp:
+        return bytes(resp.read(2_000_000))
+
+
+def _ddg_rows(q: str, n: int, timeout: float) -> list[dict[str, str]]:
+    search_url = _DDG_HTML_ENDPOINT + "?" + urlencode({"q": q})
+    # Paced like any other host, but not robots-gated: their robots.txt says
+    # Allow: / for every agent, so there is no stated rule to consult here.
+    _final, raw, charset = polite_fetch(
+        search_url, max_chars=200_000, timeout=timeout, respect_robots=False
+    )
+    html = raw.decode(charset or "utf-8", errors="replace")
+    return parse_ddg_html_results(html, max_results=n)
+
+
+def run_search(
+    q: str, *, max_results: int, timeout: float, runtime: Any = None
+) -> tuple[list[dict[str, str]], str]:
+    """Search via the best available backend. Returns (rows, backend_name).
+
+    Raises :class:`SearchConsentError` when the only route left is the
+    scraping fallback and the owner has not accepted it.
+    """
+    base = _searxng_base(runtime)
+    if base:
+        return _searxng_rows(base, q, max_results, timeout), "your search instance"
+    if not _scraping_acked(runtime):
+        raise SearchConsentError(SCRAPING_ACK_PROMPT)
+    return _ddg_rows(q, max_results, timeout), "DuckDuckGo HTML"
+
+
 def search_public_web(
     query: str,
     *,
     max_results: int = 3,
     timeout: float = 12.0,
 ) -> list[dict[str, str]]:
-    """Sync DuckDuckGo search. Empty if web tools are off or the net fails.
+    """Sync background search. Empty if web tools are off or the net fails.
 
-    Never raises. Does not fetch full pages. Same SSRF pin as web_search.
+    Never raises — an un-accepted scraping fallback reads as no results here,
+    because the callers are background passes with nobody to ask. The owner
+    meets the question through web_search instead.
     """
     if not _web_enabled(None):
         return []
@@ -74,13 +398,9 @@ def search_public_web(
         n = max(1, min(5, int(max_results or 3)))
     except (TypeError, ValueError):
         n = 3
-    search_url = "https://html.duckduckgo.com/html/?" + urlencode({"q": q})
     try:
-        _final, raw, charset = _pinned_fetch(
-            search_url, max_chars=200_000, timeout=timeout
-        )
-        html = raw.decode(charset or "utf-8", errors="replace")
-        return parse_ddg_html_results(html, max_results=n)
+        rows, _backend = run_search(q, max_results=n, timeout=timeout)
+        return rows
     except Exception:
         return []
 
@@ -257,7 +577,7 @@ def _pinned_fetch(url: str, *, max_chars: int, timeout: float = 25.0) -> tuple[s
         # Connect to pinned IP; Host / SNI use original hostname (HTTPS).
         headers = {
             "Host": host if not parsed.port else f"{host}:{parsed.port}",
-            "User-Agent": "RemedyAI-WebFetch/0.13",
+            "User-Agent": USER_AGENT,
             "Accept": "text/*,application/json,*/*",
             "Connection": "close",
         }
@@ -463,6 +783,24 @@ def register_web_tools(runtime: Any) -> None:
                     tool_name=tool_name,
                     suggestion="Use a public https URL, or read local files with file_read.",
                 )
+            if msg.startswith("ROBOTS_BLOCKED"):
+                host = msg.split(" ", 1)[-1]
+                return format_tool_error(
+                    f"Skipped: {host} disallows automated clients on this path in robots.txt.",
+                    code="ROBOTS_BLOCKED",
+                    tool_name=tool_name,
+                    suggestion=(
+                        "Tell the owner the site asks bots not to read that page. They can "
+                        "open it themselves, or set web_respect_robots=false to override."
+                    ),
+                )
+            if msg.startswith("ROBOTS_DELAY"):
+                return format_tool_error(
+                    f"Skipped: {msg.split(' ', 1)[-1]}, which is longer than a turn should wait.",
+                    code="ROBOTS_DELAY",
+                    tool_name=tool_name,
+                    suggestion="Fetch a different host now and come back to this one later.",
+                )
             return format_tool_error(msg, code="BAD_URL", tool_name=tool_name)
         if isinstance(e, HTTPError):
             return format_tool_error(
@@ -494,7 +832,9 @@ def register_web_tools(runtime: Any) -> None:
         except (TypeError, ValueError):
             cap = 50_000
         try:
-            final_url, raw, charset = _pinned_fetch(u, max_chars=max(cap * 4, 200_000), timeout=25.0)
+            final_url, raw, charset = polite_fetch(
+                u, max_chars=max(cap * 4, 200_000), timeout=25.0, runtime=runtime
+            )
         except Exception as e:
             return _map_fetch_error(e, tool_name="web_fetch")
 
@@ -559,22 +899,27 @@ def register_web_tools(runtime: Any) -> None:
         except (TypeError, ValueError):
             n = 5
         n = max(1, min(10, n))
-        # html.duckduckgo.com is public; pin-on-resolve still revalidates DNS.
-        search_url = "https://html.duckduckgo.com/html/?" + urlencode({"q": q})
         try:
-            _final, raw, charset = _pinned_fetch(
-                search_url, max_chars=200_000, timeout=20.0
+            rows, backend = run_search(q, max_results=n, timeout=20.0, runtime=runtime)
+        except SearchConsentError as consent:
+            # Not an error to retry — a question only the owner can answer.
+            return format_tool_error(
+                str(consent),
+                code="SEARCH_CONSENT_REQUIRED",
+                tool_name="web_search",
+                suggestion=(
+                    "Ask the owner which they want, then call update_settings for them. "
+                    "Do not retry web_search until one of the two is set."
+                ),
             )
         except Exception as e:
             return _map_fetch_error(e, tool_name="web_search")
-        html = raw.decode(charset or "utf-8", errors="replace")
-        rows = parse_ddg_html_results(html, max_results=n)
         if not rows:
             return (
                 f"Search: {q}\n\nNo structured results parsed. "
                 "Try a simpler query, or web_fetch a known docs URL."
             )
-        lines = [f"Search: {q}", f"Results: {len(rows)}", ""]
+        lines = [f"Search: {q}", f"Source: {backend}", f"Results: {len(rows)}", ""]
         for i, r in enumerate(rows, 1):
             lines.append(f"{i}. {r['title']}")
             lines.append(f"   {r['url']}")
