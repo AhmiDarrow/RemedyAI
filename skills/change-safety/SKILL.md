@@ -5,7 +5,7 @@ description: >
   neighbors, run paired checks, and smoke UI/chrome/messengers that unit tests
   miss. Use when implementing, fixing, refactoring, reviewing risk, or when
   the user says don't break anything / check neighbors / change safety.
-version: 1.0.0
+version: 1.1.0
 author: Remedy
 tags: [quality, regression, safety, coding, review]
 ---
@@ -71,15 +71,27 @@ safe. If unsure: targeted test or commit note `Risk: … / Smoke: …`.
 CI does not click title bars, drive Telegram, or exercise multiwebview on a real
 GPU. Green CI is **necessary, not sufficient** for those zones.
 
+### 8. Local CI before every push
+
+Remote CI is not a surprise. Run the **same commands** `.github/workflows/ci.yml`
+runs (ruff, mypy, docs, pytest, desktop npm test+build — see root `AGENTS.md`
+**Local CI**). Pytest-only is not enough.
+
+If remote CI fails: run **that failed step locally**, fix until green, **then**
+push. Do not push a guess.
+
 ## After implementation
 
 - Targeted tests for behavior you changed  
 - Full suite when shipping or when user asked “test everything”  
+- Local CI commands green **before** `git push`  
 - For **ship/release**, also activate **project-etiquette** (gate chain)
 
 ## Anti-patterns
 
 - “Tests pass” without smoke for the surface you changed  
+- Pushing after pytest-only when CI also runs ruff / mypy / docs  
+- Pushing a CI-fix without re-running the failed step locally  
 - Patching a recurring class of bug without changing architecture  
 - Shipping desktop UI without WebUI rebuild/restart when SPA is shared  
 - Dual processes fighting a single bot token or port

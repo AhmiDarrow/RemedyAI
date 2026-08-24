@@ -27,7 +27,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   `open_session` the right one. Hive-private rows stay hidden.
 - **Files rail follows ``access_scope``.** A session with no project path
   used to jail the rail to the global project, so
-  ``Desktop\example-folder`` was "outside allowed directory" even when
+  a Desktop folder was "outside allowed directory" even when
   ``list_dir`` (full access) could see it.
 - **``host_run explorer <dir>`` uses the OS file manager.** explorer.exe
   returns 1 and was hidden by CREATE_NO_WINDOW, so a simple folder open
