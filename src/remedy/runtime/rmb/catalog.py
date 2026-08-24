@@ -39,13 +39,33 @@ class RmbModelSpec:
         }
 
 
-# Default product model for agent coding on 12GB: Qwen3.6-35B-A3B (Q4_K_XL).
-# Measured on an RTX 3080 12GB / 64GB RAM: 31.7 tok/s generation, ~3.7GB VRAM
-# with experts on the CPU, zero failed tool calls across a full agent suite.
-# MoE is what makes it fit — only 3B parameters are active per token, so the
-# experts can live in system RAM without collapsing throughput, and the freed
-# VRAM leaves room for the vision model alongside it.
+# Default product model for agent coding on 12GB: Qwen3.5-9B (Q6_K).
+# Chosen on measurements against the agent suite (scripts/rig), RTX 3080 12GB:
+#
+#   Qwen3.5-9B Q6_K     86.1 tok/s, 8.1GB VRAM, best local score
+#   Qwen3-14B  Q4_K_M   68.7 tok/s, 11.4GB VRAM, ~4x the tool calls per task
+#   Qwen3.6-35B-A3B Q4  31.5 tok/s, 3.7GB VRAM, but 204s for one list_dir -
+#                       a 35B pays full prefill on every ReAct step
+#
+# Bigger is not better here: prompt eval dominates an agent loop, and a 9B at
+# 6-bit holds tool-call structure better than a larger model at 4-bit. Quant
+# damage lands on structured output first, which is exactly what a tool loop
+# depends on.
 RMB_MODELS: dict[str, RmbModelSpec] = {
+    "qwen35-9b": RmbModelSpec(
+        id="qwen35-9b",
+        name="Qwen3.5 9B (Q6_K)",
+        filename="Qwen3.5-9B-Q6_K.gguf",
+        hf_repo="unsloth/Qwen3.5-9B-GGUF",
+        approx_gb=7.5,
+        n_ctx_recommend=16384,
+        notes=(
+            "Default RMB chat model - fits a 12GB card whole at 6-bit, so it "
+            "keeps tool-call structure a 4-bit model loses. Fastest of the "
+            "measured options and the strongest on the agent suite."
+        ),
+        size_label="9b",
+    ),
     "qwen36-35b-a3b": RmbModelSpec(
         id="qwen36-35b-a3b",
         name="Qwen3.6 35B-A3B (Q4_K_XL)",
@@ -54,9 +74,10 @@ RMB_MODELS: dict[str, RmbModelSpec] = {
         approx_gb=20.8,
         n_ctx_recommend=16384,
         notes=(
-            "Default RMB chat model - MoE with 3B active parameters. Experts "
-            "run on the CPU (n_cpu_moe), so it needs ~4GB VRAM and ~21GB RAM "
-            "while performing far above its VRAM footprint."
+            "MoE with 3B active parameters; experts run on the CPU, so it "
+            "needs only ~4GB VRAM and ~21GB RAM. Slower per step than the 9B "
+            "(prefill cost) and degrades when the CPU is busy - pick it when "
+            "VRAM is scarce or another model needs the GPU."
         ),
         size_label="35b",
         n_cpu_moe=99,
@@ -97,7 +118,7 @@ RMB_MODELS: dict[str, RmbModelSpec] = {
     ),
 }
 
-DEFAULT_RMB_MODEL_ID = "qwen36-35b-a3b"
+DEFAULT_RMB_MODEL_ID = "qwen35-9b"
 
 # Profiles → llama-server knobs (ctx / sampling hints for UI)
 # ctx_size 0 on autofit = compute from VRAM/RAM + GGUF at start.
