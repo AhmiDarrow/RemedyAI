@@ -316,6 +316,26 @@ def test_open_app_resolves_relative_in_search_dir(tmp_path: Path, monkeypatch):
     assert info2.get("method") == "project_path"
 
 
+def test_open_app_directory_uses_file_manager(tmp_path: Path, monkeypatch):
+    """A folder is not 'path not found' — open it in Explorer / xdg-open."""
+    import sys
+
+    import pytest
+
+    if sys.platform != "win32":
+        pytest.skip("Desktop computer use requires Windows")
+    from remedy.core.computer.desktop_win import open_app
+
+    folder = tmp_path / "example-folder"
+    folder.mkdir()
+    opened: list[str] = []
+    monkeypatch.setattr("os.startfile", lambda p: opened.append(str(p)))
+    info = open_app(str(folder))
+    assert info.get("method") == "startfile"
+    assert opened
+    assert Path(opened[0]).resolve() == folder.resolve()
+
+
 def test_open_app_prefers_search_dirs_not_cwd(tmp_path: Path, monkeypatch):
     import os
     import sys

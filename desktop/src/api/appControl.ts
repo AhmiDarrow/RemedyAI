@@ -18,12 +18,16 @@ export type AppCommand = {
     | 'open_panel'
     | 'close_ui'
     | 'new_session'
+    | 'open_session'
   params?: {
     target?: 'grove' | 'studio' | 'alongside' | 'storyline' | 'home'
     goal_id?: string
     section?: string
     panel?: string
     article?: string
+    path?: string
+    url?: string
+    session_id?: string
   }
   ts?: number
 }

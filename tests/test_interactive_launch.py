@@ -80,3 +80,13 @@ def test_windowed_engine_launches_are_backgrounded(tmp_path: Path):
     assert command_looks_like_gui_launch(r".\Godot_v4.3.exe --path .", tmp_path)
     assert command_looks_like_gui_launch("love .", tmp_path)
     assert command_looks_like_gui_launch("lovec.exe .", tmp_path)
+
+
+def test_explorer_folder_is_a_gui_launch():
+    assert command_looks_like_gui_launch(
+        r'explorer C:\Users\Administrator\Desktop\example-folder'
+    )
+    assert command_looks_like_gui_launch(
+        r"C:\WINDOWS\explorer.EXE C:\Users\Administrator\Desktop\example-folder"
+    )
+    assert not command_looks_like_gui_launch("python -m py_compile app.py")

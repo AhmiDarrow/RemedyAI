@@ -4,6 +4,47 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.31.2] - 2026-08-24
+
+### Fixed — thinking is this round's scratchpad
+
+- **Thinking no longer stacks every ReAct recap.** Each model HTTP round is
+  a new scratchpad. The live panel *replaces* when she starts thinking
+  again after tools, instead of concatenating "The user wants…" twenty
+  times. Persist keeps the last round. Provider chunks that resend the
+  whole reasoning blob are treated as snapshots, not suffixes.
+
+### Fixed — she drives every rail, and can read scratch + sessions
+
+- **`app_control` takes rail context.** Files `path=`, Terminal `path=`
+  (cwd), Browser `url=`, Sessions `session_id=`, plus
+  `action=open_session`. "Open it in rail" is her own UI, not a click
+  and not ``host_run explorer``.
+- **`scratchpad` reads and writes the Studio Scratch rail.** Notes live
+  under ``~/.remedy/scratch/`` so Desktop and WebUI share them; she can
+  read what the owner typed.
+- **`list_sessions` lists owner chats** (id, title, when) so she can
+  `open_session` the right one. Hive-private rows stay hidden.
+- **Files rail follows ``access_scope``.** A session with no project path
+  used to jail the rail to the global project, so
+  ``Desktop\example-folder`` was "outside allowed directory" even when
+  ``list_dir`` (full access) could see it.
+- **``host_run explorer <dir>`` uses the OS file manager.** explorer.exe
+  returns 1 and was hidden by CREATE_NO_WINDOW, so a simple folder open
+  looked like HOST_TRANSLATED_FAIL. Directories go through startfile /
+  xdg-open. ``computer_app path=`` does the same for Explorer.
+
+### Fixed — source reads no longer look truncated or redacted
+
+- **``bot_token: str`` stays ``bot_token: str``.** Secret redaction was
+  matching the letters ``token`` inside the identifier and rewriting
+  ``bot_token: str`` to ``bot_[redacted]`` in file_read results. The
+  agent then "fixed" working Discord source in a loop. Assignments still
+  redact real secret *values*; type names and empty defaults are source.
+- **Tool-result caps say ``…[truncated]`` on a line break.** A glued-on
+  ``…`` mid-statement looked like the file on disk was cut off, so she
+  rewrote it through host_script.
+
 ## [0.31.1] - 2026-08-24
 
 ### Fixed — she can switch Grove / Alongside / Studio herself

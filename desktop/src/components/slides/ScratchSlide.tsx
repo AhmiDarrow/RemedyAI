@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { apiFetch } from '../../api/client'
 import { isTauri, tauriInvoke } from '../../api/tauri'
+import { SCRATCH_RELOAD_EVENT } from '../../workspace/railNav'
 import { ConfirmDialog } from '../ConfirmDialog'
 
 function storageKey(sessionId: string | null) {
@@ -44,6 +46,38 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
     }
   }
 
+  const persistServer = (v: string, sid: string | null) => {
+    void apiFetch('/scratch', {
+      method: 'PUT',
+      body: JSON.stringify({ session_id: sid, text: v }),
+    }).catch(() => {
+      /* local cache still holds it */
+    })
+  }
+
+  const loadFromServer = async (sid: string | null, storageKeyNow: string) => {
+    try {
+      const q = sid ? `?session_id=${encodeURIComponent(sid)}` : ''
+      const data = await apiFetch<{ text?: string }>(`/scratch${q}`)
+      let t = data.text || ''
+      if (!t) {
+        try {
+          t = localStorage.getItem(storageKeyNow) || ''
+        } catch {
+          t = ''
+        }
+        if (t) persistServer(t, sid)
+      }
+      return t
+    } catch {
+      try {
+        return localStorage.getItem(storageKeyNow) || ''
+      } catch {
+        return ''
+      }
+    }
+  }
+
   useEffect(() => {
     // Flush prior session's debounced text before switching keys
     if (persistTimer.current != null) {
@@ -58,16 +92,24 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
     keyRef.current = key
     setPreview(false)
     setDirty(false)
-    try {
-      const loaded = localStorage.getItem(key) || ''
+    let cancelled = false
+    void loadFromServer(sessionId, key).then((loaded) => {
+      if (cancelled) return
       setText(loaded)
       textRef.current = loaded
       setStatus('')
-    } catch {
-      setText('')
-      textRef.current = ''
+    })
+    const onReload = () => {
+      void loadFromServer(sessionId, key).then((loaded) => {
+        if (cancelled) return
+        setText(loaded)
+        textRef.current = loaded
+      })
     }
+    window.addEventListener(SCRATCH_RELOAD_EVENT, onReload)
     return () => {
+      cancelled = true
+      window.removeEventListener(SCRATCH_RELOAD_EVENT, onReload)
       if (persistTimer.current != null) {
         window.clearTimeout(persistTimer.current)
         persistTimer.current = null
@@ -82,13 +124,14 @@ export function ScratchSlide({ sessionId }: { sessionId: string | null }) {
         statusTimer.current = null
       }
     }
-  }, [key])
+  }, [key, sessionId])
 
   const persistNow = (v: string, storageKeyOverride?: string) => {
     try {
       // Always write to the live key ref so a debounced save after session
       // switch cannot land notes on the wrong pad.
       localStorage.setItem(storageKeyOverride ?? keyRef.current, v)
+      persistServer(v, sessionId)
       setDirty(false)
     } catch {
       flashStatus('Could not persist (storage full?)', 4000)

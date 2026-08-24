@@ -115,6 +115,9 @@ def command_looks_like_gui_launch(
             cand = base / rel
         if path_looks_like_gui(cand):
             return True
+    # File Explorer / start on a folder — never wait on explorer.exe (exit 1).
+    if re.search(r"(?i)(?:^|[\s\"'\\/])explorer(?:\.exe)?\b", cmd):
+        return True
     # Bare / relative .exe that is not a compiler
     for m in _LAUNCH_EXE_RE.finditer(cmd):
         exe = (m.group(1) or "").lower()

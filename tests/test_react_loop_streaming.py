@@ -263,6 +263,7 @@ async def test_reasoning_deltas_are_thinking_events_and_never_the_answer(tmp_pat
         c[len("@@thinking:") :] for c in chunks if c.startswith("@@thinking:")
     )
     assert "two plus two is four" in thinking
+    assert "@@thinking_round" in chunks
 
 
 # --------------------------------------------------------------------------
@@ -1443,6 +1444,7 @@ async def test_gpt_oss_style_reasoning_deltas_stream_as_thinking_then_the_answer
 
     thinking = [c for c in chunks if c.startswith("@@thinking:")]
     assert [t[len("@@thinking:") :] for t in thinking] == ["Let me ", "think."]
+    assert chunks.count("@@thinking_round") == 1
     assert answer(chunks) == "Four."
     # Thinking arrived before the first answer token.
     assert chunks.index(thinking[0]) < chunks.index("Four.")

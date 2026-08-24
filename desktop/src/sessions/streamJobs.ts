@@ -175,6 +175,14 @@ export function appendJobThinking(sessionId: string, thought: string) {
   j.lastActivityAt = Date.now()
 }
 
+/** Start of a new model round — this scratchpad replaces the last one. */
+export function replaceJobThinking(sessionId: string, thought: string) {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return
+  j.paint.partialThinking = thought || ''
+  j.lastActivityAt = Date.now()
+}
+
 export function setJobProcessSteps(sessionId: string, steps: ProcessStep[]) {
   const j = jobs.get(sessionId)
   if (!j || j.status !== 'running') return

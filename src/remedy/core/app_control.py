@@ -33,6 +33,7 @@ VALID_ACTIONS = frozenset(
         "open_panel",       # panel: overlay, rail, or settings
         "close_ui",         # close overlays / floating panels
         "new_session",      # (no args)
+        "open_session",     # session_id: str — show that chat in Studio
     }
 )
 

@@ -5,6 +5,7 @@ import contextlib
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
 
@@ -292,66 +293,186 @@ def register_workspace_routes(app: FastAPI, *, runtime=None, gateway=None, memor
             "entries": list_workspace_entries(root),
         }
 
+    def _list_file_entries(listed: Path, base: Path) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
+        for p in sorted(listed.iterdir()):
+            if p.name.startswith(".") and p.name != ".":
+                continue
+            try:
+                rel = str(p.relative_to(base))
+            except ValueError:
+                continue
+            entries.append({
+                "name": p.name,
+                "path": rel,
+                "is_dir": p.is_dir(),
+            })
+        return entries[:200]
+
+    def _files_payload(listed: Path, base: Path, request_path: str) -> dict[str, Any]:
+        try:
+            shown = str(listed.relative_to(base) if listed != base else ".")
+        except ValueError:
+            shown = str(listed)
+            base = listed
+        raw = (request_path or "").strip()
+        if raw and (
+            Path(raw).is_absolute()
+            or (len(raw) > 1 and raw[1] == ":" and raw[0].isalpha())
+        ):
+            shown = str(listed)
+        return {
+            "files": _list_file_entries(listed, base),
+            "path": shown,
+            "root": str(base),
+        }
+
+    def _files_denied(path: str, base: Path) -> dict[str, Any]:
+        return {
+            "files": [],
+            "path": path,
+            "error": "path outside allowed directory",
+            "root": str(base),
+        }
+
     @app.get("/api/files")
     async def list_files(
         path: str = Query(default="."),
         session_id: str | None = Query(default=None),
     ):
-        """List files in a directory for @file autocompletion (jailed to project)."""
+        """List a directory for the Files rail and @file.
+
+        Default listing is the session/project folder. Absolute paths use the
+        owner's ``access_scope`` the same way ``list_dir`` does — full access
+        can open Desktop (or any folder tools can already see). Tests pin a
+        strict jail with ``REMEDY_FILES_ROOT``.
+        """
+        env_root = os.environ.get("REMEDY_FILES_ROOT") or os.environ.get(
+            "REMEDY_PROJECT_PATH"
+        )
+        session_project: str | None = None
         if session_id and memory is not None:
             sess = await memory.get_chat_session(session_id)
             if sess and sess.project_path:
+                session_project = str(sess.project_path)
+
+        if env_root:
+            if session_project:
                 from remedy.core.workspace import ensure_project_dir, resolve_project_path
 
                 try:
                     base = _clamp_files_base(
-                        ensure_project_dir(resolve_project_path(sess.project_path))
+                        ensure_project_dir(resolve_project_path(session_project))
                     )
                 except Exception:
                     base = _files_jail_base()
             else:
                 base = _files_jail_base()
-        else:
-            base = _files_jail_base()
+            try:
+                root = _resolve_jailed(path, base)
+            except (SecurityError, ValueError):
+                return _files_denied(path, base)
+            try:
+                if not root.exists():
+                    return {
+                        "files": [],
+                        "path": path,
+                        "root": str(base),
+                        "error": "not found",
+                    }
+                if not root.is_dir():
+                    return {
+                        "files": [],
+                        "path": path,
+                        "root": str(base),
+                        "error": "not a directory",
+                    }
+                return _files_payload(root, base, path)
+            except Exception:
+                return {"files": [], "path": path, "root": str(base)}
+
+        from remedy.core.workspace import (
+            allowed_roots_for_scope,
+            default_project_from_config,
+            effective_access_scope,
+            is_unset_project_path,
+            resolve_project_path,
+            resolve_under_roots,
+        )
+
+        cfg = load_config()
+        project_raw = session_project or cfg.get("project_path")
         try:
-            root = _resolve_jailed(path, base)
+            if is_unset_project_path(project_raw):
+                project = default_project_from_config(cfg)
+            else:
+                project = resolve_project_path(str(project_raw))
+        except Exception:
+            project = _files_jail_base()
+        jail_base = _clamp_files_base(project)
+        scope = effective_access_scope(cfg.get("access_scope"), project_raw)
+        roots = allowed_roots_for_scope(scope, project)
+        try:
+            listed = resolve_under_roots(path or ".", roots, access_scope=scope)
         except (SecurityError, ValueError):
-            return {"files": [], "path": path, "error": "path outside allowed directory", "root": str(base)}
+            return _files_denied(path, jail_base)
         try:
-            if not root.exists():
+            if not listed.exists():
                 return {
                     "files": [],
                     "path": path,
-                    "root": str(base),
+                    "root": str(jail_base),
                     "error": "not found",
                 }
-            if not root.is_dir():
+            if not listed.is_dir():
                 return {
                     "files": [],
                     "path": path,
-                    "root": str(base),
+                    "root": str(jail_base),
                     "error": "not a directory",
                 }
-            entries = []
-            for p in sorted(root.iterdir()):
-                if p.name.startswith(".") and p.name != ".":
-                    continue
-                try:
-                    rel = str(p.relative_to(base))
-                except ValueError:
-                    continue
-                entries.append({
-                    "name": p.name,
-                    "path": rel,
-                    "is_dir": p.is_dir(),
-                })
-            return {
-                "files": entries[:200],
-                "path": str(root.relative_to(base) if root != base else "."),
-                "root": str(base),
-            }
+            try:
+                listed.relative_to(jail_base)
+                base = jail_base
+            except ValueError:
+                base = listed
+            return _files_payload(listed, base, path)
         except Exception:
-            return {"files": [], "path": path, "root": str(base)}
+            return {"files": [], "path": path, "root": str(jail_base)}
+
+    @app.get("/api/scratch")
+    async def get_scratch(session_id: str | None = Query(default=None)):
+        """Read the Studio scratch pad (same text the rail shows)."""
+        from remedy.core.scratchpad_store import read_scratch, scratch_id
+
+        sid = (session_id or "").strip() or None
+        text = read_scratch(sid)
+        return {"session_id": scratch_id(sid), "text": text, "chars": len(text)}
+
+    @app.put("/api/scratch")
+    async def put_scratch(request: Request):
+        """Write the Studio scratch pad so the agent and the rail share it."""
+        from remedy.core.scratchpad_store import scratch_id, write_scratch
+
+        try:
+            body = await request.json()
+        except Exception as exc:
+            raise HTTPException(400, "JSON body required") from exc
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON object required")
+        sid = str(body.get("session_id") or "").strip() or None
+        text = body.get("text")
+        if text is None:
+            text = ""
+        if not isinstance(text, str):
+            text = str(text)
+        append = bool(body.get("append"))
+        stored = write_scratch(sid, text, append=append)
+        return {
+            "session_id": scratch_id(sid),
+            "text": stored,
+            "chars": len(stored),
+        }
 
     @app.get("/api/files/search")
     async def search_files(
