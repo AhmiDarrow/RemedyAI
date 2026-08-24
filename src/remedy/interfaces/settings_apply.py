@@ -234,7 +234,7 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "thinking_level": str(raw.get("thinking_level") or "high").lower(),
         "approval_mode": str(raw.get("approval_mode") or "auto").lower(),
         "tool_process": normalize_tool_process(raw),
-        "web_tools_enabled": bool(raw.get("web_tools_enabled", False)),
+        "web_tools_enabled": bool(raw.get("web_tools_enabled", True)),
         # Mirror the real governing logic (env > config > default) so Settings
         # shows the value that actually applies — _http_bootstrap_default() is
         # env-blind and would misreport when REMEDY_HTTP_BOOTSTRAP is set.

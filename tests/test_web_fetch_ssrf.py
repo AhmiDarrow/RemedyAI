@@ -306,6 +306,13 @@ async def test_web_search_parses_pinned_html(monkeypatch):
     monkeypatch.setattr(
         "remedy.core.agent_web_tools._web_enabled", lambda runtime: True
     )
+    monkeypatch.setattr(
+        "remedy.core.agent_web_tools._openserp_rows",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("test: use DDG")),
+    )
+    monkeypatch.setattr(
+        "remedy.core.agent_web_tools._searxng_base", lambda runtime=None: ""
+    )
 
     runtime = MagicMock()
     runtime.tool_registry = ToolRegistry()

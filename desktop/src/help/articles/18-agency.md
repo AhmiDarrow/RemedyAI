@@ -45,8 +45,7 @@ Access scope (`project` / `home` / `full`) is a **security** control, separate f
 | **`job_run`** | Silent **explore** or **verify** job — returns a summary, not a second chat persona |
 | **`spread_run`** | Silent **fan-out** of several jobs in parallel (cover more ground) — one merged digest |
 | **`mission_*`** | Durable checklist + verify for work-alone builds |
-| **`web_fetch`** | Optional HTTP fetch — enable `web_tools_enabled: true` in config |
-| **`web_search`** | Lightweight web search when web tools are enabled (SSRF-safe resolve) |
+| **`web_fetch` / `web_search`** | Public HTTP fetch and search — on by default; `web_tools_enabled: false` to disable |
 | **`skill_activate` / `skill_run`** | Load procedure packs; scripts stay blocked until Trust |
 
 ### Review / implement (must use tools) — **0.20.0+**
@@ -142,15 +141,15 @@ When you say **work alone** / **handle this on your own**, continuity steers Rem
 
 Orientation: if the focus folder has `AGENTS.md`, `memory/LATEST_HANDOFF.md`, etc., Remedy surfaces short pointers automatically.
 
-## Optional web tools
+## Web tools
 
-In config (`~/.remedy/config.toml` / Settings store):
+On by default after install. To keep Remedy offline:
 
 ```toml
-web_tools_enabled = true
+web_tools_enabled = false
 ```
 
-Then `web_fetch` can load documentation URLs. Offline coding does not require this.
+First run downloads a local OpenSERP (~10 MB) for `web_search`. Offline coding does not require the web.
 
 ## Computer use (browser rail + full desktop)
 

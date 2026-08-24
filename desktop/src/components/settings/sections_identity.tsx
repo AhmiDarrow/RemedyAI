@@ -549,8 +549,8 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
               <FormToggle
                 checked={webToolsEnabled}
                 onChange={setWebToolsEnabled}
-                label="Enable web_fetch (public HTTP only)"
-                description="Opt-in. Private/localhost/metadata hosts are blocked (SSRF + DNS pin). Public web stays available."
+                label="Web fetch and search"
+                description="On by default after install. Remedy downloads a local OpenSERP search backend on first run (~10 MB) and can fetch public pages. Private/localhost/metadata hosts stay blocked. Turn off to keep her offline."
               />
               <FormToggle
                 checked={httpBootstrap}

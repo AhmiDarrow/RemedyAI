@@ -4,6 +4,19 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Changed — web search is on after install
+
+- **Web fetch and search are on by default.** The installer ToS already
+  covers automated access; a second ack is no longer required. Turn them off
+  in Settings → Security & power (`web_tools_enabled = false`) to keep Remedy
+  offline.
+- **First run downloads OpenSERP** (MIT, ~10 MB, pinned `v0.8.12`) into
+  `~/.remedy/bin` and starts it on `127.0.0.1:17410`. `web_search` uses that
+  local API when it is healthy; DuckDuckGo's no-JavaScript results page covers
+  the gap while it downloads or if it is down. An owner SearXNG URL still
+  wins when set. The managed host is not written into `web_search_url`, so it
+  does not open the SSRF private-host hole.
+
 ### Added — licence notices and web etiquette
 
 - **The installer now carries its third-party notices.** npm packages, Rust
