@@ -14,6 +14,7 @@ idiom as the build ledger.
 
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 import os
@@ -53,8 +54,13 @@ def _store_path(home: str | Path | None = None) -> Path:
     return d / "reminders.json"
 
 
+_id_seq = itertools.count()
+
+
 def _new_id() -> str:
-    return f"r{int(time.time() * 1000):x}{os.getpid() % 997:03x}"
+    # Millisecond + pid collided when two reminders were created in the same
+    # tick (Linux CI). time_ns + a process-local counter stay unique.
+    return f"r{time.time_ns():x}{os.getpid() % 997:03x}{next(_id_seq):x}"
 
 
 @dataclass
