@@ -159,14 +159,16 @@ def _dpapi_available() -> bool:
 
 
 def _dpapi_protect(plaintext: bytes) -> bytes:
+    if sys.platform != "win32":
+        raise OSError("DPAPI is Windows-only")
     import ctypes
     from ctypes import wintypes
 
     class DATA_BLOB(ctypes.Structure):
         _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
 
-    crypt32 = ctypes.windll.crypt32
-    kernel32 = ctypes.windll.kernel32
+    crypt32 = ctypes.WinDLL("crypt32")
+    kernel32 = ctypes.WinDLL("kernel32")
 
     in_buf = ctypes.create_string_buffer(plaintext)
     in_blob = DATA_BLOB(len(plaintext), ctypes.cast(in_buf, ctypes.POINTER(ctypes.c_char)))
@@ -191,14 +193,16 @@ def _dpapi_protect(plaintext: bytes) -> bytes:
 
 
 def _dpapi_unprotect(ciphertext: bytes) -> bytes:
+    if sys.platform != "win32":
+        raise OSError("DPAPI is Windows-only")
     import ctypes
     from ctypes import wintypes
 
     class DATA_BLOB(ctypes.Structure):
         _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
 
-    crypt32 = ctypes.windll.crypt32
-    kernel32 = ctypes.windll.kernel32
+    crypt32 = ctypes.WinDLL("crypt32")
+    kernel32 = ctypes.WinDLL("kernel32")
 
     in_buf = ctypes.create_string_buffer(ciphertext)
     in_blob = DATA_BLOB(len(ciphertext), ctypes.cast(in_buf, ctypes.POINTER(ctypes.c_char)))

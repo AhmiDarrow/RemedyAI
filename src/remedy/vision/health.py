@@ -20,7 +20,7 @@ from remedy.vision.config import vision_root
 
 def _total_ram_bytes() -> int | None:
     """Best-effort physical RAM size without hard deps."""
-    if os.name == "nt":
+    if sys.platform == "win32":
         try:
             import ctypes
             from ctypes import wintypes
@@ -44,12 +44,14 @@ def _total_ram_bytes() -> int | None:
                 return int(stat.ullTotalPhys)
         except Exception:
             return None
-    try:
-        pages = os.sysconf("SC_PHYS_PAGES")  # type: ignore[attr-defined]
-        size = os.sysconf("SC_PAGE_SIZE")  # type: ignore[attr-defined]
-        return int(pages) * int(size)
-    except Exception:
-        return None
+    else:
+        try:
+            pages = os.sysconf("SC_PHYS_PAGES")
+            size = os.sysconf("SC_PAGE_SIZE")
+            return int(pages) * int(size)
+        except Exception:
+            return None
+    return None
 
 
 def _disk_free_bytes(path: Path) -> int | None:
