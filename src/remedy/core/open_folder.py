@@ -19,21 +19,28 @@ _SKIP_TOKS = frozenset({"/c", "/k", "cmd", "cmd.exe", "start", ""})
 
 
 def _norm_head(raw: str) -> str:
-    name = Path(str(raw or "")).name.lower()
+    # Split on both slashes — Path.name on POSIX treats ``C:\...\explorer.EXE``
+    # as one filename, so Linux CI missed the explorer head.
+    name = str(raw or "").replace("\\", "/").rsplit("/", 1)[-1].lower()
     if name.endswith(".exe"):
         name = name[:-4]
     return name
 
 
 def _looks_flag(tok: str) -> bool:
+    """True for Windows explorer/cmd switches, not POSIX absolute paths.
+
+    ``/tmp/foo`` is a directory. ``/c`` / ``/e`` / ``/select,x`` are flags.
+    Treating every leading-slash token as a flag made Linux CI miss
+    ``explorer /tmp/…`` (session 0.31.2).
+    """
     t = (tok or "").strip()
     if not t or t in ('""', "''"):
         return True
-    return bool(
-        t.startswith("/")
-        and not t.startswith("//")
-        and not re.match(r"^/[A-Za-z]:", t)
-    )
+    low = t.lower()
+    if low.startswith("/select"):
+        return True
+    return bool(re.fullmatch(r"/[A-Za-z][A-Za-z0-9]*", t))
 
 
 def existing_dir(raw: str | None) -> Path | None:

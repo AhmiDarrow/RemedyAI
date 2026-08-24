@@ -5,7 +5,7 @@ description: >
   fix, test, update code/docs, build, commit, wait for CI, publish only if green.
   Use when the user says ship, release, finish, or "test everything then
   update/build/commit/CI/PyPI".
-version: 1.1.0
+version: 1.2.0
 author: Remedy
 tags: [quality, release, git, ci, docs, etiquette]
 ---
@@ -48,10 +48,13 @@ Execute **in order**. After any failure, stop advancement until that gate is gre
 ### 2. Test (hard gate)
 
 - Discover how *this* repo tests (pytest, npm test, cargo test, `make check`, …).
+- Open `.github/workflows/` (or equivalent) and run **those commands locally**
+  before push. Pytest-only is not CI.
 - Run the **full** suite when the user asked for “everything”; otherwise run
-  the subset that covers the change **plus** any project-required CI subset.
+  the subset that covers the change **plus** the project CI lint/type/docs steps.
 - Add or update tests when behavior changed.
 - **Do not commit known-failing tests** unless the user wants a WIP commit.
+- **Do not push** until the local CI commands are green.
 
 ### 3. Update the project
 
@@ -84,9 +87,11 @@ Execute **in order**. After any failure, stop advancement until that gate is gre
 
 ### 7. Push and wait for CI
 
-- Push to the integration branch the project uses (`main` / `master`).
-- **Wait for CI to finish.** Report the run URL when available.
-- Red CI → fix, commit, push again. **No publish while red.**
+- Push to the integration branch the project uses (`main` / `master`) **only
+  after the local CI commands are green.**
+- **Wait for remote CI to finish.** Report the run URL when available.
+- Red CI → run the **failed step locally**, fix until it is green, then push.
+  Do not push a guess. **No publish while red.**
 
 ### 8. Publish (only if asked and CI is green)
 
@@ -114,6 +119,8 @@ If blocked, state **which gate** and the **smallest next action**.
 ## Anti-patterns
 
 - “It works on my machine” without running the project’s test command.
+- Pushing after pytest-only when CI also runs ruff / mypy / docs.
+- Pushing a CI-fix commit without re-running the **failed CI step** locally.
 - Committing version bumps without changelog/docs.
 - Publishing before CI finishes (or ignoring a red run).
 - Force-pushing shared mainline branches.
@@ -136,12 +143,13 @@ Use when `cwd` is the RemedyAI tree (or user says “this project”).
 | Gate | Remedy command / note |
 |------|------------------------|
 | Blast radius | Root `AGENTS.md` Change-safety protocol; skill **change-safety** |
-| Test (Python) | `uv run pytest -q` |
+| Test (Python) | `uv run pytest -q --tb=short` |
 | Test (desktop) | `cd desktop && npm test && npm run build` |
+| **Local CI (before every push)** | Same as `.github/workflows/ci.yml`: `uv run ruff check .` · `uv run mypy` · `uv run python scripts/check_mypy_exclude.py` · import smoke · `uv run python scripts/check_docs.py` · full pytest · desktop npm test+build. After a red remote run, re-run **that step** locally before pushing again. |
 | Docs | Manuals in `docs/manual/`; `uv run python scripts/sync_help_manual.py`; gate `uv run python scripts/check_docs.py` |
 | Version | `uv run python scripts/sync_version.py {X.Y.Z}` |
 | Build wheel | `uv build` → `dist/remedy_ai-{ver}*` |
-| Commit | Push `master` (or current integration branch) |
+| Commit | Push `master` only after local CI is green |
 | CI | GitHub Actions workflow **CI** on that commit — wait for success |
 | Publish PyPI | After CI green: `uv publish dist/remedy_ai-{ver}.*` (token via env / `~/.pypirc`) |
 | Desktop installer | Tag `v{X.Y.Z}` → **desktop-release**; asset must be `Remedy.Desktop_{X.Y.Z}_x64-setup.exe` (see root `AGENTS.md`) |
