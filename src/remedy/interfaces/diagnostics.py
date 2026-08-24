@@ -100,7 +100,7 @@ def _process_stats() -> dict[str, Any]:
     except Exception:
         pass
     # Windows fallback without psutil
-    if os.name == "nt":
+    if sys.platform == "win32":
         try:
             import ctypes
             from ctypes import wintypes
