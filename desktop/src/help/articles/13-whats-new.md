@@ -14,7 +14,8 @@ still starts at 0.31.0.
 Ask her to open Alongside, Voice settings, Help, or the Terminal rail —
 she does it in the app. She does not click her own chrome. Changing a
 setting opens that Settings section so you can see it. Grove / Studio
-screenshots capture **her window**, not a random monitor.
+screenshots capture **her window**, not a random monitor. Linux `.deb`
+and AppImage now build (the 0.31.0 tag never got a GitHub Release).
 
 PyPI **`remedy-ai==0.31.1`** · tag **v0.31.1**.
 
