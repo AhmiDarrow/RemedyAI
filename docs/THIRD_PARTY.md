@@ -41,6 +41,16 @@ request** rather than bundled, so they are documented rather than attributed.
 - **License:** MIT (see upstream)
 - **Pin:** `LLAMA_CPP_TAG` in `remedy.runtime.catalog`
 
+## OpenSERP (local web search)
+
+- **Project:** [karust/openserp](https://github.com/karust/openserp)
+- **Use:** First-run local search API for `web_search` (`127.0.0.1:17410`)
+- **License:** **MIT**
+- **Redistribution:** Downloaded at first use into `~/.remedy/bin`, never bundled
+- **Pin:** `OPENSERP_VERSION` in `remedy.runtime.web_search_host` (`0.8.12`)
+- **Note:** Loopback only. If the binary is not ready yet, `web_search` uses
+  DuckDuckGo's HTML results page instead.
+
 ## ripgrep
 
 - **Project:** [BurntSushi/ripgrep](https://github.com/BurntSushi/ripgrep)

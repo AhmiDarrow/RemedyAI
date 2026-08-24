@@ -195,7 +195,7 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "thinking_level": str(cfg.get("thinking_level") or "high").lower(),
             "approval_mode": str(cfg.get("approval_mode") or "auto").lower(),
             "tool_process": _normalize_tool_process(cfg),
-            "web_tools_enabled": bool(cfg.get("web_tools_enabled", False)),
+            "web_tools_enabled": bool(cfg.get("web_tools_enabled", True)),
             "http_bootstrap": _effective_http_bootstrap(cfg),
             # Opt-in: tighter tool caps + email/phone scrub on LLM egress (default off = fast)
             "privacy_mode": bool(cfg.get("privacy_mode", False)),

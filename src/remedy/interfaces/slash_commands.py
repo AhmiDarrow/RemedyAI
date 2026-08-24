@@ -882,7 +882,7 @@ async def handle_slash_command(
         lines.append(f"{emoji} **Approval Mode:** `{am}` — {blurb}")
 
         # -- Web tools
-        web = bool(cfg.get("web_tools_enabled", False))
+        web = bool(cfg.get("web_tools_enabled", True))
         emoji = "🌐" if web else "🚫"
         lines.append(f"{emoji} **Web Tools:** `{'enabled' if web else 'disabled'}`")
 

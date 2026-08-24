@@ -254,6 +254,18 @@ def create_app(
                         logger.info("Voice assets first-run download: %s", vr.get("started"))
                 except Exception:
                     logger.exception("Voice assets first-run ensure failed")
+                # Local OpenSERP (~10 MB) so web_search has a real backend.
+                # Download is non-blocking; DuckDuckGo HTML covers the gap.
+                try:
+                    from remedy.runtime.web_search_host import schedule_ensure
+
+                    home0 = cfg0.get("home_dir") if isinstance(cfg0, dict) else None
+                    web_on = True
+                    if isinstance(cfg0, dict) and "web_tools_enabled" in cfg0:
+                        web_on = bool(cfg0.get("web_tools_enabled"))
+                    schedule_ensure(home0, enabled=web_on)
+                except Exception:
+                    logger.exception("web search host first-run ensure failed")
                 # Her voice should be ready before she is asked to speak: load
                 # the engines now (Kokoro; Chatterbox too when HQ is on) so
                 # the first sentence is not a twenty-second wait.
@@ -419,6 +431,10 @@ def create_app(
                     logger.debug("Gateway stop on shutdown failed", exc_info=True)
             logger.info("API shutdown: stopping vision decoder if running")
             _shutdown_vision_decoder()
+            with suppress(Exception):
+                from remedy.runtime.web_search_host import stop as stop_web_search_host
+
+                stop_web_search_host()
             # The shared aiohttp session behind every LLM call: nothing else
             # ever closed it, so its connection pool outlived the server.
             try:

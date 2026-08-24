@@ -804,7 +804,10 @@ def register_settings_tools(runtime: Any) -> None:
                 },
                 "web_tools_enabled": {
                     "type": "boolean",
-                    "description": "Enable public web_fetch tool",
+                    "description": (
+                        "Public web_fetch + web_search. On by default; "
+                        "set false to keep Remedy offline."
+                    ),
                 },
                 "web_respect_robots": {
                     "type": "boolean",
@@ -824,8 +827,8 @@ def register_settings_tools(runtime: Any) -> None:
                 "web_search_scraping_ack": {
                     "type": "boolean",
                     "description": (
-                        "Owner accepts the DuckDuckGo HTML fallback for search. "
-                        "Set only after they say so in their own words."
+                        "Legacy. Search no longer waits for this; the installer "
+                        "ToS covers the DuckDuckGo HTML fallback."
                     ),
                 },
                 "http_bootstrap": {"type": "boolean"},
