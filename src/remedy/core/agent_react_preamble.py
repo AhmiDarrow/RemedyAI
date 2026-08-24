@@ -676,7 +676,10 @@ async def prepare_turn_preamble(
 
         if is_local_binding(_bind0.provider, _bind0.model, _bind0.base_url) and tools:
             tools = filter_tools_write_first(
-                tools, user_message=str(message or ""), step_index=0
+                tools,
+                user_message=str(message or ""),
+                step_index=0,
+                history=messages if isinstance(messages, list) else None,
             )
             # Keep all_tools full for later re-arm; only arm write-first now
             # (rearm still uses all_tools when needed after a write succeeds)

@@ -496,17 +496,163 @@ _OPERATE_HOST_RE = re.compile(
     r"start\s+(the\s+)?(dev\s+)?server|open\s+(the\s+)?(site|page|preview))\b"
 )
 
+# Remedy injects its own bracket-tagged turns ("[Partner · … tools required]",
+# "[Task loop — PLAN]", "[Local create · tools required]"). They are harness
+# scaffolding, not something the owner typed.
+_HARNESS_INJECT_RE = re.compile(
+    r"""(?ix)^\s*\[\s*(
+        partner | task\s+loop | local\s+(create|agent) | evidence\s+delta |
+        build | auto\s+verify | machine\s+verify | local\s+create\s+contract
+    )\b[^\]]*\]"""
+)
+
+
+_INJECT_CONSTANTS = (
+    "RECOVERY_NUDGE",
+    "EMPTY_WRITE_NUDGE",
+    "SPEED_BATCH_NUDGE",
+    "APPROVAL_NUDGE",
+    "EMPTY_SEARCH_NUDGE",
+    "AGENCY_REARM_NUDGE",
+    "UNFINISHED_WORK_NUDGE",
+)
+_inject_prefixes_cache: tuple[str, ...] | None = None
+
+
+def _known_inject_prefixes() -> tuple[str, ...]:
+    """Opening text of the nudges Remedy injects as *user* turns.
+
+    Not every inject carries a ``[Bracketed tag]``. ``RECOVERY_NUDGE`` starts
+    "One or more tools failed. Do not give a final answer yet…" — plain prose,
+    indistinguishable from owner input by shape alone. Matching the real
+    constants keeps this exact instead of guessing at phrasing.
+    """
+    global _inject_prefixes_cache
+    if _inject_prefixes_cache is not None:
+        return _inject_prefixes_cache
+    found: list[str] = []
+    try:
+        from remedy.core import react_policy as _rp
+
+        for attr in _INJECT_CONSTANTS:
+            val = getattr(_rp, attr, "")
+            if isinstance(val, str) and len(val.strip()) >= 24:
+                found.append(val.strip()[:48].lower())
+    except Exception:
+        found = []
+    _inject_prefixes_cache = tuple(found)
+    return _inject_prefixes_cache
+
+
+def is_harness_inject(text: str | None) -> bool:
+    """True for a turn Remedy wrote to steer itself, not owner input."""
+    raw = str(text or "").strip()
+    if not raw:
+        return False
+    if _HARNESS_INJECT_RE.match(raw):
+        return True
+    low = raw[:48].lower()
+    return any(low.startswith(p[: len(low)]) or p.startswith(low) for p in _known_inject_prefixes())
+
+
+def last_real_user_message(messages: list[dict[str, Any]] | None) -> str:
+    """The owner's most recent turn, skipping Remedy's own injected nudges.
+
+    Classifying the inject instead of the request is actively harmful: the
+    nudges quote tool names ("Reply with native tool_calls only (file_read /
+    file_write …)"), which ``looks_like_injected_tool_markup`` reads as pasted
+    tool markup — i.e. trivia. The body optimizer then strips every tool from
+    the very step whose inject demanded a tool call, and a local model
+    deadlocks: no tools, so no tool call, so another nudge.
+    """
+    fallback = ""
+    for m in reversed(messages or []):
+        if not isinstance(m, dict) or m.get("role") != "user":
+            continue
+        content = m.get("content")
+        text = content if isinstance(content, str) else str(content or "")
+        if not text.strip():
+            continue
+        if is_harness_inject(text):
+            fallback = fallback or text
+            continue
+        return text
+    # Every user turn was an inject (rare): better to over-arm than to strip.
+    return fallback
+
+
+_WRITE_TOOL_NAMES = frozenset(
+    {"file_write", "file_edit", "file_edit_batch", "apply_patch"}
+)
+
+_EXEC_TOOL_NAMES = frozenset({"bash_exec", "host_run", "run_python_file"})
+
+# "…then run it", "…and tell me the output", "…prove it works": an explicit
+# second step the owner asked for, after the writing is done.
+_RUN_REQUEST_RE = re.compile(
+    r"(?is)\b("
+    r"then\s+run|run\s+it|run\s+that|and\s+run\b|execute\s+it|"
+    r"run\s+the\s+(?:file|script|program|app|test|tests)|"
+    r"tell\s+me\s+(?:its|the)\s+output|show\s+me\s+(?:its|the)\s+output|"
+    r"report\s+(?:its|the)\s+output|prove\s+it\s+works|demonstrate\s+it|"
+    r"run\s+it\s+again|confirm\s+it\s+(?:works|passes)"
+    r")\b"
+)
+
+
+def request_wants_execution(user_message: str | None) -> bool:
+    """True when the owner explicitly asked for the code to be *run*."""
+    return bool(_RUN_REQUEST_RE.search(str(user_message or "")))
+
+
+def execution_already_ran(history: list[dict[str, Any]] | None) -> bool:
+    """True once an execution tool has actually been called this turn."""
+    for m in reversed(history or []):
+        if not isinstance(m, dict) or m.get("role") != "assistant":
+            continue
+        for tc in m.get("tool_calls") or []:
+            if not isinstance(tc, dict):
+                continue
+            if str((tc.get("function") or {}).get("name") or "") in _EXEC_TOOL_NAMES:
+                return True
+    return False
+
+
+def write_already_attempted(history: list[dict[str, Any]] | None) -> bool:
+    """True once the model has actually called a write tool this turn."""
+    for m in reversed(history or []):
+        if not isinstance(m, dict) or m.get("role") != "assistant":
+            continue
+        for tc in m.get("tool_calls") or []:
+            if not isinstance(tc, dict):
+                continue
+            name = str((tc.get("function") or {}).get("name") or "")
+            if name in _WRITE_TOOL_NAMES:
+                return True
+    return False
+
 
 def filter_tools_write_first(
     tools: list[dict[str, Any]] | None,
     *,
     user_message: str = "",
     step_index: int = 0,
+    history: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]] | None:
-    """On early implement steps, drop bash/mission so the model must file_write."""
+    """On early implement steps, drop bash/mission so the model must file_write.
+
+    The point is *write before you run a shell*, not *wait two steps*. Gating on
+    ``step_index`` alone meant a model that wrote a file on step 0 still had no
+    ``bash_exec`` / ``host_run`` / ``run_python_file`` on step 1 — so "create
+    fib.py, run it, tell me the output" ended after the write, every time, on
+    every model tested (local and cloud alike). Once a write has happened the
+    objective is met and execution tools come back immediately.
+    """
     if not tools or step_index > 1:
         return tools
     if not message_wants_implement(user_message):
+        return tools
+    if write_already_attempted(history):
         return tools
     allow = set(WRITE_FIRST_TOOLS)
     if _OPERATE_HOST_RE.search(user_message or ""):
@@ -661,6 +807,19 @@ def apply_local_body_optimize(
                     break
         except Exception:
             pass
+    # A green build verify is not the same as the owner's request being done.
+    # "Create fib.py, then run it and tell me its output" writes the file, the
+    # engine's own smoke test passes, and GREEN stripped every tool and ordered
+    # a summary — so the model was *forbidden* from running what it had just
+    # written. The turn ended with the second half of the request unperformed,
+    # identically on every model tested. Hold the tools until the run happens.
+    if (
+        green_summary
+        and request_wants_execution(user_message)
+        and not execution_already_ran(history)
+    ):
+        green_summary = False
+
     if green_summary:
         tools = None
         out.pop("tools", None)

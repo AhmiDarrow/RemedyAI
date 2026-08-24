@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from remedy import __version__
+from remedy.home import default_home
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -17,10 +18,13 @@ def build_parser() -> argparse.ArgumentParser:
                "Power users: use 'remedy serve' to run the API server.",
     )
     parser.add_argument("--version", action="version", version=f"remedy {__version__}")
+    # Default through default_home() so REMEDY_HOME is honoured. A literal
+    # "~/.remedy" default silently outranked the env var, so a sandboxed run
+    # (harness, portable install) locked and wrote into the real profile.
     parser.add_argument(
         "--home",
-        default="~/.remedy",
-        help="Remedy home directory (default: ~/.remedy)",
+        default=str(default_home()),
+        help="Remedy home directory (default: $REMEDY_HOME or ~/.remedy)",
     )
 
     sub = parser.add_subparsers(dest="command", help="Available commands")
