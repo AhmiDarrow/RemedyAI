@@ -20,6 +20,9 @@ wheels/
 .venv
 .venv/
 
+# Node (root leftover or desktop/)
+node_modules/
+
 # IDE
 .vscode/
 .idea/

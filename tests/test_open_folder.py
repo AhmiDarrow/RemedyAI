@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 from remedy.core.open_folder import (
+    _looks_flag,
     existing_dir,
     folder_from_argv,
     folder_from_command,
@@ -24,6 +26,8 @@ def test_folder_from_argv_explorer(tmp_path: Path):
     assert folder_from_argv(["cmd", "/c", "start", "", str(d)]) == d.resolve()
     assert folder_from_argv(["python", "-c", "print(1)"]) is None
     assert folder_from_argv(["explorer"]) is None
+    # POSIX absolute paths are directories, not /c /e flags (Linux CI).
+    assert folder_from_argv(["explorer", "/e", str(d)]) == d.resolve()
 
 
 def test_folder_from_command_start(tmp_path: Path):
@@ -32,6 +36,16 @@ def test_folder_from_command_start(tmp_path: Path):
     assert folder_from_command(f'start "" "{d}"') == d.resolve()
     assert folder_from_command(f'explorer "{d}"') == d.resolve()
     assert folder_from_command("echo hi") is None
+
+
+def test_looks_flag_distinguishes_cmd_switches_from_posix_paths():
+    """Linux CI argv is explorer /tmp/... — that slash is a path, not /c."""
+    assert _looks_flag("/c") is True
+    assert _looks_flag("/k") is True
+    assert _looks_flag("/e") is True
+    assert _looks_flag("/select,C:\\foo") is True
+    assert _looks_flag("/tmp/pytest-of-runner/pytest-0/bot") is False
+    assert _looks_flag("/home/runner/work/RemedyAI") is False
 
 
 def test_existing_dir_rejects_file(tmp_path: Path):
@@ -43,10 +57,22 @@ def test_existing_dir_rejects_file(tmp_path: Path):
 
 def test_open_folder_os_mocked(tmp_path: Path, monkeypatch):
     opened: list[str] = []
-    monkeypatch.setattr(
-        "os.startfile", lambda p: opened.append(str(p)), raising=False
-    )
-    monkeypatch.setattr("os.name", "nt")
+    if os.name == "nt":
+        monkeypatch.setattr(
+            "os.startfile", lambda p: opened.append(str(p)), raising=False
+        )
+    else:
+        monkeypatch.setattr("shutil.which", lambda _n: "/usr/bin/xdg-open")
+
+        def _popen(args, **_k):
+            opened.append(str(args[-1]))
+
+            class P:
+                pid = 1
+
+            return P()
+
+        monkeypatch.setattr("subprocess.Popen", _popen)
     info = open_folder_os(tmp_path)
     assert info["ok"] is True
     assert Path(info["target"]) == tmp_path.resolve()

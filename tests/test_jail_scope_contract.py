@@ -1,6 +1,6 @@
 """Jail contract: reads never jailed; writes follow access_scope; copy source is a read.
 
-Pins the owner's complaint from the ExampleProject build session
+Pins a write-jail complaint from a bound project session
 (``access_scope=full`` + ``approval_mode=auto``): the write jail kept saying
 "raise access_scope" while the scope was already full, read-only shell runs
 were refused for their workdir, and copying an mp3 from Downloads *into* the
