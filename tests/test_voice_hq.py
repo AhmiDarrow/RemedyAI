@@ -67,6 +67,7 @@ def test_synthesize_hq_exception_falls_back(tmp_path: Path, monkeypatch):
 
 
 def test_synthesize_falls_back_to_kokoro_if_hq_missing(tmp_path: Path, monkeypatch):
+    pytest.importorskip("numpy")
     import remedy.voice.chatterbox as hq
     import remedy.voice.service as svc
 
