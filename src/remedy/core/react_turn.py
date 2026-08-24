@@ -351,42 +351,10 @@ def resolve_tools(
             logger.info("react_tools disarm reason=non_work")
             return ToolsDecision(None, False, "non_work", pack="none")
 
-    # Life / durable-goal turns: partner tools only — never coding write pack.
-    with suppress(Exception):
-        from remedy.memory.life_goals import LIFE_GOAL_TOOL_NAMES, looks_like_life_goal_statement
-        from remedy.memory.living import turn_kind
-
-        kind = turn_kind(message or "")
-        if kind in ("life", "goal") or looks_like_life_goal_statement(message or ""):
-            from remedy.core.build_engine import looks_like_build_request
-            from remedy.core.local_agent_optimize import message_wants_implement
-
-            hostish = bool(
-                re.search(
-                    r"(?is)\b("
-                    r"launch|serve|preview|localhost|http\.server|npm\s|"
-                    r"file_read|file_write|host_run|bash_exec|"
-                    r"start\s+(the\s+)?(dev\s+)?server|"
-                    r"open\s+(the\s+)?(site|page|home\s+page)|"
-                    r"\.(?:py|html?|ts|tsx|js|css)\b"
-                    r")\b",
-                    message or "",
-                )
-            )
-            work = (
-                bool(build_active)
-                or hostish
-                or message_wants_implement(message or "")
-                or looks_like_build_request(message or "")
-            )
-            if not work:
-                def _tool_name(t: dict) -> str:
-                    fn = t.get("function") if isinstance(t.get("function"), dict) else {}
-                    return str(fn.get("name") or t.get("name") or "")
-
-                pack = [t for t in all_t if _tool_name(t) in LIFE_GOAL_TOOL_NAMES]
-                logger.info("react_tools arm reason=life_goal pack=life count=%d", len(pack))
-                return ToolsDecision(pack or None, False, "life_goal", pack="life")
+    # Do not pick a tool pack from lexical classifiers (``shipping``, ``goal``,
+    # ``this week``, …). That stripped file/host tools on coding asks that
+    # merely mentioned a life-shaped word. Memory may still tag life vs code;
+    # arming stays full unless an explicit mode (Plan) or proven chat-only.
 
     # Page interaction / browse full agency
     if page_interaction:
