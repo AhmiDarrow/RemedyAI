@@ -113,8 +113,19 @@ def brace_balance(text: str) -> tuple[bool, str]:
 
 
 def _is_tsc_project_noise(err: str) -> bool:
-    """tsc on a lone file without a tsconfig errors on imports, not syntax."""
-    return "Cannot find module" in err or "TS2307" in err or "TS6059" in err
+    """tsc on a lone file without a tsconfig errors on imports/types, not syntax."""
+    e = err or ""
+    return (
+        "Cannot find module" in e
+        or "TS2307" in e
+        or "TS6059" in e
+        or "TS7006" in e  # implicit any (no tsconfig / noImplicitAny)
+        or "TS7026" in e  # JSX.IntrinsicElements missing
+        or "TS7031" in e
+        or "JSX.IntrinsicElements" in e
+        or "implicitly has type 'any'" in e
+        or "implicitly has an 'any' type" in e
+    )
 
 
 def _jsx_checker() -> str | None:
