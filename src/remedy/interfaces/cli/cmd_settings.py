@@ -489,12 +489,20 @@ def _cmd_computer(args) -> None:
                 import sys
                 from pathlib import Path as _P
 
-                # parents[3] is <root>/src, not <root> — the poller was
-                # looked for at <root>/src/scripts/ and never found, so
-                # `remedy computer host --api` printed "script missing" and
-                # silently did nothing, every time.
-                repo = _P(__file__).resolve().parents[4]
-                poller = repo / "scripts" / "computer_host_poller.py"
+                # Walk up from this file (src tree *or* site-packages) until
+                # scripts/computer_host_poller.py exists. Counting parents
+                # assumed a src/ layout and missed editable/CI installs.
+                here = _P(__file__).resolve()
+                poller = None
+                repo = here.parent
+                for parent in here.parents:
+                    candidate = parent / "scripts" / "computer_host_poller.py"
+                    if candidate.is_file():
+                        poller = candidate
+                        repo = parent
+                        break
+                if poller is None:
+                    poller = here.parents[4] / "scripts" / "computer_host_poller.py"
                 if poller.is_file():
                     import subprocess
 
