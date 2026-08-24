@@ -21,6 +21,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   Time Travel, and Studio rails (Browser, Terminal, Files). Changing a
   setting with `update_settings` also opens that Settings section so the
   owner can see it. Do not click her chrome.
+- **Linux desktop-release compiles.** The rail-browser GTK helper treated
+  GDK `origin()` as `(x, y)` and `Key` as `Into<u32>`; gtk-rs 0.18 returns
+  `(ok, x, y)` and keys deref to `u32`. That failed `build-tauri-linux` on
+  the 0.31.0 tag, so no GitHub Release. 0.31.1 ships Windows and Linux.
 
 ## [0.31.0] - 2026-08-24
 
