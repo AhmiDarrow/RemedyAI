@@ -142,10 +142,19 @@ def test_recurring_skips_missed_occurrences(home) -> None:
 def test_complete_closes_oneshot_but_rolls_recurring(home) -> None:
     one = R.add_reminder("one shot", "in 1 hour", home=home)
     rec = R.add_reminder("weekly", "in 1 hour", recurrence="weekly", home=home)
+    assert one.id != rec.id
     assert R.complete_reminder(one.id, home=home).status == R.STATUS_DONE
     rolled = R.complete_reminder(rec.id, home=home)
     assert rolled.status == R.STATUS_PENDING
     assert rolled.due_ts > time.time() + 3600
+
+
+def test_two_reminders_in_the_same_tick_get_distinct_ids(home) -> None:
+    ids = {
+        R.add_reminder(f"item {i}", "in 1 hour", home=home).id
+        for i in range(20)
+    }
+    assert len(ids) == 20
 
 
 def test_snooze_and_cancel(home) -> None:
