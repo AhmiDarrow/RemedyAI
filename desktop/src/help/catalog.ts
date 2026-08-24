@@ -24,7 +24,7 @@ const META: HelpArticleMeta[] = [
     category: 'Start here',
     order: 0,
     tags: ['intro', 'quick start', 'map'],
-    summary: 'What Remedy is, architecture sketch, and manual map.',
+    summary: 'What Remedy is — a partner for any ability level — architecture sketch, and manual map.',
   },
   {
     id: '16-continuity-philosophy',
