@@ -100,7 +100,10 @@ def open_folder_os(path: str | Path) -> dict[str, Any]:
 
     refuse_protected_secret_path(p)
     if os.name == "nt":
-        os.startfile(os.path.normpath(str(p)))  # noqa: S606 — folder open, not a URL
+        startfile = getattr(os, "startfile", None)
+        if startfile is None:
+            raise RuntimeError("os.startfile unavailable")
+        startfile(os.path.normpath(str(p)))  # noqa: S606 — folder open, not a URL
         method = "startfile"
     else:
         import shutil
