@@ -46,7 +46,7 @@ Owners span every ability level — non-technical, low-vision, limited motor con
 | **Who it’s for** | Anyone who wants a partner that *finishes* — errands, research, games, and code |
 | **What stays local** | Memory, voice, Vault, skills, approvals, DPAPI secrets, optional SmolVLM2 vision |
 | **What you bring** | Your API keys / local models — Remedy does not hold a cloud of you |
-| **Current** | **v0.31.0** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
+| **Current** | **v0.31.1** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
 
 From the creator: *My name is Ahmi, I hope you enjoy my Remedy.*  
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.
@@ -55,7 +55,7 @@ In-app: title-bar / tray → **About Remedy** · **Settings → About**.
 
 ## What’s new
 
-**Latest: [v0.31.0](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.31.0)** — a whole new Remedy. Grove is the partner home. She speaks. Life tasks finish with evidence and a Vault for cards. Silent **hive** daughters report packets, not extra chats. **Research** and **game studio** are first-class. Web search is on after install. Windows and Linux share one home.
+**Latest: [v0.31.1](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.31.1)** — she drives her own UI with you (Grove, Alongside, Settings, rails). Partner line starts at [v0.31.0](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.31.0): Grove, voice, life tasks, Vault, hive, research, game studio.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/AhmiDarrow/RemedyAI/master/docs/manual/assets/remedy-partner-architecture.jpg" alt="How Remedy fits together" width="640" />

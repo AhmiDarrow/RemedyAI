@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import pytest
+
 from remedy.core.app_control import (
     VALID_ACTIONS,
+    VALID_PANELS,
+    VALID_SURFACE_TARGETS,
     app_control_bus,
+    infer_settings_section,
+    normalize_panel,
+    normalize_settings_section,
+    normalize_surface_target,
     request_app_action,
 )
 
@@ -18,6 +26,24 @@ def test_switch_surface_enqueues():
     assert r["ok"] is True
     assert r["command"]["action"] == "switch_surface"
     assert r["command"]["params"]["target"] == "studio"
+
+
+def test_alongside_and_storyline_are_places_she_can_go():
+    for place in ("alongside", "storyline", "grove", "home"):
+        app_control_bus().clear()
+        r = request_app_action("switch_surface", target=place)
+        assert r["ok"] is True, place
+        assert r["command"]["params"]["target"] == place
+
+
+def test_normalize_surface_target_maps_owner_words():
+    assert normalize_surface_target("Alongside") == "alongside"
+    assert normalize_surface_target("home") == "grove"
+    assert normalize_surface_target("studio") == "studio"
+    assert normalize_surface_target("workbench") == "studio"
+    assert normalize_surface_target("nope") is None
+    assert "alongside" in VALID_SURFACE_TARGETS
+    assert "storyline" in VALID_SURFACE_TARGETS
 
 
 def test_unknown_action_refused():
@@ -66,3 +92,83 @@ def test_queue_is_capped():
     while bus.take() is not None:
         n += 1
     assert n <= 32
+
+
+def _settings_rt():
+    from remedy.core.agent_settings_tools import register_settings_tools
+    from remedy.skills.tool_registry import ToolRegistry
+
+    class RT:
+        def __init__(self) -> None:
+            self.tool_registry = ToolRegistry()
+
+    rt = RT()
+    register_settings_tools(rt)
+    return rt
+
+
+@pytest.mark.asyncio
+async def test_app_control_tool_accepts_alongside():
+    import json
+
+    rt = _settings_rt()
+    raw = await rt.tool_registry.execute(
+        "app_control", action="switch_surface", target="alongside"
+    )
+    data = json.loads(raw)
+    assert data["ok"] is True
+    assert data["command"]["params"]["target"] == "alongside"
+
+
+def test_normalize_panel_and_settings_section():
+    assert normalize_panel("Help") == "help"
+    assert normalize_panel("time-travel") == "time_travel"
+    assert normalize_panel("powershell") == "terminal"
+    assert normalize_panel("browser") == "browser"
+    assert normalize_panel("nope") is None
+    assert "help" in VALID_PANELS
+    assert normalize_settings_section("messengers") == "channels"
+    assert normalize_settings_section("voice") == "voice"
+    assert normalize_settings_section("appearance") == "theme"
+    assert infer_settings_section({"llm_model": "grok-4"}) == "provider"
+    assert infer_settings_section({"approval_mode": "ask"}) == "security-power"
+
+
+@pytest.mark.asyncio
+async def test_app_control_opens_settings_section_and_help():
+    import json
+
+    rt = _settings_rt()
+    raw = await rt.tool_registry.execute(
+        "app_control", action="open_settings", section="messengers"
+    )
+    data = json.loads(raw)
+    assert data["ok"] is True
+    assert data["command"]["params"]["section"] == "channels"
+    app_control_bus().clear()
+    raw = await rt.tool_registry.execute(
+        "app_control", action="open_panel", panel="terminal"
+    )
+    data = json.loads(raw)
+    assert data["ok"] is True
+    assert data["command"]["params"]["panel"] == "terminal"
+    app_control_bus().clear()
+    raw = await rt.tool_registry.execute(
+        "app_control", action="open_panel", panel="help", article="09-troubleshooting"
+    )
+    data = json.loads(raw)
+    assert data["command"]["params"]["article"] == "09-troubleshooting"
+    assert request_app_action("close_ui")["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_app_control_tool_rejects_unknown_place():
+    import json
+
+    rt = _settings_rt()
+    raw = await rt.tool_registry.execute(
+        "app_control", action="switch_surface", target="minecraft"
+    )
+    data = json.loads(raw)
+    assert data["ok"] is False
+    assert "alongside" in data["error"]

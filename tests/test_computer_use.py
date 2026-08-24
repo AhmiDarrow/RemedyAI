@@ -1541,8 +1541,29 @@ def test_list_monitors_windows():
     assert isinstance(mons, list)
     assert len(mons) >= 1
     assert "width" in mons[0]
+    assert "remedy" in mons[0]
     shot = screenshot_monitor_png(0)
     assert shot["width"] > 0
+
+
+def test_wants_self_ui_capture_for_grove_alongside_studio():
+    from remedy.core.computer.executor import wants_self_ui_capture
+
+    assert wants_self_ui_capture("Grove surface — locate Alongside tab")
+    assert wants_self_ui_capture("Capture Studio after app_control switch")
+    assert wants_self_ui_capture("remedy desktop window")
+    assert not wants_self_ui_capture("open the grocery site in the rail")
+
+
+def test_find_remedy_desktop_hwnd_is_optional():
+    import sys
+
+    if sys.platform != "win32":
+        pytest.skip("Windows only")
+    from remedy.core.computer.desktop_win import find_remedy_desktop_hwnd
+
+    hwnd = find_remedy_desktop_hwnd()
+    assert hwnd is None or int(hwnd) > 0
 
 
 def test_cancel_pending_jobs(tmp_path: Path):
