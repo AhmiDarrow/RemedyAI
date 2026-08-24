@@ -432,6 +432,8 @@ pub fn is_identity_provider_url(url: &str) -> bool {
         "/users/sign_in",
         "/dialog/oauth",
         "/i/flow/login",
+        // Google Identity Services helper pages (select / transform / iframe)
+        "/gsi/",
     ] {
         if path.contains(token) {
             return true;
@@ -623,6 +625,26 @@ pub fn privacy_shield_refresh_lists(
         g.prefs = prefs;
     }
     Ok(status_of(state.inner()))
+}
+
+#[cfg(test)]
+mod identity_url_tests {
+    use super::is_identity_provider_url;
+
+    #[test]
+    fn gsi_transform_is_an_identity_hop() {
+        assert!(is_identity_provider_url(
+            "https://accounts.google.com/gsi/transform"
+        ));
+        assert!(is_identity_provider_url(
+            "https://accounts.google.com/gsi/select?client_id=abc"
+        ));
+    }
+
+    #[test]
+    fn ordinary_https_is_not_identity() {
+        assert!(!is_identity_provider_url("https://example.com/products"));
+    }
 }
 
 
