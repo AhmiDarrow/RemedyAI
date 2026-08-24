@@ -165,7 +165,7 @@ export function SettingsPanel({
   const [launchAtLogin, setLaunchAtLogin] = useState(false)
   const [startInTray, setStartInTray] = useState(false)
   const [skipQuitWarn, setSkipQuitWarn] = useState(false)
-  const [webToolsEnabled, setWebToolsEnabled] = useState(false)
+  const [webToolsEnabled, setWebToolsEnabled] = useState(true)
   // Desktop default is off (IPC-only); GET /settings overwrites with effective value.
   const [httpBootstrap, setHttpBootstrap] = useState(false)
   const [privacyMode, setPrivacyMode] = useState(false)

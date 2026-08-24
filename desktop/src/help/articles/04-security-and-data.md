@@ -93,11 +93,11 @@ API keys and OAuth tokens never leave as model input either way. Env override: `
 - CORS `*` is **refused** while auth is on.  
 - Auth-off + non-loopback bind requires `REMEDY_ALLOW_INSECURE_BIND=1` (owner escape hatch).  
 
-## Web tools (`web_fetch`)
+## Web tools (`web_fetch` / `web_search`)
 
-- **Off by default** (`web_tools_enabled = false`). Turn on in Settings when you want online fetch.  
-- **SSRF protection**: private/localhost/metadata hosts blocked; DNS is resolved once and the connection is **pinned** to a public IP (mitigates DNS rebinding). Redirects re-validated per hop.  
-- Does **not** remove public-web fetch power when enabled — only blocks non-public targets.  
+- **On by default** after install (`web_tools_enabled = true`). Turn off in Settings → Security & power if you want her offline.
+- First run downloads **OpenSERP** (~10 MB) to `~/.remedy/bin` and runs it on `127.0.0.1` only. Until it is ready, search uses DuckDuckGo's no-JavaScript results page.
+- **SSRF protection**: private/localhost/metadata hosts blocked for fetched pages; DNS is resolved once and the connection is **pinned** to a public IP (mitigates DNS rebinding). Redirects re-validated per hop. The managed OpenSERP is a separate loopback process, not a general private-host bypass.  
 
 ## WebUI vs quit (always-ready · **0.20.0+**)
 

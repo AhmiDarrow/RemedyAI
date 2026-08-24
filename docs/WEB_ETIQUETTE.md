@@ -1,8 +1,9 @@
 # Web etiquette — how Remedy reads the public web
 
-Remedy's web tools are off until an owner turns them on
-(`web_tools_enabled = true`). This is what they do once they are on, and what
-is left for the owner to decide.
+Remedy's web tools are **on by default** after install (the installer ToS
+already covers automated access). Set `web_tools_enabled = false` to keep her
+offline. This is what they do when they are on, and what is left for the
+owner to decide.
 
 ## What every fetch does
 
@@ -40,30 +41,20 @@ performs, and the owner can flip it.
 
 ## Search
 
-There is no keyless, terms-clean, general web-search API to point at. The
-services with their own index (Brave, Mojeek, Marginalia) want a key; the
-keyless routes aggregate by scraping somebody else. So search is layered:
+On first run Remedy downloads **OpenSERP** (MIT, ~10 MB) into `~/.remedy/bin`,
+starts it bound to `127.0.0.1:17410`, and uses it for `web_search`. While that
+download finishes, or if it is down, she reads DuckDuckGo's no-JavaScript
+results page the same way `web_fetch` does — named, paced, allowed by their
+robots.txt. No second ack: the installer ToS already covered this.
 
-1. **A search instance the owner runs.** Set `web_search_url` to a SearXNG
-   base URL and Remedy queries its JSON API. Nobody else is in the loop, there
-   is no quota, and no third party's terms apply between Remedy and the owner.
-   The instance must have `json` in `search.formats` — a stock install answers
-   403 and Remedy reports that rather than guessing.
+Order:
 
-   A self-hosted instance usually listens on loopback or the LAN, which the
-   SSRF guard is there to refuse. That hole is opened by hand in `config.toml`
-   with `web_search_url_allow_private = true`, and deliberately **cannot** be
-   set through `update_settings` — otherwise anything able to write settings
-   could point Remedy at an internal address.
-
-2. **DuckDuckGo's no-JavaScript results page**, once the owner accepts it.
-   Their robots.txt allows every agent on that host (`Allow: /`), Remedy names
-   itself, and requests are paced. It is still automated use of a service
-   someone else pays for: they throttle it, they may block it, and the shape
-   of the page can change without notice. Until `web_search_scraping_ack` is
-   set, `web_search` returns a question instead of results, and Remedy asks
-   the owner rather than deciding for them. Background passes that have nobody
-   to ask simply return nothing.
+1. **`web_search_url`** if you set one (a SearXNG instance you run). Loopback
+   / LAN still needs `web_search_url_allow_private = true` in `config.toml` by
+   hand — `update_settings` cannot set it.
+2. **The managed OpenSERP** on loopback. Not written into `web_search_url`, so
+   it does not open the SSRF hole for anything else.
+3. **DuckDuckGo HTML** as the immediate fallback.
 
 Research tools are separate and unaffected: arXiv, Crossref, OpenAlex, PubMed,
 and Semantic Scholar are queried through their own documented APIs, with the
@@ -76,7 +67,7 @@ whether a given use is allowed:
 
 - **Site terms.** A site's terms of service may restrict automated access even
   where robots.txt permits it, and even for a logged-in account holder. That
-  includes the search fallback above.
+  includes OpenSERP's engines and the DuckDuckGo HTML fallback.
 - **Logged-in sessions.** The browser rail can act inside sessions the owner
   is signed into. Many services prohibit automated use of an account, whoever
   drives it.
@@ -96,11 +87,10 @@ from the site, and there is no warranty or liability beyond that license.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `web_tools_enabled` | `false` | Master switch for `web_fetch` / `web_search` |
+| `web_tools_enabled` | `true` | Master switch for `web_fetch` / `web_search` |
 | `web_respect_robots` | `true` | Obey robots.txt on fetched pages |
-| `web_search_url` | unset | Base URL of a SearXNG instance the owner runs |
+| `web_search_url` | unset | Optional SearXNG the owner runs |
 | `web_search_url_allow_private` | `false` | Allow a loopback/LAN search instance (config file only) |
-| `web_search_scraping_ack` | `false` | Owner accepts the DuckDuckGo HTML fallback |
 
 Implementation: `src/remedy/core/agent_web_tools.py`. Tests:
 `tests/test_web_robots.py`, `tests/test_web_fetch_ssrf.py`.

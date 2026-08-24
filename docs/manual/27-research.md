@@ -61,7 +61,7 @@ in their field — they never replace the spine.
 | `manuscript_check` | Evidence scan against a reporting checklist. A matching phrase is evidence the item was *mentioned*, not that reporting is adequate. |
 | `manuscript_build` | Compile `.tex` (latexmk / pdflatex / …) or `.qmd` / `.Rmd` (Quarto). Condenses the TeX log. A compile is not an analysis run. |
 
-Web literature tools need `web_tools_enabled`. Long runs (`analysis_run`,
+Web literature tools use the same public web path as `web_search` (on by default). Long runs (`analysis_run`,
 `manuscript_build`) sit behind the same approval gate as `bash_exec`.
 Remedy does not install R, Quarto, TeX or Python packages for you —
 `analysis_env` says what is missing.

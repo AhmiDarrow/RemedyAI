@@ -1,4 +1,4 @@
-"""Optional web tools (opt-in via config web_tools_enabled).
+"""Public web tools (on by default; owner can turn them off).
 
 SSRF protection: resolve DNS once, require all A/AAAA to be public, connect to a
 pinned public IP with the original Host/SNI (mitigates DNS rebinding). Redirects
@@ -56,17 +56,20 @@ _TAG_RE = re.compile(r"<[^>]+>")
 
 
 def _web_enabled(runtime: Any = None) -> bool:
+    """On unless the owner turned them off. Missing key = on."""
     try:
         from remedy.interfaces.config import load_config
 
         cfg = load_config() or {}
-        if cfg.get("web_tools_enabled") is True:
-            return True
+        if "web_tools_enabled" in cfg:
+            return bool(cfg.get("web_tools_enabled"))
     except Exception:
         pass
-    if runtime is None:
-        return False
-    return bool(getattr(getattr(runtime, "config", None), "web_tools_enabled", False))
+    if runtime is not None:
+        val = getattr(getattr(runtime, "config", None), "web_tools_enabled", None)
+        if val is not None:
+            return bool(val)
+    return True
 
 
 def web_tools_enabled(runtime: Any = None) -> bool:
@@ -278,14 +281,11 @@ def _scraping_acked(runtime: Any = None) -> bool:
 
 
 SCRAPING_ACK_PROMPT = (
-    "Web search has no key-free API to call, so the fallback reads "
-    "DuckDuckGo's no-JavaScript results page. Their robots.txt allows it, "
-    "Remedy names itself in the User-Agent and leaves a gap between requests "
-    "— but it is still automated use of somebody else's service: they may "
-    "throttle or block it at any time, and what you do with the results is "
-    "yours to answer for. Two ways forward: point Remedy at a search instance "
-    "you run yourself with update_settings(web_search_url=\"http://…\"), or "
-    "accept the fallback with update_settings(web_search_scraping_ack=true)."
+    "Web search is on. Remedy prefers the local OpenSERP instance she "
+    "downloads on first run, then DuckDuckGo's no-JavaScript results page. "
+    "You can point her at your own SearXNG with "
+    'update_settings(web_search_url="http://…") or turn the tools off with '
+    "update_settings(web_tools_enabled=false)."
 )
 
 
@@ -361,19 +361,68 @@ def _ddg_rows(q: str, n: int, timeout: float) -> list[dict[str, str]]:
     return parse_ddg_html_results(html, max_results=n)
 
 
+def _openserp_rows(q: str, n: int, timeout: float) -> list[dict[str, str]]:
+    """Query the managed loopback OpenSERP. Raises on transport failure."""
+    import json as _json
+
+    from remedy.runtime.web_search_host import base_url, is_healthy
+
+    if not is_healthy():
+        raise RuntimeError("openserp not healthy")
+    base = base_url().rstrip("/")
+    engines = ("duckduckgo", "ecosia")
+    last_err: Exception | None = None
+    for engine in engines:
+        url = f"{base}/{engine}/search?" + urlencode(
+            {"text": q, "limit": str(max(1, n))}
+        )
+        try:
+            raw = _direct_fetch(url, timeout=timeout)
+            data = _json.loads(raw.decode("utf-8", errors="replace"))
+        except Exception as exc:
+            last_err = exc
+            continue
+        rows: list[dict[str, str]] = []
+        for item in data.get("results") or []:
+            if str(item.get("type") or "organic") not in ("organic", ""):
+                continue
+            target = str(item.get("url") or "").strip()
+            if not target.startswith(("http://", "https://")):
+                continue
+            rows.append(
+                {
+                    "title": _strip_tags(str(item.get("title") or "")) or target,
+                    "url": target,
+                    "snippet": _strip_tags(str(item.get("snippet") or ""))[:300],
+                }
+            )
+            if len(rows) >= n:
+                break
+        if rows:
+            return rows
+    if last_err is not None:
+        raise last_err
+    return []
+
+
 def run_search(
     q: str, *, max_results: int, timeout: float, runtime: Any = None
 ) -> tuple[list[dict[str, str]], str]:
     """Search via the best available backend. Returns (rows, backend_name).
 
-    Raises :class:`SearchConsentError` when the only route left is the
-    scraping fallback and the owner has not accepted it.
+    Order: owner SearXNG if set, then the managed OpenSERP on loopback, then
+    DuckDuckGo HTML. The installer ToS already covers automated access, so the
+    HTML fallback no longer waits for a second ack.
     """
     base = _searxng_base(runtime)
     if base:
         return _searxng_rows(base, q, max_results, timeout), "your search instance"
-    if not _scraping_acked(runtime):
-        raise SearchConsentError(SCRAPING_ACK_PROMPT)
+    try:
+        rows = _openserp_rows(q, max_results, timeout)
+        if rows:
+            return rows, "OpenSERP (local)"
+    except Exception:
+        pass
     return _ddg_rows(q, max_results, timeout), "DuckDuckGo HTML"
 
 
@@ -385,9 +434,7 @@ def search_public_web(
 ) -> list[dict[str, str]]:
     """Sync background search. Empty if web tools are off or the net fails.
 
-    Never raises — an un-accepted scraping fallback reads as no results here,
-    because the callers are background passes with nobody to ask. The owner
-    meets the question through web_search instead.
+    Never raises — a down backend reads as no results here.
     """
     if not _web_enabled(None):
         return []
@@ -747,16 +794,16 @@ async def _rail_page_text(url: str) -> str:
 
 
 def register_web_tools(runtime: Any) -> None:
-    """Register web_fetch + web_search (opt-in via runtime gate)."""
+    """Register web_fetch + web_search (on unless the owner turned them off)."""
 
     def _web_disabled_msg(tool_name: str) -> str:
         return format_tool_error(
-            "Web tools are disabled. Enable with update_settings(web_tools_enabled=true) "
-            f'or update_settings(setup="web tools"), then retry {tool_name}.',
+            "Web tools are off. The owner turned them off — ask before turning "
+            f"them back on, then retry {tool_name}.",
             code="WEB_DISABLED",
             tool_name=tool_name,
             suggestion=(
-                "Call update_settings(web_tools_enabled=true) for the user, then retry."
+                "If the owner wants them on: update_settings(web_tools_enabled=true)."
             ),
         )
 
@@ -877,11 +924,7 @@ def register_web_tools(runtime: Any) -> None:
         return f"URL: {shown}\n\n{text}"
 
     async def web_search(query: str = "", max_results: float = 5.0) -> str:
-        """Search the public web (DuckDuckGo HTML). Same opt-in + SSRF gates as web_fetch.
-
-        Residual: plan mode, skills, and UI labeled web_search while only web_fetch
-        was registered — models hit unknown-tool. Now a real SERP digester.
-        """
+        """Search the public web. Local OpenSERP if ready, else DuckDuckGo HTML."""
         if not _web_enabled(runtime):
             return _web_disabled_msg("web_search")
         q = (query or "").strip()
@@ -902,15 +945,10 @@ def register_web_tools(runtime: Any) -> None:
         try:
             rows, backend = run_search(q, max_results=n, timeout=20.0, runtime=runtime)
         except SearchConsentError as consent:
-            # Not an error to retry — a question only the owner can answer.
             return format_tool_error(
                 str(consent),
                 code="SEARCH_CONSENT_REQUIRED",
                 tool_name="web_search",
-                suggestion=(
-                    "Ask the owner which they want, then call update_settings for them. "
-                    "Do not retry web_search until one of the two is set."
-                ),
             )
         except Exception as e:
             return _map_fetch_error(e, tool_name="web_search")
@@ -934,9 +972,9 @@ def register_web_tools(runtime: Any) -> None:
 
     runtime.tool_registry.register_builtin_handler(
         "web_fetch",
-        "Fetch an HTTP(S) URL as readable page text (opt-in: web_tools_enabled=true). "
+        "Fetch an HTTP(S) URL as readable page text. "
         "HTML is stripped to markdown. Script-only pages fall back to the in-app browser. "
-        "Private/localhost hosts are blocked (SSRF).",
+        "Private/localhost hosts are blocked (SSRF). Off only if the owner disabled web tools.",
         web_fetch,
         {
             "type": "object",
@@ -953,9 +991,9 @@ def register_web_tools(runtime: Any) -> None:
     )
     runtime.tool_registry.register_builtin_handler(
         "web_search",
-        "Search the public web (opt-in: web_tools_enabled=true). "
-        "Returns titles, URLs, and snippets; follow up with web_fetch for full pages. "
-        "Same SSRF protection as web_fetch (no private/localhost).",
+        "Search the public web. Local OpenSERP (downloaded on first run) or "
+        "DuckDuckGo HTML. Returns titles, URLs, and snippets; follow up with "
+        "web_fetch for full pages. Private/localhost hosts stay blocked (SSRF).",
         web_search,
         {
             "type": "object",
