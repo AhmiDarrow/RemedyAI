@@ -44,6 +44,7 @@ def build_step_request_body(
                 tools,
                 user_message=str(user_message or ""),
                 step_index=int(step),
+                history=messages if isinstance(messages, list) else None,
             )
 
     headers = adapter.auth_headers(bind.api_key)
@@ -169,4 +170,19 @@ def build_step_request_body(
 
     if not isinstance(body, dict):
         body = {}
+
+    # Opt-in trace of the exact body the provider receives (REMEDY_LLM_TRACE_DIR).
+    # Used by scripts/rig to score local models and to harvest teacher
+    # trajectories for fine-tuning. No-op in normal runs.
+    with suppress(Exception):
+        from remedy.core.llm_trace import record_request
+
+        record_request(
+            body,
+            provider=str(bind.provider or ""),
+            model=str(bind.model or ""),
+            step=int(step),
+            session_id=str(getattr(runtime, "_session_id", "") or ""),
+        )
+
     return body, headers, endpoint, use_openai_sse

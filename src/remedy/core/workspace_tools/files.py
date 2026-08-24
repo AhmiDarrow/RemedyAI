@@ -18,7 +18,9 @@ from remedy.core.workspace_tools.guards import (
     FULL_WRITE_PREFER_EDIT_BYTES as _FULL_WRITE_PREFER_EDIT_BYTES,
 )
 from remedy.core.workspace_tools.guards import (
+    blocking_file_ancestor,
     junk_write_guard,
+    note_denied_path,
     note_path,
     parent_hint,
     reserved_guard,
@@ -71,6 +73,37 @@ def _record_undo(
         logger.warning("undo trail could not be recorded for %s", target, exc_info=True)
         return " (this write cannot be undone: the undo trail could not be recorded)"
     return ""
+
+
+def _edits_carry_paths(edits: Any) -> bool:
+    """True when every hunk names its own ``path``.
+
+    ``file_edit(path=…, edits=[{old_string, new_string}])`` and
+    ``file_edit_batch(edits=[{path, old_string, new_string}])`` are two shapes
+    for one idea, and models pick whichever the schema text suggests. When a
+    caller supplies per-hunk paths, the request is complete — it just arrived
+    at the single-file entry point.
+    """
+    import json as _json
+
+    from remedy.core.workspace_tools.guards import normalize_edits_arg
+
+    items: Any = edits
+    if isinstance(items, str):
+        raw = normalize_edits_arg(items).strip()
+        if not raw:
+            return False
+        try:
+            items = _json.loads(raw)
+        except _json.JSONDecodeError:
+            return False
+    if isinstance(items, dict):
+        items = [items]
+    if not isinstance(items, list) or not items:
+        return False
+    return all(
+        isinstance(it, dict) and str(it.get("path") or "").strip() for it in items
+    )
 
 
 def register_files_tools(runtime: Any) -> None:
@@ -331,6 +364,7 @@ def register_files_tools(runtime: Any) -> None:
         body_s = new_body if isinstance(new_body, str) else str(new_body)
         # Partner: never wipe source with empty body or looped-import spam.
         from remedy.core.workspace_tools.guards import (
+            empty_write_creates_nothing,
             refuse_bad_file_write,
             resolve_empty_write_skip,
         )
@@ -338,6 +372,14 @@ def register_files_tools(runtime: Any) -> None:
         bad_body = refuse_bad_file_write(
             path, body_s, force_full_write=bool(force_full_write)
         )
+        # Creating a new blank file wipes nothing, and `__init__.py` is meant
+        # to be empty. Only a write over real content is a wipe.
+        if (
+            bad_body
+            and "empty file_write" in bad_body
+            and empty_write_creates_nothing(runtime, path)
+        ):
+            bad_body = None
         if bad_body:
             # Soft-skip empty wipe when real file already exists (screenshot 2026-08-08)
             if "empty file_write" in bad_body:
@@ -390,7 +432,8 @@ def register_files_tools(runtime: Any) -> None:
             target = runtime.resolve_tool_path(path, for_write=True)
         except Exception as e:
             return format_tool_error(
-                f"path not allowed for write: {path} ({e})",
+                f"path not allowed for write: {path} ({e})"
+                + note_denied_path(runtime, path),
                 code="PATH_DENIED",
                 tool_name="file_write",
                 suggestion=(
@@ -453,6 +496,19 @@ def register_files_tools(runtime: Any) -> None:
             _note_internal_write(target)
         except OSError as e:
             parent = _parent_hint(path)
+            blocker = blocking_file_ancestor(target)
+            if blocker is not None:
+                return format_tool_error(
+                    f"cannot write {path}: {blocker.name!r} already exists as a "
+                    f"file, so the folder {blocker!s} cannot be created.",
+                    code="PATH_IS_FILE",
+                    tool_name="file_write",
+                    suggestion=(
+                        f"Delete or rename {blocker!s} first, then retry the "
+                        "write. If you meant that path to be a package folder, "
+                        "remove the stray file of the same name."
+                    ),
+                )
             return format_tool_error(
                 f"cannot write {path}: {e}",
                 code="IO_ERROR",
@@ -490,6 +546,14 @@ def register_files_tools(runtime: Any) -> None:
         from remedy.core.file_edit import apply_multi_hunk, apply_search_replace
 
         if not (path or "").strip():
+            # Models routinely put the path *inside* each hunk - it is the
+            # obvious schema, and file_edit_batch already accepts exactly that.
+            # Refusing it here made file_edit unusable for hosts that emit
+            # edits=[{path, old_string, new_string}] (observed: every attempt
+            # from a local model failed MISSING_PATH). Hand those to the batch
+            # tool instead of rejecting a well-formed request.
+            if _edits_carry_paths(edits):
+                return await file_edit_batch(edits=edits)
             return format_tool_error(
                 "path is required",
                 code="MISSING_PATH",

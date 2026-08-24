@@ -18,6 +18,11 @@ class RmbModelSpec:
     notes: str
     # Size tag for context window heuristics
     size_label: str = "7b"
+    # MoE experts to keep on the CPU. A 3B-active model runs at near-dense
+    # speed with its experts in system RAM, so a 35B fits a 12GB card using
+    # ~4GB of VRAM. 0 = dense model, everything on GPU.
+    n_cpu_moe: int = 0
+    active_b: str = ""
 
     def to_public(self) -> dict[str, Any]:
         return {
@@ -29,11 +34,34 @@ class RmbModelSpec:
             "n_ctx_recommend": self.n_ctx_recommend,
             "notes": self.notes,
             "size_label": self.size_label,
+            "n_cpu_moe": self.n_cpu_moe,
+            "active_b": self.active_b,
         }
 
 
-# Default product model for agent coding on 12GB: Qwen2.5-Coder 7B Q4_K_M
+# Default product model for agent coding on 12GB: Qwen3.6-35B-A3B (Q4_K_XL).
+# Measured on an RTX 3080 12GB / 64GB RAM: 31.7 tok/s generation, ~3.7GB VRAM
+# with experts on the CPU, zero failed tool calls across a full agent suite.
+# MoE is what makes it fit — only 3B parameters are active per token, so the
+# experts can live in system RAM without collapsing throughput, and the freed
+# VRAM leaves room for the vision model alongside it.
 RMB_MODELS: dict[str, RmbModelSpec] = {
+    "qwen36-35b-a3b": RmbModelSpec(
+        id="qwen36-35b-a3b",
+        name="Qwen3.6 35B-A3B (Q4_K_XL)",
+        filename="Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf",
+        hf_repo="unsloth/Qwen3.6-35B-A3B-GGUF",
+        approx_gb=20.8,
+        n_ctx_recommend=16384,
+        notes=(
+            "Default RMB chat model - MoE with 3B active parameters. Experts "
+            "run on the CPU (n_cpu_moe), so it needs ~4GB VRAM and ~21GB RAM "
+            "while performing far above its VRAM footprint."
+        ),
+        size_label="35b",
+        n_cpu_moe=99,
+        active_b="3b",
+    ),
     "qwen25-coder-7b": RmbModelSpec(
         id="qwen25-coder-7b",
         name="Qwen2.5 Coder 7B (Q4_K_M)",
@@ -69,7 +97,7 @@ RMB_MODELS: dict[str, RmbModelSpec] = {
     ),
 }
 
-DEFAULT_RMB_MODEL_ID = "qwen25-coder-7b"
+DEFAULT_RMB_MODEL_ID = "qwen36-35b-a3b"
 
 # Profiles → llama-server knobs (ctx / sampling hints for UI)
 # ctx_size 0 on autofit = compute from VRAM/RAM + GGUF at start.
@@ -150,7 +178,7 @@ def catalog_id_from_hint(hint: str | None) -> str | None:
     # e.g. Qwen2.5-Coder-14B-Instruct-heretic.i1-Q4_K_M
     import re
 
-    size_m = re.search(r"(?:^|[^0-9])(7b|14b|32b|72b)(?:[^0-9]|$)", h, re.I)
+    size_m = re.search(r"(?:^|[^0-9])(7b|9b|12b|14b|27b|32b|35b|72b)(?:[^0-9]|$)", h, re.I)
     size = (size_m.group(1) if size_m else "").lower()
     wants_coder = "coder" in h
     if not size:

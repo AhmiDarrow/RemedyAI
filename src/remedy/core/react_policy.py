@@ -870,12 +870,94 @@ _LEAKED_SCRATCHPAD_MARKERS = (
 )
 
 
+_REASONING_SPAN_RE = re.compile(
+    r"(?is)<\s*(think|thinking|reasoning|thought)\s*>.*?<\s*/\s*\1\s*>"
+)
+_OPEN_REASONING_RE = re.compile(r"(?is)<\s*(think|thinking|reasoning|thought)\s*>.*\Z")
+
+
+_FENCED_TOOLCALL_RE = re.compile(
+    r'(?is)```(?:json)?\s*\{\s*"(?:name|function)"\s*:\s*"[a-z0-9_]+"'
+    r'\s*,\s*"(?:arguments|parameters)"\s*:\s*[\s\S]*?\}\s*```'
+)
+
+
+def strip_fenced_tool_calls(text: str) -> str:
+    """Remove ```json {"name": …, "arguments": …} ``` blocks from an answer."""
+    return _FENCED_TOOLCALL_RE.sub("", text or "")
+
+
+def is_pure_tool_call_blob(text: str) -> bool:
+    """True when the message is *only* a tool call, with no answer around it.
+
+    A model told "do not use any tools" answered with a complete fenced JSON
+    call. Detection already flagged it, but the disarmed-turn path kept the raw
+    text — so the owner was shown the call instead of a reply. Nothing here is
+    salvageable as an answer, so there is no answer.
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    remainder = strip_fenced_tool_calls(t)
+    remainder = _REASONING_SPAN_RE.sub("", remainder).strip()
+    if not remainder:
+        return True
+    # Bare (unfenced) single call: {"name": "x", "arguments": {...}}
+    if re.fullmatch(
+        r'(?is)\s*\{\s*"(?:name|function)"\s*:\s*"[a-z0-9_]+"\s*,'
+        r'\s*"(?:arguments|parameters)"\s*:[\s\S]*\}\s*',
+        t,
+    ):
+        return True
+    return False
+
+
+def split_reasoning_spans(text: str) -> tuple[str, str]:
+    """Return ``(answer, reasoning)`` for text with inline think spans.
+
+    Preferred over deleting: the scratchpad still belongs on the thinking
+    channel, it just does not belong in the reply. Hosts launched with
+    ``--reasoning-format deepseek`` separate this themselves; this covers the
+    ones that cannot.
+    """
+    raw = text or ""
+    if "<" not in raw:
+        return raw, ""
+    thoughts = [m.group(0) for m in _REASONING_SPAN_RE.finditer(raw)]
+    body = _REASONING_SPAN_RE.sub("", raw)
+    open_span = _OPEN_REASONING_RE.search(body)
+    if open_span:
+        thoughts.append(open_span.group(0))
+        body = _OPEN_REASONING_RE.sub("", body)
+    tag_re = r"(?is)</?\s*(think|thinking|reasoning|thought)\s*>"
+    inner = re.sub(tag_re, "", chr(10).join(thoughts))
+    return body.strip(), inner.strip()
+
+
+def strip_reasoning_spans(text: str) -> str:
+    """Drop inline ``<think>…</think>`` spans from user-facing text.
+
+    Reasoning models emit their scratchpad inline when the chat template does
+    not lift it into ``reasoning_content``. Distills in particular open *every*
+    answer with a ``<think>`` block, and nothing here removed it — the owner
+    saw the monologue instead of the reply. An unclosed span means generation
+    stopped mid-thought, so there is no answer in the text at all.
+    """
+    t = text or ""
+    if "<" not in t:
+        return t
+    t = _REASONING_SPAN_RE.sub("", t)
+    t = _OPEN_REASONING_RE.sub("", t)
+    return t.strip()
+
+
 def strip_stream_status_noise(text: str) -> str:
     """Remove auth/provider status lines that were wrongly streamed as tokens."""
     t = text or ""
     t = re.sub(r"(?m)^\s*\[auth\][^\n]*\n?", "", t)
     t = re.sub(r"(?m)^\s*\[auth required\][^\n]*\n?", "", t)
     t = re.sub(r"(?m)^\s*\[provider fix\][^\n]*\n?", "", t)
+    t = strip_reasoning_spans(t)
     return t.strip()
 
 
@@ -1141,7 +1223,22 @@ def looks_like_tool_markup_prefix(text: str) -> bool:
     like ``Tools are disabled in plan mode.``
     """
     t = (text or "").strip()
-    if not t or len(t) > 48:
+    if not t:
+        return False
+    # A dangling ```json fence is the same failure in the other dialect: the
+    # model began a JSON tool call, generation stopped, and the fragment became
+    # the answer. Seen live as a 12-character reply: '```json\n{\n "'.
+    # Requires an unclosed fence and no prose, so a real code block that merely
+    # mentions ```json is untouched.
+    if t.startswith("```"):
+        body = t[3:].lstrip()
+        if body[:4].lower().startswith("json"):
+            body = body[4:]
+        rest = body.strip()
+        if "```" not in t[3:] and len(rest) <= 200:
+            if not rest or rest.startswith(("{", "[", '"')):
+                return True
+    if len(t) > 48:
         return False
     return bool(_TOOL_MARKUP_PREFIX_RE.match(t))
 
@@ -1187,10 +1284,15 @@ def looks_like_pseudo_tools(text: str) -> bool:
         re.I,
     ):
         return True
-    # Any leaked tool_calls / function_calls / invoke markup (incl. truncated)
+    # Any leaked tool_calls / function_calls / invoke markup (incl. truncated).
+    # The optional "|" covers special-token spellings — ``<|tool_call|>`` and
+    # ``<|tool_call>`` are as common as the bare ``<tool_call>`` form, and
+    # without it a model trained on that convention had its raw markup shown to
+    # the user as the answer (seen live: "<|tool_call>call:Bash{command:...").
     if re.search(
-        r"(?i)(<\s*function_calls\b|</\s*function_calls\s*>|<\s*tool_call\b|"
-        r"<\s*tool_calls\b|<\s*tool_invoke\b|<\s*function_c|<\s*tool_c|"
+        r"(?i)(<\s*\|?\s*function_calls\b|</\s*\|?\s*function_calls\s*\|?\s*>|"
+        r"<\s*\|?\s*tool_call\b|<\s*\|?\s*tool_calls\b|<\s*\|?\s*tool_invoke\b|"
+        r"<\s*\|?\s*function_c|<\s*\|?\s*tool_c|"
         r"get_settings\s*$)",
         text,
     ):
@@ -1213,6 +1315,10 @@ def strip_tool_markup(text: str) -> str:
     if not text:
         return ""
     t = text
+    # Fenced JSON tool calls: ```json {"name": …, "arguments": …} ```
+    # Detection already flagged these, but nothing removed them, so a model
+    # that answered with one had it shown verbatim as its reply.
+    t = strip_fenced_tool_calls(t)
     # Strip DSML wrapper tokens
     t = _DSML_NOISE_RE.sub(" ", t)
     # Full XML-ish function_calls / tool_call blocks (complete or truncated)
@@ -1623,12 +1729,58 @@ def _parse_json_tool_blobs(text: str) -> list[dict[str, Any]]:
     return out
 
 
-def parse_pseudo_tool_calls(text: str) -> list[dict[str, Any]]:
+# Structural keys of the tool-call wire format. A recovery pass that pulls one
+# of these out as a *tool name* has locked onto scaffolding, not a call: no
+# registry ever contains them. Seen live as "No handler registered for tool:
+# auto" and "...: name" — bogus calls dispatched, failed, and burned a step.
+_NEVER_TOOL_NAMES = frozenset(
+    {
+        "auto",
+        "none",
+        "required",
+        "name",
+        "names",
+        "arguments",
+        "args",
+        "function",
+        "functions",
+        "tool",
+        "tools",
+        "tool_call",
+        "tool_calls",
+        "tool_choice",
+        "type",
+        "parameters",
+        "properties",
+        "value",
+        "response",
+        "json",
+    }
+)
+
+
+def is_impossible_tool_name(name: str | None) -> bool:
+    """True for a recovered 'tool name' that cannot address a real tool."""
+    cleaned = str(name or "").strip().lower()
+    if not cleaned:
+        return True
+    return cleaned in _NEVER_TOOL_NAMES
+
+
+def parse_pseudo_tool_calls(
+    text: str,
+    known_tools: set[str] | frozenset[str] | None = None,
+) -> list[dict[str, Any]]:
     """Best-effort parse of text-faked tools into OpenAI-style tool_call dicts.
 
     Models sometimes emit file_read("x") as plain text instead of native tool
     calls, or dump DSML/XML tool markup into the chat bubble. We recover them
     here so the ReAct loop can still execute.
+
+    Recovery is a guess, so it is validated before it is trusted: structural
+    keywords are never tool names, and when the caller supplies ``known_tools``
+    anything outside the armed set is dropped. Dispatching an invented name
+    only produces a TOOL_VALUE_ERROR and wastes the step.
     """
     if not text:
         return []
@@ -1724,14 +1876,32 @@ def parse_pseudo_tool_calls(text: str) -> list[dict[str, Any]]:
             dropped,
         )
 
-    if complete:
+    # Validate what recovery guessed. A name that is wire-format scaffolding,
+    # or one no tool is registered under, can only fail on dispatch.
+    kept: list[dict[str, Any]] = []
+    rejected: list[str] = []
+    allow = {str(n).strip().lower() for n in (known_tools or set())}
+    for c in complete:
+        cname = str((c.get("function") or {}).get("name") or "").strip()
+        if is_impossible_tool_name(cname) or (allow and cname.lower() not in allow):
+            rejected.append(cname)
+            continue
+        kept.append(c)
+    if rejected:
+        logger.warning(
+            "pseudo_tool_recovery rejected %s invented name(s): %s",
+            len(rejected),
+            rejected[:8],
+        )
+
+    if kept:
         logger.warning(
             "pseudo_tool_recovery count=%s names=%s preview=%r",
-            len(complete),
-            [c["function"]["name"] for c in complete],
+            len(kept),
+            [c["function"]["name"] for c in kept],
             (text or "")[:200],
         )
-    return complete
+    return kept
 
 
 def recovered_tool_call_is_complete(tc: dict[str, Any]) -> bool:

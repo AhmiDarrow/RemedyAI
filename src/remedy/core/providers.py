@@ -963,12 +963,12 @@ class LlamaCppProvider(OpenAIProvider):
         try:
             from remedy.core.local_agent_optimize import apply_local_body_optimize
 
-            um = ""
-            for m in reversed(fit_msgs or []):
-                if isinstance(m, dict) and m.get("role") == "user":
-                    c = m.get("content")
-                    um = c if isinstance(c, str) else str(c or "")
-                    break
+            from remedy.core.local_agent_optimize import last_real_user_message
+
+            # Must skip Remedy's own injected nudges: they quote tool names, so
+            # trivia detection reads them as pasted markup and strips the tools
+            # the inject was demanding.
+            um = last_real_user_message(fit_msgs)
             body = apply_local_body_optimize(
                 body,
                 provider=self.provider_name,

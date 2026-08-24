@@ -19,6 +19,9 @@ DEFAULT_CHAT_PORT = 8787
 # Product defaults for agent coding + tools on 12GB class GPUs.
 DEFAULT_CTX = 8192
 DEFAULT_N_GPU_LAYERS = -1  # all layers when CUDA runtime available
+# MoE experts kept on the CPU. Non-zero only for MoE models, where a few
+# billion active parameters mean RAM-resident experts cost little speed.
+DEFAULT_N_CPU_MOE = 0
 DEFAULT_THREADS = 0  # llama-server default
 DEFAULT_PARALLEL = 1
 DEFAULT_CHAT_FORMAT = ""  # auto from model; optional override
@@ -81,6 +84,7 @@ def default_state() -> dict[str, Any]:
         "runtime_binary": "",
         "runtime_id": "",  # host catalog id (win-*/linux-*) or external
         "n_gpu_layers": DEFAULT_N_GPU_LAYERS,
+        "n_cpu_moe": DEFAULT_N_CPU_MOE,
         "ctx_size": DEFAULT_CTX,
         "threads": DEFAULT_THREADS,
         "parallel": DEFAULT_PARALLEL,
