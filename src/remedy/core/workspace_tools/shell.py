@@ -1250,6 +1250,18 @@ def register_shell_tools(runtime: Any) -> None:
                 tool_name="host_script",
                 suggestion="Pass the script body; it is written under .remedy-build/tmp/.",
             )
+        from remedy.core.workspace_tools.guards import looks_like_history_stub_text
+
+        if looks_like_history_stub_text(text):
+            return format_tool_error(
+                "refusing host_script body: it is a provider-history stub, not a script.",
+                code="HISTORY_STUB",
+                tool_name="host_script",
+                suggestion=(
+                    "Do not paste omitted file_write history into host_script. "
+                    "file_write real source, or file_edit the path on disk."
+                ),
+            )
         kind = (lang or "").strip().lower() or default_script_lang()
         if kind in ("powershell", "ps1"):
             kind = "pwsh"

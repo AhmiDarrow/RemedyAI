@@ -23,20 +23,25 @@ def test_write_tools_cap_even_without_force():
     assert c >= 4096
 
 
-def test_coerce_repairs_truncated_file_write_json():
-    # Simulate stream cut mid-content string
+def test_unclosed_file_write_is_not_executed_as_a_stump():
+    """Mid-stream cut (e.g. ``int…``) must not land a half-file on disk."""
     raw = (
         '{"path": "src/main.py", "content": "def main():\\n'
-        '    print(\\"hello\\")\\n'
-        "    # more code without closing quote"
+        '    x: int'
     )
-    out = coerce_tool_arguments_json(raw)
+    out = coerce_tool_arguments_json(raw, tool_name="file_write")
     data = json.loads(out)
-    assert data.get("_invalid_json") is not True
-    assert data["path"] == "src/main.py"
-    assert "def main" in data["content"]
-    # Flag is optional (stripped on some repair paths); content salvage is required.
-    assert data.get("_repaired_truncated") in (True, None)
+    assert data.get("_stream_truncated") is True
+    assert data.get("_invalid_json") is True
+    assert data.get("path") == "src/main.py"
+    assert not data.get("content")
+
+
+def test_closed_file_write_json_is_unchanged():
+    raw = json.dumps({"path": "src/main.py", "content": "def main():\n    print(1)\n"})
+    out = coerce_tool_arguments_json(raw, tool_name="file_write")
+    data = json.loads(out)
+    assert data == {"path": "src/main.py", "content": "def main():\n    print(1)\n"}
 
 
 def test_coerce_valid_json_unchanged():
