@@ -80,6 +80,28 @@ def inject_phase_nudge(
             messages.append(pn)
 
 
+def _green_agency_args(messages: list[dict[str, Any]]) -> dict[str, Any]:
+    """User request + whether the run already happened, for green decisions.
+
+    ``keep_agency_after_green`` was called with the build state alone here, so
+    it never saw the owner's request. "Create fib.py, then run it and tell me
+    its output" therefore looked complete the moment the engine's own smoke
+    test went green: tools were stripped and the run never happened.
+    """
+    try:
+        from remedy.core.local_agent_optimize import (
+            execution_already_ran,
+            last_real_user_message,
+        )
+
+        return {
+            "user_message": last_real_user_message(messages),
+            "run_already_done": execution_already_ran(messages),
+        }
+    except Exception:
+        return {}
+
+
 async def apply_build_engine_after_batch(
     *,
     runtime: Any,
@@ -306,7 +328,8 @@ async def apply_build_engine_after_batch(
                     with _soft("keep-agency-after-green"):
                         from remedy.core.build_engine import keep_agency_after_green
 
-                        if not keep_agency_after_green(bst):
+                        _ga = _green_agency_args(messages)
+                        if not keep_agency_after_green(bst, **_ga):
                             from remedy.core.turn_context import (
                                 set_turn_build_verify_green,
                             )
@@ -329,7 +352,9 @@ async def apply_build_engine_after_batch(
                         with _soft("keep-agency-after-verify"):
                             from remedy.core.build_engine import keep_agency_after_green
 
-                            if keep_agency_after_green(bst):
+                            if keep_agency_after_green(
+                                bst, **_green_agency_args(messages)
+                            ):
                                 rearm_agency()
                                 if int(getattr(bst, "open_todo_count", 0) or 0) > 0 or bool(
                                     getattr(bst, "drive_to_done", False)

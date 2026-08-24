@@ -1195,6 +1195,24 @@ def binary_supports_chat_template_kwargs(binary: Path | str | None) -> bool:
     )
 
 
+def binary_supports_n_cpu_moe(binary: Path | str | None) -> bool:
+    """True when this llama-server build knows ``--n-cpu-moe``."""
+    return _binary_has_needles(
+        binary,
+        "n-cpu-moe",
+        (b"--n-cpu-moe", b"n-cpu-moe", b"LLAMA_ARG_N_CPU_MOE"),
+    )
+
+
+def binary_supports_reasoning_format(binary: Path | str | None) -> bool:
+    """True when this llama-server build knows ``--reasoning-format``."""
+    return _binary_has_needles(
+        binary,
+        "reasoning-format",
+        (b"--reasoning-format", b"reasoning-format", b"LLAMA_ARG_THINK"),
+    )
+
+
 def binary_supports_reasoning_budget(binary: Path | str | None) -> bool:
     """True when this llama-server build knows ``--reasoning-budget``."""
     return _binary_has_needles(
@@ -1405,6 +1423,40 @@ def _build_cmd(
     kwargs_json = str(profile.get("chat_template_kwargs") or "").strip()
     if kwargs_json and binary_supports_chat_template_kwargs(binary):
         cmd.extend(["--chat-template-kwargs", kwargs_json])
+    # MoE experts on the CPU. Only the active experts are read per token, so a
+    # 3B-active model keeps near-dense speed while its full weights live in
+    # system RAM - that is what lets a 35B class model run on a 12GB card
+    # using ~4GB of VRAM. Dense models leave this at 0 and are unaffected.
+    try:
+        _moe = int(profile.get("n_cpu_moe") or 0)
+    except (TypeError, ValueError):
+        _moe = 0
+    if _moe <= 0:
+        # Not every caller passes a host profile, so fall back to the catalog
+        # entry for this GGUF. Without this a known MoE model would silently
+        # load every expert onto the GPU and fail to fit.
+        try:
+            from remedy.runtime.rmb.catalog import (
+                catalog_id_from_hint,
+                get_model_spec,
+            )
+
+            _cid = catalog_id_from_hint(model.name)
+            if _cid:
+                _moe = int(getattr(get_model_spec(_cid), "n_cpu_moe", 0) or 0)
+        except Exception:
+            _moe = 0
+    if _moe > 0 and binary_supports_n_cpu_moe(binary):
+        cmd.extend(["--n-cpu-moe", str(_moe)])
+
+    # Separate thinking from the answer at the source. ``deepseek`` puts
+    # thoughts in ``message.reasoning_content``, which Remedy already consumes
+    # as its thinking channel - so the scratchpad reaches the thinking pane
+    # instead of leaking into the reply as raw <think> tags, and none of it is
+    # thrown away. Reasoning models (and distills, which open every answer with
+    # a <think> block) are unusable without this.
+    if binary_supports_reasoning_format(binary):
+        cmd.extend(["--reasoning-format", "deepseek"])
     if profile.get("reasoning_budget") is not None and binary_supports_reasoning_budget(
         binary
     ):

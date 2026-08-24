@@ -2006,6 +2006,8 @@ def can_machine_inject(
 def keep_agency_after_green(
     state: BuildTurnState | None,
     user_message: str = "",
+    *,
+    run_already_done: bool = False,
 ) -> bool:
     """True when green verify must NOT strip tools.
 
@@ -2014,6 +2016,18 @@ def keep_agency_after_green(
     visual follow-up. Session 765c: one file_edit → npm test green →
     ``GREEN · stop building`` → "**Still open:** …" nine hops in a row.
     """
+    # An explicitly requested run outranks the build state, and is checked
+    # before it: "create fib.py, then run it and tell me its output" wrote the
+    # file, the engine's own smoke test went green, tools were stripped, and
+    # the turn ended with the run never performed — on every model tested.
+    # The engine's verify passing says nothing about the owner's second step.
+    if not run_already_done:
+        with suppress(Exception):
+            from remedy.core.local_agent_optimize import request_wants_execution
+
+            if request_wants_execution(user_message):
+                return True
+
     if state is None or not state.active:
         return False
     if state.ship_required and not state.ship_complete():

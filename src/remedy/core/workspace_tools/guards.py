@@ -166,6 +166,97 @@ def looks_like_repetitive_spam_text(text: str | None, *, min_lines: int = 40) ->
     return False
 
 
+def note_denied_path(runtime: Any, path: str, *, limit: int = 3) -> str:
+    """Escalating guidance when the model keeps hammering a denied path.
+
+    The jail refuses correctly, but a refusal alone does not stop a model from
+    re-trying it: one local model spent 29 consecutive tool calls trying to
+    reach the same Desktop path through file_write, then bash_exec, then
+    host_run. Every attempt was blocked, and the whole step budget went to a
+    door that was never going to open. After a few tries the model needs to be
+    told to stop and report, not just told "no" again.
+    """
+    key = str(path or "").strip().lower()
+    if not key:
+        return ""
+    try:
+        seen = getattr(runtime, "_denied_path_hits", None)
+        if not isinstance(seen, dict):
+            seen = {}
+            runtime._denied_path_hits = seen
+        seen[key] = int(seen.get(key, 0)) + 1
+        hits = seen[key]
+    except Exception:
+        return ""
+    if hits < max(2, int(limit)):
+        return ""
+    return (
+        f" You have now been refused this path {hits} times. It is outside the "
+        "write roots and retrying — including via a shell, an archive, or an "
+        "encoded payload — will keep failing. Stop attempting it: tell the "
+        "owner it is outside the allowed scope and what you would need."
+    )
+
+
+def blocking_file_ancestor(target: Path | str | None) -> Path | None:
+    """The ancestor that exists as a *file* where a directory is needed.
+
+    ``mkdir(parents=True, exist_ok=True)`` still raises when a component of the
+    path is a regular file, and the OS error names that ancestor while the tool
+    error names the target — so the reply read "cannot write
+    mypkg/__init__.py: ... already exists: ...mypkg", which reads like a
+    contradiction. A model cannot act on that. Naming the blocker lets it
+    delete or rename the offender and continue.
+    """
+    if not target:
+        return None
+    try:
+        p = Path(target)
+        for parent in p.parents:
+            if parent.is_file():
+                return parent
+            if parent.is_dir():
+                break
+    except OSError:
+        return None
+    return None
+
+
+def empty_write_creates_nothing(runtime: Any, path: str) -> bool:
+    """True when a blank ``file_write`` to *path* cannot wipe anything.
+
+    The empty-write guard exists to stop a model blanking a real file. It was
+    refusing on path+content alone, with no idea whether a file was there — so
+    creating a new empty file was blocked too. That kills a completely ordinary
+    move: ``mypkg/__init__.py`` is *supposed* to be empty, and a local model
+    doing the idiomatic thing got an EMPTY_SOURCE_WRITE error and gave up on
+    building the package.
+
+    Safe when the target does not exist yet, or is already empty (rewriting
+    nothing as nothing), or is an ``__init__.py`` (canonically blank).
+    """
+    p = (path or "").strip()
+    if not p:
+        return False
+    if Path(p).name == "__init__.py":
+        return True
+    target: Path | None = None
+    for for_write in (True, False):
+        try:
+            target = runtime.resolve_tool_path(p, for_write=for_write)
+            break
+        except Exception:
+            continue
+    if target is None:
+        return False
+    try:
+        if not target.exists():
+            return True  # nothing on disk - this is a create, not a wipe
+        return target.is_file() and target.stat().st_size == 0
+    except OSError:
+        return False
+
+
 def resolve_empty_write_skip(
     runtime: Any,
     path: str,

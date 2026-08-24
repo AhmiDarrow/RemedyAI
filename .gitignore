@@ -149,3 +149,5 @@ NUL
 /Users/
 /~/
 
+# Harness run artifacts (scorecards, LLM traces). Regenerate with scripts/rig.
+out/
