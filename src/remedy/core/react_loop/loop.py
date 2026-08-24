@@ -505,8 +505,20 @@ async def call_llm_stream(runtime, message: str,
                 and not _open_drive_keeps_going()
             ):
                 return False
-            zero_tool_drive_count += 1
             _rearm_agency_tools()
+            # Re-arm declines on chat/trivia turns, and demanding a native call
+            # with no schema armed is a guaranteed loop: the model cannot
+            # comply, so the same nudge re-fires every step. Seen live as 148
+            # identical "you made zero tool_calls" injects on a turn whose
+            # request was "reply READY and do not use any tools" — the open
+            # drive kept re-firing past max_zero_tool_drives.
+            if not tools:
+                logger.info(
+                    "skip zero-tool drive — no tools armed for this turn (step %d)",
+                    step + 1,
+                )
+                return False
+            zero_tool_drive_count += 1
             force_answer_sticky = False
             set_turn_force_tool_choice(True)
             messages.append(unfinished_work_nudge_message())
@@ -673,6 +685,18 @@ async def call_llm_stream(runtime, message: str,
             _existing_todos = load_todos(runtime)
             if _existing_todos:
                 yield todos_event_token(_existing_todos)
+
+        def _armed_tool_names() -> set[str]:
+            """Names the model may legitimately call this step."""
+            names: set[str] = set()
+            for src in (tools, all_tools):
+                for _t in src or []:
+                    if not isinstance(_t, dict):
+                        continue
+                    _fn = _t.get("function")
+                    if isinstance(_fn, dict) and _fn.get("name"):
+                        names.add(str(_fn["name"]).strip().lower())
+            return names
 
         def _rearm_agency_tools() -> None:
             """Re-enable tool schemas *and* long-task epoch policy."""
@@ -981,8 +1005,58 @@ async def call_llm_stream(runtime, message: str,
 
         # One process-wide session (agent_llm owns its lifetime) — a fresh
         # connector per turn leaked "Unclosed client session" on abort/reset.
+        # Dead-loop brake. ``max_total`` defaults to 10_000 steps, which is a
+        # safety net for long *productive* builds, not for a stuck turn. A turn
+        # that runs no tools and adds no messages is re-sending an identical
+        # request: 226 consecutive rounds were observed live on a local host
+        # (minutes of GPU, and on a cloud provider the same count of billed
+        # calls). Nothing downstream can break that cycle, because nothing about
+        # the request changes between rounds.
+        no_progress_steps = 0
+        last_progress_fingerprint: tuple[int, int] | None = None
+        # Well above every legitimate no-tool sequence: the zero-tool drive
+        # allows 8 attempts, stale epochs another 8, and dead-air re-arm sits
+        # between them. This is a runaway backstop, not a policy knob - it must
+        # never fire on a turn the loop is still steering on purpose.
+        max_no_progress_steps = 25
+        stalled_finalize = False
+        # Consecutive batches in which *every* tool call errored.
+        all_error_batches = 0
+        max_all_error_batches = 8
+        # Cumulative wasted calls. Generous enough that a long legitimate build
+        # with occasional misses is never touched, low enough that a thrashing
+        # turn cannot reach four figures.
+        failed_tools_this_turn = 0
+        max_failed_tools = 60
+
         async with _http_session(timeout) as http:
             for step in range(max_total):
+                # Identical request as last round? Then the turn is spinning.
+                # Tool activity only. Message growth is NOT progress: the
+                # loop answers a tool-less round by appending a nudge, so
+                # counting messages let a nudge-loop masquerade as work and
+                # spin for hundreds of rounds (535s observed on one turn).
+                _fp = (
+                    int(tools_executed_this_turn),
+                    int(tool_batches_this_turn),
+                )
+                if _fp == last_progress_fingerprint:
+                    no_progress_steps += 1
+                    if (
+                        no_progress_steps >= max_no_progress_steps
+                        and not stalled_finalize
+                    ):
+                        stalled_finalize = True
+                        logger.warning(
+                            "ReAct made no progress for %d steps (step %d) - "
+                            "finalizing instead of re-sending the same request",
+                            no_progress_steps,
+                            step + 1,
+                        )
+                else:
+                    no_progress_steps = 0
+                    last_progress_fingerprint = _fp
+
                 # Mid-turn steering: anything the owner said while the last
                 # step ran goes in now, before she plans the next one.
                 with suppress(Exception):
@@ -1185,7 +1259,9 @@ async def call_llm_stream(runtime, message: str,
                         # Pure chat (tools never enabled) — wrap up.
                         force_answer_sticky = True
 
-                is_final_step = step >= max_total - 1
+                # A stalled turn takes the normal last-step path so it
+                # still produces a real answer instead of ending silently.
+                is_final_step = stalled_finalize or step >= max_total - 1
                 # Checkpoint on arrival at the absolute ceiling, once per turn.
                 # This used to sit at the tail of the tool-batch section, which
                 # is only reached when force_answer is False — and at the
@@ -1217,10 +1293,15 @@ async def call_llm_stream(runtime, message: str,
                             get_build_state,
                             keep_agency_after_green,
                         )
+                        from remedy.core.local_agent_optimize import (
+                            execution_already_ran,
+                        )
 
                         _keep_after_green = bool(
                             keep_agency_after_green(
-                                get_build_state(runtime), message or ""
+                                get_build_state(runtime),
+                                message or "",
+                                run_already_done=execution_already_ran(messages),
                             )
                         )
                     if _keep_after_green:
@@ -1243,6 +1324,7 @@ async def call_llm_stream(runtime, message: str,
                 # Keep tools on and require a native call instead of summarizing.
                 if (
                     force_answer
+                    and not stalled_finalize
                     and _work_unfinished()
                     and all_tools
                     and not message_asks_to_stop(message or "")
@@ -1255,11 +1337,37 @@ async def call_llm_stream(runtime, message: str,
                     force_answer_sticky = False
                     is_final_step = False
                     _rearm_agency_tools()
-                    set_turn_force_tool_choice(True)
+                    if tools:
+                        set_turn_force_tool_choice(True)
+                    else:
+                        # Re-arm declined (chat/trivia turn). Keeping tools off
+                        # while refusing to finalize spins the step wall for
+                        # nothing — let the turn answer in words instead.
+                        force_answer = True
+                        is_final_step = True
                 # Re-resolve pack each step (write-first → full after writes)
                 if not force_answer and turn.all_tools and not _verify_green:
                     _resolve_and_apply(step_index=int(step))
                 step_tools = None if force_answer else tools
+                # Why a step went out tool-less is the single hardest thing to
+                # reconstruct from a trace: the request just shows n_tools=0
+                # with no hint which of a dozen branches emptied it.
+                if all_tools and not step_tools:
+                    logger.info(
+                        "step %d sent with no tools: force_answer=%s sticky=%s "
+                        "final=%s verify_green=%s stalled=%s armed=%d "
+                        "arm_reason=%s pack=%s run_until_done=%s",
+                        step + 1,
+                        force_answer,
+                        force_answer_sticky,
+                        is_final_step,
+                        _verify_green,
+                        stalled_finalize,
+                        len(tools or []),
+                        getattr(turn, "arm_reason", "?"),
+                        getattr(turn, "pack", "?"),
+                        run_until_done,
+                    )
                 # Mid-turn hard fit for local (deep-dive #6) before POST
                 if step > 0 and step_tools is not None:
                     prov, mod, url = _provider_bits()
@@ -2292,6 +2400,21 @@ async def call_llm_stream(runtime, message: str,
                 stutter_src = str(text_out or "")
                 # Drop auth/provider status lines if they leaked into model content
                 if text_out:
+                    # Inline <think> belongs on the thinking channel, not in
+                    # the reply and not in the bin. Hosts started with
+                    # --reasoning-format deepseek already split it into
+                    # reasoning_content; this catches the ones that cannot.
+                    _thought = ""
+                    with suppress(Exception):
+                        from remedy.core.react_policy import (
+                            split_reasoning_spans,
+                        )
+
+                        _body, _thought = split_reasoning_spans(str(text_out))
+                        if _thought:
+                            text_out = _body
+                    if _thought:
+                        yield f"@@thinking:{_thought}"
                     text_out = strip_stream_status_noise(str(text_out))
                     stutter_src = str(text_out or "")
                     with suppress(Exception):
@@ -2304,14 +2427,38 @@ async def call_llm_stream(runtime, message: str,
                 # *when tools are armed*. Trivia / disarmed turns keep the text
                 # so "1 + 1" is not swallowed as fake tool markup.
                 if text_out and _looks_like_pseudo_tools(text_out):
-                    recovered_preview = _parse_pseudo_tool_calls(text_out)
+                    recovered_preview = _parse_pseudo_tool_calls(text_out, _armed_tool_names())
                     clean = strip_tool_markup(text_out)
                     if tools:
                         text_out = (
                             clean if clean and not _looks_like_pseudo_tools(clean) else ""
                         )
                     else:
-                        text_out = clean or text_out
+                        # Disarmed turns keep their text so "1 + 1" is not
+                        # swallowed as fake markup - but a *truncated*
+                        # fragment is never an answer. A local model replied
+                        # to "say READY" with a 12-character dangling json
+                        # fence, and it was shown to the user verbatim.
+                        from remedy.core.react_policy import (
+                            is_pure_tool_call_blob as _blob,
+                        )
+                        from remedy.core.react_policy import (
+                            looks_like_tool_markup_prefix as _trunc,
+                        )
+
+                        # Order matters: a *truncated* fence has no closing
+                        # ``` so strip_fenced_tool_calls cannot match it, and
+                        # `clean` comes back as the raw fragment. Checking
+                        # `clean` first would therefore hand that fragment
+                        # straight back as the answer.
+                        if _trunc(text_out) or _blob(text_out):
+                            # The whole message was a tool call or a truncated
+                            # fragment. There is no answer inside it, and
+                            # showing the raw call to the owner is worse than
+                            # showing nothing.
+                            text_out = ""
+                        elif clean:
+                            text_out = clean
                     if not tool_calls_list and recovered_preview:
                         # Force recovery path below even if tools were off this round.
                         pass
@@ -2347,7 +2494,7 @@ async def call_llm_stream(runtime, message: str,
                     and tools
                     and turn.allow_pseudo_recovery()
                 ):
-                    recovered = _parse_pseudo_tool_calls(raw_round)
+                    recovered = _parse_pseudo_tool_calls(raw_round, _armed_tool_names())
                     if recovered:
                         # Model already tried to use tools as text. Do not honor
                         # force_answer / l1_pure_chat — that left "tool_c" in chat.
@@ -2385,6 +2532,26 @@ async def call_llm_stream(runtime, message: str,
                             if tool_msg:
                                 messages.append(tool_msg)
                                 batch_tool_msgs.append(tool_msg)
+                        # Recovered calls are executed on this path too, so
+                        # their failures must count against the same ceiling.
+                        # Counting only the native batch let a recovery thrash
+                        # run to 262 failed calls untouched.
+                        failed_tools_this_turn += sum(
+                            1
+                            for _m in batch_tool_msgs
+                            if "Error [" in str((_m or {}).get("content") or "")
+                        )
+                        if (
+                            failed_tools_this_turn >= max_failed_tools
+                            and not stalled_finalize
+                        ):
+                            stalled_finalize = True
+                            logger.warning(
+                                "%d failed tool calls this turn (recovery path,"
+                                " step %d) - finalizing instead of thrashing",
+                                failed_tools_this_turn,
+                                step + 1,
+                            )
                         # Same bookkeeping as the native batch below: the turn
                         # state, the epoch's productivity and the batch count
                         # all feed the stale-epoch / zero-tool drivers, which
@@ -2433,6 +2600,7 @@ async def call_llm_stream(runtime, message: str,
                                             all_tools,
                                             user_message=str(message or "build"),
                                             step_index=0,
+                                            history=messages,
                                         )
                                         or all_tools
                                     )
@@ -2563,6 +2731,7 @@ async def call_llm_stream(runtime, message: str,
                                         all_tools,
                                         user_message=str(message or "build"),
                                         step_index=0,
+                                        history=messages,
                                     )
                                     or all_tools
                                 )
@@ -2985,6 +3154,7 @@ async def call_llm_stream(runtime, message: str,
                                     all_tools,
                                     user_message=str(message or "build"),
                                     step_index=0,
+                                    history=messages,
                                 ) or all_tools
                                 turn.tools = tools
                             set_turn_force_tool_choice(True)
@@ -3076,6 +3246,7 @@ async def call_llm_stream(runtime, message: str,
                                         all_tools,
                                         user_message=str(message or "build"),
                                         step_index=0,
+                                        history=messages,
                                     )
                                     or all_tools
                                 )
@@ -3138,6 +3309,7 @@ async def call_llm_stream(runtime, message: str,
                                         all_tools,
                                         user_message=str(message or "build"),
                                         step_index=0,
+                                        history=messages,
                                     )
                                     or all_tools
                                 )
@@ -3307,6 +3479,7 @@ async def call_llm_stream(runtime, message: str,
                                         all_tools,
                                         user_message=str(message or "build"),
                                         step_index=0,
+                                        history=messages,
                                     )
                                     or all_tools
                                 )
@@ -3593,6 +3766,51 @@ async def call_llm_stream(runtime, message: str,
                     if vis_msg:
                         messages.append(vis_msg)
                         yield "@@status:Computer vision — screenshot attached\n"
+
+                # Thrash brake: a batch where every tool errored is not
+                # progress, but it *is* tool activity, so the no-progress
+                # fingerprint above cannot see it. A model that varies its args
+                # slightly each round also slips fingerprint dedup — observed as
+                # 44 consecutive file_edit calls all failing "old_string and
+                # new_string are identical", and 42 all failing
+                # TOOL_ARGS_TRUNCATED. Nothing was changing; the turn was stuck.
+                if batch_tool_msgs:
+                    _errs = sum(
+                        1
+                        for _m in batch_tool_msgs
+                        if "Error [" in str((_m or {}).get("content") or "")
+                    )
+                    failed_tools_this_turn += _errs
+                    # Absolute ceiling on wasted calls. Requiring a batch to be
+                    # *entirely* errors was too lenient: a turn ran 1205 tool
+                    # calls with 1062 failures (88%) because the occasional
+                    # success reset the consecutive counter every few rounds.
+                    if (
+                        failed_tools_this_turn >= max_failed_tools
+                        and not stalled_finalize
+                    ):
+                        stalled_finalize = True
+                        logger.warning(
+                            "%d failed tool calls this turn (step %d) - "
+                            "finalizing instead of thrashing",
+                            failed_tools_this_turn,
+                            step + 1,
+                        )
+                    if _errs and _errs == len(batch_tool_msgs):
+                        all_error_batches += 1
+                        if (
+                            all_error_batches >= max_all_error_batches
+                            and not stalled_finalize
+                        ):
+                            stalled_finalize = True
+                            logger.warning(
+                                "%d consecutive all-error tool batches (step %d) - "
+                                "finalizing instead of thrashing",
+                                all_error_batches,
+                                step + 1,
+                            )
+                    else:
+                        all_error_batches = 0
 
                 _bdelta, _pdelta = record_tool_batch_stats(
                     turn=turn,

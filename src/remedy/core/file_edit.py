@@ -193,7 +193,32 @@ def apply_search_replace(
     if old_string == "":
         return EditResult(ok=False, message="old_string must not be empty")
     if old_string == new_string:
-        return EditResult(ok=False, message="old_string and new_string are identical")
+        # Identical strings are a *no-op*, not a failure — and when the text is
+        # already in the file the model's desired end state is already true.
+        # Returning an error invited a retry of the same hunk: a local model
+        # sent this 44 times in one turn, burning the whole step budget while
+        # nothing on disk needed to change. Only report failure when the target
+        # is genuinely absent, which is a real miss the model must correct.
+        if content.count(old_string) > 0:
+            return EditResult(
+                ok=True,
+                message=(
+                    "No change needed: the file already contains exactly that "
+                    "text (old_string and new_string are identical). Move on to "
+                    "the next step — do not resend this hunk."
+                ),
+                occurrences=content.count(old_string),
+                previous=content,
+                new_content=content,
+                hunks_applied=0,
+            )
+        return EditResult(
+            ok=False,
+            message=(
+                "old_string and new_string are identical, and that text is not "
+                "in the file. Read the file and copy an exact snippet to change."
+            ),
+        )
     count = content.count(old_string)
     if count == 0:
         # CRLF / trailing-space mismatch is the usual Windows write failure.
