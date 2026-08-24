@@ -4,6 +4,7 @@ import {
   coerceSlideId,
   layoutOpenBrowserBesideSettings,
   layoutOpenBrowserInRail,
+  layoutOpenSlideInRail,
   loadWorkspaceLayout,
   saveWorkspaceLayout,
 } from './layoutPrefs'
@@ -150,5 +151,24 @@ describe('workspace layoutPrefs v3', () => {
     expect(fromLeft.left).toBe('settings')
     expect(fromLeft.right).toBe('browser')
     expect(fromLeft.rightRail).toBe('open')
+  })
+
+  it('opens Terminal on the right without duplicating the slide', () => {
+    const next = layoutOpenSlideInRail(
+      {
+        left: 'terminal',
+        right: 'settings',
+        leftWidth: 280,
+        rightWidth: 300,
+        leftOpen: true,
+        rightOpen: false,
+        leftRail: 'open',
+        rightRail: 'thin',
+      },
+      'terminal',
+    )
+    expect(next.right).toBe('terminal')
+    expect(next.left).toBe('sessions')
+    expect(next.rightRail).toBe('open')
   })
 })

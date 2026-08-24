@@ -801,6 +801,20 @@ def list_windows(limit: int = 40) -> list[dict[str, Any]]:
     return results
 
 
+def find_remedy_desktop_hwnd() -> int | None:
+    """HWND of the running Remedy Desktop window, if any.
+
+    Multi-monitor: her window is often *not* on monitor 0 (this machine parks
+    it at negative Y). Callers that want a picture of Grove/Studio should
+    PrintWindow this HWND instead of capturing a random display.
+    """
+    for w in list_windows(limit=80):
+        title = str(w.get("title") or "").strip()
+        if title == "Remedy Desktop" or title.startswith("Remedy Desktop"):
+            return int(w["hwnd"])
+    return None
+
+
 def _window_class(hwnd: int) -> str:
     with contextlib.suppress(Exception):
         buf = ctypes.create_unicode_buffer(256)
@@ -1711,8 +1725,19 @@ def list_monitors() -> list[dict[str, Any]]:
     # Mark primary via GetSystemMetrics origin (0,0) usually on primary
     for m in monitors:
         m["primary"] = m["left"] == 0 and m["top"] == 0
+        m["remedy"] = False
     if monitors and not any(m["primary"] for m in monitors):
         monitors[0]["primary"] = True
+    hwnd = find_remedy_desktop_hwnd()
+    if hwnd:
+        rect = wintypes.RECT()
+        if user32.GetWindowRect(int(hwnd), ctypes.byref(rect)):
+            cx = (int(rect.left) + int(rect.right)) // 2
+            cy = (int(rect.top) + int(rect.bottom)) // 2
+            for m in monitors:
+                if m["left"] <= cx < m["right"] and m["top"] <= cy < m["bottom"]:
+                    m["remedy"] = True
+                    break
     return monitors
 
 

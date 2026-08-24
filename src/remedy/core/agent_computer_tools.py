@@ -744,7 +744,10 @@ def register_computer_tools(runtime: Any) -> None:
     reg.register_builtin_handler(
         "computer_screenshot",
         "Screenshot browser or desktop. Built-in vision auto-decodes the PNG "
-        "(OCR + click targets). Use for games / UIs with no accessibility tree.",
+        "(OCR + click targets). For Remedy's own Grove / Alongside / Studio, "
+        "set hint='grove' (or alongside/studio) so we capture HER window — "
+        "do not pass monitor=0 on a multi-display desk (that is often wallpaper). "
+        "Use computer_monitors to see which display holds Remedy Desktop.",
         computer_screenshot,
         {
             "type": "object",

@@ -22,7 +22,7 @@ project access scope).
 | **Home surface** | **Grove** (partner). **Studio** is one tap away (workbench). |
 | **Data home** | `~/.remedy` (config, memory, voice, Vault, skills; DPAPI on Windows) |
 | **Models** | *Your* provider keys or Ollama / RMB — continuity stays on disk |
-| **Current** | **v0.31.0** — a partner for any ability level (Grove, voice, life tasks, hive, research, games) |
+| **Current** | **v0.31.1** — she drives her own UI; partner line from 0.31.0 (Grove, voice, life tasks, hive, research, games) |
 | **Install** | [Windows](01-install-windows.md) · [Linux](01-install-linux.md) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · PyPI `remedy-ai` |
 
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.  
@@ -32,6 +32,7 @@ Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
 
 ## What’s new (start here)
 
+**v0.31.1** lets her open Grove, Alongside, Settings, and rails herself.
 **v0.31.0** is a new Remedy, not a patch on the old coding-agent line.
 
 - **Grove** is home; she **speaks and hears** locally; Studio keeps the workbench
