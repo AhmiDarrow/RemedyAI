@@ -663,6 +663,10 @@ def register_settings_tools(runtime: Any) -> None:
         section: str = "",
         panel: str = "",
         article: str = "",
+        path: str = "",
+        url: str = "",
+        session_id: str = "",
+        text: str = "",
     ) -> str:
         """Drive Remedy's own interface — switch surface, open panels, etc."""
         import json as _json
@@ -715,8 +719,26 @@ def register_settings_tools(runtime: Any) -> None:
                         }
                     )
                 params["section"] = sec
+        elif act == "open_session":
+            sid = (session_id or goal_id or "").strip()
+            if not sid:
+                return _json.dumps(
+                    {"ok": False, "error": "open_session needs session_id"}
+                )
+            params["session_id"] = sid
         elif act == "open_panel":
             p = normalize_panel(panel)
+            folder = (path or "").strip()
+            link = (url or "").strip()
+            if not p and (link.startswith("http://") or link.startswith("https://")):
+                p = "browser"
+            if not p and folder:
+                if folder.startswith("http://") or folder.startswith("https://"):
+                    p = "browser"
+                    link = folder
+                    folder = ""
+                else:
+                    p = "files"
             if not p:
                 return _json.dumps(
                     {
@@ -729,6 +751,21 @@ def register_settings_tools(runtime: Any) -> None:
             art = (article or section or "").strip()
             if p == "help" and art:
                 params["article"] = art
+            if p in {"files", "terminal"} and folder:
+                params["path"] = folder
+            if p == "browser" and (link or folder):
+                params["url"] = link or folder
+            if p == "sessions":
+                sid = (session_id or "").strip()
+                if sid:
+                    params["session_id"] = sid
+            if p == "scratch" and (text or "").strip():
+                from remedy.core.scratchpad_store import write_scratch
+                from remedy.core.turn_context import turn_session_id
+
+                sid = (session_id or turn_session_id(runtime) or "").strip() or None
+                write_scratch(sid, text)
+                params["session_id"] = sid or "_global"
         res = request_app_action(act, **params)
         res["note"] = (
             "The app will do this within a moment — it's her own UI. "
@@ -736,21 +773,82 @@ def register_settings_tools(runtime: Any) -> None:
         )
         return _json.dumps(res)
 
+    async def scratchpad(
+        action: str = "read",
+        text: str = "",
+        session_id: str = "",
+    ) -> str:
+        """Read or write the Studio scratch pad (same notes the rail shows)."""
+        from remedy.core.app_control import request_app_action
+        from remedy.core.scratchpad_store import read_scratch, write_scratch
+        from remedy.core.turn_context import turn_session_id
+
+        sid = (session_id or "").strip() or turn_session_id(runtime) or None
+        act = (action or "read").strip().lower()
+        if act in ("read", "get", "show"):
+            body = read_scratch(sid)
+            request_app_action("open_panel", panel="scratch")
+            if not body.strip():
+                return "(empty scratchpad)"
+            return body
+        if act in ("write", "set", "append"):
+            stored = write_scratch(sid, text or "", append=act == "append")
+            request_app_action("open_panel", panel="scratch")
+            return f"ok {len(stored)} chars. Scratch rail opening so they can see it."
+        return format_tool_error(
+            f"unknown scratchpad action {act!r}",
+            code="BAD_ACTION",
+            tool_name="scratchpad",
+            suggestion="action=read | write | append",
+        )
+
+    async def list_sessions(limit: int = 30) -> str:
+        """List owner chats (id, title, when) so she can open one in the Sessions rail."""
+        mem = getattr(runtime, "memory", None)
+        if mem is None or not hasattr(mem, "list_chat_sessions"):
+            return format_tool_error(
+                "session store not available",
+                code="NO_MEMORY",
+                tool_name="list_sessions",
+            )
+        try:
+            n = max(1, min(100, int(limit or 30)))
+        except (TypeError, ValueError):
+            n = 30
+        rows = await mem.list_chat_sessions(limit=n, offset=0)
+        lines: list[str] = []
+        for s in rows:
+            origin = str(getattr(s, "origin_channel", "") or "").strip() or "studio"
+            title = (getattr(s, "title", None) or "(untitled)").replace("\n", " ")
+            updated = getattr(s, "updated_at", "") or ""
+            msgs = getattr(s, "message_count", 0) or 0
+            sid = getattr(s, "id", "") or ""
+            lines.append(f"{sid}  {origin}  msgs={msgs}  {updated}  {title}")
+        if not lines:
+            return "(no sessions)"
+        return (
+            "Use app_control action=open_session session_id=<id> to show one.\n"
+            + "\n".join(lines)
+        )
+
     reg = runtime.tool_registry
     reg.register_builtin_handler(
         "app_control",
         "Drive Remedy's OWN interface with the owner watching — never "
         "computer_click her chrome. "
         "action='switch_surface' target='grove'|'alongside'|'storyline'|'studio'; "
-        "action='open_settings' section='provider'|'voice'|'channels'|'theme'|… "
-        "(opens that Settings section so they can see it); "
+        "action='open_settings' section='provider'|'voice'|'channels'|'theme'|…; "
         "action='open_panel' panel='help'|'memory'|'skills'|'diagnostics'|"
         "'usage'|'time_travel'|'about'|'browser'|'terminal'|'files'|'scratch'|"
-        "'sessions'; "
+        "'sessions'. Rails take context: files path=<dir>, terminal path=<cwd>, "
+        "browser url=<http>, scratch (read/write via scratchpad tool), "
+        "sessions session_id= to highlight a chat. "
+        "action='open_session' session_id= shows that chat. "
         "action='close_ui'; action='open_goal' goal_id=; "
         "action='focus_composer'; action='new_session'. "
-        "To CHANGE a setting, call update_settings (that also opens Settings). "
-        "For the PC / websites use computer_* / host_run.",
+        "To CHANGE a setting, call update_settings. "
+        "For the PC / websites use computer_* / host_run — not explorer.exe "
+        "for an in-app folder.",
         app_control,
         {
             "type": "object",
@@ -759,7 +857,7 @@ def register_settings_tools(runtime: Any) -> None:
                     "type": "string",
                     "description": (
                         "switch_surface | open_settings | open_panel | close_ui | "
-                        "open_goal | focus_composer | new_session"
+                        "open_goal | focus_composer | new_session | open_session"
                     ),
                 },
                 "target": {
@@ -786,8 +884,60 @@ def register_settings_tools(runtime: Any) -> None:
                     "type": "string",
                     "description": "Help article id when panel=help (e.g. 09-troubleshooting)",
                 },
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "Folder for panel=files (Files rail) or panel=terminal (shell cwd)."
+                    ),
+                },
+                "url": {
+                    "type": "string",
+                    "description": "http(s) URL for panel=browser",
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "Chat id for open_session or panel=sessions",
+                },
+                "text": {
+                    "type": "string",
+                    "description": "Optional scratch text when panel=scratch (prefer scratchpad tool)",
+                },
             },
             "required": ["action"],
+        },
+    )
+    reg.register_builtin_handler(
+        "scratchpad",
+        "Read or write the Studio Scratch rail — the same notes the owner sees. "
+        "action=read | write | append. session_id= defaults to this chat. "
+        "Opens the Scratch rail so they can watch.",
+        scratchpad,
+        {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "read | write | append",
+                },
+                "text": {"type": "string", "description": "For write/append"},
+                "session_id": {
+                    "type": "string",
+                    "description": "Chat id (default: this session)",
+                },
+            },
+        },
+    )
+    reg.register_builtin_handler(
+        "list_sessions",
+        "List owner chats (id, grove/studio, title, updated). "
+        "Then app_control action=open_session session_id= to show one in the rail. "
+        "Does not include hive-private sessions.",
+        list_sessions,
+        {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "Max rows (default 30)"},
+            },
         },
     )
     reg.register_builtin_handler(

@@ -668,6 +668,29 @@ def register_shell_tools(runtime: Any) -> None:
                     )
                 continue
 
+        from remedy.core.open_folder import (
+            folder_from_argv,
+            folder_from_command,
+            format_open_folder_result,
+            open_folder_os,
+        )
+
+        folder = folder_from_argv(_argv) if _argv else folder_from_command(command)
+        if folder is not None:
+            try:
+                info = open_folder_os(folder)
+            except Exception as exc:
+                return format_tool_error(
+                    f"could not open folder: {exc}",
+                    code="OPEN_FOLDER",
+                    tool_name="host_run" if _argv else "bash_exec",
+                    suggestion=(
+                        "Use app_control action=open_panel panel=files path=<dir> "
+                        "for the Files rail, or computer_app with path= for Explorer."
+                    ),
+                )
+            return format_open_folder_result(info)
+
         from remedy.execution.host.diagnose import diagnose_host_failure
         from remedy.execution.host.ir import HostOp
         from remedy.execution.host.runner import PreparedCommand, prepare_host_command

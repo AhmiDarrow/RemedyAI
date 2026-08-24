@@ -16,6 +16,7 @@ import {
 import {
   appendJobThinking,
   appendJobToken,
+  replaceJobThinking,
   completeStreamJob,
   detachStreamJob,
   getJobPaint,
@@ -180,6 +181,23 @@ export function useMessages(sessionId: string | null) {
       }
     },
     [flushPartialThinking],
+  )
+
+  const replacePartialThinking = useCallback(
+    (thought: string) => {
+      if (thinkingRafRef.current != null) {
+        if (typeof cancelAnimationFrame === 'function') {
+          cancelAnimationFrame(thinkingRafRef.current)
+        } else {
+          clearTimeout(thinkingRafRef.current)
+        }
+        thinkingRafRef.current = null
+      }
+      thinkingBufRef.current = ''
+      thinkingAccumRef.current = thought || ''
+      setPartialThinking(thought || '')
+    },
+    [],
   )
 
   const resetStreamBuffers = useCallback(() => {
@@ -813,8 +831,13 @@ export function useMessages(sessionId: string | null) {
           void finishErr(errMsg)
         },
         model,
-        (thought) => {
+        (thought, meta) => {
           bumpActivity()
+          if (meta?.replace) {
+            replaceJobThinking(targetId, thought)
+            if (isFocusedTurn()) replacePartialThinking(thought)
+            return
+          }
           appendJobThinking(targetId, thought)
           if (isFocusedTurn()) appendPartialThinking(thought)
         },
@@ -961,6 +984,7 @@ export function useMessages(sessionId: string | null) {
       sessionId,
       appendPartialToken,
       appendPartialThinking,
+      replacePartialThinking,
       resetStreamBuffers,
       clearStreamAccum,
       drainQueue,

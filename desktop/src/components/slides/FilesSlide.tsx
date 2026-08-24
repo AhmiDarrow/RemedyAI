@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { apiFetch } from '../../api/client'
 import { isTauri, tauriInvoke } from '../../api/tauri'
+import { FILES_SET_PATH_EVENT, takePendingFilesPath } from '../../workspace/railNav'
 import { EmptyState } from '../EmptyState'
 
 type Entry = { name: string; path: string; is_dir: boolean }
@@ -88,16 +89,29 @@ export function FilesSlide({
     [sessionId],
   )
 
-  // Reset to project root whenever the session changes (new project path).
+  // Reset whenever the session changes; honor a pending app_control path.
   useEffect(() => {
-    setPath('.')
+    const pending = takePendingFilesPath()
+    setPath(pending || '.')
     setRoot('')
     setFiles([])
     setError('')
     setStatus('')
     setFilter('')
     setFocusIdx(-1)
-    void load('.')
+    void load(pending || '.')
+  }, [load])
+
+  useEffect(() => {
+    const onSet = (ev: Event) => {
+      const folder = (ev as CustomEvent<{ path?: string }>).detail?.path?.trim()
+      if (!folder) return
+      takePendingFilesPath()
+      setFilter('')
+      void load(folder)
+    }
+    window.addEventListener(FILES_SET_PATH_EVENT, onSet)
+    return () => window.removeEventListener(FILES_SET_PATH_EVENT, onSet)
   }, [load])
 
   const absPath = (rel: string) => {

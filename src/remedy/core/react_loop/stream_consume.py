@@ -12,6 +12,7 @@ from typing import Any
 from remedy.core.react_stream import (
     StreamRoundState,
     apply_openai_sse_chunk,
+    apply_reasoning_piece,
     parse_sse_data_line,
     want_sse_stream_parse,
 )
@@ -79,7 +80,12 @@ async def consume_llm_http_response(
     """Yield (token, produced_user_text_flag) from one provider response.
 
     Updates *round_state* and *collected* in place.
+
+    Each HTTP round is a new scratchpad. ``@@thinking_round`` tells the
+    desktop to *replace* live thinking, not append this round's recap onto
+    every previous one (session 4d89: the same "The user wants…" 20 times).
     """
+    yield "@@thinking_round", False
     headers_map = getattr(resp, "headers", None) or {}
     content_type = str(
         headers_map.get("Content-Type") or headers_map.get("content-type") or ""
@@ -190,14 +196,13 @@ async def consume_llm_http_response(
         reason = (
             parsed.get("reasoning_content") or parsed.get("reasoning") or ""
         )
-        if (
-            isinstance(reason, str)
-            and reason.strip()
-            and not round_state.reasoning_parts
-        ):
-            round_state.reasoning_parts.append(reason.strip())
+        if isinstance(reason, str) and reason.strip():
+            apply_reasoning_piece(round_state, reason.strip())
         if not round_state.tool_call_acc and parsed.get("tool_calls"):
             raw_tcs = parsed.get("tool_calls")
             if isinstance(raw_tcs, list):
                 round_state.tool_call_acc = dict(enumerate(raw_tcs))
         collected.update(parsed)
+        thought = round_state.reasoning_out
+        if thought:
+            yield f"@@thinking:{thought}", False

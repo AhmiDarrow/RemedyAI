@@ -66,7 +66,7 @@ export type StreamHandlers = {
   onToken: (text: string) => void
   onDone: (data: StreamDonePayload) => void
   onError: (message: string) => void
-  onThinking?: (text: string) => void
+  onThinking?: (text: string, meta?: { replace?: boolean }) => void
   onToolCall?: (
     name: string,
     args?: Record<string, unknown>,
@@ -105,7 +105,7 @@ export function streamMessage(
   onDone: (data: StreamDonePayload) => void,
   onError: (message: string) => void,
   model?: string,
-  onThinking?: (text: string) => void,
+  onThinking?: (text: string, meta?: { replace?: boolean }) => void,
   onToolCall?: (
     name: string,
     args?: Record<string, unknown>,
@@ -223,7 +223,11 @@ export function streamMessage(
             if (typeof payload.text === 'string' && payload.text) onToken(payload.text)
             break
           case 'thinking':
-            if (typeof payload.text === 'string' && payload.text) onThinking?.(payload.text)
+            if (typeof payload.text === 'string' && payload.text) {
+              onThinking?.(payload.text, {
+                replace: payload.replace === true,
+              })
+            }
             break
           case 'tool_call':
             if (typeof payload.name === 'string' && payload.name) {

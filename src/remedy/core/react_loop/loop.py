@@ -2414,7 +2414,19 @@ async def call_llm_stream(runtime, message: str,
                         if _thought:
                             text_out = _body
                     if _thought:
-                        yield f"@@thinking:{_thought}"
+                        # This round already streamed reasoning_content as
+                        # @@thinking. Inline <think> is the same scratchpad
+                        # for hosts that cannot split it — don't append it
+                        # again onto the thinking panel.
+                        already = (reasoning_out or "").strip()
+                        extra = _thought.strip()
+                        if extra and extra not in already:
+                            if already and extra.startswith(already):
+                                tail = extra[len(already) :].lstrip()
+                                if tail:
+                                    yield f"@@thinking:{tail}"
+                            else:
+                                yield f"@@thinking:{extra}"
                     text_out = strip_stream_status_noise(str(text_out))
                     stutter_src = str(text_out or "")
                     with suppress(Exception):

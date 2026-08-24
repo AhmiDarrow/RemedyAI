@@ -13,6 +13,12 @@ import {
   saveWorkspaceLayout,
 } from './workspace/layoutPrefs'
 import { SLIDE_META, type SlideId } from './workspace/types'
+import {
+  requestBrowserUrl,
+  requestFilesPath,
+  requestScratchReload,
+  requestTerminalCwd,
+} from './workspace/railNav'
 import { PlanBanner } from './components/PlanBanner'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { cancelPlan, type TaskPlan } from './api/plans'
@@ -753,6 +759,28 @@ export default function App() {
     }
   }, [serverState])
 
+  const handleSelect = useCallback(
+    (id: string) => {
+      if (!id) return
+      // Always set active — useMessages force-loads history on session change.
+      setActiveId(id)
+      setOpenTabs((prev) => {
+        if (prev.has(id)) return prev
+        return new Set([...prev, id])
+      })
+      // Keep sessions panel open so selection is obvious
+      setWsLayout((prev) => {
+        if (prev.left === 'sessions' && prev.leftRail !== 'open') {
+          const next = { ...prev, leftRail: 'open' as const, leftOpen: true }
+          saveWorkspaceLayout(next)
+          return next
+        }
+        return prev
+      })
+    },
+    [setActiveId],
+  )
+
   const handleNewSession = useCallback(async () => {
     // Stamp with *current bar* bind (active session), not a floating global.
     const prov = barProvider
@@ -825,6 +853,23 @@ export default function App() {
               p === 'sessions'
             ) {
               switchSurface('studio')
+              if (p === 'files') {
+                const folder = (cmd.params?.path || '').trim()
+                if (folder) requestFilesPath(folder)
+              }
+              if (p === 'terminal') {
+                const folder = (cmd.params?.path || '').trim()
+                if (folder) requestTerminalCwd(folder)
+              }
+              if (p === 'browser') {
+                const u = (cmd.params?.url || '').trim()
+                if (u) requestBrowserUrl(u)
+              }
+              if (p === 'sessions') {
+                const sid = (cmd.params?.session_id || '').trim()
+                if (sid) handleSelect(sid)
+              }
+              if (p === 'scratch') requestScratchReload()
               openSlideInRail(p)
             }
             break
@@ -850,6 +895,15 @@ export default function App() {
           case 'new_session':
             void handleNewSession()
             break
+          case 'open_session': {
+            const sid = (cmd.params?.session_id || '').trim()
+            if (sid) {
+              switchSurface('studio')
+              openSlideInRail('sessions')
+              handleSelect(sid)
+            }
+            break
+          }
           case 'focus_composer':
             composerRef.current?.focus()
             window.dispatchEvent(new CustomEvent('remedy:focus-composer'))
@@ -872,31 +926,10 @@ export default function App() {
     openSettings,
     setPanel,
     handleNewSession,
+    handleSelect,
     openHelp,
     openSlideInRail,
   ])
-
-  const handleSelect = useCallback(
-    (id: string) => {
-      if (!id) return
-      // Always set active — useMessages force-loads history on session change.
-      setActiveId(id)
-      setOpenTabs((prev) => {
-        if (prev.has(id)) return prev
-        return new Set([...prev, id])
-      })
-      // Keep sessions panel open so selection is obvious
-      setWsLayout((prev) => {
-        if (prev.left === 'sessions' && prev.leftRail !== 'open') {
-          const next = { ...prev, leftRail: 'open' as const, leftOpen: true }
-          saveWorkspaceLayout(next)
-          return next
-        }
-        return prev
-      })
-    },
-    [setActiveId],
-  )
 
   const handleCloseTab = useCallback(
     (id: string) => {
