@@ -96,23 +96,54 @@ on demand.
 | # | Gate | Pass criteria | On fail |
 |---|------|---------------|---------|
 | 1 | **Fix / implement** | Requested behavior works; no known regressions you introduced | Keep fixing |
-| 2 | **Test** | Full suite (or documented subset) green; targeted tests for the change | Fix + re-run; **do not commit “red”** |
+| 2 | **Test** | Full suite green **and** the local CI commands below | Fix + re-run; **do not commit “red”**; **do not push** until local CI is green |
 | 3 | **Update project** | Version bump **only** when shipping runtime/API/installer behavior (not docs-only) | Align versions / assets |
 | 4 | **Update documentation** | CHANGELOG + user/manual notes for user-visible change; run docs sync/check if the repo has it. **Do not bump version for docs-only fixes** (e.g. What's new catch-up) | Sync docs; re-check |
 | 5 | **Build** | Package / desktop / artifacts the project expects still build | Fix build; re-test if needed |
 | 6 | **Commit** | Clear conventional message; only intentional files | Split noise out of the commit |
-| 7 | **Push → CI** | Remote CI green for that commit | Fix on a follow-up commit; **do not publish** |
+| 7 | **Push → CI** | Local CI commands already green, then remote CI green for that commit | Re-run the **failed CI step locally** until green, then push; **do not publish** |
 | 8 | **Publish** (when asked) | Tag / PyPI / release only **after** CI success | Hold publish; report blocker |
 
 ### Format conventions (this repo)
 
 - **Version surfaces:** `python scripts/sync_version.py {X.Y.Z}` (or `uv run python …`).
 - **Docs gate:** `python scripts/check_docs.py` (and `scripts/sync_help_manual.py` when manuals change).
-- **Tests:** `uv run pytest -q` (full); desktop `cd desktop && npm test && npm run build`. Public CI runs those suites (Linux full pytest, Windows security/path subset, desktop vitest).
+- **Tests:** `uv run pytest -q` (full); desktop `cd desktop && npm test && npm run build`.
 - **Python package:** `uv build` then, after CI green, `uv publish` (credentials via env / `~/.pypirc`).
 - **Desktop release:** git tag `v{X.Y.Z}` → GitHub Actions `desktop-release` (see naming rules below).
 - **Commit style:** complete sentences; `release:` / `fix:` / `docs:` prefixes as appropriate.
-- **Never:** force-push `master`/`main`; publish on red CI; leave version surfaces mismatched.
+- **Never:** force-push `master`/`main`; publish on red CI; leave version surfaces mismatched; **push after pytest-only when Linux CI also runs ruff/mypy/docs**.
+
+### Local CI — run this before every `git push`
+
+Public CI is `.github/workflows/ci.yml`. Pytest green on this Windows box does **not** prove that job. Run the **same commands** Linux CI runs, then desktop. If remote CI fails, run **that failed step locally** and get it green **before** the follow-up push.
+
+```text
+uv run ruff check .
+uv run mypy
+uv run python scripts/check_mypy_exclude.py
+uv run python -c "import remedy; from remedy.interfaces.api import create_app; create_app(); print('import OK')"
+uv run python scripts/check_docs.py
+uv run pytest -q --tb=short
+cd desktop && npm test && npm run build
+```
+
+`uv run mypy` type-checks the same on Windows as on Linux CI — do not skip it.
+Linux pytest is POSIX: a leading `/` is a path (`/tmp/…`), not a `cmd /c` flag.
+This machine has **WSL** — use it to reproduce Linux CI pytest (do not use the Windows `.venv`):
+
+```text
+wsl -e bash -lc "cd /mnt/c/Users/Administrator/Old-Remedy && UV_PROJECT_ENVIRONMENT=/tmp/remedy-wsl-venv uv run pytest -q --tb=short tests/test_open_folder.py"
+```
+
+**Never copy owner secrets or personal settings into the tree** — not from
+`~/.remedy`, not from a live chat, not “just for a test.” Tests use dummy
+strings (`not-a-portal-secret-…`, `bot_token="t"`). Do not paste Discord /
+Telegram / API key *shapes* that GitHub secret scanning treats as live
+credentials. If a push is blocked as a secret, **do not** quote the value
+in docs or follow-up commits; rewrite the test with an obviously fake string
+and drop the local dangling commit (`git reflog expire --expire=now --all`
+then `git gc --prune=now`) so the object is not sitting on disk.
 
 ### Skill pointer
 
@@ -160,7 +191,7 @@ One sentence: *what user-visible or API-visible behavior changes?*
 
 ### 4. Required checks by surface (minimum)
 
-Always when shipping runtime/UI: full `pytest` + when desktop touched: `cd desktop && npm test && npm run build`. Public CI runs the same gates.
+Always when shipping runtime/UI: the **Local CI** commands above (ruff, mypy, docs, full pytest, desktop npm test+build). Do not push on pytest-only.
 
 | If you touch… | Also verify… |
 |---------------|--------------|

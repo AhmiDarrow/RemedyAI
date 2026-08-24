@@ -80,7 +80,7 @@ def test_resolve_tools_arith_trivia_disarms_even_if_build_active():
 
 
 def test_resolve_tools_frustrated_why_keeps_build_armed():
-    """ExampleSite: 'why is everything failing?' must not strip Build tools."""
+    """A failing site build: 'why is everything failing?' must not strip Build tools."""
     all_t = [_tool("file_write"), _tool("file_read"), _tool("bash_exec")]
     d = resolve_tools(
         message="why is everything failing?",
