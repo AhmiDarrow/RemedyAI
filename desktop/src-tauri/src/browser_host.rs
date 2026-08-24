@@ -1314,9 +1314,10 @@ where
 {
     let window = wv.window();
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    let window_for_cb = window.clone();
     window
         .run_on_main_thread(move || {
-            let result = match linux_find_embed_widget(&window) {
+            let result = match linux_find_embed_widget(&window_for_cb) {
                 Ok(widget) => f(&widget),
                 Err(e) => Err(e),
             };
@@ -1360,7 +1361,7 @@ fn linux_dispatch_pointer(
         _ => return Err(format!("unknown linux pointer kind {kind}")),
     };
     let mut event = gdk::Event::new(ty);
-    let (ox, oy) = window.origin();
+    let (_ok, ox, oy) = window.origin();
     let win_ptr = window.to_glib_full();
     unsafe {
         if ty == gdk::EventType::MotionNotify {
@@ -1492,11 +1493,11 @@ fn linux_insert_text(wv: &tauri::Webview, text: &str) -> Result<(), String> {
         .chars()
         .map(|ch| {
             if ch == '\n' || ch == '\r' {
-                gtk::gdk::keys::constants::Return.into()
+                *gtk::gdk::keys::constants::Return
             } else if ch == '\t' {
-                gtk::gdk::keys::constants::Tab.into()
+                *gtk::gdk::keys::constants::Tab
             } else {
-                u32::from(Key::from_unicode(ch))
+                *Key::from_unicode(ch)
             }
         })
         .filter(|k| *k != 0)
@@ -1520,19 +1521,19 @@ fn linux_insert_text(wv: &tauri::Webview, text: &str) -> Result<(), String> {
 fn linux_named_key(wv: &tauri::Webview, key: &str) -> Option<Result<(), String>> {
     use gtk::gdk::keys::constants as k;
     let keyval: u32 = match key {
-        "enter" | "return" | "Enter" => k::Return.into(),
-        "tab" | "Tab" => k::Tab.into(),
-        "esc" | "escape" | "Escape" => k::Escape.into(),
-        "backspace" | "Backspace" => k::BackSpace.into(),
-        "delete" | "del" | "Delete" => k::Delete.into(),
-        "ArrowLeft" => k::Left.into(),
-        "ArrowUp" => k::Up.into(),
-        "ArrowRight" => k::Right.into(),
-        "ArrowDown" => k::Down.into(),
-        "PageUp" => k::Page_Up.into(),
-        "PageDown" => k::Page_Down.into(),
-        "Home" => k::Home.into(),
-        "End" => k::End.into(),
+        "enter" | "return" | "Enter" => *k::Return,
+        "tab" | "Tab" => *k::Tab,
+        "esc" | "escape" | "Escape" => *k::Escape,
+        "backspace" | "Backspace" => *k::BackSpace,
+        "delete" | "del" | "Delete" => *k::Delete,
+        "ArrowLeft" => *k::Left,
+        "ArrowUp" => *k::Up,
+        "ArrowRight" => *k::Right,
+        "ArrowDown" => *k::Down,
+        "PageUp" => *k::Page_Up,
+        "PageDown" => *k::Page_Down,
+        "Home" => *k::Home,
+        "End" => *k::End,
         _ => return None,
     };
     Some(linux_on_embed(wv, move |widget| {
