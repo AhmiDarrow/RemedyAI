@@ -763,9 +763,9 @@ def register_settings_tools(runtime: Any) -> None:
                 from remedy.core.scratchpad_store import write_scratch
                 from remedy.core.turn_context import turn_session_id
 
-                sid = (session_id or turn_session_id(runtime) or "").strip() or None
-                write_scratch(sid, text)
-                params["session_id"] = sid or "_global"
+                scratch_sid = (session_id or turn_session_id(runtime) or "").strip() or None
+                write_scratch(scratch_sid, text)
+                params["session_id"] = scratch_sid or "_global"
         res = request_app_action(act, **params)
         res["note"] = (
             "The app will do this within a moment — it's her own UI. "
