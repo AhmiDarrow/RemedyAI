@@ -311,9 +311,13 @@ def register_computer_tools(runtime: Any) -> None:
             seconds=seconds,
         )
 
-    async def computer_app(app: str = "", hint: str = "") -> str:
-        """Launch a desktop app (notepad, calc, explorer, chrome, path to .exe)."""
-        summary = f"app launch app={app!r}"
+    async def computer_app(app: str = "", hint: str = "", path: str = "") -> str:
+        """Launch a desktop app (notepad, calc, explorer, chrome, path to .exe).
+
+        path= opens that directory in the OS file manager (Explorer). Prefer
+        app_control open_panel files path= to show it in Studio's Files rail.
+        """
+        summary = f"app launch app={app!r}" + (f" path={path!r}" if path else "")
         blocked = _computer_approval_gate(runtime, "computer_app", summary)
         if blocked:
             return blocked
@@ -323,6 +327,7 @@ def register_computer_tools(runtime: Any) -> None:
             hint=hint,
             runtime=runtime,
             app=app,
+            path=path,
         )
 
     async def computer_page_text(
@@ -836,12 +841,16 @@ def register_computer_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "computer_app",
-        "Launch a Windows app: notepad, calc, explorer, chrome, edge, or a project-relative .exe (game.exe, .\\hello.exe).",
+        "Launch a Windows app: notepad, calc, explorer, chrome, edge, or a project-relative .exe (game.exe, .\\hello.exe). path= opens a folder in Explorer (OS). For the in-app Files rail use app_control panel=files path=.",
         computer_app,
         {
             "type": "object",
             "properties": {
                 "app": {"type": "string", "description": "App name or path"},
+                "path": {
+                    "type": "string",
+                    "description": "Directory to open in the OS file manager (with app=explorer or alone)",
+                },
                 "hint": hint_prop,
             },
             "required": ["app"],

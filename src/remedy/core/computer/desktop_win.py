@@ -1570,6 +1570,13 @@ def open_app(
             return refuse_os_open_text_document(path_candidate)
         subprocess.Popen([str(path_candidate)], shell=False, close_fds=True)
         return {"app": raw, "method": "path", "target": str(path_candidate)}
+    if path_candidate.is_dir() and (
+        path_candidate.is_absolute() or (search_dirs and path_candidate.exists())
+    ):
+        from remedy.core.open_folder import open_folder_os
+
+        info = open_folder_os(path_candidate)
+        return {"app": raw, **info}
     if is_text_document_path(raw):
         return refuse_os_open_text_document(raw)
     # Drive-letter path that is not an existing file — fail closed (was Popen anyway)

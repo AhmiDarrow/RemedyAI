@@ -736,6 +736,7 @@ class ComputerExecutor:
             )
         if act is ComputerAction.APP:
             app = str(kwargs.get("app") or kwargs.get("name") or "")
+            folder = str(kwargs.get("path") or kwargs.get("folder") or "").strip()
             if _is_host_browser(app):
                 return public_result(
                     ok=False,
@@ -743,6 +744,20 @@ class ComputerExecutor:
                     action="app",
                     message=_HOST_BROWSER_REFUSAL,
                     extra={"refused": "host_browser", "app": app},
+                )
+            if folder:
+                from remedy.core.open_folder import open_folder_os
+
+                info = open_folder_os(folder)
+                with contextlib.suppress(Exception):
+                    self.bridge.set_last_elements([], target="desktop")
+                time.sleep(0.4)
+                return public_result(
+                    ok=True,
+                    target="desktop",
+                    action="app",
+                    message=f"Opened folder: {info.get('target') or folder}",
+                    extra=info,
                 )
             search_dirs = list(kwargs.get("search_dirs") or [])
             info = win.open_app(app, search_dirs=search_dirs or None)

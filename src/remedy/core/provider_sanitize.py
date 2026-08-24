@@ -147,10 +147,26 @@ _SECRET_VALUE_RE = re.compile(
 )
 
 
+_TRUNCATION_MARK = "\n…[truncated]"
+
+
 def _clip(s: str, max_len: int) -> str:
+    """Cap tool/history text without looking like mid-statement source.
+
+    A glued-on ``…`` after ``except Excepti`` made the agent treat complete
+    files as truncated and rewrite them (session 4d89 host_script loop).
+    """
     if len(s) <= max_len:
         return s
-    return s[: max(0, max_len - 1)] + "…"
+    mark = _TRUNCATION_MARK
+    budget = max(0, max_len - len(mark))
+    if budget <= 0:
+        return mark.lstrip()
+    cut = budget
+    nl = s.rfind("\n", 0, budget)
+    if nl >= budget // 2:
+        cut = nl
+    return s[:cut] + mark
 
 
 def _scrub_text(

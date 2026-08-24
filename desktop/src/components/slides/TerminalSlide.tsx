@@ -5,6 +5,10 @@ import '@xterm/xterm/css/xterm.css'
 import { apiFetch } from '../../api/client'
 import { isTauri, tauriInvoke } from '../../api/tauri'
 import { isLinuxDesktop } from '../../utils/platform'
+import {
+  TERMINAL_SET_CWD_EVENT,
+  takePendingTerminalCwd,
+} from '../../workspace/railNav'
 
 const SHELL_LABEL = isLinuxDesktop() ? 'Terminal' : 'PowerShell'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -42,6 +46,7 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
   const fitRef = useRef<FitAddon | null>(null)
   const ptyIdRef = useRef<string | null>(null)
   const cwdRef = useRef('')
+  const cwdLockRef = useRef<string | null>(null)
   const startedRef = useRef(false)
   /** Bumped on each start/restart so a slow open cannot clobber a newer shell. */
   const ptyGenRef = useRef(0)
@@ -55,14 +60,23 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
     }
   })
 
-  // Resolve session project path for PTY cwd
+  // Resolve session project path for PTY cwd; honor a pending app_control path.
   useEffect(() => {
     let cancelled = false
+    const pending = takePendingTerminalCwd()
     void (async () => {
       try {
+        if (pending) {
+          if (cancelled) return
+          cwdLockRef.current = pending
+          setCwd(pending)
+          cwdRef.current = pending
+          return
+        }
+        cwdLockRef.current = null
         const q = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
         const data = await apiFetch<{ project_path?: string }>(`/workspace${q}`)
-        if (cancelled) return
+        if (cancelled || cwdLockRef.current) return
         const next = (data.project_path || '').trim()
         setCwd(next)
         cwdRef.current = next
@@ -77,6 +91,19 @@ export function TerminalSlide({ sessionId }: { sessionId?: string | null }) {
       cancelled = true
     }
   }, [sessionId])
+
+  useEffect(() => {
+    const onSet = (ev: Event) => {
+      const folder = (ev as CustomEvent<{ path?: string }>).detail?.path?.trim()
+      if (!folder) return
+      takePendingTerminalCwd()
+      cwdLockRef.current = folder
+      setCwd(folder)
+      cwdRef.current = folder
+    }
+    window.addEventListener(TERMINAL_SET_CWD_EVENT, onSet)
+    return () => window.removeEventListener(TERMINAL_SET_CWD_EVENT, onSet)
+  }, [])
 
   const startPty = useCallback(async (term: Terminal, fit: FitAddon, workdir: string) => {
     if (!isTauri()) {

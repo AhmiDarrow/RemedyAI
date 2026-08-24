@@ -1089,6 +1089,23 @@ def test_redact_shared_patterns():
     prose = "I prefer dark mode and short answers please."
     assert looks_like_secret_text(prose) is False
     assert redact_text(prose) == prose
+    # Identifiers in source — never ``bot_[redacted]`` (session 4d89 rewrite loop)
+    src = (
+        "class DiscordConfig:\n"
+        '    bot_token: str = ""\n'
+        '    mode: str = "token"\n'
+        '    password: str | None = None\n'
+    )
+    red_src = redact_text(src)
+    assert "bot_token: str" in red_src
+    assert "bot_[redacted]" not in red_src
+    assert 'mode: str = "token"' in red_src
+    assert "password: str | None" in red_src
+    secret_src = 'bot_token = "not-a-portal-secret-xyzzy-999-keep-me-out-of-source"'
+    red_secret = redact_text(secret_src)
+    assert "not-a-portal-secret-xyzzy-999-keep-me-out-of-source" not in red_secret
+    assert "bot_token" in red_secret
+    assert "[redacted]" in red_secret
 
 
 def test_identity_import_requires_hmac(tmp_path: Path):

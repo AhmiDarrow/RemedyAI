@@ -8,6 +8,7 @@ from remedy.core.react_stream import (
     StreamRoundState,
     accumulate_tool_call_delta,
     apply_openai_sse_chunk,
+    apply_reasoning_piece,
     build_runtime_system_block,
     filter_fresh_tool_calls,
     finalize_round_text,
@@ -95,6 +96,48 @@ def test_apply_openai_sse_chunk_live_and_tools() -> None:
     tcs = state.tool_calls_list()
     assert len(tcs) == 1
     assert tcs[0]["function"]["name"] == "list_dir"
+
+
+def test_reasoning_snapshots_are_not_concatenated() -> None:
+    """A proxy that resends the full scratchpad each chunk must not stack it.
+
+    Session 4d89: thinking was ``The user wants…`` twenty times because every
+    SSE delta was treated as a suffix.
+    """
+    state = StreamRoundState()
+    apply_openai_sse_chunk(
+        state,
+        {"choices": [{"delta": {"reasoning_content": "The user wants a bot."}}]},
+        stream_live=True,
+    )
+    apply_openai_sse_chunk(
+        state,
+        {"choices": [{"delta": {"reasoning_content": "The user wants a bot."}}]},
+        stream_live=True,
+    )
+    apply_openai_sse_chunk(
+        state,
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "reasoning_content": "The user wants a bot. I'll open config."
+                    }
+                }
+            ]
+        },
+        stream_live=True,
+    )
+    assert state.reasoning_out == "The user wants a bot. I'll open config."
+
+
+def test_apply_reasoning_piece_suffix_and_shorter_snapshot() -> None:
+    state = StreamRoundState()
+    assert apply_reasoning_piece(state, "abc") == "abc"
+    assert apply_reasoning_piece(state, "abc") == ""
+    assert apply_reasoning_piece(state, "abcd") == "d"
+    assert apply_reasoning_piece(state, "ab") == ""
+    assert state.reasoning_out == "abcd"
 
 
 def test_finish_reason_length_detected() -> None:

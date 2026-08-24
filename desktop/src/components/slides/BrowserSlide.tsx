@@ -19,6 +19,7 @@ import {
   browserStackSetHostVisible,
   browserStackHold,
 } from '../../utils/browserStack'
+import { takePendingBrowserUrl } from '../../workspace/railNav'
 
 type Bounds = { x: number; y: number; width: number; height: number }
 
@@ -508,20 +509,25 @@ export function BrowserSlide() {
 
   // Agent / chat double-click: set URL and navigate the embed (not address-bar only).
   useEffect(() => {
-    const onSetUrl = (ev: Event) => {
-      const detail = (ev as CustomEvent<{ url?: string; navigate?: boolean }>).detail
-      const u = (detail?.url || '').trim()
-      if (!u) return
+    const goTo = (u: string, navigate = true) => {
       applyLiveUrl(u)
       autoStarted.current = true
-      // Default: navigate. Pass navigate:false to only sync the omnibox.
-      if (detail?.navigate === false) {
+      if (!navigate) {
         setLoaded(true)
         setStatus(`URL ${u}`)
         void pushBounds()
         return
       }
       void goRef.current(u)
+    }
+    const pending = takePendingBrowserUrl()
+    if (pending) goTo(pending)
+    const onSetUrl = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ url?: string; navigate?: boolean }>).detail
+      const u = (detail?.url || '').trim()
+      if (!u) return
+      takePendingBrowserUrl()
+      goTo(u, detail?.navigate !== false)
     }
     window.addEventListener('remedy:browser-set-url', onSetUrl)
     return () => window.removeEventListener('remedy:browser-set-url', onSetUrl)

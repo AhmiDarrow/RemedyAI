@@ -7,6 +7,7 @@ vi.mock('../api/sessions', () => ({
 import {
   appendJobToken,
   appendJobThinking,
+  replaceJobThinking,
   completeStreamJob,
   countRunningJobs,
   detachStreamJob,
@@ -97,6 +98,8 @@ describe('streamJobs', () => {
     expect(paintA?.processSteps).toHaveLength(1)
     expect(paintB?.partialText).toBe('Only B')
     expect(paintB?.processSteps).toHaveLength(0)
+    replaceJobThinking('tab-a', 'round-two')
+    expect(getJobPaint('tab-a')?.partialThinking).toBe('round-two')
     completeStreamJob('tab-a', 'done')
     completeStreamJob('tab-b', 'done')
   })

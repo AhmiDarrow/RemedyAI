@@ -120,6 +120,36 @@ def want_sse_stream_parse(
     return bool(use_openai_sse) or "event-stream" in ct
 
 
+def apply_reasoning_piece(state: StreamRoundState, piece: str) -> str:
+    """Append provider reasoning as a delta *or* a snapshot.
+
+    Hosts disagree: DeepSeek / gpt-oss send incremental ``reasoning`` tokens;
+    some OpenAI-compat proxies send the whole scratchpad again on every chunk.
+    Concatenating snapshots is how one round's thinking panel fills with
+    ``The user wants… The user wants…``.
+
+    Returns the novel suffix (possibly empty) so callers stream only that.
+    """
+    text = piece or ""
+    if not text:
+        return ""
+    acc = "".join(state.reasoning_parts)
+    if not acc:
+        state.reasoning_parts.append(text)
+        return text
+    if text == acc:
+        return ""
+    if text.startswith(acc):
+        extra = text[len(acc) :]
+        if extra:
+            state.reasoning_parts.append(extra)
+        return extra
+    if acc.startswith(text):
+        return ""
+    state.reasoning_parts.append(text)
+    return text
+
+
 def reasoning_delta_text(delta: dict[str, Any] | None) -> str:
     """Thinking text carried by one delta/message, whatever key the host uses.
 
@@ -192,7 +222,7 @@ def apply_openai_sse_chunk(
     # not only in the no-content branch — so the UI shows thinking live.
     reason_delta = reasoning_delta_text(delta)
     if reason_delta:
-        state.reasoning_parts.append(reason_delta)
+        apply_reasoning_piece(state, reason_delta)
     for tc in delta.get("tool_calls") or []:
         accumulate_tool_call_delta(state.tool_call_acc, tc)
     return live
@@ -230,7 +260,7 @@ def apply_openai_completion_message(
             state.suppressed_tool_markup = True
     reason = reasoning_delta_text(msg)
     if reason.strip():
-        state.reasoning_parts.append(reason.strip())
+        apply_reasoning_piece(state, reason.strip())
     raw_tcs = msg.get("tool_calls")
     if isinstance(raw_tcs, list) and raw_tcs:
         # Store as complete tool_calls (index-keyed) for tool_calls_list().
