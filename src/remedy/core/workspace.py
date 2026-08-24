@@ -365,6 +365,17 @@ def is_remedy_installed_code_path(path: Path | str | None) -> bool:
     for i in range(len(parts) - 2):
         if parts[i] == ".remedy" and parts[i + 1] == "voice" and parts[i + 2] == "runtime":
             return True
+    # A Windows path string on POSIX is one Path part; still recognise the tree.
+    raw = str(path).replace("/", "\\")
+    if "\\" in raw:
+        win_parts = [x.lower() for x in raw.split("\\") if x]
+        for i in range(len(win_parts) - 2):
+            if (
+                win_parts[i] == ".remedy"
+                and win_parts[i + 1] == "voice"
+                and win_parts[i + 2] == "runtime"
+            ):
+                return True
     candidates: list[Path] = []
     rh = _remedy_home_for_runtime_check()
     if rh is not None:

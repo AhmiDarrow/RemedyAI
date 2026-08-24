@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -246,7 +247,8 @@ def test_run_returns_stdout_and_hides_the_console_window(monkeypatch) -> None:
     assert seen["timeout"] == 1.5
     assert seen["capture_output"] is True
     assert seen["text"] is True
-    assert isinstance(seen["creationflags"], int)
+    if sys.platform == "win32":
+        assert isinstance(seen["creationflags"], int)
 
 
 def test_run_uses_a_bounded_default_timeout(monkeypatch) -> None:

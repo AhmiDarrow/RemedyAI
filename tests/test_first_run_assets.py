@@ -72,6 +72,8 @@ def test_ensure_voice_assets_missing_extras_starts_pack(tmp_path: Path, monkeypa
 
 
 def test_ensure_voice_assets_no_op_when_present(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("remedy.voice.service.tts_deps_available", lambda: True)
+    monkeypatch.setattr("remedy.voice.service.stt_deps_available", lambda: True)
     monkeypatch.setattr("remedy.voice.service.tts_installed", lambda *a, **k: True)
     monkeypatch.setattr("remedy.voice.service.stt_installed", lambda *a, **k: True)
     monkeypatch.setattr(
