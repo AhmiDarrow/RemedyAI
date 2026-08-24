@@ -209,6 +209,20 @@ def is_protected_secret_path(path: Path | str | None) -> bool:
                 return True
             except Exception:
                 continue
+        # Case-folded: ~/.remedy/AUTH is the same secrets tree as ~/.remedy/auth
+        # even on a case-sensitive filesystem (shared Windows homes, copy-paste).
+        try:
+            parent = a.parent
+            p_cf = [x.lower() for x in p.parts]
+            parent_cf = [x.lower() for x in parent.parts]
+            if (
+                len(p_cf) > len(parent_cf)
+                and p_cf[: len(parent_cf)] == parent_cf
+                and p_cf[len(parent_cf)] == a.name.lower()
+            ):
+                return True
+        except Exception:
+            continue
     return False
 
 

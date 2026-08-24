@@ -279,14 +279,7 @@ async def test_run_python_file_script_outside_project_readable(tmp_path: Path, m
 
 
 def _copy_cases(src: Path, dst: Path) -> list[tuple[str, str]]:
-    return [
-        ("cmd copy", f'copy "{src}" "{dst}"'),
-        ("cmd copy /Y", f'copy /Y "{src}" "{dst}"'),
-        ("xcopy", f'xcopy /Y "{src}" "{dst.parent}\\"'),
-        ("robocopy", f'robocopy "{src.parent}" "{dst.parent}" "{src.name}" /NJH'),
-        ("Copy-Item named", f'Copy-Item -Path "{src}" -Destination "{dst}" -Force'),
-        ("Copy-Item positional", f'Copy-Item "{src}" "{dst}"'),
-        ("Copy-Item LiteralPath", f'Copy-Item -LiteralPath "{src}" -Destination "{dst.parent}" -Recurse'),
+    posix = [
         ("cp", f'cp "{src}" "{dst}"'),
         ("cp -r", f'cp -r "{src}" "{dst}"'),
         (
@@ -297,6 +290,18 @@ def _copy_cases(src: Path, dst: Path) -> list[tuple[str, str]]:
             "python shutil.copy2",
             f"python -c \"import shutil; shutil.copy2(r'{src}', r'{dst}')\"",
         ),
+    ]
+    if sys.platform != "win32":
+        return posix
+    return [
+        ("cmd copy", f'copy "{src}" "{dst}"'),
+        ("cmd copy /Y", f'copy /Y "{src}" "{dst}"'),
+        ("xcopy", f'xcopy /Y "{src}" "{dst.parent}\\"'),
+        ("robocopy", f'robocopy "{src.parent}" "{dst.parent}" "{src.name}" /NJH'),
+        ("Copy-Item named", f'Copy-Item -Path "{src}" -Destination "{dst}" -Force'),
+        ("Copy-Item positional", f'Copy-Item "{src}" "{dst}"'),
+        ("Copy-Item LiteralPath", f'Copy-Item -LiteralPath "{src}" -Destination "{dst.parent}" -Recurse'),
+        *posix,
     ]
 
 

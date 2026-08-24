@@ -27,7 +27,7 @@ def _is_python_binary(path_str: str) -> bool:
     """True when *path_str* names a real CPython launcher (python / python3.12 / pythonw)."""
     import os
 
-    name = os.path.basename((path_str or "").strip().strip("\"'")).lower()
+    name = os.path.basename((path_str or "").strip().strip("\"'").replace("\\", "/")).lower()
     if name.endswith(".exe"):
         name = name[:-4]
     return bool(_PY_EXE_STEM_RE.match(name))
