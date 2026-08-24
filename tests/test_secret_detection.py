@@ -17,6 +17,7 @@ import pytest
 
 from remedy.memory.partner_memory import looks_like_secret
 
+
 # Assemble at runtime so GitHub push-protection does not treat the fixtures
 # as live secrets. The concatenated values still match looks_like_secret.
 def _tok(*parts: str) -> str:

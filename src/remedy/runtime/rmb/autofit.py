@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import struct
+import sys
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -195,7 +196,7 @@ def _probe_vram_full() -> tuple[bool, int, int, str, str]:
 
 def probe_ram() -> tuple[int, int]:
     """Return (total_mb, avail_mb). Zeros when unknown."""
-    if os.name == "nt":
+    if sys.platform == "win32":
         try:
             import ctypes
             from ctypes import wintypes
@@ -222,13 +223,15 @@ def probe_ram() -> tuple[int, int]:
                 )
         except Exception:
             logger.debug("GlobalMemoryStatusEx failed", exc_info=True)
-    try:
-        pages = os.sysconf("SC_PHYS_PAGES")  # type: ignore[attr-defined]
-        avail = os.sysconf("SC_AVPHYS_PAGES")  # type: ignore[attr-defined]
-        size = os.sysconf("SC_PAGE_SIZE")  # type: ignore[attr-defined]
-        return int(pages * size // (1024 * 1024)), int(avail * size // (1024 * 1024))
-    except Exception:
-        return 0, 0
+    else:
+        try:
+            pages = os.sysconf("SC_PHYS_PAGES")
+            avail = os.sysconf("SC_AVPHYS_PAGES")
+            size = os.sysconf("SC_PAGE_SIZE")
+            return int(pages * size // (1024 * 1024)), int(avail * size // (1024 * 1024))
+        except Exception:
+            return 0, 0
+    return 0, 0
 
 
 def probe_hardware() -> HardwareProbe:
