@@ -261,6 +261,7 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
         if isinstance(args, dict) and (
             args.get("_invalid_json")
             or args.get("_truncated")
+            or args.get("_stream_truncated")
             or (args.get("_history_summarized") and name not in _WRITE_TOOLS)
         ):
             tname = (name or "").strip().lower()
@@ -300,13 +301,18 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                         ),
                     )
                 elif tname == "file_write":
+                    path_hint = salvage_path or str(args.get("path") or "").strip()
                     content_str = format_tool_error(
                         "file_write JSON was cut off mid-stream (content too large). "
-                        "Nothing was written.",
+                        "Nothing was written"
+                        + (f" to {path_hint}" if path_hint else "")
+                        + ".",
                         code="TOOL_ARGS_TRUNCATED",
                         tool_name=name or "unknown",
                         suggestion=(
-                            "Write ≤150 lines per file_write, or skeleton + file_edit."
+                            "Do not retry the same huge body (and do not dump it "
+                            "through host_script). file_write one complete small "
+                            "file, then grow it with file_edit hunks."
                         ),
                     )
                 elif tname in ("file_read", "list_dir", "repo_search"):
@@ -347,6 +353,24 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
         if isinstance(args, dict) and (
             args.get("_repaired_truncated") or args.get("_repaired_closed") is not None
         ):
+            # Defense: coerce used to return a stump plus these flags; execute
+            # must not land an unclosed file_write on disk.
+            if name == "file_write" and args.get("_repaired_closed") is False:
+                path_hint = str(args.get("path") or "").strip()
+                content_str = format_tool_error(
+                    "file_write JSON was cut off mid-content. Nothing was written"
+                    + (f" to {path_hint}" if path_hint else "")
+                    + ".",
+                    code="TOOL_ARGS_TRUNCATED",
+                    tool_name=name or "file_write",
+                    suggestion=(
+                        "file_write one complete small file, then file_edit. "
+                        "Do not retry the truncated body via host_script."
+                    ),
+                )
+                result_cache[fp] = content_str
+                seen_fps.add(fp)
+                return content_str
             args = {
                 k: v
                 for k, v in args.items()

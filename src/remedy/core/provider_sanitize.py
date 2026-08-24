@@ -472,33 +472,40 @@ def coerce_tool_arguments_json(args: Any, *, tool_name: str = "") -> str:
                             return json.dumps(slim, ensure_ascii=False)
                         except Exception:
                             pass
-            if tname in ("file_write", "file_edit", "file_edit_batch", "") and not repaired.get(
-                "_path_only"
-            ):
-                # Unclosed content string = mid-stream cut. Do not write a stump.
-                if tname == "file_write" and repaired.get("_repaired_closed") is False:
-                    pass
-                else:
-                    try:
-                        return json.dumps(
-                            {
-                                k: v
-                                for k, v in repaired.items()
-                                if not str(k).startswith("_") or k in ("path", "content")
-                            },
-                            ensure_ascii=False,
-                        )
-                    except Exception:
-                        pass
-            # file_write with path but truncated content still salvageable
-            if tname == "file_write" and repaired.get("content"):
+            # Unclosed content string = mid-stream cut. Never execute a stump
+            # (that wrote "int…" / half-modules to disk, then the model retried
+            # via host_script). Closed JSON that only needed a brace is fine.
+            unclosed_write = (
+                tname in ("file_write", "")
+                and repaired.get("_repaired_closed") is False
+                and not repaired.get("_path_only")
+            )
+            if unclosed_write:
                 try:
                     return json.dumps(
                         {
-                            "path": repaired["path"],
-                            "content": repaired["content"],
-                            "force_full_write": True,
-                            "_repaired_truncated": True,
+                            "_invalid_json": True,
+                            "_stream_truncated": True,
+                            "path": repaired.get("path") or "",
+                            "preview": str(repaired.get("content") or "")[:400],
+                            "note": (
+                                "file_write JSON was cut off mid-content. "
+                                "Nothing was written."
+                            ),
+                        },
+                        ensure_ascii=False,
+                    )
+                except Exception:
+                    pass
+            if tname in ("file_write", "file_edit", "file_edit_batch", "") and not repaired.get(
+                "_path_only"
+            ):
+                try:
+                    return json.dumps(
+                        {
+                            k: v
+                            for k, v in repaired.items()
+                            if not str(k).startswith("_") or k in ("path", "content")
                         },
                         ensure_ascii=False,
                     )

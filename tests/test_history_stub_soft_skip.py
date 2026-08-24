@@ -51,3 +51,12 @@ def test_no_skip_when_missing(tmp_path: Path):
             return tmp_path / "missing.py"
 
     assert resolve_stub_write_skip(RT(), "missing.py") is None
+
+
+def test_history_stub_markers_are_not_source():
+    from remedy.core.workspace_tools.guards import looks_like_history_stub_text
+
+    assert looks_like_history_stub_text(
+        "file body omitted from chat history (3903 chars already on disk). "
+        "Do NOT re-file_write a history stub."
+    )
