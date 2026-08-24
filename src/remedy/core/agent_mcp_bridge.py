@@ -70,11 +70,14 @@ def _safe_name(raw: str) -> str:
 
 
 def _split_command(text: str) -> list[str]:
-    """Split a command line; keep Windows backslashes intact."""
+    """Split a command line; keep Windows backslashes intact.
+
+    POSIX shlex treats ``\\`` as escape (``C:\\tools\\Pixel-Lab`` becomes
+    ``C:<tab>oolsPixel-Lab``). MCP entries are often Windows paths even when
+    Remedy itself is running on Linux, so always split with posix=False.
+    """
     try:
-        if os.name == "nt":
-            return [t.strip("\"'") for t in shlex.split(text, posix=False)]
-        return shlex.split(text)
+        return [t.strip("\"'") for t in shlex.split(text, posix=False)]
     except ValueError:
         return text.split()
 

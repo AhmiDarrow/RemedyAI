@@ -155,6 +155,7 @@ def test_synthesize_none_without_engine(tmp_path: Path, monkeypatch):
 
 
 def test_synthesize_with_mock_engine(tmp_path: Path, monkeypatch):
+    pytest.importorskip("numpy")
     import remedy.voice.service as svc
 
     class FakeKokoro:
