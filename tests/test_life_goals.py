@@ -67,28 +67,54 @@ def test_turn_kind_and_statement():
     ) is False
 
 
-def test_resolve_tools_life_goal_does_not_arm_file_write():
+def test_resolve_tools_does_not_strip_file_tools_on_life_shaped_words():
+    """Phrase lists must not choose the tool pack.
+
+    ``shipping`` in "not for shipping" used to arm only goal/help/web and
+    leave the model looping on companion_context.
+    """
     all_t = [
         _tool("file_write"),
         _tool("file_edit"),
+        _tool("file_read"),
+        _tool("host_run"),
         _tool("goal_add"),
         _tool("goal_list"),
         _tool("memory_save"),
         _tool("web_search"),
+        _tool("help_list"),
+        _tool("companion_context"),
     ]
-    d = resolve_tools(
+    novel = resolve_tools(
         message="I want to finish my novel this year",
         all_tools=all_t,
         turn_tier=1,
     )
-    names = {
+    novel_names = {
         str((t.get("function") or {}).get("name"))
-        for t in (d.tools or [])
+        for t in (novel.tools or [])
     }
-    assert "file_write" not in names
-    assert "file_edit" not in names
-    assert d.reason == "life_goal"
-    assert "goal_add" in names or d.tools is None or "goal_list" in names
+    assert novel.reason != "life_goal"
+    assert "file_write" in novel_names
+    assert "host_run" in novel_names
+
+    bot = resolve_tools(
+        message=(
+            "modify the remedy-social-bot so it doesn't need API credentials — "
+            "use already signed-in browser sessions on Reddit and X. "
+            "Local-only, not for shipping."
+        ),
+        all_tools=all_t,
+        turn_tier=1,
+    )
+    bot_names = {
+        str((t.get("function") or {}).get("name"))
+        for t in (bot.tools or [])
+    }
+    assert bot.reason != "life_goal"
+    assert "file_write" in bot_names
+    assert "file_read" in bot_names
+    assert "host_run" in bot_names
 
 
 def test_drive_and_pulse(tmp_path):
