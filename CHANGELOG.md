@@ -35,6 +35,23 @@ hive, research, and the game studio — a new Remedy, not a patch on 0.26.2.
   `~/.remedy/bin` during a sandboxed probe). A refused path is not
   published.
 
+### Fixed — tool packs are not chosen by catchphrases
+
+- **A coding turn is not a life-goal pack because the message said
+  ``shipping``.** Lexical `turn_kind` / `looks_like_life_goal_statement`
+  used to strip `file_write` / `host_run` and leave only help, web, memory,
+  and `goal_*`. The model then looped with no way to open the project.
+  Tool arming no longer consults those phrase lists. Plan mode and proven
+  chat-only still disarm; everything else keeps the full catalog.
+
+### Fixed — truncated writes stay off disk
+
+- **An unclosed `file_write` no longer lands a stump.** If the tool JSON
+  is cut mid-content (`int…`), the call is `TOOL_ARGS_TRUNCATED` and
+  nothing is written. `host_script` refuses history-stub bodies so a
+  retry cannot dump omitted chat history. The hint is one complete small
+  file, then `file_edit` — not the same huge body again.
+
 ### Changed — web search is on after install
 
 - **Web fetch and search are on by default.** The installer ToS already
