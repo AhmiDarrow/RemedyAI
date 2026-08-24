@@ -11,7 +11,7 @@ use std::time::Duration;
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl,
 };
-use tauri::webview::WebviewBuilder;
+use tauri::webview::{NewWindowResponse, WebviewBuilder};
 use tauri::utils::config::Color;
 use url::Url;
 
@@ -144,7 +144,8 @@ window.__rmdyCtx=function(el){
 };
 "#;
 
-/// Force OAuth / SSO into the same rail WebView (no popup window).
+/// Same-window OAuth for redirect-style SSO. GIS / sized IdP windows still
+/// need a real popup (`window.opener`) — those pass through to `window.open`.
 /// Brand-agnostic: path/query heuristics, not site-specific hosts.
 const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
   if (window.__remedySameWindowOpen) return;
@@ -161,7 +162,7 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
     var s = (search || '').toLowerCase();
     var blob = (href || '').toLowerCase();
     if (/[?&](ux_mode|response_type|client_id|redirect_uri|scope)=/.test(s) || /[?&](ux_mode|response_type|client_id)=/.test(blob)) return true;
-    if (/\/(oauth2?|oidc|saml|sso|authorize|signin|sign-in|sign_in|login|log-in|log_in|auth|session|connect)(\/|$|\?)/.test(p)) return true;
+    if (/\/(oauth2?|oidc|saml|sso|authorize|signin|sign-in|sign_in|login|log-in|log_in|auth|session|connect|gsi)(\/|$|\?)/.test(p)) return true;
     if (/^(login|accounts|account|auth|sso|id|identity|signin)\./.test(h)) return true;
     if (/\.(auth0|okta|onelogin|pingidentity|duosecurity)\./.test(h) || /\.(auth0|okta)\.com$/.test(h)) return true;
     return false;
@@ -245,9 +246,12 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
       var href = String(window.location.href || '');
       var stuckClose = /you may now close|you can close this|close this window|return to the app|authentication complete|sign-?in complete|login successful|successfully signed in|returned to the app|you can return to/.test(text);
       var stuckPath = /\/oauth\/(success|complete|done|callback)|\/auth\/(success|complete|callback)|\/signin\/.*\/(approval|complete)/.test(path);
+      // GIS /gsi/transform is a popup helper (postMessage to opener). As a
+      // full document it never finishes — bounce back to the site.
+      var gisTransform = /\/gsi\/transform(\/|$)/.test(path);
       var popupModeStuck = looksLikeAuthUrl(href, host, path, search)
         && (search.indexOf('ux_mode=popup') >= 0 || search.indexOf('display=popup') >= 0 || search.indexOf('ui_mode=card') >= 0);
-      if (stuckClose || stuckPath) {
+      if (stuckClose || stuckPath || gisTransform) {
         window.location.assign(ret);
         return;
       }
@@ -336,7 +340,26 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
   window.open = function(url, name, features){
     try {
       var u = (url==null || url==='') ? '' : String(url);
-      if (!u || u === 'about:blank' || u.indexOf('about:blank')===0) {
+      var feat = features == null ? '' : String(features);
+      var sized = /width\s*=|height\s*=/i.test(feat);
+      var blank = !u || u === 'about:blank' || u.indexOf('about:blank')===0;
+      var abs = '';
+      try { if (u && u.indexOf('about:')!==0) abs = new URL(u, window.location.href).href; } catch(e) {}
+      var host='', path='', search='';
+      try {
+        if (abs) { var parsed = new URL(abs); host=parsed.hostname; path=parsed.pathname; search=parsed.search; }
+      } catch(e) {}
+      var gis = /\/gsi\//i.test(u) || /\/gsi\//i.test(path) || /\/gsi\//i.test(abs);
+      var auth = looksLikeAuthUrl(abs || u, host, path, search);
+      // GIS (and other sized IdP windows) need a real popup with window.opener.
+      // Navigating the rail to /gsi/transform is what gets the owner stuck.
+      if (gis || (blank && sized) || (auth && sized)) {
+        try {
+          var real = origOpen ? origOpen.apply(window, arguments) : null;
+          if (real) return real;
+        } catch(e) {}
+      }
+      if (blank) {
         return blankStub();
       }
       go(u);
@@ -390,6 +413,7 @@ const SAME_WINDOW_OAUTH_JS: &str = r#"(function(){
     });
   }
   window.addEventListener('load', function(){ setTimeout(bounceHomeIfStuck, 600); });
+  rememberReturn();
 })();"#;
 
 /// Minimal rail helpers only — no zoom, no aggressive !important chrome overrides.
@@ -557,12 +581,65 @@ fn looks_like_auth_url_str(url: &str) -> bool {
         "/auth/",
         "/session",
         "/connect/",
+        "/gsi/",
     ] {
         if lower.contains(token) {
             return true;
         }
     }
     false
+}
+
+/// Google Identity Services last hop after account pick. It only works as a
+/// popup that `postMessage`s to `window.opener` — as a full document it hangs.
+fn is_gsi_transformer_url(url: &str) -> bool {
+    url.to_ascii_lowercase().contains("/gsi/transform")
+}
+
+/// Native `window.open` must be allowed for IdP / GIS popups. Wry denies every
+/// new window unless `on_new_window` returns Allow (see wry webview2).
+fn should_allow_oauth_popup(url: &str) -> bool {
+    let s = url.trim();
+    let lower = s.to_ascii_lowercase();
+    if s.is_empty()
+        || lower == "about:blank"
+        || lower.starts_with("about:blank")
+        || lower.starts_with("about:")
+    {
+        return true;
+    }
+    if lower.contains("/gsi/") {
+        return true;
+    }
+    crate::privacy_shield::is_identity_provider_url(s) || looks_like_auth_url_str(s)
+}
+
+fn should_remember_oauth_return(prev: &str, next: &str) -> bool {
+    if prev.is_empty() || prev.starts_with("about:") {
+        return false;
+    }
+    let next_auth = crate::privacy_shield::is_identity_provider_url(next)
+        || next.to_ascii_lowercase().contains("/gsi/");
+    if !next_auth {
+        return false;
+    }
+    // Same-host IdP hops (select → transform) must not overwrite the site URL.
+    if let (Ok(p), Ok(n)) = (Url::parse(prev), Url::parse(next)) {
+        if p.host_str().is_some() && p.host_str() == n.host_str() {
+            return false;
+        }
+    }
+    true
+}
+
+fn bounce_target_for_gsi_transformer(current: &str, return_url: Option<&str>) -> Option<String> {
+    if !is_gsi_transformer_url(current) {
+        return None;
+    }
+    let ret = return_url
+        .map(str::trim)
+        .filter(|r| !r.is_empty() && !r.starts_with("about:") && *r != current)?;
+    Some(ret.to_string())
 }
 
 fn urlencoding_minimal(enc: &str) -> Result<String, ()> {
@@ -784,6 +861,9 @@ pub struct BrowserState {
     page_fullscreen: AtomicBool,
     /// Navigate job waiting for on_page_load (complete after the page is actually open).
     pending_navigate: Mutex<Option<(String, String)>>,
+    /// Site URL to restore if GIS dumps `/gsi/transform` into the rail (cross-origin
+    /// so sessionStorage on accounts.google.com cannot hold the return URL).
+    oauth_return_url: Mutex<Option<String>>,
 }
 
 impl Default for BrowserState {
@@ -797,6 +877,7 @@ impl Default for BrowserState {
             desktop_site: AtomicBool::new(prefs.desktop_site),
             page_fullscreen: AtomicBool::new(false),
             pending_navigate: Mutex::new(None),
+            oauth_return_url: Mutex::new(None),
         }
     }
 }
@@ -997,6 +1078,77 @@ mod normalize_url_tests {
     #[test]
     fn allows_https_public_host() {
         assert!(normalize_url("https://mail.google.com").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod oauth_popup_tests {
+    use super::{
+        bounce_target_for_gsi_transformer, is_gsi_transformer_url, looks_like_auth_url_str,
+        should_allow_oauth_popup, should_remember_oauth_return,
+    };
+
+    #[test]
+    fn gsi_transform_is_the_stuck_helper() {
+        assert!(is_gsi_transformer_url(
+            "https://accounts.google.com/gsi/transform"
+        ));
+        assert!(!is_gsi_transformer_url(
+            "https://accounts.google.com/gsi/select"
+        ));
+    }
+
+    #[test]
+    fn native_popup_allowed_for_gis_and_blank() {
+        assert!(should_allow_oauth_popup("about:blank"));
+        assert!(should_allow_oauth_popup(""));
+        assert!(should_allow_oauth_popup(
+            "https://accounts.google.com/gsi/select?client_id=x"
+        ));
+        assert!(should_allow_oauth_popup(
+            "https://accounts.google.com/gsi/transform"
+        ));
+        assert!(!should_allow_oauth_popup("https://example.com/shop"));
+    }
+
+    #[test]
+    fn remembers_site_when_entering_idp() {
+        assert!(should_remember_oauth_return(
+            "https://github.com/login",
+            "https://accounts.google.com/gsi/select"
+        ));
+        assert!(!should_remember_oauth_return(
+            "https://accounts.google.com/gsi/select",
+            "https://accounts.google.com/gsi/transform"
+        ));
+        assert!(!should_remember_oauth_return(
+            "https://mail.example.com/inbox",
+            "https://mail.example.com/inbox?tab=1"
+        ));
+    }
+
+    #[test]
+    fn bounces_transform_to_saved_site() {
+        assert_eq!(
+            bounce_target_for_gsi_transformer(
+                "https://accounts.google.com/gsi/transform",
+                Some("https://mail.example.com/inbox")
+            )
+            .as_deref(),
+            Some("https://mail.example.com/inbox")
+        );
+        assert!(bounce_target_for_gsi_transformer(
+            "https://accounts.google.com/gsi/select",
+            Some("https://mail.example.com/inbox")
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn gsi_path_looks_like_auth() {
+        assert!(looks_like_auth_url_str(
+            "https://accounts.google.com/gsi/transform"
+        ));
     }
 }
 
@@ -2197,6 +2349,18 @@ pub fn navigate_embed(
             }
             true
         })
+        // GIS / SSO `window.open` is denied by Wry unless we Allow it. Without a
+        // real popup, Google lands the rail on /gsi/transform and hangs.
+        .on_new_window(|url, _features| {
+            let s = url.as_str();
+            if should_allow_oauth_popup(s) {
+                log::info!("browser new-window allow {s}");
+                NewWindowResponse::Allow
+            } else {
+                log::debug!("browser new-window deny {s}");
+                NewWindowResponse::Deny
+            }
+        })
         .on_page_load(move |wv, payload| {
             let u = payload.url().as_str().to_string();
             if u.is_empty() || u.starts_with("about:") {
@@ -2210,6 +2374,30 @@ pub fn navigate_embed(
                 if let Ok(mut g) = st.last_committed_url.lock() {
                     prev_url = g.clone();
                     *g = u.clone();
+                }
+                if should_remember_oauth_return(&prev_url, &u) {
+                    if let Ok(mut g) = st.oauth_return_url.lock() {
+                        *g = Some(prev_url.clone());
+                    }
+                }
+                let saved = st
+                    .oauth_return_url
+                    .lock()
+                    .ok()
+                    .and_then(|g| g.clone());
+                if let Some(ret) =
+                    bounce_target_for_gsi_transformer(&u, saved.as_deref())
+                {
+                    log::info!("browser oauth bounce gsi/transform → {ret}");
+                    let app3 = app_for_load.clone();
+                    let _ = app3.clone().run_on_main_thread(move || {
+                        if let Some(embed) = app3.get_webview(LABEL) {
+                            if let Ok(parsed) = ret.parse::<Url>() {
+                                let _ = embed.navigate(parsed);
+                            }
+                        }
+                    });
+                    return;
                 }
             }
             let _ = app_for_load.emit("browser-url-changed", json!({ "url": u }));

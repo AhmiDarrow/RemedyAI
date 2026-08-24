@@ -61,6 +61,9 @@ as the reply.
 turn. Long jobs keep going when the SSE pane blinks. Enter jumps to the
 latest message. Money / send / close cannot be waived by auto/full.
 
+**Browser sign-in.** “Sign in with Google” in the rail opens a real account
+window instead of parking on Google’s transformer page.
+
 PyPI **`remedy-ai==0.31.0`** · tag **v0.31.0**.
 
 ## Hive

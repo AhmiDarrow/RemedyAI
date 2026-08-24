@@ -44,6 +44,14 @@ hive, research, and the game studio — a new Remedy, not a patch on 0.26.2.
   Tool arming no longer consults those phrase lists. Plan mode and proven
   chat-only still disarm; everything else keeps the full catalog.
 
+### Fixed — Browser rail Google sign-in
+
+- **Sign in with Google no longer sticks on `/gsi/transform`.** The rail was
+  folding GIS popups into the same WebView, so the transformer page (it only
+  works as a popup that talks to `window.opener`) became the whole Browser.
+  Identity popups now open natively; if the transformer still lands in the
+  rail, it bounces back to the site.
+
 ### Fixed — truncated writes stay off disk
 
 - **An unclosed `file_write` no longer lands a stump.** If the tool JSON
