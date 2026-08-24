@@ -903,13 +903,13 @@ def is_pure_tool_call_blob(text: str) -> bool:
     if not remainder:
         return True
     # Bare (unfenced) single call: {"name": "x", "arguments": {...}}
-    if re.fullmatch(
-        r'(?is)\s*\{\s*"(?:name|function)"\s*:\s*"[a-z0-9_]+"\s*,'
-        r'\s*"(?:arguments|parameters)"\s*:[\s\S]*\}\s*',
-        t,
-    ):
-        return True
-    return False
+    return bool(
+        re.fullmatch(
+            r'(?is)\s*\{\s*"(?:name|function)"\s*:\s*"[a-z0-9_]+"\s*,'
+            r'\s*"(?:arguments|parameters)"\s*:[\s\S]*\}\s*',
+            t,
+        )
+    )
 
 
 def split_reasoning_spans(text: str) -> tuple[str, str]:

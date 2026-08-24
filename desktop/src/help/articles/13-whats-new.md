@@ -2,13 +2,68 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.30.0** (local builds after that tag keep long jobs going and stop teaching Grok a syllabus she already knows).
+Current series: **v0.31.0** — a partner for any ability level. This is the
+first public ship of Grove, voice, life tasks, hive, research, and the
+game studio. The last public package was 0.26.2.
 
 ## Contents
 
-- [Hive](#hive-local-builds-after-0300) · [Research](#research-local-builds-after-0300) · [Game dev studio](#game-dev-studio-local-builds-after-0300) · - [0.30.0](#0300---grove-voice-life-tasks-and-the-vault) · [0.26.2](#0262---host-in-remedys-hands) · [0.26.1](#0261---build-finishes) · [0.26.0](#0260---windows--linux-desktop) · [0.25.1](#0251---jail-stop-and-tab-isolation) · [0.25.0](#0250---stable-tabs--settings-chrome) · [0.24.0](#0240---host-bridge--first-home) · [0.23.2](#0232---defender-execution-false-positive) · [0.23.1](#0231---first-turn-agency) · [0.23.0](#0230---build-ability--companion) · [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+- [0.31.0](#0310---a-partner-for-any-ability-level) · [Hive](#hive) · [Research](#research) · [Game studio](#game-dev-studio) · [0.30.0](#0300---grove-voice-life-tasks-and-the-vault) · [0.26.2](#0262---host-in-remedys-hands) · [0.26.1](#0261---build-finishes) · [0.26.0](#0260---windows--linux-desktop) · [0.25.1](#0251---jail-stop-and-tab-isolation) · [0.25.0](#0250---stable-tabs--settings-chrome) · [0.24.0](#0240---host-bridge--first-home) · [0.23.2](#0232---defender-execution-false-positive) · [0.23.1](#0231---first-turn-agency) · [0.23.0](#0230---build-ability--companion) · [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
 
-## Hive (local builds after 0.30.0)
+## 0.31.0 - A partner for any ability level
+
+This is a new Remedy. She is no longer “a coding agent that also has a
+browser.” She is a partner who lives on this computer and finishes the
+goal you set — errands, research, games, and code — for owners at every
+ability level.
+
+**Grove** is home. She **speaks and hears** locally (Chatterbox Nano on
+bundled public-domain references, Kokoro until that lands, whisper for
+hearing). One speak-aloud control on the status bar, which now sits on
+Grove and Studio. You can talk while she works (mid-turn steer). Her
+voice identity actually reaches the speakers, drifts with the
+relationship, and stays put when you ask (`voice_hold`). The installed
+app fetches a pinned Python into `~/.remedy/voice/` so Desktop can
+speak — no `pip install` for the owner.
+
+**Life tasks** — order, book, fill, pay — are whole jobs: one plan-level
+approval, act → verify → retry, non-waivable checkpoints for money /
+credentials / send / delete. Cards live in the **Vault** and type only
+into verified fields. 2FA, CAPTCHA, and the last payment click are
+designed owner moments. Reminders, mail, calendar, documents stay.
+
+**Hive.** Silent foragers (one bounded job) and standing posts (pulse on
+an interval). They never appear as extra chats. They report a capped
+packet; she still talks to you. Diagnostics shows the roster.
+
+**Research.** Notebooks, R, Julia, manuscripts: literature, a citation
+library that has to resolve, analysis in *your* environment with a run
+ledger, a priori power, reporting checklists. Fourteen field packs route
+themselves; an ordinary coding turn does not list them.
+
+**Game studio.** Godot 4, Phaser/Pixi, Bevy, Pygame, Love2D — engine
+detection, headless verification, playtest, export. Unity/Unreal
+knowledge. Optional MCP editor bridge.
+
+**Web, licence, colour.** Fetch and search are on after install
+(OpenSERP on loopback; DuckDuckGo HTML while it downloads). `web_fetch`
+reads robots.txt. The installer shows the product terms and carries
+third-party notices. Three colorblind-safe themes.
+
+**Local models.** RMB defaults to **Qwen3.5-9B (Q6_K)** on measurements
+— a 9B at 6-bit holds tool-call structure that larger 4-bit models drop.
+The 35B-A3B stays in the catalog for VRAM-scarce setups. A local-model
+harness fixed the agent loop so tool calls are not stripped, green
+verifies no longer end the turn before the run, and markup is not shown
+as the reply.
+
+**Build stays the job.** Frontier models are not taught a syllabus every
+turn. Long jobs keep going when the SSE pane blinks. Enter jumps to the
+latest message. Money / send / close cannot be waived by auto/full.
+
+PyPI **`remedy-ai==0.31.0`** · tag **v0.31.0**.
+
+## Hive
 
 Remedy can hire silent daughters for a slice of work — a forager for one
 bounded job, a standing post that pulses on an interval. They never appear
@@ -16,7 +71,7 @@ as extra chats. They report a compact packet to her; she still talks to you.
 Stop cancels foragers hired by that turn; posts keep going until she retires
 them. Diagnostics shows the roster. See [Hive](28-hive.md).
 
-## Research (local builds after 0.30.0)
+## Research
 
 Point Remedy at a notebook, an R or Julia analysis, a Snakefile or a
 manuscript and she works the research loop: literature search, a citation
@@ -28,7 +83,7 @@ PRISMA, STROBE, ARRIVE, MDAR). Fourteen field packs
 …) route themselves from what you say and from the project files; an
 ordinary coding turn does not list them. See [Research](27-research.md).
 
-## Game dev studio (local builds after 0.30.0)
+## Game dev studio
 
 Remedy works game projects like a small studio. She recognises **Godot 4**,
 Phaser/PixiJS, Bevy, Pygame/Arcade and Love2D projects (Unity and Unreal
@@ -61,7 +116,7 @@ checkpoints are in code; nothing is called. A review pass fixed form
 filling, the phone checkpoints, and voice installs that could stall the
 server. mypy now covers the whole tree.
 
-PyPI **`remedy-ai==0.30.0`** · tag **v0.30.0**.
+Local line (not a public tag). The next public package is **0.31.0**.
 
 ## 0.26.2 - Host in Remedy's hands
 
