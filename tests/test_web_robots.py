@@ -140,20 +140,24 @@ def test_polite_fetch_rechecks_robots_after_a_cross_host_redirect():
 # --- search backend selection -------------------------------------------------
 
 
-def test_search_needs_consent_when_only_the_scraping_fallback_is_left():
+def test_search_uses_ddg_when_no_local_backend():
     with patch.object(w, "_searxng_base", lambda runtime=None: ""), patch.object(
-        w, "_scraping_acked", lambda runtime=None: False
+        w, "_openserp_rows", side_effect=RuntimeError("down")
+    ), patch.object(
+        w, "_ddg_rows", lambda q, n, t: [{"title": "t", "url": "https://e.org", "snippet": ""}]
     ):
-        with pytest.raises(w.SearchConsentError):
-            w.run_search("anything", max_results=3, timeout=5.0)
-
-
-def test_search_uses_the_fallback_once_the_owner_accepts():
-    with patch.object(w, "_searxng_base", lambda runtime=None: ""), patch.object(
-        w, "_scraping_acked", lambda runtime=None: True
-    ), patch.object(w, "_ddg_rows", lambda q, n, t: [{"title": "t", "url": "https://e.org", "snippet": ""}]):
         rows, backend = w.run_search("q", max_results=3, timeout=5.0)
     assert rows and "DuckDuckGo" in backend
+
+
+def test_search_prefers_openserp_when_it_answers():
+    with patch.object(w, "_searxng_base", lambda runtime=None: ""), patch.object(
+        w,
+        "_openserp_rows",
+        lambda q, n, t: [{"title": "t", "url": "https://e.org", "snippet": ""}],
+    ):
+        rows, backend = w.run_search("q", max_results=3, timeout=5.0)
+    assert rows and backend == "OpenSERP (local)"
 
 
 def test_owner_instance_wins_and_never_asks_for_consent():
@@ -165,12 +169,30 @@ def test_owner_instance_wins_and_never_asks_for_consent():
     assert rows and backend == "your search instance"
 
 
-def test_background_search_is_silent_when_consent_is_missing():
-    """Background passes have nobody to ask — they get nothing, not a crash."""
+def test_background_search_uses_ddg_without_a_second_ack():
     with patch.object(w, "_web_enabled", lambda runtime=None: True), patch.object(
         w, "_searxng_base", lambda runtime=None: ""
-    ), patch.object(w, "_scraping_acked", lambda runtime=None: False):
-        assert w.search_public_web("anything") == []
+    ), patch.object(
+        w, "_openserp_rows", side_effect=RuntimeError("down")
+    ), patch.object(
+        w, "_ddg_rows", lambda q, n, t: [{"title": "t", "url": "https://e.org", "snippet": ""}]
+    ):
+        assert w.search_public_web("anything") == [
+            {"title": "t", "url": "https://e.org", "snippet": ""}
+        ]
+
+
+def test_web_tools_are_on_when_the_key_is_missing():
+    with patch("remedy.interfaces.config.load_config", return_value={}):
+        assert w._web_enabled() is True
+
+
+def test_web_tools_stay_off_when_the_owner_said_so():
+    with patch(
+        "remedy.interfaces.config.load_config",
+        return_value={"web_tools_enabled": False},
+    ):
+        assert w._web_enabled() is False
 
 
 def test_private_search_instance_needs_an_explicit_override():

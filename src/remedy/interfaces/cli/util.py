@@ -118,6 +118,12 @@ def resolve_cli_home(home: str | os.PathLike[str] | None, *, mkdir: bool = True)
         raise UnsafeHomeError(f"--home refuses system path: {resolved}")
     if mkdir:
         resolved.mkdir(parents=True, exist_ok=True)
+    # Publish the resolved home so every module that asks ``default_home()``
+    # agrees with the CLI. Modules resolve it independently and correctly, but
+    # they cannot see ``--home`` — so ``--home <tmp> serve`` left them pointing
+    # at the real profile. Observed: the web-search host downloaded and started
+    # openserp.exe under the operator's live ~/.remedy during a sandboxed run.
+    os.environ["REMEDY_HOME"] = str(resolved)
     return resolved
 
 

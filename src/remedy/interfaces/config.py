@@ -1175,11 +1175,11 @@ sarcasm_mode = false
 # approval_mode = "auto"    # ask | auto (in-project) | full (warn, jail off except auth)
 # thinking_level = "high"   # off | low | medium | high
 # tool_process = "off"      # off | medium | full
-# web_tools_enabled = false # opt-in public web_fetch (SSRF-guarded)
+# web_tools_enabled = true  # public web_fetch + web_search (SSRF-guarded); set false to disable
 # web_respect_robots = true # obey robots.txt on fetched pages; false = owner override
-# web_search_url = "http://127.0.0.1:8080"  # your own SearXNG (needs json in search.formats)
-# web_search_url_allow_private = true       # required for a loopback/LAN instance (SSRF override)
-# web_search_scraping_ack = false           # accept the DuckDuckGo HTML fallback for search
+# web_search_url = "http://127.0.0.1:8080"  # optional: your own SearXNG (needs json in search.formats)
+# web_search_url_allow_private = true       # required for a loopback/LAN instance you run (SSRF override)
+# First-run downloads OpenSERP (~10 MB) to ~/.remedy/bin and binds it to 127.0.0.1:17410.
 # http_bootstrap — omit for auto: False on desktop sidecar, True on plain serve.
 # http_bootstrap = true     # browser loopback token; desktop prefers IPC
 
