@@ -4,6 +4,37 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-08-24
+
+First public ship of the partner line. Grove, voice, life tasks, the Vault,
+hive, research, and the game studio — a new Remedy, not a patch on 0.26.2.
+
+### Changed — local RMB default is Qwen3.5-9B
+
+- **RMB defaults to Qwen3.5-9B (Q6_K).** Benched on an RTX 3080 12 GB
+  against the agent suite: 86 tok/s, 8.1 GB VRAM, best local tool-loop
+  score. A 9B at 6-bit holds structured tool calls that Qwen3-14B Q4 and
+  Qwen3.6-35B-A3B Q4 drop. The 35B-A3B stays in the catalog for
+  VRAM-scarce setups (experts on CPU; it also slows when the CPU is busy).
+- **`scripts/rig`** boots a disposable Remedy and scores whether a model
+  can operate the product. Driving it fixed the agent loop for every
+  provider: harness nudges no longer strip tools, a green build verify no
+  longer ends the turn before the run, execution tools arm after a write
+  (not by step index), a no-progress brake and failed-tool ceiling stop
+  hundred-round stalls, pseudo-tool recovery only dispatches armed names,
+  `<|tool_call|>` / fenced JSON / `<think>` are not shown as the reply,
+  `file_edit` accepts the batch shape, identical hunks are a satisfied
+  no-op, blank writes can create `__init__.py`, and repeated jail probes
+  escalate instead of looping.
+
+### Fixed — `--home` is the whole process
+
+- **`remedy --home <dir>` publishes `REMEDY_HOME`.** The flag used to
+  resolve for the CLI only; runtime modules still asked `default_home()`
+  and wrote into the operator's real profile (OpenSERP landed under
+  `~/.remedy/bin` during a sandboxed probe). A refused path is not
+  published.
+
 ### Changed — web search is on after install
 
 - **Web fetch and search are on by default.** The installer ToS already
@@ -52,7 +83,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - **Hosts get a gap between requests** — a second by default, longer when
   robots.txt states a `Crawl-delay`. A delay beyond ten seconds is refused with
   a reason instead of holding the turn open.
-- **The fetcher says who it is.** `RemedyAI-WebFetch/0.30.0
+- **The fetcher says who it is.** `RemedyAI-WebFetch/<version>
   (+https://github.com/AhmiDarrow/RemedyAI)` — the version had been frozen at
   `0.13` and there was no way to reach the project.
 - **Search picks a backend instead of assuming one.** `web_search_url` points

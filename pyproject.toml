@@ -3,14 +3,14 @@
 # unrelated package (remedy 0.0.6) that pulls ancient Jinja2/begins.
 # Import package and CLI entry point remain `remedy`.
 name = "remedy-ai"
-version = "0.30.0"
-description = "Self-improving multi-channel software coding agent framework (memory, learning, tools) — not a medical product"
+version = "0.31.0"
+description = "Personal AI partner for any ability level — drives this computer to finish goals (life tasks, research, games, code). Not a medical product."
 readme = "README.md"
 license = { text = "LicenseRef-Proprietary" }
 authors = [
     { name = "Ahmi Darrow", email = "ahmitdarrow@gmail.com" }
 ]
-keywords = ["ai", "agent", "framework", "skill", "memory", "learning", "llm", "tools"]
+keywords = ["ai", "partner", "desktop", "agent", "voice", "computer-use", "skill", "memory", "llm", "tools"]
 # License is project.license (LicenseRef-Proprietary). Avoid deprecated
 # "License :: …" classifiers (PEP 639 / packaging warning).
 classifiers = [
