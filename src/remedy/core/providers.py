@@ -961,9 +961,10 @@ class LlamaCppProvider(OpenAIProvider):
         body.setdefault("cache_prompt", True)
         # Auto-optimize: force tools + smaller n_predict on implement turns
         try:
-            from remedy.core.local_agent_optimize import apply_local_body_optimize
-
-            from remedy.core.local_agent_optimize import last_real_user_message
+            from remedy.core.local_agent_optimize import (
+                apply_local_body_optimize,
+                last_real_user_message,
+            )
 
             # Must skip Remedy's own injected nudges: they quote tool names, so
             # trivia detection reads them as pasted markup and strips the tools
