@@ -96,7 +96,7 @@ def _spec_from_string(raw: str) -> McpServerSpec | None:
         return None
     command, args = parts[0], parts[1:]
     if not name:
-        name = os.path.splitext(os.path.basename(command))[0]
+        name = os.path.splitext(os.path.basename(command.replace("\\", "/")))[0]
     safe = _safe_name(name)
     if not safe:
         return None
@@ -118,7 +118,7 @@ def _spec_from_dict(raw: dict[str, Any]) -> McpServerSpec | None:
     if not args and " " in command:
         parts = _split_command(command)
         command, args = parts[0], parts[1:]
-    name = raw.get("name") or os.path.splitext(os.path.basename(command))[0]
+    name = raw.get("name") or os.path.splitext(os.path.basename(command.replace("\\", "/")))[0]
     safe = _safe_name(str(name))
     if not safe:
         return None

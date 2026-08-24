@@ -501,17 +501,17 @@ def _cmd_computer(args) -> None:
                     env = os.environ.copy()
                     env.setdefault("REMEDY_API", "http://127.0.0.1:7400")
                     env.setdefault("REMEDY_HOME", str(home))
-                    creationflags = 0
+                    popen_kw: dict[str, Any] = {
+                        "cwd": str(repo),
+                        "env": env,
+                        "stdout": subprocess.DEVNULL,
+                        "stderr": subprocess.DEVNULL,
+                    }
                     if sys.platform == "win32":
-                        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-                    subprocess.Popen(
-                        [sys.executable, str(poller)],
-                        cwd=str(repo),
-                        env=env,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        creationflags=creationflags,
-                    )
+                        popen_kw["creationflags"] = getattr(
+                            subprocess, "CREATE_NO_WINDOW", 0
+                        )
+                    subprocess.Popen([sys.executable, str(poller)], **popen_kw)
                     console.print(
                         "[dim]Also started HTTP host poller → "
                         f"{env.get('REMEDY_API')}[/dim]"

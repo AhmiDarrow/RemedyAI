@@ -540,6 +540,13 @@ def discover_binaries(spec: BinarySpec) -> dict[str, Any]:
 def _first_glob_hit(pattern: str) -> Path | None:
     """First file matching *pattern* (env vars / ~ expanded; never a literal home)."""
     expanded = os.path.expandvars(os.path.expanduser(pattern.strip()))
+    # Skills quote Windows %VAR% even on Linux / shared homes.
+    if "%" in expanded:
+        expanded = re.sub(
+            r"%([^%]+)%",
+            lambda m: os.environ.get(m.group(1), m.group(0)),
+            expanded,
+        )
     if not expanded or "%" in expanded or "$" in expanded:
         return None  # unexpanded variable → that location does not exist here
     try:
