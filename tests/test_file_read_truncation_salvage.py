@@ -23,9 +23,10 @@ def test_list_dir_truncated_salvages_path():
     assert not data.get("_invalid_json")
 
 
-def test_file_write_still_repairs_content():
+def test_file_write_unclosed_content_is_stream_truncated():
     raw = '{"path": "src/a.py", "content": "print(1)\\nprint(2)'
     out = coerce_tool_arguments_json(raw, tool_name="file_write")
     data = json.loads(out)
     assert data.get("path") == "src/a.py"
-    assert "print" in (data.get("content") or "")
+    assert data.get("_stream_truncated") is True
+    assert not data.get("content")
