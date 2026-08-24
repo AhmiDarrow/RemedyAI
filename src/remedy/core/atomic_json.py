@@ -26,12 +26,17 @@ id, so concurrent writers to one path never share a scratch file; whichever
 from __future__ import annotations
 
 import contextlib
+import itertools
 import json
 import os
 import threading
 import time
 from pathlib import Path
 from typing import Any
+
+# Linux can recycle threading.get_ident() the moment a thread exits, so two
+# sequential writers in one process can still share a pid+ident scratch name.
+_scratch_seq = itertools.count()
 
 __all__ = [
     "replace_with_retry",
@@ -54,12 +59,16 @@ def scratch_path(target: Path | str) -> Path:
     ``path.with_suffix(".tmp")`` gives every writer the *same* scratch name, so
     two of them — the desktop app and a CLI, two threads, two windows — write
     the same file at once and whichever renames second publishes a corrupted or
-    interleaved result. The pid *and* thread id make it unique (the pid alone
-    let two threads of one process collide); keeping it in the same directory
-    keeps ``os.replace`` atomic.
+    interleaved result. The pid, thread id, *and* a process-local counter make
+    it unique (the pid alone let two threads collide; Linux recycles
+    ``get_ident()`` as soon as a thread exits). Keeping it in the same
+    directory keeps ``os.replace`` atomic.
     """
     t = Path(target)
-    return t.with_name(f".{t.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    seq = next(_scratch_seq)
+    return t.with_name(
+        f".{t.name}.{os.getpid()}.{threading.get_ident()}.{seq}.tmp"
+    )
 
 
 def replace_with_retry(src: Path | str, dst: Path | str) -> None:
