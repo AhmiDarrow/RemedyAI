@@ -343,6 +343,7 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
 
                 full_response = ""
                 full_thinking = ""
+                thinking_replace_next = False
                 collected_tool_calls: list[dict] = []
                 collected_tool_results: list[dict] = []
                 usage_acc: dict | None = None
@@ -543,11 +544,30 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                                 "progress",
                                 {"type": "progress", "label": "Taking that in…"},
                             )
+                        elif token.startswith("@@thinking_round"):
+                            # Next thinking tokens belong to a new model round.
+                            # Replace (don't stack) when the first token arrives
+                            # so tool-time still shows the last scratchpad.
+                            thinking_replace_next = True
                         elif token.startswith("@@thinking:"):
                             thought = token[len("@@thinking:") :]
                             if thought:
-                                full_thinking += thought
-                                yield await _sse_stream_text(thought, event="thinking")
+                                if thinking_replace_next:
+                                    thinking_replace_next = False
+                                    full_thinking = thought
+                                    yield sse_event(
+                                        "thinking",
+                                        {
+                                            "type": "thinking",
+                                            "text": thought,
+                                            "replace": True,
+                                        },
+                                    )
+                                else:
+                                    full_thinking += thought
+                                    yield await _sse_stream_text(
+                                        thought, event="thinking"
+                                    )
                         elif token.startswith("@@usage:"):
                             raw_u = token[len("@@usage:") :]
                             try:

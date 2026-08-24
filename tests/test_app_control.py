@@ -158,7 +158,59 @@ async def test_app_control_opens_settings_section_and_help():
     )
     data = json.loads(raw)
     assert data["command"]["params"]["article"] == "09-troubleshooting"
+    app_control_bus().clear()
+    raw = await rt.tool_registry.execute(
+        "app_control",
+        action="open_panel",
+        panel="files",
+        path=r"C:\Users\Administrator\Desktop\example-folder",
+    )
+    data = json.loads(raw)
+    assert data["ok"] is True
+    assert data["command"]["params"]["panel"] == "files"
+    assert data["command"]["params"]["path"].endswith("example-folder")
+    app_control_bus().clear()
+    raw = await rt.tool_registry.execute(
+        "app_control",
+        action="open_panel",
+        path=r"C:\Users\Administrator\Desktop\example-folder",
+    )
+    data = json.loads(raw)
+    assert data["command"]["params"]["panel"] == "files"
+    app_control_bus().clear()
+    raw = await rt.tool_registry.execute(
+        "app_control",
+        action="open_panel",
+        panel="browser",
+        url="https://github.com/AhmiDarrow/RemedyAI",
+    )
+    data = json.loads(raw)
+    assert data["command"]["params"]["url"].startswith("https://github.com/")
+    app_control_bus().clear()
+    raw = await rt.tool_registry.execute(
+        "app_control",
+        action="open_panel",
+        panel="terminal",
+        path=r"C:\Users\Administrator\Desktop\example-folder",
+    )
+    data = json.loads(raw)
+    assert data["command"]["params"]["path"].endswith("example-folder")
+    app_control_bus().clear()
+    raw = await rt.tool_registry.execute(
+        "app_control", action="open_session", session_id="4d89d9fa-a2a0-49e7-90c0-7e48732bfd1f"
+    )
+    data = json.loads(raw)
+    assert data["ok"] is True
+    assert data["command"]["action"] == "open_session"
+    assert data["command"]["params"]["session_id"].startswith("4d89d9fa")
     assert request_app_action("close_ui")["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_tool_without_memory():
+    rt = _settings_rt()
+    out = await rt.tool_registry.execute("list_sessions")
+    assert "not available" in out.lower() or "NO_MEMORY" in out
 
 
 @pytest.mark.asyncio

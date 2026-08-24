@@ -46,7 +46,7 @@ Owners span every ability level — non-technical, low-vision, limited motor con
 | **Who it’s for** | Anyone who wants a partner that *finishes* — errands, research, games, and code |
 | **What stays local** | Memory, voice, Vault, skills, approvals, DPAPI secrets, optional SmolVLM2 vision |
 | **What you bring** | Your API keys / local models — Remedy does not hold a cloud of you |
-| **Current** | **v0.31.1** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
+| **Current** | **v0.31.2** on [PyPI](https://pypi.org/project/remedy-ai/) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases) |
 
 From the creator: *My name is Ahmi, I hope you enjoy my Remedy.*  
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.
@@ -55,7 +55,7 @@ In-app: title-bar / tray → **About Remedy** · **Settings → About**.
 
 ## What’s new
 
-**Latest: [v0.31.1](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.31.1)** — she drives her own UI with you (Grove, Alongside, Settings, rails). Partner line starts at [v0.31.0](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.31.0): Grove, voice, life tasks, Vault, hive, research, game studio.
+**Latest: [v0.31.2](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.31.2)** — thinking stays this round, she opens a folder in the Files rail, source reads stay intact. Partner line starts at [v0.31.0](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.31.0).
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/AhmiDarrow/RemedyAI/master/docs/manual/assets/remedy-partner-architecture.jpg" alt="How Remedy fits together" width="640" />
@@ -377,7 +377,7 @@ WebUI is the **same SPA** as desktop (`desktop/dist`). After UI changes:
 ```bash
 git clone https://github.com/AhmiDarrow/RemedyAI.git && cd RemedyAI
 uv sync --group dev
-uv run pytest -q          # ~8875 tests
+uv run pytest -q          # ~8904 tests
 cd desktop && npm test && npm run build
 python scripts/check_docs.py
 cd desktop && npm run tauri:dev   # full shell (set REMEDY_DEV_ROOT to repo)

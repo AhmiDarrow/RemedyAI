@@ -42,7 +42,7 @@ def test_tool_content_capped():
     huge = "x" * 50_000
     m = sanitize_message({"role": "tool", "content": huge})
     assert len(m["content"]) < 10_000
-    assert m["content"].endswith("…")
+    assert m["content"].endswith("\n…[truncated]")
 
 
 def test_sanitize_body_messages():
@@ -112,6 +112,29 @@ def test_privacy_mode_redacts_email_phone_and_tighter_tool_cap(monkeypatch):
     assert len(m1["content"]) <= TOOL_CONTENT_MAX_PRIVACY + 50
     assert len(m1["content"]) < TOOL_CONTENT_MAX
     clear_privacy_mode_cache()
+
+
+def test_file_read_python_keeps_bot_token_identifier():
+    """Tool results must not rewrite ``bot_token: str`` to ``bot_[redacted]``."""
+    src = (
+        "from dataclasses import dataclass\n\n"
+        "@dataclass\n"
+        "class DiscordConfig:\n"
+        '    bot_token: str = ""\n'
+        "    def configured(self) -> bool:\n"
+        "        return bool((self.bot_token or '').strip())\n"
+    )
+    m = sanitize_message({"role": "tool", "name": "file_read", "content": src})
+    assert "bot_token: str" in m["content"]
+    assert "bot_[redacted]" not in m["content"]
+    assert "self.bot_token" in m["content"]
+
+
+def test_tool_body_clip_uses_honest_truncated_marker():
+    body = "line one\n" + ("x" * 8000)
+    m = sanitize_message({"role": "tool", "name": "file_read", "content": body})
+    assert m["content"].endswith("\n…[truncated]")
+    assert "truncated" in m["content"]
 
 
 def test_tool_call_arguments_not_mid_string_clipped():

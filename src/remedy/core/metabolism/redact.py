@@ -13,13 +13,7 @@ _SECRET_PATTERNS: list[re.Pattern[str]] = [
     # Authorization / Bearer headers (value to EOL)
     re.compile(r"(?i)\bauthorization\s*:\s*\S.*"),
     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._\-+/=]{8,}"),
-    # key=value style secrets (value may include spaces if quoted — take non-space)
-    re.compile(
-        r"(?i)(api[_-]?key|secret|password|passwd|pwd|token|"
-        r"client_secret|refresh_token|access_token|private_key|"
-        r"session[_-]?token|id[_-]?token|auth[_-]?token)"
-        r"\s*[:=]\s*\S+"
-    ),
+
     # OpenAI / Anthropic / OpenRouter / xAI / GitHub / Slack / AWS-style
     re.compile(
         r"(?i)\b(sk-ant-|sk-or-|sk-proj-|sk-|xai-|ghp_|gho_|ghu_|ghs_|ghr_|"
@@ -73,6 +67,64 @@ _SECRET_KEY_NAMES = frozenset(
         "x-api-key",
     }
 )
+
+
+# Key=value assignments: redact the *value* when it looks like a secret, never
+# the identifier. Bare ``token`` in this list is ``\btoken\b`` so it does not
+# eat ``bot_token: str`` (that became ``bot_[redacted]`` and the agent rewrote
+# working Discord source in a loop — session 4d89).
+_KV_ASSIGN_RE = re.compile(
+    r"(?i)\b("
+    r"api[_-]?key|apikey|client_secret|refresh_token|access_token|"
+    r"private_key|session[_-]?token|id[_-]?token|auth[_-]?token|"
+    r"bot_token|app_password|signing_secret|password|passwd|pwd|"
+    r"secret|token"
+    r")\b"
+    r"(\s*[:=]\s*)"
+    r"(?P<val>(['\"])([^'\"\n]*)\4|[^\s,#;\]\}\)]+)"
+)
+_KEEP_ASSIGNMENT_VALUES = frozenset(
+    {
+        "",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "bytes",
+        "none",
+        "null",
+        "true",
+        "false",
+        "undefined",
+        "...",
+        "…",
+    }
+)
+_TYPE_NAME_RE = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_.\[\]]*(\s*\|\s*[A-Za-z_][A-Za-z0-9_.\[\]]*)*"
+)
+
+
+def _assignment_looks_like_secret(raw_val: str) -> bool:
+    v = (raw_val or "").strip()
+    inner = v[1:-1] if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"" else v
+    s = inner.strip()
+    if not s:
+        return False
+    if s.lower() in _KEEP_ASSIGNMENT_VALUES or s in ("None", "True", "False"):
+        return False
+    if s.startswith(("os.", "environ", "${", "os.environ", "env.")):
+        return False
+    return not _TYPE_NAME_RE.fullmatch(s)
+
+
+def _kv_repl(m: re.Match[str]) -> str:
+    key, op, val = m.group(1), m.group(2), m.group("val")
+    if not _assignment_looks_like_secret(val):
+        return m.group(0)
+    if len(val) >= 2 and val[0] in "'\"" and val[-1] == val[0]:
+        return f"{key}{op}{val[0]}[redacted]{val[0]}"
+    return f"{key}{op}[redacted]"
 
 
 def _needs_secret_scan(text: str) -> bool:
@@ -133,7 +185,7 @@ def redact_text(text: str) -> str:
         return ""
     if not _needs_secret_scan(text):
         return text
-    out = text
+    out = _KV_ASSIGN_RE.sub(_kv_repl, text)
     for rx in _SECRET_PATTERNS:
         out = rx.sub("[redacted]", out)
     return out
@@ -145,7 +197,12 @@ def looks_like_secret_text(text: str) -> bool:
     t = text.strip()
     if not _needs_secret_scan(t):
         return False
-    return any(rx.search(t) for rx in _SECRET_PATTERNS)
+    if any(rx.search(t) for rx in _SECRET_PATTERNS):
+        return True
+    return any(
+        _assignment_looks_like_secret(m.group("val"))
+        for m in _KV_ASSIGN_RE.finditer(t)
+    )
 
 
 def redact_obj(obj: Any, *, depth: int = 0) -> Any:
