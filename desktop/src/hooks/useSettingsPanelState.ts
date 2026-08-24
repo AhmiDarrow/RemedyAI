@@ -3,7 +3,7 @@
  * Extracted from SettingsPanel so load/save stays the main concern.
  */
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   SETTINGS_SECTION_META,
   loadLastSettingsSection,
@@ -11,6 +11,7 @@ import {
   type SettingsSectionId,
 } from '../utils/settingsSearch'
 import {
+  ADVANCED_ONLY_SECTIONS,
   loadSettingsMode,
   saveSettingsMode,
   isSectionVisibleInMode,
@@ -70,6 +71,23 @@ export function useSettingsPanelState() {
     },
     [forceSection, matchSec, settingsSearch, settingsMode],
   )
+
+  // Remedy asked to open a section (app_control / update_settings).
+  useEffect(() => {
+    const onSec = (ev: Event) => {
+      const id = String(
+        (ev as CustomEvent<{ section?: string }>).detail?.section || '',
+      )
+      if (!id) return
+      if (ADVANCED_ONLY_SECTIONS.has(id)) setSettingsMode('advanced')
+      setForceSection(id)
+      saveLastSettingsSection(id)
+      if (id === 'vision') setVisionSectionOpen(true)
+      if (id === 'rmb') setRmbSectionOpen(true)
+    }
+    window.addEventListener('remedy:settings-section', onSec)
+    return () => window.removeEventListener('remedy:settings-section', onSec)
+  }, [setSettingsMode])
 
   /** Reset search / force when the panel closes; restore last section on open. */
   const onPanelOpenChange = useCallback((open: boolean) => {

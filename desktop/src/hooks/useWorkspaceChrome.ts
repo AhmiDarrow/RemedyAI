@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   layoutOpenBrowserBesideSettings,
   layoutOpenBrowserInRail,
+  layoutOpenSlideInRail,
   loadWorkspaceLayout,
   saveWorkspaceLayout,
   type WorkspaceLayout,
@@ -59,6 +60,19 @@ export function useWorkspaceChrome(opts: {
     })
     resyncBrowserBounds()
   }, [resyncBrowserBounds, setPanel])
+
+  const openSlideInRail = useCallback(
+    (id: SlideId) => {
+      setPanel(null)
+      setWsLayout((prev) => {
+        const next = layoutOpenSlideInRail(prev, id)
+        saveWorkspaceLayout(next)
+        return next
+      })
+      if (id === 'browser') resyncBrowserBounds()
+    },
+    [resyncBrowserBounds, setPanel],
+  )
 
   const openBrowserBesideSettings = useCallback(() => {
     setPanel(null)
@@ -151,6 +165,7 @@ export function useWorkspaceChrome(opts: {
     setPopout,
     patchWs,
     openBrowserInRail,
+    openSlideInRail,
     swapSides,
   }
 }

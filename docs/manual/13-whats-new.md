@@ -2,13 +2,21 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.31.0** — a partner for any ability level. This is the
-first public ship of Grove, voice, life tasks, hive, research, and the
-game studio. The last public package was 0.26.2.
+Current series: **v0.31.1** — she drives her own UI with you. Partner line
+still starts at 0.31.0.
 
 ## Contents
 
-- [0.31.0](#0310---a-partner-for-any-ability-level) · [Hive](#hive) · [Research](#research) · [Game studio](#game-dev-studio) · [0.30.0](#0300---grove-voice-life-tasks-and-the-vault) · [0.26.2](#0262---host-in-remedys-hands) · [0.26.1](#0261---build-finishes) · [0.26.0](#0260---windows--linux-desktop) · [0.25.1](#0251---jail-stop-and-tab-isolation) · [0.25.0](#0250---stable-tabs--settings-chrome) · [0.24.0](#0240---host-bridge--first-home) · [0.23.2](#0232---defender-execution-false-positive) · [0.23.1](#0231---first-turn-agency) · [0.23.0](#0230---build-ability--companion) · [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+- [0.31.1](#0311---she-drives-her-own-ui) · [0.31.0](#0310---a-partner-for-any-ability-level) · [Hive](#hive) · [Research](#research) · [Game studio](#game-dev-studio) · [0.30.0](#0300---grove-voice-life-tasks-and-the-vault) · [0.26.2](#0262---host-in-remedys-hands) · [0.26.1](#0261---build-finishes) · [0.26.0](#0260---windows--linux-desktop) · [0.25.1](#0251---jail-stop-and-tab-isolation) · [0.25.0](#0250---stable-tabs--settings-chrome) · [0.24.0](#0240---host-bridge--first-home) · [0.23.2](#0232---defender-execution-false-positive) · [0.23.1](#0231---first-turn-agency) · [0.23.0](#0230---build-ability--companion) · [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+
+## 0.31.1 - She drives her own UI
+
+Ask her to open Alongside, Voice settings, Help, or the Terminal rail —
+she does it in the app. She does not click her own chrome. Changing a
+setting opens that Settings section so you can see it. Grove / Studio
+screenshots capture **her window**, not a random monitor.
+
+PyPI **`remedy-ai==0.31.1`** · tag **v0.31.1**.
 
 ## 0.31.0 - A partner for any ability level
 

@@ -50,6 +50,34 @@ export function coerceSlideId(value: unknown, fallback: SlideId): SlideId {
 
 const OAUTH_BROWSER_MIN = 440
 
+/** Open any Studio rail on the right (sessions stay on the left). */
+export function layoutOpenSlideInRail(
+  prev: WorkspaceLayout,
+  id: SlideId,
+): WorkspaceLayout {
+  if (id === 'browser') return layoutOpenBrowserInRail(prev)
+  if (id === 'sessions') {
+    return {
+      ...prev,
+      left: 'sessions',
+      leftRail: 'open',
+      leftOpen: true,
+    }
+  }
+  const next: WorkspaceLayout = {
+    ...prev,
+    right: id,
+    rightRail: 'open',
+    rightOpen: true,
+  }
+  if (next.left === id) {
+    next.left = 'sessions'
+    next.leftRail = 'open'
+    next.leftOpen = true
+  }
+  return next
+}
+
 /** Agent / computer-use: Browser takes the right rail (may replace Settings). */
 export function layoutOpenBrowserInRail(prev: WorkspaceLayout): WorkspaceLayout {
   const next: WorkspaceLayout = {

@@ -46,6 +46,18 @@ _HOST_BROWSER_TITLE_RE = re.compile(
     r"opera|brave|vivaldi|internet explorer|chromium|waterfox|librewolf)\s*$"
 )
 
+# Grove / Alongside / Studio live inside Remedy's WebView — capturing
+# "monitor 0" on a multi-display desk often photographs wallpaper instead.
+_SELF_UI_HINT_RE = re.compile(
+    r"(?i)\b(grove|alongside|storyline|studio|remedy desktop|"
+    r"own (ui|interface|chrome|window)|in-app (ui|chrome))\b"
+)
+
+
+def wants_self_ui_capture(hint: str) -> bool:
+    """True when the shot is of Remedy's own Grove/Studio, not the OS desk."""
+    return bool(_SELF_UI_HINT_RE.search(hint or ""))
+
 
 def _expect_url_matches(want: str, hay: str) -> bool:
     """Host-aware expect_url match (rejects github.com ⊆ github.com.evil.com)."""
@@ -584,6 +596,24 @@ class ComputerExecutor:
                     message=f"Window PrintWindow capture ({info['width']}x{info['height']})",
                     extra=info,
                 )
+            hint_s = str(kwargs.get("hint") or "")
+            if wants_self_ui_capture(hint_s):
+                hwnd = None
+                with contextlib.suppress(Exception):
+                    hwnd = win.find_remedy_desktop_hwnd()
+                if hwnd:
+                    info = win.print_window_png(int(hwnd))
+                    return public_result(
+                        ok=True,
+                        target="desktop",
+                        action="screenshot",
+                        message=(
+                            f"Remedy Desktop window capture "
+                            f"({info['width']}x{info['height']}) — her own "
+                            "Grove/Studio/Alongside, not a random monitor."
+                        ),
+                        extra=info,
+                    )
             mon = kwargs.get("monitor")
             # Set-of-Mark: overlay numbered boxes at the last desktop snapshot's
             # elements so a vision model can "click mark N" instead of guessing.
@@ -652,11 +682,18 @@ class ComputerExecutor:
             )
         if act is ComputerAction.MONITORS:
             mons = win.list_monitors()
+            home = next((m["index"] for m in mons if m.get("remedy")), None)
+            msg = f"{len(mons)} monitor(s)"
+            if home is not None:
+                msg += (
+                    f"; Remedy Desktop is on monitor {home} "
+                    "(use computer_screenshot hint='grove' to capture her window)"
+                )
             return public_result(
                 ok=True,
                 target="desktop",
                 action="monitors",
-                message=f"{len(mons)} monitor(s)",
+                message=msg,
                 extra={"monitors": mons},
             )
         if act is ComputerAction.SNAPSHOT:
