@@ -117,6 +117,12 @@ export function GroveChat({
   const rootRef = useRef<HTMLDivElement | null>(null)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
 
+  useEffect(() => {
+    const onFocus = () => taRef.current?.focus()
+    window.addEventListener('remedy:focus-composer', onFocus)
+    return () => window.removeEventListener('remedy:focus-composer', onFocus)
+  }, [])
+
   // Auto-grow the composer up to a few lines, then scroll internally.
   const autoGrow = useCallback(() => {
     const el = taRef.current

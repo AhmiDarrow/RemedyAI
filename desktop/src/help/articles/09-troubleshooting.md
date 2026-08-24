@@ -44,6 +44,12 @@ The Browser rail uses a **child WebView2** (not an iframe). Common causes:
 4. Use **↗** to open the same URL in the system browser as a fallback.  
 5. Check `%LOCALAPPDATA%\com.remedy.desktop\logs\` for `browser embed` / `add_child` lines.
 
+## She won’t open Grove / Settings / the Terminal rail
+
+Ask her in chat (“open Voice settings”, “go to Alongside”). She uses
+**app_control** — she should not click her own chrome. If an older build
+still clicks Maximize instead, install **0.31.1+**.
+
 ## “Sign in with Google / Microsoft” stuck in Browser rail
 
 Google Identity Services (and other sized login windows) open as a **real

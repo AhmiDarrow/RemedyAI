@@ -623,6 +623,18 @@ def register_settings_tools(runtime: Any) -> None:
                 gateway=_gateway(),
                 memory=_memory(),
             )
+            # Show the owner the panel she just changed — drive with them, not
+            # behind their back. Non-waivable checkpoints still pause first.
+            try:
+                from remedy.core.app_control import (
+                    infer_settings_section,
+                    request_app_action,
+                )
+
+                sec = infer_settings_section(patch)
+                request_app_action("open_settings", **({"section": sec} if sec else {}))
+            except Exception:
+                pass
             return json.dumps(result, indent=2, default=str)
         except ValueError as e:
             return format_tool_error(
@@ -650,11 +662,21 @@ def register_settings_tools(runtime: Any) -> None:
         goal_id: str = "",
         section: str = "",
         panel: str = "",
+        article: str = "",
     ) -> str:
         """Drive Remedy's own interface — switch surface, open panels, etc."""
         import json as _json
 
-        from remedy.core.app_control import VALID_ACTIONS, request_app_action
+        from remedy.core.app_control import (
+            VALID_ACTIONS,
+            VALID_PANELS,
+            VALID_SETTINGS_SECTIONS,
+            VALID_SURFACE_TARGETS,
+            normalize_panel,
+            normalize_settings_section,
+            normalize_surface_target,
+            request_app_action,
+        )
 
         act = (action or "").strip()
         if act not in VALID_ACTIONS:
@@ -667,49 +689,103 @@ def register_settings_tools(runtime: Any) -> None:
             )
         params: dict[str, Any] = {}
         if act == "switch_surface":
-            t = (target or "").strip().lower()
-            if t not in ("grove", "studio"):
+            t = normalize_surface_target(target)
+            if not t:
                 return _json.dumps(
-                    {"ok": False, "error": "switch_surface needs target=grove|studio"}
+                    {
+                        "ok": False,
+                        "error": "switch_surface needs target="
+                        + "|".join(sorted(VALID_SURFACE_TARGETS)),
+                    }
                 )
             params["target"] = t
         elif act == "open_goal":
             if not goal_id.strip():
                 return _json.dumps({"ok": False, "error": "open_goal needs goal_id"})
             params["goal_id"] = goal_id.strip()
-        elif act == "open_settings" and section.strip():
-            params["section"] = section.strip()
+        elif act == "open_settings":
+            if section.strip():
+                sec = normalize_settings_section(section)
+                if not sec:
+                    return _json.dumps(
+                        {
+                            "ok": False,
+                            "error": f"unknown settings section {section!r}",
+                            "sections": sorted(VALID_SETTINGS_SECTIONS),
+                        }
+                    )
+                params["section"] = sec
         elif act == "open_panel":
-            if not panel.strip():
-                return _json.dumps({"ok": False, "error": "open_panel needs panel"})
-            params["panel"] = panel.strip()
+            p = normalize_panel(panel)
+            if not p:
+                return _json.dumps(
+                    {
+                        "ok": False,
+                        "error": "open_panel needs panel="
+                        + "|".join(sorted(VALID_PANELS)),
+                    }
+                )
+            params["panel"] = p
+            art = (article or section or "").strip()
+            if p == "help" and art:
+                params["article"] = art
         res = request_app_action(act, **params)
-        res["note"] = "The app will do this within a moment — it's her own UI."
+        res["note"] = (
+            "The app will do this within a moment — it's her own UI. "
+            "Do not computer_click her chrome."
+        )
         return _json.dumps(res)
 
     reg = runtime.tool_registry
     reg.register_builtin_handler(
         "app_control",
-        "Drive Remedy's OWN interface instantly (no user clicks needed): "
-        "action='switch_surface' target='studio'|'grove' (switch the workbench "
-        "view — use when the user says 'switch to studio', 'go to grove', 'let's "
-        "code'); action='open_settings' section=''; action='open_panel' panel=''; "
-        "action='open_goal' goal_id=''; action='focus_composer'; "
-        "action='new_session'. This moves her own windows — for changing "
-        "settings/models use update_settings; for the PC/apps use computer_* / "
-        "host_run.",
+        "Drive Remedy's OWN interface with the owner watching — never "
+        "computer_click her chrome. "
+        "action='switch_surface' target='grove'|'alongside'|'storyline'|'studio'; "
+        "action='open_settings' section='provider'|'voice'|'channels'|'theme'|… "
+        "(opens that Settings section so they can see it); "
+        "action='open_panel' panel='help'|'memory'|'skills'|'diagnostics'|"
+        "'usage'|'time_travel'|'about'|'browser'|'terminal'|'files'|'scratch'|"
+        "'sessions'; "
+        "action='close_ui'; action='open_goal' goal_id=; "
+        "action='focus_composer'; action='new_session'. "
+        "To CHANGE a setting, call update_settings (that also opens Settings). "
+        "For the PC / websites use computer_* / host_run.",
         app_control,
         {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "description": "switch_surface | open_settings | open_panel | open_goal | focus_composer | new_session",
+                    "description": (
+                        "switch_surface | open_settings | open_panel | close_ui | "
+                        "open_goal | focus_composer | new_session"
+                    ),
                 },
-                "target": {"type": "string", "description": "grove | studio (for switch_surface)"},
+                "target": {
+                    "type": "string",
+                    "description": "grove | alongside | storyline | studio (for switch_surface)",
+                },
                 "goal_id": {"type": "string"},
-                "section": {"type": "string"},
-                "panel": {"type": "string"},
+                "section": {
+                    "type": "string",
+                    "description": (
+                        "Settings section: provider, voice, channels, theme, "
+                        "assistant, rmb, vision, access, …"
+                    ),
+                },
+                "panel": {
+                    "type": "string",
+                    "description": (
+                        "help | memory | skills | diagnostics | usage | "
+                        "time_travel | about | browser | terminal | files | "
+                        "scratch | sessions | settings"
+                    ),
+                },
+                "article": {
+                    "type": "string",
+                    "description": "Help article id when panel=help (e.g. 09-troubleshooting)",
+                },
             },
             "required": ["action"],
         },
@@ -724,7 +800,8 @@ def register_settings_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "update_settings",
-        "Configure Remedy for the user — persist settings immediately. "
+        "Configure Remedy for the user — persist settings immediately and open "
+        "Settings so they can see the change. "
         "USE THIS when the user asks to set up / enable / change / configure anything "
         "(Sleev token savings, web tools, approval mode, model, vision, name, "
         "project folder, messengers, …). "

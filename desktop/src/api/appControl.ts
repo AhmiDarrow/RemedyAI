@@ -16,12 +16,14 @@ export type AppCommand = {
     | 'focus_composer'
     | 'open_settings'
     | 'open_panel'
+    | 'close_ui'
     | 'new_session'
   params?: {
-    target?: 'grove' | 'studio'
+    target?: 'grove' | 'studio' | 'alongside' | 'storyline' | 'home'
     goal_id?: string
     section?: string
     panel?: string
+    article?: string
   }
   ts?: number
 }

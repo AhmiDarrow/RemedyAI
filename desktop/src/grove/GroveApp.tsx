@@ -114,6 +114,10 @@ export interface GroveAppProps {
   openGoalId?: string | null
   /** Ack once the requested goal has been opened (or found absent). */
   onGoalOpened?: () => void
+  /** Grove place Remedy asked to show (app_control switch_surface). */
+  openPlace?: 'home' | 'alongside' | 'storyline' | null
+  /** Ack once the requested Grove tab is on screen. */
+  onPlaceOpened?: () => void
 }
 
 type GroveView = { kind: 'home' } | { kind: 'goal'; goal: LifeGoal }
@@ -138,6 +142,8 @@ export function GroveApp({
   onSpeakingChange,
   openGoalId,
   onGoalOpened,
+  openPlace,
+  onPlaceOpened,
 }: GroveAppProps) {
   const [view, setView] = useState<GroveView>({ kind: 'home' })
   const [tab, setTab] = useState<RoomTab>('alongside')
@@ -289,6 +295,22 @@ export function GroveApp({
     if (g) openGoal(g)
     onGoalOpened?.()
   }, [openGoalId, board, openGoal, onGoalOpened])
+
+  // Remedy going to Grove home / Alongside / Storyline without a click.
+  useEffect(() => {
+    if (!openPlace) return
+    setView({ kind: 'home' })
+    if (openPlace === 'alongside') {
+      setHomeTab('alongside')
+      setTab('alongside')
+    } else if (openPlace === 'storyline') {
+      setHomeTab('storyline')
+      setTab('storyline')
+    } else {
+      setHomeTab('plots')
+    }
+    onPlaceOpened?.()
+  }, [openPlace, onPlaceOpened])
 
   /** Session for attachment uploads from Grove home: reuse active, else create. */
   const homeSessionPendingRef = useRef<Promise<string | null> | null>(null)

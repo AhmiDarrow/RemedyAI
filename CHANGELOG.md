@@ -4,6 +4,24 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-08-24
+
+### Fixed — she can switch Grove / Alongside / Studio herself
+
+- **`app_control switch_surface` accepts Alongside and Storyline.** Those
+  are Grove tabs, not a second top-level app, so `target=alongside` used
+  to be refused and she fell back to clicking her own chrome. Grove,
+  Alongside, Storyline, and Studio are places she goes without a click.
+- **A Grove/Studio screenshot captures her window, not monitor 0.** On a
+  multi-display desk Remedy often sits on a non-primary monitor; `monitor=0`
+  photographed wallpaper. `hint=grove|alongside|studio` PrintWindows the
+  Remedy Desktop HWND. `computer_monitors` says which display she is on.
+- **She can drive her whole UI with the owner.** `app_control` opens
+  Settings to a named section, Help, Memory, Skills, Diagnostics, Usage,
+  Time Travel, and Studio rails (Browser, Terminal, Files). Changing a
+  setting with `update_settings` also opens that Settings section so the
+  owner can see it. Do not click her chrome.
+
 ## [0.31.0] - 2026-08-24
 
 First public ship of the partner line. Grove, voice, life tasks, the Vault,

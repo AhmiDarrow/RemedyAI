@@ -263,6 +263,11 @@ export default function App() {
   // Goal room Remedy asked to open herself (app_control open_goal); GroveApp
   // consumes it once its board carries the goal, then acks to clear it.
   const [pendingGroveGoal, setPendingGroveGoal] = useState<string | null>(null)
+  // Grove place Remedy asked to show (home / alongside / storyline). GroveApp
+  // applies it on mount and acks so we don't re-apply every render.
+  const [pendingGrovePlace, setPendingGrovePlace] = useState<
+    'home' | 'alongside' | 'storyline' | null
+  >(null)
   /** Plan mode is per-session so switching chats does not stick Plan/Build. */
   const [planModeBySession, setPlanModeBySession] = useState<Record<string, boolean>>({})
   const planMode = Boolean(activeId && planModeBySession[activeId])
@@ -303,6 +308,7 @@ export default function App() {
     setPopout,
     patchWs,
     openBrowserInRail,
+    openSlideInRail,
     swapSides,
   } = useWorkspaceChrome({ setPanel })
   useComputerHost(true, openBrowserInRail, activeId)
@@ -341,7 +347,12 @@ export default function App() {
   surfaceRef.current = surface
   /** Open Settings on the current surface — Grove overlay, Studio rail. Never switch surfaces. */
   const openSettings = useCallback((section?: string) => {
-    if (section) saveLastSettingsSection(section)
+    if (section) {
+      saveLastSettingsSection(section)
+      window.dispatchEvent(
+        new CustomEvent('remedy:settings-section', { detail: { section } }),
+      )
+    }
     if (surfaceRef.current === 'grove') {
       setGroveSettingsOpen(true)
       return
@@ -770,21 +781,64 @@ export default function App() {
         switch (cmd.action) {
           case 'switch_surface': {
             const t = cmd.params?.target
-            if (t === 'grove' || t === 'studio') switchSurface(t)
+            if (t === 'studio') {
+              switchSurface('studio')
+              setPendingGrovePlace(null)
+            } else if (
+              t === 'grove' ||
+              t === 'home' ||
+              t === 'alongside' ||
+              t === 'storyline'
+            ) {
+              switchSurface('grove')
+              setPendingGrovePlace(
+                t === 'alongside' || t === 'storyline' ? t : 'home',
+              )
+            }
             break
           }
           case 'open_settings':
-            openSettings()
+            openSettings(cmd.params?.section)
             break
           case 'open_panel': {
             const p = cmd.params?.panel
             if (p === 'settings') {
-              openSettings()
+              openSettings(cmd.params?.section)
             } else if (p === 'memory' || p === 'skills') {
+              switchSurface('studio')
               setPanel(p)
+            } else if (p === 'help') {
+              openHelp(cmd.params?.article)
+            } else if (p === 'diagnostics') {
+              setDiagnosticsOpen(true)
+            } else if (p === 'usage') {
+              setUsageOpen(true)
+            } else if (p === 'time_travel') {
+              setTimeTravelOpen(true)
+            } else if (p === 'about') {
+              openSettings('about')
+            } else if (
+              p === 'browser' ||
+              p === 'terminal' ||
+              p === 'files' ||
+              p === 'scratch' ||
+              p === 'sessions'
+            ) {
+              switchSurface('studio')
+              openSlideInRail(p)
             }
             break
           }
+          case 'close_ui':
+            setPanel(null)
+            setGroveSettingsOpen(false)
+            setHelpOpen(false)
+            setDiagnosticsOpen(false)
+            setUsageOpen(false)
+            setTimeTravelOpen(false)
+            setAboutOpen(false)
+            setPaletteOpen(false)
+            break
           case 'open_goal': {
             const gid = cmd.params?.goal_id
             if (gid) {
@@ -798,6 +852,7 @@ export default function App() {
             break
           case 'focus_composer':
             composerRef.current?.focus()
+            window.dispatchEvent(new CustomEvent('remedy:focus-composer'))
             break
           default:
             break
@@ -806,12 +861,20 @@ export default function App() {
         /* dispatch is best-effort */
       }
     }
-    const iv = window.setInterval(() => void tick(), 700)
+    const iv = window.setInterval(() => void tick(), 250)
     return () => {
       alive = false
       window.clearInterval(iv)
     }
-  }, [serverState, switchSurface, openSettings, setPanel, handleNewSession])
+  }, [
+    serverState,
+    switchSurface,
+    openSettings,
+    setPanel,
+    handleNewSession,
+    openHelp,
+    openSlideInRail,
+  ])
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -1705,6 +1768,8 @@ export default function App() {
           onSpeakingChange={setGroveSpeaking}
           openGoalId={pendingGroveGoal}
           onGoalOpened={() => setPendingGroveGoal(null)}
+          openPlace={pendingGrovePlace}
+          onPlaceOpened={() => setPendingGrovePlace(null)}
         />
       )}
 
