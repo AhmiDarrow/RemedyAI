@@ -46,13 +46,17 @@ The Browser rail uses a **child WebView2** (not an iframe). Common causes:
 
 ## “Sign in with Google / Microsoft” stuck in Browser rail
 
-The rail is a **single WebView** (no OAuth popup window). Remedy forces `window.open`
-into the **same tab** and **never blocks** major identity hosts (Google, Microsoft,
-GitHub login, Auth0, Okta, …) via Privacy Shield.
+Google Identity Services (and other sized login windows) open as a **real
+popup** so `window.opener` stays alive. Redirect-style SSO still completes
+in the rail. Privacy Shield does not block identity hosts (Google, Microsoft,
+GitHub login, Auth0, Okta, …).
 
-1. After click, the rail should navigate to the IdP in-place — complete login there.  
-2. If still stuck: toggle **Privacy Shield off**, retry, then turn it back on.  
-3. Last resort: **↗** system browser for that login only.
+1. After **Sign in with Google**, a small account window should appear —
+   pick the account there; the rail stays on the site.  
+2. If the rail itself shows Google’s `/gsi/transform` page, it should bounce
+   back to the site. Close that tab and retry if it does not.  
+3. If still stuck: toggle **Privacy Shield off**, retry, then turn it back on.  
+4. Last resort: **↗** system browser for that login only.
 
 ## Mobile vs desktop layout in the Browser rail
 
