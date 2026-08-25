@@ -254,12 +254,14 @@ def distill_user_message_now(
                 fact_texts = [m.group(1).strip()]
         for ft in fact_texts[:3]:
             with suppress(Exception):
-                _force_memory_save_sync(mem, str(ft))
+                _force_memory_save_sync(mem, str(ft), session_id=sid or None)
                 out["tool_saved"] = True
     return out
 
 
-async def _force_memory_save_async(memory: Any, content: str) -> None:
+async def _force_memory_save_async(
+    memory: Any, content: str, *, session_id: str | None = None
+) -> None:
     """Await the memory_save mirror directly — no private loop, no blocking.
 
     Runs on the caller's event loop so the shared, loop-bound MemoryStore is
@@ -273,15 +275,26 @@ async def _force_memory_save_async(memory: Any, content: str) -> None:
     text = re.sub(r"\s+", " ", (content or "").strip())
     if not text or looks_like_secret(text):
         return
+    from remedy.memory.authority import may_write_parent_memory, stamp_entry_metadata
+
+    meta = stamp_entry_metadata(
+        {},
+        source="explicit",
+        session_id=session_id,
+        inferred=False,
+        why="remembered from chat",
+    )
     await memory.upsert(
         MemoryEntry(
             title=text[:120] or "Remembered",
             content=text,
             entry_type=MemoryEntryType.NOTE,
             importance=0.85,
+            session_id=session_id,
+            metadata=meta,
         )
     )
-    if len(text) < 400:
+    if may_write_parent_memory(session_id) and len(text) < 400:
         profile = await memory.get_or_create_profile()
         upsert_profile_fact(
             profile,
@@ -290,6 +303,10 @@ async def _force_memory_save_async(memory: Any, content: str) -> None:
             confidence=0.95,
             source="explicit",
             force=True,
+            inferred=False,
+            authority="owner",
+            why="remembered from chat",
+            session_id=session_id,
         )
         await memory.save_user_profile(profile)
 
@@ -357,12 +374,14 @@ async def distill_user_message_now_async(
                 fact_texts = [m.group(1).strip()]
         for ft in fact_texts[:3]:
             with suppress(Exception):
-                await _force_memory_save_async(mem, str(ft))
+                await _force_memory_save_async(mem, str(ft), session_id=sid or None)
                 out["tool_saved"] = True
     return out
 
 
-def _force_memory_save_sync(memory: Any, content: str) -> None:
+def _force_memory_save_sync(
+    memory: Any, content: str, *, session_id: str | None = None
+) -> None:
     """Mirror memory_save tool: NOTE entry + partner profile fact (sync path)."""
     import asyncio
     import concurrent.futures
@@ -376,15 +395,26 @@ def _force_memory_save_sync(memory: Any, content: str) -> None:
         return
 
     async def _run() -> None:
+        from remedy.memory.authority import may_write_parent_memory, stamp_entry_metadata
+
+        meta = stamp_entry_metadata(
+            {},
+            source="explicit",
+            session_id=session_id,
+            inferred=False,
+            why="remembered from chat",
+        )
         await memory.upsert(
             MemoryEntry(
                 title=text[:120] or "Remembered",
                 content=text,
                 entry_type=MemoryEntryType.NOTE,
                 importance=0.85,
+                session_id=session_id,
+                metadata=meta,
             )
         )
-        if len(text) < 400:
+        if may_write_parent_memory(session_id) and len(text) < 400:
             profile = await memory.get_or_create_profile()
             upsert_profile_fact(
                 profile,
@@ -393,6 +423,10 @@ def _force_memory_save_sync(memory: Any, content: str) -> None:
                 confidence=0.95,
                 source="explicit",
                 force=True,
+                inferred=False,
+                authority="owner",
+                why="remembered from chat",
+                session_id=session_id,
             )
             await memory.save_user_profile(profile)
 

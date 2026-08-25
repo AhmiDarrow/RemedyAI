@@ -20,6 +20,32 @@ from remedy.home import default_home
 # Lifecycle sets used by store + desktop Plan banner.
 PLAN_TERMINAL_STATUSES = frozenset({"done", "cancelled"})
 PLAN_ACTIONABLE_STATUSES = frozenset({"draft", "approved", "active"})
+# Owner-facing stop reasons — not a second ontology. Empty is fine (coding Plan).
+STEP_BLOCK_REASONS = frozenset(
+    {"need_you", "couldnt_verify", "env_changed", "tool_failed", "skipped"}
+)
+_BLOCK_ALIASES = {
+    "need_you": "need_you",
+    "needyou": "need_you",
+    "approval": "need_you",
+    "approval_required": "need_you",
+    "couldnt_verify": "couldnt_verify",
+    "couldn't_verify": "couldnt_verify",
+    "unverified": "couldnt_verify",
+    "verification_failure": "couldnt_verify",
+    "env_changed": "env_changed",
+    "environment_changed": "env_changed",
+    "tool_failed": "tool_failed",
+    "tool_failure": "tool_failed",
+    "skipped": "skipped",
+}
+
+
+def normalize_block_reason(raw: str | None) -> str:
+    s = (raw or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if not s:
+        return ""
+    return _BLOCK_ALIASES.get(s, s if s in STEP_BLOCK_REASONS else "")
 
 
 def _now() -> str:
@@ -41,6 +67,10 @@ class PlanStep:
     status: str = "pending"  # pending | active | done | skipped
     risks: list[str] = field(default_factory=list)
     tools: list[str] = field(default_factory=list)
+    intended: str = ""
+    observed: str = ""
+    evidence: str = ""
+    block_reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -54,6 +84,10 @@ class PlanStep:
             status=str(raw.get("status") or "pending"),
             risks=[str(x) for x in (raw.get("risks") or [])],
             tools=[str(x) for x in (raw.get("tools") or [])],
+            intended=str(raw.get("intended") or "")[:500],
+            observed=str(raw.get("observed") or "")[:800],
+            evidence=str(raw.get("evidence") or "")[:500],
+            block_reason=normalize_block_reason(str(raw.get("block_reason") or "")),
         )
 
 
@@ -128,6 +162,14 @@ class TaskPlan:
                 lines.append(f"   - tools: {', '.join(step.tools)}")
             if step.risks:
                 lines.append(f"   - risks: {', '.join(step.risks)}")
+            if step.intended:
+                lines.append(f"   - intended: {step.intended}")
+            if step.observed:
+                lines.append(f"   - observed: {step.observed}")
+            if step.evidence:
+                lines.append(f"   - evidence: {step.evidence}")
+            if step.block_reason:
+                lines.append(f"   - blocked: {step.block_reason}")
         if self.risks:
             lines.append("")
             lines.append("## Overall risks")
@@ -284,6 +326,10 @@ class PlanStore:
         status: str,
         *,
         auto_plan_status: bool = True,
+        intended: str | None = None,
+        observed: str | None = None,
+        evidence: str | None = None,
+        block_reason: str | None = None,
     ) -> TaskPlan | None:
         """Flip one step's status. *step_id* may be id, 1-based index, or title.
 
@@ -306,6 +352,16 @@ class PlanStore:
         target.status = st
         # Drop cosmetic "[done]" title hacks once real status is set.
         target.title = _strip_step_title_status_prefix(target.title)
+        if intended is not None:
+            target.intended = str(intended).strip()[:500]
+        if observed is not None:
+            target.observed = str(observed).strip()[:800]
+        if evidence is not None:
+            target.evidence = str(evidence).strip()[:500]
+        if block_reason is not None:
+            target.block_reason = normalize_block_reason(block_reason)
+        elif st == "skipped" and not target.block_reason:
+            target.block_reason = "skipped"
         if auto_plan_status:
             if st in ("active", "done", "skipped") and plan.status in (
                 "draft",
@@ -455,6 +511,10 @@ Process:
 3. Produce a clear structured plan (goal, numbered steps, risks, files/tools).
 4. Call `plan_save` with that structure.
 5. Do **not** claim work is implemented — wait for the user to **Approve → Build**.
+6. A finished *plan* is not the same as the owner's goal. If you could not
+   verify something, say so — do not mark the objective done on optimism.
+7. Payment, password, send, and delete checkpoints cannot be recovered around.
+   Pause and ask the owner — do not retry the same irreversible action.
 
 Prefer an ASCII outline in the chat reply, e.g.:
 
@@ -478,6 +538,7 @@ Prefer action. Batch independent reads. file_edit existing files; file_write new
 History stubs are not disk — file_read a path before you edit it.
 Never kill app.exe or port 7400 (that's this agent).
 If a plan is active, mark steps with plan_step_status as you finish them.
+When you observed an outcome, pass observed= (and evidence= if you have a path or command). Do not claim the owner's goal if you could not verify it.
 """.strip()
 
 BUILD_MODE_SYSTEM_ADDENDUM = """
@@ -519,7 +580,10 @@ request is actually done.
 ### Plan progress
 9. After finishing a step (and a quick verify when possible), call
    **`plan_step_status`** with `status=done` (or `active` when starting).
-   Do **not** fake progress by prefixing titles with `[done]`.
+   Prefer `observed=` / `evidence=` when you actually checked. If you could
+   not verify, use `block_reason=couldnt_verify` and say so — do not claim
+   the owner's goal. Do **not** fake progress with `[done]` in titles.
+   `status=done` without those fields still works (coding loops).
 10. Follow the active plan order; skip only with `status=skipped` and a reason.
 
 ### Approvals

@@ -112,6 +112,11 @@ Status bar toggle or **Ctrl+B** / Shift+Tab in composer. Desktop sends `plan_mod
 
 Finished (`done`) or cancelled plans **do not stick** in Build mode. Only **draft / approved / active** plans show the sticky card outside Plan mode. There is no cosmetic “Hide” — use **Cancel plan** to quit for good.
 
+Steps may include what Remedy **meant to do**, what she **saw**, and why a step
+**stopped** (needs you, could not verify, environment changed, tool failed).
+A tool returning ok is not the same as your goal being done. “Could not verify”
+is a valid finish. Trivial chat still does not build a plan.
+
 **Structured plans** live under `~/.remedy/plans/`. Slash commands:
 
 | Command | Action |

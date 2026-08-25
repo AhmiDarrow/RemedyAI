@@ -22,5 +22,5 @@ export async function fetchI18n(lang?: string, hint?: string): Promise<I18nPaylo
   if (lang) q.set('lang', lang)
   if (hint) q.set('hint', hint)
   const s = q.toString()
-  return apiFetch<I18nPayload>(`/i18n${s ? `?${s}` : ''}`)
+  return apiFetch<I18nPayload>(s ? `/i18n?${s}` : '/i18n')
 }

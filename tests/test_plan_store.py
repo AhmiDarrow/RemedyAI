@@ -9,7 +9,9 @@ from fastapi.testclient import TestClient
 from remedy.core.plan_store import (
     PLAN_MODE_SYSTEM_ADDENDUM,
     PLAN_MODE_TOOL_NAMES,
+    PlanStep,
     PlanStore,
+    normalize_block_reason,
     parse_steps_from_text,
 )
 from remedy.interfaces.api import create_app
@@ -189,6 +191,56 @@ def test_update_step_status_by_id_and_index(tmp_path: Path):
     assert "file_edit" in FRONTIER_BUILD_MODE_ADDENDUM
     assert "7400" in FRONTIER_BUILD_MODE_ADDENDUM
     assert "1. **Explore" not in FRONTIER_BUILD_MODE_ADDENDUM
+
+
+def test_old_plan_json_loads_without_evidence_fields(tmp_path: Path):
+    step = PlanStep.from_dict({"id": "s1", "title": "Click Submit", "status": "pending"})
+    assert step.intended == ""
+    assert step.observed == ""
+    assert step.evidence == ""
+    assert step.block_reason == ""
+    store = PlanStore(tmp_path)
+    plan = store.create("Legacy", steps=[{"id": "s1", "title": "Click Submit"}], session_id="s")
+    loaded = store.get(plan.id)
+    assert loaded is not None
+    assert loaded.steps[0].observed == ""
+    done = store.update_step_status(plan.id, "s1", "done")
+    assert done is not None
+    assert done.steps[0].status == "done"
+    assert done.steps[0].observed == ""
+
+
+def test_step_evidence_and_block_reason_roundtrip(tmp_path: Path):
+    store = PlanStore(tmp_path)
+    plan = store.create("Order groceries", steps=["Add usual items"], session_id="s-ev")
+    u = store.update_step_status(
+        plan.id,
+        "s1",
+        "active",
+        intended="Cart has the 12 usual items",
+        observed="URL still on the product page",
+        evidence="snapshot after Add to cart",
+        block_reason="couldnt_verify",
+    )
+    assert u is not None
+    assert u.steps[0].intended.startswith("Cart has")
+    assert "product page" in u.steps[0].observed
+    assert u.steps[0].block_reason == "couldnt_verify"
+    md = u.summary_markdown()
+    assert "observed:" in md
+    assert "blocked: couldnt_verify" in md
+    again = store.get(plan.id)
+    assert again is not None
+    assert again.steps[0].block_reason == "couldnt_verify"
+    assert normalize_block_reason("verification_failure") == "couldnt_verify"
+    assert normalize_block_reason("not-a-reason") == ""
+    skipped = store.update_step_status(plan.id, "s1", "skipped")
+    assert skipped is not None
+    assert skipped.steps[0].block_reason == "couldnt_verify"  # keep explicit reason
+    plan2 = store.create("Skip me", steps=["Optional"], session_id="s-sk")
+    sk = store.update_step_status(plan2.id, "s1", "skipped")
+    assert sk is not None
+    assert sk.steps[0].block_reason == "skipped"
 
 
 def test_plans_api(tmp_path: Path, monkeypatch):

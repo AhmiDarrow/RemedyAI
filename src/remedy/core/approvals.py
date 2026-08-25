@@ -42,6 +42,11 @@ def is_full_approval(raw: str | None = None) -> bool:
 # are deliberately untouched so frontier-model coding agency keeps full flow.
 SENSITIVE_PREFIX = "Owner checkpoint"
 
+
+def checkpoint_blocks_recovery(reason: str | None) -> bool:
+    """Payment / credentials / send checkpoints cannot be retried as 'recovery'."""
+    return str(reason or "").startswith(SENSITIVE_PREFIX)
+
 _SENSITIVE_COMPUTER_RE = re.compile(
     r"(?is)\b("
     # Purchase finalization

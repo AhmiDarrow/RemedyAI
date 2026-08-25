@@ -14,6 +14,10 @@ Remedy keeps durable knowledge so it can remember facts, goals, and session cont
 | **Goals** | Durable **life goals** (`/goal`, `/goals`) — horizon, next action, evidence. Session tasks stay a chapter checklist. |
 | **CAS** | Machine memory: content-addressed objects under `~/.remedy/cas`. Survives restart. Query-keyed, not a journal. |
 
+Partner Memory is **context**, not a grant of tools or approvals. Hive workers
+cannot write parent facts. Instruction-shaped text (“skip all approvals”) is
+refused. `/forget` still removes what you do not want stored.
+
 ## In the desktop app
 
 - **Memory** panel (status bar) — tabs:
