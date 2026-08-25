@@ -249,7 +249,7 @@ def mutant_kill_score(
                 else:
                     killed += 1
                     status = "killed"
-                details.append({"file": rel, "mutant": mid, "status": status})
+                details.append({"file": rel_posix, "mutant": mid, "status": status})
 
     total = killed + survived
     rate = (killed / total) if total else 0.0

@@ -567,6 +567,7 @@ class ApprovalQueue:
 
                 if (
                     profile is not None
+                    and not untrusted
                     and profile_skips_high_impact_ask(profile)
                     and not reason.startswith(SENSITIVE_PREFIX)
                     and checkpoint_still_required(tool, c) is None

@@ -55,6 +55,23 @@ def _tool_command(args: dict[str, Any], name: str = "") -> str:
     return ""
 
 
+def _approval_key(name: str, args: dict[str, Any]) -> str:
+    """Discriminating approval fingerprint for tools with no command-shaped arg.
+
+    ``skill_run(skill="notes", script="sync.py")`` and
+    ``skill_run(skill="deploy", script="wipe_prod.py")`` must not share one
+    approval: the fingerprint has to carry the arguments that decide what runs.
+    """
+    parts: list[str] = []
+    for key in sorted(args or {}):
+        val = args[key]
+        if isinstance(val, (str, int, float, bool)):
+            text = str(val).strip()
+            if text:
+                parts.append(f"{key}={text[:120]}")
+    return f"{name} {' '.join(parts)}" if parts else name
+
+
 def snapshot_live_turn(runtime: Any = None) -> None:
     """Freeze TurnContext + emit GoalStarted. Safe no-op if factory fails."""
     with suppress(Exception):
@@ -148,7 +165,7 @@ def authorize_tool(runtime: Any, name: str, args: dict[str, Any]) -> str | None:
             suggestion="Use a tool and arguments the owner has authorized.",
         )
     sid = turn_session_id(runtime)
-    cmd = command or name
+    cmd = command or _approval_key(name, args)
     if decision.requires_approval:
         from remedy.core.approvals import SENSITIVE_PREFIX
 

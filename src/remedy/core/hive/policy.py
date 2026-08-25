@@ -66,7 +66,7 @@ MOTHER_ONLY_TOOLS = frozenset(
     }
 )
 
-MOTHER_ONLY_PREFIXES = ("hive_", "mail_send", "mail_reply")
+MOTHER_ONLY_PREFIXES = ("hive_", "mail_", "calendar_")
 
 
 def hive_depth() -> int:
