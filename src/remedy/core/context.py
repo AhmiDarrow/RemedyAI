@@ -83,7 +83,7 @@ class TurnFactory:
         scope = normalize_access_scope(access_scope or "project")
         ident = identity or IdentityContext(name=DEFAULT_NAME, gender=DEFAULT_GENDER)
         bind = get_llm_binding(runtime)
-        return TurnContext(
+        ctx = TurnContext(
             session_id=sid,
             turn_id=tid,
             identity=ident,
@@ -99,3 +99,15 @@ class TurnFactory:
             plan_mode=bool(tc.current_plan_mode()),
             cancellation=CancellationToken(event=tc.current_abort_event()),
         )
+        try:
+            from remedy.events import EventType, default_bus
+
+            default_bus().emit_simple(
+                EventType.GOAL_STARTED,
+                session_id=ctx.session_id,
+                turn_id=ctx.turn_id,
+                plan_mode=ctx.plan_mode,
+            )
+        except Exception:
+            pass
+        return ctx

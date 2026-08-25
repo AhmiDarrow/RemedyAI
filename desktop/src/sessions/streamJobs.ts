@@ -7,6 +7,7 @@
  */
 
 import { abortSession } from '../api/sessions'
+import { upsertTurn } from '../state/turns'
 import type { StreamProgress, UsagePayload } from '../api/messages'
 import type { BuildTodo } from '../components/BuildTodos'
 import type { ProcessStep } from '../utils/toolLabels'
@@ -36,6 +37,8 @@ export type StreamJobPaint = {
 
 export type StreamJob = {
   sessionId: string
+  /** Stable id for this stream (TurnStore jobId / turnId). */
+  turnId: string
   status: StreamJobStatus
   controller: AbortController
   model?: string
@@ -127,17 +130,27 @@ export function registerStreamJob(
       /* */
     }
   }
+  const startedAt = Date.now()
+  const turnId = `turn-${startedAt}`
   const job: StreamJob = {
     sessionId,
+    turnId,
     status: 'running',
     controller,
     model,
-    startedAt: Date.now(),
-    lastActivityAt: Date.now(),
+    startedAt,
+    lastActivityAt: startedAt,
     detached: false,
     paint: emptyStreamPaint(),
   }
   jobs.set(sessionId, job)
+  upsertTurn({
+    sessionId,
+    turnId,
+    jobId: sessionId,
+    status: 'running',
+    startedAt: new Date(startedAt).toISOString(),
+  })
   emit({ type: 'update', job: { ...job } })
   return job
 }
@@ -307,6 +320,14 @@ export function completeStreamJob(
   j.status = status
   if (error) j.error = error
   j.lastActivityAt = Date.now()
+  upsertTurn({
+    sessionId,
+    turnId: j.turnId,
+    jobId: sessionId,
+    status: status === 'done' ? 'completed' : 'failed',
+    startedAt: new Date(j.startedAt).toISOString(),
+    completedAt: new Date().toISOString(),
+  })
   emit({ type: 'update', job: { ...j } })
   // Keep completed jobs briefly so UI can show toast / badge clear.
   const later =

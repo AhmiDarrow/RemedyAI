@@ -53,6 +53,13 @@ def scrub_subprocess_env(
     return child_environment(env, grants=inferred)
 
 
+def _clip_output(text: str, stream: str) -> str:
+    """Soft ExecutionBudget cap so a child cannot flood the turn."""
+    from remedy.execution.budgets import ExecutionBudget
+
+    return ExecutionBudget().clip(text, stream=stream)
+
+
 @dataclass
 class ExecutionResult:
     exit_code: int
@@ -229,8 +236,14 @@ class SubprocessSandbox(Sandbox):
                 elapsed = (time.monotonic() - start) * 1000
                 return ExecutionResult(
                     exit_code=proc.returncode or 0,
-                    stdout=stdout.decode("utf-8", errors="replace") if stdout else "",
-                    stderr=stderr.decode("utf-8", errors="replace") if stderr else "",
+                    stdout=_clip_output(
+                        stdout.decode("utf-8", errors="replace") if stdout else "",
+                        "stdout",
+                    ),
+                    stderr=_clip_output(
+                        stderr.decode("utf-8", errors="replace") if stderr else "",
+                        "stderr",
+                    ),
                     duration_ms=elapsed,
                 )
             finally:
