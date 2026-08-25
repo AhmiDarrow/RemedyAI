@@ -51,16 +51,46 @@ class PolicyEngine:
 
         reason = APPROVALS.needs_ask(command, tool_name=desc.name)
         if reason:
-            return PolicyDecision(
+            decision = PolicyDecision(
                 allowed=True,
                 requires_approval=True,
                 reason=reason,
                 granted_capabilities=desc.capabilities,
             )
-        _ = ctx
-        return PolicyDecision(
+            _emit_policy(ctx, desc.name, decision)
+            return decision
+        decision = PolicyDecision(
             allowed=True,
             requires_approval=False,
             reason="allowed",
             granted_capabilities=desc.capabilities,
         )
+        _emit_policy(ctx, desc.name, decision)
+        return decision
+
+
+def _emit_policy(ctx: Any, tool_name: str, decision: PolicyDecision) -> None:
+    if ctx is None:
+        return
+    try:
+        from remedy.events import EventType, default_bus
+
+        sid = str(getattr(ctx, "session_id", "") or "")
+        tid = str(getattr(ctx, "turn_id", "") or "")
+        if not tid:
+            return
+        kind = (
+            EventType.APPROVAL_REQUESTED
+            if decision.requires_approval
+            else EventType.TOOL_PROPOSED
+        )
+        default_bus().emit_simple(
+            kind,
+            session_id=sid,
+            turn_id=tid,
+            tool=tool_name,
+            allowed=decision.allowed,
+            reason=decision.reason,
+        )
+    except Exception:
+        return
