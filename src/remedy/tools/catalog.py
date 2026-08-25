@@ -81,6 +81,10 @@ def _infer(name: str) -> ToolDescriptor:
         risk = Risk.HIGH
         cred = CredentialPolicy.NONE
         verify = True
+    if n.startswith(("mail_", "calendar_")):
+        # Owner correspondence and schedule: never inside DAUGHTER_CAPABILITIES,
+        # so the hive cap gate can actually restrain this surface.
+        caps.add(Capability.COMMUNICATE)
     if n in ("mail_send", "mail_reply"):
         caps.update({Capability.COMMUNICATE, Capability.TRANSACT})
         risk = Risk.CRITICAL

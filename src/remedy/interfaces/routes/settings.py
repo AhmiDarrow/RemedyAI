@@ -32,6 +32,17 @@ def _int_or(value: Any, default: int) -> int:
     return default if value is None else int(value)
 
 
+def _trust_profile_value(raw: object = None) -> str:
+    """Normalized trust profile for the settings payload.
+
+    The panel round-trips whatever GET returns, so omitting this key made it
+    read ``undefined`` and write ``balanced`` back over a saved profile.
+    """
+    from remedy.core.trust_profile import normalize_trust_profile
+
+    return str(normalize_trust_profile(raw).value)
+
+
 def _normalize_tool_process(cfg: dict | None = None, raw: object = None) -> str:
     """off | medium | full — default off. Legacy show_tool_calls / full+ → full."""
     if raw is None and isinstance(cfg, dict):
@@ -194,6 +205,7 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "harness_max_context_pct": float(cfg.get("harness_max_context_pct", 0.92)),
             "thinking_level": str(cfg.get("thinking_level") or "high").lower(),
             "approval_mode": str(cfg.get("approval_mode") or "auto").lower(),
+            "trust_profile": _trust_profile_value(cfg.get("trust_profile")),
             "tool_process": _normalize_tool_process(cfg),
             "web_tools_enabled": bool(cfg.get("web_tools_enabled", True)),
             "http_bootstrap": _effective_http_bootstrap(cfg),
@@ -401,6 +413,7 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "harness_mode": result.get("harness_mode", "auto"),
             "thinking_level": str(result.get("thinking_level") or "high"),
             "approval_mode": str(result.get("approval_mode") or "auto"),
+            "trust_profile": _trust_profile_value(result.get("trust_profile")),
             "user_name": str(result.get("user_name") or "").strip(),
             "tool_process": result.get("tool_process") or "off",
             "vision_enabled": bool(result.get("vision_enabled")),
