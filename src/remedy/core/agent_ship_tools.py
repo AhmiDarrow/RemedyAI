@@ -88,7 +88,7 @@ def register_ship_tools(runtime: Any) -> None:
         cwd = Path(proj).expanduser() if proj else Path.cwd()
         if cwd.is_file():
             cwd = cwd.parent
-        env = scrub_subprocess_env()
+        env = scrub_subprocess_env(argv=["git"])
         # Ensure git finds same identity as interactive
         env.setdefault("GIT_TERMINAL_PROMPT", "0")
         creationflags = 0
@@ -130,7 +130,7 @@ def register_ship_tools(runtime: Any) -> None:
         cwd = Path(proj).expanduser() if proj else Path.cwd()
         if cwd.is_file():
             cwd = cwd.parent
-        env = scrub_subprocess_env()
+        env = scrub_subprocess_env(argv=["gh"])
         env.setdefault("GH_PROMPT_DISABLED", "1")
         creationflags = 0
         if os.name == "nt":
