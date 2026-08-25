@@ -2,12 +2,22 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.38.0** — capability architecture (policy, credentials,
-verification, turn ids). Partner line still starts at 0.31.0.
+Current series: **v0.38.1** — capability architecture plus the trust-gate
+follow-up. Partner line still starts at 0.31.0.
 
 ## Contents
 
-- [0.38.0](#0380---capability-architecture) · [0.31.2](#0312---this-round-this-folder) · [0.31.1](#0311---she-drives-her-own-ui) · [0.31.0](#0310---a-partner-for-any-ability-level) · [Hive](#hive) · [Research](#research) · [Game studio](#game-dev-studio) · [0.30.0](#0300---grove-voice-life-tasks-and-the-vault) · [0.26.2](#0262---host-in-remedys-hands) · [0.26.1](#0261---build-finishes) · [0.26.0](#0260---windows--linux-desktop) · [0.25.1](#0251---jail-stop-and-tab-isolation) · [0.25.0](#0250---stable-tabs--settings-chrome) · [0.24.0](#0240---host-bridge--first-home) · [0.23.2](#0232---defender-execution-false-positive) · [0.23.1](#0231---first-turn-agency) · [0.23.0](#0230---build-ability--companion) · [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+- [0.38.1](#0381---trust-gates) · [0.38.0](#0380---capability-architecture) · [0.31.2](#0312---this-round-this-folder) · [0.31.1](#0311---she-drives-her-own-ui) · [0.31.0](#0310---a-partner-for-any-ability-level) · [Hive](#hive) · [Research](#research) · [Game studio](#game-dev-studio) · [0.30.0](#0300---grove-voice-life-tasks-and-the-vault) · [0.26.2](#0262---host-in-remedys-hands) · [0.26.1](#0261---build-finishes) · [0.26.0](#0260---windows--linux-desktop) · [0.25.1](#0251---jail-stop-and-tab-isolation) · [0.25.0](#0250---stable-tabs--settings-chrome) · [0.24.0](#0240---host-bridge--first-home) · [0.23.2](#0232---defender-execution-false-positive) · [0.23.1](#0231---first-turn-agency) · [0.23.0](#0230---build-ability--companion) · [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+
+## 0.38.1 - Trust gates
+
+A helper she hires cannot read your mail or calendar. Saying yes to one
+skill run does not approve a different one. **Autonomous** still asks in an
+untrusted folder. **Trust** in Settings no longer snaps back to Balanced
+when you save something else. Voice status no longer stalls the window
+while engines load.
+
+PyPI **`remedy-ai==0.38.1`** · tag **v0.38.1**.
 
 ## 0.38.0 - Capability architecture
 
@@ -27,8 +37,8 @@ does. Mail and payment still always stop. README is a short pointer into
 this manual, not a second wiki. Grove shows the live checklist while she
 works. **Stop** on one chat does not resume that work from another tab.
 
-Public **0.31.2** remains the last GitHub Release until this branch is
-tagged. This tree is **v0.38.0**.
+Tagged as **v0.38.0**. **v0.38.1** is the follow-up that closes the
+trust gates still open in that cut.
 
 ## 0.31.2 - This round, this folder
 

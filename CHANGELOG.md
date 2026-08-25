@@ -4,6 +4,26 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.38.1] - 2026-08-25
+
+### Fixed — gates that were open in 0.38.0
+
+- **Mail and calendar stay with the owner.** A hive daughter could read the
+  mailbox and calendar because only send/reply were blocked. Read, archive,
+  draft, and calendar verbs are mother-only and carry `communicate`.
+- **One skill approval is not every skill.** Approving `skill_run` for one
+  script no longer covers every other skill/script for the session.
+- **Untrusted folders still ask in Autonomous.** The Autonomous waiver no
+  longer skips shell/files/skills in untrusted, sandbox, strict, or download
+  scope.
+- **Trust no longer resets on save.** GET `/api/settings` now returns
+  `trust_profile`, so the Settings panel does not write Balanced over a
+  saved Conservative or Autonomous profile.
+- **Voice status does not stall.** `/api/voice/status` probes whether
+  engines are installed without importing them (a first import of torch /
+  kokoro could freeze Settings for tens of seconds).
+- ReAct split modules bind loop state by name, not by position.
+
 ## [0.38.0] - 2026-08-25
 
 ### Added — capability architecture (Optimization/Stability)
