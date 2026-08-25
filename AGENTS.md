@@ -1,13 +1,47 @@
 # Agent notes — RemedyAI
 
-Durable facts for coding agents working in this repo. Prefer this file + `docs/` over chat memory when they conflict.
+Durable facts for coding agents working in this repo. Prefer this file, public product docs, and **local clone-only** notes under `docs/` (when present on disk) over chat memory. Never treat a session conversation as something to commit.
 
 ## Project identity
 
 - **This repo (`C:\Users\Administrator\Old-Remedy`) is the active multi-stack RemedyAI product** — FastAPI + Tauri + Vite SPA. **Not frozen.** It is product authority for this line.
 - **`C:\Users\Administrator\Remedy` is a different product** (machine-only / RDNA). Not a branch of this tree; different bios home (`~/.remedyai` vs `~/.remedy` here). Do not treat one as the archive/replacement of the other.
 - See `ARCHIVE.md` for the sibling-path note (filename is historical; content is status, not “frozen archive”).
-- **Public GitHub tree ships the product + the test suite.** `community/`, live/soak scripts, and review dumps stay on this clone (gitignored / `.git/info/exclude`) and are not pushed.
+- **Public GitHub tree ships the product + the test suite.** `community/`, live/soak scripts, review dumps, and session notes stay on this clone (gitignored) and are not pushed.
+
+## Public GitHub docs — allowlist only
+
+Public `docs/` is **owner-facing product documentation**, not a notebook of chats, plans, or design essays. `.gitignore` ignores every other top-level `docs/*.md`.
+
+**May be committed (this allowlist only):**
+
+| Path | Why it is public |
+|------|------------------|
+| `docs/manual/**` | Owner manuals (help catalog; `check_docs.py` / `sync_help_manual.py`) |
+| `docs/ARCHITECTURE.md` | Living pointers into the tree |
+| `docs/DESKTOP.md` | Desktop / auto-update |
+| `docs/WINDOWS_SIGNING.md` | minisign + Authenticode |
+| `docs/USAGE.md` | Usage |
+| `docs/TERMS.md` | Terms |
+| `docs/TELEPHONY.md` / `docs/TELEPHONY_TERMS.md` | Telephony product + terms |
+| `docs/THIRD_PARTY.md` | Third-party notices |
+| `docs/WEB_ETIQUETTE.md` | Web-use etiquette |
+| `docs/REMEDY_PERSONA.md` | Persona charter |
+| `docs/SKILL_LIFECYCLE.md` | Skill lifecycle protocol |
+
+**Never `git add` (even if the owner discussed them in chat):**
+
+- Session recaps, conversation dumps, “what we talked about”, program plans, `NEXT_TASKS`
+- Design / organ essays (`LIFE_TASK_PARTNER`, `EMBODIMENT`, `PROPRIOCEPTION`, `VIGIL`, `MYELIN`, `HER_HOUSE`, `SOUL_FIELD`, `SELF_INJECT`)
+- Working papers (`BLAST_RADIUS_*`, `OPTIMIZATION_*`)
+- Audits, research scratch, red-team writeups, soak signoffs (`AUDIT_*`, `RESEARCH_*`, `REDTEAM_*`, `SECURITY_AUDIT_*`, `*signoff*`, `*soak*` outside `docs/manual/`)
+- Probe dumps (`docs/_*`, `_review_*`, `_scan_*`, `_soak*`)
+
+Write those on this clone and leave them untracked. **Do not** `git add -f` to bypass gitignore.
+
+If a *new* file should actually be public: it must be owner-facing product docs (not a chat recap). Add it to this allowlist **and** a `!docs/ThatFile.md` gitignore exception **in the same commit**.
+
+Untracking HEAD is not enough once a file has been pushed — GitHub still has history. A history rewrite (`git filter-repo`) and force-push of `master` happens **only when the owner explicitly asks**. Default remains: never force-push `master`/`main`.
 
 ## Product north star — a partner for any ability level
 
@@ -18,8 +52,9 @@ coding a new app to running an errand. Owners span **every ability level**
 (non-technical, low-vision, limited motor control, cognitively loaded, power
 user); Remedy must work as their hands on the computer.
 
-Design notes live on this clone only (`docs/LIFE_TASK_PARTNER.md`,
-`docs/AUDIT_LIFE_TASK_*.md`) — not on the public GitHub tree.
+Local clone notes (`docs/LIFE_TASK_PARTNER.md`, `docs/AUDIT_LIFE_TASK_*.md`,
+and the other gitignored essays) are still the design source when they
+exist on disk — **read them; do not commit them.** See the allowlist above.
 
 **Judge every computer-use / agency change by these five questions:**
 
@@ -112,7 +147,7 @@ on demand.
 - **Python package:** `uv build` then, after CI green, `uv publish` (credentials via env / `~/.pypirc`).
 - **Desktop release:** git tag `v{X.Y.Z}` → GitHub Actions `desktop-release` (see naming rules below).
 - **Commit style:** complete sentences; `release:` / `fix:` / `docs:` prefixes as appropriate.
-- **Never:** force-push `master`/`main`; publish on red CI; leave version surfaces mismatched; **push after pytest-only when Linux CI also runs ruff/mypy/docs**.
+- **Never:** force-push `master`/`main` (exception: the owner explicitly asks to purge leaked internal docs or secrets from history); publish on red CI; leave version surfaces mismatched; **push after pytest-only when Linux CI also runs ruff/mypy/docs**; **commit session notes / plans / design essays under `docs/`**.
 
 ### Local CI — run this before every `git push`
 

@@ -113,28 +113,29 @@ examples/
 community/
 experiments/
 
-# Internal / soak / review docs (user help lives in docs/manual/)
+# ---------------------------------------------------------------------------
+# Public docs allowlist — AGENTS.md "Public GitHub docs".
+# Ignore every other top-level docs/*.md (session notes, plans, essays,
+# audits). docs/manual/ is not matched by docs/*.md and stays tracked.
+# To publish a new top-level doc: add !docs/ThatFile.md here AND add it to
+# the AGENTS.md allowlist in the same commit. Never git add -f.
+# ---------------------------------------------------------------------------
+docs/*.md
+!docs/ARCHITECTURE.md
+!docs/DESKTOP.md
+!docs/REMEDY_PERSONA.md
+!docs/SKILL_LIFECYCLE.md
+!docs/TELEPHONY.md
+!docs/TELEPHONY_TERMS.md
+!docs/TERMS.md
+!docs/THIRD_PARTY.md
+!docs/USAGE.md
+!docs/WEB_ETIQUETTE.md
+!docs/WINDOWS_SIGNING.md
 docs/_*/
-docs/_*.md
 docs/_*.json
-docs/RESEARCH_*.md
-docs/AUDIT_*.md
-docs/REDTEAM_*.md
-docs/SECURITY_AUDIT_*.md
-docs/SELF_INJECT.md
-docs/SOUL_FIELD.md
 docs/*soak*
 docs/*signoff*
-# Session notes, program plans, experimental-organ essays — this clone only
-docs/BLAST_RADIUS_*.md
-docs/NEXT_TASKS.md
-docs/OPTIMIZATION_*.md
-docs/LIFE_TASK_PARTNER.md
-docs/EMBODIMENT.md
-docs/PROPRIOCEPTION.md
-docs/VIGIL.md
-docs/MYELIN.md
-docs/HER_HOUSE.md
 
 # Live / soak / probe / training scripts (not needed to compile)
 scripts/live_*
@@ -158,6 +159,7 @@ scripts/lib_local_token.py
 # Agent / session scratch that must never ship (repo-root only —
 # do not ignore src/remedy/memory/).
 /memory/
+/COORDINATION.md
 NUL
 /Users/
 /~/
