@@ -1,6 +1,7 @@
 # Architecture (living)
 
-Pointers, not a second product bible. Design docs: `docs/LIFE_TASK_PARTNER.md`, `docs/DESKTOP.md`, `docs/TELEPHONY.md`, root `AGENTS.md`.
+Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
+`docs/TELEPHONY.md`, `docs/manual/`, root `AGENTS.md`.
 
 ## Surfaces (one SPA)
 
@@ -21,12 +22,8 @@ Grove unmounts off-surface. Studio must own its own voice instance (`useVoice` i
 - Identity: `~/.remedy/voice/identity.json`. Owner clone: `voice/clone.py` (named task, expiry, revoke).
 - Telephony loopback: `SipDirectBackend` (`sip_direct`) — UDP/in-process echo on 127.0.0.1, `simulated=True`
 
-## Dated notes
+## Voice
 
-### 2026-08-24 — Optimization program (local `Optimization/Stability`)
-
-Capability/policy contracts start in `src/remedy/policy/` and `src/remedy/tools/`. Inventory: `docs/OPTIMIZATION_BASELINE.md`. Public `master` stays 0.31.x until a phase exit gate. Roadmap ends at **v0.38** (not a 1.0 label).
-
-### 2026-08-20 — Voice is a SPA+API feature, not CLI
-
-Install and status are HTTP. Desktop and WebUI share Settings/Grove/Studio. CLI stays text-only. Phone-line anti-alias and host-session exit detection are runtime, not UI.
+Install and status are HTTP. Desktop and WebUI share Settings/Grove/Studio.
+CLI stays text-only. Capability/policy contracts live in `src/remedy/policy/`
+and `src/remedy/tools/`.

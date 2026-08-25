@@ -125,6 +125,16 @@ docs/SELF_INJECT.md
 docs/SOUL_FIELD.md
 docs/*soak*
 docs/*signoff*
+# Session notes, program plans, experimental-organ essays — this clone only
+docs/BLAST_RADIUS_*.md
+docs/NEXT_TASKS.md
+docs/OPTIMIZATION_*.md
+docs/LIFE_TASK_PARTNER.md
+docs/EMBODIMENT.md
+docs/PROPRIOCEPTION.md
+docs/VIGIL.md
+docs/MYELIN.md
+docs/HER_HOUSE.md
 
 # Live / soak / probe / training scripts (not needed to compile)
 scripts/live_*
