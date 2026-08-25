@@ -22,10 +22,12 @@ import inspect
 import re
 
 from remedy.core.react_loop import loop as loop_mod
+from remedy.core.react_loop import loop_steps as steps_mod
 
 
 def _source() -> str:
-    return inspect.getsource(loop_mod)
+    """Orchestrator + extracted step loop (split so mypy can type both)."""
+    return inspect.getsource(loop_mod) + "\n" + inspect.getsource(steps_mod)
 
 
 def test_drive_bails_out_when_no_tools_are_armed() -> None:

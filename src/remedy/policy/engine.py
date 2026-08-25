@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 from remedy.policy.decisions import PolicyDecision, ToolRequest
-from remedy.tools.catalog import descriptor_for
 from remedy.tools.descriptor import ToolDescriptor
 
 
@@ -22,7 +21,12 @@ class PolicyEngine:
         tool: ToolDescriptor | str,
         request: ToolRequest | None = None,
     ) -> PolicyDecision:
-        desc = tool if isinstance(tool, ToolDescriptor) else descriptor_for(str(tool))
+        if isinstance(tool, ToolDescriptor):
+            desc = tool
+        else:
+            from remedy.tools.catalog import descriptor_for
+
+            desc = descriptor_for(str(tool))
         req = request or ToolRequest(name=desc.name)
         command = req.command
         if not command:

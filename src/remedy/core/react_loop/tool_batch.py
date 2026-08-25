@@ -277,7 +277,7 @@ async def apply_build_engine_after_batch(
                                     ms = mutation_score_paths(
                                         root_p, list(bst.write_set)
                                     )
-                                    bst.last_mutation_score = ms  # type: ignore[attr-defined]
+                                    bst.last_mutation_score = ms
                                     if ms.get("cone_mods"):
                                         yield (
                                             "@@status:Build mutation cone "
@@ -303,7 +303,7 @@ async def apply_build_engine_after_batch(
                         )
 
                         messages.append(format_seed_oracle_message(seed))
-                    bst._seed_message = None  # type: ignore[attr-defined]
+                    bst._seed_message = None
                 messages.append(
                     format_auto_verify_message(av, state=bst)
                 )
@@ -430,7 +430,7 @@ async def apply_build_engine_after_batch(
                             write_set=list(bst.write_set or []),
                             root=runtime.effective_project_path(),
                         )
-                        bst.repair_queue = q.to_public()  # type: ignore[attr-defined]
+                        bst.repair_queue = q.to_public()
                         if q.targets:
                             yield (
                                 "@@status:Build repair queue "

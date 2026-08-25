@@ -190,13 +190,14 @@ class BasicRuntime(AgentRuntime):
         self.__dict__["_partner_state_live"] = None
         self.__dict__["_work_roots_live"] = []
         self._session_briefs: dict[str, Any] = {}
+        self._learning_loop: Any | None = None
         self._register_workspace_tools()
         self._register_memory_tools()
 
     # -- turn-local continuity (properties) ---------------------------------
 
     @property
-    def _session_id(self) -> str | None:  # type: ignore[override]
+    def _session_id(self) -> str | None:
         try:
             from remedy.core.turn_context import current_session_id, in_active_turn
 

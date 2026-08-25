@@ -64,7 +64,7 @@ def discover_verify_command(runtime: Any, *, path: str = "") -> str:
 
         if (path or "").strip():
             with suppress(Exception):
-                root = runtime.resolve_tool_path(path)  # type: ignore[attr-defined]
+                root = runtime.resolve_tool_path(path)
                 if root is not None and root.is_file():
                     root = root.parent
         if root is None:
@@ -254,7 +254,7 @@ async def run_auto_verify(
                         state.verify_command = cmd
                         state.oracle_ok = True
                         state.oracle_seeded = True
-                        state._seed_message = seed  # type: ignore[attr-defined]
+                        state._seed_message = seed
 
     if not cmd:
         if hasattr(state, "oracle_ok"):

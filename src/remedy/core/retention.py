@@ -38,16 +38,18 @@ class RetentionPolicy:
 
     @classmethod
     def from_config(cls, cfg: dict[str, Any] | None) -> RetentionPolicy:
-        raw = cfg if isinstance(cfg, dict) else {}
-        nested = raw.get("retention") if isinstance(raw.get("retention"), dict) else {}
+        raw: dict[str, Any] = cfg if isinstance(cfg, dict) else {}
+        _nested = raw.get("retention")
+        nested: dict[str, Any] = _nested if isinstance(_nested, dict) else {}
 
         def _days(*keys: str, default: int) -> int:
             """First present key wins (nested then flat). 0 is a valid disable."""
             for key in keys:
                 for src in (nested, raw):
-                    if key in src and src.get(key) is not None:
+                    val = src.get(key)
+                    if key in src and val is not None:
                         try:
-                            n = int(src.get(key))
+                            n = int(val)
                         except (TypeError, ValueError):
                             n = default
                         return max(_MIN_DAYS, min(_MAX_DAYS, n))
@@ -229,8 +231,9 @@ def run_retention_pass(
 
 def memory_encryption_requested(cfg: dict[str, Any] | None = None) -> bool:
     """True when owner opted into encrypting memory.db at rest."""
-    raw = cfg if isinstance(cfg, dict) else {}
-    nested = raw.get("retention") if isinstance(raw.get("retention"), dict) else {}
+    raw: dict[str, Any] = cfg if isinstance(cfg, dict) else {}
+    _nested = raw.get("retention")
+    nested: dict[str, Any] = _nested if isinstance(_nested, dict) else {}
     for src in (nested, raw):
         if "memory_encrypt" in src:
             return bool(src.get("memory_encrypt"))
@@ -297,9 +300,9 @@ def _memory_key_material(cfg: dict[str, Any] | None = None) -> str:
             import os
 
             if os.name == "nt":
-                from remedy.interfaces.secret_store import harden_auth_file_acl
+                from remedy.interfaces.secret_store import _harden_path
 
-                harden_auth_file_acl(key_path)
+                _harden_path(key_path, is_dir=False)
         except Exception:
             pass
     except OSError as exc:

@@ -247,8 +247,8 @@ def register_build_tools(runtime: Any) -> None:
         ms = mutation_score_paths(root, write_set)
         with contextlib.suppress(Exception):
             if st is not None:
-                st.last_mutation_score = ms  # type: ignore[attr-defined]
-            runtime._last_mutation_score = ms  # type: ignore[attr-defined]
+                st.last_mutation_score = ms
+            runtime._last_mutation_score = ms
         lines = [
             "**Mutation score (import cone)**",
             f"seeds: {', '.join(ms.get('seed_mods') or []) or '—'}",
@@ -326,7 +326,7 @@ def register_build_tools(runtime: Any) -> None:
             base = str(getattr(st, "verify_command", "") or "")
         res = run_gate_tower(runtime, write_set, base_verify=base)
         if st is not None:
-            st.last_gate_tower = res  # type: ignore[attr-defined]
+            st.last_gate_tower = res
             if not res.get("ok"):
                 st.syntax_ok = False
         lines = [res.get("message") or ""]
@@ -351,7 +351,7 @@ def register_build_tools(runtime: Any) -> None:
         ws = list(getattr(st, "write_set", None) or []) if st else []
         q = queue_from_error_vector(vec, write_set=ws, root=_project() or None)
         if st is not None:
-            st.repair_queue = q.to_public()  # type: ignore[attr-defined]
+            st.repair_queue = q.to_public()
         msg = format_repair_queue_message(q)["content"]
         if run_hops and q.targets:
             ran = run_auto_repair_hops(
@@ -392,7 +392,7 @@ def register_build_tools(runtime: Any) -> None:
             test_paths = ["tests"]
         res = mutant_kill_score(root, write_set, test_command_paths=test_paths or None)
         if st is not None:
-            st.last_mutant_kill = res  # type: ignore[attr-defined]
+            st.last_mutant_kill = res
         return (
             f"{res.get('message')}\n"
             f"killed={res.get('killed')} survived={res.get('survived')} "

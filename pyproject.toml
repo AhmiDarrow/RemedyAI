@@ -3,7 +3,7 @@
 # unrelated package (remedy 0.0.6) that pulls ancient Jinja2/begins.
 # Import package and CLI entry point remain `remedy`.
 name = "remedy-ai"
-version = "0.31.2"
+version = "0.38.0"
 description = "Personal AI partner for any ability level — drives this computer to finish goals (life tasks, research, games, code). Not a medical product."
 readme = "README.md"
 license = { text = "LicenseRef-Proprietary" }
@@ -127,6 +127,7 @@ unsafe-fixes = false
 "src/remedy/core/computer/desktop_win.py" = ["N801", "N806"]
 "src/remedy/core/metabolism/identity_export.py" = ["N806"]
 "src/remedy/core/react_policy.py" = ["N806"]
+"src/remedy/core/react_loop/loop_steps.py" = ["N806"]
 "src/remedy/interfaces/config.py" = ["N806"]
 "src/remedy/interfaces/routes/*" = ["SIM117", "N806"]
 "src/remedy/vision/config.py" = ["N806"]
@@ -139,22 +140,10 @@ python_version = "3.12"
 ignore_missing_imports = true
 warn_unused_ignores = true
 check_untyped_defs = true
-# The whole tree is checked; `exclude` lists the modules still typed gradually.
+# The whole tree is checked. `exclude` is Win32-only (Linux CI has no windll).
+# Do not exclude a module because it is large — split it and type the pieces.
 files = ["src/remedy"]
 exclude = [
-    "src/remedy/core/agent.py",  # orchestrator; type gradually
-    "src/remedy/core/react_loop/loop.py",  # large ReAct stream; type gradually
-    "src/remedy/core/react_loop/tool_batch.py",
-    "src/remedy/core/react_turn.py",
-    "src/remedy/core/agent_llm.py",
-    "src/remedy/core/agent_build_tools.py",
-    "src/remedy/core/build_mutant.py",
-    "src/remedy/core/build_oracle.py",
-    "src/remedy/core/build_scoped.py",
-    "src/remedy/core/retention.py",
-    "src/remedy/core/self_inject.py",
-    "src/remedy/core/learning_loop.py",
-    "src/remedy/core/learning",
     # Win32-only ctypes/os.startfile — mypy on Linux CI has no windll/WINFUNCTYPE.
     "src/remedy/core/computer/desktop_win.py",
     "src/remedy/core/computer/desktop_uia.py",

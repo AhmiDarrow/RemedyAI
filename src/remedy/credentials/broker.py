@@ -6,8 +6,8 @@ are copied in only when a grant is issued for git/gh/npm/etc.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Iterable, Mapping, Sequence
 
 from remedy.credentials.grants import (
     CredentialGrant,
@@ -83,11 +83,7 @@ _REGISTRY_KEYS = (
     "PYPI_TOKEN",
 )
 
-_CLOUD_KEYS = (
-    "GOOGLE_APPLICATION_CREDENTIALS",
-    "GOOGLE_CLOUD_PROJECT",
-    "GOOGLE_CLOUD_QUOTA_PROJECT",
-    "CLOUDSDK_CORE_PROJECT",
+_AWS_KEYS = (
     "AWS_PROFILE",
     "AWS_DEFAULT_PROFILE",
     "AWS_REGION",
@@ -95,10 +91,19 @@ _CLOUD_KEYS = (
     "AWS_SHARED_CREDENTIALS_FILE",
     "AWS_CONFIG_FILE",
 )
+_GCP_KEYS = (
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_CLOUD_QUOTA_PROJECT",
+    "CLOUDSDK_CORE_PROJECT",
+)
+_CLOUD_KEYS = _AWS_KEYS + _GCP_KEYS
 
 _VCS_PREFIXES = ("GIT_", "GH_", "SSH_", "GPG_")
 _REGISTRY_PREFIXES = ("NPM_",)
-_CLOUD_PREFIXES = ("AWS_", "CLOUDSDK_")
+_AWS_PREFIXES = ("AWS_",)
+_GCP_PREFIXES = ("GOOGLE_", "CLOUDSDK_")
+_CLOUD_PREFIXES = _AWS_PREFIXES + _GCP_PREFIXES
 
 
 def _copy_keys(source: Mapping[str, str], keys: Iterable[str], prefixes: tuple[str, ...] = ()) -> dict[str, str]:
@@ -145,7 +150,11 @@ class CredentialBroker:
             env = _copy_keys(raw, _VCS_KEYS, _VCS_PREFIXES)
         elif provider in ("npm", "pypi", "cargo", "registry"):
             env = _copy_keys(raw, _REGISTRY_KEYS, _REGISTRY_PREFIXES)
-        elif provider in ("aws", "gcp", "cloud"):
+        elif provider == "aws":
+            env = _copy_keys(raw, _AWS_KEYS, _AWS_PREFIXES)
+        elif provider in ("gcp", "gcloud"):
+            env = _copy_keys(raw, _GCP_KEYS, _GCP_PREFIXES)
+        elif provider == "cloud":
             env = _copy_keys(raw, _CLOUD_KEYS, _CLOUD_PREFIXES)
         else:
             env = {}
@@ -227,6 +236,8 @@ def grant_for_argv(
         return [b.grant(CredentialRequest(provider="vcs"), source=source)]
     if head in ("npm", "npx", "yarn", "pnpm", "twine", "cargo", "uv", "pip"):
         return [b.grant(CredentialRequest(provider="registry"), source=source)]
-    if head in ("aws", "gcloud"):
-        return [b.grant(CredentialRequest(provider="cloud"), source=source)]
+    if head == "aws":
+        return [b.grant(CredentialRequest(provider="aws"), source=source)]
+    if head in ("gcloud", "gsutil"):
+        return [b.grant(CredentialRequest(provider="gcp"), source=source)]
     return []
