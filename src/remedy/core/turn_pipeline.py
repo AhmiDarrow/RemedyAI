@@ -152,12 +152,12 @@ def authorize_tool(runtime: Any, name: str, args: dict[str, Any]) -> str | None:
     if decision.requires_approval:
         from remedy.core.approvals import SENSITIVE_PREFIX
 
-        granted = False
+        approved = False
         if (decision.reason or "").startswith(SENSITIVE_PREFIX):
-            granted = APPROVALS.take_one_shot(name, cmd, session_id=sid)
-        if not granted:
-            granted = APPROVALS.is_approved(name, cmd, session_id=sid)
-        if not granted:
+            approved = APPROVALS.take_one_shot(name, cmd, session_id=sid)
+        if not approved:
+            approved = APPROVALS.is_approved(name, cmd, session_id=sid)
+        if not approved:
             item = APPROVALS.create(
                 tool_name=name,
                 command=cmd,

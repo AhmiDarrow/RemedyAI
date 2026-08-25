@@ -78,9 +78,7 @@ def should_warn_slow(
     method_u = str(method or "").upper()
     if p.startswith("/api/computer/") and method_u in ("GET", "HEAD"):
         return False
-    if p.startswith("/api/computer/") and p.endswith("/hello"):
-        return False
-    return True
+    return not (p.startswith("/api/computer/") and p.endswith("/hello"))
 
 
 def _is_client_gone(exc: BaseException) -> bool:

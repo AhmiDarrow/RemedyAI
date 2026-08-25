@@ -480,7 +480,6 @@ def register_shell_tools(runtime: Any) -> None:
             )
         # Partner trust: bash_exec always asks in ask-mode (high-impact tool)
         from remedy.core.turn_context import turn_session_id
-
         from remedy.core.turn_pipeline import gate_already_passed
 
         ask_reason = (
