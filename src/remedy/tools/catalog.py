@@ -79,7 +79,7 @@ def _infer(name: str) -> ToolDescriptor:
     if n in ("bash_exec", "host_run", "run_python_file", "skill_run"):
         caps.update({Capability.PROCESS_EXEC, Capability.FS_READ, Capability.FS_WRITE})
         risk = Risk.HIGH
-        cred = CredentialPolicy.AMBIENT
+        cred = CredentialPolicy.NONE
         verify = True
     if n in ("mail_send", "mail_reply"):
         caps.add(Capability.COMMUNICATE)

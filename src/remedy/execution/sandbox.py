@@ -33,136 +33,24 @@ def _spawn_error_stderr(command: list[str], exc: OSError) -> str:
     return f"OS error: {exc}"
 
 
-def scrub_subprocess_env(env: dict[str, str] | None = None) -> dict[str, str]:
-    """Copy env for child processes without provider keys / injection vectors.
+def scrub_subprocess_env(
+    env: dict[str, str] | None = None,
+    *,
+    grants: list[Any] | None = None,
+    argv: list[str] | None = None,
+) -> dict[str, str]:
+    """Child env: safe OS/path only, plus explicit credential grants.
 
-    Owner power is unchanged (tools still run); LLM provider secrets stay out of
-    shell children. **GitHub/git auth must survive** so ``git push`` / ``gh``
-    work under full access (partner 2026-08-09: blanket TOKEN scrub killed
-    GH_TOKEN/GITHUB_TOKEN and made push look like a security policy block).
+    Generic shell (no grants, no git/gh argv) does **not** inherit GH_TOKEN,
+    SSH_AUTH_SOCK, or registry tokens. git/gh/npm argv infers a grant so
+    ``git push`` / ``gh`` still work when those tools are the executable.
     """
-    import os as _os
+    from remedy.credentials.broker import child_environment, grant_for_argv
 
-    safe_env = dict(env) if env is not None else dict(_os.environ)
-    # LLM / cloud provider secrets only — not every *TOKEN* in the environment
-    drop_prefixes = (
-        "REMEDY_",
-        "OPENAI_",
-        "ANTHROPIC_",
-        "XAI_",
-        "DEEPSEEK_",
-        "GEMINI_",
-        "GOOGLE_",
-        "AWS_",
-        "AZURE_",
-        "COHERE_",
-        "MISTRAL_",
-        "GROQ_",
-        "TOGETHER_",
-        "FIREWORKS_",
-        "PERPLEXITY_",
-        "OPENROUTER_",
-    )
-    drop_exact = {
-        "LD_PRELOAD",
-        "LD_LIBRARY_PATH",
-        "PYTHONPATH",
-        "PYTHONSTARTUP",
-        "API_KEY",
-        "OPENAI_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "XAI_API_KEY",
-        "ANTHROPIC_AUTH_TOKEN",
-        "OPENAI_ORG_ID",
-    }
-    # Keep VCS / package-registry / SSH agent credentials for owner pushes
-    keep_exact = {
-        "GH_TOKEN",
-        "GITHUB_TOKEN",
-        "GH_ENTERPRISE_TOKEN",
-        "GH_HOST",
-        "GH_REPO",
-        "GH_PAGER",
-        "GIT_ASKPASS",
-        "GIT_TERMINAL_PROMPT",
-        "GIT_SSH",
-        "GIT_SSH_COMMAND",
-        "GIT_AUTHOR_NAME",
-        "GIT_AUTHOR_EMAIL",
-        "GIT_COMMITTER_NAME",
-        "GIT_COMMITTER_EMAIL",
-        "GIT_CONFIG_GLOBAL",
-        "GIT_CONFIG_SYSTEM",
-        "GIT_EDITOR",
-        "GIT_PAGER",
-        "GIT_SEQUENCE_EDITOR",
-        "SSH_AUTH_SOCK",
-        "SSH_AGENT_PID",
-        "SSH_CONNECTION",
-        "GPG_TTY",
-        "NPM_TOKEN",
-        "NODE_AUTH_TOKEN",
-        "TWINE_USERNAME",
-        "TWINE_PASSWORD",
-        "CARGO_REGISTRY_TOKEN",
-        "PYPI_TOKEN",
-        "GOOGLE_APPLICATION_CREDENTIALS",
-        "GOOGLE_CLOUD_PROJECT",
-        "GOOGLE_CLOUD_QUOTA_PROJECT",
-        "CLOUDSDK_CORE_PROJECT",
-        "AWS_PROFILE",
-        "AWS_DEFAULT_PROFILE",
-        "AWS_REGION",
-        "AWS_DEFAULT_REGION",
-        "AWS_SHARED_CREDENTIALS_FILE",
-        "AWS_CONFIG_FILE",
-        "TERM",
-        "TEMP",
-        "TMP",
-        "TMPDIR",
-        "PATH",
-        "PATHEXT",
-        "SYSTEMROOT",
-        "WINDIR",
-        "USERPROFILE",
-        "HOME",
-        "HOMEDRIVE",
-        "HOMEPATH",
-        "APPDATA",
-        "LOCALAPPDATA",
-        "USERNAME",
-        "USERDOMAIN",
-        "COMPUTERNAME",
-        "NUMBER_OF_PROCESSORS",
-        "PROCESSOR_ARCHITECTURE",
-        "COMSPEC",
-        "OS",
-    }
-    keep_prefixes = (
-        "GIT_",
-        "GH_",
-        "SSH_",
-        "GPG_",
-        "NPM_",
-        "NODE_",
-    )
-    for key in list(safe_env):
-        upper = key.upper()
-        if upper in keep_exact or any(upper.startswith(p) for p in keep_prefixes):
-            continue
-        if upper in drop_exact or any(upper.startswith(p) for p in drop_prefixes):
-            safe_env.pop(key, None)
-            continue
-        # Only strip LLM-shaped secrets, not every *TOKEN* (that broke GH_TOKEN)
-        if upper.endswith("_API_KEY") or upper.endswith("_SECRET_KEY"):
-            safe_env.pop(key, None)
-            continue
-        if "API_KEY" in upper and not upper.startswith("GIT"):
-            safe_env.pop(key, None)
-            continue
-        if upper.endswith("_SECRET") or "CLIENT_SECRET" in upper:
-            safe_env.pop(key, None)
-    return safe_env
+    inferred = list(grants or [])
+    if not inferred and argv:
+        inferred = grant_for_argv(argv, source=env)
+    return child_environment(env, grants=inferred)
 
 
 @dataclass
@@ -274,8 +162,8 @@ class SubprocessSandbox(Sandbox):
                     duration_ms=0.0,
                 )
 
-        # Always scrub secrets / injection vectors from child env.
-        safe_env = scrub_subprocess_env(env)
+        # Always scrub secrets; infer VCS grants only when argv is git/gh/ssh.
+        safe_env = scrub_subprocess_env(env, argv=command)
         # Force UTF-8 in the child so non-ASCII stdout/stderr survives the
         # decode("utf-8") below (mirrors the persistent-session path). Without
         # this, a child Python on Windows emits cp1252 and unicode output is

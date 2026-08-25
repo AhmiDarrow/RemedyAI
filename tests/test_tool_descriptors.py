@@ -29,7 +29,7 @@ def test_shell_declares_process_and_fs():
     assert Capability.PROCESS_EXEC in d.capabilities
     assert Capability.FS_WRITE in d.capabilities
     assert d.risk == Risk.HIGH
-    assert d.credential_policy == CredentialPolicy.AMBIENT
+    assert d.credential_policy == CredentialPolicy.NONE
 
 
 def test_file_read_is_low_risk_read():
