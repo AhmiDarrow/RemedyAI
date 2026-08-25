@@ -1127,6 +1127,10 @@ class BasicRuntime(AgentRuntime):
             partner_state=turn_partner,
             work_roots=turn_roots,
         )
+        with suppress(Exception):
+            from remedy.core.turn_pipeline import snapshot_live_turn
+
+            snapshot_live_turn(self)
         # Legacy mirrors for code that still reads runtime attrs (prefer ContextVar).
         self._plan_mode = bool(plan_mode)
         self._turn_tool_steps = current_turn_tool_steps(self)

@@ -140,6 +140,11 @@ def register_hive_tools(runtime: Any) -> None:
             budget_steps=budget,
             pulse_s=pulse,
         )
+        with suppress(Exception):
+            from remedy.core.turn_pipeline import bound_hive_capabilities
+
+            daughter.journal["capabilities"] = bound_hive_capabilities()
+            store.save(daughter)
         from remedy.core.hive.mother import announce_daughter
 
         announce_daughter(daughter, runtime)

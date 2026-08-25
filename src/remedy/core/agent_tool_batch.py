@@ -236,6 +236,14 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             args = {}
         if not isinstance(args, dict):
             args = {}
+        with suppress(Exception):
+            from remedy.core.turn_pipeline import authorize_tool
+
+            gate = authorize_tool(runtime, name, args)
+            if gate:
+                result_cache[fp] = gate
+                seen_fps.add(fp)
+                return gate
         # Normalize write-tool arg aliases (model dumps file=/filepath= often)
         if name in _WRITE_TOOLS and isinstance(args, dict):
             if not str(args.get("path") or "").strip():
@@ -624,6 +632,13 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
                     path_lock.release()
         else:
             result, content_str, effective_ok = await _call()
+
+        with suppress(Exception):
+            from remedy.core.turn_pipeline import finish_tool
+
+            content_str = finish_tool(
+                runtime, name, args, content_str, ok=bool(effective_ok)
+            )
 
         # Full tool results for the model.
         # TOOL_RESULT_CHAR_CAP=0 and tier max=0 → HARD_SAFETY only (full source files).

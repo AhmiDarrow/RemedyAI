@@ -69,6 +69,7 @@ class TurnFactory:
         identity: IdentityContext | None = None,
         budget: ExecutionBudget | None = None,
         runtime: Any = None,
+        emit_start: bool = True,
     ) -> TurnContext:
         from remedy.core import turn_context as tc
         from remedy.core.agent_identity import DEFAULT_GENDER, DEFAULT_NAME
@@ -99,15 +100,16 @@ class TurnFactory:
             plan_mode=bool(tc.current_plan_mode()),
             cancellation=CancellationToken(event=tc.current_abort_event()),
         )
-        try:
-            from remedy.events import EventType, default_bus
+        if emit_start:
+            try:
+                from remedy.events import EventType, default_bus
 
-            default_bus().emit_simple(
-                EventType.GOAL_STARTED,
-                session_id=ctx.session_id,
-                turn_id=ctx.turn_id,
-                plan_mode=ctx.plan_mode,
-            )
-        except Exception:
-            pass
+                default_bus().emit_simple(
+                    EventType.GOAL_STARTED,
+                    session_id=ctx.session_id,
+                    turn_id=ctx.turn_id,
+                    plan_mode=ctx.plan_mode,
+                )
+            except Exception:
+                pass
         return ctx
