@@ -78,6 +78,39 @@ export function clearTurnsForSession(sessionId: string) {
   emit()
 }
 
+const LIVE_STATUSES: ReadonlySet<TurnStatus> = new Set([
+  'planning',
+  'running',
+  'waiting',
+  'verifying',
+])
+
+export function isLiveTurnStatus(status: TurnStatus): boolean {
+  return LIVE_STATUSES.has(status)
+}
+
+/** Plain-language line for live turns; null when completed/failed (hide). */
+export function plainTurnLabel(status: TurnStatus): string | null {
+  switch (status) {
+    case 'planning':
+    case 'running':
+      return 'Working…'
+    case 'waiting':
+      return 'Waiting for you…'
+    case 'verifying':
+      return 'Checking…'
+    default:
+      return null
+  }
+}
+
+/** Newest live turn for a session, if any. */
+export function liveTurnForSession(sessionId: string): Turn | undefined {
+  const live = turnsForSession(sessionId).filter((t) => isLiveTurnStatus(t.status))
+  if (!live.length) return undefined
+  return live.reduce((a, b) => (a.startedAt >= b.startedAt ? a : b))
+}
+
 /** Test helper — drop every turn. */
 export function resetTurns() {
   byKey.clear()

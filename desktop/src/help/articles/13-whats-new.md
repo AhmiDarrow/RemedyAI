@@ -16,7 +16,9 @@ may do, policy decides, generic shell does not inherit your GitHub or SSH
 tokens, and a command that exits 0 is not treated as “the goal is done”
 until verification says so. Turns have ids. Hive daughters cannot use
 credentials the parent did not have. Pages she reads are observed facts,
-not things you declared.
+not things you declared. Grove shows a single quiet line while a turn is
+running (Working… / Waiting for you… / Checking…). Autonomous trust still
+stops for mail and payment.
 
 Public **0.31.2** remains the last GitHub Release until this branch is
 tagged. This tree is **v0.38.0**.

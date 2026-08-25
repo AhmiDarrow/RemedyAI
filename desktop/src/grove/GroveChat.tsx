@@ -7,11 +7,13 @@
  * screenshot, drop a receipt, point at a bug. Full ability, Grove tone.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MessageFeed } from '../components/MessageFeed'
 import type { SendAttachment } from '../components/Composer'
 import { useComposerAttachments } from '../hooks/useComposerAttachments'
 import { pickAttachFiles } from '../api/attachments'
+import { liveTurnForSession, plainTurnLabel } from '../state/turns'
+import { useSessionTurns } from '../state/useTurns'
 import type { ChatMessage } from '../types'
 
 /**
@@ -116,6 +118,13 @@ export function GroveChat({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const taRef = useRef<HTMLTextAreaElement | null>(null)
+
+  const sessionTurns = useSessionTurns(sessionKey)
+  const turnStatusLine = useMemo(() => {
+    if (!sessionKey) return null
+    const live = liveTurnForSession(sessionKey)
+    return live ? plainTurnLabel(live.status) : null
+  }, [sessionKey, sessionTurns])
 
   useEffect(() => {
     const onFocus = () => taRef.current?.focus()
@@ -362,6 +371,17 @@ export function GroveChat({
           {attachNotice && <span className="grove-attachnote">{attachNotice}</span>}
         </div>
       )}
+
+      {turnStatusLine ? (
+        <div
+          className="grove-turn-status"
+          role="status"
+          aria-live="polite"
+          data-testid="grove-turn-status"
+        >
+          {turnStatusLine}
+        </div>
+      ) : null}
 
       <form
         className="grove-talkbar chatbar"

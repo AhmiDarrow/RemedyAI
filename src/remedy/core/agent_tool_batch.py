@@ -471,50 +471,57 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             data for the model, but count as failures for quality/metabolism so
             stuck recovery and fail streaks fire.
             """
-            result = await runtime.call_tool(ToolCall(tool_name=name, arguments=args))
-            if result.success:
-                payload = result.data
-                content_str = (
-                    payload
-                    if isinstance(payload, str)
-                    else json.dumps(payload, default=str)
+            from remedy.core.optimization_telemetry import span
+
+            with span("tool", tool=str(name or "unknown")):
+                result = await runtime.call_tool(
+                    ToolCall(tool_name=name, arguments=args)
                 )
-            else:
-                content_str = result.error or format_tool_error(
-                    "tool failed",
-                    code="TOOL_FAILED",
-                    tool_name=name or "unknown",
-                    suggestion="Retry with corrected arguments or a different tool.",
-                )
-            # Partner: if a stale PREFER_FILE_EDIT still appears, retry once with
-            # force_full_write so agent rewrites always land.
-            if (
-                name == "file_write"
-                and isinstance(args, dict)
-                and "PREFER_FILE_EDIT" in str(content_str)
-                and not args.get("force_full_write")
-            ):
-                retry_args = dict(args)
-                retry_args["force_full_write"] = True
-                result2 = await runtime.call_tool(
-                    ToolCall(tool_name=name, arguments=retry_args)
-                )
-                if result2.success:
-                    result = result2
-                    payload = result2.data
+                if result.success:
+                    payload = result.data
                     content_str = (
                         payload
                         if isinstance(payload, str)
                         else json.dumps(payload, default=str)
                     )
-            effective_ok = bool(result.success)
-            if effective_ok:
-                with suppress(Exception):
-                    from remedy.core.react_policy import tool_content_is_error
+                else:
+                    content_str = result.error or format_tool_error(
+                        "tool failed",
+                        code="TOOL_FAILED",
+                        tool_name=name or "unknown",
+                        suggestion=(
+                            "Retry with corrected arguments or a different tool."
+                        ),
+                    )
+                # Partner: if a stale PREFER_FILE_EDIT still appears, retry once
+                # with force_full_write so agent rewrites always land.
+                if (
+                    name == "file_write"
+                    and isinstance(args, dict)
+                    and "PREFER_FILE_EDIT" in str(content_str)
+                    and not args.get("force_full_write")
+                ):
+                    retry_args = dict(args)
+                    retry_args["force_full_write"] = True
+                    result2 = await runtime.call_tool(
+                        ToolCall(tool_name=name, arguments=retry_args)
+                    )
+                    if result2.success:
+                        result = result2
+                        payload = result2.data
+                        content_str = (
+                            payload
+                            if isinstance(payload, str)
+                            else json.dumps(payload, default=str)
+                        )
+                effective_ok = bool(result.success)
+                if effective_ok:
+                    with suppress(Exception):
+                        from remedy.core.react_policy import tool_content_is_error
 
-                    if tool_content_is_error(content_str):
-                        effective_ok = False
-            return result, content_str, effective_ok
+                        if tool_content_is_error(content_str):
+                            effective_ok = False
+                return result, content_str, effective_ok
 
         # Shadow rehearsal (L2/L3 high-blast only) — never replaces write jail.
         # Resolve session quality once per tool (not per shadow/record path).

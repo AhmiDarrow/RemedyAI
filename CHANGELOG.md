@@ -4,7 +4,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
-## [0.38.0] - 2026-08-24
+## [0.38.0] - 2026-08-25
 
 ### Added — capability architecture (Optimization/Stability)
 
@@ -36,6 +36,16 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   `finish_tool` resumes the same action record and records verification;
   hive workers are denied `credential.use` / `transact` at the gate;
   `aws` argv no longer inherits GCP ADC.
+- ReAct stream is split: `loop_prelude` / `loop_http` / `loop_round` /
+  `loop_steps` orchestrator (typed; not mypy-excluded).
+- Phase 0 latency: LLM, tool, event, and memory paths record
+  `observe_seconds` / `span`.
+- **TrustProfile.AUTONOMOUS** skips in-project high-impact asks the same
+  way auto mode does; mail/pay checkpoints still stop.
+- `GET /api/sessions/{id}/turns/{turn_id}/explain` returns what / why /
+  verified / remains from the event bus.
+- Grove shows one quiet turn line (Working… / Waiting for you… /
+  Checking…) from TurnStore.
 
 ## [0.31.2] - 2026-08-24
 

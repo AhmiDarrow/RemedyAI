@@ -531,6 +531,13 @@
 .grove-attachchip button:hover { opacity: 1; }
 .grove-attachnote { font-size: 0.8rem; color: var(--text-secondary, #888); }
 .grove-attachnote.err { color: var(--danger, #d66); }
+.grove-turn-status {
+  flex: none;
+  padding: 4px 18px 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary, #888);
+  letter-spacing: 0.01em;
+}
 .grove-chat.dragover::after { content: ''; position: absolute; inset: 0; pointer-events: none;
   border: 2px dashed var(--accent, #4a9); border-radius: 12px; }
 .grove-dropveil {
