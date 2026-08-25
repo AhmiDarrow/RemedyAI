@@ -19,6 +19,7 @@ import threading
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class TurnWorkspace:
 
 # Context-local for the current coroutine turn (survives across awaits).
 _turn_session_id: ContextVar[str | None] = ContextVar("remedy_turn_session_id", default=None)
+_turn_id: ContextVar[str | None] = ContextVar("remedy_turn_id", default=None)
 _turn_abort: ContextVar[asyncio.Event | None] = ContextVar("remedy_turn_abort", default=None)
 _turn_workspace: ContextVar[TurnWorkspace | None] = ContextVar(
     "remedy_turn_workspace", default=None
@@ -103,6 +105,7 @@ _turn_react_flags: ContextVar[TurnReactFlags | None] = ContextVar(
 # Ordered ContextVars set by begin_turn (end_turn resets by zip-order).
 _TURN_CONTEXT_VARS: tuple[ContextVar[Any], ...] = (
     _turn_session_id,
+    _turn_id,
     _turn_abort,
     _turn_workspace,
     _turn_plan_mode,
@@ -153,6 +156,12 @@ def in_active_turn() -> bool:
 def current_session_id(fallback: str | None = None) -> str | None:
     sid = _turn_session_id.get()
     return sid if sid else fallback
+
+
+def current_turn_id() -> str | None:
+    """Unique id for this coroutine turn (None outside begin_turn)."""
+    tid = _turn_id.get()
+    return str(tid) if tid else None
 
 
 def turn_session_id(runtime: Any = None, fallback: str | None = None) -> str | None:
@@ -267,6 +276,7 @@ def begin_turn(
     full ReAct stream so a sibling tab cannot rebind mid-turn.
     """
     sid = str(session_id or "").strip() or None
+    tid = str(uuid4())
     ev = asyncio.Event()
     path_s = str(active_path) if active_path is not None else ""
     ws = TurnWorkspace(project_raw=project_raw, active_path=path_s)
@@ -278,6 +288,7 @@ def begin_turn(
         flags.approval_mode = normalize_approval_mode(APPROVALS.mode)
     values: tuple[Any, ...] = (
         sid,
+        tid,
         ev,
         ws,
         bool(plan_mode),
