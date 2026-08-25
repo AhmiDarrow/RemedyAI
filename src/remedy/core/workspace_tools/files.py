@@ -443,7 +443,13 @@ def register_files_tools(runtime: Any) -> None:
                 ),
             )
         sid = turn_session_id(runtime)
-        ask_reason = APPROVALS.needs_ask(f"write {path}", tool_name="file_write")
+        from remedy.core.turn_pipeline import gate_already_passed
+
+        ask_reason = (
+            None
+            if gate_already_passed("file_write")
+            else APPROVALS.needs_ask(f"write {path}", tool_name="file_write")
+        )
         if ask_reason and not APPROVALS.is_approved(
             "file_write", f"write {path}", session_id=sid
         ):
@@ -588,7 +594,13 @@ def register_files_tools(runtime: Any) -> None:
                 ),
             )
         sid = turn_session_id(runtime)
-        ask_reason = APPROVALS.needs_ask(f"edit {path}", tool_name="file_edit")
+        from remedy.core.turn_pipeline import gate_already_passed
+
+        ask_reason = (
+            None
+            if gate_already_passed("file_edit")
+            else APPROVALS.needs_ask(f"edit {path}", tool_name="file_edit")
+        )
         if ask_reason and not APPROVALS.is_approved(
             "file_edit", f"edit {path}", session_id=sid
         ):
@@ -773,7 +785,13 @@ def register_files_tools(runtime: Any) -> None:
             if junk:
                 reports.append(f"[{i}] {p}: junk path blocked")
                 continue
-            ask_reason = APPROVALS.needs_ask(f"edit {p}", tool_name="file_edit")
+            from remedy.core.turn_pipeline import gate_already_passed
+
+            ask_reason = (
+                None
+                if gate_already_passed("file_edit")
+                else APPROVALS.needs_ask(f"edit {p}", tool_name="file_edit")
+            )
             if ask_reason and not APPROVALS.is_approved(
                 "file_edit", f"edit {p}", session_id=sid
             ):

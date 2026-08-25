@@ -6,6 +6,9 @@ from types import SimpleNamespace
 
 from remedy.core.session_continuity import (
     bind_session_continuity,
+    clear_all_continuity_caches,
+    is_recently_stopped,
+    note_session_stopped,
     session_isolation_system_line,
 )
 from remedy.memory.harness.brief import SessionBrief
@@ -112,6 +115,64 @@ def test_bind_clears_turn_scratch_on_switch():
     assert rt._mission_gate_nudge_done is False
     assert rt._evidence_inject_eu == -1
     assert rt._prospective_session_fired is False
+
+
+def test_stop_blocks_rebound_from_another_tab():
+    """Stop on B, then a turn on B while live is A, without owner_selected:
+    do not restore B's cached brief / in-memory build."""
+    from remedy.core.build_engine import BuildTurnState
+
+    clear_all_continuity_caches()
+    rt = SimpleNamespace(
+        _session_id="sess-a",
+        _session_brief=SessionBrief(session_id="sess-a", intent="A work"),
+        _work_roots=[r"C:\projA"],
+        _partner_state=None,
+        _build_turns={
+            "sess-b": BuildTurnState(
+                active=True, session_id="sess-b", goal="189-tool marathon"
+            )
+        },
+        config=SimpleNamespace(home_dir=None, project_path=""),
+    )
+    bind_session_continuity(rt, "sess-b")
+    rt._session_brief.intent = "B build"
+    bind_session_continuity(rt, "sess-a")
+    note_session_stopped("sess-b", reason="stop")
+    assert is_recently_stopped("sess-b") is True
+
+    meta = bind_session_continuity(rt, "sess-b", owner_selected=False)
+    assert meta["switched"] is True
+    assert meta["blocked_aborted_resume"] is True
+    assert rt._session_brief is not None
+    assert rt._session_brief.session_id == "sess-b"
+    assert (rt._session_brief.intent or "") != "B build"
+    assert rt._build_turns["sess-b"].active is False
+
+
+def test_owner_selected_still_restores_stopped_tab():
+    """Clicked the Stopped tab — restore cached brief; do not block."""
+    clear_all_continuity_caches()
+    rt = SimpleNamespace(
+        _session_id="sess-a",
+        _session_brief=SessionBrief(session_id="sess-a", intent="A work"),
+        _work_roots=[],
+        _partner_state=None,
+        config=SimpleNamespace(home_dir=None, project_path=""),
+    )
+    bind_session_continuity(rt, "sess-b")
+    rt._session_brief.intent = "B work"
+    bind_session_continuity(rt, "sess-a")
+    note_session_stopped("sess-b", reason="stop")
+    meta = bind_session_continuity(rt, "sess-b", owner_selected=True)
+    assert meta["blocked_aborted_resume"] is False
+    assert (rt._session_brief.intent or "") == "B work"
+
+
+def test_supersede_does_not_mark_stopped():
+    clear_all_continuity_caches()
+    note_session_stopped("sess-x", reason="supersede")
+    assert is_recently_stopped("sess-x") is False
 
 
 def test_drop_session_continuity_cache():

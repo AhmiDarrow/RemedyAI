@@ -132,6 +132,7 @@ def test_normalize_panel_and_settings_section():
     assert normalize_settings_section("appearance") == "theme"
     assert infer_settings_section({"llm_model": "grok-4"}) == "provider"
     assert infer_settings_section({"approval_mode": "ask"}) == "security-power"
+    assert infer_settings_section({"trust_profile": "autonomous"}) == "security-power"
 
 
 @pytest.mark.asyncio

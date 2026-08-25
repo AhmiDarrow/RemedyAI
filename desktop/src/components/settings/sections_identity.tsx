@@ -151,6 +151,8 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
     setPrivacyMode,
     approvalMode,
     setApprovalMode,
+    trustProfile,
+    setTrustProfile,
     thinkingLevel,
     setThinkingLevel,
     toolProcess,
@@ -522,6 +524,37 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
                     : approvalMode === 'auto'
                       ? 'Auto (in-project): pytest, file writes, and host_run inside the focus folder run without prompts. OS, home, and sibling trees stay jailed.'
                       : 'Ask: high-impact tools show Approve/Deny. Soft-risk patterns are labeled on the banner.'}
+                </FormHint>
+              </div>
+              <div className="mb-2">
+                <FormLabel>Trust</FormLabel>
+                <FormSegmented
+                  value={trustProfile}
+                  onChange={setTrustProfile}
+                  options={[
+                    {
+                      id: 'conservative',
+                      label: 'Conservative',
+                      title: 'Still ask before shell, files, and skills even in Auto',
+                    },
+                    {
+                      id: 'balanced',
+                      label: 'Balanced',
+                      title: 'Follow Approvals. Mail and payment always stop.',
+                    },
+                    {
+                      id: 'autonomous',
+                      label: 'Autonomous',
+                      title: 'Skip in-project high-impact asks like Auto. Mail and payment still stop.',
+                    },
+                  ]}
+                />
+                <FormHint>
+                  {trustProfile === 'conservative'
+                    ? 'Even Auto still asks before shell, files, and skills. Mail and payment always stop.'
+                    : trustProfile === 'autonomous'
+                      ? 'In-project high-impact work runs without extra prompts, like Auto. Mail and payment always stop.'
+                      : 'Follows Approvals (Ask / Auto / Full). Mail and payment always stop.'}
                 </FormHint>
               </div>
               <div className="mb-2">

@@ -66,12 +66,16 @@ def test_mother_only_tools_stripped():
         {"type": "function", "function": {"name": "hive_spawn"}},
         {"type": "function", "function": {"name": "update_settings"}},
         {"type": "function", "function": {"name": "mail_send"}},
+        {"type": "function", "function": {"name": "browser_click"}},
+        {"type": "function", "function": {"name": "computer_drag"}},
         {"type": "function", "function": {"name": "list_dir"}},
     ]
     out = filter_daughter_tools(tools)
     names = [t["function"]["name"] for t in out]
     assert names == ["file_read", "list_dir"]
     assert is_mother_only_tool("hive_collect")
+    assert is_mother_only_tool("browser_click")
+    assert is_mother_only_tool("computer_drag")
     assert not is_mother_only_tool("file_read")
 
 

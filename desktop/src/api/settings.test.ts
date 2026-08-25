@@ -8,6 +8,7 @@ describe('SettingsUpdate payload shape', () => {
       harness_max_context_pct: 0.92,
       thinking_level: 'high',
       approval_mode: 'auto',
+      trust_profile: 'balanced',
       web_tools_enabled: false,
       http_bootstrap: true,
       privacy_mode: false,

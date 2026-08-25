@@ -88,6 +88,7 @@ import { useChatSendFlow } from './hooks/useChatSendFlow'
 import { useSessionStreamJobs } from './sessions/useSessionStreamJobs'
 import { ConcurrentTurnDialog } from './components/ConcurrentTurnDialog'
 import { getStreamJob, subscribeStreamJobs } from './sessions/streamJobs'
+import { setFocusedSessionId } from './sessions/focusedSession'
 import { exportSession, importSession } from './api/messages'
 import { getServerUrl } from './api/client'
 import { getSettings, updateSettings } from './api/settings'
@@ -210,6 +211,9 @@ export default function App() {
     beginEdit,
     load: reloadMessages,
   } = useMessages(activeId)
+  useEffect(() => {
+    setFocusedSessionId(activeId)
+  }, [activeId])
   /** Image viewer → composer attachment rail (markup becomes prompt attachment). */
   const composerRef = useRef<ComposerHandle>(null)
   const handleAttachMarkup = useCallback(async (file: File) => {
@@ -1791,6 +1795,7 @@ export default function App() {
           partialText={partialText}
           streaming={streaming}
           messagesLoading={messagesLoading}
+          buildTodos={buildTodos}
           handleSend={handleSend}
           stickNonce={stickNonce}
           stop={stop}

@@ -26,7 +26,6 @@ export function saveSettingsMode(mode: SettingsMode): void {
 export const ADVANCED_ONLY_SECTIONS = new Set([
   'provider-catalog',
   'access',
-  'security-power',
   'tool-process',
   'vision', // image VLM — advanced; RMB chat host is Simple
   'memory-harness',

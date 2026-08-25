@@ -23,6 +23,7 @@ import { COMPUTER_UI_EVENT } from '../api/computer'
 import { RemedyLogo } from '../components/RemedyLogo'
 import { BrowserSlide } from '../components/slides/BrowserSlide'
 import { GroveChat } from './GroveChat'
+import type { BuildTodo } from '../components/BuildTodos'
 import { useSplit } from './useSplit'
 import type { SendAttachment } from '../components/Composer'
 import { messagesToMoments, latestExchange } from './storylineMoments'
@@ -97,6 +98,7 @@ export interface GroveAppProps {
   partialText: string
   streaming: boolean
   messagesLoading: boolean
+  buildTodos?: BuildTodo[]
   handleSend: (
     text: string,
     attachments?: SendAttachment[],
@@ -132,6 +134,7 @@ export function GroveApp({
   partialText,
   streaming,
   messagesLoading,
+  buildTodos = [],
   handleSend,
   stickNonce,
   stop,
@@ -460,6 +463,10 @@ export function GroveApp({
 
   const goals = board?.goals || []
   const needsYou = approvals.length
+  const waitingOnYou = useMemo(() => {
+    if (!activeId) return needsYou > 0
+    return approvals.some((a) => !a.session_id || a.session_id === activeId)
+  }, [approvals, activeId, needsYou])
   const lastStep = board?.last_step || null
   const exchange = useMemo(() => latestExchange(messages), [messages])
   const moments = useMemo(() => messagesToMoments(messages), [messages])
@@ -686,6 +693,7 @@ export function GroveApp({
             partialText={partialText}
             streaming={streaming}
             loading={messagesLoading}
+            buildTodos={buildTodos}
             userName={userName}
             partnerName={partnerName}
             serverReady={serverReady}
@@ -695,6 +703,7 @@ export function GroveApp({
             onStop={stop}
             ensureSessionId={ensureHomeSession}
             sessionKey={activeId}
+            waitingOnYou={waitingOnYou}
             onSpecialSend={async (t) => {
               if (/^i want to /i.test(t)) {
                 return plantGoal(t.replace(/^i want to /i, ''))
@@ -731,6 +740,7 @@ export function GroveApp({
                 partialText={partialText}
                 streaming={streaming}
                 loading={messagesLoading}
+                buildTodos={buildTodos}
                 userName={userName}
                 partnerName={partnerName}
                 serverReady={serverReady}
@@ -739,6 +749,7 @@ export function GroveApp({
                 onStop={stop}
                 ensureSessionId={ensureHomeSession}
                 sessionKey={activeId}
+                waitingOnYou={waitingOnYou}
                 stickNonce={stickNonce}
                 onSpecialSend={async (t) => {
                   if (/^i want to /i.test(t)) {
@@ -861,6 +872,7 @@ export function GroveApp({
               partialText={partialText}
               streaming={streaming}
               loading={messagesLoading}
+              buildTodos={buildTodos}
               userName={userName}
               partnerName={partnerName}
               serverReady={serverReady}
@@ -884,6 +896,7 @@ export function GroveApp({
               onStop={stop}
               ensureSessionId={() => ensureGoalSession(goal)}
               sessionKey={activeId}
+              waitingOnYou={waitingOnYou}
               micSupported={voice.micSupported}
               recording={voice.recording}
               onMic={() => void handleMic()}

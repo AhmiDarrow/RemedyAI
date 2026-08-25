@@ -165,7 +165,10 @@ def _computer_approval_gate(
     if not ask_reason:
         ask_reason = challenge_wall_checkpoint(tool_name, page_context, label)
     if not ask_reason:
-        ask_reason = APPROVALS.needs_ask(summary, tool_name=tool_name)
+        from remedy.core.turn_pipeline import gate_already_passed
+
+        if not gate_already_passed(tool_name):
+            ask_reason = APPROVALS.needs_ask(summary, tool_name=tool_name)
     if not ask_reason:
         return None
     sid = turn_session_id(runtime)

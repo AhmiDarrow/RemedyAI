@@ -23,6 +23,7 @@ import {
   getStreamJob,
   isJobUiCommitted,
   markJobUiCommitted,
+  markLiveTurn,
   reattachStreamJob,
   registerStreamJob,
   setJobActiveTools,
@@ -849,6 +850,7 @@ export function useMessages(sessionId: string | null) {
             { name, status: 'running' as const },
           ]
           setJobActiveTools(targetId, tools)
+          markLiveTurn(targetId, 'running')
           if (isFocusedTurn()) {
             setActiveTools(tools)
           }
@@ -922,6 +924,8 @@ export function useMessages(sessionId: string | null) {
             })
           }
           pushSteps(next)
+          const stillRunning = tools.some((t) => t.status === 'running')
+          if (!stillRunning) markLiveTurn(targetId, 'verifying')
         },
         attachments,
         (info) => {

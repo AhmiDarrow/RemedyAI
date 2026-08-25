@@ -254,15 +254,27 @@ def _pack_in_runtime(pack: str) -> bool:
     return runtime_ready() and pack_installed(pack)
 
 
+_tts_deps_cached: bool | None = None
+
+
 def tts_deps_available() -> bool:
+    """True when speaking deps are importable (or the desktop voice pack is on).
+
+    The expensive ``import kokoro_onnx`` is cached. The managed-pack marker is
+    not — tests and Settings toggles must see a pack appear immediately.
+    """
     if _managed():
         return _pack_in_runtime("voice")
+    global _tts_deps_cached
+    if _tts_deps_cached is not None:
+        return _tts_deps_cached
     try:
         import kokoro_onnx  # noqa: F401
 
-        return True
+        _tts_deps_cached = True
     except Exception:
-        return False
+        _tts_deps_cached = False
+    return _tts_deps_cached
 
 
 def tts_installed(home_dir: Path | str | None = None) -> bool:
@@ -428,15 +440,22 @@ _stt_model_size: str | None = None
 _VALID_STT = ("tiny", "base", "small", "medium", "large-v3", "large-v3-turbo")
 
 
+_stt_deps_cached: bool | None = None
+
+
 def stt_deps_available() -> bool:
     if _managed():
         return _pack_in_runtime("voice")
+    global _stt_deps_cached
+    if _stt_deps_cached is not None:
+        return _stt_deps_cached
     try:
         import faster_whisper  # noqa: F401
 
-        return True
+        _stt_deps_cached = True
     except Exception:
-        return False
+        _stt_deps_cached = False
+    return _stt_deps_cached
 
 
 def stt_cache_dir(home_dir: Path | str | None = None) -> Path:
@@ -1146,15 +1165,22 @@ def smart_turn_path(home_dir: Path | str | None = None) -> Path:
     return smart_turn_dir(home_dir) / SMART_TURN_PIN.filename
 
 
+_smart_turn_deps_cached: bool | None = None
+
+
 def smart_turn_deps_available() -> bool:
     if _managed():
         return _pack_in_runtime("voice")  # kokoro-onnx brings onnxruntime
+    global _smart_turn_deps_cached
+    if _smart_turn_deps_cached is not None:
+        return _smart_turn_deps_cached
     try:
         import onnxruntime  # noqa: F401
 
-        return True
+        _smart_turn_deps_cached = True
     except Exception:
-        return False
+        _smart_turn_deps_cached = False
+    return _smart_turn_deps_cached
 
 
 def smart_turn_installed(home_dir: Path | str | None = None) -> bool:

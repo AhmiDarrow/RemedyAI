@@ -9,10 +9,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MessageFeed } from '../components/MessageFeed'
+import type { BuildTodo } from '../components/BuildTodos'
 import type { SendAttachment } from '../components/Composer'
 import { useComposerAttachments } from '../hooks/useComposerAttachments'
 import { pickAttachFiles } from '../api/attachments'
-import { liveTurnForSession, plainTurnLabel } from '../state/turns'
+import { liveTurnForSession, plainTurnLabel, upsertTurn } from '../state/turns'
 import { useSessionTurns } from '../state/useTurns'
 import type { ChatMessage } from '../types'
 
@@ -66,6 +67,10 @@ export interface GroveChatProps {
   micSupported?: boolean
   recording?: boolean
   onMic?: () => void
+  /** Pending owner checkpoint / approval for this session. */
+  waitingOnYou?: boolean
+  /** Live build checklist — same source as Studio MessageFeed. */
+  buildTodos?: BuildTodo[]
 }
 
 export function GroveChat({
@@ -87,6 +92,8 @@ export function GroveChat({
   micSupported,
   recording,
   onMic,
+  waitingOnYou = false,
+  buildTodos = [],
 }: GroveChatProps) {
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -120,11 +127,23 @@ export function GroveChat({
   const taRef = useRef<HTMLTextAreaElement | null>(null)
 
   const sessionTurns = useSessionTurns(sessionKey)
+  useEffect(() => {
+    if (!sessionKey) return
+    const live = liveTurnForSession(sessionKey)
+    if (!live) return
+    if (waitingOnYou && live.status !== 'waiting') {
+      upsertTurn({ sessionId: sessionKey, turnId: live.turnId, status: 'waiting' })
+    } else if (!waitingOnYou && live.status === 'waiting') {
+      upsertTurn({ sessionId: sessionKey, turnId: live.turnId, status: 'running' })
+    }
+  }, [sessionKey, waitingOnYou, sessionTurns])
   const turnStatusLine = useMemo(() => {
     if (!sessionKey) return null
     const live = liveTurnForSession(sessionKey)
-    return live ? plainTurnLabel(live.status) : null
-  }, [sessionKey, sessionTurns])
+    if (!live) return null
+    if (waitingOnYou) return 'Waiting for you…'
+    return plainTurnLabel(live.status)
+  }, [sessionKey, sessionTurns, waitingOnYou])
 
   useEffect(() => {
     const onFocus = () => taRef.current?.focus()
@@ -332,6 +351,8 @@ export function GroveChat({
           onAttachMarkup={attachFromMarkup}
           onQuickPrompt={quickPrompt}
           stickNonce={stickNonce}
+          buildTodos={buildTodos}
+          sessionId={sessionKey}
           starters={starters ?? GROVE_STARTERS}
           emptySub={
             <>
@@ -346,7 +367,6 @@ export function GroveChat({
               {' '}· while she works, <code>Enter</code> steers
             </>
           }
-          sessionId={sessionKey}
         />
       </div>
 

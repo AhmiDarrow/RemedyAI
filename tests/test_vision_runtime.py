@@ -1529,6 +1529,7 @@ def test_stop_server_refuses_to_kill_a_recycled_pid_that_is_not_llama_server(
     killed: list[int] = []
     monkeypatch.setattr(vr, "_pid_is_alive", lambda _pid: True)
     monkeypatch.setattr(vr, "_looks_like_llama_server", lambda _pid: False)
+    monkeypatch.setattr(vr, "_windows_process_name", lambda _pid: "code")
     monkeypatch.setattr(vr, "_kill_pid_tree", lambda pid, force=True: killed.append(pid) or True)
 
     out = vr.stop_server(home_dir=home)

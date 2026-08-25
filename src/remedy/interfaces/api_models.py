@@ -189,6 +189,8 @@ class SettingsUpdateRequest(BaseModel):
     # Status-bar controls
     thinking_level: str | None = None  # off | low | medium | high
     approval_mode: str | None = None  # ask | auto (in-project) | full (warn)
+    # conservative | balanced (default) | autonomous — never waives mail/pay
+    trust_profile: str | None = None
     show_tool_calls: bool | None = None  # legacy → maps to tool_process
     # off = minimal progress only; medium = labels+status; full = near-raw process
     tool_process: str | None = None

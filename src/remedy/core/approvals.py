@@ -384,6 +384,7 @@ class ApprovalQueue:
     HIGH_IMPACT_TOOLS = frozenset(
         {
             "bash_exec",
+            "run_python_file",
             "file_write",
             "file_edit",
             "skill_run",
@@ -455,17 +456,31 @@ class ApprovalQueue:
             )
         # Re-sync mode when config explicitly sets approval_mode (desktop thumbs).
         # Scope always comes from config when available.
+        cfg: dict[str, Any] = {}
         untrusted = False
         try:
             from remedy.interfaces.api_support import load_config
 
-            cfg = load_config() or {}
-            if isinstance(cfg, dict) and "approval_mode" in cfg:
+            loaded = load_config() or {}
+            if isinstance(loaded, dict):
+                cfg = loaded
+            if "approval_mode" in cfg:
                 self.sync_from_config(cfg)
             scope = str(cfg.get("access_scope") or "").lower()
             untrusted = scope in ("untrusted", "sandbox", "strict", "download")
         except Exception:
             untrusted = False
+        try:
+            from remedy.core.trust_profile import (
+                normalize_trust_profile,
+                profile_forces_high_impact_ask,
+            )
+
+            profile = normalize_trust_profile(cfg.get("trust_profile"))
+            conservative = profile_forces_high_impact_ask(profile)
+        except Exception:
+            profile = None
+            conservative = False
         # Local/RMB turn may skip Ask for this turn only (never persist Settings).
         if not untrusted:
             try:
@@ -478,7 +493,8 @@ class ApprovalQueue:
         with self._lock:
             if self._mode == "full":
                 return None
-            if self._mode == "auto" and not untrusted:
+            # Conservative still asks for high-impact in Auto. Full stays Full.
+            if self._mode == "auto" and not untrusted and not conservative:
                 return None
         tool = (tool_name or "").strip()
         c = (command or "").strip()
@@ -496,6 +512,8 @@ class ApprovalQueue:
         if tool in self.HIGH_IMPACT_TOOLS and not reason:
             if tool == "bash_exec":
                 reason = "Shell execution requires approval (bash_exec)"
+            elif tool == "run_python_file":
+                reason = "Running a Python file requires approval (run_python_file)"
             elif tool == "file_write":
                 reason = "File write requires approval (file_write)"
             elif tool == "file_edit":
@@ -540,6 +558,27 @@ class ApprovalQueue:
             )
         except Exception:
             pass
+        if reason:
+            try:
+                from remedy.core.trust_profile import (
+                    checkpoint_still_required,
+                    profile_skips_high_impact_ask,
+                )
+
+                if (
+                    profile is not None
+                    and profile_skips_high_impact_ask(profile)
+                    and not reason.startswith(SENSITIVE_PREFIX)
+                    and checkpoint_still_required(tool, c) is None
+                ):
+                    return None
+            except Exception:
+                pass
+            if conservative:
+                with self._lock:
+                    auto_extra = self._mode == "auto"
+                if auto_extra and not reason.startswith("Conservative trust"):
+                    reason = f"Conservative trust — {reason}"
         return reason
 
     def is_approved(self, tool_name: str, command: str, session_id: str | None = None) -> bool:

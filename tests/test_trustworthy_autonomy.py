@@ -15,8 +15,6 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from remedy.core.context import TurnFactory
 from remedy.core.explain import explain_turn
 from remedy.core.trust_profile import (
@@ -89,12 +87,9 @@ def test_v038_explain_turn_fake_bus():
 
 
 def test_v038_events_and_explain(tmp_path: Path):
-    try:
-        from remedy.events.bus import EventBus
-        from remedy.events.types import EventType
-    except ImportError:
-        # events package is owned by another agent.
-        pytest.skip("EventBus not importable yet")
+    from remedy.events.bus import EventBus
+    from remedy.events.types import EventType
+
     bus = EventBus(db_path=tmp_path / "e.db")
     bus.emit_simple(EventType.TOOL_COMPLETED, session_id="s", turn_id="t", tool="file_read")
     bus.emit_simple(
@@ -106,22 +101,16 @@ def test_v038_events_and_explain(tmp_path: Path):
 
 
 def test_v038_hive_caps_if_importable():
-    try:
-        from remedy.core.hive_caps import child_capabilities
-    except ImportError:
-        # hive_caps is owned by another agent.
-        pytest.skip("hive_caps not importable yet")
+    from remedy.core.hive_caps import child_capabilities
+
     parent = frozenset({Capability.FS_READ})
     assert child_capabilities(parent, frozenset({Capability.FS_READ})) == parent
 
 
 def test_v038_verification_not_exit_code_alone(tmp_path: Path):
-    try:
-        from remedy.verification.evidence import ActionResult, VerificationStatus
-        from remedy.verification.verifier import verify_action
-    except ImportError:
-        # verification is owned by another agent.
-        pytest.skip("verification not importable yet")
+    from remedy.verification.evidence import ActionResult, VerificationStatus
+    from remedy.verification.verifier import verify_action
+
     p = tmp_path / "x.txt"
     assert (
         verify_action(ActionResult(tool="file_write", ok=True, path=str(p))).status
@@ -130,11 +119,8 @@ def test_v038_verification_not_exit_code_alone(tmp_path: Path):
 
 
 def test_v038_no_skip_verify():
-    try:
-        from remedy.execution.action import ActionRecord, ActionState, IllegalTransition
-    except ImportError:
-        # action.py is owned by another agent.
-        pytest.skip("ActionRecord not importable yet")
+    from remedy.execution.action import ActionRecord, ActionState, IllegalTransition
+
     rec = ActionRecord(tool="host_run")
     rec.advance(ActionState.AUTHORIZED)
     rec.advance(ActionState.RUNNING)

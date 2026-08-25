@@ -17,26 +17,35 @@ from remedy.tools.descriptor import ToolDescriptor
 
 def _resolve_trust_profile():
     """Read ``trust_profile`` from config; default BALANCED on missing/invalid."""
-    from remedy.core.trust_profile import TrustProfile
+    from remedy.core.trust_profile import TrustProfile, normalize_trust_profile
 
     try:
         from remedy.interfaces.api_support import load_config
 
         cfg = load_config() or {}
-        raw = str(cfg.get("trust_profile") or TrustProfile.BALANCED).strip().lower()
-        return TrustProfile(raw)
+        return normalize_trust_profile(cfg.get("trust_profile"))
     except Exception:
         return TrustProfile.BALANCED
 
 
-def _is_checkpoint_reason(tool_name: str, command: str, reason: str) -> bool:
-    """True when the ask is a non-waivable owner checkpoint (mail / pay / …)."""
-    from remedy.core.approvals import SENSITIVE_PREFIX
-    from remedy.core.trust_profile import checkpoint_still_required
-
-    if reason.startswith(SENSITIVE_PREFIX):
-        return True
-    return checkpoint_still_required(tool_name, command) is not None
+def _command_from_args(args: dict[str, Any] | None) -> str:
+    """Join host_run argv lists; never str(list) for the dangerous-command check."""
+    if not args:
+        return ""
+    for key in ("command", "cmd"):
+        raw = args.get(key)
+        if raw:
+            return str(raw)
+    argv = args.get("argv")
+    if isinstance(argv, (list, tuple)):
+        return " ".join(str(x) for x in argv if str(x).strip())
+    if argv:
+        return str(argv)
+    for key in ("path", "url"):
+        raw = args.get(key)
+        if raw:
+            return str(raw)
+    return ""
 
 
 class PolicyEngine:
@@ -55,24 +64,18 @@ class PolicyEngine:
 
             desc = descriptor_for(str(tool))
         req = request or ToolRequest(name=desc.name)
-        command = req.command
-        if not command:
-            args = req.arguments
-            command = str(
-                args.get("command")
-                or args.get("cmd")
-                or args.get("argv")
-                or args.get("path")
-                or ""
-            )
+        command = req.command or _command_from_args(req.arguments)
 
         from remedy.core.approvals import APPROVALS
         from remedy.core.security import check_dangerous_command
-        from remedy.core.trust_profile import profile_skips_high_impact_ask
 
         if desc.name in ("bash_exec", "host_run", "skill_run"):
-            argv = ["bash", "-c", command] if command else [desc.name]
-            dangerous = check_dangerous_command(argv)
+            raw_argv = req.arguments.get("argv") if req.arguments else None
+            if desc.name == "host_run" and isinstance(raw_argv, (list, tuple)) and raw_argv:
+                check_argv = [str(x) for x in raw_argv]
+            else:
+                check_argv = ["bash", "-c", command] if command else [desc.name]
+            dangerous = check_dangerous_command(check_argv)
             if dangerous:
                 return PolicyDecision(
                     allowed=False,
@@ -81,26 +84,15 @@ class PolicyEngine:
                     granted_capabilities=frozenset(),
                 )
 
+        # Trust profiles live in needs_ask so handler inner-gates match this gate.
         reason = APPROVALS.needs_ask(command, tool_name=desc.name)
         if reason:
-            # AUTONOMOUS ≈ auto for in-project high-impact; checkpoints still ask.
-            # Does not fight mode=="full" (needs_ask already returned None there).
-            if profile_skips_high_impact_ask(_resolve_trust_profile()) and not _is_checkpoint_reason(
-                desc.name, command or "", reason
-            ):
-                decision = PolicyDecision(
-                    allowed=True,
-                    requires_approval=False,
-                    reason="allowed",
-                    granted_capabilities=desc.capabilities,
-                )
-            else:
-                decision = PolicyDecision(
-                    allowed=True,
-                    requires_approval=True,
-                    reason=reason,
-                    granted_capabilities=desc.capabilities,
-                )
+            decision = PolicyDecision(
+                allowed=True,
+                requires_approval=True,
+                reason=reason,
+                granted_capabilities=desc.capabilities,
+            )
             _emit_policy(ctx, desc.name, decision)
             return decision
         decision = PolicyDecision(

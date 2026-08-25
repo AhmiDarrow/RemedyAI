@@ -225,7 +225,13 @@ def register_skill_tools(runtime: Any) -> None:
         from remedy.core.approvals import APPROVALS
 
         run_cmd = f"skill_run {nm} {script or ''}".strip()
-        ask_reason = APPROVALS.needs_ask(run_cmd, tool_name="skill_run")
+        from remedy.core.turn_pipeline import gate_already_passed
+
+        ask_reason = (
+            None
+            if gate_already_passed("skill_run")
+            else APPROVALS.needs_ask(run_cmd, tool_name="skill_run")
+        )
         from remedy.core.turn_context import turn_session_id
 
         sid = turn_session_id(runtime)

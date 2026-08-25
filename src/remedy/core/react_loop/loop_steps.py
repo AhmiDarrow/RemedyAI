@@ -8,7 +8,6 @@ own the rest.
 
 from __future__ import annotations
 
-import sys
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -19,163 +18,11 @@ from remedy.core.react_loop.loop_round import run_react_round
 
 async def run_react_steps(s: Any) -> AsyncIterator[str]:
     """Run nested helpers + the HTTP for-loop for one stream turn."""
-    loop_mod = sys.modules['remedy.core.react_loop.loop']
-    aiohttp = loop_mod.aiohttp
-    LlmBinding = loop_mod.LlmBinding
-    get_llm_binding = loop_mod.get_llm_binding
-    set_llm_binding = loop_mod.set_llm_binding
-    build_step_request_body = loop_mod.build_step_request_body
-    apply_build_engine_after_batch = loop_mod.apply_build_engine_after_batch
-    _turn_tier_of = loop_mod._turn_tier_of
-    _resolve_and_apply_tools_fn = loop_mod._resolve_and_apply_tools_fn
-    _wait_rmb_ready_abortable = loop_mod._wait_rmb_ready_abortable
-    consume_llm_http_response = loop_mod.consume_llm_http_response
-    sanitize_chat_body = loop_mod.sanitize_chat_body
-    repair_reasoning_content_in_messages = loop_mod.repair_reasoning_content_in_messages
-    repair_tool_arguments_in_messages = loop_mod.repair_tool_arguments_in_messages
-    strip_broken_tool_call_turns = loop_mod.strip_broken_tool_call_turns
-    _sleep_abortable = loop_mod._sleep_abortable
-    _http_session = loop_mod._http_session
-    _log_llm = loop_mod._log_llm
-    _stopped_note = loop_mod._stopped_note
-    _take_nudges = loop_mod._take_nudges
-    _steer_message = loop_mod._steer_message
-    _browse_tool_ok = loop_mod._browse_tool_ok
-    execute_tool_calls = loop_mod.execute_tool_calls
-    _provider_bits_fn = loop_mod._provider_bits_fn
-    _rearm_agency_tools_fn = loop_mod._rearm_agency_tools_fn
-    _RATE_LIMIT_MAX_RETRIES = loop_mod._RATE_LIMIT_MAX_RETRIES
-    _is_rate_limited = loop_mod._is_rate_limited
-    _pace_before_request = loop_mod._pace_before_request
-    _rate_limit_wait = loop_mod._rate_limit_wait
-    _await_or_abort = loop_mod._await_or_abort
-    inject_phase_nudge = loop_mod.inject_phase_nudge
-    record_tool_batch_stats = loop_mod.record_tool_batch_stats
-    _is_billing_llm_api_error = loop_mod._is_billing_llm_api_error
-    _is_fatal_llm_api_error = loop_mod._is_fatal_llm_api_error
-    _is_thinking_tool_choice_error = loop_mod._is_thinking_tool_choice_error
-    fatal_billing_error_message = loop_mod.fatal_billing_error_message
-    fatal_model_error_message = loop_mod.fatal_model_error_message
-    repeated_provider_error_message = loop_mod.repeated_provider_error_message
-    _TOOL_RESULT_CHAR_CAP = loop_mod._TOOL_RESULT_CHAR_CAP
-    _looks_like_pseudo_tools = loop_mod._looks_like_pseudo_tools
-    _parse_pseudo_tool_calls = loop_mod._parse_pseudo_tool_calls
-    _tool_call_fingerprint = loop_mod._tool_call_fingerprint
-    agency_rearm_nudge_message = loop_mod.agency_rearm_nudge_message
-    agency_tool_promise_claim = loop_mod.agency_tool_promise_claim
-    batch_has_approval_required = loop_mod.batch_has_approval_required
-    batch_has_empty_or_spam_write = loop_mod.batch_has_empty_or_spam_write
-    batch_has_empty_search = loop_mod.batch_has_empty_search
-    batch_has_tool_errors = loop_mod.batch_has_tool_errors
-    clip_appended_source_dump = loop_mod.clip_appended_source_dump
-    collapse_repeated_sentences = loop_mod.collapse_repeated_sentences
-    epoch_continue_message = loop_mod.epoch_continue_message
-    is_serial_explore_batch = loop_mod.is_serial_explore_batch
-    looks_like_false_progress = loop_mod.looks_like_false_progress
-    looks_like_leaked_scratchpad = loop_mod.looks_like_leaked_scratchpad
-    looks_like_safety_refusal = loop_mod.looks_like_safety_refusal
-    message_asks_to_stop = loop_mod.message_asks_to_stop
-    mission_verify_gate_message = loop_mod.mission_verify_gate_message
-    post_tools_user_summary_nudge = loop_mod.post_tools_user_summary_nudge
-    recovery_nudge_message = loop_mod.recovery_nudge_message
-    speed_batch_nudge_message = loop_mod.speed_batch_nudge_message
-    strip_stream_status_noise = loop_mod.strip_stream_status_noise
-    strip_tool_markup = loop_mod.strip_tool_markup
-    turn_has_unfinished_work = loop_mod.turn_has_unfinished_work
-    unfinished_work_blocks_final = loop_mod.unfinished_work_blocks_final
-    unfinished_work_hard_stop_message = loop_mod.unfinished_work_hard_stop_message
-    unfinished_work_nudge_message = loop_mod.unfinished_work_nudge_message
-    StreamRoundState = loop_mod.StreamRoundState
-    build_assistant_api_message = loop_mod.build_assistant_api_message
-    ensure_tool_call_pairings = loop_mod.ensure_tool_call_pairings
-    filter_fresh_tool_calls = loop_mod.filter_fresh_tool_calls
-    finalize_round_text = loop_mod.finalize_round_text
-    normalize_tool_calls = loop_mod.normalize_tool_calls
-    _current_abort_event = loop_mod._current_abort_event
-    set_turn_force_tool_choice = loop_mod.set_turn_force_tool_choice
-    set_turn_thinking_level = loop_mod.set_turn_thinking_level
-    set_turn_tool_choice_required_blocked = loop_mod.set_turn_tool_choice_required_blocked
-    turn_max_react_steps = loop_mod.turn_max_react_steps
-    turn_sleev_force_direct = loop_mod.turn_sleev_force_direct
-    turn_thinking_level = loop_mod.turn_thinking_level
-    logger = loop_mod.logger
-    json = loop_mod.json
-    time = loop_mod.time
-    asyncio = loop_mod.asyncio
-    suppress = loop_mod.suppress
-    run_until_done: Any = getattr(s, 'run_until_done', None)
-    build_state: Any = getattr(s, 'build_state', None)
-    turn: Any = getattr(s, 'turn', None)
-    plan_mode: Any = getattr(s, 'plan_mode', None)
-    attachments: Any = getattr(s, 'attachments', None)
-    session_id: Any = getattr(s, 'session_id', None)
-    message: Any = getattr(s, 'message', None)
-    runtime: Any = getattr(s, 'runtime', None)
-    prep: Any = getattr(s, 'prep', None)
-    boot: Any = getattr(s, 'boot', None)
-    messages: Any = getattr(s, 'messages', None)
-    history: Any = getattr(s, 'history', None)
-    all_tools: Any = getattr(s, 'all_tools', None)
-    tools: Any = getattr(s, 'tools', None)
-    browse_pre_url: Any = getattr(s, 'browse_pre_url', None)
-    clear_goals_only: Any = getattr(s, 'clear_goals_only', None)
-    pure_action_kick: Any = getattr(s, 'pure_action_kick', None)
-    open_only_browse: Any = getattr(s, 'open_only_browse', None)
-    page_interaction: Any = getattr(s, 'page_interaction', None)
-    seen_fps: Any = getattr(s, 'seen_fps', None)
-    result_cache: Any = getattr(s, 'result_cache', None)
-    produced_user_text: Any = getattr(s, 'produced_user_text', None)
-    pseudo_recovery_done: Any = getattr(s, 'pseudo_recovery_done', None)
-    pseudo_nudge_count: Any = getattr(s, 'pseudo_nudge_count', None)
-    false_progress_nudge_count: Any = getattr(s, 'false_progress_nudge_count', None)
-    zero_tools_hard_block_count: Any = getattr(s, 'zero_tools_hard_block_count', None)
-    mono_fp_last: Any = getattr(s, 'mono_fp_last', None)
-    mono_fp_hits: Any = getattr(s, 'mono_fp_hits', None)
-    mono_explore_injected: Any = getattr(s, 'mono_explore_injected', None)
-    scratchpad_nudge_count: Any = getattr(s, 'scratchpad_nudge_count', None)
-    tools_executed_this_turn: Any = getattr(s, 'tools_executed_this_turn', None)
-    recovery_nudge_done: Any = getattr(s, 'recovery_nudge_done', None)
-    speed_batch_nudge_done: Any = getattr(s, 'speed_batch_nudge_done', None)
-    serial_explore_streak: Any = getattr(s, 'serial_explore_streak', None)
-    _bind: Any = getattr(s, '_bind', None)
-    _adapter: Any = getattr(s, '_adapter', None)
-    headers: Any = getattr(s, 'headers', None)
-    endpoint: Any = getattr(s, 'endpoint', None)
-    _sleev_route: Any = getattr(s, '_sleev_route', None)
-    _connect_s: Any = getattr(s, '_connect_s', None)
-    timeout: Any = getattr(s, 'timeout', None)
-    max_length_continuations: Any = getattr(s, 'max_length_continuations', None)
-    _b0: Any = getattr(s, '_b0', None)
-    length_continuations: Any = getattr(s, 'length_continuations', None)
-    reasoning_repair_done: Any = getattr(s, 'reasoning_repair_done', None)
-    tool_args_repair_done: Any = getattr(s, 'tool_args_repair_done', None)
-    tool_args_strip_done: Any = getattr(s, 'tool_args_strip_done', None)
-    api_soft_failures: Any = getattr(s, 'api_soft_failures', None)
-    max_api_soft_failures: Any = getattr(s, 'max_api_soft_failures', None)
-    force_answer_sticky: Any = getattr(s, 'force_answer_sticky', None)
-    force_answer_api_fail_once: Any = getattr(s, 'force_answer_api_fail_once', None)
-    force_answer_nudge_done: Any = getattr(s, 'force_answer_nudge_done', None)
-    empty_answer_retries: Any = getattr(s, 'empty_answer_retries', None)
-    max_empty_answer_retries: Any = getattr(s, 'max_empty_answer_retries', None)
-    _b1: Any = getattr(s, '_b1', None)
-    agency_rearm_count: Any = getattr(s, 'agency_rearm_count', None)
-    max_agency_rearms: Any = getattr(s, 'max_agency_rearms', None)
-    zero_tool_drive_count: Any = getattr(s, 'zero_tool_drive_count', None)
-    max_zero_tool_drives: Any = getattr(s, 'max_zero_tool_drives', None)
-    open_work_continues: Any = getattr(s, 'open_work_continues', None)
-    max_open_work_continues: Any = getattr(s, 'max_open_work_continues', None)
-    open_work_last_score: Any = getattr(s, 'open_work_last_score', None)
-    open_work_last_batches: Any = getattr(s, 'open_work_last_batches', None)
-    finish_everything_requested: Any = getattr(s, 'finish_everything_requested', None)
-    _st_ow: Any = getattr(s, '_st_ow', None)
-    step_wall_checkpointed: Any = getattr(s, 'step_wall_checkpointed', None)
-    thinking_choice_repaired: Any = getattr(s, 'thinking_choice_repaired', None)
-    green_gate_reopen_count: Any = getattr(s, 'green_gate_reopen_count', None)
-    max_green_gate_reopens: Any = getattr(s, 'max_green_gate_reopens', None)
-    open_drive_patience: Any = getattr(s, 'open_drive_patience', None)
-    last_progress_score: Any = getattr(s, 'last_progress_score', None)
-    last_progress_step: Any = getattr(s, 'last_progress_step', None)
-    open_drive_stalled_notified: Any = getattr(s, 'open_drive_stalled_notified', None)
+    from remedy.core.react_loop.loop_bindings import bind_loop_tuple
+    (aiohttp, LlmBinding, get_llm_binding, set_llm_binding, build_step_request_body, apply_build_engine_after_batch, _turn_tier_of, _resolve_and_apply_tools_fn, _wait_rmb_ready_abortable, consume_llm_http_response, sanitize_chat_body, repair_reasoning_content_in_messages, repair_tool_arguments_in_messages, strip_broken_tool_call_turns, _sleep_abortable, _http_session, _log_llm, _stopped_note, _take_nudges, _steer_message, _browse_tool_ok, execute_tool_calls, _provider_bits_fn, _rearm_agency_tools_fn, _RATE_LIMIT_MAX_RETRIES, _is_rate_limited, _pace_before_request, _rate_limit_wait, _await_or_abort, inject_phase_nudge, record_tool_batch_stats, _is_billing_llm_api_error, _is_fatal_llm_api_error, _is_thinking_tool_choice_error, fatal_billing_error_message, fatal_model_error_message, repeated_provider_error_message, _TOOL_RESULT_CHAR_CAP, _looks_like_pseudo_tools, _parse_pseudo_tool_calls, _tool_call_fingerprint, agency_rearm_nudge_message, agency_tool_promise_claim, batch_has_approval_required, batch_has_empty_or_spam_write, batch_has_empty_search, batch_has_tool_errors, clip_appended_source_dump, collapse_repeated_sentences, epoch_continue_message, is_serial_explore_batch, looks_like_false_progress, looks_like_leaked_scratchpad, looks_like_safety_refusal, message_asks_to_stop, mission_verify_gate_message, post_tools_user_summary_nudge, recovery_nudge_message, speed_batch_nudge_message, strip_stream_status_noise, strip_tool_markup, turn_has_unfinished_work, unfinished_work_blocks_final, unfinished_work_hard_stop_message, unfinished_work_nudge_message, StreamRoundState, build_assistant_api_message, ensure_tool_call_pairings, filter_fresh_tool_calls, finalize_round_text, normalize_tool_calls, _current_abort_event, set_turn_force_tool_choice, set_turn_thinking_level, set_turn_tool_choice_required_blocked, turn_max_react_steps, turn_sleev_force_direct, turn_thinking_level, logger, json, time, asyncio, suppress) = bind_loop_tuple()  # noqa: N806
+    from remedy.core.react_loop.loop_bindings import STATE_NAMES, unpack_state
+    _st = unpack_state(s)
+    (run_until_done, build_state, turn, plan_mode, attachments, session_id, message, runtime, prep, boot, messages, history, all_tools, tools, browse_pre_url, clear_goals_only, pure_action_kick, open_only_browse, page_interaction, seen_fps, result_cache, produced_user_text, pseudo_recovery_done, pseudo_nudge_count, false_progress_nudge_count, zero_tools_hard_block_count, mono_fp_last, mono_fp_hits, mono_explore_injected, scratchpad_nudge_count, tools_executed_this_turn, recovery_nudge_done, speed_batch_nudge_done, serial_explore_streak, _bind, _adapter, headers, endpoint, _sleev_route, _connect_s, timeout, max_length_continuations, _b0, length_continuations, reasoning_repair_done, tool_args_repair_done, tool_args_strip_done, api_soft_failures, max_api_soft_failures, force_answer_sticky, force_answer_api_fail_once, force_answer_nudge_done, empty_answer_retries, max_empty_answer_retries, _b1, agency_rearm_count, max_agency_rearms, zero_tool_drive_count, max_zero_tool_drives, open_work_continues, max_open_work_continues, open_work_last_score, open_work_last_batches, finish_everything_requested, _st_ow, step_wall_checkpointed, thinking_choice_repaired, green_gate_reopen_count, max_green_gate_reopens, open_drive_patience, last_progress_score, last_progress_step, open_drive_stalled_notified, auth_refresh_done, max_total, epoch_size, auto_continue, max_stale_epochs, epoch_index, productive_in_epoch, tool_batches_in_epoch, stale_epochs, tool_batches_this_turn, open_tasks_for_wall, user_wants_stop, assistant_text_acc, no_progress_steps, last_progress_fingerprint, max_no_progress_steps, stalled_finalize, all_error_batches, max_all_error_batches, failed_tools_this_turn, max_failed_tools, force_answer, is_final_step, step_tools, use_openai_sse, collected, round_state, content_parts, reasoning_parts, sid_mm, _verify_green, _keep_after_green, is_disconnect_error, mid_turn_fit_messages, synthesize_from_tools, TurnState, effective_stale_epochs, body, stream_live, text_out, tool_calls_list, reasoning_out, stutter_src) = tuple(_st[n] for n in STATE_NAMES)  # noqa: N806
     try:
         def _open_drive_keeps_going() -> bool:
             with suppress(Exception):
@@ -467,86 +314,9 @@ async def run_react_steps(s: Any) -> AsyncIterator[str]:
                 setattr(s, _k, _v)
 
         def _pull_bag() -> None:
-            nonlocal run_until_done, build_state, turn, messages, history, all_tools, tools
-            nonlocal produced_user_text, tools_executed_this_turn, tool_batches_this_turn
-            nonlocal _bind, _adapter, headers, endpoint
-            nonlocal length_continuations, reasoning_repair_done, tool_args_repair_done
-            nonlocal tool_args_strip_done, api_soft_failures, force_answer_sticky
-            nonlocal force_answer_api_fail_once, force_answer_nudge_done
-            nonlocal empty_answer_retries, agency_rearm_count, zero_tool_drive_count
-            nonlocal open_work_continues, open_work_last_score, open_work_last_batches
-            nonlocal finish_everything_requested, step_wall_checkpointed
-            nonlocal thinking_choice_repaired, green_gate_reopen_count
-            nonlocal last_progress_score, last_progress_step, open_drive_stalled_notified
-            nonlocal auth_refresh_done, epoch_index, productive_in_epoch
-            nonlocal tool_batches_in_epoch, stale_epochs, assistant_text_acc
-            nonlocal no_progress_steps, last_progress_fingerprint, stalled_finalize
-            nonlocal all_error_batches, failed_tools_this_turn
-            nonlocal false_progress_nudge_count, zero_tools_hard_block_count
-            nonlocal mono_fp_last, mono_fp_hits, mono_explore_injected
-            nonlocal scratchpad_nudge_count, recovery_nudge_done, speed_batch_nudge_done
-            nonlocal serial_explore_streak, pseudo_recovery_done, pseudo_nudge_count
-            nonlocal seen_fps, result_cache, open_tasks_for_wall, run_until_done
-            run_until_done = getattr(s, "run_until_done", run_until_done)
-            build_state = getattr(s, "build_state", build_state)
-            turn = getattr(s, "turn", turn)
-            messages = getattr(s, "messages", messages)
-            history = getattr(s, "history", history)
-            all_tools = getattr(s, "all_tools", all_tools)
-            tools = getattr(s, "tools", tools)
-            produced_user_text = getattr(s, "produced_user_text", produced_user_text)
-            tools_executed_this_turn = getattr(s, "tools_executed_this_turn", tools_executed_this_turn)
-            tool_batches_this_turn = getattr(s, "tool_batches_this_turn", tool_batches_this_turn)
-            _bind = getattr(s, "_bind", _bind)
-            _adapter = getattr(s, "_adapter", _adapter)
-            headers = getattr(s, "headers", headers)
-            endpoint = getattr(s, "endpoint", endpoint)
-            length_continuations = getattr(s, "length_continuations", length_continuations)
-            reasoning_repair_done = getattr(s, "reasoning_repair_done", reasoning_repair_done)
-            tool_args_repair_done = getattr(s, "tool_args_repair_done", tool_args_repair_done)
-            tool_args_strip_done = getattr(s, "tool_args_strip_done", tool_args_strip_done)
-            api_soft_failures = getattr(s, "api_soft_failures", api_soft_failures)
-            force_answer_sticky = getattr(s, "force_answer_sticky", force_answer_sticky)
-            force_answer_api_fail_once = getattr(s, "force_answer_api_fail_once", force_answer_api_fail_once)
-            force_answer_nudge_done = getattr(s, "force_answer_nudge_done", force_answer_nudge_done)
-            empty_answer_retries = getattr(s, "empty_answer_retries", empty_answer_retries)
-            agency_rearm_count = getattr(s, "agency_rearm_count", agency_rearm_count)
-            zero_tool_drive_count = getattr(s, "zero_tool_drive_count", zero_tool_drive_count)
-            open_work_continues = getattr(s, "open_work_continues", open_work_continues)
-            open_work_last_score = getattr(s, "open_work_last_score", open_work_last_score)
-            open_work_last_batches = getattr(s, "open_work_last_batches", open_work_last_batches)
-            finish_everything_requested = getattr(s, "finish_everything_requested", finish_everything_requested)
-            step_wall_checkpointed = getattr(s, "step_wall_checkpointed", step_wall_checkpointed)
-            thinking_choice_repaired = getattr(s, "thinking_choice_repaired", thinking_choice_repaired)
-            green_gate_reopen_count = getattr(s, "green_gate_reopen_count", green_gate_reopen_count)
-            last_progress_score = getattr(s, "last_progress_score", last_progress_score)
-            last_progress_step = getattr(s, "last_progress_step", last_progress_step)
-            open_drive_stalled_notified = getattr(s, "open_drive_stalled_notified", open_drive_stalled_notified)
-            auth_refresh_done = getattr(s, "auth_refresh_done", auth_refresh_done)
-            epoch_index = getattr(s, "epoch_index", epoch_index)
-            productive_in_epoch = getattr(s, "productive_in_epoch", productive_in_epoch)
-            tool_batches_in_epoch = getattr(s, "tool_batches_in_epoch", tool_batches_in_epoch)
-            stale_epochs = getattr(s, "stale_epochs", stale_epochs)
-            assistant_text_acc = getattr(s, "assistant_text_acc", assistant_text_acc)
-            no_progress_steps = getattr(s, "no_progress_steps", no_progress_steps)
-            last_progress_fingerprint = getattr(s, "last_progress_fingerprint", last_progress_fingerprint)
-            stalled_finalize = getattr(s, "stalled_finalize", stalled_finalize)
-            all_error_batches = getattr(s, "all_error_batches", all_error_batches)
-            failed_tools_this_turn = getattr(s, "failed_tools_this_turn", failed_tools_this_turn)
-            false_progress_nudge_count = getattr(s, "false_progress_nudge_count", false_progress_nudge_count)
-            zero_tools_hard_block_count = getattr(s, "zero_tools_hard_block_count", zero_tools_hard_block_count)
-            mono_fp_last = getattr(s, "mono_fp_last", mono_fp_last)
-            mono_fp_hits = getattr(s, "mono_fp_hits", mono_fp_hits)
-            mono_explore_injected = getattr(s, "mono_explore_injected", mono_explore_injected)
-            scratchpad_nudge_count = getattr(s, "scratchpad_nudge_count", scratchpad_nudge_count)
-            recovery_nudge_done = getattr(s, "recovery_nudge_done", recovery_nudge_done)
-            speed_batch_nudge_done = getattr(s, "speed_batch_nudge_done", speed_batch_nudge_done)
-            serial_explore_streak = getattr(s, "serial_explore_streak", serial_explore_streak)
-            pseudo_recovery_done = getattr(s, "pseudo_recovery_done", pseudo_recovery_done)
-            pseudo_nudge_count = getattr(s, "pseudo_nudge_count", pseudo_nudge_count)
-            seen_fps = getattr(s, "seen_fps", seen_fps)
-            result_cache = getattr(s, "result_cache", result_cache)
-            open_tasks_for_wall = getattr(s, "open_tasks_for_wall", open_tasks_for_wall)
+            nonlocal run_until_done, build_state, turn, plan_mode, attachments, session_id, message, runtime, prep, boot, messages, history, all_tools, tools, browse_pre_url, clear_goals_only, pure_action_kick, open_only_browse, page_interaction, seen_fps, result_cache, produced_user_text, pseudo_recovery_done, pseudo_nudge_count, false_progress_nudge_count, zero_tools_hard_block_count, mono_fp_last, mono_fp_hits, mono_explore_injected, scratchpad_nudge_count, tools_executed_this_turn, recovery_nudge_done, speed_batch_nudge_done, serial_explore_streak, _bind, _adapter, headers, endpoint, _sleev_route, _connect_s, timeout, max_length_continuations, _b0, length_continuations, reasoning_repair_done, tool_args_repair_done, tool_args_strip_done, api_soft_failures, max_api_soft_failures, force_answer_sticky, force_answer_api_fail_once, force_answer_nudge_done, empty_answer_retries, max_empty_answer_retries, _b1, agency_rearm_count, max_agency_rearms, zero_tool_drive_count, max_zero_tool_drives, open_work_continues, max_open_work_continues, open_work_last_score, open_work_last_batches, finish_everything_requested, _st_ow, step_wall_checkpointed, thinking_choice_repaired, green_gate_reopen_count, max_green_gate_reopens, open_drive_patience, last_progress_score, last_progress_step, open_drive_stalled_notified, auth_refresh_done, max_total, epoch_size, auto_continue, max_stale_epochs, epoch_index, productive_in_epoch, tool_batches_in_epoch, stale_epochs, tool_batches_this_turn, open_tasks_for_wall, user_wants_stop, assistant_text_acc, no_progress_steps, last_progress_fingerprint, max_no_progress_steps, stalled_finalize, all_error_batches, max_all_error_batches, failed_tools_this_turn, max_failed_tools, force_answer, is_final_step, step_tools, use_openai_sse, collected, round_state, content_parts, reasoning_parts, sid_mm, _verify_green, _keep_after_green, is_disconnect_error, mid_turn_fit_messages, synthesize_from_tools, TurnState, effective_stale_epochs, body, stream_live, text_out, tool_calls_list, reasoning_out, stutter_src
+            _st2 = unpack_state(s)
+            (run_until_done, build_state, turn, plan_mode, attachments, session_id, message, runtime, prep, boot, messages, history, all_tools, tools, browse_pre_url, clear_goals_only, pure_action_kick, open_only_browse, page_interaction, seen_fps, result_cache, produced_user_text, pseudo_recovery_done, pseudo_nudge_count, false_progress_nudge_count, zero_tools_hard_block_count, mono_fp_last, mono_fp_hits, mono_explore_injected, scratchpad_nudge_count, tools_executed_this_turn, recovery_nudge_done, speed_batch_nudge_done, serial_explore_streak, _bind, _adapter, headers, endpoint, _sleev_route, _connect_s, timeout, max_length_continuations, _b0, length_continuations, reasoning_repair_done, tool_args_repair_done, tool_args_strip_done, api_soft_failures, max_api_soft_failures, force_answer_sticky, force_answer_api_fail_once, force_answer_nudge_done, empty_answer_retries, max_empty_answer_retries, _b1, agency_rearm_count, max_agency_rearms, zero_tool_drive_count, max_zero_tool_drives, open_work_continues, max_open_work_continues, open_work_last_score, open_work_last_batches, finish_everything_requested, _st_ow, step_wall_checkpointed, thinking_choice_repaired, green_gate_reopen_count, max_green_gate_reopens, open_drive_patience, last_progress_score, last_progress_step, open_drive_stalled_notified, auth_refresh_done, max_total, epoch_size, auto_continue, max_stale_epochs, epoch_index, productive_in_epoch, tool_batches_in_epoch, stale_epochs, tool_batches_this_turn, open_tasks_for_wall, user_wants_stop, assistant_text_acc, no_progress_steps, last_progress_fingerprint, max_no_progress_steps, stalled_finalize, all_error_batches, max_all_error_batches, failed_tools_this_turn, max_failed_tools, force_answer, is_final_step, step_tools, use_openai_sse, collected, round_state, content_parts, reasoning_parts, sid_mm, _verify_green, _keep_after_green, is_disconnect_error, mid_turn_fit_messages, synthesize_from_tools, TurnState, effective_stale_epochs, body, stream_live, text_out, tool_calls_list, reasoning_out, stutter_src) = tuple(_st2[n] for n in STATE_NAMES)
 
 
         # One process-wide session (agent_llm owns its lifetime) — a fresh

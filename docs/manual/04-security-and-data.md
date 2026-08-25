@@ -135,11 +135,27 @@ High-impact tools (shell, file write/edit, skill scripts) use **approval mode**.
 |------|----------|
 | **Ask** (default, safe) | Banner: Approve / Deny for high-impact tools; soft-risk shell patterns are labeled |
 | **Auto** | **Work until done** — no prompts on trusted scopes (project/home/full). Remedy runs shell/write/skills to finish. |
+| **Full** | No write jail (auth secrets stay closed). Warns when a path would have been blocked. |
 
 **Untrusted** access scope still always asks, even in Auto (downloaded folders).  
 Hard wipe/privilege blocks (`check_dangerous_command`) still apply in every mode — those are safety rails, not “power stripped.”
 
 Commands: `/approve`, `/deny` (when an id is shown). Status bar thumbs toggle Ask/Auto.
+
+## Trust
+
+Settings → **Security & power** → **Trust** is a second knob. Approvals is when
+the write jail and prompt surface change. Trust is how many extra “are you
+sure?” prompts you get inside that surface. **No profile waives mail or
+payment.**
+
+| Profile | Behavior |
+|---------|----------|
+| **Conservative** | Even Auto still asks before shell, files, and skills. Full stays Full. |
+| **Balanced** (default) | Follows Approvals. |
+| **Autonomous** | Skip in-project high-impact asks the same way Auto does, even if Approvals is Ask. |
+
+Config key: `trust_profile` (`conservative` / `balanced` / `autonomous`).
 
 ## License (not a security control)
 

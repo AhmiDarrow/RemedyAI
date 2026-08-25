@@ -44,13 +44,11 @@ export function upsertTurn(partial: TurnPatch): Turn {
   const k = keyOf(partial.sessionId, partial.turnId)
   const prev = byKey.get(k)
   const next: Turn = {
-    sessionId: partial.sessionId,
-    turnId: partial.turnId,
     jobId: '',
     status: 'running',
     goal: '',
     startedAt: new Date().toISOString(),
-    ...prev,
+    ...(prev ?? { sessionId: partial.sessionId, turnId: partial.turnId }),
     ...partial,
   }
   byKey.set(k, next)

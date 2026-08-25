@@ -164,6 +164,7 @@ _PATCH_KEY_TO_SECTION = {
     "llm_api_key": "provider",
     "llm_base_url": "provider",
     "approval_mode": "security-power",
+    "trust_profile": "security-power",
     "thinking_level": "security-power",
     "user_name": "you-agent",
     "name": "you-agent",

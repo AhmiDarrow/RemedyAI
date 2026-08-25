@@ -89,14 +89,12 @@ def load_todos(runtime: Any = None, *, root: Path | str | None = None) -> list[T
     if base is None:
         if explicit:
             return []
-        cached = getattr(runtime, "_build_todos", None) if runtime is not None else None
-        return list(cached) if isinstance(cached, list) else []
+        return _mem_todos(runtime)
     fp = _path(base)
     if not fp.is_file():
         if explicit:
             return []
-        cached = getattr(runtime, "_build_todos", None) if runtime is not None else None
-        return list(cached) if isinstance(cached, list) else []
+        return _mem_todos(runtime)
     try:
         raw = json.loads(fp.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -121,6 +119,55 @@ def load_todos(runtime: Any = None, *, root: Path | str | None = None) -> list[T
     return items
 
 
+def _todos_session_key(runtime: Any, session_id: str | None = None) -> str:
+    """Stable key for per-session in-memory todos (never a sibling tab's)."""
+    sid = str(session_id or "").strip()
+    if sid:
+        return sid
+    with suppress(Exception):
+        from remedy.core.turn_context import turn_session_id
+
+        sid = str(turn_session_id(runtime) or "").strip()
+        if sid:
+            return sid
+    if runtime is not None:
+        d = getattr(runtime, "__dict__", None) or {}
+        if "_session_id_live" in d:
+            sid = str(d.get("_session_id_live") or "").strip()
+        else:
+            sid = str(getattr(runtime, "_session_id", "") or "").strip()
+        if sid:
+            return sid
+    return "_anon"
+
+
+def _mem_todos(runtime: Any, session_id: str | None = None) -> list[TodoItem]:
+    if runtime is None:
+        return []
+    key = _todos_session_key(runtime, session_id)
+    bag = getattr(runtime, "_build_todos_by_session", None)
+    if isinstance(bag, dict):
+        cached = bag.get(key)
+        return list(cached) if isinstance(cached, list) else []
+    cached = getattr(runtime, "_build_todos", None)
+    return list(cached) if isinstance(cached, list) else []
+
+
+def _set_mem_todos(
+    runtime: Any, items: list[TodoItem], session_id: str | None = None
+) -> None:
+    if runtime is None:
+        return
+    stored = list(items)
+    key = _todos_session_key(runtime, session_id)
+    bag = getattr(runtime, "_build_todos_by_session", None)
+    if not isinstance(bag, dict):
+        bag = {}
+        runtime._build_todos_by_session = bag
+    bag[key] = stored
+    runtime._build_todos = stored
+
+
 def save_todos(
     items: list[TodoItem],
     runtime: Any = None,
@@ -133,7 +180,7 @@ def save_todos(
     if stored and open_todo_count(stored) == 0:
         stored = []
     if runtime is not None:
-        runtime._build_todos = list(stored)
+        _set_mem_todos(runtime, stored)
     mark_todos_dirty(runtime, stored)
     base = Path(root) if root else _root_for(runtime)
     if base is None:
@@ -210,17 +257,33 @@ def mark_todos_dirty(runtime: Any, items: list[TodoItem] | None) -> None:
     """Queue a live checklist event for the current ReAct stream."""
     if runtime is None:
         return
+    tok = todos_event_token(items)
+    key = _todos_session_key(runtime)
     with suppress(Exception):
-        runtime._pending_todos_event = todos_event_token(items)
+        bag = getattr(runtime, "_pending_todos_by_session", None)
+        if not isinstance(bag, dict):
+            bag = {}
+            runtime._pending_todos_by_session = bag
+        bag[key] = tok
+        # Legacy single slot — only for this session's latest write.
+        runtime._pending_todos_event = tok
 
 
-def take_todos_event(runtime: Any) -> str | None:
-    """Pop the pending ``@@todos:`` token, if any."""
+def take_todos_event(
+    runtime: Any, session_id: str | None = None
+) -> str | None:
+    """Pop the pending ``@@todos:`` token for *this* session, if any."""
     if runtime is None:
         return None
-    tok = getattr(runtime, "_pending_todos_event", None)
-    with suppress(Exception):
-        runtime._pending_todos_event = None
+    key = _todos_session_key(runtime, session_id)
+    tok = None
+    bag = getattr(runtime, "_pending_todos_by_session", None)
+    if isinstance(bag, dict):
+        tok = bag.pop(key, None)
+    else:
+        tok = getattr(runtime, "_pending_todos_event", None)
+        with suppress(Exception):
+            runtime._pending_todos_event = None
     if isinstance(tok, str) and tok.startswith("@@todos:"):
         return tok
     return None

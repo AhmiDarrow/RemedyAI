@@ -10,6 +10,7 @@ from remedy.core.build_engine import (
     BuildTurnState,
     begin_build_turn,
     build_state_owned_by,
+    deactivate_build_for_session,
     get_build_state,
     ledger_resume_allowed,
 )
@@ -163,6 +164,39 @@ def test_new_session_bare_continue_resumes_only_recent_build(tmp_path):
         assert st.phase == "scout"
     finally:
         end_turn("sess-new-2", *t)
+
+
+def test_deactivate_build_for_session():
+    rt = SimpleNamespace(
+        _build_turns={
+            "sess-a": BuildTurnState(active=True, session_id="sess-a"),
+            "sess-b": BuildTurnState(active=True, session_id="sess-b"),
+        }
+    )
+    assert deactivate_build_for_session(rt, "sess-a") is True
+    assert rt._build_turns["sess-a"].active is False
+    assert rt._build_turns["sess-b"].active is True
+    assert deactivate_build_for_session(rt, "sess-a") is False
+
+
+def test_ledger_resume_blocked_when_source_session_stopped():
+    from remedy.core.session_continuity import (
+        clear_all_continuity_caches,
+        note_session_stopped,
+    )
+
+    clear_all_continuity_caches()
+    led = _led("sess-build", age_s=60)
+    assert ledger_resume_allowed(led, session_id="sess-new", generic_continuation=True)
+    note_session_stopped("sess-build", reason="stop")
+    assert not ledger_resume_allowed(
+        led, session_id="sess-new", generic_continuation=True
+    )
+    # Same session may still continue after Stop.
+    assert ledger_resume_allowed(
+        led, session_id="sess-build", generic_continuation=True
+    )
+    clear_all_continuity_caches()
 
 
 def test_get_build_state_rejects_foreign_legacy_slot():

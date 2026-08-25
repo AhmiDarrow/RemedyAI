@@ -124,9 +124,11 @@ def _spawn_background(
     import os
     import subprocess
 
+    from remedy.execution.sandbox import scrub_subprocess_env
+
     kwargs: dict[str, Any] = {
         "cwd": str(cwd) if cwd else None,
-        "env": env,
+        "env": scrub_subprocess_env(env, argv=argv),
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
         "stdin": subprocess.DEVNULL,
@@ -479,7 +481,13 @@ def register_shell_tools(runtime: Any) -> None:
         # Partner trust: bash_exec always asks in ask-mode (high-impact tool)
         from remedy.core.turn_context import turn_session_id
 
-        ask_reason = APPROVALS.needs_ask(command, tool_name="bash_exec")
+        from remedy.core.turn_pipeline import gate_already_passed
+
+        ask_reason = (
+            None
+            if gate_already_passed("bash_exec")
+            else APPROVALS.needs_ask(command, tool_name="bash_exec")
+        )
         sid = turn_session_id(runtime)
         if ask_reason and not APPROVALS.is_approved(
             "bash_exec", command, session_id=sid

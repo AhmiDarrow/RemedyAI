@@ -6,6 +6,7 @@ describe('settings search', () => {
   it('matches security section by keyword', () => {
     const m = SETTINGS_SECTION_META['security-power']
     expect(sectionMatchesSearch('approval', m.title, m.summary, m.keywords)).toBe(true)
+    expect(sectionMatchesSearch('trust', m.title, m.summary, m.keywords)).toBe(true)
     expect(sectionMatchesSearch('xyzzy-nope', m.title, m.summary, m.keywords)).toBe(false)
   })
 

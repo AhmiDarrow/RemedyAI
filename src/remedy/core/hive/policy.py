@@ -5,8 +5,26 @@ from __future__ import annotations
 from contextvars import ContextVar
 from typing import Any
 
+from remedy.policy.capabilities import Capability
+
 # Depth: only the mother hires. Daughters cannot spawn.
 _hive_depth: ContextVar[int] = ContextVar("remedy_hive_depth", default=0)
+# Granted caps for this pulse, loaded from the daughter's journal.
+_hive_granted: ContextVar[frozenset[Capability] | None] = ContextVar(
+    "remedy_hive_granted", default=None
+)
+
+# What a daughter may hold. Mail / click / credential.use stay with the mother.
+DAUGHTER_CAPABILITIES: frozenset[Capability] = frozenset(
+    {
+        Capability.FS_READ,
+        Capability.FS_WRITE,
+        Capability.PROCESS_EXEC,
+        Capability.NETWORK_READ,
+        Capability.BROWSER_READ,
+        Capability.COMPUTER_READ,
+    }
+)
 
 DEFAULT_LIVE_PULSES = 2
 MAX_LIVE_PULSES = 4
@@ -35,6 +53,14 @@ MOTHER_ONLY_TOOLS = frozenset(
         "computer_key",
         "computer_press_hold",
         "computer_hotkey",
+        "computer_drag",
+        "computer_select",
+        "computer_app",
+        "computer_windows",
+        "browser_click",
+        "browser_type",
+        "browser_fill",
+        "browser_act",
         "session_export",
         "session_import",
     }
@@ -54,6 +80,32 @@ def set_hive_depth(depth: int):
 def reset_hive_depth(token: Any) -> None:
     if token is not None:
         _hive_depth.reset(token)
+
+
+def hive_granted_capabilities() -> frozenset[Capability] | None:
+    return _hive_granted.get()
+
+
+def set_hive_granted(caps: frozenset[Capability] | None):
+    return _hive_granted.set(caps)
+
+
+def reset_hive_granted(token: Any) -> None:
+    if token is not None:
+        _hive_granted.reset(token)
+
+
+def parse_granted_caps(raw: object) -> frozenset[Capability]:
+    """Journal list → Capability set; unknown strings dropped."""
+    out: set[Capability] = set()
+    if not isinstance(raw, (list, tuple, set, frozenset)):
+        return frozenset()
+    for item in raw:
+        try:
+            out.add(Capability(str(item)))
+        except ValueError:
+            continue
+    return frozenset(out)
 
 
 def is_mother_only_tool(name: str | None) -> bool:
