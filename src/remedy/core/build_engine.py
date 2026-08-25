@@ -414,6 +414,11 @@ class BuildTurnState:
     ship_release_url: str = ""
     wasted_auth_probes: int = 0
     last_ship_report: dict[str, Any] = field(default_factory=dict)
+    last_mutation_score: dict[str, Any] | None = None
+    last_gate_tower: dict[str, Any] | None = None
+    last_mutant_kill: dict[str, Any] | None = None
+    repair_queue: list[Any] | dict[str, Any] | None = None
+    _seed_message: dict[str, Any] | None = None
 
     def touch_path(self, path: str) -> None:
         p = (path or "").strip()

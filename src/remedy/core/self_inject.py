@@ -524,7 +524,7 @@ def request_sidecar_restart(
     """
     base = _home_dir(home)
     locks = base / "locks"
-    payload = {
+    payload: dict[str, Any] = {
         "ts": _now_utc(),
         "kind": "sidecar_restart",
         "round_id": round_id,

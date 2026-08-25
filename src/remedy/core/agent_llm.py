@@ -308,10 +308,10 @@ def slim_tools_for_local(
         if not name:
             continue
         desc = str(fn.get("description") or name)[:desc_chars]
-        params = fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {}
-        props_in = (
-            params.get("properties") if isinstance(params.get("properties"), dict) else {}
-        )
+        raw_params = fn.get("parameters")
+        params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
+        raw_props = params.get("properties")
+        props_in: dict[str, Any] = raw_props if isinstance(raw_props, dict) else {}
         props: dict[str, Any] = {}
         for k, v in list(props_in.items())[:max_props]:
             if isinstance(v, dict):
@@ -324,7 +324,8 @@ def slim_tools_for_local(
                 props[str(k)] = slim
             else:
                 props[str(k)] = {"type": "string"}
-        req = params.get("required") if isinstance(params.get("required"), list) else []
+        raw_req = params.get("required")
+        req: list[Any] = raw_req if isinstance(raw_req, list) else []
         out.append(
             {
                 "type": "function",

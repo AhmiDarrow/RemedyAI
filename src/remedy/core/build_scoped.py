@@ -115,7 +115,7 @@ def scoped_verify_command(
                     paths.append(cp)
             # stash for status
             with suppress(Exception):
-                runtime._last_mutation_score = ms  # type: ignore[attr-defined]
+                runtime._last_mutation_score = ms
     # Only scope pytest-family
     if base and not re.search(r"(?i)\bpytest\b", base) and base not in ("",):
         # npm test / cargo — hard to scope reliably without project knowledge
@@ -156,8 +156,8 @@ def scoped_verify_command(
         return ""
 
     # Cap paths for CLI length
-    paths = " ".join(f'"{t}"' if " " in t else t for t in test_files[:12])
-    return f"pytest -q {paths}"
+    joined = " ".join(f'"{t}"' if " " in t else t for t in test_files[:12])
+    return f"pytest -q {joined}"
 
 
 def format_scoped_verify_note(full_cmd: str, scoped_cmd: str) -> str:

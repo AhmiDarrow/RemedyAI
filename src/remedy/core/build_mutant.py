@@ -231,12 +231,14 @@ def mutant_kill_score(
 
         for p in targets:
             try:
-                rel = p.relative_to(root).as_posix()
+                rel_posix = p.relative_to(root).as_posix()
             except Exception:
-                rel = p.name
-            orig = (tmp_root / rel).read_text(encoding="utf-8", errors="replace")
+                rel_posix = p.name
+            orig = (tmp_root / rel_posix).read_text(
+                encoding="utf-8", errors="replace"
+            )
             for mid, mut_src in _apply_mutants(orig)[:max_mutants_per_file]:
-                mut_path = tmp_root / rel
+                mut_path = tmp_root / rel_posix
                 mut_path.write_text(mut_src, encoding="utf-8")
                 still_green = _run_pytest(tmp_root, test_args, timeout_s=timeout_s) if test_args else True
                 # restore

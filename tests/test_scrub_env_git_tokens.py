@@ -45,7 +45,11 @@ def test_cloud_cli_credentials_only_with_cloud_argv(monkeypatch):
     env = scrub_subprocess_env(argv=["aws", "s3", "ls"])
     assert env.get("AWS_PROFILE") == "dev"
     assert env.get("AWS_REGION") == "us-east-1"
+    assert "GOOGLE_APPLICATION_CREDENTIALS" not in env
     assert "GOOGLE_API_KEY" not in env
+    gcp = scrub_subprocess_env(argv=["gcloud", "auth", "list"])
+    assert gcp.get("GOOGLE_APPLICATION_CREDENTIALS") == "C:\\keys\\adc.json"
+    assert "AWS_PROFILE" not in gcp
 
 
 def test_path_env_must_use_scrubbed_base(monkeypatch, tmp_path):

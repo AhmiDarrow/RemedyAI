@@ -5,6 +5,7 @@ exclude`` must be a subset. The lock itself may only lose lines versus
 ``origin/master`` (when that ref is available).
 
 Win32-only modules stay on the lock until a Windows mypy job types them.
+Size is not a reason to exclude — split the module and type the pieces.
 """
 
 from __future__ import annotations

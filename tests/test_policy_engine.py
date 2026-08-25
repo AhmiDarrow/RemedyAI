@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import pytest
+
 from remedy.core.approvals import APPROVALS
 from remedy.core.context import TurnFactory
 from remedy.core.turn_context import begin_turn, end_turn
 from remedy.policy.decisions import ToolRequest
 from remedy.policy.engine import PolicyEngine
+
+
+@pytest.fixture(autouse=True)
+def _isolate_approval_config(monkeypatch):
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"access_scope": "project"},
+    )
 
 
 def _eval(name: str, command: str = "", *, mode: str = "ask"):

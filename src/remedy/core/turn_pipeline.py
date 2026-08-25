@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 from contextlib import suppress
+from contextvars import ContextVar
 from typing import Any
 
 from remedy.core.errors import format_tool_error
+from remedy.execution.action import ActionRecord
+
+# Per-asyncio-task record so finish_tool resumes the same action authorize opened.
+# Never written into tool arguments — models and tests must not see it.
+_current_action: ContextVar[ActionRecord | None] = ContextVar(
+    "remedy_current_action", default=None
+)
 
 
 def snapshot_live_turn(runtime: Any = None) -> None:
@@ -35,6 +43,22 @@ def authorize_tool(runtime: Any, name: str, args: dict[str, Any]) -> str | None:
     from remedy.tools.catalog import descriptor_for
 
     desc = descriptor_for(name)
+    args.pop("_action_id", None)
+    hive_block = None
+    with suppress(Exception):
+        from remedy.core.hive.policy import hive_depth
+        from remedy.policy.capabilities import Capability as Cap
+
+        if hive_depth() > 0 and (desc.capabilities & {Cap.CREDENTIAL_USE, Cap.TRANSACT}):
+            hive_block = format_tool_error(
+                "Hive workers cannot use credentials or transact.",
+                code="HIVE_CAPABILITY",
+                tool_name=name,
+                suggestion="Ask the mother to do this step.",
+            )
+    if hive_block:
+        inc("tool_failure", tool=name)
+        return hive_block
     command = str(
         args.get("command")
         or args.get("cmd")
@@ -91,7 +115,7 @@ def authorize_tool(runtime: Any, name: str, args: dict[str, Any]) -> str | None:
         rec = ActionRecord(tool=name)
         rec.advance(ActionState.AUTHORIZED)
         rec.advance(ActionState.RUNNING)
-        args["_action_id"] = rec.action_id
+        _current_action.set(rec)
     with suppress(Exception):
         if ctx is not None:
             default_bus().emit_simple(
@@ -121,14 +145,19 @@ def finish_tool(
     from remedy.tools.catalog import descriptor_for
     from remedy.verification.evidence import (
         ActionResult,
+        VerificationResult,
         VerificationStatus,
     )
     from remedy.verification.verifier import verify_action
 
     text = content or ""
+    args.pop("_action_id", None)
     desc = descriptor_for(name)
     path = str(args.get("path") or "")
-    vr_status = ""
+    vr = VerificationResult(
+        status=VerificationStatus.NOT_REQUIRED,
+        reason="no verification policy for this tool",
+    )
     if desc.requires_verification:
         vr = verify_action(
             ActionResult(
@@ -140,7 +169,6 @@ def finish_tool(
                 extra={"status": int(args.get("status") or 0)},
             )
         )
-        vr_status = vr.status.value
         with suppress(Exception):
             from remedy.core.context import TurnFactory
 
@@ -175,12 +203,17 @@ def finish_tool(
                 turn_id=str(current_turn_id() or ""),
             )
     with suppress(Exception):
-        rec = ActionRecord(tool=name)
-        rec.advance(ActionState.AUTHORIZED)
-        rec.advance(ActionState.RUNNING)
+        rec = _current_action.get()
+        if rec is None or rec.tool != name:
+            rec = ActionRecord(tool=name)
+            rec.advance(ActionState.AUTHORIZED)
+            rec.advance(ActionState.RUNNING)
         rec.advance(ActionState.RESULT)
         rec.advance(ActionState.VERIFYING)
-        if vr_status != VerificationStatus.FAIL.value:
+        rec.verification = vr
+        if vr.status == VerificationStatus.FAIL:
+            rec.advance(ActionState.FAILED)
+        else:
             rec.advance(ActionState.VERIFIED)
             rec.advance(ActionState.COMPLETED)
         from remedy.core.context import TurnFactory
@@ -193,6 +226,7 @@ def finish_tool(
             tool=name,
             ok=ok,
         )
+        _current_action.set(None)
     return text
 
 

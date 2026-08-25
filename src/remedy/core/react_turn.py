@@ -314,13 +314,13 @@ def resolve_tools(
         try:
             from remedy.core.plan_store import PLAN_MODE_TOOL_NAMES
 
-            pack = [
+            plan_tools = [
                 t
                 for t in all_t
                 if ((t.get("function") or {}).get("name") or "") in PLAN_MODE_TOOL_NAMES
             ]
             return ToolsDecision(
-                pack or None, False, "plan_mode", pack="plan"
+                plan_tools or None, False, "plan_mode", pack="plan"
             )
         except Exception:
             return ToolsDecision(all_t, False, "plan_mode_fallback", pack="full")
@@ -332,14 +332,14 @@ def resolve_tools(
         )
 
         if in_internal_improve():
-            pack = [
+            improve_tools = [
                 t
                 for t in all_t
                 if ((t.get("function") or {}).get("name") or "")
                 in INTERNAL_IMPROVE_TOOLS
             ]
             return ToolsDecision(
-                pack or None, True, "internal_improve", pack="self_fix"
+                improve_tools or None, True, "internal_improve", pack="self_fix"
             )
 
     # Only proven trivia / pasted markup strip tools. Knowledge questions
@@ -413,7 +413,9 @@ def resolve_tools(
                     pack = "write_first"
                     reason = "task_write_first"
         if local and tools and len(tools) > LOCAL_MAX_TOOLS_PER_STEP:
-            tools = cap_tools_for_step(tools, local=True)
+            capped = cap_tools_for_step(tools, local=True)
+            if capped is not None:
+                tools = capped
             reason = reason + "+local_cap"
         logger.info(
             "react_tools arm reason=%s pack=%s count=%d local=%s step=%d",
@@ -602,10 +604,10 @@ def cap_tools_for_step(
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for n in _OPERATE_CORE_TOOLS:
-        t = by_name.get(n)
-        if t is None or n in seen:
+        picked = by_name.get(n)
+        if picked is None or n in seen:
             continue
-        out.append(t)
+        out.append(picked)
         seen.add(n)
         if len(out) >= max_tools:
             return out

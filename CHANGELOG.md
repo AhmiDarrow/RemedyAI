@@ -4,6 +4,39 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-08-24
+
+### Added — capability architecture (Optimization/Stability)
+
+- **Turns have ids.** Every `begin_turn` gets a unique `turn_id`. Frozen
+  `TurnContext` is snapshotted for policy, events, and verification.
+- **Tools declare capabilities.** `ToolDescriptor` (risk, approval,
+  credentials, verification) is the source of truth — not scattered
+  `if tool in …` lists for new security logic.
+- **PolicyEngine** is the live gate on `execute_tool_calls`. The LLM
+  proposes; authority stays in policy. Owner checkpoints (pay / send /
+  mail) still cannot be waived.
+- **CredentialBroker.** Generic shell and background/host-session children
+  no longer inherit `GH_TOKEN` / `SSH_AUTH_SOCK`. `git` / `gh` / `ssh`
+  get an explicit time-bound grant. Ship tools request those grants.
+- **Verification.** A process exit code of 0 is not proof the owner's
+  goal is done. File tools must leave a file on disk.
+- **Events + TurnStore.** SQLite event log; desktop stream jobs upsert a
+  per-session turn record (`session_id` / `turn_id` / `job_id`).
+- **Hive daughters** cannot receive `credential.use` or `transact`.
+- **Web facts** ingest as `TOOL_OBSERVED`, never `USER_DECLARED`.
+- **Trust profiles** (conservative / balanced / autonomous) cannot skip
+  mail or payment checkpoints.
+- Action state machine: `RUNNING` cannot skip to `COMPLETED`.
+- **mypy no longer skips large modules.** Former "type gradually" excludes
+  (`agent.py`, `react_loop/loop.py`, build/learning, …) are typed. The ReAct
+  stream for-loop lives in `react_loop/loop_steps.py`. The exclude lock is
+  Win32-only (`desktop_win` / `desktop_uia` / `companion` / `conpty`).
+- Live-turn bugsweep: tool args are no longer mutated with `_action_id`;
+  `finish_tool` resumes the same action record and records verification;
+  hive workers are denied `credential.use` / `transact` at the gate;
+  `aws` argv no longer inherits GCP ADC.
+
 ## [0.31.2] - 2026-08-24
 
 ### Fixed — thinking is this round's scratchpad

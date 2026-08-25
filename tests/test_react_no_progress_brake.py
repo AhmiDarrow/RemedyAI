@@ -21,10 +21,12 @@ from __future__ import annotations
 import inspect
 
 from remedy.core.react_loop import loop as loop_mod
+from remedy.core.react_loop import loop_steps as steps_mod
 
 
 def _source() -> str:
-    return inspect.getsource(loop_mod)
+    """Orchestrator + extracted step loop (split so mypy can type both)."""
+    return inspect.getsource(loop_mod) + "\n" + inspect.getsource(steps_mod)
 
 
 def test_brake_state_is_initialised_before_the_step_loop() -> None:
