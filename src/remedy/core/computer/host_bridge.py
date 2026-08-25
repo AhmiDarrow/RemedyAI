@@ -438,6 +438,8 @@ class ComputerHostBridge:
         # Last a11y/desktop snapshot for click-by-ref resolution
         self._last_elements: list[dict[str, Any]] = []
         self._last_elements_target: str = ""
+        self._last_elements_at: float = 0.0
+        self._last_elements_at_by_session: dict[str, float] = {}
         # Last successful drive target (browser | desktop). Sticky so a game
         # launched with computer_app is not clicked in the Browser rail.
         self._last_drive_target: str = ""
@@ -510,11 +512,14 @@ class ComputerHostBridge:
         els = list(elements or [])[:120]
         self._last_elements = els
         self._last_elements_target = target
+        now = time.monotonic()
+        self._last_elements_at = now
         # Snapshot/find update refs only — do not steal last_drive_target
         sid = self._session_key()
         if sid:
             self._last_elements_by_session[sid] = els
             self._last_elements_target_by_session[sid] = target
+            self._last_elements_at_by_session[sid] = now
             self._trim_session_maps()
 
     def _trim_session_maps(self) -> None:
@@ -526,6 +531,7 @@ class ComputerHostBridge:
             self._last_drive_by_session.pop(k, None)
             self._last_elements_by_session.pop(k, None)
             self._last_elements_target_by_session.pop(k, None)
+            self._last_elements_at_by_session.pop(k, None)
             self._last_navigate_at_by_session.pop(k, None)
             self._last_navigate_url_by_session.pop(k, None)
             self._last_navigate_optimistic_by_session.pop(k, None)
@@ -665,6 +671,20 @@ class ComputerHostBridge:
             if str(el.get("ref") or "").strip().lower() == r:
                 return el
         return None
+
+    def last_elements_age_s(self) -> float | None:
+        """Seconds since the last snapshot for this session, or None if none."""
+        sid = self._session_key()
+        at = self._last_elements_at_by_session.get(sid, 0.0) if sid else self._last_elements_at
+        if not at:
+            return None
+        return max(0.0, time.monotonic() - at)
+
+    def snapshot_is_stale(self, *, max_age_s: float = 30.0) -> bool:
+        age = self.last_elements_age_s()
+        if age is None:
+            return True
+        return age > max(1.0, float(max_age_s))
 
     def last_elements_info(self) -> dict[str, Any]:
         sid = self._session_key()

@@ -421,6 +421,10 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
         plan_id: str = "",
         plan_status: str = "",
         note: str = "",
+        intended: str = "",
+        observed: str = "",
+        evidence: str = "",
+        block_reason: str = "",
     ) -> str:
         """Mark a plan step pending|active|done|skipped. Prefer this over [done] in titles."""
         store = _plan_store()
@@ -472,7 +476,16 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
                     f"Plan {plan.id} steps: "
                     + ", ".join(f"{s.id}:{s.status}" for s in plan.steps)
                 )
-        updated = store.update_step_status(plan.id, sid_key, st)
+        seen = (observed or "").strip() or (note or "").strip()
+        updated = store.update_step_status(
+            plan.id,
+            sid_key,
+            st,
+            intended=(intended or "").strip() or None,
+            observed=seen or None,
+            evidence=(evidence or "").strip() or None,
+            block_reason=(block_reason or "").strip() or None,
+        )
         if updated is None:
             return (
                 f"Step not found: {sid_key!r} on plan {plan.id}. "
@@ -673,6 +686,9 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
         "plan_step_status",
         "Update one plan step status (pending|active|done|skipped). "
         "Use after finishing a step — never fake progress with '[done]' in titles. "
+        "Prefer observed=/evidence= when you checked an outcome. "
+        "block_reason=couldnt_verify if you could not confirm. "
+        "status=done without those fields still works. "
         "step_id may be s1, 1-based index, or title. Omit plan_id for latest session plan.",
         plan_step_status,
         {
@@ -698,7 +714,23 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
                 },
                 "note": {
                     "type": "string",
-                    "description": "Optional short note (shown in tool result only)",
+                    "description": "Optional short note; stored as observed if observed is empty",
+                },
+                "intended": {
+                    "type": "string",
+                    "description": "What this step was supposed to accomplish",
+                },
+                "observed": {
+                    "type": "string",
+                    "description": "What you actually saw (file, URL, test output, UI)",
+                },
+                "evidence": {
+                    "type": "string",
+                    "description": "Short pointer: path, command, or snapshot note",
+                },
+                "block_reason": {
+                    "type": "string",
+                    "description": "need_you | couldnt_verify | env_changed | tool_failed | skipped",
                 },
             },
             "required": ["status"],

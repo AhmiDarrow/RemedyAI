@@ -91,6 +91,10 @@ def load_todos(
     for an unbound endless chat.
     """
     explicit = root is not None
+    if session_id and not explicit:
+        # Session GET with no bound folder: this chat's in-memory bag only —
+        # never the runtime's last cwd (another tab's project disk).
+        return _mem_todos(runtime, session_id)
     base = _disk_root(root) if explicit else _root_for(runtime)
     if base is None:
         if explicit and not session_id:
@@ -155,6 +159,8 @@ def _mem_todos(runtime: Any, session_id: str | None = None) -> list[TodoItem]:
     if isinstance(bag, dict):
         cached = bag.get(key)
         return list(cached) if isinstance(cached, list) else []
+    if session_id:
+        return []
     cached = getattr(runtime, "_build_todos", None)
     return list(cached) if isinstance(cached, list) else []
 

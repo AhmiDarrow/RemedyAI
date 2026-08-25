@@ -268,13 +268,38 @@ export function PlanBanner({
         <ol className="plan-steps mb-2.5" style={{ color: 'var(--text-secondary)' }}>
           {steps.slice(0, 8).map((s, i) => {
             const chip = stepStatusChip(s.status)
+            const block = String(s.block_reason || '').trim()
+            const seen = String(s.observed || '').trim()
+            const blockLabel =
+              block === 'need_you'
+                ? 'needs you'
+                : block === 'couldnt_verify'
+                  ? "couldn't verify"
+                  : block === 'env_changed'
+                    ? 'environment changed'
+                    : block === 'tool_failed'
+                      ? 'tool failed'
+                      : block === 'skipped'
+                        ? 'skipped'
+                        : block
             return (
               <li key={s.id || i} className="plan-step" data-step-status={chip.key}>
                 <span className="plan-step-n tabular-nums">{i + 1}.</span>
-                <span className="plan-step-title min-w-0 break-words" title={s.detail || undefined}>
-                  {s.title}
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="plan-step-title min-w-0 break-words" title={s.detail || s.intended || undefined}>
+                    {s.title}
+                  </span>
+                  {seen ? (
+                    <span className="text-[0.68rem] opacity-80 break-words" style={{ color: 'var(--text-muted)' }}>
+                      {seen}
+                    </span>
+                  ) : null}
                 </span>
-                <span className={`plan-chip plan-chip-${chip.key}`}>{chip.label}</span>
+                {blockLabel ? (
+                  <span className="plan-chip plan-chip-blocked shrink-0">{blockLabel}</span>
+                ) : (
+                  <span className={`plan-chip plan-chip-${chip.key}`}>{chip.label}</span>
+                )}
               </li>
             )
           })}

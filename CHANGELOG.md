@@ -4,6 +4,24 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-08-25
+
+### Added — memory authority and checkpoint recovery
+
+- Partner Memory stamps **who/why** on facts. Retrieval is labeled context,
+  not a grant. Hive daughters cannot write parent Partner Memory (session
+  notes only). Instruction-shaped laundering ("skip all approvals") is
+  refused. Stale UI snapshots are re-observed before a `ref=` click.
+  Payment / credential / send checkpoints still cannot be recovered around.
+
+### Added — verified Plan steps
+
+- Plan steps can record **intended / observed / evidence** and a short
+  **block reason** (`need_you`, `couldn't verify`, environment changed, tool
+  failed). Marking a step `done` without those fields still works — coding
+  Plan/Build is not jammed. The Plan banner shows what was seen or why it
+  stopped. A finished plan is not automatically the owner's goal.
+
 ### Added — language (Remedy is for everyone)
 
 - **Settings → You & Agent → Language.** Default **Auto** matches this computer

@@ -1474,6 +1474,8 @@ def test_computer_guidance_present():
     assert "target" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "play" in COMPUTER_USE_SYSTEM_ADDENDUM.lower()
     assert "target=desktop" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "plan_step_status" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "couldnt_verify" in COMPUTER_USE_SYSTEM_ADDENDUM
     from remedy.core.computer.guidance import needs_computer_use_guidance
 
     assert needs_computer_use_guidance("goto gmail and sign in")

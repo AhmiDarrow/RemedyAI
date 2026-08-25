@@ -6,6 +6,10 @@ export type PlanStep = {
   title: string
   detail?: string
   status?: string
+  intended?: string
+  observed?: string
+  evidence?: string
+  block_reason?: string
 }
 
 export type PlanStatus = 'draft' | 'approved' | 'active' | 'done' | 'cancelled' | string

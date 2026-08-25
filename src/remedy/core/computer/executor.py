@@ -837,12 +837,11 @@ class ComputerExecutor:
                     },
                 )
             if ref:
-                el = self.bridge.get_element_by_ref(ref)
-                if el is None:
-                    # Refresh window snapshot once
+                if self.bridge.snapshot_is_stale() or self.bridge.get_element_by_ref(ref) is None:
+                    # Re-observe — never click coordinates from a stale snapshot.
                     elements = win.desktop_snapshot()
                     self.bridge.set_last_elements(elements, target="desktop")
-                    el = self.bridge.get_element_by_ref(ref)
+                el = self.bridge.get_element_by_ref(ref)
                 if el is None:
                     return public_result(
                         ok=False,
@@ -1584,6 +1583,18 @@ class ComputerExecutor:
             if text_q and not ref:
                 return self._browser_click_text(text_q, kwargs)
             if ref:
+                if self.bridge.snapshot_is_stale():
+                    snap = self._browser_snapshot_now(kwargs)
+                    if not snap.get("ok"):
+                        return public_result(
+                            ok=False,
+                            target="browser",
+                            action="click",
+                            message=(
+                                "snapshot stale — take a fresh computer_snapshot "
+                                "before clicking this ref"
+                            ),
+                        )
                 # Prefer host job click_ref; also try last elements coords
                 payload["ref"] = ref
                 payload["action"] = "click"

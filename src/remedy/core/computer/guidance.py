@@ -88,8 +88,13 @@ Operate this Windows PC with Remedy-native tools when the Desktop is running.
    Pass `expect_url=` / `expect_text=` (substring) so the call fails loudly when
    the outcome doesn't match (e.g. `expect_text="added to cart"`). An
    `unverified` result is NOT completion — re-observe before claiming the
-   user's goal is done.
+   user's goal is done. If a plan is active, record that on the step with
+   `plan_step_status observed=…` or `block_reason=couldnt_verify` — never
+   mark the owner's goal done on a tool-ok alone.
 5. **Re-observe only on failure** — one retry with snapshot; do not spiral vision.
+   Refs die with the snapshot that minted them — if the page aged, snapshot
+   again before clicking `ref=`. Do not recover a payment/credential checkpoint
+   by retrying the same click; that is an owner moment.
 6. **Latest user message only** — do not resume old wiki/goals mid-task.
 
 ### Adapt & overcome — you are strong to be useful

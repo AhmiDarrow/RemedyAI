@@ -40,6 +40,10 @@ class UserFact(BaseModel):
     project_path: str | None = Field(default=None)
     # Pinned facts always inject when budget allows
     pinned: bool = Field(default=False)
+    # Provenance — defaults keep old profiles loadable.
+    inferred: bool = Field(default=True)
+    authority: str = Field(default="agent")  # owner | agent | hive | tool
+    why: str = Field(default="")
 
 
 class UserProfile(BaseModel):

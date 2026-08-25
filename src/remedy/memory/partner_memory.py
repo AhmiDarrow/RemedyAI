@@ -417,6 +417,10 @@ def upsert_profile_fact(
     force: bool = False,
     project_path: str | None = None,
     pinned: bool = False,
+    inferred: bool | None = None,
+    authority: str | None = None,
+    why: str = "",
+    session_id: str | None = None,
 ) -> tuple[UserFact | None, str]:
     """Add or reinforce a fact.
 
@@ -424,6 +428,17 @@ def upsert_profile_fact(
     """
     text = re.sub(r"\s+", " ", (text or "").strip())
     if not text:
+        return None, "skipped"
+    from remedy.memory.authority import (
+        infer_authority,
+        is_hive_writer,
+        is_inferred_source,
+        looks_like_instruction_launder,
+    )
+
+    if is_hive_writer(session_id):
+        return None, "skipped"
+    if looks_like_instruction_launder(text):
         return None, "skipped"
     # Secrets never promote — ``force`` only relaxes stability heuristics,
     # never credential / key-shaped content (fail closed).
@@ -447,8 +462,16 @@ def upsert_profile_fact(
                 existing.project_path = proj
             if pinned:
                 existing.pinned = True
+            if why and not (existing.why or "").strip():
+                existing.why = why[:240]
+            if authority and (existing.authority or "agent") == "agent":
+                existing.authority = authority
+            if inferred is False:
+                existing.inferred = False
             return existing, "reinforced"
 
+    auth = authority or infer_authority(source=source, session_id=session_id)
+    inf = is_inferred_source(source) if inferred is None else bool(inferred)
     uf = UserFact(
         fact=text[:MAX_FACT_LEN],
         category=category or "general",
@@ -456,6 +479,9 @@ def upsert_profile_fact(
         source=source,
         project_path=proj,
         pinned=bool(pinned),
+        inferred=inf,
+        authority=auth,
+        why=(why or "")[:240],
     )
     profile.facts.append(uf)
     # Soft cap growth
@@ -773,6 +799,10 @@ async def distill_user_text(
     }
     if memory is None:
         return result
+    from remedy.memory.authority import may_write_parent_memory
+
+    if not may_write_parent_memory(session_id):
+        return result
 
     candidates = extract_heuristic_facts(user_text)
     candidates.extend(extract_from_brief(brief))
@@ -821,6 +851,7 @@ async def distill_user_text(
                 source=cand.source,
                 project_path=use_proj,
                 force=force,
+                session_id=session_id,
             )
             if action == "skipped" or uf is None:
                 result["skipped"] += 1
@@ -935,6 +966,9 @@ async def search_partner_and_entries(
                     "content": f.fact,
                     "score": score,
                     "confidence": f.confidence,
+                    "authority": getattr(f, "authority", "") or "",
+                    "inferred": bool(getattr(f, "inferred", True)),
+                    "why": getattr(f, "why", "") or "",
                 }
             )
     except Exception:
@@ -951,6 +985,9 @@ async def search_partner_and_entries(
                     + token_overlap_score(q, f"{title} {content}")
                     + 0.3 * imp
                 )
+                meta = getattr(h, "metadata", None) or {}
+                if not isinstance(meta, dict):
+                    meta = {}
                 results.append(
                     {
                         "kind": "entry",
@@ -958,6 +995,9 @@ async def search_partner_and_entries(
                         "content": content[:400],
                         "score": score,
                         "importance": imp,
+                        "authority": str(meta.get("authority") or ""),
+                        "inferred": bool(meta.get("inferred", True)),
+                        "why": str(meta.get("why") or ""),
                     }
                 )
     except Exception:
