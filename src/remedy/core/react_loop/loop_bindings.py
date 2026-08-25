@@ -237,6 +237,7 @@ def pack_state(s: Any, local_ns: dict[str, Any]) -> None:
     """Write mutable locals back onto bag ``s``."""
     skip = set(LOOP_BIND_NAMES) | {
         "s",
+        "_lb",
         "http",
         "step",
         "helpers",
