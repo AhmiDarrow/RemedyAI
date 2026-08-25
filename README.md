@@ -28,8 +28,8 @@ Remedy lives on **this computer** (Windows, Linux, WSLg). **Grove** is home. **S
 
 | | |
 |--|--|
-| **This tree** | **v0.38.0** (local) |
-| **Last public release** | [v0.31.2](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.31.2) · [PyPI](https://pypi.org/project/remedy-ai/) |
+| **This tree** | **v0.38.1** |
+| **Last public release** | [v0.38.1](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.38.1) · [PyPI](https://pypi.org/project/remedy-ai/) |
 | **Owner’s manual** | [docs/manual/](https://github.com/AhmiDarrow/RemedyAI/tree/master/docs/manual/) · [index](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/README.md) |
 | **Install** | [Windows](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/01-install-windows.md) · [Linux](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/01-install-linux.md) |
 | **Security / data** | [04-security-and-data](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/04-security-and-data.md) |
