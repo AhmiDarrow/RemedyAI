@@ -21,6 +21,7 @@ from __future__ import annotations
 import inspect
 
 from remedy.core.react_loop import loop as loop_mod
+from remedy.core.react_loop import loop_finals as finals_mod
 from remedy.core.react_loop import loop_http as http_mod
 from remedy.core.react_loop import loop_prelude as prelude_mod
 from remedy.core.react_loop import loop_round as round_mod
@@ -31,7 +32,7 @@ def _source() -> str:
     """Orchestrator + extracted step modules (split so mypy can type each)."""
     return "\n".join(
         inspect.getsource(m)
-        for m in (loop_mod, steps_mod, prelude_mod, http_mod, round_mod)
+        for m in (loop_mod, steps_mod, prelude_mod, http_mod, round_mod, finals_mod)
     )
 
 
