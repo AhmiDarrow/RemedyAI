@@ -233,6 +233,10 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                         )
                         or _looks_like_path_title(cur_title)
                     )
+                    from remedy.interfaces.routes.sessions.titles import (
+                        should_refresh_living_title as _should_refresh_living_title,
+                    )
+
                     if placeholder and (user_text or att_dicts):
                         new_title = _title_from_prompt(
                             user_text
@@ -249,6 +253,17 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                         elif placeholder and (
                             _looks_like_path_title(cur_title) or not cur_title
                         ):
+                            await memory.update_chat_session(
+                                session_id, title=new_title
+                            )
+                    elif user_text.strip() and _should_refresh_living_title(
+                        cur_title, user_text
+                    ):
+                        # Endless session: one thread, sidebar name follows this beat.
+                        new_title = _title_from_prompt(
+                            user_text, att_dicts=att_dicts
+                        )
+                        if new_title and not _looks_like_path_title(new_title):
                             await memory.update_chat_session(
                                 session_id, title=new_title
                             )
@@ -431,6 +446,10 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                     return task
 
                 try:
+                    with contextlib.suppress(Exception):
+                        from remedy.core.build_todos import begin_chat_beat
+
+                        begin_chat_beat(runtime, session_id)
                     async for token in runtime.stream_response(
                         user_text or "(see attached files)",
                         session_id=session_id,

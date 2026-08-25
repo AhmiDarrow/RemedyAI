@@ -24,6 +24,7 @@ import {
 import { IconPaperclip, IconSend, IconStop } from './icons'
 import { ImageLightbox } from './ImageLightbox'
 import { sessionStashKey, swapSessionStash } from '../utils/sessionStash'
+import { useI18n } from '../i18n'
 
 export interface AgentDef {
   name: string
@@ -192,6 +193,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   },
   ref,
 ) {
+  const { t } = useI18n()
   const [input, setInput] = useState('')
   const inputRef = useRef('')
   inputRef.current = input
@@ -1381,18 +1383,18 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onPaste={onPaste}
           placeholder={
             editingQueueId
-              ? 'Edit queued message — Enter saves to queue'
+              ? t('composer.placeholderEditQueue')
               : planMode
-                ? 'Plan mode — explore & plan (Shift+Tab → Build)'
+                ? t('composer.placeholderPlan')
                 : streaming
-                  ? 'Queue next message (Enter) · Ctrl+Enter interrupt…'
+                  ? t('composer.placeholderQueue')
                   : recording
-                    ? 'Listening…'
+                    ? t('composer.placeholderListening')
                     : transcribing
-                      ? 'Hearing what you said…'
+                      ? t('composer.placeholderHearing')
                       : attachments.length
-                    ? 'Add a note for these files…'
-                    : 'Message Remedy — /command · @file · Shift+Tab Plan'
+                    ? t('composer.placeholderFiles')
+                    : t('composer.placeholder')
           }
           disabled={disabled}
           title={
@@ -1490,24 +1492,16 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       </div>
       <div className="composer-hint-row">
         <span className="truncate min-w-0">
-          {planMode ? (
-            <>
-              Plan · research only · <kbd>Shift+Tab</kbd> Build
-            </>
-          ) : streaming ? (
-            <>
-              <kbd>Enter</kbd> queue · <kbd>Ctrl+Enter</kbd> interrupt
-            </>
-          ) : (
-            <>
-              <kbd>Enter</kbd> send · <kbd>/</kbd> commands · <kbd>@</kbd> files
-            </>
-          )}
+          {planMode
+            ? t('composer.hintPlan')
+            : streaming
+              ? t('composer.hintQueue')
+              : t('composer.hintSend')}
         </span>
         {planMode ? (
-          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Plan</span>
+          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{t('bar.plan')}</span>
         ) : streaming ? (
-          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Streaming</span>
+          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{t('composer.streaming')}</span>
         ) : null}
       </div>
       </div>

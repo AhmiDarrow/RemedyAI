@@ -268,9 +268,8 @@ def get_hidden_imports() -> list[str]:
         "remedy.gateway",
         "remedy.gateway.router",
         "remedy.models",
-        "remedy.errors",
         "remedy.core.errors",
-        "remedy.persona",
+        "remedy.i18n",
         # Networking / streaming
         "aiosignal",
         "frozenlist",
@@ -282,7 +281,6 @@ def get_hidden_imports() -> list[str]:
         "h11",
         "httptools",
         "websockets",
-        "websockets.legacy",
         # Standard library modules commonly missed
         "email",
         "email.mime",

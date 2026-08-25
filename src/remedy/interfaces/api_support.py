@@ -108,6 +108,7 @@ def _apply_llm_to_runtime(
     harness_max_context_pct: float | None = None,
     thinking_level: str | None = None,
     approval_mode: str | None = None,
+    ui_language: str | None = None,
 ) -> None:
     """Push LLM settings into the live runtime so chat uses the saved config."""
     if runtime is None:
@@ -137,6 +138,8 @@ def _apply_llm_to_runtime(
             kwargs["thinking_level"] = thinking_level
         if approval_mode is not None:
             kwargs["approval_mode"] = approval_mode
+        if ui_language is not None:
+            kwargs["ui_language"] = ui_language
         runtime.reconfigure_llm(**kwargs)
         return
     # Fallback for older runtimes without reconfigure_llm

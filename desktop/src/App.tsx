@@ -154,6 +154,7 @@ function AppShell({
 }
 
 export default function App() {
+  const [serverState, setServerState] = useState<ServerState>(isTauri() ? 'connecting' : 'ready')
   const {
     sessions,
     activeId,
@@ -256,7 +257,13 @@ export default function App() {
     refreshConnected,
     onProviderModelChange,
     onModelChange,
-  } = useSessionLlm({ activeId, sessions, streaming, runningCount })
+  } = useSessionLlm({
+    activeId,
+    sessions,
+    streaming,
+    runningCount,
+    apiReady: serverState === 'ready',
+  })
 
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>('high')
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>('ask')
@@ -374,7 +381,6 @@ export default function App() {
   /** Track recently opened sessions (for archive filter only — no chip strip UI). */
   const [openTabs, setOpenTabs] = useState<Set<string>>(new Set())
   const openTabIds = useMemo(() => [...openTabs], [openTabs])
-  const [serverState, setServerState] = useState<ServerState>(isTauri() ? 'connecting' : 'ready')
   const [serverError, setServerError] = useState('')
   const [agentDefs, setAgentDefs] = useState<{ name: string; description: string }[]>([])
   const { notify } = useNotifications()
@@ -1492,7 +1498,10 @@ export default function App() {
                   const un = (s.user_name || '').trim()
                   setUserName(un)
                   if (!un) setAskUserName(true)
-                  return refreshModels()
+                  void refreshConnected()
+                  return refreshModels({
+                    provider: s.llm_provider ? String(s.llm_provider) : undefined,
+                  })
                 })
                 .catch(() => refreshModels())
             }}

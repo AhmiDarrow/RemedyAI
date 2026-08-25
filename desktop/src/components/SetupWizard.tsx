@@ -27,6 +27,7 @@ import type { MessengerInfo } from '../api/settings'
 import { MessengersWizardStep } from './setup/MessengersWizardStep'
 import { isCustomLikeProvider, mergeModelOptions, showsBaseUrl } from '../api/modelDiscovery'
 import { isLinuxDesktop } from '../utils/platform'
+import { useI18n } from '../i18n'
 
 const PERSONAS = [
   { id: 'balanced', name: 'Balanced', description: 'Helpful and adaptable to the task' },
@@ -52,6 +53,7 @@ const STEPS: Step[] = [
 ]
 
 export function SetupWizard({ open, onComplete }: SetupWizardProps) {
+  const { t, languages, stored, setStored } = useI18n()
   const [step, setStep] = useState<Step>('welcome')
   const [catalog, setCatalog] = useState<ProviderInfo[]>(OFFLINE_PROVIDERS)
   const [freeOptions, setFreeOptions] = useState<FreeProviderOption[]>([])
@@ -391,6 +393,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       user_name: userName.trim() || undefined,
       name: agentName.trim() || 'Remedy',
       agent_gender: agentGender || 'female',
+      ui_language: stored || 'auto',
       setup_completed: true,
       launch_at_login: launchAtLogin,
       start_in_tray: false,
@@ -407,6 +410,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     model,
     baseUrl,
     customName,
+    stored,
     projectPath,
     persona,
     userName,
@@ -582,6 +586,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       await updateSettings({
         setup_completed: true,
         llm_provider: 'demo',
+        ui_language: stored || 'auto',
         ...(demo?.default_model ? { llm_model: demo.default_model } : {}),
         llm_base_url: demo?.base_url || 'https://api.llm7.io/v1',
       })
@@ -606,7 +611,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     } finally {
       setSaving(false)
     }
-  }, [onComplete, catalog, closeOauthBrowser])
+  }, [onComplete, catalog, closeOauthBrowser, stored])
 
   if (!open) return null
 
@@ -622,13 +627,13 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const progressPct = ((stepIndex) / (STEPS.length - 1)) * 100
 
   const stepLabels: Record<Step, string> = {
-    welcome: 'Welcome',
-    provider: 'Provider',
-    workspace: 'Folder',
-    persona: 'Style',
-    messengers: 'Chat apps',
-    vision: 'On this PC',
-    finish: 'Ready',
+    welcome: t('setup.welcome'),
+    provider: t('setup.provider'),
+    workspace: t('setup.folder'),
+    persona: t('setup.style'),
+    messengers: t('setup.chatApps'),
+    vision: t('setup.onThisPc'),
+    finish: t('setup.ready'),
   }
 
   return (
@@ -647,7 +652,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
         <div className="px-7 pt-7 pb-3 text-center">
           <img src="/logo.png" alt="Remedy" className="remedy-shell-logo" draggable={false} />
           <h1 className="remedy-shell-title">Remedy</h1>
-          <p className="remedy-shell-subtitle">Your local AI partner</p>
+          <p className="remedy-shell-subtitle">{t('setup.subtitle')}</p>
         </div>
 
         <div className="px-7 pb-2">
@@ -681,8 +686,35 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                 className="text-center text-base leading-snug"
                 style={{ color: 'var(--text-primary)' }}
               >
-                Set up a provider and start chatting. Takes about a minute.
+                {t('setup.blurb')}
               </p>
+              {languages.length > 0 ? (
+                <label className="block text-left">
+                  <span className="block mb-1.5 text-sm font-medium" style={labelStyles}>
+                    {t('settings.language')}
+                  </span>
+                  <select
+                    value={stored || 'auto'}
+                    onChange={(e) => {
+                      const code = e.target.value
+                      setStored(code)
+                      void updateSettings({ ui_language: code }).catch(() => {})
+                    }}
+                    className="w-full rounded-lg px-3 py-2.5 text-sm outline-none"
+                    style={inputStyles}
+                  >
+                    {languages.map((row) => (
+                      <option key={row.id} value={row.id}>
+                        {row.id === 'auto'
+                          ? t('settings.languageAuto')
+                          : row.name_native === row.name_en
+                            ? row.name_native
+                            : `${row.name_native} — ${row.name_en}`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <div className="remedy-shell-actions flex-col">
                 <button
                   type="button"
@@ -691,16 +723,16 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   className="ui-btn ui-btn-primary w-full"
                   style={{ padding: '0.8rem 1rem', fontSize: '1rem' }}
                 >
-                  Get Started
+                  {t('setup.getStarted')}
                 </button>
                 <button
                   type="button"
                   onClick={handleSkip}
                   disabled={saving}
                   className="ui-btn ui-btn-ghost w-full"
-                  title="Skip setup for now — won't show again on next launch"
+                  title={t('setup.skip')}
                 >
-                  {saving ? 'Saving…' : 'Skip for now'}
+                  {saving ? t('setup.saving') : t('setup.skip')}
                 </button>
               </div>
             </div>
@@ -711,7 +743,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
               {/* Clean free path — three choices max, not a chip flea market */}
               <div className="space-y-2">
                 <div className="text-sm font-medium" style={labelStyles}>
-                  Start free
+                  {t('setup.startFree')}
                 </div>
                 <div className="grid gap-2">
                   <button
@@ -719,9 +751,9 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                     onClick={() => handleProviderChange('demo')}
                     className={`remedy-shell-choice${provider === 'demo' ? ' is-selected' : ''}`}
                   >
-                    <div className="text-sm font-semibold">Demo · no signup</div>
+                    <div className="text-sm font-semibold">{t('setup.demoTitle')}</div>
                     <div className="remedy-shell-muted mt-0.5">
-                      Chat immediately on a rate-limited free gateway. Switch later in Settings.
+                      {t('setup.demoBody')}
                     </div>
                   </button>
                   <button
@@ -729,7 +761,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                     onClick={() => handleProviderChange('ollama')}
                     className={`remedy-shell-choice${provider === 'ollama' ? ' is-selected' : ''}`}
                   >
-                    <div className="text-sm font-semibold">Ollama · free & private on this PC</div>
+                    <div className="text-sm font-semibold">{t('setup.ollamaTitle')}</div>
                     <div className="remedy-shell-muted mt-0.5">
                       {ollamaHint
                         || 'Requires Ollama installed locally. No cloud API key.'}
@@ -739,7 +771,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                 {freeKeyOptions.length > 0 && (
                   <div className="pt-1">
                     <label className="block mb-1 text-xs font-medium" style={mutedStyles}>
-                      Or a free cloud key (optional)
+                      {t('setup.orFreeKey')}
                     </label>
                     <select
                       value={freeKeyOptions.some((o) => o.id === provider) ? provider : ''}
@@ -752,7 +784,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                       onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
                       onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
                     >
-                      <option value="">Choose provider…</option>
+                      <option value="">{t('setup.chooseProvider')}</option>
                       {freeKeyOptions.map((opt) => (
                         <option key={opt.id} value={opt.id}>
                           {opt.title || opt.name}
@@ -768,7 +800,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   className="block mb-1.5 text-sm font-medium"
                   style={labelStyles}
                 >
-                  Or pick a paid / full provider
+                  {t('setup.orPaid')}
                 </label>
                 <select
                   value={
@@ -799,13 +831,13 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                     style={mutedStyles}
                     onClick={() => setShowAdvanced(true)}
                   >
-                    Custom endpoint…
+                    {t('setup.customEndpoint')}
                   </button>
                 )}
               </div>
               {provider === 'demo' && (
                 <div className="text-sm" style={mutedStyles}>
-                  Demo is rate-limited and not private. Prefer Ollama or your own key for real work.
+                  {t('setup.demoNote')}
                 </div>
               )}
               {activeMeta?.key_docs_url && provider !== 'demo' && provider !== 'ollama' && (
@@ -815,7 +847,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   style={{ color: 'var(--accent)' }}
                   onClick={() => void openExternalUrl(String(activeMeta.key_docs_url))}
                 >
-                  Get API key…
+                  {t('setup.getKey')}
                 </button>
               )}
 
@@ -917,7 +949,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   className="block mb-1.5 text-sm font-medium"
                   style={labelStyles}
                 >
-                  Model
+                  {t('setup.model')}
                 </label>
                 <select
                   value={model}
@@ -993,7 +1025,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
           {step === 'workspace' && (
             <div className="space-y-3">
               <p className="text-base" style={{ color: 'var(--text-primary)' }}>
-                Default project folder for tools and shell (optional).
+                {t('setup.workspaceBlurb')}
               </p>
               <input
                 type="text"
@@ -1015,19 +1047,19 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
             <div className="space-y-4">
               <div>
                 <label className="block mb-1.5 text-sm font-medium" style={labelStyles}>
-                  Your name
+                  {t('setup.yourName')}
                 </label>
                 <input
                   value={userName}
                   onChange={(e) => setUserName(e.target.value)}
-                  placeholder="Optional"
+                  placeholder={t('setup.optional')}
                   className="w-full rounded-lg px-3 py-2.5 text-base outline-none"
                   style={inputStyles}
                 />
               </div>
               <div>
                 <label className="block mb-1.5 text-sm font-medium" style={labelStyles}>
-                  Partner name
+                  {t('settings.partnerName')}
                 </label>
                 <input
                   value={agentName}
@@ -1037,19 +1069,19 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   style={inputStyles}
                 />
                 <p className="text-xs mt-1" style={mutedStyles}>
-                  Call your partner anything — default is Remedy.
+                  {t('settings.partnerNameHint')}
                 </p>
               </div>
               <div>
                 <label className="block mb-1.5 text-sm font-medium" style={labelStyles}>
-                  Partner gender
+                  {t('settings.partnerGender')}
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   {(
                     [
-                      { id: 'female' as const, label: 'Female', hint: 'she/her · default' },
-                      { id: 'male' as const, label: 'Male', hint: 'he/him' },
-                      { id: 'neutral' as const, label: 'Neither / AI', hint: 'they/them' },
+                      { id: 'female' as const, label: t('settings.female'), hint: 'she/her · default' },
+                      { id: 'male' as const, label: t('settings.male'), hint: 'he/him' },
+                      { id: 'neutral' as const, label: t('settings.neutral'), hint: 'they/them' },
                     ]
                   ).map((g) => (
                     <button
@@ -1083,7 +1115,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   className="block mb-1.5 text-sm font-medium"
                   style={labelStyles}
                 >
-                  Style
+                  {t('setup.style')}
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   {PERSONAS.map((p) => (
@@ -1260,7 +1292,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                       className="ui-btn ui-btn-primary w-full"
                       style={{ padding: '0.8rem 1rem', fontSize: '1rem' }}
                     >
-                      {saving ? 'Working…' : 'Start Chatting'}
+                      {saving ? t('setup.saving') : t('setup.startChatting')}
                     </button>
                     {enableVision && !visionStatus?.installed ? (
                       <button
@@ -1293,7 +1325,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   disabled={saving}
                   className="ui-btn ui-btn-secondary"
                 >
-                  Back
+                  {t('setup.back')}
                 </button>
                 <button
                   type="button"
@@ -1301,7 +1333,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   disabled={saving}
                   className="ui-btn ui-btn-primary"
                 >
-                  Next
+                  {t('setup.next')}
                 </button>
               </div>
               <button
@@ -1311,7 +1343,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                 className="ui-btn ui-btn-ghost w-full"
                 title="Skip remaining setup — won't show again on next launch"
               >
-                {saving ? 'Saving…' : 'Skip remaining'}
+                {saving ? t('setup.saving') : t('setup.skipRemaining')}
               </button>
             </div>
           )}

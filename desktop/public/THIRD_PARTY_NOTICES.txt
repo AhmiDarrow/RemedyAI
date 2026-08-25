@@ -2,7 +2,7 @@
 REMEDY DESKTOP — THIRD-PARTY NOTICES
 ==============================================================================
 
-Remedy Desktop 0.31.0
+Remedy Desktop 0.38.1
 
 Remedy Desktop includes software from the projects listed below. Each is
 used under its own licence; the full text of every licence follows the

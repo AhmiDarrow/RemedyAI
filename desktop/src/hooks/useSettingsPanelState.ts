@@ -18,8 +18,10 @@ import {
   type SettingsMode,
 } from '../utils/settingsMode'
 import { sectionMatchesSearch } from '../components/SettingsSection'
+import { useI18n } from '../i18n'
 
 export function useSettingsPanelState() {
+  const { t } = useI18n()
   const [settingsSearch, setSettingsSearch] = useState('')
   const [forceSection, setForceSection] = useState<string | null>(null)
   const [visionSectionOpen, setVisionSectionOpen] = useState(false)
@@ -38,12 +40,12 @@ export function useSettingsPanelState() {
       const meta = SETTINGS_SECTION_META[id]
       return sectionMatchesSearch(
         settingsSearch,
-        meta.title,
-        meta.summary,
+        `${t(`sec.${id}`)} ${meta.title}`,
+        `${t(`sec.${id}Sum`)} ${meta.summary}`,
         meta.keywords,
       )
     },
-    [settingsSearch],
+    [settingsSearch, t],
   )
 
   const sectionProps = useCallback(
@@ -52,8 +54,8 @@ export function useSettingsPanelState() {
       const searchHidden = settingsSearch.trim().length > 0 && !matchSec(id)
       return {
         id,
-        title: SETTINGS_SECTION_META[id].title,
-        summary: SETTINGS_SECTION_META[id].summary,
+        title: t(`sec.${id}`),
+        summary: t(`sec.${id}Sum`),
         keywords: SETTINGS_SECTION_META[id].keywords,
         forceOpen:
           forceSection === id
@@ -69,7 +71,7 @@ export function useSettingsPanelState() {
         },
       }
     },
-    [forceSection, matchSec, settingsSearch, settingsMode],
+    [forceSection, matchSec, settingsSearch, settingsMode, t],
   )
 
   // Remedy asked to open a section (app_control / update_settings).

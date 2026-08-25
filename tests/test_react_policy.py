@@ -114,6 +114,9 @@ def test_is_chat_only_message() -> None:
     assert is_chat_only_message("hi") is True
     assert is_chat_only_message("Hi!") is True
     assert is_chat_only_message("hey there") is True
+    assert is_chat_only_message("Hi reme") is True
+    assert is_chat_only_message("Hey Reme!") is True
+    assert is_chat_only_message("hello Ahmi") is True
     assert is_chat_only_message("what skills do you have?") is True
     assert is_chat_only_message("add a dark mode toggle to the about window") is False
     assert is_chat_only_message(

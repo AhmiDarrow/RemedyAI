@@ -2,6 +2,7 @@ import { getServerUrl } from '../api/client'
 import { useEffect, useState } from 'react'
 import { isTauri, tauriInvoke } from '../api/tauri'
 import { isLinuxDesktop } from '../utils/platform'
+import { useI18n } from '../i18n'
 
 export interface QuitServerWarningProps {
   open: boolean
@@ -15,6 +16,7 @@ export interface QuitServerWarningProps {
  * Prefer Switch to WebUI / tray hide to keep the server running.
  */
 export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerWarningProps) {
+  const { t } = useI18n()
   const [dontWarn, setDontWarn] = useState(false)
 
   useEffect(() => {
@@ -41,11 +43,11 @@ export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerW
           className="text-sm font-semibold mb-2 tracking-tight"
           style={{ color: 'var(--error)' }}
         >
-          Quit Remedy and stop the local server?
+          {t('quit.title')}
         </div>
         <div className="text-xs leading-relaxed mb-3 space-y-2" style={{ color: 'var(--text-secondary)' }}>
           <p>
-            Quitting fully <strong>stops the local API</strong> on{' '}
+            {t('quit.body1')}{' '}
             <code
               className="px-1 py-0.5 rounded text-[0.7rem]"
               style={{
@@ -55,13 +57,12 @@ export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerW
             >
               {getServerUrl().replace(/^https?:\/\//, '')}
             </code>
-            . Any browser WebUI will disconnect.
           </p>
           <p>
-            To keep chatting in the browser, use <strong>Switch to WebUI</strong> —
+            {t('quit.body2')}
             {isLinuxDesktop()
-              ? ' that minimizes the desktop and leaves the server running.'
-              : ' that hides the desktop to the tray and leaves the server running.'}
+              ? ' — that minimizes the desktop and leaves the server running.'
+              : ' — that hides the desktop to the tray and leaves the server running.'}
           </p>
           <p style={{ color: 'var(--text-muted)' }}>
             {isLinuxDesktop()
@@ -78,12 +79,12 @@ export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerW
             style={{ accentColor: 'var(--accent)' }}
           />
           <span style={{ color: 'var(--text-secondary)' }}>
-            Don&apos;t show this warning again
+            {t('quit.dontWarn')}
           </span>
         </label>
         <div className="flex flex-wrap justify-end gap-2">
           <button type="button" className="ui-btn ui-btn-secondary" onClick={onCancel}>
-            Cancel
+            {t('quit.cancel')}
           </button>
           <button
             type="button"
@@ -100,7 +101,7 @@ export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerW
               }
             }}
           >
-            Switch to WebUI
+            {t('quit.webui')}
           </button>
           <button
             type="button"
@@ -108,7 +109,7 @@ export function QuitServerWarning({ open, onCancel, onConfirmQuit }: QuitServerW
             style={{ background: 'var(--error)', color: '#fff' }}
             onClick={() => onConfirmQuit(dontWarn)}
           >
-            Quit and stop server
+            {t('quit.confirm')}
           </button>
         </div>
       </div>

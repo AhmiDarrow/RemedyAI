@@ -177,6 +177,8 @@ class SettingsUpdateRequest(BaseModel):
     user_name: str | None = None  # human name (what Remedy calls the user)
     # female (default) | male | neutral — partner presentation / pronouns
     agent_gender: str | None = None
+    # auto (default) or BCP-47 id — chrome + reply language
+    ui_language: str | None = None
     persona: str | None = None
     setup_completed: bool | None = None
     access_scope: str | None = None

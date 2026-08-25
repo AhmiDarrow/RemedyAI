@@ -19,6 +19,7 @@ import {
 import type { UiMode } from '../utils/uiMode'
 import { mergeModelOptions, modelOptionLabel, type ModelOption } from '../api/modelDiscovery'
 import { isLinuxDesktop } from '../utils/platform'
+import { useI18n } from '../i18n'
 
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high'
 export type ApprovalMode = 'ask' | 'auto' | 'full'
@@ -248,6 +249,7 @@ export function StatusBar({
   uiMode = 'simple',
   onUiModeChange,
 }: StatusBarProps) {
+  const { t } = useI18n()
   const advanced = uiMode === 'advanced'
   const [version, setVersion] = useState('')
   const [status, setStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking')
@@ -704,7 +706,7 @@ export function StatusBar({
       <div className="flex items-center justify-between gap-2 min-w-0 flex-1">
         <div className="flex items-center gap-1.5 min-w-0 flex-nowrap overflow-x-auto">
           <SegButton active={planMode} onClick={onTogglePlanMode} title="Plan mode (Ctrl+B)">
-            {planMode ? 'Plan' : 'Build'}
+            {planMode ? t('bar.plan') : t('bar.build')}
           </SegButton>
 
           {advanced && (
@@ -732,9 +734,9 @@ export function StatusBar({
           <SegButton
             active={panel === 'settings'}
             onClick={() => onTogglePanel('settings')}
-            title="Settings — provider, project, appearance"
+            title={t('settings.title')}
           >
-            Settings
+            {t('settings.title')}
           </SegButton>
           {onPrivacyModeChange && (
             <SegButton
@@ -746,16 +748,16 @@ export function StatusBar({
                   : 'Privacy mode OFF (default) — lightning path with secret scrub. Click for tighter privacy to the model.'
               }
             >
-              {privacyMode ? 'Privacy · on' : 'Privacy'}
+              {privacyMode ? t('bar.privacyOn') : t('bar.privacy')}
             </SegButton>
           )}
           {onOpenHelp && (
             <SegButton
               active={false}
               onClick={() => onOpenHelp()}
-              title="Help wiki — owner's manual (F1)"
+              title={t('bar.help')}
             >
-              Help
+              {t('bar.help')}
             </SegButton>
           )}
           {advanced && (
@@ -768,7 +770,7 @@ export function StatusBar({
                   : 'Hide desktop to tray and open the WebUI chat in your browser'
               }
             >
-              WebUI
+              {t('bar.webui')}
             </SegButton>
           )}
 
@@ -778,7 +780,7 @@ export function StatusBar({
               className="px-2 py-0.5 rounded text-xs font-medium"
               style={{ background: 'var(--accent)', color: '#fff' }}
             >
-              Update
+              {t('bar.update')}
             </button>
           )}
         </div>
@@ -788,11 +790,7 @@ export function StatusBar({
             <button
               type="button"
               className={`seg-btn${speakReplies ? ' is-active' : ''}${speaking ? ' speaking' : ''}`}
-              title={
-                speakReplies
-                  ? 'Speaking replies aloud — click to go quiet'
-                  : 'Speak replies aloud'
-              }
+              title={speakReplies ? t('bar.quiet') : t('bar.speak')}
               aria-pressed={speakReplies}
               onClick={onToggleSpeak}
             >
@@ -803,52 +801,54 @@ export function StatusBar({
             <button
               type="button"
               className="seg-btn"
-              title="Studio — the full workbench (files, shell, browser rail)"
+              title={t('bar.studioTitle')}
               onClick={onOpenStudio}
             >
-              ▣ Studio
+              ▣ {t('bar.studio')}
             </button>
           ) : onOpenGrove ? (
             <button
               type="button"
               className="seg-btn"
-              title="Grove — your partner home (goals, live actions, story)"
+              title={t('bar.groveTitle')}
               onClick={onOpenGrove}
             >
-              ✦ Grove
+              ✦ {t('bar.grove')}
             </button>
           ) : null}
           {onUiModeChange && (
             <button
               type="button"
               className={`seg-btn${advanced ? ' is-active' : ''}`}
-              title={
-                advanced
-                  ? 'Advanced UI (full chrome) — click for Simple'
-                  : 'Simple UI (calm chrome) — click for Advanced'
-              }
+              title={advanced ? t('bar.advancedTitle') : t('bar.simpleTitle')}
               onClick={() => onUiModeChange(advanced ? 'simple' : 'advanced')}
             >
-              {advanced ? 'Advanced' : 'Simple'}
+              {advanced ? t('bar.advanced') : t('bar.simple')}
             </button>
           )}
           {advanced && onOpenUsage && (
             <button
               type="button"
               className="seg-btn"
-              title="Usage & Continuity dashboard"
+              title={t('bar.usage')}
               onClick={onOpenUsage}
             >
-              Usage
+              {t('bar.usage')}
             </button>
           )}
-          {connectedProviders.length > 0 && onProviderModelChange ? (
+          {onProviderModelChange ? (
             <>
               <FormSelect
                 size="sm"
                 className="mb-0 max-w-[110px]"
-                disabled={streaming}
-                title={streaming ? 'Stop generation to switch provider' : 'Active provider'}
+                disabled={streaming || connectedProviders.length === 0}
+                title={
+                  streaming
+                    ? t('bar.stopToSwitch')
+                    : connectedProviders.length === 0
+                      ? t('bar.providerLoading')
+                      : t('bar.providerTitle')
+                }
                 value={
                   // Prefer exact provider; only fall back if missing from list (keep label stable).
                   connectedProviders.some((p) => p.id === effectiveProvider)
@@ -870,19 +870,34 @@ export function StatusBar({
                   )
                   onProviderModelChange(pid, nextModel || '')
                 }}
-                options={[
-                  ...(effectiveProvider === 'demo'
-                    && !connectedProviders.some((p) => p.id === 'demo')
-                    ? [{ value: 'demo', label: 'Demo (Free)' }]
-                    : []),
-                  ...connectedProviders.map((p) => ({ value: p.id, label: p.name })),
-                ]}
+                options={
+                  connectedProviders.length === 0
+                    ? [
+                        {
+                          value: effectiveProvider || '',
+                          label: effectiveProvider || 'Provider…',
+                        },
+                      ]
+                    : [
+                        ...(effectiveProvider === 'demo'
+                          && !connectedProviders.some((p) => p.id === 'demo')
+                          ? [{ value: 'demo', label: 'Demo (Free)' }]
+                          : []),
+                        ...connectedProviders.map((p) => ({ value: p.id, label: p.name })),
+                      ]
+                }
               />
               <FormSelect
                 size="sm"
                 className="mb-0 max-w-[200px]"
-                disabled={streaming}
-                title={streaming ? 'Stop generation to switch model' : 'Active model'}
+                disabled={streaming || connectedProviders.length === 0}
+                title={
+                  streaming
+                    ? t('bar.stopToSwitchModel')
+                    : connectedProviders.length === 0
+                      ? t('bar.providerLoading')
+                      : t('bar.modelTitle')
+                }
                 value={safeModel || model}
                 onChange={(id) =>
                   onProviderModelChange(effectiveProvider || provider || '', id)
@@ -930,7 +945,15 @@ export function StatusBar({
                 onChange={(id) => onThinkingLevelChange?.(id as ThinkingLevel)}
                 options={THINKING_OPTIONS.map((o) => ({
                   value: o.id,
-                  label: `Think ${o.label}`,
+                  label: `${t(
+                    o.id === 'off'
+                      ? 'bar.thinkingOff'
+                      : o.id === 'low'
+                        ? 'bar.thinkingLow'
+                        : o.id === 'medium'
+                          ? 'bar.thinkingMed'
+                          : 'bar.thinkingHigh',
+                  )}`,
                 }))}
               />
 

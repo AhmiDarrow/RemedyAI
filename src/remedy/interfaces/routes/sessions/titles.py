@@ -38,6 +38,61 @@ def title_from_attachment_name(name: str, *, max_len: int = 52) -> str:
     return t
 
 
+_LIVING_TITLE_SKIP = frozenset(
+    {
+        "ok",
+        "k",
+        "yes",
+        "y",
+        "no",
+        "n",
+        "continue",
+        "thanks",
+        "thank you",
+        "hi",
+        "hey",
+        "hello",
+        "yo",
+        "sup",
+        "stop",
+        "wait",
+        "got it",
+        "cool",
+        "nice",
+    }
+)
+
+
+def should_refresh_living_title(current: str, prompt: str) -> bool:
+    """Endless sessions keep one thread; the sidebar name follows the latest beat.
+
+    Skip acks / continue / greetings so 'ok' does not retitle a long chat.
+    """
+    t = " ".join((prompt or "").strip().split())
+    if not t or looks_like_path_title(t):
+        return False
+    low = t.lower().rstrip("!.?")
+    if low in _LIVING_TITLE_SKIP:
+        return False
+    if len(t) < 16 and "?" not in t:
+        return False
+    cur = (current or "").strip()
+    if not cur:
+        return True
+    if cur.lower() in (
+        "new session",
+        "new chat",
+        "untitled",
+        "attachments",
+        "attachment",
+        "image",
+        "screenshot",
+    ):
+        return True
+    new = title_from_prompt(t)
+    return bool(new) and new.casefold() != cur.casefold()
+
+
 def title_from_prompt(
     text: str,
     *,

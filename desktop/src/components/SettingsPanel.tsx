@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useI18n } from '../i18n'
 import { invoke } from '@tauri-apps/api/core'
 import {
   getSettings,
@@ -127,6 +128,7 @@ export function SettingsPanel({
   onToolProcessChange,
   embedded = false,
 }: SettingsPanelProps) {
+  const { reload: reloadI18n, t } = useI18n()
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -161,6 +163,10 @@ export function SettingsPanel({
   const [userName, setUserName] = useState('')
   const [agentName, setAgentName] = useState('Remedy')
   const [agentGender, setAgentGender] = useState('female')
+  const [uiLanguage, setUiLanguage] = useState('auto')
+  const [uiLanguages, setUiLanguages] = useState<
+    Array<{ id: string; name_en: string; name_native: string; rtl: boolean; chrome: boolean }>
+  >([])
   const [accessScope, setAccessScope] = useState('project')
   const [launchAtLogin, setLaunchAtLogin] = useState(false)
   const [startInTray, setStartInTray] = useState(false)
@@ -408,6 +414,10 @@ export function SettingsPanel({
         setAgentGender(
           g === 'male' || g === 'neutral' || g === 'female' ? g : 'female',
         )
+      }
+      setUiLanguage((s.ui_language || 'auto').trim() || 'auto')
+      if (Array.isArray(s.ui_languages) && s.ui_languages.length) {
+        setUiLanguages(s.ui_languages)
       }
       setAccessScope(s.access_scope || 'project')
       setLaunchAtLogin(Boolean(s.launch_at_login))
@@ -699,6 +709,7 @@ export function SettingsPanel({
       user_name: userName.trim(),
       name: agentName.trim() || 'Remedy',
       agent_gender: agentGender || 'female',
+      ui_language: uiLanguage || 'auto',
       access_scope: accessScope,
       launch_at_login: launchAtLogin,
       start_in_tray: startInTray,
@@ -798,6 +809,7 @@ export function SettingsPanel({
       setSaveToast({ kind: 'ok', text: okMsg })
       window.setTimeout(() => setSaveToast(null), 3200)
       await load()
+      void reloadI18n(uiLanguage || 'auto')
       onSettingsSaved?.()
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -1062,13 +1074,13 @@ export function SettingsPanel({
             color: 'var(--text-primary)',
           }}
         >
-          <span>Settings</span>
+          <span>{t('settings.title')}</span>
           <button
             type="button"
             onClick={onClose}
             className="ui-btn ui-btn-ghost"
             style={{ padding: '0.15rem 0.4rem' }}
-            aria-label="Close settings"
+            aria-label={t('settings.close')}
           >
             {'\u00D7'}
           </button>
@@ -1109,7 +1121,7 @@ export function SettingsPanel({
                 if (m === 'advanced') setShowAdvanced(true)
               }}
             >
-              {m === 'simple' ? 'Simple' : 'Advanced'}
+              {m === 'simple' ? t('bar.simple') : t('bar.advanced')}
             </button>
           ))}
         </div>
@@ -1246,6 +1258,9 @@ export function SettingsPanel({
               setAgentName={setAgentName}
               agentGender={agentGender}
               setAgentGender={setAgentGender}
+              uiLanguage={uiLanguage}
+              setUiLanguage={setUiLanguage}
+              uiLanguages={uiLanguages}
               accessScope={accessScope}
               setAccessScope={setAccessScope}
               launchAtLogin={launchAtLogin}
@@ -1425,7 +1440,7 @@ export function SettingsPanel({
                 : undefined
             }
           >
-            {saving ? 'Saving…' : loading ? 'Loading…' : 'Save'}
+            {saving ? t('settings.saving') : loading ? t('settings.loading') : t('settings.save')}
           </button>
           {saved && !errorMessage && !statusMessage && (
             <span className="text-xs font-semibold" style={{ color: 'var(--success)' }}>

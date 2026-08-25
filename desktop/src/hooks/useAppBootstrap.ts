@@ -5,7 +5,11 @@
 
 import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 import { listAgents } from '../api/messages'
-import { listConnectedProviders, type ConnectedProvider } from '../api/providers'
+import {
+  listConnectedProviders,
+  pickerFromConnectedResponse,
+  type ConnectedProvider,
+} from '../api/providers'
 import { getSettings } from '../api/settings'
 import type { ThinkingLevel, ApprovalMode } from '../components/StatusBar'
 import { normalizeToolProcess, type ToolProcessMode } from '../utils/toolLabels'
@@ -57,11 +61,17 @@ export function useAppBootstrap(opts: {
     setAgentDefs,
   } = opts
 
+  // refreshModels identity changes with llmProvider; keep it off the effect
+  // deps so setLlmProvider cannot cancel this hydrate mid-flight.
+  const refreshModelsRef = useRef(refreshModels)
+  refreshModelsRef.current = refreshModels
+  const refreshSessionsRef = useRef(refreshSessions)
+  refreshSessionsRef.current = refreshSessions
+
   const didBoot = useRef(false)
   useEffect(() => {
     if (serverState !== 'ready') return
     if (didBoot.current) return
-    didBoot.current = true
     let cancelled = false
     ;(async () => {
       try {
@@ -73,7 +83,7 @@ export function useAppBootstrap(opts: {
       if (cancelled) return
 
       let settings: Awaited<ReturnType<typeof getSettings>> | null = null
-      const sessionsPromise = refreshSessions()
+      const sessionsPromise = refreshSessionsRef.current()
       try {
         settings = await getSettings()
       } catch (e: unknown) {
@@ -117,14 +127,18 @@ export function useAppBootstrap(opts: {
       if (settings.llm_provider) setLlmProvider(settings.llm_provider)
       try {
         const conn = await listConnectedProviders()
-        setConnectedProviders(
-          conn.picker?.length ? conn.picker : conn.connected || [],
-        )
+        if (cancelled) return
+        setConnectedProviders(pickerFromConnectedResponse(conn))
         if (conn.active_provider) setLlmProvider(conn.active_provider)
         if (conn.active_model) setModel(conn.active_model)
       } catch {
-        /* picker falls back to models-only */
+        /* picker hydrate in useSessionLlm retries when the API is ready */
       }
+      if (cancelled) return
+      // Latch only after settings + picker hydrate so StrictMode's effect
+      // cleanup (cancelled=true) can retry instead of leaving the bar empty
+      // until Settings save calls refreshConnected.
+      didBoot.current = true
       const tl = String(settings.thinking_level || 'high').toLowerCase()
       if (tl === 'off' || tl === 'low' || tl === 'medium' || tl === 'high') {
         setThinkingLevel(tl)
@@ -150,8 +164,14 @@ export function useAppBootstrap(opts: {
       }
 
       try {
+        const bootProvider = settings.llm_provider
+          ? String(settings.llm_provider)
+          : undefined
         const [modelsData, agents] = await Promise.all([
-          refreshModels({ selectDefault: !settings?.llm_model }),
+          refreshModelsRef.current({
+            selectDefault: !settings?.llm_model,
+            provider: bootProvider,
+          }),
           listAgents().catch(() => null),
         ])
         if (cancelled) return
@@ -179,8 +199,6 @@ export function useAppBootstrap(opts: {
     }
   }, [
     serverState,
-    refreshModels,
-    refreshSessions,
     setModel,
     setLlmProvider,
     setConnectedProviders,

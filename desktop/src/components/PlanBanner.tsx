@@ -8,6 +8,7 @@ import {
   type PlanStep,
   type TaskPlan,
 } from '../api/plans'
+import { useI18n } from '../i18n'
 
 export const PLAN_STREAMING_HINT = 'Remedy is still working on the plan…'
 
@@ -85,6 +86,7 @@ export function PlanBanner({
   /** Latest actionable plan for this session (null when none). */
   onPlanChange?: (plan: TaskPlan | null) => void
 }) {
+  const { t } = useI18n()
   const [plan, setPlanState] = useState<TaskPlan | null>(null)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -189,9 +191,9 @@ export function PlanBanner({
   // Build-mode cases are drafts still waiting for Approve ("Plan ready").
   const headerLabel = planMode
     ? midBuild
-      ? 'Plan mode · in progress'
-      : 'Plan mode'
-    : 'Plan ready'
+      ? t('plan.modeProgress')
+      : t('plan.mode')
+    : t('plan.ready')
 
   const approveTitle = streaming
     ? PLAN_STREAMING_HINT
@@ -237,7 +239,7 @@ export function PlanBanner({
             title={PLAN_STREAMING_HINT}
           >
             <span className="live-stream-dot" aria-hidden />
-            working…
+            {t('plan.working')}
           </span>
         )}
         <button
@@ -254,8 +256,7 @@ export function PlanBanner({
       </div>
       {planMode && (
         <div className="mb-1.5 text-[0.7rem]" style={{ color: 'var(--text-muted)' }} data-plan-hint>
-          Plan mode: Remedy explores with read-only tools and saves a plan for you to approve before
-          she builds. <kbd className="opacity-80">Ctrl+B</kbd> returns to Build.
+          {t('plan.hint')} <kbd className="opacity-80">Ctrl+B</kbd>
         </div>
       )}
       {plan?.goal && plan.goal !== plan.title && (
@@ -288,10 +289,10 @@ export function PlanBanner({
       {!plan && planMode && (
         <div className="mb-2.5" style={{ color: 'var(--text-muted)' }}>
           {loading
-            ? 'Loading plan…'
+            ? t('plan.loading')
             : streaming
-              ? 'Remedy is researching — the plan appears here once she saves it.'
-              : 'No plan for this session yet. Describe what you want; Remedy researches with read-only tools, then saves a plan here.'}
+              ? t('plan.researching')
+              : t('plan.empty')}
         </div>
       )}
       {options.length > 0 && (
@@ -329,7 +330,7 @@ export function PlanBanner({
             disabled={locked || !plan?.id}
             data-plan-approve
           >
-            {midBuild ? 'Continue → Build' : 'Approve → Build'}
+            {midBuild ? t('plan.continue') : t('plan.approve')}
           </button>
         )}
         {planMode && (
@@ -347,7 +348,7 @@ export function PlanBanner({
             disabled={locked}
             data-plan-request-changes
           >
-            Request changes
+            {t('plan.revise')}
           </button>
         )}
         <button
@@ -361,7 +362,7 @@ export function PlanBanner({
           }
           disabled={busy}
         >
-          {plan?.id ? 'Cancel plan' : 'Quit plan mode'}
+          {plan?.id ? t('plan.cancel') : t('plan.quit')}
         </button>
       </div>
       <div className="mt-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }}>

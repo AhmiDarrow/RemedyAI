@@ -7,6 +7,7 @@ names from that module at call time (not via a static import of the original).
 from __future__ import annotations
 
 import sys
+from types import SimpleNamespace
 from typing import Any
 
 # Names resolved from ``remedy.core.react_loop.loop`` for step modules.
@@ -227,6 +228,11 @@ def bind_loop_tuple() -> tuple[Any, ...]:
     """Positional binds matching ``LOOP_BIND_NAMES`` (call-time loop lookup)."""
     loop_mod = sys.modules["remedy.core.react_loop.loop"]
     return tuple(getattr(loop_mod, name) for name in LOOP_BIND_NAMES)
+
+
+def bind_loop_ns() -> SimpleNamespace:
+    """Same binds as ``bind_loop_module`` without 80 local assignments."""
+    return SimpleNamespace(**bind_loop_module())
 
 def unpack_state(s: Any) -> dict[str, Any]:
     """Read mutable turn state from bag ``s``."""

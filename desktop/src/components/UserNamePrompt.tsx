@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { RemedyLogo } from './RemedyLogo'
+import { useI18n } from '../i18n'
 
 interface UserNamePromptProps {
   open: boolean
@@ -10,6 +11,7 @@ interface UserNamePromptProps {
 
 /** First-run / missing name: ask what Remedy should call the user. */
 export function UserNamePrompt({ open, initial = '', onSave, onSkip }: UserNamePromptProps) {
+  const { t } = useI18n()
   const [name, setName] = useState(initial)
   if (!open) return null
 
@@ -31,10 +33,10 @@ export function UserNamePrompt({ open, initial = '', onSave, onSkip }: UserNameP
           <RemedyLogo size={36} framed />
           <div className="min-w-0">
             <div id="user-name-title" className="font-semibold text-sm tracking-tight">
-              What should Remedy call you?
+              {t('userName.title')}
             </div>
             <div className="text-[11px] mt-0.5 leading-snug" style={{ color: 'var(--text-muted)' }}>
-              Used in chat and memory — change anytime in Settings.
+              {t('userName.hint')}
             </div>
           </div>
         </div>
@@ -45,14 +47,14 @@ export function UserNamePrompt({ open, initial = '', onSave, onSkip }: UserNameP
           onKeyDown={(e) => {
             if (e.key === 'Enter') submit()
           }}
-          placeholder="Your name"
+          placeholder={t('userName.placeholder')}
           className="ui-input mb-4 text-sm"
           style={{ padding: '0.55rem 0.75rem', fontSize: '0.875rem' }}
         />
         <div className="flex gap-2 justify-end">
           {onSkip && (
             <button type="button" className="ui-btn ui-btn-secondary" onClick={onSkip}>
-              Later
+              {t('userName.later')}
             </button>
           )}
           <button
@@ -61,7 +63,7 @@ export function UserNamePrompt({ open, initial = '', onSave, onSkip }: UserNameP
             disabled={!name.trim()}
             onClick={submit}
           >
-            Save
+            {t('userName.save')}
           </button>
         </div>
       </div>

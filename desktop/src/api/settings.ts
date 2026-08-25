@@ -23,6 +23,15 @@ export interface Settings {
   user_name?: string
   /** Partner gender presentation: female (default) | male | neutral */
   agent_gender?: string
+  /** auto or BCP-47 id — chrome + reply language */
+  ui_language?: string
+  ui_languages?: Array<{
+    id: string
+    name_en: string
+    name_native: string
+    rtl: boolean
+    chrome: boolean
+  }>
   persona: string
   project_path: string
   access_scope?: string
@@ -217,6 +226,7 @@ export interface SettingsUpdate {
   name?: string
   user_name?: string
   agent_gender?: string
+  ui_language?: string
   persona?: string
   setup_completed?: boolean
   access_scope?: string

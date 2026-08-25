@@ -368,6 +368,10 @@ class AgentConfig(BaseModel):
         default="female",
         description="Partner gender presentation: female | male | neutral",
     )
+    ui_language: str = Field(
+        default="auto",
+        description="Owner language: auto or a BCP-47 id (chrome + replies)",
+    )
     persona: str = Field(default="default")
     home_dir: str = Field(default="~/.remedy")
     skills_dir: list[str] = Field(default_factory=list)

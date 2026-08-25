@@ -97,6 +97,7 @@ SETTABLE_KEYS = frozenset(
         "name",
         "user_name",
         "agent_gender",
+        "ui_language",
         "persona",
         "setup_completed",
         "access_scope",
@@ -202,6 +203,7 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
     key = resolve_provider_api_key(raw, provider, home=home_path)
     vision_raw = raw.get("vision")
     vision: dict[str, Any] = vision_raw if isinstance(vision_raw, dict) else {}
+    from remedy.i18n.languages import normalize_ui_language
     from remedy.vision.catalog import DEFAULT_MODEL_ID
 
     out: dict[str, Any] = {
@@ -223,6 +225,7 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "agent_gender": str(raw.get("agent_gender") or "female").strip().lower()
         if str(raw.get("agent_gender") or "female").strip().lower() in ("female", "male", "neutral")
         else "female",
+        "ui_language": normalize_ui_language(raw.get("ui_language")),
         "persona": raw.get("persona", "default"),
         "project_path": raw.get("project_path") or "",
         "access_scope": raw.get("access_scope", "project"),
@@ -718,6 +721,13 @@ async def _apply_settings_update_inner(
         patch["agent_gender"] = g
         cfg["agent_gender"] = g
 
+    if "ui_language" in patch and patch["ui_language"] is not None:
+        from remedy.i18n.languages import normalize_ui_language
+
+        lang = normalize_ui_language(str(patch["ui_language"]))
+        patch["ui_language"] = lang
+        cfg["ui_language"] = lang
+
     if "name" in patch and patch["name"] is not None:
         from remedy.core.agent_identity import normalize_agent_name
 
@@ -809,6 +819,7 @@ async def _apply_settings_update_inner(
         harness_max_context_pct=cfg.get("harness_max_context_pct"),
         thinking_level=cfg.get("thinking_level"),
         approval_mode=cfg.get("approval_mode"),
+        ui_language=cfg.get("ui_language"),
     )
     # Keep runtime.config flags in sync for tools that read attributes
     if runtime is not None and hasattr(runtime, "config") and runtime.config is not None:
@@ -881,6 +892,7 @@ async def _apply_settings_update_inner(
         "user_name",
         "name",
         "agent_gender",
+        "ui_language",
         "tool_process",
         "web_tools_enabled",
         "http_bootstrap",

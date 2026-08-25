@@ -4,6 +4,42 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — language (Remedy is for everyone)
+
+- **Settings → You & Agent → Language.** Default **Auto** matches this computer
+  and the language you type. Pick any listed language to pin chrome *and*
+  Remedy's replies. Tools, code, and file paths stay as written. Help manuals
+  stay English for now.
+- Reply-language is in the system prompt on every turn, so chat works in the
+  owner's language even when a chrome catalog is still catching up.
+- Chrome catalogs for the default surface (status bar, logo menu, composer,
+  sidebar, approvals, first-run name, Grove home, language picker, Settings
+  section titles, setup wizard, Plan banner, quit warning, empty chat) in every
+  language marked for chrome, including Spanish, Portuguese, French, German,
+  Arabic, Hindi, Bengali, Indonesian, Vietnamese, Japanese, Korean,
+  Simplified/Traditional Chinese, Swahili, and more. RTL languages flip the
+  layout. Auto uses this computer's language as a hint. First-run setup has a
+  language pick. Help manuals stay English.
+
+### Fixed — provider list at launch
+
+- The status-bar provider picker hydrates when the local API is ready, so you
+  can switch providers without opening Settings first.
+
+### Changed — endless session continuity
+
+- Telegram / Discord turns join the focused desktop chat when it is the same
+  thread, instead of opening a parallel `msg:` session.
+- Sidebar title follows the latest beat (skips acks like "ok").
+- Unbound chats drop leftover todos when a new owner message starts a beat.
+
+### Changed — quality that does not cut ability
+
+- Sidecar freeze no longer lists missing hidden imports (`remedy.errors`,
+  `remedy.persona`, `websockets.legacy`) and includes `remedy.i18n`.
+- ReAct step modules can bind loop names as a namespace (`bind_loop_ns`)
+  instead of 80 local assignments — behavior unchanged.
+
 ## [0.38.1] - 2026-08-25
 
 ### Fixed — gates that were open in 0.38.0

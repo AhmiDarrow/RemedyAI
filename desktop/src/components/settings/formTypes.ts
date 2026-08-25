@@ -60,6 +60,15 @@ export interface SettingsFormProps {
   agentName: string
   agentGender: string
   setAgentGender: (v: string) => void
+  uiLanguage: string
+  setUiLanguage: Dispatch<SetStateAction<string>>
+  uiLanguages: Array<{
+    id: string
+    name_en: string
+    name_native: string
+    rtl: boolean
+    chrome: boolean
+  }>
   setAgentName: Dispatch<SetStateAction<string>>
   accessScope: string
   setAccessScope: Dispatch<SetStateAction<string>>

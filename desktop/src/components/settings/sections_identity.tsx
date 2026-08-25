@@ -1,5 +1,6 @@
 /** Settings form sections — identity. */
 import { useState, type ReactNode } from 'react'
+import { useI18n } from '../../i18n'
 import type { SettingsFormProps } from './formTypes'
 import { SettingsSection } from '../SettingsSection'
 import {
@@ -133,6 +134,9 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
     setAgentName,
     agentGender,
     setAgentGender,
+    uiLanguage,
+    setUiLanguage,
+    uiLanguages,
     accessScope,
     setAccessScope,
     launchAtLogin,
@@ -161,42 +165,60 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
     handleBrowseProject,
     settingsMode = 'simple',
   } = p
+  const { t } = useI18n()
+  const langOptions = (uiLanguages.length ? uiLanguages : [{ id: 'auto', name_en: 'Auto', name_native: 'Auto', rtl: false, chrome: true }]).map(
+    (row) => ({
+      value: row.id,
+      label:
+        row.id === 'auto'
+          ? t('settings.languageAuto')
+          : row.name_native === row.name_en
+            ? row.name_native
+            : `${row.name_native} — ${row.name_en}`,
+    }),
+  )
 
   return (
     <>
       <SettingsSection
         {...sectionProps('you-agent')}
+        title={t('sec.youAgent')}
+        summary={t('sec.youAgentSummary')}
       >
+        <FormLabel>{t('settings.language')}</FormLabel>
+        <FormSelect value={uiLanguage} onChange={setUiLanguage} options={langOptions} />
+        <FormHint>{t('settings.languageHint')}</FormHint>
+        <FormHint>{t('settings.helpEnglish')}</FormHint>
         <Field
-          label="Your name (what Remedy calls you)"
+          label={t('settings.yourName')}
           value={userName}
           onChange={setUserName}
           placeholder="e.g. Alex"
         />
         <FormHint>
-          Saved to your profile so Remedy can address you naturally.
+          {t('settings.yourNameHint')}
         </FormHint>
         <Field
-          label="Partner name"
+          label={t('settings.partnerName')}
           value={agentName}
           onChange={setAgentName}
           placeholder="Remedy"
         />
         <FormHint>
-          Call your partner anything — default is Remedy.
+          {t('settings.partnerNameHint')}
         </FormHint>
-        <FormLabel>Partner gender</FormLabel>
+        <FormLabel>{t('settings.partnerGender')}</FormLabel>
         <FormSegmented
           value={agentGender}
           onChange={setAgentGender}
           options={[
-            { id: 'female', label: 'Female' },
-            { id: 'male', label: 'Male' },
-            { id: 'neutral', label: 'Neither / AI' },
+            { id: 'female', label: t('settings.female') },
+            { id: 'male', label: t('settings.male') },
+            { id: 'neutral', label: t('settings.neutral') },
           ]}
         />
         <FormHint>
-          Presentation only — not medical. Default female; change anytime.
+          {t('settings.genderHint')}
         </FormHint>
         <FormLabel>
           Persona

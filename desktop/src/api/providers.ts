@@ -162,6 +162,14 @@ export async function listConnectedProviders(): Promise<ConnectedProvidersRespon
   return apiFetch<ConnectedProvidersResponse>('/providers/connected')
 }
 
+/** Status-bar picker rows: enabled+connected first, else every connected row. */
+export function pickerFromConnectedResponse(
+  conn: Pick<ConnectedProvidersResponse, 'picker' | 'connected'> | null | undefined,
+): ConnectedProvider[] {
+  if (!conn) return []
+  return conn.picker?.length ? conn.picker : conn.connected || []
+}
+
 export interface ProviderProbeResult {
   ok: boolean
   provider: string

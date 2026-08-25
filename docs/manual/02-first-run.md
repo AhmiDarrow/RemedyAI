@@ -18,6 +18,7 @@ After you finish or **Skip**, `setup_completed = true` is written and the wizard
 ### 1. Welcome
 
 - Short product intro  
+- **Language** pick (default Auto — matches this computer). Change anytime in Settings → You & Agent.  
 - **Get Started** or **Skip setup (configure later)**  
 
 ### 2. Provider
