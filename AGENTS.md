@@ -18,8 +18,8 @@ coding a new app to running an errand. Owners span **every ability level**
 (non-technical, low-vision, limited motor control, cognitively loaded, power
 user); Remedy must work as their hands on the computer.
 
-Design doc: `docs/LIFE_TASK_PARTNER.md` · fix anchors: local
-`docs/AUDIT_LIFE_TASK_2026-08-16.md`.
+Design notes live on this clone only (`docs/LIFE_TASK_PARTNER.md`,
+`docs/AUDIT_LIFE_TASK_*.md`) — not on the public GitHub tree.
 
 **Judge every computer-use / agency change by these five questions:**
 
