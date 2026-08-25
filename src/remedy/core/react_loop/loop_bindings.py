@@ -245,6 +245,10 @@ def pack_state(s: Any, local_ns: dict[str, Any]) -> None:
         "L",
         "_k",
         "_v",
+        "_ftok",
+        "_st",
+        "_pack_before_finals",
+        "_unpack_after_finals",
     }
     for key, val in local_ns.items():
         if key in skip or key.startswith("__"):

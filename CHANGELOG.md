@@ -37,7 +37,7 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   hive workers are denied `credential.use` / `transact` at the gate;
   `aws` argv no longer inherits GCP ADC.
 - ReAct stream is split: `loop_prelude` / `loop_http` / `loop_round` /
-  `loop_steps` orchestrator (typed; not mypy-excluded).
+  `loop_finals` / `loop_steps` orchestrator (typed; not mypy-excluded).
 - Phase 0 latency: LLM, tool, event, and memory paths record
   `observe_seconds` / `span`.
 - **TrustProfile.AUTONOMOUS** skips in-project high-impact asks the same

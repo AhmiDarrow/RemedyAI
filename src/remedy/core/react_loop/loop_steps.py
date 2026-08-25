@@ -2,7 +2,8 @@
 
 Looks up patched names on ``remedy.core.react_loop.loop`` at call time so
 existing tests that patch that module keep working. Nested drive helpers
-live here; ``loop_prelude`` / ``loop_http`` / ``loop_round`` own the rest.
+live here; ``loop_prelude`` / ``loop_http`` / ``loop_round`` / ``loop_finals``
+own the rest.
 """
 
 from __future__ import annotations
