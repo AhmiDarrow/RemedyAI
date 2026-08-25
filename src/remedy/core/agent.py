@@ -95,6 +95,7 @@ class BasicRuntime(AgentRuntime):
             getattr(config, "persona", None),
             name=getattr(config, "name", None),
             gender=getattr(config, "agent_gender", None),
+            ui_language=getattr(config, "ui_language", None),
         )
         self._llm_api_key: str = config.llm_api_key
         self._llm_model: str = config.llm_model
@@ -509,6 +510,7 @@ class BasicRuntime(AgentRuntime):
         harness_max_context_pct: float | None = None,
         thinking_level: str | None = None,
         approval_mode: str | None = None,
+        ui_language: str | None = None,
     ) -> None:
         """Hot-apply LLM / persona / identity / project settings without restarting."""
         if thinking_level is not None:
@@ -647,11 +649,19 @@ class BasicRuntime(AgentRuntime):
                 g_set = normalize_agent_gender(agent_gender)
                 if hasattr(self, "config") and self.config is not None:
                     self.config.agent_gender = g_set
-        # Rebuild system prompt when persona/name/gender change
+        if ui_language is not None:
+            with suppress(Exception):
+                from remedy.i18n.languages import normalize_ui_language
+
+                lang = normalize_ui_language(ui_language)
+                if hasattr(self, "config") and self.config is not None:
+                    self.config.ui_language = lang
+        # Rebuild system prompt when persona/name/gender/language change
         if (
             persona is not None
             or (name is not None and str(name).strip())
             or agent_gender is not None
+            or ui_language is not None
         ):
             with suppress(Exception):
                 from remedy.core.agent_identity import (
@@ -674,7 +684,10 @@ class BasicRuntime(AgentRuntime):
                     or getattr(cfg, "persona", None)
                     or "default"
                 )
-                self._system_prompt = _build_system_prompt(p, name=n, gender=g)
+                lang = getattr(cfg, "ui_language", None)
+                self._system_prompt = _build_system_prompt(
+                    p, name=n, gender=g, ui_language=lang
+                )
                 home = getattr(cfg, "home_dir", None)
                 sync_identity_to_soul(n, g, home=home)
         if project_path is not None:

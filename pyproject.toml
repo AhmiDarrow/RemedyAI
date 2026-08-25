@@ -106,6 +106,9 @@ unsafe-fixes = false
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["N802", "N803", "N806", "SIM117"]
+# Translation tables: late imports stitch overlays; dict() packs kwargs for _core.
+"src/remedy/i18n/chrome_fill*.py" = ["E402", "C408"]
+"src/remedy/i18n/chrome_final*.py" = ["E402", "C408"]
 # Soak/live scripts: path bootstrap imports, intentional bare Fail, loop closures.
 "scripts/*" = [
     "B007",

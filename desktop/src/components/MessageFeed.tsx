@@ -42,6 +42,7 @@ import {
 } from '../utils/toolLabels'
 import { useStickToBottom } from '../hooks/useStickToBottom'
 import { DiffCode } from './DiffCode'
+import { useI18n } from '../i18n'
 
 export type ActiveTool = { name: string; status: 'running' | 'done' | 'error' }
 
@@ -662,6 +663,7 @@ export function MessageFeed({
   sessionId = null,
   stickNonce,
 }: MessageFeedProps) {
+  const { t } = useI18n()
   const [lightbox, setLightbox] = useState<{ src: string; alt?: string } | null>(null)
   const openLightbox = useCallback((src: string, alt?: string) => {
     setLightbox({ src, alt })
@@ -938,21 +940,18 @@ export function MessageFeed({
           <RemedyLogo size={88} variant="auto" title="Remedy" />
           <div className="chat-empty-title">
             {userName?.trim()
-              ? `Ready when you are, ${firstName(userName)}`
-              : 'Your partner is ready'}
+              ? t('empty.readyNamed', { name: firstName(userName) })
+              : t('empty.ready')}
           </div>
           <div className="chat-empty-sub">
             {emptySub ?? (projectPath ? (
               <>
-                Project folder attached — ask to explore, review, or implement.
+                {t('empty.withProject')}
                 <br />
                 <code className="text-[0.7em] break-all">{projectPath}</code>
               </>
             ) : (
-              <>
-                Ask anything, plan, research, or open a project to build.{' '}
-                <code>/help</code> lists commands · <code>F1</code> opens the Help wiki.
-              </>
+              t('empty.noProject')
             ))}
           </div>
           {onQuickPrompt && (
@@ -975,12 +974,7 @@ export function MessageFeed({
             </div>
           )}
           <div className="chat-empty-sub mt-0.5" style={{ maxWidth: '26rem', opacity: 0.85 }}>
-            {emptyHints ?? (
-              <>
-                <code>Enter</code> send · <code>Shift+Enter</code> new line ·{' '}
-                <code>@</code> files · <code>/</code> commands · <code>Shift+Tab</code> Plan/Build
-              </>
-            )}
+            {emptyHints ?? t('empty.hints')}
           </div>
         </div>
       )}
@@ -996,11 +990,17 @@ export function MessageFeed({
             type="button"
             className="scroll-latest-fab scroll-latest-pill"
             onClick={jumpLatest}
-            title="Jump to latest and resume auto-scroll"
-            aria-label={unread > 0 ? `Jump to latest, ${unread} new` : 'Jump to latest'}
+            title={t('empty.jump')}
+            aria-label={
+              unread > 0
+                ? `${t('empty.jump')}, ${t('empty.jumpNew', { n: String(unread) })}`
+                : t('empty.jump')
+            }
           >
-            {unread > 0 && <span className="scroll-latest-count">{unread} new</span>}
-            <span>Jump to latest</span>
+            {unread > 0 && (
+              <span className="scroll-latest-count">{t('empty.jumpNew', { n: String(unread) })}</span>
+            )}
+            <span>{t('empty.jump')}</span>
             <span aria-hidden>↓</span>
           </button>
         </div>

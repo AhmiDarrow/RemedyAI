@@ -19,6 +19,13 @@ hides to the system tray** and keeps the local API running (always-ready partner
 optional). Fully exit only from the **tray menu → Quit** (or app menu Quit) — that stops
 the server and browser WebUI.
 
+## Language
+
+Remedy is for everyone. **Settings → You & Agent → Language** (default **Auto**)
+matches this computer and the language you type. First-run setup also has a
+language pick. Pick a language to pin the buttons *and* Remedy's replies. Tools,
+code, and file paths stay as written. Help in this wiki is still English.
+
 ## Sending messages
 
 | Input | Action |

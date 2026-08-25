@@ -580,6 +580,17 @@ _GREET_PREFIX_RE = re.compile(
 )
 
 
+def _is_vocative_name(rest: str) -> bool:
+    """Single leftover token after a greeting: a name, not 'keep going'."""
+    tok = (rest or "").strip().rstrip("!.?")
+    if not tok or " " in tok or len(tok) > 24:
+        return False
+    if _ACTION_KICK_RE.search(tok):
+        return False
+    cleaned = tok.replace("-", "").replace("'", "")
+    return bool(cleaned) and cleaned.isalpha()
+
+
 def is_chat_only_message(message: str) -> bool:
     """True only for greets, acks, and short meta questions.
 
@@ -603,9 +614,10 @@ def is_chat_only_message(message: str) -> bool:
             or rest.lower() in _CHAT_SHORT_SET
             or rest_low in {"there", "again", "friend", "buddy"}
             or bool(_HARD_CHAT_ONLY_RE.match(rest) or _CHAT_ONLY_RE.match(rest))
+            # "Hi reme" / "Hey Ahmi" — vocative name, not a work request.
+            or _is_vocative_name(rest)
         )
-        if not leftover_is_chat:
-            return False
+        return leftover_is_chat
     if len(msg) <= 24 and "\n" not in msg:
         low = msg.lower().rstrip("!.?")
         if low in _CHAT_SHORT_SET or msg.lower() in _CHAT_SHORT_SET:
@@ -1996,6 +2008,7 @@ def build_system_prompt(
     *,
     name: str | None = None,
     gender: str | None = None,
+    ui_language: str | None = None,
 ) -> str:
     """Base system prompt: identity kernel + operational body + style addendum.
 
@@ -2005,10 +2018,18 @@ def build_system_prompt(
     from ``identity_system_preamble`` and canon in ``docs/REMEDY_PERSONA.md``.
     A chosen style leads over the emergent voice; it never overrides the creed
     or temperament.
+    *ui_language* is reply-language only — it does not strip tools or checkpoints.
     """
     from remedy.core.agent_identity import identity_system_preamble
+    from remedy.i18n.languages import language_system_line
 
-    base = identity_system_preamble(name=name, gender=gender) + "\n\n" + _DEFAULT_SYSTEM_BODY
+    base = (
+        identity_system_preamble(name=name, gender=gender)
+        + "\n"
+        + language_system_line(ui_language)
+        + "\n\n"
+        + _DEFAULT_SYSTEM_BODY
+    )
     addendum = persona_system_addendum(persona)
     if addendum:
         return f"{base}\n\n{addendum}"

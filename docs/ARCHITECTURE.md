@@ -13,6 +13,10 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 
 Grove unmounts off-surface. Studio must own its own voice instance (`useVoice` in `App.tsx`). Logo-menu Settings must **not** switch Grove → Studio.
 
+## Language
+
+`src/remedy/i18n/` — `ui_language` (`auto` or a BCP-47 id). Chrome catalogs overlay English. Reply-language is a system-prompt line (`language_system_line`); it does not strip tools or checkpoints. `GET /api/i18n`. Desktop: `desktop/src/i18n/`. Help manuals stay English until translated.
+
 ## Voice stack
 
 - API: `src/remedy/interfaces/routes/voice.py` → `src/remedy/voice/service.py`

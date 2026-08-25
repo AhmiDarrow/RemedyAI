@@ -198,6 +198,40 @@ async def test_messenger_session_bridge(tmp_path):
         await store.close()
 
 
+@pytest.mark.asyncio
+async def test_telegram_joins_focused_endless_session(tmp_path, monkeypatch):
+    from remedy.core.computer import host_bridge as hb
+    from remedy.gateway.session_bridge import resolve_or_create_messenger_session
+    from remedy.memory.store import MemoryStore
+    from remedy.models import ChatSession
+
+    class _Bridge:
+        def focused_session_id(self):
+            return "live-endless"
+
+    monkeypatch.setattr(hb, "get_host_bridge", lambda home_dir=None: _Bridge())
+    db = tmp_path / "memory.db"
+    store = MemoryStore(db)
+    await store.initialize()
+    try:
+        home = await store.create_chat_session(
+            ChatSession(id="live-endless", title="Write up a fancy x post")
+        )
+        joined = await resolve_or_create_messenger_session(
+            store,
+            channel="telegram",
+            external_chat_id="8720969343",
+            first_message="Hi reme",
+        )
+        assert joined.id == home.id
+        assert joined.origin_channel == "telegram"
+        assert joined.external_chat_id == "8720969343"
+        ghost = await store.get_chat_session("msg:telegram:8720969343")
+        assert ghost is None
+    finally:
+        await store.close()
+
+
 def test_adapters_importable():
     from remedy.gateway.channels import (
         DiscordChannel,

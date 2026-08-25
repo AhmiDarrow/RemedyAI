@@ -1047,9 +1047,12 @@ def config_to_agent_config(config: dict[str, Any]) -> AgentConfig:
     _ag = str(config.get("agent_gender") or "female").strip().lower()
     if _ag not in ("female", "male", "neutral"):
         _ag = "female"
+    from remedy.i18n.languages import normalize_ui_language
+
     return AgentConfig(
         name=config.get("name", "Remedy") or "Remedy",
         agent_gender=_ag,
+        ui_language=normalize_ui_language(config.get("ui_language")),
         persona=config.get("persona", "default"),
         home_dir=config.get("home_dir", "~/.remedy"),
         skills_dir=config.get("skills_dir", []),
@@ -1115,6 +1118,8 @@ name = "Remedy"
 agent_gender = "female"
 # What your partner calls you (desktop Settings → You & Agent)
 # user_name = "You"
+# Owner language: auto (match OS + what they type) or a BCP-47 id (es, ja, …)
+# ui_language = "auto"
 persona = "default"
 home_dir = "{home_dir.as_posix()}"
 

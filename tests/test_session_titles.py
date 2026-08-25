@@ -15,6 +15,7 @@ import pytest
 
 from remedy.interfaces.routes.sessions.titles import (
     looks_like_path_title,
+    should_refresh_living_title,
     title_from_attachment_name,
     title_from_prompt,
 )
@@ -134,6 +135,20 @@ def test_a_long_message_is_bounded_and_marked():
     out = title_from_prompt("think about " * 40)
     assert len(out) <= 52
     assert out.endswith("…")
+
+
+def test_endless_session_retitles_on_a_new_beat():
+    assert should_refresh_living_title(
+        "Write up a fancy x post for the 0.31 Remedy release…",
+        "I setup telegram but not getting a response from you",
+    )
+    assert should_refresh_living_title("New Session", "update catalog, we have guitarremedy now")
+
+
+def test_endless_session_does_not_retitle_on_acks():
+    assert not should_refresh_living_title("Oracle pack is ready", "ok")
+    assert not should_refresh_living_title("Oracle pack is ready", "continue")
+    assert not should_refresh_living_title("Oracle pack is ready", "Hi reme")
 
 
 def test_a_pasted_path_becomes_the_file_it_points_at():

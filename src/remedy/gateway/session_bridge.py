@@ -30,6 +30,47 @@ from remedy.models import (
 logger = logging.getLogger(__name__)
 
 
+async def _attach_to_focused_session(
+    memory: Any,
+    *,
+    channel: str,
+    external_chat_id: str,
+    username: str | None,
+) -> Any:
+    """Use the focused desktop chat when the owner lives in one endless session."""
+    focused = ""
+    with suppress(Exception):
+        from remedy.core.computer.host_bridge import get_host_bridge
+
+        focused = str(get_host_bridge().focused_session_id() or "").strip()
+    if not focused or focused.startswith("msg:"):
+        return None
+    sess = await memory.get_chat_session(focused)
+    if sess is None:
+        return None
+    oc = str(getattr(sess, "origin_channel", None) or "").strip().lower()
+    ext = str(getattr(sess, "external_chat_id", None) or "").strip()
+    if oc and oc != channel:
+        return None
+    if ext and ext != str(external_chat_id or "").strip():
+        return None
+    updates: dict[str, Any] = {}
+    if not oc:
+        updates["origin_channel"] = channel
+    if not ext:
+        updates["external_chat_id"] = str(external_chat_id or "").strip()
+    if username and not getattr(sess, "external_user", None):
+        updates["external_user"] = str(username)[:120]
+    if updates:
+        try:
+            updated = await memory.update_chat_session(focused, **updates)
+            if updated is not None:
+                return updated
+        except Exception:
+            logger.debug("attach messenger origin to focused session failed", exc_info=True)
+    return sess
+
+
 def _channel_value(channel: Any) -> str:
     if hasattr(channel, "value"):
         return str(channel.value)
@@ -53,6 +94,17 @@ async def resolve_or_create_messenger_session(
     ch = str(channel or "").strip().lower()
     ext = str(external_chat_id or "").strip() or "default"
     sid = external_session_id(ch, ext)
+
+    # Endless desktop session: Telegram/Discord join the focused tab instead
+    # of spawning a parallel ``msg:telegram:…`` thread that steals continuity.
+    attached = await _attach_to_focused_session(
+        memory,
+        channel=ch,
+        external_chat_id=ext,
+        username=username,
+    )
+    if attached is not None:
+        return attached
 
     existing = await memory.get_chat_session(sid)
     if existing is not None:
@@ -263,9 +315,27 @@ async def handle_messenger_event(
             )
 
             if not try_claim_session_stream(session.id):
+                # Endless session: Telegram joins the live turn instead of
+                # opening a second thread that fights continuity.
+                steered = False
+                with suppress(Exception):
+                    from remedy.core.turn_context import push_nudge
+
+                    steered = bool(push_nudge(session.id, message))
+                if steered and memory is not None:
+                    with suppress(Exception):
+                        model = getattr(getattr(runtime, "config", None), "llm_model", None)
+                        agent = getattr(getattr(runtime, "config", None), "name", None)
+                        await persist_user_message(
+                            memory, session, message, model=model, agent=agent
+                        )
                 busy = (
-                    "*(This chat is already generating a reply — "
-                    "try again in a moment.)*"
+                    "*(Got it — folding that into the turn that's already going.)*"
+                    if steered
+                    else (
+                        "*(This chat is already generating a reply — "
+                        "try again in a moment.)*"
+                    )
                 )
                 reply_parts.append(busy)
                 yield busy

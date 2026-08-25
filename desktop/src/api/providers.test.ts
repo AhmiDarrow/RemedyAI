@@ -1,5 +1,48 @@
 import { describe, expect, it } from 'vitest'
-import { connectReasonLabel, customProviderBody, OFFLINE_PROVIDERS } from './providers'
+import {
+  connectReasonLabel,
+  customProviderBody,
+  OFFLINE_PROVIDERS,
+  pickerFromConnectedResponse,
+  type ConnectedProvider,
+} from './providers'
+
+function stubConnected(id: string): ConnectedProvider {
+  return {
+    id,
+    name: id,
+    base_url: 'http://127.0.0.1/v1',
+    models: [],
+    default_model: '',
+    auth: ['none'],
+    oauth: false,
+    env_keys: [],
+    show_base_url: false,
+    advanced: false,
+    connected: true,
+    connect_reason: 'demo',
+    enabled: true,
+    picker_eligible: true,
+  }
+}
+
+describe('pickerFromConnectedResponse', () => {
+  it('prefers picker rows when the backend sent them', () => {
+    const picker = [stubConnected('xai')]
+    const connected = [stubConnected('xai'), stubConnected('demo')]
+    expect(pickerFromConnectedResponse({ picker, connected })).toEqual(picker)
+  })
+
+  it('falls back to connected when picker is empty', () => {
+    const connected = [stubConnected('demo')]
+    expect(pickerFromConnectedResponse({ picker: [], connected })).toEqual(connected)
+  })
+
+  it('is empty when the connected payload never loaded', () => {
+    expect(pickerFromConnectedResponse(null)).toEqual([])
+    expect(pickerFromConnectedResponse(undefined)).toEqual([])
+  })
+})
 
 describe('connectReasonLabel', () => {
   it('explains why a provider is or is not ready', () => {

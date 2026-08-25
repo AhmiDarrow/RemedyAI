@@ -3,7 +3,7 @@
  * Extracted from App.tsx so tab switching and multi-provider state stay testable.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   fetchModels,
   pickDefaultModel,
@@ -12,6 +12,7 @@ import {
 } from '../api/modelDiscovery'
 import {
   listConnectedProviders,
+  pickerFromConnectedResponse,
   setSessionLlm as applySessionLlm,
   type ConnectedProvider,
 } from '../api/providers'
@@ -38,8 +39,10 @@ export function useSessionLlm(opts: {
   streaming: boolean
   /** Any tab streaming (not only the focused one). */
   runningCount?: number
+  /** Local API is up — hydrate the status-bar picker (not only Settings save). */
+  apiReady?: boolean
 }) {
-  const { activeId, sessions, streaming, runningCount = 0 } = opts
+  const { activeId, sessions, streaming, runningCount = 0, apiReady = false } = opts
 
   // Unknown until settings / session binds load — never a seeded provider/model.
   const [model, setModel] = useState('')
@@ -175,14 +178,51 @@ export function useSessionLlm(opts: {
   const refreshConnected = useCallback(async () => {
     try {
       const conn = await listConnectedProviders()
-      setConnectedProviders(
-        conn.picker?.length ? conn.picker : conn.connected || [],
-      )
+      setConnectedProviders(pickerFromConnectedResponse(conn))
       return conn
     } catch {
       return null
     }
   }, [])
+
+  const refreshModelsRef = useRef(refreshModels)
+  refreshModelsRef.current = refreshModels
+
+  // Status-bar picker is hidden while connectedProviders is empty. Bootstrap
+  // used to latch didBoot before this fetch, so StrictMode cancel / a late
+  // token left the bar dead until Settings save called refreshConnected.
+  useEffect(() => {
+    if (!apiReady) return
+    let cancelled = false
+    void (async () => {
+      for (let i = 0; i < 4; i++) {
+        if (cancelled) return
+        const conn = await refreshConnected()
+        if (cancelled) return
+        const rows = pickerFromConnectedResponse(conn)
+        if (rows.length > 0) {
+          const p = (conn?.active_provider || '').trim()
+          if (p) void refreshModelsRef.current({ provider: p })
+          return
+        }
+        await new Promise((r) => window.setTimeout(r, 300 * (i + 1)))
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [apiReady, refreshConnected])
+
+  // Session bind may differ from Settings default — list that provider's models
+  // without waiting for a Settings reload.
+  const fetchedModelsFor = useRef('')
+  useEffect(() => {
+    if (!apiReady) return
+    const p = (barProvider || llmProvider || '').trim()
+    if (!p || fetchedModelsFor.current === p) return
+    fetchedModelsFor.current = p
+    void refreshModels({ provider: p })
+  }, [apiReady, barProvider, llmProvider, refreshModels])
 
   // RMB settings / GGUF load → keep status bar + session bind on the same stem
   useEffect(() => {
@@ -276,16 +316,27 @@ export function useSessionLlm(opts: {
   const onProviderModelChange = useCallback(
     (prov: string, mid: string) => {
       if (streaming) return
+      const modelId = (mid || '').trim()
+      if (!prov) return
       if (!activeId) {
         setLlmProvider(prov)
-        setModel(mid)
-        void updateSettings({ llm_provider: prov, llm_model: mid }).catch(() => {})
+        if (modelId) setModel(modelId)
+        void updateSettings({
+          llm_provider: prov,
+          ...(modelId ? { llm_model: modelId } : {}),
+        }).catch((e: unknown) => {
+          const msg = e instanceof Error ? e.message : String(e)
+          showSwitchToast(msg || 'Could not save provider')
+        })
         void refreshModels({ provider: prov })
         void refreshConnected()
         return
       }
-      setSessionBind(activeId, prov, mid)
-      void applySessionLlm(activeId, prov, mid, false)
+      if (modelId) setSessionBind(activeId, prov, modelId)
+      else {
+        setLlmProvider(prov)
+      }
+      void applySessionLlm(activeId, prov, modelId || undefined, false)
         .then(async (r) => {
           // After RMB GGUF switch, server may return the resolved stem
           const resolved = (r as { model?: string; provider?: string })?.model
@@ -297,7 +348,10 @@ export function useSessionLlm(opts: {
           await refreshModels({ provider: prov })
           await refreshConnected()
         })
-        .catch(() => {})
+        .catch((e: unknown) => {
+          const msg = e instanceof Error ? e.message : String(e)
+          showSwitchToast(msg || 'Could not switch provider')
+        })
     },
     [
       streaming,

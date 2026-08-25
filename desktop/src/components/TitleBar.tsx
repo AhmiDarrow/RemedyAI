@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { isTauri, tauriInvoke } from '../api/tauri'
+import { useI18n } from '../i18n'
 import { browserStackHold } from '../utils/browserStack'
 import { TitleBarDownload } from './TitleBarDownload'
 
@@ -46,6 +47,7 @@ export function TitleBar({
   const menuRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
   const customChrome = useCustomWindowChrome()
+  const { t } = useI18n()
 
   useEffect(() => {
     const root = document.documentElement
@@ -128,10 +130,10 @@ export function TitleBar({
             paddingTop: 0,
             paddingBottom: 0,
           }}
-          title="Remedy menu"
+          title={t('menu.open')}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
-          aria-label="Open Remedy menu"
+          aria-label={t('menu.open')}
           onClick={() => setMenuOpen((o) => !o)}
         >
           <img
@@ -169,28 +171,28 @@ export function TitleBar({
               backdropFilter: 'blur(12px)',
             }}
           >
-            <MenuItem label="New session" onClick={() => run('new_session')} shortcut="Ctrl+N" />
+            <MenuItem label={t('menu.newSession')} onClick={() => run('new_session')} shortcut="Ctrl+N" />
             <MenuSep />
-            <MenuItem label="Settings…" onClick={() => run('settings')} shortcut="Ctrl+," />
-            <MenuItem label="Memory" onClick={() => run('memory')} />
-            <MenuItem label="Skills" onClick={() => run('skills')} />
-            <MenuItem label="Diagnostics" onClick={() => run('diagnostics')} />
-            <MenuItem label="Help" onClick={() => run('help')} shortcut="F1" />
+            <MenuItem label={t('menu.settings')} onClick={() => run('settings')} shortcut="Ctrl+," />
+            <MenuItem label={t('menu.memory')} onClick={() => run('memory')} />
+            <MenuItem label={t('menu.skills')} onClick={() => run('skills')} />
+            <MenuItem label={t('menu.diagnostics')} onClick={() => run('diagnostics')} />
+            <MenuItem label={t('menu.help')} onClick={() => run('help')} shortcut="F1" />
             {isTauri() && (
-              <MenuItem label="Open in browser" onClick={() => run('switch_web_ui')} />
+              <MenuItem label={t('menu.openBrowser')} onClick={() => run('switch_web_ui')} />
             )}
             <MenuSep />
             {updateAvailable ? (
-              <MenuItem label="Install update…" onClick={() => run('install_update')} accent />
+              <MenuItem label={t('menu.installUpdate')} onClick={() => run('install_update')} accent />
             ) : (
-              <MenuItem label="Check for updates…" onClick={() => run('check_updates')} />
+              <MenuItem label={t('menu.checkUpdates')} onClick={() => run('check_updates')} />
             )}
             <MenuItem
-              label={version ? `About Remedy (v${version})` : 'About Remedy'}
+              label={version ? t('menu.aboutVersion', { version }) : t('menu.about')}
               onClick={() => run('about')}
             />
             <MenuSep />
-            <MenuItem label="Quit Remedy" onClick={() => run('quit')} danger />
+            <MenuItem label={t('menu.quit')} onClick={() => run('quit')} danger />
           </div>
         )}
       </div>
@@ -228,7 +230,7 @@ export function TitleBar({
           <button
             type="button"
             className="titlebar-win-btn"
-            title="Minimize"
+            title={t('win.minimize')}
             aria-label="Minimize"
             onClick={() => void tauriInvoke('minimize_main_window')}
           >
@@ -237,7 +239,7 @@ export function TitleBar({
           <button
             type="button"
             className="titlebar-win-btn"
-            title={maximized ? 'Restore' : 'Maximize'}
+            title={maximized ? t('win.restore') : t('win.maximize')}
             aria-label={maximized ? 'Restore' : 'Maximize'}
             onClick={() => {
               void tauriInvoke<boolean>('toggle_maximize_main_window')
@@ -250,8 +252,8 @@ export function TitleBar({
           <button
             type="button"
             className="titlebar-win-btn is-close"
-            title="Close"
-            aria-label="Close"
+            title={t('win.close')}
+            aria-label={t('win.close')}
             onClick={() => void tauriInvoke('request_close_main_window')}
           >
             <WinIcon kind="close" />

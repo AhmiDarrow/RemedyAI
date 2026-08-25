@@ -98,13 +98,18 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             from remedy.core.workspace import is_unset_project_path, is_volume_root_path
 
             if not raw or is_unset_project_path(raw) or is_volume_root_path(raw):
-                return {"todos": []}
+                items = load_todos(runtime, session_id=session_id)
+                if open_todo_count(items) == 0:
+                    return {"todos": []}
+                return {"todos": todos_public(items)}
             p = Path(str(raw))
             root = p.parent if p.is_file() else p
             if is_volume_root_path(root):
-                return {"todos": []}
-        # Never fall back to the shared runtime / user profile cache.
-        items = load_todos(None, root=root)
+                items = load_todos(runtime, session_id=session_id)
+                if open_todo_count(items) == 0:
+                    return {"todos": []}
+                return {"todos": todos_public(items)}
+        items = load_todos(runtime if root is None else None, root=root, session_id=session_id)
         if open_todo_count(items) == 0:
             return {"todos": []}
         return {"todos": todos_public(items)}

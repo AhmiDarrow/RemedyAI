@@ -150,6 +150,26 @@ def test_todos_event_is_session_scoped():
     assert take_todos_event(rt, session_id="sess-b") is None
 
 
+def test_begin_chat_beat_clears_unbound_mem_todos():
+    from types import SimpleNamespace
+
+    from remedy.core.build_todos import begin_chat_beat, load_todos, upsert_todos
+
+    rt = SimpleNamespace(
+        effective_project_path=lambda: None,
+        config=None,
+        _session_id="sess-endless",
+    )
+    upsert_todos(
+        rt,
+        [{"id": "old", "content": "Oracle pack", "status": "in_progress"}],
+        merge=False,
+    )
+    assert load_todos(rt, session_id="sess-endless")
+    begin_chat_beat(rt, "sess-endless")
+    assert load_todos(rt, session_id="sess-endless") == []
+
+
 def test_mem_todos_do_not_leak_across_sessions():
     rt = SimpleNamespace(
         effective_project_path=lambda: None,

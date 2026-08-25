@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useI18n } from '../i18n'
 import {
   listApprovals,
   resolveApproval,
@@ -12,6 +13,7 @@ interface ApprovalBannerProps {
 }
 
 export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
+  const { t } = useI18n()
   const [items, setItems] = useState<PendingApproval[]>([])
   const [busyId, setBusyId] = useState<string | null>(null)
   const [message, setMessage] = useState('')
@@ -49,7 +51,7 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
     setMessage('')
     try {
       const res = await resolveApproval(item.id, approve, 'session')
-      const msg = res.hint || (approve ? 'Approved' : 'Denied')
+      const msg = res.hint || (approve ? t('approval.approved') : t('approval.denied'))
       flashMsg(msg, 2800)
       await refresh()
       onResolved?.(approve, item.command)
@@ -68,7 +70,7 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
       className="mx-3 mt-2 mb-1 space-y-2"
       style={{ color: 'var(--text-primary)' }}
       role="region"
-      aria-label="Pending tool approvals"
+      aria-label={t('approval.region')}
     >
       {items.map((item) => (
         <div key={item.id} className="ui-banner ui-banner-warn">
@@ -77,7 +79,7 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
             style={{ color: 'var(--warning)' }}
           >
             <span aria-hidden>{item.sensitive ? '💳' : '⚠'}</span>
-            {item.sensitive ? 'Payment step — needs you' : 'Approval required'}
+            {item.sensitive ? t('approval.payment') : t('approval.required')}
           </div>
           {/* Plain-language headline first (Grove premise); raw reason/command
               demoted to a details line. */}
@@ -86,7 +88,7 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
           </div>
           {item.sensitive && (
             <div className="mb-1.5 text-[0.72rem]" style={{ color: 'var(--warning)' }}>
-              Asked every time — no mode skips a payment or stored-secret step.
+              {t('approval.paymentNote')}
             </div>
           )}
           <details className="mb-2.5">
@@ -94,7 +96,7 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
               className="text-[0.7rem] cursor-pointer select-none"
               style={{ color: 'var(--text-muted)' }}
             >
-              Details
+              {t('approval.details')}
             </summary>
             <div className="mt-1 text-[0.7rem]" style={{ color: 'var(--text-secondary)' }}>
               {item.reason}
@@ -118,10 +120,10 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
               className="ui-btn ui-btn-primary"
             >
               {busyId === item.id
-                ? 'Working…'
+                ? t('approval.working')
                 : item.sensitive
-                  ? 'Yes, go ahead'
-                  : 'Approve once'}
+                  ? t('approval.yes')
+                  : t('approval.once')}
             </button>
             <button
               type="button"
@@ -129,7 +131,7 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
               onClick={() => void act(item, false)}
               className="ui-btn ui-btn-secondary"
             >
-              {item.sensitive ? 'Not now' : 'Deny'}
+              {item.sensitive ? t('approval.notNow') : t('approval.deny')}
             </button>
           </div>
         </div>

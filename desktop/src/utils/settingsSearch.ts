@@ -39,8 +39,8 @@ export const SETTINGS_SECTION_META: Record<
   },
   'you-agent': {
     title: 'You & Agent',
-    summary: 'Names & persona',
-    keywords: 'user name agent persona identity wipe memory forget whoami soul',
+    summary: 'Names, language & persona',
+    keywords: 'user name agent persona identity wipe memory forget whoami soul language locale i18n',
   },
   voice: {
     title: 'Voice',

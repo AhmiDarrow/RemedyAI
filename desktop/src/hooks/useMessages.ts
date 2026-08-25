@@ -593,6 +593,9 @@ export function useMessages(sessionId: string | null) {
         setRunUsage(emptyUsage(model || null, null))
         setStreamStalled(false)
         setStallSeconds(0)
+        // Endless session: this message is a new beat — don't keep the
+        // previous task's open checklist painted until this turn writes one.
+        setBuildTodos([])
       }
       lastStreamActivityRef.current = Date.now()
       lastSentBySessionRef.current.set(targetId, {

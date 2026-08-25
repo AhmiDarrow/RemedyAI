@@ -78,23 +78,29 @@ def _path(root: Path) -> Path:
     return root / ".remedy-build" / "todos.json"
 
 
-def load_todos(runtime: Any = None, *, root: Path | str | None = None) -> list[TodoItem]:
+def load_todos(
+    runtime: Any = None,
+    *,
+    root: Path | str | None = None,
+    session_id: str | None = None,
+) -> list[TodoItem]:
     """Load todos from disk (empty list if none).
 
     When *root* is passed (session GET /todos), never fall back to the
-    in-memory cache from another tab's turn.
+    in-memory cache from another tab's turn — unless *session_id* is given
+    for an unbound endless chat.
     """
     explicit = root is not None
     base = _disk_root(root) if explicit else _root_for(runtime)
     if base is None:
-        if explicit:
+        if explicit and not session_id:
             return []
-        return _mem_todos(runtime)
+        return _mem_todos(runtime, session_id)
     fp = _path(base)
     if not fp.is_file():
-        if explicit:
+        if explicit and not session_id:
             return []
-        return _mem_todos(runtime)
+        return _mem_todos(runtime, session_id)
     try:
         raw = json.loads(fp.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -253,12 +259,29 @@ def todos_event_token(items: list[TodoItem] | None) -> str:
     return "@@todos:" + json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
 
 
-def mark_todos_dirty(runtime: Any, items: list[TodoItem] | None) -> None:
+def begin_chat_beat(runtime: Any, session_id: str | None = None) -> None:
+    """Endless session: a new owner message is a new beat.
+
+    Unbound chats drop leftover in-memory todos so yesterday's Oracle list
+    does not sit on today's Telegram question. Bound project folders keep
+    disk todos.
+    """
+    if runtime is None:
+        return
+    if _root_for(runtime) is not None:
+        return
+    _set_mem_todos(runtime, [], session_id=session_id)
+    mark_todos_dirty(runtime, [], session_id=session_id)
+
+
+def mark_todos_dirty(
+    runtime: Any, items: list[TodoItem] | None, *, session_id: str | None = None
+) -> None:
     """Queue a live checklist event for the current ReAct stream."""
     if runtime is None:
         return
     tok = todos_event_token(items)
-    key = _todos_session_key(runtime)
+    key = _todos_session_key(runtime, session_id)
     with suppress(Exception):
         bag = getattr(runtime, "_pending_todos_by_session", None)
         if not isinstance(bag, dict):

@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useI18n } from '../i18n'
 import {
   getLifeBoard,
   listApprovals,
@@ -79,9 +80,17 @@ function saveGoalSessions(map: Record<string, string>): void {
   }
 }
 
-function timeOfDayGreeting(name: string): string {
+function timeOfDayGreeting(name: string, t: (key: string) => string): string {
   const h = new Date().getHours()
-  const part = h < 5 ? 'Up late' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
+  const key =
+    h < 5
+      ? 'grove.helloLate'
+      : h < 12
+        ? 'grove.helloMorning'
+        : h < 18
+          ? 'grove.helloAfternoon'
+          : 'grove.helloEvening'
+  const part = t(key)
   return name ? `${part}, ${name}` : part
 }
 
@@ -148,6 +157,7 @@ export function GroveApp({
   openPlace,
   onPlaceOpened,
 }: GroveAppProps) {
+  const { t } = useI18n()
   const [view, setView] = useState<GroveView>({ kind: 'home' })
   const [tab, setTab] = useState<RoomTab>('alongside')
   // Home surface mirrors a goal room's tabs: plots (default) · Alongside
@@ -503,7 +513,7 @@ export function GroveApp({
               onClick={() => setHomeTab('alongside')}
               title="Live stage — I drive the browser, you watch (shop, forms, email)"
             >
-              Alongside
+              {t('grove.alongside')}
             </button>
             <button
               type="button"
@@ -511,7 +521,7 @@ export function GroveApp({
               onClick={() => setHomeTab('storyline')}
               title="Everything we say and do, in order, in plain words"
             >
-              📖 Storyline
+              📖 {t('grove.storyline')}
             </button>
           </div>
           <button
@@ -520,7 +530,7 @@ export function GroveApp({
             onClick={onSwitchToStudio}
             title="Full workbench: files, terminal, raw tools"
           >
-            Grove ✦ · switch to <b>Studio</b>
+            {t('grove.switchStudio')}
           </button>
         </div>
 
@@ -531,7 +541,7 @@ export function GroveApp({
         >
         <div className="grove-scroll" style={{ width: `${homeSplit.ratio * 100}%` }}>
           <h1 className="grove-hello">
-            {timeOfDayGreeting(userName)}
+            {timeOfDayGreeting(userName, t)}
             <span>
               {goals.length
                 ? `${goals.length} ${goals.length === 1 ? 'plot' : 'plots'} growing${needsYou ? ` · ${needsYou} thing${needsYou > 1 ? 's' : ''} need${needsYou > 1 ? '' : 's'} you` : ''}`
@@ -786,7 +796,7 @@ export function GroveApp({
             ))}
             {streaming && (
               <div className="grove-mo remedy-said now">
-                <div className="who">Happening now</div>
+                <div className="who">{t('grove.happeningNow')}</div>
                 <div className="said">{partialText || '…'}</div>
               </div>
             )}
@@ -794,7 +804,7 @@ export function GroveApp({
         )}
         {voice.recording && (
           <div className="grove-sr-live" role="status" aria-live="polite">
-            Listening…
+            {t('grove.listening')}
           </div>
         )}
       </div>
@@ -820,18 +830,18 @@ export function GroveApp({
             className={tab === 'alongside' ? 'on' : ''}
             onClick={() => setTab('alongside')}
           >
-            Alongside
+            {t('grove.alongside')}
           </button>
           <button
             type="button"
             className={tab === 'storyline' ? 'on' : ''}
             onClick={() => setTab('storyline')}
           >
-            📖 Storyline
+            📖 {t('grove.storyline')}
           </button>
         </div>
         <button type="button" className="grove-switch" onClick={onSwitchToStudio}>
-          switch to <b>Studio</b>
+          {t('grove.switchStudioShort')}
         </button>
       </div>
 
@@ -904,7 +914,7 @@ export function GroveApp({
           </div>
           {voice.recording && (
             <div className="grove-sr-live" role="status" aria-live="polite">
-              Listening…
+              {t('grove.listening')}
             </div>
           )}
         </div>
@@ -930,7 +940,7 @@ export function GroveApp({
           ))}
           {streaming && (
             <div className="grove-mo remedy-said now">
-              <div className="who">Happening now</div>
+              <div className="who">{t('grove.happeningNow')}</div>
               <div className="said">{partialText || '…'}</div>
             </div>
           )}

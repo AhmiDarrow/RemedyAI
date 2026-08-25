@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, useRef, type ReactNode, type DragEvent } from 'react'
+import { useI18n } from '../i18n'
 import type { ChatSession } from '../types'
 import { relativeTime } from '../utils/relativeTime'
 import {
@@ -88,6 +89,7 @@ export function Sidebar({
   embedded = false,
   busySessionIds,
 }: SidebarProps) {
+  const { t } = useI18n()
   const [query, setQuery] = useState('')
   const [meta, setMeta] = useState<Record<string, SessionMeta>>(() => getAllSessionMeta())
   const [tagDraft, setTagDraft] = useState('')
@@ -391,7 +393,7 @@ export function Sidebar({
       {/* Sticky chrome: stays visible while session list scrolls */}
       <div className="sidebar-chrome p-3 space-y-2 shrink-0 sticky top-0 z-10">
         <button type="button" onClick={onNew} className="sidebar-new-btn">
-          + New session
+          {t('sidebar.newSession')}
         </button>
         {(onExport || onImport) && (
           <div className="flex gap-1.5">
@@ -406,7 +408,7 @@ export function Sidebar({
                   color: 'var(--text-secondary)',
                 }}
               >
-                Import
+                {t('sidebar.import')}
               </button>
             )}
             {onExport && (
@@ -421,7 +423,7 @@ export function Sidebar({
                   color: 'var(--text-secondary)',
                 }}
               >
-                Export
+                {t('sidebar.export')}
               </button>
             )}
           </div>
@@ -429,21 +431,21 @@ export function Sidebar({
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search sessions, projects…"
+          placeholder={t('sidebar.search')}
           className="sidebar-search"
-          aria-label="Search sessions"
+          aria-label={t('sidebar.search')}
         />
         <div className="flex flex-wrap gap-1">
-          <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label="All" />
+          <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label={t('sidebar.all')} />
           <FilterChip
             active={filter === 'pinned'}
             onClick={() => setFilter('pinned')}
-            label="★ Pin"
+            label={t('sidebar.pin')}
           />
           <FilterChip
             active={filter === 'archived'}
             onClick={() => setFilter('archived')}
-            label="Archive"
+            label={t('sidebar.archive')}
           />
         </div>
         <label

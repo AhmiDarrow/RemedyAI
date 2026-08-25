@@ -32,6 +32,18 @@ def _int_or(value: Any, default: int) -> int:
     return default if value is None else int(value)
 
 
+def _ui_lang_norm(raw: object = None) -> str:
+    from remedy.i18n.languages import normalize_ui_language
+
+    return normalize_ui_language(None if raw is None else str(raw))
+
+
+def _ui_lang_list() -> list[dict[str, object]]:
+    from remedy.i18n.languages import public_language_list
+
+    return public_language_list()
+
+
 def _trust_profile_value(raw: object = None) -> str:
     """Normalized trust profile for the settings payload.
 
@@ -189,6 +201,8 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 in ("female", "male", "neutral")
                 else "female"
             ),
+            "ui_language": _ui_lang_norm(cfg.get("ui_language")),
+            "ui_languages": _ui_lang_list(),
             "persona": cfg.get("persona", "default"),
             "project_path": cfg.get("project_path")
             or (
