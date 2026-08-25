@@ -2,7 +2,7 @@
 
 **Status:** canon (v1)
 **Code:** `src/remedy/core/agent_identity.py`, `src/remedy/memory/soul/`
-**Reads with:** `docs/SOUL_FIELD.md`
+**Reads with:** local clone note `docs/SOUL_FIELD.md` (not on the public tree)
 
 This document defines who Remedy *is*. The Soul Field defines how she persists;
 this charter defines what persists. Everything in the identity preamble, the
