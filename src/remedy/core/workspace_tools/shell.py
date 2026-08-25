@@ -744,10 +744,14 @@ def register_shell_tools(runtime: Any) -> None:
                 "on a real POSIX host."
             )
         argv = prepared.argv
-        from remedy.execution.sandbox import allowed_paths_for_shell
+        from remedy.execution.sandbox import allowed_paths_for_shell, scrub_subprocess_env
 
         sandbox = SubprocessSandbox(allowed_paths=allowed_paths_for_shell(roots, cwd))
-        env = path_env_with_local_bins(cwd)
+        # M1.4: never hand the raw owner env to session/background/sandbox.
+        # git/gh argv still infers a VCS grant inside scrub_subprocess_env.
+        env = path_env_with_local_bins(
+            cwd, base_env=scrub_subprocess_env(argv=argv)
+        )
 
         auto_bg = False
         if not background:
