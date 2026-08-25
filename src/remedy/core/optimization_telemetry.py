@@ -1,12 +1,13 @@
 """Phase 0 instrumentation — named counters/histograms, no new backends.
 
 Use these helpers so later phases can prove optimization against a v0.31 baseline.
+All record helpers are best-effort and never raise into callers.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from time import perf_counter
 
 from remedy.core.metrics import MetricsRegistry
@@ -44,12 +45,14 @@ RELIABILITY_COUNTERS = (
 
 def observe_seconds(kind: str, seconds: float, **labels: str) -> None:
     """Record a latency sample. *kind* is one of LATENCY_NAMES."""
-    REGISTRY.histogram(f"remedy_{kind}_seconds", **labels).observe(float(seconds))
+    with suppress(Exception):
+        REGISTRY.histogram(f"remedy_{kind}_seconds", **labels).observe(float(seconds))
 
 
 def inc(kind: str, amount: int = 1, **labels: str) -> None:
     """Increment a reliability counter. *kind* is one of RELIABILITY_COUNTERS."""
-    REGISTRY.counter(f"remedy_{kind}_total", **labels).inc(amount)
+    with suppress(Exception):
+        REGISTRY.counter(f"remedy_{kind}_total", **labels).inc(amount)
 
 
 @contextmanager

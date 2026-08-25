@@ -8,7 +8,11 @@ import { completeStreamJob, registerStreamJob } from '../sessions/streamJobs'
 import {
   clearTurnsForSession,
   getTurn,
+  isLiveTurnStatus,
+  liveTurnForSession,
+  plainTurnLabel,
   resetTurns,
+  subscribeTurns,
   turnsForSession,
   upsertTurn,
 } from './turns'
@@ -79,5 +83,66 @@ describe('TurnStore', () => {
     const done = getTurn('sess-wire', job.turnId)
     expect(done?.status).toBe('completed')
     expect(done?.completedAt).toBeTruthy()
+  })
+
+  it('subscribeTurns notifies then stops after unsubscribe', () => {
+    const seen: string[] = []
+    const unsub = subscribeTurns((all) => {
+      seen.push(all.map((t) => t.turnId).join(','))
+    })
+    upsertTurn({
+      sessionId: 'a',
+      turnId: 't-sub',
+      status: 'running',
+      startedAt: '2026-08-24T00:00:00Z',
+    })
+    expect(seen).toEqual(['t-sub'])
+    unsub()
+    upsertTurn({
+      sessionId: 'a',
+      turnId: 't-sub',
+      status: 'waiting',
+    })
+    expect(seen).toEqual(['t-sub'])
+  })
+
+  it('plainTurnLabel uses partner-surface wording and hides terminal states', () => {
+    expect(plainTurnLabel('planning')).toBe('Working…')
+    expect(plainTurnLabel('running')).toBe('Working…')
+    expect(plainTurnLabel('waiting')).toBe('Waiting for you…')
+    expect(plainTurnLabel('verifying')).toBe('Checking…')
+    expect(plainTurnLabel('completed')).toBeNull()
+    expect(plainTurnLabel('failed')).toBeNull()
+    expect(isLiveTurnStatus('running')).toBe(true)
+    expect(isLiveTurnStatus('completed')).toBe(false)
+  })
+
+  it('liveTurnForSession picks the newest live turn and ignores completed', () => {
+    expect(liveTurnForSession('empty')).toBeUndefined()
+    upsertTurn({
+      sessionId: 'a',
+      turnId: 'old',
+      status: 'running',
+      startedAt: '2026-08-24T00:00:00Z',
+    })
+    upsertTurn({
+      sessionId: 'a',
+      turnId: 'newer',
+      status: 'waiting',
+      startedAt: '2026-08-24T00:00:05Z',
+    })
+    upsertTurn({
+      sessionId: 'a',
+      turnId: 'done',
+      status: 'completed',
+      startedAt: '2026-08-24T00:00:09Z',
+      completedAt: '2026-08-24T00:00:10Z',
+    })
+    const live = liveTurnForSession('a')
+    expect(live?.turnId).toBe('newer')
+    expect(plainTurnLabel(live!.status)).toBe('Waiting for you…')
+    upsertTurn({ sessionId: 'a', turnId: 'newer', status: 'completed' })
+    upsertTurn({ sessionId: 'a', turnId: 'old', status: 'failed' })
+    expect(liveTurnForSession('a')).toBeUndefined()
   })
 })

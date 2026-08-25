@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from remedy.interfaces.routes.sessions.attachments import register_attachments_routes
 from remedy.interfaces.routes.sessions.crud import register_crud_routes
+from remedy.interfaces.routes.sessions.explain import register_explain_routes
 from remedy.interfaces.routes.sessions.legacy_chat import (
     register_legacy_chat_stream_routes,
 )
@@ -23,6 +24,7 @@ def register_sessions_routes(app: FastAPI, *, runtime=None, gateway=None, memory
     register_attachments_routes(app, **kw)
     register_stream_routes(app, **kw)
     register_legacy_chat_stream_routes(app, **kw)
+    register_explain_routes(app, **kw)
     from remedy.interfaces.routes.session_events import register_session_event_routes
 
     register_session_event_routes(app)

@@ -341,8 +341,10 @@ class MemoryStore:
 
     async def upsert(self, entry: MemoryEntry) -> MemoryEntry:
         """Insert or update a memory entry. Returns the saved entry."""
+        from remedy.core.optimization_telemetry import span
+
         entry.updated_at = datetime.now(UTC)
-        with self._locked():
+        with span("memory_write"), self._locked():
             db = self._ensure_db()
             return self._upsert_unlocked(db, entry)
 
@@ -599,55 +601,62 @@ class MemoryStore:
         Falls back to :meth:`search_simple` when FTS5 MATCH rejects the query
         (e.g. special characters) so callers always get a safe result set.
         """
-        query = sanitize_search_query(query, max_length=500)
-        if not query.strip():
-            return []
-        type_filter = ""
-        params: list[Any] = []
+        from remedy.core.optimization_telemetry import span
 
-        if entry_type is not None:
-            type_filter = "AND memory_entries.entry_type = ?"
-            params = [query, entry_type.value, limit]
-        else:
-            params = [query, limit]
+        with span("memory_read"):
+            query = sanitize_search_query(query, max_length=500)
+            if not query.strip():
+                return []
+            type_filter = ""
+            params: list[Any] = []
 
-        sql = f"""
-                SELECT memory_entries.* FROM memory_entries
-                JOIN memory_fts ON memory_entries.rowid = memory_fts.rowid
-                WHERE memory_fts MATCH ? {type_filter}
-                ORDER BY rank
-                LIMIT ?
-                """
-        try:
-            with self._locked():
-                db = self._ensure_db()
-                try:
-                    rows = db.execute(sql, params).fetchall()
-                except sqlite3.OperationalError as exc:
-                    # ``.`` / ``;`` / ``:`` in free text are fts5 syntax errors. Retry
-                    # with every token quoted before ever touching the slow LIKE scan
-                    # (that fallback stalled the loop 4x in one session).
-                    if "fts5: syntax error" not in str(exc) and "no such" in str(exc):
-                        raise
-                    from remedy.memory.fts_query import fts5_match_query
+            if entry_type is not None:
+                type_filter = "AND memory_entries.entry_type = ?"
+                params = [query, entry_type.value, limit]
+            else:
+                params = [query, limit]
 
-                    match_q = fts5_match_query(query)
-                    if not match_q:
-                        return []
-                    rows = db.execute(sql, [match_q, *params[1:]]).fetchall()
-            return [self._row_to_entry(r) for r in rows]
-        except sqlite3.OperationalError as exc:
-            # Missing FTS table etc. — degrade gracefully (no recursion).
-            logger = logging.getLogger(__name__)
-            logger.debug(
-                "FTS MATCH failed (%s); falling back to LIKE for query=%r",
-                exc,
-                query[:80],
-            )
-            hits = await self._search_like(query, limit=limit)
-            if entry_type is None:
-                return hits
-            return [h for h in hits if h.entry_type == entry_type]
+            sql = f"""
+                    SELECT memory_entries.* FROM memory_entries
+                    JOIN memory_fts ON memory_entries.rowid = memory_fts.rowid
+                    WHERE memory_fts MATCH ? {type_filter}
+                    ORDER BY rank
+                    LIMIT ?
+                    """
+            try:
+                with self._locked():
+                    db = self._ensure_db()
+                    try:
+                        rows = db.execute(sql, params).fetchall()
+                    except sqlite3.OperationalError as exc:
+                        # ``.`` / ``;`` / ``:`` in free text are fts5 syntax
+                        # errors. Retry with every token quoted before ever
+                        # touching the slow LIKE scan (that fallback stalled
+                        # the loop 4x in one session).
+                        if (
+                            "fts5: syntax error" not in str(exc)
+                            and "no such" in str(exc)
+                        ):
+                            raise
+                        from remedy.memory.fts_query import fts5_match_query
+
+                        match_q = fts5_match_query(query)
+                        if not match_q:
+                            return []
+                        rows = db.execute(sql, [match_q, *params[1:]]).fetchall()
+                return [self._row_to_entry(r) for r in rows]
+            except sqlite3.OperationalError as exc:
+                # Missing FTS table etc. — degrade gracefully (no recursion).
+                logger = logging.getLogger(__name__)
+                logger.debug(
+                    "FTS MATCH failed (%s); falling back to LIKE for query=%r",
+                    exc,
+                    query[:80],
+                )
+                hits = await self._search_like(query, limit=limit)
+                if entry_type is None:
+                    return hits
+                return [h for h in hits if h.entry_type == entry_type]
 
     async def _search_like(self, query: str, limit: int = 20) -> list[MemoryEntry]:
         """Parameterized LIKE fallback (escapes % and _). Never uses FTS."""

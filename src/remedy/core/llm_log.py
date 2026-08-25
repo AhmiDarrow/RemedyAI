@@ -114,6 +114,17 @@ def log_llm_call(**fields: Any) -> None:
             logger.warning(line)
     except Exception:  # pragma: no cover - logging must never break a turn
         logger.debug("llm log line failed", exc_info=True)
+    with contextlib.suppress(Exception):
+        latency_ms = fields.get("latency_ms")
+        if latency_ms is not None:
+            from remedy.core.optimization_telemetry import observe_seconds
+
+            observe_seconds(
+                "llm",
+                float(latency_ms) / 1000.0,
+                provider=str(fields.get("provider") or "-"),
+                model=str(fields.get("model") or "-"),
+            )
 
 
 def count_tool_calls(response_json: Any, adapter: Any = None) -> int:

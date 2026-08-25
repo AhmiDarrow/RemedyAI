@@ -69,27 +69,30 @@ class EventBus:
             self._subs.append(fn)
 
     def emit(self, event: Event) -> None:
-        with self._lock:
-            subs = list(self._subs)
-            conn = self._db()
-            conn.execute(
-                "INSERT OR REPLACE INTO events VALUES (?,?,?,?,?,?,?)",
-                (
-                    event.event_id,
-                    event.session_id,
-                    event.turn_id,
-                    event.timestamp.isoformat(),
-                    event.event_type.value,
-                    event.actor,
-                    json.dumps(dict(event.payload), default=str),
-                ),
-            )
-            conn.commit()
-        for fn in subs:
-            try:
-                fn(event)
-            except Exception:
-                continue
+        from remedy.core.optimization_telemetry import span
+
+        with span("event", event_type=str(event.event_type.value)):
+            with self._lock:
+                subs = list(self._subs)
+                conn = self._db()
+                conn.execute(
+                    "INSERT OR REPLACE INTO events VALUES (?,?,?,?,?,?,?)",
+                    (
+                        event.event_id,
+                        event.session_id,
+                        event.turn_id,
+                        event.timestamp.isoformat(),
+                        event.event_type.value,
+                        event.actor,
+                        json.dumps(dict(event.payload), default=str),
+                    ),
+                )
+                conn.commit()
+            for fn in subs:
+                try:
+                    fn(event)
+                except Exception:
+                    continue
 
     def emit_simple(
         self,

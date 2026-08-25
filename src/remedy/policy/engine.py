@@ -2,6 +2,9 @@
 
 Does not change allow/deny outcomes. Later phases replace the internals;
 callers should start depending on ``evaluate`` instead of tool-name lists.
+
+v0.37: ``TrustProfile.AUTONOMOUS`` may skip high-impact asks the same way
+``auto`` mode does; owner checkpoints (mail / pay) are never waived.
 """
 
 from __future__ import annotations
@@ -10,6 +13,30 @@ from typing import Any
 
 from remedy.policy.decisions import PolicyDecision, ToolRequest
 from remedy.tools.descriptor import ToolDescriptor
+
+
+def _resolve_trust_profile():
+    """Read ``trust_profile`` from config; default BALANCED on missing/invalid."""
+    from remedy.core.trust_profile import TrustProfile
+
+    try:
+        from remedy.interfaces.api_support import load_config
+
+        cfg = load_config() or {}
+        raw = str(cfg.get("trust_profile") or TrustProfile.BALANCED).strip().lower()
+        return TrustProfile(raw)
+    except Exception:
+        return TrustProfile.BALANCED
+
+
+def _is_checkpoint_reason(tool_name: str, command: str, reason: str) -> bool:
+    """True when the ask is a non-waivable owner checkpoint (mail / pay / …)."""
+    from remedy.core.approvals import SENSITIVE_PREFIX
+    from remedy.core.trust_profile import checkpoint_still_required
+
+    if reason.startswith(SENSITIVE_PREFIX):
+        return True
+    return checkpoint_still_required(tool_name, command) is not None
 
 
 class PolicyEngine:
@@ -41,6 +68,7 @@ class PolicyEngine:
 
         from remedy.core.approvals import APPROVALS
         from remedy.core.security import check_dangerous_command
+        from remedy.core.trust_profile import profile_skips_high_impact_ask
 
         if desc.name in ("bash_exec", "host_run", "skill_run"):
             argv = ["bash", "-c", command] if command else [desc.name]
@@ -55,12 +83,24 @@ class PolicyEngine:
 
         reason = APPROVALS.needs_ask(command, tool_name=desc.name)
         if reason:
-            decision = PolicyDecision(
-                allowed=True,
-                requires_approval=True,
-                reason=reason,
-                granted_capabilities=desc.capabilities,
-            )
+            # AUTONOMOUS ≈ auto for in-project high-impact; checkpoints still ask.
+            # Does not fight mode=="full" (needs_ask already returned None there).
+            if profile_skips_high_impact_ask(_resolve_trust_profile()) and not _is_checkpoint_reason(
+                desc.name, command or "", reason
+            ):
+                decision = PolicyDecision(
+                    allowed=True,
+                    requires_approval=False,
+                    reason="allowed",
+                    granted_capabilities=desc.capabilities,
+                )
+            else:
+                decision = PolicyDecision(
+                    allowed=True,
+                    requires_approval=True,
+                    reason=reason,
+                    granted_capabilities=desc.capabilities,
+                )
             _emit_policy(ctx, desc.name, decision)
             return decision
         decision = PolicyDecision(
