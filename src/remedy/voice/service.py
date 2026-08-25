@@ -257,23 +257,33 @@ def _pack_in_runtime(pack: str) -> bool:
 _tts_deps_cached: bool | None = None
 
 
+def _module_present(name: str) -> bool:
+    """True when *name* is on sys.path. Does not import the package.
+
+    Status polls must not load torch / onnx / kokoro — the first import can
+    stall the API for tens of seconds on a machine that has the extras.
+    """
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError, ModuleNotFoundError):
+        return False
+
+
 def tts_deps_available() -> bool:
     """True when speaking deps are importable (or the desktop voice pack is on).
 
-    The expensive ``import kokoro_onnx`` is cached. The managed-pack marker is
-    not — tests and Settings toggles must see a pack appear immediately.
+    Presence is a ``find_spec`` probe, not ``import kokoro_onnx``. The
+    managed-pack marker is not cached — tests and Settings toggles must see a
+    pack appear immediately.
     """
     if _managed():
         return _pack_in_runtime("voice")
     global _tts_deps_cached
     if _tts_deps_cached is not None:
         return _tts_deps_cached
-    try:
-        import kokoro_onnx  # noqa: F401
-
-        _tts_deps_cached = True
-    except Exception:
-        _tts_deps_cached = False
+    _tts_deps_cached = _module_present("kokoro_onnx")
     return _tts_deps_cached
 
 
@@ -449,12 +459,7 @@ def stt_deps_available() -> bool:
     global _stt_deps_cached
     if _stt_deps_cached is not None:
         return _stt_deps_cached
-    try:
-        import faster_whisper  # noqa: F401
-
-        _stt_deps_cached = True
-    except Exception:
-        _stt_deps_cached = False
+    _stt_deps_cached = _module_present("faster_whisper")
     return _stt_deps_cached
 
 
@@ -1174,12 +1179,7 @@ def smart_turn_deps_available() -> bool:
     global _smart_turn_deps_cached
     if _smart_turn_deps_cached is not None:
         return _smart_turn_deps_cached
-    try:
-        import onnxruntime  # noqa: F401
-
-        _smart_turn_deps_cached = True
-    except Exception:
-        _smart_turn_deps_cached = False
+    _smart_turn_deps_cached = _module_present("onnxruntime")
     return _smart_turn_deps_cached
 
 

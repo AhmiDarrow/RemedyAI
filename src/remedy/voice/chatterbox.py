@@ -65,18 +65,21 @@ def _managed() -> bool:
 
 
 def chatterbox_deps_available() -> bool:
-    """Importable *and* new enough to load Nano."""
+    """True when the HQ package is on sys.path (or the managed HQ pack is on).
+
+    Status must not ``import chatterbox`` — that pulls torch and can stall
+    GET /api/voice/status for tens of seconds. Speak/load still imports and
+    fails closed if the installed wheel is too old for Nano.
+    """
     if _managed():
         from remedy.voice.runtime import pack_installed, runtime_ready
 
         return runtime_ready() and pack_installed("hq")
+    import importlib.util
+
     try:
-        import inspect
-
-        from chatterbox.tts_turbo import ChatterboxTurboTTS
-
-        return "nano" in inspect.signature(ChatterboxTurboTTS.from_pretrained).parameters
-    except Exception:
+        return importlib.util.find_spec("chatterbox") is not None
+    except (ImportError, ValueError, ModuleNotFoundError):
         return False
 
 

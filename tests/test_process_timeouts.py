@@ -25,8 +25,26 @@ async def test_git_returns_normally(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_hung_git_becomes_a_failed_call_not_a_hang():
-    code, out, err = await _git_out(Path("."), "rev-list", "--all", timeout_s=0.001)
+async def test_a_hung_git_becomes_a_failed_call_not_a_hang(monkeypatch):
+    """Must not race a real git that can finish in under 1ms on a warm CI box."""
+
+    class _Never:
+        returncode = None
+
+        async def communicate(self):
+            await asyncio.sleep(3600)
+
+        def kill(self):
+            return None
+
+        async def wait(self):
+            return 0
+
+    async def _spawn(*_a, **_kw):
+        return _Never()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+    code, out, err = await _git_out(Path("."), "rev-list", "--all", timeout_s=0.05)
     assert code != 0
     assert out == ""
     assert "timed out" in err
