@@ -17,11 +17,13 @@ import {
   isJobUiCommitted,
   markJobUiCommitted,
   registerStreamJob,
+  markLiveTurn,
   setJobProcessSteps,
   shouldRestoreStoppedPartial,
   stopStreamJob,
   withStoppedMarker,
 } from './streamJobs'
+import { getTurn, resetTurns } from '../state/turns'
 
 describe('streamJobs', () => {
   afterEach(() => {
@@ -29,6 +31,15 @@ describe('streamJobs', () => {
     for (const id of getBusySessionIds()) {
       completeStreamJob(id, 'aborted')
     }
+    resetTurns()
+  })
+
+  it('markLiveTurn writes verifying onto TurnStore', () => {
+    const c = new AbortController()
+    const job = registerStreamJob('s-v', c, 'grok')
+    markLiveTurn('s-v', 'verifying')
+    expect(getTurn('s-v', job.turnId)?.status).toBe('verifying')
+    completeStreamJob('s-v', 'done')
   })
 
   it('register and count running', () => {

@@ -14,6 +14,45 @@ from remedy.execution.action import ActionRecord
 _current_action: ContextVar[ActionRecord | None] = ContextVar(
     "remedy_current_action", default=None
 )
+# Set when authorize_tool allows this task through so handlers do not
+# re-ask (mail one-shot would otherwise be consumed twice).
+_gate_passed: ContextVar[str | None] = ContextVar("remedy_gate_passed", default=None)
+
+
+def gate_already_passed(name: str) -> bool:
+    """True when authorize_tool already allowed this tool on this task."""
+    return _gate_passed.get() == (name or "").strip()
+
+
+def clear_tool_gate() -> None:
+    """Drop the per-task authorize mark (end of turn / after finish_tool)."""
+    _gate_passed.set(None)
+
+
+def _tool_command(args: dict[str, Any], name: str = "") -> str:
+    """Command string for policy / approval fingerprints (join host_run argv)."""
+    n = (name or "").strip()
+    if n == "mail_send":
+        to_addr = str(args.get("to") or "").strip()
+        subj = str(args.get("subject") or "").strip()[:80]
+        return f"mail_send to={to_addr} subject={subj}"
+    if n == "mail_reply":
+        mid = str(args.get("message_id") or "").strip()
+        return f"mail_reply to message={mid} chars={len(args.get('body') or '')}"
+    for key in ("command", "cmd"):
+        raw = args.get(key)
+        if raw:
+            return str(raw)
+    argv = args.get("argv")
+    if isinstance(argv, (list, tuple)):
+        return " ".join(str(x) for x in argv if str(x).strip())
+    if argv:
+        return str(argv)
+    for key in ("path", "url"):
+        raw = args.get(key)
+        if raw:
+            return str(raw)
+    return ""
 
 
 def snapshot_live_turn(runtime: Any = None) -> None:
@@ -44,28 +83,52 @@ def authorize_tool(runtime: Any, name: str, args: dict[str, Any]) -> str | None:
 
     desc = descriptor_for(name)
     args.pop("_action_id", None)
+    _gate_passed.set(None)
     hive_block = None
-    with suppress(Exception):
-        from remedy.core.hive.policy import hive_depth
+    try:
+        from remedy.core.hive.policy import hive_depth, is_mother_only_tool
         from remedy.policy.capabilities import Capability as Cap
 
-        if hive_depth() > 0 and (desc.capabilities & {Cap.CREDENTIAL_USE, Cap.TRANSACT}):
-            hive_block = format_tool_error(
-                "Hive workers cannot use credentials or transact.",
-                code="HIVE_CAPABILITY",
-                tool_name=name,
-                suggestion="Ask the mother to do this step.",
-            )
+        if hive_depth() > 0:
+            blocked = {
+                Cap.CREDENTIAL_USE,
+                Cap.TRANSACT,
+                Cap.COMMUNICATE,
+                Cap.COMPUTER_INPUT,
+                Cap.BROWSER_WRITE,
+            }
+            if is_mother_only_tool(name) or (desc.capabilities & blocked):
+                hive_block = format_tool_error(
+                    "Hive workers cannot use credentials or transact.",
+                    code="HIVE_CAPABILITY",
+                    tool_name=name,
+                    suggestion="Ask the mother to do this step.",
+                )
+            if hive_block is None:
+                from remedy.core.hive.policy import (
+                    DAUGHTER_CAPABILITIES,
+                    hive_granted_capabilities,
+                    parse_granted_caps,
+                )
+
+                granted = hive_granted_capabilities()
+                if granted is None:
+                    granted = parse_granted_caps(bound_hive_capabilities()) or DAUGHTER_CAPABILITIES
+                extra = desc.capabilities - granted
+                if extra:
+                    hive_block = format_tool_error(
+                        "Hive worker is not granted: "
+                        + ", ".join(sorted(c.value for c in extra)),
+                        code="HIVE_CAPABILITY",
+                        tool_name=name,
+                        suggestion="Ask the mother to do this step.",
+                    )
+    except Exception:
+        hive_block = None
     if hive_block:
         inc("tool_failure", tool=name)
         return hive_block
-    command = str(
-        args.get("command")
-        or args.get("cmd")
-        or args.get("path")
-        or args.get("url")
-        or ""
-    )
+    command = _tool_command(args, name)
     ctx = None
     with suppress(Exception):
         ctx = TurnFactory.create(
@@ -85,32 +148,40 @@ def authorize_tool(runtime: Any, name: str, args: dict[str, Any]) -> str | None:
             suggestion="Use a tool and arguments the owner has authorized.",
         )
     sid = turn_session_id(runtime)
-    if decision.requires_approval and not APPROVALS.is_approved(
-        name, command, session_id=sid
-    ):
-        item = APPROVALS.create(
-            tool_name=name,
-            command=command or name,
-            reason=decision.reason,
-            session_id=sid,
-        )
-        with suppress(Exception):
-            if ctx is not None:
-                default_bus().emit_simple(
-                    EventType.APPROVAL_REQUESTED,
-                    session_id=ctx.session_id,
-                    turn_id=ctx.turn_id,
-                    tool=name,
-                    reason=decision.reason,
-                )
-        return (
-            f"APPROVAL_REQUIRED id={item.id}\n"
-            f"reason={decision.reason}\n"
-            f"command={(command or name)[:400]}\n"
-            "Do not invent success. Tell the user this needs approval in the UI "
-            f"(or /approve {item.id}). After they approve, retry {name} with "
-            "the same arguments."
-        )
+    cmd = command or name
+    if decision.requires_approval:
+        from remedy.core.approvals import SENSITIVE_PREFIX
+
+        granted = False
+        if (decision.reason or "").startswith(SENSITIVE_PREFIX):
+            granted = APPROVALS.take_one_shot(name, cmd, session_id=sid)
+        if not granted:
+            granted = APPROVALS.is_approved(name, cmd, session_id=sid)
+        if not granted:
+            item = APPROVALS.create(
+                tool_name=name,
+                command=cmd,
+                reason=decision.reason,
+                session_id=sid,
+            )
+            with suppress(Exception):
+                if ctx is not None:
+                    default_bus().emit_simple(
+                        EventType.APPROVAL_REQUESTED,
+                        session_id=ctx.session_id,
+                        turn_id=ctx.turn_id,
+                        tool=name,
+                        reason=decision.reason,
+                    )
+            return (
+                f"APPROVAL_REQUIRED id={item.id}\n"
+                f"reason={decision.reason}\n"
+                f"command={cmd[:400]}\n"
+                "Do not invent success. Tell the user this needs approval in the UI "
+                f"(or /approve {item.id}). After they approve, retry {name} with "
+                "the same arguments."
+            )
+    _gate_passed.set(name)
     with suppress(Exception):
         rec = ActionRecord(tool=name)
         rec.advance(ActionState.AUTHORIZED)
@@ -227,15 +298,12 @@ def finish_tool(
             ok=ok,
         )
         _current_action.set(None)
+    clear_tool_gate()
     return text
 
 
 def bound_hive_capabilities() -> list[str]:
-    """Daughters get parent caps minus credential.use / transact."""
-    from remedy.core.hive_caps import child_capabilities
-    from remedy.policy.capabilities import Capability
+    """Caps written to the daughter journal and enforced on her tools."""
+    from remedy.core.hive.policy import DAUGHTER_CAPABILITIES
 
-    parent = frozenset(Capability)
-    requested = parent - {Capability.CREDENTIAL_USE, Capability.TRANSACT}
-    child = child_capabilities(parent, requested)
-    return sorted(c.value for c in child)
+    return sorted(c.value for c in DAUGHTER_CAPABILITIES)

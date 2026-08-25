@@ -26,7 +26,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - **Hive daughters** cannot receive `credential.use` or `transact`.
 - **Web facts** ingest as `TOOL_OBSERVED`, never `USER_DECLARED`.
 - **Trust profiles** (conservative / balanced / autonomous) cannot skip
-  mail or payment checkpoints.
+  mail or payment checkpoints. Settings → Security & power has the
+  **Trust** control; `trust_profile` persists in config. Conservative
+  still asks for high-impact work in Auto (Full stays Full). Autonomous
+  skips in-project high-impact asks the same way Auto does.
 - Action state machine: `RUNNING` cannot skip to `COMPLETED`.
 - **mypy no longer skips large modules.** Former "type gradually" excludes
   (`agent.py`, `react_loop/loop.py`, build/learning, …) are typed. The ReAct
@@ -44,8 +47,32 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   way auto mode does; mail/pay checkpoints still stop.
 - `GET /api/sessions/{id}/turns/{turn_id}/explain` returns what / why /
   verified / remains from the event bus.
-- Grove shows one quiet turn line (Working… / Waiting for you… /
-  Checking…) from TurnStore.
+- Grove shows one quiet turn line from TurnStore: **Working…** while a
+  turn is live, **Waiting for you…** when an approval is pending,
+  **Checking…** after tools until the next model round.
+- README is a short PyPI/GitHub pointer into the owner’s manual (slash
+  commands live in `docs/manual/11-reference-commands.md`).
+- Trust profiles apply on every `needs_ask` path (shell/files/skills
+  handlers), not only PolicyEngine — Autonomous was a no-op on live
+  `bash_exec` otherwise. Grove’s quiet line writes **Waiting for you…**
+  when an approval is pending. `host_run` argv lists reach the
+  dangerous-command check instead of `str(['rm', …])`.
+- Mail/pay one-shot grants are consumed in `authorize_tool` (retry after
+  yes actually sends). Hive daughters are denied mail, computer input,
+  and browser write at the live gate. GUI `run_python_file` spawn no
+  longer inherits `GH_TOKEN`. Policy gate fails closed. Trust is visible
+  in Simple Settings. Hive journal ``capabilities`` is loaded on each
+  pulse and enforced in ``authorize_tool``. ReAct ``loop_steps`` uses
+  ``bind_loop_tuple`` / full ``STATE_NAMES`` pull like the other split
+  modules.
+- Grove paints the live build checklist (Studio already did). Todo events
+  are per-session so two chats cannot steal each other's list.
+- **Stop** does not rebound continuity onto that session from another tab
+  unless the owner clicked it and sent. Host pollers (`jobs/next`, hello)
+  no longer log SLOW when a fat turn blocks the event loop.
+- Voice `/status` caches dependency probes; vision idle-stop no longer
+  skips a kill on an empty process name; Settings skip empty-messenger
+  hot-reload.
 
 ## [0.31.2] - 2026-08-24
 

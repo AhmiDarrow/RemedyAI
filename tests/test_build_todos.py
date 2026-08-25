@@ -124,6 +124,47 @@ def test_seed_drive_todos(tmp_path):
     assert any("greet" in t.content for t in items)
 
 
+def test_todos_event_is_session_scoped():
+    """Sibling streams must not pop each other's @@todos token."""
+    rt = SimpleNamespace(
+        effective_project_path=lambda: None,
+        config=None,
+        _session_id="sess-a",
+    )
+    upsert_todos(
+        rt,
+        [{"id": "a", "content": "A checklist", "status": "pending"}],
+        merge=False,
+    )
+    rt._session_id = "sess-b"
+    upsert_todos(
+        rt,
+        [{"id": "b", "content": "B checklist", "status": "in_progress"}],
+        merge=False,
+    )
+    b = take_todos_event(rt, session_id="sess-b")
+    a = take_todos_event(rt, session_id="sess-a")
+    assert a and "A checklist" in a
+    assert b and "B checklist" in b
+    assert take_todos_event(rt, session_id="sess-a") is None
+    assert take_todos_event(rt, session_id="sess-b") is None
+
+
+def test_mem_todos_do_not_leak_across_sessions():
+    rt = SimpleNamespace(
+        effective_project_path=lambda: None,
+        config=None,
+        _session_id="sess-a",
+    )
+    upsert_todos(
+        rt,
+        [{"id": "a", "content": "only A", "status": "pending"}],
+        merge=False,
+    )
+    rt._session_id = "sess-b"
+    assert load_todos(rt) == []
+
+
 def test_todos_event_token_and_take():
     rt = SimpleNamespace(effective_project_path=lambda: None, config=None)
     items = upsert_todos(

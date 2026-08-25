@@ -97,6 +97,8 @@ export interface SettingsFormProps {
   setSoulFieldEnabled: Dispatch<SetStateAction<boolean>>
   approvalMode: 'ask' | 'auto' | 'full'
   setApprovalMode: Dispatch<SetStateAction<'ask' | 'auto' | 'full'>>
+  trustProfile: 'conservative' | 'balanced' | 'autonomous'
+  setTrustProfile: Dispatch<SetStateAction<'conservative' | 'balanced' | 'autonomous'>>
   harnessMode: string
   setHarnessMode: Dispatch<SetStateAction<string>>
   harnessMinPct: number

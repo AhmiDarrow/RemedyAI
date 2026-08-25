@@ -22,7 +22,7 @@ project access scope).
 | **Home surface** | **Grove** (partner). **Studio** is one tap away (workbench). |
 | **Data home** | `~/.remedy` (config, memory, voice, Vault, skills; DPAPI on Windows) |
 | **Models** | *Your* provider keys or Ollama / RMB — continuity stays on disk |
-| **Current** | **v0.31.2** — this-round thinking, Files rail at a real folder; partner line from 0.31.0 |
+| **Current** | **v0.38.0** (this tree) — capability architecture + Settings trust. Last public GitHub Release is **v0.31.2** |
 | **Install** | [Windows](01-install-windows.md) · [Linux](01-install-linux.md) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · PyPI `remedy-ai` |
 
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.  
@@ -32,10 +32,15 @@ Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
 
 ## What’s new (start here)
 
-**v0.31.2** keeps thinking to this round and lets her open a folder in the
-Files rail (and read scratch). **v0.31.1** lets her open Grove, Alongside,
-Settings, and rails herself. **v0.31.0** is a new Remedy, not a patch on the
-old coding-agent line.
+**v0.38.0** (this tree, not a GitHub tag yet) is the capability architecture:
+policy owns authority, generic shell does not inherit GitHub/SSH tokens, and
+Settings → Security & power has a **Trust** control (Conservative / Balanced /
+Autonomous). Mail and payment still always stop.
+
+**v0.31.2** is the last public release: thinking is this round’s scratchpad, and
+she can open a folder in the Files rail (and read scratch). **v0.31.1** lets her
+open Grove, Alongside, Settings, and rails herself. **v0.31.0** is a new Remedy,
+not a patch on the old coding-agent line.
 
 - **Grove** is home; she **speaks and hears** locally; Studio keeps the workbench
 - **Life tasks** finish with observed success, owner checkpoints, and the **Vault**

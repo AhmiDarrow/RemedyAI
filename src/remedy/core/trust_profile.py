@@ -13,9 +13,22 @@ class TrustProfile(StrEnum):
     AUTONOMOUS = "autonomous"
 
 
+def normalize_trust_profile(raw: object | None) -> TrustProfile:
+    """Parse config/UI value; invalid or missing → BALANCED."""
+    try:
+        return TrustProfile(str(raw or "").strip().lower())
+    except ValueError:
+        return TrustProfile.BALANCED
+
+
 def profile_skips_high_impact_ask(profile: TrustProfile) -> bool:
     """Autonomous ≈ today's auto mode for in-project work. Checkpoints still ask."""
     return profile == TrustProfile.AUTONOMOUS
+
+
+def profile_forces_high_impact_ask(profile: TrustProfile) -> bool:
+    """Conservative still asks for high-impact in Auto. Full stays Full."""
+    return profile == TrustProfile.CONSERVATIVE
 
 
 def checkpoint_still_required(tool_name: str, command: str) -> str | None:

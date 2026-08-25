@@ -262,6 +262,13 @@ def ledger_resume_allowed(
         return True
     if not generic_continuation:
         return False
+    with suppress(Exception):
+        from remedy.core.session_continuity import is_recently_stopped
+
+        # Owner Stopped the ledger's session — sibling tabs must not pick up
+        # that drive via a bare "continue".
+        if is_recently_stopped(led_sid):
+            return False
     ts = float(getattr(led, "updated_ts", 0.0) or 0.0)
     if ts <= 0:
         return False
@@ -1757,6 +1764,32 @@ def build_state_owned_by(state: Any, session_id: str | None) -> bool:
     if not st_sid or not sid:
         return True
     return st_sid == sid
+
+
+def deactivate_build_for_session(runtime: Any, session_id: str | None) -> bool:
+    """Clear in-memory ``active`` for *session_id* (Stop rebound from another tab).
+
+    Same-session ``continue`` can still resume from the on-disk ledger.
+    """
+    sid = str(session_id or "").strip()
+    if not sid or runtime is None:
+        return False
+    changed = False
+    m = _build_turns_map(runtime)
+    if m is not None:
+        st = m.get(sid)
+        if isinstance(st, BuildTurnState) and bool(getattr(st, "active", False)):
+            st.active = False
+            changed = True
+    legacy = getattr(runtime, "_build_turn", None)
+    if (
+        isinstance(legacy, BuildTurnState)
+        and build_state_owned_by(legacy, sid)
+        and bool(getattr(legacy, "active", False))
+    ):
+        legacy.active = False
+        changed = True
+    return changed
 
 
 def should_force_tools_for_build(runtime: Any, message: str) -> bool:

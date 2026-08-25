@@ -17,8 +17,15 @@ tokens, and a command that exits 0 is not treated as “the goal is done”
 until verification says so. Turns have ids. Hive daughters cannot use
 credentials the parent did not have. Pages she reads are observed facts,
 not things you declared. Grove shows a single quiet line while a turn is
-running (Working… / Waiting for you… / Checking…). Autonomous trust still
-stops for mail and payment.
+running (**Working…**, **Waiting for you…** when she needs a yes, **Checking…**
+after tools until the next reply).
+
+**Trust** lives in Settings → Security & power (Conservative / Balanced /
+Autonomous). Conservative still asks before shell, files, and skills even
+in Auto. Autonomous skips in-project high-impact asks the same way Auto
+does. Mail and payment still always stop. README is a short pointer into
+this manual, not a second wiki. Grove shows the live checklist while she
+works. **Stop** on one chat does not resume that work from another tab.
 
 Public **0.31.2** remains the last GitHub Release until this branch is
 tagged. This tree is **v0.38.0**.

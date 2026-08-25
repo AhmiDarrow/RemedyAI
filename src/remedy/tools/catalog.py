@@ -82,7 +82,7 @@ def _infer(name: str) -> ToolDescriptor:
         cred = CredentialPolicy.NONE
         verify = True
     if n in ("mail_send", "mail_reply"):
-        caps.add(Capability.COMMUNICATE)
+        caps.update({Capability.COMMUNICATE, Capability.TRANSACT})
         risk = Risk.CRITICAL
         approval = True
         verify = True

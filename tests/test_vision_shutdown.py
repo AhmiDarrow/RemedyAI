@@ -65,6 +65,7 @@ def test_stop_server_skips_foreign_pid(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(vision_runtime, "_pid_is_alive", lambda pid: True)
     monkeypatch.setattr(vision_runtime, "_looks_like_llama_server", lambda pid: False)
+    monkeypatch.setattr(vision_runtime, "_windows_process_name", lambda pid: "code")
     kills: list[int] = []
     monkeypatch.setattr(
         vision_runtime,

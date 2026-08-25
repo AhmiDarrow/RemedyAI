@@ -108,6 +108,7 @@ SETTABLE_KEYS = frozenset(
         "harness_max_context_pct",
         "thinking_level",
         "approval_mode",
+        "trust_profile",
         "show_tool_calls",
         "tool_process",
         "vision_enabled",
@@ -233,6 +234,7 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "harness_max_context_pct": float(raw.get("harness_max_context_pct", 0.92)),
         "thinking_level": str(raw.get("thinking_level") or "high").lower(),
         "approval_mode": str(raw.get("approval_mode") or "auto").lower(),
+        "trust_profile": _normalize_trust_profile_value(raw.get("trust_profile")),
         "tool_process": normalize_tool_process(raw),
         "web_tools_enabled": bool(raw.get("web_tools_enabled", True)),
         # Mirror the real governing logic (env > config > default) so Settings
@@ -506,6 +508,9 @@ async def _apply_settings_update_inner(
         except Exception:
             pass
 
+    if "trust_profile" in patch and patch["trust_profile"] is not None:
+        patch["trust_profile"] = _normalize_trust_profile_value(patch["trust_profile"])
+
     if "web_tools_enabled" in patch and patch["web_tools_enabled"] is not None:
         patch["web_tools_enabled"] = _as_bool(patch["web_tools_enabled"])
 
@@ -680,7 +685,7 @@ async def _apply_settings_update_inner(
         except Exception as exc:
             logger.warning("assistant prefs save failed: %s", exc)
 
-    if isinstance(messengers_update, dict):
+    if isinstance(messengers_update, dict) and messengers_update:
         try:
             from remedy.interfaces.messenger_settings import apply_messengers_update
 
@@ -817,6 +822,7 @@ async def _apply_settings_update_inner(
             "tool_process",
             "sarcasm_mode",
             "allow_skill_creation",
+            "trust_profile",
         ):
             if attr in cfg:
                 with contextlib.suppress(Exception):
@@ -871,6 +877,7 @@ async def _apply_settings_update_inner(
         "access_scope",
         "thinking_level",
         "approval_mode",
+        "trust_profile",
         "user_name",
         "name",
         "agent_gender",
@@ -893,6 +900,12 @@ async def _apply_settings_update_inner(
         if k in snap:
             out[k] = snap[k]
     return out
+
+
+def _normalize_trust_profile_value(raw: object | None) -> str:
+    from remedy.core.trust_profile import normalize_trust_profile
+
+    return normalize_trust_profile(raw).value
 
 
 def _as_bool(v: object) -> bool:
@@ -921,6 +934,9 @@ SETUP_ALIASES: dict[str, dict[str, Any]] = {
     "work until done": {"approval_mode": "auto"},
     "ask approval": {"approval_mode": "ask"},
     "safe mode": {"approval_mode": "ask"},
+    "conservative trust": {"trust_profile": "conservative"},
+    "autonomous trust": {"trust_profile": "autonomous"},
+    "balanced trust": {"trust_profile": "balanced"},
     "vision": {"vision_enabled": True, "vision_model_id": "smolvlm2-2.2b"},
     "smolvlm": {"vision_enabled": True, "vision_model_id": "smolvlm2-2.2b"},
     "smolvlm2": {"vision_enabled": True, "vision_model_id": "smolvlm2-2.2b"},

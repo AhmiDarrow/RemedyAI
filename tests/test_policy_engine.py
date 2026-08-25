@@ -97,3 +97,18 @@ def test_balanced_trust_default_does_not_skip_in_ask_mode():
     d = _eval("file_write", "notes.txt", mode="ask")
     assert d.allowed is True
     assert d.requires_approval is True
+
+
+def test_conservative_trust_still_asks_in_auto_mode():
+    _CFG["trust_profile"] = "conservative"
+    d = _eval("bash_exec", "echo hi", mode="auto")
+    assert d.allowed is True
+    assert d.requires_approval is True
+    assert "Conservative" in d.reason
+
+
+def test_conservative_trust_does_not_fight_full_mode():
+    _CFG["trust_profile"] = "conservative"
+    d = _eval("bash_exec", "echo hi", mode="full")
+    assert d.allowed is True
+    assert d.requires_approval is False

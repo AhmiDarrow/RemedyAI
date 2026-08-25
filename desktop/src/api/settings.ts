@@ -38,6 +38,8 @@ export interface Settings {
   thinking_level?: string
   /** Status bar: ask | auto (in-project) | full (warn) */
   approval_mode?: string
+  /** conservative | balanced (default) | autonomous — never waives mail/pay */
+  trust_profile?: string
   /** Tool process: off | medium | full (default off) */
   tool_process?: string
   /** @deprecated use tool_process */
@@ -226,6 +228,7 @@ export interface SettingsUpdate {
   harness_max_context_pct?: number
   thinking_level?: string
   approval_mode?: string
+  trust_profile?: string
   tool_process?: string
   web_tools_enabled?: boolean
   http_bootstrap?: boolean

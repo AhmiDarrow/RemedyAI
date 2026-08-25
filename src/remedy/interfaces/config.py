@@ -1173,6 +1173,7 @@ sarcasm_mode = false
 
 # --- Partner controls (also on status bar / Settings → Security & power) ---
 # approval_mode = "auto"    # ask | auto (in-project) | full (warn, jail off except auth)
+# trust_profile = "balanced"  # conservative | balanced | autonomous (mail/pay never skipped)
 # thinking_level = "high"   # off | low | medium | high
 # tool_process = "off"      # off | medium | full
 # web_tools_enabled = true  # public web_fetch + web_search (SSRF-guarded); set false to disable

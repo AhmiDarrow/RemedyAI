@@ -41,6 +41,47 @@ from remedy.interfaces.api_support import (
 
 logger = logging.getLogger(__name__)
 
+# High-frequency host polls. A fat ReAct turn blocks the event loop; these
+# waiting ≥500ms is contention, not the poller being slow. Failures stay loud.
+_SLOW_EXEMPT_PATHS = frozenset(
+    {
+        "/api/status",
+        "/api/ping",
+        "/api/self-improve",
+        "/api/partner/status",
+        "/api/checkpoints/latest",
+        "/api/plans/latest",
+        "/api/events/sessions",
+        "/api/computer/jobs/next",
+        "/api/computer/ui/command",
+        "/api/computer/host/status",
+        "/api/computer/host/hello",
+    }
+)
+_SLOW_WARN_MS = 500.0
+
+
+def should_warn_slow(
+    method: str,
+    path: str,
+    status_code: int,
+    duration_ms: float,
+) -> bool:
+    """True when the request log should emit a SLOW warning."""
+    if float(duration_ms) < _SLOW_WARN_MS:
+        return False
+    if int(status_code) >= 400:
+        return True
+    p = str(path or "")
+    if p in _SLOW_EXEMPT_PATHS:
+        return False
+    method_u = str(method or "").upper()
+    if p.startswith("/api/computer/") and method_u in ("GET", "HEAD"):
+        return False
+    if p.startswith("/api/computer/") and p.endswith("/hello"):
+        return False
+    return True
+
 
 def _is_client_gone(exc: BaseException) -> bool:
     """True when the HTTP client disconnected mid-request (not a server fault)."""
@@ -725,7 +766,7 @@ def create_app(
                 quiet = True
         if desktop and method in ("GET", "HEAD") and response.status_code < 400:
             quiet = True
-        if duration >= 500:
+        if should_warn_slow(method, path, response.status_code, duration):
             logger.warning(
                 "SLOW %s %s -> %d (%.0fms)",
                 request.method,

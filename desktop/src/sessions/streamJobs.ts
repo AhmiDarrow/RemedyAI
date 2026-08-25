@@ -171,12 +171,28 @@ export function touchStreamJob(sessionId: string) {
 }
 
 /** Append assistant token into the job paint buffer (focus-agnostic). */
+export function markLiveTurn(
+  sessionId: string,
+  status: 'running' | 'waiting' | 'verifying',
+) {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return
+  upsertTurn({
+    sessionId,
+    turnId: j.turnId,
+    jobId: sessionId,
+    status,
+    startedAt: new Date(j.startedAt).toISOString(),
+  })
+}
+
 export function appendJobToken(sessionId: string, token: string) {
   if (!token) return
   const j = jobs.get(sessionId)
   if (!j || j.status !== 'running') return
   j.paint.partialText += token
   j.lastActivityAt = Date.now()
+  markLiveTurn(sessionId, 'running')
 }
 
 /** Append thinking token into the job paint buffer. */

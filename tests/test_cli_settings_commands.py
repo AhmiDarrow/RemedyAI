@@ -462,7 +462,7 @@ def test_keys_lists_every_settable_key(isolated_home, capsys) -> None:
 
     cmd_settings._cmd_settings(_args(isolated_home, settings_cmd="keys"))
     out = _squash(_out(capsys))
-    for key in ("thinking_level", "approval_mode", "privacy_mode"):
+    for key in ("thinking_level", "approval_mode", "privacy_mode", "trust_profile"):
         assert key in SETTABLE_KEYS
         assert key in out
 

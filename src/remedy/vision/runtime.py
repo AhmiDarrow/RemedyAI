@@ -553,6 +553,27 @@ def _pid_is_alive(pid: int) -> bool:
         return False
 
 
+def _windows_process_name(pid: int) -> str:
+    """Lowercased ProcessName, or empty if gone / denied / not Windows."""
+    if os.name != "nt" or pid <= 0:
+        return ""
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    out = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            f"(Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue).ProcessName",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        creationflags=creationflags,
+        check=False,
+    )
+    return (out.stdout or "").strip().lower()
+
+
 def _looks_like_llama_server(pid: int) -> bool:
     """Best-effort check that *pid* is our vision binary (avoid killing strangers)."""
     if pid <= 0:
@@ -566,22 +587,10 @@ def _looks_like_llama_server(pid: int) -> bool:
         except OSError:
             return True  # still allow terminate if we recorded the pid ourselves
     try:
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        out = subprocess.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-Command",
-                f"(Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue).ProcessName",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            creationflags=creationflags,
-            check=False,
-        )
-        name = (out.stdout or "").strip().lower()
-        return "llama-server" in name or name in ("llama-server", "llama_server")
+        name = _windows_process_name(pid)
+        if not name:
+            return False
+        return "llama" in name
     except (OSError, subprocess.TimeoutExpired):
         return True
 
@@ -630,13 +639,23 @@ def stop_server(home_dir: str | Path | None = None) -> dict[str, Any]:
         seen.add(pid)
         if not _pid_is_alive(pid):
             continue
-        # Only force-kill if it looks like llama-server (or we own the Popen handle pid)
+        # Only force-kill if it looks like llama-server (or we own the Popen handle pid).
+        # Empty Windows ProcessName (access denied / gone) is not a stranger —
+        # skipping that leaked llama-server after idle-stop. Linux already
+        # identified non-llama via /proc, so a False match stays a skip.
         if pid == recorded and not _looks_like_llama_server(pid):
-            logger.warning(
-                "Vision pid %s in vision.json does not look like llama-server; skipping kill",
-                pid,
-            )
-            continue
+            skip = True
+            if os.name == "nt":
+                name = ""
+                with contextlib.suppress(Exception):
+                    name = _windows_process_name(pid)
+                skip = bool(name)
+            if skip:
+                logger.warning(
+                    "Vision pid %s in vision.json does not look like llama-server; skipping kill",
+                    pid,
+                )
+                continue
         if _kill_pid_tree(pid, force=True):
             killed = True
             logger.info("Stopped vision decoder process pid=%s", pid)

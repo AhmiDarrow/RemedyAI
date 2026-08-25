@@ -131,12 +131,16 @@ export function streamMessage(
   ;(async () => {
     try {
       await ensureApiToken()
+      const { sessionSelectHeaders, shouldRetryStreamAfter409 } = await import(
+        '../sessions/focusedSession'
+      )
       const doFetch = () =>
         fetch(`${getApiBase()}/sessions/${sessionId}/messages/stream`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             ...authHeaders(),
+            ...sessionSelectHeaders(sessionId),
           },
           body: JSON.stringify({
             message,
@@ -194,6 +198,9 @@ export function streamMessage(
         for (const wait of [80, 160, 320]) {
           await new Promise((r) => setTimeout(r, wait))
           if (controller.signal.aborted) break
+          if (!shouldRetryStreamAfter409(sessionId, { aborted: controller.signal.aborted })) {
+            break
+          }
           res = await doFetch()
           if (res.status !== 409) break
         }

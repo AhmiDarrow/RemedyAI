@@ -637,7 +637,11 @@ def register_assistant_tools(runtime: Any) -> None:
             )
         # Sending on the owner's behalf always respects the approval gate.
         summary = f"mail_reply to message={mid} chars={len(body or '')}"
-        ask_reason = APPROVALS.needs_ask(summary, tool_name="mail_reply")
+        from remedy.core.turn_pipeline import gate_already_passed
+
+        ask_reason = None
+        if not gate_already_passed("mail_reply"):
+            ask_reason = APPROVALS.needs_ask(summary, tool_name="mail_reply")
         from remedy.core.approvals import SENSITIVE_PREFIX
 
         sid = turn_session_id(runtime)
@@ -906,7 +910,11 @@ def register_assistant_tools(runtime: Any) -> None:
         subj = (subject or "").strip()
         # Partner trust: never silent-send in Ask mode.
         summary = f"mail_send to={to_addr} subject={subj[:80]}"
-        ask_reason = APPROVALS.needs_ask(summary, tool_name="mail_send")
+        from remedy.core.turn_pipeline import gate_already_passed
+
+        ask_reason = None
+        if not gate_already_passed("mail_send"):
+            ask_reason = APPROVALS.needs_ask(summary, tool_name="mail_send")
         from remedy.core.approvals import SENSITIVE_PREFIX
         from remedy.core.turn_context import turn_session_id
 

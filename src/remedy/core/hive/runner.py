@@ -9,10 +9,14 @@ from contextlib import suppress
 from typing import Any
 
 from remedy.core.hive.policy import (
+    DAUGHTER_CAPABILITIES,
     MAX_BUDGET_STEPS,
     hive_depth,
+    parse_granted_caps,
     reset_hive_depth,
+    reset_hive_granted,
     set_hive_depth,
+    set_hive_granted,
 )
 from remedy.core.hive.store import HiveStore, get_hive_store
 from remedy.core.hive.types import (
@@ -113,6 +117,10 @@ async def run_isolated_pulse(runtime: Any, daughter: HiveDaughter) -> ReturnPack
             blockers=["hive_depth"],
         )
     depth_tok = set_hive_depth(1)
+    granted = parse_granted_caps((daughter.journal or {}).get("capabilities"))
+    if not granted:
+        granted = DAUGHTER_CAPABILITIES
+    caps_tok = set_hive_granted(granted)
     proj = daughter.project_path or ""
     if not proj:
         with suppress(Exception):
@@ -139,6 +147,7 @@ async def run_isolated_pulse(runtime: Any, daughter: HiveDaughter) -> ReturnPack
         raise
     finally:
         end_turn(daughter.session_id, *turn_toks)
+        reset_hive_granted(caps_tok)
         reset_hive_depth(depth_tok)
         with suppress(Exception):
             abort_session(daughter.session_id)

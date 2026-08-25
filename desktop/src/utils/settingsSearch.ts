@@ -65,8 +65,9 @@ export const SETTINGS_SECTION_META: Record<
   },
   'security-power': {
     title: 'Security & power',
-    summary: 'Approvals, web, bootstrap',
-    keywords: 'approval auto ask shell web_fetch bootstrap token ssrf thinking privacy',
+    summary: 'Approvals, trust, web, bootstrap',
+    keywords:
+      'approval auto ask shell web_fetch bootstrap token ssrf thinking privacy trust conservative balanced autonomous profile',
   },
   privacy: {
     title: 'Privacy',

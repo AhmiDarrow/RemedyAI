@@ -177,6 +177,9 @@ export function SettingsPanel({
   /** Soul Field personhood — default on (matches server maturity default). */
   const [soulFieldEnabled, setSoulFieldEnabled] = useState(true)
   const [approvalMode, setApprovalMode] = useState<'ask' | 'auto' | 'full'>('ask')
+  const [trustProfile, setTrustProfile] = useState<
+    'conservative' | 'balanced' | 'autonomous'
+  >('balanced')
   const [harnessMode, setHarnessMode] = useState('auto')
   const [harnessMinPct, setHarnessMinPct] = useState(0.75)
   const [harnessMaxPct, setHarnessMaxPct] = useState(0.92)
@@ -227,6 +230,7 @@ export function SettingsPanel({
   const [skillsBudget, setSkillsBudget] = useState(80)
   const [messengers, setMessengers] = useState<MessengerInfo[]>([])
   const [messengerDrafts, setMessengerDrafts] = useState<MessengerDraftMap>({})
+  const messengersDirtyRef = useRef(false)
   const [assistantDraft, setAssistantDraft] = useState<AssistantDraft>({})
   const {
     settingsSearch,
@@ -463,12 +467,19 @@ export function SettingsPanel({
         const list = Array.isArray(s.messengers) ? s.messengers : []
         setMessengers(list)
         setMessengerDrafts(draftsFromMessengers(list))
+        messengersDirtyRef.current = false
       }
       // Reset draft so checkboxes reflect server status after load/save.
       setAssistantDraft({})
       {
         const am = String(s.approval_mode || 'ask').toLowerCase()
         setApprovalMode(am === 'auto' || am === 'full' ? am : 'ask')
+      }
+      {
+        const tp = String(s.trust_profile || 'balanced').toLowerCase()
+        setTrustProfile(
+          tp === 'conservative' || tp === 'autonomous' ? tp : 'balanced',
+        )
       }
       {
         const tp = normalizeToolProcess(s.tool_process)
@@ -707,6 +718,7 @@ export function SettingsPanel({
       sleev_allow_remote_gateway: sleevAllowRemoteGateway,
       soul_field_enabled: soulFieldEnabled,
       approval_mode: approvalMode,
+      trust_profile: trustProfile,
       allow_skill_creation: allowSkillCreation,
       auto_approve_threshold: autoApproveThreshold,
       log_level: logLevel,
@@ -728,7 +740,7 @@ export function SettingsPanel({
       updates.llm_api_key = apiKey
     }
     const msgBody = messengersUpdateFromDrafts(messengers, messengerDrafts)
-    if (msgBody) updates.messengers = msgBody
+    if (msgBody && messengersDirtyRef.current) updates.messengers = msgBody
     if (Object.keys(assistantDraft).length > 0) {
       updates.assistant = { ...assistantDraft }
     }
@@ -757,6 +769,7 @@ export function SettingsPanel({
         console.warn('desktop prefs OS sync:', e)
       }
       const result = await updateSettings(updates)
+      messengersDirtyRef.current = false
       // Server may normalize provider/model/url — reflect that immediately.
       if (result && typeof result === 'object') {
         const r = result as SettingsUpdate & {
@@ -1258,6 +1271,8 @@ export function SettingsPanel({
               setSoulFieldEnabled={setSoulFieldEnabled}
               approvalMode={approvalMode}
               setApprovalMode={setApprovalMode}
+              trustProfile={trustProfile}
+              setTrustProfile={setTrustProfile}
               harnessMode={harnessMode}
               setHarnessMode={setHarnessMode}
               harnessMinPct={harnessMinPct}
@@ -1317,7 +1332,10 @@ export function SettingsPanel({
               setSkillsBudget={setSkillsBudget}
               messengers={messengers}
               messengerDrafts={messengerDrafts}
-              setMessengerDrafts={setMessengerDrafts}
+              setMessengerDrafts={(v) => {
+                messengersDirtyRef.current = true
+                setMessengerDrafts(v)
+              }}
               assistant={settings?.assistant}
               assistantDraft={assistantDraft}
               setAssistantDraft={setAssistantDraft}

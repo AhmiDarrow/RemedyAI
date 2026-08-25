@@ -385,6 +385,10 @@ def end_turn(
         if tok is not None:
             with contextlib.suppress(Exception):
                 var.reset(tok)
+    with contextlib.suppress(Exception):
+        from remedy.core.turn_pipeline import clear_tool_gate
+
+        clear_tool_gate()
 
 
 def register_turn_process(proc: Any) -> None:
@@ -611,6 +615,12 @@ def abort_session(
         _coord_unregister(sid)
     # Stop / supersede cancel the detached worker. A dropped SSE must not.
     cancel_turn_job(sid)
+    # Disconnect abort passes reason=None — do not treat that as owner Stop.
+    if reason is not None:
+        with contextlib.suppress(Exception):
+            from remedy.core.session_continuity import note_session_stopped
+
+            note_session_stopped(sid, reason=reason)
     return len(events)
 
 

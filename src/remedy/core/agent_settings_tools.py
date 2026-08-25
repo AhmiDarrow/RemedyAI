@@ -223,6 +223,7 @@ def register_settings_tools(runtime: Any) -> None:
         access_scope: str | None = None,
         thinking_level: str | None = None,
         approval_mode: str | None = None,
+        trust_profile: str | None = None,
         tool_process: str | None = None,
         web_tools_enabled: bool | str | None = None,
         web_respect_robots: bool | str | None = None,
@@ -283,6 +284,15 @@ def register_settings_tools(runtime: Any) -> None:
                 low = str(setup).strip().lower()
                 if "web" in low and ("tool" in low or "fetch" in low or "enable" in low):
                     patch["web_tools_enabled"] = "disable" not in low and "off" not in low
+                elif "trust" in low and (
+                    "conservative" in low or "autonomous" in low or "balanced" in low
+                ):
+                    if "conservative" in low:
+                        patch["trust_profile"] = "conservative"
+                    elif "autonomous" in low:
+                        patch["trust_profile"] = "autonomous"
+                    else:
+                        patch["trust_profile"] = "balanced"
                 elif re.search(r"\bapproval\b", low) or re.search(
                     r"\b(?:auto|ask|full)\s+mode\b", low
                 ):
@@ -348,6 +358,7 @@ def register_settings_tools(runtime: Any) -> None:
             "access_scope": access_scope,
             "thinking_level": thinking_level,
             "approval_mode": approval_mode,
+            "trust_profile": trust_profile,
             "tool_process": tool_process,
             "web_tools_enabled": web_tools_enabled,
             "web_respect_robots": web_respect_robots,
@@ -534,13 +545,21 @@ def register_settings_tools(runtime: Any) -> None:
         # Widening scope / auto-approval is owner power — model cannot self-grant.
         widen_scope = str(patch.get("access_scope") or "").strip().lower()
         widen_approval = str(patch.get("approval_mode") or "").strip().lower()
-        if widen_scope in ("home", "full") or widen_approval in ("auto", "full"):
+        widen_trust = str(patch.get("trust_profile") or "").strip().lower()
+        if (
+            widen_scope in ("home", "full")
+            or widen_approval in ("auto", "full")
+            or widen_trust == "autonomous"
+        ):
             if widen_scope in ("home", "full"):
                 cmd = f"widen_access_scope:{widen_scope}"
                 reason = f"Raising access_scope to {widen_scope} requires approval"
-            else:
+            elif widen_approval in ("auto", "full"):
                 cmd = f"widen_approval_mode:{widen_approval}"
                 reason = f"Switching approval_mode to {widen_approval} requires approval"
+            else:
+                cmd = "widen_trust_profile:autonomous"
+                reason = "Switching trust profile to autonomous requires approval"
             locked = _approval_required(runtime, cmd, reason)
             if locked:
                 return locked

@@ -12,7 +12,9 @@ Call ``bind_session_continuity`` at the start of every turn (via
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import suppress
+from contextvars import ContextVar, Token
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -23,6 +25,15 @@ _brief_by_session: dict[str, Any] = {}
 _partner_by_session: dict[str, Any] = {}
 _work_roots_by_session: dict[str, list[str]] = {}
 _MAX_CACHED_SESSIONS = 48
+
+# Owner hit Stop — in-process until this many seconds later. A turn that
+# lands on that session from a *different* live tab must not restore the
+# aborted drive unless the focused chat actually sent (owner_selected).
+_STOP_COOLDOWN_S = 90.0
+_stopped_until: dict[str, float] = {}
+_owner_session_select: ContextVar[bool] = ContextVar(
+    "remedy_owner_session_select", default=False
+)
 
 
 def _trim_cache(cache: dict[str, Any]) -> None:
@@ -41,23 +52,92 @@ def _live_session_id(runtime: Any) -> str:
     return str(getattr(runtime, "_session_id", "") or "").strip()
 
 
-def bind_session_continuity(runtime: Any, session_id: str | None) -> dict[str, Any]:
+def note_session_stopped(session_id: str | None, *, reason: str | None = None) -> None:
+    """Record an owner Stop so we do not auto-resume that tab from another chat.
+
+    ``supersede`` (send-while-busy) is the next message on the *same* session
+    and must not poison resume.
+    """
+    sid = str(session_id or "").strip()
+    if not sid:
+        return
+    r = str(reason or "stop").strip().lower()
+    if r in ("supersede", "superseded", "resend", "next_message"):
+        _stopped_until.pop(sid, None)
+        return
+    _stopped_until[sid] = time.monotonic() + _STOP_COOLDOWN_S
+
+
+def is_recently_stopped(session_id: str | None, *, now: float | None = None) -> bool:
+    sid = str(session_id or "").strip()
+    if not sid:
+        return False
+    deadline = _stopped_until.get(sid)
+    if deadline is None:
+        return False
+    t = time.monotonic() if now is None else float(now)
+    if t >= deadline:
+        _stopped_until.pop(sid, None)
+        return False
+    return True
+
+
+def set_owner_session_select(selected: bool) -> Token[bool]:
+    """Mark this turn as coming from the focused tab (owner clicked / sent)."""
+    return _owner_session_select.set(bool(selected))
+
+
+def reset_owner_session_select(token: Token[bool]) -> None:
+    with suppress(Exception):
+        _owner_session_select.reset(token)
+
+
+def is_owner_session_select() -> bool:
+    return bool(_owner_session_select.get())
+
+
+def bind_session_continuity(
+    runtime: Any,
+    session_id: str | None,
+    *,
+    owner_selected: bool | None = None,
+) -> dict[str, Any]:
     """Rebind live continuity slots to *session_id*. Returns meta for logs/tests.
 
     Live mirrors are still updated (legacy tools / post-turn code). Concurrent
     streams freeze the rebound objects into turn ContextVars via ``begin_turn``.
+
+    Switching onto a just-Stopped session from another live tab without
+    ``owner_selected`` drops that session's cached brief/partner/roots and
+    deactivates its in-memory build drive so a 189-tool marathon cannot
+    resume in the background.
     """
     sid = str(session_id or "").strip()
     prev = _live_session_id(runtime)
+    switched = bool(sid and prev and sid != prev)
+    selected = (
+        bool(owner_selected)
+        if owner_selected is not None
+        else is_owner_session_select()
+    )
+    blocked = bool(switched and sid and is_recently_stopped(sid) and not selected)
     meta: dict[str, Any] = {
         "session_id": sid,
         "previous_session_id": prev or None,
-        "switched": bool(sid and prev and sid != prev),
+        "switched": switched,
         "cleared_orphan": False,
         "brief_bound": False,
         "partner_bound": False,
         "work_roots_bound": False,
+        "blocked_aborted_resume": blocked,
+        "owner_selected": selected,
     }
+    if blocked:
+        drop_session_continuity_cache(sid)
+        with suppress(Exception):
+            from remedy.core.build_engine import deactivate_build_for_session
+
+            deactivate_build_for_session(runtime, sid)
 
     # Stash outgoing tab state before switch (prefer live stores).
     def _brief_live() -> Any:
@@ -215,7 +295,14 @@ def bind_session_continuity(runtime: Any, session_id: str | None) -> dict[str, A
                 eu_map.pop(str(sid), None)
             meta["turn_scratch_cleared"] = True
 
-    if meta["switched"]:
+    if meta.get("blocked_aborted_resume"):
+        logger.info(
+            "Session continuity rebound blocked (recently stopped) %s → %s "
+            "(fresh bind, build deactivated)",
+            prev,
+            sid,
+        )
+    elif meta["switched"]:
         logger.info(
             "Session continuity rebound %s → %s (brief=%s partner=%s scratch=%s)",
             prev,
@@ -242,6 +329,7 @@ def clear_all_continuity_caches() -> None:
     _brief_by_session.clear()
     _partner_by_session.clear()
     _work_roots_by_session.clear()
+    _stopped_until.clear()
 
 
 def session_isolation_system_line(runtime: Any) -> str:

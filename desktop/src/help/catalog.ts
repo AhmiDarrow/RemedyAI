@@ -116,8 +116,8 @@ const META: HelpArticleMeta[] = [
     title: 'Security & data',
     category: 'Configuration',
     order: 4,
-    tags: ['security', 'privacy', 'scope', 'approvals', 'dpapi'],
-    summary: 'Data map, what leaves the machine, scope, approvals.',
+    tags: ['security', 'privacy', 'scope', 'approvals', 'trust', 'dpapi'],
+    summary: 'Data map, what leaves the machine, scope, approvals, trust.',
   },
   {
     id: '05-chat-and-sessions',

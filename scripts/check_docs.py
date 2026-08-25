@@ -7,6 +7,8 @@ Canonical sources (do not invent second homes for these):
   - Version numbers     → pyproject.toml          (sync_version.py)
   - Help chapter bodies → docs/manual/*.md        (sync_help_manual.py)
   - Slash commands      → src/remedy/interfaces/slash_commands.py  _BUILTIN_COMMANDS
+                           (canonical: docs/manual/11-reference-commands.md;
+                            README slash table is optional)
   - Keyboard shortcuts  → desktop/src/hotkeys.ts  HOTKEYS
   - Help catalog ids    → docs/manual chapter files ↔ catalog.ts META
 
@@ -150,7 +152,12 @@ def _parse_builtin_commands() -> list[dict]:
 
 
 def check_slash_commands() -> CheckResult:
-    """Every built-in slash command must appear in manual + README tables."""
+    """Every built-in slash command must appear in the owner-manual table.
+
+    README is a pointer into the wiki, not a second command list. If README
+    has a ``### Slash commands`` section, that copy is still checked; if it
+    does not, skip README.
+    """
     msgs: list[str] = []
     try:
         cmds = _parse_builtin_commands()
@@ -165,21 +172,18 @@ def check_slash_commands() -> CheckResult:
 
     if not COMMANDS_MD.is_file():
         return CheckResult("slash-commands", False, [f"missing {COMMANDS_MD.relative_to(ROOT)}"])
-    if not README.is_file():
-        return CheckResult("slash-commands", False, [f"missing {README.relative_to(ROOT)}"])
 
     manual_text = COMMANDS_MD.read_text(encoding="utf-8")
-    readme_text = README.read_text(encoding="utf-8")
-
-    # Focus README on the slash-command section if present.
-    readme_section = readme_text
-    m = re.search(
+    readme_text = README.read_text(encoding="utf-8") if README.is_file() else ""
+    readme_section_m = re.search(
         r"### Slash commands.*?(?=\n### |\n## |\Z)",
         readme_text,
         re.DOTALL | re.IGNORECASE,
     )
-    if m:
-        readme_section = m.group(0)
+    readme_section = readme_section_m.group(0) if readme_section_m else ""
+    check_readme = bool(readme_section)
+    if not check_readme:
+        msgs.append("ok: README has no slash-command section (manual is canonical)")
 
     bad = 0
     for name in names:
@@ -188,11 +192,12 @@ def check_slash_commands() -> CheckResult:
             bad += 1
         else:
             msgs.append(f"ok manual: {name}")
-        if name not in readme_section:
-            msgs.append(f"missing in README slash table: {name}")
-            bad += 1
-        else:
-            msgs.append(f"ok readme: {name}")
+        if check_readme:
+            if name not in readme_section:
+                msgs.append(f"missing in README slash table: {name}")
+                bad += 1
+            else:
+                msgs.append(f"ok readme: {name}")
 
     # Documented-only commands (warn, don't fail hard) — catch typos in manual
     documented = set(re.findall(r"`?(/[a-z][a-z0-9-]*)`?", manual_text, re.I))
@@ -217,8 +222,8 @@ def check_slash_commands() -> CheckResult:
         "slash-commands",
         bad == 0,
         msgs,
-        "Update docs/manual/11-reference-commands.md and README slash table "
-        "to match _BUILTIN_COMMANDS in slash_commands.py",
+        "Update docs/manual/11-reference-commands.md to match "
+        "_BUILTIN_COMMANDS in slash_commands.py",
     )
 
 

@@ -8,7 +8,7 @@ import logging
 import time
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 
 from remedy.interfaces.api_models import (
@@ -106,9 +106,15 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
     """Register stream session routes."""
     _ = gateway  # may be unused in some modules
     @app.post("/api/sessions/{session_id}/messages/stream")
-    async def stream_message(session_id: str, req: SendMessageRequest):
+    async def stream_message(
+        session_id: str,
+        req: SendMessageRequest,
+        x_remedy_session_select: str | None = Header(default=None),
+    ):
         if runtime is None:
             raise HTTPException(503, "Runtime not available")
+        _sel = str(x_remedy_session_select or "").strip().lower()
+        owner_selected = _sel in ("1", "true", "yes", "on")
 
         # Serialize same-session streams (multi-tab / double-submit safety).
         # Claim *before* persisting the user message so two POSTs cannot both start.
@@ -334,7 +340,12 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
 
             async def _event_stream_body():
                 from remedy.core.metrics import default_registry
+                from remedy.core.session_continuity import (
+                    reset_owner_session_select,
+                    set_owner_session_select,
+                )
 
+                select_tok = set_owner_session_select(owner_selected)
                 t0 = time.perf_counter()
                 status = "ok"
                 yield (
@@ -768,7 +779,7 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                     with contextlib.suppress(Exception):
                         from remedy.core.build_todos import take_todos_event
 
-                        _td_tok = take_todos_event(runtime)
+                        _td_tok = take_todos_event(runtime, session_id=session_id)
                         if _td_tok:
                             _td_raw = _td_tok[len("@@todos:") :]
                             _td_payload = json.loads(_td_raw) if _td_raw else {}
@@ -859,6 +870,7 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                                     )
                                 )
                 finally:
+                    reset_owner_session_select(select_tok)
                     # GeneratorExit (client closed the SSE mid-yield) skips every
                     # except-branch above. Never lose partial text / tool calls.
                     if not body_finished and not persist_done and (
