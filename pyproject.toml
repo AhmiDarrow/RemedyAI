@@ -128,6 +128,8 @@ unsafe-fixes = false
 "src/remedy/core/metabolism/identity_export.py" = ["N806"]
 "src/remedy/core/react_policy.py" = ["N806"]
 "src/remedy/core/react_loop/loop_steps.py" = ["N806"]
+    # Orchestrator re-exports names so tests can patch ``loop.<name>``.
+    "src/remedy/core/react_loop/loop.py" = ["F401"]
 "src/remedy/interfaces/config.py" = ["N806"]
 "src/remedy/interfaces/routes/*" = ["SIM117", "N806"]
 "src/remedy/vision/config.py" = ["N806"]

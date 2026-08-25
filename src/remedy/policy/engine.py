@@ -9,6 +9,7 @@ v0.37: ``TrustProfile.AUTONOMOUS`` may skip high-impact asks the same way
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from remedy.policy.decisions import PolicyDecision, ToolRequest
@@ -28,7 +29,7 @@ def _resolve_trust_profile():
         return TrustProfile.BALANCED
 
 
-def _command_from_args(args: dict[str, Any] | None) -> str:
+def _command_from_args(args: Mapping[str, Any] | None) -> str:
     """Join host_run argv lists; never str(list) for the dangerous-command check."""
     if not args:
         return ""

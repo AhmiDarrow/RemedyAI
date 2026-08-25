@@ -126,7 +126,7 @@ async def run_react_steps(s: Any) -> AsyncIterator[str]:
         tool_batches_in_epoch = 0
         stale_epochs = 0
         tool_batches_this_turn = 0
-        open_tasks_for_wall: list[str] = []
+        open_tasks_for_wall = []
         with suppress(Exception):
             brief = getattr(runtime, "_session_brief", None)
             if brief is not None:
@@ -292,11 +292,11 @@ async def run_react_steps(s: Any) -> AsyncIterator[str]:
             s.run_until_done = run_until_done
 
         # Accumulated assistant text for critical verify at end
-        assistant_text_acc: list[str] = []
+        assistant_text_acc = []
 
         # Brake / thrash counters — initialized before _pull_bag so nonlocal binds.
         no_progress_steps = 0
-        last_progress_fingerprint: tuple[int, int] | None = None
+        last_progress_fingerprint = None
         max_no_progress_steps = 25
         stalled_finalize = False
         all_error_batches = 0
