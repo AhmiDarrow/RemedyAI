@@ -887,6 +887,15 @@ def register_web_tools(runtime: Any) -> None:
 
         shown = final_url if final_url != u else u
         text = raw.decode(charset or "utf-8", errors="replace")
+        with suppress(Exception):
+            from remedy.core.turn_context import current_turn_id, turn_session_id
+            from remedy.memory.provenance import ingest_web_text
+
+            ingest_web_text(
+                text[:800],
+                session_id=str(turn_session_id(runtime) or ""),
+                turn_id=str(current_turn_id() or ""),
+            )
         from remedy.core.html_extract import html_to_markdown, looks_like_html
 
         if looks_like_html(raw):

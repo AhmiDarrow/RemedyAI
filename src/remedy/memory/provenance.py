@@ -35,9 +35,33 @@ class FactRecord:
         return str(self.extra.get("channel") or "") in ("web", "browser", "http")
 
 
+def persist_fact(fact: FactRecord) -> None:
+    """Append-only jsonl under ~/.remedy so provenance survives the process."""
+    import json
+    from pathlib import Path
+
+    from remedy.core.security import get_home_dir
+
+    row = {
+        "fact_id": fact.fact_id,
+        "text": fact.text[:2000],
+        "source_type": fact.source_type.value,
+        "source_session": fact.source_session,
+        "source_turn": fact.source_turn,
+        "confidence": fact.confidence,
+        "user_confirmed": fact.user_confirmed,
+        "sensitivity": fact.sensitivity,
+        "extra": fact.extra,
+    }
+    path: Path = get_home_dir() / "facts.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row, default=str) + "\n")
+
+
 def ingest_web_text(text: str, *, session_id: str = "", turn_id: str = "") -> FactRecord:
     """Pages can be TOOL_OBSERVED at low confidence — never USER_DECLARED."""
-    return FactRecord(
+    fact = FactRecord(
         text=text,
         source_type=SourceType.TOOL_OBSERVED,
         source_session=session_id,
@@ -46,6 +70,14 @@ def ingest_web_text(text: str, *, session_id: str = "", turn_id: str = "") -> Fa
         user_confirmed=False,
         extra={"channel": "web"},
     )
+    try:
+        import os
+
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            persist_fact(fact)
+    except Exception:
+        pass
+    return fact
 
 
 def resolve_contradiction(old: FactRecord, new: FactRecord) -> FactRecord:
