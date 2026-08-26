@@ -94,6 +94,14 @@ export interface RmbStatus {
     dry_penalty_last_n?: number | null
     xtc_probability?: number | null
     xtc_threshold?: number | null
+    cache_reuse?: number | null
+    thinking?: 'on' | 'off' | string
+    reasoning_budget?: number | null
+    enable_mtp?: boolean
+    spec_draft_n_max?: number | null
+    n_cpu_moe?: number | null
+    n_gpu_layers_draft?: number | null
+    model_draft?: string
   }
   nvidia?: boolean
   not_ready_hint?: string | null
@@ -114,10 +122,11 @@ export interface RmbStatus {
     silent_context?: boolean
     note?: string
   }
-  /** Auto-load knobs Remedy inferred from the GGUF (no user setup). */
+  /** Auto-load knobs Remedy inferred from the GGUF; owner can override each. */
   host_auto?: {
     summary?: string
     thinking?: boolean
+    thinking_mode?: string
     coder?: boolean
     qwen3_family?: boolean
     mtp?: boolean

@@ -4,6 +4,16 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.41.5] - 2026-08-26
+
+### Changed — RMB thinking is an option, default on
+
+- RMB no longer turns off Qwen/R1 thinking by default. Thinking is **on**
+  unless you set it **Off** in Settings → RMB (or
+  `rmb action=settings thinking=off`).
+- Host auto-load still detects Jinja, MTP, mmap, and MoE from the GGUF.
+  Those knobs are owner settings now — auto-load does not clobber them.
+
 ## [0.41.4] - 2026-08-26
 
 ### Fixed — local muscle without leftover jobs or a 256-token muzzle

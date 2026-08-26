@@ -89,6 +89,13 @@ def default_state() -> dict[str, Any]:
         "threads": DEFAULT_THREADS,
         "parallel": DEFAULT_PARALLEL,
         "flash_attn": True,
+        # Thinking is on unless the owner turns it off in Settings.
+        "thinking": "on",
+        "reasoning_budget": -1,  # -1 = no cap; 0 = disable hidden think; N = token cap
+        "enable_mtp": True,  # False skips speculative flags even on MTP GGUFs
+        "spec_draft_n_max": 0,  # 0 = auto from GGUF
+        "n_gpu_layers_draft": 0,  # 0 = auto
+        "model_draft": "",  # empty = sibling mtp-<stem>.gguf when present
         "chat_template": "",  # optional path or empty
         # --- inference engine knobs (llama-server) ---
         "temperature": 0.8,

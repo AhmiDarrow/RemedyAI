@@ -58,10 +58,12 @@ Starting RMB still uses this PC's GPU and **suspends** SmolVLM until you
    cache from this PC’s VRAM/RAM so the GGUF actually loads. Or pick a fixed
    profile (agent / turbo / quality) or type a context size to lock it.
    Switching GGUFs **re-fits** automatically. Remedy also auto-loads host
-   knobs from the file (Jinja chat template, thinking off for Qwen3/R1,
-   mmap, MTP single-slot, or a sibling `mtp-*.gguf` draft). You should
-   not need to set those. Too many GPU layers on a GGUF bigger than VRAM
-   will crawl — Autofit is the safe default.
+   knobs from the file (Jinja chat template, mmap, MTP single-slot, or a
+   sibling `mtp-*.gguf` draft). **Thinking stays on** unless you turn it
+   off under RMB options. Every auto knob is in Settings (and
+   `rmb action=settings`) — Jinja, mmap, MTP, MoE CPU experts, draft
+   layers, reasoning budget. Too many GPU layers on a GGUF bigger than
+   VRAM will crawl — Autofit is the safe default.
 4. **Start RMB** (required — RMB does **not** auto-start when the API/serve
    process comes up). Optionally enable **auto-start** only if you want the host
    to load with every Remedy launch.

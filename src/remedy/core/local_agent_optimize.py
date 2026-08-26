@@ -893,16 +893,24 @@ def apply_local_body_optimize(
     elif green_summary:
         out["stream"] = False
         out["temperature"] = 0.1
-    # Local models: never send cloud thinking knobs. Qwen3/R1 otherwise
-    # spend thousands of tokens in <think> before "1 + 1" → 2. Request
-    # body covers hosts that ignore argv; unknown field is ignored.
+    # Local models: never send cloud thinking knobs. Owner RMB thinking
+    # (default on) is the request-body switch; hosts that ignore the field
+    # still honor llama-server argv.
     out.pop("reasoning_effort", None)
     out.pop("thinking", None)
     prev_kw = out.get("chat_template_kwargs")
     merged_kw: dict[str, Any] = dict(prev_kw) if isinstance(prev_kw, dict) else {}
-    merged_kw.setdefault("enable_thinking", False)
+    if local_thinking_enabled():
+        merged_kw.setdefault("enable_thinking", True)
+        rb = _rmb_reasoning_budget()
+        if rb is not None:
+            out["reasoning_budget"] = rb
+        else:
+            out.pop("reasoning_budget", None)
+    else:
+        merged_kw.setdefault("enable_thinking", False)
+        out.setdefault("reasoning_budget", 0)
     out["chat_template_kwargs"] = merged_kw
-    out.setdefault("reasoning_budget", 0)
     return out
 
 
@@ -912,6 +920,31 @@ _PATH_RE = re.compile(
     r"(?:[^\"'\n|*?<>]+\.)"
     r"(?:py|js|ts|tsx|jsx|rs|go|java|cs|cpp|c|h|md|txt|json|html|css)\b)"
 )
+
+
+def local_thinking_enabled() -> bool:
+    """RMB thinking switch. Default on; owner may set thinking=off in Settings."""
+    try:
+        from remedy.runtime.rmb.config import load_rmb_json, merge_state
+        from remedy.runtime.rmb.host_profile import thinking_is_on
+
+        return thinking_is_on(merge_state(load_rmb_json()).get("thinking"))
+    except Exception:
+        return True
+
+
+def _rmb_reasoning_budget() -> int | None:
+    """Owner reasoning_budget (≥0) or None when unset / unlimited."""
+    try:
+        from remedy.runtime.rmb.config import load_rmb_json, merge_state
+
+        raw = merge_state(load_rmb_json()).get("reasoning_budget")
+        if raw is None or str(raw).strip() == "":
+            return None
+        n = int(raw)
+        return n if n >= 0 else None
+    except Exception:
+        return None
 
 
 def extract_create_path(message: str | None) -> str | None:
