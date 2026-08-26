@@ -2,7 +2,7 @@
 REMEDY DESKTOP — THIRD-PARTY NOTICES
 ==============================================================================
 
-Remedy Desktop 0.41.3
+Remedy Desktop 0.41.4
 
 Remedy Desktop includes software from the projects listed below. Each is
 used under its own licence; the full text of every licence follows the
@@ -50,9 +50,9 @@ SUMMARY
        1  0BSD OR MIT OR Apache-2.0
        1  Apache 2.0
        1  Apache License 2.0
-       1  Apache Software License
        1  Apache-2.0 / MIT
        1  Apache-2.0 AND ISC
+       1  Apache-2.0 OR BSD-2-Clause
        1  Apache-2.0/MIT
        1  BSD License
        1  BSD-2-Clause
@@ -118,7 +118,7 @@ attrs 26.1.0
     Copyright (c) 2015 Hynek Schlawack and the attrs contributors
     Licence text: [L010]
 
-cffi 2.1.0
+cffi 2.1.1
     Licence: MIT-0
     THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
     Licence text: [L011]
@@ -173,13 +173,13 @@ multidict 6.7.1
     Copyright 2016 Andrew Svetlov and aio-libs contributors
     Licence text: [L021]
 
-numpy 2.5.2
+numpy 2.4.4
     Licence: BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0
     Copyright (c) 2005-2025, NumPy Developers.
     Licence text: [L022, L023, L024, L025, L026, L027, L028, L029, L030, L031, L032, L033, L034, L035, L036, L037]
 
-packaging 25.0
-    Licence: Apache Software License
+packaging 26.2
+    Licence: Apache-2.0 OR BSD-2-Clause
     "Licensor" shall mean the copyright owner or entity authorized by
     Licence text: [L038, L039, L040]
 
@@ -233,7 +233,7 @@ starlette 1.3.1
     Copyright © 2018, [Encode OSS Ltd](https://www.encode.io/).
     Licence text: [L051]
 
-tqdm 4.70.0
+tqdm 4.69.0
     Licence: MPL-2.0 AND MIT
     Unless otherwise stated, all authors (see commit logs) retain copyright
     Licence text: [L052]
@@ -243,7 +243,7 @@ typing-inspection 0.4.2
     Copyright (c) Pydantic Services Inc. 2025 to present
     Licence text: [L053]
 
-typing_extensions 4.16.0
+typing_extensions 4.15.0
     Licence: PSF-2.0
     provided, however, that PSF's License Agreement and PSF's notice of copyright,
     Licence text: [L003]
@@ -253,7 +253,7 @@ uvicorn 0.51.0
     Copyright © 2017-present, [Encode OSS Ltd](https://www.encode.io/).
     Licence text: [L054]
 
-yarl 1.24.5
+yarl 1.24.2
     Licence: Apache-2.0
     "Licensor" shall mean the copyright owner or entity authorized by
     Licence text: [L041, L042]
@@ -2503,7 +2503,7 @@ OTHER DEALINGS IN THE SOFTWARE.
 For more information, please refer to <http://unlicense.org/>
 
 ------------------------------------------------------------------------------
-[L003]  applies to: aiohappyeyeballs 2.7.1, typing_extensions 4.16.0
+[L003]  applies to: aiohappyeyeballs 2.7.1, typing_extensions 4.15.0
 ------------------------------------------------------------------------------
 
 A. HISTORY OF THE SOFTWARE
@@ -3329,7 +3329,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------------------------------------------------------------------------------
-[L011]  applies to: cffi 2.1.0
+[L011]  applies to: cffi 2.1.1
 ------------------------------------------------------------------------------
 
 Except when otherwise stated (look for LICENSE files in directories or
@@ -3660,7 +3660,7 @@ Copyright 2016 Andrew Svetlov and aio-libs contributors
    limitations under the License.
 
 ------------------------------------------------------------------------------
-[L022]  applies to: numpy 2.5.2
+[L022]  applies to: numpy 2.4.4
 ------------------------------------------------------------------------------
 
 Copyright (c) 2005-2025, NumPy Developers.
@@ -4462,7 +4462,7 @@ combined work, and to convey the resulting work.  The terms of this
 License will continue to apply to the part which is the covered wor
 
 ------------------------------------------------------------------------------
-[L023]  applies to: numpy 2.5.2
+[L023]  applies to: numpy 2.4.4
 ------------------------------------------------------------------------------
 
 zlib License
@@ -4488,7 +4488,7 @@ zlib License
   3. This notice may not be removed or altered from any source distribution.
 
 ------------------------------------------------------------------------------
-[L024]  applies to: numpy 2.5.2
+[L024]  applies to: numpy 2.4.4
 ------------------------------------------------------------------------------
 
 BSD Zero Clause License
@@ -4507,7 +4507,7 @@ OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
 
 ------------------------------------------------------------------------------
-[L025]  applies to: numpy 2.5.2
+[L025]  applies to: numpy 2.4.4
 ------------------------------------------------------------------------------
 
 This project is primarily dual-licensed under your choice of either the Apache
@@ -4883,7 +4883,7 @@ express Statement of Purpose.
     this CC0 or use of the Work.
 
 ------------------------------------------------------------------------------
-[L026]  applies to: numpy 2.5.2
+[L026]  applies to: numpy 2.4.4
 ------------------------------------------------------------------------------
 
 BSD 3-Clause License
@@ -4916,7 +4916,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------------------------
-[L027]  applies to: numpy 2.5.2
+[L027]  applies to: numpy 2.4.4
 ------------------------------------------------------------------------------
 
 Copyright (c) 2005-2021, NumPy Developers.
@@ -4951,7 +4951,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------------------------
-[L028]  applies to: numpy 2.5.2
+[L028]  applies to: numpy 2.4.4
 ------------------------------------------------------------------------------
 
 Copyright (C) 2010-2018 Max-Planck-Society
@@ -4981,7 +4981,7 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------------------------
-[L029]  applies to: numpy 2.5.2
+[L029]  applies to: numpy 2.4.4
 ------------------------------------------------------------------------------
 
 Copyright (c) 1992-2013 The University of Tennessee and The University
@@ -5034,7 +5034,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------------------------
-[L030]  applies to: numpy 2.5.2
+[L030]  applies to: numpy 2.4.4
 ------------------------------------------------------------------------------
 
 * Copyright (c) 2006, University of Georgia and Pierre G.F. Gerard-Marchant
@@ -5063,7 +5063,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------------------------
-[L031]  applies to: numpy 2.5.2
+[L031]  applies to: numpy 2.4.4
 ------------------------------------------------------------------------------
 
 **This software is dual-licensed under the The University of Illinois/NCSA
@@ -5139,7 +5139,7 @@ often the algorithm's designer. Component licenses are located with
 the component code.
 
 ------------------------------------------------------------------------------
-[L032]  applies to: numpy 2.5.2
+[L032]  applies to: numpy 2.4.4
 ------------------------------------------------------------------------------
 
 ## NumPy
@@ -5205,7 +5205,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[L033]  applies to: numpy 2.5.2
+[L033]  applies to: numpy 2.4.4
 ------------------------------------------------------------------------------
 
 # MT19937
@@ -5271,7 +5271,7 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[L034]  applies to: numpy 2.5.2
+[L034]  applies to: numpy 2.4.4
 ------------------------------------------------------------------------------
 
 # PCG64
@@ -5298,7 +5298,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[L035]  applies to: numpy 2.5.2
+[L035]  applies to: numpy 2.4.4
 ------------------------------------------------------------------------------
 
 # PHILOX
@@ -5334,7 +5334,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------------------------
-[L036]  applies to: numpy 2.5.2
+[L036]  applies to: numpy 2.4.4
 ------------------------------------------------------------------------------
 
 # SFC64
@@ -5366,7 +5366,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ------------------------------------------------------------------------------
-[L037]  applies to: numpy 2.5.2
+[L037]  applies to: numpy 2.4.4
 ------------------------------------------------------------------------------
 
 # SPLITMIX64
@@ -5380,7 +5380,7 @@ worldwide. This software is distributed without any warranty.
 See <http://creativecommons.org/publicdomain/zero/1.0/>.
 
 ------------------------------------------------------------------------------
-[L038]  applies to: packaging 25.0
+[L038]  applies to: packaging 26.2
 ------------------------------------------------------------------------------
 
 This software is made available under the terms of *either* of the licenses
@@ -5388,7 +5388,7 @@ found in LICENSE.APACHE or LICENSE.BSD. Contributions to this software is made
 under the terms of *both* these licenses.
 
 ------------------------------------------------------------------------------
-[L039]  applies to: packaging 25.0, fdeflate 0.3.7, flatbuffers 25.12.19, miniz_oxide 0.8.9, num-conv 0.2.2, pin-project-lite 0.2.17, raw-window-handle 0.6.2, sync_wrapper 1.0.2, tauri 2.11.5, tauri-codegen 2.6.3, tauri-macros 2.6.3, tauri-plugin-log 2.9.0 …
+[L039]  applies to: packaging 26.2, fdeflate 0.3.7, flatbuffers 25.12.19, miniz_oxide 0.8.9, num-conv 0.2.2, pin-project-lite 0.2.17, raw-window-handle 0.6.2, sync_wrapper 1.0.2, tauri 2.11.5, tauri-codegen 2.6.3, tauri-macros 2.6.3, tauri-plugin-log 2.9.0 …
 ------------------------------------------------------------------------------
 
 Apache License
@@ -5569,7 +5569,7 @@ Apache License
    END OF TERMS AND CONDITIONS
 
 ------------------------------------------------------------------------------
-[L040]  applies to: packaging 25.0
+[L040]  applies to: packaging 26.2
 ------------------------------------------------------------------------------
 
 Copyright (c) Donald Stufft and individual contributors.
@@ -5597,7 +5597,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------------------------
-[L041]  applies to: propcache 0.5.2, python-multipart 0.0.32, yarl 1.24.5, encoding_rs 0.8.35, rustls-platform-verifier 0.7.0, serialize-to-javascript 0.1.2, serialize-to-javascript-impl 0.1.2, ureq 2.12.1, utf8_iter 1.0.4, zeroize 1.9.0
+[L041]  applies to: propcache 0.5.2, python-multipart 0.0.32, yarl 1.24.2, encoding_rs 0.8.35, rustls-platform-verifier 0.7.0, serialize-to-javascript 0.1.2, serialize-to-javascript-impl 0.1.2, ureq 2.12.1, utf8_iter 1.0.4, zeroize 1.9.0
 ------------------------------------------------------------------------------
 
 Apache License
@@ -5803,7 +5803,7 @@ Apache License
    limitations under the License.
 
 ------------------------------------------------------------------------------
-[L042]  applies to: propcache 0.5.2, yarl 1.24.5
+[L042]  applies to: propcache 0.5.2, yarl 1.24.2
 ------------------------------------------------------------------------------
 
 Copyright 2016-2021, Andrew Svetlov and aio-libs team
@@ -6218,7 +6218,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ------------------------------------------------------------------------------
-[L052]  applies to: tqdm 4.70.0
+[L052]  applies to: tqdm 4.69.0
 ------------------------------------------------------------------------------
 
 `tqdm` is a product of collaborative work.
