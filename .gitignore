@@ -160,6 +160,8 @@ scripts/lib_local_token.py
 # do not ignore src/remedy/memory/).
 /memory/
 /COORDINATION.md
+/AGENTS.md
+/ARCHIVE.md
 NUL
 /Users/
 /~/
