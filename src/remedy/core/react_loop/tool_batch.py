@@ -267,10 +267,23 @@ async def apply_build_engine_after_batch(
                             )
                             imsg = format_import_dry_run_message(imp)
                             if imsg is not None:
-                                bst.syntax_ok = False  # block suite
-                                messages.append(imsg)
-                                rearm_agency()
-                                yield "@@status:Build import dry-run red\n"
+                                body = str(imsg.get("content") or "")
+                                # Interpreter/sidecar soft-pass must NOT block
+                                # the suite or mark syntax red — models thrash
+                                # "fixing" healthy modules when the CLI ate -c.
+                                if "IMPORT DRY-RUN · SKIPPED" in body:
+                                    messages.append(imsg)
+                                    yield "@@status:Build import dry-run skipped (no CPython)\n"
+                                    with _soft("mutation-score"):
+                                        ms = mutation_score_paths(
+                                            root_p, list(bst.write_set)
+                                        )
+                                        bst.last_mutation_score = ms
+                                else:
+                                    bst.syntax_ok = False  # block suite
+                                    messages.append(imsg)
+                                    rearm_agency()
+                                    yield "@@status:Build import dry-run red\n"
                             else:
                                 # mutation score for next scoped verify
                                 with _soft("mutation-score"):

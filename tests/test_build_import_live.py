@@ -195,6 +195,75 @@ def test_format_import_dry_run_message():
     assert "broken" in msg["content"]
 
 
+def test_format_import_dry_run_skips_interpreter_failures():
+    """Sidecar/CLI as sys.executable must not send models on a fix chase."""
+    from remedy.core.build_import_graph import format_import_dry_run_message
+
+    msg = format_import_dry_run_message(
+        [
+            {
+                "ok": False,
+                "module": "healthy",
+                "error": "remedy: error: argument command: invalid choice",
+                "error_class": "interpreter",
+            }
+        ]
+    )
+    assert msg is not None
+    assert "SKIPPED" in msg["content"]
+    assert "not a module import bug" in msg["content"].lower() or "not" in msg["content"].lower()
+    assert "file_edit those modules" not in msg["content"]
+
+
+def test_python_cmd_for_subprocess_prefers_real_python(tmp_path):
+    from pathlib import Path as _P
+
+    from remedy.core.build_python import (
+        is_sidecar_spawn_error,
+        python_cmd_for_subprocess,
+    )
+
+    cmd = python_cmd_for_subprocess(tmp_path)
+    # On CI / this machine we expect a real interpreter; empty is only OK if
+    # the host truly has no Python (then dry-run soft-fails).
+    if cmd:
+        head = str(cmd[0]).lower().replace("\\", "/")
+        name = _P(cmd[0]).name.lower()
+        assert "remedy" not in name or head.endswith("python") or "uv" in head
+    assert is_sidecar_spawn_error(
+        'remedy: error: argument command: invalid choice: "import importlib"'
+    )
+    assert not is_sidecar_spawn_error("ImportError: cannot import name foo")
+
+
+def test_gate_l2_soft_pass_on_interpreter(tmp_path):
+    from remedy.core.build_gate_tower import gate_l2_import
+
+    (tmp_path / "m.py").write_text("x = 1\n", encoding="utf-8")
+    # Monkeypatch dry_run to simulate sidecar failure
+    import remedy.core.build_import_graph as big
+
+    real = big.dry_run_imports_for_paths
+
+    def fake(_paths, _root, **_k):
+        return [
+            {
+                "ok": False,
+                "module": "m",
+                "error": "remedy: error: argument command: invalid choice",
+                "error_class": "interpreter",
+            }
+        ]
+
+    big.dry_run_imports_for_paths = fake  # type: ignore[assignment]
+    try:
+        gr = gate_l2_import(tmp_path, [str(tmp_path / "m.py")])
+        assert gr.ok is True
+        assert "soft-pass" in (gr.summary or "").lower() or "cpython" in (gr.summary or "").lower()
+    finally:
+        big.dry_run_imports_for_paths = real  # type: ignore[assignment]
+
+
 def test_build_tools_handlers_callable(tmp_path):
     """Registration must bind real async handlers (no NameError at call)."""
     import asyncio

@@ -96,9 +96,14 @@ def _apply_mutants(source: str) -> list[tuple[str, str]]:
 
 
 def _run_pytest(root: Path, test_args: list[str], *, timeout_s: float = 45.0) -> bool:
+    from remedy.core.build_python import python_cmd_for_subprocess
+
+    py = python_cmd_for_subprocess(root)
+    if not py:
+        return False
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *test_args],
+            [*py, "-m", "pytest", "-q", "-p", "no:cacheprovider", *test_args],
             cwd=str(root),
             capture_output=True,
             text=True,
