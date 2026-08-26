@@ -22,6 +22,9 @@ def register_workspace_tools(runtime: Any) -> None:
     runtime._register_comfyui_tools()
     runtime._register_vision_tools()
     runtime._register_local_discover_tools()
+    _rmb = getattr(runtime, "_register_rmb_tools", None)
+    if callable(_rmb):
+        _rmb()
     runtime._register_skill_tools()
     try:
         from remedy.core.agent_mission_tools import register_mission_tools

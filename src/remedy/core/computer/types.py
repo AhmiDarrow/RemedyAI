@@ -23,6 +23,7 @@ COMPUTER_TOOL_NAMES = frozenset(
         "computer_drag",
         "computer_wait",
         "computer_app",
+        "computer_apps",
         "computer_page_text",
         "computer_find",
         "computer_act",
@@ -43,6 +44,7 @@ COMPUTER_PLAN_MODE_TOOLS = frozenset(
         "computer_page_text",
         "computer_find",
         "computer_wait",
+        "computer_apps",
     }
 )
 

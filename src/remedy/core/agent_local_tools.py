@@ -427,3 +427,489 @@ def register_vision_tools(runtime: Any) -> None:
         },
     )
 
+
+def _rmb_home(runtime: Any) -> Any:
+    cfg = getattr(runtime, "config", None)
+    return getattr(cfg, "home_dir", None) if cfg is not None else None
+
+
+def _rmb_cfg(runtime: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    with suppress(Exception):
+        from remedy.interfaces.config import load_config
+
+        raw = load_config() or {}
+        if isinstance(raw, dict):
+            out = dict(raw)
+    home = _rmb_home(runtime)
+    if home:
+        out["home_dir"] = home
+    return out
+
+
+def _rmb_approval(runtime: Any, cmd: str, reason: str) -> str:
+    from remedy.core.approvals import APPROVALS
+    from remedy.core.turn_context import turn_session_id
+
+    sid = turn_session_id(runtime)
+    # Honor Auto/Full: do not invent a checkpoint Settings would not show.
+    ask_reason = APPROVALS.needs_ask(cmd, tool_name="rmb")
+    if not ask_reason:
+        return ""
+    if APPROVALS.is_approved("rmb", cmd, session_id=sid):
+        return ""
+    item = APPROVALS.create(
+        tool_name="rmb",
+        command=cmd,
+        reason=ask_reason or reason,
+        session_id=sid,
+    )
+    return (
+        f"APPROVAL_REQUIRED id={item.id}\n"
+        f"reason={ask_reason or reason}\n"
+        "Do not invent success. Tell the owner this needs approval "
+        f"in the UI (or /approve {item.id}), then retry."
+    )
+
+
+def _this_turn_is_rmb(runtime: Any) -> bool:
+    with suppress(Exception):
+        from remedy.core.llm_binding import get_llm_binding
+        from remedy.runtime.rmb.mode import is_rmb_provider
+
+        bind = get_llm_binding(runtime)
+        return is_rmb_provider(
+            getattr(bind, "provider", None), getattr(bind, "base_url", None)
+        )
+    return False
+
+
+def _note_rmb_map(runtime: Any, data: dict[str, Any]) -> None:
+    with suppress(Exception):
+        from remedy.core.metabolism.machine_map import get_machine_map
+        from remedy.core.turn_context import turn_session_id
+
+        get_machine_map(turn_session_id(runtime)).note_organ("rmb", data, ttl_s=20.0)
+
+
+def register_rmb_tools(runtime: Any) -> None:
+    """RMB — her own local llama.cpp muscle. Not a second product."""
+
+    async def rmb(
+        action: str = "status",
+        query: str = "",
+        repo: str = "",
+        filename: str = "",
+        profile: str = "",
+        model_id: str = "",
+        model_path: str = "",
+        ctx_size: int | None = None,
+        auto_start: bool | None = None,
+        settings: dict | str | None = None,
+        load: bool = True,
+    ) -> str:
+        """Drive Remedy Muscle Bridge (local llama.cpp on :8787).
+
+        action=status  → running/ready/model/autofit (no start)
+        action=start   → enable + start host (autofit default)
+        action=stop    → stop host; vision can use the GPU again
+        action=use     → start and switch *this* chat to RMB
+        action=catalog → bundled GGUF catalog
+        action=search  → Hugging Face name / owner/repo / file URL
+        action=files   → list .gguf in a repo (after search)
+        action=pull    → download into ~/.remedy/rmb/models/
+        action=settings → patch profile/ctx/model (restarts host)
+
+        Autofit is default. Do not guess Hugging Face hosts — search, then pick.
+        Starting RMB suspends SmolVLM. Never list_dir for GGUFs.
+        """
+        act = (action or "status").strip().lower()
+        home = _rmb_home(runtime)
+        cfg = _rmb_cfg(runtime)
+
+        if act in ("status", "info", "health"):
+            from remedy.runtime.rmb.service import get_rmb_status
+
+            st = await asyncio.to_thread(get_rmb_status, cfg)
+            _note_rmb_map(
+                runtime,
+                {
+                    "running": bool(st.get("running")),
+                    "ready": bool(st.get("ready")),
+                    "model": str(st.get("chat_model") or st.get("model_id") or ""),
+                    "profile": str(st.get("profile") or "autofit"),
+                    "ctx": int(st.get("ctx_size") or 0),
+                    "vision_suspended": bool(st.get("vision_suspended")),
+                },
+            )
+            public: dict[str, Any] = {
+                k: st.get(k)
+                for k in (
+                    "ok",
+                    "brand",
+                    "brand_full",
+                    "enabled",
+                    "auto_start",
+                    "installed",
+                    "running",
+                    "ready",
+                    "starting",
+                    "loading",
+                    "user_stopped",
+                    "base_url",
+                    "port",
+                    "model_id",
+                    "chat_model",
+                    "model_path",
+                    "model_present",
+                    "runtime_present",
+                    "ctx_size",
+                    "profile",
+                    "vision_suspended",
+                    "last_error",
+                    "not_ready_hint",
+                )
+                if k in st
+            }
+            public["next"] = (
+                "rmb action=start (then action=use to chat on it). "
+                "Autofit sizes VRAM. Pull a GGUF with action=search then action=pull."
+                if not st.get("ready")
+                else "ready — rmb action=use switches this chat onto the local host."
+            )
+            return json.dumps(public, indent=2, default=str)
+
+        if act in ("catalog", "models"):
+            from remedy.runtime.rmb.catalog import catalog_public
+
+            return json.dumps(catalog_public(), indent=2, default=str)
+
+        if act in ("search", "hf"):
+            q = (query or repo or "").strip()
+            if not q:
+                return format_tool_error(
+                    "query is required for action=search",
+                    code="MISSING_QUERY",
+                    tool_name="rmb",
+                    suggestion=(
+                        'rmb action="search" query="Qwen3.5-9B" '
+                        "or query=\"owner/repo\" or a Hugging Face file URL."
+                    ),
+                )
+            from remedy.runtime.rmb.hf import HfError, resolve_query
+
+            try:
+                out = await asyncio.to_thread(resolve_query, q)
+            except HfError as e:
+                return format_tool_error(
+                    str(e),
+                    code="HF_SEARCH",
+                    tool_name="rmb",
+                    suggestion="Paste owner/repo or a /resolve/…gguf URL. Do not guess the host.",
+                )
+            return json.dumps(out, indent=2, default=str)
+
+        if act in ("files", "list"):
+            r = (repo or query or "").strip()
+            if not r:
+                return format_tool_error(
+                    "repo is required for action=files",
+                    code="MISSING_REPO",
+                    tool_name="rmb",
+                    suggestion='rmb action="files" repo="owner/repo"',
+                )
+            from remedy.runtime.rmb.hf import HfError, list_gguf_files, sanitize_repo
+
+            try:
+                clean = sanitize_repo(r)
+                files = await asyncio.to_thread(list_gguf_files, clean)
+            except HfError as e:
+                return format_tool_error(str(e), code="HF_FILES", tool_name="rmb")
+            return json.dumps({"ok": True, "repo": clean, "files": files}, indent=2)
+
+        restart_acts = ("start", "stop", "use", "settings")
+        if (
+            act in restart_acts or (act in ("pull", "download") and load)
+        ) and _this_turn_is_rmb(runtime):
+            return format_tool_error(
+                "This turn is already on RMB — restarting the host would cut the reply. "
+                "Finish this message, then start/stop from Settings or a new chat.",
+                code="RMB_SELF",
+                tool_name="rmb",
+                suggestion="Use a cloud chat (or a new session) to restart RMB.",
+            )
+
+        if act in ("start", "run", "up"):
+            gate = _rmb_approval(
+                runtime,
+                "rmb start",
+                "Start the local RMB llama.cpp host (uses this PC's GPU/RAM; "
+                "suspends SmolVLM while it runs).",
+            )
+            if gate:
+                return gate
+            from remedy.runtime.rmb.service import apply_rmb_settings, start_rmb_server
+
+            await asyncio.to_thread(
+                apply_rmb_settings, {"enabled": True}, home_dir=home, cfg=cfg
+            )
+            result = await asyncio.to_thread(
+                start_rmb_server, home_dir=home, wait_s=120.0, clear_user_stopped=True
+            )
+            _note_rmb_map(
+                runtime,
+                {
+                    "running": bool(result.get("ok") or result.get("running")),
+                    "ready": bool(result.get("ok") or result.get("ready")),
+                    "profile": "autofit",
+                },
+            )
+            return json.dumps(result, indent=2, default=str)
+
+        if act in ("stop", "down"):
+            gate = _rmb_approval(
+                runtime,
+                "rmb stop",
+                "Stop the local RMB host so vision can use the GPU again.",
+            )
+            if gate:
+                return gate
+            from remedy.runtime.rmb.service import stop_rmb_server
+
+            result = await asyncio.to_thread(stop_rmb_server, home_dir=home)
+            _note_rmb_map(runtime, {"running": False, "ready": False})
+            return json.dumps(result, indent=2, default=str)
+
+        if act in ("use", "switch", "chat"):
+            gate = _rmb_approval(
+                runtime,
+                "rmb use",
+                "Start RMB and switch this chat onto the local model.",
+            )
+            if gate:
+                return gate
+            from pathlib import Path as _P
+
+            from remedy.interfaces.api_support import _apply_llm_to_runtime
+            from remedy.runtime.rmb.catalog import DEFAULT_RMB_MODEL_ID, RMB_MODELS, get_model_spec
+            from remedy.runtime.rmb.config import load_rmb_json, merge_state
+            from remedy.runtime.rmb.service import apply_rmb_settings, start_rmb_server
+
+            st = await asyncio.to_thread(
+                apply_rmb_settings,
+                {"enabled": True, "use_as_chat_provider": True},
+                home_dir=home,
+                cfg=cfg,
+            )
+            start = await asyncio.to_thread(
+                start_rmb_server,
+                home_dir=home,
+                wait_s=120.0,
+                clear_user_stopped=True,
+            )
+            rstate = merge_state(load_rmb_json(home))
+            base = str(rstate.get("base_url") or "http://127.0.0.1:8787/v1")
+            model = ""
+            if rstate.get("model_path"):
+                model = _P(str(rstate["model_path"])).stem
+            if not model:
+                mid = str(rstate.get("model_id") or DEFAULT_RMB_MODEL_ID)
+                if mid in RMB_MODELS:
+                    model = get_model_spec(mid).filename.replace(".gguf", "")
+                else:
+                    model = mid
+            applied = False
+            if model:
+                with suppress(Exception):
+                    _apply_llm_to_runtime(
+                        runtime,
+                        provider="rmb",
+                        model=model,
+                        base_url=base,
+                        api_key="rmb",
+                        harness_mode="auto",
+                        harness_min_context_pct=0.55,
+                        harness_max_context_pct=0.78,
+                    )
+                    applied = True
+            _note_rmb_map(
+                runtime,
+                {
+                    "running": True,
+                    "ready": bool(start.get("ok") or start.get("ready")),
+                    "model": model,
+                    "profile": str(rstate.get("profile") or "autofit"),
+                },
+            )
+            return json.dumps(
+                {
+                    "status": st,
+                    "start": start,
+                    "runtime_applied": applied,
+                    "chat_model": model,
+                    "next": (
+                        "This chat is now RMB. Send a new message to talk on the local host. "
+                        "SmolVLM stays suspended until rmb action=stop."
+                    ),
+                },
+                indent=2,
+                default=str,
+            )
+
+        if act in ("settings", "configure", "set"):
+            patch: dict[str, Any] = {}
+            if isinstance(settings, str) and settings.strip():
+                try:
+                    parsed = json.loads(settings)
+                except json.JSONDecodeError as e:
+                    return format_tool_error(
+                        f"settings is not valid JSON: {e}",
+                        code="BAD_JSON",
+                        tool_name="rmb",
+                    )
+                if isinstance(parsed, dict):
+                    patch.update(parsed)
+            elif isinstance(settings, dict):
+                patch.update(settings)
+            if profile:
+                patch["profile"] = profile
+            if model_id:
+                patch["model_id"] = model_id
+            if model_path:
+                patch["model_path"] = model_path
+            if ctx_size is not None:
+                patch["ctx_size"] = int(ctx_size)
+            if auto_start is not None:
+                patch["auto_start"] = bool(auto_start)
+            if not patch:
+                return format_tool_error(
+                    "No settings to apply.",
+                    code="EMPTY_PATCH",
+                    tool_name="rmb",
+                    suggestion=(
+                        'rmb action="settings" profile="autofit" '
+                        "or ctx_size=8192 or model_id=…"
+                    ),
+                )
+            gate = _rmb_approval(
+                runtime,
+                f"rmb settings {sorted(patch.keys())}",
+                "Change RMB host settings (may restart llama-server).",
+            )
+            if gate:
+                return gate
+            from remedy.runtime.rmb.service import apply_rmb_settings
+
+            result = await asyncio.to_thread(
+                apply_rmb_settings, patch, home_dir=home, cfg=cfg, live=True, wait_s=120.0
+            )
+            return json.dumps(result, indent=2, default=str)
+
+        if act in ("pull", "download"):
+            q = (query or "").strip()
+            r = (repo or "").strip()
+            fn = (filename or "").strip()
+            if not q and not (r and fn):
+                return format_tool_error(
+                    "pull needs query= (file URL or owner/repo + filename) "
+                    "or repo= and filename=.",
+                    code="MISSING_PULL",
+                    tool_name="rmb",
+                    suggestion=(
+                        'rmb action="search" first, then '
+                        'rmb action="pull" repo="owner/repo" filename="….gguf"'
+                    ),
+                )
+            gate = _rmb_approval(
+                runtime,
+                f"rmb pull {q or r}/{fn}",
+                "Download a GGUF into ~/.remedy/rmb/models/ (can be large).",
+            )
+            if gate:
+                return gate
+            from remedy.runtime.rmb.hf import HfError, parse_hf_hint, start_pull
+
+            url = ""
+            rev = None
+            if q and not (r and fn):
+                try:
+                    hint = parse_hf_hint(q)
+                except HfError as e:
+                    return format_tool_error(str(e), code="HF_HINT", tool_name="rmb")
+                r = r or str(hint.repo or "")
+                fn = fn or str(hint.filename or "")
+                rev = hint.revision
+                url = str(hint.url or "")
+            try:
+                out = await asyncio.to_thread(
+                    start_pull,
+                    repo=r or None,
+                    filename=fn or None,
+                    revision=rev,
+                    url=url or None,
+                    home_dir=home,
+                    load=bool(load),
+                )
+            except HfError as e:
+                return format_tool_error(str(e), code="HF_PULL", tool_name="rmb")
+            return json.dumps(out, indent=2, default=str)
+
+        if act in ("progress",):
+            from remedy.runtime.rmb.hf import progress_snapshot
+
+            return json.dumps(progress_snapshot(), indent=2, default=str)
+
+        return format_tool_error(
+            f"Unknown rmb action: {action!r}",
+            code="UNKNOWN_ACTION",
+            tool_name="rmb",
+            suggestion=(
+                "status | start | stop | use | catalog | search | files | "
+                "pull | settings | progress"
+            ),
+        )
+
+    runtime.tool_registry.register_builtin_handler(
+        "rmb",
+        "Remedy Muscle Bridge — her own local llama.cpp host (not a second product). "
+        "status | start | stop | use (chat on it) | catalog | search | files | "
+        "pull | settings | progress. Autofit default. Starting suspends SmolVLM. "
+        "Do not list_dir for GGUFs; do not guess Hugging Face hosts — search first. "
+        "Do not only point the owner at Settings.",
+        rmb,
+        {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": (
+                        "status | start | stop | use | catalog | search | files | "
+                        "pull | settings | progress (default status)"
+                    ),
+                },
+                "query": {
+                    "type": "string",
+                    "description": "HF name, owner/repo, or file URL (search/pull)",
+                },
+                "repo": {"type": "string", "description": "owner/repo for files/pull"},
+                "filename": {"type": "string", "description": ".gguf filename to pull"},
+                "profile": {
+                    "type": "string",
+                    "description": "autofit | agent | turbo | quality (settings)",
+                },
+                "model_id": {"type": "string"},
+                "model_path": {"type": "string"},
+                "ctx_size": {"type": "integer"},
+                "auto_start": {"type": "boolean"},
+                "settings": {
+                    "type": "object",
+                    "description": "Partial rmb.json patch for action=settings",
+                },
+                "load": {
+                    "type": "boolean",
+                    "description": "After pull, start RMB on that file (default true)",
+                },
+            },
+        },
+    )
+

@@ -418,6 +418,10 @@ class ApprovalQueue:
             "computer_fill",
             # Close only is gated in the tool; list/focus never call the gate.
             "computer_windows",
+            # Local llama.cpp host: GPU + vision suspend. Status never calls
+            # the gate; start/stop/use/pull/settings do. Auto/Full skip these
+            # the same way they skip bash_exec.
+            "rmb",
             # NOT computer_press_hold, deliberately: a press-and-hold is how a
             # CAPTCHA challenge is answered, and prompting on every one makes
             # them unusable. It is still in _MUTATION_COMPUTER_TOOLS, so the
@@ -559,6 +563,11 @@ class ApprovalQueue:
                 reason = "Closing a window requires approval (computer_windows)"
             elif tool.startswith("computer_"):
                 reason = f"Computer control requires approval ({tool})"
+            elif tool == "rmb":
+                reason = (
+                    "Starting or changing the local RMB host uses this PC's "
+                    "GPU/RAM and may suspend vision"
+                )
         if not reason and c and _ASK_PATTERNS.search(c):
             reason = "High-impact / destructive command pattern"
         if reason and soft:
