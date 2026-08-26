@@ -415,7 +415,85 @@ def test_dialect_persist_and_success(tmp_path: Path) -> None:
 def test_resolve_which_python() -> None:
     found = resolve_which("python")
     assert found
+    name = Path(found).name.lower()
+    assert name.startswith("python") or name.startswith("py") or "python" in found.lower()
+    assert "remedy" not in name
+
+
+def test_probe_dialect_never_stamps_sidecar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sidecar = tmp_path / "remedy-desktop.exe"
+    sidecar.write_bytes(b"")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(sidecar))
+    monkeypatch.setattr(
+        "remedy.core.build_python.host_python_executable", lambda: ""
+    )
+    monkeypatch.setattr(
+        "remedy.core.build_python.python_cmd_for_subprocess", lambda root=None: []
+    )
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda *_a, **_k: None)
+    d = probe_host_dialect(home=tmp_path / "home", persist=False)
+    assert d.python_cmd == ""
+    assert "remedy" not in (d.python_cmd or "").lower()
+
+
+def test_load_dialect_heals_sidecar_python_cmd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    home = tmp_path / "remedy-home"
+    (home / "host").mkdir(parents=True)
+    sidecar = tmp_path / "remedy-desktop.exe"
+    sidecar.write_bytes(b"")
+    (home / "host" / "dialect.json").write_text(
+        json.dumps({"host": "cmd", "python_cmd": str(sidecar)}),
+        encoding="utf-8",
+    )
+    real = sys.executable
+    monkeypatch.setattr(
+        "remedy.core.build_python.host_python_executable", lambda: real
+    )
+    loaded = load_dialect(home)
+    assert loaded.python_cmd == real
+    assert "remedy-desktop" not in Path(loaded.python_cmd).name.lower()
+
+
+def test_resolve_which_python_skips_sidecar_dialect(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sidecar = tmp_path / "remedy-desktop.exe"
+    sidecar.write_bytes(b"")
+    monkeypatch.setattr(
+        "remedy.execution.host.dialect.load_dialect",
+        lambda home=None: HostDialect(python_cmd=str(sidecar)),
+    )
+    found = resolve_which("python")
+    assert found
+    assert "remedy-desktop" not in Path(found).name.lower()
     assert Path(found).name.lower().startswith("python") or "python" in found.lower()
+
+
+def test_python_exe_rewrite_skips_sidecar_when_frozen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from remedy.execution.host import translate
+
+    sidecar = tmp_path / "remedy-desktop.exe"
+    sidecar.write_bytes(b"")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(sidecar))
+    monkeypatch.setattr(
+        "remedy.core.build_python.host_python_executable", lambda: ""
+    )
+    exe = translate._python_exe()
+    assert "remedy" not in Path(exe).name.lower()
+    h = translate_posix_to_host("head -n 2 README.md", host="cmd")
+    assert "remedy-desktop" not in h.text.lower()
 
 
 def test_resolve_which_finds_venv_pytest(tmp_path: Path) -> None:
@@ -455,9 +533,15 @@ def test_script_body_size_cap(tmp_path: Path) -> None:
 
 
 def test_launch_script_python(tmp_path: Path) -> None:
+    from remedy.core.build_python import python_cmd_for_subprocess
+
     launch = launch_script("python", "print('ok')", scratch_dir=tmp_path)
     assert launch.path.suffix == ".py"
-    assert launch.argv[0] == sys.executable
+    py = python_cmd_for_subprocess()
+    assert py
+    assert launch.argv[: len(py)] == py
+    stem = Path(py[0]).name.lower()
+    assert "remedy-desktop" not in stem
     assert launch.path.read_text(encoding="utf-8").startswith("print")
 
 

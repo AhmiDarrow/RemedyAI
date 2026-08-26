@@ -458,9 +458,12 @@ async def apply_or_rollback(
                     _record_soul_lesson(round_, home)
                     return round_
             if round_.tree in ("python", "both"):
-                request_sidecar_restart(
+                requested = request_sidecar_restart(
                     home, repo=repo, snapshot=snapshot, round_id=round_.round_id
                 )
+                # Honest ledger: "applied" without a restart request means the
+                # running serve still executes the old code (frozen install).
+                round_.detail["sidecar_restart_requested"] = bool(requested)
         round_.outcome = "applied"
         round_.status = "applied"
     else:
@@ -533,6 +536,17 @@ def request_sidecar_restart(
         "changed": (snapshot or {}).get("changed", []),
         "untracked": (snapshot or {}).get("untracked", []),
     }
+    if bool(getattr(sys, "frozen", False)):
+        # Frozen Desktop is not this checkout. Recycling serve mid-turn just
+        # drops the SSE ("Error: network error") and cannot load repo edits.
+        # Frozen only — the dev-checkout Desktop also sets the sidecar env
+        # vars (_is_packaged_runtime), but its serve DOES run this checkout,
+        # so it must still request the restart to load the edit.
+        logger.info(
+            "skip sidecar restart request — frozen install (round=%s)",
+            round_id or "-",
+        )
+        return False
     try:
         locks.mkdir(parents=True, exist_ok=True)
         write_json_atomic(

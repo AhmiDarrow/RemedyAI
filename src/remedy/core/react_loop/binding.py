@@ -65,15 +65,16 @@ def resolve_and_apply_tools(
         writes_done=turn.write_batches,
     )
     # Mid-turn re-resolve may narrow a pack. It must never *accidentally*
-    # strip a work turn as l1_pure_chat. Explicit non-work / chat disarms
-    # (Reply only STILLALIVE) must stay stripped — keep_armed was re-arming
-    # those after a pseudo-tool dump and sending the local model into a loop.
+    # strip a work turn as l1_pure_chat / no_work_request / ask_first.
+    # Explicit non-work / Chat pin (Reply only STILLALIVE) stay stripped —
+    # keep_armed was re-arming those after a pseudo-tool dump and looping.
     prev_armed = bool(getattr(turn, "tools", None))
+    reason = str(getattr(decision, "reason", "") or "")
     if (
         int(step_index or 0) > 0
         and prev_armed
         and decision.tools is None
-        and str(getattr(decision, "reason", "") or "") == "l1_pure_chat"
+        and reason in {"l1_pure_chat", "no_work_request", "ask_first"}
     ):
         turn.rearm(reason="keep_armed")
         return turn.tools, turn.run_until_done

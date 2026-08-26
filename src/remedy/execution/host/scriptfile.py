@@ -185,8 +185,14 @@ def launch_script(
         exe = shutil.which("cmd") or "cmd.exe"
         argv = [exe, "/c", str(path)]
         return ScriptLaunch(argv=argv, path=path, lang="cmd", body=body)
-    # python
-    import sys
+    # python — never the frozen sidecar (that would re-launch serve on :7400)
+    from remedy.core.build_python import python_cmd_for_subprocess
 
-    argv = [sys.executable, str(path)]
+    py = python_cmd_for_subprocess()
+    if not py:
+        raise ValueError(
+            "No real Python interpreter for host_script (Desktop sidecar is not CPython). "
+            "Set REMEDY_PYTHON."
+        )
+    argv = [*py, str(path)]
     return ScriptLaunch(argv=argv, path=path, lang="python", body=body)

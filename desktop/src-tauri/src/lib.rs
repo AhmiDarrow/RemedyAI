@@ -4296,6 +4296,43 @@ fn restart_sidecar_and_wait(state: &ServerState, wait: Duration) -> bool {
 ///  3. if unhealthy, rolls the change back and restarts once more,
 ///  4. if still unhealthy, stops and logs an investigation payload (no storms).
 /// The marker is always removed after one attempt.
+/// True while any live chat turn holds a stream lock in `<home>/locks`.
+///
+/// Writers create one `stream_active.<pid>` file per process and heartbeat
+/// its mtime every ~10s (see `remedy/core/stream_lock.py`). A file whose
+/// mtime is older than the stale bound belongs to a crashed process — it is
+/// removed here so a hard-killed serve can never block self-inject forever.
+/// The legacy bare `stream_active` name (older sidecars) gets the same TTL.
+fn stream_lock_active() -> bool {
+    const STALE_AFTER: Duration = Duration::from_secs(120);
+    let locks = remedy_home().join("locks");
+    let now = std::time::SystemTime::now();
+    let mut active = false;
+    if let Ok(entries) = std::fs::read_dir(&locks) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name != "stream_active" && !name.starts_with("stream_active.") {
+                continue;
+            }
+            let fresh = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|m| now.duration_since(m).ok())
+                .map(|age| age < STALE_AFTER)
+                // Unreadable mtime: assume live — never recycle a real turn.
+                .unwrap_or(true);
+            if fresh {
+                active = true;
+            } else {
+                log::info!("stream lock {} is stale — removing", name);
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    active
+}
+
 fn self_inject_apply_poller(app: AppHandle) {
     let _ = thread::Builder::new()
         .name("self-inject-apply".into())
@@ -4303,6 +4340,14 @@ fn self_inject_apply_poller(app: AppHandle) {
             let marker = remedy_home().join("locks").join("self_inject_apply");
             loop {
                 thread::sleep(Duration::from_secs(2));
+                // Never recycle serve while a chat turn is on the wire —
+                // that painted "Error: network error" while working this repo
+                // from the packaged install. Stale locks (crashed writer, no
+                // heartbeat) are ignored and cleaned up so a hard-killed serve
+                // cannot block applies forever.
+                if stream_lock_active() {
+                    continue;
+                }
                 let raw = match std::fs::read_to_string(&marker) {
                     Ok(s) => s,
                     Err(_) => continue, // not present yet

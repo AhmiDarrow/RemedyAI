@@ -41,7 +41,6 @@ from __future__ import annotations
 
 import re
 import subprocess
-import sys
 import threading
 import time
 from contextlib import suppress
@@ -279,10 +278,19 @@ def _run_script(
 ) -> tuple[bool, str]:
     """Run one sheath script in a subprocess. Never shell; cwd = sheath dir."""
     try:
+        from remedy.core.build_python import python_cmd_for_subprocess
         from remedy.execution.process import hidden_subprocess_kwargs
 
+        # Never the frozen sidecar — spawning remedy-desktop.exe as Python
+        # relaunches serve on :7400 and drops the live chat.
+        py = python_cmd_for_subprocess()
+        if not py:
+            return False, (
+                "no real Python interpreter for sheath scripts "
+                "(Desktop sidecar is not CPython); set REMEDY_PYTHON"
+            )
         r = subprocess.run(
-            [sys.executable, str(script), *args],
+            [*py, str(script), *args],
             cwd=str(script.parent),
             capture_output=True,
             text=True,

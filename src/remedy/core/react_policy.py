@@ -677,7 +677,11 @@ def runtime_turn_is_chat_only(runtime: Any = None, message: str | None = None) -
 _REQUEST_WORK_RE = re.compile(
     r"(?i)\b(?:can you|could you|would you|will you|please|"
     r"can we|could we|we need|i need you to|i want you to|"
+    r"i want to\s+(?:finish|write|make|build|create|start|complete|ship)|"
     r"make sure|be sure to)\b"
+    # Imperative 'modify' only at a clause start — "why did you modify X?"
+    # and "don't modify anything" are questions/limits, not work requests.
+    r"|(?:^|[.!;]\s+|\b(?:and|then|also)\s+)modify\b"
 )
 # World/agent trivia openers — only a knowledge question when nothing
 # locates the request in this machine / project / UI.

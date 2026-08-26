@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import sys
+from contextlib import suppress
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
@@ -275,6 +276,11 @@ def setup_serve_logging(
         lvl,
         log_dir,
     )
+    # Stale stream locks from a killed sidecar must not block self-inject forever.
+    with suppress(Exception):
+        from remedy.core.stream_lock import clear_stale_stream_locks
+
+        clear_stale_stream_locks(home)
     return log_dir
 
 

@@ -219,7 +219,9 @@ def test_python_cmd_for_subprocess_prefers_real_python(tmp_path):
     from pathlib import Path as _P
 
     from remedy.core.build_python import (
+        host_python_executable,
         is_sidecar_spawn_error,
+        is_usable_host_python,
         python_cmd_for_subprocess,
     )
 
@@ -234,6 +236,17 @@ def test_python_cmd_for_subprocess_prefers_real_python(tmp_path):
         'remedy: error: argument command: invalid choice: "import importlib"'
     )
     assert not is_sidecar_spawn_error("ImportError: cannot import name foo")
+    assert is_usable_host_python(r"C:\Python313\python.exe")
+    assert is_usable_host_python(r"C:\Windows\py.exe")
+    assert not is_usable_host_python(r"C:\Program Files\Remedy Desktop\remedy-desktop.exe")
+    assert not is_usable_host_python(
+        r"C:\Users\x\AppData\Local\Microsoft\WindowsApps\python.exe"
+    )
+    assert not is_usable_host_python("")
+    host = host_python_executable()
+    if host:
+        assert is_usable_host_python(host)
+        assert "remedy-desktop" not in _P(host).name.lower()
 
 
 def test_gate_l2_soft_pass_on_interpreter(tmp_path):

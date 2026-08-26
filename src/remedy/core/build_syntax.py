@@ -58,7 +58,13 @@ def check_path_syntax(path: str | Path) -> dict[str, Any]:
             out["error"] = f"JSONDecodeError: {e.msg} (line {e.lineno})"
         return out
 
-    # Unknown types: pass (full oracle handles them)
+    # Known non-Python sources go through the lang oracle (brace / tsc / gcc).
+    # Docs and other unknown suffixes skip — they are not a syntax red.
+    from remedy.core.build_lang_oracle import LANG_SUFFIXES, check_lang_syntax
+
+    if suffix in LANG_SUFFIXES:
+        return check_lang_syntax(p)
+    out["engine"] = "skip"
     return out
 
 
@@ -110,6 +116,8 @@ def resolve_write_paths(runtime: Any, paths: list[str] | None) -> list[str]:
 
 
 def check_paths_syntax(paths: list[str]) -> list[dict[str, Any]]:
+    from remedy.core.build_lang_oracle import LANG_SUFFIXES
+
     results: list[dict[str, Any]] = []
     seen: set[str] = set()
     for raw in paths or []:
@@ -123,17 +131,10 @@ def check_paths_syntax(paths: list[str]) -> list[dict[str, Any]]:
         if not target.is_file():
             # Unresolved relative path — skip (do not false-red)
             continue
-        suf = target.suffix.lower()
-        if suf in {".py", ".json"}:
-            seen.add(p)
-            results.append(check_path_syntax(p))
-        else:
-            from remedy.core.build_lang_oracle import LANG_SUFFIXES, check_lang_syntax
-
-            if suf not in LANG_SUFFIXES:
-                continue
-            seen.add(p)
-            results.append(check_lang_syntax(p))
+        if target.suffix.lower() not in LANG_SUFFIXES:
+            continue
+        seen.add(p)
+        results.append(check_path_syntax(p))
         if len(results) >= 12:
             break
     return results

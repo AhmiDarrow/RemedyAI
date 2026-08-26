@@ -90,7 +90,11 @@ from remedy.skills.tool_registry import ToolRegistry
 #: ``aiohttp.ClientSession`` globally) is what the rest of the suite does.
 LOOP_CLIENT_SESSION = "remedy.core.react_loop.loop.aiohttp.ClientSession"
 #: The tools-on/tools-off gate the loop consults before it arms any tool.
+#: ``resolve_tools`` uses the ``_message_wants_tools`` alias. Do **not** patch
+#: ``message_wants_tools`` itself — that also drives unfinished-work blocking
+#: and would keep a text-only round looping until the step wall.
 AGENT_WANTS_TOOLS = "remedy.core.agent._message_wants_tools"
+POLICY_WANTS_TOOLS = "remedy.core.react_policy._message_wants_tools"
 
 SSE_CONTENT_TYPE = "text/event-stream"
 JSON_CONTENT_TYPE = "application/json"
@@ -666,6 +670,7 @@ class FakeLLM:
             stack.enter_context(patch(LOOP_CLIENT_SESSION, return_value=self.session))
             if force_tools:
                 stack.enter_context(patch(AGENT_WANTS_TOOLS, return_value=True))
+                stack.enter_context(patch(POLICY_WANTS_TOOLS, return_value=True))
             yield self
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import sys
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -63,24 +63,56 @@ def load_dialect(home: str | Path | None = None) -> HostDialect:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeError):
-        return probe_host_dialect(home=home, persist=False)
+        return _probe_cached(home)
     d = HostDialect.from_dict(raw if isinstance(raw, dict) else None)
-    # Fill any empty probe fields without clobbering last-good
-    probed = probe_host_dialect(home=home, persist=False)
-    if not d.python_cmd:
-        d.python_cmd = probed.python_cmd
-    if not d.git_cmd:
-        d.git_cmd = probed.git_cmd
-    if not d.rg_cmd or d.rg_cmd.startswith("("):
-        # Heal a leftover `str((Path, source))` tuple from older probes.
-        d.rg_cmd = probed.rg_cmd
-    if not d.curl_kind:
-        d.curl_kind = probed.curl_kind
-    if not d.pwsh_cmd:
-        d.pwsh_cmd = probed.pwsh_cmd
-    if not d.host:
-        d.host = probed.host
+    # Fill any empty probe fields without clobbering last-good. Probe lazily:
+    # load_dialect sits on hot paths (resolve_which per host command,
+    # record_success, the per-turn system-prompt inject) and a healthy
+    # dialect.json needs no which/glob sweeps at all.
+    if (
+        not d.python_cmd
+        or not _python_cmd_usable(d.python_cmd)
+        or not d.git_cmd
+        or not d.rg_cmd
+        or d.rg_cmd.startswith("(")
+        or not d.curl_kind
+        or not d.pwsh_cmd
+        or not d.host
+    ):
+        probed = _probe_cached(home)
+        if not d.python_cmd or not _python_cmd_usable(d.python_cmd):
+            # Sidecar / Store stub stamped by an older probe — heal in memory.
+            d.python_cmd = probed.python_cmd
+        if not d.git_cmd:
+            d.git_cmd = probed.git_cmd
+        if not d.rg_cmd or d.rg_cmd.startswith("("):
+            # Heal a leftover `str((Path, source))` tuple from older probes.
+            d.rg_cmd = probed.rg_cmd
+        if not d.curl_kind:
+            d.curl_kind = probed.curl_kind
+        if not d.pwsh_cmd:
+            d.pwsh_cmd = probed.pwsh_cmd
+        if not d.host:
+            d.host = probed.host
     return d
+
+
+# A host permanently missing a tool (no pwsh installed → pwsh_cmd stays "")
+# would otherwise re-probe on every load; cache probe results briefly so the
+# hot paths stay cheap while a newly installed tool is still picked up.
+_PROBE_TTL_S = 300.0
+_probe_cache: dict[str, tuple[float, HostDialect]] = {}
+
+
+def _probe_cached(home: str | Path | None) -> HostDialect:
+    key = str(_home(home))
+    now = time.monotonic()
+    hit = _probe_cache.get(key)
+    if hit is not None and now - hit[0] < _PROBE_TTL_S:
+        return hit[1]
+    probed = probe_host_dialect(home=home, persist=False)
+    _probe_cache[key] = (now, probed)
+    return probed
 
 
 def save_dialect(dialect: HostDialect, home: str | Path | None = None) -> Path:
@@ -89,13 +121,37 @@ def save_dialect(dialect: HostDialect, home: str | Path | None = None) -> Path:
     return path
 
 
+def _python_cmd_usable(path: str) -> bool:
+    try:
+        from remedy.core.build_python import is_usable_host_python
+
+        return is_usable_host_python(path)
+    except Exception:
+        name = os.path.basename((path or "").replace("\\", "/")).lower()
+        if name.endswith(".exe"):
+            name = name[:-4]
+        return bool(name) and "remedy" not in name and "windowsapps" not in (path or "").lower()
+
+
 def probe_host_dialect(
     *,
     home: str | Path | None = None,
     persist: bool = False,
 ) -> HostDialect:
     """Cheap PATH probe — no network, no long commands."""
-    python = shutil.which("python") or shutil.which("py") or sys.executable
+    python = ""
+    try:
+        from remedy.core.build_python import host_python_executable
+
+        python = host_python_executable()
+    except Exception:
+        python = ""
+    if not python:
+        for name in ("python", "python3", "py"):
+            found = shutil.which(name) or ""
+            if found and _python_cmd_usable(found):
+                python = found
+                break
     git = shutil.which("git") or ""
     pwsh = shutil.which("pwsh") or ""
     curl = shutil.which("curl") or ""

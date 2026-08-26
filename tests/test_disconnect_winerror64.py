@@ -12,6 +12,8 @@ def test_winerror_64_is_disconnect():
     )
     assert is_disconnect_error("Server disconnected")
     assert is_disconnect_error("actively refused")
+    assert is_disconnect_error("Error: network error")
+    assert is_disconnect_error("network error")
 
 
 def test_real_errors_not_disconnect():

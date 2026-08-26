@@ -438,14 +438,22 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
                 slice_files.append(_unquote(t))
             i += 1
         if slice_files:
+            exe = _python_exe()
+            if not exe:
+                notes.append(f"{head} {_NO_PY_NOTE}")
+                return s, notes
             notes.append(f"{head} → python slice")
-            return _python_line_slice(slice_files[0], n, tail=(head == "tail")), notes
+            return _python_line_slice(exe, slice_files[0], n, tail=(head == "tail")), notes
 
     if head == "wc":
         wc_files = [_unquote(t) for t in toks[1:] if not t.startswith("-")]
         if wc_files and any(t in ("-l", "--lines") for t in toks[1:]):
+            exe = _python_exe()
+            if not exe:
+                notes.append(f"wc -l {_NO_PY_NOTE}")
+                return s, notes
             notes.append("wc -l → python line count")
-            return _python_line_count(wc_files[0]), notes
+            return _python_line_count(exe, wc_files[0]), notes
 
     if head == "find":
         name_pat = ""
@@ -487,19 +495,39 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
     return s, notes
 
 
-def _python_exe() -> str:
-    """A real CPython, not the frozen sidecar (``remedy-desktop.exe -c`` is not Python)."""
-    if getattr(sys, "frozen", False):
-        import shutil
+_NO_PY_NOTE = "needs Python — install Python 3 or set REMEDY_PYTHON to python.exe"
 
-        found = shutil.which("python") or shutil.which("python3")
+
+def _python_exe() -> str:
+    """A real CPython, not the frozen sidecar (``remedy-desktop.exe -c`` is not Python).
+
+    Empty string means none: callers must skip the python rewrite (with a
+    ``_NO_PY_NOTE`` hint) rather than hand the shell a bare ``python`` that
+    resolves to the banned WindowsApps Store stub (exit 9009).
+    """
+    try:
+        from remedy.core.build_python import host_python_executable
+
+        found = host_python_executable()
         if found:
             return found
-    return sys.executable or "python"
+    except Exception:
+        pass
+    if getattr(sys, "frozen", False):
+        return ""
+    exe = sys.executable or ""
+    try:
+        from remedy.core.build_python import is_usable_host_python
+
+        if exe and is_usable_host_python(exe):
+            return exe
+    except Exception:
+        if exe and "remedy" not in os.path.basename(exe).lower():
+            return exe
+    return ""
 
 
-def _python_line_slice(path: str, n: int, *, tail: bool) -> str:
-    exe = _python_exe()
+def _python_line_slice(exe: str, path: str, n: int, *, tail: bool) -> str:
     win_p = path.replace("/", "\\") if ("/" in path or os.name == "nt") else path
     # Keep the one-liner free of nested double quotes.
     op = f"p[-{int(n)}:]" if tail else f"p[:{int(n)}]"
@@ -512,8 +540,7 @@ def _python_line_slice(path: str, n: int, *, tail: bool) -> str:
     return f"{_q(exe)} -c {_q(code)}"
 
 
-def _python_line_count(path: str) -> str:
-    exe = _python_exe()
+def _python_line_count(exe: str, path: str) -> str:
     win_p = path.replace("/", "\\") if ("/" in path or os.name == "nt") else path
     code = (
         "p=open(r'''"
@@ -540,8 +567,11 @@ def rewrite_posix_argv(argv: list[str]) -> tuple[list[str], list[str]]:
     if head == "wc" and any(t in ("-l", "--lines") for t in rest):
         files = [t for t in rest if not t.startswith("-")]
         if files:
-            notes.append("wc -l → python line count")
             exe = _python_exe()
+            if not exe:
+                notes.append(f"wc -l {_NO_PY_NOTE}")
+                return argv, notes
+            notes.append("wc -l → python line count")
             win_p = files[0].replace("/", "\\") if ("/" in files[0] or os.name == "nt") else files[0]
             code = (
                 "p=open(r'''"

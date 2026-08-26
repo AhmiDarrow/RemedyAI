@@ -296,7 +296,17 @@ def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
         }
         hit = (mapped.get(key) or "").strip()
         if hit and Path(hit).is_file():
-            return hit
+            if key in {"python", "python3", "py"}:
+                try:
+                    from remedy.core.build_python import is_usable_host_python
+
+                    if not is_usable_host_python(hit):
+                        hit = ""
+                except Exception:
+                    if "remedy" in Path(hit).name.lower():
+                        hit = ""
+            if hit:
+                return hit
     except Exception:
         pass
     if cwd is not None:
@@ -314,27 +324,40 @@ def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
                         return str(alt)
         except Exception:
             pass
+    def _ok_python(path: str | None) -> bool:
+        if not path:
+            return False
+        try:
+            from remedy.core.build_python import is_usable_host_python
+
+            return is_usable_host_python(path)
+        except Exception:
+            return "remedy" not in Path(path).name.lower() and "windowsapps" not in path.lower()
+
     found = shutil.which(n)
-    if found:
+    if found and (key not in {"python", "python3", "py"} or _ok_python(found)):
         return found
     if os.name == "nt" and not n.lower().endswith(".exe"):
         found = shutil.which(n + ".exe")
-        if found:
+        if found and (key not in {"python", "python3", "py"} or _ok_python(found)):
             return found
     if key in {"python", "python3"}:
         # Frozen Desktop: ``sys.executable`` is the sidecar, which would print
-        # its own usage and exit 2. Ask for a real interpreter instead.
+        # its own usage and exit 2. Ask for a real interpreter instead —
+        # host_python_executable resolves ['py', '-3'] to the concrete
+        # python.exe rather than truncating the launcher argv to bare ``py``.
         try:
-            from remedy.core.workspace_tools.shell import resolve_python_interpreter
+            from remedy.core.build_python import host_python_executable
 
-            argv = resolve_python_interpreter()
+            hit = host_python_executable()
         except Exception:
-            argv = None
-        if argv and len(argv) == 1:
-            return argv[0]
+            hit = ""
+        if hit and _ok_python(hit):
+            return hit
         if getattr(sys, "frozen", False):
             return None
-        return sys.executable
+        exe = sys.executable or ""
+        return exe if _ok_python(exe) else None
     return None
 
 

@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import re
-import sys
 import tempfile
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -71,7 +70,17 @@ class SkillExecutor:
             result.ended_at = datetime.now(UTC)
             return result
 
-        command = [sys.executable, str(script_path), *(args or [])]
+        from remedy.core.build_python import python_cmd_for_subprocess
+
+        py = python_cmd_for_subprocess()
+        if not py:
+            result.error = (
+                "No real Python interpreter for skill scripts "
+                "(Desktop sidecar is not CPython). Set REMEDY_PYTHON."
+            )
+            result.ended_at = datetime.now(UTC)
+            return result
+        command = [*py, str(script_path), *(args or [])]
         danger = check_dangerous_command(command)
         if danger:
             result.error = f"Blocked by security policy: {danger}"
