@@ -628,6 +628,11 @@ button.chat-chip:disabled {
   background: color-mix(in srgb, var(--accent) 12%, var(--bg-secondary));
   color: var(--accent);
 }
+.chat-chip-mode.is-chat {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-secondary));
+  color: var(--text-secondary);
+}
 .chat-chip-mode.is-plan {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   background: color-mix(in srgb, var(--accent) 18%, var(--bg-secondary));

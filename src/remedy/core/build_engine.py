@@ -61,6 +61,12 @@ _BUILD_RE = re.compile(
     r")\b"
 )
 
+# File/compiler cues for looks_like_build_request. Word-boundary extensions
+# only — substring ".c" used to match ".com", "test" used to match "interesting".
+_BUILD_FILE_CUE_RE = re.compile(
+    r"(?i)(?:\.(?:py|tsx?|jsx?|rs|go|cpp|h|gd)\b|\.c\b|\bgcc\b|\bcompile\b|\bclang\b)"
+)
+
 # Source mutations only — shell is classified as verify when it looks like tests
 _WRITE_TOOLS = frozenset(
     {
@@ -644,10 +650,16 @@ def looks_like_build_request(message: str) -> bool:
     # Long multi-line specs are almost always build work
     if len(msg) > 280 and ("```" in msg or msg.count("\n") >= 4):
         return True
-    # Imperative short tasks with path/file cues
-    # Path / compiler / write cues only — polite wrappers ("could you",
-    # "please") are not a build by themselves (trivia questions match them).
-    return bool(len(msg) > 24 and any(x in low for x in (".py", ".ts", ".js", ".rs", ".go", ".c", ".cpp", ".h", "src/", "test", "need you to", "gcc", "compile", "file_write", "program")))
+    # Path / compiler / write cues only — substring "test" used to match
+    # "interesting", and ".c" matched ".com".
+    if len(msg) <= 24:
+        return False
+    return bool(
+        _BUILD_FILE_CUE_RE.search(msg)
+        or "need you to" in low
+        or "file_write" in low
+        or "src/" in low
+    )
 
 
 # Alias — product language is research → plan → build (tasks, not only “builds”)

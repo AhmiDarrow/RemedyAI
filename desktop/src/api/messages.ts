@@ -125,6 +125,7 @@ export function streamMessage(
   /** Per-session provider — must pair with model for multi-tab multi-provider. */
   provider?: string,
   onTodos?: (payload: Record<string, unknown>) => void,
+  chatMode?: boolean,
 ): AbortController {
   const controller = new AbortController()
 
@@ -148,6 +149,7 @@ export function streamMessage(
             provider: provider || undefined,
             attachments: attachments?.length ? attachments : undefined,
             plan_mode: Boolean(planMode),
+            chat_mode: Boolean(chatMode),
           }),
           signal: controller.signal,
         })

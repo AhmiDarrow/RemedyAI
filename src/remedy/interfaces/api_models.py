@@ -158,6 +158,10 @@ class SendMessageRequest(BaseModel):
         default=False,
         description="When true, only planning tools run (no shell/file mutation)",
     )
+    chat_mode: bool = Field(
+        default=False,
+        description="When true, this turn is conversation — no tool pack",
+    )
 
 
 class CommandRequest(BaseModel):

@@ -7,14 +7,17 @@ import json
 from remedy.core.react_policy import (
     _DEFAULT_SYSTEM_BODY,
     AGENCY_REARM_NUDGE,
+    ASK_FIRST_NUDGE,
     RECOVERY_NUDGE,
     SPEED_BATCH_NUDGE,
     UNFINISHED_WORK_HARD_STOP,
     UNFINISHED_WORK_NUDGE,
     agency_rearm_nudge_message,
     agency_tool_promise_claim,
+    ask_first_nudge_message,
     batch_has_tool_errors,
     build_keeps_tools_armed,
+    collapse_repeated_sentences,
     is_chat_only_message,
     is_knowledge_question,
     is_pure_trivia_message,
@@ -39,6 +42,19 @@ from remedy.core.react_policy import (
     unfinished_work_hard_stop_message,
     unfinished_work_nudge_message,
 )
+
+
+def test_ask_first_nudge_is_one_question_not_a_ledger() -> None:
+    low = ASK_FIRST_NUDGE.lower()
+    assert "one short question" in low
+    assert "do not start tools" in low
+    assert "ledger" in low
+    msg = ask_first_nudge_message()
+    assert msg["role"] == "user"
+    assert ASK_FIRST_NUDGE in msg["content"]
+    body = _DEFAULT_SYSTEM_BODY.lower()
+    assert "when unsure" in body
+    assert "do not guess" in body
 
 
 def test_serial_explore_batch_detection() -> None:
@@ -70,7 +86,7 @@ def test_message_wants_tools_chat_vs_code() -> None:
     # Action kicks still True (must not be swallowed by short-set)
     assert message_wants_tools("proceed") is True
     assert message_wants_tools("continue") is True
-    assert message_wants_tools("sounds good") is True
+    assert message_wants_tools("sounds good") is False
     # Live 2026-08-13: "full bugsweep" was L1 pure-chat (bug ≠ bugsweep)
     assert message_wants_tools("full bugsweep") is True
     assert message_wants_tools("bugsweep") is True
@@ -128,11 +144,15 @@ def test_is_chat_only_message() -> None:
     assert is_chat_only_message("Hey continue") is False
     assert is_chat_only_message("hi pick up where we left off") is False
     assert is_chat_only_message("Hello, resume the build") is False
-    # Typo / extra words after hi still stay work (fail-open)
+    # Typo after Hi is not a work request (no kick, no shape).
     assert is_chat_only_message("Hi kep going") is False
     assert is_chat_only_message("hi run pytest") is False
+    assert is_chat_only_message("It's ok we'll get there") is True
+    assert is_chat_only_message("we'll get there") is True
+    assert is_chat_only_message("all good") is True
+    assert is_chat_only_message("it's ok, continue") is False
     assert message_wants_tools("Hi keep going") is True
-    assert message_wants_tools("Hi kep going") is True
+    assert message_wants_tools("Hi kep going") is False
 
 
 def test_runtime_greeting_prefix_does_not_strip_continue() -> None:
@@ -167,7 +187,7 @@ def test_is_knowledge_question_class() -> None:
 
 
 def test_message_wants_tools_fail_open_without_verb_list() -> None:
-    """Standing rule: tools on unless proven chat/trivia. No product nouns."""
+    """Product asks stay armed on shape/path; chat without a request does not."""
     # Imperative product change with none of the old special-case verbs
     assert message_wants_tools(
         "the idle lock should be fifteen minutes and the about window "
@@ -180,6 +200,28 @@ def test_message_wants_tools_fail_open_without_verb_list() -> None:
     # Knowledge does not *force* a tool loop. resolve_tools still offers schemas.
     assert message_wants_tools("what time is it in paris") is False
     assert message_wants_tools("thanks") is False
+    # Conversation is not a work request — do not inherit 189 tools.
+    assert message_wants_tools("Good deal") is False
+    assert message_wants_tools("that makes sense") is False
+    assert message_wants_tools("How are you doing?") is False
+    assert message_wants_tools(
+        "Does that feel like a lot of memories or not many?"
+    ) is False
+    # Long / multi-line talk is still talk unless it asks for work.
+    assert message_wants_tools(
+        "It's only a few weeks worth.\nWhat happens in a year from now?"
+    ) is False
+    assert message_wants_tools(
+        "I keep thinking about how this partnership feels after all "
+        "these turns together and whether the memories land as dense."
+    ) is False
+    # Substring traps: "test" in interesting, ".c"/generic ext in .com
+    assert message_wants_tools(
+        "that's interesting, tell me more about how this feels"
+    ) is False
+    assert message_wants_tools(
+        "I was thinking about example.com yesterday over dinner with friends"
+    ) is False
 
 
 def test_verbal_only_and_inject_are_not_work() -> None:
@@ -187,7 +229,7 @@ def test_verbal_only_and_inject_are_not_work() -> None:
     assert is_verbal_only_request("Turn 0: say only T0OK") is True
     assert message_wants_tools("Turn 3: say only T3OK") is False
     assert message_wants_tools("Reply only STILLALIVE") is False
-    assert message_wants_tools("Remember the codeword is secret. Reply GOTIT.") is True
+    assert message_wants_tools("Remember the codeword is secret. Reply GOTIT.") is False
     assert unfinished_work_blocks_final("Reply only STILLALIVE", tools_executed=0) is False
     assert looks_like_injected_tool_markup(
         '<function_calls><invoke name="bash_exec"><parameter name="command">'
@@ -332,12 +374,10 @@ def test_message_wants_tools_action_kicks() -> None:
         "switch to build",
         "leave plan mode",
         # 2026-07-25 assets session: affirm + progress pings must keep tools on
-        "go with your suggestions",
         "progress?",
         "eta",
         "I need an eta",
         "do that",
-        "sounds good",
         "troubleshoot why",
         "you don't seem to be able to complete this task",
         "process the assets",
@@ -357,6 +397,9 @@ def test_message_wants_tools_action_kicks() -> None:
     # Still skip pure chit-chat
     assert message_wants_tools("hi") is False
     assert message_wants_tools("thanks") is False
+    # Soft agree is not a continue — ask when leftover work exists.
+    assert message_wants_tools("sounds good") is False
+    assert message_wants_tools("go with your suggestions") is False
     assert message_wants_tools("ok") is False
 
 
@@ -387,7 +430,7 @@ def test_history_suggests_open_work_keeps_agency() -> None:
             "function": {"name": "list_dir", "parameters": {"type": "object"}},
         }
     ]
-    # Even a bare affirmation that might miss regex still keeps tools via history.
+    # "please" is a request wrapper — work even without leftover history.
     assert (
         should_enable_tools(
             "please",
@@ -397,14 +440,16 @@ def test_history_suggests_open_work_keeps_agency() -> None:
         )
         is True
     )
-    # Soft affirm mid-task must keep agency (session bug 2026-07-28).
-    assert should_enable_tools("ok", tools, has_attachments=False, history=history) is True
-    assert should_enable_tools("okay", tools, has_attachments=False, history=history) is True
-    assert should_enable_tools("sure", tools, has_attachments=False, history=history) is True
+    # Leftover history is not a request. Soft affirm → ask, don't inherit tools.
+    assert should_enable_tools("ok", tools, has_attachments=False, history=history) is False
+    assert should_enable_tools("okay", tools, has_attachments=False, history=history) is False
+    assert should_enable_tools("sure", tools, has_attachments=False, history=history) is False
     # Pure social still tool-free even with open history.
     assert should_enable_tools("thanks", tools, has_attachments=False, history=history) is False
     assert should_enable_tools("hi", tools, has_attachments=False, history=history) is False
-    # Without open history, soft affirm stays chat-only.
+    assert should_enable_tools(
+        "Good deal", tools, has_attachments=False, history=history
+    ) is False
     assert should_enable_tools("ok", tools, has_attachments=False, history=None) is False
     assert looks_like_false_progress("Processing both logos now.") is True
     assert looks_like_false_progress(
@@ -697,6 +742,39 @@ def test_policy_thinking_echo_is_detected():
     collapsed = collapse_repeated_sentences(cycle)
     assert collapsed.lower().count("core is green") == 1
     assert "wiring ui" in collapsed.lower()
+
+
+def test_collapse_preserves_markdown_structure() -> None:
+    """Session 4e814: unique review sentences must not become one paragraph."""
+    review = (
+        "**RemedyAI (Old-Remedy) — project review**\n"
+        "Scout only. Nothing written.\n\n"
+        "## What this tree is\n\n"
+        "Ahmi's source-available partner product.\n\n"
+        "- Branch: master\n"
+        "- Not pushed.\n\n"
+        "## Size and shape\n\n"
+        "| Surface | Count |\n"
+        "|---|---|\n"
+        "| Python | 544 |\n"
+    )
+    out = collapse_repeated_sentences(review)
+    assert "\n## What this tree is\n" in out
+    assert "Nothing written.\n\n## What this tree is" in out
+    assert "\n- Branch: master\n" in out
+    assert "\n- Not pushed.\n" in out
+    assert "| Surface | Count |" in out
+    assert "Nothing written. ## What this tree is" not in out
+    assert "product. - Branch:" not in out
+    # Duplicate mantra across a blank line still collapses.
+    mantra = (
+        "Core is green. Wiring UI + tests, then commit.\n\n"
+        "Core is green. Wiring UI + tests, then commit.\n\n"
+        "## Still open\n"
+    )
+    collapsed = collapse_repeated_sentences(mantra)
+    assert collapsed.lower().count("core is green") == 1
+    assert "\n## Still open" in collapsed
     from remedy.core.react_policy import clip_appended_source_dump
 
     dumped = (

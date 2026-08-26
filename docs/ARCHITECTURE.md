@@ -3,6 +3,17 @@
 Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 `docs/TELEPHONY.md`, `docs/manual/`, root `AGENTS.md`.
 
+## Stack
+
+| Layer | Path | Role |
+|-------|------|------|
+| Python sidecar | `src/remedy/` | FastAPI/uvicorn API, ReAct loop, jail, PolicyEngine, hive, build engine, Soul/Partner memory |
+| Desktop SPA | `desktop/` | Tauri 2 + React 19 (Grove / Alongside / Studio) |
+| Tests | `tests/` | Jail, SSRF, hive caps, memory authority, plan store, build engine, ReAct policy |
+| Gateway | `src/remedy/gateway/` | Serve bootstrap, session bridge, messenger flush |
+
+Entry: `serve.py` / `uv run` · verify: `uv run pytest -q`
+
 ## Surfaces (one SPA)
 
 | Surface | How UI loads | Voice | Settings |
@@ -12,6 +23,15 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 | CLI | no SPA | **No voice** (owner preference 2026-08-20) | n/a |
 
 Grove unmounts off-surface. Studio must own its own voice instance (`useVoice` in `App.tsx`). Logo-menu Settings must **not** switch Grove → Studio.
+
+## Core control plane
+
+- **ReAct** — `core/react_loop/`, `react_turn.py`, `react_policy.py`, `react_stream.py`, `turn_context.py`. Work signal gates tools; chat-only messages do not start a tool storm.
+- **PolicyEngine** — `policy/engine.py`. Deterministic allow / ask / deny. Dangerous host commands denied; mail/pay checkpoints never waived. Trust profiles live in `APPROVALS.needs_ask`.
+- **Write jail** — `core/security` + computer executor. Runtime-bin skip requires a real executable extension; cross-session computer state is thread-local per session.
+- **Hive** — daughters are capped; no parent Partner Memory writes; no nested spawn. PROCESS_EXEC + FS_WRITE + NETWORK_READ by design for foragers (not a full sandbox).
+- **Build engine** — TDD → unit hop → gate-tower verify. Plan steps may record intended / observed / evidence.
+- **Soul / Partner memory** — `memory/soul/`, Partner Memory with who/why stamps. Retrieval is labeled context, not a grant.
 
 ## Language
 
@@ -31,3 +51,7 @@ Grove unmounts off-surface. Studio must own its own voice instance (`useVoice` i
 Install and status are HTTP. Desktop and WebUI share Settings/Grove/Studio.
 CLI stays text-only. Capability/policy contracts live in `src/remedy/policy/`
 and `src/remedy/tools/`.
+
+## Versioning
+
+`pyproject.toml`, `desktop/package.json`, and `desktop/src-tauri/Cargo.toml` share one version. Tag + push only when the owner asks; local HEAD may be ahead of origin without a matching tag.

@@ -98,7 +98,24 @@ _PLEDGE = re.compile(
     r"(?i)\b(?:promise|always remember|from now on|we(?:'ll| will) always|"
     r"never forget that)\b(.{8,120})"
 )
-_VOICE_SNIP = re.compile(r"(?i)\b(ship it|make it so|be real|no theater|just works)\b")
+_VOICE_SNIP = re.compile(
+    r"(?i)\b(ship it|make it so|be real|no theater|just works|feels like|no fluff)\b"
+)
+_CASUAL = re.compile(
+    r"(?i)\b(yeah|yep|nah|gonna|wanna|kinda|idk|lol|hey|feels like)\b|"
+    r"\b\w+n't\b|\b(?:it's|i'm|that's|you're)\b"
+)
+
+
+def _infer_register(text: str) -> str:
+    """Cheap write-register from this turn. Empty = nothing to learn."""
+    t = (text or "").strip()
+    if not t:
+        return ""
+    casual = bool(_CASUAL.search(t))
+    if len(t) < 90:
+        return "casual-short" if casual else "terse"
+    return "casual" if casual else ""
 
 
 def _stance(user_text: str) -> str:
@@ -240,6 +257,13 @@ def update_soul_after_turn(
         phrase = m.group(0).strip().lower()
         if phrase and phrase not in [v.lower() for v in rel.voice_markers]:
             rel.voice_markers.append(phrase)
+    _reg = _infer_register(ut)
+    if _reg:
+        # Casual sticks; one long task prompt must not wipe it.
+        if not rel.speech_register or not rel.speech_register.startswith("casual"):
+            rel.speech_register = _reg
+        elif _reg.startswith("casual"):
+            rel.speech_register = _reg
 
     # Pledges (life-horizon commitments stated in chat). A re-stated pledge is
     # a recall: its trace reconsolidates, so live commitments outlast dormant ones.

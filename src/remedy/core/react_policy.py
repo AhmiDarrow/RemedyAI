@@ -26,11 +26,11 @@ _DEFAULT_SYSTEM_BODY = (
     "changes. Continue open threads from episode residue; honor pledges and "
     "tensions. With a capable provider you can design and build full "
     "systems end-to-end with tools; use soul_recall / soul_status for continuity.\n"
-    "Style: emergent — your voice grows from what the Soul Field has observed "
-    "with this partner (shared voice markers, help mode, correction style); "
-    "an explicitly chosen communication style leads when set. "
-    "Default until the field fills in: concise, decisive, high-signal; match "
-    "the user's energy. Prefer action over narration.\n"
+    "Style: emergent — talk like a friend doing the work with them, not "
+    "an assistant or a ranked briefing. Speech grows from the Soul Field "
+    "(how they write, shared phrases, help mode); a chosen communication "
+    "style leads when set. Match their length and slang. Prefer action "
+    "over narration.\n"
     "**Greetings / thanks / check-ins:** reply in one or two short sentences. "
     "Do not dump continuity, build ledger, open threads, rapport scores, or a "
     "resume plan. Do not offer a multi-step work plan unless they asked.\n"
@@ -41,7 +41,10 @@ _DEFAULT_SYSTEM_BODY = (
     "Do not resume earlier navigates, wikis, goals, or unfinished side-quests unless "
     "the latest message clearly continues them. A greeting or thanks is not a "
     "continue. Soul/Brief/ledger stay silent until they ask to pick up work. "
-    "When that request is done, stop.\n\n"
+    "When that request is done, stop.\n"
+    "**When unsure** whether they want work on the machine or just to talk: ask "
+    "ONE short question. Do not start tools. Do not resume leftover tasks. "
+    "Do not guess.\n\n"
     "Scope of help:\n"
     "- Chat and knowledge: answer clearly; use memory/context when present.\n"
     "- Tasks: use tools until the owner's goal is actually done.\n"
@@ -134,6 +137,19 @@ RECOVERY_NUDGE = (
     "use an absolute path, try an alternate path, or adjust the shell command. "
     "Finish the user's task with corrected tool calls."
 )
+
+# Ambiguous follow-up while work is still open — ask, don't assume tools.
+ASK_FIRST_NUDGE = (
+    "[Partner] You are not sure if they want work on the machine or just to "
+    "talk. Ask ONE short question. Do not start tools. Do not resume leftover "
+    "tasks. If something is still open, name it in plain words and ask if they "
+    "want that, or if we're just talking. Do not dump a ledger."
+)
+
+
+def ask_first_nudge_message() -> dict[str, str]:
+    return {"role": "user", "content": ASK_FIRST_NUDGE}
+
 
 # Empty / spam file_write — model must resend full content (not monologue).
 EMPTY_WRITE_NUDGE = (
@@ -279,7 +295,10 @@ _TOOL_HINT_RE = re.compile(
     r"hotfix|triage|cleanup|dogfood|"
     r"sweep|qa|error|stack|trace|"
     r"patch|apply|ship|deploy|"
-    r"git|commit|diff|branch|src/|\\.[a-z]{1,5}\b|"
+    r"git|commit|diff|branch|src/|"
+    r"\.(?:py|tsx?|jsx?|mjs|cjs|rs|go|c|cpp|h|hpp|gd|json|toml|ya?ml|md|"
+    r"html?|css|scss|vue|svelte|java|kt|swift|rb|php|sql|sh|ps1|"
+    r"txt|csv|xml|svg|png|jpe?g|webp|gif)\b|"
     # Asset / image work (session log 2026-07-25: logos on alpha without tools)
     r"asset|assets|logo|logos|icon|icons|favicon|png|jpe?g|webp|svg|gif|"
     r"alpha|transparent|cutout|brighten|background|process|"
@@ -311,18 +330,12 @@ _ACTION_KICK_RE = re.compile(
     r"\bproceed\b|"
     r"\bcontinue\b|"
     r"\bgo\s+ahead\b|"
-    r"\bgo\s+with\b|"
     r"\bdo\s+it\b|"
     r"\bdo\s+that\b|"
     r"\bdo\s+this\b|"
     r"\bdo\s+the\s+(?:work|task|thing|fix|rest)\b|"
     r"\bkeep\s+going\b|"
     r"\bcarry\s+on\b|"
-    r"\bsounds?\s+good\b|"
-    r"\bthat\s+works\b|"
-    r"\byour\s+(?:call|suggestion|suggestions|recommendation|recommendations)\b|"
-    r"\bwith\s+your\s+(?:suggestion|suggestions|recommendation|recommendations|plan|idea|ideas)\b|"
-    r"\brecommended?\b|"
     r"\bstart\s+(?:working|now|implementing|coding|building)\b|"
     r"\bget\s+(?:to\s+)?work\b|"
     r"\bact(?:ually)?\s+(?:do|implement|start|run|fix)\b|"
@@ -436,6 +449,22 @@ _CHAT_ONLY_RE = re.compile(
     r"good\s+(?:morning|afternoon|evening|night)|"
     r"how\s+are\s+you\??|"
     r"bye|goodbye|see\s+ya"
+    r")[\s!.?]*$",
+    re.IGNORECASE,
+)
+
+# Short reassurance on a phone — must not start a 10-minute tool loop.
+# "It's ok we'll get there" (Telegram 2026-08-25) was treated as work.
+_SOCIAL_REASSURE_RE = re.compile(
+    r"^(?:"
+    r"it'?s\s+ok(?:ay)?"
+    r"(?:\s*[,.]?\s*we(?:'ll| will)\s+get\s+there)?"
+    r"|we(?:'ll| will)\s+get\s+there"
+    r"|we(?:'ll| will)\s+be\s+(?:ok(?:ay)?|fine)"
+    r"|all\s+good"
+    r"|no\s+(?:rush|worries)"
+    r"|don'?t\s+worry"
+    r"|take\s+your\s+time"
     r")[\s!.?]*$",
     re.IGNORECASE,
 )
@@ -594,11 +623,9 @@ def _is_vocative_name(rest: str) -> bool:
 def is_chat_only_message(message: str) -> bool:
     """True only for greets, acks, and short meta questions.
 
-    L1 must never strip tools unless this is True. Work requests are the
-    default — never require a verb/noun hit to stay armed.
-
-    A greeting *prefix* is not enough: "Hi keep going" / "Hey, continue"
-    is work. Bare "Hi" / "Hi!" stays chat-only.
+    Conversation is the default. Tools require a work signal in this
+    message. A greeting *prefix* is not enough: "Hi keep going" / "Hey,
+    continue" is work. Bare "Hi" / "Hi!" stays chat-only.
     """
     msg = (message or "").strip()
     if not msg:
@@ -623,6 +650,8 @@ def is_chat_only_message(message: str) -> bool:
         if low in _CHAT_SHORT_SET or msg.lower() in _CHAT_SHORT_SET:
             return True
     if _HARD_CHAT_ONLY_RE.match(msg) or _CHAT_ONLY_RE.match(msg):
+        return True
+    if len(msg) <= 80 and _SOCIAL_REASSURE_RE.match(msg):
         return True
     # Short meta only — "what tools should I use to implement X" stays work.
     return bool(len(msg) <= 80 and _META_NO_TOOLS_RE.search(msg))
@@ -664,9 +693,12 @@ _ARITH_ONLY_RE = re.compile(
 # Structural work shape (paths, UI chrome, code tokens) — not product nouns.
 _WORK_SHAPE_RE = re.compile(
     r"(?i)(?:[A-Za-z]:)?[\\/][\w.\\/ -]+|"
-    r"\.\w{1,8}\b|"
+    r"\.(?:py|tsx?|jsx?|mjs|cjs|rs|go|c|cpp|h|hpp|gd|json|toml|ya?ml|md|"
+    r"html?|css|scss|vue|svelte|java|kt|swift|rb|php|sql|sh|ps1|"
+    r"txt|csv|xml|svg|png|jpe?g|webp|gif)\b|"
     r"\b(?:src|app|ui|ux|dialog|panel|window|modal|page|screen|"
-    r"config|settings|preference|preferences|about|"
+    r"config|settings|preference|preferences|"
+    r"about\s+(?:window|dialog|ui|page|screen)|"
     r"module|package|class|function|handler|component|"
     r"test|tests|spec|bug|build|compile|"
     r"lock|timeout|auth|login)\b"
@@ -735,27 +767,61 @@ def is_pure_trivia_message(message: str) -> bool:
 
 
 def build_keeps_tools_armed(message: str, *, build_active: bool) -> bool:
-    """Frustrated / 'why is this failing' follow-ups must not strip an open Build.
+    """Open Build keeps tools only if *this* line is still a work request.
 
-    Bare greetings, thanks, verbal-only tokens, and ``1 + 1`` stay tool-free
-    even if a leftover build is active. Everything else keeps agency.
+    Greetings, acks, and chat stay tool-free even with leftover todos.
+    Debug follow-ups ('why is this failing?') stay armed.
     """
     if not build_active:
         return False
     msg = (message or "").strip()
     if not msg:
         return False
-    if is_chat_only_message(msg):
+    if is_chat_only_message(msg) or is_pure_trivia_message(msg):
         return False
-    return not is_pure_trivia_message(msg)
+    return message_has_work_request(msg)
+
+
+# Debugging an open job is a work request. Not a social-phrase list.
+_DEBUG_FOLLOWUP_RE = re.compile(
+    r"(?i)\b(?:failing|broken|traceback|exception|stack\s*trace|"
+    r"not working|doesn'?t work|won'?t work|"
+    r"why is (?:this|it|everything)|still (?:broken|failing)|"
+    r"what(?:'s| is) going wrong|what(?:'s| is) wrong)\b"
+)
+
+
+def message_has_work_request(message: str) -> bool:
+    """True when *this* message asks for work on the machine.
+
+    Conversation is the default. Tools require a work signal in the latest
+    line (shape, kick, path, debug follow-up, a real brief) — not leftover
+    todos and not “missing from the hi/thanks list.”
+    """
+    msg = (message or "").strip()
+    if not msg:
+        return False
+    if _ACTION_KICK_RE.search(msg) or _REQUEST_WORK_RE.search(msg):
+        return True
+    if _TOOL_HINT_RE.search(msg) or _WORK_SHAPE_RE.search(msg):
+        return True
+    if _DEBUG_FOLLOWUP_RE.search(msg):
+        return True
+    # Length / extra lines are not a request. A two-paragraph "how are you"
+    # used to inherit 189 tools the same way "Good deal" did.
+    with suppress(Exception):
+        from remedy.core.companion import looks_like_companion_request
+
+        if looks_like_companion_request(msg):
+            return True
+    return False
 
 
 def message_wants_tools(message: str) -> bool:
-    """Fail-open: tools on unless the message is proven chat or trivia.
+    """Tools only when this message requests work.
 
-    Keyword-miss product asks must stay armed. Chat/meta, short world
-    questions, verbal-only tokens, and pasted tool markup stay one-shot.
-    Action kicks ('proceed') are work.
+    Chat, acks, and knowledge questions stay one-shot. Product asks still
+    match on shape/kick/path so a verb-less UI change stays armed.
     """
     msg = (message or "").strip()
     if not msg:
@@ -766,16 +832,9 @@ def message_wants_tools(message: str) -> bool:
         return False
     if looks_like_injected_tool_markup(msg):
         return False
-    if is_knowledge_question(msg):
-        # Do not *force* tools (avoids a tool-loop on "what time is it").
-        # resolve_tools still *offers* schemas — the host may look.
+    if is_knowledge_question(msg) and not _DEBUG_FOLLOWUP_RE.search(msg):
         return False
-    with suppress(Exception):
-        from remedy.core.companion import looks_like_companion_request
-
-        if looks_like_companion_request(msg):
-            return True
-    return True
+    return message_has_work_request(msg)
 
 
 _SAFETY_REFUSAL_RE = re.compile(
@@ -811,9 +870,7 @@ def unfinished_work_blocks_final(
         return False
     if is_chat_only_message(message or ""):
         return False
-    if message_wants_tools(message or ""):
-        return True
-    return bool(build_active)
+    return message_wants_tools(message or "")
 
 
 def history_suggests_open_work(
@@ -824,9 +881,9 @@ def history_suggests_open_work(
 ) -> bool:
     """True when recent session history still has tool work / open tasks.
 
-    Follow-ups like "go with your suggestions" or "progress?" must keep tools
-    on if the prior turn already used tools or the Session Brief has open work.
-    Otherwise tools=[] + force_answer → pure narration and a stuck UI.
+    Open work is not itself a request. Follow-ups that do not clearly continue
+    ("sounds good", "Good deal") should *ask*, not inherit a tool pack.
+    Hard continues ("keep going", "progress?") still match as work requests.
     """
     if open_tasks:
         for t in open_tasks:
@@ -984,7 +1041,10 @@ def looks_like_policy_thinking(text: str) -> bool:
 
 # Split even when the model concatenates sentences without a space
 # ("committing.Core lib is green" — session 765c 20:54 stutter).
-_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])(?:\s+|(?=[A-Z]))")
+# Capture the separator so unique sentences keep their original
+# newlines (headings / lists / paragraphs). Empty capture = glued
+# "end.Start" — we insert a single space when both sides are kept.
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])((?:\s+)|(?=[A-Z]))")
 
 
 def collapse_repeated_sentences(text: str) -> str:
@@ -994,26 +1054,40 @@ def collapse_repeated_sentences(text: str) -> str:
     ``Core is green. Wiring UI + tests, then commit.`` × 80). A sliding
     window of recent fingerprints keeps a real review that reuses a phrase
     several paragraphs later.
+
+    Unique sentences keep their original separators. Rejoining with a
+    single space flattened structured finals into one paragraph
+    (session 4e814 2026-08-25: ``Nothing written. ## What this tree is``).
     """
     raw = (text or "").strip()
     if not raw:
         return ""
     parts = _SENTENCE_SPLIT_RE.split(raw)
-    out: list[str] = []
+    buf: list[str] = []
     recent: list[str] = []
-    for p in parts:
-        key = re.sub(r"\s+", " ", p).strip().lower()
+    i = 0
+    n = len(parts)
+    while i < n:
+        sentence = parts[i]
+        delim = parts[i + 1] if i + 1 < n else None
+        i += 2
+        key = re.sub(r"\s+", " ", sentence).strip().lower()
         key = re.sub(r"[;:]+", ".", key)
         if not key:
-            out.append(p)
+            if buf and delim is not None:
+                buf[-1] += sentence + delim
+            elif buf:
+                buf[-1] += sentence
             continue
         if key in recent:
             continue
-        out.append(p)
+        buf.append(sentence)
+        if delim is not None:
+            buf.append(" " if delim == "" else delim)
         recent.append(key)
         if len(recent) > 6:
             recent.pop(0)
-    return " ".join(out).strip()
+    return "".join(buf).strip()
 
 
 _SOURCE_DUMP_HEAD_RE = re.compile(

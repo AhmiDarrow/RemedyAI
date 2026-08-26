@@ -63,6 +63,7 @@ interface StatusBarProps {
   theme: Theme
   onThemeChange: (id: ThemeId) => void
   planMode: boolean
+  chatMode?: boolean
   onTogglePlanMode: () => void
   panel?: 'memory' | 'skills' | 'settings' | null
   onTogglePanel: (panel: 'memory' | 'skills' | 'settings') => void
@@ -230,6 +231,7 @@ export function StatusBar({
   theme,
   onThemeChange,
   planMode,
+  chatMode = false,
   onTogglePlanMode,
   panel,
   onTogglePanel,
@@ -705,8 +707,18 @@ export function StatusBar({
 
       <div className="flex items-center justify-between gap-2 min-w-0 flex-1">
         <div className="flex items-center gap-1.5 min-w-0 flex-nowrap overflow-x-auto">
-          <SegButton active={planMode} onClick={onTogglePlanMode} title="Plan mode (Ctrl+B)">
-            {planMode ? t('bar.plan') : t('bar.build')}
+          <SegButton
+            active={planMode || chatMode}
+            onClick={onTogglePlanMode}
+            title={
+              chatMode
+                ? 'Chat — conversation. Click for Plan (Ctrl+B)'
+                : planMode
+                  ? 'Plan — outline first. Click for Build (Ctrl+B)'
+                  : 'Build — work when you ask. Click for Chat (Ctrl+B)'
+            }
+          >
+            {chatMode ? t('bar.chat') : planMode ? t('bar.plan') : t('bar.build')}
           </SegButton>
 
           {advanced && (

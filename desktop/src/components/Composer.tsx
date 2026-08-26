@@ -63,7 +63,8 @@ interface ComposerProps {
   onPromoteQueued?: (id: string) => void
   onUpdateQueued?: (id: string, patch: { text?: string; mode?: 'after' | 'interrupt' | 'steer' }) => void
   planMode?: boolean
-  /** Shift+Tab toggles Plan ↔ Build (composer-focused). */
+  chatMode?: boolean
+  /** Shift+Tab cycles Chat → Plan → Build (composer-focused). */
   onTogglePlanMode?: () => void
   agents?: AgentDef[]
   /**
@@ -176,6 +177,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     onPromoteQueued,
     onUpdateQueued,
     planMode,
+    chatMode,
     onTogglePlanMode,
     agents = [],
     editDraft,
@@ -1384,7 +1386,9 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           placeholder={
             editingQueueId
               ? t('composer.placeholderEditQueue')
-              : planMode
+              : chatMode
+                ? t('composer.placeholderChat')
+                : planMode
                 ? t('composer.placeholderPlan')
                 : streaming
                   ? t('composer.placeholderQueue')
@@ -1400,9 +1404,11 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           title={
             streaming
               ? 'Enter queues after this turn. Ctrl+Enter interrupts and sends now.'
-              : planMode
-                ? 'Plan mode: planning tools only. Shift+Tab switches to Build.'
-                : undefined
+              : chatMode
+                ? 'Chat: conversation. Shift+Tab for Plan.'
+                : planMode
+                ? 'Plan: outline first. Shift+Tab for Build.'
+                : 'Build: work when you ask. Shift+Tab for Chat.'
           }
           rows={1}
           className="composer-input flex-1 resize-none text-sm outline-none"
@@ -1492,13 +1498,17 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       </div>
       <div className="composer-hint-row">
         <span className="truncate min-w-0">
-          {planMode
+          {chatMode
+            ? t('composer.hintChat')
+            : planMode
             ? t('composer.hintPlan')
             : streaming
               ? t('composer.hintQueue')
               : t('composer.hintSend')}
         </span>
-        {planMode ? (
+        {chatMode ? (
+          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{t('bar.chat')}</span>
+        ) : planMode ? (
           <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{t('bar.plan')}</span>
         ) : streaming ? (
           <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{t('composer.streaming')}</span>

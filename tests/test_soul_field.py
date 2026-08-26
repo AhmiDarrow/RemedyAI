@@ -78,6 +78,35 @@ def test_frustrated_stance_and_correction(tmp_path):
     assert sf.relational.correction_style in ("blunt", "direct")
 
 
+def test_speech_register_and_friend_voice(tmp_path):
+    clear_soul_cache()
+    sf = update_soul_after_turn(
+        user_text="yeah this feels like it's not working",
+        assistant_text="On it.",
+        session_id="s-voice",
+        home=tmp_path,
+    )
+    assert "feels like" in " ".join(sf.relational.voice_markers).lower()
+    assert sf.relational.speech_register.startswith("casual")
+    sf.relational.turns_together = 240
+    sf.relational.open_threads = [
+        "Continue remaining work from the last successful tool",
+        "check in about the guitar app",
+    ]
+    sf.self_habits = [
+        "what is the day?: resume, do not restart",
+        "Prefer action over narration when they want work done.",
+    ]
+    save_soul_field(sf, tmp_path)
+    block = build_soul_context_block(home=tmp_path)
+    assert "talk like a friend" in block.lower()
+    assert "old friend" in block.lower()
+    assert "feels like" in block.lower()
+    assert "last successful tool" not in block.lower()
+    assert "what is the day?" not in block.lower()
+    assert "Prefer action over narration" in block
+
+
 def test_inject_block_includes_residue(tmp_path):
     clear_soul_cache()
     update_soul_after_turn(

@@ -129,6 +129,8 @@ export interface GroveAppProps {
   openPlace?: 'home' | 'alongside' | 'storyline' | null
   /** Ack once the requested Grove tab is on screen. */
   onPlaceOpened?: () => void
+  workMode?: 'chat' | 'plan' | 'build'
+  onWorkModeChange?: (mode: 'chat' | 'plan' | 'build', sessionId?: string) => void
 }
 
 type GroveView = { kind: 'home' } | { kind: 'goal'; goal: LifeGoal }
@@ -156,6 +158,8 @@ export function GroveApp({
   onGoalOpened,
   openPlace,
   onPlaceOpened,
+  workMode = 'build',
+  onWorkModeChange,
 }: GroveAppProps) {
   const { t } = useI18n()
   const [view, setView] = useState<GroveView>({ kind: 'home' })
@@ -580,6 +584,30 @@ export function GroveApp({
               <ApprovalBanner sessionId={null} onResolved={refreshBoard} />
             </div>
           )}
+
+          <div className="grove-mode-row" role="group" aria-label="How we work">
+            {(
+              [
+                ['chat', 'Talk', 'Just talk — no tools unless you ask'],
+                ['plan', 'Plan', 'Outline first, then build'],
+                ['build', 'Build', 'Do the work when you ask'],
+              ] as const
+            ).map(([id, label, title]) => (
+              <button
+                key={id}
+                type="button"
+                className={`grove-mode-chip${workMode === id ? ' on' : ''}`}
+                title={title}
+                onClick={() => {
+                  void ensureHomeSession().then((sid) => {
+                    if (sid) onWorkModeChange?.(id, sid)
+                  })
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
 
           <div className="grove-plots">
             {goals.map((g) => (

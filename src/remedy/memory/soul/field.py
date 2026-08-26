@@ -249,8 +249,10 @@ class RelationalField:
     trust: float = 0.55
     # Preferred correction style observed from user
     correction_style: str = ""  # blunt | gentle | technical | silent-fix
-    # Shared humor / register markers (short phrases)
+    # Shared humor / register markers (short phrases they actually use)
     voice_markers: list[str] = field(default_factory=list)
+    # How they write: casual | casual-short | terse | plain
+    speech_register: str = ""
     # How the user likes to be helped (derived)
     help_mode: str = ""  # pair | coach | silent-doer | sparring
     # Open relational threads ("check in about X")
@@ -266,7 +268,9 @@ class RelationalField:
         self.rapport = max(0.05, min(0.98, float(self.rapport)))
         self.trust = max(0.05, min(0.98, float(self.trust)))
         self.turns_together = max(0, int(self.turns_together))
-        self.voice_markers = [v[:80] for v in self.voice_markers if v][:MAX_VOICE_MARKERS]
+        # Newest markers win — speech evolves; do not freeze the first 12.
+        self.voice_markers = [v[:80] for v in self.voice_markers if v][-MAX_VOICE_MARKERS:]
+        self.speech_register = str(self.speech_register or "")[:32]
         self.open_threads = [t[:160] for t in self.open_threads if t][-MAX_OPEN_THREADS:]
         self.tensions = [t[:180] for t in self.tensions if t][-MAX_TENSIONS:]
 
@@ -436,6 +440,7 @@ class SoulField:
             trust=float(rel_raw.get("trust", 0.55) or 0.55),
             correction_style=str(rel_raw.get("correction_style") or ""),
             voice_markers=list(rel_raw.get("voice_markers") or []),
+            speech_register=str(rel_raw.get("speech_register") or ""),
             help_mode=str(rel_raw.get("help_mode") or ""),
             open_threads=list(rel_raw.get("open_threads") or []),
             tensions=list(rel_raw.get("tensions") or []),

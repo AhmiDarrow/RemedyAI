@@ -1,10 +1,12 @@
-"""PolicyEngine — reproduce today's approval/jail semantics (v0.32 M1.3).
+"""PolicyEngine — deterministic allow / ask / deny gate for tool calls.
 
-Does not change allow/deny outcomes. Later phases replace the internals;
-callers should start depending on ``evaluate`` instead of tool-name lists.
+``evaluate(ctx, tool, request)`` is the public entry. Callers should depend
+on that decision, not on hard-coded tool-name allowlists.
 
-v0.37: ``TrustProfile.AUTONOMOUS`` may skip high-impact asks the same way
-``auto`` mode does; owner checkpoints (mail / pay) are never waived.
+Dangerous shell/host commands are denied outright. Everything else goes
+through ``APPROVALS.needs_ask`` so handler inner-gates match this gate.
+``TrustProfile.AUTONOMOUS`` may skip high-impact asks the same way ``auto``
+mode does; owner checkpoints (mail / pay) are never waived.
 """
 
 from __future__ import annotations

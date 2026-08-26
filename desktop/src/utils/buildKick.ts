@@ -19,3 +19,21 @@ export function looksLikeBuildKick(text: string): boolean {
     || /\bnot\s+doing\s+anything\b/i.test(t)
   )
 }
+
+/** Chat pin stays on "continue" (still talking). Clear work kicks leave Chat. */
+export function looksLikeLeaveChat(text: string): boolean {
+  const t = (text || '').trim()
+  if (!t) return false
+  return (
+    /\bswitch\s+to\s+build\b/i.test(t)
+    || /\benter\s+build(?:\s+mode)?\b/i.test(t)
+    || /\bbuild\s+mode\b/i.test(t)
+    || /\bleave\s+chat(?:\s+mode)?\b/i.test(t)
+    || /\bimplement\b/i.test(t)
+    || /\bstart\s+(?:working|implementing|coding|building)\b/i.test(t)
+    || /\bkeep\s+going\b/i.test(t)
+    || /\bgo\s+ahead\b/i.test(t)
+    || /\bdo\s+it\b/i.test(t)
+    || /\bproceed\b/i.test(t)
+  )
+}

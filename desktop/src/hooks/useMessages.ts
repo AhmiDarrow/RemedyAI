@@ -64,6 +64,7 @@ export type QueuedSend = {
     is_text?: boolean
   }[]
   planMode?: boolean
+  chatMode?: boolean
   /** after = wait for current turn; interrupt = stop current then send */
   mode: 'after' | 'interrupt' | 'steer'
 }
@@ -102,6 +103,7 @@ export function useMessages(sessionId: string | null) {
         sid?: string
         attachments?: QueuedSend['attachments']
         planMode?: boolean
+        chatMode?: boolean
       }
     >
   >(new Map())
@@ -134,6 +136,7 @@ export function useMessages(sessionId: string | null) {
         attachments?: QueuedSend['attachments'],
         planMode?: boolean,
         provider?: string,
+        chatMode?: boolean,
       ) => Promise<void>)
     | null
   >(null)
@@ -481,6 +484,7 @@ export function useMessages(sessionId: string | null) {
             nextOther.attachments,
             nextOther.planMode,
             nextOther.provider,
+            nextOther.chatMode,
           )
         }
       } finally {
@@ -504,6 +508,7 @@ export function useMessages(sessionId: string | null) {
           next.attachments,
           next.planMode,
           next.provider,
+          next.chatMode,
         )
       }
     } finally {
@@ -519,6 +524,7 @@ export function useMessages(sessionId: string | null) {
       attachments?: QueuedSend['attachments'],
       planMode?: boolean,
       provider?: string,
+      chatMode?: boolean,
     ) => {
       const targetId = sid || sessionId
       const hasAtt = Boolean(attachments?.length)
@@ -605,6 +611,7 @@ export function useMessages(sessionId: string | null) {
         sid: targetId,
         attachments,
         planMode,
+        chatMode,
       })
 
       let doneReceived = false
@@ -978,6 +985,7 @@ export function useMessages(sessionId: string | null) {
           setJobBuildTodos(targetId, live)
           if (isFocusedTurn()) setBuildTodos(live)
         },
+        chatMode,
       )
 
       registerStreamJob(targetId, ctrl, model)
@@ -1009,7 +1017,7 @@ export function useMessages(sessionId: string | null) {
       sid?: string,
       attachments?: QueuedSend['attachments'],
       planMode?: boolean,
-      opts?: { mode?: 'after' | 'interrupt' | 'steer'; provider?: string },
+      opts?: { mode?: 'after' | 'interrupt' | 'steer'; provider?: string; chatMode?: boolean },
     ) => {
       const hasAtt = Boolean(attachments?.length)
       if (!text.trim() && !hasAtt) return
@@ -1063,6 +1071,7 @@ export function useMessages(sessionId: string | null) {
           sid: targetId,
           attachments,
           planMode,
+          chatMode: opts?.chatMode,
           mode,
         }
         if (mode === 'interrupt') {
@@ -1144,7 +1153,7 @@ export function useMessages(sessionId: string | null) {
         return
       }
 
-      await sendTurn(text, model, sid, attachments, planMode, provider)
+      await sendTurn(text, model, sid, attachments, planMode, provider, opts?.chatMode)
     },
     [sessionId, sendTurn, resetStreamBuffers, drainQueue],
   )

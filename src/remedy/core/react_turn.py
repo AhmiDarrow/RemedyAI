@@ -135,6 +135,17 @@ class TurnState:
     def rearm(self, *, reason: str = "rearm") -> None:
         if not self.all_tools:
             return
+        chat_pin = False
+        with suppress(Exception):
+            from remedy.core.turn_context import current_chat_mode, turn_has_attachments
+
+            chat_pin = bool(current_chat_mode()) and not bool(turn_has_attachments())
+        if chat_pin:
+            self.tools = None
+            self.run_until_done = False
+            self.arm_reason = "chat_mode"
+            logger.info("react_tools skip rearm reason=chat_mode")
+            return
         if self.plan_mode:
             # Never restore file_write / bash_exec into a Plan turn.
             try:
@@ -304,11 +315,29 @@ def resolve_tools(
     model: str | None = None,
     base_url: str | None = None,
     writes_done: int = 0,
+    has_attachments: bool | None = None,
 ) -> ToolsDecision:
     """Single pure decision: which tool schemas to send this turn/step."""
     all_t = list(all_tools or [])
     if not all_t:
         return ToolsDecision(None, False, "no_tools_registered", pack="none")
+
+    has_att = bool(has_attachments) if has_attachments is not None else False
+    if has_attachments is None:
+        with suppress(Exception):
+            from remedy.core.turn_context import turn_has_attachments
+
+            has_att = bool(turn_has_attachments())
+
+    chat_pin = False
+    with suppress(Exception):
+        from remedy.core.turn_context import current_chat_mode
+
+        chat_pin = bool(current_chat_mode())
+    # Chat pin yields to files they just handed over — don't blind companion tools.
+    if chat_pin and not has_att:
+        logger.info("react_tools disarm reason=chat_mode")
+        return ToolsDecision(None, False, "chat_mode", pack="none")
 
     if plan_mode:
         try:
@@ -362,28 +391,31 @@ def resolve_tools(
 
     # Bare greetings/acks never inherit leftover build_active or open_tasks.
     # "Hi keep going" is not chat-only (action-kick) and stays armed below.
+    # Attachments are a request to look — do not treat a blank caption as Hi.
     with suppress(Exception):
         from remedy.core.react_policy import is_chat_only_message
 
-        if is_chat_only_message(message or ""):
+        if is_chat_only_message(message or "") and not has_att:
             logger.info("react_tools disarm reason=l1_pure_chat")
             return ToolsDecision(None, False, "l1_pure_chat", pack="none")
 
     msg_wants = False
-    task_like = False
     with suppress(Exception):
         from remedy.core.react_policy import message_wants_tools
 
         msg_wants = bool(message_wants_tools(message or ""))
-    with suppress(Exception):
-        from remedy.core.local_agent_optimize import message_wants_implement
 
-        msg_wants = msg_wants or bool(message_wants_implement(message or ""))
+    # Real build/create/game asks must stay armed. The detector used to
+    # match "test" inside "interesting"; that substring hole is closed.
+    task_like = False
     with suppress(Exception):
         from remedy.core.build_engine import looks_like_task_request
 
         task_like = bool(looks_like_task_request(message or ""))
         msg_wants = msg_wants or task_like
+
+    if has_att:
+        msg_wants = True
 
     local = False
     with suppress(Exception):
@@ -391,16 +423,17 @@ def resolve_tools(
 
         local = is_local_binding(provider, model, base_url)
 
-    # Task / tool-wanting messages: never strip (P0)
-    if msg_wants or build_active or task_like:
+    if msg_wants:
         tools = all_t
         pack = "full"
-        reason = (
-            "build_active"
-            if build_active
-            else ("task" if task_like else "message_wants_tools")
-        )
-        # Local early steps: write-first until a write succeeds
+        if build_active:
+            reason = "build_active"
+        elif has_att and not task_like:
+            reason = "attachments"
+        elif task_like:
+            reason = "task"
+        else:
+            reason = "message_wants_tools"
         if local and step_index <= 1 and writes_done <= 0 and task_like:
             with suppress(Exception):
                 from remedy.core.local_agent_optimize import filter_tools_write_first
@@ -446,30 +479,21 @@ def resolve_tools(
             logger.info("react_tools disarm reason=non_work")
             return ToolsDecision(None, False, "non_work", pack="none")
 
-    # L1 may strip *only* proven social/meta chat. Any other ask stays armed.
-    # ``int(turn_tier or 1)`` read tier 0 as tier 1, so L0 turns got the
-    # L1-only chat strip and lost their tools.
-    tier = 1 if turn_tier is None else int(turn_tier)
-    if tier == 1 and not browse_pre_url and not page_interaction:
-        chat_only = False
+    # Ambiguous + leftover work: ask, don't assume they want tools or silence.
+    open_work = bool(open_tasks) or bool(build_active)
+    if not open_work and history:
         with suppress(Exception):
-            from remedy.core.react_policy import is_chat_only_message
+            from remedy.core.react_policy import history_suggests_open_work
 
-            chat_only = bool(is_chat_only_message(message or ""))
-        if chat_only:
-            open_work = bool(open_tasks)
-            if not open_work and history:
-                with suppress(Exception):
-                    from remedy.core.react_policy import history_suggests_open_work
+            open_work = history_suggests_open_work(
+                history, open_tasks=open_tasks or None
+            )
+    if open_work:
+        logger.info("react_tools disarm reason=ask_first")
+        return ToolsDecision(None, False, "ask_first", pack="none")
 
-                    open_work = history_suggests_open_work(
-                        history, open_tasks=open_tasks or None
-                    )
-            if not open_work:
-                logger.info("react_tools disarm reason=l1_pure_chat tier=%s", turn_tier)
-                return ToolsDecision(None, False, "l1_pure_chat", pack="none")
-
-    return ToolsDecision(all_t, bool(all_t), "default_armed", pack="full")
+    logger.info("react_tools disarm reason=no_work_request")
+    return ToolsDecision(None, False, "no_work_request", pack="none")
 
 
 def apply_tools_decision(state: TurnState, decision: ToolsDecision) -> None:

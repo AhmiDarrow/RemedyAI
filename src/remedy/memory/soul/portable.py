@@ -138,6 +138,8 @@ def import_soul_payload(
         current.relational.help_mode = incoming.relational.help_mode
     if incoming.relational.correction_style and not current.relational.correction_style:
         current.relational.correction_style = incoming.relational.correction_style
+    if incoming.relational.speech_register and not current.relational.speech_register:
+        current.relational.speech_register = incoming.relational.speech_register
     for v in incoming.relational.voice_markers:
         if v not in current.relational.voice_markers:
             current.relational.voice_markers.append(v)
