@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -285,7 +284,15 @@ class ToolRuntime:
 
         if name.startswith("python_") or name in ("python_exec", "python_eval", "python_run"):
             code = tool_call.arguments.get("code", tool_call.arguments.get("command", ""))
-            return [sys.executable, "-c", str(code)]
+            from remedy.core.build_python import python_cmd_for_subprocess
+
+            py = python_cmd_for_subprocess()
+            if not py:
+                raise ValueError(
+                    "No real Python interpreter (Desktop sidecar is not CPython). "
+                    "Set REMEDY_PYTHON."
+                )
+            return [*py, "-c", str(code)]
 
         raise ValueError(f"No sandbox command mapping for tool: {name}")
 

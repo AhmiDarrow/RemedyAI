@@ -1376,11 +1376,18 @@ def register_shell_tools(runtime: Any) -> None:
         try:
             launch = launch_script(kind, text, project_path=root)
         except ValueError as exc:
+            # launch_script raises ValueError for two distinct causes: body
+            # over the size cap, and (python) no usable interpreter.
+            no_python = "REMEDY_PYTHON" in str(exc) or "interpreter" in str(exc).lower()
             return format_tool_error(
                 str(exc),
                 code="HOST_PREPARE",
                 tool_name="host_script",
-                suggestion="Shrink the script body.",
+                suggestion=(
+                    "Install Python 3 (python.org) or set REMEDY_PYTHON to python.exe."
+                    if no_python
+                    else "Shrink the script body."
+                ),
             )
         from remedy.core.approvals import is_full_approval
 

@@ -156,12 +156,34 @@ def test_the_result_says_which_engine_judged_it(tmp_path):
 
 
 def test_an_unknown_extension_is_skipped_not_failed(tmp_path):
-    """A .md file is not broken code; it is not code."""
+    """A .md file is not broken code; it is not code.
+
+    Both the lang oracle and the engine's ``check_path_syntax`` entry must
+    skip it. The old singular gate returned ok=True for *every* non-py/json
+    path (including broken .c / .ts) under a comment that the 'full oracle
+    handles them' — it never called the oracle.
+    """
     f = tmp_path / "notes.md"
     f.write_text("# hello {\n", encoding="utf-8")
     out = check_lang_syntax(f)
     assert out["ok"] is True
     assert out["engine"] == "skip"
+    from remedy.core.build_syntax import check_path_syntax
+
+    gated = check_path_syntax(f)
+    assert gated["ok"] is True
+    assert gated.get("engine") == "skip"
+
+
+def test_check_path_syntax_does_not_skip_broken_c(tmp_path):
+    """Singular gate used to false-green C/TS; batch path already dispatched."""
+    from remedy.core.build_syntax import check_path_syntax
+
+    src = tmp_path / "broken.c"
+    src.write_text("int main(void) { return 0;\n", encoding="utf-8")
+    out = check_path_syntax(src)
+    assert out["ok"] is False
+    assert out.get("error")
 
 
 def test_real_jsx_is_not_reported_as_broken(tmp_path):

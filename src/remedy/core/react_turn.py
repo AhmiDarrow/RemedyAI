@@ -401,9 +401,9 @@ def resolve_tools(
 
     msg_wants = False
     with suppress(Exception):
-        from remedy.core.react_policy import message_wants_tools
+        from remedy.core.react_policy import _message_wants_tools
 
-        msg_wants = bool(message_wants_tools(message or ""))
+        msg_wants = bool(_message_wants_tools(message or ""))
 
     # Real build/create/game asks must stay armed. The detector used to
     # match "test" inside "interesting"; that substring hole is closed.
@@ -601,6 +601,9 @@ def is_disconnect_error(exc: BaseException | str) -> bool:
             "connectionerror",
             "timeout",
             "timed out",
+            "network error",
+            "failed to fetch",
+            "err_connection",
         )
     )
 

@@ -15,6 +15,9 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Tools require a work signal in *this* message (shape, kick, path, debug
   follow-up, a real brief). Leftover todos and “not in the hi/thanks list”
   are not a request. “Good deal” is chat.
+- “modify” counts as a work request only at a clause start (“Modify the
+  header”) — “why did you modify X?” and “don’t modify anything” stay
+  questions/limits.
 
 ### Fixed — when unsure, ask; do not assume work or silence
 
@@ -23,6 +26,48 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   “continue” (that is still talking). “interesting” is not a test suite;
   “.com” is not a C file. Attachments, Godot/create-app asks, and “keep
   going” still get tools — Chat pin does not blind a file they handed over.
+
+### Fixed — working this repo from the installed app killed the live turn
+
+- Packaged Desktop is a frozen sidecar. Spawning ``sys.executable`` for
+  Python/pytest/import checks launched a **second** `remedy-desktop.exe`,
+  which took port 7400 and dropped the chat as `Error: network error`.
+  Those jobs now use a real CPython (or skip). Frozen installs never ask
+  the parent to recycle serve for a checkout edit. Self-inject apply waits
+  while a stream is live.
+- Host dialect / ``host_run python`` / POSIX ``head`` ``tail`` ``wc``
+  rewrites used to stamp the sidecar as this PC's Python (including a
+  stale ``~/.remedy/host/dialect.json``). They now skip the sidecar and
+  the Windows Store stub, so a build's ``python -m http.server`` or
+  ``python -c`` cannot relaunch serve.
+- Syntax gate: unknown suffixes (``.md``) still skip. Known languages
+  (``.c`` / ``.ts`` / …) no longer false-green when checked one file at
+  a time — they go through the same lang oracle as the batch path.
+- Review follow-ups: myelin sheath scripts (crystallize / run) also spawned
+  ``sys.executable`` — now a real CPython, or an honest “set REMEDY_PYTHON”
+  failure. ``py -3`` resolves to its concrete python.exe for single-exe
+  consumers (bare ``py`` could target another version via py.ini). With no
+  CPython at all, ``head``/``tail``/``wc`` rewrites and ``host_script`` say
+  “set REMEDY_PYTHON” instead of exit 9009 or “Shrink the script body.”
+- The stream lock is per-process with a heartbeat: a gateway turn ending on
+  the same home can no longer unlink serve’s live lock, and a hard-killed
+  serve leaves only a stale lock the desktop poller ignores (and cleans up)
+  after ~2 minutes instead of blocking self-inject applies forever.
+- Dev-checkout Desktop still requests the sidecar restart after a green
+  self-edit — only frozen installs skip it — and the round records whether
+  the request was written.
+- Host dialect probe runs only when a stored field needs healing (with a
+  short re-probe cap), not on every host command.
+
+### Fixed — “Error: network error” after install/restart mid-turn
+
+- Killing the sidecar (installer, or a restart while a turn is running) used
+  to paint a system bubble that just said `Error: network error`. That is a
+  dropped local SSE, not the internet. The bubble now says the local server
+  was lost and to send continue. Provider “network error” disconnects retry.
+- Wrapped drops (“TypeError: network error”, Safari “Load failed”) map to
+  the same lost-server bubble; backend text like “model load failed” no
+  longer does.
 
 ### Fixed — Telegram going silent on short chats
 

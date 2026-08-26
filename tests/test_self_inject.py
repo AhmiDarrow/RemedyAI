@@ -87,6 +87,24 @@ def test_request_sidecar_restart_writes_rollback_payload(tmp_path):
     assert payload["untracked"] == ["src/remedy/core/new.py"]
 
 
+def test_request_sidecar_restart_skipped_when_frozen(tmp_path, monkeypatch):
+    import sys
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    ok = request_sidecar_restart(home=tmp_path)
+    assert ok is False
+    assert not (tmp_path / "locks" / "self_inject_apply").exists()
+
+
+def test_request_sidecar_restart_dev_desktop_still_requests(tmp_path, monkeypatch):
+    """Dev-checkout Desktop sets the sidecar env vars but is not frozen —
+    its serve runs this checkout, so the restart request must be written."""
+    monkeypatch.setenv("REMEDY_DESKTOP_SIDECAR", "1")
+    ok = request_sidecar_restart(home=tmp_path)
+    assert ok is True
+    assert (tmp_path / "locks" / "self_inject_apply").exists()
+
+
 def test_request_sidecar_restart_no_snapshot(tmp_path):
     ok = request_sidecar_restart(home=tmp_path)
     assert ok is True

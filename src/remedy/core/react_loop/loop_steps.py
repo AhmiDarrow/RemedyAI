@@ -979,17 +979,34 @@ async def run_react_steps(s: Any) -> AsyncIterator[str]:
                 force_answer = (
                     is_final_step or not tools or force_answer_sticky
                 )
+                # Hitting the ceiling on step 0 with an armed pack still owes
+                # a tool round; last-ditch (no tools) is the round AFTER tools
+                # ran. Without this, max_react_steps=1 stripped tools before
+                # the first POST and last-ditch tests never saw a tool call.
+                _opinion = False
+                with suppress(Exception):
+                    from remedy.core.react_policy import is_knowledge_question
+
+                    _opinion = bool(is_knowledge_question(message or ""))
+                armed_ceiling_needs_a_tool_round = (
+                    bool(is_final_step)
+                    and int(tools_executed_this_turn or 0) == 0
+                    and bool(tools)
+                    and not _verify_green
+                    and not _opinion
+                )
                 # Work request + zero tool evidence is never a successful final.
                 # Keep tools on and require a native call instead of summarizing.
                 if (
                     force_answer
                     and not stalled_finalize
-                    and _work_unfinished()
+                    and (_work_unfinished() or armed_ceiling_needs_a_tool_round)
                     and all_tools
                     and not message_asks_to_stop(message or "")
                     and (
                         zero_tool_drive_count < max_zero_tool_drives
                         or _open_drive_keeps_going()
+                        or armed_ceiling_needs_a_tool_round
                     )
                 ):
                     force_answer = False

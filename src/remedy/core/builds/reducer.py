@@ -33,7 +33,6 @@ from __future__ import annotations
 import ast
 import re
 import subprocess
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -232,11 +231,9 @@ def run_project_tests(
     try:
         from remedy.core.build_python import python_cmd_for_subprocess
 
-        py_cmd = python_cmd_for_subprocess(root) or (
-            [sys.executable] if sys.executable else []
-        )
+        py_cmd = python_cmd_for_subprocess(root) or []
     except Exception:
-        py_cmd = [sys.executable] if sys.executable else []
+        py_cmd = []
     if not py_cmd:
         return False, "pytest failed to run: no real Python interpreter", []
     try:
@@ -276,11 +273,9 @@ class PytestOracle:
         try:
             from remedy.core.build_python import python_cmd_for_subprocess
 
-            py_cmd = python_cmd_for_subprocess(self.root) or (
-                [sys.executable] if sys.executable else []
-            )
+            py_cmd = python_cmd_for_subprocess(self.root) or []
         except Exception:
-            py_cmd = [sys.executable] if sys.executable else []
+            py_cmd = []
         if not py_cmd:
             return [OracleError(unit.id, "pytest error: no real Python interpreter")]
         try:

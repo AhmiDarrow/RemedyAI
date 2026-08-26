@@ -684,9 +684,9 @@ class BasicRuntime(AgentRuntime):
                     or getattr(cfg, "persona", None)
                     or "default"
                 )
-                lang = getattr(cfg, "ui_language", None)
+                reply_lang = getattr(cfg, "ui_language", None)
                 self._system_prompt = _build_system_prompt(
-                    p, name=n, gender=g, ui_language=lang
+                    p, name=n, gender=g, ui_language=reply_lang
                 )
                 home = getattr(cfg, "home_dir", None)
                 sync_identity_to_soul(n, g, home=home)
@@ -1153,6 +1153,15 @@ class BasicRuntime(AgentRuntime):
         self._chat_mode = bool(chat_mode)
         self._turn_tool_steps = current_turn_tool_steps(self)
         self._streaming_sessions.add(sid_key)
+        with suppress(Exception):
+            home = Path(str(getattr(self.config, "home_dir", "") or "")).expanduser()
+            if home.as_posix() not in ("", "."):
+                # Per-process lock file with heartbeat: a sibling process on the
+                # same home (gateway runner) cannot unlink ours, and a crashed
+                # process leaves only a stale file readers ignore.
+                from remedy.core.stream_lock import acquire_stream_lock
+
+                acquire_stream_lock(home, sid_key)
         try:
             # L0 local replies work without a provider key (version/whoami/skills/status)
             if not plan_mode and not attachments:
@@ -1190,6 +1199,12 @@ class BasicRuntime(AgentRuntime):
                 yield chunk
         finally:
             self._streaming_sessions.discard(sid_key)
+            with suppress(Exception):
+                home = Path(str(getattr(self.config, "home_dir", "") or "")).expanduser()
+                if home.as_posix() not in ("", "."):
+                    from remedy.core.stream_lock import release_stream_lock
+
+                    release_stream_lock(home, sid_key)
             steps_snap = list(current_turn_tool_steps(self))
             # Captured before end_turn() resets the turn contextvars.
             aborted_snap = is_turn_aborted()

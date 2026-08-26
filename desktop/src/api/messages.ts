@@ -19,6 +19,31 @@ export function streamHttpErrorMessage(
   return formatApiErrorBody(body, statusText || `HTTP ${status}`)
 }
 
+/** Fetch/SSE drop (sidecar killed mid-turn) — not an xAI outage. */
+export function streamTransportErrorMessage(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err || 'Stream failed')
+  const low = msg.toLowerCase()
+  const dropped =
+    low.includes('failed to fetch')
+    || low.includes('networkerror')
+    || low.includes('network error')
+    // Safari's bare fetch failure ("Load failed", possibly "TypeError: Load
+    // failed") — but not backend text like "model load failed".
+    || low === 'load failed'
+    || low.endsWith(': load failed')
+    || low.includes('err_connection')
+    || low.includes('connection reset')
+    || low.includes('connection refused')
+    || low.includes('connection aborted')
+  if (dropped) {
+    return (
+      'Lost the local server mid-turn (install or restart). '
+      + 'History is intact — send continue.'
+    )
+  }
+  return msg || 'Stream failed'
+}
+
 export type SessionTodosPayload = {
   todos: { id: string; content: string; status: string }[]
 }
@@ -372,7 +397,7 @@ export function streamMessage(
       if (err instanceof Error && err.name === 'AbortError') {
         return
       }
-      onError(err instanceof Error ? err.message : String(err || 'Stream failed'))
+      onError(streamTransportErrorMessage(err))
     }
   })()
 

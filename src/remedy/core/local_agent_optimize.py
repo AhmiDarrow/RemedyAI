@@ -1056,10 +1056,14 @@ async def maybe_bootstrap_local_create(
     if wants_hello and print_phrase:
         try:
             import subprocess
-            import sys as _sys
 
+            from remedy.core.build_python import python_cmd_for_subprocess
+
+            py = python_cmd_for_subprocess(resolved.parent)
+            if not py:
+                raise RuntimeError("no real Python")
             r = subprocess.run(
-                [_sys.executable, str(resolved)],
+                [*py, str(resolved)],
                 capture_output=True,
                 text=True,
                 timeout=15,

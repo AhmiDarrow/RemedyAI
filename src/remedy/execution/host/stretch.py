@@ -331,12 +331,17 @@ def _probe(home: str | Path | None) -> HomeCensus:
             tools[name] = found
         else:
             missing.append(name)
-    # Prefer Remedy's own python when `python` is missing from PATH
+    # Real CPython only — frozen Desktop's sys.executable is the sidecar.
     if "python" not in tools:
-        import sys
+        try:
+            from remedy.core.build_python import host_python_executable
 
-        tools["python"] = sys.executable
-        missing = [m for m in missing if m != "python"]
+            found = host_python_executable()
+        except Exception:
+            found = ""
+        if found:
+            tools["python"] = found
+            missing = [m for m in missing if m != "python"]
 
     hw_gpu = ""
     hw_vram = 0
