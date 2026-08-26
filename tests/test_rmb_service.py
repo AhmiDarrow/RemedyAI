@@ -1416,11 +1416,15 @@ def test_autofit_card_stays_quiet_until_a_fit_has_actually_been_measured(
 
 def test_the_host_auto_card_prefers_what_was_recorded_at_start(tmp_path: Path) -> None:
     recorded = {"summary": "MTP armed", "mtp": True}
-    assert svc._status_host_auto({"host_auto": recorded}, None) == recorded
+    card = svc._status_host_auto({"host_auto": recorded}, None)
+    assert card.get("mtp") is True
+    assert "MTP" in str(card.get("summary") or "")
+    assert card.get("thinking_mode") == "on"
     # No record yet → a filename-only guess, never a GGUF walk on the 8s poll.
     fresh = svc._status_host_auto({}, None)
     assert isinstance(fresh, dict)
     assert fresh.get("mtp") is False
+    assert fresh.get("thinking_mode") == "on"
 
 
 def test_the_default_port_is_the_rmb_port_not_the_vision_port(tmp_path: Path) -> None:

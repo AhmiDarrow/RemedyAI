@@ -506,6 +506,9 @@ def register_rmb_tools(runtime: Any) -> None:
         ctx_size: int | None = None,
         n_gpu_layers: int | None = None,
         auto_start: bool | None = None,
+        thinking: str = "",
+        enable_mtp: bool | None = None,
+        n_cpu_moe: int | None = None,
         settings: dict | str | None = None,
         load: bool = True,
     ) -> str:
@@ -597,6 +600,7 @@ def register_rmb_tools(runtime: Any) -> None:
                         "model_draft",
                         "spec_type",
                         "spec_draft_n_max",
+                        "thinking_mode",
                         "summary",
                         "unfit",
                         "warnings",
@@ -853,6 +857,12 @@ def register_rmb_tools(runtime: Any) -> None:
                 patch["n_gpu_layers"] = int(n_gpu_layers)
             if auto_start is not None:
                 patch["auto_start"] = bool(auto_start)
+            if thinking:
+                patch["thinking"] = thinking
+            if enable_mtp is not None:
+                patch["enable_mtp"] = bool(enable_mtp)
+            if n_cpu_moe is not None:
+                patch["n_cpu_moe"] = int(n_cpu_moe)
             if not patch:
                 from remedy.runtime.rmb.config import load_rmb_json, merge_state
 
@@ -872,12 +882,23 @@ def register_rmb_tools(runtime: Any) -> None:
                         "cache_type",
                         "flash_attn",
                         "temperature",
+                        "thinking",
+                        "reasoning_budget",
+                        "enable_mtp",
+                        "n_cpu_moe",
+                        "spec_draft_n_max",
+                        "n_gpu_layers_draft",
+                        "model_draft",
+                        "use_jinja",
+                        "no_mmap",
+                        "cache_reuse",
                     )
                     if k in live
                 }
                 public_live["ok"] = True
                 public_live["next"] = (
-                    'Patch with rmb action="settings" profile="turbo" '
+                    'Patch with rmb action="settings" thinking="off" '
+                    'or enable_mtp=false or n_cpu_moe=99 or profile="turbo" '
                     "or n_gpu_layers=40 or ctx_size=4096 or model_path=…"
                 )
                 return json.dumps(public_live, indent=2, default=str)
@@ -995,10 +1016,27 @@ def register_rmb_tools(runtime: Any) -> None:
                     "type": "integer",
                     "description": "GPU layers for action=settings (too high thrashs VRAM)",
                 },
+                "thinking": {
+                    "type": "string",
+                    "description": "on (default) | off — hidden reasoning for action=settings",
+                },
+                "enable_mtp": {
+                    "type": "boolean",
+                    "description": "Speculative MTP for action=settings (default on when GGUF is MTP)",
+                },
+                "n_cpu_moe": {
+                    "type": "integer",
+                    "description": "MoE experts on CPU (0 = auto from catalog) for action=settings",
+                },
                 "auto_start": {"type": "boolean"},
                 "settings": {
                     "type": "object",
-                    "description": "Partial rmb.json patch for action=settings",
+                    "description": (
+                        "Partial rmb.json patch for action=settings. "
+                        "thinking on|off (default on), enable_mtp, n_cpu_moe, "
+                        "reasoning_budget, spec_draft_n_max, n_gpu_layers_draft, "
+                        "model_draft, use_jinja, no_mmap, plus engine knobs."
+                    ),
                 },
                 "load": {
                     "type": "boolean",

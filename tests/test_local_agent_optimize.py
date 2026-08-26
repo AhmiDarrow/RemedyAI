@@ -15,6 +15,18 @@ from remedy.core.local_agent_optimize import (
 from remedy.core.react_stream import build_runtime_system_block
 
 
+@pytest.fixture(autouse=True)
+def _rmb_thinking_on(monkeypatch):
+    monkeypatch.setattr(
+        "remedy.core.local_agent_optimize.local_thinking_enabled",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "remedy.core.local_agent_optimize._rmb_reasoning_budget",
+        lambda: None,
+    )
+
+
 def test_message_wants_implement_calculator():
     assert message_wants_implement(
         "create a calculator app, Present once you have a working calculator"
@@ -119,8 +131,8 @@ def test_apply_local_body_sets_required_tools():
     assert int(out["max_tokens"]) >= 1024
     assert int(out["max_tokens"]) <= 32_768
     assert float(out["temperature"]) <= 0.15
-    assert (out.get("chat_template_kwargs") or {}).get("enable_thinking") is False
-    assert out.get("reasoning_budget") == 0
+    assert (out.get("chat_template_kwargs") or {}).get("enable_thinking") is True
+    assert "reasoning_budget" not in out
 
 
 def test_local_chat_completion_cap_is_not_trivia_256():
@@ -168,7 +180,28 @@ def test_apply_local_body_strips_tools_on_trivia():
     assert "tools" not in out
     assert "tool_choice" not in out
     assert int(out["max_tokens"]) <= 256
+    assert (out.get("chat_template_kwargs") or {}).get("enable_thinking") is True
+
+
+def test_apply_local_body_thinking_off_when_owner_sets_it(monkeypatch):
+    monkeypatch.setattr(
+        "remedy.core.local_agent_optimize.local_thinking_enabled",
+        lambda: False,
+    )
+    body = {
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 800,
+    }
+    out = apply_local_body_optimize(
+        body,
+        provider="rmb",
+        model="Qwen3.5-9B",
+        base_url="http://127.0.0.1:8787/v1",
+        user_message="hi",
+        step_index=0,
+    )
     assert (out.get("chat_template_kwargs") or {}).get("enable_thinking") is False
+    assert out.get("reasoning_budget") == 0
 
 
 def test_looks_like_tutorial_monologue_from_export():

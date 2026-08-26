@@ -8,32 +8,44 @@ from remedy.runtime.rmb.host_profile import (
     apply_host_profile_to_state,
     detect_gguf_host_profile,
     model_switch_should_refit,
+    overlay_owner_on_profile,
 )
 from remedy.runtime.rmb.service import _build_cmd
 
 
-def test_detect_qwen35_coder_turns_thinking_off():
+def test_detect_qwen35_coder_does_not_force_thinking_off():
     p = Path("qwen3.5-4b-agentic-coder-v4.i1-IQ4_XS.gguf")
     prof = detect_gguf_host_profile(p)
     assert prof["qwen3_family"] is True
     assert prof["coder"] is True
     assert prof["use_jinja"] is True
     assert prof["no_mmap"] is False
-    assert prof["chat_template_kwargs"] == '{"enable_thinking": false}'
+    assert prof["qwen_thinking_toggle"] is True
+    assert prof["chat_template_kwargs"] is None
     assert prof["reasoning_budget"] is None
-    assert "thinking off" in prof["summary"]
+    assert "thinking" in prof["summary"]
+    assert "thinking off" not in prof["summary"]
     assert prof["chat_style"] == "instruct"
+    on = overlay_owner_on_profile(prof, {})
+    assert on["thinking_mode"] == "on"
+    assert on["chat_template_kwargs"] == '{"enable_thinking": true}'
+    off = overlay_owner_on_profile(prof, {"thinking": "off"})
+    assert off["thinking_mode"] == "off"
+    assert off["chat_template_kwargs"] == '{"enable_thinking": false}'
+    assert "thinking off" in off["summary"]
 
 
-def test_detect_r1_thinking_caps_reasoning_budget():
+def test_detect_r1_thinking_does_not_cap_budget_by_default():
     p = Path("DeepSeek-R1-STEM-Coder-7B.Q6_K.gguf")
     prof = detect_gguf_host_profile(p)
     assert prof["thinking"] is True
     assert prof["coder"] is True
     assert prof["use_jinja"] is True
-    assert prof["reasoning_budget"] == 0
+    assert prof["reasoning_budget"] is None
     assert prof["chat_style"] == "thinking"
     assert any("thinking" in w.lower() or "reasoning" in w.lower() for w in prof["warnings"])
+    off = overlay_owner_on_profile(prof, {"thinking": "off"})
+    assert off["reasoning_budget"] == 0
 
 
 def test_detect_base_model_warns():
@@ -58,7 +70,8 @@ def test_status_path_skips_template_sniff(monkeypatch):
         Path("Qwen3.5-9B-Q4_K_M.gguf"), sniff_template=False
     )
     assert prof["qwen3_family"] is True
-    assert prof["chat_template_kwargs"] == '{"enable_thinking": false}'
+    assert prof["chat_template_kwargs"] is None
+    assert prof["qwen_thinking_toggle"] is True
 
 
 def test_detect_kanana_instruct_is_not_thinking():
@@ -105,6 +118,33 @@ def test_apply_host_profile_sets_jinja_and_mmap():
     assert state["use_jinja"] is True
     assert state["no_mmap"] is False
     assert state["host_auto"]["qwen3_family"] is True
+
+
+def test_apply_settings_thinking_off_persists(tmp_path, monkeypatch):
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    from remedy.runtime.rmb.config import load_rmb_json, merge_state, save_rmb_json
+    from remedy.runtime.rmb.service import apply_rmb_settings
+
+    save_rmb_json(merge_state({}), tmp_path)
+    out = apply_rmb_settings(
+        {"thinking": "off", "enable_mtp": False, "n_cpu_moe": 99},
+        home_dir=str(tmp_path),
+        live=False,
+    )
+    assert out.get("ok") is not False
+    st = load_rmb_json(tmp_path)
+    assert st.get("thinking") == "off"
+    assert st.get("enable_mtp") is False
+    assert int(st.get("n_cpu_moe") or 0) == 99
+
+
+def test_overlay_owner_can_disable_mtp():
+    prof = detect_gguf_host_profile(Path("Qwopus3.5-9B-Coder-MTP-Q4_K_M.gguf"))
+    assert prof["mtp"] is True
+    off = overlay_owner_on_profile(prof, {"enable_mtp": False})
+    assert off["mtp"] is False
+    assert off["force_parallel_1"] is False
+    assert off.get("mtp_owner_off") is True
 
 
 def test_apply_host_profile_preserves_user_jinja():
@@ -162,18 +202,20 @@ def test_apply_settings_new_gguf_clears_last_good_and_applies_profile(tmp_path, 
     assert Path(str(st.get("model_path"))).name == b.name
     assert st.get("last_good_fit") is None
     assert st.get("autofit_locked") is False
-    assert st.get("use_jinja") is True
-    assert st.get("no_mmap") is False
+    # Owner jinja/mmap survive a GGUF switch (auto-load does not clobber).
+    assert st.get("use_jinja") is False
+    assert st.get("no_mmap") is True
     ha = st.get("host_auto") or {}
     assert ha.get("qwen3_family") is True
-    assert ha.get("chat_template_kwargs") == '{"enable_thinking": false}'
+    assert ha.get("thinking_mode") == "on"
+    assert ha.get("chat_template_kwargs") == '{"enable_thinking": true}'
 
 
-def test_build_cmd_emits_thinking_kwargs_when_capable(tmp_path):
+def test_build_cmd_default_keeps_thinking_on(tmp_path):
     fake_bin = tmp_path / "llama-server.exe"
     fake_bin.write_bytes(b"stub")
     (tmp_path / "llama-common.dll").write_bytes(
-        b"xx --chat-template-kwargs --reasoning-budget yy"
+        b"xx --chat-template-kwargs --reasoning-budget --reasoning off yy"
     )
     from remedy.runtime.rmb import service as svc
 
@@ -192,12 +234,43 @@ def test_build_cmd_emits_thinking_kwargs_when_capable(tmp_path):
         flash_attn=False,
     )
     assert "--jinja" in cmd
+    assert "--reasoning" not in cmd
     assert "--chat-template-kwargs" in cmd
-    assert cmd[cmd.index("--chat-template-kwargs") + 1] == '{"enable_thinking": false}'
+    assert cmd[cmd.index("--chat-template-kwargs") + 1] == '{"enable_thinking": true}'
     assert "--reasoning-budget" not in cmd
 
 
-def test_build_cmd_emits_reasoning_budget_for_r1(tmp_path):
+def test_build_cmd_thinking_off_emits_reasoning_off(tmp_path):
+    fake_bin = tmp_path / "llama-server.exe"
+    fake_bin.write_bytes(b"stub")
+    (tmp_path / "llama-common.dll").write_bytes(
+        b"xx --chat-template-kwargs --reasoning-budget --reasoning off yy"
+    )
+    from remedy.runtime.rmb import service as svc
+
+    svc._flag_cap_cache.clear()
+    model = tmp_path / "Qwen3.5-4B-Instruct.gguf"
+    model.write_bytes(b"0")
+    prof = overlay_owner_on_profile(
+        detect_gguf_host_profile(model), {"thinking": "off"}
+    )
+    cmd = _build_cmd(
+        fake_bin,
+        model,
+        host="127.0.0.1",
+        port=8787,
+        ctx=8192,
+        ngl=-1,
+        threads=0,
+        parallel=1,
+        flash_attn=False,
+        host_profile=prof,
+    )
+    assert "--reasoning" in cmd
+    assert cmd[cmd.index("--reasoning") + 1] == "off"
+
+
+def test_build_cmd_emits_reasoning_budget_for_r1_when_thinking_off(tmp_path):
     fake_bin = tmp_path / "llama-server.exe"
     fake_bin.write_bytes(b"stub")
     (tmp_path / "llama-common.dll").write_bytes(b"--reasoning-budget --chat-template-kwargs")
@@ -206,6 +279,21 @@ def test_build_cmd_emits_reasoning_budget_for_r1(tmp_path):
     svc._flag_cap_cache.clear()
     model = tmp_path / "DeepSeek-R1-Distill-7B.gguf"
     model.write_bytes(b"0")
+    on_cmd = _build_cmd(
+        fake_bin,
+        model,
+        host="127.0.0.1",
+        port=8787,
+        ctx=8192,
+        ngl=0,
+        threads=0,
+        parallel=1,
+        flash_attn=False,
+    )
+    assert "--reasoning-budget" not in on_cmd
+    prof = overlay_owner_on_profile(
+        detect_gguf_host_profile(model), {"thinking": "off"}
+    )
     cmd = _build_cmd(
         fake_bin,
         model,
@@ -216,6 +304,7 @@ def test_build_cmd_emits_reasoning_budget_for_r1(tmp_path):
         threads=0,
         parallel=1,
         flash_attn=False,
+        host_profile=prof,
     )
     assert "--reasoning-budget" in cmd
     assert cmd[cmd.index("--reasoning-budget") + 1] == "0"

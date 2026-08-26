@@ -46,9 +46,13 @@ from remedy.runtime.rmb.config import (
     save_rmb_json,
 )
 from remedy.runtime.rmb.host_profile import (
+    OWNER_HOST_KEYS,
     apply_host_profile_to_state,
     detect_gguf_host_profile,
     model_switch_should_refit,
+    normalize_thinking,
+    overlay_owner_on_profile,
+    owner_flag_on,
 )
 
 logger = logging.getLogger(__name__)
@@ -1069,7 +1073,7 @@ def _live_process_has_mtp_flags(state: dict[str, Any] | None = None) -> bool:
 
 # --- GGUF host autoconfig (MTP / coding / template / thinking) ---
 # Partner rule: user loads a GGUF; Remedy wires llama-server correctly.
-# detect_gguf_host_profile / apply_host_profile_to_state live in host_profile.py.
+# Owner overrides every auto knob (thinking default on). See host_profile.py.
 
 # Cache binary capability probes (path + mtime → bool)
 _spec_cap_cache: dict[str, tuple[float, bool]] = {}
@@ -1407,6 +1411,8 @@ def _build_cmd(
     ``enable_mtp=False`` forces a plain start (soft-retry after bad flags).
     """
     profile = host_profile if host_profile is not None else detect_gguf_host_profile(model)
+    if not profile.get("thinking_mode"):
+        profile = overlay_owner_on_profile(profile, {})
     use_parallel = int(parallel)
     if profile.get("force_parallel_1"):
         use_parallel = 1
@@ -1427,13 +1433,11 @@ def _build_cmd(
         str(max(1, use_parallel)),
         "--cont-batching",
     ]
-    if use_jinja or profile.get("use_jinja"):
+    if use_jinja:
         cmd.append("--jinja")
-    # Qwen thinking-off: prefer --reasoning off (current llama.cpp). The
-    # chat-template-kwargs enable_thinking path is deprecated and noisy.
-    reasoning_off = bool(profile.get("qwen_thinking_toggle")) and not profile.get(
-        "always_think"
-    )
+    # Thinking is on unless the owner set thinking=off. --reasoning off is the
+    # current llama.cpp switch; chat-template-kwargs covers older builds.
+    reasoning_off = normalize_thinking(profile.get("thinking_mode")) == "off"
     if reasoning_off and binary_supports_reasoning_off(binary):
         cmd.extend(["--reasoning", "off"])
     else:
@@ -1448,7 +1452,7 @@ def _build_cmd(
         _moe = int(profile.get("n_cpu_moe") or 0)
     except (TypeError, ValueError):
         _moe = 0
-    if _moe <= 0:
+    if _moe <= 0 and not profile.get("n_cpu_moe_owner"):
         # Not every caller passes a host profile, so fall back to the catalog
         # entry for this GGUF. Without this a known MoE model would silently
         # load every expert onto the GPU and fail to fit.
@@ -1932,7 +1936,9 @@ def _start_rmb_server_impl(
             # autoconfig was added/improved → restart so partner gets full speed.
             # Do NOT restart when the live process already has draft-mtp (host_auto
             # may be missing after API recycle) — mid-chat restart → 503 Loading.
-            want_profile = detect_gguf_host_profile(want_model)
+            want_profile = overlay_owner_on_profile(
+                detect_gguf_host_profile(want_model), st_probe
+            )
             prev_auto_raw = st_probe.get("host_auto")
             prev_auto: dict[str, Any] = (
                 prev_auto_raw if isinstance(prev_auto_raw, dict) else {}
@@ -2140,7 +2146,8 @@ def _start_rmb_server_impl(
         host_profile = detect_gguf_host_profile(
             model, hardware=hw.to_public() if hw is not None else None
         )
-        apply_host_profile_to_state(state, host_profile)
+        apply_host_profile_to_state(state, host_profile, preserve=set(OWNER_HOST_KEYS))
+        host_profile = overlay_owner_on_profile(host_profile, state)
         last_good = (
             state.get("last_good_fit")
             if isinstance(state.get("last_good_fit"), dict)
@@ -2179,7 +2186,7 @@ def _start_rmb_server_impl(
         ctx = int(plan.ctx_size)
         ngl = int(plan.n_gpu_layers)
 
-        # Autoconfig from GGUF — jinja / thinking-off / mmap / MTP (no user knobs)
+        # Autoconfig from GGUF; owner knobs (thinking, MTP, jinja, …) already overlaid.
         use_parallel = int(state.get("parallel") or 1)
         if host_profile.get("force_parallel_1"):
             use_parallel = 1
@@ -2829,6 +2836,13 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
             "xtc_probability": state.get("xtc_probability"),
             "xtc_threshold": state.get("xtc_threshold"),
             "cache_reuse": state.get("cache_reuse"),
+            "thinking": normalize_thinking(state.get("thinking")),
+            "reasoning_budget": state.get("reasoning_budget"),
+            "enable_mtp": owner_flag_on(state.get("enable_mtp"), default=True),
+            "spec_draft_n_max": state.get("spec_draft_n_max"),
+            "n_cpu_moe": state.get("n_cpu_moe"),
+            "n_gpu_layers_draft": state.get("n_gpu_layers_draft"),
+            "model_draft": state.get("model_draft") or "",
         },
         "nvidia": _nvidia_ok(),
         "has_gpu": _gpu_present(),
@@ -2874,12 +2888,13 @@ def _status_host_auto(state: dict[str, Any], model_path: Path | None) -> dict[st
     """Public auto-load card. Refresh when disk cache predates richer profiles.
 
     No GPU probe here — status is polled often; unfit is computed at start.
+    Owner thinking / MTP / MoE overlay so the card matches Settings.
     """
     ha = state.get("host_auto") if isinstance(state.get("host_auto"), dict) else None
-    if ha and ha.get("summary"):
-        return ha
-    # Filename-only — do not walk GGUF KV on the 8s status poll.
-    return detect_gguf_host_profile(model_path, sniff_template=False)
+    if not (ha and ha.get("summary")):
+        # Filename-only — do not walk GGUF KV on the 8s status poll.
+        ha = detect_gguf_host_profile(model_path, sniff_template=False)
+    return overlay_owner_on_profile(ha or {}, state)
 
 
 def _status_autofit(
@@ -2981,6 +2996,13 @@ _RMB_PROCESS_KEYS = frozenset(
         "xtc_probability",
         "xtc_threshold",
         "cache_reuse",
+        "thinking",
+        "reasoning_budget",
+        "enable_mtp",
+        "spec_draft_n_max",
+        "n_cpu_moe",
+        "n_gpu_layers_draft",
+        "model_draft",
     }
 )
 
@@ -3005,6 +3027,10 @@ def _norm_rmb_val(key: str, val: Any) -> Any:
         "dry_allowed_length",
         "dry_penalty_last_n",
         "cache_reuse",
+        "reasoning_budget",
+        "spec_draft_n_max",
+        "n_cpu_moe",
+        "n_gpu_layers_draft",
     ):
         try:
             return int(val) if val is not None and str(val).strip() != "" else val
@@ -3017,6 +3043,10 @@ def _norm_rmb_val(key: str, val: Any) -> Any:
             return val
     if key in ("flash_attn", "use_jinja", "mlock", "no_mmap", "no_kv_offload"):
         return bool(val)
+    if key == "enable_mtp":
+        return owner_flag_on(val, default=True)
+    if key == "thinking":
+        return normalize_thinking(val)
     if key in (
         "model_path",
         "runtime_binary",
@@ -3030,6 +3060,7 @@ def _norm_rmb_val(key: str, val: Any) -> Any:
         "tensor_split",
         "samplers",
         "rope_scaling",
+        "model_draft",
     ):
         return str(val or "").strip()
     return val
@@ -3282,6 +3313,13 @@ def apply_rmb_settings(
         "xtc_probability",
         "xtc_threshold",
         "cache_reuse",
+        "thinking",
+        "reasoning_budget",
+        "enable_mtp",
+        "spec_draft_n_max",
+        "n_cpu_moe",
+        "n_gpu_layers_draft",
+        "model_draft",
     ):
         if key not in patch:
             continue
@@ -3295,6 +3333,7 @@ def apply_rmb_settings(
             "tensor_split",
             "samplers",
             "rope_scaling",
+            "model_draft",
         ):
             continue
         if key == "ctx_size" and patch[key] is not None:
@@ -3311,6 +3350,30 @@ def apply_rmb_settings(
         elif key == "n_gpu_layers" and patch[key] is not None:
             try:
                 state[key] = int(patch[key])
+            except (TypeError, ValueError):
+                continue
+        elif key == "thinking" and patch[key] is not None:
+            state[key] = normalize_thinking(patch[key])
+        elif key == "enable_mtp" and patch[key] is not None:
+            state[key] = owner_flag_on(patch[key], default=True)
+        elif key == "n_cpu_moe" and patch[key] is not None:
+            try:
+                state[key] = max(-1, min(256, int(patch[key])))
+            except (TypeError, ValueError):
+                continue
+        elif key == "reasoning_budget" and patch[key] is not None:
+            try:
+                state[key] = max(-1, min(100_000, int(patch[key])))
+            except (TypeError, ValueError):
+                continue
+        elif key == "spec_draft_n_max" and patch[key] is not None:
+            try:
+                state[key] = max(0, min(8, int(patch[key])))
+            except (TypeError, ValueError):
+                continue
+        elif key == "n_gpu_layers_draft" and patch[key] is not None:
+            try:
+                state[key] = max(0, min(99, int(patch[key])))
             except (TypeError, ValueError):
                 continue
         elif key == "mirostat" and patch[key] is not None:
@@ -3335,6 +3398,8 @@ def apply_rmb_settings(
                 continue
         elif key in ("use_jinja", "mlock", "no_mmap", "no_kv_offload") and patch[key] is not None:
             state[key] = bool(patch[key])
+        elif key == "model_draft":
+            state[key] = str(patch[key]).strip() if patch[key] else ""
         else:
             state[key] = patch[key] if patch[key] is not None else ""
 
@@ -3382,7 +3447,7 @@ def apply_rmb_settings(
         if key not in patch or patch[key] is None:
             continue
         state[key] = bool(patch[key])
-    for key in ("mmproj", "chat_template", "cache_type", "tensor_split", "samplers", "rope_scaling"):
+    for key in ("mmproj", "chat_template", "cache_type", "tensor_split", "samplers", "rope_scaling", "model_draft"):
         if key not in patch:
             continue
         state[key] = str(patch[key]).strip() if patch[key] else ""
@@ -3468,12 +3533,10 @@ def apply_rmb_settings(
         with contextlib.suppress(Exception):
             hw_pub = probe_hardware().to_public()
         auto = detect_gguf_host_profile(new_path, hardware=hw_pub)
-        preserve: set[str] = set()
-        if "use_jinja" in patch:
-            preserve.add("use_jinja")
-        if "no_mmap" in patch:
-            preserve.add("no_mmap")
+        preserve: set[str] = set(OWNER_HOST_KEYS)
         apply_host_profile_to_state(state, auto, preserve=preserve)
+        auto = overlay_owner_on_profile(auto, state)
+        state["host_auto"] = {**(state.get("host_auto") or {}), **auto}
         if path_changed:
             state["last_good_fit"] = None
             if model_switch_should_refit(state):

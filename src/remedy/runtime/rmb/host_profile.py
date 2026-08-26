@@ -1,9 +1,10 @@
-"""Per-GGUF host profile — auto-load knobs users should not have to know.
+"""Per-GGUF host profile — detect knobs, never hide them from the owner.
 
 Frontier cloud is one API. Local GGUFs differ: Jinja templates, thinking
 toggles, MTP slots, mmap, and whether the file even fits VRAM. Remedy
 detects that from the filename + a light GGUF metadata sniff and applies
-it on every Start / model switch.
+it on every Start / model switch. Every auto knob has an owner override
+in rmb.json / Settings; thinking stays **on** unless the owner turns it off.
 """
 
 from __future__ import annotations
@@ -50,6 +51,46 @@ _CHAT_TEMPLATE_KEYS = (
 )
 _NAME_KEYS = ("general.name", "general.basename", "general.architecture")
 _MAX_TEMPLATE_CHARS = 200_000
+
+# Owner rmb.json keys auto-load must not clobber (Settings / rmb settings).
+OWNER_HOST_KEYS = frozenset(
+    {
+        "use_jinja",
+        "no_mmap",
+        "thinking",
+        "reasoning_budget",
+        "enable_mtp",
+        "spec_draft_n_max",
+        "n_cpu_moe",
+        "n_gpu_layers_draft",
+        "model_draft",
+        "parallel",
+    }
+)
+
+
+def normalize_thinking(value: Any) -> str:
+    """Owner thinking switch: ``on`` (default) or ``off``."""
+    raw = str(value if value is not None else "on").strip().lower()
+    if raw in ("off", "false", "0", "no"):
+        return "off"
+    return "on"
+
+
+def thinking_is_on(value: Any) -> bool:
+    return normalize_thinking(value) == "on"
+
+
+def owner_flag_on(value: Any, *, default: bool = True) -> bool:
+    """Bool-ish owner flag. Strings like ``off`` / ``false`` are False."""
+    if value is None:
+        return default
+    if isinstance(value, str):
+        raw = value.strip().lower()
+        if raw in ("", "auto"):
+            return default
+        return raw not in ("off", "false", "0", "no")
+    return bool(value)
 
 
 def _empty_profile() -> dict[str, Any]:
@@ -266,18 +307,13 @@ def detect_gguf_host_profile(
     # that made large GGUFs crawl.
     no_mmap = False
 
+    # Detection only — do not force thinking off. Owner switch is ``thinking``
+    # on rmb.json (default on). overlay_owner_on_profile applies that.
     chat_template_kwargs: str | None = None
     reasoning_budget: int | None = None
-    if qwen_toggle:
-        # Qwen3/3.5/3.6 default to a hidden <think> block that can run for
-        # thousands of tokens. Remedy turns it off so chat/tools stay fast.
-        chat_template_kwargs = '{"enable_thinking": false}'
-        reasons.append("thinking_off_kwargs")
     if thinking and not qwen_toggle:
-        # R1 / QwQ always think — cap (0 = disable) so 1+1 is not minutes.
-        reasoning_budget = 0
-        reasons.append("reasoning_budget_0")
         always_think = True
+        reasons.append("filename_always_think")
 
     if base_model:
         warnings.append(
@@ -290,11 +326,13 @@ def detect_gguf_host_profile(
         )
     if thinking and not qwen_toggle:
         warnings.append(
-            "Thinking model — Remedy caps hidden reasoning so short answers stay fast."
+            "Thinking model — hidden reasoning can run long. Turn thinking off "
+            "in RMB options if short answers feel slow."
         )
     if qwen_toggle:
         warnings.append(
-            "Qwen3-family — Remedy turns off thinking mode so replies are direct."
+            "Qwen3-family — thinking is on by default. Turn it off in RMB "
+            "options for faster short replies."
         )
 
     unfit = False
@@ -335,10 +373,8 @@ def detect_gguf_host_profile(
         bits.append("vision")
     if mtp:
         bits.append("MTP")
-    if thinking and not qwen_toggle:
+    if thinking or qwen_toggle:
         bits.append("thinking")
-    elif qwen_toggle:
-        bits.append("thinking off")
     if base_model:
         bits.append("base")
     if use_jinja:
@@ -376,6 +412,86 @@ def detect_gguf_host_profile(
     }
 
 
+def overlay_owner_on_profile(
+    profile: dict[str, Any] | None,
+    state: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Apply owner rmb.json knobs onto a detected host profile.
+
+    Thinking defaults **on**. MTP / draft / MoE stay auto unless the owner
+    set them. Call this before ``_build_cmd``.
+    """
+    out = dict(profile) if isinstance(profile, dict) else _empty_profile()
+    st = state if isinstance(state, dict) else {}
+    mode = normalize_thinking(st.get("thinking"))
+    out["thinking_mode"] = mode
+    if mode == "off":
+        if out.get("qwen_thinking_toggle"):
+            out["chat_template_kwargs"] = '{"enable_thinking": false}'
+        else:
+            out["chat_template_kwargs"] = None
+        if out.get("reasoning_budget") is None:
+            out["reasoning_budget"] = 0
+    else:
+        if out.get("qwen_thinking_toggle"):
+            out["chat_template_kwargs"] = '{"enable_thinking": true}'
+        else:
+            out["chat_template_kwargs"] = None
+        out["reasoning_budget"] = None
+    raw_rb = st.get("reasoning_budget")
+    if raw_rb is not None and str(raw_rb).strip() != "":
+        try:
+            rb = int(raw_rb)
+        except (TypeError, ValueError):
+            rb = -1
+        if rb >= 0:
+            out["reasoning_budget"] = rb
+        elif mode == "on":
+            out["reasoning_budget"] = None
+
+    if not owner_flag_on(st.get("enable_mtp"), default=True):
+        out["mtp"] = False
+        out["force_parallel_1"] = False
+        out["spec_type"] = None
+        out["spec_draft_n_max"] = None
+        out["model_draft"] = None
+        out["mtp_owner_off"] = True
+    try:
+        n_max = int(st.get("spec_draft_n_max") or 0)
+        if n_max > 0:
+            out["spec_draft_n_max"] = max(1, min(8, n_max))
+    except (TypeError, ValueError):
+        pass
+    draft = str(st.get("model_draft") or "").strip()
+    if draft:
+        out["model_draft"] = draft
+    try:
+        raw_dn = st.get("n_gpu_layers_draft")
+        if raw_dn is not None and str(raw_dn).strip() != "" and int(raw_dn) > 0:
+            out["n_gpu_layers_draft"] = max(1, min(99, int(raw_dn)))
+    except (TypeError, ValueError):
+        pass
+    try:
+        moe = int(st["n_cpu_moe"]) if st.get("n_cpu_moe") is not None else 0
+        if moe > 0:
+            out["n_cpu_moe"] = moe
+            out["n_cpu_moe_owner"] = True
+    except (TypeError, ValueError):
+        pass
+
+    summary = str(out.get("summary") or "")
+    if mode == "off":
+        if "thinking off" not in summary:
+            if "thinking" in summary:
+                summary = summary.replace("thinking", "thinking off", 1)
+            else:
+                summary = (summary + " · thinking off") if summary else "thinking off"
+    else:
+        summary = summary.replace("thinking off", "thinking")
+    out["summary"] = summary
+    return out
+
+
 def apply_host_profile_to_state(
     state: dict[str, Any],
     profile: dict[str, Any] | None,
@@ -384,7 +500,9 @@ def apply_host_profile_to_state(
 ) -> dict[str, Any]:
     """Write auto-load knobs onto rmb.json state. Does not touch ctx / ngl.
 
-    ``preserve`` is a set of keys the user just set in Settings (do not overwrite).
+    ``preserve`` is a set of keys the owner set (do not overwrite). Pass
+    ``OWNER_HOST_KEYS`` on start / model switch so auto-load never clobbers
+    Settings.
     """
     if not isinstance(state, dict):
         return state
@@ -394,7 +512,7 @@ def apply_host_profile_to_state(
         state["use_jinja"] = bool(prof.get("use_jinja", True))
     if "no_mmap" not in keep:
         state["no_mmap"] = bool(prof.get("no_mmap", False))
-    if prof.get("force_parallel_1"):
+    if prof.get("force_parallel_1") and "parallel" not in keep:
         state["parallel"] = 1
     # Merge, keep runtime-only keys (mtp_armed) already on disk
     prev_raw = state.get("host_auto")

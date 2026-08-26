@@ -42,6 +42,11 @@ owner at Settings.
 5. Chat on it → `rmb action=use` (starts + binds this session). Ask them
    to send a **new message** after the bind.
 6. Free the GPU for SmolVLM → `rmb action=stop`.
+7. Thinking is **on** by default. The owner turns it off in Settings → RMB
+   or `rmb action=settings thinking=off` (faster short replies; hidden
+   `<think>` stays off). MTP, MoE CPU experts, Jinja, mmap, draft layers,
+   and reasoning budget are the same settings dump — nothing is
+   auto-only. Do not force thinking off in source to "help" speed.
 
 ## Do not
 

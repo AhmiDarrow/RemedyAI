@@ -478,7 +478,8 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             {rmb?.nvidia ? ' · NVIDIA' : ' · CPU'}
           </FormStatusRow>
           <FormStatusRow label="Auto-load">
-            {rmb?.host_auto?.summary || 'Remedy sets Jinja, thinking, and slots from the GGUF'}
+            {rmb?.host_auto?.summary ||
+              'Jinja, MTP, mmap from the GGUF — thinking is an option (on by default)'}
           </FormStatusRow>
           <FormStatusRow label="Runtime">
             {rmb?.runtime_present
@@ -501,6 +502,33 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             {(rmb?.host_auto?.warnings || []).join(' ')}
           </FormNotice>
         ) : null}
+
+        <div className="mt-2 mb-2 space-y-1">
+          <FormLabel>Thinking</FormLabel>
+          <FormSegmented
+            value={rmb?.engine?.thinking === 'off' ? 'off' : 'on'}
+            options={[
+              {
+                id: 'on',
+                label: 'On',
+                title: 'Model may use a hidden think block (default)',
+              },
+              {
+                id: 'off',
+                label: 'Off',
+                title: 'Skip hidden reasoning — faster short replies',
+              },
+            ]}
+            disabled={rmbBusy}
+            onChange={(thinking) => {
+              if (rmbBusy) return
+              void patchKnob({ thinking }, `Thinking: ${thinking}`)
+            }}
+          />
+          <FormHint>
+            On by default. Off skips Qwen/R1 hidden reasoning so short answers stay fast.
+          </FormHint>
+        </div>
 
         {/* Primary: pick GGUF from disk scan — options prop so values always stick */}
         <div className="mt-2 mb-2 space-y-1.5">
@@ -785,6 +813,91 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             Advanced engine settings (llama-server)
           </summary>
           <div className="mt-2 space-y-1.5">
+            <FormHint>
+              Auto-load fills these from the GGUF. Every value is yours to change.
+            </FormHint>
+            <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+              <FormToggle
+                label="MTP speculative"
+                description="Draft heads / sibling mtp-*.gguf"
+                checked={Boolean(rmb?.engine?.enable_mtp ?? true)}
+                disabled={rmbBusy}
+                onChange={(enable_mtp) =>
+                  void patchKnob(
+                    { enable_mtp },
+                    `MTP: ${enable_mtp ? 'on' : 'off'}`,
+                  )
+                }
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+              <RmbEngineNumber
+                label="MoE experts on CPU (0 = auto)"
+                value={rmb?.engine?.n_cpu_moe ?? 0}
+                min={0}
+                step={1}
+                disabled={rmbBusy}
+                onApply={(n_cpu_moe) =>
+                  void patchKnob(
+                    { n_cpu_moe: Math.max(0, Math.round(n_cpu_moe)) },
+                    `n_cpu_moe: ${n_cpu_moe}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Reasoning budget (−1 = no cap)"
+                value={rmb?.engine?.reasoning_budget ?? -1}
+                min={-1}
+                step={1}
+                disabled={rmbBusy}
+                onApply={(reasoning_budget) =>
+                  void patchKnob(
+                    { reasoning_budget: Math.round(reasoning_budget) },
+                    `Reasoning budget: ${reasoning_budget}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="MTP draft tokens (0 = auto)"
+                value={rmb?.engine?.spec_draft_n_max ?? 0}
+                min={0}
+                max={8}
+                step={1}
+                disabled={rmbBusy}
+                onApply={(spec_draft_n_max) =>
+                  void patchKnob(
+                    { spec_draft_n_max: Math.max(0, Math.min(8, Math.round(spec_draft_n_max))) },
+                    `MTP draft n: ${spec_draft_n_max}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Draft GPU layers (0 = auto)"
+                value={rmb?.engine?.n_gpu_layers_draft ?? 0}
+                min={0}
+                step={1}
+                disabled={rmbBusy}
+                onApply={(n_gpu_layers_draft) =>
+                  void patchKnob(
+                    { n_gpu_layers_draft: Math.max(0, Math.round(n_gpu_layers_draft)) },
+                    `Draft ngl: ${n_gpu_layers_draft}`,
+                  )
+                }
+              />
+              <RmbEngineNumber
+                label="Prefix cache reuse (0 = off)"
+                value={rmb?.engine?.cache_reuse ?? 256}
+                min={0}
+                step={16}
+                disabled={rmbBusy}
+                onApply={(cache_reuse) =>
+                  void patchKnob(
+                    { cache_reuse: Math.max(0, Math.round(cache_reuse)) },
+                    `Cache reuse: ${cache_reuse}`,
+                  )
+                }
+              />
+            </div>
             <div className="grid grid-cols-2 gap-x-2 gap-y-1">
               <RmbEngineNumber
                 label="Threads (0 = auto)"
@@ -1342,6 +1455,28 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                   void patchKnob(
                     { mmproj },
                     mmproj ? `MMProj: ${mmproj.replace(/^.*[\\/]/, '')}` : 'MMProj cleared',
+                  )
+                }}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <FormLabel>MTP draft GGUF (empty = sibling mtp-*.gguf)</FormLabel>
+              <input
+                type="text"
+                className="ui-input ui-input-sm mb-1 font-mono w-full"
+                disabled={rmbBusy}
+                defaultValue={rmb?.engine?.model_draft || ''}
+                key={`draft-${rmb?.engine?.model_draft || ''}`}
+                placeholder="C:\…\mtp-Qwen….gguf"
+                onBlur={(e) => {
+                  const model_draft = e.target.value.trim()
+                  if (model_draft === (rmb?.engine?.model_draft || '')) return
+                  void patchKnob(
+                    { model_draft },
+                    model_draft
+                      ? `Draft: ${model_draft.replace(/^.*[\\/]/, '')}`
+                      : 'Draft: auto sibling',
                   )
                 }}
               />
