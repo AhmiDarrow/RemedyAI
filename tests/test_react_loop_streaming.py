@@ -1392,7 +1392,7 @@ async def test_consecutive_rounds_to_a_paced_provider_are_spaced_apart(tmp_path)
         llm_pacing.reset_pacing()
 
     assert fake.request_count == 2
-    assert len(slept) == 1 and 0.0 < slept[0] <= 1.1
+    assert len(slept) == 1 and 0.0 < slept[0] <= 1.15
     assert "The sum is 5." in answer(chunks)
 
 

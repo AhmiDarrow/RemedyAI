@@ -123,6 +123,28 @@ def test_apply_local_body_sets_required_tools():
     assert out.get("reasoning_budget") == 0
 
 
+def test_local_chat_completion_cap_is_not_trivia_256():
+    """4k RMB ctx used to collapse no-tools answers to 256 (finish=length)."""
+    from remedy.core.local_agent_optimize import local_completion_cap
+
+    cap = local_completion_cap(4096, tools_present=False, force_tools=False)
+    assert cap >= 768
+    # Trivia still uses the 256 ceiling inside apply_local_body_optimize.
+
+
+def test_slim_system_knowledge_is_not_tool_first():
+    out = slim_system_for_local(
+        "Personhood: " + ("x" * 5000),
+        "Project workspace: C:/proj\nStay with: Continue wiring MTP",
+        provider="rmb",
+        model="Qwen3.8-27B-Q4_0",
+        user_message="how does a local model feel?",
+    )
+    assert "Call tools immediately" not in out
+    assert "file_write" not in out
+    assert "No tools" in out
+
+
 def test_apply_local_body_strips_tools_on_trivia():
     body = {
         "messages": [{"role": "user", "content": "1 + 1"}],

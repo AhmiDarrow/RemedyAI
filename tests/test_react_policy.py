@@ -19,6 +19,7 @@ from remedy.core.react_policy import (
     build_keeps_tools_armed,
     collapse_repeated_sentences,
     is_chat_only_message,
+    is_feeling_presence_question,
     is_knowledge_question,
     is_pure_trivia_message,
     is_serial_explore_batch,
@@ -184,6 +185,17 @@ def test_is_knowledge_question_class() -> None:
     assert is_knowledge_question("what should we do?\nadd idle lock") is False
     # Chat is not a knowledge question
     assert is_knowledge_question("hi") is False
+    assert is_feeling_presence_question("how does a local model feel?") is True
+    assert is_knowledge_question("how does a local model feel?") is True
+    assert message_wants_tools("how does a local model feel?") is False
+    assert is_feeling_presence_question("what do you think of the new plan?") is False
+    assert is_feeling_presence_question("how did it go") is False
+    assert is_knowledge_question("why is everything failing?") is False
+    assert message_wants_tools("start the local model") is True
+    # "how do I …" is work, not presence
+    assert is_knowledge_question("how do I fix the about window") is False
+    assert message_wants_tools("how do I fix the about window") is True
+    assert is_knowledge_question("how do I start the local model") is False
 
 
 def test_message_wants_tools_fail_open_without_verb_list() -> None:

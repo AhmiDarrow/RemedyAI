@@ -429,6 +429,21 @@ def slim_system_for_local(
                 f"You are a local assistant on this PC (model: {model or 'local'}).\n"
                 "Answer in one short sentence. No tools. No essays. No chain-of-thought."
             )
+        from remedy.core.react_policy import (
+            is_chat_only_message,
+            is_feeling_presence_question,
+        )
+
+        # Empty user_message is not chat — work turns often omit it here.
+        if (user_message or "").strip() and (
+            is_chat_only_message(user_message)
+            or is_feeling_presence_question(user_message)
+        ):
+            return (
+                f"You are a local assistant on this PC (model: {model or 'local'}).\n"
+                "Answer in plain chat. No tools. No empty shell calls. "
+                "Do not continue a previous tab's job unless this message asks."
+            )
     except Exception:
         pass
 
@@ -731,7 +746,9 @@ def local_completion_cap(
     if tools_present:
         # Was 6k at 32k ctx — R1/Qwen3 fill that with hidden thinking (minutes).
         return max(768, min(2048, win // 12))
-    return max(256, min(768, win // 24))
+    # Chat / knowledge answers (tools stripped). 4k ctx used to collapse to
+    # 256 and kill the reply (finish=length) after empty tool retries.
+    return max(768, min(2048, win // 6))
 
 
 def apply_local_body_optimize(

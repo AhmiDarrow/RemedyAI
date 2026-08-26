@@ -138,9 +138,15 @@ def append_plan_and_computer_addenda(
         else:
             chat_only = False
             with suppress(Exception):
-                from remedy.core.react_policy import is_chat_only_message
+                from remedy.core.react_policy import (
+                    is_chat_only_message,
+                    is_feeling_presence_question,
+                )
 
-                chat_only = is_chat_only_message(message or "")
+                chat_only = is_chat_only_message(message or "") or (
+                    bool((message or "").strip())
+                    and is_feeling_presence_question(message or "")
+                )
             if not chat_only:
                 with suppress(Exception):
                     from remedy.core.muscle_profile import muscle_from_runtime

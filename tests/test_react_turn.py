@@ -209,6 +209,30 @@ def test_resolve_tools_sounds_good_asks_when_work_is_open():
     assert idle.reason == "no_work_request"
 
 
+def test_resolve_tools_feeling_question_does_not_inherit_job_tools():
+    """Live 2026-08-26: 'how does a local model feel?' got empty bash_exec."""
+    all_t = [
+        _tool("file_write"),
+        _tool("bash_exec"),
+        _tool("host_run"),
+        _tool("list_dir"),
+        _tool("file_read"),
+    ]
+    d = resolve_tools(
+        message="how does a local model feel?",
+        all_tools=all_t,
+        turn_tier=1,
+        build_active=True,
+        open_tasks=["wire Qwen 3.8 MTP"],
+        history=[
+            {"role": "assistant", "tool_calls": [{"id": "1", "function": {"name": "host_run"}}]},
+        ],
+    )
+    assert d.tools is None
+    assert d.run_until_done is False
+    assert d.reason == "knowledge"
+
+
 def test_resolve_tools_l1_strips_pure_chat():
     all_t = [_tool("file_write")]
     d = resolve_tools(

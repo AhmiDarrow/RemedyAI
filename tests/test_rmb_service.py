@@ -491,6 +491,20 @@ def test_extra_model_dirs_from_env_are_used_and_missing_ones_ignored(
     assert len(keys) == len(set(keys))
 
 
+def test_old_muscle_bridge_folder_is_after_house_models(tmp_path: Path) -> None:
+    """Live session treated ~/Remedy Muscle Bridge as the house over ~/.remedy/rmb."""
+    names = [str(r) for r in svc._model_search_roots(str(tmp_path))]
+    old = [i for i, n in enumerate(names) if "Remedy Muscle Bridge" in n]
+    house = [
+        i
+        for i, n in enumerate(names)
+        if "rmb" in n.replace("\\", "/").lower() and n.lower().rstrip("\\/").endswith("models")
+    ]
+    assert old, names
+    assert house, names
+    assert min(old) > max(house)
+
+
 def test_discover_ggufs_includes_the_configured_path_outside_every_search_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

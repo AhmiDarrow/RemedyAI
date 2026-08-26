@@ -722,6 +722,38 @@ def test_action_ir_redacts_and_persists(tmp_path: Path):
     assert "supersecret_body_value" not in blob
 
 
+def test_time_crystal_does_not_inject_previous_job_on_new_session():
+    """Live 2026-08-26: new RMB chat inherited 'Stay with: Continue…' life pledges."""
+    from remedy.core.metabolism.time_crystal import looks_like_job_resume_fact
+
+    reset_time_crystal("fresh_rmb_chat")
+    tc = get_time_crystal("fresh_rmb_chat")
+    life = tc.admit(
+        "Stay with: Continue: how we feeling?",
+        horizon="life",
+        source="soul_pledge",
+    )
+    assert life is not None
+    assert life.horizon == "session"
+    tc.admit("continue: hi", horizon="session", source="soul_open_thread")
+    tc.admit("Prefer typed APIs for public surfaces", horizon="life", source="soul_pledge")
+    ident = tc.admit(
+        "Continue to prefer typed APIs for public surfaces",
+        horizon="life",
+        source="soul_pledge",
+    )
+    assert ident is not None
+    assert ident.horizon == "life"
+    block = tc.hot_block(max_chars=800)
+    assert "Stay with: Continue" not in block
+    assert "continue: hi" not in block
+    assert "Prefer typed APIs" in block
+    assert "Continue to prefer typed APIs" in block
+    assert looks_like_job_resume_fact("Stay with: Continue wiring MTP") is True
+    assert looks_like_job_resume_fact("Prefer typed APIs") is False
+    assert looks_like_job_resume_fact("Continue to prefer typed APIs") is False
+
+
 def test_time_crystal_never_promotes_secrets():
     tc = get_time_crystal("test_meta_sess")
     assert tc.admit("api_key=sk-abcdef0123456789", horizon="session") is None

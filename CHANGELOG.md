@@ -4,6 +4,23 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.41.4] - 2026-08-26
+
+### Fixed — local muscle without leftover jobs or a 256-token muzzle
+
+- A new chat no longer inherits the previous tab's "Stay with: Continue…"
+  job as a life pledge. Identity pledges still inject.
+- "How does a local model feel?" answers in chat. Starting/stopping RMB
+  and "how do I fix the about window" still get tools. Debug follow-ups
+  on an open build stay armed.
+- Local replies with tools stripped use a real answer budget (≥768 on a
+  4k window), not the 256 trivia cap that cut the last RMB turn.
+- `rmb status` lists house GGUFs, ngl, and MTP. `action=models` (and
+  `files` with no repo) is local inventory. Empty `settings` dumps live
+  config. Sibling `mtp-<stem>.gguf` auto-arms `--model-draft` so a
+  Settings restart keeps MTP. The old `Remedy Muscle Bridge` folder is
+  last in the search list.
+
 ## [0.41.3] - 2026-08-26
 
 ### Added — she knows the house

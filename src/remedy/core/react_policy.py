@@ -78,9 +78,11 @@ _DEFAULT_SYSTEM_BODY = (
     "NEVER thrash list_dir on C:\\ or / or run where/dir /s to find installs — "
     "discovery is built-in and portable for any machine.\n"
     "- **RMB** (her local llama.cpp muscle, port 8787): **rmb** "
-    "action=status|start|stop|use|catalog|search|pull|settings. Autofit is default. "
+    "action=status|start|stop|use|catalog|models|search|pull|settings. Autofit is default. "
+    "Local GGUFs live in ~/.remedy/rmb/models — **rmb action=models** or status.local_ggufs. "
+    "Never glob C:\\\\Users or edit the git repo to load a model. "
     "Do not guess Hugging Face hosts — search, then pick. Starting RMB suspends "
-    "SmolVLM. Never list_dir for GGUFs. Do not only point the owner at Settings.\n"
+    "SmolVLM. Do not only point the owner at Settings.\n"
     "- **This PC is her house.** **house_status** is the combined self+machine map. "
     "**computer_apps** lists installed apps; **computer_app** launches by natural name "
     "(not a 5-name alias list). **house_walkthrough** is a read-only door/vault round. "
@@ -722,6 +724,37 @@ _WORK_SHAPE_RE = re.compile(
 )
 
 
+# Presence/feeling — not "how do I fix the about window".
+_FEELING_PRESENCE_RE = re.compile(
+    r"(?i)("
+    r"\bfeel(?:s|ing)?\b|"
+    r"\bmood\b|\balive\b|\bpresence\b|"
+    r"how (?:are|is) (?:you|we|it)\b|"
+    r"how we feeling|"
+    r"how(?:'s| is) it going"
+    r")"
+)
+_HOST_WORK_RE = re.compile(
+    r"(?i)\b("
+    r"start|stop|load|pull|download|install|switch|configure|"
+    r"settings|restart|enable|disable|quant|offload|n_gpu|ngl|"
+    r"ctx[-_ ]size|use as chat|wire(?:d|ing)?"
+    r")\b"
+)
+
+
+def is_feeling_presence_question(message: str) -> bool:
+    """True for short presence/feeling asks — not 'how do I fix…' work."""
+    msg = (message or "").strip()
+    if not msg or "\n" in msg or len(msg) > 120:
+        return False
+    if _ACTION_KICK_RE.search(msg) or _REQUEST_WORK_RE.search(msg):
+        return False
+    if _HOST_WORK_RE.search(msg) or _DEBUG_FOLLOWUP_RE.search(msg):
+        return False
+    return bool(_FEELING_PRESENCE_RE.search(msg))
+
+
 def is_knowledge_question(message: str) -> bool:
     """True for short world/agent questions that do not require tools.
 
@@ -737,9 +770,13 @@ def is_knowledge_question(message: str) -> bool:
         return False
     if _ACTION_KICK_RE.search(msg) or _REQUEST_WORK_RE.search(msg):
         return False
-    if _TOOL_HINT_RE.search(msg) or _WORK_SHAPE_RE.search(msg):
+    if _DEBUG_FOLLOWUP_RE.search(msg):
         return False
-    if msg.endswith("?") or _KNOWLEDGE_Q_START_RE.match(msg):
+    feeling = bool(_FEELING_PRESENCE_RE.search(msg) and not _HOST_WORK_RE.search(msg))
+    if _TOOL_HINT_RE.search(msg) or _WORK_SHAPE_RE.search(msg):
+        # Mere mention of "local model" is not a request to start it.
+        return bool(feeling and len(msg) <= 120)
+    if msg.endswith("?") or _KNOWLEDGE_Q_START_RE.match(msg) or feeling:
         return True
     # Bare arithmetic ("1 + 1", "2*2=") is trivia, not a build ask.
     return bool(_ARITH_ONLY_RE.match(msg))
