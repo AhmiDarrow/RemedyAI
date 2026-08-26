@@ -1049,6 +1049,7 @@ class BasicRuntime(AgentRuntime):
         attachments: list[dict[str, Any]] | None = None,
         *,
         plan_mode: bool = False,
+        chat_mode: bool = False,
         provider: str | None = None,
         internal: bool = False,
         project_override: str | None = None,
@@ -1060,6 +1061,7 @@ class BasicRuntime(AgentRuntime):
         Falls back to the echo-style fallback when no API key is configured.
 
         *plan_mode*: restrict tools to planning helpers (plan_save, goals, memory search).
+        *chat_mode*: pin conversation — no tool pack this turn.
         *provider* / *model*: per-session bind via ContextVar (parallel multi-provider).
         *internal*: unattended self-fix — does not count as a user turn.
         *project_override*: bind the tool jail to this path after session workspace.
@@ -1136,7 +1138,8 @@ class BasicRuntime(AgentRuntime):
             session_id,
             project_raw=turn_project_raw,
             active_path=turn_active_path,
-            plan_mode=bool(plan_mode),
+            plan_mode=bool(plan_mode) and not bool(chat_mode),
+            chat_mode=bool(chat_mode),
             session_brief=turn_brief,
             partner_state=turn_partner,
             work_roots=turn_roots,
@@ -1146,7 +1149,8 @@ class BasicRuntime(AgentRuntime):
 
             snapshot_live_turn(self)
         # Legacy mirrors for code that still reads runtime attrs (prefer ContextVar).
-        self._plan_mode = bool(plan_mode)
+        self._plan_mode = bool(plan_mode) and not bool(chat_mode)
+        self._chat_mode = bool(chat_mode)
         self._turn_tool_steps = current_turn_tool_steps(self)
         self._streaming_sessions.add(sid_key)
         try:
@@ -1223,6 +1227,7 @@ class BasicRuntime(AgentRuntime):
             with suppress(Exception):
                 reset_llm_binding(llm_tok)
             self._plan_mode = False
+            self._chat_mode = False
             self._turn_tool_steps = []
             # Soft end-of-turn checkpoint if substantial tool work happened
             if not plan_mode and not internal and not is_turn_aborted():

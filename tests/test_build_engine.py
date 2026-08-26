@@ -37,6 +37,13 @@ def test_detects_build_requests():
         "could you explain how recursion works please"
     )
     assert not looks_like_build_request("can you tell me about your day")
+    # Substring traps: "test" inside "interesting", ".c" inside ".com"
+    assert not looks_like_build_request(
+        "that's interesting, tell me more about how you feel today"
+    )
+    assert not looks_like_build_request(
+        "I was thinking about example.com yesterday over dinner with friends"
+    )
 
 
 def test_begin_build_turn_greeting_ignores_leftover_brief():

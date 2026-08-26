@@ -10,6 +10,7 @@ export type ChatSessionHeaderProps = {
   modelLabel?: string | null
   providerLabel?: string | null
   planMode?: boolean
+  chatMode?: boolean
   streaming?: boolean
   messageCount?: number
   onTogglePlanMode?: () => void
@@ -28,6 +29,7 @@ export const ChatSessionHeader = memo(function ChatSessionHeader({
   modelLabel,
   providerLabel,
   planMode = false,
+  chatMode = false,
   streaming = false,
   messageCount,
   onTogglePlanMode,
@@ -76,16 +78,18 @@ export const ChatSessionHeader = memo(function ChatSessionHeader({
         )}
         <button
           type="button"
-          className={`chat-chip chat-chip-mode ${planMode ? 'is-plan' : 'is-build'}`}
+          className={`chat-chip chat-chip-mode ${chatMode ? 'is-chat' : planMode ? 'is-plan' : 'is-build'}`}
           onClick={onTogglePlanMode}
           title={
-            planMode
-              ? 'Plan mode — click for Build (or Ctrl+B / Shift+Tab)'
-              : 'Build mode — click for Plan (or Ctrl+B / Shift+Tab)'
+            chatMode
+              ? 'Chat — conversation, no tools. Click for Plan (Ctrl+B)'
+              : planMode
+                ? 'Plan — outline first. Click for Build (Ctrl+B)'
+                : 'Build — work when you ask. Click for Chat (Ctrl+B)'
           }
           disabled={!onTogglePlanMode}
         >
-          {planMode ? 'Plan' : 'Build'}
+          {chatMode ? 'Chat' : planMode ? 'Plan' : 'Build'}
         </button>
       </div>
     </header>

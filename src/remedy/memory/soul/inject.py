@@ -141,6 +141,18 @@ def build_soul_context_block(
         f"Bond: rapport≈{rel.rapport:.2f} trust≈{rel.trust:.2f} "
         f"turns_together={rel.turns_together}"
     )
+    # Friend-voice — one line, here so budget truncation cannot eat it.
+    _stage = (
+        "old friend" if rel.turns_together >= 200
+        else "together" if rel.turns_together >= 40
+        else "new"
+    )
+    _voice = f"Voice ({_stage}): talk like a friend, not a briefing."
+    if getattr(rel, "speech_register", ""):
+        _voice += f" Their register: {rel.speech_register}."
+    if rel.voice_markers:
+        _voice += " Phrases: " + "; ".join(rel.voice_markers[-6:]) + "."
+    lines.append(_voice)
     if rel.help_mode:
         lines.append(f"Help mode they like: {rel.help_mode}")
     lines.append(
@@ -148,12 +160,18 @@ def build_soul_context_block(
     )
     if rel.correction_style:
         lines.append(f"Correction style: {rel.correction_style}")
-    if rel.voice_markers:
-        lines.append("Shared voice: " + "; ".join(rel.voice_markers[:6]))
     if work_threads and rel.open_threads:
-        lines.append("Relational open threads:")
-        for t in rel.open_threads[-4:]:
-            lines.append(f"  · {t}")
+        _threads = [
+            t for t in rel.open_threads[-6:]
+            if t
+            and "last successful tool" not in t.lower()
+            and "retry or work around" not in t.lower()
+            and not t.lower().startswith("continue remaining")
+        ][-4:]
+        if _threads:
+            lines.append("Relational open threads:")
+            for t in _threads:
+                lines.append(f"  · {t}")
     if work_threads and rel.tensions:
         lines.append("Tensions (resolve carefully — do not silent-overwrite):")
         for t in rel.tensions[-3:]:
@@ -165,9 +183,17 @@ def build_soul_context_block(
             lines.append(f"  · {p}")
 
     if work_threads and sf.self_habits:
-        lines.append("Memory of myself (how I show up):")
-        for h in sf.self_habits[:4]:
-            lines.append(f"  · {h}")
+        _habits = [
+            h for h in sf.self_habits
+            if h
+            and not h.lower().startswith("what is ")
+            and "intent=" not in h.lower()
+            and "| user:" not in h.lower()
+        ][:4]
+        if _habits:
+            lines.append("Memory of myself (how I show up):")
+            for h in _habits:
+                lines.append(f"  · {h}")
 
     if work_threads and getattr(sf, "future_dreams", None):
         lines.append("Dreams of the future (how I help them reach their goals):")

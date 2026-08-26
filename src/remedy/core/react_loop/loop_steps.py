@@ -450,6 +450,11 @@ async def run_react_steps(s: Any) -> AsyncIterator[str]:
             s.run_until_done = run_until_done
 
         _resolve_and_apply(step_index=0)
+        if str(getattr(turn, "arm_reason", "") or "") == "ask_first":
+            with suppress(Exception):
+                from remedy.core.react_policy import ask_first_nudge_message
+
+                messages.append(ask_first_nudge_message())
         with suppress(Exception):
             from remedy.core.build_todos import load_todos, todos_event_token
 
@@ -475,6 +480,12 @@ async def run_react_steps(s: Any) -> AsyncIterator[str]:
             if turn.plan_mode or plan_mode:
                 logger.info("skip rearm — plan mode")
                 return
+            with suppress(Exception):
+                from remedy.core.turn_context import current_chat_mode, turn_has_attachments
+
+                if current_chat_mode() and not turn_has_attachments():
+                    logger.info("skip rearm — chat pin")
+                    return
             # Only greetings / verbal trivia stay tool-free. Knowledge
             # follow-ups re-arm — do not stall a capable model.
             with suppress(Exception):
@@ -485,6 +496,15 @@ async def run_react_steps(s: Any) -> AsyncIterator[str]:
                 ):
                     logger.info("skip rearm — user message is chat/trivia")
                     return
+            if str(getattr(turn, "arm_reason", "") or "") in (
+                "ask_first",
+                "chat_mode",
+                "no_work_request",
+                "non_work",
+                "l1_pure_chat",
+            ):
+                logger.info("skip rearm — %s", turn.arm_reason)
+                return
             tools, run_until_done = _rearm_agency_tools_fn(turn)
             s.tools = tools
             s.run_until_done = run_until_done

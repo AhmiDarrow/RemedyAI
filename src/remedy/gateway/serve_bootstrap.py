@@ -39,7 +39,34 @@ def attach_messengers_to_gateway(runtime: Any, gateway: Any) -> list[str]:
 
             buf: list[str] = []
             last_typing = 0.0
+            sent_upto = 0
             import time as _time
+
+            async def _flush_phone(*, final: bool) -> None:
+                """Send visible text to the phone as paragraphs land.
+
+                Waiting until the whole ReAct finishes is why Telegram
+                looks dead: typing for minutes, then maybe one dump.
+                """
+                nonlocal sent_upto
+                acc = "".join(buf)
+                dest = str(target) if target else None
+                if final:
+                    rest = acc[sent_upto:].strip()
+                    if rest:
+                        for part in outbound_chunks(rest, ch):
+                            await gateway.send_to(event.channel, part, target=dest)
+                        sent_upto = len(acc)
+                    return
+                while True:
+                    nxt = acc.find("\n\n", sent_upto)
+                    if nxt < 0:
+                        break
+                    piece = acc[sent_upto:nxt].strip()
+                    sent_upto = nxt + 2
+                    if piece:
+                        for part in outbound_chunks(piece, ch):
+                            await gateway.send_to(event.channel, part, target=dest)
 
             async for chunk in handle_messenger_event(runtime, event):
                 if chunk is not None:
@@ -50,14 +77,8 @@ def attach_messengers_to_gateway(runtime: Any, gateway: Any) -> list[str]:
                         last_typing = now
                         with contextlib.suppress(Exception):
                             await typing_fn(str(target))
-            full = "".join(buf).strip()
-            if full:
-                for part in outbound_chunks(full, ch):
-                    await gateway.send_to(
-                        event.channel,
-                        part,
-                        target=str(target) if target else None,
-                    )
+                    await _flush_phone(final=False)
+            await _flush_phone(final=True)
             return
         async for chunk in runtime.handle_event(event):
             if chunk is not None:

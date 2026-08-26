@@ -14,7 +14,7 @@ import {
 import { getSettings } from '../api/settings'
 import { shouldConfirmNewTurn } from '../sessions/concurrentTurns'
 import type { ChatSession } from '../types'
-import { looksLikeBuildKick } from '../utils/buildKick'
+import { looksLikeBuildKick, looksLikeLeaveChat } from '../utils/buildKick'
 import { isPlaceholderTitle, titleFromPrompt } from '../utils/sessionTitle'
 
 type AttachmentMeta = {
@@ -47,7 +47,7 @@ export function useChatSendFlow(opts: {
     sessionId?: string,
     attachments?: AttachmentMeta[],
     planMode?: boolean,
-    opts?: { mode?: 'after' | 'interrupt' | 'steer'; provider?: string },
+    opts?: { mode?: 'after' | 'interrupt' | 'steer'; provider?: string; chatMode?: boolean },
   ) => unknown
   runCommand: (
     command: string,
@@ -69,6 +69,7 @@ export function useChatSendFlow(opts: {
   streaming: boolean
   model: string
   planMode: boolean
+  chatMode: boolean
   setPlanMode: (v: boolean | ((p: boolean) => boolean)) => void
   notify: (title: string, opts?: { body?: string; silent?: boolean }) => void
   runningCount: number
@@ -101,6 +102,7 @@ export function useChatSendFlow(opts: {
     streaming,
     model,
     planMode,
+    chatMode,
     setPlanMode,
     notify,
     runningCount,
@@ -347,12 +349,18 @@ export function useChatSendFlow(opts: {
           )
           void rename(sid, title)
         }
-        // Session log bug: user said "proceed out of plan mode" / "proceed with all
-        // fixes" while Plan was still on → only plan tools → felt stuck. Auto-leave
-        // Plan on build/proceed kicks so Build tools actually load.
+        // Plan: auto-leave on proceed/continue so Build tools actually load.
+        // Chat: stay pinned on "continue" (still talking). Clear work kicks
+        // and attachments leave Chat so agency is not stripped.
         let usePlan = planMode
+        let useChat = chatMode
+        const attached = Boolean(attachments?.length)
         if (usePlan && looksLikeBuildKick(text)) {
           usePlan = false
+          useChat = false
+          setPlanMode(false)
+        } else if (useChat && (attached || looksLikeLeaveChat(text))) {
+          useChat = false
           setPlanMode(false)
         }
         // Concurrent turn guard: 3+ live jobs → confirm (other models/sessions).
@@ -391,6 +399,7 @@ export function useChatSendFlow(opts: {
         void send(text, useModel, sid, attachments, usePlan, {
           ...opts,
           provider: useProvider || undefined,
+          chatMode: useChat,
         })
         window.setTimeout(() => {
           void refreshSessions()
@@ -408,6 +417,7 @@ export function useChatSendFlow(opts: {
       rename,
       refreshSessions,
       planMode,
+      chatMode,
       setPlanMode,
       notify,
       runningCount,
@@ -466,9 +476,10 @@ export function useChatSendFlow(opts: {
       bumpStick()
       send(toSend, bind?.model || model, sid, undefined, planMode, {
         provider: bind?.provider,
+        chatMode,
       })
     },
-    [activeId, streaming, messages, beginEdit, send, model, sessionLlmMap, planMode, bumpStick],
+    [activeId, streaming, messages, beginEdit, send, model, sessionLlmMap, planMode, chatMode, bumpStick],
   )
 
   // Notify only when a turn we started on *this* session ends — not on tab switch.

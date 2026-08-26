@@ -45,6 +45,7 @@ _turn_workspace: ContextVar[TurnWorkspace | None] = ContextVar(
 # Per-turn plan mode + tool trace (must not share mutable runtime lists across
 # concurrent multi-provider streams).
 _turn_plan_mode: ContextVar[bool] = ContextVar("remedy_turn_plan_mode", default=False)
+_turn_chat_mode: ContextVar[bool] = ContextVar("remedy_turn_chat_mode", default=False)
 _turn_tool_steps: ContextVar[list[dict[str, Any]] | None] = ContextVar(
     "remedy_turn_tool_steps", default=None
 )
@@ -109,6 +110,7 @@ _TURN_CONTEXT_VARS: tuple[ContextVar[Any], ...] = (
     _turn_abort,
     _turn_workspace,
     _turn_plan_mode,
+    _turn_chat_mode,
     _turn_tool_steps,
     _turn_session_brief,
     _turn_partner_state,
@@ -265,6 +267,7 @@ def begin_turn(
     project_raw: str | None = None,
     active_path: str | Any = "",
     plan_mode: bool = False,
+    chat_mode: bool = False,
     session_brief: Any = None,
     partner_state: Any = None,
     work_roots: list[str] | None = None,
@@ -292,6 +295,7 @@ def begin_turn(
         ev,
         ws,
         bool(plan_mode),
+        bool(chat_mode),
         [],
         session_brief,
         partner_state,
@@ -318,6 +322,15 @@ def current_plan_mode(runtime: Any = None) -> bool:
     if runtime is not None:
         return bool(getattr(runtime, "_plan_mode", False))
     return bool(_turn_plan_mode.get())
+
+
+def current_chat_mode(runtime: Any = None) -> bool:
+    """Chat pin for this coroutine turn — tools stay off."""
+    if in_active_turn() or _turn_tool_steps.get() is not None or _turn_session_id.get():
+        return bool(_turn_chat_mode.get())
+    if runtime is not None:
+        return bool(getattr(runtime, "_chat_mode", False))
+    return bool(_turn_chat_mode.get())
 
 
 def current_turn_approval_mode() -> str | None:

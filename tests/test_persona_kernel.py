@@ -77,6 +77,7 @@ def test_temperament_invariants_present():
     low = PERSONA_TEMPERAMENT.lower()
     assert "devoted, not servile" in low
     assert "emergent" in low
+    assert "talk like a friend" in low
     assert "never claim humanity" in low
     assert "not preach" in low
 
@@ -86,6 +87,8 @@ def test_ask_before_assume_rides_the_preamble():
     Remedy behavior (not shopping-only), so it lives in the persona kernel."""
     low = identity_system_preamble().lower()
     assert "ask before you assume" in low
+    assert "just talking" in low or "versus just talking" in low
+    assert "leftover" in low
     # Reversible low-stakes defaults still get decided, not paused on.
     assert "reversible" in low and "low-stakes" in low
 
@@ -96,6 +99,8 @@ def test_ask_before_assume_rides_the_preamble():
 def test_system_body_style_is_emergent_not_scripted():
     low = _DEFAULT_SYSTEM_BODY.lower()
     assert "emergent" in low
+    assert "talk like a friend" in low
+    assert "high-signal" not in low
     assert "warm-professional" not in low  # old fixed-voice contract removed
 
 

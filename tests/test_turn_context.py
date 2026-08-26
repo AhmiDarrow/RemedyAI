@@ -12,6 +12,7 @@ import pytest
 from remedy.core.turn_context import (
     abort_session,
     begin_turn,
+    current_chat_mode,
     current_last_user_text,
     current_plan_mode,
     current_turn_approval_mode,
@@ -153,6 +154,21 @@ def test_turn_session_id_prefers_contextvar():
     finally:
         end_turn("ctx-session", *tok)
     assert turn_session_id(runtime) == "runtime-stale"
+
+
+def test_chat_mode_isolated_per_turn():
+
+    t_chat = begin_turn("chat-sess", project_raw=None, active_path=".", chat_mode=True)
+    try:
+        assert current_chat_mode() is True
+        assert current_plan_mode() is False
+    finally:
+        end_turn("chat-sess", *t_chat)
+    t_build = begin_turn("build-sess", project_raw=None, active_path=".")
+    try:
+        assert current_chat_mode() is False
+    finally:
+        end_turn("build-sess", *t_build)
 
 
 def test_plan_mode_and_tool_steps_isolated_per_turn():

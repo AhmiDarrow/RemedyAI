@@ -102,6 +102,27 @@
 
 .grove-approvals { padding: 0 18px; flex: none; }
 
+.grove-mode-row {
+  display: flex;
+  gap: 8px;
+  padding: 8px 32px 0;
+}
+.grove-mode-chip {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.grove-mode-chip.on {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
 .grove-plots {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));

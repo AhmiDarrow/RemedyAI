@@ -4,6 +4,48 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — Chat pin next to Plan / Build
+
+- Cycle **Chat → Plan → Build** on the session chip and status bar (Ctrl+B).
+  Chat means conversation, no tool pack. Grove’s start page has Talk / Plan /
+  Build. Auto still applies in Build: this message must ask for work.
+
+### Fixed — chat without a work request no longer starts a tool storm
+
+- Tools require a work signal in *this* message (shape, kick, path, debug
+  follow-up, a real brief). Leftover todos and “not in the hi/thanks list”
+  are not a request. “Good deal” is chat.
+
+### Fixed — when unsure, ask; do not assume work or silence
+
+- Soft agrees (“sounds good”) and leftover review todos do not inherit tools.
+  Remedy asks one short question instead of guessing. Chat pin stays on
+  “continue” (that is still talking). “interesting” is not a test suite;
+  “.com” is not a C file. Attachments, Godot/create-app asks, and “keep
+  going” still get tools — Chat pin does not blind a file they handed over.
+
+### Fixed — Telegram going silent on short chats
+
+- Short reassurance (“it’s ok we’ll get there”) is chat, not a tool marathon.
+- Messenger replies flush to the phone as paragraphs land, not only when
+  the whole ReAct loop ends.
+- Telegram uses the last desktop provider/model, not the launch default.
+
+### Changed — speak like a friend, not a briefing
+
+- Default voice is a friend whose speech learns this partner (register +
+  phrases they actually use). The old “concise, decisive, high-signal”
+  default is gone. Soul inject keeps one Voice line and drops machine
+  leftover threads/habits so the register can ride.
+
+### Fixed — final answers flattened into one paragraph
+
+- Stutter collapse no longer rejoins unique sentences with a single space.
+  Headings, lists, and blank lines in the final bubble stay where the model
+  put them (dogfood: a project review became
+  `Nothing written. ## What this tree is`). Duplicate looping mantras still
+  collapse.
+
 ## [0.41.0] - 2026-08-25
 
 ### Added — memory authority and checkpoint recovery

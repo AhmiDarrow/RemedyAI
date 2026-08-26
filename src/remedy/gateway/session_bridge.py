@@ -30,6 +30,27 @@ from remedy.models import (
 logger = logging.getLogger(__name__)
 
 
+def _last_desktop_muscle() -> tuple[str | None, str | None]:
+    """Provider/model the owner last used on desktop — remote should match."""
+    with suppress(Exception):
+        from remedy.interfaces.api_support import load_config
+
+        cfg = load_config() or {}
+        last_p = str(cfg.get("last_llm_provider") or "").strip().lower() or None
+        cfg_p = str(cfg.get("llm_provider") or "").strip().lower() or None
+        by_p = cfg.get("last_model_by_provider") or {}
+        last_m = None
+        if last_p and isinstance(by_p, dict):
+            last_m = str(by_p.get(last_p) or "").strip() or None
+        # Do not pair xAI with the launch DeepSeek id (or the reverse).
+        if not last_m and last_p and (not cfg_p or last_p == cfg_p):
+            last_m = str(cfg.get("llm_model") or "").strip() or None
+        if not last_p:
+            last_p = cfg_p
+        return last_p, last_m
+    return None, None
+
+
 async def _attach_to_focused_session(
     memory: Any,
     *,
@@ -191,15 +212,22 @@ async def ensure_session_for_event(
     model = None
     agent = None
     llm_provider = None
+    last_p, last_m = _last_desktop_muscle()
+    if last_p:
+        llm_provider = last_p
+    if last_m:
+        model = last_m
     if runtime is not None:
         try:
             if hasattr(runtime, "effective_project_path"):
                 project_path = str(runtime.effective_project_path() or "") or None
             cfg = getattr(runtime, "config", None)
             if cfg is not None:
-                model = getattr(cfg, "llm_model", None)
                 agent = getattr(cfg, "name", None)
-                llm_provider = getattr(cfg, "llm_provider", None)
+                if not llm_provider:
+                    llm_provider = getattr(cfg, "llm_provider", None)
+                if not model:
+                    model = getattr(cfg, "llm_model", None)
         except Exception:
             pass
 
@@ -342,8 +370,23 @@ async def handle_messenger_event(
                 return
             claimed = True
             claim_epoch = stream_claim_epoch(session.id)
+            last_p, last_m = _last_desktop_muscle()
+            if memory is not None and last_p:
+                cur_p = str(getattr(session, "llm_provider", "") or "").strip().lower()
+                cur_m = str(getattr(session, "model", "") or "").strip()
+                if cur_p != last_p or (last_m and cur_m != last_m):
+                    with suppress(Exception):
+                        updated = await memory.update_chat_session(
+                            session.id,
+                            llm_provider=last_p,
+                            model=last_m or getattr(session, "model", None),
+                        )
+                        if updated is not None:
+                            session = updated
             if memory is not None:
-                model = getattr(getattr(runtime, "config", None), "llm_model", None)
+                model = getattr(session, "model", None) or getattr(
+                    getattr(runtime, "config", None), "llm_model", None
+                )
                 agent = getattr(getattr(runtime, "config", None), "name", None)
                 await persist_user_message(
                     memory, session, message, model=model, agent=agent

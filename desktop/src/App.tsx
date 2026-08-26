@@ -285,17 +285,32 @@ export default function App() {
   const [pendingGrovePlace, setPendingGrovePlace] = useState<
     'home' | 'alongside' | 'storyline' | null
   >(null)
-  /** Plan mode is per-session so switching chats does not stick Plan/Build. */
-  const [planModeBySession, setPlanModeBySession] = useState<Record<string, boolean>>({})
-  const planMode = Boolean(activeId && planModeBySession[activeId])
+  /** Chat / Plan / Build is per-session so switching chats does not stick the pin. */
+  type WorkMode = 'chat' | 'plan' | 'build'
+  const [workModeBySession, setWorkModeBySession] = useState<Record<string, WorkMode>>({})
+  const workMode: WorkMode = (activeId && workModeBySession[activeId]) || 'build'
+  const planMode = workMode === 'plan'
+  const chatMode = workMode === 'chat'
+  const setWorkMode = useCallback(
+    (mode: WorkMode, sid?: string) => {
+      const id = sid || activeId
+      if (!id) return
+      setWorkModeBySession((prev) => {
+        if (prev[id] === mode) return prev
+        return { ...prev, [id]: mode }
+      })
+    },
+    [activeId],
+  )
   const setPlanMode = useCallback(
     (value: boolean | ((prev: boolean) => boolean)) => {
       if (!activeId) return
-      setPlanModeBySession((prev) => {
-        const cur = Boolean(prev[activeId])
+      setWorkModeBySession((prev) => {
+        const cur = (prev[activeId] || 'build') === 'plan'
         const next = typeof value === 'function' ? value(cur) : value
-        if (cur === next) return prev
-        return { ...prev, [activeId]: next }
+        const mode: WorkMode = next ? 'plan' : 'build'
+        if ((prev[activeId] || 'build') === mode) return prev
+        return { ...prev, [activeId]: mode }
       })
     },
     [activeId],
@@ -309,14 +324,16 @@ export default function App() {
   const [planLeaveConfirm, setPlanLeaveConfirm] = useState<TaskPlan | null>(null)
   const togglePlanMode = useCallback(() => {
     if (!activeId) return
-    const cur = Boolean(planModeBySession[activeId])
+    const cur = workMode
     const draft = currentPlanRef.current
-    if (cur && draft?.id && String(draft.status || 'draft').toLowerCase() === 'draft') {
+    if (cur === 'plan' && draft?.id && String(draft.status || 'draft').toLowerCase() === 'draft') {
       setPlanLeaveConfirm(draft)
       return
     }
-    setPlanMode(!cur)
-  }, [activeId, planModeBySession, setPlanMode])
+    const order: WorkMode[] = ['chat', 'plan', 'build']
+    const next = order[(order.indexOf(cur) + 1) % 3]!
+    setWorkMode(next)
+  }, [activeId, workMode, setWorkMode])
   const [panel, setPanel] = useState<'memory' | 'skills' | 'settings' | null>(null)
   const {
     wsLayout,
@@ -1153,6 +1170,7 @@ export default function App() {
     streaming,
     model,
     planMode,
+    chatMode,
     setPlanMode,
     notify,
     runningCount,
@@ -1278,7 +1296,7 @@ export default function App() {
         action: () => void handleImport(),
       },
       { id: 'palette', label: 'Command palette', description: 'Open this palette', category: 'general', action: () => setPaletteOpen(true) },
-      { id: 'plan', label: 'Toggle Plan / Build', description: 'Switch between plan and build', category: 'general', action: () => togglePlanMode() },
+      { id: 'plan', label: 'Cycle Chat / Plan / Build', description: 'Pin conversation, planning, or building', category: 'general', action: () => togglePlanMode() },
       { id: 'memory', label: 'Memory', description: 'Toggle memory panel', category: 'panel', action: () => setPanel((p) => (p === 'memory' ? null : 'memory')) },
       { id: 'skills', label: 'Skills', description: 'Toggle skills panel', category: 'panel', action: () => setPanel((p) => (p === 'skills' ? null : 'skills')) },
       { id: 'settings', label: 'Settings', description: 'Open Settings', category: 'panel', action: () => openSettings() },
@@ -1817,6 +1835,8 @@ export default function App() {
           onGoalOpened={() => setPendingGroveGoal(null)}
           openPlace={pendingGrovePlace}
           onPlaceOpened={() => setPendingGrovePlace(null)}
+          workMode={workMode}
+          onWorkModeChange={setWorkMode}
         />
       )}
 
@@ -1884,6 +1904,7 @@ export default function App() {
             modelLabel={barModel || model}
             providerLabel={barProvider || llmProvider}
             planMode={planMode}
+            chatMode={chatMode}
             streaming={streaming}
             messageCount={
               activeId
@@ -2059,6 +2080,7 @@ export default function App() {
               onUpdateQueued={updateQueued}
               disabled={serverState !== 'ready'}
               planMode={planMode}
+              chatMode={chatMode}
               onTogglePlanMode={togglePlanMode}
               agents={agentDefs}
               editDraft={editDraft}
@@ -2237,6 +2259,7 @@ export default function App() {
           theme={theme}
           onThemeChange={setTheme}
           planMode={planMode}
+          chatMode={chatMode}
           onTogglePlanMode={togglePlanMode}
           panel={
             wsLayout.right === 'settings' && wsLayout.rightRail === 'open'

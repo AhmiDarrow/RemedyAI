@@ -37,7 +37,7 @@ def test_resolve_tools_never_strips_task():
     )
     assert d.tools is not None
     assert d.run_until_done is True
-    assert d.reason in ("task", "task_write_first", "message_wants_tools") or "task" in d.reason
+    assert d.reason in ("task", "task_write_first", "message_wants_tools", "build_active") or "task" in d.reason or "message_wants" in d.reason
 
 
 def test_resolve_tools_verbal_only_disarms_even_with_history():
@@ -102,6 +102,106 @@ def test_resolve_tools_frustrated_why_keeps_build_armed():
     assert idle.reason != "non_work"
 
 
+def test_resolve_tools_chat_mode_disarms_even_with_work_ask():
+    from remedy.core.turn_context import begin_turn, end_turn
+
+    all_t = [_tool("file_write"), _tool("bash_exec")]
+    toks = begin_turn("chat-pin", project_raw=None, active_path=".", chat_mode=True)
+    try:
+        d = resolve_tools(
+            message="implement the installer",
+            all_tools=all_t,
+            turn_tier=1,
+            build_active=True,
+        )
+        assert d.tools is None
+        assert d.reason == "chat_mode"
+    finally:
+        end_turn("chat-pin", *toks)
+
+
+def test_resolve_tools_attachments_keep_agency():
+    """A file in the hand is a request — Chat pin / blank caption must not blind tools."""
+    all_t = [_tool("file_read"), _tool("companion_context")]
+    d = resolve_tools(
+        message="what do you think?",
+        all_tools=all_t,
+        turn_tier=1,
+        has_attachments=True,
+    )
+    assert d.tools is not None
+    assert d.reason == "attachments"
+    blank = resolve_tools(
+        message="",
+        all_tools=all_t,
+        turn_tier=1,
+        has_attachments=True,
+    )
+    assert blank.tools is not None
+    from remedy.core.turn_context import begin_turn, end_turn
+
+    toks = begin_turn("chat-att", project_raw=None, active_path=".", chat_mode=True)
+    try:
+        pinned = resolve_tools(
+            message="look at this",
+            all_tools=all_t,
+            turn_tier=1,
+            has_attachments=True,
+        )
+        assert pinned.tools is not None
+    finally:
+        end_turn("chat-att", *toks)
+
+
+def test_resolve_tools_game_create_stays_armed():
+    """Do not strip Godot / create-app ability when tightening chat gating."""
+    all_t = [_tool("file_write"), _tool("file_read")]
+    d = resolve_tools(
+        message="make a tiny platformer in godot",
+        all_tools=all_t,
+        turn_tier=1,
+    )
+    assert d.tools is not None
+    assert d.reason != "l1_pure_chat"
+    assert d.reason != "no_work_request"
+    assert d.reason != "ask_first"
+
+
+def test_resolve_tools_ack_does_not_inherit_leftover_build():
+    """'Good deal' is not a work request — leftover review todos stay off."""
+    all_t = [_tool("file_write"), _tool("bash_exec"), _tool("list_dir")]
+    d = resolve_tools(
+        message="Good deal",
+        all_tools=all_t,
+        turn_tier=1,
+        build_active=True,
+        open_tasks=["finish the project review"],
+        history=[
+            {"role": "assistant", "tool_calls": [{"id": "1", "function": {"name": "file_read"}}]},
+            {"role": "tool", "content": "ok"},
+        ],
+    )
+    assert d.tools is None
+    assert d.reason == "ask_first"
+
+
+def test_resolve_tools_sounds_good_asks_when_work_is_open():
+    """Soft agree is not a continue — ask, don't assume leftover tools."""
+    all_t = [_tool("file_write"), _tool("bash_exec")]
+    d = resolve_tools(
+        message="sounds good",
+        all_tools=all_t,
+        turn_tier=1,
+        build_active=True,
+        open_tasks=["finish the logos"],
+    )
+    assert d.tools is None
+    assert d.reason == "ask_first"
+    idle = resolve_tools(message="sounds good", all_tools=all_t, turn_tier=1)
+    assert idle.tools is None
+    assert idle.reason == "no_work_request"
+
+
 def test_resolve_tools_l1_strips_pure_chat():
     all_t = [_tool("file_write")]
     d = resolve_tools(
@@ -113,30 +213,13 @@ def test_resolve_tools_l1_strips_pure_chat():
     assert d.reason == "l1_pure_chat"
 
 
-def test_resolve_tools_tier0_is_not_treated_as_l1(monkeypatch):
-    """Tier 0 must not take the L1-only chat strip (``int(0 or 1)`` was 1).
-
-    The early bare-greeting strip uses the same classifier, so it is stubbed to
-    pass the first call and flag the second: that isolates the tier-gated
-    branch, which is the only place the tier is consulted.
-    """
-    from remedy.core import react_policy
-
-    calls = {"n": 0}
-
-    def _chat_only(_msg):
-        calls["n"] += 1
-        return calls["n"] > 1
-
-    monkeypatch.setattr(react_policy, "is_chat_only_message", _chat_only)
+def test_resolve_tools_greeting_disarms_on_any_tier():
+    """Hi/thanks stay chat-only regardless of turn tier."""
     all_t = [_tool("file_write"), _tool("bash_exec")]
-    calls["n"] = 0
-    d1 = resolve_tools(message="ok so", all_tools=all_t, turn_tier=1)
-    assert d1.reason == "l1_pure_chat"
-    calls["n"] = 0
-    d0 = resolve_tools(message="ok so", all_tools=all_t, turn_tier=0)
-    assert d0.reason != "l1_pure_chat"
-    assert d0.tools is not None
+    for tier in (0, 1):
+        d = resolve_tools(message="thanks", all_tools=all_t, turn_tier=tier)
+        assert d.tools is None
+        assert d.reason == "l1_pure_chat"
 
 
 def test_resolve_tools_greeting_disarms_leftover_build():

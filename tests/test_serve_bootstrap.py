@@ -143,6 +143,14 @@ async def test_a_messenger_reply_is_sent_back_over_the_channel(wire):
 
 
 @pytest.mark.asyncio
+async def test_paragraphs_go_to_the_phone_as_they_land(wire):
+    """Do not wait for the whole ReAct loop — Telegram looks dead if we do."""
+    out = wire(reply=("first bit.\n\n", "second bit."))
+    await drain(out["gateway"], Event())
+    assert [p for p, _ in out["gateway"].sent] == ["first bit.", "second bit."]
+
+
+@pytest.mark.asyncio
 async def test_the_reply_is_also_streamed_to_the_caller(wire):
     out = wire(reply=("a", "b"))
     assert await drain(out["gateway"], Event()) == ["a", "b"]

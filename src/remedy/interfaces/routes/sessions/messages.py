@@ -290,6 +290,7 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             model=sess_model,
             attachments=att_dicts,
             plan_mode=bool(getattr(req, "plan_mode", False)),
+            chat_mode=bool(getattr(req, "chat_mode", False)),
             provider=sess_provider,
         ):
             # Keep user-visible text only (tool lifecycle events are @@-prefixed).
