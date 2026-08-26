@@ -110,6 +110,9 @@ class TurnState:
     tool_batches: int = 0
     pseudo_recoveries: int = 0
     disconnect_retries: int = 0
+    # Armed-ceiling forcing fires at most once; a second decline is a signal.
+    armed_ceiling_fired: bool = False
+    intent_declined_recorded: bool = False
     # Task loop phases (product language)
     phase: str = "idle"  # idle | research | plan | build | done
     research_batches: int = 0
@@ -296,6 +299,35 @@ def soft_api_recovery_action(
     return "stop"
 
 
+# Read-only tools an ambiguous (non-work-verdict) turn may still use to peek
+# before asking. No shell, no writes, no computer input — misclassification
+# in either direction stays cheap.
+AMBIGUOUS_READONLY_TOOLS = frozenset(
+    {
+        "file_read",
+        "list_dir",
+        "file_glob",
+        "repo_search",
+        "memory_search",
+        "skill_search",
+        "todo_read",
+        "help_list",
+        "help_read",
+    }
+)
+
+
+def _readonly_peek_tools(
+    all_tools: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]] | None:
+    picked = [
+        t
+        for t in (all_tools or [])
+        if ((t.get("function") or {}).get("name") or "") in AMBIGUOUS_READONLY_TOOLS
+    ]
+    return picked or None
+
+
 def resolve_tools(
     *,
     message: str,
@@ -414,6 +446,15 @@ def resolve_tools(
         task_like = bool(looks_like_task_request(message or ""))
         msg_wants = msg_wants or task_like
 
+    # Learned per-partner intent (arm-only): teaches toward the regex verdict
+    # every turn and may override False→True once confidently trained. It can
+    # never disarm — the regex layer stays the floor.
+    if step_index == 0:
+        with suppress(Exception):
+            from remedy.core.intent_learn import consult
+
+            msg_wants = bool(consult(message or "", regex_verdict=bool(msg_wants)))
+
     if has_att:
         msg_wants = True
 
@@ -488,12 +529,19 @@ def resolve_tools(
             open_work = history_suggests_open_work(
                 history, open_tasks=open_tasks or None
             )
+    # Ambiguous middle: keep a small read-only peek pack instead of stripping
+    # everything. The model may still just answer (run_until_done stays off,
+    # the ceiling never forces these), but a misread work ask isn't blind —
+    # it can look before asking. Strictly added ability.
+    peek = _readonly_peek_tools(all_t)
     if open_work:
-        logger.info("react_tools disarm reason=ask_first")
-        return ToolsDecision(None, False, "ask_first", pack="none")
+        logger.info("react_tools soft-disarm reason=ask_first pack=peek")
+        return ToolsDecision(peek, False, "ask_first", pack="peek" if peek else "none")
 
-    logger.info("react_tools disarm reason=no_work_request")
-    return ToolsDecision(None, False, "no_work_request", pack="none")
+    logger.info("react_tools soft-disarm reason=no_work_request pack=peek")
+    return ToolsDecision(
+        peek, False, "no_work_request", pack="peek" if peek else "none"
+    )
 
 
 def apply_tools_decision(state: TurnState, decision: ToolsDecision) -> None:

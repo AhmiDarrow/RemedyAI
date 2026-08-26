@@ -168,7 +168,11 @@ def test_resolve_tools_game_create_stays_armed():
 
 
 def test_resolve_tools_ack_does_not_inherit_leftover_build():
-    """'Good deal' is not a work request — leftover review todos stay off."""
+    """'Good deal' is not a work request — leftover review todos never re-arm.
+
+    Ambiguous acks keep only the read-only peek pack (look before asking):
+    no write/shell tools, and the turn is never driven (run_until_done off).
+    """
     all_t = [_tool("file_write"), _tool("bash_exec"), _tool("list_dir")]
     d = resolve_tools(
         message="Good deal",
@@ -181,8 +185,11 @@ def test_resolve_tools_ack_does_not_inherit_leftover_build():
             {"role": "tool", "content": "ok"},
         ],
     )
-    assert d.tools is None
     assert d.reason == "ask_first"
+    assert d.run_until_done is False
+    names = {((t.get("function") or {}).get("name") or "") for t in (d.tools or [])}
+    assert names == {"list_dir"}
+    assert "file_write" not in names and "bash_exec" not in names
 
 
 def test_resolve_tools_sounds_good_asks_when_work_is_open():

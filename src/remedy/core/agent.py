@@ -1208,6 +1208,13 @@ class BasicRuntime(AgentRuntime):
             steps_snap = list(current_turn_tool_steps(self))
             # Captured before end_turn() resets the turn contextvars.
             aborted_snap = is_turn_aborted()
+            # Per-partner intent learning: a turn that really used tools is a
+            # confirmed work label for this message shape (see intent_learn).
+            if steps_snap and not aborted_snap and not plan_mode and not internal:
+                with suppress(Exception):
+                    from remedy.core.intent_learn import record_confirmed_work
+
+                    record_confirmed_work(message or "")
             # Write turn-local continuity back into session caches / live store
             # so the next turn for this session resumes the same brief/partner.
             with suppress(Exception):

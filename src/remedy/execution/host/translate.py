@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sys
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -439,21 +440,29 @@ def _rewrite_segment(segment: str) -> tuple[str, list[str]]:
             i += 1
         if slice_files:
             exe = _python_exe()
-            if not exe:
-                notes.append(f"{head} {_NO_PY_NOTE}")
-                return s, notes
-            notes.append(f"{head} → python slice")
-            return _python_line_slice(exe, slice_files[0], n, tail=(head == "tail")), notes
+            if exe:
+                notes.append(f"{head} → python slice")
+                return _python_line_slice(exe, slice_files[0], n, tail=(head == "tail")), notes
+            pw = _pwsh_exe()
+            if pw:
+                notes.append(f"{head} → pwsh Get-Content")
+                return _pwsh_line_slice(pw, slice_files[0], n, tail=(head == "tail")), notes
+            notes.append(f"{head} {_NO_PY_NOTE}")
+            return s, notes
 
     if head == "wc":
         wc_files = [_unquote(t) for t in toks[1:] if not t.startswith("-")]
         if wc_files and any(t in ("-l", "--lines") for t in toks[1:]):
             exe = _python_exe()
-            if not exe:
-                notes.append(f"wc -l {_NO_PY_NOTE}")
-                return s, notes
-            notes.append("wc -l → python line count")
-            return _python_line_count(exe, wc_files[0]), notes
+            if exe:
+                notes.append("wc -l → python line count")
+                return _python_line_count(exe, wc_files[0]), notes
+            pw = _pwsh_exe()
+            if pw:
+                notes.append("wc -l → pwsh Measure-Object")
+                return _pwsh_line_count(pw, wc_files[0]), notes
+            notes.append(f"wc -l {_NO_PY_NOTE}")
+            return s, notes
 
     if head == "find":
         name_pat = ""
@@ -513,18 +522,41 @@ def _python_exe() -> str:
             return found
     except Exception:
         pass
-    if getattr(sys, "frozen", False):
-        return ""
-    exe = sys.executable or ""
-    try:
-        from remedy.core.build_python import is_usable_host_python
+    from remedy.core.runtime_identity import is_frozen_install
 
-        if exe and is_usable_host_python(exe):
-            return exe
-    except Exception:
-        if exe and "remedy" not in os.path.basename(exe).lower():
-            return exe
+    if is_frozen_install():
+        return ""
+    from remedy.core.build_python import is_usable_host_python
+
+    exe = sys.executable or ""
+    if exe and is_usable_host_python(exe):
+        return exe
     return ""
+
+
+def _pwsh_exe() -> str:
+    """PowerShell for line rewrites when no CPython exists (PS 3+ suffices)."""
+    return shutil.which("pwsh") or shutil.which("powershell") or ""
+
+
+def _ps_q(path: str) -> str:
+    win_p = path.replace("/", "\\") if ("/" in path or os.name == "nt") else path
+    return "'" + win_p.replace("'", "''") + "'"
+
+
+def _pwsh_line_slice(pw: str, path: str, n: int, *, tail: bool) -> str:
+    op = f"-Tail {int(n)}" if tail else f"-TotalCount {int(n)}"
+    return (
+        f"{_q(pw)} -NoProfile -Command "
+        f'"Get-Content -LiteralPath {_ps_q(path)} {op}"'
+    )
+
+
+def _pwsh_line_count(pw: str, path: str) -> str:
+    return (
+        f"{_q(pw)} -NoProfile -Command "
+        f'"(Get-Content -LiteralPath {_ps_q(path)} | Measure-Object -Line).Lines"'
+    )
 
 
 def _python_line_slice(exe: str, path: str, n: int, *, tail: bool) -> str:
@@ -568,18 +600,23 @@ def rewrite_posix_argv(argv: list[str]) -> tuple[list[str], list[str]]:
         files = [t for t in rest if not t.startswith("-")]
         if files:
             exe = _python_exe()
-            if not exe:
-                notes.append(f"wc -l {_NO_PY_NOTE}")
-                return argv, notes
-            notes.append("wc -l → python line count")
             win_p = files[0].replace("/", "\\") if ("/" in files[0] or os.name == "nt") else files[0]
-            code = (
-                "p=open(r'''"
-                + win_p.replace("'''", "")
-                + "''',encoding='utf-8',errors='replace').read().splitlines();"
-                + "print(len(p))"
-            )
-            return [exe, "-c", code], notes
+            if exe:
+                notes.append("wc -l → python line count")
+                code = (
+                    "p=open(r'''"
+                    + win_p.replace("'''", "")
+                    + "''',encoding='utf-8',errors='replace').read().splitlines();"
+                    + "print(len(p))"
+                )
+                return [exe, "-c", code], notes
+            pw = _pwsh_exe()
+            if pw:
+                notes.append("wc -l → pwsh Measure-Object")
+                ps = f"(Get-Content -LiteralPath {_ps_q(files[0])} | Measure-Object -Line).Lines"
+                return [pw, "-NoProfile", "-Command", ps], notes
+            notes.append(f"wc -l {_NO_PY_NOTE}")
+            return argv, notes
     return argv, notes
 
 

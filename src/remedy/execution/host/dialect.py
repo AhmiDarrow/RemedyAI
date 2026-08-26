@@ -122,15 +122,9 @@ def save_dialect(dialect: HostDialect, home: str | Path | None = None) -> Path:
 
 
 def _python_cmd_usable(path: str) -> bool:
-    try:
-        from remedy.core.build_python import is_usable_host_python
+    from remedy.core.build_python import is_usable_host_python
 
-        return is_usable_host_python(path)
-    except Exception:
-        name = os.path.basename((path or "").replace("\\", "/")).lower()
-        if name.endswith(".exe"):
-            name = name[:-4]
-        return bool(name) and "remedy" not in name and "windowsapps" not in (path or "").lower()
+    return is_usable_host_python(path)
 
 
 def probe_host_dialect(

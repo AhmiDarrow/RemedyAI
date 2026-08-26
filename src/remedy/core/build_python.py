@@ -63,6 +63,79 @@ def is_usable_host_python(path: str) -> bool:
     return _stem_is_python(p)
 
 
+def resolve_python_interpreter() -> list[str] | None:
+    """Return the argv prefix for a real Python 3 interpreter, or ``None``.
+
+    In the frozen Desktop build ``sys.executable`` is ``remedy-desktop.exe``;
+    running ``remedy-desktop.exe script.py`` prints the sidecar's usage and
+    exits 2. Resolution order: ``REMEDY_PYTHON`` (file path or bare name),
+    ``sys.executable`` when it really is Python, then PATH (``python``,
+    ``py -3``, ``python3``), then the usual Windows install dirs.
+    """
+    import glob
+
+    override = (os.environ.get("REMEDY_PYTHON") or "").strip().strip("\"'")
+    if override:
+        if os.path.isfile(override):
+            return [override]
+        found = shutil.which(override)
+        if found:
+            return [found]
+
+    from remedy.core.runtime_identity import is_frozen_install
+
+    frozen = is_frozen_install()
+    exe = sys.executable or ""
+    if not frozen and exe and _stem_is_python(exe):
+        return [exe]
+
+    def _usable(p: str | None) -> bool:
+        # Skip the Microsoft Store execution alias (opens the Store, exit 9009).
+        if not p:
+            return False
+        return _stem_is_python(p) and "windowsapps" not in p.lower()
+
+    found = shutil.which("python")
+    if _usable(found):
+        return [str(found)]
+    found = shutil.which("py")
+    if found:
+        return [found, "-3"]
+    found = shutil.which("python3")
+    if _usable(found):
+        return [str(found)]
+
+    if os.name == "nt":
+        patterns: list[str] = []
+        local = os.environ.get("LOCALAPPDATA") or ""
+        if local:
+            patterns.append(os.path.join(local, "Programs", "Python", "Python3*", "python.exe"))
+        for base in (
+            os.environ.get("PROGRAMFILES") or r"C:\Program Files",
+            os.environ.get("PROGRAMFILES(X86)") or r"C:\Program Files (x86)",
+        ):
+            patterns.append(os.path.join(base, "Python3*", "python.exe"))
+        patterns.append(r"C:\Python3*\python.exe")
+        hits: list[str] = []
+        for pat in patterns:
+            hits.extend(p for p in glob.glob(pat) if os.path.isfile(p))
+        if hits:
+            # Highest version first (Python313 before Python39).
+            def _ver(p: str) -> tuple[int, ...]:
+                m = re.search(r"Python(\d)(\d+)", p, re.I)
+                return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+            hits.sort(key=_ver, reverse=True)
+            return [hits[0]]
+
+    # Last resort: a non-frozen sys.executable that is Python under another name.
+    if not frozen and exe and not _stem_is_python(exe):
+        stem = os.path.basename(exe).lower()
+        if "remedy" not in stem:
+            return [exe]
+    return None
+
+
 _LAUNCHER_RESOLVE_CACHE: dict[tuple[str, ...], str] = {}
 
 
@@ -118,8 +191,6 @@ def host_python_executable() -> str:
     if exe:
         return exe
     with suppress(Exception):
-        from remedy.core.workspace_tools.shell import resolve_python_interpreter
-
         exe = _single_exe(resolve_python_interpreter())
     return exe or ""
 
@@ -150,8 +221,6 @@ def python_cmd_for_subprocess(root: Path | str | None = None) -> list[str]:
                     return list(py)
 
     with suppress(Exception):
-        from remedy.core.workspace_tools.shell import resolve_python_interpreter
-
         found = resolve_python_interpreter()
         if found:
             if len(found) == 1 and _looks_like_sidecar(found[0]):
@@ -170,10 +239,12 @@ def python_cmd_for_subprocess(root: Path | str | None = None) -> list[str]:
         if _stem_is_python(which):
             return [which]
 
+    from remedy.core.runtime_identity import is_frozen_install
+
     exe = sys.executable or ""
     if (
         exe
-        and not getattr(sys, "frozen", False)
+        and not is_frozen_install()
         and _stem_is_python(exe)
         and not _looks_like_sidecar(exe)
     ):

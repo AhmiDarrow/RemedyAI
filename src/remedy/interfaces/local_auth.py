@@ -48,23 +48,9 @@ def _env_truthy(name: str) -> bool | None:
 
 def _desktop_sidecar_context() -> bool:
     """True when running as packaged/desktop sidecar (IPC preferred over HTTP bootstrap)."""
-    import sys
+    from remedy.core.runtime_identity import is_desktop_runtime
 
-    if str(os.environ.get("REMEDY_DESKTOP_SIDECAR", "")).strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    ):
-        return True
-    if str(os.environ.get("REMEDY_DESKTOP", "")).strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    ):
-        return True
-    return bool(getattr(sys, "frozen", False))
+    return is_desktop_runtime()
 
 
 def http_bootstrap_enabled() -> bool:

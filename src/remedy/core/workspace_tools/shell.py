@@ -36,75 +36,13 @@ def _is_python_binary(path_str: str) -> bool:
 def resolve_python_interpreter() -> list[str] | None:
     """Return the argv prefix for a real Python 3 interpreter, or ``None``.
 
-    In the frozen Desktop build ``sys.executable`` is ``remedy-desktop.exe``;
-    running ``remedy-desktop.exe script.py`` prints the sidecar's usage and
-    exits 2. Resolution order: ``REMEDY_PYTHON`` (file path or bare name),
-    ``sys.executable`` when it really is Python, then PATH (``python``,
-    ``py -3``, ``python3``), then the usual Windows install dirs.
+    Canonical implementation lives in ``remedy.core.build_python`` — the
+    single authority for interpreter resolution. This wrapper stays so
+    existing imports and monkeypatches of the shell name keep working.
     """
-    import glob
-    import os
-    import shutil
-    import sys
+    from remedy.core.build_python import resolve_python_interpreter as _impl
 
-    override = (os.environ.get("REMEDY_PYTHON") or "").strip().strip("\"'")
-    if override:
-        if os.path.isfile(override):
-            return [override]
-        found = shutil.which(override)
-        if found:
-            return [found]
-
-    frozen = bool(getattr(sys, "frozen", False))
-    exe = sys.executable or ""
-    if not frozen and exe and _is_python_binary(exe):
-        return [exe]
-
-    def _usable(p: str | None) -> bool:
-        # Skip the Microsoft Store execution alias (opens the Store, exit 9009).
-        if not p:
-            return False
-        return _is_python_binary(p) and "windowsapps" not in p.lower()
-
-    found = shutil.which("python")
-    if _usable(found):
-        return [str(found)]
-    found = shutil.which("py")
-    if found:
-        return [found, "-3"]
-    found = shutil.which("python3")
-    if _usable(found):
-        return [str(found)]
-
-    if os.name == "nt":
-        patterns: list[str] = []
-        local = os.environ.get("LOCALAPPDATA") or ""
-        if local:
-            patterns.append(os.path.join(local, "Programs", "Python", "Python3*", "python.exe"))
-        for base in (
-            os.environ.get("PROGRAMFILES") or r"C:\Program Files",
-            os.environ.get("PROGRAMFILES(X86)") or r"C:\Program Files (x86)",
-        ):
-            patterns.append(os.path.join(base, "Python3*", "python.exe"))
-        patterns.append(r"C:\Python3*\python.exe")
-        hits: list[str] = []
-        for pat in patterns:
-            hits.extend(p for p in glob.glob(pat) if os.path.isfile(p))
-        if hits:
-            # Highest version first (Python313 before Python39).
-            def _ver(p: str) -> tuple[int, ...]:
-                m = re.search(r"Python(\d)(\d+)", p, re.I)
-                return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
-
-            hits.sort(key=_ver, reverse=True)
-            return [hits[0]]
-
-    # Last resort: a non-frozen sys.executable that is Python under another name.
-    if not frozen and exe and not _is_python_binary(exe):
-        stem = os.path.basename(exe).lower()
-        if "remedy" not in stem:
-            return [exe]
-    return None
+    return _impl()
 
 
 _NO_PYTHON_MSG = (

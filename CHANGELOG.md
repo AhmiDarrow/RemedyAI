@@ -4,6 +4,39 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Changed — one authority per question (improvement roadmap, phase 1)
+
+- **Runtime identity**: frozen/dev/sidecar questions go through
+  `remedy.core.runtime_identity` (`is_frozen_install`, `is_desktop_sidecar`,
+  `is_desktop_runtime`, `runs_this_checkout`) instead of scattered raw
+  `sys.frozen` / env checks. A guard test keeps new raw checks out.
+- **Interpreter resolution** is consolidated in `build_python.py`
+  (`resolve_python_interpreter` moved; shell re-exports; the three divergent
+  fallback copies of `is_usable_host_python` are gone). With no CPython at
+  all, `head`/`tail`/`wc -l` now rewrite to PowerShell (`Get-Content` /
+  `Measure-Object`) before giving up with the REMEDY_PYTHON hint.
+- **Self-inject gate asks serve, not the filesystem**: the desktop poller
+  checks `GET /api/turn-active` (serve answers from its in-process stream
+  registry). A crashed serve cannot answer, so it can never deadlock an
+  apply; per-pid lock files stay one release as belt-and-suspenders.
+- **Self-inject ledger surfaced**: `GET /api/self-inject/rounds` + a
+  Diagnostics card show each round with an honest verdict — Live,
+  Awaiting restart, or Not loaded — instead of a bare "applied".
+
+### Changed — intent: soft gating + a learner, not more regexes
+
+- Ambiguous turns (no work signal, not pure chat) keep a small read-only
+  peek pack (`file_read`, `list_dir`, `repo_search`, memory/skills lookup)
+  instead of losing all tools — a misread work ask can look before asking,
+  and the step ceiling never forces a tool round on these.
+- The armed-ceiling forced tool round fires at most once per turn; a model
+  that answers in words twice gets to answer.
+- New `remedy.core.intent_learn`: a local, per-partner learned classifier
+  (hashed n-gram logistic regression, no API calls, weights under
+  `<home>/intent/`). The regexes stay the floor and the teacher; once
+  outcome evidence is strong the learner may *arm* a phrasing the regexes
+  miss — it never disarms. Kill switch: `REMEDY_INTENT_LEARN=0`.
+
 ### Added — Chat pin next to Plan / Build
 
 - Cycle **Chat → Plan → Build** on the session chip and status bar (Ctrl+B).

@@ -297,14 +297,10 @@ def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
         hit = (mapped.get(key) or "").strip()
         if hit and Path(hit).is_file():
             if key in {"python", "python3", "py"}:
-                try:
-                    from remedy.core.build_python import is_usable_host_python
+                from remedy.core.build_python import is_usable_host_python
 
-                    if not is_usable_host_python(hit):
-                        hit = ""
-                except Exception:
-                    if "remedy" in Path(hit).name.lower():
-                        hit = ""
+                if not is_usable_host_python(hit):
+                    hit = ""
             if hit:
                 return hit
     except Exception:
@@ -327,12 +323,9 @@ def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
     def _ok_python(path: str | None) -> bool:
         if not path:
             return False
-        try:
-            from remedy.core.build_python import is_usable_host_python
+        from remedy.core.build_python import is_usable_host_python
 
-            return is_usable_host_python(path)
-        except Exception:
-            return "remedy" not in Path(path).name.lower() and "windowsapps" not in path.lower()
+        return is_usable_host_python(path)
 
     found = shutil.which(n)
     if found and (key not in {"python", "python3", "py"} or _ok_python(found)):
@@ -354,7 +347,9 @@ def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
             hit = ""
         if hit and _ok_python(hit):
             return hit
-        if getattr(sys, "frozen", False):
+        from remedy.core.runtime_identity import is_frozen_install
+
+        if is_frozen_install():
             return None
         exe = sys.executable or ""
         return exe if _ok_python(exe) else None

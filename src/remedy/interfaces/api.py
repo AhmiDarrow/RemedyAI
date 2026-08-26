@@ -47,6 +47,7 @@ _SLOW_EXEMPT_PATHS = frozenset(
     {
         "/api/status",
         "/api/ping",
+        "/api/turn-active",
         "/api/self-improve",
         "/api/partner/status",
         "/api/checkpoints/latest",
@@ -492,7 +493,9 @@ def create_app(
     elif _docs_env in ("1", "true", "yes", "on"):
         _disable_api_docs = True
     else:
-        _disable_api_docs = bool(getattr(sys, "frozen", False))
+        from remedy.core.runtime_identity import is_frozen_install
+
+        _disable_api_docs = is_frozen_install()
     app = FastAPI(
         title=title,
         version=version,
@@ -576,6 +579,7 @@ def create_app(
         "/dashboard",
         "/api/status",
         "/api/ping",
+        "/api/turn-active",
         "/api/auth/local-bootstrap",
         # Google OAuth browser redirect (state is one-time secret; no bearer).
         "/api/assistant/google/callback",
@@ -735,17 +739,15 @@ def create_app(
         duration = (time.time() - start) * 1000
         path = request.url.path
         method = request.method.upper()
-        desktop = str(os.environ.get("REMEDY_DESKTOP_SIDECAR", "")).strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        )
+        from remedy.core.runtime_identity import is_desktop_sidecar
+
+        desktop = is_desktop_sidecar()
         # High-frequency polls at DEBUG so CLI `remedy serve` terminals stay readable
         # (Desktop computer-host + status bars used to flood INFO every few ms).
         quiet = method == "OPTIONS" or path in (
             "/api/status",
             "/api/ping",
+            "/api/turn-active",
             "/api/self-improve",
             "/api/partner/status",
             "/api/checkpoints/latest",
@@ -821,7 +823,9 @@ def find_webui_dir() -> Path | None:
         candidates.append(parent / "desktop" / "dist")
     # Tauri debug externalBin lives at desktop/src-tauri/target/debug/*.exe
     # → desktop/dist is parents[3]/dist (prefer over staged webui/)
-    if getattr(sys, "frozen", False):
+    from remedy.core.runtime_identity import is_frozen_install
+
+    if is_frozen_install():
         try:
             exe = Path(sys.executable).resolve()
             # .../desktop/src-tauri/target/debug/remedy-desktop.exe
@@ -830,7 +834,7 @@ def find_webui_dir() -> Path | None:
         except (IndexError, OSError):
             pass
     # Staged copies next to frozen sidecar (packaged installs; after live dist)
-    if getattr(sys, "frozen", False):
+    if is_frozen_install():
         exe_dir = Path(sys.executable).resolve().parent
         candidates.extend(
             [
