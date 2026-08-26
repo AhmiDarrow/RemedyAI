@@ -406,7 +406,10 @@ class TelegramChannel(ChannelAdapter):
             from_user.get("username") or user_id,
             len(text),
         )
-        await self.gateway.emit(event)
+        if getattr(self.gateway, "_running", False) and hasattr(self.gateway, "enqueue"):
+            await self.gateway.enqueue(event)
+        else:
+            await self.gateway.emit(event)
 
 
 def aiohttp_timeout(total: float):

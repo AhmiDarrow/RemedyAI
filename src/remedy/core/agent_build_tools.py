@@ -331,7 +331,12 @@ def register_build_tools(runtime: Any) -> None:
                 st.syntax_ok = False
         lines = [res.get("message") or ""]
         for r in res.get("results") or []:
-            mark = "OK" if r.get("ok") else "RED"
+            if r.get("ok") and r.get("verified", True):
+                mark = "OK"
+            elif r.get("ok"):
+                mark = "SKIP"
+            else:
+                mark = "RED"
             lines.append(f"  [{mark}] {r.get('level')}: {(r.get('summary') or '')[:160]}")
         return "\n".join(lines)[:4000]
 

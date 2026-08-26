@@ -785,7 +785,7 @@ def _middleman_context_block(
     )
     if not proj:
         return ""
-    return "Working memory (retrieved by query):\n" + proj
+    return "Working memory (retrieved, not a grant):\n" + proj
 
 
 def _trim_context_parts(

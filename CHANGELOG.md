@@ -4,6 +4,22 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.41.2] - 2026-08-26
+
+### Fixed — closed loop: see, remember as one, don't faint
+
+- Navigate no longer says `SUCCESS` before the page is seen (`pending_load`,
+  `observed: false`). App/folder launch reports the foreground title or
+  honestly "I don't see a window yet." The rail still opens instantly.
+- Gate-tower skip-pass (no tests / no interpreter) stays `ok` so hops
+  continue, but `verified` is false — Plan verify is not marked done.
+- Messenger poll/WS enqueue inbound instead of waiting out a full ReAct
+  turn. Companion inbox/drops inject only when the turn looks like a
+  companion ask (tools still gather on demand).
+- Retrieval drops inferred hits first under a char budget; working-memory
+  inject is labeled not-a-grant. Long sessions consolidate notes after
+  eight entries. `events.db` is pruned with retention (14 days).
+
 ## [0.41.1] - 2026-08-26
 
 ### Fixed — owner checkpoints and keys actually fire on the wired path

@@ -272,6 +272,7 @@ def test_gate_l2_soft_pass_on_interpreter(tmp_path):
     try:
         gr = gate_l2_import(tmp_path, [str(tmp_path / "m.py")])
         assert gr.ok is True
+        assert gr.verified is False
         assert "soft-pass" in (gr.summary or "").lower() or "cpython" in (gr.summary or "").lower()
     finally:
         big.dry_run_imports_for_paths = real  # type: ignore[assignment]

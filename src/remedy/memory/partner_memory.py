@@ -617,6 +617,12 @@ def rank_injectable_facts(
         # Explicit / heuristic prefs slightly preferred over vague
         if (f.source or "") in ("explicit", "heuristic", "user", "living", "taste"):
             score += 0.25
+        if bool(getattr(f, "inferred", False)) or (f.source or "") in (
+            "inferred",
+            "tool",
+            "agent",
+        ):
+            score -= 0.35
         # This-turn kind: a life question should surface kids before ruff config
         try:
             from remedy.memory.living import category_boost, turn_kind
@@ -996,11 +1002,16 @@ async def search_partner_and_entries(
                         "score": score,
                         "importance": imp,
                         "authority": str(meta.get("authority") or ""),
-                        "inferred": bool(meta.get("inferred", True)),
+                        # Unstamped notes are owner-era; only drop when marked.
+                        "inferred": bool(meta["inferred"])
+                        if "inferred" in meta
+                        else False,
                         "why": str(meta.get("why") or ""),
                     }
                 )
     except Exception:
         pass
     results.sort(key=lambda r: float(r.get("score") or 0), reverse=True)
-    return results[:limit]
+    from remedy.memory.authority import budget_hits
+
+    return budget_hits(results, limit=limit, max_chars=900)

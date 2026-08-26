@@ -506,6 +506,39 @@ class ComputerExecutor:
         return result
 
     @staticmethod
+    def _launch_result(
+        win: Any,
+        info: dict[str, Any],
+        *,
+        action: str,
+        name: str,
+        started: str,
+    ) -> dict[str, Any]:
+        """Launch-attempt plus a cheap observe — never invent a window."""
+        launched = bool((info or {}).get("ok", True))
+        title = ""
+        with contextlib.suppress(Exception):
+            fg = win.foreground_window_info() or {}
+            title = str(fg.get("title") or "").strip()
+        observed = bool(title)
+        if not launched:
+            msg = str((info or {}).get("message") or f"Could not start {name}")
+        elif observed:
+            msg = f"{started} {name} — I see: {title[:80]}"
+        else:
+            msg = f"{started} {name}; I don't see a window yet."
+        extra = dict(info or {})
+        extra["observed"] = observed
+        extra["observed_title"] = title[:120]
+        return public_result(
+            ok=launched,
+            target="desktop",
+            action=action,
+            message=msg,
+            extra=extra,
+        )
+
+    @staticmethod
     def _desktop_evidence() -> dict[str, Any]:
         """Post-action proof for desktop acts: foreground window + focused element.
 
@@ -758,12 +791,12 @@ class ComputerExecutor:
                 with contextlib.suppress(Exception):
                     self.bridge.set_last_elements([], target="desktop")
                 time.sleep(0.4)
-                return public_result(
-                    ok=True,
-                    target="desktop",
+                return self._launch_result(
+                    win,
+                    info,
                     action="app",
-                    message=f"Opened folder: {info.get('target') or folder}",
-                    extra=info,
+                    name=str(info.get("target") or folder),
+                    started="Opened folder",
                 )
             search_dirs = list(kwargs.get("search_dirs") or [])
             info = win.open_app(app, search_dirs=search_dirs or None)
@@ -771,12 +804,8 @@ class ComputerExecutor:
             with contextlib.suppress(Exception):
                 self.bridge.set_last_elements([], target="desktop")
             time.sleep(0.4)
-            return public_result(
-                ok=True,
-                target="desktop",
-                action="app",
-                message=f"Launched app: {app}",
-                extra=info,
+            return self._launch_result(
+                win, info, action="app", name=app, started="Started"
             )
         if act is ComputerAction.FIND:
             query = str(kwargs.get("text") or kwargs.get("query") or kwargs.get("hint") or "")
@@ -2655,13 +2684,14 @@ class ComputerExecutor:
         hint: str,
         req_target: str,
     ) -> dict[str, Any]:
-        """Open URL in Browser rail with sub-second agent-visible SUCCESS.
+        """Open URL in Browser rail without waiting the full host timeout.
 
         Strategy:
         1. Enqueue + ui_command (Desktop poller drives WebView).
         2. Wait up to ~0.9s for host complete (normal path is 50–300ms).
-        3. If host is alive and still pending → complete SUCCESS optimistically
-           (host will still open the page). Never burn 8–14s on open-url.
+        3. If host is alive and still pending → return immediately with
+           observed=false / pending_load (host will still open the page).
+           Never burn 8–14s on open-url; never claim SUCCESS unseen.
         """
         url = str(payload.get("url") or "")
         if not url or not is_valid_navigate_url(url):
@@ -2767,15 +2797,16 @@ class ComputerExecutor:
             job_id=job.id,
         )
         if twin and twin.result:
-            out = dict(twin.result)
-            out["reconciled"] = True
-            out["job_id"] = job.id
-            return _nav_ok(out, optimistic=False)
+            tres = dict(twin.result)
+            # Unobserved optimistic opens are not a loaded page.
+            if not tres.get("pending_load") and tres.get("observed") is not False:
+                tres["reconciled"] = True
+                tres["job_id"] = job.id
+                return _nav_ok(tres, optimistic=False)
 
-        # Desktop is alive → fire-and-forget SUCCESS so the model never claims
-        # the rail failed while the page is opening (open-url must be instant).
-        # Mark optimistic so type/click wait for settle before acting.
-        # Never optimistic-complete after Stop — would still open the URL.
+        # Desktop is alive → return immediately so open-url stays instant.
+        # Do not say SUCCESS / observed: the page has not been seen yet.
+        # Type/click still wait for settle. Never complete after Stop.
         if self._abort_check():
             return public_result(
                 ok=False,
@@ -2790,16 +2821,15 @@ class ComputerExecutor:
                 "target": "browser",
                 "action": "navigate",
                 "message": (
-                    f"SUCCESS: Browser rail is opening {url}. "
-                    "The user will see the page as it loads. "
+                    f"Opening {url} in the rail — I have not seen the page yet. "
                     "Do NOT say the rail failed. Do NOT open system browser. "
                     "Do NOT web_fetch this page. "
-                    "Before typing passwords or clicking login controls, run "
-                    "computer_snapshot or computer_page_text to confirm the form "
-                    "is visible (avoid typing into the previous page)."
+                    "Before typing or clicking, run computer_snapshot or "
+                    "computer_page_text to confirm the form is visible."
                 ),
                 "url": url,
                 "via": "optimistic",
+                "observed": False,
                 "user_visible": True,
                 "ready_for_input": False,
                 "pending_load": True,

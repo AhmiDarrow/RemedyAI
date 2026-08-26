@@ -202,12 +202,16 @@ def append_plan_and_computer_addenda(
                         home = getattr(getattr(runtime, "config", None), "home_dir", None)
                         take_step(home)
         with suppress(Exception):
+            from remedy.core.companion import looks_like_companion_request
             from remedy.core.companion_inbox import format_inbox_block, poll_new_drops
+            from remedy.core.turn_context import current_last_user_text
 
-            drops = poll_new_drops(runtime)
-            ib = format_inbox_block(drops)
-            if ib:
-                context = (context or "") + "\n\n" + ib
+            um_i = current_last_user_text(runtime)
+            if looks_like_companion_request(um_i):
+                drops = poll_new_drops(runtime, mark_seen=True)
+                ib = format_inbox_block(drops)
+                if ib:
+                    context = (context or "") + "\n\n" + ib
         with suppress(Exception):
             from remedy.core.computer.guidance import (
                 COMPUTER_USE_SYSTEM_ADDENDUM,
