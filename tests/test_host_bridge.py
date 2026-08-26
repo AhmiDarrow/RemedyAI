@@ -496,6 +496,56 @@ def test_python_exe_rewrite_skips_sidecar_when_frozen(
     assert "remedy-desktop" not in h.text.lower()
 
 
+def test_line_rewrites_fall_back_to_pwsh_without_python(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No CPython at all: head/tail/wc still work via PowerShell."""
+    from remedy.execution.host import translate
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(
+        "remedy.core.build_python.host_python_executable", lambda: ""
+    )
+    pw = tmp_path / "pwsh.exe"
+    pw.write_bytes(b"")
+    monkeypatch.setattr(translate, "_pwsh_exe", lambda: str(pw))
+
+    for cmd, marker in (
+        ("head -n 2 file.txt", "-TotalCount 2"),
+        ("tail -n 5 file.txt", "-Tail 5"),
+        ("wc -l file.txt", "Measure-Object -Line"),
+    ):
+        h = translate_posix_to_host(cmd, host="cmd")
+        assert marker in h.text, (cmd, h.text)
+        assert "Get-Content" in h.text
+        assert "python" not in h.text.lower()
+
+    argv, notes = translate.rewrite_posix_argv(["wc", "-l", "file.txt"])
+    assert argv[0] == str(pw)
+    assert any("pwsh" in n for n in notes)
+
+
+def test_line_rewrites_skip_with_hint_without_python_or_pwsh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Neither CPython nor pwsh: leave the command, surface REMEDY_PYTHON."""
+    from remedy.execution.host import translate
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(
+        "remedy.core.build_python.host_python_executable", lambda: ""
+    )
+    monkeypatch.setattr(translate, "_pwsh_exe", lambda: "")
+    h = translate_posix_to_host("head -n 2 file.txt", host="cmd")
+    assert "head" in h.text
+    assert "9009" not in h.text
+    assert any("REMEDY_PYTHON" in n for n in h.notes)
+
+    argv, notes = translate.rewrite_posix_argv(["wc", "-l", "file.txt"])
+    assert argv == ["wc", "-l", "file.txt"]
+    assert any("REMEDY_PYTHON" in n for n in notes)
+
+
 def test_resolve_which_finds_venv_pytest(tmp_path: Path) -> None:
     import os
 

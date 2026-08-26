@@ -171,3 +171,28 @@ export async function getDiagnostics(opts?: {
   const q = opts?.probeProviders ? '?probe_providers=true' : ''
   return apiFetch<DiagnosticsSnapshot>(`/diagnostics${q}`)
 }
+
+/** One self-inject round from the ledger, newest first. */
+export interface SelfInjectRound {
+  round_id?: string
+  status?: string // draft | gating | green | red | applied | rolled_back
+  tree?: string // python | desktop | both
+  summary?: string
+  gate_cmds?: string[]
+  gate_exit_codes?: Record<string, number>
+  outcome?: string
+  started_utc?: string
+  finished_utc?: string
+  detail?: Record<string, unknown>
+  /** live | awaiting_restart | not_loaded | '' (non-applied) */
+  live_state?: string
+}
+
+export interface SelfInjectRoundsPayload {
+  serve_started_utc?: string
+  rounds: SelfInjectRound[]
+}
+
+export async function getSelfInjectRounds(limit = 20): Promise<SelfInjectRoundsPayload> {
+  return apiFetch<SelfInjectRoundsPayload>(`/self-inject/rounds?limit=${limit}`)
+}

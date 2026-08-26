@@ -38,6 +38,17 @@ def _touch(path: Path) -> None:
     path.write_text(str(os.getpid()), encoding="utf-8")
 
 
+def any_stream_active() -> bool:
+    """True while any session in THIS process is streaming.
+
+    Authoritative for the process itself — the ``/api/turn-active`` route
+    serves this to the desktop parent, which prefers it over lock files
+    (a crashed serve cannot answer HTTP, so it can never block an apply).
+    """
+    with _mutex:
+        return any(_active.values())
+
+
 def acquire_stream_lock(home: str | Path, session_key: str) -> None:
     """Mark *session_key* as streaming; write/refresh this process's lock file."""
     base = Path(home).expanduser()

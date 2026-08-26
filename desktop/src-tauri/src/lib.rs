@@ -798,6 +798,49 @@ fn check_health(timeout: Duration) -> bool {
     }
 }
 
+/// Ask serve itself whether a chat turn is on the wire (`/api/turn-active`).
+///
+/// `Some(true)` = live turn, `Some(false)` = idle, `None` = no or bad
+/// answer (serve dead, hung, or pre-endpoint version). Preferred over lock
+/// files: a crashed serve cannot answer, so it can never block an apply.
+fn serve_turn_active() -> Option<bool> {
+    let mut stream =
+        TcpStream::connect_timeout(&status_addr(), Duration::from_millis(500)).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
+    let req = "GET /api/turn-active HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    stream.write_all(req.as_bytes()).ok()?;
+    let mut buf = Vec::with_capacity(1024);
+    let mut chunk = [0u8; 512];
+    loop {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.len() >= 4096 {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    let response = String::from_utf8_lossy(&buf);
+    let ok = response
+        .lines()
+        .next()
+        .map(|line| line.contains(" 200 ") || line.contains("200 OK"))
+        .unwrap_or(false);
+    if !ok {
+        return None;
+    }
+    if response.contains("\"active\":true") || response.contains("\"active\": true") {
+        Some(true)
+    } else if response.contains("\"active\":false") || response.contains("\"active\": false") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 fn wait_for_health(max_wait: Duration) -> bool {
     let started = Instant::now();
     let mut backoff = Duration::from_millis(250);
@@ -4342,10 +4385,11 @@ fn self_inject_apply_poller(app: AppHandle) {
                 thread::sleep(Duration::from_secs(2));
                 // Never recycle serve while a chat turn is on the wire —
                 // that painted "Error: network error" while working this repo
-                // from the packaged install. Stale locks (crashed writer, no
-                // heartbeat) are ignored and cleaned up so a hard-killed serve
-                // cannot block applies forever.
-                if stream_lock_active() {
+                // from the packaged install. Serve's own answer is preferred
+                // (a crashed serve can't answer, so it can't deadlock); lock
+                // files remain as belt-and-suspenders for gateway runners and
+                // pre-endpoint sidecars, with stale ones ignored and cleaned.
+                if serve_turn_active().unwrap_or(false) || stream_lock_active() {
                     continue;
                 }
                 let raw = match std::fs::read_to_string(&marker) {

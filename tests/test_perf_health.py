@@ -25,6 +25,23 @@ def test_ping_is_public_and_fast():
     assert ms < 500, f"/api/ping took {ms:.0f}ms"
 
 
+def test_turn_active_is_public_and_reflects_stream_locks(tmp_path: Path):
+    """Desktop parent gates self-inject restarts on this — no auth, no DB."""
+    from remedy.core.stream_lock import acquire_stream_lock, release_stream_lock
+
+    client = TestClient(create_app())
+    r = client.get("/api/turn-active")
+    assert r.status_code == 200
+    assert r.json() == {"status": "ok", "active": False}
+
+    acquire_stream_lock(tmp_path, "sid-turn-active")
+    try:
+        assert client.get("/api/turn-active").json()["active"] is True
+    finally:
+        release_stream_lock(tmp_path, "sid-turn-active")
+    assert client.get("/api/turn-active").json()["active"] is False
+
+
 def test_is_running_skips_http_when_port_closed(tmp_path: Path):
     """Dead vision port must not urlopen (was ~4s freezes → status bar flap)."""
     home = tmp_path / "remedy-home"

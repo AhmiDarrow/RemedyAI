@@ -22,7 +22,6 @@ import asyncio
 import json
 import logging
 import os
-import sys
 import time
 import uuid
 from contextlib import suppress
@@ -536,7 +535,9 @@ def request_sidecar_restart(
         "changed": (snapshot or {}).get("changed", []),
         "untracked": (snapshot or {}).get("untracked", []),
     }
-    if bool(getattr(sys, "frozen", False)):
+    from remedy.core.runtime_identity import runs_this_checkout
+
+    if not runs_this_checkout():
         # Frozen Desktop is not this checkout. Recycling serve mid-turn just
         # drops the SSE ("Error: network error") and cannot load repo edits.
         # Frozen only — the dev-checkout Desktop also sets the sidecar env
@@ -624,9 +625,9 @@ def activity_snapshot(home: str | Path | None = None) -> dict[str, Any]:
 
 def _is_packaged_runtime() -> bool:
     """Desktop sidecar / frozen install — do not mutate the source tree by default."""
-    if os.environ.get("REMEDY_DESKTOP_SIDECAR") or os.environ.get("REMEDY_DESKTOP"):
-        return True
-    return bool(getattr(sys, "frozen", False))
+    from remedy.core.runtime_identity import is_desktop_runtime
+
+    return is_desktop_runtime()
 
 
 def is_enabled(home: str | Path | None = None) -> bool:

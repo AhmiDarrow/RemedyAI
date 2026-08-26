@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   getDiagnostics,
+  getSelfInjectRounds,
   type DiagnosticsIssue,
   type DiagnosticsOverall,
   type DiagnosticsSnapshot,
+  type SelfInjectRoundsPayload,
 } from '../api/diagnostics'
 import { formatCost, formatTokens } from '../utils/tokenCost'
 import { browserStackHold } from '../utils/browserStack'
@@ -220,6 +222,8 @@ export function DiagnosticsPanel({ open, onClose }: DiagnosticsPanelProps) {
   const [auto, setAuto] = useState(true)
   const [probe, setProbe] = useState(false)
 
+  const [selfInject, setSelfInject] = useState<SelfInjectRoundsPayload | null>(null)
+
   const load = useCallback(async () => {
     if (!open) return
     setLoading(true)
@@ -231,6 +235,12 @@ export function DiagnosticsPanel({ open, onClose }: DiagnosticsPanelProps) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
+    }
+    // Independent of the main snapshot — a ledger hiccup must not blank diagnostics.
+    try {
+      setSelfInject(await getSelfInjectRounds(12))
+    } catch {
+      setSelfInject(null)
     }
   }, [open, probe])
 
@@ -708,6 +718,61 @@ export function DiagnosticsPanel({ open, onClose }: DiagnosticsPanelProps) {
                   ) : null}
                 </Card>
               </div>
+
+              {selfInject && selfInject.rounds.length > 0 ? (
+                <Card
+                  title="Self-inject rounds"
+                  subtitle="Test-gated self-edits — what changed, and whether serve runs it"
+                >
+                  <ul className="space-y-1.5">
+                    {selfInject.rounds.map((round) => {
+                      const status = round.status || 'draft'
+                      const applied = status === 'applied'
+                      const rolledBack = status === 'rolled_back'
+                      const live = round.live_state || ''
+                      return (
+                        <li
+                          key={round.round_id || round.started_utc}
+                          className="flex items-center gap-2 text-[11px]"
+                        >
+                          <Badge
+                            ok={applied ? true : rolledBack || status === 'red' ? false : null}
+                            warn={rolledBack}
+                            label={status}
+                          />
+                          {applied ? (
+                            <Badge
+                              ok={live === 'live' ? true : null}
+                              warn={live !== 'live'}
+                              label={
+                                live === 'live'
+                                  ? 'Live'
+                                  : live === 'awaiting_restart'
+                                    ? 'Awaiting restart'
+                                    : live === 'not_loaded'
+                                      ? 'Not loaded'
+                                      : 'Applied'
+                              }
+                            />
+                          ) : null}
+                          <span className="truncate flex-1" title={round.summary || ''}>
+                            {round.summary || '(no summary)'}
+                          </span>
+                          <span
+                            className="flex-shrink-0 tabular-nums"
+                            style={{ color: 'var(--text-muted)' }}
+                          >
+                            {round.tree || '—'}
+                            {round.finished_utc
+                              ? ` · ${round.finished_utc.replace('T', ' ').slice(0, 16)}`
+                              : ''}
+                          </span>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </Card>
+              ) : null}
             </>
           )}
 

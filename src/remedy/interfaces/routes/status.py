@@ -5,6 +5,7 @@ import contextlib
 import hmac
 import logging
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI, Query, Request, Response
@@ -80,6 +81,18 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         with vision install / model discovery. Public (no auth).
         """
         return {"status": "ok", "version": _remedy_version, "ts": time.time()}
+
+    @app.get("/api/turn-active")
+    async def turn_active():
+        """Is a chat turn on the wire in this serve process? Public, sub-ms.
+
+        The desktop parent gates self-inject sidecar restarts on this — a
+        crashed serve cannot answer HTTP, so it can never deadlock an apply
+        the way a stale lock file could.
+        """
+        from remedy.core.stream_lock import any_stream_active
+
+        return {"status": "ok", "active": any_stream_active()}
 
     @app.get("/api/notifications")
     async def list_notifications_route(
@@ -271,6 +284,47 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                 getattr(runtime, "config", None), "home_dir", None
             )
         return activity_snapshot(home)
+
+    # Serve boot instant (register time) — a python round finished before this
+    # is running in this very process; one finished after it awaits a restart.
+    _serve_started_utc = datetime.now(UTC).isoformat(timespec="seconds")
+
+    @app.get("/api/self-inject/rounds")
+    async def get_self_inject_rounds(limit: int = Query(default=20)):
+        """Recent self-inject rounds with an honest per-round ``live`` verdict.
+
+        ``live`` = the running serve/SPA actually executes the change;
+        ``awaiting_restart`` = applied but this serve booted before the round;
+        ``not_loaded`` = applied with no restart requested (frozen install).
+        """
+        from remedy.core.self_inject import read_ledger
+
+        home = None
+        if runtime is not None:
+            home = getattr(runtime, "home_dir", None) or getattr(
+                getattr(runtime, "config", None), "home_dir", None
+            )
+
+        def _live_state(r: dict) -> str:
+            if str(r.get("status") or "") != "applied":
+                return ""
+            if str(r.get("tree") or "") == "desktop":
+                return "live"  # SPA rebuilt in-round
+            finished = str(r.get("finished_utc") or "")
+            requested = bool(
+                (r.get("detail") or {}).get("sidecar_restart_requested", True)
+            )
+            if finished and finished <= _serve_started_utc:
+                return "live"
+            return "awaiting_restart" if requested else "not_loaded"
+
+        n = max(1, min(int(limit or 20), 100))
+        rounds = read_ledger(home)[-n:][::-1]  # newest first
+        for r in rounds:
+            r["live_state"] = _live_state(r)
+            # Keep the payload lean — the diff can be large and has its own audit trail.
+            r.pop("diff", None)
+        return {"serve_started_utc": _serve_started_utc, "rounds": rounds}
 
     @app.get("/api/diagnostics")
     async def get_diagnostics(

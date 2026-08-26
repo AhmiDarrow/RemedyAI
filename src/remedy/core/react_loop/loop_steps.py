@@ -988,12 +988,18 @@ async def run_react_steps(s: Any) -> AsyncIterator[str]:
                     from remedy.core.react_policy import is_knowledge_question
 
                     _opinion = bool(is_knowledge_question(message or ""))
+                # Fires at most once per turn, and never for the ambiguous
+                # read-only peek pack — a model that answers in words twice
+                # gets to answer, not a third forced round.
                 armed_ceiling_needs_a_tool_round = (
                     bool(is_final_step)
                     and int(tools_executed_this_turn or 0) == 0
                     and bool(tools)
                     and not _verify_green
                     and not _opinion
+                    and not bool(getattr(turn, "armed_ceiling_fired", False))
+                    and str(getattr(turn, "arm_reason", ""))
+                    not in ("ask_first", "no_work_request")
                 )
                 # Work request + zero tool evidence is never a successful final.
                 # Keep tools on and require a native call instead of summarizing.
@@ -1012,6 +1018,8 @@ async def run_react_steps(s: Any) -> AsyncIterator[str]:
                     force_answer = False
                     force_answer_sticky = False
                     is_final_step = False
+                    if armed_ceiling_needs_a_tool_round:
+                        turn.armed_ceiling_fired = True
                     _rearm_agency_tools()
                     if tools:
                         set_turn_force_tool_choice(True)
@@ -1021,6 +1029,19 @@ async def run_react_steps(s: Any) -> AsyncIterator[str]:
                         # nothing — let the turn answer in words instead.
                         force_answer = True
                         is_final_step = True
+                # Offered tools (incl. one forced round) and still answered in
+                # words: strong per-partner not-work signal for intent_learn.
+                if (
+                    force_answer
+                    and bool(getattr(turn, "armed_ceiling_fired", False))
+                    and int(tools_executed_this_turn or 0) == 0
+                    and not bool(getattr(turn, "intent_declined_recorded", False))
+                ):
+                    turn.intent_declined_recorded = True
+                    with suppress(Exception):
+                        from remedy.core.intent_learn import record_tools_declined
+
+                        record_tools_declined(message or "")
                 # Re-resolve pack each step (write-first → full after writes)
                 if not force_answer and turn.all_tools and not _verify_green:
                     _resolve_and_apply(step_index=int(step))

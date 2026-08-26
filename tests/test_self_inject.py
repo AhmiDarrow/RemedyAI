@@ -105,6 +105,46 @@ def test_request_sidecar_restart_dev_desktop_still_requests(tmp_path, monkeypatc
     assert (tmp_path / "locks" / "self_inject_apply").exists()
 
 
+def test_self_inject_rounds_endpoint_reports_live_state(tmp_path, monkeypatch):
+    """Ledger surface: live vs awaiting-restart vs not-loaded, newest first."""
+    from fastapi.testclient import TestClient
+
+    from remedy.core.self_inject import SelfInjectRound, append_ledger
+    from remedy.interfaces.api import create_app
+
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+
+    live = SelfInjectRound(status="applied", tree="python", summary="old edit")
+    live.finished_utc = "2000-01-01T00:00:00+00:00"
+    live.detail["sidecar_restart_requested"] = True
+    append_ledger(live, tmp_path)
+
+    pending = SelfInjectRound(status="applied", tree="python", summary="fresh edit")
+    pending.finished_utc = "2999-01-01T00:00:00+00:00"
+    pending.detail["sidecar_restart_requested"] = True
+    append_ledger(pending, tmp_path)
+
+    frozen_skip = SelfInjectRound(status="applied", tree="python", summary="frozen edit")
+    frozen_skip.finished_utc = "2999-01-01T00:00:00+00:00"
+    frozen_skip.detail["sidecar_restart_requested"] = False
+    append_ledger(frozen_skip, tmp_path)
+
+    red = SelfInjectRound(status="rolled_back", tree="python", summary="bad edit")
+    red.finished_utc = "2999-01-01T00:00:00+00:00"
+    append_ledger(red, tmp_path)
+
+    client = TestClient(create_app())
+    data = client.get("/api/self-inject/rounds").json()
+    by_id = {r["round_id"]: r for r in data["rounds"]}
+    assert by_id[live.round_id]["live_state"] == "live"
+    assert by_id[pending.round_id]["live_state"] == "awaiting_restart"
+    assert by_id[frozen_skip.round_id]["live_state"] == "not_loaded"
+    assert by_id[red.round_id]["live_state"] == ""
+    # Newest first, diff stripped from the payload.
+    assert data["rounds"][0]["round_id"] == red.round_id
+    assert all("diff" not in r for r in data["rounds"])
+
+
 def test_request_sidecar_restart_no_snapshot(tmp_path):
     ok = request_sidecar_restart(home=tmp_path)
     assert ok is True
@@ -268,7 +308,9 @@ def test_is_enabled_source_checkout_default_on(monkeypatch, tmp_path):
     monkeypatch.delenv("REMEDY_SELF_INJECT", raising=False)
     monkeypatch.delenv("REMEDY_DESKTOP_SIDECAR", raising=False)
     monkeypatch.delenv("REMEDY_DESKTOP", raising=False)
-    monkeypatch.setattr("remedy.core.self_inject.sys.frozen", False, raising=False)
+    import sys
+
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
     monkeypatch.setattr(
         "remedy.interfaces.config.load_config",
         lambda: {},

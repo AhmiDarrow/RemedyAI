@@ -64,9 +64,9 @@ def _cmd_serve(args) -> None:
     # First-run setup: NEVER block the HTTP server for the desktop sidecar.
     # Desktop UI (SetupWizard) is the first-run experience and needs the API up.
     # Interactive CLI TTY can still run the wizard; --skip-setup / env skip it.
-    skip = bool(getattr(args, "skip_setup", False)) or str(
-        os.environ.get("REMEDY_DESKTOP_SIDECAR", "")
-    ).strip().lower() in ("1", "true", "yes")
+    from remedy.core.runtime_identity import is_desktop_sidecar
+
+    skip = bool(getattr(args, "skip_setup", False)) or is_desktop_sidecar()
     force = bool(getattr(args, "force_setup", False))
     is_tty = bool(sys.stdin is not None and sys.stdin.isatty())
     # Only interactive CLI (real TTY, not desktop) may gate on the wizard.
