@@ -229,10 +229,19 @@ def run_project_tests(
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(test_src, encoding="utf-8")
-    py = sys.executable
+    try:
+        from remedy.core.build_python import python_cmd_for_subprocess
+
+        py_cmd = python_cmd_for_subprocess(root) or (
+            [sys.executable] if sys.executable else []
+        )
+    except Exception:
+        py_cmd = [sys.executable] if sys.executable else []
+    if not py_cmd:
+        return False, "pytest failed to run: no real Python interpreter", []
     try:
         proc = subprocess.run(
-            [py, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
+            [*py_cmd, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
             cwd=str(root),
             capture_output=True,
             text=True,
@@ -264,10 +273,19 @@ class PytestOracle:
         materialize(state, self.root)
         test_rel = f"test_{unit.id}.py"
         (self.root / test_rel).write_text(unit.tests, encoding="utf-8")
-        py = sys.executable
+        try:
+            from remedy.core.build_python import python_cmd_for_subprocess
+
+            py_cmd = python_cmd_for_subprocess(self.root) or (
+                [sys.executable] if sys.executable else []
+            )
+        except Exception:
+            py_cmd = [sys.executable] if sys.executable else []
+        if not py_cmd:
+            return [OracleError(unit.id, "pytest error: no real Python interpreter")]
         try:
             proc = subprocess.run(
-                [py, "-m", "pytest", test_rel, "-q", "-p", "no:cacheprovider"],
+                [*py_cmd, "-m", "pytest", test_rel, "-q", "-p", "no:cacheprovider"],
                 cwd=str(self.root),
                 capture_output=True,
                 text=True,

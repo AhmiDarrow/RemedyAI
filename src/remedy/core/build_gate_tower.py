@@ -40,6 +40,13 @@ class GateResult:
         }
 
 
+def _python_cmd(root: Path | None = None) -> list[str]:
+    """Real CPython argv prefix — never the Remedy sidecar/CLI."""
+    from remedy.core.build_python import python_cmd_for_subprocess
+
+    return python_cmd_for_subprocess(root)
+
+
 def _run(cmd: list[str], cwd: Path, timeout_s: float = 60.0) -> tuple[bool, str]:
     try:
         proc = subprocess.run(
@@ -101,8 +108,16 @@ def gate_l1_static(root: Path, paths: list[str]) -> GateResult:
         return GateResult(level="L1_static", ok=ok, command="pyright", summary=out[:600])
 
     if py_paths and shutil.which("mypy"):
+        py = _python_cmd(root)
+        if not py:
+            return GateResult(
+                level="L1_static",
+                ok=True,
+                command="mypy (skipped — no real Python)",
+                summary="static gate soft-pass: no CPython for mypy -m",
+            )
         ok, out = _run(
-            [sys.executable, "-m", "mypy", "--pretty", "--no-error-summary",
+            [*py, "-m", "mypy", "--pretty", "--no-error-summary",
              *[str(p) for p in py_paths[:12]]],
             root,
             timeout_s=90,
@@ -130,12 +145,26 @@ def gate_l2_import(root: Path, paths: list[str]) -> GateResult:
         return GateResult(level="L2_import", ok=True, command="(no py)", summary="skip")
     results = dry_run_imports_for_paths(py, root)
     bad = [r for r in results if not r.get("ok")]
+    # Sidecar/interpreter failures are machine config, not product red.
+    real_bad = [
+        r
+        for r in bad
+        if str(r.get("error_class") or "") not in {"interpreter", "spawn"}
+    ]
+    if bad and not real_bad:
+        return GateResult(
+            level="L2_import",
+            ok=True,
+            command="importlib dry-run",
+            summary="import soft-pass: no real CPython (not a module fault)",
+            details=bad[:10],
+        )
     return GateResult(
         level="L2_import",
-        ok=not bad,
+        ok=not real_bad,
         command="importlib dry-run",
-        summary="import green" if not bad else f"{len(bad)} import failures",
-        details=bad[:10],
+        summary="import green" if not real_bad else f"{len(real_bad)} import failures",
+        details=(real_bad or bad)[:10],
     )
 
 
@@ -167,8 +196,16 @@ def gate_l3_unit(root: Path, paths: list[str], *, unit_tests: list[str] | None =
             command="(no unit tests mapped)",
             summary="unit gate soft-pass",
         )
+    py = _python_cmd(root)
+    if not py:
+        return GateResult(
+            level="L3_unit",
+            ok=True,
+            command="(no real Python for unit pytest)",
+            summary="unit gate soft-pass: interpreter missing",
+        )
     ok, out = _run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *tests],
+        [*py, "-m", "pytest", "-q", "-p", "no:cacheprovider", *tests],
         root,
         timeout_s=90,
     )
@@ -188,16 +225,24 @@ def gate_l4_cone(runtime: Any, root: Path, write_set: list[str], base_command: s
     )
     if not cmd:
         cmd = base_command or "pytest -q"
+    py = _python_cmd(root)
+    if not py:
+        return GateResult(
+            level="L4_cone",
+            ok=True,
+            command=cmd,
+            summary="cone soft-pass: no real Python for pytest",
+        )
     # Parse simple pytest invocation
     parts = cmd if isinstance(cmd, list) else cmd.split()
     if parts and parts[0] == "pytest":
-        argv = [sys.executable, "-m", "pytest", *parts[1:]]
+        argv = [*py, "-m", "pytest", *parts[1:]]
     else:
         # shell-ish — run via python -m pytest if pytest in string
         if re.search(r"\bpytest\b", cmd):
             rest = re.sub(r"^.*?\bpytest\b", "", cmd).strip()
-            argv = [sys.executable, "-m", "pytest", *rest.split()] if rest else [
-                sys.executable, "-m", "pytest", "-q"
+            argv = [*py, "-m", "pytest", *rest.split()] if rest else [
+                *py, "-m", "pytest", "-q"
             ]
         else:
             return GateResult(

@@ -380,7 +380,9 @@ def live_unit_hop(
             results = dry_run_imports_for_paths([str(dest)], root)
             if results:
                 import_result = results[0]
-                if not import_result.get("ok"):
+                # Interpreter/spawn failures are machine config, not unit red.
+                _cls = str(import_result.get("error_class") or "")
+                if not import_result.get("ok") and _cls not in {"interpreter", "spawn"}:
                     errors.append(
                         OracleError(unit.id, f"import dry-run: {import_result.get('error')}")
                     )

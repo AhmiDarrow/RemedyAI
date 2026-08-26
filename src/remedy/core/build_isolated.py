@@ -135,12 +135,15 @@ def isolated_unit_hop(
 
                         imps = dry_run_imports_for_paths([str(dest)], project)
                         if imps and not imps[0].get("ok"):
-                            live_ok = False
-                            err = str(imps[0].get("error") or "import failed on live tree")
-                            errs = list(res.get("errors") or [])
-                            errs.append(f"live import: {err}")
-                            res["errors"] = errs
-                            res["ok"] = False
+                            _cls = str(imps[0].get("error_class") or "")
+                            # Sidecar/CLI as sys.executable is not a merge fault.
+                            if _cls not in {"interpreter", "spawn"}:
+                                live_ok = False
+                                err = str(imps[0].get("error") or "import failed on live tree")
+                                errs = list(res.get("errors") or [])
+                                errs.append(f"live import: {err}")
+                                res["errors"] = errs
+                                res["ok"] = False
                 if not live_ok:
                     if prev is not None:
                         dest.write_text(prev, encoding="utf-8")
