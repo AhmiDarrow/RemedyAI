@@ -37,6 +37,18 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _is_unobserved_result(res: dict[str, Any] | None) -> bool:
+    """Optimistic navigate completes ok=True before the page is seen.
+
+    Those jobs must not satisfy find_recent_success — a later open of the
+    same URL would otherwise be treated as ready_for_input.
+    """
+    r = res or {}
+    if r.get("pending_load"):
+        return True
+    return r.get("observed") is False
+
+
 def _same_or_child_url(got: str, want: str) -> bool:
     """True when *got* is *want* or a same-host child path (redirect).
 
@@ -1027,6 +1039,7 @@ class ComputerHostBridge:
                 and mine.action == action
                 and mine.status == "done"
                 and (mine.result or {}).get("ok", True)
+                and not _is_unobserved_result(mine.result)
             ):
                 return mine
         cutoff = time.time() - max_age_s
@@ -1054,7 +1067,7 @@ class ComputerHostBridge:
                 if js != want_sid:
                     continue
             res = job.result or {}
-            if not res.get("ok", True):
+            if not res.get("ok", True) or _is_unobserved_result(res):
                 continue
             got = str(
                 res.get("url") or (job.payload or {}).get("url") or ""

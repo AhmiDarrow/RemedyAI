@@ -7,7 +7,7 @@ import os
 import sqlite3
 import threading
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -112,6 +112,17 @@ class EventBus:
         )
         self.emit(ev)
         return ev
+
+    def prune_older_than_days(self, days: int) -> int:
+        """Drop events older than *days*. 0 disables. Does not touch other homes."""
+        if int(days or 0) <= 0:
+            return 0
+        cutoff = (datetime.now(UTC) - timedelta(days=int(days))).isoformat()
+        with self._lock:
+            conn = self._db()
+            cur = conn.execute("DELETE FROM events WHERE timestamp < ?", (cutoff,))
+            conn.commit()
+            return int(cur.rowcount or 0)
 
     def for_turn(self, turn_id: str) -> list[Event]:
         with self._lock:

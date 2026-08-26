@@ -28,11 +28,15 @@ class GateResult:
     command: str = ""
     summary: str = ""
     details: list[dict[str, Any]] = field(default_factory=list)
+    # True when a real check ran. Skip-pass stays ok so hops continue, but
+    # verified=False so we never tell the owner the goal is done.
+    verified: bool = True
 
     def to_public(self) -> dict[str, Any]:
         return {
             "level": self.level,
             "ok": self.ok,
+            "verified": self.verified,
             "command": self.command,
             "summary": self.summary[:800],
             "details": self.details[:20],
@@ -112,8 +116,9 @@ def gate_l1_static(root: Path, paths: list[str]) -> GateResult:
             return GateResult(
                 level="L1_static",
                 ok=True,
+                verified=False,
                 command="mypy (skipped — no real Python)",
-                summary="static gate soft-pass: no CPython for mypy -m",
+                summary="static gate soft-pass — I didn't run mypy (no interpreter)",
             )
         ok, out = _run(
             [*py, "-m", "mypy", "--pretty", "--no-error-summary",
@@ -127,12 +132,13 @@ def gate_l1_static(root: Path, paths: list[str]) -> GateResult:
         ok, out = _run(["tsc", "--noEmit"], root, timeout_s=120)
         return GateResult(level="L1_static", ok=ok, command="tsc --noEmit", summary=out[:600])
 
-    # No static tool — pass through (not fail closed)
+    # No static tool — pass through (not fail closed), not owner-verified.
     return GateResult(
         level="L1_static",
         ok=True,
+        verified=False,
         command="(skipped — no ruff/mypy/pyright/tsc)",
-        summary="static gate skipped",
+        summary="static gate skipped — I didn't run a linter",
     )
 
 
@@ -154,6 +160,7 @@ def gate_l2_import(root: Path, paths: list[str]) -> GateResult:
         return GateResult(
             level="L2_import",
             ok=True,
+            verified=False,
             command="importlib dry-run",
             summary="import soft-pass: no real CPython (not a module fault)",
             details=bad[:10],
@@ -192,16 +199,18 @@ def gate_l3_unit(root: Path, paths: list[str], *, unit_tests: list[str] | None =
         return GateResult(
             level="L3_unit",
             ok=True,
+            verified=False,
             command="(no unit tests mapped)",
-            summary="unit gate soft-pass",
+            summary="unit gate soft-pass — I didn't run tests (none mapped)",
         )
     py = _python_cmd(root)
     if not py:
         return GateResult(
             level="L3_unit",
             ok=True,
+            verified=False,
             command="(no real Python for unit pytest)",
-            summary="unit gate soft-pass: interpreter missing",
+            summary="unit gate soft-pass — I didn't run tests (no interpreter)",
         )
     ok, out = _run(
         [*py, "-m", "pytest", "-q", "-p", "no:cacheprovider", *tests],
@@ -229,8 +238,9 @@ def gate_l4_cone(runtime: Any, root: Path, write_set: list[str], base_command: s
         return GateResult(
             level="L4_cone",
             ok=True,
+            verified=False,
             command=cmd,
-            summary="cone soft-pass: no real Python for pytest",
+            summary="cone soft-pass — I didn't run tests (no interpreter)",
         )
     # Parse simple pytest invocation
     parts = cmd if isinstance(cmd, list) else cmd.split()
@@ -247,8 +257,9 @@ def gate_l4_cone(runtime: Any, root: Path, write_set: list[str], base_command: s
             return GateResult(
                 level="L4_cone",
                 ok=True,
+                verified=False,
                 command=cmd,
-                summary="non-pytest L4 deferred to job runner",
+                summary="non-pytest L4 deferred — I didn't verify here",
             )
     ok, out = _run(argv, root, timeout_s=120)
     return GateResult(
@@ -274,7 +285,13 @@ def run_gate_tower(
         if root.is_file():
             root = root.parent
     except Exception:
-        return {"ok": False, "error": "no project", "results": [], "first_red": None}
+        return {
+            "ok": False,
+            "verified": False,
+            "error": "no project",
+            "results": [],
+            "first_red": None,
+        }
 
     want = levels or list(LEVELS)
     paths = list(write_set or [])
@@ -293,7 +310,9 @@ def run_gate_tower(
                 return gate_l3_unit(root, paths, unit_tests=unit_tests)
             if lev == "L4_cone":
                 return gate_l4_cone(runtime, root, paths, base_verify)
-            return GateResult(level=lev, ok=True, summary="unknown level skipped")
+            return GateResult(
+                level=lev, ok=True, verified=False, summary="unknown level skipped"
+            )
         except Exception as e:
             return GateResult(level=lev, ok=False, summary=str(e)[:400])
 
@@ -306,17 +325,28 @@ def run_gate_tower(
             if stop_at_first_red:
                 break
 
+    verified = bool(results) and first_red is None and all(
+        r.get("verified", True) for r in results
+    )
+    if first_red is None and results and verified:
+        message = "Gate tower GREEN: " + " → ".join(r["level"] for r in results)
+    elif first_red is None and results:
+        message = (
+            "Gate tower ran without full tests — I couldn't verify. "
+            + " → ".join(r["level"] for r in results)
+        )
+    else:
+        message = (
+            f"Gate tower RED at {(first_red or {}).get('level')}: "
+            f"{(first_red or {}).get('summary', '')[:200]}"
+        )
     return {
         "ok": first_red is None and bool(results),
+        "verified": verified,
         "results": results,
         "first_red": first_red,
         "passed_levels": [r["level"] for r in results if r.get("ok")],
-        "message": (
-            "Gate tower GREEN: " + " → ".join(r["level"] for r in results)
-            if first_red is None and results
-            else f"Gate tower RED at {(first_red or {}).get('level')}: "
-            f"{(first_red or {}).get('summary', '')[:200]}"
-        ),
+        "message": message,
     }
 
 
@@ -325,7 +355,12 @@ run_gate_tower_safe = run_gate_tower
 
 
 def format_gate_tower_message(result: dict[str, Any]) -> dict[str, str]:
-    tag = "GREEN" if result.get("ok") else "RED"
+    if result.get("ok") and result.get("verified", True):
+        tag = "GREEN"
+    elif result.get("ok"):
+        tag = "UNVERIFIED"
+    else:
+        tag = "RED"
     lines = [
         f"[Build engine · GATE TOWER · {tag}]",
         result.get("message") or "",

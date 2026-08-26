@@ -34,4 +34,9 @@ async def emit_message(
         payload=payload,
         raw=str(message)[:500],
     )
-    await gateway.emit(event)
+    # Messenger poll/WS must not wait out a full ReAct turn. Queue when the
+    # gateway is running; emit inline in tests / CLI that need the result.
+    if getattr(gateway, "_running", False) and hasattr(gateway, "enqueue"):
+        await gateway.enqueue(event)
+    else:
+        await gateway.emit(event)

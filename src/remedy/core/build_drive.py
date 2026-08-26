@@ -264,7 +264,8 @@ def drive_build(
                 drive_green = outcome.to_public()
                 repair = {"ran": sum(1 for h in outcome.history if h.get("repaired"))}
                 if outcome.ok:
-                    gate = {"ok": True, "passed_levels": gate.get("passed_levels")}
+                    # Re-run so skip-pass vs real green keeps `verified`.
+                    gate = _verify()
                 # Learn from the build: fold the outcome into organism memory
                 # so she gets stronger at building the more she builds.
                 with suppress(Exception):
@@ -293,8 +294,10 @@ def drive_build(
         ok = ok and bool(gate.get("ok"))
 
     verify_status = "pending"
-    if gate.get("ok"):
+    if gate.get("verified"):
         verify_status = "completed"
+    elif gate.get("ok"):
+        verify_status = "in_progress"
     elif gate:
         verify_status = "in_progress"
     upsert_todos(

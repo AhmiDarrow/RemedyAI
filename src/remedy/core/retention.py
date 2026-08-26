@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,7 @@ class RetentionPolicy:
     computer_shot_days: int = 14  # soft default: drop stale CUA screenshots
     undo_days: int = 30
     log_days: int = 30
+    event_days: int = 14
 
     @classmethod
     def from_config(cls, cfg: dict[str, Any] | None) -> RetentionPolicy:
@@ -65,6 +67,7 @@ class RetentionPolicy:
             ),
             undo_days=_days("undo_days", "retention_undo_days", default=30),
             log_days=_days("log_days", "retention_log_days", default=30),
+            event_days=_days("event_days", "retention_event_days", default=14),
         )
 
 
@@ -219,8 +222,23 @@ def run_retention_pass(
         ),
         "undo": purge_undo(home_path, max_age_days=policy.undo_days),
         "logs": purge_logs(home_path, max_age_days=policy.log_days),
+        "events": 0,
         "sessions": 0,
     }
+    if policy.event_days > 0:
+        dbp = home_path / "events.db"
+        if dbp.is_file():
+            with suppress(Exception):
+                from remedy.events.bus import EventBus
+
+                bus = EventBus(db_path=dbp)
+                try:
+                    result["events"] = int(
+                        bus.prune_older_than_days(policy.event_days) or 0
+                    )
+                finally:
+                    with suppress(Exception):
+                        bus.close()
     if store is not None and policy.session_days > 0:
         result["sessions"] = purge_old_sessions(store, max_age_days=policy.session_days)
     total = sum(result.values())

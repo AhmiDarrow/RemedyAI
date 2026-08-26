@@ -105,6 +105,39 @@ def schedule_post_turn_prep(
                 soul_on = bool(soul_field_enabled())
             if soul_on:
                 with suppress(Exception):
+                    import asyncio
+                    import threading
+
+                    from remedy.core.turn_context import turn_session_id
+                    from remedy.memory.consolidator import MemoryConsolidator
+
+                    mem = getattr(runtime, "memory", None)
+                    sid_c = str(turn_session_id(runtime) or sid or "")
+                    if mem is not None and sid_c and not sid_c.startswith("hive_"):
+
+                        def _consolidate() -> None:
+                            # Swallow: tests and closed stores raise
+                            # "MemoryStore not initialized"; a daemon thread
+                            # must never leak that to the owner process.
+                            try:
+
+                                async def _go() -> None:
+                                    notes = await mem.list_by_session(sid_c, limit=24)
+                                    if len(notes) >= 8:
+                                        await MemoryConsolidator(mem).consolidate_session(
+                                            sid_c
+                                        )
+
+                                asyncio.run(_go())
+                            except Exception:
+                                return
+
+                        threading.Thread(
+                            target=_consolidate,
+                            daemon=True,
+                            name="remedy-consolidate",
+                        ).start()
+                with suppress(Exception):
                     from remedy.core.llm_binding import get_llm_binding
                     from remedy.core.turn_context import turn_session_id
                     from remedy.memory.soul.update import update_soul_after_turn

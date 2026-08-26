@@ -53,6 +53,7 @@ def test_the_defaults_keep_a_long_history():
     assert p.computer_shot_days == 14
     assert p.undo_days == 30
     assert p.log_days == 30
+    assert p.event_days == 14
 
 
 def test_a_nested_config_block_is_read():
@@ -332,6 +333,7 @@ def test_a_pass_reports_what_it_removed_in_each_category(home):
         "computer_shots": 1,
         "undo": 1,
         "logs": 1,
+        "events": 0,
         "sessions": 2,
     }
 

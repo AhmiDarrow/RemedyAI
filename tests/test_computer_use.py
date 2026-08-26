@@ -1296,6 +1296,36 @@ def test_find_recent_success(tmp_path: Path):
     assert found.id == j.id
 
 
+def test_find_recent_success_skips_unobserved_optimistic(tmp_path: Path):
+    """pending_load / observed=false is not a loaded page — family of SUCCESS-before-seen."""
+    b = ComputerHostBridge(home_dir=tmp_path)
+    j = b.enqueue("navigate", {"url": "https://mail.google.com"})
+    b.complete(
+        j.id,
+        ok=True,
+        result={
+            "ok": True,
+            "url": "https://mail.google.com",
+            "via": "optimistic",
+            "observed": False,
+            "pending_load": True,
+        },
+    )
+    assert (
+        b.find_recent_success(action="navigate", url="https://mail.google.com")
+        is None
+    )
+    # Same-job lookup must not upgrade an unobserved complete either.
+    assert (
+        b.find_recent_success(
+            action="navigate",
+            url="https://mail.google.com",
+            job_id=j.id,
+        )
+        is None
+    )
+
+
 def test_find_recent_success_filters_other_session(tmp_path: Path):
     from remedy.core.computer.host_bridge import ComputerHostBridge
 
@@ -1333,7 +1363,7 @@ def test_find_recent_success_filters_other_session(tmp_path: Path):
 
 
 def test_navigate_rail_fast_optimistic_when_host_alive(tmp_path: Path, monkeypatch):
-    """Open-url must return SUCCESS quickly even if host is slow to complete."""
+    """Open-url must return quickly even if host is slow; must not claim SUCCESS."""
     import json
 
     from remedy.core.computer import host_bridge as hb
@@ -1354,7 +1384,19 @@ def test_navigate_rail_fast_optimistic_when_host_alive(tmp_path: Path, monkeypat
     assert d.get("via") in ("optimistic", "rust-host", None) or d.get("url")
     if d.get("via") == "optimistic":
         assert d.get("ready_for_input") is False or d.get("pending_load") is True
+        assert d.get("observed") is False
+        assert "SUCCESS" not in str(d.get("message") or "")
+        assert "have not seen" in str(d.get("message") or "").lower()
         assert ex.bridge.navigate_needs_settle() is True
+
+    # A second open of the same URL must not reconcile the unobserved
+    # complete as ready_for_input (page still not seen).
+    raw2 = ex.run(ComputerAction.NAVIGATE, target="browser", url="https://mail.google.com")
+    d2 = json.loads(raw2)
+    assert d2.get("ok") is True, d2
+    if d2.get("via") == "optimistic" or d2.get("pending_load") or d2.get("observed") is False:
+        assert d2.get("ready_for_input") is not True
+        assert "SUCCESS" not in str(d2.get("message") or "")
 
 
 def test_computer_api_and_tools_registered(tmp_path: Path, monkeypatch):

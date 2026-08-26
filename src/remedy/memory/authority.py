@@ -104,3 +104,28 @@ def format_search_hits(hits: list[dict[str, Any]]) -> str:
         lines.append(line)
     lines.append(RETRIEVAL_NOT_AUTHORITY)
     return "\n".join(lines)
+
+
+def budget_hits(
+    hits: list[dict[str, Any]],
+    *,
+    limit: int = 6,
+    max_chars: int = 900,
+) -> list[dict[str, Any]]:
+    """Keep owner/stated hits first; drop inferred when the budget is spent."""
+    owner = [h for h in hits if not h.get("inferred")]
+    inferred = [h for h in hits if h.get("inferred")]
+    out: list[dict[str, Any]] = []
+    used = 0
+    for hit in owner + inferred:
+        if len(out) >= limit:
+            break
+        blob = f"{hit.get('title') or ''}{hit.get('content') or ''}"
+        n = len(blob)
+        if out and used + n > max_chars and hit.get("inferred"):
+            continue
+        if out and used + n > max_chars:
+            break
+        out.append(hit)
+        used += n
+    return out
