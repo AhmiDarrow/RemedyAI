@@ -302,6 +302,17 @@ def register_settings_tools(runtime: Any) -> None:
                         patch["approval_mode"] = "full"
                     else:
                         patch["approval_mode"] = "auto"
+                elif "rmb" in low or "muscle bridge" in low or "local model" in low:
+                    return format_tool_error(
+                        "RMB is her own muscle — use the rmb tool, not update_settings.",
+                        code="USE_RMB_TOOL",
+                        tool_name="update_settings",
+                        suggestion=(
+                            'rmb action="status" then rmb action="start" or '
+                            'rmb action="use" to chat on the local host. '
+                            "Autofit is default. Search Hugging Face before pulling."
+                        ),
+                    )
                 elif "vision" in low or "smol" in low:
                     patch["vision_enabled"] = "disable" not in low and "off" not in low
                     if patch.get("vision_enabled"):

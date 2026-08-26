@@ -850,7 +850,11 @@ def register_computer_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "computer_app",
-        "Launch a Windows app: notepad, calc, explorer, chrome, edge, or a project-relative .exe (game.exe, .\\hello.exe). path= opens a folder in Explorer (OS). For the in-app Files rail use app_control panel=files path=.",
+        "Launch an app from this house (Start Menu / XDG inventory — "
+        "computer_apps lists them). Natural names: Spotify, Notepad, VLC, "
+        "or a project-relative .exe (game.exe, .\\hello.exe). path= opens a "
+        "folder in the OS file manager. For the in-app Files rail use "
+        "app_control panel=files path=.",
         computer_app,
         {
             "type": "object",
@@ -1114,4 +1118,134 @@ def register_computer_tools(runtime: Any) -> None:
                 "hint": hint_prop,
             },
         },
+    )
+
+    async def computer_apps(query: str = "", limit: int = 30) -> str:
+        """List launchable apps in this house (Start Menu / .desktop inventory)."""
+        from remedy.core.computer.appliances import appliance_overview
+
+        home_dir = None
+        with contextlib.suppress(Exception):
+            home_dir = getattr(getattr(runtime, "config", None), "home_dir", None)
+        return json.dumps(
+            appliance_overview(query, home_dir, limit=max(1, min(80, int(limit or 30)))),
+            indent=2,
+            default=str,
+        )
+
+    async def house_walkthrough_tool() -> str:
+        from remedy.core.computer.household import house_walkthrough as _walk
+
+        home_dir = None
+        with contextlib.suppress(Exception):
+            home_dir = getattr(getattr(runtime, "config", None), "home_dir", None)
+        return json.dumps(_walk(home_dir), indent=2, default=str)
+
+    async def house_addition(package: str = "", manager: str = "") -> str:
+        from remedy.core.computer.household import plan_addition
+
+        plan = plan_addition(package, manager=manager)
+        if plan.get("ok"):
+            plan["next"] = (
+                "This is a PLAN. After the owner approves, run it with "
+                "host_run argv= that list. Then local_discover action=stretch."
+            )
+        return json.dumps(plan, indent=2, default=str)
+
+    async def house_status() -> str:
+        """Combined self + machine map: census, organs, vault, apps, how to drive each."""
+        home_dir = None
+        with contextlib.suppress(Exception):
+            home_dir = getattr(getattr(runtime, "config", None), "home_dir", None)
+        out: dict[str, Any] = {"ok": True}
+        with contextlib.suppress(Exception):
+            from remedy.core.metabolism.machine_map import get_machine_map
+            from remedy.core.turn_context import turn_session_id
+
+            mm = get_machine_map(turn_session_id(runtime))
+            mm.refresh_house_organs(home_dir)
+            out["house_line"] = mm.organ_hint()
+        with contextlib.suppress(Exception):
+            from remedy.execution.host.stretch import format_home_whoami
+
+            out["census"] = format_home_whoami(home=home_dir)
+        with contextlib.suppress(Exception):
+            from remedy.core.computer.appliances import appliance_overview
+
+            apps = appliance_overview("", home_dir, limit=12)
+            out["appliances_known"] = apps.get("total_known")
+            out["appliances_sample"] = apps.get("appliances")
+        with contextlib.suppress(Exception):
+            from remedy.core import vault
+
+            items = vault.vault_list(home_dir) or []
+            out["vault_handles"] = len(items)
+        out["drive"] = {
+            "rmb": "rmb action=status|start|stop|use (local llama.cpp muscle)",
+            "vision": "vision_decode action=status|install|decode",
+            "voice": "voice_identity / voice_adjust",
+            "vault": "vault_list (handles only — owner adds values in Settings)",
+            "apps": "computer_apps then computer_app app=<name>",
+            "walkthrough": "house_walkthrough (live doors, read-only)",
+            "add_tool": "house_addition package=ffmpeg → host_run the argv after approval",
+            "census": "local_discover action=stretch (PATH / GPU / ports)",
+            "settings": "get_settings / update_settings",
+            "self_ui": "app_control (Grove / Settings / rails)",
+        }
+        out["note"] = (
+            "This PC is her house. Use the drive table — do not list_dir C:\\ "
+            "or only point the owner at Settings."
+        )
+        return json.dumps(out, indent=2, default=str)
+
+    reg.register_builtin_handler(
+        "computer_apps",
+        "List apps installed in this house (Start Menu / XDG). "
+        "query= filters by name. Launch with computer_app app=<name>. "
+        "Do not list_dir Program Files to find apps.",
+        computer_apps,
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Optional name filter"},
+                "limit": {"type": "integer"},
+            },
+        },
+    )
+    reg.register_builtin_handler(
+        "house_walkthrough",
+        "Read-only security round of this PC: known doors (Remedy, RMB, "
+        "vision, Ollama, ComfyUI), unexpected listeners, vault presence, "
+        "census freshness. Observes; never changes.",
+        house_walkthrough_tool,
+        {"type": "object", "properties": {}},
+    )
+    reg.register_builtin_handler(
+        "house_addition",
+        "Plan adding a PATH tool via this house's package manager "
+        "(winget/choco/scoop or brew/apt/dnf/pacman). Never installs itself — "
+        "returns argv for host_run after the owner countersigns.",
+        house_addition,
+        {
+            "type": "object",
+            "properties": {
+                "package": {
+                    "type": "string",
+                    "description": "Package id (no URLs/paths)",
+                },
+                "manager": {
+                    "type": "string",
+                    "description": "Optional manager override",
+                },
+            },
+            "required": ["package"],
+        },
+    )
+    reg.register_builtin_handler(
+        "house_status",
+        "What she is and what this PC is: census, RMB/vision/vault/apps, "
+        "and which tool drives each organ. Call this instead of guessing "
+        "or sending the owner to Settings.",
+        house_status,
+        {"type": "object", "properties": {}},
     )

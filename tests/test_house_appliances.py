@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from remedy.core.computer.appliances import (
     ApplianceInventory,
     appliance_overview,
@@ -147,6 +149,48 @@ def test_addition_plans_argv_never_runs(tmp_path):
     assert plan["manager"] == "apt"
     assert "ffmpeg" in plan["argv"]
     assert "PLAN" in plan["note"]
+
+
+@pytest.mark.asyncio
+async def test_house_tools_are_on_the_agent(tmp_path, monkeypatch):
+    """Walkthrough / apps / status were Python-only — same class of gap as RMB."""
+    import json
+
+    from remedy.core.agent_computer_tools import register_computer_tools
+
+    class _Ex:
+        def run(self, *a, **k):
+            return "{}"
+
+    class _Reg:
+        def __init__(self) -> None:
+            self.tools = {}
+
+        def register_builtin_handler(self, name, description, handler, parameters=None):
+            self.tools[name] = handler
+
+    class _RT:
+        def __init__(self) -> None:
+            self.tool_registry = _Reg()
+            self.config = type("C", (), {"home_dir": str(tmp_path)})()
+
+    monkeypatch.setattr(
+        "remedy.core.agent_computer_tools.get_computer_executor",
+        lambda home=None: _Ex(),
+    )
+    rt = _RT()
+    register_computer_tools(rt)
+    names = set(rt.tool_registry.tools)
+    assert {"computer_apps", "house_walkthrough", "house_addition", "house_status"} <= names
+    status = json.loads(await rt.tool_registry.tools["house_status"]())
+    assert status["ok"] is True
+    assert "rmb" in status["drive"]
+    assert "vision" in status["drive"]
+    assert "computer_apps" in status["drive"]["apps"]
+    walk = json.loads(await rt.tool_registry.tools["house_walkthrough"]())
+    assert walk["ok"] is True
+    plan = json.loads(await rt.tool_registry.tools["house_addition"](package="ffmpeg; rm"))
+    assert plan["ok"] is False
 
 
 def test_addition_jails_package_names():

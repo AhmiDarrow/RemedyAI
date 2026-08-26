@@ -127,6 +127,7 @@ async def build_turn_context(runtime: Any) -> str:
                 access_scope=runtime.access_scope(),
                 extra_roots=runtime.allowed_roots(),
                 project_unset=runtime.project_path_is_unset(),
+                home_dir=getattr(getattr(runtime, "config", None), "home_dir", None),
             )
         )
 
@@ -396,10 +397,15 @@ async def build_turn_context(runtime: Any) -> str:
             "change, or configure Remedy (web tools, approval mode, model/provider, "
             "vision, persona, their name, project folder, access scope, messengers, "
             "assistant prefs, etc.), call update_settings (or get_settings first). "
+            "RMB (local llama.cpp muscle) is hers — call **rmb** "
+            "(status/start/stop/use/search/pull), not only Settings. "
+            "The PC is her house — **house_status** for the combined map, "
+            "**computer_apps** / **computer_app**, **house_walkthrough**, "
+            "**vision_decode**, **voice_identity**, **vault_list**. "
             "Apply the change yourself — do not only point them at Settings UI. "
             "Examples: update_settings(setup=\"web tools\"), "
             "update_settings(approval_mode=\"auto\"), "
-            "update_settings(user_name=\"…\", thinking_level=\"medium\")."
+            "rmb(action=\"status\"), rmb(action=\"use\")."
         )
         parts.append(
             "Durable memory: when the user says remember / note that / don't forget / "

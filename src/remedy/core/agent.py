@@ -478,6 +478,11 @@ class BasicRuntime(AgentRuntime):
 
         register_vision_tools(self)
 
+    def _register_rmb_tools(self) -> None:
+        from remedy.core.agent_local_tools import register_rmb_tools
+
+        register_rmb_tools(self)
+
     def _register_memory_tools(self) -> None:
         """Memory + harness + goals/plans/checkpoints."""
         from remedy.core.agent_memory_tools import register_memory_tools

@@ -4,6 +4,22 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.41.3] - 2026-08-26
+
+### Added — she knows the house
+
+- The world map (Machine Map / first-home stretch) tracks her organs and
+  this PC: `[House] <os> · RAM · GPU · RMB=… · vision=… · vault=n`.
+- **`rmb`** drives the local llama.cpp muscle (status / start / stop / use /
+  catalog / Hugging Face search+pull / settings). Autofit stays the default.
+  Ask mode still checkpoints start and downloads. Skill **rmb-muscle**.
+- **`house_status`**, **`computer_apps`**, **`house_walkthrough`**,
+  **`house_addition`** are now chat tools (they already existed as code).
+  `computer_app` launches from the Start Menu inventory, not a five-name
+  alias list. Skill **her-house**.
+- `local_discover` probes bundled RMB (`/health` :8787) and SmolVLM
+  (`/health` :8740), not an external `run_host.py` product.
+
 ## [0.41.2] - 2026-08-26
 
 ### Fixed — closed loop: see, remember as one, don't faint

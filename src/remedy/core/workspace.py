@@ -625,6 +625,7 @@ def workspace_context_block(
     access_scope: str = "project",
     extra_roots: list[Path] | None = None,
     project_unset: bool = False,
+    home_dir: Path | str | None = None,
 ) -> str:
     """Markdown-ish block for the agent system prompt."""
     try:
@@ -694,7 +695,7 @@ def workspace_context_block(
     with suppress(Exception):
         from remedy.execution.host.stretch import format_home_line
 
-        line = format_home_line()
+        line = format_home_line(home=home_dir)
         if line:
             lines.append(line)
     with suppress(Exception):

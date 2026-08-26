@@ -465,6 +465,8 @@ def _plan_mode_tool_names() -> frozenset[str]:
         # F1 / owner's manual — always readable (never "out of scope" in Plan).
         "help_list",
         "help_read",
+        "house_status",
+        "house_walkthrough",
     }
     try:
         from remedy.core.computer.types import COMPUTER_PLAN_MODE_TOOLS

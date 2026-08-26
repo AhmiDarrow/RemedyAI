@@ -29,6 +29,14 @@ Local models emit bash. The **Host Bridge** (see [Agency](18-agency.md)) rewrite
 POSIX-ish `bash_exec` strings for Windows cmd, runs PowerShell via `pwsh -File`,
 and prefers `host_run(argv)` so quoting does not burn the small window.
 
+## She can drive it
+
+RMB is part of Remedy, not a bolt-on. Chat can call the **`rmb`** tool
+(`status`, `start`, `stop`, `use`, `catalog`, `search`, `pull`, `settings`)
+instead of sending you to this page. The living map shows
+`[House] RMB=…` so she knows whether the host is up. Starting RMB still
+uses this PC's GPU and **suspends** SmolVLM until you (or she) stop it.
+
 ## Setup (owner UI)
 
 1. Open **Settings → Remedy Muscle Bridge** (local models).

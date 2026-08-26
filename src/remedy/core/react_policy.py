@@ -59,7 +59,7 @@ _DEFAULT_SYSTEM_BODY = (
     "— do NOT shell out or invent names.\n"
     "- **Tools** are executable actions: file_read, file_write, list_dir, host_run, "
     "host_mkdir, host_script, bash_exec, "
-    "local_discover, comfyui (and others when registered).\n\n"
+    "local_discover, comfyui, rmb, vision_decode (and others when registered).\n\n"
     "Tool policy:\n"
     "- Simple chat (greetings, definitions, provider/model/skills questions): "
     "answer immediately with NO tools.\n"
@@ -74,9 +74,19 @@ _DEFAULT_SYSTEM_BODY = (
     "- Project / task work (review, files, shell, debug, implement): "
     "native tool_calls. Don't recap a process — do the next real step.\n"
     "- Local apps/services (ComfyUI, Ollama, skill deps): use **local_discover** "
-    "(scan / one) or the dedicated tool (e.g. comfyui). "
+    "(scan / one) or the dedicated tool (e.g. comfyui, rmb). "
     "NEVER thrash list_dir on C:\\ or / or run where/dir /s to find installs — "
     "discovery is built-in and portable for any machine.\n"
+    "- **RMB** (her local llama.cpp muscle, port 8787): **rmb** "
+    "action=status|start|stop|use|catalog|search|pull|settings. Autofit is default. "
+    "Do not guess Hugging Face hosts — search, then pick. Starting RMB suspends "
+    "SmolVLM. Never list_dir for GGUFs. Do not only point the owner at Settings.\n"
+    "- **This PC is her house.** **house_status** is the combined self+machine map. "
+    "**computer_apps** lists installed apps; **computer_app** launches by natural name "
+    "(not a 5-name alias list). **house_walkthrough** is a read-only door/vault round. "
+    "**house_addition** plans winget/apt installs — owner countersigns via host_run. "
+    "**local_discover action=stretch** remaps PATH/GPU/ports. NEVER list_dir C:\\ "
+    "or Program Files to learn the house.\n"
     "- ComfyUI images: **comfyui** action=status|locate|generate. If nothing installed, "
     "follow the comfyui skill **From scratch bootstrap** (portable + models + start), "
     "then generate. Paste markdown images from the tool result into your final answer.\n"
@@ -303,6 +313,9 @@ _TOOL_HINT_RE = re.compile(
     r"asset|assets|logo|logos|icon|icons|favicon|png|jpe?g|webp|svg|gif|"
     r"alpha|transparent|cutout|brighten|background|process|"
     r"comfyui|comfy|txt2img|img2img|portrait|nebula|spacey|"
+    r"rmb|gguf|llama\.cpp|llamacpp|muscle\s+bridge|local\s+model|"
+    r"walkthrough|what'?s installed|installed apps|this (pc|machine|computer)|"
+    r"house_status|computer_apps|"
     r"generate(\s+an?)?\s+image|image\s+generation|render(\s+an?)?\s+image|"
     r"make\s+(me\s+)?(an?\s+)?(image|picture|photo)|"
     r"draw\s+(me\s+)?|illustrat|picture\s+of|photo\s+of|"
@@ -487,7 +500,7 @@ _TOOL_ID = r"[a-z][a-z0-9_]{1,64}"
 # Models sometimes emit tool syntax as plain text instead of function-calls.
 _PSEUDO_TOOL_RE = re.compile(
     r"\b(file_read|file_write|list_dir|bash_exec|host_run|host_mkdir|host_which|"
-    r"host_script|comfyui|local_discover|"
+    r"host_script|comfyui|local_discover|rmb|"
     r"get_settings|update_settings|mail_list|mail_send|mail_create_draft|"
     r"calendar_list_events|calendar_create_event|budget_set|bill_upsert|"
     r"debt_upsert|assistant_brief)\s*\(",
@@ -2050,6 +2063,12 @@ def recovered_tool_call_is_complete(tc: dict[str, Any]) -> bool:
             "calendar_list_events",
             "mail_list",
             "local_discover",
+            "rmb",
+            "house_status",
+            "house_walkthrough",
+            "computer_apps",
+            "vault_list",
+            "voice_identity",
         }
     )
     if name in _NO_ARG_OK:

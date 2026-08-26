@@ -140,6 +140,8 @@ def begin_turn_metabolism(
         mmap.set_work_roots(list(work_roots))
     elif project_path:
         mmap.set_work_roots([project_path])
+    with suppress(Exception):
+        mmap.refresh_house_organs(home)
 
     # One SessionQuality handle for the whole begin_turn (no double registry lookup)
     sq = None
@@ -184,6 +186,10 @@ def begin_turn_metabolism(
     map_hint = mmap.system_hint()
     if map_hint and int(tier) >= 2:
         injects.append(map_hint)
+    elif int(tier) >= 1:
+        organ = mmap.organ_hint()
+        if organ:
+            injects.append(organ)
     crystal_block = crystal.hot_block(max_chars=800)
     if crystal_block and int(tier) >= 1:
         injects.append(crystal_block)
