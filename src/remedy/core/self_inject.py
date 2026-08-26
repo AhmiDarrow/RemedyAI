@@ -425,6 +425,7 @@ async def apply_or_rollback(
     *,
     apply: Any = None,
     home: str | Path | None = None,
+    round_paths: list[str] | None = None,
 ) -> SelfInjectRound:
     """Green -> call ``apply`` (default noop, records applied). Red -> roll back.
 
@@ -448,7 +449,7 @@ async def apply_or_rollback(
             if round_.tree in ("desktop", "both"):
                 ok = await rebuild_spa(repo)
                 if not ok:
-                    err = await git_restore(repo, snapshot)
+                    err = await git_restore(repo, snapshot, round_paths=round_paths)
                     round_.outcome = "rolled_back"
                     round_.status = "rolled_back"
                     round_.detail["rollback_reason"] = "spa_build_failed"
@@ -466,7 +467,7 @@ async def apply_or_rollback(
         round_.outcome = "applied"
         round_.status = "applied"
     else:
-        err = await git_restore(repo, snapshot)
+        err = await git_restore(repo, snapshot, round_paths=round_paths)
         round_.outcome = "rolled_back"
         round_.status = "rolled_back"
         round_.detail["rollback_error"] = err or ""

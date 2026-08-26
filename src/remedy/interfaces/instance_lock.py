@@ -85,15 +85,11 @@ def try_acquire_serve_lock(home: Path | str | None = None) -> tuple[bool, str]:
         try:
             raw = path.read_text(encoding="utf-8").strip().split()
             old_pid = int(raw[0]) if raw else 0
-            old_ts = float(raw[1]) if len(raw) > 1 else 0.0
         except (OSError, ValueError):
-            old_pid, old_ts = 0, 0.0
-        now = time.time()
-        stale = (
-            old_pid <= 0
-            or not _pid_alive(old_pid)
-            or (old_ts > 0 and (now - old_ts) > STALE_LOCK_SECONDS)
-        )
+            old_pid = 0
+        # A live holder keeps the lock even if the heartbeat timestamp is old
+        # (sleep, hung event loop). Timestamp reclaim is only for dead PIDs.
+        stale = not (old_pid > 0 and _pid_alive(old_pid))
         if stale:
             with contextlib.suppress(OSError):
                 path.unlink()

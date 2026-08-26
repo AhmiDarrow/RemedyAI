@@ -427,7 +427,11 @@ class ApprovalQueue:
     )
     # GitHub write for self-improve PRs — Auto / thumbs-up must never waive these.
     OWNER_LOCK_TOOLS = frozenset(
-        {"self_improve_submit_issue", "self_improve_submit_pr"}
+        {
+            "self_improve_submit_issue",
+            "self_improve_submit_pr",
+            "self_inject_round",
+        }
     )
 
     def needs_ask(self, command: str, *, tool_name: str = "") -> str | None:
@@ -458,6 +462,16 @@ class ApprovalQueue:
             return (
                 f"{SENSITIVE_PREFIX} — sending mail always needs your go-ahead "
                 "(no approval mode skips this)."
+            )
+        if tool_early in ("calendar_cancel_event", "mail_disconnect"):
+            return (
+                f"{SENSITIVE_PREFIX} — cancelling an appointment or disconnecting "
+                "the mailbox always needs your go-ahead."
+            )
+        if tool_early in self.OWNER_LOCK_TOOLS:
+            return (
+                f"{SENSITIVE_PREFIX} — applying Remedy's own code or posting to "
+                "GitHub always needs your go-ahead."
             )
         # Re-sync mode when config explicitly sets approval_mode (desktop thumbs).
         # Scope always comes from config when available.

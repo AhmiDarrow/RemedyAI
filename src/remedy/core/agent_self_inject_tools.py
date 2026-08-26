@@ -154,14 +154,43 @@ def register_self_inject_tools(runtime: Any) -> None:
         try:
             snapshot = await git_capture(repo)
             round_.detail["head"] = snapshot.get("head")
-            round_ = await run_gate(round_, repo, timeout=timeout)
-            if apply:
+            after = await git_capture(repo)
+            files = list(after.get("changed") or [])
+            untracked = list(after.get("untracked") or [])
+            before = set(snapshot.get("changed") or []) | set(
+                snapshot.get("untracked") or []
+            )
+            round_paths = sorted(
+                (set(files) | set(untracked)) - before
+            ) or sorted(set(files) | set(untracked))
+            from remedy.core.self_inject_guard import run_both_passes
+
+            scan = run_both_passes(round_paths or files, str(after.get("diff") or ""))
+            round_.detail["guard"] = {
+                "ok": bool(scan.get("ok")),
+                "blocks": list(scan.get("blocks") or [])[:12],
+            }
+            if not scan.get("ok"):
+                round_.status = "red"
+                round_.summary = "self-inject guard blocked apply: " + "; ".join(
+                    str(b) for b in (scan.get("blocks") or ["blocked"])[:4]
+                )
                 round_ = await apply_or_rollback(
-                    round_, repo, snapshot, home=home
+                    round_, repo, snapshot, home=home, round_paths=round_paths
                 )
             else:
-                round_.status = "gated_only"
-                round_.outcome = "noop"
+                round_ = await run_gate(round_, repo, timeout=timeout)
+                if apply:
+                    round_ = await apply_or_rollback(
+                        round_,
+                        repo,
+                        snapshot,
+                        home=home,
+                        round_paths=round_paths,
+                    )
+                else:
+                    round_.status = "gated_only"
+                    round_.outcome = "noop"
             append_ledger(round_, home)
         except Exception as e:  # noqa: BLE001
             round_.status = "error"

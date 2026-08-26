@@ -466,7 +466,9 @@ class ComputerExecutor:
             already_fallback=bool(result.get("fallback")),
         ):
             try:
-                from remedy.core.computer import desktop_win as win
+                from remedy.core.computer.desktop_os import native
+
+                win = native()
 
                 hwnd = kwargs.get("hwnd")
                 info = win.print_window_png(int(hwnd)) if hwnd else win.screenshot_png()
@@ -512,7 +514,9 @@ class ComputerExecutor:
         """
         ev: dict[str, Any] = {}
         with contextlib.suppress(Exception):
-            from remedy.core.computer import desktop_win as win
+            from remedy.core.computer.desktop_os import native
+
+            win = native()
 
             fg = win.foreground_window_info()
             if fg.get("title"):
@@ -563,7 +567,9 @@ class ComputerExecutor:
         return el
 
     def _run_desktop(self, act: ComputerAction, **kwargs: Any) -> dict[str, Any]:
-        from remedy.core.computer import desktop_win as win
+        from remedy.core.computer.desktop_os import native
+
+        win = native()
 
         # UAC / secure-desktop guard: SendInput cannot touch the secure desktop,
         # so a click/type/key there would silently no-op and we'd report a false
@@ -1343,15 +1349,32 @@ class ComputerExecutor:
         # Vault tokens in typed text expand machine-side, bound to the rail's
         # current site — the model and job log only ever saw the handle.
         if act is ComputerAction.TYPE and payload.get("text"):
+            text = str(payload.get("text") or "")
+            had_vault = "{{" in text
+            set_ref = str(payload.get("ref") or kwargs.get("ref") or "").strip()
+            if had_vault and not set_ref:
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="type",
+                    message=(
+                        "Vault secrets only type into a named field. Pass ref= "
+                        "from computer_snapshot so the value lands in that control, "
+                        "not whatever currently has focus."
+                    ),
+                    extra={"needs": "ref"},
+                )
             # Binding domain is the LIVE page (probed inside), not last navigate.
             expanded, vault_err = self._expand_vault_text(
-                str(payload.get("text") or ""),
+                text,
                 action="type",
                 target="browser",
             )
             if vault_err is not None:
                 return vault_err
             payload["text"] = expanded
+            if set_ref:
+                payload["ref"] = set_ref
         if act is ComputerAction.NAVIGATE and payload.get("url"):
             raw_u = str(payload.get("url") or "")
             cleaned = normalize_url(raw_u)
@@ -1501,7 +1524,9 @@ class ComputerExecutor:
             scale = float((bounds or {}).get("scale") or 1.0)
             if bounds and bounds.get("width", 0) > 40 and bounds.get("height", 0) > 40:
                 try:
-                    from remedy.core.computer import desktop_win as win
+                    from remedy.core.computer.desktop_os import native
+
+                    win = native()
 
                     info = win.screenshot_region_png(
                         int(bounds["x"]),
@@ -1528,7 +1553,9 @@ class ComputerExecutor:
             # Fallback: PrintWindow the rail webview. No reliable scale here, so
             # tell the model the coords may need the page's devicePixelRatio.
             try:
-                from remedy.core.computer import desktop_win as win
+                from remedy.core.computer.desktop_os import native
+
+                win = native()
 
                 wv = win.find_webview_host_hwnd()
                 if wv:

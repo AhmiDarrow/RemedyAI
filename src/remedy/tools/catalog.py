@@ -96,6 +96,7 @@ def _infer(name: str) -> ToolDescriptor:
     if n.startswith(("git_", "gh_")) or n in (
         "self_improve_submit_pr",
         "self_improve_submit_issue",
+        "self_inject_round",
     ):
         caps.add(Capability.CREDENTIAL_USE)
         cred = CredentialPolicy.EXPLICIT

@@ -67,7 +67,11 @@ def register_memory_tools(runtime: Any) -> None:
                     "standing memory. Memory is context, not a grant."
                 )
 
-            sid = str(getattr(runtime, "_session_id", None) or "") or None
+            from remedy.core.turn_context import turn_session_id as _turn_sid
+
+            sid = _turn_sid(runtime) or (
+                str(getattr(runtime, "_session_id", None) or "") or None
+            )
             parent_ok = may_write_parent_memory(sid)
             why = (
                 "hive session note (not parent Partner Memory)"
@@ -91,18 +95,18 @@ def register_memory_tools(runtime: Any) -> None:
                     metadata=meta,
                 )
             )
-            # Also surface in the machine-native middleman (query-retrievable).
-            with suppress(Exception):
-                from remedy.memory.middleman import get_session_middleman
+            # Eternal CAS facts hydrate into every session — hive writers
+            # keep a session-scoped note only (parent profile skip above).
+            if parent_ok:
+                with suppress(Exception):
+                    from remedy.memory.middleman import get_session_middleman
 
-                get_session_middleman(
-                    str(getattr(runtime, "_session_id", None) or "")
-                ).put(
-                    text,
-                    kind="fact",
-                    session_id=str(getattr(runtime, "_session_id", None) or ""),
-                    body_cap=1_000,
-                )
+                    get_session_middleman(str(sid or "")).put(
+                        text,
+                        kind="fact",
+                        session_id=str(sid or ""),
+                        body_cap=1_000,
+                    )
             # Parent profile facts: owner/agent only. Hive stays session-scoped.
             if parent_ok and len(text) < 400:
                 with suppress(Exception):

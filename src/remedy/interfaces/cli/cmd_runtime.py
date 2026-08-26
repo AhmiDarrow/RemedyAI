@@ -326,8 +326,10 @@ def _cmd_chat(args) -> None:
         n_skills = runtime.skills.discover_defaults(home_dir=home)
 
         # Computer-use: in-process CLI host so navigate/open works without Desktop.
+        # Default OFF so Desktop's poller is not racing claims (same as serve).
         computer_host_on = False
-        skip_host = bool(getattr(args, "no_computer_host", False))
+        want_host = bool(getattr(args, "computer_host", False))
+        skip_host = bool(getattr(args, "no_computer_host", False)) or not want_host
         if not skip_host:
             try:
                 from remedy.core.computer.cli_host import start_cli_computer_host

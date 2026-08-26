@@ -73,6 +73,47 @@ def _wipe_life_goals(home: Path) -> bool:
     return False
 
 
+def _wipe_cas_personhood(home: Path) -> int:
+    """Tombstone eternal fact/life objects so hydrate cannot recall the person."""
+    from remedy.memory.cas import EternalCAS
+
+    n = 0
+    cas = EternalCAS(home)
+    for item in cas.fetch_hot(session_id="", limit=10_000, facts_limit=10_000):
+        kind = str(getattr(item, "kind", "") or "")
+        if kind in ("fact", "life"):
+            key = str(getattr(item, "key", "") or "")
+            if key and cas.tombstone(key):
+                n += 1
+    return n
+
+
+def _wipe_persona_files(home: Path) -> int:
+    """Drop soul embeddings, myelin examples, provenance, vigil residue."""
+    n = 0
+    paths = [
+        home / "soul" / "embeddings.json",
+        home / "soul" / "proprioception.json",
+        home / "soul" / "vigil.json",
+        home / "soul" / "vigil_journal.jsonl",
+        home / "facts.jsonl",
+        home / "myelin" / "ledger.json",
+    ]
+    myelin_sheaths = home / "myelin" / "sheaths"
+    for p in paths:
+        if p.is_file():
+            with contextlib.suppress(OSError):
+                p.unlink()
+                n += 1
+    if myelin_sheaths.is_dir():
+        for p in myelin_sheaths.glob("*"):
+            if p.is_file():
+                with contextlib.suppress(OSError):
+                    p.unlink()
+                    n += 1
+    return n
+
+
 async def wipe_persona(
     memory: Any,
     *,
@@ -117,6 +158,15 @@ async def wipe_persona(
 
     with contextlib.suppress(Exception):
         stats["life_goals_removed"] = _wipe_life_goals(root)
+
+    if memory is not None:
+        with contextlib.suppress(Exception):
+            stats["note_entries"] = int(await memory.delete_by_type("note") or 0)
+
+    with contextlib.suppress(Exception):
+        stats["cas_tombstoned"] = _wipe_cas_personhood(root)
+    with contextlib.suppress(Exception):
+        stats["persona_files"] = _wipe_persona_files(root)
 
     if runtime is not None:
         with contextlib.suppress(Exception):

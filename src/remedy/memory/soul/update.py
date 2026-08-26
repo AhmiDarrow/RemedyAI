@@ -210,6 +210,11 @@ def update_soul_after_turn(
     field: SoulField | None = None,
 ) -> SoulField:
     """Micro-update the soul field after a turn. Safe, secret-scrubbed."""
+    with suppress(Exception):
+        from remedy.memory.authority import is_hive_writer
+
+        if is_hive_writer(session_id):
+            return field if field is not None else load_soul_field(home)
     sf = field if field is not None else load_soul_field(home)
     ut = (user_text or "").strip()
     at = (assistant_text or "").strip()

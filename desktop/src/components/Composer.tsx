@@ -73,6 +73,8 @@ interface ComposerProps {
    */
   editDraft?: { text: string; key: number } | null
   sessionId?: string | null
+  /** When false (Grove up), do not drain OS file drops into this hidden composer. */
+  acceptNativeDrops?: boolean
   /** Create a session if needed before upload. */
   ensureSession?: () => Promise<string | null>
   /** Optional preloaded slash commands (falls back to API). */
@@ -182,6 +184,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     agents = [],
     editDraft,
     sessionId,
+    acceptNativeDrops = true,
     ensureSession,
     slashCommands: slashCommandsProp,
     llmProvider = '',
@@ -401,6 +404,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // Primary: poll Rust pending queue. Secondary: events only for drag highlight.
   // (Previously poll + event + path fallback all added the same file → 3 chips.)
   useEffect(() => {
+    if (!acceptNativeDrops) return
     let cancelled = false
     let unlisten: (() => void) | undefined
     let inFlight = false
@@ -472,7 +476,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       unlisten?.()
       clearDragOver()
     }
-  }, [addNativePayloads, disabled, clearDragOver, armDragOver])
+  }, [acceptNativeDrops, addNativePayloads, disabled, clearDragOver, armDragOver])
 
   // Global drag/drop end — WebView often never fires dragleave on the composer.
   useEffect(() => {
