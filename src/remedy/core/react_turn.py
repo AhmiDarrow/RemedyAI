@@ -437,14 +437,25 @@ def resolve_tools(
 
         msg_wants = bool(_message_wants_tools(message or ""))
 
-    # Real build/create/game asks must stay armed. The detector used to
-    # match "test" inside "interesting"; that substring hole is closed.
+    # Build packing (write-first schemas) may still consult the task detector
+    # *after* work is already decided. Arm from regex build verbs (godot /
+    # create app) so ability is not stripped; do not arm from length/fence
+    # alone or from social "make me laugh".
     task_like = False
     with suppress(Exception):
-        from remedy.core.build_engine import looks_like_task_request
+        from remedy.core.build_engine import _BUILD_RE, looks_like_task_request
 
-        task_like = bool(looks_like_task_request(message or ""))
-        msg_wants = msg_wants or task_like
+        raw = message or ""
+        task_like = bool(looks_like_task_request(raw))
+        m = _BUILD_RE.search(raw)
+        if m:
+            hit = m.group(0).lower()
+            if re.fullmatch(r"make\s+(it|me)", hit):
+                rest = raw[: m.start()] + raw[m.end() :]
+                if _BUILD_RE.search(rest):
+                    msg_wants = True
+            else:
+                msg_wants = True
 
     # Learned per-partner intent (arm-only): teaches toward the regex verdict
     # every turn and may override False→True once confidently trained. It can

@@ -60,6 +60,9 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
                 from remedy.memory.partner_memory import upsert_profile_fact
 
                 async def _remember() -> None:
+                    from remedy.core.turn_context import turn_session_id
+
+                    sid = turn_session_id(runtime)
                     profile = await mem.get_or_create_profile()
                     text = t if not description else f"{t} — {description.strip()[:160]}"
                     upsert_profile_fact(
@@ -68,6 +71,7 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
                         category="goal",
                         confidence=0.9,
                         source="goal_add",
+                        session_id=sid,
                     )
                     await mem.save_user_profile(profile)
 

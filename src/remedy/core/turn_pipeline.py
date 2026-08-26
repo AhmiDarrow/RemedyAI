@@ -39,6 +39,16 @@ def _tool_command(args: dict[str, Any], name: str = "") -> str:
     if n == "mail_reply":
         mid = str(args.get("message_id") or "").strip()
         return f"mail_reply to message={mid} chars={len(args.get('body') or '')}"
+    if n.startswith("computer_"):
+        parts = [n]
+        for key in ("text", "click", "label", "key", "url", "ref", "fields"):
+            raw = args.get(key)
+            if raw is None or raw is False:
+                continue
+            text = str(raw).strip()
+            if text:
+                parts.append(f"{key}={text[:160]}")
+        return " ".join(parts)
     for key in ("command", "cmd"):
         raw = args.get(key)
         if raw:
@@ -170,10 +180,11 @@ def authorize_tool(runtime: Any, name: str, args: dict[str, Any]) -> str | None:
         from remedy.core.approvals import SENSITIVE_PREFIX
 
         approved = False
-        if (decision.reason or "").startswith(SENSITIVE_PREFIX):
+        sensitive = (decision.reason or "").startswith(SENSITIVE_PREFIX)
+        if sensitive:
             approved = APPROVALS.take_one_shot(name, cmd, session_id=sid)
-        if not approved:
-            approved = APPROVALS.is_approved(name, cmd, session_id=sid)
+        elif APPROVALS.is_approved(name, cmd, session_id=sid):
+            approved = True
         if not approved:
             item = APPROVALS.create(
                 tool_name=name,

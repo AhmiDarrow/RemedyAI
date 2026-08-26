@@ -370,19 +370,9 @@ async def handle_messenger_event(
                 return
             claimed = True
             claim_epoch = stream_claim_epoch(session.id)
-            last_p, last_m = _last_desktop_muscle()
-            if memory is not None and last_p:
-                cur_p = str(getattr(session, "llm_provider", "") or "").strip().lower()
-                cur_m = str(getattr(session, "model", "") or "").strip()
-                if cur_p != last_p or (last_m and cur_m != last_m):
-                    with suppress(Exception):
-                        updated = await memory.update_chat_session(
-                            session.id,
-                            llm_provider=last_p,
-                            model=last_m or getattr(session, "model", None),
-                        )
-                        if updated is not None:
-                            session = updated
+            # Keep the session's own provider/model. Seeding a *new* messenger
+            # row may copy desktop muscle; inbound must not clobber a sticky bind
+            # (including a focused desktop tab Telegram just joined).
             if memory is not None:
                 model = getattr(session, "model", None) or getattr(
                     getattr(runtime, "config", None), "llm_model", None

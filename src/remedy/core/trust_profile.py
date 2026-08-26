@@ -36,6 +36,14 @@ def checkpoint_still_required(tool_name: str, command: str) -> str | None:
     hit = sensitive_computer_checkpoint(tool_name, command)
     if hit:
         return hit
-    if (tool_name or "").strip() in ("mail_send", "mail_reply"):
-        return f"{SENSITIVE_PREFIX} — sending mail always needs your go-ahead"
+    if (tool_name or "").strip() in (
+        "mail_send",
+        "mail_reply",
+        "calendar_cancel_event",
+        "mail_disconnect",
+        "self_inject_round",
+        "self_improve_submit_issue",
+        "self_improve_submit_pr",
+    ):
+        return f"{SENSITIVE_PREFIX} — this owner-visible action always needs your go-ahead"
     return None

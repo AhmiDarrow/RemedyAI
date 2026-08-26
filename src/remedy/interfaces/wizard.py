@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import getpass
 import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -593,8 +594,24 @@ def _write_config(config: dict) -> Path:
 
     safe = dict(config or {})
     try:
-        from remedy.interfaces.secret_store import scrub_config_secrets
+        from remedy.interfaces.secret_store import (
+            migrate_secrets_from_config,
+            scrub_config_secrets,
+            set_provider_secret,
+        )
 
+        safe = migrate_secrets_from_config(safe, home)
+        with suppress(Exception):
+            from remedy.gateway.messengers import SECRET_FIELD_KEYS, messenger_ids
+
+            for mid in messenger_ids():
+                sec = safe.get(mid)
+                if not isinstance(sec, dict):
+                    continue
+                for field in SECRET_FIELD_KEYS:
+                    val = str(sec.get(field) or "").strip()
+                    if val:
+                        set_provider_secret(f"ch:{mid}:{field}", val, home=home)
         safe = scrub_config_secrets(safe)
     except Exception:
         safe.pop("provider_keys", None)

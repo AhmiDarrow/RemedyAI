@@ -3234,7 +3234,7 @@ wheels = [
 
 [[package]]
 name = "remedy-ai"
-version = "0.41.0"
+version = "0.41.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },

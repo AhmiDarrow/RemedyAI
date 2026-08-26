@@ -130,7 +130,9 @@ class LocalComputerHost:
         job_id = cmd.get("job_id")
         if action in ("open_browser", "navigate") and url:
             try:
-                from remedy.core.computer import desktop_win as win
+                from remedy.core.computer.desktop_os import native
+
+                win = native()
                 from remedy.core.computer.router import is_valid_navigate_url, normalize_url
 
                 cleaned = normalize_url(url)
@@ -180,7 +182,9 @@ class LocalComputerHost:
     def _run_action(
         self, act: str, payload: dict[str, Any], bridge: Any
     ) -> dict[str, Any]:
-        from remedy.core.computer import desktop_win as win
+        from remedy.core.computer.desktop_os import native
+
+        win = native()
         from remedy.core.computer.router import is_valid_navigate_url, normalize_url
         from remedy.core.computer.types import public_result
 

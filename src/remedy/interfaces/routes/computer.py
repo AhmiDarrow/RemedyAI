@@ -139,11 +139,9 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
     @app.post("/api/computer/capture")
     async def computer_capture(req: CaptureRequest):
         """Server-side screenshot on this PC (full or region). Used by host + tools."""
-        import sys
+        from remedy.core.computer.desktop_os import native
 
-        if sys.platform != "win32":
-            raise HTTPException(501, "capture requires Windows")
-        from remedy.core.computer import desktop_win as win
+        win = native()
 
         # GDI/PIL capture + PNG encode can take hundreds of ms — keep the
         # loop free so the host pollers and chat stream do not stall.

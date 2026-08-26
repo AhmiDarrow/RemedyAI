@@ -490,6 +490,7 @@ async def test_a_read_only_calendar_says_so_instead_of_pretending(
 ):
     # About the provider's refusal, not the approval gate — cancel is gated now.
     approvals.set_mode("auto")
+    monkeypatch.setattr(approvals, "is_approved", lambda *a, **k: True)
     _install_calendar(monkeypatch, _ReadOnlyCalendar(provider_id="caldav"), caldav=True)
     out = await _json(tools, tool, **kwargs)
     assert out["ok"] is False
@@ -539,6 +540,7 @@ async def test_a_calendar_failure_is_reported_not_raised(
     tools, monkeypatch, approvals, tool, kwargs, fail, text
 ):
     approvals.set_mode("auto")
+    monkeypatch.setattr(approvals, "is_approved", lambda *a, **k: True)
     _install_calendar(monkeypatch, _FullCalendar(provider_id="caldav", fail=fail), caldav=True)
     out = await _json(tools, tool, **kwargs)
     assert out["ok"] is False
@@ -860,10 +862,12 @@ async def test_disconnecting_a_mailbox_is_gated_in_ask_mode(
 
 
 @pytest.mark.asyncio
-async def test_auto_mode_disconnects_without_a_prompt(tools, approvals, home):
+async def test_auto_mode_disconnects_without_a_prompt(tools, monkeypatch, approvals, home):
     from remedy.interfaces.secret_store import get_provider_secret, set_provider_secret
 
     approvals.set_mode("auto")
+    # Owner checkpoint still fires in auto; an owner grant lets disconnect finish.
+    monkeypatch.setattr(approvals, "is_approved", lambda *a, **k: True)
     set_provider_secret("mail_address", "someone@fastmail.com", home)
     set_provider_secret("mail_app_password", "hunter2-app-password", home)
     out = await _json(tools, "mail_disconnect")
@@ -878,6 +882,7 @@ async def test_a_cancel_survives_a_provider_that_cannot_describe_the_event(
     """get_event is best-effort labelling — a failure there must not block the
     cancellation the owner asked for."""
     approvals.set_mode("auto")
+    monkeypatch.setattr(approvals, "is_approved", lambda *a, **k: True)
 
     class _NoLookup(_FullCalendar):
         def get_event(self, event_id):

@@ -310,7 +310,7 @@ def build_parser() -> argparse.ArgumentParser:
     chat_cmd.add_argument(
         "--computer-host",
         action="store_true",
-        help="Force-start CLI computer host (default: on)",
+        help="Start CLI computer host (default: off so Desktop owns the rail)",
     )
 
     # remedy serve

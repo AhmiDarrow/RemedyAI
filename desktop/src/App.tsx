@@ -273,10 +273,20 @@ export default function App() {
   // Grove (partner home, default) vs Studio (this full workbench)
   const [surface, setSurface] = useState<AppSurface>(() => loadSurface())
   const [groveSettingsOpen, setGroveSettingsOpen] = useState(false)
+  const studioActiveRef = useRef<string | null>(null)
   const switchSurface = useCallback((s: AppSurface) => {
-    setSurface(s)
+    setSurface((prev) => {
+      if (prev === 'studio' && s === 'grove' && activeId) {
+        studioActiveRef.current = activeId
+      }
+      return s
+    })
     saveSurface(s)
-  }, [])
+    if (s === 'studio') {
+      const restore = studioActiveRef.current
+      if (restore) setActiveId(restore)
+    }
+  }, [activeId, setActiveId])
   // Goal room Remedy asked to open herself (app_control open_goal); GroveApp
   // consumes it once its board carries the goal, then acks to clear it.
   const [pendingGroveGoal, setPendingGroveGoal] = useState<string | null>(null)
@@ -2069,6 +2079,7 @@ export default function App() {
             />
             <Composer
               ref={composerRef}
+              acceptNativeDrops={surface !== 'grove'}
               onSend={handleSend}
               onStop={stop}
               onCommand={handleCommand}

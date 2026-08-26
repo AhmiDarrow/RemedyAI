@@ -4,6 +4,36 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.41.1] - 2026-08-26
+
+### Fixed — owner checkpoints and keys actually fire on the wired path
+
+- Vault / click text now reach PolicyEngine; inner `needs_ask` still stops
+  `{{vault:…}}` after a generic allow. Browser type requires snapshot `ref=`
+  the same way desktop already did. Ordinary typing in Auto is unchanged.
+- `GET /api/models` will not send a stored key to a caller-supplied host
+  (same family as the provider probe). `remedy setup` writes keys into the
+  secret store instead of scrubbing them into nowhere.
+- Chatterbox HQ speak and first-run pack install honor `tts_quality`; Kokoro
+  stays the default voice. HQ is still there when you turn it on.
+- `self_inject_round` is owner-locked, runs the two-pass guard, and rolls
+  back only the round's write set. The tool still applies on green after you
+  approve.
+- Messenger inbound no longer overwrites the session's provider from
+  Settings' previous provider. Work-signal arming no longer ORs the loose
+  "make me" / long-paste detector (that detector still packs build tools
+  *after* work is decided).
+- Hive daughters still forage with write+exec; they no longer mint parent
+  CAS facts, life goals, or Soul Field updates, and cannot see `mcp_*`
+  tools. Persona wipe also clears notes, CAS fact/life, embeddings, myelin.
+- Linux capture / click / type / open_app via grim/xdotool/xdg-open (Windows
+  path unchanged). `remedy chat` defaults the CLI computer host **off** like
+  serve (`--computer-host` still starts it). Serve lock is not stolen from a
+  live PID. Windows update scheduler uses the first successful host only.
+- Grove stashes the Studio session and restores it; the hidden Studio
+  composer no longer eats OS file drops. Calendar cancel and mailbox
+  disconnect are owner checkpoints (still run after you say yes).
+
 ### Changed — one authority per question (improvement roadmap, phase 1)
 
 - **Runtime identity**: frozen/dev/sidecar questions go through

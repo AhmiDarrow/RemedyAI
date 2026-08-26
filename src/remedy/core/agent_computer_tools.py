@@ -164,6 +164,12 @@ def _computer_approval_gate(
         ask_reason = raw_secret_checkpoint(tool_name, typed_text)
     if not ask_reason:
         ask_reason = challenge_wall_checkpoint(tool_name, page_context, label)
+    # Vault / click-copy checkpoints live in needs_ask(summary). PolicyEngine
+    # may have allowed on an empty command; still stop owner-checkpoint text.
+    if not ask_reason:
+        from remedy.core.approvals import sensitive_computer_checkpoint
+
+        ask_reason = sensitive_computer_checkpoint(tool_name, summary)
     if not ask_reason:
         from remedy.core.turn_pipeline import gate_already_passed
 

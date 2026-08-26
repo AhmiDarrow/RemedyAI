@@ -184,6 +184,32 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
 
         # Unsaved overrides from the Settings form (list before Save).
         if override_url:
+            # Stored keys stay on this provider's own host (same family as
+            # POST /api/providers/probe). A pasted ?api_key= may probe anywhere.
+            if (api_key or "").strip() and not override_key:
+                from urllib.parse import urlparse
+
+                def _host(u: str) -> str:
+                    with suppress(Exception):
+                        return (urlparse(u).hostname or "").lower()
+                    return ""
+
+                allowed_hosts = {
+                    _host(base_url),
+                    _host(str(catalog_meta.get("base_url") or "")),
+                    _host(str(cfg.get("llm_base_url") or "")),
+                }
+                allowed_hosts.discard("")
+                if _host(override_url) not in allowed_hosts:
+                    return {
+                        "provider": configured_provider,
+                        "models": [],
+                        "error": (
+                            "Refused: won't send the stored API key to a custom URL "
+                            "that isn't this provider's own endpoint. Paste the key "
+                            "explicitly to list models on an arbitrary endpoint."
+                        ),
+                    }
             base_url = override_url
         if override_key:
             api_key = override_key

@@ -380,7 +380,11 @@ def register_assistant_tools(runtime: Any) -> None:
         if not label:
             return json.dumps(clear_mail_credentials(home=home), indent=2)
         summary = f"mail_disconnect {label[:100]}"
-        ask_reason = APPROVALS.needs_ask(summary, tool_name="mail_disconnect")
+        from remedy.core.turn_pipeline import gate_already_passed
+
+        ask_reason = None
+        if not gate_already_passed("mail_disconnect"):
+            ask_reason = APPROVALS.needs_ask(summary, tool_name="mail_disconnect")
         sid = turn_session_id(runtime)
         if ask_reason and not APPROVALS.is_approved(
             "mail_disconnect", summary, session_id=sid
@@ -581,7 +585,13 @@ def register_assistant_tools(runtime: Any) -> None:
             ev0 = cal.get_event(eid)
             label = f"{ev0.title} @ {ev0.start}"
         summary = f"calendar_cancel_event {label[:100]}"
-        ask_reason = APPROVALS.needs_ask(summary, tool_name="calendar_cancel_event")
+        from remedy.core.turn_pipeline import gate_already_passed
+
+        ask_reason = None
+        if not gate_already_passed("calendar_cancel_event"):
+            ask_reason = APPROVALS.needs_ask(
+                summary, tool_name="calendar_cancel_event"
+            )
         sid = turn_session_id(runtime)
         if ask_reason and not APPROVALS.is_approved(
             "calendar_cancel_event", summary, session_id=sid

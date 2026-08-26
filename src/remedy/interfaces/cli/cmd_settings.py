@@ -458,7 +458,7 @@ def _cmd_computer(args) -> None:
         console.print(
             "\n[dim]Desktop tools (app/windows/click) work in-process.\n"
             "Browser rail needs Remedy Desktop, or start: remedy computer host start\n"
-            "Chat starts the CLI host automatically unless --no-computer-host.[/dim]"
+            "Chat starts the CLI host only with --computer-host (Desktop owns the rail).[/dim]"
         )
         return
 

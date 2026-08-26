@@ -101,6 +101,13 @@ def save_voice_settings(
     return cur
 
 
+def _hq_wanted(home_dir: Path | str | None = None, cfg: dict[str, Any] | None = None) -> bool:
+    """True when the owner opted into Chatterbox (not merely when files exist)."""
+    raw = cfg if isinstance(cfg, dict) else load_voice_settings(home_dir)
+    q = str((raw or {}).get("tts_quality") or "standard").strip().lower()
+    return q in ("hq", "high", "chatterbox")
+
+
 # ---------------------------------------------------------------------------
 # Gender → voice mapping (agent_gender is the owner's existing choice)
 # ---------------------------------------------------------------------------
@@ -389,7 +396,7 @@ def synthesize(
         # quick first voice answers, and any failure falls through to it.
         from remedy.voice.chatterbox import chatterbox_ready
 
-        if chatterbox_ready(home_dir):
+        if _hq_wanted(home_dir) and chatterbox_ready(home_dir):
             try:
                 hq_out = get_bridge(home_dir, LANE_HQ).synthesize(text, gender=gender)
                 if hq_out is not None:
@@ -409,7 +416,7 @@ def synthesize(
 
     # Never pip/download inside a speak request: until her voice has
     # finished arriving, the quick first voice answers.
-    if chatterbox_ready(home_dir):
+    if _hq_wanted(home_dir, cfg) and chatterbox_ready(home_dir):
         try:
             out = hq_synthesize(text, gender=gender, home_dir=home_dir)
         except Exception as exc:
@@ -865,10 +872,11 @@ def install_voice_pack(home_dir: Path | str | None = None) -> None:
             install_stt_background(home_dir)
         if not smart_turn_installed(home_dir):
             install_smart_turn_background(home_dir)
-        # Her full voice follows in the background (its own progress line).
+        # Chatterbox (torch) is opt-in. Pack install still offers it when
+        # Settings already asked for HQ; otherwise Kokoro is the first voice.
         from remedy.voice.chatterbox import chatterbox_ready, install_chatterbox_background
 
-        if not chatterbox_ready(home_dir):
+        if _hq_wanted(home_dir) and not chatterbox_ready(home_dir):
             install_chatterbox_background(home_dir)
         _install_state["pack"] = {
             "status": "done",
@@ -922,18 +930,17 @@ def warm_voice_engines(
                     get_tts_engine(home_dir)
             from remedy.voice.chatterbox import chatterbox_ready
 
-            if True:
-                if chatterbox_ready(home_dir):
-                    if _managed():
-                        from remedy.voice.bridge import LANE_HQ, get_bridge
+            if _hq_wanted(home_dir) and chatterbox_ready(home_dir):
+                if _managed():
+                    from remedy.voice.bridge import LANE_HQ, get_bridge
 
-                        get_bridge(home_dir, LANE_HQ).call(
-                            "warm_hq_start", timeout=60, gender=gender or "female"
-                        )
-                    else:
-                        from remedy.voice.chatterbox import synthesize as hq_synth
+                    get_bridge(home_dir, LANE_HQ).call(
+                        "warm_hq_start", timeout=60, gender=gender or "female"
+                    )
+                else:
+                    from remedy.voice.chatterbox import synthesize as hq_synth
 
-                        hq_synth("Ready.", gender=gender or "female", home_dir=home_dir)
+                    hq_synth("Ready.", gender=gender or "female", home_dir=home_dir)
         except Exception as exc:  # noqa: BLE001 — warm-up is best effort
             logger.info("voice warm-up skipped: %s", exc)
 

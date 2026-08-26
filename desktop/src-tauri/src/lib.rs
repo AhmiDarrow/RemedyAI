@@ -3045,7 +3045,6 @@ fn schedule_update_install_script(ps1_path: &str) -> Result<(), String> {
         DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW | CREATE_BREAKAWAY_FROM_JOB;
     let flags_basic = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW;
 
-    let mut ok_count = 0u32;
     let mut errors: Vec<String> = Vec::new();
 
     // --- 1) Direct PowerShell with job breakaway ---
@@ -3075,8 +3074,8 @@ fn schedule_update_install_script(ps1_path: &str) -> Result<(), String> {
         })
         .is_ok()
     {
-        ok_count += 1;
         log::info!("update schedule: powershell spawn ok");
+        return Ok(());
     } else {
         errors.push("powershell spawn failed".into());
     }
@@ -3113,8 +3112,8 @@ fn schedule_update_install_script(ps1_path: &str) -> Result<(), String> {
             })
             .is_ok()
         {
-            ok_count += 1;
             log::info!("update schedule: wscript launch ok");
+            return Ok(());
         } else {
             errors.push("wscript spawn failed".into());
         }
@@ -3186,7 +3185,6 @@ fn schedule_update_install_script(ps1_path: &str) -> Result<(), String> {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
-        ok_count += 1;
         log::info!("update schedule: schtasks {task} created and run (ST={st})");
         let cleanup = format!("Start-Sleep -Seconds 240; schtasks /Delete /TN \"{task}\" /F");
         let _ = Command::new("powershell.exe")
@@ -3196,16 +3194,13 @@ fn schedule_update_install_script(ps1_path: &str) -> Result<(), String> {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn();
+        return Ok(());
     } else {
         errors.push("schtasks create/run failed".into());
         log::warn!("update schedule: schtasks create failed");
     }
 
-    if ok_count > 0 {
-        Ok(())
-    } else {
-        Err(errors.join(" | "))
-    }
+    Err(errors.join(" | "))
 }
 
 #[cfg(not(target_os = "windows"))]
