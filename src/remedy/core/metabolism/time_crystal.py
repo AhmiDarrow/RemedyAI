@@ -7,6 +7,7 @@ Secrets never promote. Per-tab isolation via session_id.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from contextlib import suppress
@@ -20,6 +21,26 @@ from remedy.home import default_home
 HORIZONS = ("turn", "session", "project_week", "life")
 # Bound fact list growth (was 300) — hot_block sort + inject size stay cheap.
 MAX_CRYSTAL_FACTS = 128
+# Soul used to promote "Stay with: Continue…" into life, so a new chat
+# inherited the previous tab's job. Those are session work, not identity.
+_JOB_RESUME_FACT_RE = re.compile(
+    r"(?i)^\s*(?:"
+    r"stay with:\s*continue|"
+    r"continue:\s|"
+    r"keep going|"
+    r"resume (?:the |this )?(?:task|job|build|work)|"
+    r"pick up where|"
+    r"don'?t stop"
+    r")"
+)
+
+
+def looks_like_job_resume_fact(text: str, *, source: str = "") -> bool:
+    """True for leftover 'continue the last job' lines — not durable identity."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    return bool(_JOB_RESUME_FACT_RE.search(t))
 
 
 @dataclass
@@ -72,6 +93,9 @@ class TimeCrystal:
             with self._lock:
                 self.blocked_secret += 1
             return None
+        # Job-resume pledges must not become life facts that infect new chats.
+        if looks_like_job_resume_fact(t, source=source) and horizon == "life":
+            horizon = "session"
         if horizon not in HORIZONS:
             horizon = "session"
         # Dedupe by lower text
@@ -167,6 +191,8 @@ class TimeCrystal:
             used = 0
             for f in ordered:
                 if f.horizon == "turn":
+                    continue
+                if looks_like_job_resume_fact(f.text, source=f.source):
                     continue
                 line = f"- ({f.horizon}) {f.text}"
                 if used + len(line) > max_chars:

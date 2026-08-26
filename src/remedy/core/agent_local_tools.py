@@ -504,24 +504,27 @@ def register_rmb_tools(runtime: Any) -> None:
         model_id: str = "",
         model_path: str = "",
         ctx_size: int | None = None,
+        n_gpu_layers: int | None = None,
         auto_start: bool | None = None,
         settings: dict | str | None = None,
         load: bool = True,
     ) -> str:
         """Drive Remedy Muscle Bridge (local llama.cpp on :8787).
 
-        action=status  → running/ready/model/autofit (no start)
+        action=status  → running/ready/model/local GGUFs/MTP (no start)
         action=start   → enable + start host (autofit default)
         action=stop    → stop host; vision can use the GPU again
         action=use     → start and switch *this* chat to RMB
-        action=catalog → bundled GGUF catalog
+        action=catalog → bundled Hugging Face GGUF catalog
+        action=models  → GGUFs already in ~/.remedy/rmb/models/ (and search roots)
         action=search  → Hugging Face name / owner/repo / file URL
-        action=files   → list .gguf in a repo (after search)
+        action=files   → no repo: local GGUFs; with repo: list .gguf on HF
         action=pull    → download into ~/.remedy/rmb/models/
-        action=settings → patch profile/ctx/model (restarts host)
+        action=settings → no patch: dump live config; else patch (may restart)
 
         Autofit is default. Do not guess Hugging Face hosts — search, then pick.
-        Starting RMB suspends SmolVLM. Never list_dir for GGUFs.
+        Starting RMB suspends SmolVLM. Never glob C:\\Users for GGUFs —
+        action=status / action=models lists the house first.
         """
         act = (action or "status").strip().lower()
         home = _rmb_home(runtime)
@@ -564,6 +567,7 @@ def register_rmb_tools(runtime: Any) -> None:
                     "model_present",
                     "runtime_present",
                     "ctx_size",
+                    "n_gpu_layers",
                     "profile",
                     "vision_suspended",
                     "last_error",
@@ -571,18 +575,73 @@ def register_rmb_tools(runtime: Any) -> None:
                 )
                 if k in st
             }
+            ggufs = st.get("discovered_ggufs")
+            if isinstance(ggufs, list):
+                public["local_ggufs"] = [
+                    {
+                        "name": g.get("name"),
+                        "size_gb": g.get("size_gb"),
+                        "dir": g.get("dir"),
+                        "path": g.get("path"),
+                    }
+                    for g in ggufs[:24]
+                    if isinstance(g, dict)
+                ]
+            ha = st.get("host_auto")
+            if isinstance(ha, dict):
+                public["host_auto"] = {
+                    k: ha.get(k)
+                    for k in (
+                        "mtp",
+                        "mtp_armed",
+                        "model_draft",
+                        "spec_type",
+                        "spec_draft_n_max",
+                        "summary",
+                        "unfit",
+                        "warnings",
+                    )
+                    if k in ha
+                }
+            af = st.get("autofit")
+            if isinstance(af, dict):
+                public["autofit"] = {
+                    k: af.get(k)
+                    for k in ("summary", "ctx_size", "n_gpu_layers", "target")
+                    if k in af
+                }
             public["next"] = (
+                "House GGUFs are local_ggufs. Point at one with "
+                'rmb action="settings" model_path=… then '
                 "rmb action=start (then action=use to chat on it). "
-                "Autofit sizes VRAM. Pull a GGUF with action=search then action=pull."
+                "Do not glob C:\\Users. Do not edit the git repo to load a model."
                 if not st.get("ready")
                 else "ready — rmb action=use switches this chat onto the local host."
             )
             return json.dumps(public, indent=2, default=str)
 
-        if act in ("catalog", "models"):
+        if act in ("catalog",):
             from remedy.runtime.rmb.catalog import catalog_public
 
             return json.dumps(catalog_public(), indent=2, default=str)
+
+        if act in ("models", "inventory", "local"):
+            from remedy.runtime.rmb.service import discover_ggufs
+
+            found = await asyncio.to_thread(discover_ggufs, home)
+            return json.dumps(
+                {
+                    "ok": True,
+                    "house": str(home) if home else "~/.remedy/rmb/models",
+                    "ggufs": found[:48],
+                    "next": (
+                        'rmb action="settings" model_path="<path>" to load one. '
+                        "Sibling mtp-<stem>.gguf next to the main file auto-arms MTP."
+                    ),
+                },
+                indent=2,
+                default=str,
+            )
 
         if act in ("search", "hf"):
             q = (query or repo or "").strip()
@@ -612,11 +671,22 @@ def register_rmb_tools(runtime: Any) -> None:
         if act in ("files", "list"):
             r = (repo or query or "").strip()
             if not r:
-                return format_tool_error(
-                    "repo is required for action=files",
-                    code="MISSING_REPO",
-                    tool_name="rmb",
-                    suggestion='rmb action="files" repo="owner/repo"',
+                from remedy.runtime.rmb.service import discover_ggufs
+
+                found = await asyncio.to_thread(discover_ggufs, home)
+                return json.dumps(
+                    {
+                        "ok": True,
+                        "house": True,
+                        "ggufs": found[:48],
+                        "next": (
+                            "These are local GGUFs. For Hugging Face listing pass "
+                            'repo="owner/repo". Load one with '
+                            'rmb action="settings" model_path=…'
+                        ),
+                    },
+                    indent=2,
+                    default=str,
                 )
             from remedy.runtime.rmb.hf import HfError, list_gguf_files, sanitize_repo
 
@@ -779,18 +849,38 @@ def register_rmb_tools(runtime: Any) -> None:
                 patch["model_path"] = model_path
             if ctx_size is not None:
                 patch["ctx_size"] = int(ctx_size)
+            if n_gpu_layers is not None:
+                patch["n_gpu_layers"] = int(n_gpu_layers)
             if auto_start is not None:
                 patch["auto_start"] = bool(auto_start)
             if not patch:
-                return format_tool_error(
-                    "No settings to apply.",
-                    code="EMPTY_PATCH",
-                    tool_name="rmb",
-                    suggestion=(
-                        'rmb action="settings" profile="autofit" '
-                        "or ctx_size=8192 or model_id=…"
-                    ),
+                from remedy.runtime.rmb.config import load_rmb_json, merge_state
+
+                live = merge_state(load_rmb_json(home))
+                public_live: dict[str, Any] = {
+                    k: live.get(k)
+                    for k in (
+                        "enabled",
+                        "model_id",
+                        "model_path",
+                        "n_gpu_layers",
+                        "ctx_size",
+                        "profile",
+                        "autofit",
+                        "autofit_locked",
+                        "host_auto",
+                        "cache_type",
+                        "flash_attn",
+                        "temperature",
+                    )
+                    if k in live
+                }
+                public_live["ok"] = True
+                public_live["next"] = (
+                    'Patch with rmb action="settings" profile="turbo" '
+                    "or n_gpu_layers=40 or ctx_size=4096 or model_path=…"
                 )
+                return json.dumps(public_live, indent=2, default=str)
             gate = _rmb_approval(
                 runtime,
                 f"rmb settings {sorted(patch.keys())}",
@@ -864,7 +954,7 @@ def register_rmb_tools(runtime: Any) -> None:
             code="UNKNOWN_ACTION",
             tool_name="rmb",
             suggestion=(
-                "status | start | stop | use | catalog | search | files | "
+                "status | start | stop | use | catalog | models | search | files | "
                 "pull | settings | progress"
             ),
         )
@@ -872,9 +962,10 @@ def register_rmb_tools(runtime: Any) -> None:
     runtime.tool_registry.register_builtin_handler(
         "rmb",
         "Remedy Muscle Bridge — her own local llama.cpp host (not a second product). "
-        "status | start | stop | use (chat on it) | catalog | search | files | "
-        "pull | settings | progress. Autofit default. Starting suspends SmolVLM. "
-        "Do not list_dir for GGUFs; do not guess Hugging Face hosts — search first. "
+        "status | start | stop | use (chat on it) | catalog | models (local GGUFs) | "
+        "search | files | pull | settings | progress. Autofit default. Starting "
+        "suspends SmolVLM. Local inventory is action=models / status.local_ggufs — "
+        "never glob the user profile. Do not guess Hugging Face hosts — search first. "
         "Do not only point the owner at Settings.",
         rmb,
         {
@@ -883,8 +974,8 @@ def register_rmb_tools(runtime: Any) -> None:
                 "action": {
                     "type": "string",
                     "description": (
-                        "status | start | stop | use | catalog | search | files | "
-                        "pull | settings | progress (default status)"
+                        "status | start | stop | use | catalog | models | search | "
+                        "files | pull | settings | progress (default status)"
                     ),
                 },
                 "query": {
@@ -900,6 +991,10 @@ def register_rmb_tools(runtime: Any) -> None:
                 "model_id": {"type": "string"},
                 "model_path": {"type": "string"},
                 "ctx_size": {"type": "integer"},
+                "n_gpu_layers": {
+                    "type": "integer",
+                    "description": "GPU layers for action=settings (too high thrashs VRAM)",
+                },
                 "auto_start": {"type": "boolean"},
                 "settings": {
                     "type": "object",

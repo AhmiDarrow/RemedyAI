@@ -32,10 +32,14 @@ and prefers `host_run(argv)` so quoting does not burn the small window.
 ## She can drive it
 
 RMB is part of Remedy, not a bolt-on. Chat can call the **`rmb`** tool
-(`status`, `start`, `stop`, `use`, `catalog`, `search`, `pull`, `settings`)
-instead of sending you to this page. The living map shows
-`[House] RMB=…` so she knows whether the host is up. Starting RMB still
-uses this PC's GPU and **suspends** SmolVLM until you (or she) stop it.
+(`status`, `start`, `stop`, `use`, `catalog`, `models`, `search`, `pull`,
+`settings`) instead of sending you to this page. **`status`** and
+**`models`** list GGUFs already in `~/.remedy/rmb/models/` — she should
+not search the whole user profile. A sibling `mtp-<name>.gguf` next to
+the main file auto-arms MTP on start (Settings restart keeps it). The
+living map shows `[House] RMB=…` so she knows whether the host is up.
+Starting RMB still uses this PC's GPU and **suspends** SmolVLM until you
+(or she) stop it.
 
 ## Setup (owner UI)
 
@@ -55,7 +59,9 @@ uses this PC's GPU and **suspends** SmolVLM until you (or she) stop it.
    profile (agent / turbo / quality) or type a context size to lock it.
    Switching GGUFs **re-fits** automatically. Remedy also auto-loads host
    knobs from the file (Jinja chat template, thinking off for Qwen3/R1,
-   mmap, MTP single-slot). You should not need to set those.
+   mmap, MTP single-slot, or a sibling `mtp-*.gguf` draft). You should
+   not need to set those. Too many GPU layers on a GGUF bigger than VRAM
+   will crawl — Autofit is the safe default.
 4. **Start RMB** (required — RMB does **not** auto-start when the API/serve
    process comes up). Optionally enable **auto-start** only if you want the host
    to load with every Remedy launch.

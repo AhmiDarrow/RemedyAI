@@ -73,6 +73,120 @@ async def test_rmb_status_does_not_claim_ready_when_stopped(rmb_rt):
 
 
 @pytest.mark.asyncio
+async def test_rmb_status_lists_local_ggufs_not_just_sticky_path(
+    rmb_rt, monkeypatch: pytest.MonkeyPatch
+):
+    """Live session: status hid ~/.remedy/rmb/models while showing old Coder 7B."""
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.service.get_rmb_status",
+        lambda cfg=None: {
+            "ok": True,
+            "brand": "RMB",
+            "brand_full": "Remedy Muscle Bridge",
+            "enabled": True,
+            "auto_start": False,
+            "installed": True,
+            "running": False,
+            "ready": False,
+            "starting": False,
+            "loading": False,
+            "user_stopped": True,
+            "base_url": "http://127.0.0.1:8787/v1",
+            "port": 8787,
+            "model_id": "Qwen2.5-Coder-7B",
+            "chat_model": "Qwen2.5-Coder-7B",
+            "model_path": str(Path.home() / "Remedy Muscle Bridge" / "models" / "old.gguf"),
+            "model_present": True,
+            "runtime_present": True,
+            "ctx_size": 8192,
+            "n_gpu_layers": 33,
+            "profile": "autofit",
+            "vision_suspended": False,
+            "last_error": None,
+            "discovered_ggufs": [
+                {
+                    "name": "Qwen3.8-27B-Q4_0.gguf",
+                    "size_gb": 15.3,
+                    "dir": str(Path.home() / ".remedy" / "rmb" / "models"),
+                    "path": str(Path.home() / ".remedy" / "rmb" / "models" / "Qwen3.8-27B-Q4_0.gguf"),
+                },
+                {
+                    "name": "mtp-Qwen3.8-27B-Q4_0.gguf",
+                    "size_gb": 1.3,
+                    "dir": str(Path.home() / ".remedy" / "rmb" / "models"),
+                    "path": str(Path.home() / ".remedy" / "rmb" / "models" / "mtp-Qwen3.8-27B-Q4_0.gguf"),
+                },
+            ],
+            "host_auto": {
+                "mtp": True,
+                "mtp_armed": True,
+                "model_draft": "mtp-Qwen3.8-27B-Q4_0.gguf",
+                "spec_type": "draft-mtp",
+                "summary": "Qwen3 · MTP n3",
+                "unfit": True,
+                "warnings": ["partial offload"],
+            },
+        },
+    )
+    raw = await rmb_rt.tool_registry.tools["rmb"](action="status")
+    d = json.loads(raw)
+    names = [g["name"] for g in d.get("local_ggufs") or []]
+    assert "Qwen3.8-27B-Q4_0.gguf" in names
+    assert "mtp-Qwen3.8-27B-Q4_0.gguf" in names
+    assert d.get("n_gpu_layers") == 33
+    assert (d.get("host_auto") or {}).get("mtp_armed") is True
+
+
+@pytest.mark.asyncio
+async def test_rmb_files_without_repo_lists_house_ggufs(
+    rmb_rt, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    house = tmp_path / "rmb" / "models"
+    house.mkdir(parents=True)
+    (house / "Qwen3.8-27B-Q4_0.gguf").write_bytes(b"gguf")
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.service.discover_ggufs",
+        lambda home=None: [
+            {
+                "name": "Qwen3.8-27B-Q4_0.gguf",
+                "size_gb": 15.3,
+                "dir": str(house),
+                "path": str(house / "Qwen3.8-27B-Q4_0.gguf"),
+            }
+        ],
+    )
+    raw = await rmb_rt.tool_registry.tools["rmb"](action="files")
+    assert "MISSING_REPO" not in raw
+    d = json.loads(raw)
+    assert d["ok"] is True
+    assert d["ggufs"][0]["name"] == "Qwen3.8-27B-Q4_0.gguf"
+
+
+@pytest.mark.asyncio
+async def test_rmb_empty_settings_dumps_live_config(rmb_rt, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.config.load_rmb_json",
+        lambda home=None: {
+            "enabled": True,
+            "model_id": "Qwen3.8-27B-Q4_0",
+            "n_gpu_layers": 40,
+            "ctx_size": 4096,
+            "profile": "turbo",
+        },
+    )
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.config.merge_state",
+        lambda st: dict(st),
+    )
+    raw = await rmb_rt.tool_registry.tools["rmb"](action="settings")
+    assert "EMPTY_PATCH" not in raw
+    d = json.loads(raw)
+    assert d["ok"] is True
+    assert d["n_gpu_layers"] == 40
+    assert d["profile"] == "turbo"
+
+
+@pytest.mark.asyncio
 async def test_rmb_unknown_action_names_the_family(rmb_rt):
     raw = await rmb_rt.tool_registry.tools["rmb"](action="explode")
     assert "Unknown rmb action" in raw

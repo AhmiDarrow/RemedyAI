@@ -489,12 +489,18 @@ async def run_react_steps(s: Any) -> AsyncIterator[str]:
             # Only greetings / verbal trivia stay tool-free. Knowledge
             # follow-ups re-arm — do not stall a capable model.
             with suppress(Exception):
-                from remedy.core.react_policy import is_chat_only_message, is_pure_trivia_message
+                from remedy.core.react_policy import (
+                    is_chat_only_message,
+                    is_feeling_presence_question,
+                    is_pure_trivia_message,
+                )
 
-                if is_chat_only_message(message or "") or is_pure_trivia_message(
-                    message or ""
+                if (
+                    is_chat_only_message(message or "")
+                    or is_pure_trivia_message(message or "")
+                    or is_feeling_presence_question(message or "")
                 ):
-                    logger.info("skip rearm — user message is chat/trivia")
+                    logger.info("skip rearm — user message is chat/trivia/presence")
                     return
             if str(getattr(turn, "arm_reason", "") or "") in (
                 "ask_first",
@@ -502,6 +508,7 @@ async def run_react_steps(s: Any) -> AsyncIterator[str]:
                 "no_work_request",
                 "non_work",
                 "l1_pure_chat",
+                "knowledge",
             ):
                 logger.info("skip rearm — %s", turn.arm_reason)
                 return

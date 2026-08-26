@@ -729,9 +729,9 @@ def _model_search_roots(home_dir: str | Path | None) -> list[Path]:
         models_dir(home_dir),
         default_home() / "models",
         default_home() / "rmb" / "models",
-        # Common user drop folders (Windows RMB package + Downloads)
-        Path.home() / "Remedy Muscle Bridge" / "models",
         Path.home() / "Downloads",
+        # Last: leftover sibling-product folder — never preferred over ~/.remedy/rmb
+        Path.home() / "Remedy Muscle Bridge" / "models",
     ]
     # Optional extra dirs via env (semicolon-separated on Windows)
     extra = (os.environ.get("REMEDY_RMB_MODEL_DIRS") or "").strip()
@@ -1222,6 +1222,15 @@ def binary_supports_reasoning_budget(binary: Path | str | None) -> bool:
     )
 
 
+def binary_supports_reasoning_off(binary: Path | str | None) -> bool:
+    """True when this llama-server build knows ``--reasoning off``."""
+    return _binary_has_needles(
+        binary,
+        "reasoning-off",
+        (b"--reasoning off", b"reasoning off"),
+    )
+
+
 def _binary_has_needles(
     binary: Path | str | None, cache_key: str, needles: tuple[bytes, ...]
 ) -> bool:
@@ -1420,9 +1429,17 @@ def _build_cmd(
     ]
     if use_jinja or profile.get("use_jinja"):
         cmd.append("--jinja")
-    kwargs_json = str(profile.get("chat_template_kwargs") or "").strip()
-    if kwargs_json and binary_supports_chat_template_kwargs(binary):
-        cmd.extend(["--chat-template-kwargs", kwargs_json])
+    # Qwen thinking-off: prefer --reasoning off (current llama.cpp). The
+    # chat-template-kwargs enable_thinking path is deprecated and noisy.
+    reasoning_off = bool(profile.get("qwen_thinking_toggle")) and not profile.get(
+        "always_think"
+    )
+    if reasoning_off and binary_supports_reasoning_off(binary):
+        cmd.extend(["--reasoning", "off"])
+    else:
+        kwargs_json = str(profile.get("chat_template_kwargs") or "").strip()
+        if kwargs_json and binary_supports_chat_template_kwargs(binary):
+            cmd.extend(["--chat-template-kwargs", kwargs_json])
     # MoE experts on the CPU. Only the active experts are read per token, so a
     # 3B-active model keeps near-dense speed while its full weights live in
     # system RAM - that is what lets a 35B class model run on a 12GB card
@@ -1554,7 +1571,7 @@ def _build_cmd(
         if yarn_beta_slow is not None and float(yarn_beta_slow) > 0:
             cmd.extend(["--yarn-beta-slow", str(float(yarn_beta_slow))])
 
-    # MTP: baked-in multi-token heads — no separate draft GGUF
+    # MTP: baked-in heads, or a sibling mtp-<stem>.gguf via --model-draft
     want_mtp = bool(profile.get("mtp")) if enable_mtp is None else bool(enable_mtp)
     if want_mtp and profile.get("mtp"):
         if binary_supports_draft_mtp(binary):
@@ -1569,10 +1586,33 @@ def _build_cmd(
                     str(n_max),
                 ]
             )
+            draft = str(profile.get("model_draft") or "").strip()
+            if draft:
+                draft_p = Path(draft)
+                try:
+                    same = draft_p.resolve() == Path(model).resolve()
+                except OSError:
+                    same = str(draft_p) == str(model)
+                if draft_p.is_file() and not same:
+                    cmd.extend(["--model-draft", str(draft_p)])
+                    try:
+                        raw_dn = profile.get("n_gpu_layers_draft")
+                        if raw_dn is None:
+                            # Keep draft small so it does not crowd the main ngl.
+                            ngl_i = int(ngl)
+                            draft_ngl = (
+                                max(4, min(16, ngl_i // 4)) if ngl_i > 0 else 8
+                            )
+                        else:
+                            draft_ngl = max(1, min(99, int(raw_dn)))
+                    except (TypeError, ValueError):
+                        draft_ngl = 8
+                    cmd.extend(["--n-gpu-layers-draft", str(draft_ngl)])
             logger.info(
-                "RMB autoconfig: MTP enabled (%s n_max=%s) for %s",
+                "RMB autoconfig: MTP enabled (%s n_max=%s draft=%s) for %s",
                 spec,
                 n_max,
+                Path(draft).name if draft else "heads",
                 model.name,
             )
         else:

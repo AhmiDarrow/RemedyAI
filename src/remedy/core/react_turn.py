@@ -431,6 +431,16 @@ def resolve_tools(
             logger.info("react_tools disarm reason=l1_pure_chat")
             return ToolsDecision(None, False, "l1_pure_chat", pack="none")
 
+    # Presence/feeling is an answer, not leftover Build tools. Peek + BUILD
+    # mode made local RMB emit empty bash_exec/host_run on "how does a local
+    # model feel?". Other knowledge questions still get the read-only peek.
+    with suppress(Exception):
+        from remedy.core.react_policy import is_feeling_presence_question
+
+        if is_feeling_presence_question(message or "") and not has_att:
+            logger.info("react_tools disarm reason=knowledge")
+            return ToolsDecision(None, False, "knowledge", pack="none")
+
     msg_wants = False
     with suppress(Exception):
         from remedy.core.react_policy import _message_wants_tools

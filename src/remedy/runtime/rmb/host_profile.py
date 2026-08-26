@@ -77,7 +77,52 @@ def _empty_profile() -> dict[str, Any]:
         "reasons": [],
         "summary": "default",
         "model_stem": "",
+        "model_draft": None,
+        "n_gpu_layers_draft": None,
     }
+
+
+def find_sibling_mtp_draft(model: Path | str | None) -> Path | None:
+    """Sibling ``mtp-<stem>.gguf`` next to the main GGUF (Qwen 3.8 layout).
+
+    The main file is a normal instruct GGUF; the draft is a separate MTP
+    file beside it. Filename-only ``mtp`` on the *main* path misses this.
+    """
+    if not model:
+        return None
+    p = Path(model)
+    if p.suffix.lower() != ".gguf":
+        return None
+    parent = p.parent
+    stem = p.stem
+    name = p.name
+    if _MTP_NAME_RE.search(name):
+        # Already the draft (or a baked-in MTP main) — don't pair with self.
+        return None
+    candidates = (
+        parent / f"mtp-{stem}.gguf",
+        parent / f"mtp-{name}",
+        parent / f"{stem}-mtp.gguf",
+        parent / f"{stem}.mtp.gguf",
+    )
+    seen: set[str] = set()
+    for c in candidates:
+        try:
+            key = str(c.resolve()).lower()
+        except OSError:
+            key = str(c).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if c.is_file() and c.suffix.lower() == ".gguf":
+            try:
+                if c.resolve() == p.resolve():
+                    continue
+            except OSError:
+                if str(c) == str(p):
+                    continue
+            return c
+    return None
 
 
 def read_gguf_chat_signals(model: Path | str | None) -> dict[str, Any]:
@@ -145,6 +190,10 @@ def detect_gguf_host_profile(
     mtp = bool(_MTP_NAME_RE.search(name)) or "multi-token" in name or "multitoken" in name
     if mtp:
         reasons.append("filename_mtp")
+    sibling_draft = find_sibling_mtp_draft(p)
+    if sibling_draft is not None and not mtp:
+        mtp = True
+        reasons.append("sibling_draft")
     coder = bool(_CODER_NAME_RE.search(name))
     if coder:
         reasons.append("filename_coder")
@@ -196,6 +245,12 @@ def detect_gguf_host_profile(
             weight_mb = max(0, int(p.stat().st_size // (1024 * 1024)))
     except OSError:
         weight_mb = 0
+    if sibling_draft is not None:
+        try:
+            if sibling_draft.is_file():
+                weight_mb += max(0, int(sibling_draft.stat().st_size // (1024 * 1024)))
+        except OSError:
+            pass
     if mtp:
         size_gb = weight_mb / 1024.0
         if size_gb >= 12 or re.search(r"\b(14b|27b|32b|35b|70b)\b", name):
@@ -316,6 +371,8 @@ def detect_gguf_host_profile(
         "reasons": reasons,
         "summary": summary,
         "model_stem": p.stem,
+        "model_draft": str(sibling_draft) if sibling_draft is not None else None,
+        "n_gpu_layers_draft": None,
     }
 
 

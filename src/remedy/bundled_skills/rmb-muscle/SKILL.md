@@ -25,26 +25,35 @@ owner at Settings.
 
 ## Do this
 
-1. `rmb action=status` — running, ready, GGUF, autofit, vision suspended.
-2. No weights → `rmb action=catalog` or `rmb action=search query=…`.
+1. `rmb action=status` — running, ready, GGUF, local_ggufs, MTP, ngl.
+2. Weights already on this PC → `rmb action=models` (or `action=files`
+   with no repo). They live in `~/.remedy/rmb/models/`. Point at one with
+   `rmb action=settings model_path=…`. A sibling `mtp-<stem>.gguf` next
+   to the main file auto-arms MTP — do not edit source to wire it.
+3. No weights → `rmb action=catalog` or `rmb action=search query=…`.
    Same weights often live under more than one Hugging Face account.
    **Do not guess the host.** List repos, pick with the owner, then
    `rmb action=files repo=owner/repo`, then
    `rmb action=pull repo=… filename=….gguf`.
-3. Host down → `rmb action=start` (Ask mode will checkpoint). Autofit
-   sizes context / GPU layers from this PC. Leave profile=`autofit`.
-4. Chat on it → `rmb action=use` (starts + binds this session). Ask them
+4. Host down → `rmb action=start` (Ask mode will checkpoint). Autofit
+   sizes context / GPU layers from this PC. Leave profile=`autofit`
+   unless the owner asked for turbo. Too many GPU layers on a GGUF
+   bigger than VRAM tanks tok/s — trust last_autofit / status warnings.
+5. Chat on it → `rmb action=use` (starts + binds this session). Ask them
    to send a **new message** after the bind.
-5. Free the GPU for SmolVLM → `rmb action=stop`.
+6. Free the GPU for SmolVLM → `rmb action=stop`.
 
 ## Do not
 
-- `list_dir` / `where` / crawl disk for GGUFs — status/catalog/search.
+- Glob `C:\Users` / `list_dir` / `where` for GGUFs — status / models.
+- Edit Old-Remedy (or any git repo) to configure the live host. Live
+  RMB is `~/.remedy/rmb/` + this tool.
 - Invent `owner/repo`. Search, then pick.
 - Restart RMB **this turn** if the current provider is already RMB
   (that cuts the reply). Use a cloud chat or a new session.
 - Claim the page/model is loaded from a Settings screenshot. Read `rmb status`.
 - Treat RMB as Ollama. Different door (8787 vs 11434).
+- Treat the old `Remedy Muscle Bridge` product folder as her house.
 
 ## House
 

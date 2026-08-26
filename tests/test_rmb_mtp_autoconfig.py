@@ -92,6 +92,51 @@ def test_build_cmd_soft_skips_mtp_when_binary_lacks_flags(tmp_path):
     assert "--spec-type" not in cmd
 
 
+def test_sibling_mtp_draft_pairs_without_mtp_in_main_name(tmp_path):
+    """Qwen 3.8 layout: Qwen3.8-27B-Q4_0.gguf + mtp-Qwen3.8-27B-Q4_0.gguf."""
+    main = tmp_path / "Qwen3.8-27B-Q4_0.gguf"
+    draft = tmp_path / "mtp-Qwen3.8-27B-Q4_0.gguf"
+    main.write_bytes(b"0")
+    draft.write_bytes(b"1")
+    prof = detect_gguf_host_profile(main, sniff_template=False)
+    assert prof["mtp"] is True
+    assert "sibling_draft" in (prof.get("reasons") or [])
+    assert Path(str(prof.get("model_draft"))) == draft
+    assert prof["spec_type"] == "draft-mtp"
+    assert prof["force_parallel_1"] is True
+
+
+def test_build_cmd_passes_model_draft_for_sibling(tmp_path, monkeypatch):
+    fake_bin = tmp_path / "llama-server.exe"
+    fake_bin.write_bytes(b"stub")
+    (tmp_path / "llama-common.dll").write_bytes(
+        b"xx --spec-type draft-mtp spec-draft-n-max --model-draft --reasoning off yy"
+    )
+    from remedy.runtime.rmb import service as svc
+
+    svc._spec_cap_cache.clear()
+    svc._flag_cap_cache.clear()
+    main = tmp_path / "Qwen3.8-27B-Q4_0.gguf"
+    draft = tmp_path / "mtp-Qwen3.8-27B-Q4_0.gguf"
+    main.write_bytes(b"0")
+    draft.write_bytes(b"1")
+    cmd = _build_cmd(
+        fake_bin,
+        main,
+        host="127.0.0.1",
+        port=8787,
+        ctx=4096,
+        ngl=40,
+        threads=0,
+        parallel=1,
+        flash_attn=True,
+    )
+    assert "--model-draft" in cmd
+    assert str(draft) in cmd
+    assert "--n-gpu-layers-draft" in cmd
+    assert "--spec-type" in cmd
+
+
 def test_build_cmd_enable_mtp_false_strips_flags(tmp_path):
     fake_bin = tmp_path / "llama-server.exe"
     fake_bin.write_bytes(b"stub")

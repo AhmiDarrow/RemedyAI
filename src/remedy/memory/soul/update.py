@@ -349,7 +349,13 @@ def update_soul_after_turn(
         tc = get_time_crystal(str(session_id or "") or "default")
         if open_t and len(open_t) >= 12:
             tc.admit(open_t, horizon="session", source="soul_open_thread")
+        from remedy.core.metabolism.time_crystal import looks_like_job_resume_fact
+
         for p in sf.pledges[-2:]:
+            # Identity pledges stay life. "Stay with: Continue…" is last-tab
+            # work and must not land on a fresh session as a standing job.
+            if looks_like_job_resume_fact(p, source="soul_pledge"):
+                continue
             tc.admit(p, horizon="life", source="soul_pledge")
 
     # Myelin: count the pathway this turn wore (repetition earns crystallizing)
