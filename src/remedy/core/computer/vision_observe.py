@@ -302,11 +302,22 @@ def format_vision_block(
     *,
     origin: dict[str, Any] | None = None,
     path: str = "",
+    surface: str = "",
 ) -> str:
     """Text appended to the computer tool result for the chat model."""
     ox = (origin or {}).get("x", 0)
     oy = (origin or {}).get("y", 0)
+    web = (surface or "").strip().lower() in ("browser", "web", "rail")
     if decoded.get("ok") and decoded.get("text"):
+        if web:
+            return (
+                "## Visual decode (built-in local vision)\n"
+                f"{decoded['text']}\n"
+                "This is the Browser rail. Prefer computer_snapshot / "
+                "computer_page_text / computer_click text= or ref=. Pixel "
+                "clicks must use computer_click target=browser x= y= (page "
+                "coordinates in this image), never desktop x/y."
+            )
         return (
             "## Visual decode (built-in local vision)\n"
             f"{decoded['text']}\n"
@@ -317,12 +328,24 @@ def format_vision_block(
         )
     err = str(decoded.get("error") or "decoder unavailable")
     native = " Chat model may still see the PNG on the next step." if path else ""
+    if web:
+        return (
+            "## Visual decode skipped\n"
+            f"({err}){native}\n"
+            f"Screenshot file: {path or '(none)'}\n"
+            "This is a **web page**. Do NOT click desktop x/y, Maximize, or "
+            "Ctrl+L — that walks off the rail onto Grove chrome (including "
+            "negative-Y clicks on another monitor). Retry "
+            "computer_snapshot / computer_page_text target=browser. Local "
+            "SmolVLM is often idle while RMB is the chat host; that is not "
+            "a reason to pixel-drive the desktop."
+        )
     return (
         "## Visual decode skipped\n"
         f"({err}){native}\n"
         f"Screenshot file: {path or '(none)'}\n"
         "Retry vision_decode action=decode on that path, or computer_click x/y "
-        "if you can see the image."
+        "if you can see the image AND this is a native/game window — not a website."
     )
 
 

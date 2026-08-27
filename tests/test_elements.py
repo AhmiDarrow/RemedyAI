@@ -137,3 +137,151 @@ def test_nonsense_query_does_not_fire_on_stopword():
     assert find_best_element(els, "the a to of quuxzzy") is None
     # But a real meaningful token still matches
     assert (find_best_element(els, "substitution") or {}).get("ref") == "e1"
+
+
+def test_composer_placeholder_does_not_click_gif_toolbar():
+    """Live miss: click-by-text 'What's happening?' landed on Add a GIF
+    because the 1-char name token 'a' is a substring of 'what's' / 'happening'
+    and the GIF button's card wrapped the composer placeholder."""
+    from remedy.core.computer.elements import find_best_element, score_element
+
+    els = [
+        {
+            "ref": "e4",
+            "tag": "textarea",
+            "role": "textbox",
+            "name": "Post text What's happening?",
+            "placeholder": "What's happening?",
+            "w": 400,
+            "h": 80,
+            "context": "Post Everyone can reply Add a GIF",
+        },
+        {
+            "ref": "e7",
+            "tag": "button",
+            "role": "button",
+            "name": "Add a GIF",
+            "w": 32,
+            "h": 32,
+            "context": "What's happening? Post Everyone can reply Add a GIF",
+        },
+        {
+            "ref": "e11",
+            "tag": "a",
+            "role": "link",
+            "name": "Post",
+            "w": 48,
+            "h": 28,
+            "context": "Home Explore",
+        },
+        {
+            "ref": "e3",
+            "tag": "button",
+            "role": "button",
+            "name": "Post",
+            "type": "submit",
+            "w": 72,
+            "h": 32,
+            "context": "What's happening? Everyone can reply",
+        },
+    ]
+    composer = find_best_element(els, "What's happening?")
+    assert composer is not None
+    assert composer["ref"] == "e4"
+    assert score_element(els[1], "What's happening?") < 20
+
+    post = find_best_element(els, "Post")
+    assert post is not None
+    assert post["ref"] == "e3"
+    assert score_element(els[3], "Post") > score_element(els[2], "Post")
+
+
+def test_app_banner_continue_is_downranked_vs_form_continue():
+    """Reddit 'Continue' in 'View in Reddit App' is not the form Continue."""
+    from remedy.core.computer.elements import find_best_element, score_element
+
+    els = [
+        {
+            "ref": "e9",
+            "tag": "button",
+            "name": "Continue",
+            "w": 80,
+            "h": 36,
+            "context": "View in Reddit App",
+        },
+        {
+            "ref": "e20",
+            "tag": "button",
+            "name": "Continue",
+            "w": 80,
+            "h": 36,
+            "context": "Add flair and tags Title Body",
+        },
+    ]
+    best = find_best_element(els, "Continue")
+    assert best is not None
+    assert best["ref"] == "e20"
+    assert score_element(els[1], "Continue") > score_element(els[0], "Continue")
+
+
+def test_label_matches_query_and_url_path_divergence():
+    from remedy.core.computer.elements import (
+        label_matches_query,
+        looks_like_field_prompt,
+        parse_click_landed,
+        urls_path_diverged,
+    )
+
+    landed = parse_click_landed(
+        "Clicked text=What's happening? (ok:27:button:button:Add a GIF)"
+    )
+    assert landed.get("name") == "Add a GIF"
+    assert landed.get("tag") == "button"
+    assert not label_matches_query(landed["name"], "What's happening?")
+    assert label_matches_query("Post text What's happening?", "What's happening?")
+    assert label_matches_query("Post", "Post")
+    assert looks_like_field_prompt("What's happening?")
+    assert looks_like_field_prompt("Title")
+    assert not looks_like_field_prompt("Post")
+    assert urls_path_diverged(
+        "https://x.com/compose/post",
+        "https://x.com/i/foundmedia/search",
+    )
+    assert not urls_path_diverged(
+        "https://x.com/compose/post",
+        "https://x.com/compose/post?foo=1",
+    )
+
+
+def test_modal_and_compose_oracle_family() -> None:
+    from remedy.core.computer.elements import (
+        detect_modal_obstacle,
+        draft_still_on_page,
+        is_compose_url,
+        looks_like_publish_verb,
+    )
+
+    gif = detect_modal_obstacle(
+        url="https://x.com/i/foundmedia/search",
+        title="Categories — GIF Search / X",
+    )
+    assert gif is not None
+    banner = detect_modal_obstacle(
+        elements=[
+            {
+                "name": "Continue",
+                "context": "View in Reddit App",
+                "tag": "button",
+            }
+        ]
+    )
+    assert banner is not None
+    assert looks_like_publish_verb("Post")
+    assert looks_like_publish_verb("Tweet")
+    assert not looks_like_publish_verb("What's happening?")
+    assert is_compose_url("https://x.com/compose/post")
+    assert is_compose_url("https://www.reddit.com/r/LocalLLaMA/submit/")
+    assert not is_compose_url("https://x.com/Ahmi_Darrow/status/123")
+    body = "Remedy 0.41.5 is multilingual now — Windows and Linux."
+    assert draft_still_on_page(body, "compose\n" + body + "\nPost")
+    assert not draft_still_on_page(body, "Your post is now live on the timeline")

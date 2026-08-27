@@ -1,0 +1,346 @@
+"""On-screen OCR for computer use — word boxes the agent can click.
+
+DOM/UIA first. This is the path when those are empty or SmolVLM is idle
+(RMB holds VRAM): read the pixels, return labeled boxes, click by text/ref.
+
+Backends (first that works, no extra required install):
+- Windows.Media.Ocr via winrt (optional) or built-in PowerShell
+- tesseract CLI if present (Windows + Linux)
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_PS_TIMEOUT_S = 12.0
+_TESS_TIMEOUT_S = 8.0
+
+_PS_SCRIPT = r"""
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Runtime.WindowsRuntime | Out-Null
+$asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() |
+  Where-Object {
+    $_.Name -eq 'AsTask' -and
+    $_.GetParameters().Count -eq 1 -and
+    $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+  })[0]
+function Await-WinRT($async, [type]$type) {
+  $task = $asTask.MakeGenericMethod($type).Invoke($null, @($async))
+  $null = $task.Wait(20000)
+  if (-not $task.IsCompleted) { throw 'OCR await timed out' }
+  return $task.Result
+}
+[void][Windows.Storage.StorageFile,Windows.Storage,ContentType=WindowsRuntime]
+[void][Windows.Media.Ocr.OcrEngine,Windows.Foundation,ContentType=WindowsRuntime]
+[void][Windows.Graphics.Imaging.BitmapDecoder,Windows.Foundation,ContentType=WindowsRuntime]
+$file = Await-WinRT ([Windows.Storage.StorageFile]::GetFileFromPathAsync($Path)) ([Windows.Storage.StorageFile])
+$stream = Await-WinRT ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+$decoder = Await-WinRT ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+$bitmap = Await-WinRT ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+$ocr = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+if (-not $ocr) { Write-Output '[]'; return }
+$result = Await-WinRT ($ocr.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+$items = New-Object System.Collections.Generic.List[object]
+foreach ($line in $result.Lines) {
+  foreach ($word in $line.Words) {
+    $b = $word.BoundingRect
+    $items.Add([pscustomobject]@{
+      text = [string]$word.Text
+      x = [int]$b.X; y = [int]$b.Y
+      w = [int]$b.Width; h = [int]$b.Height
+    })
+  }
+}
+if ($items.Count -eq 0) { Write-Output '[]' }
+elseif ($items.Count -eq 1) { Write-Output ('[' + ($items[0] | ConvertTo-Json -Compress) + ']') }
+else { $items | ConvertTo-Json -Compress }
+"""
+
+
+def _cache_key(path: Path) -> str:
+    try:
+        st = path.stat()
+        return f"{path.resolve()}:{st.st_mtime_ns}:{st.st_size}"
+    except OSError:
+        return str(path)
+
+
+def words_to_elements(
+    words: list[dict[str, Any]],
+    *,
+    scale: float = 1.0,
+    origin_x: float = 0.0,
+    origin_y: float = 0.0,
+    space: str = "page",
+) -> list[dict[str, Any]]:
+    """OCR words → snapshot-shaped elements (ref o1…).
+
+    ``space=page``: image pixels / scale (Browser rail CSS coords).
+    ``space=screen``: image pixels + origin (desktop click coords).
+    """
+    sc = float(scale) if scale and scale > 0 else 1.0
+    out: list[dict[str, Any]] = []
+    n = 0
+    for w in words or []:
+        if not isinstance(w, dict):
+            continue
+        text = re.sub(r"\s+", " ", str(w.get("text") or "")).strip()
+        if not text:
+            continue
+        if len(text) == 1 and not text.isalnum():
+            continue
+        try:
+            ix = float(w.get("x") or 0)
+            iy = float(w.get("y") or 0)
+            iw = float(w.get("w") or 0)
+            ih = float(w.get("h") or 0)
+        except (TypeError, ValueError):
+            continue
+        if iw < 2 or ih < 2:
+            continue
+        cx = ix + iw / 2.0
+        cy = iy + ih / 2.0
+        if space == "screen":
+            x, y = cx + float(origin_x), cy + float(origin_y)
+        else:
+            x, y = cx / sc, cy / sc
+        n += 1
+        out.append(
+            {
+                "ref": f"o{n}",
+                "tag": "ocr",
+                "role": "text",
+                "name": text[:80],
+                "text": text[:80],
+                "x": int(round(x)),
+                "y": int(round(y)),
+                "w": int(round(iw / sc if space != "screen" else iw)),
+                "h": int(round(ih / sc if space != "screen" else ih)),
+                "source": "ocr",
+            }
+        )
+        if n >= 80:
+            break
+    return out
+
+
+def merge_ocr_elements(
+    existing: list[dict[str, Any]] | None,
+    ocr_els: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep DOM/UIA refs; replace previous OCR boxes."""
+    kept = [
+        e
+        for e in list(existing or [])
+        if not str(e.get("ref") or "").lower().startswith("o")
+    ]
+    return kept + list(ocr_els or [])
+
+
+def read_screenshot_ocr(path: str | Path, *, force: bool = False) -> dict[str, Any]:
+    """Return ``{ok, backend, words, text}``. Never raises."""
+    p = Path(path)
+    empty: dict[str, Any] = {"ok": False, "backend": "", "words": [], "text": ""}
+    if not p.is_file():
+        empty["error"] = "no screenshot file"
+        return empty
+    key = _cache_key(p)
+    if not force and key in _CACHE:
+        return dict(_CACHE[key][1])
+    result = empty
+    for fn, name in (
+        (_ocr_winrt, "windows.media.ocr"),
+        (_ocr_powershell, "windows.media.ocr"),
+        (_ocr_tesseract, "tesseract"),
+    ):
+        try:
+            words = fn(p)
+        except Exception as exc:
+            logger.debug("ocr backend %s failed: %s", name, exc)
+            continue
+        if words is None:
+            continue
+        text = " ".join(str(w.get("text") or "") for w in words).strip()
+        result = {
+            "ok": True,
+            "backend": name,
+            "words": words,
+            "text": text[:4000],
+        }
+        break
+    else:
+        result = {
+            "ok": False,
+            "backend": "",
+            "words": [],
+            "text": "",
+            "error": "no OCR backend (Windows.Media.Ocr / tesseract)",
+        }
+    _CACHE[key] = (time.time(), result)
+    if len(_CACHE) > 16:
+        oldest = sorted(_CACHE.items(), key=lambda kv: kv[1][0])[:8]
+        for k, _ in oldest:
+            _CACHE.pop(k, None)
+    return dict(result)
+
+
+def _ocr_winrt(path: Path) -> list[dict[str, Any]] | None:
+    if sys.platform != "win32":
+        return None
+    try:
+        from winrt.windows.graphics.imaging import BitmapDecoder  # type: ignore
+        from winrt.windows.media.ocr import OcrEngine  # type: ignore
+        from winrt.windows.storage import FileAccessMode, StorageFile  # type: ignore
+    except Exception:
+        return None
+    import asyncio
+
+    async def _run() -> list[dict[str, Any]]:
+        file = await StorageFile.get_file_from_path_async(str(path))
+        stream = await file.open_async(FileAccessMode.READ)
+        decoder = await BitmapDecoder.create_async(stream)
+        bitmap = await decoder.get_software_bitmap_async()
+        engine = OcrEngine.try_create_from_user_profile_languages()
+        if engine is None:
+            return []
+        recognized = await engine.recognize_async(bitmap)
+        words: list[dict[str, Any]] = []
+        for line in recognized.lines:
+            for word in line.words:
+                box = word.bounding_rect
+                words.append(
+                    {
+                        "text": str(word.text or ""),
+                        "x": float(box.x),
+                        "y": float(box.y),
+                        "w": float(box.width),
+                        "h": float(box.height),
+                    }
+                )
+        return words
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_run())
+    # Already in an event loop — do not nest. Fall through to PowerShell.
+    return None
+
+
+def _ocr_powershell(path: Path) -> list[dict[str, Any]] | None:
+    if sys.platform != "win32":
+        return None
+    # Hidden, no profile — this is a local OS capability, not a shell the owner sees.
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    escaped = str(path.resolve()).replace("'", "''")
+    script = f"$Path = '{escaped}'\n" + _PS_SCRIPT
+    proc = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=_PS_TIMEOUT_S,
+        creationflags=flags,
+        env={**os.environ, "TERM": "dumb"},
+    )
+    if proc.returncode != 0:
+        logger.debug("ocr powershell rc=%s err=%s", proc.returncode, (proc.stderr or "")[:300])
+        return None
+    raw = (proc.stdout or "").strip()
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, dict):
+        data = [data]
+    if not isinstance(data, list):
+        return None
+    words: list[dict[str, Any]] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        words.append(
+            {
+                "text": str(item.get("text") or ""),
+                "x": float(item.get("x") or 0),
+                "y": float(item.get("y") or 0),
+                "w": float(item.get("w") or 0),
+                "h": float(item.get("h") or 0),
+            }
+        )
+    return words
+
+
+def _ocr_tesseract(path: Path) -> list[dict[str, Any]] | None:
+    exe = shutil.which("tesseract")
+    if not exe:
+        return None
+    proc = subprocess.run(
+        [exe, str(path), "stdout", "tsv", "-l", "eng"],
+        capture_output=True,
+        text=True,
+        timeout=_TESS_TIMEOUT_S,
+    )
+    if proc.returncode != 0:
+        return None
+    lines = (proc.stdout or "").splitlines()
+    if len(lines) < 2:
+        return []
+    header = lines[0].split("\t")
+    try:
+        i_text = header.index("text")
+        i_left = header.index("left")
+        i_top = header.index("top")
+        i_w = header.index("width")
+        i_h = header.index("height")
+        i_conf = header.index("conf")
+        i_level = header.index("level")
+    except ValueError:
+        return None
+    words: list[dict[str, Any]] = []
+    for line in lines[1:]:
+        cols = line.split("\t")
+        if len(cols) <= max(i_text, i_left, i_top, i_w, i_h, i_conf, i_level):
+            continue
+        try:
+            if int(float(cols[i_level])) != 5:
+                continue
+            conf = float(cols[i_conf])
+        except ValueError:
+            continue
+        if conf < 40:
+            continue
+        text = (cols[i_text] or "").strip()
+        if not text:
+            continue
+        words.append(
+            {
+                "text": text,
+                "x": float(cols[i_left]),
+                "y": float(cols[i_top]),
+                "w": float(cols[i_w]),
+                "h": float(cols[i_h]),
+            }
+        )
+    return words

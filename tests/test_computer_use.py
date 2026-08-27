@@ -710,6 +710,18 @@ def test_infer_sticky_target_game_and_refs():
     assert infer_sticky_target("auto", ref="e3") == "browser"
     assert infer_sticky_target("auto", ref="w1") == "desktop"
     assert infer_sticky_target("auto", ref="c12") == "desktop"
+    assert (
+        infer_sticky_target(
+            "auto", ref="o3", last_elements_target="browser"
+        )
+        == "browser"
+    )
+    assert (
+        infer_sticky_target(
+            "auto", ref="o3", last_elements_target="desktop"
+        )
+        == "desktop"
+    )
     # After computer_app, auto click/find stay desktop
     assert (
         infer_sticky_target(
@@ -1515,6 +1527,10 @@ def test_computer_guidance_present():
     assert "target=desktop" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "plan_step_status" in COMPUTER_USE_SYSTEM_ADDENDUM
     assert "couldnt_verify" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "Compose / social post" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "View in Reddit App" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "OCR" in COMPUTER_USE_SYSTEM_ADDENDUM
+    assert "ref=oN" in COMPUTER_USE_SYSTEM_ADDENDUM
     from remedy.core.computer.guidance import needs_computer_use_guidance
 
     assert needs_computer_use_guidance("goto gmail and sign in")
@@ -1831,12 +1847,16 @@ def test_offline_navigate_refuses_os_browser_snapshot_falls_back(
             timeout_s=1.0,
         )
     )
-    assert snap.get("ok") is True
+    # Not a successful *page* observe — desktop windows must not be driven
+    # as the site (live socials run clicked Maximize / typed into chrome).
+    assert snap.get("ok") is False
     assert snap.get("fallback") == "desktop" or snap.get("target") == "desktop"
     assert any(
         str(e.get("ref", "")).startswith("w") for e in (snap.get("elements") or [])
     )
-    assert "offline" in str(snap.get("note") or "").lower() or snap.get("fallback")
+    msg = str(snap.get("message") or "") + " " + str(snap.get("note") or "")
+    assert "not the web page" in msg.lower()
+    assert "offline" in msg.lower() or snap.get("fallback")
 
 
 def test_executor_click_text_stays_desktop_after_app(tmp_path: Path, monkeypatch):
@@ -2134,6 +2154,231 @@ def test_act_unverified_when_probe_unavailable(tmp_path: Path, monkeypatch):
     assert out.get("unverified") is True
     assert "UNVERIFIED" in str(out.get("message", "")).upper()
     assert "do not claim" in str(out.get("message", "")).lower()
+
+
+def test_act_refuses_to_type_after_click_lands_on_wrong_control(
+    tmp_path: Path, monkeypatch
+):
+    """Live miss: click 'What's happening?' returned ok:27:…:Add a GIF, then
+    typed 250 chars into GIF search and still said SUCCESS."""
+    typed = {"n": 0}
+    ex = _fresh_executor(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        ex,
+        "_page_probe",
+        lambda **_k: {
+            "ok": True,
+            "url": "https://x.com/compose/post",
+            "title": "Compose",
+            "text_hash": "pre",
+            "text_head": "What's happening?",
+        },
+    )
+    monkeypatch.setattr(
+        ex,
+        "_browser_click_text",
+        lambda text_q, kwargs: {
+            "ok": True,
+            "message": (
+                f"Clicked text={text_q} "
+                "(ok:27:button:button:Add a GIF)"
+            ),
+            "detail": "ok:27:button:button:Add a GIF",
+        },
+    )
+
+    def _no_type(*_a, **_k):
+        typed["n"] += 1
+        raise AssertionError("must not type after a wrong-control click")
+
+    monkeypatch.setattr(ex, "_enqueue", _no_type)
+    out = ex._computer_act(
+        {"click": "What's happening?", "type": "Remedy 0.41.5 is multilingual"},
+        hint="",
+        req_target="browser",
+    )
+    assert out.get("ok") is False, out
+    assert typed["n"] == 0
+    assert "add a gif" in str(out.get("message") or "").lower()
+    assert "nothing was typed" in str(out.get("message") or "").lower()
+
+
+def test_act_field_prompt_fails_when_url_walks_off_the_form(
+    tmp_path: Path, monkeypatch
+):
+    """Composer click + type that lands on GIF search must not report SUCCESS."""
+    ex = _fresh_executor(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        ex,
+        "_browser_click_text",
+        lambda text_q, kwargs: {
+            "ok": True,
+            "message": f"Clicked text={text_q} (ok:100:textarea::What's happening?)",
+            "detail": "ok:100:textarea::What's happening?",
+        },
+    )
+    probes = iter(
+        [
+            {
+                "ok": True,
+                "url": "https://x.com/compose/post",
+                "title": "Compose new post / X",
+                "text_hash": "before",
+                "text_head": "What's happening?",
+            },
+            {
+                "ok": True,
+                "url": "https://x.com/i/foundmedia/search",
+                "title": "Categories — GIF Search / X",
+                "text_hash": "after",
+                "text_head": "GIF Search",
+            },
+        ]
+    )
+    monkeypatch.setattr(ex, "_page_probe", lambda **_k: next(probes))
+
+    class _Fin:
+        status = "done"
+        error = ""
+        result = {"ok": True}
+
+    class _Job:
+        id = "j1"
+
+    monkeypatch.setattr(ex, "_enqueue", lambda *_a, **_k: _Job())
+    monkeypatch.setattr(ex.bridge, "wait", lambda *_a, **_k: _Fin())
+    out = ex._computer_act(
+        {"click": "What's happening?", "type": "hello multilingual"},
+        hint="",
+        req_target="browser",
+    )
+    assert out.get("ok") is False, out
+    assert "left the form" in str(out.get("message") or "").lower()
+    assert "foundmedia" in str(out.get("message") or "").lower()
+
+
+def test_publish_click_still_on_compose_is_not_success(tmp_path: Path, monkeypatch):
+    """Clicking Post while still on /compose/post is not a live post."""
+    ex = _fresh_executor(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        ex,
+        "_browser_click_text",
+        lambda text_q, kwargs: {
+            "ok": True,
+            "message": f"Clicked text={text_q} (ok:125:button:submit:Post)",
+            "detail": "ok:125:button:submit:Post",
+        },
+    )
+    monkeypatch.setattr(
+        ex,
+        "_page_probe",
+        lambda **_k: {
+            "ok": True,
+            "url": "https://x.com/compose/post",
+            "title": "Compose new post / X",
+            "text_hash": "same",
+            "text_head": "What's happening?",
+        },
+    )
+
+    class _Fin:
+        status = "done"
+        error = ""
+        result = {"ok": True}
+
+    class _Job:
+        id = "j1"
+
+    monkeypatch.setattr(ex, "_enqueue", lambda *_a, **_k: _Job())
+    monkeypatch.setattr(ex.bridge, "wait", lambda *_a, **_k: _Fin())
+    out = ex._computer_act(
+        {"click": "Post", "type": "Remedy 0.41.5 is multilingual"},
+        hint="",
+        req_target="browser",
+    )
+    assert out.get("ok") is False, out
+    assert out.get("unverified") is True
+    assert "compose" in str(out.get("message") or "").lower()
+
+
+def test_desktop_xy_refused_while_rail_web_task_is_open(tmp_path: Path, monkeypatch):
+    import json
+
+    from remedy.core.computer.types import ComputerAction
+
+    ex = _fresh_executor(tmp_path, monkeypatch)
+    ex.bridge.mark_navigated("https://x.com/compose/post")
+    out = json.loads(
+        ex.run(ComputerAction.CLICK, target="desktop", x=1272, y=-1036)
+    )
+    assert out.get("ok") is False
+    assert out.get("refused") == "off_rail"
+    assert "browser rail" in str(out.get("message") or "").lower()
+
+
+def test_desktop_ctrl_l_refused_while_rail_web_task_is_open(tmp_path: Path, monkeypatch):
+    import json
+
+    from remedy.core.computer.types import ComputerAction
+
+    ex = _fresh_executor(tmp_path, monkeypatch)
+    ex.bridge.mark_navigated("https://x.com/compose/post")
+    out = json.loads(
+        ex.run(ComputerAction.KEY, target="desktop", key="ctrl+l")
+    )
+    assert out.get("ok") is False
+    assert out.get("refused") == "off_rail"
+
+
+def test_stale_ref_type_recovers_by_relocate(tmp_path: Path, monkeypatch):
+    import json as _json
+
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    ex.bridge.set_last_elements(
+        [{"ref": "e4", "name": "Post text What's happening?", "tag": "textarea"}],
+        target="browser",
+    )
+    monkeypatch.setattr(
+        ex,
+        "_relocate_browser_ref",
+        lambda ref: {"ref": "e9", "name": "Post text What's happening?"},
+    )
+
+    class _Job:
+        id = "j1"
+
+    monkeypatch.setattr(ex, "_enqueue", lambda *_a, **_k: _Job())
+    n = {"i": 0}
+
+    class _Miss:
+        status = "done"
+        result = {"ok": False, "message": "browser:type failed: missing-ref:e4"}
+        error = "missing-ref:e4"
+
+    class _Ok:
+        status = "done"
+        result = {"ok": True, "message": "ok:trusted-type"}
+        error = ""
+
+    def _wait(*_a, **_k):
+        n["i"] += 1
+        return _Miss() if n["i"] == 1 else _Ok()
+
+    monkeypatch.setattr(ex.bridge, "wait", _wait)
+    out = _json.loads(
+        ex.run(
+            ComputerAction.TYPE,
+            target="browser",
+            ref="e4",
+            text="hello multilingual",
+        )
+    )
+    assert out.get("ok") is True, out
+    assert out.get("recovered_from") == "stale_ref"
+    assert n["i"] >= 2
 
 
 def test_act_without_mutating_steps_skips_probe(tmp_path: Path, monkeypatch):
