@@ -64,16 +64,16 @@ def load_rmb_json(home_dir: str | Path | None = None) -> dict[str, Any]:
         return {}
 
 
+# Merged-state cache for hot request paths (per-turn thinking/budget reads).
+# Keyed by rmb.json path, invalidated by mtime+size signature or save.
+_merged_cache: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}
+
+
 def save_rmb_json(state: dict[str, Any], home_dir: str | Path | None = None) -> None:
     path = rmb_json_path(home_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     write_json_atomic(path, state)
     _merged_cache.pop(str(path), None)
-
-
-# Merged-state cache for hot request paths (per-turn thinking/budget reads).
-# Keyed by rmb.json path, invalidated by mtime+size signature or save.
-_merged_cache: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}
 
 
 def merged_state_cached(home_dir: str | Path | None = None) -> dict[str, Any]:

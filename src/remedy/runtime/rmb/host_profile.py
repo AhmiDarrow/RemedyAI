@@ -110,9 +110,12 @@ def reasoning_budget_cap(value: Any) -> int | None:
     if value is None or str(value).strip() == "":
         return None
     try:
-        n = int(str(value).strip())
+        n = int(value)  # ints, bools, and JSON floats like 512.0
     except (TypeError, ValueError):
-        return None
+        try:
+            n = int(float(str(value).strip()))
+        except (TypeError, ValueError):
+            return None
     return n if n >= 0 else None
 
 
@@ -121,15 +124,32 @@ def thinking_is_on(value: Any) -> bool:
 
 
 def owner_flag_on(value: Any, *, default: bool = True) -> bool:
-    """Bool-ish owner flag. Strings like ``off`` / ``false`` are False."""
+    """Bool-ish owner flag. Strings like ``off`` / ``disabled`` are False.
+
+    Shares the thinking off-vocabulary so ``enable_mtp="disabled"`` cannot
+    silently evaluate ON while ``thinking="disabled"`` evaluates off.
+    """
     if value is None:
         return default
     if isinstance(value, str):
         raw = value.strip().lower()
         if raw in ("", "auto"):
             return default
-        return raw not in ("off", "false", "0", "no")
+        return raw not in _THINKING_OFF_WORDS
     return bool(value)
+
+
+def owner_flag_value_known(value: Any) -> bool:
+    """True when a bool-ish owner flag value is recognized either way.
+
+    Non-strings are always accepted (bool()-coerced); unknown strings —
+    typos like ``"disbled"`` — should be rejected by the settings entry
+    points instead of silently evaluating as ON.
+    """
+    if not isinstance(value, str):
+        return True
+    raw = value.strip().lower()
+    return raw in _THINKING_OFF_WORDS or raw in _THINKING_ON_WORDS
 
 
 def _empty_profile() -> dict[str, Any]:
@@ -508,10 +528,12 @@ def overlay_owner_on_profile(
     except (TypeError, ValueError):
         pass
     draft = str(st.get("model_draft") or "").strip()
-    if draft:
+    if draft and not out.get("mtp_owner_off"):
         out["model_draft"] = draft
         # Owner typed this path — _build_cmd emits classic --model-draft
         # speculation for it even when the main GGUF is not MTP-named.
+        # The owner MTP switch kills all speculation, so its clear above
+        # stays authoritative.
         out["model_draft_owner"] = True
     else:
         out.pop("model_draft_owner", None)

@@ -598,6 +598,7 @@ def register_rmb_tools(runtime: Any) -> None:
                         "mtp",
                         "mtp_armed",
                         "draft_armed",
+                        "parallel_effective",
                         "model_draft",
                         "spec_type",
                         "spec_draft_n_max",

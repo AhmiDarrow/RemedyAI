@@ -436,6 +436,99 @@ def test_autofit_apply_plan_keeps_owner_parallel():
     apply_plan_to_state(state, plan)
     # Owner slot count survives autofit; plan slots are recorded in last_autofit.
     assert state["parallel"] == 4
+    assert state["last_autofit"]["parallel"] == 1
+    # Autofit never writes parallel — merge_state supplies the default.
     fresh: dict = {}
     apply_plan_to_state(fresh, plan)
-    assert fresh["parallel"] == 1
+    assert "parallel" not in fresh
+
+
+def test_owner_flag_on_shares_thinking_off_vocab():
+    from remedy.runtime.rmb.host_profile import owner_flag_on, owner_flag_value_known
+
+    for word in ("off", "false", "0", "no", "disable", "disabled", "none", "never"):
+        assert owner_flag_on(word, default=True) is False
+    assert owner_flag_on("auto", default=True) is True
+    assert owner_flag_value_known("disabled") is True
+    assert owner_flag_value_known(True) is True
+    assert owner_flag_value_known("disbled") is False
+
+
+def test_reasoning_budget_cap_accepts_json_floats():
+    from remedy.runtime.rmb.host_profile import reasoning_budget_cap
+
+    assert reasoning_budget_cap(512.0) == 512
+    assert reasoning_budget_cap("512.0") == 512
+    assert reasoning_budget_cap("512") == 512
+    assert reasoning_budget_cap(-1) is None
+    assert reasoning_budget_cap("garbage") is None
+
+
+def test_apply_settings_rejects_unknown_enable_mtp_word(tmp_path, monkeypatch):
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    from remedy.runtime.rmb.config import load_rmb_json, merge_state, save_rmb_json
+    from remedy.runtime.rmb.service import apply_rmb_settings
+
+    save_rmb_json(merge_state({}), tmp_path)
+    out = apply_rmb_settings(
+        {"enable_mtp": "disbled"}, home_dir=str(tmp_path), live=False
+    )
+    assert out.get("rejected_settings") == {"enable_mtp": "disbled"}
+    st = load_rmb_json(tmp_path)
+    assert st.get("enable_mtp") is True  # default untouched by a typo
+    out2 = apply_rmb_settings(
+        {"enable_mtp": "disabled"}, home_dir=str(tmp_path), live=False
+    )
+    assert out2.get("rejected_settings") is None
+    st = load_rmb_json(tmp_path)
+    assert st.get("enable_mtp") is False
+
+
+def test_apply_settings_use_jinja_string_words(tmp_path, monkeypatch):
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    from remedy.runtime.rmb.config import load_rmb_json, merge_state, save_rmb_json
+    from remedy.runtime.rmb.service import apply_rmb_settings
+
+    save_rmb_json(merge_state({}), tmp_path)
+    # String "off" must store False (bool("off") would store True and pin it).
+    apply_rmb_settings({"use_jinja": "off"}, home_dir=str(tmp_path), live=False)
+    st = load_rmb_json(tmp_path)
+    assert st.get("use_jinja") is False
+    assert st.get("use_jinja_owner") is True
+    out = apply_rmb_settings({"use_jinja": "maybe"}, home_dir=str(tmp_path), live=False)
+    assert out.get("rejected_settings") == {"use_jinja": "maybe"}
+    st = load_rmb_json(tmp_path)
+    assert st.get("use_jinja") is False  # unchanged by the rejected word
+
+
+def test_rmb_settings_route_declares_all_owner_knobs():
+    """Pydantic silently strips undeclared fields — the desktop knobs must
+    survive the POST /api/rmb/settings model."""
+    from remedy.interfaces.routes.rmb import RmbSettingsPatch
+
+    body = RmbSettingsPatch(
+        thinking="off",
+        reasoning_budget=512,
+        enable_mtp=False,
+        n_cpu_moe=-1,
+        spec_draft_n_max=4,
+        n_gpu_layers_draft=8,
+        model_draft="draft.gguf",
+        use_jinja="auto",
+        cache_reuse=256,
+    )
+    patch = body.model_dump(exclude_none=True)
+    for key in (
+        "thinking",
+        "reasoning_budget",
+        "enable_mtp",
+        "n_cpu_moe",
+        "spec_draft_n_max",
+        "n_gpu_layers_draft",
+        "model_draft",
+        "use_jinja",
+        "cache_reuse",
+    ):
+        assert key in patch, key
+    assert patch["use_jinja"] == "auto"
+    assert patch["n_cpu_moe"] == -1
