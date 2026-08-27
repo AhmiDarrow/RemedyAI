@@ -902,6 +902,7 @@ def register_rmb_tools(runtime: Any) -> None:
                         "n_gpu_layers_draft",
                         "model_draft",
                         "use_jinja",
+                        "use_jinja_owner",
                         "no_mmap",
                         "cache_reuse",
                     )

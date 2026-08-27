@@ -1269,15 +1269,32 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                   void patchKnob({ flash_attn }, `Flash attention: ${flash_attn ? 'on' : 'off'}`)
                 }
               />
-              <FormToggle
-                label="Use Jinja"
-                description="--jinja chat templates"
-                checked={Boolean(rmb?.engine?.use_jinja ?? true)}
-                disabled={rmbBusy}
-                onChange={(use_jinja) =>
-                  void patchKnob({ use_jinja }, `Jinja templates: ${use_jinja ? 'on' : 'off'}`)
-                }
-              />
+              <div className="space-y-1">
+                <FormLabel>Jinja templates (--jinja)</FormLabel>
+                <FormSegmented
+                  value={
+                    !rmb?.engine?.use_jinja_owner
+                      ? 'auto'
+                      : rmb?.engine?.use_jinja
+                        ? 'on'
+                        : 'off'
+                  }
+                  options={[
+                    {
+                      id: 'auto',
+                      label: `Auto (${rmb?.engine?.use_jinja ?? true ? 'on' : 'off'})`,
+                      title: 'Follow GGUF detection per model (default)',
+                    },
+                    { id: 'on', label: 'On', title: 'Always pass --jinja' },
+                    { id: 'off', label: 'Off', title: 'Never pass --jinja' },
+                  ]}
+                  disabled={rmbBusy}
+                  onChange={(use_jinja) => {
+                    if (rmbBusy) return
+                    void patchKnob({ use_jinja }, `Jinja templates: ${use_jinja}`)
+                  }}
+                />
+              </div>
               <FormToggle
                 label="mlock"
                 description="Lock model in RAM"
