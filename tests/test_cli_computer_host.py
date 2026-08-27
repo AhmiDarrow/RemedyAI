@@ -188,11 +188,16 @@ def test_the_last_action_is_recorded_for_status(host, monkeypatch):
 # --- UI commands: the path that opens a real browser ------------------------
 
 
+def _patch_native_open_url(monkeypatch, fn):
+    """cli_host uses desktop_os.native() — patch whichever OS module is live."""
+    from remedy.core.computer.desktop_os import native
+
+    monkeypatch.setattr(native(), "open_url", fn)
+
+
 def test_a_ui_open_command_opens_the_url(host, monkeypatch):
     opened: list[str] = []
-    monkeypatch.setattr(
-        "remedy.core.computer.desktop_win.open_url", lambda u: opened.append(u)
-    )
+    _patch_native_open_url(monkeypatch, lambda u: opened.append(u))
     host._handle_ui(FakeBridge(), {"action": "open_browser", "url": "https://example.com"})
     assert len(opened) == 1
     assert opened[0].startswith("https://example.com")
@@ -209,27 +214,18 @@ def test_a_ui_open_command_opens_the_url(host, monkeypatch):
 )
 def test_a_dangerous_or_malformed_url_is_refused(host, monkeypatch, url):
     """The queue is a file on disk; anything that can write it can ask for a URL."""
-    monkeypatch.setattr(
-        "remedy.core.computer.desktop_win.open_url",
-        lambda u: pytest.fail(f"opened {u!r}"),
-    )
+    _patch_native_open_url(monkeypatch, lambda u: pytest.fail(f"opened {u!r}"))
     host._handle_ui(FakeBridge(), {"action": "open_browser", "url": url})
     assert host.last_error
 
 
 def test_a_ui_command_with_no_url_does_nothing(host, monkeypatch):
-    monkeypatch.setattr(
-        "remedy.core.computer.desktop_win.open_url",
-        lambda u: pytest.fail("opened nothing"),
-    )
+    _patch_native_open_url(monkeypatch, lambda u: pytest.fail("opened nothing"))
     host._handle_ui(FakeBridge(), {"action": "open_browser", "url": ""})
 
 
 def test_an_unrelated_ui_command_is_ignored(host, monkeypatch):
-    monkeypatch.setattr(
-        "remedy.core.computer.desktop_win.open_url",
-        lambda u: pytest.fail("should not open"),
-    )
+    _patch_native_open_url(monkeypatch, lambda u: pytest.fail("should not open"))
     host._handle_ui(FakeBridge(), {"action": "focus_window", "url": "https://x.example"})
 
 
@@ -237,7 +233,7 @@ def test_a_failure_to_open_is_recorded_not_raised(host, monkeypatch):
     def boom(_u):
         raise OSError("no browser registered")
 
-    monkeypatch.setattr("remedy.core.computer.desktop_win.open_url", boom)
+    _patch_native_open_url(monkeypatch, boom)
     host._handle_ui(FakeBridge(), {"action": "navigate", "url": "https://example.com"})
     assert "no browser registered" in host.last_error
 
