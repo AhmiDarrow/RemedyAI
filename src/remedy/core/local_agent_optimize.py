@@ -864,10 +864,23 @@ def apply_local_body_optimize(
         force_tools=force and not trivia,
         write_tools=writes and not trivia,
     )
+    # Hidden <think> tokens share max_tokens with the visible answer. On the
+    # tightly capped turns (trivia 256 / green summary 512) a thinking model
+    # burns the whole budget inside <think> and returns a truncated or empty
+    # reply (finish=length) — the 0.41.3 muzzle, back through the thinking
+    # door. Keep the tight answer budget and ADD room for the reasoning.
+    think_on = local_thinking_enabled()
+    rb_cap = _rmb_reasoning_budget() if think_on else None
+    think_headroom = 0
+    if think_on and (trivia or green_summary):
+        think_headroom = (
+            min(rb_cap, 8192) if rb_cap is not None else LOCAL_THINK_HEADROOM
+        )
     if trivia:
         cap = min(cap, 256)
     if green_summary:
         cap = min(cap, 512)
+    cap += think_headroom
     if sticky > cap and not green_summary:
         cap = sticky
     try:
@@ -880,7 +893,7 @@ def apply_local_body_optimize(
             if not green_summary:
                 out["max_tokens"] = max(int(out["max_tokens"]), min(cap, 2048))
             else:
-                out["max_tokens"] = min(int(out["max_tokens"]), 512)
+                out["max_tokens"] = min(int(out["max_tokens"]), 512 + think_headroom)
     except (TypeError, ValueError):
         out["max_tokens"] = cap
     out.pop("_remedy_write_budget", None)
@@ -900,11 +913,10 @@ def apply_local_body_optimize(
     out.pop("thinking", None)
     prev_kw = out.get("chat_template_kwargs")
     merged_kw: dict[str, Any] = dict(prev_kw) if isinstance(prev_kw, dict) else {}
-    if local_thinking_enabled():
+    if think_on:
         merged_kw.setdefault("enable_thinking", True)
-        rb = _rmb_reasoning_budget()
-        if rb is not None:
-            out["reasoning_budget"] = rb
+        if rb_cap is not None:
+            out["reasoning_budget"] = rb_cap
         else:
             out.pop("reasoning_budget", None)
     else:
@@ -922,13 +934,27 @@ _PATH_RE = re.compile(
 )
 
 
+# Reasoning room granted on top of tight answer caps (trivia / green summary)
+# when thinking is on and the owner set no finite reasoning_budget.
+LOCAL_THINK_HEADROOM = 1024
+
+
+def _rmb_owner_state() -> dict[str, Any]:
+    """Merged rmb.json owner knobs, mtime-cached — cheap on the request path."""
+    try:
+        from remedy.runtime.rmb.config import merged_state_cached
+
+        return merged_state_cached()
+    except Exception:
+        return {}
+
+
 def local_thinking_enabled() -> bool:
     """RMB thinking switch. Default on; owner may set thinking=off in Settings."""
     try:
-        from remedy.runtime.rmb.config import load_rmb_json, merge_state
         from remedy.runtime.rmb.host_profile import thinking_is_on
 
-        return thinking_is_on(merge_state(load_rmb_json()).get("thinking"))
+        return thinking_is_on(_rmb_owner_state().get("thinking"))
     except Exception:
         return True
 
@@ -936,13 +962,9 @@ def local_thinking_enabled() -> bool:
 def _rmb_reasoning_budget() -> int | None:
     """Owner reasoning_budget (≥0) or None when unset / unlimited."""
     try:
-        from remedy.runtime.rmb.config import load_rmb_json, merge_state
+        from remedy.runtime.rmb.host_profile import reasoning_budget_cap
 
-        raw = merge_state(load_rmb_json()).get("reasoning_budget")
-        if raw is None or str(raw).strip() == "":
-            return None
-        n = int(raw)
-        return n if n >= 0 else None
+        return reasoning_budget_cap(_rmb_owner_state().get("reasoning_budget"))
     except Exception:
         return None
 

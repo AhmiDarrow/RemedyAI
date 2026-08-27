@@ -148,10 +148,20 @@ def test_overlay_owner_can_disable_mtp():
 
 
 def test_apply_host_profile_preserves_user_jinja():
-    state: dict = {"use_jinja": False}
+    # Owner explicitly set use_jinja in Settings → the marker pins it.
+    state: dict = {"use_jinja": False, "use_jinja_owner": True}
     prof = detect_gguf_host_profile(Path("Qwen3.5-9B-Q4_K_M.gguf"))
     apply_host_profile_to_state(state, prof, preserve={"use_jinja"})
     assert state["use_jinja"] is False
+
+
+def test_apply_host_profile_heals_stale_auto_jinja_without_owner_marker():
+    # A use_jinja=False auto-written by 0.41.4 (no owner marker) must not
+    # silently break the chat template of the next instruct GGUF.
+    state: dict = {"use_jinja": False}
+    prof = detect_gguf_host_profile(Path("Qwen3.5-9B-Q4_K_M.gguf"))
+    apply_host_profile_to_state(state, prof, preserve={"use_jinja"})
+    assert state["use_jinja"] is True
 
 
 def test_model_switch_refits_autofit_not_turbo():
@@ -178,6 +188,7 @@ def test_apply_settings_new_gguf_clears_last_good_and_applies_profile(tmp_path, 
                 "model_path": str(a),
                 "model_id": a.stem,
                 "use_jinja": False,
+                "use_jinja_owner": True,
                 "no_mmap": True,
                 "last_good_fit": {
                     "model_path": str(a),
@@ -308,3 +319,123 @@ def test_build_cmd_emits_reasoning_budget_for_r1_when_thinking_off(tmp_path):
     )
     assert "--reasoning-budget" in cmd
     assert cmd[cmd.index("--reasoning-budget") + 1] == "0"
+
+
+def test_thinking_off_annotation_only_on_models_with_a_knob():
+    """A plain instruct GGUF has no thinking mode — the card must not claim one."""
+    prof = detect_gguf_host_profile(Path("Kanana-2-9B-instruct-Q4_K_M.gguf"))
+    assert "thinking" not in prof["summary"]
+    off = overlay_owner_on_profile(prof, {"thinking": "off"})
+    assert off["thinking_mode"] == "off"
+    assert "thinking" not in off["summary"]
+    # Toggling back on must not rewrite the card into claiming a thinking model.
+    healed = overlay_owner_on_profile(off, {"thinking": "on"})
+    assert "thinking" not in healed["summary"]
+
+
+def test_thinking_off_summary_heals_legacy_corrupted_card():
+    """0.41.5 wrote 'instruct · jinja · thinking off' onto non-thinking cards."""
+    stale = dict(detect_gguf_host_profile(Path("Kanana-2-9B-instruct-Q4_K_M.gguf")))
+    stale["summary"] = "instruct · jinja · thinking off"
+    on = overlay_owner_on_profile(stale, {"thinking": "on"})
+    assert "thinking" not in on["summary"]
+    off = overlay_owner_on_profile(stale, {"thinking": "off"})
+    assert "thinking" not in off["summary"]
+
+
+def test_overlay_owner_mtp_off_clears_armed_and_marks_summary():
+    prof = detect_gguf_host_profile(Path("Qwopus3.5-9B-Coder-MTP-Q4_K_M.gguf"))
+    recorded = {**prof, "mtp_armed": True}
+    off = overlay_owner_on_profile(recorded, {"enable_mtp": False})
+    assert off["mtp"] is False
+    assert off["mtp_armed"] is False
+    assert "MTP off" in off["summary"]
+    back_on = overlay_owner_on_profile(off, {"enable_mtp": True})
+    assert "MTP off" not in back_on["summary"]
+
+
+def test_overlay_owner_n_cpu_moe_minus_one_forces_gpu():
+    prof = detect_gguf_host_profile(Path("Qwen3.5-30B-A3B-Q4_K_M.gguf"))
+    out = overlay_owner_on_profile(prof, {"n_cpu_moe": -1})
+    assert out["n_cpu_moe"] == 0
+    assert out["n_cpu_moe_owner"] is True
+
+
+def test_overlay_owner_marks_typed_draft():
+    prof = detect_gguf_host_profile(Path("Qwen3.5-9B-Q4_K_M.gguf"))
+    out = overlay_owner_on_profile(prof, {"model_draft": r"C:\x\draft.gguf"})
+    assert out["model_draft"] == r"C:\x\draft.gguf"
+    assert out["model_draft_owner"] is True
+
+
+def test_normalize_thinking_vocab_and_validation():
+    from remedy.runtime.rmb.host_profile import (
+        normalize_thinking,
+        thinking_value_known,
+    )
+
+    for word in ("off", "false", "0", "no", "disable", "disabled", "none", "never"):
+        assert normalize_thinking(word) == "off"
+    for word in ("on", "true", "1", "yes", "auto", ""):
+        assert normalize_thinking(word) == "on"
+    assert thinking_value_known("disable") is True
+    assert thinking_value_known("on") is True
+    # Typos are not silently mapped to on — entry points reject them.
+    assert thinking_value_known("of") is False
+    assert thinking_value_known("disbled") is False
+
+
+def test_apply_settings_rejects_unknown_thinking_word(tmp_path, monkeypatch):
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    from remedy.runtime.rmb.config import load_rmb_json, merge_state, save_rmb_json
+    from remedy.runtime.rmb.service import apply_rmb_settings
+
+    save_rmb_json(merge_state({}), tmp_path)
+    out = apply_rmb_settings({"thinking": "disbled"}, home_dir=str(tmp_path), live=False)
+    assert out.get("rejected_settings") == {"thinking": "disbled"}
+    st = load_rmb_json(tmp_path)
+    assert st.get("thinking") == "on"  # unchanged default, not flipped by a typo
+
+
+def test_apply_settings_marks_use_jinja_owner(tmp_path, monkeypatch):
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    from remedy.runtime.rmb.config import load_rmb_json, merge_state, save_rmb_json
+    from remedy.runtime.rmb.service import apply_rmb_settings
+
+    save_rmb_json(merge_state({}), tmp_path)
+    apply_rmb_settings({"use_jinja": False}, home_dir=str(tmp_path), live=False)
+    st = load_rmb_json(tmp_path)
+    assert st.get("use_jinja") is False
+    assert st.get("use_jinja_owner") is True
+    # "auto" hands the knob back to detection.
+    apply_rmb_settings({"use_jinja": "auto"}, home_dir=str(tmp_path), live=False)
+    st = load_rmb_json(tmp_path)
+    assert st.get("use_jinja_owner") is False
+
+
+def test_autofit_apply_plan_keeps_owner_parallel():
+    from remedy.runtime.rmb.autofit import AutofitPlan, apply_plan_to_state
+
+    plan = AutofitPlan(
+        ctx_size=8192,
+        n_gpu_layers=-1,
+        cache_type="",
+        flash_attn=True,
+        batch_size=2048,
+        ubatch_size=512,
+        threads=0,
+        cache_reuse=256,
+        parallel=1,
+        target="gpu_full",
+        vram_budget_mb=10000,
+        kv_mb=1800,
+        weight_mb=4000,
+        estimated_used_mb=6000,
+    )
+    state = {"parallel": 4}
+    apply_plan_to_state(state, plan)
+    # Owner slot count survives autofit; plan slots are recorded in last_autofit.
+    assert state["parallel"] == 4
+    fresh: dict = {}
+    apply_plan_to_state(fresh, plan)
+    assert fresh["parallel"] == 1
