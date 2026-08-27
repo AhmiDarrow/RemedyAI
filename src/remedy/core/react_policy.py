@@ -159,8 +159,17 @@ ASK_FIRST_NUDGE = (
 )
 
 
+def _partner_nudge(content: str) -> dict[str, str]:
+    """Internal steering. Never a fake owner message.
+
+    Live 2026-08-27: ASK_FIRST as role=user made grok-4.6 think it should
+    'reply to the person' instead of asking Ahmi, or start peek tools.
+    """
+    return {"role": "system", "content": content}
+
+
 def ask_first_nudge_message() -> dict[str, str]:
-    return {"role": "user", "content": ASK_FIRST_NUDGE}
+    return _partner_nudge(ASK_FIRST_NUDGE)
 
 
 # Empty / spam file_write — model must resend full content (not monologue).
@@ -201,7 +210,7 @@ def is_serial_explore_batch(tool_calls_list: list[dict[str, Any]] | None) -> boo
 
 
 def speed_batch_nudge_message() -> dict[str, str]:
-    return {"role": "user", "content": SPEED_BATCH_NUDGE}
+    return _partner_nudge(SPEED_BATCH_NUDGE)
 
 # When the failure is Ask-mode approval — do NOT invent alternate commands.
 APPROVAL_NUDGE = (
@@ -379,6 +388,10 @@ _ACTION_KICK_RE = re.compile(
     r"\btry\s+it\b|"
     r"\blaunch\s+it\b|"
     r"\brun\s+it\b|"
+    r"\bon\s+to\b|"
+    r"\bnext\s+up\b|"
+    r"\bnow\s+(?:the|let'?s|we)\b|"
+    r"\bfix\s+(?:the|this|it)\b|"
     r"\bpick\s+up\b|"
     r"\bwhere\s+you\s+left\s+off\b|"
     r"\bleft\s+off\b|"
@@ -430,6 +443,26 @@ _FALSE_PROGRESS_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+
+# Soft acks while a job is open — ask, don't assume. Longer follow-ups
+# ("ok on to assets", "fix the movement") are continues, not acks.
+_AMBIGUOUS_ACK_RE = re.compile(
+    r"(?i)^\s*(?:"
+    r"good\s+deal|sounds\s+good|that\s+makes\s+sense|"
+    r"makes\s+sense|got\s+it|fair\s+enough|"
+    r"alright\s+then|ok(?:ay)?\s+then|"
+    r"lgtm|sgtm"
+    r")[\s!.?]*$"
+)
+
+
+def is_ambiguous_ack_message(message: str) -> bool:
+    """True for short agrees that must not inherit leftover tools."""
+    msg = (message or "").strip()
+    if not msg or "\n" in msg:
+        return False
+    return bool(_SOFT_AFFIRM_RE.match(msg) or _AMBIGUOUS_ACK_RE.match(msg))
+
 
 # Soft affirmations: mid-task "ok" / "cool" means continue work, not chat-only.
 _SOFT_AFFIRM_RE = re.compile(
@@ -689,10 +722,16 @@ def runtime_turn_is_chat_only(runtime: Any = None, message: str | None = None) -
 
 
 # Polite wrappers that look like questions but are work ("can you add…").
+# Live 2026-08-27: "needs to work for Firefox and Chrome" / "yes need to work
+# for both" missed `we need` / `i need you to` and fell through to ask_first.
 _REQUEST_WORK_RE = re.compile(
     r"(?i)\b(?:can you|could you|would you|will you|please|"
     r"can we|could we|we need|i need you to|i want you to|"
     r"i want to\s+(?:finish|write|make|build|create|start|complete|ship)|"
+    r"need(?:s)?\s+to\s+work|"
+    r"make\s+it\s+work|"
+    r"work\s+for\s+both|"
+    r"add\s+(?:firefox|chrome|safari|msedge|edge)\b|"
     r"make sure|be sure to)\b"
     # Imperative 'modify' only at a clause start — "why did you modify X?"
     # and "don't modify anything" are questions/limits, not work requests.
@@ -925,6 +964,50 @@ def unfinished_work_blocks_final(
     if is_chat_only_message(message or ""):
         return False
     return message_wants_tools(message or "")
+
+
+# Remedy asked "want me to add X, or are we just talking?" — a yes is work.
+_OFFERED_WORK_Q_RE = re.compile(
+    r"(?i)("
+    r"want me to|"
+    r"should i|"
+    r"shall i|"
+    r"just talking|"
+    r"or are we|"
+    r"start (?:the |that )?(?:work|build|remake|fix|implement)|"
+    r"add (?:firefox|chrome|that|it|support)|"
+    r"fix (?:that|it|the|this)"
+    r")"
+)
+_CONFIRM_WORK_RE = re.compile(
+    r"(?i)^\s*(?:yes|yeah|yep|yup|correct|do it|please do|go ahead)\b"
+)
+
+
+def confirmation_continues_offered_work(
+    message: str,
+    history: list[dict[str, Any]] | None,
+) -> bool:
+    """True when the owner confirmed Remedy's own 'should I do X?' question.
+
+    Bare 'yes' is chat-only in isolation. After an offer-to-work question it
+    is a continue — live 2026-08-27 asked again instead of adding Firefox.
+    """
+    msg = (message or "").strip()
+    if not msg or not history:
+        return False
+    if not _CONFIRM_WORK_RE.search(msg):
+        return False
+    for m in reversed(list(history)):
+        if not isinstance(m, dict):
+            continue
+        if (m.get("role") or "").strip().lower() != "assistant":
+            continue
+        content = str(m.get("content") or "")
+        if not content.strip():
+            continue
+        return "?" in content and bool(_OFFERED_WORK_Q_RE.search(content))
+    return False
 
 
 def history_suggests_open_work(
@@ -1190,19 +1273,16 @@ def looks_like_leaked_scratchpad(text: str) -> bool:
 
 def post_tools_user_summary_nudge() -> dict[str, str]:
     """Force a real user-facing summary after tools (no monologue)."""
-    return {
-        "role": "user",
-        "content": (
-            "Your last message was **internal scratchpad**, not a user-facing answer. "
-            "Write a clear summary for the user now:\n"
-            "• What you found / fixed\n"
-            "• Files changed (paths)\n"
-            "• Tests run and results\n"
-            "• What is still open\n"
-            "Do **not** say “the user wants…” or “I should not leak…”. "
-            "Do not call tools unless one critical verification is missing."
-        ),
-    }
+    return _partner_nudge(
+        "Your last message was **internal scratchpad**, not a user-facing answer. "
+        "Write a clear summary for the user now:\n"
+        "• What you found / fixed\n"
+        "• Files changed (paths)\n"
+        "• Tests run and results\n"
+        "• What is still open\n"
+        "Do **not** say “the user wants…” or “I should not leak…”. "
+        "Do not call tools unless one critical verification is missing."
+    )
 
 
 # Hard phrases: always re-arm tools (even if the model wrote a longer stub).
@@ -1329,13 +1409,13 @@ def agency_tool_promise_claim(
 
 
 def agency_rearm_nudge_message() -> dict[str, str]:
-    """User-role message that demands real function calls after a prose promise."""
-    return {"role": "user", "content": AGENCY_REARM_NUDGE}
+    """Internal nudge that demands real function calls after a prose promise."""
+    return _partner_nudge(AGENCY_REARM_NUDGE)
 
 
 def unfinished_work_nudge_message() -> dict[str, str]:
-    """User-role message that refuses a zero-tool work 'final'."""
-    return {"role": "user", "content": UNFINISHED_WORK_NUDGE}
+    """Internal nudge that refuses a zero-tool work 'final'."""
+    return _partner_nudge(UNFINISHED_WORK_NUDGE)
 
 
 def unfinished_work_hard_stop_message() -> str:
@@ -2281,39 +2361,33 @@ def recovery_nudge_message(
     approval: bool = False,
     empty_write: bool = False,
 ) -> dict[str, str]:
-    """User-role message that triggers one automatic recovery attempt."""
+    """Internal nudge that triggers one automatic recovery attempt."""
     if approval:
-        return {"role": "user", "content": APPROVAL_NUDGE}
+        return _partner_nudge(APPROVAL_NUDGE)
     if empty_write:
-        return {"role": "user", "content": EMPTY_WRITE_NUDGE}
+        return _partner_nudge(EMPTY_WRITE_NUDGE)
     if empty_search:
-        return {"role": "user", "content": EMPTY_SEARCH_NUDGE + "\n" + RECOVERY_NUDGE}
-    return {"role": "user", "content": RECOVERY_NUDGE}
+        return _partner_nudge(EMPTY_SEARCH_NUDGE + "\n" + RECOVERY_NUDGE)
+    return _partner_nudge(RECOVERY_NUDGE)
 
 
 def mission_verify_gate_message(verify_command: str) -> dict[str, str]:
     """Block claiming done until mission_verify passes."""
-    return {
-        "role": "user",
-        "content": (
-            "[Mission gate] Checklist steps may be done but verify has not passed. "
-            f"Run mission_verify (command={verify_command!r}) now, fix failures, "
-            "and only then write the final summary. Do not claim complete without a pass."
-        ),
-    }
+    return _partner_nudge(
+        "[Mission gate] Checklist steps may be done but verify has not passed. "
+        f"Run mission_verify (command={verify_command!r}) now, fix failures, "
+        "and only then write the final summary. Do not claim complete without a pass."
+    )
 
 
 def epoch_continue_message(*, epoch: int, total_step: int) -> dict[str, str]:
     """Injected between soft epochs — keep tools; do not restate entire history."""
-    return {
-        "role": "user",
-        "content": (
-            f"[Epoch {epoch} complete at step {total_step}] Context was compacted — "
-            "this is not a stop. Run until the task is finished: continue from the "
-            "checkpoint / tool results above. Do not restart, renumber, or summarize-only. "
-            "Keep using tools until the work is done (or mission_verify passes)."
-        ),
-    }
+    return _partner_nudge(
+        f"[Epoch {epoch} complete at step {total_step}] Context was compacted — "
+        "this is not a stop. Run until the task is finished: continue from the "
+        "checkpoint / tool results above. Do not restart, renumber, or summarize-only. "
+        "Keep using tools until the work is done (or mission_verify passes)."
+    )
 
 
 def turn_has_unfinished_work(

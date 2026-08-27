@@ -744,6 +744,31 @@ def parse_ddg_html_results(html: str, *, max_results: int = 5) -> list[dict[str,
     return results
 
 
+def _rail_url_matches(requested: str, observed: str) -> bool:
+    """True when the rail is actually on the URL we asked to fetch.
+
+    Live 2026-08-27: navigate returned pending_load, then PAGE_TEXT read the
+    owner's current Reddit tab and web_fetch attributed it to PyPI.
+    """
+    from urllib.parse import urlparse
+
+    req = (requested or "").strip()
+    obs = (observed or "").strip()
+    if not req or not obs:
+        return False
+    try:
+        a, b = urlparse(req), urlparse(obs)
+    except Exception:
+        return False
+    host_a = (a.hostname or "").lower().removeprefix("www.")
+    host_b = (b.hostname or "").lower().removeprefix("www.")
+    if not host_a or host_a != host_b:
+        return False
+    path_a = (a.path or "/").rstrip("/") or "/"
+    path_b = (b.path or "/").rstrip("/") or "/"
+    return path_a == path_b
+
+
 async def _rail_page_text(url: str) -> str:
     """If the in-app browser can open *url*, return visible page text.
 
@@ -772,10 +797,17 @@ async def _rail_page_text(url: str) -> str:
 
             ex = get_computer_executor()
             nav = _as_dict(ex.run(ComputerAction.NAVIGATE, url=url, target="browser"))
-            if not nav:
+            if not nav or nav.get("ok") is False:
                 return ""
+            # Fire-and-forget navigate is not a loaded page — wait once, then
+            # only keep the text if the rail URL matches the fetch target.
+            if nav.get("pending_load") or nav.get("observed") is False:
+                ex.run(ComputerAction.WAIT, seconds=1.2, target="browser")
             page = _as_dict(ex.run(ComputerAction.PAGE_TEXT, target="browser"))
             if not page:
+                return ""
+            observed = str(page.get("url") or nav.get("url") or "").strip()
+            if not _rail_url_matches(url, observed):
                 return ""
             text = str(page.get("text") or "").strip()
             title = str(page.get("title") or "").strip()

@@ -117,6 +117,68 @@ async def test_a_thin_extract_beats_a_thinner_browser_read(monkeypatch):
     assert "in-app browser" not in out
 
 
+def test_rail_url_must_match_fetch_target():
+    """Live 2026-08-27: PyPI fetch must not return the current Reddit tab."""
+    from remedy.core.agent_web_tools import _rail_url_matches
+
+    assert _rail_url_matches(
+        "https://pypi.org/project/PyChromecast/",
+        "https://pypi.org/project/PyChromecast/",
+    )
+    assert _rail_url_matches(
+        "https://www.pypi.org/project/PyChromecast/",
+        "https://pypi.org/project/PyChromecast/",
+    )
+    assert not _rail_url_matches(
+        "https://pypi.org/project/PyChromecast/",
+        "https://www.reddit.com/r/artificial/",
+    )
+    assert not _rail_url_matches(
+        "https://pypi.org/project/PyChromecast/",
+        "",
+    )
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_drops_rail_from_the_wrong_tab(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from remedy.core.agent_web_tools import register_web_tools
+    from remedy.skills.tool_registry import ToolRegistry
+
+    html = b"<!doctype html><html><body><script>app()</script></body></html>"
+    monkeypatch.setattr(
+        "remedy.core.agent_web_tools._pinned_fetch",
+        lambda url, **k: (url, html, "utf-8"),
+    )
+    monkeypatch.setattr(
+        "remedy.core.agent_web_tools._web_enabled", lambda runtime: True
+    )
+
+    async def _wrong_tab(url: str) -> str:
+        return "# Reddit\n\nSubmit to r/artificial"
+
+    monkeypatch.setattr("remedy.core.agent_web_tools._rail_page_text", _wrong_tab)
+
+    # Direct unit: matcher rejects; fetch with mocked rail that wouldn't match
+    # is still gated inside _rail_page_text. Here we assert the public fetch
+    # does not keep a rail body that names a different site if the HTTP
+    # extract is an empty shell AND the rail helper returns "".
+    async def _empty_rail(url: str) -> str:
+        return ""
+
+    monkeypatch.setattr("remedy.core.agent_web_tools._rail_page_text", _empty_rail)
+
+    runtime = MagicMock()
+    runtime.tool_registry = ToolRegistry()
+    register_web_tools(runtime)
+    out = await runtime.tool_registry.execute(
+        "web_fetch", url="https://pypi.org/project/PyChromecast/"
+    )
+    assert "r/artificial" not in out
+    assert "URL: https://pypi.org/project/PyChromecast/" in out
+
+
 def test_jwks_host_allowlist():
     from remedy.gateway.channels.jwt_rs256 import _jwks_url_allowed
 

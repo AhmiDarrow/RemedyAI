@@ -30,7 +30,7 @@ def test_max_tool_steps_has_headroom():
 
 def test_epoch_continue_message_keeps_going():
     msg = epoch_continue_message(epoch=2, total_step=512)
-    assert msg["role"] == "user"
+    assert msg["role"] == "system"
     low = msg["content"].lower()
     assert "epoch" in low and "step" in low
     assert "run until" in low or "finished" in low

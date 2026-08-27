@@ -74,9 +74,15 @@ def build_step_request_body(
             think = "low"
             set_turn_thinking_level("low")
 
-    # Local: never stream tool rounds — stream disconnects kill the turn
-    # (Server disconnected / WinError 64 pattern after every monologue nudge).
+    # Local + xAI/Grok: never stream tool rounds. SSE + long thinking is
+    # the WinError 64 / ClientPayloadError class. Final answers (no tools)
+    # still stream. Other clouds keep SSE (their fakes/tests depend on it).
     _stream = use_openai_sse
+    _prov = str(getattr(bind, "provider", "") or "").lower()
+    _model = str(getattr(bind, "model", "") or "").lower()
+    if tools and (_prov in {"xai", "grok"} or "grok" in _model):
+        _stream = False
+        use_openai_sse = False
     with suppress(Exception):
         from remedy.core.local_agent_optimize import is_local_binding
 

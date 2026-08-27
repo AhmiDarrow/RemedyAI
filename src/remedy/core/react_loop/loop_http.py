@@ -261,6 +261,13 @@ async def run_react_http(
             step=int(step),
             user_message=str(message or ""),
         )
+        # Sticky: a mid-SSE RST this turn must not re-enable streaming on
+        # the next step (xAI TransferEncodingError / WinError 64 loop).
+        if getattr(turn, "force_nonstream", False):
+            if isinstance(body, dict):
+                body = dict(body)
+                body["stream"] = False
+            use_openai_sse = False
 
         collected = {"content": None, "tool_calls": None}
         round_state = StreamRoundState()
@@ -988,6 +995,28 @@ async def run_react_http(
               _bind, runtime, turn, step, _llm_t0, "error", round_state,
               error=_stream_exc,
           )
+          _is_local_bind = False
+          with suppress(Exception):
+              from remedy.core.local_agent_optimize import (
+                  is_local_binding as _ilb_disc,
+              )
+
+              _is_local_bind = bool(
+                  _ilb_disc(
+                      _bind.provider, _bind.model, _bind.base_url
+                  )
+              )
+          from remedy.core.react_turn import is_connect_refused_error
+
+          if is_connect_refused_error(_stream_exc) and _is_local_bind:
+            # RMB / llama-server is not listening. Waiting 60s × 8 is a loop.
+            yield (
+                "\nI could not reach the local model — nothing is listening "
+                "on the RMB port. Start RMB in Settings, or switch to a "
+                "cloud model, then send again. History is intact.\n"
+            )
+            s.turn_complete = True
+            return
           if (
             is_disconnect_error(_stream_exc)
             and turn.allow_disconnect_retry()
@@ -1040,17 +1069,6 @@ async def run_react_http(
                     "provider directly (no user action needed)…\n"
                 )
             else:
-                _is_local_bind = False
-                with suppress(Exception):
-                    from remedy.core.local_agent_optimize import (
-                        is_local_binding as _ilb_disc,
-                    )
-
-                    _is_local_bind = bool(
-                        _ilb_disc(
-                            _bind.provider, _bind.model, _bind.base_url
-                        )
-                    )
                 if _is_local_bind:
                     yield (
                         "@@status:Connection dropped — waiting for local "

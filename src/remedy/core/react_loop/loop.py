@@ -402,6 +402,9 @@ async def call_llm_stream(runtime, message: str,
         # After tools: prefer synthesis over raw exception as the main answer (#4/#8)
         try:
             from remedy.core.react_turn import (
+                is_connect_refused_error as _is_refused,
+            )
+            from remedy.core.react_turn import (
                 is_disconnect_error as _is_disc,
             )
             from remedy.core.react_turn import (
@@ -450,7 +453,7 @@ async def call_llm_stream(runtime, message: str,
                             _b2 = get_llm_binding(runtime)
                             if _ilb_rec(
                                 _b2.provider, _b2.model, _b2.base_url
-                            ):
+                            ) and not _is_refused(e):
                                 from remedy.runtime.rmb.service import wait_rmb_ready
 
                                 _wr = await _await_or_abort(

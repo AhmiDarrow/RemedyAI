@@ -30,7 +30,9 @@ _JOB_RESUME_FACT_RE = re.compile(
     r"keep going|"
     r"resume (?:the |this )?(?:task|job|build|work)|"
     r"pick up where|"
-    r"don'?t stop"
+    r"don'?t stop|"
+    r"continue remaining work|"
+    r"from the last successful tool"
     r")"
 )
 
@@ -150,6 +152,8 @@ class TimeCrystal:
         with self._lock:
             for f in self.facts:
                 if f.horizon == "session" and f.hits >= min_hits:
+                    if looks_like_job_resume_fact(f.text, source=f.source):
+                        continue
                     f.horizon = "project_week"
                     self.promotions += 1
                     n += 1

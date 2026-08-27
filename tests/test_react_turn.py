@@ -167,6 +167,105 @@ def test_resolve_tools_game_create_stays_armed():
     assert d.reason != "ask_first"
 
 
+def test_resolve_tools_browser_requirement_stays_armed():
+    """Live 2026-08-27: leftover todos must not turn 'needs to work for Firefox' into ask_first."""
+    all_t = [_tool("file_write"), _tool("bash_exec"), _tool("list_dir"), _tool("file_read")]
+    d = resolve_tools(
+        message="yes need to work for both firefox AND chrome",
+        all_tools=all_t,
+        turn_tier=1,
+        build_active=True,
+        open_tasks=["Chrome extension"],
+        history=[
+            {"role": "assistant", "tool_calls": [{"id": "1", "function": {"name": "file_write"}}]},
+            {"role": "tool", "content": "ok"},
+        ],
+    )
+    assert d.run_until_done is True
+    assert d.reason != "ask_first"
+    names = {((t.get("function") or {}).get("name") or "") for t in (d.tools or [])}
+    assert "file_write" in names
+
+
+def test_resolve_tools_yes_after_offer_arms():
+    all_t = [_tool("file_write"), _tool("list_dir")]
+    d = resolve_tools(
+        message="yes",
+        all_tools=all_t,
+        turn_tier=1,
+        build_active=True,
+        history=[
+            {
+                "role": "assistant",
+                "content": "Want me to add Firefox now, or are we just talking?",
+            }
+        ],
+    )
+    assert d.reason != "l1_pure_chat"
+    assert d.reason != "ask_first"
+    assert d.run_until_done is True
+    assert d.tools is not None
+
+
+def test_resolve_tools_ask_first_peek_spent_after_step_zero():
+    all_t = [_tool("file_write"), _tool("list_dir")]
+    d0 = resolve_tools(
+        message="Good deal",
+        all_tools=all_t,
+        turn_tier=1,
+        build_active=True,
+        open_tasks=["finish the project review"],
+        step_index=0,
+    )
+    assert d0.reason == "ask_first"
+    assert d0.pack == "peek"
+    d1 = resolve_tools(
+        message="Good deal",
+        all_tools=all_t,
+        turn_tier=1,
+        build_active=True,
+        open_tasks=["finish the project review"],
+        step_index=1,
+    )
+    assert d1.reason == "ask_first"
+    assert d1.tools is None
+    assert d1.pack == "none"
+
+
+def test_disconnect_retry_sticks_nonstream():
+    t = TurnState()
+    assert t.force_nonstream is False
+    t.note_disconnect_retry()
+    assert t.force_nonstream is True
+    assert t.allow_disconnect_retry() is True
+
+
+def test_resolve_tools_open_work_followup_stays_armed():
+    """Long session: leftover job + a real follow-up is a continue, not a chat."""
+    all_t = [_tool("file_write"), _tool("bash_exec"), _tool("list_dir")]
+    history = [
+        {"role": "assistant", "tool_calls": [{"id": "1", "function": {"name": "file_write"}}]},
+        {"role": "tool", "content": "ok"},
+    ]
+    for msg in (
+        "ok on to assets, they need work overall",
+        "fix the movement issues, we'll circle back to sprites",
+        "now the sprite remake with pixellab",
+    ):
+        d = resolve_tools(
+            message=msg,
+            all_tools=all_t,
+            turn_tier=1,
+            build_active=True,
+            open_tasks=["cohesive sprite remake"],
+            history=history,
+        )
+        assert d.run_until_done is True, msg
+        assert d.reason != "ask_first", msg
+        names = {((t.get("function") or {}).get("name") or "") for t in (d.tools or [])}
+        assert "file_write" in names, msg
+
+
 def test_resolve_tools_ack_does_not_inherit_leftover_build():
     """'Good deal' is not a work request — leftover review todos never re-arm.
 
@@ -359,6 +458,41 @@ def test_mid_turn_keep_armed_does_not_override_non_work():
     assert tools is None
     assert run is False
     assert turn.arm_reason == "non_work"
+
+
+def test_mid_turn_resolve_cannot_downgrade_full_pack_to_peek():
+    """A driven work turn must not become ask_first peek on a later step."""
+    all_t = [_tool("file_write"), _tool("file_read"), _tool("list_dir")]
+    turn = TurnState(all_tools=all_t, run_until_done=True, arm_reason="task")
+    turn.rearm(reason="rearm_agency")
+    assert turn.run_until_done is True
+
+    class _Rt:
+        _turn_tier = 1
+
+    tools, run = resolve_and_apply_tools(
+        runtime=_Rt(),
+        turn=turn,
+        message="Good deal",
+        plan_mode=False,
+        history=[
+            {"role": "assistant", "tool_calls": [{"id": "1"}]},
+            {"role": "tool", "content": "ok"},
+        ],
+        pure_action_kick=False,
+        clear_goals_only=False,
+        browse_pre_url=None,
+        page_interaction=False,
+        open_only_browse=False,
+        build_state=None,
+        open_tasks_for_wall=["finish the review"],
+        step_index=4,
+    )
+    assert tools is not None
+    assert run is True
+    assert turn.arm_reason == "keep_armed"
+    names = {((t.get("function") or {}).get("name") or "") for t in (tools or [])}
+    assert "file_write" in names
 
 
 def test_mid_turn_resolve_cannot_disarm_armed_turn():
