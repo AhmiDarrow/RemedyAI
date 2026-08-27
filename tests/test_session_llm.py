@@ -151,12 +151,8 @@ def test_resolve_does_not_persist_live_rmb_stem(monkeypatch):
     """Turn address may use the loaded GGUF; persist must keep the tab bind."""
     sess = SimpleNamespace(llm_provider="rmb", model="my-7b")
     monkeypatch.setattr(
-        "remedy.runtime.rmb.config.load_rmb_json",
+        "remedy.runtime.rmb.config.merged_state_cached",
         lambda *a, **k: {"model_path": "C:/models/host-70b.gguf"},
-    )
-    monkeypatch.setattr(
-        "remedy.runtime.rmb.config.merge_state",
-        lambda st: st if isinstance(st, dict) else {"model_path": "C:/models/host-70b.gguf"},
     )
     live_p, live_m = resolve_session_llm_bind(
         session=sess, req_provider=None, req_model=None, use_live_rmb=True
