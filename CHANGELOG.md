@@ -215,6 +215,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [0.41.0] - 2026-08-25
 
+**Multilingual.** Remedy is multilingual in 0.41: chrome and replies follow
+**Settings → You & Agent → Language** (default **Auto** = this PC + the
+language you type). Spanish, Portuguese, French, German, Arabic, Hindi,
+Bengali, Indonesian, Vietnamese, Japanese, Korean, Simplified/Traditional
+Chinese, Swahili, and more — RTL flips the layout. Tools, code, and paths
+stay as written; Help manuals stay English for now.
+
 ### Added — memory authority and checkpoint recovery
 
 - Partner Memory stamps **who/why** on facts. Retrieval is labeled context,
@@ -231,12 +238,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   Plan/Build is not jammed. The Plan banner shows what was seen or why it
   stopped. A finished plan is not automatically the owner's goal.
 
-### Added — language (Remedy is for everyone)
+### Added — multilingual (Remedy is for everyone)
 
-- **Settings → You & Agent → Language.** Default **Auto** matches this computer
-  and the language you type. Pick any listed language to pin chrome *and*
-  Remedy's replies. Tools, code, and file paths stay as written. Help manuals
-  stay English for now.
+- **Remedy is multilingual.** **Settings → You & Agent → Language.** Default
+  **Auto** matches this computer and the language you type. Pick any listed
+  language to pin chrome *and* Remedy's replies. Tools, code, and file paths
+  stay as written. Help manuals stay English for now.
 - Reply-language is in the system prompt on every turn, so chat works in the
   owner's language even when a chrome catalog is still catching up.
 - Chrome catalogs for the default surface (status bar, logo menu, composer,
