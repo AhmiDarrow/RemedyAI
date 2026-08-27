@@ -1009,9 +1009,9 @@ class RmbProvider(LlamaCppProvider):
         try:
             from pathlib import Path
 
-            from remedy.runtime.rmb.config import load_rmb_json, merge_state
+            from remedy.runtime.rmb.config import merged_state_cached
 
-            st = merge_state(load_rmb_json())
+            st = merged_state_cached()
             mp = str(st.get("model_path") or "").strip()
             if mp:
                 return Path(mp).stem
@@ -1027,9 +1027,9 @@ class RmbProvider(LlamaCppProvider):
                 cache_context_window,
                 get_cached_context_window,
             )
-            from remedy.runtime.rmb.config import load_rmb_json, merge_state
+            from remedy.runtime.rmb.config import merged_state_cached
 
-            st = merge_state(load_rmb_json())
+            st = merged_state_cached()
             ctx = int(st.get("ctx_size") or 0)
             if ctx >= 2048:
                 cache_context_window(st.get("base_url"), model, ctx)
@@ -1055,9 +1055,9 @@ class RmbProvider(LlamaCppProvider):
         except Exception:
             pass
         try:
-            from remedy.runtime.rmb.config import load_rmb_json, merge_state
+            from remedy.runtime.rmb.config import merged_state_cached
 
-            st = merge_state(load_rmb_json())
+            st = merged_state_cached()
             ctx = int(st.get("ctx_size") or 0)
             if ctx >= 2048:
                 return ctx

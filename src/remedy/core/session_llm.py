@@ -54,9 +54,9 @@ def resolve_session_llm_bind(
         try:
             from pathlib import Path
 
-            from remedy.runtime.rmb.config import load_rmb_json, merge_state
+            from remedy.runtime.rmb.config import merged_state_cached
 
-            st = merge_state(load_rmb_json())
+            st = merged_state_cached()
             mp = str(st.get("model_path") or "").strip()
             if mp:
                 return Path(mp).stem

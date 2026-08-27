@@ -185,11 +185,11 @@ def resolve_local_window(
     # 1. rmb.json is the user's configured physical window when chat is RMB
     try:
         from remedy.nanoswarm.token_nanobot import cache_context_window
-        from remedy.runtime.rmb.config import load_rmb_json, merge_state
+        from remedy.runtime.rmb.config import merged_state_cached
         from remedy.runtime.rmb.mode import is_rmb_provider
 
         if is_rmb_provider(provider, base_url) or (provider or "").lower() == "rmb":
-            st = merge_state(load_rmb_json())
+            st = merged_state_cached()
             ctx = int(st.get("ctx_size") or 0)
             if ctx >= 2048:
                 url = str(st.get("base_url") or base_url or "")
