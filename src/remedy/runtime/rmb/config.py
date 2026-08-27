@@ -80,7 +80,9 @@ def merged_state_cached(home_dir: str | Path | None = None) -> dict[str, Any]:
     """``merge_state(load_rmb_json(...))`` with an mtime-keyed cache.
 
     Chat request paths read owner knobs on every ReAct step; rmb.json only
-    changes when Settings apply. Treat the returned dict as read-only.
+    changes when Settings apply. The raw parse goes through
+    ``remedy.memory.statecache`` (locked, size-trimmed); only the merged
+    result is memoized here. Treat the returned dict as read-only.
     """
     path = rmb_json_path(home_dir)
     key = str(path)
@@ -92,7 +94,14 @@ def merged_state_cached(home_dir: str | Path | None = None) -> dict[str, Any]:
     hit = _merged_cache.get(key)
     if hit is not None and hit[0] == sig:
         return hit[1]
-    merged = merge_state(load_rmb_json(home_dir))
+    try:
+        from remedy.memory.statecache import read_json_cached
+
+        raw = read_json_cached(path)
+        data = raw if isinstance(raw, dict) else {}
+    except Exception:
+        data = load_rmb_json(home_dir)
+    merged = merge_state(data)
     _merged_cache[key] = (sig, merged)
     return merged
 

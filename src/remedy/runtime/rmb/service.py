@@ -3353,30 +3353,6 @@ def apply_rmb_settings(
     state = dict(before)
     rejected: dict[str, Any] = {}
 
-    # ``use_jinja`` ownership: an explicit patch pins the value against
-    # auto-load; the string "auto" hands it back to GGUF detection. String
-    # values are normalized here — bool("off") would store True and pin the
-    # opposite of what was asked, permanently.
-    raw_uj = patch.get("use_jinja")
-    if isinstance(raw_uj, str):
-        patch = {k: v for k, v in patch.items() if k != "use_jinja"}
-        word = raw_uj.strip().lower()
-        if word in ("", "auto"):
-            state["use_jinja_owner"] = False
-            with contextlib.suppress(Exception):
-                mp = str(state.get("model_path") or "").strip()
-                if mp:
-                    state["use_jinja"] = bool(
-                        detect_gguf_host_profile(mp).get("use_jinja", True)
-                    )
-        elif owner_flag_value_known(word):
-            patch["use_jinja"] = owner_flag_on(word, default=True)
-            state["use_jinja_owner"] = True
-        else:
-            rejected["use_jinja"] = raw_uj
-    elif "use_jinja" in patch and patch["use_jinja"] is not None:
-        state["use_jinja_owner"] = True
-
     for key in (
         "enabled",
         "auto_start",
@@ -3534,7 +3510,31 @@ def apply_rmb_settings(
                 state[key] = int(patch[key])
             except (TypeError, ValueError):
                 continue
-        elif key in ("use_jinja", "mlock", "no_mmap", "no_kv_offload") and patch[key] is not None:
+        elif key == "use_jinja" and patch[key] is not None:
+            # An explicit value pins the flag against GGUF auto-detection
+            # (use_jinja_owner); the string "auto" hands it back. Strings are
+            # word-normalized — bool("off") would store True, permanently
+            # pinning the opposite of what was asked.
+            if isinstance(patch[key], str):
+                word = patch[key].strip().lower()
+                if word in ("", "auto"):
+                    state["use_jinja_owner"] = False
+                    with contextlib.suppress(Exception):
+                        mp = str(state.get("model_path") or "").strip()
+                        if mp:
+                            state[key] = bool(
+                                detect_gguf_host_profile(mp).get("use_jinja", True)
+                            )
+                elif owner_flag_value_known(word):
+                    state[key] = owner_flag_on(word, default=True)
+                    state["use_jinja_owner"] = True
+                else:
+                    rejected[key] = patch[key]
+                    continue
+            else:
+                state[key] = bool(patch[key])
+                state["use_jinja_owner"] = True
+        elif key in ("mlock", "no_mmap", "no_kv_offload") and patch[key] is not None:
             state[key] = bool(patch[key])
         elif key == "model_draft":
             state[key] = str(patch[key]).strip() if patch[key] else ""
@@ -3581,7 +3581,8 @@ def apply_rmb_settings(
             state[key] = int(patch[key])
         except (TypeError, ValueError):
             continue
-    for key in ("use_jinja", "mlock", "no_mmap", "no_kv_offload"):
+    # use_jinja has its own branch in the main loop (ownership + "auto").
+    for key in ("mlock", "no_mmap", "no_kv_offload"):
         if key not in patch or patch[key] is None:
             continue
         state[key] = bool(patch[key])

@@ -561,32 +561,41 @@ def overlay_owner_on_profile(
     except (TypeError, ValueError):
         pass
 
-    summary = str(out.get("summary") or "")
+    # Summary: rewrite the state-bearing bits ("thinking", "MTP") from flags
+    # instead of substring surgery — exact-token matching cannot corrupt other
+    # bits and it heals cards an older overlay annotated wrongly (e.g.
+    # "instruct · jinja · thinking off" on a model with no thinking knob).
+    tokens = [
+        t for t in (s.strip() for s in str(out.get("summary") or "").split("·")) if t
+    ]
     has_think_knob = bool(
         out.get("thinking") or out.get("qwen_thinking_toggle") or out.get("always_think")
     )
-    if not has_think_knob:
-        # Heal cards an older overlay annotated on a model with no thinking
-        # knob ("instruct · jinja · thinking off" on a plain instruct GGUF).
-        summary = (
-            summary.replace(" · thinking off", "")
-            .replace("thinking off", "")
-            .strip(" ·")
-        )
-    elif mode == "off":
-        if "thinking off" not in summary:
-            if "thinking" in summary:
-                summary = summary.replace("thinking", "thinking off", 1)
-            else:
-                summary = (summary + " · thinking off") if summary else "thinking off"
-    else:
-        summary = summary.replace("thinking off", "thinking")
+    think_token = ("thinking off" if mode == "off" else "thinking") if has_think_knob else None
+    mtp_token = None
     if out.get("mtp_owner_off"):
-        if "MTP" in summary and "MTP off" not in summary:
-            summary = summary.replace("MTP", "MTP off", 1)
-    else:
-        summary = summary.replace("MTP off", "MTP")
-    out["summary"] = summary
+        mtp_token = "MTP off"
+    elif out.get("mtp"):
+        mtp_token = "MTP"
+
+    def _rewrite(toks: list[str], variants: tuple[str, ...], want: str | None) -> list[str]:
+        rebuilt: list[str] = []
+        placed = False
+        for t in toks:
+            if t in variants:
+                if want is not None and not placed:
+                    rebuilt.append(want)
+                    placed = True
+                # duplicates and unwanted state tokens are dropped
+            else:
+                rebuilt.append(t)
+        if want is not None and not placed:
+            rebuilt.append(want)
+        return rebuilt
+
+    tokens = _rewrite(tokens, ("thinking", "thinking off"), think_token)
+    tokens = _rewrite(tokens, ("MTP", "MTP off"), mtp_token)
+    out["summary"] = " · ".join(tokens)
     return out
 
 

@@ -532,3 +532,19 @@ def test_rmb_settings_route_declares_all_owner_knobs():
         assert key in patch, key
     assert patch["use_jinja"] == "auto"
     assert patch["n_cpu_moe"] == -1
+
+
+def test_merged_state_cached_tracks_saves(tmp_path):
+    from remedy.runtime.rmb.config import (
+        merge_state,
+        merged_state_cached,
+        save_rmb_json,
+    )
+
+    save_rmb_json(merge_state({"thinking": "on"}), tmp_path)
+    first = merged_state_cached(tmp_path)
+    assert first.get("thinking") == "on"
+    # Repeated reads with no write return the same merged object (cache hit).
+    assert merged_state_cached(tmp_path) is first
+    save_rmb_json(merge_state({"thinking": "off"}), tmp_path)
+    assert merged_state_cached(tmp_path).get("thinking") == "off"
