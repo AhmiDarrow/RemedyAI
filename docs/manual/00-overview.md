@@ -22,7 +22,7 @@ project access scope).
 | **Home surface** | **Grove** (partner). **Studio** is one tap away (workbench). |
 | **Data home** | `~/.remedy` (config, memory, voice, Vault, skills; DPAPI on Windows) |
 | **Models** | *Your* provider keys or Ollama / RMB — continuity stays on disk |
-| **Current** | **v0.41.0** — language, verified Plan, memory authority. Last public GitHub Release **v0.38.1** |
+| **Current** | **v0.41.5** — **multilingual** (chrome + replies), verified Plan, memory authority. Last public GitHub Release **v0.38.1** |
 | **Install** | [Windows](01-install-windows.md) · [Linux](01-install-linux.md) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · PyPI `remedy-ai` |
 
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.  
@@ -32,9 +32,10 @@ Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
 
 ## What’s new (start here)
 
-**v0.41.0** adds Language (chrome and replies), verified Plan steps, and memory
-as context not a grant. Hive cannot write parent Partner Memory. Payment
-checkpoints still cannot be recovered around.
+**v0.41** is **multilingual**: Language pins chrome *and* replies (default Auto
+= this PC + what you type; many languages + RTL). Verified Plan steps and
+memory as context not a grant. Hive cannot write parent Partner Memory.
+Payment checkpoints still cannot be recovered around.
 
 **v0.38.1** closes gates that were still open in 0.38.0: hired helpers cannot
 read your mail or calendar, one skill yes is not every skill, Autonomous still
