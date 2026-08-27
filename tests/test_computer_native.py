@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from remedy.core.computer import desktop_win as W
+from remedy.core.computer.desktop_os import native
 from remedy.core.computer.executor import ComputerExecutor
 from remedy.core.computer.types import (
     COMPUTER_TOOL_NAMES,
@@ -20,17 +21,23 @@ from remedy.core.computer.types import (
 IS_WIN = sys.platform == "win32"
 
 
+def _OS():
+    """Desktop module the executor actually calls (win or linux)."""
+    return native()
+
+
 def test_press_hold_is_first_class_tool() -> None:
     assert "computer_press_hold" in COMPUTER_TOOL_NAMES
     assert action_from_tool("computer_press_hold") is ComputerAction.PRESS_HOLD
 
 
-# --- executor routing (fake win module — no live desktop needed) -----------
+# --- executor routing (fake OS module — no live desktop needed) -----------
 
 
 def _patch_win(monkeypatch, **overrides: Any):
-    """Patch desktop_win functions the executor calls."""
+    """Patch native() desktop functions the executor calls (win or linux)."""
     calls: dict[str, list] = {}
+    mod = _OS()
 
     def rec(name, ret=None):
         def _f(*a, **k):
@@ -54,7 +61,7 @@ def _patch_win(monkeypatch, **overrides: Any):
     }
     defaults.update(overrides)
     for name, fn in defaults.items():
-        monkeypatch.setattr(W, name, fn, raising=True)
+        monkeypatch.setattr(mod, name, fn, raising=True)
     return calls
 
 
@@ -272,12 +279,13 @@ def test_screenshot_mark_flag_builds_legend(tmp_path, monkeypatch) -> None:
         target="desktop",
     )
     captured: dict[str, Any] = {}
+    mod = _OS()
 
     def fake_shot(path=None, *, marks=None):
         captured["marks"] = marks
         return {"path": "x.png", "width": 800, "height": 600, "origin": {"x": 0, "y": 0}}
 
-    monkeypatch.setattr(W, "screenshot_png", fake_shot)
+    monkeypatch.setattr(mod, "screenshot_png", fake_shot)
     monkeypatch.setattr(ComputerExecutor, "_see_if_needed", lambda self, r, **k: r)
     out = ex._run_desktop(ComputerAction.SCREENSHOT, mark=True)
     assert out["ok"] is True
@@ -290,8 +298,9 @@ def test_screenshot_mark_flag_builds_legend(tmp_path, monkeypatch) -> None:
 
 
 def test_uac_blocks_input_actions(tmp_path, monkeypatch) -> None:
+    mod = _OS()
     monkeypatch.setattr(
-        W,
+        mod,
         "detect_system_prompt",
         lambda: {"blocked": True, "kind": "uac", "message": "UAC is up — approve it"},
     )
@@ -303,11 +312,12 @@ def test_uac_blocks_input_actions(tmp_path, monkeypatch) -> None:
 
 
 def test_no_system_prompt_allows_actions(tmp_path, monkeypatch) -> None:
+    mod = _OS()
     monkeypatch.setattr(
-        W, "detect_system_prompt", lambda: {"blocked": False, "kind": "", "message": ""}
+        mod, "detect_system_prompt", lambda: {"blocked": False, "kind": "", "message": ""}
     )
-    monkeypatch.setattr(W, "press_key", lambda k: None)
-    monkeypatch.setattr(W, "foreground_window_info", lambda: {"hwnd": 1, "title": "App"})
+    monkeypatch.setattr(mod, "press_key", lambda k: None)
+    monkeypatch.setattr(mod, "foreground_window_info", lambda: {"hwnd": 1, "title": "App"})
     ex = ComputerExecutor(home_dir=tmp_path)
     out = ex._run_desktop(ComputerAction.KEY, key="enter")
     assert out["ok"] is True
@@ -372,12 +382,13 @@ def test_screenshot_marks_fall_back_to_pixels(tmp_path, monkeypatch) -> None:
     """No a11y elements → marks come from pixel detection, with x/y in legend."""
     ex = ComputerExecutor(home_dir=tmp_path)
     ex.bridge.set_last_elements([], target="desktop")
-    monkeypatch.setattr(W, "desktop_snapshot", lambda **k: [])
+    mod = _OS()
+    monkeypatch.setattr(mod, "desktop_snapshot", lambda **k: [])
     monkeypatch.setattr(
-        W, "_capture_virtual_screen", lambda: (b"\x00" * 300, 30, 10, 10, 5, 7)
+        mod, "_capture_virtual_screen", lambda: (b"\x00" * 300, 30, 10, 10, 5, 7)
     )
     monkeypatch.setattr(
-        W,
+        mod,
         "detect_ui_candidates",
         lambda raw, stride, w, h, **k: [{"x": 100, "y": 50, "w": 40, "h": 20, "area": 800}],
     )
@@ -387,7 +398,7 @@ def test_screenshot_marks_fall_back_to_pixels(tmp_path, monkeypatch) -> None:
         captured["marks"] = marks
         return {"path": "x.png", "width": 800, "height": 600, "origin": {"x": 5, "y": 7}}
 
-    monkeypatch.setattr(W, "screenshot_png", fake_shot)
+    monkeypatch.setattr(mod, "screenshot_png", fake_shot)
     monkeypatch.setattr(ComputerExecutor, "_see_if_needed", lambda self, r, **k: r)
     out = ex._run_desktop(ComputerAction.SCREENSHOT, mark=True)
     assert out["ok"] is True

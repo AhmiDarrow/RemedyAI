@@ -456,13 +456,10 @@ def test_desktop_navigate_refuses_system_browser_without_explicit_ask(
         opened.append(url)
         return {"ok": True, "url": url}
 
-    monkeypatch.setattr(
-        "remedy.core.computer.desktop_win.open_url", fake_open, raising=False
-    )
-    # Patch the module path used by executor
-    import remedy.core.computer.desktop_win as win
+    from remedy.core.computer.desktop_os import native
 
-    monkeypatch.setattr(win, "open_url", fake_open)
+    # Executor / cli host call desktop_os.native() — patch the live OS module.
+    monkeypatch.setattr(native(), "open_url", fake_open)
 
     ex = ComputerExecutor(home_dir=tmp_path)
     # Host offline, no explicit system-browser request
@@ -1797,7 +1794,9 @@ def test_offline_navigate_refuses_os_browser_snapshot_falls_back(
         opened.append(url)
         return {"ok": True, "url": url}
 
-    import remedy.core.computer.desktop_win as win
+    from remedy.core.computer.desktop_os import native
+
+    win = native()
 
     monkeypatch.setattr(win, "open_url", fake_open)
     # Fake desktop snapshot so non-Windows CI still covers fallback
@@ -1845,11 +1844,12 @@ def test_executor_click_text_stays_desktop_after_app(tmp_path: Path, monkeypatch
     import json
 
     from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.desktop_os import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction
 
     monkeypatch.setattr(hb, "_bridge", None)
-    import remedy.core.computer.desktop_win as win
+    win = native()
 
     monkeypatch.setattr(
         win,
@@ -1944,17 +1944,23 @@ def test_executor_type_surfaces_abort(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(hb, "_bridge", None)
     ex = ComputerExecutor(home_dir=tmp_path)
 
-    def boom(text, abort_check=None, chars_typed=None):
+    def boom(text, abort_check=None, chars_typed=None, **_k):
         if chars_typed is not None:
             chars_typed[:] = [8]
         raise RuntimeError("Aborted by user during type")
 
-    monkeypatch.setattr(
-        "remedy.core.computer.desktop_win.type_text", boom, raising=False
-    )
-    import remedy.core.computer.desktop_win as win
+    from remedy.core.computer.desktop_os import native
 
+    win = native()
+    # TYPE path prefers type_text_fast (non-vault); both must abort the same way.
     monkeypatch.setattr(win, "type_text", boom)
+    monkeypatch.setattr(
+        win,
+        "type_text_fast",
+        lambda text, abort_check=None, chars_typed=None, **k: boom(
+            text, abort_check=abort_check, chars_typed=chars_typed
+        ),
+    )
 
     raw = json.loads(
         ex.run(ComputerAction.TYPE, target="desktop", text="hello world long")
