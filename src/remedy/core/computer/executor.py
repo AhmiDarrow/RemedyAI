@@ -117,6 +117,24 @@ _HOST_BROWSER_REFUSAL = (
     "session. If the rail is unreachable, computer_wait 2 and retry the rail, "
     "then tell the owner — do not open a desktop browser."
 )
+_OFF_RAIL_PIXEL_REFUSAL = (
+    "Refused: a web page is open in the Browser rail. Desktop x/y, Ctrl+L, "
+    "and Maximize are how a socials run walked off the page onto Grove chrome "
+    "(including negative-Y clicks on the other monitor). Use computer_click / "
+    "computer_type / computer_snapshot target=browser. If the rail is "
+    "unreachable, computer_wait 2 and retry the rail — do not pixel-drive "
+    "the desktop."
+)
+_ADDRESS_BAR_KEYS = frozenset(
+    {
+        "ctrl+l",
+        "control+l",
+        "ctrl+t",
+        "control+t",
+        "alt+d",
+        "ctrl+lenter",
+    }
+)
 
 
 def _skill_host(url_or_label: str) -> str:
@@ -366,15 +384,24 @@ class ComputerExecutor:
                     host = _skill_host(
                         self.bridge.last_navigate_url() or host_label(tgt)
                     )
+                    # A tool-ok that landed on the wrong control, walked to a
+                    # GIF picker, or never verified the post is a FAIL to learn
+                    # from — otherwise X.com "learns" the broken GIF-click path.
+                    skill_ok = bool(result.get("ok")) and not (
+                        result.get("wrong_control")
+                        or result.get("unverified")
+                        or result.get("modal")
+                        or result.get("refused")
+                    )
                     record_action(
                         host,
                         act.value,
                         approach_of(act.value, kwargs),
-                        bool(result.get("ok")),
+                        skill_ok,
                         home=self.home_dir,
                     )
                     # Newly mastered a site → fold it into who she is (once).
-                    if bool(result.get("ok")):
+                    if skill_ok:
                         from remedy.core.computer.computer_skill import (
                             maybe_site_lesson,
                         )
@@ -432,6 +459,13 @@ class ComputerExecutor:
         height = result.get("height")
 
         if act is ComputerAction.SCREENSHOT and path:
+            surface = str(result.get("target") or "")
+            ocr_block = self._attach_ocr(
+                result,
+                path=path,
+                surface=surface,
+                origin=origin,
+            )
             decoded = observe_screenshot(
                 path,
                 runtime=runtime,
@@ -440,9 +474,16 @@ class ComputerExecutor:
                 height=int(height) if height else None,
                 hint=hint,
             )
-            block = format_vision_block(decoded, origin=origin, path=path)
+            block = format_vision_block(
+                decoded,
+                origin=origin,
+                path=path,
+                surface=surface,
+            )
             result["vision_ok"] = bool(decoded.get("ok"))
-            result["message"] = f"{result.get('message') or ''}\n\n{block}".strip()
+            result["message"] = (
+                f"{result.get('message') or ''}\n\n{ocr_block}\n\n{block}"
+            ).strip()
             if decoded.get("text"):
                 result["vision"] = decoded["text"]
             with contextlib.suppress(Exception):
@@ -482,7 +523,12 @@ class ComputerExecutor:
                     height=info.get("height"),
                     hint=hint,
                 )
-                block = format_vision_block(decoded, origin=origin, path=path)
+                block = format_vision_block(
+                    decoded,
+                    origin=origin,
+                    path=path,
+                    surface=str(result.get("target") or last_t or ""),
+                )
                 result["fallback"] = result.get("fallback") or "vision"
                 result["path"] = path
                 result["width"] = info.get("width")
@@ -491,10 +537,17 @@ class ComputerExecutor:
                 result["vision_ok"] = bool(decoded.get("ok"))
                 if decoded.get("text"):
                     result["vision"] = decoded["text"]
+                ocr_block = self._attach_ocr(
+                    result,
+                    path=path,
+                    surface=str(result.get("target") or last_t or "desktop"),
+                    origin=origin if isinstance(origin, dict) else {},
+                )
                 result["message"] = (
                     f"{result.get('message') or ''}\n"
-                    "UIA/DOM had no clickable controls — captured the pixels "
-                    "and ran built-in vision.\n"
+                    "UIA/DOM had no clickable controls — captured the pixels, "
+                    "ran OCR, then built-in vision.\n"
+                    f"{ocr_block}\n"
                     f"{block}"
                 ).strip()
             except Exception as e:
@@ -503,7 +556,189 @@ class ComputerExecutor:
                     f"Vision fallback failed ({e}). "
                     "Retry computer_screenshot target=desktop."
                 ).strip()
+        # Empty rail snapshot (SPA not painted / no DOM): OCR the rail capture
+        # so "What's happening?" / "Post" are still clickable.
+        if (
+            act is ComputerAction.SNAPSHOT
+            and str(result.get("target") or "") == "browser"
+            and not result.get("ocr_ok")
+            and not any(
+                str(e.get("ref") or "").lower().startswith("e")
+                for e in (result.get("elements") or [])
+            )
+        ):
+            with contextlib.suppress(Exception):
+                bounds = self.bridge.get_browser_bounds()
+                scale = float((bounds or {}).get("scale") or 1.0)
+                if bounds and int(bounds.get("width") or 0) > 40:
+                    from remedy.core.computer.desktop_os import native
+
+                    info = native().screenshot_region_png(
+                        int(bounds["x"]),
+                        int(bounds["y"]),
+                        int(bounds["width"]),
+                        int(bounds["height"]),
+                        scale=scale,
+                    )
+                    result["path"] = str(info.get("path") or "")
+                    result["coord_scale"] = scale
+                    ocr_block = self._attach_ocr(
+                        result,
+                        path=str(info.get("path") or ""),
+                        surface="browser",
+                        origin={},
+                    )
+                    if result.get("ocr_ok"):
+                        result["message"] = (
+                            f"{result.get('message') or '(no interactive elements)'}\n"
+                            "DOM was empty — OCR of the rail:\n"
+                            f"{ocr_block}"
+                        ).strip()
         return result
+
+    def _attach_ocr(
+        self,
+        result: dict[str, Any],
+        *,
+        path: str,
+        surface: str,
+        origin: dict[str, Any],
+    ) -> str:
+        """Read word boxes from a screenshot; merge as clickable oN refs.
+
+        Better than a skipped SmolVLM decode for labels (Post, What's happening?,
+        dialog titles) — the socials run went blind when RMB held VRAM.
+        """
+        from remedy.core.computer.elements import format_som_list
+        from remedy.core.computer.ocr import (
+            merge_ocr_elements,
+            read_screenshot_ocr,
+            words_to_elements,
+        )
+
+        ocr = read_screenshot_ocr(path)
+        result["ocr_ok"] = bool(ocr.get("ok"))
+        result["ocr_backend"] = str(ocr.get("backend") or "")
+        if not ocr.get("ok") or not ocr.get("words"):
+            err = str(ocr.get("error") or "no words")
+            return (
+                f"## OCR skipped\n({err})\n"
+                "If this is a web page, retry computer_snapshot target=browser. "
+                "Do not guess desktop x/y."
+            )
+        web = (surface or "").strip().lower() in ("browser", "web", "rail")
+        scale = float(result.get("coord_scale") or result.get("scale") or 1.0)
+        ox = float((origin or {}).get("x") or 0)
+        oy = float((origin or {}).get("y") or 0)
+        els = words_to_elements(
+            list(ocr.get("words") or []),
+            scale=scale if web else 1.0,
+            origin_x=ox,
+            origin_y=oy,
+            space="page" if web else "screen",
+        )
+        result["ocr_elements"] = els
+        result["ocr_text"] = str(ocr.get("text") or "")[:1500]
+        info = {}
+        with contextlib.suppress(Exception):
+            info = self.bridge.last_elements_info() or {}
+        merged = merge_ocr_elements(list(info.get("elements") or []), els)
+        tgt = surface if surface in ("browser", "desktop") else str(info.get("target") or surface or "desktop")
+        with contextlib.suppress(Exception):
+            self.bridge.set_last_elements(merged, target=tgt or "desktop")
+        som = format_som_list(els, limit=40)
+        return (
+            f"## OCR ({ocr.get('backend')}) — click with computer_click "
+            f"ref=oN or text=\n"
+            f"{som}\n"
+            "These boxes are real word positions, not a VLM guess. "
+            + (
+                "computer_click target=browser ref=oN (page coordinates)."
+                if web
+                else "computer_click target=desktop ref=oN (screen coordinates)."
+            )
+        )
+
+    def _ocr_click_text(self, text_q: str, *, surface: str) -> dict[str, Any] | None:
+        """Match a label against OCR word boxes and click that coordinate."""
+        from remedy.core.computer.elements import find_best_element
+        from remedy.core.computer.ocr import (
+            merge_ocr_elements,
+            read_screenshot_ocr,
+            words_to_elements,
+        )
+
+        shot = {}
+        with contextlib.suppress(Exception):
+            shot = self.bridge.last_shot() or {}
+        path = str(shot.get("path") or "")
+        if not path or not Path(path).is_file():
+            return None
+        ocr = read_screenshot_ocr(path)
+        if not ocr.get("ok") or not ocr.get("words"):
+            return None
+        web = surface == "browser"
+        scale = 1.0
+        ox = float((shot.get("origin") or {}).get("x") or 0)
+        oy = float((shot.get("origin") or {}).get("y") or 0)
+        info = {}
+        with contextlib.suppress(Exception):
+            info = self.bridge.last_elements_info() or {}
+        els = words_to_elements(
+            list(ocr.get("words") or []),
+            scale=scale,
+            origin_x=ox,
+            origin_y=oy,
+            space="page" if web else "screen",
+        )
+        merged = merge_ocr_elements(list(info.get("elements") or []), els)
+        with contextlib.suppress(Exception):
+            self.bridge.set_last_elements(merged, target=surface)
+        el = find_best_element(els, text_q)
+        if el is None:
+            return None
+        x, y = int(el.get("x") or 0), int(el.get("y") or 0)
+        if web:
+            job = self._enqueue(
+                "click",
+                {"ui": {"open_browser": True}, "x": x, "y": y, "action": "click"},
+            )
+            fin = self.bridge.wait(
+                job.id,
+                timeout_s=4.0,
+                poll_s=0.05,
+                abort_check=self._abort_check,
+                unclaimed_timeout_s=2.0,
+                grace_s=0.15,
+            )
+            if fin.status != "done" or not fin.result:
+                return None
+            out = dict(fin.result)
+            out.setdefault("ok", True)
+            out["text"] = text_q
+            out["ref"] = el.get("ref")
+            out["source"] = "ocr"
+            out["message"] = (
+                f"Clicked text={text_q!r} via OCR {el.get('ref')} "
+                f"({str(el.get('name') or '')[:40]}) at ({x},{y})"
+            )
+            return out
+        try:
+            from remedy.core.computer.desktop_os import native
+
+            native().click(x, y)
+        except Exception:
+            return None
+        return public_result(
+            ok=True,
+            target="desktop",
+            action="click",
+            message=(
+                f"Clicked text={text_q!r} via OCR {el.get('ref')} "
+                f"({str(el.get('name') or '')[:40]}) at ({x},{y})"
+            ),
+            extra={"ref": el.get("ref"), "x": x, "y": y, "source": "ocr", "text": text_q},
+        )
 
     @staticmethod
     def _launch_result(
@@ -537,6 +772,71 @@ class ComputerExecutor:
             message=msg,
             extra=extra,
         )
+
+    def _web_task_in_flight(self) -> bool:
+        """A rail URL is open and we have not switched to a native app."""
+        last = (self.bridge.last_drive_target() or "").strip().lower()
+        if last == "desktop":
+            return False
+        url = (self.bridge.last_navigate_url() or "").strip().lower()
+        return url.startswith("http://") or url.startswith("https://")
+
+    def _refuse_off_rail_desktop(self, action: str, **extra: Any) -> dict[str, Any]:
+        return public_result(
+            ok=False,
+            target="desktop",
+            action=action,
+            message=_OFF_RAIL_PIXEL_REFUSAL,
+            extra={"refused": "off_rail", **extra},
+        )
+
+    def _remembered_query_for_ref(self, ref: str) -> tuple[str, dict[str, Any] | None]:
+        remembered = self.bridge.get_element_by_ref(ref) if ref else None
+        name = str((remembered or {}).get("name") or "").strip()
+        ctx = str((remembered or {}).get("context") or "")
+        ctx_bits = " ".join(w for w in re.findall(r"[A-Za-z0-9]{3,}", ctx)[:4])
+        query = (name + " " + ctx_bits).strip()
+        return query, remembered if isinstance(remembered, dict) else None
+
+    def _relocate_browser_ref(self, ref: str) -> dict[str, Any] | None:
+        """Fresh snapshot + label match for a dead eN ref."""
+        query, _ = self._remembered_query_for_ref(ref)
+        if not query:
+            return None
+        snap = self._browser_snapshot_now({})
+        if not (snap.get("ok") and snap.get("elements")):
+            return None
+        from remedy.core.computer.elements import find_best_element
+
+        el = find_best_element(list(snap.get("elements") or []), query)
+        if el and el.get("ref"):
+            return el
+        return None
+
+    def _click_matches_query(self, text_q: str, out: dict[str, Any]) -> bool:
+        from remedy.core.computer.elements import (
+            label_matches_query,
+            parse_click_landed,
+        )
+
+        landed = parse_click_landed(
+            str(out.get("message") or ""),
+            str(out.get("detail") or ""),
+        )
+        name = str(landed.get("name") or "").strip()
+        if not name:
+            return True
+        if label_matches_query(name, text_q):
+            return True
+        out["wrong_control"] = True
+        out["landed"] = landed
+        out["ok"] = False
+        out["message"] = (
+            f"click for {text_q!r} landed on {name!r} "
+            f"({landed.get('tag') or '?'}) — that is not the control. "
+            "Snapshot and click the field or the Post/Submit *button* by ref=."
+        )
+        return False
 
     @staticmethod
     def _desktop_evidence() -> dict[str, Any]:
@@ -845,6 +1145,9 @@ class ComputerExecutor:
 
                 el = find_best_element(elements, text_q)
                 if el is None:
+                    ocr_hit = self._ocr_click_text(text_q, surface="desktop")
+                    if ocr_hit is not None:
+                        return ocr_hit
                     return public_result(
                         ok=False,
                         target="desktop",
@@ -870,6 +1173,32 @@ class ComputerExecutor:
                         "match_score": el.get("match_score"),
                         **self._desktop_evidence(),
                     },
+                )
+            if ref.lower().startswith("o"):
+                el = self.bridge.get_element_by_ref(ref)
+                if el is None:
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="click",
+                        message=(
+                            f"Unknown OCR ref {ref} — run computer_screenshot "
+                            "first and click ref=oN from that list"
+                        ),
+                    )
+                x, y = int(el.get("x") or 0), int(el.get("y") or 0)
+                win.click(
+                    x,
+                    y,
+                    button=str(kwargs.get("button") or "left"),
+                    clicks=int(kwargs.get("clicks") or 1),
+                )
+                return public_result(
+                    ok=True,
+                    target="desktop",
+                    action="click",
+                    message=f"Clicked OCR {ref} ({str(el.get('name') or '')[:40]}) at ({x},{y})",
+                    extra={"ref": ref, "x": x, "y": y, "source": "ocr", **self._desktop_evidence()},
                 )
             if ref:
                 if self.bridge.snapshot_is_stale() or self.bridge.get_element_by_ref(ref) is None:
@@ -910,6 +1239,10 @@ class ComputerExecutor:
                     target="desktop",
                     action="click",
                     message="Provide ref=, text=, or explicit x/y (refusing bare click at 0,0)",
+                )
+            if self._web_task_in_flight():
+                return self._refuse_off_rail_desktop(
+                    "click", x=x, y=y
                 )
             try:
                 shot = self.bridge.last_shot()
@@ -976,6 +1309,10 @@ class ComputerExecutor:
                     ),
                     extra={"length": reported_len, "needs": "ref"},
                 )
+            if self._web_task_in_flight() and not (
+                set_ref.lower().startswith("c") or set_ref.lower().startswith("w")
+            ):
+                return self._refuse_off_rail_desktop("type")
             if set_ref:
                 el = self.bridge.get_element_by_ref(set_ref)
                 if el is not None and el.get("hwnd") and el.get("uia"):
@@ -1068,6 +1405,11 @@ class ComputerExecutor:
             )
         if act is ComputerAction.KEY:
             key = str(kwargs.get("key") or "")
+            key_n = key.strip().lower().replace(" ", "")
+            if self._web_task_in_flight() and (
+                key_n in _ADDRESS_BAR_KEYS or key_n.startswith("ctrl+l")
+            ):
+                return self._refuse_off_rail_desktop("key", key=key)
             win.press_key(key)
             return public_result(
                 ok=True,
@@ -1638,7 +1980,25 @@ class ComputerExecutor:
             ref = str(kwargs.get("ref") or "").strip()
             if text_q and not ref:
                 return self._browser_click_text(text_q, kwargs)
-            if ref:
+            if ref.lower().startswith("o"):
+                # OCR word box — no data-remedy-ref in the DOM. Click the
+                # page coordinates we stored from the screenshot.
+                el = self.bridge.get_element_by_ref(ref)
+                if el is None:
+                    return public_result(
+                        ok=False,
+                        target="browser",
+                        action="click",
+                        message=(
+                            f"Unknown OCR ref {ref} — run computer_screenshot "
+                            "on the rail first and click ref=oN from that list"
+                        ),
+                    )
+                payload.pop("ref", None)
+                payload["x"] = int(el.get("x") or 0)
+                payload["y"] = int(el.get("y") or 0)
+                payload["action"] = "click"
+            elif ref:
                 if self.bridge.snapshot_is_stale():
                     snap = self._browser_snapshot_now(kwargs)
                     if not snap.get("ok"):
@@ -1711,23 +2071,32 @@ class ComputerExecutor:
             query = str(kwargs.get("hint") or kwargs.get("query") or "").strip()
 
             def _desktop_snapshot_fallback(reason: str) -> dict[str, Any]:
-                """Host offline / rail miss → window+UIA tree (never hang the agent)."""
+                """Host offline / rail miss → window+UIA tree (never hang the agent).
+
+                ``ok=False``: this is not a successful *page* observe. Returning
+                ok with a desktop tree made the model click Maximize / type a
+                URL into chrome with negative Y coords and still think it was
+                on X.com.
+                """
                 desk = self._run_desktop(
                     ComputerAction.SNAPSHOT,
                     limit=kwargs.get("limit") or 40,
                     mode=kwargs.get("mode") or "auto",
                     hwnd=kwargs.get("hwnd"),
                 )
-                desk["note"] = (
+                warn = (
                     f"BROWSER RAIL UNREACHABLE ({reason}) — the elements below "
-                    "are DESKTOP WINDOWS, NOT the web page. Do NOT drive the "
-                    "owner's own browser (Firefox/Chrome/Edge windows, Ctrl+T, "
-                    "typing URLs) — web tasks live in the in-app rail only. "
-                    "computer_wait 2 then retry computer_snapshot "
-                    "target=browser; if it stays unreachable, tell the owner "
-                    "instead of improvising on the desktop."
+                    "are DESKTOP WINDOWS, NOT the web page. Do NOT click them "
+                    "as the site. Do NOT drive the owner's own browser "
+                    "(Firefox/Chrome/Edge, Ctrl+T, typing URLs) — web tasks "
+                    "live in the in-app rail only. computer_wait 2 then retry "
+                    "computer_snapshot target=browser; if it stays unreachable, "
+                    "tell the owner instead of improvising on the desktop."
                 )
+                desk["note"] = warn
+                desk["message"] = warn
                 desk["fallback"] = "desktop"
+                desk["ok"] = False
                 desk.setdefault("target", "desktop")
                 return desk
 
@@ -1794,6 +2163,21 @@ class ComputerExecutor:
                         out["settled_s"] = round(slept, 2)
                     if attempt:
                         out["attempt"] = attempt + 1
+                    from remedy.core.computer.elements import detect_modal_obstacle
+
+                    modal = detect_modal_obstacle(
+                        elements=elements,
+                        url=str(out.get("url") or ""),
+                        title=str(out.get("title") or ""),
+                        text=str(out.get("text") or ""),
+                    )
+                    if modal:
+                        out["modal"] = modal
+                        out["message"] = (
+                            f"MODAL/POPUP in front ({modal.get('kind')}: "
+                            f"{modal.get('detail')}). {modal.get('hint')} "
+                            "Do not type into the page underneath.\n"
+                        ) + str(out.get("message") or "")
                     return out
                 last_err = str(finished.error or finished.status or "snapshot failed")
                 # Retry once on webview eval timeout / mid-load races
@@ -1877,20 +2261,80 @@ class ComputerExecutor:
         )
         if act is ComputerAction.CLICK and "missing-ref" in fail_msg:
             ref = str(kwargs.get("ref") or payload.get("ref") or "").strip()
-            remembered = self.bridge.get_element_by_ref(ref) if ref else None
+            query, remembered = self._remembered_query_for_ref(ref)
             name = str((remembered or {}).get("name") or "").strip()
-            if name:
-                ctx = str((remembered or {}).get("context") or "")
-                ctx_bits = " ".join(w for w in re.findall(r"[A-Za-z0-9]{3,}", ctx)[:4])
-                query = (name + " " + ctx_bits).strip()
+            if query:
                 recovered = self._browser_click_text(query, kwargs)
                 if recovered.get("ok"):
                     recovered["note"] = (
                         f"ref {ref} was stale (page changed) — re-located by "
-                        f"label {name!r} and clicked"
+                        f"label {name or query!r} and clicked"
                     )
                     recovered["recovered_from"] = "stale_ref"
                     return recovered
+        if act is ComputerAction.TYPE and "missing-ref" in fail_msg:
+            ref = str(kwargs.get("ref") or payload.get("ref") or "").strip()
+            text = str(payload.get("text") or kwargs.get("text") or "")
+            el = self._relocate_browser_ref(ref)
+            if el and el.get("ref") and text:
+                job2 = self._enqueue(
+                    "type",
+                    {
+                        "ui": {"open_browser": True},
+                        "text": text,
+                        "ref": str(el.get("ref")),
+                    },
+                )
+                fin2 = self.bridge.wait(
+                    job2.id,
+                    timeout_s=4.0,
+                    poll_s=0.05,
+                    abort_check=self._abort_check,
+                    unclaimed_timeout_s=2.0,
+                    grace_s=0.15,
+                )
+                if fin2.status == "done" and fin2.result:
+                    out = dict(fin2.result)
+                    if out.get("ok", True) is not False:
+                        out.setdefault("ok", True)
+                        out.setdefault("target", "browser")
+                        out.setdefault("action", "type")
+                        out["note"] = (
+                            f"ref {ref} was stale — re-located to "
+                            f"{el.get('ref')} ({str(el.get('name') or '')[:40]}) "
+                            "and typed"
+                        )
+                        out["recovered_from"] = "stale_ref"
+                        out["ref"] = el.get("ref")
+                        return out
+            query, remembered = self._remembered_query_for_ref(ref)
+            name = str((remembered or {}).get("name") or "").strip()
+            if query and text:
+                focused = self._browser_click_text(query, kwargs)
+                if focused.get("ok"):
+                    job3 = self._enqueue(
+                        "type",
+                        {"ui": {"open_browser": True}, "text": text},
+                    )
+                    fin3 = self.bridge.wait(
+                        job3.id,
+                        timeout_s=4.0,
+                        poll_s=0.05,
+                        abort_check=self._abort_check,
+                        unclaimed_timeout_s=2.0,
+                        grace_s=0.15,
+                    )
+                    if fin3.status == "done" and (fin3.result or {}).get("ok", True) is not False:
+                        return public_result(
+                            ok=True,
+                            target="browser",
+                            action="type",
+                            message=(
+                                f"ref {ref} was stale — focused {name or query!r} "
+                                "by label and typed"
+                            ),
+                            extra={"recovered_from": "stale_ref", "ref": None},
+                        )
 
         if done_out is not None:
             return done_out
@@ -1976,7 +2420,10 @@ class ComputerExecutor:
                     out.setdefault("action", "click")
                     out.setdefault("text", text_q)
                     out["attempt"] = attempt + 1
-                    return out
+                    if self._click_matches_query(text_q, out):
+                        return out
+                    last_err = str(out.get("message") or "wrong-control")
+                    continue
                 last_err = msg
             elif finished.status == "cancelled" or self._abort_check():
                 return public_result(
@@ -2085,6 +2532,10 @@ class ComputerExecutor:
                 message="Aborted by user",
                 extra={"aborted": True, "text": text_q},
             )
+        # DOM miss → OCR the rail capture (custom paint, late SPA, vision idle).
+        ocr_hit = self._ocr_click_text(text_q, surface="browser")
+        if ocr_hit is not None:
+            return ocr_hit
         # A missed rail click must NOT fall back to driving the desktop — web
         # work lives in the rail (the old desktop-click fallback is how Remedy
         # walked off the rail onto a look-alike control).
@@ -2323,8 +2774,22 @@ class ComputerExecutor:
                     message=f"act: navigate failed — {nav.get('message')}",
                     extra={"steps": log, "detail": nav},
                 )
+            # After a compound navigate, capture the page we landed on so a
+            # later field-prompt click that walks off to GIF-search / a
+            # download interstitial fails closed.
+            if mutating and (click or type_text) and pre_state is None:
+                pre_state = self._page_probe(max_wait_s=1.5)
 
-        if click:
+        from remedy.core.computer.elements import looks_like_publish_verb
+
+        # computer_act(click="Post", type="hello") used to click Post first
+        # (often a nav link) then type into whatever opened. Type the body,
+        # then press the submit button.
+        type_before_click = bool(
+            type_text and click and looks_like_publish_verb(click)
+        )
+
+        def _act_click() -> dict[str, Any] | None:
             ck = self._browser_click_text(click, payload)
             log.append(f"click:{ck.get('ok')} {click!r} → {ck.get('message', '')[:60]}")
             if not ck.get("ok"):
@@ -2333,14 +2798,42 @@ class ComputerExecutor:
                     target="browser",
                     action="act",
                     message=f"act: click failed — {ck.get('message')}",
-                    extra={"steps": log, "detail": ck},
+                    extra={"steps": log, "detail": ck, "wrong_control": ck.get("wrong_control")},
+                )
+            from remedy.core.computer.elements import (
+                label_matches_query,
+                parse_click_landed,
+            )
+
+            landed = parse_click_landed(
+                str(ck.get("message") or ""),
+                str(ck.get("detail") or ""),
+            )
+            landed_name = str(landed.get("name") or "").strip()
+            if landed_name and not label_matches_query(landed_name, click):
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="act",
+                    message=(
+                        f"act: click for {click!r} landed on {landed_name!r} "
+                        f"({landed.get('tag') or '?'}) — that is not the control. "
+                        "computer_snapshot, then click by ref= of the field or "
+                        "the Post/Submit *button* (not a nav link). Nothing was typed."
+                    ),
+                    extra={
+                        "steps": log,
+                        "detail": ck,
+                        "landed": landed,
+                        "wrong_control": True,
+                    },
                 )
             time.sleep(0.25)
+            return None
 
-        if type_text:
+        def _act_type() -> dict[str, Any] | None:
+            nonlocal type_text
             typed_reported = "a stored secret" if "{{" in type_text else f"{len(type_text)} chars"
-            # Bind to the live page (post-click/redirect), probed inside — a
-            # click earlier in this same act may have changed the origin.
             type_text, vault_err = self._expand_vault_text(
                 type_text,
                 action="act",
@@ -2349,7 +2842,6 @@ class ComputerExecutor:
             if vault_err is not None:
                 vault_err["steps"] = log
                 return vault_err
-            # Prefer focusing email/username field if goal implies login
             if not click and any(
                 w in (goal + " " + type_text).lower()
                 for w in ("email", "user", "login", "@")
@@ -2381,6 +2873,25 @@ class ComputerExecutor:
                     message=f"act: type failed — {fin.error}",
                     extra={"steps": log},
                 )
+            return None
+
+        if type_before_click:
+            log.append("order:type-then-Post")
+            fail = _act_type()
+            if fail is not None:
+                return fail
+            fail = _act_click()
+            if fail is not None:
+                return fail
+        else:
+            if click:
+                fail = _act_click()
+                if fail is not None:
+                    return fail
+            if type_text:
+                fail = _act_type()
+                if fail is not None:
+                    return fail
 
         if key:
             job = self._enqueue(
@@ -2409,7 +2920,12 @@ class ComputerExecutor:
         # Observe the outcome — success is observed, not asserted
         # (docs/LIFE_TASK_PARTNER.md §2.3/§2.5).
         verify_extra, verify_fail = self._verify_act_outcome(
-            pre=pre_state, expect=expect, acted=mutating
+            pre=pre_state,
+            expect=expect,
+            acted=mutating,
+            click=click,
+            typed=bool(type_text),
+            typed_text=type_text,
         )
         if verify_fail:
             return public_result(
@@ -2586,6 +3102,9 @@ class ComputerExecutor:
         pre: dict[str, Any] | None,
         expect: dict[str, str],
         acted: bool,
+        click: str = "",
+        typed: bool = False,
+        typed_text: str = "",
     ) -> tuple[dict[str, Any], str | None]:
         """Post-action observation → (extra fields, failure message | None)."""
         extra: dict[str, Any] = {}
@@ -2603,6 +3122,65 @@ class ComputerExecutor:
                 (pre.get("url") or "") != (post.get("url") or "")
                 or (pre.get("text_hash") or "") != (post.get("text_hash") or "")
             )
+        # Field-prompt clicks ("What's happening?", Title, Body) must stay on
+        # the same path. Navigating to GIF search / app-store after "click the
+        # composer then type" is a miss, even when the caller passed no expect=.
+        if typed and click:
+            from remedy.core.computer.elements import (
+                looks_like_field_prompt,
+                urls_path_diverged,
+            )
+
+            if looks_like_field_prompt(click) and pre and pre.get("ok"):
+                if urls_path_diverged(str(pre.get("url") or ""), str(post.get("url") or "")):
+                    extra["verified"] = False
+                    return extra, (
+                        f"act ran but left the form: clicked {click!r} then typed, "
+                        f"and the URL moved from {pre.get('url')!r} to "
+                        f"{observed.get('url')!r} ({observed.get('title')!r}). "
+                        "That click did not focus the field. Snapshot, click the "
+                        "textarea/input by ref=, then type."
+                    )
+        from remedy.core.computer.elements import (
+            detect_modal_obstacle,
+            draft_still_on_page,
+            is_compose_url,
+            looks_like_publish_verb,
+        )
+
+        modal = detect_modal_obstacle(
+            url=str(post.get("url") or ""),
+            title=str(post.get("title") or ""),
+            text=str(post.get("text_head") or ""),
+        )
+        if modal:
+            extra["modal"] = modal
+            extra["verified"] = False
+            return extra, (
+                f"act ran but a dialog/popup is in front ({modal.get('kind')}: "
+                f"{modal.get('detail')}). {modal.get('hint')} "
+                "Do not claim the post/submit succeeded."
+            )
+        if looks_like_publish_verb(click):
+            hay = str(post.get("text_head") or "")
+            if typed_text and draft_still_on_page(typed_text, hay):
+                extra["verified"] = False
+                extra["unverified"] = True
+                return extra, (
+                    "Post/Submit was clicked but the draft is still on the form — "
+                    "it did not go out. Snapshot for a blocking modal or the real "
+                    "Post button (not a nav link)."
+                )
+            title_l = str(post.get("title") or "").lower()
+            if is_compose_url(str(post.get("url") or "")) or "compose" in title_l:
+                extra["verified"] = False
+                extra["unverified"] = True
+                return extra, (
+                    "Post/Submit was clicked but you are still on the compose form "
+                    f"({observed.get('url')}). That is not proof the post is live. "
+                    "computer_page_text / snapshot — if the timeline post is "
+                    "visible, continue; if Post is still there, the click missed."
+                )
         if expect:
             hay_url = str(post.get("url") or "").lower()
             hay_text = (

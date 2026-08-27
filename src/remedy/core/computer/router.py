@@ -271,9 +271,11 @@ def host_label(target: ComputerTarget) -> str:
     return "browser" if target is ComputerTarget.BROWSER else "desktop"
 
 
-# Snapshot / click refs: e1… = browser DOM; w1… windows + c1… UIA controls.
+# Snapshot / click refs: e1… = browser DOM; w1… windows + c1… UIA controls;
+# o1… = OCR word boxes from a screenshot (rail or desktop — use last_elements target).
 _REF_BROWSER_RE = re.compile(r"^e\d+$", re.IGNORECASE)
 _REF_DESKTOP_RE = re.compile(r"^[wc]\d+$", re.IGNORECASE)
+_REF_OCR_RE = re.compile(r"^o\d+$", re.IGNORECASE)
 
 
 def infer_sticky_target(
@@ -305,6 +307,12 @@ def infer_sticky_target(
         return "desktop"
     if _REF_BROWSER_RE.match(ref_s):
         return "browser"
+    if _REF_OCR_RE.match(ref_s):
+        last_el = (last_elements_target or "").strip().lower()
+        if last_el in ("browser", "web", "rail"):
+            return "browser"
+        if last_el in ("desktop", "os", "screen"):
+            return "desktop"
 
     act = (action or "").strip().lower()
     if act in ("app", "windows", "monitors"):

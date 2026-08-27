@@ -68,9 +68,23 @@ window.__rmdyFind=function(ref){
   return null;
 };
 window.__rmdyName=function(el){
-  return (el.getAttribute&&(el.getAttribute('aria-label')||el.getAttribute('title'))||
-    el.innerText||el.value||el.placeholder||(el.getAttribute&&el.getAttribute('name'))||
-    el.tagName||'').toString().trim().replace(/\s+/g,' ');
+  // Concatenate aria + visible text + placeholder. Aria-only ("Post text")
+  // used to hide the on-screen placeholder ("What's happening?") so
+  // click-by-visible-text missed the composer and hit a toolbar control.
+  const aria=(el.getAttribute&&(el.getAttribute('aria-label')||el.getAttribute('title')))||'';
+  const text=(el.innerText||'').toString();
+  const val=(el.value!=null?String(el.value):'');
+  const ph=el.placeholder||'';
+  const nm=(el.getAttribute&&el.getAttribute('name'))||'';
+  const parts=[aria,text,val,ph,nm];
+  const seen={}; const uniq=[];
+  for(const p of parts){
+    const n=String(p||'').trim().replace(/\s+/g,' ');
+    const k=n.toLowerCase();
+    if(!k||seen[k]) continue;
+    seen[k]=1; uniq.push(n);
+  }
+  return (uniq.join(' ')||(el.tagName||'')).trim();
 };
 // True TOP-WINDOW rect for any element. Shadow-DOM elements share the top
 // document's layout so their getBoundingClientRect is already top-relative;
@@ -1759,7 +1773,7 @@ fn resolve_point(
     if(!window.__rmdyVisible(el)) continue;
     const name=window.__rmdyName(el).toLowerCase();
     if(!name) continue;
-    let s=name===q?100:(name.includes(q)?70:(q.includes(name)&&name.length>2?40:0));
+    let s=name===q?100:(name.includes(q)?70:(q.includes(name)&&name.length>=3?40:0));
     if(s>bestS){{ bestS=s; best=el; }}
   }}
   if(!best||bestS<40) return 'no-match';
@@ -2623,8 +2637,12 @@ fn computer_host_loop(app: AppHandle) {
         // case), Rust must drive EVERYTHING, interactive actions included, or
         // click/type/press-hold sit unclaimed until the executor times out
         // ("timeout waiting for desktop host"). handle_job runs them all.
+        // Observe jobs (snapshot/page_text) must not sit unclaimed for 5s
+        // just because the SPA poller is busy on a heavy page (X/Reddit).
+        // Click/type stay SPA-owned while the window is visible so two
+        // drivers don't inject into the same webview. Observe is read-only.
         let only = if spa_can_claim {
-            "navigate,ready"
+            "navigate,ready,snapshot,page_text"
         } else {
             "navigate,snapshot,a11y,page_text,ready,click,type,key,scroll,drag,press_hold,select"
         };
@@ -3576,8 +3594,14 @@ pub fn browser_agent_action(
     const rawVal = (el.value!=null?String(el.value):'');
     const hasVal = rawVal.length>0;
     const aria=(el.getAttribute&&el.getAttribute('aria-label'))||'';
+    const titleAttr=(el.getAttribute&&el.getAttribute('title'))||'';
+    const ph=(el.placeholder||'');
     // Prefer labels/placeholder over raw value for name (avoids password in name).
-    const name=(aria||(el.getAttribute&&el.getAttribute('title'))||text||el.placeholder||el.name||(sensitive?'':rawVal)||el.tagName||'').trim().replace(/\s+/g,' ').slice(0,120);
+    // Keep the visible placeholder even when aria-label differs (X compose:
+    // aria "Post text" + placeholder "What's happening?").
+    let name=(aria||titleAttr||text||ph||el.name||(sensitive?'':rawVal)||el.tagName||'').trim().replace(/\s+/g,' ');
+    if(ph && name.toLowerCase().indexOf(ph.toLowerCase().slice(0,24))<0) name=(name+' '+ph).trim();
+    name=name.slice(0,120);
     // Selected/pressed state (a store already chosen, a tab active, …).
     const state=((el.getAttribute&&(el.getAttribute('aria-pressed')||el.getAttribute('aria-selected')||el.getAttribute('aria-checked')))||'').toString();
     let ctx=''; try {{ ctx=window.__rmdyCtx(el); }} catch(e) {{}}
@@ -3635,7 +3659,7 @@ pub fn browser_agent_action(
   {dom}
   const q='{escaped}'.toLowerCase().trim();
   if(!q) return 'missing-text';
-  const qt=q.split(/\s+/).filter(Boolean);
+  const qt=q.split(/[^a-z0-9]+/).filter(Boolean);
   // Meaningful tokens only — a fuzzy hit on a stopword ("to","a","the") or a
   // 1-2 char fragment must NOT fire a click for a label that isn't there.
   const STOP=new Set(['the','a','an','to','of','in','on','at','for','and','or',
@@ -3647,48 +3671,70 @@ pub fn browser_agent_action(
     const r=window.__rmdyRect(el)||el.getBoundingClientRect();
     const name=window.__rmdyName(el).toLowerCase();
     if(!name) return -1;
+    const tag=(el.tagName||'').toLowerCase();
+    const role=((el.getAttribute&&el.getAttribute('role'))||'').toLowerCase();
+    const itype=(el.type||'').toLowerCase();
     let s=0;
     if(name===q) s=100;
     else if(name.includes(q)) s=70;
-    else if(q.includes(name)&&name.length>2) s=40;
+    else if(q.includes(name)&&name.length>=3) s=40;
     else {{
-      const nt=name.split(/\s+/);
-      const use=mqt.length?mqt:qt;
-      const hit=use.filter(t=>nt.some(n=>n.includes(t)||t.includes(n))).length;
-      // Full meaningful match ≈22 (fires); a lone spurious token stays under
-      // the 15 no-match cutoff, so a wrong label is not clicked.
+      // Strip punctuation so "happening?" still matches "happening".
+      const nt=name.split(/[^a-z0-9]+/).filter(t=>t.length>=3 && !STOP.has(t));
+      const use=mqt.length?mqt:qt.filter(t=>t.length>=3 && !STOP.has(t));
+      // BOTH sides must be ≥3 chars. `t.includes(n)` with n="a" (from
+      // "Add a GIF") matched almost every English query ("what's" contains "a")
+      // and fired a 27-score click on the GIF button instead of the composer.
+      const hit=use.filter(t=>nt.some(n=>n===t||(n.length>=3&&t.length>=3&&(n.includes(t)||t.includes(n))))).length;
       s = use.length ? 22*(hit/use.length) : 0;
     }}
-    // Context-aware disambiguation: query tokens the control's LABEL does not
-    // cover, matched against its CARD context, break ties between N identical
-    // controls (e.g. five "Set as store" buttons → the Hueytown one). This is
-    // what lets "set as store hueytown supercenter" pick the right store.
+    // Context-aware disambiguation: ONLY when the LABEL already overlaps the
+    // query (generic "Set as store"). Do not promote a sibling whose card
+    // happens to contain the composer placeholder.
     let ctx=''; try {{ ctx=window.__rmdyCtx(el).toLowerCase(); }} catch(e) {{}}
-    if(ctx && mqt.length>1){{
+    const nameHasQuery=mqt.some(t=>name.includes(t));
+    if(ctx && mqt.length>1 && nameHasQuery){{
       const missing=mqt.filter(t=>!name.includes(t));
       const inCtx=missing.filter(t=>ctx.includes(t)).length;
       if(inCtx) s+=20*(inCtx/mqt.length);
+    }}
+    if(ctx && /view in .{{0,24}}app|get the app|download (the )?app|open (in|the) app|install (the )?app/.test(ctx)) s-=40;
+    const ACTION=new Set(['post','submit','send','tweet','publish','share','continue','next','save','create','reply','comment','search','confirm']);
+    if(mqt.some(t=>ACTION.has(t))){{
+      if(tag==='button'||role==='button'||itype==='submit') s+=25;
+      else if(tag==='a'||role==='link') s-=20;
+    }}
+    if(/happen|write a|write your|compose|post text|\\btitle\\b|\\bbody\\b|caption|what.s on/.test(q)){{
+      if(tag==='textarea'||el.isContentEditable||role==='textbox'||role==='searchbox'||itype==='text'||itype==='search') s+=30;
+      else if(tag==='button'||role==='button') s-=15;
     }}
     if(s<=0) return -1;
     if(r.width>8&&r.width<900&&r.height>8&&r.height<220) s+=5;
     return s;
   }}
-  let best=null, bestS=-1;
+  let best=null, bestS=-1, second=null, secondS=-1;
   for(const el of window.__rmdyDeep(sel)){{
     const s=score(el);
-    if(s>bestS){{ bestS=s; best=el; }}
+    if(s>bestS){{ second=best; secondS=bestS; bestS=s; best=el; }}
+    else if(s>secondS){{ secondS=s; second=el; }}
   }}
   // Scroll passes: find off-screen matches (OSWorld: re-observe after scroll)
-  if(!best||bestS<15){{
-    for(let pass=0; pass<4 && (!best||bestS<15); pass++){{
+  if(!best||bestS<40){{
+    for(let pass=0; pass<4 && (!best||bestS<40); pass++){{
       window.scrollBy(0, Math.floor(innerHeight*0.75));
       for(const el of window.__rmdyDeep(sel)){{
         const s=score(el);
-        if(s>bestS){{ bestS=s; best=el; }}
+        if(s>bestS){{ second=best; secondS=bestS; bestS=s; best=el; }}
+        else if(s>secondS){{ secondS=s; second=el; }}
       }}
     }}
   }}
-  if(!best||bestS<15) return 'no-match:'+q;
+  if(!best||bestS<40) return 'no-match:'+q;
+  if(second && bestS-secondS<8 && bestS>=70){{
+    const bn=(best.getAttribute('aria-label')||best.innerText||best.placeholder||'').trim().slice(0,40);
+    const sn=(second.getAttribute('aria-label')||second.innerText||second.placeholder||'').trim().slice(0,40);
+    return 'ambiguous:'+bn+' vs '+sn+' — pass ref= from computer_snapshot';
+  }}
   try{{ best.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
   try{{ best.focus({{preventScroll:true}}); }}catch(e){{}}
   const r=window.__rmdyRect(best)||best.getBoundingClientRect();

@@ -76,13 +76,16 @@ Operate this Windows PC with Remedy-native tools when the Desktop is running.
 | `computer_select` / `computer_fill` | Dropdowns (`value=` option) and multi-field forms in **one** call |
 | `computer_wait` | Short settle 0.3–1.0s if needed |
 | `computer_app` / `computer_windows` | Launch/focus OS apps |
-| `computer_screenshot` | Games / custom-drawn UIs — **auto-runs built-in vision** (OCR + click x/y) |
+| `computer_screenshot` | Games / custom-drawn UIs / when DOM is empty — **OCR word boxes** (`ref=oN`) plus vision if it is running |
 | `target` | auto | browser | desktop routing |
 
 ### Research-backed loop (OSWorld / CUA / SoM)
 
 1. **Structured observe first** — snapshot/find (a11y/DOM), not screenshots.
 2. **Act with labels** — click by **text** or **ref**, not guessed pixels.
+   When snapshot is empty or vision is skipped (RMB holds VRAM), the
+   screenshot runs **OCR**: click `ref=oN` or `text=` matching a word box.
+   That is better than guessing x/y.
 3. **Compound when possible** — `computer_act(url=…, click=…, type=…, key=enter)`.
 4. **Verify outcomes** — `computer_act` reports `observed` url/title after acting.
    Pass `expect_url=` / `expect_text=` (substring) so the call fails loudly when
@@ -185,6 +188,31 @@ step; do not land on the homepage and hunt for the search box:
 | Walgreens / CVS | `…/search/results.jsp?Ntt=…` / `…/search?searchTerm=…` |
 | Home Depot / Lowe's | `…/s/…` / `…/search?searchTerm=…` |
 | eBay / Etsy / Chewy | `…/sch/i.html?_nkw=…` / `…/search?q=…` / `…/s?query=…` |
+
+### Compose / social post (X, Reddit, Patreon, …)
+
+These pages lie to click-by-text. Do this, in order:
+
+1. **Navigate, then wait, then snapshot.** Do not `computer_act(click=…, type=…)`
+   in the same call as the first load. SPAs paint late; a snapshot of
+   "13 desktop windows" is NOT the page — wait 2s and snapshot the **rail**.
+2. **Type into a field by ref.** Snapshot, find the textarea/input
+   (`[e4] textarea "Post text What's happening?"`), then
+   `computer_type ref=e4 text=…`. A visible placeholder ("What's happening?")
+   is often NOT the aria-label ("Post text") — use the snapshot ref.
+3. **Submit is a BUTTON, not a link.** Several controls are named "Post" /
+   "Continue". Pick the `button` whose card is the composer, not a nav `<a>`
+   and not "Continue" · in: "View in Reddit App".
+4. **Popups are the task.** Cookie, "get the app", GIF picker, audience,
+   flair, confirm — snapshot after every click. If a modal appeared, dismiss
+   or complete *that* dialog, then re-snapshot the form. Never keep typing
+   into the page under a modal.
+5. **Verify you are still on the compose URL** (`expect_url=compose` /
+   `submit`). If observed URL is GIF search, `/i/foundmedia`, an app-store
+   interstitial, or page text is ~100 chars of chrome, you missed. Do not
+   claim the post went out from tool-ok.
+6. **Stay on the rail.** Negative Y clicks, Maximize, Ctrl+L into desktop
+   chrome, and the owner's Firefox/Chrome are all wrong recoveries.
 
 Traps that lose the task:
 - The header ZIP/store-locator box is NOT product search — typing an address

@@ -20,6 +20,11 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - `web_fetch` ignores in-app browser text unless that tab's URL matches.
 - Checkpoint leftover "continue the last tool" is not a durable job.
 
+### Added — on-screen OCR when DOM/UIA is empty
+
+- Computer-use can read word boxes from the screenshot (Windows.Media.Ocr or
+  tesseract) and click them by text/ref when the page has no DOM/UIA tree.
+
 ## [0.41.5] - 2026-08-26
 
 ### Changed — RMB thinking is an option, default on
