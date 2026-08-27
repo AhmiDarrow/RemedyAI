@@ -42,7 +42,8 @@ class RmbSettingsPatch(BaseModel):
     ubatch_size: int | None = None
     mmproj: str | None = None
     chat_template: str | None = None
-    use_jinja: bool | None = None
+    # bool pins the value against GGUF detection; "auto" hands it back.
+    use_jinja: bool | str | None = None
     rope_freq_scale: float | None = None
     rope_freq_base: float | None = None
     mlock: bool | None = None
@@ -73,6 +74,17 @@ class RmbSettingsPatch(BaseModel):
     dry_penalty_last_n: int | None = None
     xtc_probability: float | None = None
     xtc_threshold: float | None = None
+    cache_reuse: int | None = None
+    # --- owner thinking / speculation / MoE knobs (0.41.5) ---
+    # Undeclared fields are silently stripped by pydantic — every knob the
+    # desktop Settings panel can send MUST be declared here.
+    thinking: str | bool | None = None
+    reasoning_budget: int | None = None
+    enable_mtp: bool | str | None = None
+    n_cpu_moe: int | None = None
+    spec_draft_n_max: int | None = None
+    n_gpu_layers_draft: int | None = None
+    model_draft: str | None = None
 
 
 class RmbHfQuery(BaseModel):

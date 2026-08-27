@@ -267,3 +267,41 @@ def test_build_cmd_owner_draft_suppressed_when_mtp_owner_off(tmp_path):
         host_profile=prof,
     )
     assert "--model-draft" not in cmd
+
+
+def test_build_cmd_mtp_named_falls_back_to_classic_owner_draft(tmp_path):
+    """MTP-named main + binary without draft-mtp but with --model-draft:
+    an owner-typed draft still gets classic speculation instead of nothing."""
+    from remedy.runtime.rmb.host_profile import overlay_owner_on_profile
+
+    fake_bin = tmp_path / "llama-server.exe"
+    fake_bin.write_bytes(b"stub")
+    (tmp_path / "llama-common.dll").write_bytes(b"xx --model-draft yy")
+    from remedy.runtime.rmb import service as svc
+
+    svc._spec_cap_cache.clear()
+    svc._flag_cap_cache.clear()
+
+    main = tmp_path / "Foo-Coder-MTP-Q4.gguf"
+    main.write_bytes(b"0")
+    draft = tmp_path / "Foo-0.5B-draft.gguf"
+    draft.write_bytes(b"0")
+    prof = overlay_owner_on_profile(
+        detect_gguf_host_profile(main), {"model_draft": str(draft)}
+    )
+    assert prof["mtp"] is True
+    cmd = _build_cmd(
+        fake_bin,
+        main,
+        host="127.0.0.1",
+        port=8787,
+        ctx=8192,
+        ngl=0,
+        threads=0,
+        parallel=1,
+        flash_attn=False,
+        host_profile=prof,
+    )
+    assert "--spec-type" not in cmd
+    assert "--model-draft" in cmd
+    assert str(draft) in cmd

@@ -972,10 +972,9 @@ def apply_plan_to_state(state: dict[str, Any], plan: AutofitPlan) -> dict[str, A
     state["ubatch_size"] = int(plan.ubatch_size)
     state["threads"] = int(plan.threads)
     state["cache_reuse"] = int(plan.cache_reuse)
-    # ``parallel`` is an OWNER_HOST_KEY — the plan's slot count is recorded in
-    # last_autofit, but autofit must not overwrite the owner's setting.
-    if not state.get("parallel"):
-        state["parallel"] = max(1, int(plan.parallel))
+    # ``parallel`` is an OWNER_HOST_KEY — autofit never writes it (real states
+    # always carry a value via merge_state, so a conditional write would be
+    # dead anyway). The plan's slot count is recorded in last_autofit.
     state["last_autofit"] = plan.to_public()
     return state
 

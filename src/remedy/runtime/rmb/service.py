@@ -61,6 +61,7 @@ from remedy.runtime.rmb.host_profile import (
     normalize_thinking,
     overlay_owner_on_profile,
     owner_flag_on,
+    owner_flag_value_known,
     thinking_value_known,
 )
 
@@ -1626,6 +1627,53 @@ def _build_cmd(
             same = str(draft_p) == str(model)
         return draft_p if draft_p.is_file() and not same else None
 
+    def _emit_classic_owner_draft() -> bool:
+        # Owner typed a draft GGUF → classic small-draft speculative decoding.
+        # The setting was accepted and persisted; never silently drop it just
+        # because filename detection did not say "MTP" (or the binary lacks
+        # draft-mtp — classic --model-draft may still work there).
+        if (
+            enable_mtp is False
+            or not profile.get("model_draft_owner")
+            or profile.get("mtp_owner_off")
+        ):
+            return False
+        draft_p = _usable_draft()
+        if draft_p is not None and binary_supports_model_draft(binary):
+            cmd.extend(["--model-draft", str(draft_p)])
+            cmd.extend(["--n-gpu-layers-draft", str(_draft_layers())])
+            try:
+                n_max = int(profile.get("spec_draft_n_max") or 0)
+            except (TypeError, ValueError):
+                n_max = 0
+            if n_max > 0 and binary_supports_draft_max(binary):
+                cmd.extend(
+                    [
+                        "--draft-max",
+                        str(max(SPEC_DRAFT_N_MAX_MIN, min(SPEC_DRAFT_N_MAX_MAX, n_max))),
+                    ]
+                )
+            logger.info(
+                "RMB autoconfig: owner draft speculation (%s) for %s",
+                draft_p.name,
+                model.name,
+            )
+            return True
+        if draft_p is not None:
+            logger.warning(
+                "RMB autoconfig: owner draft GGUF set (%s) but this "
+                "llama-server build lacks --model-draft — starting without "
+                "speculation.",
+                draft_p.name,
+            )
+        else:
+            logger.warning(
+                "RMB autoconfig: owner draft GGUF %r is missing or equals the "
+                "main model — starting without speculation.",
+                str(profile.get("model_draft") or ""),
+            )
+        return False
+
     want_mtp = bool(profile.get("mtp")) if enable_mtp is None else bool(enable_mtp)
     if want_mtp and profile.get("mtp"):
         if binary_supports_draft_mtp(binary):
@@ -1651,55 +1699,15 @@ def _build_cmd(
                 draft_p.name if draft_p is not None else "heads",
                 model.name,
             )
-        else:
+        elif not _emit_classic_owner_draft():
             logger.warning(
                 "RMB autoconfig: GGUF looks like MTP (%s) but llama-server "
                 "build lacks draft-mtp — starting without speculative flags. "
                 "Update the CUDA/CPU runtime to unlock ~2x decode.",
                 model.name,
             )
-    elif (
-        enable_mtp is not False
-        and profile.get("model_draft_owner")
-        and not profile.get("mtp_owner_off")
-    ):
-        # Owner typed a draft GGUF for a non-MTP main model → classic
-        # small-draft speculative decoding. The setting was accepted and
-        # persisted; never silently drop it because filename detection did
-        # not say "MTP".
-        draft_p = _usable_draft()
-        if draft_p is not None and binary_supports_model_draft(binary):
-            cmd.extend(["--model-draft", str(draft_p)])
-            cmd.extend(["--n-gpu-layers-draft", str(_draft_layers())])
-            try:
-                n_max = int(profile.get("spec_draft_n_max") or 0)
-            except (TypeError, ValueError):
-                n_max = 0
-            if n_max > 0 and binary_supports_draft_max(binary):
-                cmd.extend(
-                    [
-                        "--draft-max",
-                        str(max(SPEC_DRAFT_N_MAX_MIN, min(SPEC_DRAFT_N_MAX_MAX, n_max))),
-                    ]
-                )
-            logger.info(
-                "RMB autoconfig: owner draft speculation (%s) for %s",
-                draft_p.name,
-                model.name,
-            )
-        elif draft_p is not None:
-            logger.warning(
-                "RMB autoconfig: owner draft GGUF set (%s) but this "
-                "llama-server build lacks --model-draft — starting without "
-                "speculation.",
-                draft_p.name,
-            )
-        else:
-            logger.warning(
-                "RMB autoconfig: owner draft GGUF %r is missing or equals the "
-                "main model — starting without speculation.",
-                str(profile.get("model_draft") or ""),
-            )
+    else:
+        _emit_classic_owner_draft()
     # Prefix cache: ReAct tool loops resubmit the same system head every step.
     if cache_reuse is not None and int(cache_reuse) > 0 and binary_supports_cache_reuse(binary):
         cmd.extend(["--cache-reuse", str(int(cache_reuse))])
@@ -2291,8 +2299,18 @@ def _start_rmb_server_impl(
             "mtp_armed": mtp_armed,
             "draft_armed": "--model-draft" in cmd,
             "binary_supports_mtp": binary_supports_draft_mtp(binary),
+            # The slot count this spawn actually runs with — Settings keeps
+            # the owner's ``parallel`` while MTP forces the live process to 1.
+            "parallel_effective": max(1, use_parallel),
             "cmd_flags": [a for a in cmd if a.startswith("--") or a in ("-fa", "-ngl", "-m")],
         }
+        owner_parallel = int(state.get("parallel") or 1)
+        if host_profile.get("force_parallel_1") and owner_parallel > 1:
+            host_auto["warnings"] = [
+                *host_auto.get("warnings", []),
+                f"MTP host runs 1 slot; parallel={owner_parallel} resumes on "
+                "the next non-MTP start.",
+            ]
 
         creation = 0
         if os.name == "nt":
@@ -3336,16 +3354,26 @@ def apply_rmb_settings(
     rejected: dict[str, Any] = {}
 
     # ``use_jinja`` ownership: an explicit patch pins the value against
-    # auto-load; the string "auto" hands it back to GGUF detection.
-    if isinstance(patch.get("use_jinja"), str) and patch["use_jinja"].strip().lower() == "auto":
+    # auto-load; the string "auto" hands it back to GGUF detection. String
+    # values are normalized here — bool("off") would store True and pin the
+    # opposite of what was asked, permanently.
+    raw_uj = patch.get("use_jinja")
+    if isinstance(raw_uj, str):
         patch = {k: v for k, v in patch.items() if k != "use_jinja"}
-        state["use_jinja_owner"] = False
-        with contextlib.suppress(Exception):
-            mp = str(state.get("model_path") or "").strip()
-            if mp:
-                state["use_jinja"] = bool(
-                    detect_gguf_host_profile(mp).get("use_jinja", True)
-                )
+        word = raw_uj.strip().lower()
+        if word in ("", "auto"):
+            state["use_jinja_owner"] = False
+            with contextlib.suppress(Exception):
+                mp = str(state.get("model_path") or "").strip()
+                if mp:
+                    state["use_jinja"] = bool(
+                        detect_gguf_host_profile(mp).get("use_jinja", True)
+                    )
+        elif owner_flag_value_known(word):
+            patch["use_jinja"] = owner_flag_on(word, default=True)
+            state["use_jinja_owner"] = True
+        else:
+            rejected["use_jinja"] = raw_uj
     elif "use_jinja" in patch and patch["use_jinja"] is not None:
         state["use_jinja_owner"] = True
 
@@ -3456,7 +3484,12 @@ def apply_rmb_settings(
                 rejected[key] = patch[key]
                 continue
         elif key == "enable_mtp" and patch[key] is not None:
-            state[key] = owner_flag_on(patch[key], default=True)
+            # An unrecognized string ("disbled") must not silently evaluate ON.
+            if owner_flag_value_known(patch[key]):
+                state[key] = owner_flag_on(patch[key], default=True)
+            else:
+                rejected[key] = patch[key]
+                continue
         elif key == "n_cpu_moe" and patch[key] is not None:
             try:
                 state[key] = max(N_CPU_MOE_MIN, min(N_CPU_MOE_MAX, int(patch[key])))
@@ -3886,7 +3919,7 @@ def apply_rmb_settings(
         status["rejected_note"] = (
             "Some values were not applied: "
             + ", ".join(f"{k}={v!r}" for k, v in rejected.items())
-            + " (thinking accepts on/off)"
+            + ' (on/off words only; use_jinja also accepts "auto")'
         )
     # Canonical stem for UI (status bar + provider form)
     if chat_sync.get("stem"):

@@ -868,14 +868,17 @@ def apply_local_body_optimize(
     # tightly capped turns (trivia 256 / green summary 512) a thinking model
     # burns the whole budget inside <think> and returns a truncated or empty
     # reply (finish=length) — the 0.41.3 muzzle, back through the thinking
-    # door. Keep the tight answer budget and ADD room for the reasoning.
+    # door. Keep the tight answer budget and ADD room for the reasoning:
+    # the owner's full finite budget (max_tokens must cover budget + answer,
+    # or finish=length still lands inside <think>), else a flat headroom that
+    # is also sent as the per-request reasoning_budget so unlimited thinking
+    # cannot outrun it. Models with no thinking knob get no headroom at all —
+    # the muzzle stays 256 for them.
     think_on = local_thinking_enabled()
     rb_cap = _rmb_reasoning_budget() if think_on else None
     think_headroom = 0
-    if think_on and (trivia or green_summary):
-        think_headroom = (
-            min(rb_cap, 8192) if rb_cap is not None else LOCAL_THINK_HEADROOM
-        )
+    if think_on and (trivia or green_summary) and _rmb_model_has_thinking():
+        think_headroom = rb_cap if rb_cap is not None else LOCAL_THINK_HEADROOM
     if trivia:
         cap = min(cap, 256)
     if green_summary:
@@ -893,7 +896,7 @@ def apply_local_body_optimize(
             if not green_summary:
                 out["max_tokens"] = max(int(out["max_tokens"]), min(cap, 2048))
             else:
-                out["max_tokens"] = min(int(out["max_tokens"]), 512 + think_headroom)
+                out["max_tokens"] = min(int(out["max_tokens"]), cap)
     except (TypeError, ValueError):
         out["max_tokens"] = cap
     out.pop("_remedy_write_budget", None)
@@ -917,6 +920,10 @@ def apply_local_body_optimize(
         merged_kw.setdefault("enable_thinking", True)
         if rb_cap is not None:
             out["reasoning_budget"] = rb_cap
+        elif think_headroom:
+            # Tight turn with unlimited owner budget: bound hidden thinking to
+            # the granted headroom so the visible answer keeps its budget.
+            out["reasoning_budget"] = think_headroom
         else:
             out.pop("reasoning_budget", None)
     else:
@@ -967,6 +974,25 @@ def _rmb_reasoning_budget() -> int | None:
         return reasoning_budget_cap(_rmb_owner_state().get("reasoning_budget"))
     except Exception:
         return None
+
+
+def _rmb_model_has_thinking() -> bool:
+    """Whether the loaded GGUF's card says it can think.
+
+    Unknown (no card yet) errs to True so a real thinking model is never
+    re-muzzled; a plain instruct card gets no thinking headroom.
+    """
+    try:
+        ha = _rmb_owner_state().get("host_auto")
+        if not isinstance(ha, dict) or not ha.get("summary"):
+            return True
+        return bool(
+            ha.get("thinking")
+            or ha.get("qwen_thinking_toggle")
+            or ha.get("always_think")
+        )
+    except Exception:
+        return True
 
 
 def extract_create_path(message: str | None) -> str | None:

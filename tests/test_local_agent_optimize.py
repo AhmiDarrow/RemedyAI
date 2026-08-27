@@ -372,3 +372,82 @@ async def test_bootstrap_skips_in_plan_mode(tmp_path):
         end_turn("plan-boot", *toks)
     assert res is None
     assert not out.exists()
+
+
+def test_trivia_headroom_covers_large_owner_budget(monkeypatch):
+    """max_tokens must cover budget + answer or finish=length lands in <think>."""
+    monkeypatch.setattr(
+        "remedy.core.local_agent_optimize.local_thinking_enabled",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "remedy.core.local_agent_optimize._rmb_reasoning_budget",
+        lambda: 20000,
+    )
+    body = {
+        "messages": [{"role": "user", "content": "1 + 1"}],
+        "max_tokens": 64000,
+    }
+    out = apply_local_body_optimize(
+        body,
+        provider="rmb",
+        model="Qwen3.5-4B",
+        base_url="http://127.0.0.1:8787/v1",
+        user_message="1 + 1",
+        step_index=0,
+    )
+    assert int(out["max_tokens"]) == 256 + 20000
+    assert out.get("reasoning_budget") == 20000
+
+
+def test_trivia_unlimited_budget_is_bounded_to_headroom(monkeypatch):
+    """Unlimited owner thinking gets a per-request budget equal to the headroom."""
+    from remedy.core.local_agent_optimize import LOCAL_THINK_HEADROOM
+
+    monkeypatch.setattr(
+        "remedy.core.local_agent_optimize.local_thinking_enabled",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "remedy.core.local_agent_optimize._rmb_reasoning_budget",
+        lambda: None,
+    )
+    body = {
+        "messages": [{"role": "user", "content": "1 + 1"}],
+        "max_tokens": 8000,
+    }
+    out = apply_local_body_optimize(
+        body,
+        provider="rmb",
+        model="Qwen3.5-4B",
+        base_url="http://127.0.0.1:8787/v1",
+        user_message="1 + 1",
+        step_index=0,
+    )
+    assert int(out["max_tokens"]) == 256 + LOCAL_THINK_HEADROOM
+    assert out.get("reasoning_budget") == LOCAL_THINK_HEADROOM
+
+
+def test_trivia_no_headroom_for_non_thinking_model(monkeypatch):
+    """A plain instruct GGUF keeps the 256 muzzle — headroom is for thinkers."""
+    monkeypatch.setattr(
+        "remedy.core.local_agent_optimize.local_thinking_enabled",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "remedy.core.local_agent_optimize._rmb_model_has_thinking",
+        lambda: False,
+    )
+    body = {
+        "messages": [{"role": "user", "content": "1 + 1"}],
+        "max_tokens": 8000,
+    }
+    out = apply_local_body_optimize(
+        body,
+        provider="rmb",
+        model="kanana-2-1.3b-instruct",
+        base_url="http://127.0.0.1:8787/v1",
+        user_message="1 + 1",
+        step_index=0,
+    )
+    assert int(out["max_tokens"]) <= 256
