@@ -831,15 +831,17 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
               />
             </div>
             <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+              {/* Bounds mirror OWNER knob ranges in rmb/host_profile.py — change together. */}
               <RmbEngineNumber
-                label="MoE experts on CPU (0 = auto)"
+                label="MoE experts on CPU (0 = auto, −1 = all on GPU)"
                 value={rmb?.engine?.n_cpu_moe ?? 0}
-                min={0}
+                min={-1}
+                max={256}
                 step={1}
                 disabled={rmbBusy}
                 onApply={(n_cpu_moe) =>
                   void patchKnob(
-                    { n_cpu_moe: Math.max(0, Math.round(n_cpu_moe)) },
+                    { n_cpu_moe: Math.max(-1, Math.min(256, Math.round(n_cpu_moe))) },
                     `n_cpu_moe: ${n_cpu_moe}`,
                   )
                 }
@@ -848,11 +850,12 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                 label="Reasoning budget (−1 = no cap)"
                 value={rmb?.engine?.reasoning_budget ?? -1}
                 min={-1}
+                max={100000}
                 step={1}
                 disabled={rmbBusy}
                 onApply={(reasoning_budget) =>
                   void patchKnob(
-                    { reasoning_budget: Math.round(reasoning_budget) },
+                    { reasoning_budget: Math.max(-1, Math.min(100000, Math.round(reasoning_budget))) },
                     `Reasoning budget: ${reasoning_budget}`,
                   )
                 }
@@ -875,11 +878,12 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
                 label="Draft GPU layers (0 = auto)"
                 value={rmb?.engine?.n_gpu_layers_draft ?? 0}
                 min={0}
+                max={99}
                 step={1}
                 disabled={rmbBusy}
                 onApply={(n_gpu_layers_draft) =>
                   void patchKnob(
-                    { n_gpu_layers_draft: Math.max(0, Math.round(n_gpu_layers_draft)) },
+                    { n_gpu_layers_draft: Math.max(0, Math.min(99, Math.round(n_gpu_layers_draft))) },
                     `Draft ngl: ${n_gpu_layers_draft}`,
                   )
                 }
@@ -1461,7 +1465,7 @@ export function SettingsSections_localModels(p: SettingsFormProps): ReactNode {
             </div>
 
             <div className="space-y-1">
-              <FormLabel>MTP draft GGUF (empty = sibling mtp-*.gguf)</FormLabel>
+              <FormLabel>Draft GGUF — MTP or classic speculative (empty = sibling mtp-*.gguf)</FormLabel>
               <input
                 type="text"
                 className="ui-input ui-input-sm mb-1 font-mono w-full"

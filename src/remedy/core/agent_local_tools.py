@@ -597,6 +597,7 @@ def register_rmb_tools(runtime: Any) -> None:
                     for k in (
                         "mtp",
                         "mtp_armed",
+                        "draft_armed",
                         "model_draft",
                         "spec_type",
                         "spec_draft_n_max",
@@ -858,6 +859,16 @@ def register_rmb_tools(runtime: Any) -> None:
             if auto_start is not None:
                 patch["auto_start"] = bool(auto_start)
             if thinking:
+                from remedy.runtime.rmb.host_profile import thinking_value_known
+
+                if not thinking_value_known(thinking):
+                    return format_tool_error(
+                        f"thinking must be on/off (got {thinking!r}) — an "
+                        "unrecognized word would silently leave thinking ON.",
+                        code="BAD_THINKING",
+                        tool_name="rmb",
+                        suggestion='rmb action="settings" thinking="off"',
+                    )
                 patch["thinking"] = thinking
             if enable_mtp is not None:
                 patch["enable_mtp"] = bool(enable_mtp)
@@ -898,7 +909,8 @@ def register_rmb_tools(runtime: Any) -> None:
                 public_live["ok"] = True
                 public_live["next"] = (
                     'Patch with rmb action="settings" thinking="off" '
-                    'or enable_mtp=false or n_cpu_moe=99 or profile="turbo" '
+                    'or enable_mtp=false or n_cpu_moe=99 (-1 = all experts on '
+                    'GPU) or profile="turbo" '
                     "or n_gpu_layers=40 or ctx_size=4096 or model_path=…"
                 )
                 return json.dumps(public_live, indent=2, default=str)

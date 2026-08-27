@@ -68,6 +68,33 @@ def save_rmb_json(state: dict[str, Any], home_dir: str | Path | None = None) -> 
     path = rmb_json_path(home_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     write_json_atomic(path, state)
+    _merged_cache.pop(str(path), None)
+
+
+# Merged-state cache for hot request paths (per-turn thinking/budget reads).
+# Keyed by rmb.json path, invalidated by mtime+size signature or save.
+_merged_cache: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}
+
+
+def merged_state_cached(home_dir: str | Path | None = None) -> dict[str, Any]:
+    """``merge_state(load_rmb_json(...))`` with an mtime-keyed cache.
+
+    Chat request paths read owner knobs on every ReAct step; rmb.json only
+    changes when Settings apply. Treat the returned dict as read-only.
+    """
+    path = rmb_json_path(home_dir)
+    key = str(path)
+    try:
+        st = path.stat()
+        sig = (int(st.st_mtime_ns), int(st.st_size))
+    except OSError:
+        sig = (-1, -1)
+    hit = _merged_cache.get(key)
+    if hit is not None and hit[0] == sig:
+        return hit[1]
+    merged = merge_state(load_rmb_json(home_dir))
+    _merged_cache[key] = (sig, merged)
+    return merged
 
 
 def default_state() -> dict[str, Any]:
@@ -109,6 +136,9 @@ def default_state() -> dict[str, Any]:
         "ubatch_size": 512,
         "mmproj": "",  # multimodal projector GGUF (vision in chat)
         "use_jinja": True,  # --jinja (use GGUF-embedded chat template)
+        # True only after the owner explicitly set use_jinja in Settings;
+        # while False, GGUF detection keeps correcting use_jinja per model.
+        "use_jinja_owner": False,
         "rope_freq_scale": 0.0,  # 0 = llama.cpp default
         "rope_freq_base": 0.0,  # 0 = llama.cpp default
         # --- KoboldCpp-class parity knobs ('' / 0 / None = llama.cpp default) ---

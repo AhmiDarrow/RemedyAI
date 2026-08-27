@@ -68,13 +68,52 @@ OWNER_HOST_KEYS = frozenset(
     }
 )
 
+# Shared numeric bounds for owner engine knobs. The desktop Settings inputs
+# (sections_localModels.tsx) mirror these — change them together.
+SPEC_DRAFT_N_MAX_MIN, SPEC_DRAFT_N_MAX_MAX = 1, 8
+N_GPU_LAYERS_DRAFT_MIN, N_GPU_LAYERS_DRAFT_MAX = 1, 99
+N_CPU_MOE_MIN, N_CPU_MOE_MAX = -1, 256
+REASONING_BUDGET_MIN, REASONING_BUDGET_MAX = -1, 100_000
+
+_THINKING_OFF_WORDS = frozenset(
+    {"off", "false", "0", "no", "disable", "disabled", "none", "never"}
+)
+_THINKING_ON_WORDS = frozenset(
+    {"", "on", "true", "1", "yes", "default", "auto", "enable", "enabled", "always"}
+)
+
 
 def normalize_thinking(value: Any) -> str:
     """Owner thinking switch: ``on`` (default) or ``off``."""
     raw = str(value if value is not None else "on").strip().lower()
-    if raw in ("off", "false", "0", "no"):
+    if raw in _THINKING_OFF_WORDS:
         return "off"
     return "on"
+
+
+def thinking_value_known(value: Any) -> bool:
+    """True when *value* is a recognized thinking word in either direction.
+
+    Settings entry points validate with this so a typo ("of", "disbled")
+    errors out instead of silently flipping thinking **on**.
+    """
+    raw = str(value if value is not None else "on").strip().lower()
+    return raw in _THINKING_OFF_WORDS or raw in _THINKING_ON_WORDS
+
+
+def reasoning_budget_cap(value: Any) -> int | None:
+    """Owner reasoning_budget as a cap: int ≥ 0, or None when unset/unlimited.
+
+    Single home for the "None/'' → unset, ≥0 → cap, negative → unlimited"
+    rule so overlay and the request-body path cannot drift.
+    """
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        n = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return n if n >= 0 else None
 
 
 def thinking_is_on(value: Any) -> bool:
@@ -309,8 +348,8 @@ def detect_gguf_host_profile(
 
     # Detection only — do not force thinking off. Owner switch is ``thinking``
     # on rmb.json (default on). overlay_owner_on_profile applies that.
-    chat_template_kwargs: str | None = None
-    reasoning_budget: int | None = None
+    # ``always_think`` is card metadata (reasons/warnings tell the owner why);
+    # since 0.41.5 the runtime switch is --reasoning / chat_template_kwargs.
     if thinking and not qwen_toggle:
         always_think = True
         reasons.append("filename_always_think")
@@ -398,8 +437,9 @@ def detect_gguf_host_profile(
         "spec_draft_n_max": draft_n if mtp else None,
         "use_jinja": use_jinja,
         "no_mmap": no_mmap,
-        "chat_template_kwargs": chat_template_kwargs,
-        "reasoning_budget": reasoning_budget,
+        # Both owned by overlay_owner_on_profile — detection never sets them.
+        "chat_template_kwargs": None,
+        "reasoning_budget": None,
         "chat_style": chat_style,
         "unfit": unfit,
         "weight_mb": weight_mb,
@@ -440,11 +480,8 @@ def overlay_owner_on_profile(
         out["reasoning_budget"] = None
     raw_rb = st.get("reasoning_budget")
     if raw_rb is not None and str(raw_rb).strip() != "":
-        try:
-            rb = int(raw_rb)
-        except (TypeError, ValueError):
-            rb = -1
-        if rb >= 0:
+        rb = reasoning_budget_cap(raw_rb)
+        if rb is not None:
             out["reasoning_budget"] = rb
         elif mode == "on":
             out["reasoning_budget"] = None
@@ -456,19 +493,34 @@ def overlay_owner_on_profile(
         out["spec_draft_n_max"] = None
         out["model_draft"] = None
         out["mtp_owner_off"] = True
+        # Nothing is armed while the owner switch is off — a card recorded at
+        # an MTP start must not keep claiming "armed" next to mtp=False.
+        out["mtp_armed"] = False
+    else:
+        # Re-overlaying a card from a previous overlay: drop the stale marker.
+        out.pop("mtp_owner_off", None)
     try:
         n_max = int(st.get("spec_draft_n_max") or 0)
         if n_max > 0:
-            out["spec_draft_n_max"] = max(1, min(8, n_max))
+            out["spec_draft_n_max"] = max(
+                SPEC_DRAFT_N_MAX_MIN, min(SPEC_DRAFT_N_MAX_MAX, n_max)
+            )
     except (TypeError, ValueError):
         pass
     draft = str(st.get("model_draft") or "").strip()
     if draft:
         out["model_draft"] = draft
+        # Owner typed this path — _build_cmd emits classic --model-draft
+        # speculation for it even when the main GGUF is not MTP-named.
+        out["model_draft_owner"] = True
+    else:
+        out.pop("model_draft_owner", None)
     try:
         raw_dn = st.get("n_gpu_layers_draft")
         if raw_dn is not None and str(raw_dn).strip() != "" and int(raw_dn) > 0:
-            out["n_gpu_layers_draft"] = max(1, min(99, int(raw_dn)))
+            out["n_gpu_layers_draft"] = max(
+                N_GPU_LAYERS_DRAFT_MIN, min(N_GPU_LAYERS_DRAFT_MAX, int(raw_dn))
+            )
     except (TypeError, ValueError):
         pass
     try:
@@ -476,11 +528,30 @@ def overlay_owner_on_profile(
         if moe > 0:
             out["n_cpu_moe"] = moe
             out["n_cpu_moe_owner"] = True
+        elif moe < 0:
+            # Owner said "keep every expert on the GPU": emit no --n-cpu-moe
+            # and suppress the catalog fallback (owner marker does that).
+            out["n_cpu_moe"] = 0
+            out["n_cpu_moe_owner"] = True
+        else:
+            # 0 = auto — drop a stale marker from a previously overlaid card.
+            out.pop("n_cpu_moe_owner", None)
     except (TypeError, ValueError):
         pass
 
     summary = str(out.get("summary") or "")
-    if mode == "off":
+    has_think_knob = bool(
+        out.get("thinking") or out.get("qwen_thinking_toggle") or out.get("always_think")
+    )
+    if not has_think_knob:
+        # Heal cards an older overlay annotated on a model with no thinking
+        # knob ("instruct · jinja · thinking off" on a plain instruct GGUF).
+        summary = (
+            summary.replace(" · thinking off", "")
+            .replace("thinking off", "")
+            .strip(" ·")
+        )
+    elif mode == "off":
         if "thinking off" not in summary:
             if "thinking" in summary:
                 summary = summary.replace("thinking", "thinking off", 1)
@@ -488,6 +559,11 @@ def overlay_owner_on_profile(
                 summary = (summary + " · thinking off") if summary else "thinking off"
     else:
         summary = summary.replace("thinking off", "thinking")
+    if out.get("mtp_owner_off"):
+        if "MTP" in summary and "MTP off" not in summary:
+            summary = summary.replace("MTP", "MTP off", 1)
+    else:
+        summary = summary.replace("MTP off", "MTP")
     out["summary"] = summary
     return out
 
@@ -502,13 +578,17 @@ def apply_host_profile_to_state(
 
     ``preserve`` is a set of keys the owner set (do not overwrite). Pass
     ``OWNER_HOST_KEYS`` on start / model switch so auto-load never clobbers
-    Settings.
+    Settings. ``use_jinja`` is special: the owner-set flag is
+    ``use_jinja_owner`` (written by apply_rmb_settings on an explicit patch);
+    without it, detection keeps correcting the value on every start/switch —
+    a stale auto-written False must not break the chat template of the next
+    instruct GGUF, and a template-less base GGUF must not get --jinja.
     """
     if not isinstance(state, dict):
         return state
     prof = profile if isinstance(profile, dict) else _empty_profile()
     keep = preserve or set()
-    if "use_jinja" not in keep:
+    if "use_jinja" not in keep or not state.get("use_jinja_owner"):
         state["use_jinja"] = bool(prof.get("use_jinja", True))
     if "no_mmap" not in keep:
         state["no_mmap"] = bool(prof.get("no_mmap", False))

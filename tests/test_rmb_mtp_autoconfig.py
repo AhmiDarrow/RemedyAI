@@ -160,3 +160,110 @@ def test_build_cmd_enable_mtp_false_strips_flags(tmp_path):
         enable_mtp=False,
     )
     assert "--spec-type" not in cmd
+
+
+def test_build_cmd_owner_draft_enables_classic_speculation(tmp_path):
+    """Owner-typed draft GGUF on a non-MTP main → --model-draft, no MTP flags."""
+    from remedy.runtime.rmb.host_profile import overlay_owner_on_profile
+
+    fake_bin = tmp_path / "llama-server.exe"
+    fake_bin.write_bytes(b"stub")
+    (tmp_path / "llama-common.dll").write_bytes(b"xx --model-draft --draft-max yy")
+    from remedy.runtime.rmb import service as svc
+
+    svc._spec_cap_cache.clear()
+    svc._flag_cap_cache.clear()
+
+    main = tmp_path / "Qwen3.5-9B-Q4_K_M.gguf"
+    main.write_bytes(b"0")
+    draft = tmp_path / "Qwen3.5-0.5B-draft.gguf"
+    draft.write_bytes(b"0")
+    prof = overlay_owner_on_profile(
+        detect_gguf_host_profile(main),
+        {"model_draft": str(draft), "spec_draft_n_max": 4},
+    )
+    cmd = _build_cmd(
+        fake_bin,
+        main,
+        host="127.0.0.1",
+        port=8787,
+        ctx=8192,
+        ngl=40,
+        threads=0,
+        parallel=1,
+        flash_attn=False,
+        host_profile=prof,
+    )
+    assert "--model-draft" in cmd
+    assert str(draft) in cmd
+    assert "--n-gpu-layers-draft" in cmd
+    assert "--draft-max" in cmd
+    assert cmd[cmd.index("--draft-max") + 1] == "4"
+    # Classic draft is not MTP — no MTP-specific flags.
+    assert "--spec-type" not in cmd
+
+
+def test_build_cmd_owner_draft_skipped_when_binary_lacks_flag(tmp_path):
+    from remedy.runtime.rmb.host_profile import overlay_owner_on_profile
+
+    fake_bin = tmp_path / "llama-server.exe"
+    fake_bin.write_bytes(b"no speculative support here")
+    from remedy.runtime.rmb import service as svc
+
+    svc._spec_cap_cache.clear()
+    svc._flag_cap_cache.clear()
+
+    main = tmp_path / "Qwen3.5-9B-Q4_K_M.gguf"
+    main.write_bytes(b"0")
+    draft = tmp_path / "Qwen3.5-0.5B-draft.gguf"
+    draft.write_bytes(b"0")
+    prof = overlay_owner_on_profile(
+        detect_gguf_host_profile(main), {"model_draft": str(draft)}
+    )
+    cmd = _build_cmd(
+        fake_bin,
+        main,
+        host="127.0.0.1",
+        port=8787,
+        ctx=8192,
+        ngl=0,
+        threads=0,
+        parallel=1,
+        flash_attn=False,
+        host_profile=prof,
+    )
+    assert "--model-draft" not in cmd
+
+
+def test_build_cmd_owner_draft_suppressed_when_mtp_owner_off(tmp_path):
+    from remedy.runtime.rmb.host_profile import overlay_owner_on_profile
+
+    fake_bin = tmp_path / "llama-server.exe"
+    fake_bin.write_bytes(b"stub")
+    (tmp_path / "llama-common.dll").write_bytes(b"xx --model-draft yy")
+    from remedy.runtime.rmb import service as svc
+
+    svc._spec_cap_cache.clear()
+    svc._flag_cap_cache.clear()
+
+    main = tmp_path / "Qwen3.5-9B-Q4_K_M.gguf"
+    main.write_bytes(b"0")
+    draft = tmp_path / "Qwen3.5-0.5B-draft.gguf"
+    draft.write_bytes(b"0")
+    prof = overlay_owner_on_profile(
+        detect_gguf_host_profile(main),
+        {"model_draft": str(draft), "enable_mtp": False},
+    )
+    cmd = _build_cmd(
+        fake_bin,
+        main,
+        host="127.0.0.1",
+        port=8787,
+        ctx=8192,
+        ngl=0,
+        threads=0,
+        parallel=1,
+        flash_attn=False,
+        host_profile=prof,
+    )
+    assert "--model-draft" not in cmd

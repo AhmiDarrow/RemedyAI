@@ -179,8 +179,59 @@ def test_apply_local_body_strips_tools_on_trivia():
     )
     assert "tools" not in out
     assert "tool_choice" not in out
-    assert int(out["max_tokens"]) <= 256
+    # Thinking is on by default and shares max_tokens with the answer: the
+    # 256-token answer budget stays, plus headroom for the hidden <think>
+    # block (otherwise finish=length lands inside <think> → empty reply).
+    from remedy.core.local_agent_optimize import LOCAL_THINK_HEADROOM
+
+    assert int(out["max_tokens"]) <= 256 + LOCAL_THINK_HEADROOM
+    assert int(out["max_tokens"]) > 256
     assert (out.get("chat_template_kwargs") or {}).get("enable_thinking") is True
+
+
+def test_trivia_stays_256_when_thinking_off(monkeypatch):
+    monkeypatch.setattr(
+        "remedy.core.local_agent_optimize.local_thinking_enabled",
+        lambda: False,
+    )
+    body = {
+        "messages": [{"role": "user", "content": "1 + 1"}],
+        "max_tokens": 8000,
+    }
+    out = apply_local_body_optimize(
+        body,
+        provider="rmb",
+        model="Qwen3.5-4B",
+        base_url="http://127.0.0.1:8787/v1",
+        user_message="1 + 1",
+        step_index=0,
+    )
+    assert int(out["max_tokens"]) <= 256
+
+
+def test_trivia_headroom_uses_owner_budget_when_finite(monkeypatch):
+    monkeypatch.setattr(
+        "remedy.core.local_agent_optimize.local_thinking_enabled",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "remedy.core.local_agent_optimize._rmb_reasoning_budget",
+        lambda: 300,
+    )
+    body = {
+        "messages": [{"role": "user", "content": "1 + 1"}],
+        "max_tokens": 8000,
+    }
+    out = apply_local_body_optimize(
+        body,
+        provider="rmb",
+        model="Qwen3.5-4B",
+        base_url="http://127.0.0.1:8787/v1",
+        user_message="1 + 1",
+        step_index=0,
+    )
+    assert int(out["max_tokens"]) == 256 + 300
+    assert out.get("reasoning_budget") == 300
 
 
 def test_apply_local_body_thinking_off_when_owner_sets_it(monkeypatch):

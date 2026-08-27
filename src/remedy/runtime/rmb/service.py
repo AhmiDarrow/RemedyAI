@@ -46,13 +46,22 @@ from remedy.runtime.rmb.config import (
     save_rmb_json,
 )
 from remedy.runtime.rmb.host_profile import (
+    N_CPU_MOE_MAX,
+    N_CPU_MOE_MIN,
+    N_GPU_LAYERS_DRAFT_MAX,
+    N_GPU_LAYERS_DRAFT_MIN,
     OWNER_HOST_KEYS,
+    REASONING_BUDGET_MAX,
+    REASONING_BUDGET_MIN,
+    SPEC_DRAFT_N_MAX_MAX,
+    SPEC_DRAFT_N_MAX_MIN,
     apply_host_profile_to_state,
     detect_gguf_host_profile,
     model_switch_should_refit,
     normalize_thinking,
     overlay_owner_on_profile,
     owner_flag_on,
+    thinking_value_known,
 )
 
 logger = logging.getLogger(__name__)
@@ -1235,6 +1244,25 @@ def binary_supports_reasoning_off(binary: Path | str | None) -> bool:
     )
 
 
+def binary_supports_model_draft(binary: Path | str | None) -> bool:
+    """True when this llama-server build knows ``--model-draft`` (classic
+    small-draft speculative decoding, no MTP heads required)."""
+    return _binary_has_needles(
+        binary,
+        "model-draft",
+        (b"--model-draft", b"model-draft", b"LLAMA_ARG_MODEL_DRAFT"),
+    )
+
+
+def binary_supports_draft_max(binary: Path | str | None) -> bool:
+    """True when this llama-server build knows ``--draft-max``."""
+    return _binary_has_needles(
+        binary,
+        "draft-max",
+        (b"--draft-max", b"draft-max", b"LLAMA_ARG_DRAFT_MAX"),
+    )
+
+
 def _binary_has_needles(
     binary: Path | str | None, cache_key: str, needles: tuple[bytes, ...]
 ) -> bool:
@@ -1576,12 +1604,34 @@ def _build_cmd(
             cmd.extend(["--yarn-beta-slow", str(float(yarn_beta_slow))])
 
     # MTP: baked-in heads, or a sibling mtp-<stem>.gguf via --model-draft
+    def _draft_layers() -> int:
+        try:
+            raw_dn = profile.get("n_gpu_layers_draft")
+            if raw_dn is None:
+                # Keep draft small so it does not crowd the main ngl.
+                ngl_i = int(ngl)
+                return max(4, min(16, ngl_i // 4)) if ngl_i > 0 else 8
+            return max(N_GPU_LAYERS_DRAFT_MIN, min(N_GPU_LAYERS_DRAFT_MAX, int(raw_dn)))
+        except (TypeError, ValueError):
+            return 8
+
+    def _usable_draft() -> Path | None:
+        draft = str(profile.get("model_draft") or "").strip()
+        if not draft:
+            return None
+        draft_p = Path(draft)
+        try:
+            same = draft_p.resolve() == Path(model).resolve()
+        except OSError:
+            same = str(draft_p) == str(model)
+        return draft_p if draft_p.is_file() and not same else None
+
     want_mtp = bool(profile.get("mtp")) if enable_mtp is None else bool(enable_mtp)
     if want_mtp and profile.get("mtp"):
         if binary_supports_draft_mtp(binary):
             spec = str(profile.get("spec_type") or "draft-mtp")
             n_max = int(profile.get("spec_draft_n_max") or 2)
-            n_max = max(1, min(8, n_max))
+            n_max = max(SPEC_DRAFT_N_MAX_MIN, min(SPEC_DRAFT_N_MAX_MAX, n_max))
             cmd.extend(
                 [
                     "--spec-type",
@@ -1590,33 +1640,15 @@ def _build_cmd(
                     str(n_max),
                 ]
             )
-            draft = str(profile.get("model_draft") or "").strip()
-            if draft:
-                draft_p = Path(draft)
-                try:
-                    same = draft_p.resolve() == Path(model).resolve()
-                except OSError:
-                    same = str(draft_p) == str(model)
-                if draft_p.is_file() and not same:
-                    cmd.extend(["--model-draft", str(draft_p)])
-                    try:
-                        raw_dn = profile.get("n_gpu_layers_draft")
-                        if raw_dn is None:
-                            # Keep draft small so it does not crowd the main ngl.
-                            ngl_i = int(ngl)
-                            draft_ngl = (
-                                max(4, min(16, ngl_i // 4)) if ngl_i > 0 else 8
-                            )
-                        else:
-                            draft_ngl = max(1, min(99, int(raw_dn)))
-                    except (TypeError, ValueError):
-                        draft_ngl = 8
-                    cmd.extend(["--n-gpu-layers-draft", str(draft_ngl)])
+            draft_p = _usable_draft()
+            if draft_p is not None:
+                cmd.extend(["--model-draft", str(draft_p)])
+                cmd.extend(["--n-gpu-layers-draft", str(_draft_layers())])
             logger.info(
                 "RMB autoconfig: MTP enabled (%s n_max=%s draft=%s) for %s",
                 spec,
                 n_max,
-                Path(draft).name if draft else "heads",
+                draft_p.name if draft_p is not None else "heads",
                 model.name,
             )
         else:
@@ -1625,6 +1657,48 @@ def _build_cmd(
                 "build lacks draft-mtp — starting without speculative flags. "
                 "Update the CUDA/CPU runtime to unlock ~2x decode.",
                 model.name,
+            )
+    elif (
+        enable_mtp is not False
+        and profile.get("model_draft_owner")
+        and not profile.get("mtp_owner_off")
+    ):
+        # Owner typed a draft GGUF for a non-MTP main model → classic
+        # small-draft speculative decoding. The setting was accepted and
+        # persisted; never silently drop it because filename detection did
+        # not say "MTP".
+        draft_p = _usable_draft()
+        if draft_p is not None and binary_supports_model_draft(binary):
+            cmd.extend(["--model-draft", str(draft_p)])
+            cmd.extend(["--n-gpu-layers-draft", str(_draft_layers())])
+            try:
+                n_max = int(profile.get("spec_draft_n_max") or 0)
+            except (TypeError, ValueError):
+                n_max = 0
+            if n_max > 0 and binary_supports_draft_max(binary):
+                cmd.extend(
+                    [
+                        "--draft-max",
+                        str(max(SPEC_DRAFT_N_MAX_MIN, min(SPEC_DRAFT_N_MAX_MAX, n_max))),
+                    ]
+                )
+            logger.info(
+                "RMB autoconfig: owner draft speculation (%s) for %s",
+                draft_p.name,
+                model.name,
+            )
+        elif draft_p is not None:
+            logger.warning(
+                "RMB autoconfig: owner draft GGUF set (%s) but this "
+                "llama-server build lacks --model-draft — starting without "
+                "speculation.",
+                draft_p.name,
+            )
+        else:
+            logger.warning(
+                "RMB autoconfig: owner draft GGUF %r is missing or equals the "
+                "main model — starting without speculation.",
+                str(profile.get("model_draft") or ""),
             )
     # Prefix cache: ReAct tool loops resubmit the same system head every step.
     if cache_reuse is not None and int(cache_reuse) > 0 and binary_supports_cache_reuse(binary):
@@ -2187,10 +2261,12 @@ def _start_rmb_server_impl(
         ngl = int(plan.n_gpu_layers)
 
         # Autoconfig from GGUF; owner knobs (thinking, MTP, jinja, …) already overlaid.
+        # MTP forces this spawn to one slot but must not overwrite the owner's
+        # persisted ``parallel`` (OWNER_HOST_KEYS) — the next non-MTP model
+        # should come back up with the owner's slot count.
         use_parallel = int(state.get("parallel") or 1)
         if host_profile.get("force_parallel_1"):
             use_parallel = 1
-            state["parallel"] = 1
 
         cmd = _build_cmd(
             binary,
@@ -2213,6 +2289,7 @@ def _start_rmb_server_impl(
         host_auto = {
             **host_profile,
             "mtp_armed": mtp_armed,
+            "draft_armed": "--model-draft" in cmd,
             "binary_supports_mtp": binary_supports_draft_mtp(binary),
             "cmd_flags": [a for a in cmd if a.startswith("--") or a in ("-fa", "-ngl", "-m")],
         }
@@ -2253,14 +2330,15 @@ def _start_rmb_server_impl(
                     log_f.close()
             return _fail({"ok": False, "error": f"failed to spawn llama-server: {e}"})
 
-        # Soft-retry: if MTP flags make an older binary die instantly, restart plain.
-        # Partner rule — never fail to load a valid GGUF because of speculative knobs.
-        if mtp_armed:
+        # Soft-retry: if speculative flags (MTP or owner draft) make an older
+        # binary die instantly, restart plain. Partner rule — never fail to
+        # load a valid GGUF because of speculative knobs.
+        if mtp_armed or "--model-draft" in cmd:
             time.sleep(0.35)
             if _proc.poll() is not None:
                 logger.warning(
-                    "RMB autoconfig: MTP spawn exited code %s — retrying without "
-                    "speculative flags so the model still loads",
+                    "RMB autoconfig: speculative spawn exited code %s — retrying "
+                    "without speculative flags so the model still loads",
                     _proc.returncode,
                 )
                 cmd = _build_cmd(
@@ -2278,6 +2356,7 @@ def _start_rmb_server_impl(
                     **_engine_kwargs(state),
                 )
                 host_auto["mtp_armed"] = False
+                host_auto["draft_armed"] = False
                 host_auto["mtp_soft_disabled"] = True
                 host_auto["mtp_soft_reason"] = (
                     f"speculative flags rejected (exit {_proc.returncode})"
@@ -3254,6 +3333,22 @@ def apply_rmb_settings(
 
     before = merge_state(load_rmb_json(home_dir))
     state = dict(before)
+    rejected: dict[str, Any] = {}
+
+    # ``use_jinja`` ownership: an explicit patch pins the value against
+    # auto-load; the string "auto" hands it back to GGUF detection.
+    if isinstance(patch.get("use_jinja"), str) and patch["use_jinja"].strip().lower() == "auto":
+        patch = {k: v for k, v in patch.items() if k != "use_jinja"}
+        state["use_jinja_owner"] = False
+        with contextlib.suppress(Exception):
+            mp = str(state.get("model_path") or "").strip()
+            if mp:
+                state["use_jinja"] = bool(
+                    detect_gguf_host_profile(mp).get("use_jinja", True)
+                )
+    elif "use_jinja" in patch and patch["use_jinja"] is not None:
+        state["use_jinja_owner"] = True
+
     for key in (
         "enabled",
         "auto_start",
@@ -3353,27 +3448,37 @@ def apply_rmb_settings(
             except (TypeError, ValueError):
                 continue
         elif key == "thinking" and patch[key] is not None:
-            state[key] = normalize_thinking(patch[key])
+            # Unknown words must not silently flip thinking ON ("disable",
+            # typos). Reject so the caller learns instead of believing off.
+            if thinking_value_known(patch[key]):
+                state[key] = normalize_thinking(patch[key])
+            else:
+                rejected[key] = patch[key]
+                continue
         elif key == "enable_mtp" and patch[key] is not None:
             state[key] = owner_flag_on(patch[key], default=True)
         elif key == "n_cpu_moe" and patch[key] is not None:
             try:
-                state[key] = max(-1, min(256, int(patch[key])))
+                state[key] = max(N_CPU_MOE_MIN, min(N_CPU_MOE_MAX, int(patch[key])))
             except (TypeError, ValueError):
                 continue
         elif key == "reasoning_budget" and patch[key] is not None:
             try:
-                state[key] = max(-1, min(100_000, int(patch[key])))
+                state[key] = max(
+                    REASONING_BUDGET_MIN, min(REASONING_BUDGET_MAX, int(patch[key]))
+                )
             except (TypeError, ValueError):
                 continue
         elif key == "spec_draft_n_max" and patch[key] is not None:
             try:
-                state[key] = max(0, min(8, int(patch[key])))
+                # 0 = auto from GGUF; owner values clamp to the shared range.
+                state[key] = max(0, min(SPEC_DRAFT_N_MAX_MAX, int(patch[key])))
             except (TypeError, ValueError):
                 continue
         elif key == "n_gpu_layers_draft" and patch[key] is not None:
             try:
-                state[key] = max(0, min(99, int(patch[key])))
+                # 0 = auto; owner values clamp to the shared range.
+                state[key] = max(0, min(N_GPU_LAYERS_DRAFT_MAX, int(patch[key])))
             except (TypeError, ValueError):
                 continue
         elif key == "mirostat" and patch[key] is not None:
@@ -3447,7 +3552,9 @@ def apply_rmb_settings(
         if key not in patch or patch[key] is None:
             continue
         state[key] = bool(patch[key])
-    for key in ("mmproj", "chat_template", "cache_type", "tensor_split", "samplers", "rope_scaling", "model_draft"):
+    # model_draft is already normalized in the main loop above — do not
+    # re-process it here.
+    for key in ("mmproj", "chat_template", "cache_type", "tensor_split", "samplers", "rope_scaling"):
         if key not in patch:
             continue
         state[key] = str(patch[key]).strip() if patch[key] else ""
@@ -3774,6 +3881,13 @@ def apply_rmb_settings(
     status = get_rmb_status(cfg)
     status["live_apply"] = live_meta
     status["chat_sync"] = chat_sync
+    if rejected:
+        status["rejected_settings"] = rejected
+        status["rejected_note"] = (
+            "Some values were not applied: "
+            + ", ".join(f"{k}={v!r}" for k, v in rejected.items())
+            + " (thinking accepts on/off)"
+        )
     # Canonical stem for UI (status bar + provider form)
     if chat_sync.get("stem"):
         status["chat_model"] = chat_sync["stem"]
