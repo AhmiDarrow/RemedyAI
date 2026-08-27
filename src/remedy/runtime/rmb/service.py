@@ -2902,6 +2902,8 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
             "mmproj": state.get("mmproj") or "",
             "chat_template": state.get("chat_template") or "",
             "use_jinja": bool(state.get("use_jinja", True)),
+            # False = GGUF detection drives use_jinja; True = owner pinned it.
+            "use_jinja_owner": bool(state.get("use_jinja_owner", False)),
             "rope_freq_scale": state.get("rope_freq_scale"),
             "rope_freq_base": state.get("rope_freq_base"),
             "mlock": bool(state.get("mlock", False)),

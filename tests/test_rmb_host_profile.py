@@ -548,3 +548,39 @@ def test_merged_state_cached_tracks_saves(tmp_path):
     assert merged_state_cached(tmp_path) is first
     save_rmb_json(merge_state({"thinking": "off"}), tmp_path)
     assert merged_state_cached(tmp_path).get("thinking") == "off"
+
+
+def test_markerless_jinja_heal_is_visible_on_the_card():
+    """Correcting a markerless use_jinja must warn on the card, not be silent."""
+    state: dict = {"use_jinja": False}
+    prof = detect_gguf_host_profile(Path("Qwen3.5-9B-Q4_K_M.gguf"))
+    apply_host_profile_to_state(state, prof, preserve={"use_jinja"})
+    assert state["use_jinja"] is True
+    assert any("jinja" in w.lower() and "pin" in w.lower() for w in prof["warnings"])
+    # Owner-pinned values are preserved with no warning.
+    state2: dict = {"use_jinja": False, "use_jinja_owner": True}
+    prof2 = detect_gguf_host_profile(Path("Qwen3.5-9B-Q4_K_M.gguf"))
+    apply_host_profile_to_state(state2, prof2, preserve={"use_jinja"})
+    assert state2["use_jinja"] is False
+    assert not any("jinja templates auto-set" in w.lower() for w in prof2["warnings"])
+    # No stored value → nothing to heal, no warning.
+    state3: dict = {}
+    prof3 = detect_gguf_host_profile(Path("Qwen3.5-9B-Q4_K_M.gguf"))
+    apply_host_profile_to_state(state3, prof3, preserve={"use_jinja"})
+    assert state3["use_jinja"] is True
+    assert not any("jinja templates auto-set" in w.lower() for w in prof3["warnings"])
+
+
+def test_status_engine_reports_use_jinja_owner(tmp_path, monkeypatch):
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    from remedy.runtime.rmb.config import merge_state, save_rmb_json
+    from remedy.runtime.rmb.service import apply_rmb_settings
+
+    save_rmb_json(merge_state({}), tmp_path)
+    out = apply_rmb_settings({}, home_dir=str(tmp_path), live=False)
+    assert out["engine"]["use_jinja_owner"] is False
+    out = apply_rmb_settings({"use_jinja": "off"}, home_dir=str(tmp_path), live=False)
+    assert out["engine"]["use_jinja"] is False
+    assert out["engine"]["use_jinja_owner"] is True
+    out = apply_rmb_settings({"use_jinja": "auto"}, home_dir=str(tmp_path), live=False)
+    assert out["engine"]["use_jinja_owner"] is False

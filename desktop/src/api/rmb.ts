@@ -66,6 +66,8 @@ export interface RmbStatus {
     mmproj?: string
     chat_template?: string
     use_jinja?: boolean
+    /** false = GGUF detection drives use_jinja; true = owner pinned it. */
+    use_jinja_owner?: boolean
     rope_freq_scale?: number | null
     rope_freq_base?: number | null
     mlock?: boolean

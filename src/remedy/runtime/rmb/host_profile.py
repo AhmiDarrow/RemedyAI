@@ -620,7 +620,21 @@ def apply_host_profile_to_state(
     prof = profile if isinstance(profile, dict) else _empty_profile()
     keep = preserve or set()
     if "use_jinja" not in keep or not state.get("use_jinja_owner"):
-        state["use_jinja"] = bool(prof.get("use_jinja", True))
+        want = bool(prof.get("use_jinja", True))
+        had = state.get("use_jinja")
+        if had is not None and bool(had) != want and not state.get("use_jinja_owner"):
+            # Healing must be visible, not silent: a stored value with no
+            # owner marker (stale auto-write, or an owner choice from before
+            # the marker existed) was just corrected. The note rides on the
+            # profile so the card shows it; *profile* is mutated on purpose.
+            note = (
+                f"Jinja templates auto-set to {'on' if want else 'off'} for "
+                f"this model (was {'on' if bool(had) else 'off'}). If that "
+                "was your setting, flip Jinja in Settings once to pin it."
+            )
+            prof["warnings"] = [*prof.get("warnings", []), note]
+            logger.info("RMB auto-load: %s", note)
+        state["use_jinja"] = want
     if "no_mmap" not in keep:
         state["no_mmap"] = bool(prof.get("no_mmap", False))
     if prof.get("force_parallel_1") and "parallel" not in keep:
