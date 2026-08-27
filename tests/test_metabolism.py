@@ -752,6 +752,18 @@ def test_time_crystal_does_not_inject_previous_job_on_new_session():
     assert looks_like_job_resume_fact("Stay with: Continue wiring MTP") is True
     assert looks_like_job_resume_fact("Prefer typed APIs") is False
     assert looks_like_job_resume_fact("Continue to prefer typed APIs") is False
+    assert looks_like_job_resume_fact(
+        "Continue remaining work from the last successful tool"
+    ) is True
+    resume = tc.admit(
+        "Continue remaining work from the last successful tool",
+        horizon="session",
+        source="soul_open_thread",
+    )
+    assert resume is not None
+    resume.hits = 9
+    tc.promote_session_to_project(min_hits=2)
+    assert resume.horizon == "session"
 
 
 def test_time_crystal_never_promotes_secrets():

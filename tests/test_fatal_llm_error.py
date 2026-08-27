@@ -87,6 +87,69 @@ def test_deepseek_force_tool_choice_stays_auto() -> None:
     assert body.get("tool_choice") == "auto"
 
 
+def test_xai_tool_rounds_do_not_stream() -> None:
+    """Live 2026-08-27: grok-4.6 SSE tool rounds RST mid-chunk on long builds."""
+    from types import SimpleNamespace
+
+    from remedy.core.react_loop.build_request import build_step_request_body
+
+    class _Adapter:
+        uses_openai_sse = True
+
+        def auth_headers(self, _key: str) -> dict:
+            return {}
+
+        def chat_endpoint(self, _base: str) -> str:
+            return "https://api.x.ai/v1/chat/completions"
+
+        def build_body(self, **kwargs: object) -> dict:
+            return {
+                "stream": kwargs.get("stream"),
+                "tools": kwargs.get("tools"),
+                "model": kwargs.get("model"),
+            }
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "file_read",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+    bind = SimpleNamespace(
+        provider="xai",
+        model="grok-4.6",
+        api_key="x",
+        base_url="https://api.x.ai/v1",
+        adapter=lambda: _Adapter(),
+    )
+    runtime = SimpleNamespace(_llm_max_output_tokens=256)
+    body, _h, _ep, sse = build_step_request_body(
+        runtime=runtime,
+        bind=bind,
+        adapter=_Adapter(),
+        messages=[{"role": "user", "content": "read it"}],
+        step_tools=tools,
+        step=1,
+        user_message="read it",
+    )
+    assert body.get("stream") is False
+    assert sse is False
+    final, _h2, _ep2, sse2 = build_step_request_body(
+        runtime=runtime,
+        bind=bind,
+        adapter=_Adapter(),
+        messages=[{"role": "user", "content": "read it"}],
+        step_tools=None,
+        step=2,
+        user_message="read it",
+    )
+    assert final.get("stream") is True
+    assert sse2 is True
+
+
 def test_thinking_tool_choice_mismatch_is_recoverable() -> None:
     body = (
         '{"error":{"message":"Thinking mode does not support this tool_choice",'

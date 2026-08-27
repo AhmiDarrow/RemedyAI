@@ -69,11 +69,16 @@ def resolve_and_apply_tools(
     # Explicit non-work / Chat pin (Reply only STILLALIVE) stay stripped —
     # keep_armed was re-arming those after a pseudo-tool dump and looping.
     prev_armed = bool(getattr(turn, "tools", None))
+    prev_driven = bool(getattr(turn, "run_until_done", False))
     reason = str(getattr(decision, "reason", "") or "")
+    peek_or_empty = (
+        decision.tools is None or str(getattr(decision, "pack", "") or "") == "peek"
+    )
     if (
         int(step_index or 0) > 0
         and prev_armed
-        and decision.tools is None
+        and prev_driven
+        and peek_or_empty
         and reason in {"l1_pure_chat", "no_work_request", "ask_first"}
     ):
         turn.rearm(reason="keep_armed")

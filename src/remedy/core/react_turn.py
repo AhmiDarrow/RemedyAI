@@ -105,6 +105,7 @@ class TurnState:
     tools: list[dict[str, Any]] | None = None
     run_until_done: bool = False
     arm_reason: str = ""
+    pack: str = "none"
     # Counters
     tools_executed: int = 0
     tool_batches: int = 0
@@ -127,6 +128,10 @@ class TurnState:
     fingerprint_loop_hits: int = 0
     evidence_inject_eu: int = -1
     mission_gate_nudge_done: bool = False
+    # After a mid-SSE RST (WinError 64 / TransferEncodingError) keep the rest
+    # of the turn on a single JSON POST. Re-enabling stream on the next step
+    # is what made xAI drop three times in one Quickcast turn (2026-08-27).
+    force_nonstream: bool = False
 
     def tools_armed(self) -> bool:
         """True when tool schemas will actually be sent this step."""
@@ -264,6 +269,7 @@ class TurnState:
 
     def note_disconnect_retry(self) -> None:
         self.disconnect_retries += 1
+        self.force_nonstream = True
 
     def note_fingerprint_loop(self) -> int:
         """Increment fingerprint-loop hits; return new count."""
@@ -424,10 +430,22 @@ def resolve_tools(
     # Bare greetings/acks never inherit leftover build_active or open_tasks.
     # "Hi keep going" is not chat-only (action-kick) and stays armed below.
     # Attachments are a request to look — do not treat a blank caption as Hi.
+    # A 'yes' after Remedy's own "want me to add X?" is a continue, not chat.
+    offered_confirm = False
+    with suppress(Exception):
+        from remedy.core.react_policy import confirmation_continues_offered_work
+
+        offered_confirm = confirmation_continues_offered_work(
+            message or "", history
+        )
     with suppress(Exception):
         from remedy.core.react_policy import is_chat_only_message
 
-        if is_chat_only_message(message or "") and not has_att:
+        if (
+            is_chat_only_message(message or "")
+            and not has_att
+            and not offered_confirm
+        ):
             logger.info("react_tools disarm reason=l1_pure_chat")
             return ToolsDecision(None, False, "l1_pure_chat", pack="none")
 
@@ -477,6 +495,8 @@ def resolve_tools(
             msg_wants = bool(consult(message or "", regex_verdict=bool(msg_wants)))
 
     if has_att:
+        msg_wants = True
+    if offered_confirm:
         msg_wants = True
 
     local = False
@@ -556,6 +576,28 @@ def resolve_tools(
     # it can look before asking. Strictly added ability.
     peek = _readonly_peek_tools(all_t)
     if open_work:
+        ack = False
+        knowledge = False
+        with suppress(Exception):
+            from remedy.core.react_policy import (
+                is_ambiguous_ack_message,
+                is_knowledge_question,
+            )
+
+            ack = is_ambiguous_ack_message(message or "")
+            knowledge = is_knowledge_question(message or "")
+        # Long session: leftover work + a real follow-up is a continue.
+        # Only short acks / knowledge questions still ask first.
+        # Live 2026-08-26: "ok on to assets" / "fix the movement issues"
+        # became "are we just talking?" and killed the build.
+        if not ack and not knowledge:
+            logger.info("react_tools arm reason=open_work_continue pack=full")
+            return ToolsDecision(all_t, True, "open_work_continue", pack="full")
+        # One peek round, then the one question. Extra peek steps were the
+        # 2026-08-27 Firefox turn: 18 file_reads, no writes, minutes of "loop".
+        if int(step_index or 0) > 0:
+            logger.info("react_tools disarm reason=ask_first peek_spent")
+            return ToolsDecision(None, False, "ask_first", pack="none")
         logger.info("react_tools soft-disarm reason=ask_first pack=peek")
         return ToolsDecision(peek, False, "ask_first", pack="peek" if peek else "none")
 
@@ -569,6 +611,7 @@ def apply_tools_decision(state: TurnState, decision: ToolsDecision) -> None:
     state.tools = decision.tools
     state.run_until_done = decision.run_until_done
     state.arm_reason = decision.reason
+    state.pack = str(getattr(decision, "pack", "") or "none")
     if decision.run_until_done and state.phase == "idle":
         state.phase = "research"
 
@@ -647,6 +690,29 @@ def synthesize_from_tools(
     return text
 
 
+def is_connect_refused_error(exc: BaseException | str) -> bool:
+    """True when nothing is listening — not a mid-stream RST.
+
+    Live 2026-08-26: 'review project' hit 127.0.0.1:8787 refused, then eight
+    'disconnect' retries + RMB waits instead of saying the local model is off.
+    """
+    s = str(exc or "").lower()
+    return any(
+        x in s
+        for x in (
+            "actively refused",
+            "connection refused",
+            "winerror 10061",
+            "errno 111",
+            "errno 61",
+            "10061",
+        )
+    ) or (
+        "cannot connect" in s
+        and ("refused" in s or "8787" in s or "127.0.0.1" in s)
+    )
+
+
 def is_disconnect_error(exc: BaseException | str) -> bool:
     s = str(exc or "").lower()
     return any(
@@ -658,6 +724,8 @@ def is_disconnect_error(exc: BaseException | str) -> bool:
             "clientconnectorerror",
             "cannot connect",
             "transferencodingerror",
+            "clientpayloaderror",
+            "payload is not completed",
             "not enough data",
             "connection aborted",
             "broken pipe",

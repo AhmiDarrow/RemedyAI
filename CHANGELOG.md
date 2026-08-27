@@ -4,6 +4,22 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed — long desktop sessions keep building
+
+- A follow-up like "ok on to assets" or "needs to work for Firefox and Chrome"
+  no longer asks "are we just talking?" and drops the job. Short acks
+  (`Good deal`, `sounds good`) still ask.
+- Saying **yes** after Remedy's own "want me to add X?" continues the work.
+- `ask_first` may peek once, then it must ask or stop — no 18-step
+  `file_read` loop.
+- xAI/Grok **tool** rounds no longer stream (same as local RMB). Mid-chunk
+  TCP resets were killing long grok-4.6 builds; a drop now keeps the rest
+  of the turn on a single JSON POST.
+- RMB port refused is "local model is off", not eight disconnect waits.
+- Partner nudges are system notes, not fake owner messages.
+- `web_fetch` ignores in-app browser text unless that tab's URL matches.
+- Checkpoint leftover "continue the last tool" is not a durable job.
+
 ## [0.41.5] - 2026-08-26
 
 ### Changed — RMB thinking is an option, default on

@@ -450,6 +450,16 @@ async def run_react_steps(s: Any) -> AsyncIterator[str]:
             s.run_until_done = run_until_done
 
         _resolve_and_apply(step_index=0)
+        if str(getattr(turn, "arm_reason", "") or "") in (
+            "ask_first",
+            "no_work_request",
+            "l1_pure_chat",
+            "knowledge",
+            "non_work",
+        ):
+            # Leftover todos must not spin empty force_answer steps (14-step
+            # ask_first loop 2026-08-26). One answer, then stop.
+            max_empty_answer_retries = min(int(max_empty_answer_retries or 0), 1)
         if str(getattr(turn, "arm_reason", "") or "") == "ask_first":
             with suppress(Exception):
                 from remedy.core.react_policy import ask_first_nudge_message
@@ -463,15 +473,18 @@ async def run_react_steps(s: Any) -> AsyncIterator[str]:
                 yield todos_event_token(_existing_todos)
 
         def _armed_tool_names() -> set[str]:
-            """Names the model may legitimately call this step."""
+            """Names the model may legitimately call this step.
+
+            Only the pack actually sent (peek vs full). Unioning ``all_tools``
+            let DSML recovery treat writes as armed during ask_first peek.
+            """
             names: set[str] = set()
-            for src in (tools, all_tools):
-                for _t in src or []:
-                    if not isinstance(_t, dict):
-                        continue
-                    _fn = _t.get("function")
-                    if isinstance(_fn, dict) and _fn.get("name"):
-                        names.add(str(_fn["name"]).strip().lower())
+            for _t in tools or []:
+                if not isinstance(_t, dict):
+                    continue
+                _fn = _t.get("function")
+                if isinstance(_fn, dict) and _fn.get("name"):
+                    names.add(str(_fn["name"]).strip().lower())
             return names
 
         def _rearm_agency_tools() -> None:
@@ -1016,6 +1029,14 @@ async def run_react_steps(s: Any) -> AsyncIterator[str]:
                     and (_work_unfinished() or armed_ceiling_needs_a_tool_round)
                     and all_tools
                     and not message_asks_to_stop(message or "")
+                    and str(getattr(turn, "arm_reason", ""))
+                    not in (
+                        "ask_first",
+                        "no_work_request",
+                        "l1_pure_chat",
+                        "non_work",
+                        "knowledge",
+                    )
                     and (
                         zero_tool_drive_count < max_zero_tool_drives
                         or _open_drive_keeps_going()

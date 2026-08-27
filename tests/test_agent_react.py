@@ -353,13 +353,14 @@ async def test_react_loop_recovery_nudge_on_tool_error():
 
     assert "Recovered" in text
     assert session.posts == 2
-    # Second request must include the recovery nudge user message.
+    # Second request must include the recovery nudge (system, possibly
+    # merged into the leading system message — never a fake owner line).
     assert len(session.bodies) >= 2
     second_msgs = session.bodies[1].get("messages") or []
     nudge_msgs = [
         m
         for m in second_msgs
-        if m.get("role") == "user" and RECOVERY_NUDGE in str(m.get("content") or "")
+        if RECOVERY_NUDGE in str(m.get("content") or "")
     ]
     assert len(nudge_msgs) == 1
 
@@ -463,8 +464,7 @@ async def test_react_loop_agency_rearm_after_activating_skill_prose():
     continued = [
         m
         for m in second_msgs
-        if m.get("role") == "user"
-        and (
+        if (
             AGENCY_REARM_NUDGE in str(m.get("content") or "")
             or "function-calling" in str(m.get("content") or "").lower()
             or "native function-calling" in str(m.get("content") or "").lower()

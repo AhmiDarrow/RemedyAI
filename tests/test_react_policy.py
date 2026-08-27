@@ -18,6 +18,7 @@ from remedy.core.react_policy import (
     batch_has_tool_errors,
     build_keeps_tools_armed,
     collapse_repeated_sentences,
+    confirmation_continues_offered_work,
     is_chat_only_message,
     is_feeling_presence_question,
     is_knowledge_question,
@@ -51,11 +52,34 @@ def test_ask_first_nudge_is_one_question_not_a_ledger() -> None:
     assert "do not start tools" in low
     assert "ledger" in low
     msg = ask_first_nudge_message()
-    assert msg["role"] == "user"
+    assert msg["role"] == "system"
     assert ASK_FIRST_NUDGE in msg["content"]
     body = _DEFAULT_SYSTEM_BODY.lower()
     assert "when unsure" in body
     assert "do not guess" in body
+
+
+def test_yes_after_want_me_to_is_work_confirmation() -> None:
+    """Live 2026-08-27: Remedy asked, owner said yes — that is a continue."""
+    history = [
+        {
+            "role": "assistant",
+            "content": (
+                "Firefox + Chrome for Quickcast intercept — want me to add "
+                "Firefox now, or are we just talking?"
+            ),
+        }
+    ]
+    assert confirmation_continues_offered_work("yes", history) is True
+    assert confirmation_continues_offered_work(
+        "yes need to work for both firefox AND chrome", history
+    ) is True
+    assert confirmation_continues_offered_work("correct", history) is True
+    assert confirmation_continues_offered_work("Good deal", history) is False
+    assert confirmation_continues_offered_work("yes", []) is False
+    assert confirmation_continues_offered_work(
+        "yes", [{"role": "assistant", "content": "How are you doing?"}]
+    ) is False
 
 
 def test_serial_explore_batch_detection() -> None:
@@ -70,7 +94,7 @@ def test_serial_explore_batch_detection() -> None:
     assert is_serial_explore_batch([]) is False
     assert "batch" in SPEED_BATCH_NUDGE.lower() or "tool_calls" in SPEED_BATCH_NUDGE
     msg = speed_batch_nudge_message()
-    assert msg["role"] == "user"
+    assert msg["role"] == "system"
     assert "Speed" in msg["content"] or "speed" in msg["content"].lower()
 
 
@@ -99,6 +123,17 @@ def test_message_wants_tools_chat_vs_code() -> None:
         "the settings and about ui they require scrolling to see and "
         "don't need to be that large"
     ) is True
+    # Live 2026-08-27 Quickcast: product requirement, not chit-chat.
+    assert message_wants_tools("needs to work for Firefox and Chrome") is True
+    assert message_wants_tools(
+        "yes need to work for both firefox AND chrome"
+    ) is True
+    assert message_wants_tools("make it work for firefox") is True
+    assert message_wants_tools("add firefox") is True
+    assert message_wants_tools("ok on to assets") is True
+    assert message_wants_tools("fix the movement issues") is True
+    # Still talk, not a browser-port request.
+    assert message_wants_tools("I use firefox sometimes") is False
 
 
 def test_runtime_turn_is_chat_only() -> None:
@@ -278,7 +313,7 @@ def test_unfinished_work_blocks_final_class() -> None:
     # Length of the model's prose is irrelevant — user asked for work.
     assert unfinished_work_blocks_final(work, tools_executed=0) is True
     nudge = unfinished_work_nudge_message()
-    assert nudge["role"] == "user"
+    assert nudge["role"] == "system"
     assert UNFINISHED_WORK_NUDGE in nudge["content"]
     assert "function-calling" in nudge["content"].lower()
     assert unfinished_work_hard_stop_message() == UNFINISHED_WORK_HARD_STOP
@@ -346,7 +381,7 @@ def test_agency_tool_promise_claim_hard_and_soft() -> None:
     assert agency_tool_promise_claim(long_debug) is False
     # Nudge message shape for loop injection
     nudge = agency_rearm_nudge_message()
-    assert nudge["role"] == "user"
+    assert nudge["role"] == "system"
     assert AGENCY_REARM_NUDGE in nudge["content"]
     assert "function-calling" in nudge["content"].lower()
 
@@ -693,7 +728,7 @@ def test_batch_has_tool_errors_and_nudge() -> None:
     assert batch_has_tool_errors([ok]) is False
     assert batch_has_tool_errors([ok, bad]) is True
     nudge = recovery_nudge_message()
-    assert nudge["role"] == "user"
+    assert nudge["role"] == "system"
     assert nudge["content"] == RECOVERY_NUDGE
     assert "Recover" in RECOVERY_NUDGE
 
@@ -799,5 +834,5 @@ def test_collapse_preserves_markdown_structure() -> None:
     assert ":root" not in clipped
     assert "█" not in clipped
     nudge = post_tools_user_summary_nudge()
-    assert nudge["role"] == "user"
+    assert nudge["role"] == "system"
     assert "scratchpad" in nudge["content"].lower() or "user-facing" in nudge["content"].lower()

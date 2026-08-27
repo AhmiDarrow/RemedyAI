@@ -344,12 +344,15 @@ def update_soul_after_turn(
 
     # Bridge durable pledges / strong arcs into Time Crystal when available
     with suppress(Exception):
-        from remedy.core.metabolism.time_crystal import get_time_crystal
+        from remedy.core.metabolism.time_crystal import (
+            get_time_crystal,
+            looks_like_job_resume_fact,
+        )
 
         tc = get_time_crystal(str(session_id or "") or "default")
         if open_t and len(open_t) >= 12:
-            tc.admit(open_t, horizon="session", source="soul_open_thread")
-        from remedy.core.metabolism.time_crystal import looks_like_job_resume_fact
+            if not looks_like_job_resume_fact(open_t, source="soul_open_thread"):
+                tc.admit(open_t, horizon="session", source="soul_open_thread")
 
         for p in sf.pledges[-2:]:
             # Identity pledges stay life. "Stay with: Continue…" is last-tab
