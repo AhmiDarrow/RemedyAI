@@ -3,7 +3,7 @@
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
 Current series: **v0.41.5** — **multilingual** (chrome + replies), then house/RMB polish.
-Last **public** release remains v0.38.1. Partner line still starts at 0.31.0.
+**Public** release is **[v0.41.5](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.41.5)** · PyPI **`remedy-ai==0.41.5`**. Partner line still starts at 0.31.0.
 
 ## Contents
 
@@ -16,17 +16,13 @@ Settings → RMB (or `rmb action=settings thinking=off`). Jinja, MTP, mmap,
 MoE CPU experts, draft layers, and reasoning budget are the same options
 list — auto-load no longer hides them.
 
-This tree is **v0.41.5**. Last public release is still
-[v0.38.1](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.38.1).
+**Public:** GitHub **[v0.41.5](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.41.5)** · PyPI **`remedy-ai==0.41.5`**.
 
 ## 0.41.4 - Local muscle without leftover jobs
 
 A new chat does not inherit the last tab's "keep going" job. Asking how a
 local model feels is an answer, not a tool storm. RMB lists GGUFs already
 in her house and keeps a sibling MTP draft across Settings restarts.
-
-This tree is **v0.41.4**. Last public release is still
-[v0.38.1](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.38.1).
 
 ## 0.41.3 - She knows the house
 
@@ -35,17 +31,11 @@ switch chat onto it. She can list this PC's apps, walk the doors, and
 say which tool drives each organ. A build without tests is still not
 your goal done.
 
-This tree is **v0.41.3**. Last public release is still
-[v0.38.1](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.38.1).
-
 ## 0.41.2 - Closed loop
 
 She does not call a page loaded until she has seen it. A build without tests
 is not your goal done. The phone keeps listening while a long turn runs.
 Memory inject stays small and labeled. Inbox drops wait until you ask.
-
-This tree is **v0.41.2**. Last public release is still
-[v0.38.1](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.38.1).
 
 ## 0.41.1 - Checkpoints on the wired path
 
@@ -55,9 +45,6 @@ field. Stored provider keys stay on that provider's own host. Setup saves
 keys into the secret store. High-quality voice stays opt-in. Self-inject
 apply asks you first. Telegram does not rewrite the chat's model. Linux
 can capture and click. Grove remembers your Studio chat.
-
-This tree is **v0.41.1**. Last public release is still
-[v0.38.1](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.38.1).
 
 ## 0.41.0 - Multilingual, Plan, and memory authority
 
@@ -72,7 +59,7 @@ Payment and credential checkpoints still cannot be recovered around. Stale
 screen snapshots are re-taken before a `ref=` click. The status-bar provider
 list hydrates at launch.
 
-Local series **0.41.0**. Last public tag remains **v0.38.1**.
+Shipped in the **0.41** public line (current tag **v0.41.5**).
 
 ## 0.38.1 - Trust gates
 
@@ -82,7 +69,7 @@ untrusted folder. **Trust** in Settings no longer snaps back to Balanced
 when you save something else. Voice status no longer stalls the window
 while engines load.
 
-PyPI **`remedy-ai==0.38.1`** · tag **v0.38.1**.
+Was public as PyPI **`remedy-ai==0.38.1`** · tag **v0.38.1** (superseded by **v0.41.5**).
 
 ## 0.38.0 - Capability architecture
 
