@@ -36,9 +36,10 @@ MAX_DISCONNECT_RETRIES = 8
 LOCAL_MAX_TOOLS_PER_STEP = 8
 # Cloud work pack. A 194-schema dump (33k→61k prompt) is never the live
 # round. Tight pack (xAI / Grok window) vs richer pack (Claude / GPT /
-# DeepSeek / Gemini / OpenRouter-non-Grok). Recall and job_run stay in
-# the core so every provider can remember and verify while operating.
-WORK_MAX_TOOLS_PER_STEP = 36
+# DeepSeek / Gemini / OpenRouter-non-Grok). Recall, job_run, and
+# git_diff stay in the core so every provider can remember, verify,
+# and review a patch while operating.
+WORK_MAX_TOOLS_PER_STEP = 38
 WORK_MAX_TOOLS_CLOUD = 64
 # Prefer these when capping — first-N used to drop host_run behind help/goal.
 _OPERATE_CORE_TOOLS = (
@@ -62,6 +63,7 @@ _OPERATE_CORE_TOOLS = (
     "mission_update",
     "mission_verify",
     "git_status",
+    "git_diff",
     "skill_activate",
     "computer_navigate",
     "computer_snapshot",

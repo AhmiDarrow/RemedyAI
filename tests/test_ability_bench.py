@@ -9,6 +9,7 @@ rounds, hive does not write the owner.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -34,8 +35,9 @@ from remedy.core.turn_context import (
 from remedy.memory.authority import is_hive_writer
 from remedy.memory.cas import EternalCAS
 from remedy.memory.middleman import MemoryItem, content_key
+from remedy.memory.profile import UserProfile
 from remedy.memory.store import MemoryStore
-from remedy.models import ChatSession, MemoryEntry
+from remedy.models import ChatSession, HandoffNote, MemoryEntry, SessionSummary
 
 
 def test_every_cloud_keeps_more_hands_than_local():
@@ -68,6 +70,8 @@ def test_every_cloud_keeps_recall_on_the_live_round():
         _schema("memory_search"),
         _schema("soul_recall"),
         _schema("job_run"),
+        _schema("git_status"),
+        _schema("git_diff"),
         _schema("help_list"),
     ]
     for provider, model, cap in (
@@ -87,6 +91,8 @@ def test_every_cloud_keeps_recall_on_the_live_round():
         assert "memory_search" in names, provider
         assert "soul_recall" in names, provider
         assert "job_run" in names, provider
+        assert "git_status" in names, provider
+        assert "git_diff" in names, provider
         assert "help_list" not in names, provider
 
 
@@ -291,4 +297,31 @@ async def test_chat_session_reads_run_off_the_event_loop(tmp_path, monkeypatch):
     del_before = off["n"]
     assert await store.delete_chat_session(sess.id) is True
     assert off["n"] > del_before
+    profile_before = off["n"]
+    profile = UserProfile(user_id="bench")
+    await store.save_user_profile(profile)
+    loaded = await store.load_user_profile("bench")
+    assert loaded is not None and loaded.user_id == "bench"
+    await store.search_user_facts("anything", user_id="bench")
+    assert off["n"] > profile_before
+    handoff_before = off["n"]
+    note = HandoffNote(title="bench note", content="carry this")
+    await store.create_handoff(note)
+    got_note = await store.get_handoff(note.id)
+    listed_notes = await store.list_handoffs(limit=5)
+    assert got_note is not None and got_note.title == "bench note"
+    assert any(n.id == note.id for n in listed_notes)
+    assert off["n"] > handoff_before
+    summary_before = off["n"]
+    summary = SessionSummary(
+        session_id="bench-sum",
+        started_at=datetime.now(UTC),
+        summary="wrapped",
+    )
+    await store.save_session_summary(summary)
+    got_sum = await store.get_session_summary("bench-sum")
+    listed_sum = await store.list_sessions(limit=5)
+    assert got_sum is not None and got_sum.summary == "wrapped"
+    assert any(s.session_id == "bench-sum" for s in listed_sum)
+    assert off["n"] > summary_before
     await store.close()

@@ -4,6 +4,19 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — git_diff on every live round; glob walks stop; remaining SQLite off the loop
+
+- ``git_diff`` (read-only, no approval) stays in the operate core so Claude /
+  GPT / DeepSeek / Gemini / OpenRouter / xAI can review the patch before
+  ``git_push``. Tight pack is 38; other clouds keep 64.
+- ``file_glob`` walks stop after 8s and skip huge-root OS trees (AppData,
+  Windows, …). A home-sized glob cannot occupy a worker until ``os.walk``
+  finishes.
+- User-profile save/load/facts, handoffs, and session summaries run off the
+  event loop. Distill during a turn no longer freezes chrome.
+- ``list_dir`` iterates the filesystem in a worker so a fat folder cannot
+  stall SSE.
+
 ### Added — verify jobs on every live round; remaining chrome SQLite off the loop
 
 - ``job_run`` stays in the operate core so Claude / GPT / DeepSeek / Gemini /

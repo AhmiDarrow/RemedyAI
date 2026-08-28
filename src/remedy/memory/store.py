@@ -738,32 +738,64 @@ class MemoryStore:
 
     # -- handoff notes -------------------------------------------------------
 
+    def _row_to_handoff(self, r: sqlite3.Row) -> HandoffNote:
+        return HandoffNote(
+            id=UUID(r["id"]),
+            title=r["title"],
+            content=r["content"],
+            tags=json.loads(r["tags"]),
+            from_session=r["from_session"],
+            to_session=r["to_session"],
+            context_summary=r["context_summary"],
+            action_items=json.loads(r["action_items"]),
+            decisions=json.loads(r["decisions"]),
+            created_at=datetime.fromisoformat(r["created_at"]),
+            acknowledged=bool(r["acknowledged"]),
+        )
+
+    def _row_to_session_summary(self, r: sqlite3.Row) -> SessionSummary:
+        return SessionSummary(
+            session_id=r["session_id"],
+            started_at=datetime.fromisoformat(r["started_at"]),
+            ended_at=datetime.fromisoformat(r["ended_at"]),
+            tasks_completed=r["tasks_completed"],
+            skills_created=r["skills_created"],
+            skills_refined=r["skills_refined"],
+            key_decisions=json.loads(r["key_decisions"]),
+            open_items=json.loads(r["open_items"]),
+            summary=r["summary"],
+        )
+
     async def create_handoff(self, note: HandoffNote) -> HandoffNote:
         """Persist a handoff note and optionally save it as a memory entry."""
-        with self._locked():
-            db = self._ensure_db()
-            db.execute(
-                """
-                INSERT OR REPLACE INTO handoff_notes
-                    (id, title, content, tags, from_session, to_session,
-                     context_summary, action_items, decisions, created_at, acknowledged)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    str(note.id),
-                    note.title,
-                    note.content,
-                    json.dumps(note.tags),
-                    note.from_session,
-                    note.to_session,
-                    note.context_summary,
-                    json.dumps(note.action_items),
-                    json.dumps(note.decisions),
-                    note.created_at.isoformat(),
-                    int(note.acknowledged),
-                ),
-            )
-            db.commit()
+
+        def _go() -> None:
+            with self._locked():
+                db = self._ensure_db()
+                db.execute(
+                    """
+                    INSERT OR REPLACE INTO handoff_notes
+                        (id, title, content, tags, from_session, to_session,
+                         context_summary, action_items, decisions, created_at, acknowledged)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(note.id),
+                        note.title,
+                        note.content,
+                        json.dumps(note.tags),
+                        note.from_session,
+                        note.to_session,
+                        note.context_summary,
+                        json.dumps(note.action_items),
+                        json.dumps(note.decisions),
+                        note.created_at.isoformat(),
+                        int(note.acknowledged),
+                    ),
+                )
+                db.commit()
+
+        await self._off_loop(_go)
 
         # Stable memory id = handoff id so re-saving the same note does not
         # duplicate rows in memory_entries.
@@ -786,26 +818,17 @@ class MemoryStore:
         return note
 
     async def get_handoff(self, handoff_id: str | UUID) -> HandoffNote | None:
-        with self._locked():
-            db = self._ensure_db()
-            row = db.execute(
-                "SELECT * FROM handoff_notes WHERE id = ?", (str(handoff_id),)
-            ).fetchone()
-        if row is None:
-            return None
-        return HandoffNote(
-            id=UUID(row["id"]),
-            title=row["title"],
-            content=row["content"],
-            tags=json.loads(row["tags"]),
-            from_session=row["from_session"],
-            to_session=row["to_session"],
-            context_summary=row["context_summary"],
-            action_items=json.loads(row["action_items"]),
-            decisions=json.loads(row["decisions"]),
-            created_at=datetime.fromisoformat(row["created_at"]),
-            acknowledged=bool(row["acknowledged"]),
-        )
+        def _go() -> HandoffNote | None:
+            with self._locked():
+                db = self._ensure_db()
+                row = db.execute(
+                    "SELECT * FROM handoff_notes WHERE id = ?", (str(handoff_id),)
+                ).fetchone()
+            if row is None:
+                return None
+            return self._row_to_handoff(row)
+
+        return await self._off_loop(_go)
 
     async def get_relevant_handoffs(
         self, query: str, limit: int = 5
@@ -814,195 +837,182 @@ class MemoryStore:
         q = (query or "").strip()
         safe = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         like_q = f"%{safe}%"
-        with self._locked():
-            db = self._ensure_db()
-            rows = db.execute(
-                "SELECT * FROM handoff_notes WHERE title LIKE ? ESCAPE '\\' "
-                "OR content LIKE ? ESCAPE '\\' "
-                "ORDER BY created_at DESC LIMIT ?",
-                (like_q, like_q, limit),
-            ).fetchall()
-        return [
-            HandoffNote(
-                id=UUID(r["id"]),
-                title=r["title"],
-                content=r["content"],
-                tags=json.loads(r["tags"]),
-                from_session=r["from_session"],
-                to_session=r["to_session"],
-                context_summary=r["context_summary"],
-                action_items=json.loads(r["action_items"]),
-                decisions=json.loads(r["decisions"]),
-                created_at=datetime.fromisoformat(r["created_at"]),
-                acknowledged=bool(r["acknowledged"]),
-            )
-            for r in rows
-        ]
+
+        def _go() -> list[HandoffNote]:
+            with self._locked():
+                db = self._ensure_db()
+                rows = db.execute(
+                    "SELECT * FROM handoff_notes WHERE title LIKE ? ESCAPE '\\' "
+                    "OR content LIKE ? ESCAPE '\\' "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (like_q, like_q, limit),
+                ).fetchall()
+            return [self._row_to_handoff(r) for r in rows]
+
+        return await self._off_loop(_go)
 
     async def list_handoffs(self, limit: int = 50) -> list[HandoffNote]:
-        with self._locked():
-            db = self._ensure_db()
-            rows = db.execute(
-                "SELECT * FROM handoff_notes ORDER BY created_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        return [
-            HandoffNote(
-                id=UUID(r["id"]),
-                title=r["title"],
-                content=r["content"],
-                tags=json.loads(r["tags"]),
-                from_session=r["from_session"],
-                to_session=r["to_session"],
-                context_summary=r["context_summary"],
-                action_items=json.loads(r["action_items"]),
-                decisions=json.loads(r["decisions"]),
-                created_at=datetime.fromisoformat(r["created_at"]),
-                acknowledged=bool(r["acknowledged"]),
-            )
-            for r in rows
-        ]
+        def _go() -> list[HandoffNote]:
+            with self._locked():
+                db = self._ensure_db()
+                rows = db.execute(
+                    "SELECT * FROM handoff_notes ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return [self._row_to_handoff(r) for r in rows]
+
+        return await self._off_loop(_go)
 
     async def ack_handoff(self, handoff_id: str | UUID) -> bool:
-        with self._locked():
-            db = self._ensure_db()
-            cursor = db.execute(
-                "UPDATE handoff_notes SET acknowledged = 1 WHERE id = ?",
-                (str(handoff_id),),
-            )
-            db.commit()
-            return cursor.rowcount > 0
+        def _go() -> bool:
+            with self._locked():
+                db = self._ensure_db()
+                cursor = db.execute(
+                    "UPDATE handoff_notes SET acknowledged = 1 WHERE id = ?",
+                    (str(handoff_id),),
+                )
+                db.commit()
+                return cursor.rowcount > 0
+
+        return await self._off_loop(_go)
 
     # -- session summaries ---------------------------------------------------
 
     async def save_session_summary(self, summary: SessionSummary) -> SessionSummary:
-        with self._locked():
-            db = self._ensure_db()
-            db.execute(
-                """
-                INSERT OR REPLACE INTO session_summaries
-                    (session_id, started_at, ended_at, tasks_completed, skills_created,
-                     skills_refined, key_decisions, open_items, summary)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    summary.session_id,
-                    summary.started_at.isoformat(),
-                    summary.ended_at.isoformat(),
-                    summary.tasks_completed,
-                    summary.skills_created,
-                    summary.skills_refined,
-                    json.dumps(summary.key_decisions),
-                    json.dumps(summary.open_items),
-                    summary.summary,
-                ),
-            )
-            db.commit()
-            return summary
+        def _go() -> SessionSummary:
+            with self._locked():
+                db = self._ensure_db()
+                db.execute(
+                    """
+                    INSERT OR REPLACE INTO session_summaries
+                        (session_id, started_at, ended_at, tasks_completed, skills_created,
+                         skills_refined, key_decisions, open_items, summary)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        summary.session_id,
+                        summary.started_at.isoformat(),
+                        summary.ended_at.isoformat(),
+                        summary.tasks_completed,
+                        summary.skills_created,
+                        summary.skills_refined,
+                        json.dumps(summary.key_decisions),
+                        json.dumps(summary.open_items),
+                        summary.summary,
+                    ),
+                )
+                db.commit()
+                return summary
+
+        return await self._off_loop(_go)
 
     async def get_session_summary(self, session_id: str) -> SessionSummary | None:
-        with self._locked():
-            db = self._ensure_db()
-            row = db.execute(
-                "SELECT * FROM session_summaries WHERE session_id = ?", (session_id,)
-            ).fetchone()
-        if row is None:
-            return None
-        return SessionSummary(
-            session_id=row["session_id"],
-            started_at=datetime.fromisoformat(row["started_at"]),
-            ended_at=datetime.fromisoformat(row["ended_at"]),
-            tasks_completed=row["tasks_completed"],
-            skills_created=row["skills_created"],
-            skills_refined=row["skills_refined"],
-            key_decisions=json.loads(row["key_decisions"]),
-            open_items=json.loads(row["open_items"]),
-            summary=row["summary"],
-        )
+        def _go() -> SessionSummary | None:
+            with self._locked():
+                db = self._ensure_db()
+                row = db.execute(
+                    "SELECT * FROM session_summaries WHERE session_id = ?", (session_id,)
+                ).fetchone()
+            if row is None:
+                return None
+            return self._row_to_session_summary(row)
+
+        return await self._off_loop(_go)
 
     async def list_sessions(self, limit: int = 50) -> list[SessionSummary]:
-        with self._locked():
-            db = self._ensure_db()
-            rows = db.execute(
-                "SELECT * FROM session_summaries ORDER BY ended_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        return [
-            SessionSummary(
-                session_id=r["session_id"],
-                started_at=datetime.fromisoformat(r["started_at"]),
-                ended_at=datetime.fromisoformat(r["ended_at"]),
-                tasks_completed=r["tasks_completed"],
-                skills_created=r["skills_created"],
-                skills_refined=r["skills_refined"],
-                key_decisions=json.loads(r["key_decisions"]),
-                open_items=json.loads(r["open_items"]),
-                summary=r["summary"],
-            )
-            for r in rows
-        ]
+        def _go() -> list[SessionSummary]:
+            with self._locked():
+                db = self._ensure_db()
+                rows = db.execute(
+                    "SELECT * FROM session_summaries ORDER BY ended_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return [self._row_to_session_summary(r) for r in rows]
+
+        return await self._off_loop(_go)
 
     # -- user profile ---------------------------------------------------------
 
     async def save_user_profile(self, profile: UserProfile) -> None:
-        with self._locked():
-            db = self._ensure_db()
-            now = datetime.now(UTC).isoformat()
-            # DELETE-then-reinsert must be all-or-nothing: an insert error after
-            # the DELETEs would otherwise leave the transaction open with the
-            # wipe applied, and the next commit on this shared connection would
-            # persist an empty profile. Roll back on any failure.
-            try:
-                db.execute(
-                    "INSERT OR REPLACE INTO user_profile (user_id, profile_json, updated_at) VALUES (?, ?, ?)",
-                    (profile.user_id, profile.model_dump_json(indent=2), now),
-                )
-
-                db.execute(
-                    "DELETE FROM user_facts WHERE user_id = ?", (profile.user_id,)
-                )
-                db.execute(
-                    "DELETE FROM user_traits WHERE user_id = ?", (profile.user_id,)
-                )
-
-                for fact in profile.facts:
+        def _go() -> None:
+            with self._locked():
+                db = self._ensure_db()
+                now = datetime.now(UTC).isoformat()
+                # DELETE-then-reinsert must be all-or-nothing: an insert error
+                # after the DELETEs would otherwise leave the transaction open
+                # with the wipe applied, and the next commit on this shared
+                # connection would persist an empty profile.
+                try:
                     db.execute(
-                        "INSERT OR REPLACE INTO user_facts (id, user_id, fact, category, confidence, "
-                        "source, created_at, last_referenced, reference_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (str(fact.id), profile.user_id, fact.fact, fact.category, fact.confidence,
-                         fact.source, fact.created_at.isoformat(), fact.last_referenced.isoformat(),
-                         fact.reference_count),
+                        "INSERT OR REPLACE INTO user_profile "
+                        "(user_id, profile_json, updated_at) VALUES (?, ?, ?)",
+                        (profile.user_id, profile.model_dump_json(indent=2), now),
                     )
-
-                for key, trait in profile.traits.items():
-                    import json as _json
                     db.execute(
-                        "INSERT OR REPLACE INTO user_traits (user_id, key, value_json, confidence, "
-                        "source, first_observed, last_updated, observation_count) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                        (profile.user_id, key, _json.dumps(trait.value, default=str),
-                         trait.confidence, trait.source,
-                         trait.first_observed.isoformat(), trait.last_updated.isoformat(),
-                         trait.observation_count),
+                        "DELETE FROM user_facts WHERE user_id = ?", (profile.user_id,)
                     )
+                    db.execute(
+                        "DELETE FROM user_traits WHERE user_id = ?", (profile.user_id,)
+                    )
+                    for fact in profile.facts:
+                        db.execute(
+                            "INSERT OR REPLACE INTO user_facts "
+                            "(id, user_id, fact, category, confidence, "
+                            "source, created_at, last_referenced, reference_count) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (
+                                str(fact.id),
+                                profile.user_id,
+                                fact.fact,
+                                fact.category,
+                                fact.confidence,
+                                fact.source,
+                                fact.created_at.isoformat(),
+                                fact.last_referenced.isoformat(),
+                                fact.reference_count,
+                            ),
+                        )
+                    for key, trait in profile.traits.items():
+                        import json as _json
 
-                db.commit()
-            except Exception:
-                with contextlib.suppress(Exception):
-                    db.rollback()
-                raise
+                        db.execute(
+                            "INSERT OR REPLACE INTO user_traits "
+                            "(user_id, key, value_json, confidence, "
+                            "source, first_observed, last_updated, observation_count) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                            (
+                                profile.user_id,
+                                key,
+                                _json.dumps(trait.value, default=str),
+                                trait.confidence,
+                                trait.source,
+                                trait.first_observed.isoformat(),
+                                trait.last_updated.isoformat(),
+                                trait.observation_count,
+                            ),
+                        )
+                    db.commit()
+                except Exception:
+                    with contextlib.suppress(Exception):
+                        db.rollback()
+                    raise
+
+        await self._off_loop(_go)
 
     async def load_user_profile(self, user_id: str = "default") -> UserProfile | None:
-        with self._locked():
-            db = self._ensure_db()
-            row = db.execute(
-                "SELECT profile_json FROM user_profile WHERE user_id = ?", (user_id,)
-            ).fetchone()
-        if row is None:
-            return None
-        data = json.loads(row["profile_json"])
-        profile = UserProfile(**data)
-        return profile
+        def _go() -> UserProfile | None:
+            with self._locked():
+                db = self._ensure_db()
+                row = db.execute(
+                    "SELECT profile_json FROM user_profile WHERE user_id = ?",
+                    (user_id,),
+                ).fetchone()
+            if row is None:
+                return None
+            data = json.loads(row["profile_json"])
+            return UserProfile(**data)
+
+        return await self._off_loop(_go)
 
     async def get_or_create_profile(self, user_id: str = "default") -> UserProfile:
         profile = await self.load_user_profile(user_id)
@@ -1011,15 +1021,21 @@ class MemoryStore:
             await self.save_user_profile(profile)
         return profile
 
-    async def search_user_facts(self, query: str, user_id: str = "default", limit: int = 10) -> list[dict]:
-        with self._locked():
-            db = self._ensure_db()
-            rows = db.execute(
-                "SELECT * FROM user_facts WHERE user_id = ? AND (fact LIKE ? OR category LIKE ?) "
-                "ORDER BY reference_count DESC LIMIT ?",
-                (user_id, f"%{query}%", f"%{query}%", limit),
-            ).fetchall()
-        return [dict(r) for r in rows]
+    async def search_user_facts(
+        self, query: str, user_id: str = "default", limit: int = 10
+    ) -> list[dict]:
+        def _go() -> list[dict]:
+            with self._locked():
+                db = self._ensure_db()
+                rows = db.execute(
+                    "SELECT * FROM user_facts WHERE user_id = ? AND "
+                    "(fact LIKE ? OR category LIKE ?) "
+                    "ORDER BY reference_count DESC LIMIT ?",
+                    (user_id, f"%{query}%", f"%{query}%", limit),
+                ).fetchall()
+            return [dict(r) for r in rows]
+
+        return await self._off_loop(_go)
 
     # -- chat sessions --------------------------------------------------------
 

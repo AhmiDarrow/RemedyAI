@@ -118,15 +118,27 @@ def test_the_gate_is_asked_about_the_exact_command(approvals):
 # --- registration -----------------------------------------------------------
 
 
-def test_all_four_ship_tools_are_registered(tmp_path):
+def test_all_ship_tools_are_registered(tmp_path):
     rt = RT(tmp_path)
     S.register_ship_tools(rt)
     assert set(rt.tool_registry.tools) == {
         "git_status",
+        "git_diff",
         "git_push",
         "gh_release",
         "ship_status",
     }
+
+
+@pytest.mark.asyncio
+async def test_git_diff_is_read_only_and_never_asks(tmp_path, approvals):
+    fake = approvals(ask="pushes to a remote", approved=False)
+    rt = RT(tmp_path)
+    S.register_ship_tools(rt)
+    out = await rt.tool_registry.tools["git_diff"]()
+    assert fake.created == []
+    assert "APPROVAL_REQUIRED" not in out
+    assert "git_diff" in out.lower()
 
 
 @pytest.mark.asyncio
