@@ -70,6 +70,7 @@ def _get_conn(home: Path | str | None = None) -> sqlite3.Connection:
         conn.executescript(_SCHEMA)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         _conn = conn
         _path = path
         return conn

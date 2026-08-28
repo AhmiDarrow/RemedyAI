@@ -4,12 +4,20 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — verify jobs on every live round; remaining chrome SQLite off the loop
+
+- ``job_run`` stays in the operate core so Claude / GPT / DeepSeek / Gemini /
+  OpenRouter / xAI can verify in the background the way they edit and click.
+  Tight pack is 36; other clouds keep 64.
+- Session delete, clear, revert, and bulk memory writes run off the event
+  loop. Usage ledger sets ``busy_timeout`` like the other SQLite homes.
+
 ### Added — recall on every provider's live round; FTS off the loop
 
 - ``memory_search`` and ``soul_recall`` stay in the operate core so Claude,
   GPT, DeepSeek, Gemini, OpenRouter, and xAI can look up partner memory
-  while they code or click. Tight pack is 34 (xAI window); other clouds
-  keep 64. Catalog is still uncapped.
+  while they code or click. Tight pack (xAI window) plus ``job_run``;
+  other clouds keep 64. Catalog is still uncapped.
 - Memory FTS / LIKE / upsert run in a worker thread. Speculative prep
   calls ``search_sync`` instead of ``asyncio.run`` on a background thread.
 - CAS objects.db sets ``busy_timeout`` like memory.db.

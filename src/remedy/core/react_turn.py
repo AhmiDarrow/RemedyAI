@@ -36,9 +36,9 @@ MAX_DISCONNECT_RETRIES = 8
 LOCAL_MAX_TOOLS_PER_STEP = 8
 # Cloud work pack. A 194-schema dump (33k→61k prompt) is never the live
 # round. Tight pack (xAI / Grok window) vs richer pack (Claude / GPT /
-# DeepSeek / Gemini / OpenRouter-non-Grok). Recall stays in the core so
-# every provider can search memory while operating.
-WORK_MAX_TOOLS_PER_STEP = 34
+# DeepSeek / Gemini / OpenRouter-non-Grok). Recall and job_run stay in
+# the core so every provider can remember and verify while operating.
+WORK_MAX_TOOLS_PER_STEP = 36
 WORK_MAX_TOOLS_CLOUD = 64
 # Prefer these when capping — first-N used to drop host_run behind help/goal.
 _OPERATE_CORE_TOOLS = (
@@ -55,6 +55,7 @@ _OPERATE_CORE_TOOLS = (
     "host_mkdir",
     "host_which",
     "bash_exec",
+    "job_run",
     "todo_write",
     "todo_read",
     "mission_start",

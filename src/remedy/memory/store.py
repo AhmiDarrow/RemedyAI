@@ -433,8 +433,7 @@ class MemoryStore:
         """
         if not entries:
             return 0
-        with self._locked():
-            return self._upsert_many_unlocked(entries)
+        return await self._off_loop(self._upsert_many_unlocked, entries)
 
     def _upsert_many_unlocked(self, entries: list[MemoryEntry]) -> int:
         db = self._ensure_db()
@@ -499,13 +498,16 @@ class MemoryStore:
         Useful after bulk imports or if the external-content FTS index drifts.
         Returns the number of rows re-indexed.
         """
-        with self._locked():
-            db = self._ensure_db()
-            # FTS5 external-content rebuild from the content table.
-            db.execute("INSERT INTO memory_fts(memory_fts) VALUES('rebuild')")
-            db.commit()
-            row = db.execute("SELECT COUNT(*) FROM memory_entries").fetchone()
-            return int(row[0]) if row else 0
+
+        def _go() -> int:
+            with self._locked():
+                db = self._ensure_db()
+                db.execute("INSERT INTO memory_fts(memory_fts) VALUES('rebuild')")
+                db.commit()
+                row = db.execute("SELECT COUNT(*) FROM memory_entries").fetchone()
+                return int(row[0]) if row else 0
+
+        return await self._off_loop(_go)
 
     async def get(self, entry_id: str | UUID) -> MemoryEntry | None:
         def _go() -> MemoryEntry | None:
@@ -521,43 +523,54 @@ class MemoryStore:
         return await self._off_loop(_go)
 
     async def delete(self, entry_id: str | UUID) -> bool:
-        with self._locked():
-            db = self._ensure_db()
-            cursor = db.execute(
-                "DELETE FROM memory_entries WHERE id = ?", (str(entry_id),)
-            )
-            db.commit()
-            return cursor.rowcount > 0
+        def _go() -> bool:
+            with self._locked():
+                db = self._ensure_db()
+                cursor = db.execute(
+                    "DELETE FROM memory_entries WHERE id = ?", (str(entry_id),)
+                )
+                db.commit()
+                return cursor.rowcount > 0
+
+        return await self._off_loop(_go)
 
     async def delete_by_session(self, session_id: str) -> int:
         """Drop memory entries + session summary for one chat."""
         sid = str(session_id or "").strip()
         if not sid:
             return 0
-        with self._locked():
-            db = self._ensure_db()
-            cur = db.execute(
-                "DELETE FROM memory_entries WHERE session_id = ?", (sid,)
-            )
-            with contextlib.suppress(sqlite3.Error):
-                db.execute(
-                    "DELETE FROM session_summaries WHERE session_id = ?", (sid,)
+
+        def _go() -> int:
+            with self._locked():
+                db = self._ensure_db()
+                cur = db.execute(
+                    "DELETE FROM memory_entries WHERE session_id = ?", (sid,)
                 )
-            db.commit()
-            return int(cur.rowcount or 0)
+                with contextlib.suppress(sqlite3.Error):
+                    db.execute(
+                        "DELETE FROM session_summaries WHERE session_id = ?", (sid,)
+                    )
+                db.commit()
+                return int(cur.rowcount or 0)
+
+        return await self._off_loop(_go)
 
     async def delete_by_type(self, entry_type: str | MemoryEntryType) -> int:
         kind = getattr(entry_type, "value", entry_type)
         kind = str(kind or "").strip()
         if not kind:
             return 0
-        with self._locked():
-            db = self._ensure_db()
-            cur = db.execute(
-                "DELETE FROM memory_entries WHERE entry_type = ?", (kind,)
-            )
-            db.commit()
-            return int(cur.rowcount or 0)
+
+        def _go() -> int:
+            with self._locked():
+                db = self._ensure_db()
+                cur = db.execute(
+                    "DELETE FROM memory_entries WHERE entry_type = ?", (kind,)
+                )
+                db.commit()
+                return int(cur.rowcount or 0)
+
+        return await self._off_loop(_go)
 
     async def list_by_type(
         self, entry_type: MemoryEntryType, limit: int = 50, offset: int = 0
@@ -1142,22 +1155,26 @@ class MemoryStore:
 
     async def delete_chat_session(self, session_id: str) -> bool:
         sid = str(session_id or "").strip()
-        with self._locked():
-            db = self._ensure_db()
-            db.execute("DELETE FROM chat_messages WHERE session_id = ?", (sid,))
-            with contextlib.suppress(sqlite3.Error):
-                db.execute(
-                    "DELETE FROM session_summaries WHERE session_id = ?", (sid,)
+
+        def _go() -> bool:
+            with self._locked():
+                db = self._ensure_db()
+                db.execute("DELETE FROM chat_messages WHERE session_id = ?", (sid,))
+                with contextlib.suppress(sqlite3.Error):
+                    db.execute(
+                        "DELETE FROM session_summaries WHERE session_id = ?", (sid,)
+                    )
+                with contextlib.suppress(sqlite3.Error):
+                    db.execute(
+                        "DELETE FROM memory_entries WHERE session_id = ?", (sid,)
+                    )
+                cursor = db.execute(
+                    "DELETE FROM chat_sessions WHERE id = ?", (sid,)
                 )
-            with contextlib.suppress(sqlite3.Error):
-                db.execute(
-                    "DELETE FROM memory_entries WHERE session_id = ?", (sid,)
-                )
-            cursor = db.execute(
-                "DELETE FROM chat_sessions WHERE id = ?", (sid,)
-            )
-            db.commit()
-            return cursor.rowcount > 0
+                db.commit()
+                return cursor.rowcount > 0
+
+        return await self._off_loop(_go)
 
     def purge_sessions_older_than_days(self, max_age_days: int) -> int:
         """Delete chat sessions whose updated_at is older than *max_age_days*.
@@ -1226,29 +1243,33 @@ class MemoryStore:
         model, or provider. Returns number of messages removed.
         """
         now = datetime.now(UTC).isoformat()
-        with self._locked():
-            db = self._ensure_db()
-            row = db.execute(
-                "SELECT id FROM chat_sessions WHERE id = ?", (session_id,)
-            ).fetchone()
-            if row is None:
-                return 0
-            cursor = db.execute(
-                "DELETE FROM chat_messages WHERE session_id = ?", (session_id,)
-            )
-            deleted = int(cursor.rowcount or 0)
-            # Drop Memory Harness session summary for this chat (fresh slate).
-            with contextlib.suppress(sqlite3.Error):
-                db.execute(
-                    "DELETE FROM session_summaries WHERE session_id = ?",
-                    (session_id,),
+
+        def _go() -> int:
+            with self._locked():
+                db = self._ensure_db()
+                row = db.execute(
+                    "SELECT id FROM chat_sessions WHERE id = ?", (session_id,)
+                ).fetchone()
+                if row is None:
+                    return 0
+                cursor = db.execute(
+                    "DELETE FROM chat_messages WHERE session_id = ?", (session_id,)
                 )
-            db.execute(
-                "UPDATE chat_sessions SET message_count = 0, updated_at = ? WHERE id = ?",
-                (now, session_id),
-            )
-            db.commit()
-            return deleted
+                deleted = int(cursor.rowcount or 0)
+                with contextlib.suppress(sqlite3.Error):
+                    db.execute(
+                        "DELETE FROM session_summaries WHERE session_id = ?",
+                        (session_id,),
+                    )
+                db.execute(
+                    "UPDATE chat_sessions SET message_count = 0, updated_at = ? "
+                    "WHERE id = ?",
+                    (now, session_id),
+                )
+                db.commit()
+                return deleted
+
+        return await self._off_loop(_go)
 
     async def status_counts(self) -> tuple[int, int, int]:
         """memory_entries, session_summaries, chat_sessions — chrome poll, off-loop."""
@@ -1472,28 +1493,32 @@ class MemoryStore:
 
     async def revert_message(self, msg_id: str) -> bool:
         """Soft-delete one message and resync session message_count."""
-        with self._locked():
-            db = self._ensure_db()
-            row = db.execute(
-                "SELECT session_id, reverted FROM chat_messages WHERE id = ?",
-                (msg_id,),
-            ).fetchone()
-            if row is None:
-                return False
-            if int(row["reverted"] or 0):
-                return False
-            sid = str(row["session_id"] or "")
-            cursor = db.execute(
-                "UPDATE chat_messages SET reverted = 1 WHERE id = ? AND reverted = 0",
-                (msg_id,),
-            )
-            if cursor.rowcount <= 0:
-                db.rollback()
-                return False
-            if sid:
-                self._sync_session_message_count(db, sid)
-            db.commit()
-            return True
+
+        def _go() -> bool:
+            with self._locked():
+                db = self._ensure_db()
+                row = db.execute(
+                    "SELECT session_id, reverted FROM chat_messages WHERE id = ?",
+                    (msg_id,),
+                ).fetchone()
+                if row is None:
+                    return False
+                if int(row["reverted"] or 0):
+                    return False
+                sid = str(row["session_id"] or "")
+                cursor = db.execute(
+                    "UPDATE chat_messages SET reverted = 1 WHERE id = ? AND reverted = 0",
+                    (msg_id,),
+                )
+                if cursor.rowcount <= 0:
+                    db.rollback()
+                    return False
+                if sid:
+                    self._sync_session_message_count(db, sid)
+                db.commit()
+                return True
+
+        return await self._off_loop(_go)
 
     async def revert_from(self, session_id: str, msg_id: str) -> int:
         """Soft-delete this message and all later messages; resync message_count.
@@ -1506,26 +1531,30 @@ class MemoryStore:
         several messages land in one second) still roll back from the chosen
         message forward, not the whole second.
         """
-        with self._locked():
-            db = self._ensure_db()
-            target = db.execute(
-                "SELECT created_at, rowid AS _rid FROM chat_messages "
-                "WHERE id = ? AND session_id = ?",
-                (msg_id, session_id),
-            ).fetchone()
-            if target is None:
-                return 0
-            cut_at = target["created_at"]
-            cut_rid = int(target["_rid"])
-            cursor = db.execute(
-                "UPDATE chat_messages SET reverted = 1 "
-                "WHERE session_id = ? AND reverted = 0 AND ("
-                "  created_at > ? OR (created_at = ? AND rowid >= ?)"
-                ")",
-                (session_id, cut_at, cut_at, cut_rid),
-            )
-            n = int(cursor.rowcount or 0)
-            if n > 0:
-                self._sync_session_message_count(db, session_id)
-            db.commit()
-            return n
+
+        def _go() -> int:
+            with self._locked():
+                db = self._ensure_db()
+                target = db.execute(
+                    "SELECT created_at, rowid AS _rid FROM chat_messages "
+                    "WHERE id = ? AND session_id = ?",
+                    (msg_id, session_id),
+                ).fetchone()
+                if target is None:
+                    return 0
+                cut_at = target["created_at"]
+                cut_rid = int(target["_rid"])
+                cursor = db.execute(
+                    "UPDATE chat_messages SET reverted = 1 "
+                    "WHERE session_id = ? AND reverted = 0 AND ("
+                    "  created_at > ? OR (created_at = ? AND rowid >= ?)"
+                    ")",
+                    (session_id, cut_at, cut_at, cut_rid),
+                )
+                n = int(cursor.rowcount or 0)
+                if n > 0:
+                    self._sync_session_message_count(db, session_id)
+                db.commit()
+                return n
+
+        return await self._off_loop(_go)
