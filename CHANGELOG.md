@@ -4,6 +4,18 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed — tests match partner-system steering; list tool ids pair; versions align
+
+- Partner injects are ``role=system`` so the model does not treat them as the
+  owner talking. Loop tests now look at those injects, not only ``role=user``.
+- ``ensure_tool_call_pairings`` coerces a list-shaped ``tool_call_id`` the same
+  way ``normalize_tool_calls`` coerces the assistant id — a ``["call_a"]``
+  tool result pairs instead of 400ing.
+- First-run demo slot tests ignore live ``POE_API_KEY`` / sibling env keys.
+- ``scripts/latest.json`` matches tree version 0.41.6. Voice status is a
+  poller (no SLOW warn on 200). Stop mid-stream is abort, not a disconnect
+  retry, when the abort flag is set.
+
 ### Fixed — vault fill is one owner yes; hive facts stay in the hive
 
 - Approving a vault type / Place-order click once is enough. Authorize and

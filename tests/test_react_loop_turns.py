@@ -295,7 +295,7 @@ async def test_a_tool_call_repeated_verbatim_is_answered_from_cache_not_rerun(tm
     assert "Done, it is 5." in answer(chunks)
     # The looped call still gets a tool message back (pairing) and a nudge.
     assert any(
-        "already ran" in t for t in fake.requests[2].texts_for_role("user")
+        "already ran" in t for t in fake.requests[2].steering_texts()
     )
 
 
@@ -311,7 +311,7 @@ async def test_a_failing_tool_does_not_end_the_turn_it_gets_a_recovery_nudge(tmp
 
     # The error text is handed back to the model rather than swallowed.
     assert any("disk on fire" in t for t in fake.requests[1].tool_result_texts)
-    nudges = fake.requests[1].texts_for_role("user")
+    nudges = fake.requests[1].steering_texts()
     assert any("tools failed" in t.lower() for t in nudges)
     assert "The tool failed" in answer(chunks)
 
@@ -418,7 +418,7 @@ async def test_a_work_request_answered_with_a_promise_is_driven_back_to_tools(tm
     assert all(r.tools for r in fake.requests)
     assert any(
         "no function calls is not done" in t
-        for t in fake.last_request.texts_for_role("user")
+        for t in fake.last_request.steering_texts()
     )
 
 
@@ -458,7 +458,7 @@ async def test_a_refusal_is_delivered_verbatim_and_never_forced_into_tools(tmp_p
     assert not any(
         "no function calls is not done" in t
         for r in fake.requests
-        for t in r.texts_for_role("user")
+        for t in r.steering_texts()
     )
 
 
@@ -535,7 +535,7 @@ async def test_a_transient_500_is_retried_once_without_tools_then_given_up_on(tm
     assert fake.requests[1].tools == []
     assert any(
         "API returned an error" in t
-        for t in fake.requests[1].texts_for_role("user")
+        for t in fake.requests[1].steering_texts()
     )
     reply = answer(chunks)
     assert "500" in reply
@@ -848,7 +848,7 @@ async def test_an_empty_completion_is_retried_rather_than_shipped_as_the_answer(
     assert fake.request_count == 2
     assert any(
         "returned no final answer text" in t
-        for t in fake.requests[1].texts_for_role("user")
+        for t in fake.requests[1].steering_texts()
     )
     assert answer(chunks) == "recovered answer"
 
@@ -896,7 +896,7 @@ async def test_an_answer_cut_by_the_token_limit_is_continued_not_restarted(tmp_p
 
     assert fake.request_count == 2
     assert answer(chunks) == "part one part two"
-    followup = fake.requests[1].texts_for_role("user")
+    followup = fake.requests[1].steering_texts()
     assert any("do not restart" in t for t in followup)
     # The partial answer is replayed as assistant text so the model can resume.
     assert "part one" in fake.requests[1].texts_for_role("assistant")
@@ -947,7 +947,7 @@ async def test_incomplete_tool_markup_is_nudged_back_to_real_function_calls(tmp_
     assert fake.request_count >= 2
     assert any(
         "leaked incomplete tool markup" in t
-        for t in fake.requests[1].texts_for_role("user")
+        for t in fake.requests[1].steering_texts()
     )
     assert "<tool_call>" not in answer(chunks)
 
@@ -1028,7 +1028,7 @@ async def test_a_navigate_that_reports_ok_false_is_not_read_as_a_successful_open
     # The real failure body is handed to the model, not hidden behind a retry.
     assert any(
         "did not succeed" in t and "rail_failed" in t
-        for t in fake.requests[0].texts_for_role("user")
+        for t in fake.requests[0].steering_texts()
     )
 
 
@@ -1055,7 +1055,7 @@ async def test_running_out_of_steps_asks_once_more_without_tools(tmp_path):
     assert fake.requests[1].tools == []
     assert any(
         "write the complete final answer now" in t
-        for t in fake.requests[1].texts_for_role("user")
+        for t in fake.requests[1].steering_texts()
     )
     assert "Synthesized final." in answer(chunks)
 

@@ -312,7 +312,7 @@ async def test_a_cancel_raised_mid_stream_stops_the_turn_with_a_durable_note(tmp
 
     with fake.patch(), patch(NO_TOOLS, return_value=False), patch(
         "remedy.core.react_loop.loop.consume_llm_http_response", _cancel
-    ):
+    ), patch(ABORTED, side_effect=lambda *a, **k: fake.request_count >= 1):
         chunks = await drain(runtime, "say hello")
 
     assert fake.request_count == 1
@@ -540,7 +540,7 @@ async def test_a_force_answer_rebuild_keeps_the_write_budget_it_was_given(tmp_pa
     assert fake.request_count == 2
     assert fake.requests[1].tools == []
     assert any(
-        "Do not call tools" in t for t in fake.requests[1].texts_for_role("user")
+        "Do not call tools" in t for t in fake.requests[1].steering_texts()
     )
     assert "salvaged answer" in answer(chunks)
 
@@ -820,7 +820,7 @@ async def test_a_recovered_text_tool_call_that_fails_gets_a_recovery_nudge(tmp_p
         chunks = await drain(runtime, "write notes.txt in the project")
 
     assert [c.name for c in registry.calls] == ["file_write"]
-    nudges = fake.requests[1].texts_for_role("user")
+    nudges = fake.requests[1].steering_texts()
     assert any("EMPTY/SPAM file_write blocked" in t for t in nudges)
     # The real file was kept — the nudge must say so, not invent a success.
     assert any("kept" in t for t in nudges)
@@ -872,7 +872,7 @@ async def test_a_green_verify_asks_for_six_short_lines_not_an_essay(tmp_path):
     ):
         chunks = await drain(runtime, "say hello")
 
-    followup = fake.requests[1].texts_for_role("user")
+    followup = fake.requests[1].steering_texts()
     assert any("Verify is GREEN" in t for t in followup)
     assert any("at most 6 short lines" in t for t in followup)
     assert not any("Be thorough" in t for t in followup)
@@ -1022,7 +1022,9 @@ async def test_a_cancel_raised_by_the_post_itself_is_not_reported_as_a_crash(
     FakeToolRegistry().install(runtime)
     fake = FakeLLM([exception_turn(asyncio.CancelledError())])
 
-    with fake.patch(), patch(NO_TOOLS, return_value=False):
+    with fake.patch(), patch(NO_TOOLS, return_value=False), patch(
+        ABORTED, side_effect=lambda *a, **k: fake.request_count >= 1
+    ):
         chunks = await drain(runtime, "say hello")
 
     assert "@@aborted\n" in chunks

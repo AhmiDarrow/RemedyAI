@@ -66,11 +66,12 @@ def test_step_loop_finalizes_when_rearm_declines() -> None:
     """The other drive site must let the turn answer in words."""
     src = _source()
     anchor = src.index("# Work request + zero tool evidence is never a successful final.")
-    block = src[anchor : anchor + 1600]
+    block = src[anchor : anchor + 3600]
     rearm = block.index("_rearm_agency_tools()")
     assert "if tools:" in block[rearm:], "must check whether re-arm actually armed"
     after = block[rearm:]
     # The declined branch has to stop forcing tool_choice and finalize.
+    assert "Re-arm declined" in after
     assert "force_answer = True" in after
     assert "is_final_step = True" in after
 

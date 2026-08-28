@@ -241,7 +241,17 @@ def test_resolve_llm_slot_first_run_uses_demo(monkeypatch):
         "OPENAI_API_KEY",
         "XAI_API_KEY",
         "REMEDY_XAI_API_KEY",
+        "GROQ_API_KEY",
+        "MISTRAL_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "OPENROUTER_API_KEY",
+        "POE_API_KEY",
+        "REMEDY_POE_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
         "REMEDY_DEMO_DISABLED",
+        "REMEDY_PREFER_OLLAMA",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("REMEDY_PREFER_DEMO", "1")
@@ -255,6 +265,7 @@ def test_resolve_llm_slot_first_run_uses_demo(monkeypatch):
 def test_resolve_llm_slot_runtime_demo_wins(monkeypatch):
     """Serve bootstraps AgentConfig to demo; toml still says openai."""
     from types import SimpleNamespace
+
     from remedy.interfaces import api_support
 
     monkeypatch.setattr(
@@ -272,6 +283,8 @@ def test_resolve_llm_slot_runtime_demo_wins(monkeypatch):
         "REMEDY_LLM_PROVIDER",
         "OPENAI_API_KEY",
         "XAI_API_KEY",
+        "POE_API_KEY",
+        "REMEDY_POE_API_KEY",
         "REMEDY_DEMO_DISABLED",
     ):
         monkeypatch.delenv(key, raising=False)
