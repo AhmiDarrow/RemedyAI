@@ -131,6 +131,39 @@ async def apply_build_engine_after_batch(
         from remedy.core.turn_context import turn_session_id
 
         bst = get_build_state(runtime)
+        wrote_names = {
+            "file_write",
+            "file_edit",
+            "file_edit_batch",
+            "apply_patch",
+        }
+        wrote_now = any(
+            (
+                (t.get("function") or {}).get("name")
+                if isinstance(t, dict)
+                else ""
+            )
+            in wrote_names
+            for t in (fresh_calls or [])
+            if isinstance(t, dict)
+        )
+        if (bst is None or not getattr(bst, "active", False)) and wrote_now:
+            with _soft("casual-write-verify"):
+                from remedy.core.build_oracle import discover_verify_command
+
+                cmd = discover_verify_command(runtime)
+                if cmd:
+                    messages.append(
+                        {
+                            "role": "system",
+                            "content": (
+                                "[Machine · verify] After those writes, run "
+                                f"`{cmd}` (job_run kind=verify). Do not claim "
+                                "green until it exits 0."
+                            ),
+                        }
+                    )
+                    yield "@@status:Verify after writes\n"
         if bst is not None and bst.active:
             observe_tool_batch(bst, fresh_calls, batch_tool_msgs, runtime=runtime)
             with _soft("todos-flush"):

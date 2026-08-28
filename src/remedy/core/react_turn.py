@@ -39,7 +39,7 @@ LOCAL_MAX_TOOLS_PER_STEP = 8
 # DeepSeek / Gemini / OpenRouter-non-Grok). Recall, job_run, git_diff,
 # and git_log stay in the core so every provider can remember, verify,
 # and review history while operating.
-WORK_MAX_TOOLS_PER_STEP = 39
+WORK_MAX_TOOLS_PER_STEP = 40
 WORK_MAX_TOOLS_CLOUD = 64
 # Prefer these when capping — first-N used to drop host_run behind help/goal.
 _OPERATE_CORE_TOOLS = (
@@ -49,6 +49,7 @@ _OPERATE_CORE_TOOLS = (
     "file_edit_batch",
     "list_dir",
     "file_glob",
+    "code_map",
     "repo_search",
     "memory_search",
     "soul_recall",

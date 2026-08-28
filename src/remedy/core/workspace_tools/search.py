@@ -337,6 +337,67 @@ def register_search_tools(runtime: Any) -> None:
             },
         },
     )
+    async def code_map(
+        query: str = "",
+        path: str = ".",
+        max_hits: int = 80,
+    ) -> str:
+        """List class/def/fn symbols under path (local walk, time-budgeted)."""
+        from remedy.core.code_map import build_code_map, format_code_map
+
+        raw_path = (path or ".").strip() or "."
+        bad = _reserved_guard(raw_path)
+        if bad:
+            return format_tool_error(
+                bad,
+                code="RESERVED_NAME",
+                tool_name="code_map",
+                suggestion="Map under the project root.",
+            )
+        try:
+            target = runtime.resolve_tool_path(raw_path)
+        except Exception as e:
+            return format_tool_error(
+                f"path not allowed: {raw_path} ({e})",
+                code="PATH_DENIED",
+                tool_name="code_map",
+                suggestion="Use a path under access scope.",
+            )
+        if not target.exists():
+            return format_tool_error(
+                f"path not found: {raw_path}",
+                code="NOT_FOUND",
+                tool_name="code_map",
+                suggestion="list_dir the parent, then retry.",
+            )
+        if target.is_file():
+            target = target.parent
+        try:
+            cap = max(1, min(400, int(max_hits or 80)))
+        except (TypeError, ValueError):
+            cap = 80
+        import asyncio
+
+        hits = await asyncio.to_thread(
+            build_code_map, target, query=(query or "").strip(), max_hits=cap
+        )
+        return format_code_map(hits, query=(query or "").strip())
+
+    runtime.tool_registry.register_builtin_handler(
+        "code_map",
+        "On-PC symbol map (class/def/fn) under a tree. query= filters by name. "
+        "Prefer this over serial list_dir when looking for a definition. "
+        "Not embeddings — same skip-dirs and time budget as file_glob.",
+        code_map,
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Optional symbol/path filter"},
+                "path": {"type": "string", "default": "."},
+                "max_hits": {"type": "integer", "default": 80},
+            },
+        },
+    )
     runtime.tool_registry.register_builtin_handler(
         "file_glob",
         "Find files by glob pattern (recursive, skip node_modules/.git/venv). "
