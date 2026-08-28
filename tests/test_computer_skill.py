@@ -18,6 +18,8 @@ def test_approach_of_click():
     assert approach_of("click", {"ref": "e3"}) == "ref"
     assert approach_of("click", {"x": 100, "y": 200}) == "coords"
     assert approach_of("click", {}) == "unknown"
+    assert approach_of("hover", {"text": "File"}) == "text"
+    assert approach_of("hover", {"ref": "e2"}) == "ref"
 
 
 def test_approach_of_other_actions():

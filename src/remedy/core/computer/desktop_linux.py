@@ -874,6 +874,20 @@ def foreground_window_info() -> dict[str, Any]:
     return {"hwnd": hwnd, "title": title}
 
 
+def move_mouse(x: int, y: int) -> None:
+    """Pointer only — menus and CSS :hover need the cursor on the control."""
+    _require_linux()
+    xd = _which("xdotool")
+    if xd:
+        _run([xd, "mousemove", "--sync", str(int(x)), str(int(y))])
+        return
+    yd = _which("ydotool")
+    if yd:
+        _run([yd, "mousemove", str(int(x)), str(int(y))])
+        return
+    raise RuntimeError("Linux hover needs xdotool (X11) or ydotool (Wayland)")
+
+
 def click(x: int, y: int, *, button: str = "left", clicks: int = 1) -> None:
     _require_linux()
     btn = {"left": "1", "middle": "2", "right": "3"}.get((button or "left").lower(), "1")

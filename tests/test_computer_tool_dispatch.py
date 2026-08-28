@@ -345,7 +345,8 @@ def test_every_computer_handler_is_a_coroutine(tools):
         ("computer_type", ["text"]),
         ("computer_key", ["key"]),
         ("computer_navigate", ["url"]),
-        ("computer_drag", ["x", "y", "x2", "y2"]),
+        ("computer_drag", None),  # from_text/to_text locate; coords optional
+        ("computer_hover", None),  # text=/ref= locate; coords optional
         ("computer_fill", ["fields"]),
     ],
 )

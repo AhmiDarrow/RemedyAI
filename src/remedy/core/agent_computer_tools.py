@@ -325,6 +325,46 @@ def register_computer_tools(runtime: Any) -> None:
             text=text,
         )
 
+    async def computer_hover(
+        x: int = 0,
+        y: int = 0,
+        ref: str = "",
+        text: str = "",
+        target: str = "auto",
+        hint: str = "",
+    ) -> str:
+        """Move the pointer onto a control without clicking.
+
+        Opens menus and CSS :hover flyouts the way a hand does. Prefer
+        text=\"File\" or ref= from snapshot; x/y last.
+        """
+        text = coerce_text_arg(text)
+        ref = coerce_text_arg(ref)
+        target = coerce_text_arg(target) or "auto"
+        hint = coerce_text_arg(hint)
+        summary = (
+            f"hover text={text!r} ref={ref!r} x={x} y={y} target={target or 'auto'}"
+        )
+        blocked = _computer_approval_gate(
+            runtime, "computer_hover", summary,
+            page_context=_page_context(ex),
+            label_resolved=bool(text or ref),
+            label=text or _resolve_ref_label(ex, ref),
+        )
+        if blocked:
+            return blocked
+        return await _run_computer(
+            ex,
+            ComputerAction.HOVER,
+            target=target,
+            hint=hint,
+            runtime=runtime,
+            x=x,
+            y=y,
+            ref=ref,
+            text=text,
+        )
+
     async def computer_wait(seconds: float = 0.5, hint: str = "") -> str:
         """Pause briefly (page paint, app launch). Prefer 0.3–1.5s, max 30s."""
         hint = coerce_text_arg(hint)
@@ -1127,6 +1167,29 @@ def register_computer_tools(runtime: Any) -> None:
                 "hint": hint_prop,
             },
             "required": ["key"],
+        },
+    )
+    reg.register_builtin_handler(
+        "computer_hover",
+        "Move the pointer onto a control without clicking (menus, tooltips, "
+        "CSS :hover). Locate by text= or ref= like computer_click.",
+        computer_hover,
+        {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "Visible label to hover (File, Account, …)",
+                },
+                "ref": {
+                    "type": "string",
+                    "description": "Snapshot ref (e3 / c5)",
+                },
+                "x": {"type": "integer"},
+                "y": {"type": "integer"},
+                "target": target_prop,
+                "hint": hint_prop,
+            },
         },
     )
     reg.register_builtin_handler(

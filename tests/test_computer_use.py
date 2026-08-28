@@ -2751,6 +2751,45 @@ def test_press_hold_learns_per_site():
     assert approach_of("scroll", {"x": 100, "y": 200, "dy": -3}) == "coords"
 
 
+def test_executor_hover_text_moves_pointer_without_click(tmp_path: Path, monkeypatch):
+    """Hover must locate by label and move — never click (menus / :hover)."""
+    import json
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    win = native()
+    monkeypatch.setattr(
+        win,
+        "desktop_snapshot",
+        lambda limit=60, mode="auto", hwnd=None: [
+            {"ref": "c1", "name": "File", "tag": "menu", "x": 20, "y": 12}
+        ],
+    )
+    moved: list[tuple[int, int]] = []
+    clicked: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        win, "move_mouse", lambda x, y: moved.append((int(x), int(y))), raising=False
+    )
+    monkeypatch.setattr(
+        win,
+        "click",
+        lambda x, y, **k: clicked.append((int(x), int(y))),
+        raising=False,
+    )
+    ex = ComputerExecutor(home_dir=tmp_path)
+    out = json.loads(
+        ex.run(ComputerAction.HOVER, text="File", target="desktop")
+    )
+    assert out.get("ok") is True, out
+    assert moved == [(20, 12)]
+    assert clicked == []
+    assert "File" in str(out.get("message") or "")
+
+
 def test_executor_press_hold_text_locates_native_control(tmp_path: Path, monkeypatch):
     """Native press-hold with text= must find the control like click.
 

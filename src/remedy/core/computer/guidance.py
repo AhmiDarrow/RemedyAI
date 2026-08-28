@@ -71,6 +71,7 @@ Operate this Windows PC with Remedy-native tools when the Desktop is running.
 | **`computer_act`** | Multi-step in ONE call: url + click + type + key (login/search). **Prefer this.** |
 | `computer_navigate` | Open URL in **Browser rail** only |
 | `computer_click` | `text=\"Sign in\"` (preferred) or `ref=e3` or x/y last |
+| `computer_hover` | Move the pointer onto a control (`text=` / `ref=`) without clicking — menus, tooltips |
 | `computer_snapshot` | SoM list of controls `[e1] button \"…\"` — not for open-only |
 | `computer_find` | Rank matches for a label |
 | `computer_page_text` | Read page text (no vision) |
