@@ -155,6 +155,32 @@ _SCREEN_RE = re.compile(
     r")\s*[.?!]?\s*$"
 )
 
+_RMB_STATUS_RE = re.compile(
+    r"(?is)^\s*("
+    r"rmb[_ ]status"
+    r"|what('?s| is) (the )?(rmb|local (model|llama)) status"
+    r"|is rmb (running|ready|up|on)"
+    r"|show (me )?(the )?rmb status"
+    r")\s*[.?!]?\s*$"
+)
+
+_RMB_MODELS_RE = re.compile(
+    r"(?is)^\s*("
+    r"rmb[_ ]models"
+    r"|list (my |the )?(local )?(ggufs?|rmb models?)"
+    r"|what (ggufs?|local models?) (do i have|are installed)"
+    r")\s*[.?!]?\s*$"
+)
+
+_WINDOWS_LIST_RE = re.compile(
+    r"(?is)^\s*("
+    r"what windows are open"
+    r"|(list|show) (me )?(the |open |os )?windows"
+    r"|open windows"
+    r"|computer_windows"
+    r")\s*[.?!]?\s*$"
+)
+
 _PLAIN_TOOLS = frozenset(
     {
         "git_status",
@@ -169,6 +195,8 @@ _PLAIN_TOOLS = frozenset(
         "ship_status",
         "mission_status",
         "companion_context",
+        "rmb",
+        "computer_windows",
     }
 )
 
@@ -231,6 +259,14 @@ def match_in_app_fast_path(message: str) -> FastPathPlan | None:
         return FastPathPlan("mission_status", {}, "mission_status")
     if _SCREEN_RE.match(msg):
         return FastPathPlan("companion_context", {}, "companion_context")
+    if _RMB_STATUS_RE.match(msg):
+        return FastPathPlan("rmb", {"action": "status"}, "rmb_status")
+    if _RMB_MODELS_RE.match(msg):
+        return FastPathPlan("rmb", {"action": "models"}, "rmb_models")
+    if _WINDOWS_LIST_RE.match(msg):
+        return FastPathPlan(
+            "computer_windows", {"mode": "list"}, "computer_windows"
+        )
     return None
 
 

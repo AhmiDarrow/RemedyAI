@@ -56,8 +56,18 @@ def test_todo_list_dir_verify_clipboard_which_goals():
     assert p8 is not None and p8.tool == "mission_status"
     p9 = match_in_app_fast_path("what's on my screen")
     assert p9 is not None and p9.tool == "companion_context"
+    p10 = match_in_app_fast_path("rmb status")
+    assert p10 is not None and p10.tool == "rmb"
+    assert p10.arguments.get("action") == "status"
+    p11 = match_in_app_fast_path("list local ggufs")
+    assert p11 is not None and p11.arguments.get("action") == "models"
+    p12 = match_in_app_fast_path("what windows are open")
+    assert p12 is not None and p12.tool == "computer_windows"
+    assert p12.arguments.get("mode") == "list"
     assert match_in_app_fast_path("look at this") is None
     assert match_in_app_fast_path("what's the mission") is None
+    assert match_in_app_fast_path("start rmb") is None
+    assert match_in_app_fast_path("close the window") is None
 
 
 def test_mutates_and_multi_step_stay_on_the_provider():

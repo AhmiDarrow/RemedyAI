@@ -18,6 +18,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - ``ship status``, ``mission status``, and ``what's on my screen`` run the
   local tools (no provider). Bare ``look at this`` / ``what's the mission``
   still go to the model.
+- ``rmb status`` / ``list local ggufs`` and ``what windows are open`` run
+  local status/list only (``rmb action=status|models``,
+  ``computer_windows mode=list``). Start/stop RMB and close/focus windows
+  still go to the model.
 
 ### Added — git_log on every live round; file I/O and usage SQLite off the loop
 
