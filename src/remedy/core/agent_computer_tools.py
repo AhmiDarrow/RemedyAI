@@ -169,8 +169,20 @@ def _computer_approval_gate(
     # may have allowed on an empty command; still stop owner-checkpoint text.
     if not ask_reason:
         from remedy.core.approvals import sensitive_computer_checkpoint
+        from remedy.core.turn_pipeline import gate_already_passed, gate_command
 
         ask_reason = sensitive_computer_checkpoint(tool_name, summary)
+        # authorize_tool already consumed the owner yes for this same
+        # payment/vault family. Fingerprints differ (typed args vs a
+        # sanitized handler summary) — do not ask twice. payment_surface /
+        # raw PAN / challenge-wall still run above; PolicyEngine cannot
+        # see the live page.
+        if (
+            ask_reason
+            and gate_already_passed(tool_name)
+            and sensitive_computer_checkpoint(tool_name, gate_command())
+        ):
+            ask_reason = None
     if not ask_reason:
         from remedy.core.turn_pipeline import gate_already_passed
 

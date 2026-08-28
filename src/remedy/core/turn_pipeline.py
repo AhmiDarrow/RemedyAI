@@ -17,6 +17,9 @@ _current_action: ContextVar[ActionRecord | None] = ContextVar(
 # Set when authorize_tool allows this task through so handlers do not
 # re-ask (mail one-shot would otherwise be consumed twice).
 _gate_passed: ContextVar[str | None] = ContextVar("remedy_gate_passed", default=None)
+# Command fingerprint authorize_tool used, so the computer inner gate can
+# skip a second payment/vault prompt for the same owner moment.
+_gate_command: ContextVar[str | None] = ContextVar("remedy_gate_command", default=None)
 
 
 def gate_already_passed(name: str) -> bool:
@@ -24,9 +27,29 @@ def gate_already_passed(name: str) -> bool:
     return _gate_passed.get() == (name or "").strip()
 
 
+def gate_command() -> str:
+    """Command string authorize_tool fingerprinted for this task (or "")."""
+    return (_gate_command.get() or "").strip()
+
+
 def clear_tool_gate() -> None:
     """Drop the per-task authorize mark (end of turn / after finish_tool)."""
     _gate_passed.set(None)
+    _gate_command.set(None)
+
+
+def _vault_handles_from_args(args: dict[str, Any]) -> list[str]:
+    """Opaque vault handles in tool args — never the secret values."""
+    with suppress(Exception):
+        from remedy.core.vault import token_handles
+
+        blobs: list[str] = []
+        for raw in (args or {}).values():
+            if raw is None or raw is False:
+                continue
+            blobs.append(str(raw))
+        return token_handles(" ".join(blobs))
+    return []
 
 
 def _tool_command(args: dict[str, Any], name: str = "") -> str:
@@ -41,13 +64,35 @@ def _tool_command(args: dict[str, Any], name: str = "") -> str:
         return f"mail_reply to message={mid} chars={len(args.get('body') or '')}"
     if n.startswith("computer_"):
         parts = [n]
-        for key in ("text", "click", "label", "key", "url", "ref", "fields"):
+        # Typed payloads can be passwords / PANs. Keep vault tokens (opaque)
+        # and click/label/url locators; replace other text with a length.
+        redact = n in ("computer_type", "computer_act", "computer_fill")
+        for key in ("text", "click", "label", "key", "url", "ref", "query", "fields"):
             raw = args.get(key)
             if raw is None or raw is False:
                 continue
             text = str(raw).strip()
-            if text:
-                parts.append(f"{key}={text[:160]}")
+            if not text:
+                continue
+            if key == "fields":
+                continue
+            if redact and key in ("text", "type", "type_text"):
+                vaultish = False
+                with suppress(Exception):
+                    from remedy.core.vault import contains_vault_token
+
+                    vaultish = contains_vault_token(text)
+                if vaultish:
+                    parts.append(f"{key}={text[:160]}")
+                else:
+                    parts.append(f"chars={len(text)}")
+                continue
+            parts.append(f"{key}={text[:160]}")
+        handles = _vault_handles_from_args(args)
+        if handles:
+            note = f"vault={','.join(handles)}"
+            if note not in parts:
+                parts.append(note)
         return " ".join(parts)
     for key in ("command", "cmd"):
         raw = args.get(key)
@@ -111,6 +156,7 @@ def authorize_tool(runtime: Any, name: str, args: dict[str, Any]) -> str | None:
     desc = descriptor_for(name)
     args.pop("_action_id", None)
     _gate_passed.set(None)
+    _gate_command.set(None)
     hive_block = None
     try:
         from remedy.core.hive.policy import hive_depth, is_mother_only_tool
@@ -176,13 +222,23 @@ def authorize_tool(runtime: Any, name: str, args: dict[str, Any]) -> str | None:
         )
     sid = turn_session_id(runtime)
     cmd = command or _approval_key(name, args)
+    origin = ""
+    if (name or "").startswith("computer_") and runtime is not None:
+        with suppress(Exception):
+            from remedy.core.agent_computer_tools import _page_context, _page_origin
+            from remedy.core.computer.executor import get_computer_executor
+
+            home = getattr(getattr(runtime, "config", None), "home_dir", None)
+            origin = _page_origin(_page_context(get_computer_executor(home))) or ""
     if decision.requires_approval:
         from remedy.core.approvals import SENSITIVE_PREFIX
 
         approved = False
         sensitive = (decision.reason or "").startswith(SENSITIVE_PREFIX)
         if sensitive:
-            approved = APPROVALS.take_one_shot(name, cmd, session_id=sid)
+            approved = APPROVALS.take_one_shot(
+                name, cmd, session_id=sid, origin=origin
+            )
         elif APPROVALS.is_approved(name, cmd, session_id=sid):
             approved = True
         if not approved:
@@ -191,6 +247,7 @@ def authorize_tool(runtime: Any, name: str, args: dict[str, Any]) -> str | None:
                 command=cmd,
                 reason=decision.reason,
                 session_id=sid,
+                origin=origin,
             )
             with suppress(Exception):
                 if ctx is not None:
@@ -210,6 +267,7 @@ def authorize_tool(runtime: Any, name: str, args: dict[str, Any]) -> str | None:
                 "the same arguments."
             )
     _gate_passed.set(name)
+    _gate_command.set(cmd)
     with suppress(Exception):
         rec = ActionRecord(tool=name)
         rec.advance(ActionState.AUTHORIZED)

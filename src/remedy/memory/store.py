@@ -504,14 +504,17 @@ class MemoryStore:
             return int(row[0]) if row else 0
 
     async def get(self, entry_id: str | UUID) -> MemoryEntry | None:
-        with self._locked():
-            db = self._ensure_db()
-            row = db.execute(
-                "SELECT * FROM memory_entries WHERE id = ?", (str(entry_id),)
-            ).fetchone()
-        if row is None:
-            return None
-        return self._row_to_entry(row)
+        def _go() -> MemoryEntry | None:
+            with self._locked():
+                db = self._ensure_db()
+                row = db.execute(
+                    "SELECT * FROM memory_entries WHERE id = ?", (str(entry_id),)
+                ).fetchone()
+            if row is None:
+                return None
+            return self._row_to_entry(row)
+
+        return await self._off_loop(_go)
 
     async def delete(self, entry_id: str | UUID) -> bool:
         with self._locked():
@@ -555,46 +558,59 @@ class MemoryStore:
     async def list_by_type(
         self, entry_type: MemoryEntryType, limit: int = 50, offset: int = 0
     ) -> list[MemoryEntry]:
-        with self._locked():
-            db = self._ensure_db()
-            rows = db.execute(
-                "SELECT * FROM memory_entries WHERE entry_type = ? "
-                "ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (entry_type.value, limit, offset),
-            ).fetchall()
-        return [self._row_to_entry(r) for r in rows]
+        def _go() -> list[MemoryEntry]:
+            with self._locked():
+                db = self._ensure_db()
+                rows = db.execute(
+                    "SELECT * FROM memory_entries WHERE entry_type = ? "
+                    "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                    (entry_type.value, limit, offset),
+                ).fetchall()
+            return [self._row_to_entry(r) for r in rows]
+
+        return await self._off_loop(_go)
 
     async def list_recent(self, limit: int = 50) -> list[MemoryEntry]:
-        with self._locked():
-            db = self._ensure_db()
-            rows = db.execute(
-                "SELECT * FROM memory_entries ORDER BY created_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        return [self._row_to_entry(r) for r in rows]
+        def _go() -> list[MemoryEntry]:
+            with self._locked():
+                db = self._ensure_db()
+                rows = db.execute(
+                    "SELECT * FROM memory_entries ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return [self._row_to_entry(r) for r in rows]
+
+        return await self._off_loop(_go)
 
     async def list_by_session(
         self, session_id: str, limit: int = 200, offset: int = 0
     ) -> list[MemoryEntry]:
         """Return memory entries belonging to a specific session."""
-        with self._locked():
-            db = self._ensure_db()
-            rows = db.execute(
-                "SELECT * FROM memory_entries WHERE session_id = ? "
-                "ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (session_id, limit, offset),
-            ).fetchall()
-        return [self._row_to_entry(r) for r in rows]
+
+        def _go() -> list[MemoryEntry]:
+            with self._locked():
+                db = self._ensure_db()
+                rows = db.execute(
+                    "SELECT * FROM memory_entries WHERE session_id = ? "
+                    "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                    (session_id, limit, offset),
+                ).fetchall()
+            return [self._row_to_entry(r) for r in rows]
+
+        return await self._off_loop(_go)
 
     async def list_important(self, threshold: float = 0.7, limit: int = 50) -> list[MemoryEntry]:
-        with self._locked():
-            db = self._ensure_db()
-            rows = db.execute(
-                "SELECT * FROM memory_entries WHERE importance >= ? "
-                "ORDER BY importance DESC LIMIT ?",
-                (threshold, limit),
-            ).fetchall()
-        return [self._row_to_entry(r) for r in rows]
+        def _go() -> list[MemoryEntry]:
+            with self._locked():
+                db = self._ensure_db()
+                rows = db.execute(
+                    "SELECT * FROM memory_entries WHERE importance >= ? "
+                    "ORDER BY importance DESC LIMIT ?",
+                    (threshold, limit),
+                ).fetchall()
+            return [self._row_to_entry(r) for r in rows]
+
+        return await self._off_loop(_go)
 
     # -- FTS5 search ---------------------------------------------------------
 
@@ -1223,6 +1239,21 @@ class MemoryStore:
             )
             db.commit()
             return deleted
+
+    async def status_counts(self) -> tuple[int, int, int]:
+        """memory_entries, session_summaries, chat_sessions — chrome poll, off-loop."""
+
+        def _go() -> tuple[int, int, int]:
+            with self._locked():
+                db = self._ensure_db()
+                mem = db.execute("SELECT COUNT(*) FROM memory_entries").fetchone()[0]
+                summaries = db.execute(
+                    "SELECT COUNT(*) FROM session_summaries"
+                ).fetchone()[0]
+                chats = db.execute("SELECT COUNT(*) FROM chat_sessions").fetchone()[0]
+                return int(mem), int(summaries), int(chats)
+
+        return await self._off_loop(_go)
 
     async def list_chat_sessions(
         self, limit: int = 50, offset: int = 0
