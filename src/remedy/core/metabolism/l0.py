@@ -28,6 +28,7 @@ def try_l0_system_reply(
         _L0_ORGANISM,
         _L0_SKILLS,
         _L0_STATUS,
+        _L0_TIME,
         _L0_VERSION,
         _L0_WHOAMI,
         TurnTier,
@@ -42,6 +43,16 @@ def try_l0_system_reply(
         tier = classify_turn_tier(msg, intent="chat", tools_enabled=False)
         if tier != TurnTier.L0_INSTANT:
             return None
+
+    if _L0_TIME.match(msg):
+        from datetime import datetime
+
+        now = datetime.now().astimezone()
+        tz = now.tzname() or "local"
+        return (
+            f"**Local time:** {now.strftime('%A, %Y-%m-%d %H:%M')} "
+            f"({tz}). This clock is this PC — no provider."
+        )
 
     if _L0_VERSION.match(msg):
         ver = "unknown"

@@ -50,6 +50,15 @@ _L0_VERSION = re.compile(
     r"/version"
     r")\s*[.?!]?\s*$"
 )
+_L0_TIME = re.compile(
+    r"(?is)^\s*("
+    r"what('?s| is) (the )?(local |current )?(time|date|day)"
+    r"|what time is it"
+    r"|what day is it"
+    r"|today('?s| is) date"
+    r"|/time|/date"
+    r")\s*[.?!]?\s*$"
+)
 _L0_LIFE_DRIVE = re.compile(
     r"(?is)^\s*("
     r"what should i (do|work on|focus on)|"
@@ -433,6 +442,7 @@ def classify_turn_tier(
             or _L0_SKILLS.match(ut)
             or _L0_STATUS.match(ut)
             or _L0_VERSION.match(ut)
+            or _L0_TIME.match(ut)
             or _L0_LIFE_DRIVE.match(ut)
             or _L0_LIFE_PULSE.match(ut)
             or _L0_LIFE_NOTICE.match(ut)
