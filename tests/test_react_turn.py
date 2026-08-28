@@ -645,6 +645,11 @@ def test_work_cap_keeps_computer_hands():
         _tool("computer_click"),
         _tool("computer_type"),
         _tool("computer_act"),
+        _tool("computer_hover"),
+        _tool("computer_scroll"),
+        _tool("computer_wait"),
+        _tool("computer_select"),
+        _tool("apply_patch"),
         _tool("web_fetch"),
         _tool("help_list"),
     ]
@@ -665,6 +670,11 @@ def test_work_cap_keeps_computer_hands():
         "computer_click",
         "computer_type",
         "computer_act",
+        "computer_hover",
+        "computer_scroll",
+        "computer_wait",
+        "computer_select",
+        "apply_patch",
         "web_fetch",
     ):
         assert n in names, n

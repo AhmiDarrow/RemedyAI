@@ -66,6 +66,11 @@ _OPERATE_CORE_TOOLS = (
     "computer_act",
     "computer_key",
     "computer_fill",
+    "computer_scroll",
+    "computer_wait",
+    "computer_select",
+    "computer_hover",
+    "apply_patch",
     "web_search",
     "web_fetch",
 )

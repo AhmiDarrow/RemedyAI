@@ -407,7 +407,7 @@ class ComputerExecutor:
                     record_action,
                 )
 
-                if act.value in ("click", "act", "drag", "press_hold"):
+                if act.value in ("click", "act", "drag", "press_hold", "hover"):
                     host = _skill_host(
                         self.bridge.last_navigate_url() or host_label(tgt)
                     )
@@ -1504,6 +1504,43 @@ class ComputerExecutor:
                 message=f"Clicked ({x},{y})",
                 extra={"x": x, "y": y},
             )
+        if act is ComputerAction.HOVER:
+            if self._abort_check():
+                raise RuntimeError("Aborted by user")
+            text_q = str(kwargs.get("text") or kwargs.get("query") or "").strip()
+            ref_q = str(kwargs.get("ref") or "").strip()
+            x, y = int(kwargs.get("x") or 0), int(kwargs.get("y") or 0)
+            got = self._resolve_label_point(
+                win,
+                text=text_q,
+                ref=ref_q,
+                x=x,
+                y=y,
+                surface="desktop",
+            )
+            if got is None:
+                label = text_q or ref_q or f"({x},{y})"
+                return public_result(
+                    ok=False,
+                    target="desktop",
+                    action="hover",
+                    message=(
+                        f"No desktop control matching hover target {label!r} — "
+                        "try computer_snapshot or pass x/y"
+                    ),
+                )
+            hx, hy, meta = got
+            win.move_mouse(hx, hy)
+            bits = [f"Hover ({hx},{hy})"]
+            if text_q:
+                bits.append(f"text={text_q!r}")
+            return public_result(
+                ok=True,
+                target="desktop",
+                action="hover",
+                message=" ".join(bits),
+                extra={"x": hx, "y": hy, "located": meta, **self._desktop_evidence()},
+            )
         if act is ComputerAction.DRAG:
             if self._abort_check():
                 raise RuntimeError("Aborted by user")
@@ -2421,6 +2458,7 @@ class ComputerExecutor:
             ComputerAction.DRAG,
             ComputerAction.SELECT,
             ComputerAction.FILL,
+            ComputerAction.HOVER,
         ):
             payload.setdefault("ui", {})
             if isinstance(payload.get("ui"), dict):
@@ -2434,6 +2472,7 @@ class ComputerExecutor:
             ComputerAction.SNAPSHOT,
             ComputerAction.FIND,
             ComputerAction.SELECT,
+            ComputerAction.HOVER,
         ) and self.bridge.navigate_needs_settle():
             slept = self.bridge.settle_after_navigate(min_s=0.6, max_s=1.2)
             # Best-effort ready probe via host job (ignore failures).
@@ -2478,6 +2517,7 @@ class ComputerExecutor:
                 ComputerAction.ACT,
                 ComputerAction.SELECT,
                 ComputerAction.FILL,
+                ComputerAction.HOVER,
             ):
                 # Optimistic enqueue — host poller may still be alive on disk.
                 # PRESS_HOLD/DRAG belong here too: they enqueue exactly like
@@ -2607,6 +2647,19 @@ class ComputerExecutor:
         # Host poller opens the WebView; we do not block on page load.
         if act is ComputerAction.NAVIGATE and payload.get("url"):
             return self._navigate_rail_fast(payload, hint=hint, req_target=req_target)
+
+        if act is ComputerAction.HOVER:
+            text_q = str(kwargs.get("text") or kwargs.get("query") or "").strip()
+            ref = str(kwargs.get("ref") or "").strip()
+            payload["action"] = "hover"
+            if text_q:
+                payload["text"] = text_q
+            if ref:
+                payload["ref"] = ref
+            if kwargs.get("x") is not None:
+                payload["x"] = kwargs.get("x")
+            if kwargs.get("y") is not None:
+                payload["y"] = kwargs.get("y")
 
         # Atomic click-by-text in the rail (one JS pass — no vision)
         if act is ComputerAction.CLICK:

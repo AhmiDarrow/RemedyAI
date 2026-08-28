@@ -1597,6 +1597,17 @@ fn linux_click_trusted(wv: &tauri::Webview, x: f64, y: f64, button: &str) -> Res
     target_os = "netbsd",
     target_os = "openbsd"
 ))]
+fn linux_hover_trusted(wv: &tauri::Webview, x: f64, y: f64) -> Result<(), String> {
+    linux_mouse(wv, "mouseMoved", x, y, "none")
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
 fn linux_insert_text(wv: &tauri::Webview, text: &str) -> Result<(), String> {
     use gtk::gdk::keys::Key;
 
@@ -2088,6 +2099,12 @@ fn cdp_click_trusted(wv: &tauri::Webview, x: f64, y: f64, button: &str) -> Resul
     let _ = cdp_mouse(wv, "mouseMoved", x, y, "none", 0);
     cdp_mouse(wv, "mousePressed", x, y, btn, 1)?;
     cdp_mouse(wv, "mouseReleased", x, y, btn, 1)
+}
+
+/// Pointer only — menus / CSS :hover need the cursor on the control.
+#[cfg(windows)]
+fn cdp_hover_trusted(wv: &tauri::Webview, x: f64, y: f64) -> Result<(), String> {
+    cdp_mouse(wv, "mouseMoved", x, y, "none", 0)
 }
 
 /// Trusted text entry into the focused editable (real input events; React
@@ -3095,7 +3112,7 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
         return;
     }
 
-    if action == "click" {
+    if action == "click" || action == "hover" {
         let text = payload
             .get("text")
             .and_then(|t| t.as_str())
@@ -3117,10 +3134,21 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
             || (text.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
                 && r#ref.as_ref().map(|s| s.is_empty()).unwrap_or(true)
                 && x.is_none());
+        let hover = action == "hover";
         let act = if click_text {
-            "click_text".to_string()
+            if hover {
+                "hover_text".to_string()
+            } else {
+                "click_text".to_string()
+            }
         } else if r#ref.as_ref().map(|s| !s.is_empty()).unwrap_or(false) {
-            "click_ref".to_string()
+            if hover {
+                "hover_ref".to_string()
+            } else {
+                "click_ref".to_string()
+            }
+        } else if hover {
+            "hover".to_string()
         } else {
             "click".to_string()
         };
@@ -3882,7 +3910,7 @@ pub fn browser_agent_action(
 })()"#
             .to_string()
         }
-        "click_text" => {
+        "click_text" | "hover_text" => {
             let needle = text.clone().unwrap_or_default();
             if needle.is_empty() {
                 return Err("text required for click_text".into());
@@ -3927,7 +3955,7 @@ pub fn browser_agent_action(
                 dom = REMEDY_DOM_JS
             )
         }
-        "click_ref" => {
+        "click_ref" | "hover_ref" => {
             let rf = r#ref.unwrap_or_default();
             if rf.is_empty() {
                 return Err("ref required for click_ref".into());
@@ -3949,7 +3977,7 @@ pub fn browser_agent_action(
                 dom = REMEDY_DOM_JS
             )
         }
-        "click" => {
+        "click" | "hover" => {
             // Prefer ref when provided
             if let Some(rf) = r#ref.clone().filter(|s| !s.is_empty()) {
                 let escaped = rf.replace('\\', "\\\\").replace('\'', "\\'");
@@ -4171,8 +4199,8 @@ pub fn browser_agent_action(
         // mid-shop. Budgets sized with executor waits (snapshot 22s, click
         // 18s) at 2 host attempts each.
         "snapshot" | "a11y" | "page_text" => 9,
-        "click" | "click_ref" | "click_text" | "type" | "type_text" | "key" | "scroll"
-        | "drag" | "select" => 8,
+        "click" | "click_ref" | "click_text" | "hover" | "hover_ref" | "hover_text"
+        | "type" | "type_text" | "key" | "scroll" | "drag" | "select" => 8,
         "ready" => 2,
         _ => 4,
     };
@@ -4298,13 +4326,24 @@ pub fn browser_agent_action(
             let cy: f64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(-1.0);
             let meta = it.next().unwrap_or("").to_string();
             if cx >= 0.0 && cy >= 0.0 {
+                let hover_only = act.starts_with("hover");
                 let btn = button_cdp.clone().unwrap_or_else(|| "left".into());
                 #[cfg(windows)]
-                let trusted = match cdp_click_trusted(&wv, cx, cy, &btn) {
-                    Ok(()) => true,
-                    Err(e) => {
-                        log::warn!("trusted click failed — synthetic fallback: {e}");
-                        false
+                let trusted = if hover_only {
+                    match cdp_hover_trusted(&wv, cx, cy) {
+                        Ok(()) => true,
+                        Err(e) => {
+                            log::warn!("trusted hover failed — synthetic fallback: {e}");
+                            false
+                        }
+                    }
+                } else {
+                    match cdp_click_trusted(&wv, cx, cy, &btn) {
+                        Ok(()) => true,
+                        Err(e) => {
+                            log::warn!("trusted click failed — synthetic fallback: {e}");
+                            false
+                        }
                     }
                 };
                 #[cfg(any(
@@ -4314,11 +4353,21 @@ pub fn browser_agent_action(
                     target_os = "netbsd",
                     target_os = "openbsd"
                 ))]
-                let trusted = match linux_click_trusted(&wv, cx, cy, &btn) {
-                    Ok(()) => true,
-                    Err(e) => {
-                        log::warn!("linux trusted click failed — synthetic fallback: {e}");
-                        false
+                let trusted = if hover_only {
+                    match linux_hover_trusted(&wv, cx, cy) {
+                        Ok(()) => true,
+                        Err(e) => {
+                            log::warn!("linux trusted hover failed — synthetic fallback: {e}");
+                            false
+                        }
+                    }
+                } else {
+                    match linux_click_trusted(&wv, cx, cy, &btn) {
+                        Ok(()) => true,
+                        Err(e) => {
+                            log::warn!("linux trusted click failed — synthetic fallback: {e}");
+                            false
+                        }
                     }
                 };
                 #[cfg(not(any(
@@ -4331,10 +4380,22 @@ pub fn browser_agent_action(
                 )))]
                 let trusted = false;
                 if !trusted {
-                    let ev = if btn == "right" { "contextmenu" } else { "click" };
-                    let code = if btn == "right" { 2 } else { 0 };
-                    let fb = format!(
-                        r#"(function(){{
+                    let fb = if hover_only {
+                        format!(
+                            r#"(function(){{
+  const x={cx}, y={cy};
+  const el=document.elementFromPoint(x,y)||document.body;
+  const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window}};
+  try{{ el.dispatchEvent(new MouseEvent('mouseover', opts)); }}catch(e){{}}
+  try{{ el.dispatchEvent(new MouseEvent('mouseenter', opts)); }}catch(e){{}}
+  try{{ el.dispatchEvent(new MouseEvent('mousemove', opts)); }}catch(e){{}}
+}})()"#
+                        )
+                    } else {
+                        let ev = if btn == "right" { "contextmenu" } else { "click" };
+                        let code = if btn == "right" { 2 } else { 0 };
+                        format!(
+                            r#"(function(){{
   const x={cx}, y={cy};
   const el=document.elementFromPoint(x,y)||document.body;
   const opts={{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window,button:{code}}};
@@ -4343,7 +4404,8 @@ pub fn browser_agent_action(
   try{{ el.dispatchEvent(new MouseEvent('{ev}', opts)); }}catch(e){{}}
   if({code}===0&&typeof el.click==='function') try{{ el.click(); }}catch(e){{}}
 }})()"#
-                    );
+                        )
+                    };
                     let _ = wv.eval(&fb);
                 }
                 let out = format!("ok:{meta}");

@@ -49,7 +49,7 @@ def _path(home: str | Path | None = None) -> Path:
 def approach_of(action: str, kwargs: dict[str, Any]) -> str:
     """The concrete approach a computer action used (for click-family tools)."""
     a = (action or "").lower()
-    if a in ("click", "drag", "press_hold", "scroll"):
+    if a in ("click", "drag", "press_hold", "scroll", "hover"):
         if str(
             kwargs.get("text")
             or kwargs.get("from_text")

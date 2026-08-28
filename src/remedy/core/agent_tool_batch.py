@@ -67,7 +67,7 @@ def progress_marker(
 
 
 _WRITE_TOOLS = frozenset({"file_write", "file_edit", "file_edit_batch", "apply_patch"})
-_READ_TOOLS = frozenset({"file_read", "list_dir", "repo_search"})
+_READ_TOOLS = frozenset({"file_read", "list_dir", "repo_search", "file_glob"})
 # Provider-history bookkeeping keys a model may copy back into a fresh call.
 _HISTORY_REPLAY_KEYS = frozenset(
     {"_history_summarized", "_body_omitted", "_content_chars", "history_note"}

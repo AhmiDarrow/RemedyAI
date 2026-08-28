@@ -4,6 +4,19 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — hover, and the Grok operate pack keeps full hands
+
+- `computer_hover` moves the pointer onto a control (`text=` / `ref=`)
+  without clicking — menus, tooltips, CSS `:hover` — same locator family as
+  click. Trusted CDP/GDK move on the rail; native `move_mouse` on desktop
+  (Windows + Linux).
+- Cloud work-pack cap (32) now keeps `apply_patch`, `computer_scroll`,
+  `computer_wait`, `computer_select`, and `computer_hover` alongside click /
+  type / fill. A long Grok turn can still code *and* drive the PC the way
+  Operator / Claude CUA do, without 194-schema prompt bloat.
+- Writes invalidate `file_glob` cache the same way they invalidate
+  `repo_search` / `file_read`.
+
 ### Fixed — stale Stop cannot kill a newer turn
 
 - `POST /abort` accepts `epoch=` from stream `event: start`. A late Stop
