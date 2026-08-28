@@ -15,6 +15,9 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   ``run the tests``, clipboard, ``which python`` / ``where is git``, and
   ``list my goals``. ``pwd`` / project path is L0 on this PC. A path like
   ``list files in src`` still goes to the model.
+- ``ship status``, ``mission status``, and ``what's on my screen`` run the
+  local tools (no provider). Bare ``look at this`` / ``what's the mission``
+  still go to the model.
 
 ### Added — git_log on every live round; file I/O and usage SQLite off the loop
 

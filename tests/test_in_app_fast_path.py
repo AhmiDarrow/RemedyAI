@@ -50,6 +50,14 @@ def test_todo_list_dir_verify_clipboard_which_goals():
     assert p5.arguments.get("name") == "python"
     p6 = match_in_app_fast_path("list my goals")
     assert p6 is not None and p6.tool == "goal_list"
+    p7 = match_in_app_fast_path("ship status")
+    assert p7 is not None and p7.tool == "ship_status"
+    p8 = match_in_app_fast_path("mission status")
+    assert p8 is not None and p8.tool == "mission_status"
+    p9 = match_in_app_fast_path("what's on my screen")
+    assert p9 is not None and p9.tool == "companion_context"
+    assert match_in_app_fast_path("look at this") is None
+    assert match_in_app_fast_path("what's the mission") is None
 
 
 def test_mutates_and_multi_step_stay_on_the_provider():
