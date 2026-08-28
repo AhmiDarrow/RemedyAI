@@ -2832,6 +2832,213 @@ def test_executor_press_hold_text_locates_native_control(tmp_path: Path, monkeyp
     assert "press_hold" not in enqueued
 
 
+def test_executor_type_query_locates_native_field(tmp_path: Path, monkeypatch):
+    """Native type with query= must find the field like click.
+
+    computer_type advertises query=/label= as the visible field locator.
+    The rail host already relocates; the desktop path used to ignore query
+    and type into whatever had focus.
+    """
+    import json
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    win = native()
+    monkeypatch.setattr(
+        win,
+        "desktop_snapshot",
+        lambda limit=60, mode="auto", hwnd=None: [
+            {
+                "ref": "c1",
+                "name": "What's happening?",
+                "tag": "edit",
+                "x": 80,
+                "y": 120,
+            }
+        ],
+    )
+    clicked: list[tuple[int, int]] = []
+    typed: list[str] = []
+
+    def fake_click(x, y, *, button="left", clicks=1):
+        clicked.append((int(x), int(y)))
+
+    def fake_type_fast(text, abort_check=None, chars_typed=None, **_k):
+        typed.append(str(text))
+        if chars_typed is not None:
+            chars_typed[:] = [len(text)]
+        return {"method": "keystrokes"}
+
+    monkeypatch.setattr(win, "click", fake_click, raising=False)
+    monkeypatch.setattr(
+        win,
+        "click_element",
+        lambda el, **k: fake_click(int(el.get("x") or 0), int(el.get("y") or 0)),
+        raising=False,
+    )
+    monkeypatch.setattr(win, "type_text_fast", fake_type_fast, raising=False)
+    monkeypatch.setattr(
+        win,
+        "type_text",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("vault path")),
+        raising=False,
+    )
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    out = json.loads(
+        ex.run(
+            ComputerAction.TYPE,
+            text="hello from query",
+            query="What's happening?",
+            target="desktop",
+        )
+    )
+    assert out.get("ok") is True, out
+    assert out.get("target") == "desktop"
+    assert typed == ["hello from query"]
+    assert clicked == [(80, 120)]
+    assert out.get("query") == "What's happening?"
+    assert "What's happening?" in str(out.get("message") or "")
+
+
+def test_executor_type_query_miss_names_the_label(tmp_path: Path, monkeypatch):
+    """A missing native field label must not type into whatever is focused."""
+    import json
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    win = native()
+    monkeypatch.setattr(
+        win,
+        "desktop_snapshot",
+        lambda limit=60, mode="auto", hwnd=None: [
+            {"ref": "c1", "name": "Search", "tag": "edit", "x": 1, "y": 1}
+        ],
+    )
+    typed: list[str] = []
+    monkeypatch.setattr(
+        win,
+        "type_text_fast",
+        lambda text, **k: typed.append(str(text)) or {"method": "keystrokes"},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        win,
+        "type_text",
+        lambda text, **k: typed.append(str(text)),
+        raising=False,
+    )
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    out = json.loads(
+        ex.run(
+            ComputerAction.TYPE,
+            text="should not land",
+            query="NoSuchFieldXYZ",
+            target="desktop",
+        )
+    )
+    assert out.get("ok") is False, out
+    msg = str(out.get("message") or "")
+    assert "NoSuchFieldXYZ" in msg
+    assert "computer_snapshot" in msg
+    assert typed == []
+
+
+def test_executor_type_stale_ref_plus_query_relocates(tmp_path: Path, monkeypatch):
+    """Stale ref + query relocates by the visible label in one pass."""
+    import json
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    win = native()
+    monkeypatch.setattr(
+        win,
+        "desktop_snapshot",
+        lambda limit=60, mode="auto", hwnd=None: [
+            {
+                "ref": "c9",
+                "name": "Email",
+                "tag": "edit",
+                "x": 40,
+                "y": 60,
+            }
+        ],
+    )
+    clicked: list[tuple[int, int]] = []
+    typed: list[str] = []
+    monkeypatch.setattr(
+        win,
+        "click",
+        lambda x, y, **k: clicked.append((int(x), int(y))),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        win,
+        "type_text_fast",
+        lambda text, abort_check=None, chars_typed=None, **k: (
+            typed.append(str(text)) or {"method": "keystrokes"}
+        ),
+        raising=False,
+    )
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    out = json.loads(
+        ex.run(
+            ComputerAction.TYPE,
+            text="hi@x.com",
+            ref="stale-ref",
+            query="Email",
+            target="desktop",
+        )
+    )
+    assert out.get("ok") is True, out
+    assert typed == ["hi@x.com"]
+    assert clicked == [(40, 60)]
+    assert out.get("query") == "Email"
+
+
+def test_executor_type_without_query_still_types_into_focus(tmp_path: Path, monkeypatch):
+    """Bare computer_type still types into the focused control — do not take that away."""
+    import json
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    win = native()
+    typed: list[str] = []
+    monkeypatch.setattr(
+        win,
+        "type_text_fast",
+        lambda text, abort_check=None, chars_typed=None, **k: (
+            typed.append(str(text)) or {"method": "keystrokes"}
+        ),
+        raising=False,
+    )
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    out = json.loads(
+        ex.run(ComputerAction.TYPE, text="into focus", target="desktop")
+    )
+    assert out.get("ok") is True, out
+    assert typed == ["into focus"]
+
+
 def test_executor_press_hold_text_miss_names_the_label(tmp_path: Path, monkeypatch):
     """A missing native hold label must say so — not 'needs x/y or a ref'."""
     import json
@@ -3252,6 +3459,7 @@ def test_stale_ref_click_recovers_by_remembered_label(tmp_path, monkeypatch):
 def test_claim_next_idle_empty_skips_disk(tmp_path: Path, monkeypatch):
     """After an empty scan, idle polls must not re-glob job JSON until enqueue."""
     from pathlib import Path as PathCls
+
     from remedy.core.computer.host_bridge import ComputerHostBridge
 
     b = ComputerHostBridge(home_dir=tmp_path)

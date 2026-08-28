@@ -4,6 +4,29 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed — failed steer waits in line
+
+- Enter while she works still steers the live turn. If `/steer` cannot land
+  (nudge cap, a 4xx/5xx, a dropped request), the words **queue after** —
+  they no longer interrupt. Ctrl+Enter still stops and sends now. Mid-turn
+  queue holds 24 remarks (was 8); a full queue names `nudge_full` so chrome
+  can wait instead of taking her hands off a click or payment.
+
+### Fixed — desktop type locates the field by visible label
+
+- `computer_type(query="What's happening?")` already relocated in the
+  in-app rail. On native desktop it ignored the label and typed into
+  whatever had focus. Desktop now resolves `query=` / `label=` (and a
+  stale `ref=` plus query) via last snapshot / UIA then OCR, focuses that
+  field, then types. Bare type without a locator still uses the focused
+  control. Vault secrets may use a resolved label, not only `ref=`.
+
+### Fixed — goal evidence joins list args
+
+- `goal_complete` / `goal_verify` still did `(evidence or "").strip()` so
+  `evidence=["tests green"]` died. Wrapper now joins via `coerce_text_arg`;
+  empty after coerce still refuses on verify (no invented evidence).
+
 ### Fixed — companion_taste joins list fact
 
 - `companion_taste` still did `(fact or "").strip()` / `fact.strip()` so a

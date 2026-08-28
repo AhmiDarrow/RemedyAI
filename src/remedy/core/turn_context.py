@@ -138,7 +138,9 @@ _pending_verify_by_session: dict[str, Any] = {}
 # drains these between steps and folds them in as user messages, so the
 # owner can redirect without stopping her (Grove's "every message steers").
 _nudges_by_session: dict[str, list[str]] = {}
-_NUDGE_MAX = 8
+# Enter steers every mid-turn remark. 24 holds a long computer-use back-and-forth
+# without dropping the live turn; a full queue still queues *after*, never aborts.
+_NUDGE_MAX = 24
 # sid → why the last abort happened ("stop" = Stop button, "supersede" = the
 # owner sent the next message while this turn ran). The dying stream reads it
 # to word the durable assistant row.
@@ -469,24 +471,31 @@ def session_turn_running(session_id: str) -> bool:
         return bool(_registry.get(sid)) or sid in _stream_claims
 
 
-def push_nudge(session_id: str, text: str) -> bool:
-    """Queue an owner message for the running turn. False when no turn runs.
+def try_push_nudge(session_id: str, text: str) -> tuple[bool, str]:
+    """Queue an owner message for the running turn.
 
-    The caller then sends it as an ordinary message instead. At most
-    ``_NUDGE_MAX`` are held; older ones are kept (they were said first).
+    Returns ``(ok, reason)``. ``reason`` is ``ok``, ``empty``, ``no_turn``,
+    or ``nudge_full``. A full queue keeps the older words (said first) and
+    refuses the new one so the caller can wait in line instead of aborting.
     """
     sid = str(session_id or "").strip()
     body = str(text or "").strip()
     if not sid or not body:
-        return False
+        return False, "empty"
     with _lock:
         if not (_registry.get(sid) or sid in _stream_claims):
-            return False
+            return False, "no_turn"
         lst = _nudges_by_session.setdefault(sid, [])
         if len(lst) >= _NUDGE_MAX:
-            return False
+            return False, "nudge_full"
         lst.append(body)
-        return True
+        return True, "ok"
+
+
+def push_nudge(session_id: str, text: str) -> bool:
+    """Queue an owner message for the running turn. False when it cannot land."""
+    ok, _reason = try_push_nudge(session_id, text)
+    return ok
 
 
 def drain_nudges(session_id: str | None) -> list[str]:

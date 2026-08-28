@@ -171,6 +171,7 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
         from remedy.models import TaskStatus
 
         title_s = coerce_text_arg(title)
+        evidence = coerce_text_arg(evidence)
         needle = title_s.lower()
         if not needle:
             return "Provide goal title (or partial) to complete."
@@ -189,7 +190,7 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
             return f"No open goal matching: {title_s}"
         task = matches[0]
         task.status = TaskStatus.COMPLETED
-        task.result_summary = (evidence or "done").strip()[:500]
+        task.result_summary = (evidence or "done")[:500]
         task.completed_at = datetime.now(UTC)
         task.updated_at = datetime.now(UTC)
         with suppress(Exception):
@@ -271,7 +272,8 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
         return str(out.get("markdown") or out.get("skipped") or "Nothing to do.")
 
     async def goal_verify(title: str = "", evidence: str = "") -> str:
-        if not (evidence or "").strip():
+        evidence = coerce_text_arg(evidence)
+        if not evidence:
             return "Provide evidence of completion (command output, file path, result)."
         return await goal_complete(title=title, evidence=evidence)
 

@@ -91,7 +91,7 @@ export async function abortSession(
 export async function steerSession(
   sessionId: string,
   message: string,
-): Promise<{ steered: boolean }> {
+): Promise<{ steered: boolean; reason?: string }> {
   return apiFetch(`/sessions/${sessionId}/steer`, {
     method: 'POST',
     body: JSON.stringify({ message }),

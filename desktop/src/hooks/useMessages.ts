@@ -36,7 +36,11 @@ import {
   touchStreamJob,
   withStoppedMarker,
 } from '../sessions/streamJobs'
-import { promoteQueuedOptions, retrySendOptions } from '../sessions/retryPrompt'
+import {
+  promoteQueuedOptions,
+  resolveBusySend,
+  retrySendOptions,
+} from '../sessions/retryPrompt'
 import { steerSession } from '../api/sessions'
 import type { ChatMessage } from '../types'
 import { toolLabel, type ProcessStep } from '../utils/toolLabels'
@@ -1037,35 +1041,40 @@ export function useMessages(sessionId: string | null) {
         // owner asked to interrupt).
         const explicit = opts?.mode
         const trySteer = !hasAtt && explicit !== 'after' && explicit !== 'interrupt'
+        let steered = false
         if (trySteer) {
-          let steered = false
           try {
             steered = (await steerSession(targetId, text)).steered
           } catch {
             steered = false
           }
-          if (steered) {
-            if (sessionIdRef.current === targetId) {
-              const userMsg: ChatMessage = {
-                id: crypto.randomUUID(),
-                role: 'user',
-                content: text,
-                thinking: null,
-                tool_calls: [],
-                tool_results: [],
-                model: null,
-                agent: null,
-                tokens: null,
-                created_at: new Date().toISOString(),
-                reverted: false,
-              }
-              setMessages((prev) => [...prev, userMsg])
-            }
-            return
-          }
         }
-        const mode =
-          explicit === 'interrupt' || (trySteer && !hasAtt) ? 'interrupt' : 'after'
+        const decision = resolveBusySend({
+          explicit,
+          hasAttachments: hasAtt,
+          steered,
+        })
+        if (decision === 'steered') {
+          if (sessionIdRef.current === targetId) {
+            const userMsg: ChatMessage = {
+              id: crypto.randomUUID(),
+              role: 'user',
+              content: text,
+              thinking: null,
+              tool_calls: [],
+              tool_results: [],
+              model: null,
+              agent: null,
+              tokens: null,
+              created_at: new Date().toISOString(),
+              reverted: false,
+            }
+            setMessages((prev) => [...prev, userMsg])
+          }
+          return
+        }
+        const mode: 'after' | 'interrupt' =
+          decision === 'interrupt' ? 'interrupt' : 'after'
         const item: QueuedSend = {
           id: crypto.randomUUID(),
           text,

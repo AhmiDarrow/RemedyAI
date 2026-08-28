@@ -211,3 +211,41 @@ async def test_goal_set_next_joins_list_title_and_action(tools):
     assert "['Learn Spanish']" not in out
     assert "['Twenty minutes of vocabulary']" not in out
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        ["tests green"],
+        ("tests green",),
+        '["tests green"]',
+        [["tests green"]],
+    ],
+)
+async def test_goal_complete_joins_list_evidence(tools, rt, evidence):
+    """goal_complete(evidence=["tests green"]) must not .strip() a list."""
+    await tools["goal_add"](title="Ship it")
+    out = await tools["goal_complete"](title="Ship it", evidence=evidence)
+    assert "attribute 'strip'" not in out
+    assert "Goal completed" in out
+    assert "tests green" in out
+    assert "['tests green']" not in out
+    assert rt._tasks[0].result_summary == "tests green"
+
+
+@pytest.mark.asyncio
+async def test_goal_verify_joins_list_evidence(tools):
+    await tools["goal_add"](title="Ship it")
+    out = await tools["goal_verify"](title="Ship it", evidence=["pytest -q green"])
+    assert "attribute 'strip'" not in out
+    assert "Goal completed" in out
+    assert "pytest -q green" in out
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("evidence", [[], "", "   "])
+async def test_goal_verify_empty_evidence_still_refuses(tools, evidence):
+    await tools["goal_add"](title="Ship it")
+    out = await tools["goal_verify"](title="Ship it", evidence=evidence)
+    assert "Provide evidence" in out
+

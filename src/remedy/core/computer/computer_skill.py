@@ -70,6 +70,10 @@ def approach_of(action: str, kwargs: dict[str, Any]) -> str:
     if a == "act":
         return "act"
     if a == "type":
+        if str(kwargs.get("query") or kwargs.get("label") or "").strip():
+            return "text"
+        if str(kwargs.get("ref") or "").strip():
+            return "ref"
         return "type"
     if a == "key":
         return "key"

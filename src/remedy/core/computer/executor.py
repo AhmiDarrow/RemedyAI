@@ -1587,18 +1587,44 @@ class ComputerExecutor:
             )
             if vault_err is not None:
                 return vault_err
-            # ref= → UIA ValuePattern.SetValue: sets the WHOLE value atomically
-            # into that specific control — no focus races, verified read-back.
+            # query=/label= is the same locator family as click text=. ref=
+            # still wins when query is empty; stale ref + query relocates.
             set_ref = str(kwargs.get("ref") or "").strip()
-            if had_vault and not set_ref:
+            set_query = str(
+                kwargs.get("query") or kwargs.get("label") or ""
+            ).strip()
+            locate_meta: dict[str, Any] = {}
+            if set_query:
+                got = self._resolve_label_point(
+                    win,
+                    text=set_query,
+                    ref=set_ref,
+                    surface="desktop",
+                )
+                if got is None:
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="type",
+                        message=(
+                            f"No desktop field matching {set_query!r} — "
+                            "try computer_snapshot or pass ref="
+                        ),
+                    )
+                _, _, locate_meta = got
+                hit_ref = str(locate_meta.get("ref") or "").strip()
+                if hit_ref:
+                    set_ref = hit_ref
+            if had_vault and not set_ref and not set_query:
                 return public_result(
                     ok=False,
                     target="desktop",
                     action="type",
                     message=(
                         "Vault secrets only type into a named field. Pass ref= "
-                        "from computer_snapshot so the value lands in that control, "
-                        "not whatever currently has focus."
+                        "from computer_snapshot or query= the visible label so "
+                        "the value lands in that control, not whatever currently "
+                        "has focus."
                     ),
                     extra={"length": reported_len, "needs": "ref"},
                 )
@@ -1606,6 +1632,7 @@ class ComputerExecutor:
                 set_ref.lower().startswith("c") or set_ref.lower().startswith("w")
             ):
                 return self._refuse_off_rail_desktop("type")
+            focused = False
             if set_ref:
                 el = self.bridge.get_element_by_ref(set_ref)
                 if el is not None and el.get("hwnd") and el.get("uia"):
@@ -1619,23 +1646,36 @@ class ComputerExecutor:
                         text=text,
                     )
                     if res.get("ok"):
+                        extra = {
+                            "ref": set_ref,
+                            "length": reported_len,
+                            "method": "uia_set_value",
+                            "verified": bool(res.get("verified")),
+                            **self._desktop_evidence(),
+                        }
+                        if set_query:
+                            extra["query"] = set_query
+                        if locate_meta:
+                            extra["located"] = locate_meta
                         return public_result(
                             ok=True,
                             target="desktop",
                             action="type",
                             message=str(res.get("message") or "Set value"),
-                            extra={
-                                "ref": set_ref,
-                                "length": reported_len,
-                                "method": "uia_set_value",
-                                "verified": bool(res.get("verified")),
-                                **self._desktop_evidence(),
-                            },
+                            extra=extra,
                         )
                     # Not settable → click it to focus, then fall through to keys.
                     with contextlib.suppress(Exception):
                         win.click_element(el)
                         time.sleep(0.1)
+                    focused = True
+            if locate_meta and not focused:
+                with contextlib.suppress(Exception):
+                    win.click(
+                        int(locate_meta.get("x") or 0),
+                        int(locate_meta.get("y") or 0),
+                    )
+                    time.sleep(0.1)
             typed_box: list[int] = [0]
             type_method = "keystrokes"
             try:
@@ -1685,16 +1725,24 @@ class ComputerExecutor:
                 )
             length = "a stored secret" if had_vault else f"{reported_len} chars"
             verb = "Pasted" if type_method == "paste" else "Typed"
+            into = f" into {set_query!r}" if set_query else ""
+            extra = {
+                "length": reported_len if not had_vault else None,
+                "method": type_method,
+                **self._desktop_evidence(),
+            }
+            if set_query:
+                extra["query"] = set_query
+            if set_ref:
+                extra["ref"] = set_ref
+            if locate_meta:
+                extra["located"] = locate_meta
             return public_result(
                 ok=True,
                 target="desktop",
                 action="type",
-                message=f"{verb} {length}",
-                extra={
-                    "length": reported_len if not had_vault else None,
-                    "method": type_method,
-                    **self._desktop_evidence(),
-                },
+                message=f"{verb} {length}{into}",
+                extra=extra,
             )
         if act is ComputerAction.KEY:
             key = str(kwargs.get("key") or "")
