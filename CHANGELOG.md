@@ -22,6 +22,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   local status/list only (``rmb action=status|models``,
   ``computer_windows mode=list``). Start/stop RMB and close/focus windows
   still go to the model.
+- Vault handles, F1 help list/read, hive/soul status, reload/search skills,
+  ``remember that …`` / ``what do you remember about …``, mail connected,
+  screenshot, and list monitors also skip the provider. ``remember to …``
+  (a task) still goes to the model.
 
 ### Added — git_log on every live round; file I/O and usage SQLite off the loop
 

@@ -70,6 +70,40 @@ def test_todo_list_dir_verify_clipboard_which_goals():
     assert match_in_app_fast_path("close the window") is None
 
 
+def test_vault_help_hive_soul_skills_memory_mail_screenshot():
+    p = match_in_app_fast_path("list vault")
+    assert p is not None and p.tool == "vault_list"
+    p = match_in_app_fast_path("help topics")
+    assert p is not None and p.tool == "help_list"
+    p = match_in_app_fast_path("help_read 20-rmb-local-agent")
+    assert p is not None and p.tool == "help_read"
+    assert p.arguments.get("id") == "20-rmb-local-agent"
+    p = match_in_app_fast_path("hive status")
+    assert p is not None and p.tool == "hive_status"
+    p = match_in_app_fast_path("soul status")
+    assert p is not None and p.tool == "soul_status"
+    p = match_in_app_fast_path("reload skills")
+    assert p is not None and p.tool == "skill_reload"
+    p = match_in_app_fast_path("search skills for git")
+    assert p is not None and p.tool == "skill_search"
+    assert "git" in (p.arguments.get("query") or "")
+    p = match_in_app_fast_path("what do you remember about oat milk")
+    assert p is not None and p.tool == "memory_search"
+    assert "oat milk" in p.arguments.get("query", "")
+    p = match_in_app_fast_path("remember that I like oat milk")
+    assert p is not None and p.tool == "memory_save"
+    assert "oat milk" in p.arguments.get("content", "")
+    p = match_in_app_fast_path("remember oat milk")
+    assert p is not None and p.tool == "memory_save"
+    assert match_in_app_fast_path("remember to buy milk") is None
+    p = match_in_app_fast_path("is mail connected")
+    assert p is not None and p.tool == "mail_status"
+    p = match_in_app_fast_path("take a screenshot")
+    assert p is not None and p.tool == "computer_screenshot"
+    p = match_in_app_fast_path("list monitors")
+    assert p is not None and p.tool == "computer_monitors"
+
+
 def test_mutates_and_multi_step_stay_on_the_provider():
     assert match_in_app_fast_path("git commit") is None
     assert match_in_app_fast_path("git push origin") is None
@@ -85,6 +119,23 @@ def test_format_git_is_plain_text():
         "git_status", "**git_status** exit=0\n## master"
     )
     assert "master" in out
+
+
+def test_format_vault_handles_only():
+    out = format_in_app_fast_path_reply(
+        "vault_list",
+        json.dumps(
+            {
+                "ok": True,
+                "items": [
+                    {"handle": "card-visa", "kind": "card", "label": "Visa"},
+                ],
+            }
+        ),
+    )
+    assert "card-visa" in out
+    assert "Visa" in out
+    assert "4111" not in out
 
 
 def test_format_reminder_list():
