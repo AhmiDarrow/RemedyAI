@@ -1481,24 +1481,72 @@ def register_computer_tools(runtime: Any) -> None:
         goal: str = "",
         steps: Any = "",
         max_retries: int = 1,
+        task_id: str = "",
     ) -> str:
         """Machine-owned computer drive: act → verify → one retry → escalate."""
-        from remedy.core.life_task_drive import drive_life_task, format_drive_result
+        from remedy.core.life_task_drive import (
+            drive_life_task,
+            format_drive_result,
+            resume_life_task,
+        )
+        from remedy.core.turn_context import turn_session_id
 
+        tid = coerce_text_arg(task_id)
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        sid = turn_session_id(runtime)
+        if tid and not coerce_text_arg(steps):
+            result = resume_life_task(
+                tid,
+                runtime=runtime,
+                max_retries=int(max_retries or 1),
+                home=home,
+            )
+            return format_drive_result(result)
         result = drive_life_task(
             goal=goal,
             steps=steps,
             runtime=runtime,
             max_retries=int(max_retries or 1),
+            persist=True,
+            session_id=sid,
+            home=home,
+            task_id=tid or None,
         )
         return format_drive_result(result)
+
+    async def life_task_status(task_id: str = "") -> str:
+        """Show saved life-task evidence (plain steps + observed)."""
+        from remedy.core.life_task_store import list_life_tasks, load_life_task
+        from remedy.core.turn_context import turn_session_id
+
+        home = getattr(getattr(runtime, "config", None), "home_dir", None)
+        tid = coerce_text_arg(task_id)
+        if tid:
+            rec = load_life_task(tid, home=home)
+            if rec is None:
+                return f"No life task `{tid}`."
+            return str(rec.get("markdown") or json.dumps(rec)[:2000])
+        rows = list_life_tasks(
+            session_id=turn_session_id(runtime), home=home, limit=10
+        )
+        if not rows:
+            rows = list_life_tasks(home=home, limit=10)
+        if not rows:
+            return "No saved life tasks yet."
+        lines = ["**Life tasks**"]
+        for r in rows:
+            lines.append(
+                f"- `{r.get('id')}` [{r.get('status')}] {r.get('goal') or ''}"
+            )
+        return "\n".join(lines)
 
     reg.register_builtin_handler(
         "life_drive",
         "Drive a life task on this PC (navigate/click/type/fill) with "
         "act→verify→retry→escalate. Never marks the goal done without an "
         "observed ok. Pay/send/password/CAPTCHA steps stop for the owner. "
-        "steps=[{title, action, url?, text?, expect_text?}].",
+        "steps=[{title, action, url?, text?, expect_text?}]. "
+        "task_id= resumes a saved drive (checkpoints still stop).",
         life_drive,
         {
             "type": "object",
@@ -1512,7 +1560,20 @@ def register_computer_tools(runtime: Any) -> None:
                     ],
                 },
                 "max_retries": {"type": "integer", "default": 1},
+                "task_id": {
+                    "type": "string",
+                    "description": "Resume a saved life task id",
+                },
             },
-            "required": ["goal", "steps"],
+        },
+    )
+    reg.register_builtin_handler(
+        "life_task_status",
+        "Show saved life-task evidence (plain steps + what was observed). "
+        "Pass task_id= for one trail, or omit to list recent.",
+        life_task_status,
+        {
+            "type": "object",
+            "properties": {"task_id": {"type": "string"}},
         },
     )
