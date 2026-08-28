@@ -278,6 +278,37 @@ def test_browser_vault_type_requires_ref(tmp_path: Path) -> None:
     assert extra.get("needs") == "ref" or "named field" in str(out.get("message") or "").lower()
 
 
+@pytest.mark.parametrize("query", ["browser", "desktop", "auto", "rail", "os"])
+def test_browser_vault_type_rejects_routing_token_query(tmp_path: Path, query: str) -> None:
+    """query=browser is a drive target, not a field — must not unlock vault type."""
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    ex = ComputerExecutor(tmp_path)
+    out = ex._run_browser(
+        ComputerAction.TYPE, text="{{vault:card-visa}}", query=query
+    )
+    assert out.get("ok") is False, out
+    assert "named field" in str(out.get("message") or "").lower()
+
+
+def test_act_vault_type_refuses_without_a_named_field(tmp_path: Path, monkeypatch) -> None:
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    ex = ComputerExecutor(tmp_path)
+    monkeypatch.setattr(
+        ex,
+        "_expand_vault_text",
+        lambda text, **_k: (str(text).replace("{{vault:card-visa}}", "4111"), None),
+    )
+    out = ex._run_browser(
+        ComputerAction.ACT, type="{{vault:card-visa}}", goal="fill the card"
+    )
+    assert out.get("ok") is False, out
+    assert "named field" in str(out.get("message") or "").lower()
+
+
 def test_resolve_tools_does_not_or_task_detector() -> None:
     import inspect
 

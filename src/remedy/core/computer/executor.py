@@ -24,6 +24,33 @@ from remedy.core.computer.router import (
 )
 from remedy.core.computer.types import ComputerAction, public_result
 
+# Host JS strips these from query= (they are drive targets, not field labels).
+# Python must agree so vault cannot treat query="browser" as a named field.
+_TYPE_ROUTING_TOKENS = frozenset(
+    {
+        "browser",
+        "desktop",
+        "auto",
+        "system",
+        "grove",
+        "alongside",
+        "studio",
+        "chrome",
+        "rail",
+        "web",
+        "os",
+    }
+)
+
+
+def field_locator(*candidates: Any) -> str:
+    """Visible field label, or empty when the value is a routing token."""
+    for raw in candidates:
+        q = str(raw or "").strip()
+        if q and q.lower() not in _TYPE_ROUTING_TOKENS:
+            return q
+    return ""
+
 # Owner's own web browsers. Remedy has the in-app Browser rail for every web
 # task — she must NEVER launch or focus one of these. Driving the owner's
 # browser gives her no page eyes (the rail's snapshot/page_text/click do not
@@ -1590,9 +1617,7 @@ class ComputerExecutor:
             # query=/label= is the same locator family as click text=. ref=
             # still wins when query is empty; stale ref + query relocates.
             set_ref = str(kwargs.get("ref") or "").strip()
-            set_query = str(
-                kwargs.get("query") or kwargs.get("label") or ""
-            ).strip()
+            set_query = field_locator(kwargs.get("query"), kwargs.get("label"))
             locate_meta: dict[str, Any] = {}
             if set_query:
                 got = self._resolve_label_point(
@@ -1703,7 +1728,7 @@ class ComputerExecutor:
                         action="type",
                         message=f"Aborted by user during type after {n} chars",
                         extra={
-                            "length": len(text),
+                            "length": None if had_vault else reported_len,
                             "typed": n,
                             "aborted": True,
                         },
@@ -1718,7 +1743,7 @@ class ComputerExecutor:
                     action="type",
                     message=f"Aborted by user during type after {n} chars",
                     extra={
-                        "length": len(text),
+                        "length": None if had_vault else reported_len,
                         "typed": n,
                         "aborted": True,
                     },
@@ -2324,9 +2349,11 @@ class ComputerExecutor:
             text = str(payload.get("text") or "")
             had_vault = "{{" in text
             set_ref = str(payload.get("ref") or kwargs.get("ref") or "").strip()
-            set_query = str(
-                payload.get("query") or kwargs.get("query") or kwargs.get("label") or ""
-            ).strip()
+            set_query = field_locator(
+                payload.get("query"),
+                kwargs.get("query"),
+                kwargs.get("label"),
+            )
             if set_query:
                 payload["query"] = set_query
             if had_vault and not set_ref and not set_query:
@@ -3448,7 +3475,8 @@ class ComputerExecutor:
 
         def _act_type() -> dict[str, Any] | None:
             nonlocal type_text
-            typed_reported = "a stored secret" if "{{" in type_text else f"{len(type_text)} chars"
+            had_vault = "{{" in type_text
+            typed_reported = "a stored secret" if had_vault else f"{len(type_text)} chars"
             type_text, vault_err = self._expand_vault_text(
                 type_text,
                 action="act",
@@ -3457,6 +3485,20 @@ class ComputerExecutor:
             if vault_err is not None:
                 vault_err["steps"] = log
                 return vault_err
+            type_query = field_locator(click)
+            if had_vault and not type_query:
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="act",
+                    message=(
+                        "Vault secrets only type into a named field. Pass click= "
+                        "the visible label (or computer_type with ref=/query=) so "
+                        "the value lands in that control, not whatever currently "
+                        "has focus."
+                    ),
+                    extra={"steps": log, "needs": "ref"},
+                )
             if not click and any(
                 w in (goal + " " + type_text).lower()
                 for w in ("email", "user", "login", "@")
@@ -3465,10 +3507,17 @@ class ComputerExecutor:
                     pre = self._browser_click_text(label, payload)
                     if pre.get("ok"):
                         log.append(f"focus:{label}")
+                        type_query = field_locator(label) or type_query
                         break
+            type_payload: dict[str, Any] = {
+                "ui": {"open_browser": True},
+                "text": type_text,
+            }
+            if type_query:
+                type_payload["query"] = type_query
             job = self._enqueue(
                 "type",
-                {"ui": {"open_browser": True}, "text": type_text},
+                type_payload,
             )
             fin = self.bridge.wait(
                 job.id,

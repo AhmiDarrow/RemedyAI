@@ -4,6 +4,19 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed — 409 recovery no longer kills a live turn
+
+- When chrome thought the session was idle (dropped SSE) and the server
+  still held the claim, a failed `/steer` used to abort with supersede.
+  `nudge_full` and a steer blip now retry join and keep her hands on the
+  page. Abort-and-resend only when `/steer` says `no_turn`.
+
+### Fixed — vault type cannot use a routing token as a field
+
+- `query=browser` / `label=auto` are drive targets, not field names. They
+  no longer unlock vault type into whatever is focused. `computer_act` vault
+  type also needs a named click/label. Ordinary type-into-focus is unchanged.
+
 ### Fixed — failed steer waits in line
 
 - Enter while she works still steers the live turn. If `/steer` cannot land

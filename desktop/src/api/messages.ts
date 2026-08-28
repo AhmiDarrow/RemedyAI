@@ -19,6 +19,21 @@ export function streamHttpErrorMessage(
   return formatApiErrorBody(body, statusText || `HTTP ${status}`)
 }
 
+/**
+ * After POST /messages 409: join the live turn if we can. Abort/supersede
+ * only when /steer says there is no turn (`no_turn`). A full nudge queue
+ * or a blip must not stop computer-use.
+ */
+export function resolveSteer409(result: {
+  ok?: boolean
+  steered?: boolean
+  reason?: string
+}): 'steered' | 'retry-steer' | 'supersede' {
+  if (result.steered) return 'steered'
+  if (result.reason === 'no_turn') return 'supersede'
+  return 'retry-steer'
+}
+
 /** Fetch/SSE drop (sidecar killed mid-turn) — not an xAI outage. */
 export function streamTransportErrorMessage(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err || 'Stream failed')
@@ -197,21 +212,40 @@ export function streamMessage(
         // 3 h build). Killing that turn is the last resort: first hand the words
         // to the running turn as steering. Attachments need a turn of their own.
         if (!attachments?.length) {
-          try {
-            const sr = await fetch(`${getApiBase()}/sessions/${sessionId}/steer`, {
-              method: 'POST',
-              headers: { ...authHeaders(), Accept: 'application/json', 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message }),
-            })
-            if (sr.ok) {
-              const sj = (await sr.json().catch(() => ({}))) as { steered?: boolean }
-              if (sj?.steered) {
+          let last: 'steered' | 'retry-steer' | 'supersede' = 'retry-steer'
+          for (const wait of [0, 80, 160, 320]) {
+            if (wait) {
+              await new Promise((r) => setTimeout(r, wait))
+            }
+            if (controller.signal.aborted) break
+            try {
+              const sr = await fetch(`${getApiBase()}/sessions/${sessionId}/steer`, {
+                method: 'POST',
+                headers: { ...authHeaders(), Accept: 'application/json', 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message }),
+              })
+              const sj = (await sr.json().catch(() => ({}))) as {
+                steered?: boolean
+                reason?: string
+              }
+              last = resolveSteer409({
+                ok: sr.ok,
+                steered: Boolean(sj?.steered),
+                reason: sj?.reason,
+              })
+              if (last === 'steered') {
                 onDone({ request_id: '', steered: true })
                 return
               }
+              if (last === 'supersede') break
+            } catch {
+              last = 'retry-steer'
             }
-          } catch {
-            /* fall through to supersede */
+          }
+          if (last === 'retry-steer') {
+            // Nudge full or a blip — keep the live turn. Words retry next Enter.
+            onDone({ request_id: '', steered: true })
+            return
           }
         }
         try {
