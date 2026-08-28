@@ -181,6 +181,96 @@ _WINDOWS_LIST_RE = re.compile(
     r")\s*[.?!]?\s*$"
 )
 
+_VAULT_LIST_RE = re.compile(
+    r"(?is)^\s*("
+    r"vault[_ ]list"
+    r"|(list|show) (me )?(the |my )?vault( items?| handles?)?"
+    r"|what('?s| is) in (the |my )?vault"
+    r")\s*[.?!]?\s*$"
+)
+
+_HELP_LIST_RE = re.compile(
+    r"(?is)^\s*("
+    r"help[_ ]list"
+    r"|help (topics?|articles?|chapters?)"
+    r"|(list|show) (me )?(the |f1 )?(help|manual)( topics?| articles?| chapters?)?"
+    r"|owner'?s manual( topics?| chapters?)?"
+    r"|f1 help"
+    r")\s*[.?!]?\s*$"
+)
+
+_HELP_READ_RE = re.compile(
+    r"(?is)^\s*(help_read(?:\s+id=)?|read help(?: article)?)\s+"
+    r"(?P<id>[\w.-]{2,64})\s*$"
+)
+
+_HIVE_STATUS_RE = re.compile(
+    r"(?is)^\s*("
+    r"hive[_ ]status"
+    r"|(list|show) (the |my )?hive"
+    r"|what('?s| is) (the )?hive( status| roster)?"
+    r")\s*[.?!]?\s*$"
+)
+
+_SOUL_STATUS_RE = re.compile(
+    r"(?is)^\s*(soul[_ ]status|show (me )?(the )?soul status)\s*[.?!]?\s*$"
+)
+
+_SKILL_RELOAD_RE = re.compile(
+    r"(?is)^\s*("
+    r"skill_reload"
+    r"|(reload|rescan|refresh) (my |the )?skills?"
+    r")\s*[.?!]?\s*$"
+)
+
+_SKILL_SEARCH_RE = re.compile(
+    r"(?is)^\s*("
+    r"skill_search(?:\s+(?P<q>[\w .-]{2,80}))?"
+    r"|search skills(?:\s+for)?\s+(?P<q2>[\w .-]{2,80})"
+    r"|find (a )?skill(?:\s+for)?\s+(?P<q3>[\w .-]{2,80})"
+    r")\s*$"
+)
+
+_MEMORY_SEARCH_RE = re.compile(
+    r"(?is)^\s*("
+    r"what do you remember about\s+(?P<q>.+?)"
+    r"|do you remember\s+(?P<q2>.+?)"
+    r"|recall\s+(?P<q3>.+?)"
+    r")\s*[.?!]?\s*$"
+)
+
+# Explicit remember-that / remember: — not "remember to …" (a task) and not
+# "do you remember" (search, above).
+_MEMORY_SAVE_RE = re.compile(
+    r"(?is)^\s*(please )?remember(?:\s+that|:)\s+(?P<text>.+?)\s*$"
+)
+_MEMORY_SAVE_BARE_RE = re.compile(
+    r"(?is)^\s*(please )?remember\s+(?!to\b|me\b)(?P<text>.+?)\s*$"
+)
+
+_MAIL_STATUS_RE = re.compile(
+    r"(?is)^\s*("
+    r"mail[_ ]status"
+    r"|is mail connected"
+    r"|mailbox status"
+    r")\s*[.?!]?\s*$"
+)
+
+_SCREENSHOT_RE = re.compile(
+    r"(?is)^\s*("
+    r"(take |grab )?(a )?screenshot"
+    r"|computer_screenshot"
+    r")\s*[.?!]?\s*$"
+)
+
+_MONITORS_RE = re.compile(
+    r"(?is)^\s*("
+    r"(list|show) (me )?(the )?(monitors|displays)"
+    r"|what (monitors|displays) (do i have|are (there|connected))"
+    r"|computer_monitors"
+    r")\s*[.?!]?\s*$"
+)
+
 _PLAIN_TOOLS = frozenset(
     {
         "git_status",
@@ -197,6 +287,16 @@ _PLAIN_TOOLS = frozenset(
         "companion_context",
         "rmb",
         "computer_windows",
+        "help_list",
+        "help_read",
+        "hive_status",
+        "soul_status",
+        "skill_reload",
+        "skill_search",
+        "memory_search",
+        "memory_save",
+        "computer_screenshot",
+        "computer_monitors",
     }
 )
 
@@ -267,6 +367,46 @@ def match_in_app_fast_path(message: str) -> FastPathPlan | None:
         return FastPathPlan(
             "computer_windows", {"mode": "list"}, "computer_windows"
         )
+    if _VAULT_LIST_RE.match(msg):
+        return FastPathPlan("vault_list", {}, "vault_list")
+    if _HELP_LIST_RE.match(msg):
+        return FastPathPlan("help_list", {}, "help_list")
+    hr = _HELP_READ_RE.match(msg)
+    if hr:
+        aid = (hr.group("id") or "").strip()
+        if aid:
+            return FastPathPlan("help_read", {"id": aid}, "help_read")
+    if _HIVE_STATUS_RE.match(msg):
+        return FastPathPlan("hive_status", {}, "hive_status")
+    if _SOUL_STATUS_RE.match(msg):
+        return FastPathPlan("soul_status", {}, "soul_status")
+    if _SKILL_RELOAD_RE.match(msg):
+        return FastPathPlan("skill_reload", {}, "skill_reload")
+    ss = _SKILL_SEARCH_RE.match(msg)
+    if ss:
+        q = (ss.group("q") or ss.group("q2") or ss.group("q3") or "").strip()
+        args: dict[str, Any] = {}
+        if q:
+            args["query"] = q
+        return FastPathPlan("skill_search", args, "skill_search")
+    ms = _MEMORY_SEARCH_RE.match(msg)
+    if ms:
+        q = (ms.group("q") or ms.group("q2") or ms.group("q3") or "").strip(" .,-")
+        if q and len(q) >= 2:
+            return FastPathPlan("memory_search", {"query": q}, "memory_search")
+    mem = _MEMORY_SAVE_RE.match(msg) or _MEMORY_SAVE_BARE_RE.match(msg)
+    if mem:
+        text = (mem.group("text") or "").strip(" .,-")
+        if text and len(text) >= 3:
+            return FastPathPlan(
+                "memory_save", {"content": text, "title": "Remembered"}, "memory_save"
+            )
+    if _MAIL_STATUS_RE.match(msg):
+        return FastPathPlan("mail_status", {}, "mail_status")
+    if _SCREENSHOT_RE.match(msg):
+        return FastPathPlan("computer_screenshot", {}, "computer_screenshot")
+    if _MONITORS_RE.match(msg):
+        return FastPathPlan("computer_monitors", {}, "computer_monitors")
     return None
 
 
@@ -303,6 +443,23 @@ def format_in_app_fast_path_reply(tool: str, raw: str) -> str:
 
     if tool == "remind_me":
         return str(data.get("message") or "Holding that.")
+
+    if tool == "vault_list":
+        items = data.get("items") or []
+        if not items:
+            return str(data.get("note") or "Vault is empty.")
+        lines = ["**Vault** (handles only — values stay in Settings):"]
+        for it in items[:40]:
+            if not isinstance(it, dict):
+                continue
+            handle = it.get("handle") or "?"
+            kind = it.get("kind") or ""
+            label = it.get("label") or ""
+            lines.append(f"- `{handle}` {kind} {label}".rstrip())
+        return "\n".join(lines)
+
+    if tool == "mail_status":
+        return str(data.get("message") or text)[:800]
 
     if data.get("message"):
         return str(data["message"])
