@@ -124,6 +124,7 @@ def test_all_ship_tools_are_registered(tmp_path):
     assert set(rt.tool_registry.tools) == {
         "git_status",
         "git_diff",
+        "git_log",
         "git_push",
         "gh_release",
         "ship_status",
@@ -139,6 +140,17 @@ async def test_git_diff_is_read_only_and_never_asks(tmp_path, approvals):
     assert fake.created == []
     assert "APPROVAL_REQUIRED" not in out
     assert "git_diff" in out.lower()
+
+
+@pytest.mark.asyncio
+async def test_git_log_is_read_only_and_never_asks(tmp_path, approvals):
+    fake = approvals(ask="pushes to a remote", approved=False)
+    rt = RT(tmp_path)
+    S.register_ship_tools(rt)
+    out = await rt.tool_registry.tools["git_log"]()
+    assert fake.created == []
+    assert "APPROVAL_REQUIRED" not in out
+    assert "git_log" in out.lower()
 
 
 @pytest.mark.asyncio

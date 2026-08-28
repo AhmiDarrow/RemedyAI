@@ -4,6 +4,16 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — git_log on every live round; file I/O and usage SQLite off the loop
+
+- ``git_log`` (read-only, no approval) stays in the operate core so Claude /
+  GPT / DeepSeek / Gemini / OpenRouter / xAI can read history the way they
+  already ``git_diff``. Tight pack is 39; other clouds keep 64.
+- ``file_read`` / ``file_write`` / ``file_edit`` / ``file_edit_batch`` do
+  disk work in a worker. A fat source file no longer freezes chrome or SSE.
+- Usage summary / series / session routes and mid-turn ledger writes run
+  off the event loop. Analysis artifact scans stop after 8s.
+
 ### Added — git_diff on every live round; glob walks stop; remaining SQLite off the loop
 
 - ``git_diff`` (read-only, no approval) stays in the operate core so Claude /

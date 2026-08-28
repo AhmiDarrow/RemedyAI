@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import suppress
 from pathlib import Path
@@ -31,6 +32,52 @@ from remedy.core.workspace_tools.guards import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _load_text_file(target: Path) -> tuple[str, str]:
+    """Stat + sniff + read *target* for file_read. Returns ``(code, payload)``.
+
+    ``code == "ok"`` means *payload* is the file text. Other codes match the
+    tool-error codes. Runs in a worker so a fat file cannot freeze chrome.
+    """
+    from remedy.core.security import is_credential_filename
+    from remedy.core.text_files import is_probably_text
+
+    try:
+        if not target.exists():
+            return "NOT_FOUND", ""
+        if target.is_dir():
+            return "IS_DIRECTORY", ""
+        if is_credential_filename(target.name) or any(
+            is_credential_filename(part) for part in target.parts
+        ):
+            return "CREDENTIAL_FILE", ""
+        try:
+            if not is_probably_text(target):
+                return "BINARY", ""
+        except Exception:
+            pass
+        return "ok", target.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return "IO_ERROR", str(e)
+
+
+def _snapshot_text_file(target: Path) -> tuple[bool, str | None]:
+    """``(is_file, contents_or_none)`` for undo / no-op compare before a write."""
+    existed = False
+    previous: str | None = None
+    try:
+        if target.is_file():
+            existed = True
+            previous = target.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        previous = None
+    return existed, previous
+
+
+def _write_text_file(target: Path, body: str) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body, encoding="utf-8")
 
 
 def _record_undo(
@@ -202,7 +249,8 @@ def register_files_tools(runtime: Any) -> None:
             )
         target = runtime.resolve_tool_path(path)
         _note_path(target)
-        if not target.exists():
+        code, data = await asyncio.to_thread(_load_text_file, target)
+        if code == "NOT_FOUND":
             parent = _parent_hint(path)
             return format_tool_error(
                 f"file not found: {path}",
@@ -213,7 +261,7 @@ def register_files_tools(runtime: Any) -> None:
                     "to discover the correct path, then retry file_read."
                 ),
             )
-        if target.is_dir():
+        if code == "IS_DIRECTORY":
             return format_tool_error(
                 f"path is a directory: {path}",
                 code="IS_DIRECTORY",
@@ -222,11 +270,7 @@ def register_files_tools(runtime: Any) -> None:
                     f'Use list_dir("{path}") then file_read on a specific file inside it.'
                 ),
             )
-        from remedy.core.security import is_credential_filename
-
-        if is_credential_filename(target.name) or any(
-            is_credential_filename(part) for part in target.parts
-        ):
+        if code == "CREDENTIAL_FILE":
             return format_tool_error(
                 "This file looks like credentials and will not be read.",
                 code="CREDENTIAL_FILE",
@@ -236,23 +280,16 @@ def register_files_tools(runtime: Any) -> None:
                     "or read a non-secret template such as .env.example."
                 ),
             )
-        try:
-            from remedy.core.text_files import is_probably_text
-
-            if not is_probably_text(target):
-                return format_tool_error(
-                    f"binary or non-text file: {path}",
-                    code="BINARY",
-                    tool_name="file_read",
-                    suggestion="Use another tool for binaries; file_read is for text sources.",
-                )
-        except Exception:
-            pass
-        try:
-            data = target.read_text(encoding="utf-8", errors="replace")
-        except OSError as e:
+        if code == "BINARY":
             return format_tool_error(
-                f"cannot read {path}: {e}",
+                f"binary or non-text file: {path}",
+                code="BINARY",
+                tool_name="file_read",
+                suggestion="Use another tool for binaries; file_read is for text sources.",
+            )
+        if code != "ok":
+            return format_tool_error(
+                f"cannot read {path}: {data or code}",
                 code="IO_ERROR",
                 tool_name="file_read",
                 suggestion="Check permissions or try list_dir on the parent path.",
@@ -468,14 +505,7 @@ def register_files_tools(runtime: Any) -> None:
             )
         _note_path(target)
         # Capture prior content for time-travel undo (best-effort).
-        existed = False
-        previous: str | None = None
-        try:
-            if target.is_file():
-                existed = True
-                previous = target.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            previous = None
+        existed, previous = await asyncio.to_thread(_snapshot_text_file, target)
         # Partner rule (2026-08-08): NEVER refuse a real rewrite with PREFER_FILE_EDIT.
         # That guard blocked 31k app.py rewrites and taught the agent to monologue.
         # Only no-op when content is byte-identical. Prefer file_edit is a tip, not a wall.
@@ -497,8 +527,7 @@ def register_files_tools(runtime: Any) -> None:
             new_size=len(new_body or ""),
         )
         try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(new_body, encoding="utf-8")
+            await asyncio.to_thread(_write_text_file, target, new_body)
             _note_internal_write(target)
         except OSError as e:
             parent = _parent_hint(path)
@@ -618,12 +647,19 @@ def register_files_tools(runtime: Any) -> None:
                 f"(or /approve {item.id}), then retry file_edit."
             )
         _note_path(target)
-        if not target.is_file():
+        is_file, previous = await asyncio.to_thread(_snapshot_text_file, target)
+        if not is_file:
             return format_tool_error(
                 f"file not found: {path}",
                 code="NOT_FOUND",
                 tool_name="file_edit",
                 suggestion="Use list_dir/repo_search to find the path, then file_read before edit.",
+            )
+        if previous is None:
+            return format_tool_error(
+                f"cannot read {path}",
+                code="IO_ERROR",
+                tool_name="file_edit",
             )
         edits_raw = _normalize_edits_arg(edits).strip()
         has_single = bool((old_string or "").strip())
@@ -647,14 +683,6 @@ def register_files_tools(runtime: Any) -> None:
                     "\nNote: this file was not file_read this turn — "
                     "prefer reading before large edits to avoid stale matches."
                 )
-        try:
-            previous = target.read_text(encoding="utf-8", errors="replace")
-        except OSError as e:
-            return format_tool_error(
-                f"cannot read {path}: {e}",
-                code="IO_ERROR",
-                tool_name="file_edit",
-            )
 
         if edits_raw:
             try:
@@ -708,7 +736,7 @@ def register_files_tools(runtime: Any) -> None:
             new_size=len(result.new_content or ""),
         )
         try:
-            target.write_text(result.new_content, encoding="utf-8")
+            await asyncio.to_thread(target.write_text, result.new_content, "utf-8")
             _note_internal_write(target)
         except OSError as e:
             return format_tool_error(
@@ -813,13 +841,12 @@ def register_files_tools(runtime: Any) -> None:
                 )
                 continue
             _note_path(target)
-            if not target.is_file():
+            is_file, previous = await asyncio.to_thread(_snapshot_text_file, target)
+            if not is_file:
                 reports.append(f"[{i}] {p}: not found")
                 continue
-            try:
-                previous = target.read_text(encoding="utf-8", errors="replace")
-            except OSError as e:
-                reports.append(f"[{i}] {p}: read error {e}")
+            if previous is None:
+                reports.append(f"[{i}] {p}: read error")
                 continue
             r = apply_search_replace(
                 previous,
@@ -848,7 +875,7 @@ def register_files_tools(runtime: Any) -> None:
                 new_size=len(r.new_content or ""),
             )
             try:
-                target.write_text(r.new_content, encoding="utf-8")
+                await asyncio.to_thread(target.write_text, r.new_content, "utf-8")
                 _note_internal_write(target)
             except OSError as e:
                 reports.append(f"[{i}] {p}: write error {e}")

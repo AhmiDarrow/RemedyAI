@@ -941,7 +941,11 @@ async def run_react_http(
             except asyncio.CancelledError:
                 from remedy.core.react_loop.stream_consume import (
                     PROVIDER_DROP_ERROR as _drop_msg,
+                )
+                from remedy.core.react_loop.stream_consume import (
                     is_owner_stop as _owner_stop,
+                )
+                from remedy.core.react_loop.stream_consume import (
                     uncancel_current_task as _uncancel,
                 )
 
@@ -993,7 +997,11 @@ async def run_react_http(
           if isinstance(_stream_exc, asyncio.CancelledError):
             from remedy.core.react_loop.stream_consume import (
                 PROVIDER_DROP_ERROR as _drop_msg,
+            )
+            from remedy.core.react_loop.stream_consume import (
                 is_owner_stop as _owner_stop,
+            )
+            from remedy.core.react_loop.stream_consume import (
                 uncancel_current_task as _uncancel,
             )
 
@@ -1195,7 +1203,8 @@ async def run_react_http(
                         )
                     ).record_turn(prompt_tokens=pt, completion_tokens=ct)
                 with suppress(Exception):
-                    record_usage_event(
+                    await asyncio.to_thread(
+                        record_usage_event,
                         session_id=str(
                             getattr(turn, "session_id", None)
                             or getattr(runtime, "_session_id", "")

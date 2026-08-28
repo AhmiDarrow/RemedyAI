@@ -1472,7 +1472,10 @@ def _scan_tree(root: Path, patterns: list[str]) -> dict[str, tuple[float, int]]:
     if not root.is_dir():
         return out
     count = 0
+    deadline = time.monotonic() + 8.0
     for dirpath, dirnames, filenames in os.walk(root):
+        if time.monotonic() > deadline:
+            return out
         dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".remedy-")]
         for fname in filenames:
             count += 1

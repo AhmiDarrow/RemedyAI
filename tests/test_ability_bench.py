@@ -32,6 +32,7 @@ from remedy.core.turn_context import (
     stream_claim_epoch,
     try_claim_session_stream,
 )
+from remedy.core.workspace_tools.files import _load_text_file
 from remedy.memory.authority import is_hive_writer
 from remedy.memory.cas import EternalCAS
 from remedy.memory.middleman import MemoryItem, content_key
@@ -72,6 +73,7 @@ def test_every_cloud_keeps_recall_on_the_live_round():
         _schema("job_run"),
         _schema("git_status"),
         _schema("git_diff"),
+        _schema("git_log"),
         _schema("help_list"),
     ]
     for provider, model, cap in (
@@ -93,7 +95,23 @@ def test_every_cloud_keeps_recall_on_the_live_round():
         assert "job_run" in names, provider
         assert "git_status" in names, provider
         assert "git_diff" in names, provider
+        assert "git_log" in names, provider
         assert "help_list" not in names, provider
+
+
+def test_file_read_loader_sniffs_without_serving_secrets(tmp_path):
+    secret = tmp_path / ".env"
+    secret.write_text("API_KEY=sk-leaked\n", encoding="utf-8")
+    code, _ = _load_text_file(secret)
+    assert code == "CREDENTIAL_FILE"
+    src = tmp_path / "app.py"
+    src.write_text("print(1)\n", encoding="utf-8")
+    code, body = _load_text_file(src)
+    assert code == "ok"
+    assert "print(1)" in body
+    missing = tmp_path / "nope.py"
+    code, _ = _load_text_file(missing)
+    assert code == "NOT_FOUND"
 
 
 def test_hover_is_a_first_class_computer_hand():

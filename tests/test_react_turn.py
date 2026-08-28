@@ -671,6 +671,7 @@ def test_openai_work_round_keeps_press_hold_and_drag():
         _tool("job_run"),
         _tool("git_status"),
         _tool("git_diff"),
+        _tool("git_log"),
         _tool("help_list"),
     ]
     d = resolve_tools(
@@ -690,6 +691,7 @@ def test_openai_work_round_keeps_press_hold_and_drag():
     assert "job_run" in names
     assert "git_status" in names
     assert "git_diff" in names
+    assert "git_log" in names
     assert "help_list" not in names
     assert len(d.tools or []) <= WORK_MAX_TOOLS_CLOUD
 
@@ -714,6 +716,7 @@ def test_work_cap_keeps_computer_hands():
         _tool("job_run"),
         _tool("git_status"),
         _tool("git_diff"),
+        _tool("git_log"),
         _tool("help_list"),
     ]
     d = resolve_tools(
@@ -744,6 +747,7 @@ def test_work_cap_keeps_computer_hands():
         "job_run",
         "git_status",
         "git_diff",
+        "git_log",
     ):
         assert n in names, n
     assert "help_list" not in names

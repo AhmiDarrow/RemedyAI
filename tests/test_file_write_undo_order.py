@@ -42,8 +42,15 @@ def _call_lines(fn_name: str) -> tuple[list[int], list[int]]:
         name = n.func.id if isinstance(n.func, ast.Name) else getattr(n.func, "attr", "")
         if name == "_record_undo":
             records.append(n.lineno)
-        elif name == "write_text":
+        elif name in ("write_text", "_write_text_file"):
             writes.append(n.lineno)
+        # Disk write handed to a worker: to_thread(_write_text_file, …)
+        # or to_thread(target.write_text, …)
+        for arg in n.args:
+            if isinstance(arg, ast.Attribute) and arg.attr == "write_text":
+                writes.append(arg.lineno)
+            if isinstance(arg, ast.Name) and arg.id in ("write_text", "_write_text_file"):
+                writes.append(arg.lineno)
     return records, writes
 
 
