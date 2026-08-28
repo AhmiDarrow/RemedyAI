@@ -1,6 +1,7 @@
 """API route registration for Remedy FastAPI app."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hmac
 import logging
@@ -247,10 +248,21 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         chat_sessions = 0
         if memory:
             try:
-                db = memory._ensure_db()
-                mem_count = db.execute("SELECT COUNT(*) FROM memory_entries").fetchone()[0]
-                summary_sessions = db.execute("SELECT COUNT(*) FROM session_summaries").fetchone()[0]
-                chat_sessions = db.execute("SELECT COUNT(*) FROM chat_sessions").fetchone()[0]
+                counts = getattr(memory, "status_counts", None)
+                if counts is not None:
+                    mem_count, summary_sessions, chat_sessions = await counts()
+                else:
+                    def _counts() -> tuple[int, int, int]:
+                        db = memory._ensure_db()
+                        return (
+                            int(db.execute("SELECT COUNT(*) FROM memory_entries").fetchone()[0]),
+                            int(db.execute("SELECT COUNT(*) FROM session_summaries").fetchone()[0]),
+                            int(db.execute("SELECT COUNT(*) FROM chat_sessions").fetchone()[0]),
+                        )
+
+                    mem_count, summary_sessions, chat_sessions = await asyncio.to_thread(
+                        _counts
+                    )
             except Exception:
                 pass
 

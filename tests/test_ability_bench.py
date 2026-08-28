@@ -31,6 +31,8 @@ from remedy.core.turn_context import (
     try_claim_session_stream,
 )
 from remedy.memory.authority import is_hive_writer
+from remedy.memory.cas import EternalCAS
+from remedy.memory.middleman import MemoryItem, content_key
 from remedy.memory.store import MemoryStore
 from remedy.models import ChatSession
 
@@ -161,6 +163,48 @@ async def test_json_tool_round_says_working_before_the_body_arrives():
     assert "click next" in joined
 
 
+def test_hover_enqueue_opens_the_browser_rail(tmp_path):
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    job = b.enqueue("hover", {"text": "File"})
+    cmd = b.peek_ui_command()
+    assert cmd is not None
+    assert cmd.get("action") == "open_browser"
+    assert cmd.get("job_action") == "hover"
+    assert cmd.get("job_id") == job.id
+
+
+def test_fetch_hot_does_not_hydrate_hive_facts_into_the_owner(tmp_path):
+    cas = EternalCAS(tmp_path)
+    owner_body = "owner likes oat milk"
+    hive_body = "hive decided the house language is COBOL"
+    cas.put_item(
+        MemoryItem(
+            key=content_key(owner_body),
+            kind="fact",
+            body=owner_body,
+            session_id="chat-1",
+        )
+    )
+    cas.put_item(
+        MemoryItem(
+            key=content_key(hive_body),
+            kind="fact",
+            body=hive_body,
+            session_id="hive_forager1",
+        )
+    )
+    owner_hot = [getattr(i, "body", "") for i in cas.fetch_hot(session_id="chat-1")]
+    assert any("oat milk" in b for b in owner_hot)
+    assert not any("COBOL" in b for b in owner_hot)
+    hive_hot = [
+        getattr(i, "body", "") for i in cas.fetch_hot(session_id="hive_forager1")
+    ]
+    assert any("COBOL" in b for b in hive_hot)
+    assert any("oat milk" in b for b in hive_hot)
+
+
 def test_hive_residue_does_not_mint_parent_cas_facts(tmp_path):
     from remedy.core.metabolism.organism import ingest_turn_residue
 
@@ -193,4 +237,8 @@ async def test_chat_session_reads_run_off_the_event_loop(tmp_path, monkeypatch):
     assert got is not None and got.id == sess.id
     assert any(s.id == sess.id for s in listed)
     assert off["n"] >= 3
+    counts_before = off["n"]
+    mem, summaries, chats = await store.status_counts()
+    assert mem == 0 and summaries == 0 and chats >= 1
+    assert off["n"] > counts_before
     await store.close()

@@ -236,6 +236,7 @@ class EternalCAS:
                 """
                 SELECT * FROM objects
                 WHERE tombstone = 0 AND kind IN ('fact', 'life')
+                  AND session_id NOT LIKE 'hive_%'
                 ORDER BY ts DESC
                 LIMIT ?
                 """,

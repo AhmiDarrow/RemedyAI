@@ -4,6 +4,21 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed — vault fill is one owner yes; hive facts stay in the hive
+
+- Approving a vault type / Place-order click once is enough. Authorize and
+  the computer handler used different fingerprints, so Stop-and-retry asked
+  twice. The inner gate now treats the authorize-side owner moment as spent;
+  live-page payment / raw-PAN / CAPTCHA checkpoints still ask on their own.
+- Vault tokens stay in the policy command as handles (`vault=card-visa`);
+  typed passwords are a character count, not the value.
+- `cas.fetch_hot` no longer hydrates `hive_*` fact/life objects into every
+  session. A daughter's own slice still loads when her session is open.
+- Authed `GET /api/status` COUNTs (and memory list/get) run off the event
+  loop so Settings polls do not stall a turn.
+- `computer_hover` (and key / scroll / drag / press-hold) open the browser
+  rail the way click/type already did.
+
 ### Fixed — chrome stays live during chat I/O; tool rounds show work
 
 - Session list / get / add-message SQLite runs in a worker thread so a fat

@@ -30,13 +30,21 @@ from remedy.tools.catalog import descriptor_for
 def test_computer_type_command_carries_vault_and_click_text() -> None:
     cmd = _tool_command({"text": "{{vault:card-visa}}"}, "computer_type")
     assert "vault:card-visa" in cmd
+    assert "vault=card-visa" in cmd
     click = _tool_command({"click": "Place order"}, "computer_click")
     assert "Place order" in click
 
 
+def test_computer_type_command_does_not_embed_typed_secrets() -> None:
+    secret = "hunter2-correct-horse"
+    cmd = _tool_command({"text": secret}, "computer_type")
+    assert secret not in cmd
+    assert f"chars={len(secret)}" in cmd
+
+
 @pytest.mark.parametrize(
     "text",
-    ("{{vault:card-visa}}", "{{ vault:amex }}", "vault=card"),
+    ("{{vault:card-visa}}", "{{ vault:amex }}", "prefix {{vault:card}} suffix"),
 )
 def test_authorize_tool_vault_family_is_owner_checkpoint(text: str, monkeypatch) -> None:
     """auto/full cannot skip vault — PolicyEngine sees the typed text."""
@@ -55,6 +63,61 @@ def test_authorize_tool_vault_family_is_owner_checkpoint(text: str, monkeypatch)
         assert SENSITIVE_PREFIX in out
     finally:
         end_turn("vault-auth", *tokens)
+        APPROVALS.set_mode(prev)
+        clear_tool_gate()
+
+
+def test_vault_authorize_then_handler_is_one_owner_moment(monkeypatch) -> None:
+    """Approve-once at PolicyEngine must not re-ask on the handler summary."""
+    from remedy.core.agent_computer_tools import _computer_approval_gate
+
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"access_scope": "project", "trust_profile": "autonomous"},
+    )
+    prev = APPROVALS.mode
+    APPROVALS.set_mode("auto")
+    tokens = begin_turn("vault-once", project_raw=None, active_path=".")
+    try:
+        clear_tool_gate()
+        args = {"text": "{{vault:card-visa}}", "target": "auto"}
+        first = authorize_tool(None, "computer_type", args)
+        assert first is not None
+        assert "APPROVAL_REQUIRED" in first
+        aid = first.split("id=", 1)[1].split()[0].strip()
+        APPROVALS.resolve(aid, approve=True)
+        retry = authorize_tool(None, "computer_type", args)
+        assert retry is None
+        summary = "type chars=22 target=auto vault=card-visa"
+        assert _computer_approval_gate(None, "computer_type", summary) is None
+    finally:
+        end_turn("vault-once", *tokens)
+        APPROVALS.set_mode(prev)
+        clear_tool_gate()
+
+
+def test_handler_vault_still_asks_when_authorize_saw_plain_text(monkeypatch) -> None:
+    """PolicyEngine miss (plain type) must not waive a vault handler summary."""
+    from remedy.core.agent_computer_tools import _computer_approval_gate
+
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"access_scope": "project", "trust_profile": "autonomous"},
+    )
+    prev = APPROVALS.mode
+    APPROVALS.set_mode("auto")
+    tokens = begin_turn("vault-inner", project_raw=None, active_path=".")
+    try:
+        clear_tool_gate()
+        assert authorize_tool(None, "computer_type", {"text": "hello"}) is None
+        out = _computer_approval_gate(
+            None, "computer_type", "type chars=22 target=auto vault=card-visa"
+        )
+        assert out is not None
+        assert "APPROVAL_REQUIRED" in out
+        assert SENSITIVE_PREFIX in out
+    finally:
+        end_turn("vault-inner", *tokens)
         APPROVALS.set_mode(prev)
         clear_tool_gate()
 

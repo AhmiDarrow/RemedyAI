@@ -878,7 +878,12 @@ class ComputerHostBridge:
             "ready",
             "click",
             "type",
+            "key",
+            "scroll",
+            "drag",
+            "press_hold",
             "select",
+            "hover",
             "screenshot",
         ) or ui.get("open_browser"):
             cmd = {
