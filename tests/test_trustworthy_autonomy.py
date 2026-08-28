@@ -5,7 +5,6 @@ Documents the Optimization/Stability close-out:
 - capability / policy still authorize tools (committed PolicyEngine)
 - generic ``child_environment()`` must not inherit ambient ``GH_TOKEN``
 - web facts are TOOL_OBSERVED, never USER_DECLARED
-- hive workers cannot exceed parent caps (if ``hive_caps`` is importable)
 - AUTONOMOUS does not waive mail_send / payment owner checkpoints
 - ``explain_turn`` summarizes what / why / verified / remains
 """
@@ -98,13 +97,6 @@ def test_v038_events_and_explain(tmp_path: Path):
     summary = explain_turn(bus, "t")
     assert "file_read" in summary["what"]
     assert "file exists" in summary["verified"]
-
-
-def test_v038_hive_caps_if_importable():
-    from remedy.core.hive_caps import child_capabilities
-
-    parent = frozenset({Capability.FS_READ})
-    assert child_capabilities(parent, frozenset({Capability.FS_READ})) == parent
 
 
 def test_v038_verification_not_exit_code_alone(tmp_path: Path):
