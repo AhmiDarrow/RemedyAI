@@ -129,6 +129,32 @@ _GOAL_LIST_RE = re.compile(
     r")\s*[.?!]?\s*$"
 )
 
+_SHIP_STATUS_RE = re.compile(
+    r"(?is)^\s*("
+    r"ship[_ ]status"
+    r"|what('?s| is) (the )?ship status"
+    r"|show (me )?(the )?ship status"
+    r")\s*[.?!]?\s*$"
+)
+
+_MISSION_STATUS_RE = re.compile(
+    r"(?is)^\s*("
+    r"mission[_ ]status"
+    r"|show (me )?(the |my )?(active )?mission( status)?"
+    r"|what('?s| is) (the |my )?(active )?mission status"
+    r")\s*[.?!]?\s*$"
+)
+
+_SCREEN_RE = re.compile(
+    r"(?is)^\s*("
+    r"what('?s| is) on (my |the )?(screen|display|monitor)"
+    r"|what am i looking at"
+    r"|what('?s| is) (the )?(focused|foreground|active) window"
+    r"|look at (my |the )?screen"
+    r"|companion_context"
+    r")\s*[.?!]?\s*$"
+)
+
 _PLAIN_TOOLS = frozenset(
     {
         "git_status",
@@ -140,6 +166,9 @@ _PLAIN_TOOLS = frozenset(
         "clipboard_read",
         "host_which",
         "goal_list",
+        "ship_status",
+        "mission_status",
+        "companion_context",
     }
 )
 
@@ -196,6 +225,12 @@ def match_in_app_fast_path(message: str) -> FastPathPlan | None:
             return FastPathPlan("host_which", {"name": name}, "host_which")
     if _GOAL_LIST_RE.match(msg):
         return FastPathPlan("goal_list", {}, "goal_list")
+    if _SHIP_STATUS_RE.match(msg):
+        return FastPathPlan("ship_status", {}, "ship_status")
+    if _MISSION_STATUS_RE.match(msg):
+        return FastPathPlan("mission_status", {}, "mission_status")
+    if _SCREEN_RE.match(msg):
+        return FastPathPlan("companion_context", {}, "companion_context")
     return None
 
 

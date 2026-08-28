@@ -315,6 +315,25 @@ async def test_a_personal_assistant_ask_is_answered_from_one_tool_call(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_whats_on_screen_is_answered_in_app_without_a_provider_round(tmp_path):
+    runtime = make_runtime(tmp_path)
+    registry = FakeToolRegistry().install(runtime)
+    registry.add(
+        "companion_context",
+        description="screen snapshot",
+        results=["**Foreground:** Notepad\nclipboard: empty"],
+    )
+    fake = FakeLLM([], when_exhausted=text_turn("must never be reached"))
+
+    with fake.patch(force_tools=True):
+        chunks = await drain(runtime, "what's on my screen")
+
+    assert fake.request_count == 0
+    assert registry.calls == [RecordedToolCall("companion_context", {})]
+    assert "Notepad" in answer(chunks)
+
+
+@pytest.mark.asyncio
 async def test_run_the_tests_is_answered_in_app_without_a_provider_round(tmp_path):
     runtime = make_runtime(tmp_path)
     registry = FakeToolRegistry().install(runtime)
