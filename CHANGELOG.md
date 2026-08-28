@@ -4,6 +4,14 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — in-app git / reminder / clock answers skip the provider
+
+- High-confidence ``git status`` / ``git diff`` / ``git log``, reminder list,
+  and ``remind me in 30m to …`` run the local tool and reply without a
+  Claude / GPT / DeepSeek / Gemini / OpenRouter / xAI round. Mutating git
+  (commit, push, …) and multi-step asks still go to the model.
+- ``what time is it`` / ``what's the date`` is an L0 clock on this PC.
+
 ### Added — git_log on every live round; file I/O and usage SQLite off the loop
 
 - ``git_log`` (read-only, no approval) stays in the operate core so Claude /

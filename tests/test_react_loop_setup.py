@@ -315,6 +315,26 @@ async def test_a_personal_assistant_ask_is_answered_from_one_tool_call(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_git_status_is_answered_in_app_without_a_provider_round(tmp_path):
+    """git status is a local lookup — Claude / GPT / anyone should not be billed."""
+    runtime = make_runtime(tmp_path)
+    registry = FakeToolRegistry().install(runtime)
+    registry.add(
+        "git_status",
+        description="git status",
+        results=["**git_status** exit=0\n## master"],
+    )
+    fake = FakeLLM([], when_exhausted=text_turn("must never be reached"))
+
+    with fake.patch(force_tools=True):
+        chunks = await drain(runtime, "git status")
+
+    assert fake.request_count == 0
+    assert registry.calls == [RecordedToolCall("git_status", {})]
+    assert "master" in answer(chunks)
+
+
+@pytest.mark.asyncio
 async def test_the_fast_path_is_skipped_when_the_tool_is_not_registered(tmp_path):
     """No debt_list tool means the model has to answer — not a silent 'Done.'."""
     runtime = make_runtime(tmp_path)

@@ -257,11 +257,27 @@ async def run_react_prelude(s: Any) -> AsyncIterator[str]:
                 )
 
                 pa_plan = match_assistant_fast_path(message or "")
+                plan = None
+                fmt = format_fast_path_reply
+                src = "assistant_fast_path"
                 if pa_plan is not None and assistant_fast_path_enabled(
                     getattr(getattr(runtime, "config", None), "home_dir", None)
                 ):
+                    plan = pa_plan
+                if plan is None:
+                    from remedy.core.in_app_fast_path import (
+                        format_in_app_fast_path_reply,
+                        match_in_app_fast_path,
+                    )
+
+                    ws = match_in_app_fast_path(message or "")
+                    if ws is not None:
+                        plan = ws
+                        fmt = format_in_app_fast_path_reply
+                        src = "in_app_fast_path"
+                if plan is not None:
                     has_tool = any(
-                        ((t.get("function") or {}).get("name") or "") == pa_plan.tool
+                        ((t.get("function") or {}).get("name") or "") == plan.tool
                         for t in (all_tools or [])
                     )
                     if has_tool:
@@ -274,16 +290,17 @@ async def run_react_prelude(s: Any) -> AsyncIterator[str]:
                                     "id": fp_id,
                                     "type": "function",
                                     "function": {
-                                        "name": pa_plan.tool,
-                                        "arguments": json.dumps(pa_plan.arguments),
+                                        "name": plan.tool,
+                                        "arguments": json.dumps(plan.arguments),
                                     },
                                 }
                             ]
                         )
                         logger.info(
-                            "assistant_fast_path tool=%s label=%s",
-                            pa_plan.tool,
-                            pa_plan.label,
+                            "%s tool=%s label=%s",
+                            src,
+                            plan.tool,
+                            plan.label,
                         )
                         yield "@@tool_calls"
                         messages.append(
@@ -303,11 +320,12 @@ async def run_react_prelude(s: Any) -> AsyncIterator[str]:
                             if tool_msg:
                                 messages.append(tool_msg)
                                 tool_body = str(tool_msg.get("content") or "")
-                        reply = format_fast_path_reply(pa_plan.tool, tool_body)
+                        reply = fmt(plan.tool, tool_body)
                         yield reply if reply else "Done."
                         logger.info(
-                            "assistant_fast_path done tool=%s chars=%s",
-                            pa_plan.tool,
+                            "%s done tool=%s chars=%s",
+                            src,
+                            plan.tool,
                             len(reply or ""),
                         )
                         s.turn_complete = True
