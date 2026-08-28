@@ -60,6 +60,8 @@ def test_tier_l0_model_and_skills():
     assert classify_turn_tier("/version") == TurnTier.L0_INSTANT
     assert classify_turn_tier("what time is it") == TurnTier.L0_INSTANT
     assert classify_turn_tier("what's the date") == TurnTier.L0_INSTANT
+    assert classify_turn_tier("pwd") == TurnTier.L0_INSTANT
+    assert classify_turn_tier("what's the project path") == TurnTier.L0_INSTANT
 
 
 def test_tier_l3_autonomous_and_partition():

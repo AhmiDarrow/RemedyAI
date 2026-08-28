@@ -11,6 +11,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   Claude / GPT / DeepSeek / Gemini / OpenRouter / xAI round. Mutating git
   (commit, push, …) and multi-step asks still go to the model.
 - ``what time is it`` / ``what's the date`` is an L0 clock on this PC.
+- Same in-app skip for ``show todos``, ``list files`` (cwd only),
+  ``run the tests``, clipboard, ``which python`` / ``where is git``, and
+  ``list my goals``. ``pwd`` / project path is L0 on this PC. A path like
+  ``list files in src`` still goes to the model.
 
 ### Added — git_log on every live round; file I/O and usage SQLite off the loop
 

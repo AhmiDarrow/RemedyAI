@@ -315,6 +315,25 @@ async def test_a_personal_assistant_ask_is_answered_from_one_tool_call(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_run_the_tests_is_answered_in_app_without_a_provider_round(tmp_path):
+    runtime = make_runtime(tmp_path)
+    registry = FakeToolRegistry().install(runtime)
+    registry.add(
+        "job_run",
+        description="verify",
+        results=["[job verify ok]\npytest: 12 passed"],
+    )
+    fake = FakeLLM([], when_exhausted=text_turn("must never be reached"))
+
+    with fake.patch(force_tools=True):
+        chunks = await drain(runtime, "run the tests")
+
+    assert fake.request_count == 0
+    assert registry.calls == [RecordedToolCall("job_run", {"kind": "verify"})]
+    assert "12 passed" in answer(chunks)
+
+
+@pytest.mark.asyncio
 async def test_git_status_is_answered_in_app_without_a_provider_round(tmp_path):
     """git status is a local lookup — Claude / GPT / anyone should not be billed."""
     runtime = make_runtime(tmp_path)

@@ -33,11 +33,32 @@ def test_reminder_list_and_remind_me():
     assert p3.arguments["when"] == "tomorrow"
 
 
+def test_todo_list_dir_verify_clipboard_which_goals():
+    p = match_in_app_fast_path("show todos")
+    assert p is not None and p.tool == "todo_read"
+    p2 = match_in_app_fast_path("list files")
+    assert p2 is not None and p2.tool == "list_dir"
+    assert p2.arguments.get("path") == "."
+    assert match_in_app_fast_path("list files in src") is None
+    p3 = match_in_app_fast_path("run the tests")
+    assert p3 is not None and p3.tool == "job_run"
+    assert p3.arguments.get("kind") == "verify"
+    p4 = match_in_app_fast_path("what's on the clipboard")
+    assert p4 is not None and p4.tool == "clipboard_read"
+    p5 = match_in_app_fast_path("which python")
+    assert p5 is not None and p5.tool == "host_which"
+    assert p5.arguments.get("name") == "python"
+    p6 = match_in_app_fast_path("list my goals")
+    assert p6 is not None and p6.tool == "goal_list"
+
+
 def test_mutates_and_multi_step_stay_on_the_provider():
     assert match_in_app_fast_path("git commit") is None
     assert match_in_app_fast_path("git push origin") is None
     assert match_in_app_fast_path("git status and then commit") is None
     assert match_in_app_fast_path("show the diff then implement the fix") is None
+    assert match_in_app_fast_path("run the tests and then implement the fix") is None
+    assert match_in_app_fast_path("where is the bathroom") is None
     assert match_in_app_fast_path("") is None
 
 
@@ -74,4 +95,19 @@ def test_clock_is_l0_not_a_provider_round():
     out = try_l0_system_reply(_R(), "what time is it", preclassified=True)
     assert out is not None
     assert "Local time" in out
+    assert "no provider" in out.lower()
+
+
+def test_cwd_is_l0_not_a_provider_round():
+    assert classify_turn_tier("pwd") == TurnTier.L0_INSTANT
+    assert classify_turn_tier("what's the project path") == TurnTier.L0_INSTANT
+    from remedy.core.metabolism.l0 import try_l0_system_reply
+
+    class _R:
+        def effective_project_path(self):
+            return "C:/proj"
+
+    out = try_l0_system_reply(_R(), "pwd", preclassified=True)
+    assert out is not None
+    assert "C:/proj" in out
     assert "no provider" in out.lower()
