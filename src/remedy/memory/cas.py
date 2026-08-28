@@ -112,6 +112,7 @@ class EternalCAS:
         self.dir.mkdir(parents=True, exist_ok=True)
         db = sqlite3.connect(str(self.path), check_same_thread=False)
         db.row_factory = sqlite3.Row
+        db.execute("PRAGMA busy_timeout=5000")
         db.executescript(_SCHEMA)
         db.commit()
         self._db = db

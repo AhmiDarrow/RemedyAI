@@ -1,9 +1,9 @@
 """Peer-framework ability benches — Remedy must match or beat the set.
 
-Claude Code / Codex / Operator / CUA: coding + computer-use hands stay on
-the live round for every cloud, jobs wake on enqueue, chrome SQLite does
-not freeze the loop, thinking is visible on tool rounds, hive does not
-write the owner.
+Claude Code / Codex / Operator / CUA: coding + computer-use + recall stay
+on the live round for every cloud (not Grok-only), jobs wake on enqueue,
+chrome SQLite does not freeze the loop, thinking is visible on tool
+rounds, hive does not write the owner.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from remedy.core.react_turn import (
     LOCAL_MAX_TOOLS_PER_STEP,
     WORK_MAX_TOOLS_CLOUD,
     WORK_MAX_TOOLS_PER_STEP,
+    cap_tools_for_step,
     work_max_tools_for_step,
 )
 from remedy.core.turn_context import (
@@ -34,7 +35,7 @@ from remedy.memory.authority import is_hive_writer
 from remedy.memory.cas import EternalCAS
 from remedy.memory.middleman import MemoryItem, content_key
 from remedy.memory.store import MemoryStore
-from remedy.models import ChatSession
+from remedy.models import ChatSession, MemoryEntry
 
 
 def test_every_cloud_keeps_more_hands_than_local():
@@ -47,10 +48,44 @@ def test_every_cloud_keeps_more_hands_than_local():
     deepseek = work_max_tools_for_step(
         local=False, provider="deepseek", model="deepseek-chat"
     )
+    gemini = work_max_tools_for_step(
+        local=False, provider="google", model="gemini-2.5-pro"
+    )
     assert grok == WORK_MAX_TOOLS_PER_STEP
-    assert gpt == claude == deepseek == WORK_MAX_TOOLS_CLOUD
+    assert gpt == claude == deepseek == gemini == WORK_MAX_TOOLS_CLOUD
     assert grok < gpt
     assert gpt < 194
+
+
+def test_every_cloud_keeps_recall_on_the_live_round():
+    """Claude / GPT / Grok / DeepSeek / Gemini all keep memory on the operate pack."""
+
+    def _schema(name: str) -> dict:
+        return {"type": "function", "function": {"name": name, "parameters": {}}}
+
+    flood = [_schema(f"extra_{i}") for i in range(180)] + [
+        _schema("file_read"),
+        _schema("memory_search"),
+        _schema("soul_recall"),
+        _schema("help_list"),
+    ]
+    for provider, model, cap in (
+        ("xai", "grok-4.6", WORK_MAX_TOOLS_PER_STEP),
+        ("openai", "gpt-4.1", WORK_MAX_TOOLS_CLOUD),
+        ("anthropic", "claude-sonnet-4", WORK_MAX_TOOLS_CLOUD),
+        ("deepseek", "deepseek-chat", WORK_MAX_TOOLS_CLOUD),
+        ("google", "gemini-2.5-pro", WORK_MAX_TOOLS_CLOUD),
+        ("openrouter", "anthropic/claude-sonnet-4", WORK_MAX_TOOLS_CLOUD),
+    ):
+        n = work_max_tools_for_step(local=False, provider=provider, model=model)
+        assert n == cap, provider
+        names = {
+            str((t.get("function") or {}).get("name"))
+            for t in (cap_tools_for_step(flood, local=False, max_tools=n) or [])
+        }
+        assert "memory_search" in names, provider
+        assert "soul_recall" in names, provider
+        assert "help_list" not in names, provider
 
 
 def test_hover_is_a_first_class_computer_hand():
@@ -241,4 +276,14 @@ async def test_chat_session_reads_run_off_the_event_loop(tmp_path, monkeypatch):
     mem, summaries, chats = await store.status_counts()
     assert mem == 0 and summaries == 0 and chats >= 1
     assert off["n"] > counts_before
+    search_before = off["n"]
+    await store.upsert(
+        MemoryEntry(
+            title="oat milk",
+            content="owner likes oat milk",
+        )
+    )
+    hits = await store.search("oat milk", limit=5)
+    assert any("oat milk" in (h.title or "") for h in hits)
+    assert off["n"] > search_before
     await store.close()

@@ -4,6 +4,16 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — recall on every provider's live round; FTS off the loop
+
+- ``memory_search`` and ``soul_recall`` stay in the operate core so Claude,
+  GPT, DeepSeek, Gemini, OpenRouter, and xAI can look up partner memory
+  while they code or click. Tight pack is 34 (xAI window); other clouds
+  keep 64. Catalog is still uncapped.
+- Memory FTS / LIKE / upsert run in a worker thread. Speculative prep
+  calls ``search_sync`` instead of ``asyncio.run`` on a background thread.
+- CAS objects.db sets ``busy_timeout`` like memory.db.
+
 ### Changed — drop tests that skip on public CI or patch APIs that do not exist
 
 - Update-check no longer has a skip-if-404 probe that patched a missing
