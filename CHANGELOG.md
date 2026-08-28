@@ -4,6 +4,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Changed — git and explore jobs keep chrome live
+
+- ``git_status`` and silent ``job_run kind=diff`` run their git probes in
+  parallel instead of one after another.
+- Explore listing + stack fingerprint, and verify's fingerprint lookup, run
+  in a worker so a fat folder cannot stall SSE.
+
 ### Added — in-app git / reminder / clock answers skip the provider
 
 - High-confidence ``git status`` / ``git diff`` / ``git log``, reminder list,
