@@ -179,6 +179,10 @@ def drive_life_task(
     run_action: RunAction | None = None,
     runtime: Any = None,
     max_retries: int = 1,
+    persist: bool = False,
+    session_id: str | None = None,
+    home: Any = None,
+    task_id: str | None = None,
 ) -> dict[str, Any]:
     """Run *steps* on this PC. Never claims done without an observed ok.
 
@@ -302,13 +306,116 @@ def drive_life_task(
         status = "blocked"
         all_done = False
     md = _markdown(g, results, status)
-    return {
+    out = {
         "ok": bool(all_done),
         "status": status if status in {"done", "need_you", "blocked"} else "blocked",
         "goal": g,
         "steps": [r.as_dict() for r in results],
         "markdown": md,
     }
+    if persist:
+        from remedy.core.life_task_store import save_life_task
+
+        sid = session_id
+        if not sid and runtime is not None:
+            sid = str(getattr(runtime, "_session_id", "") or "") or None
+        h = home
+        if h is None and runtime is not None:
+            h = getattr(getattr(runtime, "config", None), "home_dir", None)
+        out = save_life_task(
+            out,
+            source_steps=parsed,
+            session_id=sid,
+            home=h,
+            task_id=task_id,
+        )
+        out["markdown"] = (
+            str(out.get("markdown") or md)
+            + f"\n\nEvidence id=`{out.get('task_id')}` — resume with "
+            "life_drive(task_id=…) or review the saved steps."
+        )
+    return out
+
+
+def resume_life_task(
+    task_id: str,
+    *,
+    run_action: RunAction | None = None,
+    runtime: Any = None,
+    max_retries: int = 1,
+    home: Any = None,
+) -> dict[str, Any]:
+    """Continue a saved drive from the first unfinished step."""
+    from remedy.core.life_task_store import load_life_task, remaining_source_steps
+
+    h = home
+    if h is None and runtime is not None:
+        h = getattr(getattr(runtime, "config", None), "home_dir", None)
+    rec = load_life_task(task_id, home=h)
+    if rec is None:
+        return {
+            "ok": False,
+            "status": "blocked",
+            "goal": "",
+            "steps": [],
+            "markdown": f"No saved life task `{task_id}`.",
+        }
+    remaining, halt = remaining_source_steps(rec)
+    if halt == "need_you":
+        md = str(rec.get("markdown") or "")
+        return {
+            "ok": False,
+            "status": "need_you",
+            "goal": rec.get("goal") or "",
+            "task_id": rec.get("id"),
+            "steps": list(rec.get("steps") or []),
+            "markdown": (
+                md
+                + "\n\nStill an owner moment — password, 2FA, CAPTCHA, pay, "
+                "send, or delete. Nothing was re-pressed."
+            ),
+        }
+    if not remaining:
+        return {
+            "ok": bool(rec.get("ok")),
+            "status": str(rec.get("status") or "done"),
+            "goal": rec.get("goal") or "",
+            "task_id": rec.get("id"),
+            "steps": list(rec.get("steps") or []),
+            "markdown": str(rec.get("markdown") or "Already finished."),
+        }
+    prior = [
+        s
+        for s in (rec.get("steps") or [])
+        if isinstance(s, dict) and s.get("status") == "done"
+    ]
+    nxt = drive_life_task(
+        goal=str(rec.get("goal") or ""),
+        steps=remaining,
+        run_action=run_action,
+        runtime=runtime,
+        max_retries=max_retries,
+        persist=False,
+        session_id=rec.get("session_id"),
+        home=h,
+        task_id=str(rec.get("id") or task_id),
+    )
+    merged = prior + list(nxt.get("steps") or [])
+    nxt["steps"] = merged
+    all_done = bool(merged) and all(s.get("status") == "done" for s in merged)
+    nxt["ok"] = all_done
+    if all_done:
+        nxt["status"] = "done"
+    from remedy.core.life_task_store import save_life_task
+
+    nxt = save_life_task(
+        nxt,
+        source_steps=list(rec.get("source_steps") or remaining),
+        session_id=rec.get("session_id"),
+        home=h,
+        task_id=str(rec.get("id") or task_id),
+    )
+    return nxt
 
 
 def _observed_line(blob: dict[str, Any]) -> str:

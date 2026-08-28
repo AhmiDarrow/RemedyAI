@@ -101,6 +101,50 @@ def test_verified_steps_mark_the_goal_done():
     assert "observed" in out["markdown"].lower()
 
 
+def test_evidence_persists_and_resume_skips_done_steps(tmp_path):
+    from remedy.core.life_task_store import load_life_task
+
+    n = {"nav": 0}
+
+    def run(action, **_kw):
+        name = str(getattr(action, "value", action)).lower()
+        if name == "navigate":
+            n["nav"] += 1
+            return json.dumps(
+                {
+                    "ok": True,
+                    "message": "SUCCESS",
+                    "observed": {"url": "https://shop.example", "title": "Shop"},
+                }
+            )
+        return json.dumps({"ok": True, "message": "SUCCESS"})
+
+    first = drive_life_task(
+        goal="shop",
+        steps=[
+            {"title": "Open", "action": "navigate", "url": "https://shop.example"},
+            {"title": "Place order", "action": "click", "text": "Place order"},
+        ],
+        run_action=run,
+        persist=True,
+        home=tmp_path,
+        session_id="s1",
+    )
+    assert first.get("task_id")
+    rec = load_life_task(first["task_id"], home=tmp_path)
+    assert rec is not None
+    assert rec["steps"][0]["status"] == "done"
+    assert rec["steps"][1]["status"] == "need_you"
+
+    from remedy.core.life_task_drive import resume_life_task
+
+    again = resume_life_task(
+        first["task_id"], run_action=run, home=tmp_path
+    )
+    assert again["status"] == "need_you"
+    assert n["nav"] == 1  # did not re-navigate
+
+
 def test_retry_recovers_after_one_miss():
     n = {"click": 0}
 

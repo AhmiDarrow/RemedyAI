@@ -91,6 +91,7 @@ _OPERATE_CORE_TOOLS = (
     "vault_list",
     "host_script",
     "life_drive",
+    "life_task_status",
 )
 _OPERATE_DEFER_TOOLS = frozenset(
     {

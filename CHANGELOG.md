@@ -4,6 +4,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — life-task evidence and resume
+
+- Each ``life_drive`` writes a durable trail under ``~/.remedy/life_tasks/``
+  (intended vs observed). ``life_drive(task_id=…)`` continues from the first
+  unfinished step; pay/password checkpoints still stop. ``life_task_status``
+  lists the evidence in plain language.
+
 ### Added — life-task drive: act, verify, retry, escalate
 
 - ``life_drive`` runs a computer-use plan on this PC the way ``build_drive``
