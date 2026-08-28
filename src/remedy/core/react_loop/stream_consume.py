@@ -209,6 +209,10 @@ async def consume_llm_http_response(
             if live:
                 yield live, True
     else:
+        # JSON tool rounds (Grok / local) cannot SSE thinking. Say we're
+        # working so chrome is not frozen until the whole body arrives —
+        # every provider, not Grok-only.
+        yield "@@status:Working…", False
         try:
             data = await _await_or_abort(resp.json(), abort_ev)
         except asyncio.CancelledError:

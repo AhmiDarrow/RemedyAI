@@ -6,6 +6,7 @@ critical for the Remedy/Reme companion experience.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -322,6 +323,10 @@ class MemoryStore:
     def _locked(self) -> threading.RLock:
         """Hold across multi-statement transactions (execute + commit)."""
         return self._lock
+
+    async def _off_loop(self, fn, /, *args, **kwargs):
+        """Run sync SQLite on a worker so messenger + chrome polls stay live."""
+        return await asyncio.to_thread(fn, *args, **kwargs)
 
     # -- memory entry CRUD ---------------------------------------------------
 
@@ -1015,87 +1020,99 @@ class MemoryStore:
     async def create_chat_session(self, session: ChatSession) -> ChatSession:
         session.created_at = datetime.now(UTC)
         session.updated_at = datetime.now(UTC)
-        with self._locked():
-            db = self._ensure_db()
-            try:
-                db.execute(
-                    """INSERT INTO chat_sessions (id, title, model, agent, project_path,
-                       llm_provider, message_count, origin_channel, external_chat_id,
-                       external_user, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        session.id, session.title, session.model, session.agent,
-                        session.project_path, session.llm_provider, session.message_count,
-                        session.origin_channel, session.external_chat_id, session.external_user,
-                        session.created_at.isoformat(), session.updated_at.isoformat(),
-                    ),
-                )
-                db.commit()
-                return session
-            except sqlite3.IntegrityError:
-                # Concurrent create (messenger dual-delivery / race) — return existing.
-                db.rollback()
+
+        def _go() -> ChatSession | None:
+            with self._locked():
+                db = self._ensure_db()
+                try:
+                    db.execute(
+                        """INSERT INTO chat_sessions (id, title, model, agent, project_path,
+                           llm_provider, message_count, origin_channel, external_chat_id,
+                           external_user, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            session.id, session.title, session.model, session.agent,
+                            session.project_path, session.llm_provider, session.message_count,
+                            session.origin_channel, session.external_chat_id, session.external_user,
+                            session.created_at.isoformat(), session.updated_at.isoformat(),
+                        ),
+                    )
+                    db.commit()
+                    return session
+                except sqlite3.IntegrityError:
+                    db.rollback()
+                    return None
+
+        created = await self._off_loop(_go)
+        if created is not None:
+            return created
         existing = await self.get_chat_session(session.id)
         if existing is not None:
             return existing
         raise sqlite3.IntegrityError(f"chat_session create race for {session.id}")
 
     async def get_chat_session(self, session_id: str) -> ChatSession | None:
-        with self._locked():
-            db = self._ensure_db()
-            row = db.execute(
-                "SELECT * FROM chat_sessions WHERE id = ?", (session_id,)
-            ).fetchone()
-            if row is None:
-                return None
-            return self._row_to_session(row)
-
-    async def update_chat_session(self, session_id: str, **fields: Any) -> ChatSession | None:
-        with self._locked():
-            db = self._ensure_db()
-            allowed = {
-                "title",
-                "model",
-                "agent",
-                "project_path",
-                "llm_provider",
-                "message_count",
-                "origin_channel",
-                "external_chat_id",
-                "external_user",
-            }
-            updates: dict[str, Any] = {}
-            for k, v in fields.items():
-                if k not in allowed:
-                    continue
-                # project_path may be cleared to NULL (no-project sessions)
-                if k == "project_path":
-                    if v is None or str(v).strip() in ("", ".", "./"):
-                        updates[k] = None
-                    else:
-                        updates[k] = v
-                elif v is not None:
-                    updates[k] = v
-            if not updates:
+        def _go() -> ChatSession | None:
+            with self._locked():
+                db = self._ensure_db()
                 row = db.execute(
                     "SELECT * FROM chat_sessions WHERE id = ?", (session_id,)
                 ).fetchone()
                 if row is None:
                     return None
                 return self._row_to_session(row)
-            updates["updated_at"] = datetime.now(UTC).isoformat()
-            set_clause = ", ".join(f"{k} = ?" for k in updates)
-            values = list(updates.values()) + [session_id]
-            db.execute(
-                f"UPDATE chat_sessions SET {set_clause} WHERE id = ?", values
-            )
-            db.commit()
-            row = db.execute(
-                "SELECT * FROM chat_sessions WHERE id = ?", (session_id,)
-            ).fetchone()
-            if row is None:
-                return None
-            return self._row_to_session(row)
+
+        return await self._off_loop(_go)
+
+    async def update_chat_session(self, session_id: str, **fields: Any) -> ChatSession | None:
+        def _go() -> ChatSession | None:
+            with self._locked():
+                db = self._ensure_db()
+                allowed = {
+                    "title",
+                    "model",
+                    "agent",
+                    "project_path",
+                    "llm_provider",
+                    "message_count",
+                    "origin_channel",
+                    "external_chat_id",
+                    "external_user",
+                }
+                updates: dict[str, Any] = {}
+                for k, v in fields.items():
+                    if k not in allowed:
+                        continue
+                    # project_path may be cleared to NULL (no-project sessions)
+                    if k == "project_path":
+                        if v is None or str(v).strip() in ("", ".", "./"):
+                            updates[k] = None
+                        else:
+                            updates[k] = v
+                    elif v is not None:
+                        updates[k] = v
+                if not updates:
+                    row = db.execute(
+                        "SELECT * FROM chat_sessions WHERE id = ?", (session_id,)
+                    ).fetchone()
+                    if row is None:
+                        return None
+                    return self._row_to_session(row)
+                updates["updated_at"] = datetime.now(UTC).isoformat()
+                set_clause = ", ".join(f"{k} = ?" for k in updates)
+                values = list(updates.values()) + [session_id]
+                db.execute(
+                    f"UPDATE chat_sessions SET {set_clause} WHERE id = ?", values
+                )
+                db.commit()
+                row = db.execute(
+                    "SELECT * FROM chat_sessions WHERE id = ?", (session_id,)
+                ).fetchone()
+                if row is None:
+                    return None
+                return self._row_to_session(row)
+
+        return await self._off_loop(_go)
 
     async def delete_chat_session(self, session_id: str) -> bool:
         sid = str(session_id or "").strip()
@@ -1210,18 +1227,21 @@ class MemoryStore:
     async def list_chat_sessions(
         self, limit: int = 50, offset: int = 0
     ) -> list[ChatSession]:
-        with self._locked():
-            db = self._ensure_db()
-            rows = db.execute(
-                "SELECT * FROM chat_sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-                (limit, offset),
-            ).fetchall()
-        # Hive sessions are mother-private — never the owner sidebar.
-        return [
-            self._row_to_session(r)
-            for r in rows
-            if not str(r["id"] or "").startswith("hive_")
-        ]
+        def _go() -> list[ChatSession]:
+            with self._locked():
+                db = self._ensure_db()
+                rows = db.execute(
+                    "SELECT * FROM chat_sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+                    (limit, offset),
+                ).fetchall()
+            # Hive sessions are mother-private — never the owner sidebar.
+            return [
+                self._row_to_session(r)
+                for r in rows
+                if not str(r["id"] or "").startswith("hive_")
+            ]
+
+        return await self._off_loop(_go)
 
     async def find_session_by_external(
         self,
@@ -1233,16 +1253,20 @@ class MemoryStore:
         ext = str(external_chat_id or "").strip()
         if not ch or not ext:
             return None
-        with self._locked():
-            db = self._ensure_db()
-            row = db.execute(
-                "SELECT * FROM chat_sessions WHERE origin_channel = ? AND external_chat_id = ? "
-                "ORDER BY updated_at DESC LIMIT 1",
-                (ch, ext),
-            ).fetchone()
-        if row is None:
-            return None
-        return self._row_to_session(row)
+
+        def _go() -> ChatSession | None:
+            with self._locked():
+                db = self._ensure_db()
+                row = db.execute(
+                    "SELECT * FROM chat_sessions WHERE origin_channel = ? AND "
+                    "external_chat_id = ? ORDER BY updated_at DESC LIMIT 1",
+                    (ch, ext),
+                ).fetchone()
+            if row is None:
+                return None
+            return self._row_to_session(row)
+
+        return await self._off_loop(_go)
 
     # -- chat messages --------------------------------------------------------
 
@@ -1264,26 +1288,30 @@ class MemoryStore:
             msg.content = cleaned
         if isinstance(msg.thinking, str) and msg.thinking:
             msg.thinking = strip_inline_images(msg.thinking)
-        with self._locked():
-            db = self._ensure_db()
-            db.execute(
-                """INSERT INTO chat_messages (id, session_id, role, content, thinking,
-                   tool_calls, tool_results, model, agent, tokens, created_at, reverted)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    str(msg.id), msg.session_id, msg.role.value, msg.content,
-                    msg.thinking, json.dumps(safe_calls),
-                    json.dumps(safe_results), msg.model, msg.agent,
-                    msg.tokens, msg.created_at.isoformat(), int(msg.reverted),
-                ),
-            )
-            db.execute(
-                "UPDATE chat_sessions SET message_count = message_count + 1, "
-                "updated_at = ? WHERE id = ?",
-                (datetime.now(UTC).isoformat(), msg.session_id),
-            )
-            db.commit()
-        return msg
+
+        def _go() -> ChatMessage:
+            with self._locked():
+                db = self._ensure_db()
+                db.execute(
+                    """INSERT INTO chat_messages (id, session_id, role, content, thinking,
+                       tool_calls, tool_results, model, agent, tokens, created_at, reverted)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        str(msg.id), msg.session_id, msg.role.value, msg.content,
+                        msg.thinking, json.dumps(safe_calls),
+                        json.dumps(safe_results), msg.model, msg.agent,
+                        msg.tokens, msg.created_at.isoformat(), int(msg.reverted),
+                    ),
+                )
+                db.execute(
+                    "UPDATE chat_sessions SET message_count = message_count + 1, "
+                    "updated_at = ? WHERE id = ?",
+                    (datetime.now(UTC).isoformat(), msg.session_id),
+                )
+                db.commit()
+            return msg
+
+        return await self._off_loop(_go)
 
     async def get_chat_messages(
         self,
@@ -1299,40 +1327,44 @@ class MemoryStore:
         **latest** turns for long sessions — not the oldest page.
         ``offset`` skips that many newest messages (for older-page loads).
         """
-        with self._locked():
-            db = self._ensure_db()
-            where = "session_id = ?"
-            params: list[Any] = [session_id]
-            if not include_reverted:
-                where += " AND reverted = 0"
-            # Nested select: take newest first, then chronological for callers.
-            # Explicit rowid AS _rid — SELECT * does not expose rowid to the outer query.
-            sql = (
-                f"SELECT * FROM ("
-                f"  SELECT *, rowid AS _rid FROM chat_messages WHERE {where} "
-                f"  ORDER BY created_at DESC, rowid DESC "
-                f"  LIMIT ? OFFSET ?"
-                f") AS recent "
-                f"ORDER BY created_at ASC, _rid ASC"
-            )
-            params.extend([limit, offset])
-            rows = db.execute(sql, params).fetchall()
-            msgs = [self._row_to_message(r) for r in rows]
-        for msg in msgs:
-            self._heal_message_inline_images(msg)
-        return msgs
+        def _go() -> list[ChatMessage]:
+            with self._locked():
+                db = self._ensure_db()
+                where = "session_id = ?"
+                params: list[Any] = [session_id]
+                if not include_reverted:
+                    where += " AND reverted = 0"
+                sql = (
+                    f"SELECT * FROM ("
+                    f"  SELECT *, rowid AS _rid FROM chat_messages WHERE {where} "
+                    f"  ORDER BY created_at DESC, rowid DESC "
+                    f"  LIMIT ? OFFSET ?"
+                    f") AS recent "
+                    f"ORDER BY created_at ASC, _rid ASC"
+                )
+                params.extend([limit, offset])
+                rows = db.execute(sql, params).fetchall()
+                msgs = [self._row_to_message(r) for r in rows]
+            for msg in msgs:
+                self._heal_message_inline_images(msg)
+            return msgs
+
+        return await self._off_loop(_go)
 
     async def get_chat_message(self, msg_id: str) -> ChatMessage | None:
-        with self._locked():
-            db = self._ensure_db()
-            row = db.execute(
-                "SELECT * FROM chat_messages WHERE id = ?", (msg_id,)
-            ).fetchone()
-            if row is None:
-                return None
-            msg = self._row_to_message(row)
-        self._heal_message_inline_images(msg)
-        return msg
+        def _go() -> ChatMessage | None:
+            with self._locked():
+                db = self._ensure_db()
+                row = db.execute(
+                    "SELECT * FROM chat_messages WHERE id = ?", (msg_id,)
+                ).fetchone()
+                if row is None:
+                    return None
+                msg = self._row_to_message(row)
+            self._heal_message_inline_images(msg)
+            return msg
+
+        return await self._off_loop(_go)
 
     def _heal_message_inline_images(self, msg: ChatMessage) -> None:
         """Extract leftover data-URIs on read; persist only when files landed."""
