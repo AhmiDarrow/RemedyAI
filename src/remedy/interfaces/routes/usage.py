@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import FastAPI, Query
 
 
@@ -15,7 +17,9 @@ def register_usage_routes(app: FastAPI, *, runtime=None, gateway=None, memory=No
     ):
         from remedy.core.usage_ledger import summary
 
-        return summary(range_days=range_days, session_id=session_id)
+        return await asyncio.to_thread(
+            summary, range_days=range_days, session_id=session_id
+        )
 
     @app.get("/api/usage/series")
     async def usage_series(
@@ -25,13 +29,13 @@ def register_usage_routes(app: FastAPI, *, runtime=None, gateway=None, memory=No
         from remedy.core.usage_ledger import series
 
         g = "model" if str(group).lower() == "model" else "provider"
-        return series(range_days=range_days, group=g)
+        return await asyncio.to_thread(series, range_days=range_days, group=g)
 
     @app.get("/api/usage/session/{session_id}")
     async def usage_session(session_id: str):
         from remedy.core.usage_ledger import session_usage
 
-        return session_usage(session_id)
+        return await asyncio.to_thread(session_usage, session_id)
 
     @app.get("/api/usage/export")
     async def usage_export(
@@ -44,12 +48,13 @@ def register_usage_routes(app: FastAPI, *, runtime=None, gateway=None, memory=No
         from remedy.core.usage_ledger import series, summary
 
         if str(format).lower() == "json":
-            return {
-                "summary": summary(range_days=range_days),
-                "series": series(range_days=range_days, group="provider"),
-            }
+            summ, ser_json = await asyncio.gather(
+                asyncio.to_thread(summary, range_days=range_days),
+                asyncio.to_thread(series, range_days=range_days, group="provider"),
+            )
+            return {"summary": summ, "series": ser_json}
         # CSV of daily series by provider
-        ser = series(range_days=range_days, group="provider")
+        ser = await asyncio.to_thread(series, range_days=range_days, group="provider")
         lines = ["day,provider,total_tokens,estimated_cost_usd,events"]
         for p in ser.get("points") or []:
             lines.append(
