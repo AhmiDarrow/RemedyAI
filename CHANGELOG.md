@@ -4,6 +4,11 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — speakable Yes-No-Explain for life tasks
+
+- Plan prompts, checkpoints, and blocked steps are one spoken sentence plus
+  Yes / No / Explain. Tool names never appear in that sentence.
+
 ### Added — one yes for a life-task plan
 
 - ``life_drive`` asks once for the whole plan in Ask mode ("Remedy will: … then

@@ -147,11 +147,24 @@ def life_plan_gate(
         reason=ask,
         session_id=session_id,
     )
+    from remedy.core.speakable import speakable_plan
+
+    titles = [
+        coerce_text_arg(s.get("title")) or coerce_text_arg(s.get("action")) or "step"
+        for s in steps
+    ]
+    stops = [
+        coerce_text_arg(s.get("title")) or "checkpoint"
+        for s in steps
+        if step_is_checkpoint(s)
+    ]
+    spoken = speakable_plan(goal, titles, stops=stops)
     return (
         f"APPROVAL_REQUIRED id={item.id}\n"
         f"reason={ask}\n"
         f"{cmd}\n"
-        "Approve in UI then retry life_drive. "
+        f"{spoken}\n"
+        "Approve in UI then retry. "
         "Pay/send/password/CAPTCHA still stop after this yes."
     )
 
@@ -516,12 +529,24 @@ def _markdown(goal: str, results: list[DriveStepResult], status: str) -> str:
         if r.retries:
             lines.append(f"   retries: {r.retries}")
     if status == "need_you":
+        from remedy.core.speakable import speakable_checkpoint
+
+        last = results[-1].title if results else "this step"
+        lines.append(speakable_checkpoint(last))
+    if status == "blocked":
+        from remedy.core.speakable import speakable_blocked
+
+        last = results[-1] if results else None
         lines.append(
-            "This is an owner moment (password, 2FA, CAPTCHA, pay, send, or delete). "
-            "Nothing irreversible was done. Say when to continue."
+            speakable_blocked(
+                last.title if last else "that step",
+                last.block_reason if last else "",
+            )
         )
     if status == "done":
-        lines.append("Each step was observed — not just a tool returning ok.")
+        from remedy.core.speakable import speakable_done
+
+        lines.append(speakable_done(goal))
     return "\n".join(lines)
 
 
