@@ -4,6 +4,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — life-task drive: act, verify, retry, escalate
+
+- ``life_drive`` runs a computer-use plan on this PC the way ``build_drive``
+  runs code: each step is observed, one retry with a fresh snapshot, then a
+  plain-language stop. Pay / send / password / CAPTCHA steps never auto-run.
+  A tool returning ok is not a finished goal.
+
 ### Changed — git and explore jobs keep chrome live
 
 - ``git_status`` and silent ``job_run kind=diff`` run their git probes in

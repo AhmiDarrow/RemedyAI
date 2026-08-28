@@ -1476,3 +1476,43 @@ def register_computer_tools(runtime: Any) -> None:
         house_status,
         {"type": "object", "properties": {}},
     )
+
+    async def life_drive(
+        goal: str = "",
+        steps: Any = "",
+        max_retries: int = 1,
+    ) -> str:
+        """Machine-owned computer drive: act → verify → one retry → escalate."""
+        from remedy.core.life_task_drive import drive_life_task, format_drive_result
+
+        result = drive_life_task(
+            goal=goal,
+            steps=steps,
+            runtime=runtime,
+            max_retries=int(max_retries or 1),
+        )
+        return format_drive_result(result)
+
+    reg.register_builtin_handler(
+        "life_drive",
+        "Drive a life task on this PC (navigate/click/type/fill) with "
+        "act→verify→retry→escalate. Never marks the goal done without an "
+        "observed ok. Pay/send/password/CAPTCHA steps stop for the owner. "
+        "steps=[{title, action, url?, text?, expect_text?}].",
+        life_drive,
+        {
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string"},
+                "steps": {
+                    "description": "JSON array of {title, action, url?, text?, expect_text?}",
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "array", "items": {"type": "object"}},
+                    ],
+                },
+                "max_retries": {"type": "integer", "default": 1},
+            },
+            "required": ["goal", "steps"],
+        },
+    )
