@@ -3525,6 +3525,31 @@ def test_claim_next_idle_empty_skips_disk(tmp_path: Path, monkeypatch):
     assert calls["n"] >= 1
 
 
+def test_claim_next_wait_wakes_on_enqueue(tmp_path: Path):
+    """Long-poll claim_next must return as soon as a job is enqueued."""
+    import threading
+    import time
+
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    assert b.claim_next() is None
+    holder: list = []
+
+    def _late_enqueue():
+        time.sleep(0.05)
+        holder.append(b.enqueue("click", {"x": 9, "y": 9}))
+
+    t = threading.Thread(target=_late_enqueue)
+    t.start()
+    t0 = time.monotonic()
+    claimed = b.claim_next(wait_s=1.0)
+    elapsed = time.monotonic() - t0
+    t.join(timeout=2)
+    assert claimed is not None and holder and claimed.id == holder[0].id
+    assert elapsed < 0.8
+
+
 def test_claim_next_filter_skip_does_not_mark_idle_empty(tmp_path: Path):
     """Rust only=navigate must not mark idle-empty while a click job waits."""
     from remedy.core.computer.host_bridge import ComputerHostBridge

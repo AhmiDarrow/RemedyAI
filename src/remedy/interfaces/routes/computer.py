@@ -171,13 +171,17 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
     @app.get("/api/computer/jobs/next")
     async def computer_job_next(
-        exclude: str = "", only: str = "", session_id: str = ""
+        exclude: str = "",
+        only: str = "",
+        session_id: str = "",
+        wait_ms: int = 0,
     ):
         """Desktop host claims the next pending browser job (or null).
 
         *exclude*: comma-separated actions to leave pending (SPA should pass
         ``exclude=navigate`` so Rust owns in-rail navigates via ui_command).
         *only*: if set, only claim these actions (Rust backup: ``only=navigate``).
+        *wait_ms*: block until enqueue or timeout (wake-on-enqueue; max 5000).
         """
         b = _bridge()
         b.mark_host_alive(poller=True)
@@ -189,11 +193,17 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             only_set = {p.strip().lower() for p in str(only).split(",") if p.strip()}
         if session_id.strip():
             b.set_focused_session(session_id)
-        job = b.claim_next(
-            exclude_actions=skip,
-            only_actions=only_set,
-            session_id=session_id or None,
-        )
+        wait_s = min(5.0, max(0, int(wait_ms or 0)) / 1000.0)
+        kwargs = {
+            "exclude_actions": skip,
+            "only_actions": only_set,
+            "session_id": session_id or None,
+            "wait_s": wait_s,
+        }
+        if wait_s > 0:
+            job = await asyncio.to_thread(b.claim_next, **kwargs)
+        else:
+            job = b.claim_next(**kwargs)
         if job is None:
             return {"job": None}
         return {"job": job.to_dict()}

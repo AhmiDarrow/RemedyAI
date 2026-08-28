@@ -475,6 +475,7 @@ export function useComputerHost(
           job = await claimComputerJob({
             exclude: 'navigate,ready',
             sessionId: sessionIdRef.current,
+            waitMs: jobWaitMs(),
           })
         } catch (e) {
           console.warn('[computer-host] claim failed', e)
@@ -523,6 +524,7 @@ export function useComputerHost(
     const JOB_BUSY_MS = 120
     const JOB_IDLE_MS = 800
     const JOB_IDLE_MAX_MS = 2000
+    const JOB_WAIT_MS = 2000
     const UI_BUSY_MS = 250
     const UI_IDLE_MS = 800
     const UI_IDLE_MAX_MS = 2000
@@ -533,6 +535,8 @@ export function useComputerHost(
     let loopGen = 0
     let jobIdleStreak = 0
     let uiIdleStreak = 0
+    const jobWaitMs = () =>
+      jobIdleStreak >= 8 ? JOB_WAIT_MS : jobIdleStreak >= 1 ? JOB_IDLE_MS : 0
 
     const stopLoops = () => {
       loopGen += 1
@@ -571,9 +575,8 @@ export function useComputerHost(
             return
           }
           jobIdleStreak += 1
-          const idleMs =
-            jobIdleStreak >= 8 ? JOB_IDLE_MAX_MS : JOB_IDLE_MS
-          scheduleJobs(idleMs)
+          // Long-poll already waited; loop immediately (wake-on-enqueue).
+          scheduleJobs(jobIdleStreak >= 1 ? 0 : JOB_BUSY_MS)
         })
       }, ms)
     }

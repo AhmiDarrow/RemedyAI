@@ -30,21 +30,28 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
             return "Provide a goal title."
         life = None
         drove = None
+        hive_writer = False
         with suppress(Exception):
-            from remedy.memory.life_drive import invent_next, take_step
+            from remedy.core.turn_context import turn_session_id
+            from remedy.memory.authority import is_hive_writer
 
-            store = _life_store()
-            life = store.add(
-                t,
-                why=desc,
-                source="goal_add",
-            )
-            if life and not life.next_action:
-                store.set_next(life.title, invent_next(life))
-            drove = take_step(
-                getattr(getattr(runtime, "config", None), "home_dir", None),
-                force=True,
-            )
+            hive_writer = is_hive_writer(turn_session_id(runtime))
+        with suppress(Exception):
+            if not hive_writer:
+                from remedy.memory.life_drive import invent_next, take_step
+
+                store = _life_store()
+                life = store.add(
+                    t,
+                    why=desc,
+                    source="goal_add",
+                )
+                if life and not life.next_action:
+                    store.set_next(life.title, invent_next(life))
+                drove = take_step(
+                    getattr(getattr(runtime, "config", None), "home_dir", None),
+                    force=True,
+                )
         task = runtime.create_task(t, description=desc, tags=["goal"])
         with suppress(Exception):
             from remedy.memory.harness.brief import SessionBrief
@@ -79,15 +86,17 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
 
                 await _remember()
         # Dream immediately: a new goal should shape how I partner *now*
+        # (owner turns only — hive foragers must not rewrite parent dreams).
         with suppress(Exception):
-            from remedy.memory.soul.partner_dream import refresh_partner_dreams
+            if not hive_writer:
+                from remedy.memory.soul.partner_dream import refresh_partner_dreams
 
-            home = getattr(getattr(runtime, "config", None), "home_dir", None)
-            refresh_partner_dreams(
-                home,
-                memory=getattr(runtime, "memory", None),
-                extra_goals=[t],
-            )
+                home = getattr(getattr(runtime, "config", None), "home_dir", None)
+                refresh_partner_dreams(
+                    home,
+                    memory=getattr(runtime, "memory", None),
+                    extra_goals=[t],
+                )
         extra = ""
         if life is not None:
             extra = f" life_id={life.id} horizon={life.horizon}"

@@ -92,6 +92,25 @@ def test_the_expected_tools_are_registered(tools):
 
 
 @pytest.mark.asyncio
+async def test_hive_goal_add_does_not_write_parent_life_board(tools, rt, tmp_path):
+    """Daughters keep a session task; they must not upsert owner life goals."""
+
+    from remedy.core.turn_context import begin_turn, end_turn
+    from remedy.memory.life_goals import LifeGoalStore
+
+    toks = begin_turn("hive_forager1")
+    try:
+        out = await tools["goal_add"](title="Hive-only forage")
+        assert "Hive-only forage" in out
+        assert [t.title for t in rt._tasks] == ["Hive-only forage"]
+    finally:
+        end_turn("hive_forager1", *toks)
+    store = LifeGoalStore(str(tmp_path))
+    titles = [g.title for g in store.list(include_closed=True)]
+    assert "Hive-only forage" not in titles
+
+
+@pytest.mark.asyncio
 async def test_a_goal_added_is_a_goal_listed(tools, rt):
     await tools["goal_add"](title="Ship the thing", description="by friday")
     assert [t.title for t in rt._tasks] == ["Ship the thing"]
