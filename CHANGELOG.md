@@ -4,6 +4,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — on-PC code map and verify-after-writes
+
+- ``code_map`` lists class/def/fn symbols under a tree (time-budgeted, same
+  skip-dirs as file_glob). Tight operate pack is 40.
+- After a write batch with no active build engine, Remedy injects the
+  project's verify command so the model runs it instead of claiming green.
+
 ### Added — speakable Yes-No-Explain for life tasks
 
 - Plan prompts, checkpoints, and blocked steps are one spoken sentence plus
