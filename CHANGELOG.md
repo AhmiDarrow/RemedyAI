@@ -4,6 +4,15 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed — chrome stays live during chat I/O; tool rounds show work
+
+- Session list / get / add-message SQLite runs in a worker thread so a fat
+  turn does not freeze Settings, jobs/next, or SSE on any provider.
+- JSON tool rounds (Grok, local RMB) emit ``Working…`` immediately, then
+  thinking — the bar is not blank until the whole body arrives. SSE clouds
+  already stream reasoning while buffering tool JSON.
+- ``events.db`` uses WAL + busy_timeout like memory.db.
+
 ### Added — richer operate pack for non-Grok clouds; jobs wake on enqueue
 
 - Tool-schema cap is per provider: local 8, Grok/xAI 32, Claude / GPT /

@@ -1,0 +1,196 @@
+"""Peer-framework ability benches — Remedy must match or beat the set.
+
+Claude Code / Codex / Operator / CUA: coding + computer-use hands stay on
+the live round for every cloud, jobs wake on enqueue, chrome SQLite does
+not freeze the loop, thinking is visible on tool rounds, hive does not
+write the owner.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from types import SimpleNamespace
+
+import pytest
+
+from remedy.core.computer.types import COMPUTER_TOOL_NAMES, ComputerAction, action_from_tool
+from remedy.core.react_stream import StreamRoundState, apply_openai_sse_chunk
+from remedy.core.react_turn import (
+    LOCAL_MAX_TOOLS_PER_STEP,
+    WORK_MAX_TOOLS_CLOUD,
+    WORK_MAX_TOOLS_PER_STEP,
+    work_max_tools_for_step,
+)
+from remedy.core.turn_context import (
+    abort_session,
+    begin_turn,
+    end_turn,
+    is_turn_aborted,
+    release_session_stream_claim,
+    stream_claim_epoch,
+    try_claim_session_stream,
+)
+from remedy.memory.authority import is_hive_writer
+from remedy.memory.store import MemoryStore
+from remedy.models import ChatSession
+
+
+def test_every_cloud_keeps_more_hands_than_local():
+    assert work_max_tools_for_step(local=True) == LOCAL_MAX_TOOLS_PER_STEP
+    grok = work_max_tools_for_step(local=False, provider="xai", model="grok-4.6")
+    gpt = work_max_tools_for_step(local=False, provider="openai", model="gpt-4.1")
+    claude = work_max_tools_for_step(
+        local=False, provider="anthropic", model="claude-sonnet-4"
+    )
+    deepseek = work_max_tools_for_step(
+        local=False, provider="deepseek", model="deepseek-chat"
+    )
+    assert grok == WORK_MAX_TOOLS_PER_STEP
+    assert gpt == claude == deepseek == WORK_MAX_TOOLS_CLOUD
+    assert grok < gpt
+    assert gpt < 194
+
+
+def test_hover_is_a_first_class_computer_hand():
+    assert "computer_hover" in COMPUTER_TOOL_NAMES
+    assert action_from_tool("computer_hover") is ComputerAction.HOVER
+
+
+def test_stale_abort_epoch_does_not_kill_newer_turn():
+    sid = "bench-epoch"
+    assert try_claim_session_stream(sid)
+    e1 = stream_claim_epoch(sid)
+    release_session_stream_claim(sid, epoch=e1)
+    assert try_claim_session_stream(sid)
+    e2 = stream_claim_epoch(sid)
+    toks = begin_turn(sid, project_raw=None, active_path=".")
+    try:
+        assert abort_session(sid, epoch=e1) == 0
+        assert is_turn_aborted() is False
+        assert abort_session(sid, epoch=e2) == 1
+        assert is_turn_aborted() is True
+    finally:
+        end_turn(sid, *toks)
+        release_session_stream_claim(sid, epoch=e2)
+
+
+def test_sse_tool_round_still_emits_thinking_when_content_is_buffered():
+    """Claude/GPT/DeepSeek SSE tool rounds must show thinking live.
+
+    stream_live=False buffers assistant text (no DSML spam) but reasoning
+    deltas still accumulate so consume can yield @@thinking.
+    """
+    state = StreamRoundState()
+    live = apply_openai_sse_chunk(
+        state,
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "reasoning_content": "I will click Sign in.",
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "c1",
+                                "type": "function",
+                                "function": {"name": "computer_click", "arguments": "{"},
+                            }
+                        ],
+                    }
+                }
+            ]
+        },
+        stream_live=False,
+    )
+    assert live is None
+    assert "Sign in" in state.reasoning_out
+    assert 0 in state.tool_call_acc
+
+
+@pytest.mark.asyncio
+async def test_json_tool_round_says_working_before_the_body_arrives():
+    from remedy.core.react_loop.stream_consume import consume_llm_http_response
+
+    class _Resp:
+        headers = {"Content-Type": "application/json"}
+        content = None
+
+        async def json(self):
+            await asyncio.sleep(0)
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "",
+                            "reasoning_content": "click next",
+                            "tool_calls": [
+                                {
+                                    "id": "c1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "computer_click",
+                                        "arguments": '{"text":"Next"}',
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+
+    adapter = SimpleNamespace(extract_response=lambda data: {})
+    bind = SimpleNamespace(model="grok-4.6", provider="xai")
+    state = StreamRoundState()
+    collected: dict = {}
+    tokens: list[str] = []
+    async for tok, _user in consume_llm_http_response(
+        _Resp(),
+        round_state=state,
+        collected=collected,
+        adapter=adapter,
+        bind=bind,
+        body={"stream": False},
+        use_openai_sse=False,
+        stream_live=False,
+    ):
+        tokens.append(tok)
+    joined = " ".join(tokens)
+    assert "@@thinking_round" in joined
+    assert "@@status:Working" in joined
+    assert "@@thinking:" in joined
+    assert "click next" in joined
+
+
+def test_hive_residue_does_not_mint_parent_cas_facts(tmp_path):
+    from remedy.core.metabolism.organism import ingest_turn_residue
+
+    assert is_hive_writer("hive_forager1")
+    key = ingest_turn_residue(
+        home=tmp_path,
+        session_id="hive_forager1",
+        user_text="Remember we decided TypeScript is the house language forever.",
+        assistant_text="Logged that TypeScript is the house language.",
+    )
+    assert key == ""
+
+
+@pytest.mark.asyncio
+async def test_chat_session_reads_run_off_the_event_loop(tmp_path, monkeypatch):
+    store = MemoryStore(tmp_path / "bench.db")
+    await store.initialize()
+    off = {"n": 0}
+    real = store._off_loop
+
+    async def spy(fn, /, *args, **kwargs):
+        off["n"] += 1
+        return await real(fn, *args, **kwargs)
+
+    monkeypatch.setattr(store, "_off_loop", spy)
+    sess = ChatSession(title="bench")
+    await store.create_chat_session(sess)
+    got = await store.get_chat_session(sess.id)
+    listed = await store.list_chat_sessions(limit=10)
+    assert got is not None and got.id == sess.id
+    assert any(s.id == sess.id for s in listed)
+    assert off["n"] >= 3
+    await store.close()

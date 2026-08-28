@@ -40,6 +40,8 @@ class EventBus:
             path.parent.mkdir(parents=True, exist_ok=True)
             uri = str(path)
         conn = sqlite3.connect(uri, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS events (
