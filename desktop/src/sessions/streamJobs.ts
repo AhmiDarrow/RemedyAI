@@ -47,6 +47,8 @@ export type StreamJob = {
   error?: string
   /** Detached from focused UI — still running on server. */
   detached: boolean
+  /** Stream-claim generation from `event: start`. Stop must send this. */
+  claimEpoch?: number
   /** Accumulated stream paint (tokens/tools) — always updated, even when detached. */
   paint: StreamJobPaint
   /**
@@ -363,10 +365,20 @@ export function completeStreamJob(
   }, 4000)
 }
 
+/** Remember the server claim generation so Stop cannot kill a newer turn. */
+export function setJobClaimEpoch(sessionId: string, epoch: number): void {
+  const j = jobs.get(sessionId)
+  if (!j || j.status !== 'running') return
+  if (!Number.isFinite(epoch) || epoch <= 0) return
+  j.claimEpoch = Math.trunc(epoch)
+  emit({ type: 'update', job: j })
+}
+
 /** Abort client stream + server cooperative cancel. */
 export async function stopStreamJob(sessionId: string): Promise<void> {
+  const live = jobs.get(sessionId)
   try {
-    await abortSession(sessionId)
+    await abortSession(sessionId, 'stop', live?.claimEpoch)
   } catch {
     /* */
   }

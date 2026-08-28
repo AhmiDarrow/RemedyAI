@@ -4,6 +4,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed — stale Stop cannot kill a newer turn
+
+- `POST /abort` accepts `epoch=` from stream `event: start`. A late Stop
+  with an old generation is ignored. Desktop Stop always sends the live
+  job's epoch. 409 recovery no longer abort-supersedes (join or retry
+  POST). CLI / delete still omit epoch and abort whatever is current.
+
 ### Fixed — 409 recovery no longer kills a live turn
 
 - When chrome thought the session was idle (dropped SSE) and the server

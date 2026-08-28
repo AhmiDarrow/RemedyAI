@@ -66,4 +66,5 @@ export interface SSEEvent {
   message?: string
   request_id?: string
   session_id?: string
+  claim_epoch?: number
 }

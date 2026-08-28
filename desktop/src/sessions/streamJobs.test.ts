@@ -18,6 +18,7 @@ import {
   markJobUiCommitted,
   registerStreamJob,
   markLiveTurn,
+  setJobClaimEpoch,
   setJobProcessSteps,
   shouldRestoreStoppedPartial,
   stopStreamJob,
@@ -72,6 +73,29 @@ describe('streamJobs', () => {
     expect(c.signal.aborted).toBe(true)
     expect(order[0]).toBe('abort')
     expect(order).toContain('controller')
+    expect(vi.mocked(abortSession).mock.calls.at(-1)?.[2]).toBeUndefined()
+  })
+
+  it('stopStreamJob sends the claim epoch from event start', async () => {
+    const { abortSession } = await import('../api/sessions')
+    vi.mocked(abortSession).mockClear()
+    const c = new AbortController()
+    registerStreamJob('s-epoch', c)
+    setJobClaimEpoch('s-epoch', 7)
+    await stopStreamJob('s-epoch')
+    expect(vi.mocked(abortSession)).toHaveBeenCalledWith('s-epoch', 'stop', 7)
+  })
+
+  it('setJobClaimEpoch ignores a finished job and non-positive epochs', () => {
+    const c = new AbortController()
+    registerStreamJob('s-ep', c)
+    setJobClaimEpoch('s-ep', 0)
+    expect(getStreamJob('s-ep')?.claimEpoch).toBeUndefined()
+    setJobClaimEpoch('s-ep', 3)
+    expect(getStreamJob('s-ep')?.claimEpoch).toBe(3)
+    completeStreamJob('s-ep', 'done')
+    setJobClaimEpoch('s-ep', 9)
+    expect(getStreamJob('s-ep')?.claimEpoch).not.toBe(9)
   })
 
   it('completeStreamJob does not revive terminal status', async () => {

@@ -5,6 +5,7 @@ import {
   formatApiErrorBody,
   getApiBase,
 } from './client'
+import { setJobClaimEpoch } from '../sessions/streamJobs'
 import type { ChatMessage, ModelDefinition, AgentDefinition, CommandDefinition } from '../types'
 
 /**
@@ -248,14 +249,8 @@ export function streamMessage(
             return
           }
         }
-        try {
-          await fetch(`${getApiBase()}/sessions/${sessionId}/abort?reason=supersede`, {
-            method: 'POST',
-            headers: { ...authHeaders(), Accept: 'application/json' },
-          })
-        } catch {
-          /* best effort */
-        }
+        // no_turn (or attachments): do not abort. A stale Stop-less abort
+        // would kill a newer claim that started after steer. Retry POST.
         for (const wait of [80, 160, 320]) {
           await new Promise((r) => setTimeout(r, wait))
           if (controller.signal.aborted) break
@@ -360,6 +355,11 @@ export function streamMessage(
               onTodos?.(payload)
             }
             break
+          case 'start': {
+            const ep = payload.claim_epoch
+            if (typeof ep === 'number') setJobClaimEpoch(sessionId, ep)
+            break
+          }
           case 'done':
             finished = true
             if (payload.usage && typeof payload.usage === 'object') {

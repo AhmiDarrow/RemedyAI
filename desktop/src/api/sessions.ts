@@ -73,14 +73,29 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await apiFetch(`/sessions/${sessionId}`, { method: 'DELETE' })
 }
 
+/** Path for POST /abort. `epoch` is the stream-claim generation from
+ *  `event: start` — a stale Stop must not kill a newer turn. */
+export function abortSessionPath(
+  sessionId: string,
+  reason: 'stop' | 'supersede' = 'stop',
+  epoch?: number,
+): string {
+  const q = new URLSearchParams({ reason })
+  if (epoch != null && Number.isFinite(epoch) && epoch > 0) {
+    q.set('epoch', String(Math.trunc(epoch)))
+  }
+  return `/sessions/${sessionId}/abort?${q.toString()}`
+}
+
 /** Stop the in-flight turn. `reason` tells the server how to word the
  *  interrupted turn's saved row: 'stop' (Stop button) or 'supersede'
  *  (the owner sent the next message while this one ran). */
 export async function abortSession(
   sessionId: string,
   reason: 'stop' | 'supersede' = 'stop',
-): Promise<void> {
-  await apiFetch(`/sessions/${sessionId}/abort?reason=${reason}`, { method: 'POST' })
+  epoch?: number,
+): Promise<{ status?: string; notified?: number }> {
+  return apiFetch(abortSessionPath(sessionId, reason, epoch), { method: 'POST' })
 }
 
 /**

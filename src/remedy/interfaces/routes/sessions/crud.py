@@ -287,18 +287,26 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         }
 
     @app.post("/api/sessions/{session_id}/abort")
-    async def abort_session(session_id: str, reason: str | None = None):
+    async def abort_session(
+        session_id: str,
+        reason: str | None = None,
+        epoch: int | None = Query(default=None),
+    ):
         """Cooperatively stop in-flight generation for this session.
 
         ``reason`` = ``stop`` (Stop button, default) or ``supersede`` (the
         client is about to send the next message). The dying stream words its
         durable assistant row from it.
+
+        ``epoch`` is the stream-claim generation from ``event: start``. A
+        stale Stop must not abort a newer turn on the same session. Omit it
+        only for delete/CLI (abort whatever is current).
         """
         from remedy.core.turn_context import abort_session as _abort_turn
         from remedy.core.turn_context import normalize_abort_reason
 
         reason_n = normalize_abort_reason(reason)
-        n = _abort_turn(session_id, reason=reason_n)
+        n = _abort_turn(session_id, epoch=epoch, reason=reason_n)
         with contextlib.suppress(Exception):
             from remedy.execution.host.session import close_shared_session
 
@@ -310,9 +318,11 @@ def register_crud_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
                 ss = getattr(runtime, "_streaming_sessions", None)
                 if isinstance(ss, set):
                     ss.discard(str(session_id))
+        ignored = epoch is not None and n == 0
         return {
-            "status": "aborted",
+            "status": "ignored" if ignored else "aborted",
             "session_id": session_id,
             "notified": n,
             "reason": reason_n,
+            "epoch": epoch,
         }
