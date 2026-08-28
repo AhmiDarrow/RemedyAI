@@ -4,6 +4,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Changed — drop tests that skip on public CI or patch APIs that do not exist
+
+- Update-check no longer has a skip-if-404 probe that patched a missing
+  ``check_for_updates``. Poll-cache and the trusted GitHub URL family remain.
+- Duplicate ``hive_caps`` "if importable" case removed (covered in
+  ``test_hive_caps``). Gitignored prompt/pipeline "file exists" checks dropped.
+
 ### Fixed — tests match partner-system steering; list tool ids pair; versions align
 
 - Partner injects are ``role=system`` so the model does not treat them as the

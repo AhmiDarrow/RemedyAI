@@ -8,13 +8,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[1]
 HOOKS = ROOT / "desktop" / "src-tauri" / "windows" / "hooks.nsh"
 UPDATE_UI = ROOT / "desktop" / "src-tauri" / "windows" / "remedy-update-ui.ps1"
 LIB_RS = ROOT / "desktop" / "src-tauri" / "src" / "lib.rs"
-PIPELINE = ROOT / "scripts" / "test_autoupdate_pipeline.ps1"
 
 
 def test_hooks_defer_relaunch_via_marker_and_noautolaunch() -> None:
@@ -90,14 +87,6 @@ def test_hooks_silent_relaunch_uses_exec() -> None:
     code = "\n".join(code_lines).lower()
     assert "cmd /c start" not in code
     assert "exec " in code
-
-
-def test_autoupdate_pipeline_script_exists() -> None:
-    if not PIPELINE.is_file():
-        pytest.skip("autoupdate pipeline script stays in the local tree (not public)")
-    body = PIPELINE.read_text(encoding="utf-8")
-    assert "Relaunch" in body
-    assert "parent" in body.lower()
 
 
 def test_hooks_kill_before_replace_and_marker_cleanup() -> None:
