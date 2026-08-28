@@ -1,5 +1,29 @@
 import { describe, expect, it } from 'vitest'
-import { streamHttpErrorMessage, streamTransportErrorMessage } from './messages'
+import {
+  resolveSteer409,
+  streamHttpErrorMessage,
+  streamTransportErrorMessage,
+} from './messages'
+
+describe('resolveSteer409', () => {
+  it('joins the live turn when steer lands', () => {
+    expect(resolveSteer409({ steered: true, reason: 'ok' })).toBe('steered')
+  })
+
+  it('does not abort when the nudge queue is full or steer blips', () => {
+    expect(resolveSteer409({ steered: false, reason: 'nudge_full' })).toBe(
+      'retry-steer',
+    )
+    expect(resolveSteer409({ ok: false, steered: false })).toBe('retry-steer')
+    expect(resolveSteer409({ steered: false })).toBe('retry-steer')
+  })
+
+  it('supersedes only when no turn is running', () => {
+    expect(resolveSteer409({ steered: false, reason: 'no_turn' })).toBe(
+      'supersede',
+    )
+  })
+})
 
 describe('streamHttpErrorMessage', () => {
   it('prefers string detail', () => {
