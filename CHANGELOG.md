@@ -4,6 +4,17 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — richer operate pack for non-Grok clouds; jobs wake on enqueue
+
+- Tool-schema cap is per provider: local 8, Grok/xAI 32, Claude / GPT /
+  DeepSeek / Gemini / OpenRouter-non-Grok 64. Press-hold, drag, screenshot,
+  page_text, app, find stay on those live rounds. Grok still fits the window.
+- `GET /computer/jobs/next?wait_ms=` blocks until a job is enqueued (capped
+  5s), off the event loop. SPA and Rust idle long-poll instead of sleeping
+  2s, so the first click after quiet is immediate on every provider.
+- Hive `goal_add` still makes a daughter task; it no longer writes the
+  owner's life board or soul dreams.
+
 ### Added — hover, and the Grok operate pack keeps full hands
 
 - `computer_hover` moves the pointer onto a control (`text=` / `ref=`)

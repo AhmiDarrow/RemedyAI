@@ -2821,19 +2821,20 @@ fn computer_host_loop(app: AppHandle) {
     // was pure spam (no bounds, no session) on top of the SPA 4s bounds hello.
     let mut idle_streak: u32 = 0;
     loop {
-        // Busy 50ms. Idle matches SPA: 150ms, then 800ms, then 2s.
-        // host_connected max_age is 15s so 2s idle stays driveable.
-        // A flat 150ms idle filled debug.log (8MB / ~40min) even after SPA backoff.
-        let sleep_ms: u64 = if idle_streak == 0 {
-            50
+        // Busy 50ms. Idle long-polls jobs/next (wake-on-enqueue) instead of
+        // sleeping 2s then missing the first click.
+        let (sleep_ms, wait_ms): (u64, u64) = if idle_streak == 0 {
+            (50, 0)
         } else if idle_streak < 8 {
-            150
+            (0, 150)
         } else if idle_streak < 16 {
-            800
+            (0, 800)
         } else {
-            2000
+            (0, 2000)
         };
-        std::thread::sleep(Duration::from_millis(sleep_ms));
+        if sleep_ms > 0 {
+            std::thread::sleep(Duration::from_millis(sleep_ms));
+        }
         let mut saw_work = false;
 
         // take=1 clears command atomically — prevents reloading the same wiki forever
@@ -2884,10 +2885,15 @@ fn computer_host_loop(app: AppHandle) {
         let only = if spa_can_claim {
             "navigate,ready,snapshot,page_text"
         } else {
-            "navigate,snapshot,a11y,page_text,ready,click,type,key,scroll,drag,press_hold,select"
+            "navigate,snapshot,a11y,page_text,ready,click,type,key,scroll,drag,press_hold,select,hover"
+        };
+        let wait_q = if wait_ms > 0 {
+            format!("&wait_ms={wait_ms}")
+        } else {
+            String::new()
         };
         if let Ok(resp) = auth_req(agent.get(
-            &api_url(&format!("/api/computer/jobs/next?only={only}")),
+            &api_url(&format!("/api/computer/jobs/next?only={only}{wait_q}")),
         ))
         .call()
         {
@@ -2915,6 +2921,7 @@ fn computer_host_loop(app: AppHandle) {
                         action,
                         "snapshot" | "a11y" | "page_text" | "ready" | "click"
                             | "type" | "key" | "scroll" | "drag" | "press_hold" | "select"
+                            | "hover"
                     ) {
                         let app2 = app.clone();
                         let agent2 = agent.clone();

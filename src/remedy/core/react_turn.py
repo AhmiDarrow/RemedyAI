@@ -36,9 +36,10 @@ MAX_DISCONNECT_RETRIES = 8
 LOCAL_MAX_TOOLS_PER_STEP = 8
 # Cloud work pack. Live 2026-08-27: grok-4.6 "proceed until finished" sent 194
 # schemas every step (33k→61k prompt, 145s thinking). The catalog is ability;
-# the live round is an operate pack. 32 still dwarfs 194; it has to fit coding
-# plus computer/web hands or a socials turn drives the rail blind.
+# the live round is an operate pack. Grok stays at 32; Claude/GPT/DeepSeek/…
+# keep a richer CUA set (still capped, never 194).
 WORK_MAX_TOOLS_PER_STEP = 32
+WORK_MAX_TOOLS_CLOUD = 64
 # Prefer these when capping — first-N used to drop host_run behind help/goal.
 _OPERATE_CORE_TOOLS = (
     "file_read",
@@ -73,6 +74,16 @@ _OPERATE_CORE_TOOLS = (
     "apply_patch",
     "web_search",
     "web_fetch",
+    # Past Grok's 32 — other clouds keep these on the live round.
+    "computer_press_hold",
+    "computer_drag",
+    "computer_screenshot",
+    "computer_page_text",
+    "computer_app",
+    "computer_find",
+    "computer_windows",
+    "vault_list",
+    "host_script",
 )
 _OPERATE_DEFER_TOOLS = frozenset(
     {
@@ -202,7 +213,7 @@ class TurnState:
         packed = cap_tools_for_step(
             list(self.all_tools),
             local=False,
-            max_tools=WORK_MAX_TOOLS_PER_STEP,
+            max_tools=work_max_tools_for_step(local=False),
         )
         self.tools = list(packed or self.all_tools)
         self.run_until_done = True
@@ -560,7 +571,9 @@ def resolve_tools(
                     tools = filtered
                     pack = "write_first"
                     reason = "task_write_first"
-        cap_n = LOCAL_MAX_TOOLS_PER_STEP if local else WORK_MAX_TOOLS_PER_STEP
+        cap_n = work_max_tools_for_step(
+            local=local, provider=provider or "", model=model or ""
+        )
         if tools and len(tools) > cap_n:
             capped = cap_tools_for_step(tools, local=local, max_tools=cap_n)
             if capped is not None:
@@ -628,8 +641,8 @@ def resolve_tools(
             packed = cap_tools_for_step(
                 all_t,
                 local=local,
-                max_tools=(
-                    LOCAL_MAX_TOOLS_PER_STEP if local else WORK_MAX_TOOLS_PER_STEP
+                max_tools=work_max_tools_for_step(
+                    local=local, provider=provider or "", model=model or ""
                 ),
             )
             logger.info(
@@ -794,6 +807,33 @@ def is_disconnect_error(exc: BaseException | str) -> bool:
 def _tool_schema_name(t: dict[str, Any]) -> str:
     fn = t.get("function") if isinstance(t.get("function"), dict) else {}
     return str((fn or {}).get("name") or t.get("name") or "")
+
+
+def work_max_tools_for_step(
+    *,
+    local: bool = False,
+    provider: str = "",
+    model: str = "",
+) -> int:
+    """Per-provider operate cap. Local stays tight; Grok stays 32; other clouds richer.
+
+    Remedy is every provider — Claude/GPT/DeepSeek/Gemini must not inherit
+    Grok's 32-schema ceiling. Still capped so a 194-tool dump never ships.
+    """
+    if local:
+        return LOCAL_MAX_TOOLS_PER_STEP
+    p = str(provider or "").strip().lower()
+    m = str(model or "").strip().lower()
+    if not p and not m:
+        with suppress(Exception):
+            from remedy.core.llm_binding import get_llm_binding
+
+            bind = get_llm_binding()
+            p = str(getattr(bind, "provider", "") or "").strip().lower()
+            m = str(getattr(bind, "model", "") or "").strip().lower()
+    if p in ("xai", "grok") or "grok" in m:
+        return WORK_MAX_TOOLS_PER_STEP
+    return WORK_MAX_TOOLS_CLOUD
 
 
 def cap_tools_for_step(

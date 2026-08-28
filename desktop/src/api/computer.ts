@@ -108,12 +108,14 @@ export async function computerCapture(body: {
 
 /** Claim next job. SPA must exclude navigate — Rust owns rail navigates. */
 export async function claimComputerJob(
-  opts?: { exclude?: string; sessionId?: string | null },
+  opts?: { exclude?: string; sessionId?: string | null; waitMs?: number },
 ): Promise<ComputerJob | null> {
   const exclude = opts?.exclude ?? 'navigate'
   const params = new URLSearchParams()
   if (exclude) params.set('exclude', exclude)
   if (opts?.sessionId) params.set('session_id', opts.sessionId)
+  const waitMs = Math.max(0, Math.min(5000, Math.floor(opts?.waitMs ?? 0)))
+  if (waitMs > 0) params.set('wait_ms', String(waitMs))
   const q = params.toString() ? `?${params.toString()}` : ''
   const data = await hostFetch<{ job?: ComputerJob | null }>(
     `/computer/jobs/next${q}`,

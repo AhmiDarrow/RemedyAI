@@ -187,6 +187,11 @@ def ingest_turn_residue(
     from remedy.memory.middleman import content_key, get_session_middleman
 
     sid = (session_id or "").strip() or "eternal"
+    with suppress(Exception):
+        from remedy.memory.authority import is_hive_writer
+
+        if is_hive_writer(sid):
+            return ""
     mm = get_session_middleman(sid)
     fresh = mm.item(content_key(body)) is None
     key = mm.put(

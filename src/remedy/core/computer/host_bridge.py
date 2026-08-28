@@ -447,6 +447,7 @@ class ComputerHostBridge:
         # Set True after a full claim_next scan finds nothing pending. Cleared on
         # enqueue so idle host polls (~150ms) skip glob+read until new work lands.
         self._poll_idle_empty: bool = False
+        self._wake = threading.Event()
         self._last_claim_at: float = 0.0
         self._browser_bounds: dict[str, float] | None = None
         self._browser_scale: float = 1.0
@@ -865,6 +866,7 @@ class ComputerHostBridge:
         with self._lock:
             self._write(job)
             self._poll_idle_empty = False
+            self._wake.set()
         # Always request rail open for browser actions (Desktop pops panel like Settings)
         raw_ui = pl.get("ui")
         ui: dict[str, Any] = raw_ui if isinstance(raw_ui, dict) else {}
@@ -934,6 +936,7 @@ class ComputerHostBridge:
         exclude_actions: set[str] | frozenset[str] | None = None,
         only_actions: set[str] | frozenset[str] | None = None,
         session_id: str | None = None,
+        wait_s: float = 0.0,
     ) -> ComputerJob | None:
         """Desktop host: claim oldest pending job.
 
@@ -943,7 +946,34 @@ class ComputerHostBridge:
 
         *only_actions*: if set, only claim jobs whose action is in this set
         (Rust backup path: only=navigate).
+
+        *wait_s*: block until a job is enqueued or the timeout (wake-on-enqueue).
         """
+        deadline = time.monotonic() + max(0.0, float(wait_s or 0.0))
+        while True:
+            job = self._claim_next_once(
+                exclude_actions=exclude_actions,
+                only_actions=only_actions,
+                session_id=session_id,
+            )
+            if job is not None:
+                return job
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            self._wake.clear()
+            if not self._poll_idle_empty:
+                time.sleep(min(0.05, remaining))
+                continue
+            self._wake.wait(timeout=min(0.5, remaining))
+
+    def _claim_next_once(
+        self,
+        *,
+        exclude_actions: set[str] | frozenset[str] | None = None,
+        only_actions: set[str] | frozenset[str] | None = None,
+        session_id: str | None = None,
+    ) -> ComputerJob | None:
         skip = {str(a).lower() for a in (exclude_actions or ())}
         only = {str(a).lower() for a in (only_actions or ())} if only_actions else None
         want = str(session_id or self._focused_session_id or "").strip()

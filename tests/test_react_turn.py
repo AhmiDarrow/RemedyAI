@@ -7,6 +7,7 @@ from remedy.core.react_policy import REACT_MAX_STALE_EPOCHS
 from remedy.core.react_turn import (
     LOCAL_MAX_TOOLS_PER_STEP,
     MAX_PSEUDO_RECOVERIES,
+    WORK_MAX_TOOLS_CLOUD,
     WORK_MAX_TOOLS_PER_STEP,
     TurnState,
     apply_tools_decision,
@@ -15,6 +16,7 @@ from remedy.core.react_turn import (
     is_disconnect_error,
     resolve_tools,
     synthesize_from_tools,
+    work_max_tools_for_step,
 )
 
 
@@ -634,6 +636,52 @@ def test_work_turn_does_not_send_the_whole_catalog():
     assert "help_list" not in names
 
 
+
+
+def test_work_cap_is_tighter_for_grok_than_other_clouds():
+    assert work_max_tools_for_step(local=True) == LOCAL_MAX_TOOLS_PER_STEP
+    assert (
+        work_max_tools_for_step(local=False, provider="xai", model="grok-4.6")
+        == WORK_MAX_TOOLS_PER_STEP
+    )
+    assert (
+        work_max_tools_for_step(local=False, provider="openrouter", model="grok-4")
+        == WORK_MAX_TOOLS_PER_STEP
+    )
+    assert work_max_tools_for_step(local=False, provider="openai", model="gpt-4.1") == (
+        WORK_MAX_TOOLS_CLOUD
+    )
+    assert work_max_tools_for_step(
+        local=False, provider="anthropic", model="claude-sonnet-4"
+    ) == WORK_MAX_TOOLS_CLOUD
+    assert work_max_tools_for_step(
+        local=False, provider="deepseek", model="deepseek-chat"
+    ) == WORK_MAX_TOOLS_CLOUD
+
+
+def test_openai_work_round_keeps_press_hold_and_drag():
+    all_t = [_tool(f"extra_{i}") for i in range(180)] + [
+        _tool("file_write"),
+        _tool("computer_click"),
+        _tool("computer_press_hold"),
+        _tool("computer_drag"),
+        _tool("computer_screenshot"),
+        _tool("help_list"),
+    ]
+    d = resolve_tools(
+        message="proceed with project until it is finished",
+        all_tools=all_t,
+        turn_tier=1,
+        provider="openai",
+        model="gpt-4.1",
+        base_url="https://api.openai.com/v1",
+    )
+    names = {((t.get("function") or {}).get("name") or "") for t in (d.tools or [])}
+    assert "computer_press_hold" in names
+    assert "computer_drag" in names
+    assert "computer_screenshot" in names
+    assert "help_list" not in names
+    assert len(d.tools or []) <= WORK_MAX_TOOLS_CLOUD
 
 
 def test_work_cap_keeps_computer_hands():
