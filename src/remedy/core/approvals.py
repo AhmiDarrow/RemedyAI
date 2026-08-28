@@ -422,6 +422,9 @@ class ApprovalQueue:
             # the gate; start/stop/use/pull/settings do. Auto/Full skip these
             # the same way they skip bash_exec.
             "rmb",
+            # One prompt for a whole life-task plan (not per click). Checkpoints
+            # inside the plan still stop even after this yes.
+            "life_drive",
             # NOT computer_press_hold, deliberately: a press-and-hold is how a
             # CAPTCHA challenge is answered, and prompting on every one makes
             # them unusable. It is still in _MUTATION_COMPUTER_TOOLS, so the
@@ -567,6 +570,11 @@ class ApprovalQueue:
                 reason = (
                     "Starting or changing the local RMB host uses this PC's "
                     "GPU/RAM and may suspend vision"
+                )
+            elif tool == "life_drive":
+                reason = (
+                    "Remedy wants to drive this computer through a plan. "
+                    "One yes covers the listed steps; pay/send/password still stop."
                 )
         if not reason and c and _ASK_PATTERNS.search(c):
             reason = "High-impact / destructive command pattern"
