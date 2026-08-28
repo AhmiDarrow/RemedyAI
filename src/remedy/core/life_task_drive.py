@@ -13,6 +13,7 @@ honesty about what was seen.
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -103,6 +104,58 @@ def parse_steps(raw: Any) -> list[dict[str, Any]]:
     return out[:40]
 
 
+def plan_plain_language(goal: str, steps: list[dict[str, Any]]) -> str:
+    """Owner-facing plan: what Remedy will do, and where it will stop."""
+    lines = [f"Remedy will work toward: {goal}"]
+    stops: list[str] = []
+    for i, step in enumerate(steps, 1):
+        title = coerce_text_arg(step.get("title")) or coerce_text_arg(
+            step.get("action")
+        ) or f"step {i}"
+        if step_is_checkpoint(step):
+            stops.append(title)
+            lines.append(f"{i}. then stop for you: {title}")
+        else:
+            lines.append(f"{i}. {title}")
+    if stops:
+        lines.append(
+            "Checkpoints no mode can skip: " + ", ".join(stops) + "."
+        )
+    else:
+        lines.append("No payment/send/password stop in this plan.")
+    return "\n".join(lines)
+
+
+def life_plan_gate(
+    goal: str,
+    steps: list[dict[str, Any]],
+    *,
+    session_id: str | None = None,
+) -> str | None:
+    """One Ask for the whole plan. None when Auto/Full or already approved."""
+    from remedy.core.approvals import APPROVALS
+
+    cmd = plan_plain_language(goal, steps)
+    ask = APPROVALS.needs_ask(cmd, tool_name="life_drive")
+    if not ask:
+        return None
+    if APPROVALS.is_approved("life_drive", cmd, session_id=session_id):
+        return None
+    item = APPROVALS.create(
+        tool_name="life_drive",
+        command=cmd,
+        reason=ask,
+        session_id=session_id,
+    )
+    return (
+        f"APPROVAL_REQUIRED id={item.id}\n"
+        f"reason={ask}\n"
+        f"{cmd}\n"
+        "Approve in UI then retry life_drive. "
+        "Pay/send/password/CAPTCHA still stop after this yes."
+    )
+
+
 def step_is_checkpoint(step: dict[str, Any]) -> bool:
     """True when this step is an owner moment (pay / send / password / CAPTCHA)."""
     if step.get("checkpoint") is True:
@@ -183,6 +236,7 @@ def drive_life_task(
     session_id: str | None = None,
     home: Any = None,
     task_id: str | None = None,
+    require_plan_approval: bool | None = None,
 ) -> dict[str, Any]:
     """Run *steps* on this PC. Never claims done without an observed ok.
 
@@ -203,6 +257,20 @@ def drive_life_task(
                 "[{title, action, …}]."
             ),
         }
+
+    gate = require_plan_approval
+    if gate is None:
+        gate = not bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    if gate:
+        blocked = life_plan_gate(g, parsed, session_id=session_id)
+        if blocked:
+            return {
+                "ok": False,
+                "status": "need_you",
+                "goal": g,
+                "steps": [],
+                "markdown": blocked,
+            }
 
     runner = run_action
     if runner is None:

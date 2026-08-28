@@ -4,6 +4,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — one yes for a life-task plan
+
+- ``life_drive`` asks once for the whole plan in Ask mode ("Remedy will: … then
+  stop for you at Place order"). Auto/Full skip that prompt. Pay / send /
+  password / CAPTCHA still stop after the yes — no mode can waive them.
+
 ### Added — life-task evidence and resume
 
 - Each ``life_drive`` writes a durable trail under ``~/.remedy/life_tasks/``

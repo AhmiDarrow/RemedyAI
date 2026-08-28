@@ -53,7 +53,7 @@ def _infer(name: str) -> ToolDescriptor:
     cred = CredentialPolicy.NONE
     net = NetworkPolicy.DENIED
 
-    if n.startswith("computer_"):
+    if n.startswith("computer_") or n == "life_drive":
         if n in ("computer_screenshot", "computer_windows", "computer_observe"):
             caps.add(Capability.COMPUTER_READ)
         else:

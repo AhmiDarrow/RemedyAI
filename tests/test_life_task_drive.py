@@ -101,6 +101,56 @@ def test_verified_steps_mark_the_goal_done():
     assert "observed" in out["markdown"].lower()
 
 
+def test_plan_plain_language_names_the_owner_stop():
+    from remedy.core.life_task_drive import plan_plain_language
+
+    text = plan_plain_language(
+        "buy milk",
+        [
+            {"title": "Open store", "action": "navigate"},
+            {"title": "Place order", "action": "click", "text": "Place order"},
+        ],
+    )
+    assert "Open store" in text
+    assert "stop for you" in text.lower()
+    assert "Place order" in text
+
+
+def test_one_plan_approval_not_per_click(monkeypatch):
+    from remedy.core.approvals import ApprovalQueue
+
+    q = ApprovalQueue()
+    q.set_mode("ask")
+    monkeypatch.setattr("remedy.core.approvals.APPROVALS", q)
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"approval_mode": "ask", "access_scope": "project"},
+    )
+    created = {"n": 0}
+
+    def run(action, **_kw):
+        created["n"] += 1
+        return json.dumps({"ok": True, "message": "SUCCESS"})
+
+    out = drive_life_task(
+        goal="add milk",
+        steps=[
+            {"title": "Open", "action": "navigate", "url": "https://shop.example"},
+            {"title": "Add", "action": "click", "text": "Add"},
+        ],
+        run_action=run,
+        require_plan_approval=True,
+        session_id="s1",
+    )
+    assert out["ok"] is False
+    assert "APPROVAL_REQUIRED" in out["markdown"]
+    assert created["n"] == 0
+    # One pending item for the whole plan, not two clicks.
+    pending = [i for i in q._items.values() if i.status == "pending"]
+    assert len(pending) == 1
+    assert pending[0].tool_name == "life_drive"
+
+
 def test_evidence_persists_and_resume_skips_done_steps(tmp_path):
     from remedy.core.life_task_store import load_life_task
 
