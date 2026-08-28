@@ -34,11 +34,11 @@ MAX_PSEUDO_RECOVERIES = 4
 MAX_DISCONNECT_RETRIES = 8
 # Local: max tool schemas per model step after write-first pack.
 LOCAL_MAX_TOOLS_PER_STEP = 8
-# Cloud work pack. Live 2026-08-27: grok-4.6 "proceed until finished" sent 194
-# schemas every step (33k→61k prompt, 145s thinking). The catalog is ability;
-# the live round is an operate pack. Grok stays at 32; Claude/GPT/DeepSeek/…
-# keep a richer CUA set (still capped, never 194).
-WORK_MAX_TOOLS_PER_STEP = 32
+# Cloud work pack. A 194-schema dump (33k→61k prompt) is never the live
+# round. Tight pack (xAI / Grok window) vs richer pack (Claude / GPT /
+# DeepSeek / Gemini / OpenRouter-non-Grok). Recall stays in the core so
+# every provider can search memory while operating.
+WORK_MAX_TOOLS_PER_STEP = 34
 WORK_MAX_TOOLS_CLOUD = 64
 # Prefer these when capping — first-N used to drop host_run behind help/goal.
 _OPERATE_CORE_TOOLS = (
@@ -49,6 +49,8 @@ _OPERATE_CORE_TOOLS = (
     "list_dir",
     "file_glob",
     "repo_search",
+    "memory_search",
+    "soul_recall",
     "host_run",
     "host_mkdir",
     "host_which",
@@ -74,7 +76,7 @@ _OPERATE_CORE_TOOLS = (
     "apply_patch",
     "web_search",
     "web_fetch",
-    # Past Grok's 32 — other clouds keep these on the live round.
+    # After the tight pack — Claude / GPT / DeepSeek / Gemini keep these.
     "computer_press_hold",
     "computer_drag",
     "computer_screenshot",
@@ -815,10 +817,9 @@ def work_max_tools_for_step(
     provider: str = "",
     model: str = "",
 ) -> int:
-    """Per-provider operate cap. Local stays tight; Grok stays 32; other clouds richer.
-
-    Remedy is every provider — Claude/GPT/DeepSeek/Gemini must not inherit
-    Grok's 32-schema ceiling. Still capped so a 194-tool dump never ships.
+    """Per-provider operate cap. Local stays tight; xAI/Grok uses the
+    tight cloud pack; Claude / GPT / DeepSeek / Gemini / OpenRouter-non-Grok
+    get the richer pack. Never 194 schemas.
     """
     if local:
         return LOCAL_MAX_TOOLS_PER_STEP

@@ -666,6 +666,8 @@ def test_openai_work_round_keeps_press_hold_and_drag():
         _tool("computer_press_hold"),
         _tool("computer_drag"),
         _tool("computer_screenshot"),
+        _tool("memory_search"),
+        _tool("soul_recall"),
         _tool("help_list"),
     ]
     d = resolve_tools(
@@ -680,6 +682,8 @@ def test_openai_work_round_keeps_press_hold_and_drag():
     assert "computer_press_hold" in names
     assert "computer_drag" in names
     assert "computer_screenshot" in names
+    assert "memory_search" in names
+    assert "soul_recall" in names
     assert "help_list" not in names
     assert len(d.tools or []) <= WORK_MAX_TOOLS_CLOUD
 
@@ -699,6 +703,8 @@ def test_work_cap_keeps_computer_hands():
         _tool("computer_select"),
         _tool("apply_patch"),
         _tool("web_fetch"),
+        _tool("memory_search"),
+        _tool("soul_recall"),
         _tool("help_list"),
     ]
     d = resolve_tools(
@@ -724,6 +730,8 @@ def test_work_cap_keeps_computer_hands():
         "computer_select",
         "apply_patch",
         "web_fetch",
+        "memory_search",
+        "soul_recall",
     ):
         assert n in names, n
     assert "help_list" not in names

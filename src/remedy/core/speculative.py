@@ -120,12 +120,15 @@ def _prep(
     # 2b) Stage memory candidates (FTS) for next turn injection if store available
     if memory is not None and (user_text or "").strip():
         try:
-            import asyncio
-            import inspect
-
             q = (user_text or "").strip()[:200]
             hits: Any = None
-            if hasattr(memory, "search"):
+            sync = getattr(memory, "search_sync", None)
+            if callable(sync):
+                hits = sync(q, limit=5)
+            elif hasattr(memory, "search"):
+                import asyncio
+                import inspect
+
                 res = memory.search(q, limit=5)
                 hits = (
                     asyncio.run(res)  # type: ignore[arg-type]

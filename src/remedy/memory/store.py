@@ -349,9 +349,13 @@ class MemoryStore:
         from remedy.core.optimization_telemetry import span
 
         entry.updated_at = datetime.now(UTC)
-        with span("memory_write"), self._locked():
-            db = self._ensure_db()
-            return self._upsert_unlocked(db, entry)
+
+        def _go() -> MemoryEntry:
+            with span("memory_write"), self._locked():
+                db = self._ensure_db()
+                return self._upsert_unlocked(db, entry)
+
+        return await self._off_loop(_go)
 
     def _upsert_unlocked(self, db: sqlite3.Connection, entry: MemoryEntry) -> MemoryEntry:
         db.execute(
@@ -614,14 +618,13 @@ class MemoryStore:
 
     # -- FTS5 search ---------------------------------------------------------
 
-    async def search(
-        self, query: str, limit: int = 20, entry_type: MemoryEntryType | None = None
+    def search_sync(
+        self,
+        query: str,
+        limit: int = 20,
+        entry_type: MemoryEntryType | None = None,
     ) -> list[MemoryEntry]:
-        """Full-text search across title, content, and tags.
-
-        Falls back to :meth:`search_simple` when FTS5 MATCH rejects the query
-        (e.g. special characters) so callers always get a safe result set.
-        """
+        """Same as :meth:`search`, for worker threads (no nested asyncio)."""
         from remedy.core.optimization_telemetry import span
 
         with span("memory_read"):
@@ -630,13 +633,11 @@ class MemoryStore:
                 return []
             type_filter = ""
             params: list[Any] = []
-
             if entry_type is not None:
                 type_filter = "AND memory_entries.entry_type = ?"
                 params = [query, entry_type.value, limit]
             else:
                 params = [query, limit]
-
             sql = f"""
                     SELECT memory_entries.* FROM memory_entries
                     JOIN memory_fts ON memory_entries.rowid = memory_fts.rowid
@@ -650,10 +651,6 @@ class MemoryStore:
                     try:
                         rows = db.execute(sql, params).fetchall()
                     except sqlite3.OperationalError as exc:
-                        # ``.`` / ``;`` / ``:`` in free text are fts5 syntax
-                        # errors. Retry with every token quoted before ever
-                        # touching the slow LIKE scan (that fallback stalled
-                        # the loop 4x in one session).
                         if (
                             "fts5: syntax error" not in str(exc)
                             and "no such" in str(exc)
@@ -667,19 +664,29 @@ class MemoryStore:
                         rows = db.execute(sql, [match_q, *params[1:]]).fetchall()
                 return [self._row_to_entry(r) for r in rows]
             except sqlite3.OperationalError as exc:
-                # Missing FTS table etc. — degrade gracefully (no recursion).
                 logger = logging.getLogger(__name__)
                 logger.debug(
                     "FTS MATCH failed (%s); falling back to LIKE for query=%r",
                     exc,
                     query[:80],
                 )
-                hits = await self._search_like(query, limit=limit)
+                hits = self._search_like_sync(query, limit=limit)
                 if entry_type is None:
                     return hits
                 return [h for h in hits if h.entry_type == entry_type]
 
-    async def _search_like(self, query: str, limit: int = 20) -> list[MemoryEntry]:
+    async def search(
+        self, query: str, limit: int = 20, entry_type: MemoryEntryType | None = None
+    ) -> list[MemoryEntry]:
+        """Full-text search across title, content, and tags.
+
+        Falls back to LIKE when FTS5 MATCH rejects the query (e.g. special
+        characters) so callers always get a safe result set. Runs off the
+        event loop so a fat FTS scan cannot freeze chrome or jobs/next.
+        """
+        return await self._off_loop(self.search_sync, query, limit, entry_type)
+
+    def _search_like_sync(self, query: str, limit: int = 20) -> list[MemoryEntry]:
         """Parameterized LIKE fallback (escapes % and _). Never uses FTS."""
         q = (query or "").strip()
         if not q:
@@ -695,6 +702,9 @@ class MemoryStore:
                 (like_q, like_q, limit),
             ).fetchall()
         return [self._row_to_entry(r) for r in rows]
+
+    async def _search_like(self, query: str, limit: int = 20) -> list[MemoryEntry]:
+        return await self._off_loop(self._search_like_sync, query, limit)
 
     async def search_simple(self, query: str, limit: int = 20) -> list[MemoryEntry]:
         """Tolerant search: try FTS MATCH, then parameterized LIKE.
