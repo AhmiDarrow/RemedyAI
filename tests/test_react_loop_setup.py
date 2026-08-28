@@ -617,7 +617,7 @@ async def test_a_productive_epoch_rolls_over_and_tells_the_model_to_keep_going(
     assert "epoch 2, step 16" in roll[0]
     after_roll = fake.requests[17]
     assert after_roll.tools, "the epoch wall must not disarm tools"
-    assert any("epoch" in t.lower() for t in after_roll.texts_for_role("user"))
+    assert any("epoch" in t.lower() for t in after_roll.steering_texts())
 
 
 @pytest.mark.asyncio
@@ -648,7 +648,7 @@ async def test_an_epoch_of_pure_talk_is_nudged_back_to_tools_not_wrapped_up(tmp_
 
     nudge = [e for e in events(chunks) if "Nudge" in e and "use tools" in e]
     assert len(nudge) == 1
-    assert any("Use tools now" in t for t in fake.requests[17].texts_for_role("user"))
+    assert any("Use tools now" in t for t in fake.requests[17].steering_texts())
     assert fake.requests[17].tools
 
 
@@ -703,11 +703,11 @@ async def test_an_open_drive_that_stops_advancing_is_asked_for_an_honest_status(
     # later request — but never appended twice. A nag on every step would just
     # be more noise in an already long context window.
     asks = [
-        t for t in fake.requests[-1].texts_for_role("user") if "[Progress check]" in t
+        t for t in fake.requests[-1].steering_texts() if "[Progress check]" in t
     ]
     assert len(asks) == 1
     assert "what you need from me" in asks[0]
-    assert not any("[Progress check]" in t for t in fake.requests[0].texts_for_role("user"))
+    assert not any("[Progress check]" in t for t in fake.requests[0].steering_texts())
 
 
 # --------------------------------------------------------------------------

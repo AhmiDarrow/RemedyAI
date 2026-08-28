@@ -542,11 +542,40 @@ class RecordedRequest:
 
     def texts_for_role(self, role: str) -> list[str]:
         """Message contents for one role, skipping non-string (multimodal) parts."""
+        return self.contents(role)
+
+    def contents(self, *roles: str) -> list[str]:
+        """Message contents for the given roles (default: user + system).
+
+        Partner steering is ``role=system`` since 2026-08-27 so tests that
+        ask "what did the loop tell the model" pass both owner and injects.
+        """
+        want = set(roles) if roles else {"user", "system"}
         return [
             m["content"]
             for m in self.messages
-            if m.get("role") == role and isinstance(m.get("content"), str)
+            if m.get("role") in want and isinstance(m.get("content"), str)
         ]
+
+    def steering_texts(self) -> list[str]:
+        """Owner turns + partner injects after the conversation started.
+
+        Standing system prompts (persona / work / house) sit before the
+        first user message. Partner steering is role=system after that.
+        """
+        texts: list[str] = []
+        seen_user = False
+        for m in self.messages:
+            role = m.get("role")
+            c = m.get("content")
+            if not isinstance(c, str):
+                continue
+            if role == "user":
+                seen_user = True
+                texts.append(c)
+            elif role == "system" and seen_user:
+                texts.append(c)
+        return texts
 
     @property
     def tool_result_texts(self) -> list[str]:

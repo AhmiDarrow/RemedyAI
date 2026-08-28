@@ -514,7 +514,7 @@ def ensure_tool_call_pairings(
         while j < n and isinstance(messages[j], dict) and messages[j].get("role") == "tool":
             tid = coerce_text_arg(messages[j].get("tool_call_id"))
             if tid and tid in needed and tid not in found:
-                collected_tools.append(messages[j])
+                collected_tools.append({**messages[j], "tool_call_id": tid})
                 found.add(tid)
             j += 1
 
@@ -536,7 +536,7 @@ def ensure_tool_call_pairings(
                 if rk == "tool":
                     tid = coerce_text_arg(mk.get("tool_call_id"))
                     if tid and tid in needed and tid not in found:
-                        collected_tools.append(mk)
+                        collected_tools.append({**mk, "tool_call_id": tid})
                         found.add(tid)
                         pulled.append(k)
                         if len(found) >= len(needed):

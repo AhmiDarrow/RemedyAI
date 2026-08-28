@@ -211,7 +211,7 @@ async def test_an_answer_cut_by_max_tokens_on_a_tool_armed_round_is_continued(tm
     assert "part one" in fake.requests[2].texts_for_role("assistant")
     assert any(
         "Continue exactly where you stopped" in t
-        for t in fake.requests[2].texts_for_role("user")
+        for t in fake.requests[2].steering_texts()
     )
 
 
@@ -321,7 +321,7 @@ async def test_a_reasoning_only_answer_cut_by_max_tokens_is_continued_not_restar
     assert "Half the answer." in fake.requests[2].texts_for_role("assistant")
     assert any(
         "Do not restart or summarize" in t
-        for t in fake.requests[2].texts_for_role("user")
+        for t in fake.requests[2].steering_texts()
     )
 
 
@@ -546,7 +546,7 @@ async def test_a_model_stuck_on_one_tool_call_is_nudged_a_bounded_number_of_time
     # Nudges accumulate in the history, so the last request carries them all.
     nudges = [
         t
-        for t in fake.requests[-1].texts_for_role("user")
+        for t in fake.requests[-1].steering_texts()
         if "Do not repeat them" in t
     ]
     assert len(nudges) == 7
@@ -580,7 +580,7 @@ async def test_a_native_screenshot_is_attached_to_the_next_step_and_announced(tm
     ):
         chunks = await drain(runtime, "add one")
 
-    assert "[screenshot of the running app]" in fake.requests[1].texts_for_role("user")
+    assert "[screenshot of the running app]" in fake.requests[1].steering_texts()
     assert any("screenshot attached" in e for e in events(chunks))
 
 
@@ -610,7 +610,7 @@ async def test_three_one_at_a_time_reads_earn_a_single_batch_up_nudge(tmp_path):
     nudged = [
         i
         for i, r in enumerate(fake.requests)
-        if any("You are calling tools one-at-a-time" in t for t in r.texts_for_role("user"))
+        if any("You are calling tools one-at-a-time" in t for t in r.steering_texts())
     ]
     # Fires only after the third serial batch, and only once.
     assert nudged and nudged[0] == 3
@@ -643,7 +643,7 @@ async def test_a_blocked_empty_file_write_rearms_write_tools_instead_of_giving_u
     ):
         chunks = await drain(runtime, "create a file called notes.txt in the project")
 
-    nudges = fake.requests[1].texts_for_role("user")
+    nudges = fake.requests[1].steering_texts()
     assert any("EMPTY/SPAM file_write blocked" in t for t in nudges)
     assert any("was **kept** (not wiped)" in t for t in nudges)
     # Tools must still be armed — the model has to be able to write for real.
@@ -762,7 +762,7 @@ async def test_a_mission_whose_steps_are_done_but_unverified_is_sent_back_to_ver
     gate = [
         t
         for r in fake.requests
-        for t in r.texts_for_role("user")
+        for t in r.steering_texts()
         if "[Mission gate]" in t
     ]
     assert gate and "pytest -q" in gate[0]
@@ -1262,7 +1262,7 @@ async def test_a_promise_hidden_only_in_reasoning_still_rearms_tools(tmp_path):
         for r in fake.requests
         if any(
             "Do not only *say* you will use tools" in t
-            for t in r.texts_for_role("user")
+            for t in r.steering_texts()
         )
     ]
     assert rearmed, "the promise in reasoning was dropped"
@@ -1324,7 +1324,7 @@ async def test_a_broken_debug_logging_switch_never_breaks_the_turn(tmp_path):
         chunks = await drain(runtime, "look around the project")
 
     # Both nudges still landed even though their debug logging blew up.
-    last = fake.requests[-1].texts_for_role("user")
+    last = fake.requests[-1].steering_texts()
     assert any("You are calling tools one-at-a-time" in t for t in last)
     assert any("boom while listing" in t for t in fake.requests[-1].tool_result_texts)
     assert "Explored." in answer(chunks)
