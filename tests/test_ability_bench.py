@@ -67,6 +67,7 @@ def test_every_cloud_keeps_recall_on_the_live_round():
         _schema("file_read"),
         _schema("memory_search"),
         _schema("soul_recall"),
+        _schema("job_run"),
         _schema("help_list"),
     ]
     for provider, model, cap in (
@@ -85,6 +86,7 @@ def test_every_cloud_keeps_recall_on_the_live_round():
         }
         assert "memory_search" in names, provider
         assert "soul_recall" in names, provider
+        assert "job_run" in names, provider
         assert "help_list" not in names, provider
 
 
@@ -286,4 +288,7 @@ async def test_chat_session_reads_run_off_the_event_loop(tmp_path, monkeypatch):
     hits = await store.search("oat milk", limit=5)
     assert any("oat milk" in (h.title or "") for h in hits)
     assert off["n"] > search_before
+    del_before = off["n"]
+    assert await store.delete_chat_session(sess.id) is True
+    assert off["n"] > del_before
     await store.close()
