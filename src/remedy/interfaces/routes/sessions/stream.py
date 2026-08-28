@@ -9,10 +9,9 @@ import time
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException
-
-from remedy.core.build_oracle import coerce_text_arg
 from fastapi.responses import StreamingResponse
 
+from remedy.core.build_oracle import coerce_text_arg
 from remedy.interfaces.api_models import (
     SendMessageRequest,
 )
@@ -366,7 +365,16 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                 t0 = time.perf_counter()
                 status = "ok"
                 yield (
-                    f"event: start\ndata: {json.dumps({'type': 'start', 'request_id': request_id, 'session_id': session_id})}\n\n"
+                    "event: start\ndata: "
+                    + json.dumps(
+                        {
+                            "type": "start",
+                            "request_id": request_id,
+                            "session_id": session_id,
+                            "claim_epoch": claim_epoch,
+                        }
+                    )
+                    + "\n\n"
                 )
 
                 full_response = ""

@@ -205,6 +205,7 @@ def test_stream_aborted_event_not_error(tmp_path: Path, monkeypatch):
             body = "".join(resp.iter_text())
     assert "event: aborted" in body
     assert "Generation stopped" in body
+    assert "claim_epoch" in body
     # Must not paint Stop as a hard stream error
     assert '"type": "error"' not in body or "Generation stopped" not in body.split(
         "event: error"

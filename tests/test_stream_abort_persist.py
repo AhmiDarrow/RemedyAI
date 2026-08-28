@@ -195,6 +195,79 @@ def _stream_endpoint(app):
     raise AssertionError("stream route not registered")
 
 
+def test_abort_stale_epoch_does_not_kill_a_newer_turn(tmp_path: Path, fake_key):
+    """Family: old Stop, current Stop, omit-epoch CLI still works."""
+    from remedy.core.turn_context import (
+        begin_turn,
+        end_turn,
+        is_turn_aborted,
+        release_session_stream_claim,
+        stream_claim_epoch,
+        try_claim_session_stream,
+    )
+
+    store = _make_store(tmp_path)
+    app = create_app(runtime=_AbortWithToolsRuntime(), memory=store, api_key="")
+    with TestClient(app) as client:
+        sid = _create_session(client)
+        assert try_claim_session_stream(sid)
+        e1 = stream_claim_epoch(sid)
+        release_session_stream_claim(sid, epoch=e1)
+        assert try_claim_session_stream(sid)
+        e2 = stream_claim_epoch(sid)
+        assert e2 != e1
+        toks = begin_turn(sid, project_raw=None, active_path=".")
+        try:
+            stale = client.post(
+                f"/api/sessions/{sid}/abort?reason=stop&epoch={e1}"
+            )
+            assert stale.status_code == 200
+            body = stale.json()
+            assert body.get("status") == "ignored"
+            assert body.get("notified") == 0
+            assert is_turn_aborted() is False
+
+            live = client.post(
+                f"/api/sessions/{sid}/abort?reason=stop&epoch={e2}"
+            )
+            assert live.status_code == 200
+            assert live.json().get("status") == "aborted"
+            assert live.json().get("notified") == 1
+            assert is_turn_aborted() is True
+        finally:
+            end_turn(sid, *toks)
+            release_session_stream_claim(sid, epoch=e2)
+
+
+def test_abort_without_epoch_still_stops_current(tmp_path: Path, fake_key):
+    """CLI / delete omit epoch — abort whatever is current (back-compat)."""
+    from remedy.core.turn_context import (
+        begin_turn,
+        end_turn,
+        is_turn_aborted,
+        release_session_stream_claim,
+        stream_claim_epoch,
+        try_claim_session_stream,
+    )
+
+    store = _make_store(tmp_path)
+    app = create_app(runtime=_AbortWithToolsRuntime(), memory=store, api_key="")
+    with TestClient(app) as client:
+        sid = _create_session(client)
+        assert try_claim_session_stream(sid)
+        epoch = stream_claim_epoch(sid)
+        toks = begin_turn(sid, project_raw=None, active_path=".")
+        try:
+            r = client.post(f"/api/sessions/{sid}/abort")
+            assert r.status_code == 200
+            assert r.json().get("status") == "aborted"
+            assert r.json().get("notified") == 1
+            assert is_turn_aborted() is True
+        finally:
+            end_turn(sid, *toks)
+            release_session_stream_claim(sid, epoch=epoch)
+
+
 def test_client_disconnect_mid_turn_does_not_stop_the_job(tmp_path: Path, fake_key):
     """A dropped SSE is not Stop: the ReAct worker keeps going until /abort."""
     from remedy.core.turn_context import abort_session
