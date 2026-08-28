@@ -59,6 +59,14 @@ _L0_TIME = re.compile(
     r"|/time|/date"
     r")\s*[.?!]?\s*$"
 )
+_L0_CWD = re.compile(
+    r"(?is)^\s*("
+    r"pwd"
+    r"|/pwd"
+    r"|what('?s| is) (the )?(project path|cwd|working directory|focus folder)"
+    r"|where is (the )?project"
+    r")\s*[.?!]?\s*$"
+)
 _L0_LIFE_DRIVE = re.compile(
     r"(?is)^\s*("
     r"what should i (do|work on|focus on)|"
@@ -443,6 +451,7 @@ def classify_turn_tier(
             or _L0_STATUS.match(ut)
             or _L0_VERSION.match(ut)
             or _L0_TIME.match(ut)
+            or _L0_CWD.match(ut)
             or _L0_LIFE_DRIVE.match(ut)
             or _L0_LIFE_PULSE.match(ut)
             or _L0_LIFE_NOTICE.match(ut)

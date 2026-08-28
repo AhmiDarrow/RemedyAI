@@ -79,6 +79,70 @@ _REMIND_ME_RE = re.compile(
     r"(?P<text>.+?)\s*$"
 )
 
+_TODO_READ_RE = re.compile(
+    r"(?is)^\s*("
+    r"(show |list |get |read )?(my |the |active )?(todos?|to-?dos?|checklist)( list)?"
+    r"|what('?s| is) on (the |my )?(todo list|checklist)"
+    r"|todo_read"
+    r")\s*[.?!]?\s*$"
+)
+
+# Cwd only — a path like "list files in src" stays on the provider.
+_LIST_DIR_RE = re.compile(
+    r"(?is)^\s*("
+    r"ls"
+    r"|dir"
+    r"|list_dir"
+    r"|(list|show|display) (me )?(the |all )?(files?|dirs?|directories|folders?)"
+    r"( here| in this (folder|directory|project))?"
+    r"|what('?s| is) in (this |the )?(folder|directory|project|cwd)"
+    r")\s*[.?!]?\s*$"
+)
+
+_VERIFY_RE = re.compile(
+    r"(?is)^\s*("
+    r"(please )?(run|execute) (the |all |my )?(tests?|pytest|test suite|unit tests)"
+    r"|pytest( -q)?"
+    r")\s*[.?!]?\s*$"
+)
+
+_CLIPBOARD_RE = re.compile(
+    r"(?is)^\s*("
+    r"what('?s| is) (on )?(the |my )?clipboard"
+    r"|read (the |my )?clipboard"
+    r"|clipboard_read"
+    r")\s*[.?!]?\s*$"
+)
+
+_WHICH_RE = re.compile(
+    r"(?is)^\s*(which|where is|where'?s)\s+"
+    r"(?P<name>python3?|py|git|node|npm|pnpm|yarn|pwsh|powershell|"
+    r"uv|cargo|pytest|rg|gh|pip3?|go|rustc|cmake)"
+    r"\s*\??\s*$"
+)
+
+_GOAL_LIST_RE = re.compile(
+    r"(?is)^\s*("
+    r"(list|show) (my |the )?(open |life )?goals?"
+    r"|what (are|is) (my )?(open )?goals?"
+    r"|goal_list"
+    r")\s*[.?!]?\s*$"
+)
+
+_PLAIN_TOOLS = frozenset(
+    {
+        "git_status",
+        "git_diff",
+        "git_log",
+        "todo_read",
+        "list_dir",
+        "job_run",
+        "clipboard_read",
+        "host_which",
+        "goal_list",
+    }
+)
+
 
 def match_in_app_fast_path(message: str) -> FastPathPlan | None:
     """Return a plan if *message* is a high-confidence local-tool request."""
@@ -117,6 +181,21 @@ def match_in_app_fast_path(message: str) -> FastPathPlan | None:
             {"text": text, "when": when},
             "remind_me",
         )
+    if _TODO_READ_RE.match(msg):
+        return FastPathPlan("todo_read", {}, "todo_read")
+    if _LIST_DIR_RE.match(msg):
+        return FastPathPlan("list_dir", {"path": "."}, "list_dir")
+    if _VERIFY_RE.match(msg):
+        return FastPathPlan("job_run", {"kind": "verify"}, "job_verify")
+    if _CLIPBOARD_RE.match(msg):
+        return FastPathPlan("clipboard_read", {}, "clipboard_read")
+    which = _WHICH_RE.match(msg)
+    if which:
+        name = (which.group("name") or "").strip()
+        if name:
+            return FastPathPlan("host_which", {"name": name}, "host_which")
+    if _GOAL_LIST_RE.match(msg):
+        return FastPathPlan("goal_list", {}, "goal_list")
     return None
 
 
@@ -126,7 +205,7 @@ def format_in_app_fast_path_reply(tool: str, raw: str) -> str:
     if not text:
         return "Done."
 
-    if tool in ("git_status", "git_diff", "git_log"):
+    if tool in _PLAIN_TOOLS:
         return text if len(text) < 8000 else text[:8000] + "\n…"
 
     data: Any

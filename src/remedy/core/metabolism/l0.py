@@ -20,6 +20,7 @@ def try_l0_system_reply(
     skip a redundant ``classify_turn_tier`` walk on the hot path.
     """
     from remedy.core.metabolism.tier import (
+        _L0_CWD,
         _L0_LIFE_DIGEST,
         _L0_LIFE_DRIVE,
         _L0_LIFE_NOTICE,
@@ -52,6 +53,22 @@ def try_l0_system_reply(
         return (
             f"**Local time:** {now.strftime('%A, %Y-%m-%d %H:%M')} "
             f"({tz}). This clock is this PC — no provider."
+        )
+
+    if _L0_CWD.match(msg):
+        path = ""
+        with suppress(Exception):
+            path = str(runtime.effective_project_path() or "")
+        if not path:
+            with suppress(Exception):
+                path = str(
+                    getattr(getattr(runtime, "config", None), "project_path", "") or ""
+                )
+        if path:
+            return f"**Project path:** `{path}` (this PC — no provider)."
+        return (
+            "No focus folder is set. Relative tools use this profile; "
+            "pass an absolute path for any other tree."
         )
 
     if _L0_VERSION.match(msg):
