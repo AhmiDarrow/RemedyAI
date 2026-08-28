@@ -9,7 +9,6 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Query
 
 from remedy.core.build_oracle import coerce_text_arg
-
 from remedy.interfaces.api_models import (
     SendMessageRequest,
 )
@@ -128,10 +127,11 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         text = coerce_text_arg(req.message)
         if not text:
             raise HTTPException(400, "Message is empty")
-        from remedy.core.turn_context import push_nudge
+        from remedy.core.turn_context import try_push_nudge
 
-        if not push_nudge(session_id, text):
-            return {"steered": False}
+        ok, reason = try_push_nudge(session_id, text)
+        if not ok:
+            return {"steered": False, "reason": reason}
         if memory is not None:
             with contextlib.suppress(Exception):
                 if await memory.get_chat_session(session_id) is not None:
@@ -142,7 +142,7 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                             content=text,
                         )
                     )
-        return {"steered": True}
+        return {"steered": True, "reason": "ok"}
 
     @app.post("/api/sessions/{session_id}/messages")
     async def send_message(session_id: str, req: SendMessageRequest):

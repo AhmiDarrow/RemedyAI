@@ -23,6 +23,9 @@ def test_approach_of_click():
 def test_approach_of_other_actions():
     assert approach_of("act", {}) == "act"
     assert approach_of("type", {}) == "type"
+    assert approach_of("type", {"query": "What's happening?"}) == "text"
+    assert approach_of("type", {"label": "Email"}) == "text"
+    assert approach_of("type", {"ref": "c4"}) == "ref"
     assert approach_of("key", {}) == "key"
 
 

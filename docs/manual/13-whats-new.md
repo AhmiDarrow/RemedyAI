@@ -12,11 +12,12 @@ Current series: **v0.41.6** — steer-by-default, first-run talks, leftover jobs
 ## 0.41.6 - Hands stay on, first run talks
 
 Enter while she is working steers the live turn (Ctrl+Enter interrupts, Alt+Enter queues).
+If steer cannot land, the words wait in line — they do not stop her hands.
 A new home actually talks on guest llm7 instead of dummy OpenAI. Leftover
 "Stay with: Continue…" residue no longer arms as a job. Linux vision extract
 keeps its library links. The Grok work pack keeps computer hands. RMB stays
 off until you start it. Desktop OCR can click on-screen words when DOM/UIA
-is empty.
+is empty. Native type finds a field by its visible label, same as click.
 
 This tree **v0.41.6**. Public is still **v0.41.5**.
 

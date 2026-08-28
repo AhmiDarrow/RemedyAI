@@ -64,13 +64,21 @@ def test_nudges_are_kept_in_order_and_capped():
     tokens = tc.begin_turn(sid)
     try:
         for i in range(tc._NUDGE_MAX + 2):
-            ok = tc.push_nudge(sid, f"n{i}")
-            assert ok is (i < tc._NUDGE_MAX)
+            ok, reason = tc.try_push_nudge(sid, f"n{i}")
+            if i < tc._NUDGE_MAX:
+                assert ok is True and reason == "ok"
+            else:
+                assert ok is False and reason == "nudge_full"
         got = tc.drain_nudges(sid)
         assert got == [f"n{i}" for i in range(tc._NUDGE_MAX)]
         assert tc.drain_nudges(sid) == []
     finally:
         tc.end_turn(sid, *tokens)
+
+
+def test_try_push_nudge_names_no_turn():
+    ok, reason = tc.try_push_nudge("nobody-home", "hello")
+    assert ok is False and reason == "no_turn"
 
 
 def test_blank_nudges_are_ignored():
@@ -186,16 +194,40 @@ def test_steer_route_falls_back_when_no_turn_runs_and_joins_a_live_one(tmp_path,
 
     # Nothing running: the client must send normally.
     r = client.post(f"/api/sessions/{sid}/steer", json={"message": "turn left"})
-    assert r.status_code == 200 and r.json() == {"steered": False}
+    assert r.status_code == 200
+    assert r.json() == {"steered": False, "reason": "no_turn"}
     assert client.post(f"/api/sessions/{sid}/steer", json={"message": "  "}).status_code == 400
 
     # A turn is live (stream claim held): the words join it and are kept.
     assert tc.try_claim_session_stream(sid)
     try:
         r = client.post(f"/api/sessions/{sid}/steer", json={"message": "turn left"})
-        assert r.json() == {"steered": True}
+        assert r.json() == {"steered": True, "reason": "ok"}
         assert tc.drain_nudges(sid) == ["turn left"]
     finally:
         tc.release_session_stream_claim(sid)
     rows = asyncio.run(memory.get_chat_messages(sid))
     assert any(m.role == "user" and m.content == "turn left" for m in rows)
+
+
+def test_steer_route_names_nudge_full_instead_of_aborting(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    monkeypatch.setenv("REMEDY_API_AUTH", "0")
+    monkeypatch.setenv("REMEDY_NO_FIRST_RUN_DOWNLOAD", "1")
+    from remedy.interfaces.api import create_app
+
+    client = TestClient(create_app(memory=None))
+    sid = "steer-full"
+    assert tc.try_claim_session_stream(sid)
+    try:
+        for i in range(tc._NUDGE_MAX):
+            r = client.post(f"/api/sessions/{sid}/steer", json={"message": f"n{i}"})
+            assert r.json() == {"steered": True, "reason": "ok"}
+        r = client.post(f"/api/sessions/{sid}/steer", json={"message": "one more"})
+        assert r.status_code == 200
+        assert r.json() == {"steered": False, "reason": "nudge_full"}
+        assert len(tc.drain_nudges(sid)) == tc._NUDGE_MAX
+    finally:
+        tc.release_session_stream_claim(sid)

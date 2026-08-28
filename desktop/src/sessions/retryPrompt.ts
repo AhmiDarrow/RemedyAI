@@ -42,3 +42,24 @@ export function promoteQueuedOptions(item: {
     chatMode: item.chatMode,
   }
 }
+
+export type BusySendMode = 'after' | 'interrupt' | 'steer'
+
+/**
+ * Mid-turn send when /steer did not land. Interrupt only if the owner asked
+ * (Ctrl+Enter). A failed steer (nudge cap, 4xx, network) queues after — it
+ * must not stop her hands.
+ */
+export function resolveBusySend(opts: {
+  explicit?: BusySendMode
+  hasAttachments?: boolean
+  steered: boolean
+}): 'steered' | 'after' | 'interrupt' {
+  const hasAtt = Boolean(opts.hasAttachments)
+  const explicit = opts.explicit
+  const trySteer =
+    !hasAtt && explicit !== 'after' && explicit !== 'interrupt'
+  if (trySteer && opts.steered) return 'steered'
+  if (explicit === 'interrupt') return 'interrupt'
+  return 'after'
+}
