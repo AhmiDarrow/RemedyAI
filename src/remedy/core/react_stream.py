@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from remedy.core.build_oracle import coerce_text_arg
 from remedy.core.react_policy import (
     _HARD_CHAT_ONLY_RE,
     _META_NO_TOOLS_RE,
@@ -63,7 +64,7 @@ class StreamRoundState:
         return [
             tc
             for tc in raw
-            if ((tc.get("function") or {}).get("name") or "").strip()
+            if coerce_text_arg((tc.get("function") or {}).get("name"))
         ]
 
 
@@ -385,7 +386,7 @@ def should_enable_tools(
         return False
     if has_attachments:
         return True
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     # Meta questions stay tool-free even mid-session.
     if msg and _META_NO_TOOLS_RE.search(msg):
         return False
@@ -432,13 +433,13 @@ def normalize_tool_calls(tool_calls_list: list[dict[str, Any]]) -> list[dict[str
         if not isinstance(tc, dict):
             continue
         fn = tc.get("function") or {}
-        name = (fn.get("name") or "").strip()
+        name = coerce_text_arg(fn.get("name"))
         if not name:
             continue
         args_s = coerce_tool_arguments_json(
             fn.get("arguments"), tool_name=name
         )
-        call_id = (tc.get("id") or "").strip() or f"call_{uuid4().hex[:24]}"
+        call_id = coerce_text_arg(tc.get("id")) or f"call_{uuid4().hex[:24]}"
         out.append(
             {
                 "id": call_id,
@@ -511,7 +512,7 @@ def ensure_tool_call_pairings(
         j = i + 1
         # 1) Immediate consecutive tool results (happy path).
         while j < n and isinstance(messages[j], dict) and messages[j].get("role") == "tool":
-            tid = (messages[j].get("tool_call_id") or "").strip()
+            tid = coerce_text_arg(messages[j].get("tool_call_id"))
             if tid and tid in needed and tid not in found:
                 collected_tools.append(messages[j])
                 found.add(tid)
@@ -533,7 +534,7 @@ def ensure_tool_call_pairings(
                 if rk == "assistant":
                     break
                 if rk == "tool":
-                    tid = (mk.get("tool_call_id") or "").strip()
+                    tid = coerce_text_arg(mk.get("tool_call_id"))
                     if tid and tid in needed and tid not in found:
                         collected_tools.append(mk)
                         found.add(tid)
@@ -559,7 +560,7 @@ def ensure_tool_call_pairings(
         for cid, tc in needed.items():
             if cid in found:
                 continue
-            name = ((tc.get("function") or {}).get("name") or "unknown").strip()
+            name = coerce_text_arg((tc.get("function") or {}).get("name")) or "unknown"
             out.append(
                 {
                     "role": "tool",

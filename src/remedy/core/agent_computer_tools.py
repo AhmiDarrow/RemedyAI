@@ -7,6 +7,7 @@ import contextlib
 import json
 from typing import Any
 
+from remedy.core.build_oracle import coerce_text_arg
 from remedy.core.computer.executor import get_computer_executor
 from remedy.core.computer.types import ComputerAction
 
@@ -32,7 +33,7 @@ def _resolve_ref_label(ex: Any, ref: str) -> str:
     making the payment classifier see 'Place order' when the model clicks by
     ref instead of text.
     """
-    r = (ref or "").strip()
+    r = coerce_text_arg(ref)
     if not r:
         return ""
     try:
@@ -98,7 +99,7 @@ _KEY_ALIASES = {
 
 
 def _canonical_key(key: str) -> str:
-    raw = (key or "").strip()
+    raw = coerce_text_arg(key)
     if not raw:
         return raw
     # Combos (ctrl+s) keep the last token canonical so Enter aliases work.
@@ -228,12 +229,15 @@ def register_computer_tools(runtime: Any) -> None:
         elements and return a mark→ref legend — for pixel-only apps, reference a
         numbered mark instead of estimating x/y.
         """
+        target = coerce_text_arg(target) or "auto"
+        hint = coerce_text_arg(hint)
+        monitor = coerce_text_arg(monitor)
         return await _run_computer(ex,
             ComputerAction.SCREENSHOT,
-            target=target or "auto",
+            target=target,
             hint=hint,
             runtime=runtime,
-            monitor=monitor if str(monitor).strip() != "" else None,
+            monitor=monitor or None,
             mark=mark,
         )
 
@@ -248,9 +252,12 @@ def register_computer_tools(runtime: Any) -> None:
 
         Browser: e1… (DOM). Desktop: w1… windows + c1… UIA controls (mode=auto|windows|controls).
         """
+        target = coerce_text_arg(target) or "auto"
+        hint = coerce_text_arg(hint)
+        mode = coerce_text_arg(mode)
         return await _run_computer(ex,
             ComputerAction.SNAPSHOT,
-            target=target or "auto",
+            target=target,
             hint=hint,
             runtime=runtime,
             limit=limit,
@@ -260,6 +267,7 @@ def register_computer_tools(runtime: Any) -> None:
 
     async def computer_monitors(hint: str = "") -> str:
         """List displays (index, size, primary) for multi-monitor screenshots."""
+        hint = coerce_text_arg(hint)
         return await _run_computer(ex,
             ComputerAction.MONITORS,
             target="desktop",
@@ -281,6 +289,13 @@ def register_computer_tools(runtime: Any) -> None:
 
         Prefer text=\"Membership options\" or ref=e3 over guessing pixels.
         """
+        # Models send JSON arrays for str fields; registry coerce is skipped
+        # on direct handler calls, so (text or "").strip() used to crash.
+        text = coerce_text_arg(text)
+        ref = coerce_text_arg(ref)
+        target = coerce_text_arg(target) or "auto"
+        hint = coerce_text_arg(hint)
+        button = coerce_text_arg(button)
         # Resolve ref → element label so the payment/owner checkpoint can see
         # snapshot clicks (the primary click path), not just text= clicks.
         label = text or _resolve_ref_label(ex, ref)
@@ -288,7 +303,7 @@ def register_computer_tools(runtime: Any) -> None:
             f"click text={(label or text)!r} ref={ref!r} x={x} y={y} "
             f"button={button} clicks={clicks} target={target or 'auto'}"
         )
-        _label_ok = bool((text or "").strip()) or bool(_resolve_ref_label(ex, ref))
+        _label_ok = bool(text) or bool(_resolve_ref_label(ex, ref))
         blocked = _computer_approval_gate(
             runtime, "computer_click", summary,
             page_context=_page_context(ex),
@@ -299,7 +314,7 @@ def register_computer_tools(runtime: Any) -> None:
             return blocked
         return await _run_computer(ex,
             ComputerAction.CLICK,
-            target=target or "auto",
+            target=target,
             hint=hint,
             runtime=runtime,
             x=x,
@@ -312,6 +327,7 @@ def register_computer_tools(runtime: Any) -> None:
 
     async def computer_wait(seconds: float = 0.5, hint: str = "") -> str:
         """Pause briefly (page paint, app launch). Prefer 0.3–1.5s, max 30s."""
+        hint = coerce_text_arg(hint)
         return await _run_computer(ex,
             ComputerAction.WAIT,
             target="desktop",
@@ -326,6 +342,9 @@ def register_computer_tools(runtime: Any) -> None:
         path= opens that directory in the OS file manager (Explorer). Prefer
         app_control open_panel files path= to show it in Studio's Files rail.
         """
+        app = coerce_text_arg(app)
+        hint = coerce_text_arg(hint)
+        path = coerce_text_arg(path)
         summary = f"app launch app={app!r}" + (f" path={path!r}" if path else "")
         blocked = _computer_approval_gate(runtime, "computer_app", summary)
         if blocked:
@@ -350,7 +369,9 @@ def register_computer_tools(runtime: Any) -> None:
         This is how you READ what an app shows or what you just typed — no
         screenshot needed.
         """
-        want_desktop = str(target or "").strip().lower() == "desktop" or bool(hwnd)
+        hint = coerce_text_arg(hint)
+        target = coerce_text_arg(target)
+        want_desktop = target.lower() == "desktop" or bool(hwnd)
         return await _run_computer(ex,
             ComputerAction.PAGE_TEXT,
             target="desktop" if want_desktop else "browser",
@@ -367,9 +388,13 @@ def register_computer_tools(runtime: Any) -> None:
         limit: int = 8,
     ) -> str:
         """Find controls matching text/name on browser or desktop (ranked matches)."""
+        text = coerce_text_arg(text)
+        query = coerce_text_arg(query)
+        target = coerce_text_arg(target) or "auto"
+        hint = coerce_text_arg(hint)
         return await _run_computer(ex,
             ComputerAction.FIND,
-            target=target or "auto",
+            target=target,
             hint=hint or text or query,
             runtime=runtime,
             text=text or query,
@@ -402,6 +427,14 @@ def register_computer_tools(runtime: Any) -> None:
         verification is reported as unverified; do not claim the user's goal is
         done from an unverified result.
         """
+        url = coerce_text_arg(url)
+        click = coerce_text_arg(click)
+        type = coerce_text_arg(type)
+        goal = coerce_text_arg(goal)
+        target = coerce_text_arg(target) or "auto"
+        hint = coerce_text_arg(hint)
+        expect_url = coerce_text_arg(expect_url)
+        expect_text = coerce_text_arg(expect_text)
         # Do not put typed secrets in the approval banner; only lengths / labels.
         key = _canonical_key(key)
         type_note = f"type_chars={len(type)}" if type else "type=-"
@@ -420,7 +453,7 @@ def register_computer_tools(runtime: Any) -> None:
         blocked = _computer_approval_gate(
             runtime, "computer_act", summary,
             page_context=_page_context(ex),
-            label_resolved=bool((click or "").strip()),
+            label_resolved=bool(click),
             key=key,
             typed_text=type,
         )
@@ -428,7 +461,7 @@ def register_computer_tools(runtime: Any) -> None:
             return blocked
         return await _run_computer(ex,
             ComputerAction.ACT,
-            target=target or "auto",
+            target=target,
             hint=hint or goal,
             runtime=runtime,
             url=url,
@@ -480,8 +513,14 @@ def register_computer_tools(runtime: Any) -> None:
         target: str = "auto",
         hint: str = "",
         ref: str = "",
+        query: str = "",
+        label: str = "",
     ) -> str:
-        """Type text into the focused UI (browser or desktop).
+        """Type text into a field (browser or desktop).
+
+        query=/label= is the visible field label, placeholder, or hint —
+        same family as computer_click text=. ref= still wins; a stale ref
+        relocates via query in the host.
 
         Stored secrets: pass a vault token like ``{{vault:card-visa}}`` — the
         machine substitutes the real value at the input path (you never see
@@ -489,6 +528,11 @@ def register_computer_tools(runtime: Any) -> None:
         Never ask the user to paste card numbers or passwords into chat; use
         vault_list to find handles.
         """
+        text = coerce_text_arg(text)
+        target = coerce_text_arg(target) or "auto"
+        hint = coerce_text_arg(hint)
+        ref = coerce_text_arg(ref)
+        query = coerce_text_arg(query) or coerce_text_arg(label)
         vault_note = ""
         try:
             from remedy.core.vault import token_handles
@@ -510,11 +554,12 @@ def register_computer_tools(runtime: Any) -> None:
             return blocked
         return await _run_computer(ex,
             ComputerAction.TYPE,
-            target=target or "auto",
+            target=target,
             hint=hint,
             runtime=runtime,
             text=text,
             ref=ref,
+            query=query or None,
         )
 
     async def computer_select(
@@ -526,7 +571,13 @@ def register_computer_tools(runtime: Any) -> None:
         hint: str = "",
     ) -> str:
         """Choose an option in a <select> (dropdown) by visible text or value."""
-        choice = (value or option or text or "").strip()
+        value = coerce_text_arg(value)
+        option = coerce_text_arg(option)
+        text = coerce_text_arg(text)
+        ref = coerce_text_arg(ref)
+        target = coerce_text_arg(target) or "browser"
+        hint = coerce_text_arg(hint)
+        choice = value or option or text
         summary = f"select {choice!r} ref={ref or '-'}"
         blocked = _computer_approval_gate(
             runtime, "computer_select", summary,
@@ -538,7 +589,7 @@ def register_computer_tools(runtime: Any) -> None:
         return await _run_computer(
             ex,
             ComputerAction.SELECT,
-            target=target or "browser",
+            target=target,
             hint=hint,
             runtime=runtime,
             value=choice,
@@ -557,6 +608,8 @@ def register_computer_tools(runtime: Any) -> None:
         Example: [{\"text\":\"First name\",\"value\":\"Ada\"},
         {\"text\":\"State\",\"select\":\"California\"}]
         """
+        target = coerce_text_arg(target) or "browser"
+        hint = coerce_text_arg(hint)
         typed = _fill_typed_text(fields)
         vault_note = ""
         try:
@@ -580,7 +633,7 @@ def register_computer_tools(runtime: Any) -> None:
         return await _run_computer(
             ex,
             ComputerAction.FILL,
-            target=target or "browser",
+            target=target,
             hint=hint,
             runtime=runtime,
             fields=fields,
@@ -593,6 +646,8 @@ def register_computer_tools(runtime: Any) -> None:
     ) -> str:
         """Press a key or combo (enter, tab, ctrl+s, alt+f4, …)."""
         key = _canonical_key(key)
+        target = coerce_text_arg(target) or "auto"
+        hint = coerce_text_arg(hint)
         summary = f"key={key!r} target={target or 'auto'}"
         blocked = _computer_approval_gate(
             runtime, "computer_key", summary,
@@ -604,7 +659,7 @@ def register_computer_tools(runtime: Any) -> None:
             return blocked
         return await _run_computer(ex,
             ComputerAction.KEY,
-            target=target or "auto",
+            target=target,
             hint=hint,
             runtime=runtime,
             key=key,
@@ -614,18 +669,31 @@ def register_computer_tools(runtime: Any) -> None:
         x: int = 0,
         y: int = 0,
         dy: int = -3,
+        text: str = "",
+        ref: str = "",
         target: str = "auto",
         hint: str = "",
     ) -> str:
-        """Scroll at a point. dy>0 scrolls up, dy<0 scrolls down (notches)."""
+        """Scroll at a point, or locate the pane/list by visible label.
+
+        Guidance addresses scroll by label like click / press_hold / drag.
+        Prefer text= or ref= when the DOM / UIA exposes a name; bare x/y still
+        work for canvas / pixel targets. dy>0 scrolls up, dy<0 scrolls down.
+        """
+        text = coerce_text_arg(text)
+        ref = coerce_text_arg(ref)
+        target = coerce_text_arg(target) or "auto"
+        hint = coerce_text_arg(hint)
         return await _run_computer(ex,
             ComputerAction.SCROLL,
-            target=target or "auto",
+            target=target,
             hint=hint,
             runtime=runtime,
             x=x,
             y=y,
             dy=dy,
+            text=text or None,
+            ref=ref or None,
         )
 
     async def computer_navigate(
@@ -638,9 +706,12 @@ def register_computer_tools(runtime: Any) -> None:
         Use target=desktop / hint about system/external browser only when the
         user asks to open outside Remedy.
         """
+        url = coerce_text_arg(url)
+        target = coerce_text_arg(target) or "browser"
+        hint = coerce_text_arg(hint)
         return await _run_computer(ex,
             ComputerAction.NAVIGATE,
-            target=target or "browser",
+            target=target,
             hint=hint,
             runtime=runtime,
             url=url,
@@ -659,6 +730,10 @@ def register_computer_tools(runtime: Any) -> None:
         hint: str = "",
     ) -> str:
         """List / focus / minimize / maximize / restore / close / move / resize windows."""
+        mode = coerce_text_arg(mode)
+        title = coerce_text_arg(title)
+        target = coerce_text_arg(target) or "desktop"
+        hint = coerce_text_arg(hint)
         mode_l = (mode or "list").strip().lower()
         if mode_l == "close":
             summary = f"close window title={title!r} hwnd={hwnd}"
@@ -667,7 +742,7 @@ def register_computer_tools(runtime: Any) -> None:
                 return blocked
         return await _run_computer(ex,
             ComputerAction.WINDOWS,
-            target=target or "desktop",
+            target=target,
             hint=hint or title,
             runtime=runtime,
             mode=mode,
@@ -685,27 +760,52 @@ def register_computer_tools(runtime: Any) -> None:
         y: int = 0,
         x2: int = 0,
         y2: int = 0,
+        from_text: str = "",
+        to_text: str = "",
+        from_ref: str = "",
+        to_ref: str = "",
+        text: str = "",
+        ref: str = "",
         target: str = "auto",
         hint: str = "",
     ) -> str:
-        """Drag from (x,y) to (x2,y2)."""
-        summary = f"drag ({x},{y})->({x2},{y2}) target={target or 'auto'}"
+        """Drag from (x,y) to (x2,y2), or locate endpoints by visible label.
+
+        Guidance already addresses drag by label like click / press_hold.
+        Prefer from_text=/to_text= (or text= for the start) when the DOM / UIA
+        exposes names; bare coords still work for canvas / pixel targets.
+        """
+        from_text = coerce_text_arg(from_text) or coerce_text_arg(text)
+        to_text = coerce_text_arg(to_text)
+        from_ref = coerce_text_arg(from_ref) or coerce_text_arg(ref)
+        to_ref = coerce_text_arg(to_ref)
+        target = coerce_text_arg(target) or "auto"
+        hint = coerce_text_arg(hint)
+        start = from_text or from_ref or f"({x},{y})"
+        end = to_text or to_ref or f"({x2},{y2})"
+        summary = f"drag {start}->{end} target={target or 'auto'}"
         blocked = _computer_approval_gate(
             runtime, "computer_drag", summary,
             page_context=_page_context(ex),
-            label_resolved=False,
+            label_resolved=bool(from_text or to_text or from_ref or to_ref),
         )
         if blocked:
             return blocked
         return await _run_computer(ex,
             ComputerAction.DRAG,
-            target=target or "auto",
+            target=target,
             hint=hint,
             runtime=runtime,
             x=x,
             y=y,
             x2=x2,
             y2=y2,
+            from_text=from_text or None,
+            to_text=to_text or None,
+            from_ref=from_ref or None,
+            to_ref=to_ref or None,
+            text=from_text or None,
+            ref=from_ref or None,
         )
 
     async def computer_press_hold(
@@ -720,13 +820,17 @@ def register_computer_tools(runtime: Any) -> None:
         """Press and HOLD a control (a hold button). Human-check walls
         (CAPTCHA / I'm not a robot) are owner handoffs — do not complete them.
         """
+        text = coerce_text_arg(text)
+        ref = coerce_text_arg(ref)
+        target = coerce_text_arg(target) or "auto"
+        hint = coerce_text_arg(hint)
         label = text or _resolve_ref_label(ex, ref)
         where = label or text or ref or f"({x},{y})"
         summary = f"press-and-hold {where} for {hold_ms}ms target={target or 'auto'}"
         blocked = _computer_approval_gate(
             runtime, "computer_press_hold", summary,
             page_context=_page_context(ex),
-            label_resolved=bool((text or "").strip()) or bool(_resolve_ref_label(ex, ref)),
+            label_resolved=bool(text) or bool(_resolve_ref_label(ex, ref)),
         )
         if blocked:
             return blocked
@@ -735,7 +839,7 @@ def register_computer_tools(runtime: Any) -> None:
         point = (int(x or 0), int(y or 0)) != (0, 0)
         return await _run_computer(ex,
             ComputerAction.PRESS_HOLD,
-            target=target or "auto",
+            target=target,
             hint=hint,
             runtime=runtime,
             text=text or None,
@@ -937,7 +1041,8 @@ def register_computer_tools(runtime: Any) -> None:
     reg.register_builtin_handler(
         "computer_type",
         "Type text into a field (browser or desktop). Long text pastes atomically. "
-        "ref= from computer_snapshot is most reliable: browser eN writes that control; "
+        "query=/label= is the visible field label or placeholder (like click text=). "
+        "ref= from computer_snapshot still wins; a stale ref relocates via query. "
         "desktop cN sets the value via UIA. Stored secrets: pass {{vault:handle}} "
         "(see vault_list).",
         computer_type,
@@ -951,6 +1056,17 @@ def register_computer_tools(runtime: Any) -> None:
                         "Snapshot ref: browser eN focuses/writes that field; "
                         "desktop cN sets the value via UIA (atomic, verified)."
                     ),
+                },
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Visible field label, placeholder, or hint. Host "
+                        "relocates like click_text when ref is missing or stale."
+                    ),
+                },
+                "label": {
+                    "type": "string",
+                    "description": "Alias for query= (associated <label> text).",
                 },
                 "target": target_prop,
                 "hint": hint_prop,
@@ -1015,14 +1131,24 @@ def register_computer_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "computer_scroll",
-        "Scroll the wheel at (x,y). dy notches (negative = down).",
+        "Scroll the wheel at a pane/list. Locate by text= or ref= from a "
+        "snapshot (same family as computer_click / press_hold / drag), or "
+        "pass x/y from a screenshot. dy notches (negative = down).",
         computer_scroll,
         {
             "type": "object",
             "properties": {
-                "x": {"type": "integer"},
-                "y": {"type": "integer"},
-                "dy": {"type": "integer"},
+                "text": {
+                    "type": "string",
+                    "description": "Visible label of the pane/list/control to scroll",
+                },
+                "ref": {
+                    "type": "string",
+                    "description": "Snapshot ref of the pane/list (e3 / c5)",
+                },
+                "x": {"type": "integer", "description": "Scroll x (screenshot coords)"},
+                "y": {"type": "integer", "description": "Scroll y"},
+                "dy": {"type": "integer", "description": "Wheel notches (negative = down)"},
                 "target": target_prop,
                 "hint": hint_prop,
             },
@@ -1080,19 +1206,45 @@ def register_computer_tools(runtime: Any) -> None:
     )
     reg.register_builtin_handler(
         "computer_drag",
-        "Drag from (x,y) to (x2,y2) on desktop or browser.",
+        "Drag from one control to another. Locate endpoints by "
+        "from_text=/to_text= (visible labels) or from_ref=/to_ref= from a "
+        "snapshot — same family as computer_click / computer_press_hold — or "
+        "pass x/y/x2/y2 from a screenshot for canvas / pixel targets.",
         computer_drag,
         {
             "type": "object",
             "properties": {
-                "x": {"type": "integer"},
-                "y": {"type": "integer"},
-                "x2": {"type": "integer"},
-                "y2": {"type": "integer"},
+                "from_text": {
+                    "type": "string",
+                    "description": "Visible label of the drag start control",
+                },
+                "to_text": {
+                    "type": "string",
+                    "description": "Visible label of the drag end control",
+                },
+                "from_ref": {
+                    "type": "string",
+                    "description": "Snapshot ref for the start (e3 / c5)",
+                },
+                "to_ref": {
+                    "type": "string",
+                    "description": "Snapshot ref for the end (e3 / c5)",
+                },
+                "text": {
+                    "type": "string",
+                    "description": "Alias for from_text (start label)",
+                },
+                "ref": {
+                    "type": "string",
+                    "description": "Alias for from_ref (start ref)",
+                },
+                "x": {"type": "integer", "description": "Start x (screenshot coords)"},
+                "y": {"type": "integer", "description": "Start y"},
+                "x2": {"type": "integer", "description": "End x"},
+                "y2": {"type": "integer", "description": "End y"},
                 "target": target_prop,
                 "hint": hint_prop,
             },
-            "required": ["x", "y", "x2", "y2"],
         },
     )
     reg.register_builtin_handler(

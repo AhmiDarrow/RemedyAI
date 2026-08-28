@@ -113,7 +113,9 @@ def load_todos(
     for row in raw if isinstance(raw, list) else (raw.get("items") or []):
         if not isinstance(row, dict):
             continue
-        content = str(row.get("content") or "").strip()
+        from remedy.core.build_oracle import coerce_text_arg
+
+        content = coerce_text_arg(row.get("content") or "")
         if not content:
             continue
         status = str(row.get("status") or "pending").strip().lower()
@@ -223,7 +225,9 @@ def upsert_todos(
     for raw in items or []:
         if not isinstance(raw, dict):
             continue
-        content = str(raw.get("content") or raw.get("title") or "").strip()
+        from remedy.core.build_oracle import coerce_text_arg
+
+        content = coerce_text_arg(raw.get("content") or raw.get("title") or "")
         if not content:
             continue
         tid = str(raw.get("id") or "").strip() or uuid4().hex[:8]

@@ -257,13 +257,29 @@ class SubprocessSandbox(Sandbox):
             )
 
 
+async def _cancel_waiters(*tasks: asyncio.Task[Any] | None) -> None:
+    """Cancel leftover waiters and await them so they are not destroyed pending."""
+    for t in tasks:
+        if t is None:
+            continue
+        if not t.done():
+            t.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await t
+
+
 async def _communicate_or_abort(
     proc: asyncio.subprocess.Process,
     *,
     timeout_seconds: float,
     abort_event: asyncio.Event | None,
 ) -> tuple[bytes | None, bytes | None]:
-    """Wait for process I/O, abort event, or timeout. Returns (None, None) if killed."""
+    """Wait for process I/O, abort event, or timeout. Returns (None, None) if killed.
+
+    Every waiter this function creates must be awaited. Cancelling
+    ``_wait_abort`` without awaiting it logs ``Task was destroyed but it
+    is pending`` on Windows when a Stop or timeout races communicate().
+    """
     from remedy.execution.process import kill_process_tree
 
     comm = asyncio.create_task(proc.communicate())
@@ -286,27 +302,17 @@ async def _communicate_or_abort(
     # Timeout — nothing finished
     if not done:
         kill_process_tree(proc)
-        for t in pending:
-            t.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await comm
+        await _cancel_waiters(*pending)
         return None, None
 
     # Abort won
     if abort_task is not None and abort_task in done and not comm.done():
         kill_process_tree(proc)
-        comm.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await comm
-        if abort_task and not abort_task.done():
-            abort_task.cancel()
+        await _cancel_waiters(comm)
         return None, None
 
-    # Communicate finished
-    if abort_task is not None and not abort_task.done():
-        abort_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await abort_task
+    # Communicate finished (or both). Reap the abort waiter.
+    await _cancel_waiters(abort_task)
     try:
         return await comm
     except Exception:

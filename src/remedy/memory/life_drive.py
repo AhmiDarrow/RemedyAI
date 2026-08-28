@@ -16,8 +16,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from remedy.core.build_oracle import coerce_text_arg
 from remedy.home import default_home
 from remedy.memory.life_goals import LifeGoal, LifeGoalStore
+
 
 _IRREVERSIBLE = re.compile(
     r"(?i)\b("
@@ -115,7 +117,7 @@ def life_notes_enabled(home_dir=None) -> bool:
 
 
 def classify_action(text: str) -> str:
-    t = (text or "").strip()
+    t = coerce_text_arg(text)
     if not t:
         return "invent"
     if _IRREVERSIBLE.search(t):
@@ -316,14 +318,14 @@ def reveal_artifact(path: str | Path) -> bool:
 
 
 def looks_like_step_done(message: str) -> bool:
-    return bool(_STEP_DONE.match(message or ""))
+    return bool(_STEP_DONE.match(coerce_text_arg(message)))
 
 
 def looks_like_goal_done(message: str, goal_title: str = "") -> bool:
-    msg = message or ""
+    msg = coerce_text_arg(message)
     if _GOAL_DONE.match(msg):
         return True
-    title = (goal_title or "").strip()
+    title = coerce_text_arg(goal_title)
     if len(title) >= 8:
         try:
             if re.search(
@@ -337,7 +339,7 @@ def looks_like_goal_done(message: str, goal_title: str = "") -> bool:
 
 
 def looks_like_return(message: str) -> bool:
-    return bool(_RETURN.match(message or ""))
+    return bool(_RETURN.match(coerce_text_arg(message)))
 
 
 def _search_web(query: str, max_results: int = 3) -> list[dict[str, str]]:
@@ -402,7 +404,7 @@ def notice_progress(
     g = store.active()
     if g is None:
         return {"ok": False, "skipped": "no_open_goal"}
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if looks_like_goal_done(msg, g.title):
         ev = f"you said the goal is done: {msg[:120]}"
         store.complete(g.title, evidence=ev)

@@ -68,6 +68,39 @@ def test_silent_context_rmb_only():
     assert silent_context_for_local_agent({"llm_provider": "llamacpp"}) is False
 
 
+def test_leftover_rmb_provider_does_not_skip_vision_when_host_is_off(
+    tmp_path, monkeypatch
+):
+    """config.toml llm_provider=rmb is not a call-on while 8787 is closed."""
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.service.is_starting", lambda: False, raising=False
+    )
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.service.managed_process_alive", lambda: False, raising=False
+    )
+    monkeypatch.setattr(
+        "remedy.runtime.rmb.mode.rmb_server_running", lambda home_dir=None: False
+    )
+    st = merge_state(load_rmb_json(str(tmp_path)))
+    st["enabled"] = True
+    st["auto_start"] = False
+    st["vision_suspended"] = False
+    save_rmb_json(st, str(tmp_path))
+    assert should_skip_vision_stack(
+        {
+            "home_dir": str(tmp_path),
+            "llm_provider": "rmb",
+            "llm_base_url": "http://127.0.0.1:8787/v1",
+        }
+    ) is False
+    st["auto_start"] = True
+    save_rmb_json(st, str(tmp_path))
+    assert should_skip_vision_stack(
+        {"home_dir": str(tmp_path), "llm_provider": "xai"}
+    ) is True
+
+
 def test_vision_suspended_skips_stack(monkeypatch):
     home = tempfile.mkdtemp(prefix="rmb-mode-")
     monkeypatch.setenv("REMEDY_HOME", home)

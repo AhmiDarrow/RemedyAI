@@ -939,13 +939,22 @@ async def run_react_http(
                         produced_user_text = True
                     yield _tok
             except asyncio.CancelledError:
-                yield _stopped_note(
-                    tools_executed_this_turn > 0
-                    or tool_batches_this_turn > 0
+                from remedy.core.react_loop.stream_consume import (
+                    PROVIDER_DROP_ERROR as _drop_msg,
+                    is_owner_stop as _owner_stop,
+                    uncancel_current_task as _uncancel,
                 )
-                yield "@@aborted\n"
-                s.turn_complete = True
-                return
+
+                if _owner_stop():
+                    yield _stopped_note(
+                        tools_executed_this_turn > 0
+                        or tool_batches_this_turn > 0
+                    )
+                    yield "@@aborted\n"
+                    s.turn_complete = True
+                    return
+                _uncancel()
+                raise ConnectionError(_drop_msg) from None
             from remedy.core.turn_context import is_turn_aborted as _ab_mid
 
             if _ab_mid():
@@ -980,17 +989,30 @@ async def run_react_http(
             )
             s.turn_complete = True
             return
-         except asyncio.CancelledError:
-            _log_llm(
-                _bind, runtime, turn, step, _llm_t0, "aborted", round_state
+         except BaseException as _stream_exc:
+          if isinstance(_stream_exc, asyncio.CancelledError):
+            from remedy.core.react_loop.stream_consume import (
+                PROVIDER_DROP_ERROR as _drop_msg,
+                is_owner_stop as _owner_stop,
+                uncancel_current_task as _uncancel,
             )
-            yield _stopped_note(
-                tools_executed_this_turn > 0 or tool_batches_this_turn > 0
-            )
-            yield "@@aborted\n"
-            s.turn_complete = True
-            return
-         except Exception as _stream_exc:
+
+            if _owner_stop():
+                _log_llm(
+                    _bind, runtime, turn, step, _llm_t0, "aborted", round_state
+                )
+                yield _stopped_note(
+                    tools_executed_this_turn > 0 or tool_batches_this_turn > 0
+                )
+                yield "@@aborted\n"
+                s.turn_complete = True
+                return
+            # Provider/socket drop arrived as CancelledError (WinError 64 /
+            # mid-JSON RST). Keep the turn — same path as ClientPayloadError.
+            _uncancel()
+            _stream_exc = ConnectionError(_drop_msg)
+          elif not isinstance(_stream_exc, Exception):
+            raise
           _log_llm(
               _bind, runtime, turn, step, _llm_t0, "error", round_state,
               error=_stream_exc,

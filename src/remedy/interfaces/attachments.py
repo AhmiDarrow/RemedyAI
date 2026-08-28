@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from remedy.core.build_oracle import coerce_text_arg
 from remedy.home import default_home
 
 logger = logging.getLogger(__name__)
@@ -389,14 +390,14 @@ def build_multimodal_user_content(
     snippets = inject_text_file_snippets(
         atts, home_dir=home_dir, session_id=session_id
     )
-    text = (message or "").strip()
+    text = coerce_text_arg(message)
     if block:
         text = f"{text}{block}" if text else block.lstrip()
     if snippets:
         text = f"{text}\n{snippets}"
 
     mode = (vision_mode or "native").strip().lower()
-    brief = (decode_brief or "").strip()
+    brief = coerce_text_arg(decode_brief)
     if mode == "decode" and brief:
         text = f"{text}\n\n{brief}".strip() if text else brief
         return text

@@ -83,6 +83,28 @@ def test_latest_for_session_does_not_leak_other_session(tmp_path: Path):
     assert listed == []
 
 
+def test_create_joins_list_title_and_goal(tmp_path: Path):
+    """Models send JSON arrays for title/goal — must not .strip() a list."""
+    store = PlanStore(tmp_path)
+    plan = store.create(
+        ["Ship it"],
+        goal=["do the thing"],
+        steps=["Inventory"],
+        session_id="s-list",
+    )
+    assert plan.title == "Ship it"
+    assert plan.goal == "do the thing"
+    loaded = store.get(plan.id)
+    assert loaded is not None
+    assert loaded.title == "Ship it"
+    assert loaded.goal == "do the thing"
+    untitled = store.create([], goal="", session_id="s-empty-title")
+    assert untitled.title == "Untitled plan"
+    untitled2 = store.create("   ", goal=["  "], session_id="s-ws")
+    assert untitled2.title == "Untitled plan"
+    assert untitled2.goal == ""
+
+
 def test_create_normalizes_done_with_pending_steps(tmp_path: Path):
     """Agent must not stick the banner on done while all steps are still pending."""
     store = PlanStore(tmp_path)
@@ -326,6 +348,45 @@ def test_call_tool_blocks_in_plan_mode():
     res = asyncio.run(_run())
     assert res.success is False
     assert "Plan mode" in (res.error or "") or "PLAN_MODE" in (res.error or "")
+
+
+def test_plan_save_joins_list_title_and_goal(tmp_path: Path):
+    """plan_save(title=["Ship it"]) stores prose, not a Python repr."""
+    import asyncio
+
+    from remedy.core.agent import BasicRuntime
+    from remedy.core.plan_store import PlanStore
+    from remedy.models import AgentConfig
+
+    home = tmp_path / "home"
+    home.mkdir()
+    rt = BasicRuntime(AgentConfig(name="t", llm_api_key="x", home_dir=str(home)))
+    rt._session_id = "sess-list-title"
+
+    async def _run():
+        return await rt.call_tool(
+            ToolCall(
+                tool_name="plan_save",
+                arguments={
+                    "title": ["Ship it"],
+                    "goal": ["do the thing"],
+                    "steps": ["Write tests"],
+                    "status": "draft",
+                },
+            )
+        )
+
+    res = asyncio.run(_run())
+    assert res.success is True, res.error or res.data
+    body = str(res.data or res.error or "")
+    assert "Ship it" in body
+    assert "['Ship it']" not in body
+    assert "do the thing" in body
+    store = PlanStore(home)
+    latest = store.latest_for_session("sess-list-title")
+    assert latest is not None
+    assert latest.title == "Ship it"
+    assert latest.goal == "do the thing"
 
 
 def test_plan_save_accepts_native_step_arrays(tmp_path: Path):

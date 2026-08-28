@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from remedy.core.errors import format_tool_error
+from remedy.core.build_oracle import coerce_text_arg, coerce_verify_command
 from remedy.core.jobs import run_job
 from remedy.core.mission import (
     MissionStore,
@@ -25,8 +26,9 @@ def register_mission_tools(runtime: Any) -> None:
         try:
             from remedy.core.project_fingerprint import fingerprint_path
 
-            if (path or "").strip():
-                root = runtime.resolve_tool_path(path)
+            path_s = coerce_verify_command(path)
+            if path_s:
+                root = runtime.resolve_tool_path(path_s)
             else:
                 root = runtime.effective_project_path()
             if root.is_file():
@@ -42,9 +44,11 @@ def register_mission_tools(runtime: Any) -> None:
         path: str = "",
     ) -> str:
         """Start a durable mission (checklist + optional verify command)."""
-        if isinstance(steps, list | dict):
-            steps = json.dumps(steps, ensure_ascii=False, default=str)
-        g = str(goal or "").strip()
+        from remedy.core.build_oracle import coerce_json_text
+
+        if isinstance(steps, list | tuple | dict):
+            steps = coerce_json_text(steps)
+        g = coerce_text_arg(goal)
         if not g:
             return format_tool_error(
                 "goal is required",
@@ -61,13 +65,13 @@ def register_mission_tools(runtime: Any) -> None:
             try:
                 parsed = json.loads(raw)
                 if isinstance(parsed, list):
-                    step_list = [str(x) for x in parsed]
+                    step_list = [coerce_text_arg(x) for x in parsed]
                 else:
                     step_list = [ln.strip(" -*\t") for ln in raw.splitlines() if ln.strip()]
             except json.JSONDecodeError:
                 step_list = [ln.strip(" -*\t") for ln in raw.splitlines() if ln.strip()]
 
-        vcmd = (verify_command or "").strip()
+        vcmd = coerce_verify_command(verify_command)
         auto_note = ""
         if not vcmd:
             suggested = _suggest_verify(path)
@@ -86,7 +90,7 @@ def register_mission_tools(runtime: Any) -> None:
 
     async def mission_status(mission_id: str = "") -> str:
         store = MissionStore(_home())
-        mid = (mission_id or "").strip()
+        mid = coerce_verify_command(mission_id)
         m = store.get(mid) if mid else store.latest(
             str(getattr(runtime, "_session_id", "") or "") or None
         )
@@ -108,16 +112,18 @@ def register_mission_tools(runtime: Any) -> None:
         mission_id: str = "",
     ) -> str:
         store = MissionStore(_home())
-        mid = (mission_id or "").strip()
+        mid = coerce_verify_command(mission_id)
         m = store.get(mid) if mid else store.latest(
             str(getattr(runtime, "_session_id", "") or "") or None
         )
         if m is None:
             return "No mission to update. Call mission_start first."
-        st = (status or "done").strip().lower()
+        st = coerce_verify_command(status or "done").lower()
         if st not in ("done", "failed", "skipped", "active", "pending"):
             st = "done"
-        m = advance_step(m, step_id=(step or None), status=st, note=note or "")
+        step_s = coerce_text_arg(step)
+        note_s = coerce_text_arg(note)
+        m = advance_step(m, step_id=(step_s or None), status=st, note=note_s)
         store.save(m)
         done_gate = ""
         if (
@@ -139,11 +145,13 @@ def register_mission_tools(runtime: Any) -> None:
         timeout_seconds: float = 180.0,
     ) -> str:
         store = MissionStore(_home())
-        mid = (mission_id or "").strip()
+        mid = coerce_verify_command(mission_id)
         m = store.get(mid) if mid else store.latest(
             str(getattr(runtime, "_session_id", "") or "") or None
         )
-        cmd = (command or "").strip() or (m.verify_command if m else "") or ""
+        cmd = coerce_verify_command(command) or coerce_verify_command(
+            m.verify_command if m else ""
+        )
         if not cmd:
             suggested = _suggest_verify(path)
             if suggested:
@@ -163,7 +171,7 @@ def register_mission_tools(runtime: Any) -> None:
             runtime,
             "verify",
             command=cmd,
-            path=path or ".",
+            path=coerce_text_arg(path) or ".",
             timeout=timeout,
         )
         if m is not None:

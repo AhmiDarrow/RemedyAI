@@ -59,3 +59,21 @@ async def test_registry_execute_coerces_before_calling_handler():
     res = await reg.execute("todo_write", todos_json=[{"id": "1", "content": "x"}], merge="yes")
     assert res.startswith("str:")
     assert res.endswith("merge=True")
+
+
+
+def test_tuple_for_str_param_becomes_json_text():
+    out = _coerce_handler_arguments(_todo_like, {"todos_json": ({"id": "1"},)})
+    assert isinstance(out["todos_json"], str)
+    assert json.loads(out["todos_json"]) == [{"id": "1"}]
+
+
+def test_coerce_text_arg_joins_list_tuple_and_json_array_string():
+    from remedy.core.build_oracle import coerce_json_text, coerce_text_arg
+
+    assert coerce_text_arg(["Ship", "it"]) == "Ship it"
+    assert coerce_text_arg(("Ship", "it")) == "Ship it"
+    assert coerce_text_arg('["Ship it"]') == "Ship it"
+    assert coerce_text_arg({"goal": "Ship it"}) == "Ship it"
+    dumped = coerce_json_text(({"id": "1", "content": "x"},))
+    assert json.loads(dumped) == [{"id": "1", "content": "x"}]

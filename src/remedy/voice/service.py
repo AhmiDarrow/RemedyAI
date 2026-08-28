@@ -570,6 +570,181 @@ def _pulse_install(
 _PIP_IDLE_TIMEOUT_S = 900.0  # no output for 15 min = something is wrong
 _PIP_PROGRESS_RE = re.compile(r"^Progress\s+(\d+)\s+of\s+(\d+)", re.I)
 _PIP_COLLECT_RE = re.compile(r"^(?:Collecting|Downloading)\s+(\S+)", re.I)
+_GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
+
+
+def _find_uv(python: str | None = None) -> str | None:
+    """uv on PATH, or next to this Python / the target interpreter.
+
+    Desktop and ``uv run`` checkouts often have uv beside python.org's
+    Scripts, not on the PATH the sidecar inherited.
+    """
+    found = shutil.which("uv") or shutil.which("uv.exe")
+    if found:
+        return found
+    names = ("uv.exe", "uv")
+    roots: list[Path] = []
+    for exe in (sys.executable, python):
+        if not exe:
+            continue
+        try:
+            parent = Path(exe).resolve().parent
+        except OSError:
+            continue
+        roots.extend((parent, parent / "Scripts", parent / "bin"))
+    home = Path.home()
+    roots.extend((home / ".local" / "bin", home / ".cargo" / "bin"))
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        progs = Path(local) / "Programs" / "Python"
+        if progs.is_dir():
+            try:
+                roots.extend(d / "Scripts" for d in progs.iterdir() if d.is_dir())
+            except OSError:
+                pass
+    seen: set[str] = set()
+    for root in roots:
+        for name in names:
+            cand = root / name
+            key = os.path.normcase(str(cand))
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                if cand.is_file():
+                    return str(cand)
+            except OSError:
+                continue
+    return None
+
+
+def _python_has_module(py: str, env: dict[str, str], name: str) -> bool:
+    """True when *py* can ``import name``. *name* is a fixed identifier."""
+    if not name.isidentifier():
+        return False
+    try:
+        same = os.path.normcase(os.path.abspath(py)) == os.path.normcase(
+            os.path.abspath(sys.executable)
+        )
+    except OSError:
+        same = False
+    if same:
+        return _module_present(name)
+    from remedy.execution.process import run_hidden
+
+    try:
+        r = run_hidden(
+            [py, "-c", f"import {name}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _run_hidden(
+    args: list[str],
+    env: dict[str, str],
+    *,
+    timeout: float = 120.0,
+) -> Any:
+    from remedy.execution.process import run_hidden
+
+    return run_hidden(
+        args, capture_output=True, text=True, timeout=timeout, env=env
+    )
+
+
+def _download_get_pip(dest: Path) -> None:
+    """Fetch official get-pip.py. Size-capped so a hijack cannot fill the disk."""
+    req = urllib.request.Request(_GET_PIP_URL, headers={"User-Agent": "remedy-voice"})
+    with urllib.request.urlopen(req, timeout=60) as resp, dest.open("wb") as f:
+        done = 0
+        while True:
+            chunk = resp.read(1 << 16)
+            if not chunk:
+                break
+            done += len(chunk)
+            if done > 5_000_000:
+                raise RuntimeError("get-pip.py was larger than expected")
+            f.write(chunk)
+
+
+def _ensure_pip(
+    py: str,
+    env: dict[str, str],
+    *,
+    on_message: Any | None = None,
+) -> bool:
+    """Make ``python -m pip`` work on *py*.
+
+    uv venvs (no ``--seed``) and some stripped runtimes ship ensurepip
+    but not pip. First-run speaking then dies with ``No module named pip``
+    and she never gets a local voice. Try ensurepip, then uv, then
+    get-pip.py. Returns True when pip is importable.
+    """
+    if _python_has_module(py, env, "pip"):
+        return True
+    logger.info("voice: %s has no pip; bootstrapping", py)
+    if on_message:
+        on_message("Preparing the voice installer")
+
+    if _python_has_module(py, env, "ensurepip"):
+        try:
+            r = _run_hidden(
+                [py, "-m", "ensurepip", "--upgrade", "--default-pip"], env
+            )
+            if r.returncode == 0 and _python_has_module(py, env, "pip"):
+                logger.info("voice: pip landed via ensurepip")
+                return True
+            logger.warning(
+                "voice ensurepip: %s",
+                (r.stderr or r.stdout or f"exit {r.returncode}")[:300],
+            )
+        except Exception as exc:
+            logger.warning("voice ensurepip error: %s", exc)
+
+    uv = _find_uv(py)
+    if uv:
+        try:
+            r = _run_hidden([uv, "pip", "install", "--python", py, "pip"], env)
+            if r.returncode == 0 and _python_has_module(py, env, "pip"):
+                logger.info("voice: pip landed via uv")
+                return True
+            logger.warning(
+                "voice uv pip bootstrap: %s",
+                (r.stderr or r.stdout or f"exit {r.returncode}")[:300],
+            )
+        except Exception as exc:
+            logger.warning("voice uv pip bootstrap error: %s", exc)
+
+    tmp: Path | None = None
+    try:
+        import tempfile
+
+        if on_message:
+            on_message("Fetching a voice installer")
+        fd, raw = tempfile.mkstemp(prefix="remedy-get-pip-", suffix=".py")
+        os.close(fd)
+        tmp = Path(raw)
+        _download_get_pip(tmp)
+        r = _run_hidden([py, str(tmp)], env, timeout=180.0)
+        if r.returncode == 0 and _python_has_module(py, env, "pip"):
+            logger.info("voice: pip landed via get-pip")
+            return True
+        logger.warning(
+            "voice get-pip: %s",
+            (r.stderr or r.stdout or f"exit {r.returncode}")[:300],
+        )
+    except Exception as exc:
+        logger.warning("voice get-pip error: %s", exc)
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+    return False
 
 
 def run_pip_packages(
@@ -592,7 +767,10 @@ def run_pip_packages(
     no output at all fails the install.
 
     A frozen sidecar has no pip of its own; callers pass the managed
-    runtime's interpreter (see :func:`_runtime_python`).
+    runtime's interpreter (see :func:`_runtime_python`). uv venvs and
+    stripped CPythons may also lack pip — :func:`_ensure_pip` bootstraps
+    it (ensurepip, then uv, then get-pip.py) so first-run still lands a
+    real local voice.
     """
     if python is None:
         if getattr(sys, "frozen", False):
@@ -605,13 +783,20 @@ def run_pip_packages(
     env = child_env(None, with_source=False)
     env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
     env["PIP_NO_INPUT"] = "1"
+
+    def _msg(message: str) -> None:
+        cur = state.get(key)
+        if isinstance(cur, dict) and message:
+            cur["message"] = message
+
+    _ensure_pip(py, env, on_message=_msg)
     attempts: list[list[str]] = [
         [
             py, "-m", "pip", "install", "--disable-pip-version-check",
             "--progress-bar", "raw", *extra_args, *packages,
         ],
     ]
-    uv = shutil.which("uv")
+    uv = _find_uv(py)
     if uv:
         attempts.append([uv, "pip", "install", "--python", py, *extra_args, *packages])
 

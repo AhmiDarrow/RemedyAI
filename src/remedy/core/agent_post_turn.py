@@ -9,6 +9,8 @@ from __future__ import annotations
 from contextlib import suppress
 from typing import Any
 
+from remedy.core.build_oracle import coerce_text_arg
+
 
 def schedule_post_turn_prep(
     runtime: Any,
@@ -48,7 +50,7 @@ def schedule_post_turn_prep(
             session_id=sid,
             brief=getattr(runtime, "_session_brief", None),
             messages=getattr(runtime, "_last_send_messages", None),
-            user_text=message or "",
+            user_text=coerce_text_arg(message),
             project_path=project_path,
             memory=getattr(runtime, "memory", None),
         )
@@ -83,7 +85,7 @@ def schedule_post_turn_prep(
                 action_ir=turn_action_ir(runtime),
                 status="done",
                 assistant_text=asst,
-                user_text=message or "",
+                user_text=coerce_text_arg(message),
                 recent_tool_texts=recent_tools,
                 allow_verify=bool(
                     turn_metabolism_allow_verify(runtime) or int(turn_tier(runtime)) >= 2
@@ -144,7 +146,7 @@ def schedule_post_turn_prep(
 
                     bind = get_llm_binding(runtime)
                     update_soul_after_turn(
-                        user_text=message or "",
+                        user_text=coerce_text_arg(message),
                         assistant_text=asst,
                         session_id=str(turn_session_id(runtime) or sid or ""),
                         provider=str(getattr(bind, "provider", "") or ""),
@@ -235,7 +237,7 @@ def distill_user_message_now(
         "skipped": 0,
         "tool_saved": False,
     }
-    text = (message or "").strip()
+    text = coerce_text_arg(message)
     if not text:
         return out
     mem = getattr(runtime, "memory", None)
@@ -358,7 +360,7 @@ async def distill_user_message_now_async(
     memory_save mirror runs (awaited, not thread-blocked).
     """
     out: dict[str, Any] = {"added": 0, "reinforced": 0, "skipped": 0, "tool_saved": False}
-    text = (message or "").strip()
+    text = coerce_text_arg(message)
     mem = getattr(runtime, "memory", None)
     if not text or mem is None:
         return out
@@ -493,7 +495,7 @@ def schedule_mid_turn_warm(
             session_id=sid,
             brief=getattr(runtime, "_session_brief", None),
             messages=messages or getattr(runtime, "_last_send_messages", None),
-            user_text=message or "",
+            user_text=coerce_text_arg(message),
             project_path=project_path,
             memory=getattr(runtime, "memory", None),
         )

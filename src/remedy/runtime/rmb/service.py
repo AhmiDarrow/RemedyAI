@@ -74,7 +74,12 @@ _atexit_registered = False
 _starting_until: float = 0.0
 _user_stopped: bool = False
 _discover_ggufs_cache: dict[str, Any] = {"ts": 0.0, "key": "", "value": []}
-_DISCOVER_GGUFS_TTL_S = 5.0
+_DISCOVER_GGUFS_TTL_S = 60.0
+# Chrome polls /api/providers/connected often. glob("*.gguf") on a huge
+# Downloads folder lists every file (pathlib uses listdir+fnmatch). Budget
+# dump-dirs so Settings/presence do not sit behind a 1.5s Defender walk.
+_DUMP_ROOT_NAMES = frozenset({"downloads", "desktop", "documents"})
+_DUMP_ROOT_BUDGET_S = 0.05
 
 
 def _refresh_user_stopped(home_dir: str | Path | None = None) -> bool:
@@ -495,9 +500,25 @@ def _watchdog_record_restart() -> None:
     _watchdog_restart_times.append(time.time())
 
 
-def ensure_rmb_watchdog(home_dir: str | Path | None = None) -> None:
-    """Start a daemon watchdog that restarts RMB if it dies (auto_start mode)."""
+def ensure_rmb_watchdog(
+    home_dir: str | Path | None = None,
+    *,
+    force: bool = False,
+) -> None:
+    """Start a daemon watchdog that restarts RMB if it dies (auto_start mode).
+
+    Status polls and serve boot must not spawn this unless the owner called
+    RMB on (Start / auto_start / a live start in this process).
+    """
     global _watchdog_thread, _watchdog_home
+    if not force:
+        try:
+            st = merge_state(load_rmb_json(home_dir))
+            if not st.get("auto_start", False):
+                if not is_starting() and not managed_process_alive():
+                    return
+        except Exception:
+            return
     _watchdog_home = home_dir
     if _watchdog_thread is not None and _watchdog_thread.is_alive():
         return
@@ -808,6 +829,29 @@ def _find_llama_binary(state: dict[str, Any], home_dir: str | Path | None) -> Pa
     return None
 
 
+def _iter_ggufs(root: Path, *, budget_s: float | None = None) -> list[Path]:
+    """Shallow *.gguf listing. Dump dirs (Downloads) abort after *budget_s*."""
+    hits: list[Path] = []
+    t0 = time.perf_counter()
+    try:
+        with os.scandir(root) as it:
+            for ent in it:
+                if budget_s is not None and (time.perf_counter() - t0) > budget_s:
+                    break
+                name = ent.name
+                if not name.lower().endswith(".gguf"):
+                    continue
+                try:
+                    if ent.is_file(follow_symlinks=False):
+                        hits.append(Path(ent.path))
+                except OSError:
+                    continue
+    except OSError:
+        return hits
+    hits.sort(key=lambda p: p.name.lower())
+    return hits
+
+
 def discover_ggufs(home_dir: str | Path | None = None) -> list[dict[str, Any]]:
     """List GGUF files Remedy can load into RMB (any model, not catalog-only)."""
     cache_key = str(home_dir or "")
@@ -859,8 +903,13 @@ def discover_ggufs(home_dir: str | Path | None = None) -> list[dict[str, Any]]:
     for root in _model_search_roots(home_dir):
         if not root.is_dir():
             continue
+        budget = (
+            _DUMP_ROOT_BUDGET_S
+            if root.name.lower() in _DUMP_ROOT_NAMES
+            else None
+        )
         try:
-            for p in sorted(root.glob("*.gguf")):
+            for p in _iter_ggufs(root, budget_s=budget):
                 _add(p)
         except Exception:
             continue
@@ -1813,7 +1862,7 @@ def wait_rmb_ready(
     kicked_async = False
     kicked_sync = False
     cleared_stall = False
-    ensure_rmb_watchdog(home_dir)
+    ensure_rmb_watchdog(home_dir, force=True)
     while time.time() < deadline:
         if is_running(home_dir, force=True, require_http=True):
             mark_used()
@@ -1873,7 +1922,7 @@ def wait_rmb_ready(
 
 def wake_rmb_async(home_dir: str | Path | None = None) -> dict[str, Any]:
     """Start RMB in a daemon thread if needed (never blocks the chat path)."""
-    ensure_rmb_watchdog(home_dir)
+    ensure_rmb_watchdog(home_dir, force=True)
     # Adopt orphan host from previous API process before spawning a second one
     with contextlib.suppress(Exception):
         ad = adopt_existing_host(home_dir)
@@ -1928,7 +1977,7 @@ def start_rmb_server(
     elif _refresh_user_stopped(home_dir):
         return {"ok": False, "error": "RMB stopped by user"}
 
-    ensure_rmb_watchdog(home_dir)
+    ensure_rmb_watchdog(home_dir, force=True)
 
     # Single-flight: if another thread is already starting, join its wait
     with _start_flight_lock:
@@ -2716,7 +2765,7 @@ def ensure_rmb_server(
     force: bool = False,
 ) -> dict[str, Any]:
     """Start if enabled. Does not start when disabled unless force=True."""
-    ensure_rmb_watchdog(home_dir)
+    ensure_rmb_watchdog(home_dir, force=True)
     state = merge_state(load_rmb_json(home_dir))
     if is_running(home_dir, force=True, require_http=True):
         mark_used()
@@ -2754,8 +2803,11 @@ def get_rmb_status(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     disk = load_rmb_json(home)
     state = merge_state({**rmb_cfg, **disk})
     _refresh_user_stopped(home)
-    # Soft auto-heal: only when auto_start is explicitly on (never default on)
-    ensure_rmb_watchdog(home)
+    # Status is read-only. Watchdog/wake only when the owner asked auto_start
+    # (Start RMB / settings). Live 2026-08-27: leftover llm_provider=rmb plus
+    # this poll spawned a watchdog while 8787 was closed and Grok was the chat.
+    if state.get("auto_start", False) and not _user_stopped:
+        ensure_rmb_watchdog(home)
     # UI polls this every ~8s — honor the running cache. Heal only if auto_start.
     running = is_running(home, force=False, require_http=True)
     if (

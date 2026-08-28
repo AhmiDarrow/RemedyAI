@@ -57,6 +57,10 @@ _SLOW_EXEMPT_PATHS = frozenset(
         "/api/computer/ui/command",
         "/api/computer/host/status",
         "/api/computer/host/hello",
+        "/api/app/command",
+        "/api/voice/status",
+        "/api/rmb/hf/progress",
+        "/api/vision/status",
     }
 )
 _SLOW_WARN_MS = 500.0
@@ -80,6 +84,29 @@ def should_warn_slow(
     if p.startswith("/api/computer/") and method_u in ("GET", "HEAD"):
         return False
     return not (p.startswith("/api/computer/") and p.endswith("/hello"))
+
+
+# Hot polls already sit at DEBUG; writing every ~150ms jobs/next into debug.log
+# still burns disk during long Grok turns. Keep failures + slow quiet polls.
+_QUIET_SILENT_MS = 100.0
+
+
+def request_log_level(
+    *,
+    quiet: bool,
+    status_code: int,
+    duration_ms: float,
+    slow: bool,
+) -> str | None:
+    """Return logging level name, or None to stay silent."""
+    if slow:
+        return "warning"
+    if quiet and int(status_code) < 400 and float(duration_ms) < _QUIET_SILENT_MS:
+        return None
+    if quiet:
+        return "debug"
+    return "info"
+
 
 
 def _is_client_gone(exc: BaseException) -> bool:
@@ -335,14 +362,22 @@ def create_app(
                         )
                     )
                     r = maybe_ensure_local_model(cfg0)
-                    if skip_smol and r.get("ok") and not r.get("skipped"):
+                    # skipped=True + ok=True is RMB owning the GPU host — not
+                    # a started SmolVLM. Live 2026-08-27 logged "Local model
+                    # auto-started" while 8787 was closed and vision was skipped.
+                    if r.get("skipped"):
+                        logger.info(
+                            "Local vision autostart skipped (%s)",
+                            r.get("reason") or "not started",
+                        )
+                    elif skip_smol and r.get("ok"):
                         logger.info(
                             "Local vision download underway; SmolVLM start skipped "
                             "(RMB exclusive host)"
                         )
                     elif r.get("ok"):
                         logger.info("Local model auto-started with Remedy")
-                    elif not r.get("skipped"):
+                    else:
                         logger.info(
                             "Local model auto-start: %s",
                             r.get("error") or r.get("reason") or r,
@@ -757,6 +792,10 @@ def create_app(
             "/api/computer/ui/command",
             "/api/computer/host/status",
             "/api/computer/host/hello",
+            "/api/app/command",
+            "/api/voice/status",
+            "/api/rmb/hf/progress",
+            "/api/vision/status",
         )
         if path.startswith("/api/computer/") and method in ("GET", "HEAD", "POST"):
             # hello / jobs complete are also high-frequency; keep failures loud.
@@ -766,7 +805,14 @@ def create_app(
                 quiet = True
         if desktop and method in ("GET", "HEAD") and response.status_code < 400:
             quiet = True
-        if should_warn_slow(method, path, response.status_code, duration):
+        slow = should_warn_slow(method, path, response.status_code, duration)
+        level = request_log_level(
+            quiet=quiet,
+            status_code=response.status_code,
+            duration_ms=duration,
+            slow=slow,
+        )
+        if level == "warning":
             logger.warning(
                 "SLOW %s %s -> %d (%.0fms)",
                 request.method,
@@ -774,7 +820,7 @@ def create_app(
                 response.status_code,
                 duration,
             )
-        elif quiet:
+        elif level == "debug":
             logger.debug(
                 "%s %s -> %d (%.0fms)",
                 request.method,
@@ -782,7 +828,7 @@ def create_app(
                 response.status_code,
                 duration,
             )
-        else:
+        elif level == "info":
             logger.info(
                 "%s %s -> %d (%.0fms)",
                 request.method,

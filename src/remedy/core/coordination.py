@@ -355,18 +355,30 @@ def release_path(
             b.claims.pop(norm_path(path), None)
 
 
+def _snapshot_beacons(home: str | Path | None = None) -> dict[str, SessionBeacon]:
+    """Read-only registry snapshot — no lock file, no rewrite.
+
+    GET /api/coordination/presence polls this; taking the exclusive write txn
+    on every chrome tick contended with heartbeats and froze the event loop.
+    Live filtering still happens in memory; writers prune the file.
+    """
+    if _test_isolated(home):
+        return {}
+    with _thread_lock:
+        return _read_beacons(home)
+
+
 def active_beacons(
     *, exclude: str | None = None, home: str | Path | None = None
 ) -> list[SessionBeacon]:
     """All currently live beacons (optionally excluding one session)."""
     now = time.time()
     out: list[SessionBeacon] = []
-    with _txn(home) as beacons:
-        for sid, b in beacons.items():
-            if exclude and sid == exclude:
-                continue
-            if b.is_live(now):
-                out.append(b)
+    for sid, b in _snapshot_beacons(home).items():
+        if exclude and sid == exclude:
+            continue
+        if b.is_live(now):
+            out.append(b)
     out.sort(key=lambda b: b.started_ts)
     return out
 

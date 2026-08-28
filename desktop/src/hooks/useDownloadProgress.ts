@@ -21,7 +21,7 @@ function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
 }
 
 /** Idle (not running, no install in flight) vision status poll interval. */
-export const VISION_IDLE_POLL_MS = 15_000
+export const VISION_IDLE_POLL_MS = 45_000
 
 const VISION_ACTIVE_PHASES = new Set([
   'downloading', 'download', 'extracting', 'extract', 'installing', 'install',

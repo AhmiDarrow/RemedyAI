@@ -13,6 +13,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from remedy.core.build_oracle import coerce_text_arg
+
 # User wants code/files on disk — not a tutorial monologue.
 _IMPLEMENT_RE = re.compile(
     r"(?is)\b("
@@ -119,7 +121,7 @@ def is_frontier_binding(
 
 def message_wants_continue_work(message: str | None) -> bool:
     """True for short resume phrases: keep going / continue / finish it."""
-    t = (message or "").strip()
+    t = coerce_text_arg(message)
     if not t or len(t) > 220:
         # Long messages use implement keywords instead
         return bool(_CONTINUE_RE.search(t[:220])) if t else False
@@ -131,7 +133,7 @@ def message_wants_implement(message: str | None) -> bool:
 
     Partner rule: "keep going" on a build session is implement intent.
     """
-    t = (message or "").strip()
+    t = coerce_text_arg(message)
     if len(t) < 2:
         return False
     if message_wants_continue_work(t):
@@ -182,7 +184,7 @@ def message_wants_build_work(
     if message_wants_implement(message):
         return True
     # Bare "ok" / "yes" after a build monologue still means keep building
-    t = (message or "").strip().lower()
+    t = coerce_text_arg(message).lower()
     if t in ("ok", "okay", "yes", "yep", "yeah", "do it", "go", "sure") and history_suggests_unfinished_build(
         history
     ):
@@ -193,7 +195,7 @@ def message_wants_build_work(
 
 def looks_like_intent_monologue(text: str | None) -> bool:
     """True when the model promises to build/architect without tool_calls."""
-    t = (text or "").strip()
+    t = coerce_text_arg(text)
     if len(t) < 40:
         return False
     return bool(_INTENT_MONOLOGUE_RE.search(t))
@@ -203,7 +205,7 @@ def monologue_fingerprint(text: str | None) -> str:
     """Normalize monologue text for loop detection (ignore whitespace noise)."""
     import re as _re
 
-    t = (text or "").strip().lower()
+    t = coerce_text_arg(text).lower()
     t = _re.sub(r"\s+", " ", t)
     # Collapse repeated identical sentences (model stutter in one blob)
     parts = [p.strip() for p in _re.split(r"(?<=[.!?])\s+", t) if p.strip()]
@@ -219,7 +221,7 @@ def monologue_fingerprint(text: str | None) -> str:
 
 def text_has_internal_repetition(text: str | None) -> bool:
     """True when the same sentence appears 2+ times in one reply (loop stutter)."""
-    t = (text or "").strip()
+    t = coerce_text_arg(text)
     if len(t) < 80:
         return False
     import re as _re
@@ -327,7 +329,7 @@ def looks_like_tutorial_monologue(text: str | None) -> bool:
     Also: short intent monologues ("I'll build X… laying out architecture")
     that leave the partner with zero files on disk (screenshot 2026-08-08).
     """
-    t = (text or "").strip()
+    t = coerce_text_arg(text)
     if not t:
         return False
     # Intent-only promise (can be short) — still not work
@@ -435,7 +437,7 @@ def slim_system_for_local(
         )
 
         # Empty user_message is not chat — work turns often omit it here.
-        if (user_message or "").strip() and (
+        if coerce_text_arg(user_message) and (
             is_chat_only_message(user_message)
             or is_feeling_presence_question(user_message)
         ):

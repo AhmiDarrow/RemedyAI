@@ -44,6 +44,8 @@ def test_detects_build_requests():
     assert not looks_like_build_request(
         "I was thinking about example.com yesterday over dinner with friends"
     )
+    assert looks_like_build_request(["implement a REST API for todos"])
+    assert not looks_like_build_request(["thanks"])
 
 
 def test_begin_build_turn_greeting_ignores_leftover_brief():

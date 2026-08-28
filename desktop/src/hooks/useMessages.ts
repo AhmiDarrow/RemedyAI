@@ -65,7 +65,7 @@ export type QueuedSend = {
   }[]
   planMode?: boolean
   chatMode?: boolean
-  /** after = wait for current turn; interrupt = stop current then send */
+  /** after = wait for current turn; interrupt = stop then send; steer is live, not queued */
   mode: 'after' | 'interrupt' | 'steer'
 }
 
@@ -1031,11 +1031,13 @@ export function useMessages(sessionId: string | null) {
         (sessionIdRef.current === targetId &&
           (streamingRef.current || sendLockRef.current))
       if (targetBusy) {
-        // Steer: hand the words to the running turn. Text only — an
-        // attachment needs a turn of its own, so that falls back to
-        // interrupt, as does a turn that ended between the check and the
-        // call.
-        if (opts?.mode === 'steer' && !hasAtt) {
+        // Default is steer: the owner is talking to the live turn.
+        // after / interrupt stay explicit. Attachments need a turn of
+        // their own, so they never steer (they queue after unless the
+        // owner asked to interrupt).
+        const explicit = opts?.mode
+        const trySteer = !hasAtt && explicit !== 'after' && explicit !== 'interrupt'
+        if (trySteer) {
           let steered = false
           try {
             steered = (await steerSession(targetId, text)).steered
@@ -1062,7 +1064,8 @@ export function useMessages(sessionId: string | null) {
             return
           }
         }
-        const mode = opts?.mode === 'after' ? 'after' : 'interrupt'
+        const mode =
+          explicit === 'interrupt' || (trySteer && !hasAtt) ? 'interrupt' : 'after'
         const item: QueuedSend = {
           id: crypto.randomUUID(),
           text,

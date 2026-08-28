@@ -18,6 +18,7 @@ from typing import Any
 from uuid import uuid4
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.core.build_oracle import coerce_text_arg
 from remedy.home import default_home
 
 HORIZONS = ("week", "season", "life")
@@ -222,7 +223,7 @@ class LifeGoalStore:
         return [g for g in goals if g.status in OPEN_STATUSES]
 
     def get(self, goal_id: str) -> LifeGoal | None:
-        needle = (goal_id or "").strip()
+        needle = coerce_text_arg(goal_id)
         if not needle:
             return None
         for g in self.list(include_closed=True):
@@ -231,7 +232,7 @@ class LifeGoalStore:
         return None
 
     def find(self, title: str) -> LifeGoal | None:
-        needle = (title or "").strip().lower()
+        needle = coerce_text_arg(title).lower()
         if not needle:
             return None
         open_first = self.list(include_closed=False) + [
@@ -253,7 +254,11 @@ class LifeGoalStore:
         next_by: str = "",
         source: str = "chat",
     ) -> LifeGoal:
-        t = (title or "").strip()
+        t = coerce_text_arg(title)
+        why = coerce_text_arg(why)
+        next_action = coerce_text_arg(next_action)
+        done_looks_like = coerce_text_arg(done_looks_like)
+        next_by = coerce_text_arg(next_by)
         if not t:
             raise ValueError("title required")
         existing = self.find(t)
@@ -273,11 +278,11 @@ class LifeGoalStore:
         goal = LifeGoal(
             id=uuid4().hex[:12],
             title=t[:200],
-            why=(why or "").strip()[:400],
+            why=why[:400],
             horizon=horizon if horizon in HORIZONS else "season",
-            done_looks_like=(done_looks_like or "").strip()[:280],
-            next_action=(next_action or "").strip()[:280],
-            next_by=(next_by or "").strip()[:40],
+            done_looks_like=done_looks_like[:280],
+            next_action=next_action[:280],
+            next_by=next_by[:40],
             status="active" if not self.list() else "open",
             source=source,
         )
@@ -291,8 +296,9 @@ class LifeGoalStore:
         g = self.find(title)
         if g is None or g.status in ("done", "dropped"):
             return None
-        if evidence.strip():
-            g.evidence = (g.evidence + [evidence.strip()[:240]])[:_MAX_EVIDENCE]
+        evidence = coerce_text_arg(evidence)
+        if evidence:
+            g.evidence = (g.evidence + [evidence[:240]])[:_MAX_EVIDENCE]
         g.status = "done"
         g.updated_at = _now()
         with _lock:
@@ -304,7 +310,7 @@ class LifeGoalStore:
     def delete(self, goal_id: str) -> bool:
         """Hard-remove ONE goal by exact id (or exact title) — never a
         substring, so 'Ship app' can't also wipe 'Ship app v2'."""
-        needle = (goal_id or "").strip().lower()
+        needle = coerce_text_arg(goal_id).lower()
         if not needle:
             return False
         with _lock:
@@ -323,9 +329,10 @@ class LifeGoalStore:
         g = self.find(title)
         if g is None or g.status not in OPEN_STATUSES:
             return None
-        g.next_action = (action or "").strip()[:280]
-        if next_by.strip():
-            g.next_by = next_by.strip()[:40]
+        g.next_action = coerce_text_arg(action)[:280]
+        next_by = coerce_text_arg(next_by)
+        if next_by:
+            g.next_by = next_by[:40]
         g.status = "active"
         g.updated_at = _now()
         with _lock:
@@ -469,7 +476,7 @@ _LIFE_GOAL_STATE_RE = re.compile(
 
 def looks_like_life_goal_statement(message: str) -> bool:
     """True when the user is stating a durable life aim, not coding work."""
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg or "\n" in msg or len(msg) > 200:
         return False
     try:

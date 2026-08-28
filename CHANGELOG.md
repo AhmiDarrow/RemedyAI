@@ -4,6 +4,291 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed — companion_taste joins list fact
+
+- `companion_taste` still did `(fact or "").strip()` / `fact.strip()` so a
+  model sending `fact=["soft spacing"]` died before `remember_taste` could
+  coerce. Wrapper now joins via `coerce_text_arg`; empty after coerce still
+  shows existing taste (no invented fact). `clipboard_write` text and
+  `companion_design` goal join the same way.
+
+### Fixed — goal_add and memory tools join list args
+
+- `goal_add(title=["Ship it"])` died with `'list' object has no attribute
+  'strip'` before `LifeGoalStore` could coerce. Same family in
+  `goal_set_next` title/action, `subgoal_open` title, `memory_search`
+  query, and `memory_save` content/title. Wrappers now join via
+  `coerce_text_arg`; empty after coerce still refuses like an empty
+  string (no invented titles).
+
+### Fixed — plan create joins list title/goal
+
+- `PlanStore.create` still did `(title or "Untitled plan").strip()` so a model
+  sending `title=["Ship it"]` died with `'list' object has no attribute
+  'strip'` (same class as `todo_write` / `mission_start`). Title and goal now
+  join via `coerce_text_arg`; empty after coerce still falls back to
+  "Untitled plan". `drive_build` / the `build_drive` tool do the same for
+  `goal=`. `plan_save` stores real prose, not a Python list repr.
+
+### Fixed — computer_scroll locates the pane by visible text
+
+- Guidance already said `computer_scroll` is addressed by **label** (text/ref)
+  like click / press_hold / drag — but the tool only accepted x/y/dy, so a
+  named pane or list always fell through to foreground-window center (often
+  the wrong surface). Desktop now resolves `text=` / `ref=` via last snapshot
+  / UIA then OCR (offscreen controls scroll-into-view first), then wheels at
+  that point. Bare coords and dy still work. Browser rail resolves labels to
+  coords before enqueue (no desktop rebuild). `approach_of` records a real
+  text/ref/coords approach for scroll.
+
+### Fixed - computer_drag locates endpoints by visible text
+
+- Guidance already said `computer_drag` is addressed by **label** (text/ref)
+  like click / press_hold, and `approach_of` learned a text approach — but the
+  tool only accepted x/y/x2/y2, so a slider or kanban move by visible names
+  always forced a screenshot. Desktop now resolves `from_text=` / `to_text=`
+  (and `from_ref=` / `to_ref=`, plus `text=` / `ref=` aliases for the start)
+  via last snapshot / UIA then OCR, same family as `computer_click`. Bare
+  coords still work for canvas / pixel targets. Browser rail resolves labels
+  to coords before enqueue (no desktop rebuild).
+
+### Fixed — native press-hold locates the control by visible text
+
+- `computer_press_hold(text="Hold to confirm")` already worked in the in-app
+  rail (host JS locates by label). On native desktop it ignored the label
+  and failed with "needs x/y or a ref", even though the tool schema
+  advertises `text=` as the locator. Desktop now resolves the control the
+  same way `computer_click` does: last snapshot / UIA tree, then OCR word
+  boxes, then press-and-hold at that point. Offscreen controls scroll into
+  view first. Bare x/y and snapshot refs still work.
+
+### Fixed — remaining owner/model list.strip crashes
+
+- Same-family `(message or "").strip()` still died when a model or API sent
+  a JSON array (`["keep going"]`). Distill, ledger continue, taste, intent
+  learn, local harness, open-work, ReAct stream pairing (`tool_call_id`),
+  attachments, life goals/drive, L0, and session `req.message` now join via
+  `coerce_text_arg`.
+
+### Fixed — ReAct policy list messages no longer crash
+
+- `looks_like_away_request` / `looks_like_companion_request` in the
+  preamble still did `(message or "").strip()`; `suppress` hid the
+  `'list' object has no attribute 'strip'` crash so the away/companion
+  block never injected. Same-family detectors in `react_policy`,
+  `build_engine`, `intent_policy`, and `fast_path` now join via
+  `coerce_text_arg`.
+
+### Fixed — type/type_text relocates by visible field text
+
+- Host `type` / `type_text` used to write only the snapshot ref or
+  `activeElement`. `query=` / `label=` / `hint=` now runs the same
+  `__rmdyPick` family (exact-token `__rmdyScore` — `add` still must not
+  match `address`) over editable fields and associated `<label>`s, then
+  `__rmdyFieldOf` focuses the input. Stale ref + query relocates in one
+  pass. Empty ref+query still uses the focused node.
+- Desktop rebuild needed before the host JS is live.
+
+### Fixed — browse intent list messages no longer crash
+
+- `parse_browse_navigate_url(["https://mail.google.com"])` died with
+  `'list' object has no attribute 'strip'` after `looks_like_url` started
+  accepting arrays. Message/url/alias entry points now join via
+  `coerce_text_arg` so a list kick still opens the rail.
+
+### Fixed — first live GET /api/models no longer stacks TCP + a second RTT
+
+- After the 5:52pm CT serve restart a Settings tick logged **SLOW GET
+  /api/models 780ms** next to the RMB `not listening` probe (170ms). Two
+  chrome callers (session + Settings) each ran `asyncio.open_connection`
+  against a firewalled 8787; Windows Proactor + dropped SYN froze the loop
+  so the second wait landed ~780ms. Local listen is now the same 150ms
+  socket precheck as Ollama, single-flight, cached 3s, and runs in a
+  worker so the loop stays free. xAI `/models` and `/language-models` start
+  together (one RTT, same ids + aliases). Listing is not filtered.
+
+### Fixed — computer click/url list args no longer crash
+
+- Models send JSON arrays for `text`/`url` (`["Sign in"]`). Registry coerce
+  is skipped on direct handler/router calls, so `(text or "").strip()` died
+  with `'list' object has no attribute 'strip'`. `computer_click`,
+  `computer_press_hold`, sibling locators, and `looks_like_url` now join
+  arrays via `coerce_text_arg`.
+
+### Fixed — hive pulse no longer steals the owner tab
+
+- A daughter ReAct (`ensure_partner_state`, `compress_context`, session
+  brief / work roots) wrote `BasicRuntime`'s process-live continuity even
+  inside `begin_turn`. After the mother turn ended, live PartnerState /
+  brief / roots stayed `hive_*`, so the next owner action mixed tabs.
+  Setters now update only the turn ContextVar while a turn is active.
+
+### Fixed — Matrix and Mattermost dual-poll after serve restart
+
+- Telegram/Discord/Slack held `MessengerPollLock`; Matrix `/sync` and
+  Mattermost WebSocket did not. Two serves raced the since cursor (dropped
+  or duplicated room events). They now take the same exclusive lock, retry
+  every 20s if locked out, and heartbeat while connected.
+
+
+### Added — Linux computer-use clickable candidates
+
+- `detect_ui_candidates` on Linux no longer returns an empty list. It walks
+  AT-SPI for named buttons/fields, then OCR word boxes (tesseract), then the
+  same pixel-edge Set-of-Mark fallback Windows already uses, so a marked
+  screenshot can reach GTK/Qt apps and games. Tests fake AT-SPI/OCR so no
+  live Linux session is required.
+
+### Fixed — chrome connected poll no longer walks Downloads
+
+- `GET /api/providers/connected` was 1473ms after the 5:52pm CT serve restart
+  (presence 1232ms in the same tick). RMB GGUF discovery globbed every file
+  in the user's Downloads folder (5s cache, pathlib listdir). Dump dirs now
+  abort after 50ms and the list is cached 60s, so Settings stays snappy.
+  House model dirs still scan fully.
+
+### Fixed — OCR click-text hits the word, not the whole bar
+
+- A merged OCR line (`Reply Retweet Share`) is also scored as each word, so
+  click-by-text **Reply** lands on Reply (and **What's happening?** still
+  lands on the phrase). Floor 40 matches the Rust host `click_text` scorer.
+- Host `__rmdyScore` tokens are exact (`add` no longer hits `address` via
+  `includes`). Query substring boosts need 3+ characters.
+
+
+### Fixed — list/tuple goals and steps are real text
+
+- `mission_start(goal=["Ship it"], steps=["a", "b"])` used to store
+  `"['Ship it']"` or die with `'list' object has no attribute 'strip'`
+  inside `create_mission` (same Aug 21 errors.log family as todo_write).
+  Arrays and tuples now join into prose; nested step titles flatten.
+- `todo_write` accepts a tuple of items the same way it accepts a list.
+  `apply_patch` / `build_parallel` / `build_tdd` join list args instead
+  of calling `.strip()` on a list.
+
+### Fixed — list verify_command actually runs the tests
+
+- `mission_start(verify_command=["pytest -q"])` crashed with `'list' object
+  has no attribute 'strip'` (live errors.log Aug 21) or, after registry
+  coercion, stored `["pytest -q"]` as the shell command so verify never ran.
+  Arrays, argv tokens, and JSON-array strings now become a real command.
+  Whitespace `run_auto_verify(command="   ")` falls back to the stored oracle
+  instead of reporting oracle_missing.
+
+### Fixed — OCR click-by-text reads on-screen phrases
+
+- Word boxes from Windows.Media.Ocr / tesseract are grouped into labels
+  (`What's happening?`, `Add a GIF`, `Sign in`) so a DOM-miss click lands
+  on the composer, not a 1-word fragment. Action verbs score as buttons;
+  composer placeholders score as textboxes.
+- HiDPI rail captures divide by devicePixelRatio when clicking those boxes
+  (was hardcoded `scale=1`). A missing last screenshot recaptures the rail
+  instead of giving up.
+- Press-and-hold-by-text uses the same token scorer as click-text (floor 40,
+  stopwords, Post-is-a-button, app-banner downrank) instead of a substring
+  match that could not see a textarea.
+
+### Fixed — sandbox Stop no longer leaks a pending abort waiter
+
+- Shell timeout / owner Stop cancelled `_wait_abort` without awaiting it.
+  Windows then logged `Task was destroyed but it is pending` (errors.log
+  2026-08-27 17:04). Every waiter is now cancelled *and* awaited.
+
+### Fixed — chrome poll DEBUG also covers app/voice/rmb
+
+- `/api/app/command`, `/api/voice/status`, and `/api/rmb/hf/progress` were
+  still writing a DEBUG line every few hundred ms next to jobs/next.
+
+### Fixed — voice pack install bootstraps pip
+
+- First-run speaking died with `No module named pip` on uv venvs (no
+  `--seed`) and stripped runtimes that ship `ensurepip` but not pip.
+  Pack install now bootstraps pip (ensurepip, then uv, then get-pip.py)
+  and still finds uv off PATH next to Python, so she gets a real local
+  voice instead of falling through to OS speech forever.
+
+### Fixed — Telegram poller comes back after serve restart
+
+- A leftover `telegram_getupdates.lock` whose PID still looked live (Windows
+  STILL_ACTIVE / PID reuse) used to refuse the new serve without trying the
+  OS exclusive lock, so Telegram stayed silent. Flock/msvcrt is now the source
+  of truth: free lock → reclaim; busy lock → stay out (no dual pollers).
+- The persisted getUpdates offset is left alone on reclaim, so unread updates
+  are not dropped.
+- After we own the lock, HTTP 409 retries in ~2s for 90s (takeover of a dying
+  previous poller) instead of lock-stepping 25s; lock retry starts at 2s
+  instead of waiting 20s.
+
+### Fixed — a dropped Grok stream keeps the turn
+
+- A provider wait that dies as `CancelledError` (WinError 64 / mid-JSON
+  RST on xAI) no longer paints **Generation stopped** or dumps **continue**
+  into a new job. The same turn retries on a JSON POST, like a
+  `ClientPayloadError`. Owner Stop still stops.
+
+### Fixed — chrome polls no longer wait 1.5s
+
+- `GET /api/providers/connected` was probing Ollama with a 1.5s urllib
+  timeout on the asyncio loop. Windows often drops the SYN when nothing
+  is listening, so Settings, presence, and even CORS OPTIONS sat behind
+  that wait. Detect now fail-fast TCP-checks local hosts, caches for 3s,
+  and the connected/presence handlers run in a worker thread. Presence
+  GET reads the registry without rewriting it.
+
+### Fixed — dual computer-host poll spam
+
+- SPA no longer POSTs `/api/computer/host/hello` on every 120ms `jobs/next`
+  tick. Hello is bounds/session only (~4s). `jobs/next` already marks the
+  poller (`host_connected`). Idle claim escalates 800ms → 2s after a quiet streak; a real job stays
+  at 120ms.
+- Rust poller drops its redundant hello (no bounds; `jobs/next` is the
+  heartbeat) and sleeps 50ms after work, then 150ms -> 800ms -> 2s when
+  idle (matches SPA). Rail stays driveable; capability is unchanged.
+- Empty claim_next scans set an idle-empty flag so later host polls skip
+  glob+JSON reads until the next enqueue (filtered pollers cannot poison it
+  by skipping sibling actions).
+- Fast quiet host polls (<100ms, 2xx) no longer write DEBUG access lines into
+  debug.log every tick — long Grok turns were filling the 8MB ring.
+
+### Fixed — Linux vision install keeps its .so links
+
+- Official llama.cpp Ubuntu tarballs ship relative versioned library
+  symlinks (`libllama.so.0 -> libllama.so.0.0.N`). Extracting them no
+  longer fails with "Tar symlink blocked", so local eyes can install
+  on Linux first run. Absolute / escaping links stay refused.
+
+### Fixed — first-run actually talks
+
+- A new home no longer looks like Demo in Settings while the turn hits
+  OpenAI with dummy key `unused` (401, then quarantine). Guest llm7 is
+  used so she can speak before any paid key is set.
+
+### Fixed — leftover jobs don't steal her hands
+
+- Dream no longer turns "Stay with: Continue…" residue into life pledges,
+  and soul missions no longer arm those as real jobs. Time Crystal already
+  refused them; the muscle that starts work now does too.
+
+### Changed — mid-turn talk steers
+
+- Enter (and Send) while she's working folds into the live turn. No stop,
+  no restart, no waiting in line. Ctrl+Enter still interrupts and sends
+  now. Alt+Enter still queues after. Attachments still start a new turn
+  (they queue after unless you interrupt).
+
+### Fixed — RMB stays off until you start it
+
+- A leftover Settings default of `llm_provider=rmb` no longer starts a
+  watchdog, skips SmolVLM, or logs "Local model auto-started" while the
+  host on :8787 is closed. RMB runs when you Start it, turn on auto-start,
+  or send a turn that actually uses it.
+
+### Fixed — Grok work pack still has hands
+
+- The live operate cap (194 schemas → 32) keeps `computer_snapshot` /
+  `click` / `type` / `act` and `web_fetch`, not only `computer_navigate`.
+  A proceed-until-finished socials turn can still see the rail.
+
 ### Fixed — long desktop sessions keep building
 
 - A follow-up like "ok on to assets" or "needs to work for Firefox and Chrome"

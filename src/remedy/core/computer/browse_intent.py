@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from urllib.parse import quote, quote_plus
 
+from remedy.core.build_oracle import coerce_text_arg
 from remedy.core.computer.router import looks_like_url, normalize_url
 
 # Common nicknames → full https URL (lowercase keys).
@@ -151,7 +152,7 @@ _INTERACTION_RE = re.compile(
 
 def resolve_site_alias(name: str) -> str | None:
     """Map a nickname or bare host to https URL, or None if unknown."""
-    raw = (name or "").strip().strip("\"'`")
+    raw = coerce_text_arg(name).strip("\"'`")
     if not raw:
         return None
     # Never treat emails / multi-clause phrases as a site URL
@@ -176,14 +177,14 @@ def resolve_site_alias(name: str) -> str | None:
 
 
 def _clean_target(target: str) -> str:
-    t = (target or "").strip().strip("\"'`")
+    t = coerce_text_arg(target).strip("\"'`")
     t = _STRIP_FILLER_RE.sub(" ", t)
     t = re.sub(r"\s+", " ", t).strip(" .,!")
     return t
 
 
 def _search_url(site: str, query: str) -> str | None:
-    site = (site or "").strip().lower()
+    site = coerce_text_arg(site).lower()
     q = _clean_target(query)
     if not q or len(q) > 120:
         return None
@@ -227,7 +228,7 @@ _RETAIL_SEARCH: dict[str, str] = {
 
 
 def _retail_search_url(site: str, q: str) -> str | None:
-    tpl = _RETAIL_SEARCH.get((site or "").strip().lower())
+    tpl = _RETAIL_SEARCH.get(coerce_text_arg(site).lower())
     if not tpl or not q:
         return None
     return tpl.format(q=quote_plus(q))
@@ -280,7 +281,7 @@ def _retail_search_matcher() -> re.Pattern[str]:
 
 def parse_retail_search(message: str) -> str | None:
     """'<retailer> <verb> <product>' → the retailer's direct results URL."""
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg or len(msg) > 280:
         return None
     m = _retail_search_matcher().match(msg)
@@ -291,7 +292,7 @@ def parse_retail_search(message: str) -> str | None:
 
 def short_site_label(url: str) -> str:
     """Human label for a brief confirmation (Gmail, Google, Wikipedia, …)."""
-    u = (url or "").strip()
+    u = coerce_text_arg(url)
     low = u.lower()
     if "google.com/search" in low:
         from urllib.parse import parse_qs, urlparse
@@ -320,27 +321,27 @@ def short_site_label(url: str) -> str:
     try:
         from urllib.parse import urlparse
 
-        host = (urlparse(url).hostname or "").removeprefix("www.")
+        host = (urlparse(u).hostname or "").removeprefix("www.")
         if host:
             return host
     except Exception:
         pass
-    return url or "page"
+    return u or "page"
 
 
 def is_clear_goals_intent(message: str) -> bool:
     """True when the user only wants goals cleared — no web / history replay."""
-    return bool(_CLEAR_GOALS_RE.match((message or "").strip()))
+    return bool(_CLEAR_GOALS_RE.match(coerce_text_arg(message)))
 
 
 def wants_page_interaction(message: str) -> bool:
     """True when the user wants to act on the page after open (login, type, click…)."""
-    return bool(_INTERACTION_RE.search(message or ""))
+    return bool(_INTERACTION_RE.search(coerce_text_arg(message)))
 
 
 def is_open_only_browse(message: str) -> bool:
     """True when the request is only open/show a URL — safe to short-circuit after navigate."""
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg:
         return False
     if wants_page_interaction(msg):
@@ -352,7 +353,7 @@ def is_open_only_browse(message: str) -> bool:
 
 def is_pure_action_kick(message: str) -> bool:
     """Short latest-message-only kicks (don't resume older multi-step work)."""
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg or len(msg) > 200:
         return False
     if is_clear_goals_intent(msg):
@@ -394,11 +395,11 @@ def parse_browse_navigate_url(message: str) -> str | None:
     For multi-step messages (login/type after open), still returns the open URL so
     the agent can pre-navigate; short-circuit after navigate is gated separately.
     """
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg or len(msg) > 280:
         return None
     # Full URL alone
-    if looks_like_url(msg) and " " not in msg.strip() and "@" not in msg:
+    if looks_like_url(msg) and " " not in msg and "@" not in msg:
         return normalize_url(msg)
 
     # Retail product search first — "go to walmart and find milk" lands on

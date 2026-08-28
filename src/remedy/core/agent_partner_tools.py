@@ -5,6 +5,8 @@ from __future__ import annotations
 from contextlib import suppress
 from typing import Any
 
+from remedy.core.build_oracle import coerce_text_arg
+
 
 def register_partner_state_tools(runtime: Any) -> None:
     """Register Partner State Machine tools on the runtime registry."""
@@ -16,7 +18,7 @@ def register_partner_state_tools(runtime: Any) -> None:
 
     async def subgoal_open(title: str = "", notes: str = "") -> str:
         st = _st()
-        t = (title or "").strip()
+        t = coerce_text_arg(title)
         if not t:
             return "Provide a short subgoal title (what you are working on now)."
         sg = st.open_subgoal(t, notes=notes or "")

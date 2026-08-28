@@ -110,6 +110,9 @@ class TestCustomEndpointRoundTrip:
 
 class TestOllamaDetect:
     def test_detect_unavailable_is_safe(self):
+        from remedy.interfaces.model_discovery import invalidate_ollama_detect_cache
+
+        invalidate_ollama_detect_cache()
         # Force network failure with bogus host
         result = detect_ollama(base_url="http://127.0.0.1:9/v1", timeout=0.2)
         assert result["available"] is False
@@ -118,6 +121,9 @@ class TestOllamaDetect:
     def test_detect_success_mocked(self):
         import json
 
+        from remedy.interfaces import model_discovery as md
+
+        md.invalidate_ollama_detect_cache()
         payload = json.dumps({"models": [{"name": "llama3.2:latest"}, {"name": "qwen2.5"}]}).encode()
 
         class FakeResp:
@@ -130,11 +136,55 @@ class TestOllamaDetect:
             def read(self):
                 return payload
 
-        with patch("urllib.request.urlopen", return_value=FakeResp()):
-            result = detect_ollama()
+        with patch.object(md, "_PRECHECK_LOCAL_LISTEN", False):
+            with patch("urllib.request.urlopen", return_value=FakeResp()):
+                result = detect_ollama()
         assert result["available"] is True
         assert "llama3.2" in result["models"]
         assert "qwen2.5" in result["models"]
+
+    def test_closed_local_port_skips_http_and_is_fast(self):
+        import time
+
+        from remedy.interfaces import model_discovery as md
+
+        md.invalidate_ollama_detect_cache()
+        with patch("urllib.request.urlopen") as uo:
+            t0 = time.perf_counter()
+            result = detect_ollama(base_url="http://127.0.0.1:9/v1", timeout=1.5)
+            ms = (time.perf_counter() - t0) * 1000
+        assert result["available"] is False
+        uo.assert_not_called()
+        assert ms < 500, f"closed-port detect took {ms:.0f}ms (wanted fail-fast, not 1.5s timeout)"
+
+    def test_detect_cache_hit_and_force(self):
+        import json
+
+        from remedy.interfaces import model_discovery as md
+
+        md.invalidate_ollama_detect_cache()
+        payload = json.dumps({"models": [{"name": "llama3.2:latest"}]}).encode()
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return payload
+
+        with patch.object(md, "_PRECHECK_LOCAL_LISTEN", False):
+            with patch("urllib.request.urlopen", return_value=FakeResp()) as uo:
+                a = detect_ollama(base_url="http://127.0.0.1:11434/v1")
+                b = detect_ollama(base_url="http://127.0.0.1:11434/v1")
+                assert a["available"] is True and b["available"] is True
+                assert a["models"] == b["models"] == ["llama3.2"]
+                assert uo.call_count == 1
+                c = detect_ollama(base_url="http://127.0.0.1:11434/v1", force=True)
+                assert c["available"] is True
+                assert uo.call_count == 2
 
 
 class TestCliAuth:

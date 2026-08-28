@@ -189,6 +189,9 @@ def test_is_chat_only_message() -> None:
     assert is_chat_only_message("it's ok, continue") is False
     assert message_wants_tools("Hi keep going") is True
     assert message_wants_tools("Hi kep going") is False
+    assert is_chat_only_message(["thanks"]) is True
+    assert is_chat_only_message(["Hi keep going"]) is False
+    assert message_wants_tools(["Hi keep going"]) is True
 
 
 def test_runtime_greeting_prefix_does_not_strip_continue() -> None:

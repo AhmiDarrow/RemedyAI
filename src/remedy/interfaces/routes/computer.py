@@ -85,6 +85,8 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
         Does **not** alone mark the rail driveable — host_connected requires
         jobs/next or ui/command polling (see host_bridge.host_connected).
+        Clients must not POST this on the jobs/next hot path; bounds/session
+        every few seconds is enough. jobs/next already carries session_id.
         """
         b = _bridge()
         # Soft touch only — real poller marks via jobs/ui routes.

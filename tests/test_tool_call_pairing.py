@@ -392,3 +392,23 @@ async def test_execute_tool_calls_exception_uses_matching_tool_call_id():
     assert len(tool_msgs) == 1
     assert tool_msgs[0]["tool_call_id"] == "call_x"
     assert "kaboom" in tool_msgs[0]["content"] or "TOOL_EXCEPTION" in tool_msgs[0]["content"]
+
+
+def test_nonstring_tool_call_id_strip_in_pairing() -> None:
+    raw = [
+        {
+            "id": ["call_a"],
+            "type": "function",
+            "function": {"name": ["list_dir"], "arguments": "{}"},
+        }
+    ]
+    out = normalize_tool_calls(raw)
+    assert out[0]["id"] == "call_a"
+    assert out[0]["function"]["name"] == "list_dir"
+    messages = [
+        {"role": "assistant", "content": None, "tool_calls": raw},
+        {"role": "tool", "tool_call_id": ["call_a"], "content": "ok"},
+    ]
+    fixed = ensure_tool_call_pairings(messages)
+    ids = [m["tool_call_id"] for m in fixed if m.get("role") == "tool"]
+    assert ids == ["call_a"]

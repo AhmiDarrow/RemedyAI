@@ -17,6 +17,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from remedy.core.build_oracle import coerce_text_arg
+
 # The ledger is written from the per-turn path AND the vigil thread — serialize
 # read-modify-write so a concurrent save can't drop an appended hop or corrupt
 # the file via a shared temp name.
@@ -535,7 +537,7 @@ _CONTINUE_RE = re.compile(
 
 def looks_like_continue(message: str) -> bool:
     """A bare continue signal (not a fresh, unrelated request)."""
-    m = (message or "").strip()
+    m = coerce_text_arg(message)
     return not m or bool(_CONTINUE_RE.match(m))
 
 

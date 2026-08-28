@@ -27,7 +27,10 @@ import asyncio
 import logging
 import os
 import re
+import socket
+import threading
 import time
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -70,6 +73,17 @@ _NON_CHAT_SUBSTR = (
 _MAX_OLLAMA_SHOW = 24
 _DEFAULT_TIMEOUT = 4.5
 _CONNECT_TIMEOUT = 2.5
+# Skip the 2.5s aiohttp connect wait when 127.0.0.1:8787 is closed.
+# Tests that fake HTTP against localhost disable this.
+_PRECHECK_LOCAL_LISTEN = True
+_LOCAL_LISTEN_TIMEOUT_S = 0.15
+
+# Chrome polls GET /api/providers/connected often. A 1.5s urllib timeout on a
+# firewalled Windows loopback (SYN dropped, not RST) froze the asyncio loop
+# and made settings/presence look just as slow. Fail-fast TCP + short TTL.
+_OLLAMA_DETECT_TTL_S = 3.0
+_ollama_detect_cache: dict[str, Any] = {"key": None, "ts": 0.0, "value": None}
+_ollama_detect_lock = threading.Lock()
 
 # provider -> {model id -> row} for ids a live endpoint actually returned.
 _LIVE_KNOWN: dict[str, dict[str, dict[str, Any]]] = {}
@@ -117,6 +131,93 @@ def _root(base_url: str) -> str:
         else:
             break
     return u
+
+
+def _parse_host_port(base_url: str) -> tuple[str, int] | None:
+    """host, port for a URL, or None if unparseable."""
+    try:
+        parsed = urlparse(base_url if "://" in base_url else f"http://{base_url}")
+        host = parsed.hostname or "127.0.0.1"
+        if parsed.port:
+            port = int(parsed.port)
+        else:
+            port = 443 if (parsed.scheme or "").lower() == "https" else 80
+        return host, port
+    except Exception:
+        return None
+
+
+# host:port -> (monotonic_ts, listening). Shared by async discovery and the
+# sync Ollama detector so a closed 8787 is not probed twice in one chrome tick.
+_LISTEN_TTL_S = 3.0
+_listen_cache: dict[str, tuple[float, bool]] = {}
+_listen_lock = threading.Lock()
+_listen_inflight: dict[str, threading.Event] = {}
+
+
+def _listen_cache_key(base_url: str) -> str | None:
+    parsed = _parse_host_port(base_url)
+    if parsed is None:
+        return None
+    host, port = parsed
+    return f"{host}:{port}"
+
+
+def _connect_local(host: str, port: int, timeout_s: float) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout_s):
+            return True
+    except OSError:
+        return False
+
+
+def _local_host_listening_sync(
+    base_url: str, timeout_s: float = _LOCAL_LISTEN_TIMEOUT_S
+) -> bool:
+    """True when a TCP connect to the local host:port succeeds quickly.
+
+    Single-flight + 3s cache so concurrent GET /api/models (session + Settings)
+    share one 150ms fail-fast instead of stacking asyncio.open_connection waits
+    on the event loop (Windows Proactor + dropped SYN was the 780ms SLOW GET).
+    """
+    key = _listen_cache_key(base_url)
+    if key is None:
+        return True
+    now = time.monotonic()
+    with _listen_lock:
+        hit = _listen_cache.get(key)
+        if hit is not None and (now - hit[0]) < _LISTEN_TTL_S:
+            return hit[1]
+        waiter = _listen_inflight.get(key)
+        leader = waiter is None
+        if leader:
+            waiter = threading.Event()
+            _listen_inflight[key] = waiter
+    if not leader:
+        waiter.wait(timeout_s + 0.05)
+        with _listen_lock:
+            hit = _listen_cache.get(key)
+            if hit is not None:
+                return hit[1]
+        return False
+    try:
+        host, port = key.rsplit(":", 1)
+        ok = _connect_local(host, int(port), timeout_s)
+        with _listen_lock:
+            _listen_cache[key] = (time.monotonic(), ok)
+        return ok
+    finally:
+        with _listen_lock:
+            _listen_inflight.pop(key, None)
+        waiter.set()
+
+
+async def _local_host_listening(base_url: str, timeout_s: float = _LOCAL_LISTEN_TIMEOUT_S) -> bool:
+    """True when a TCP connect to the local host:port succeeds quickly."""
+    # socket.create_connection in a worker — not asyncio.open_connection.
+    # Proactor ConnectEx + wait_for on a firewalled loopback can outlive the
+    # 150ms budget and freeze sibling /api/models on the same loop.
+    return await asyncio.to_thread(_local_host_listening_sync, base_url, timeout_s)
 
 
 def _is_local_url(url: str) -> bool:
@@ -663,11 +764,8 @@ async def _enrich_llamacpp(
     res.flavour = "llamacpp"
 
 
-async def _enrich_xai(
-    session: aiohttp.ClientSession, base_url: str, api_key: str, res: DiscoveryResult, verify_ssl: bool
-) -> None:
-    url = base_url.rstrip("/") + "/language-models"
-    _s, body, _e = await _get_json(session, url, headers=_bearer(api_key), verify_ssl=verify_ssl)
+def _apply_xai_language_models(res: DiscoveryResult, body: Any) -> None:
+    """Merge xAI /language-models into an OpenAI-style listing. Same rows, plus aliases."""
     if not isinstance(body, dict) or not isinstance(body.get("models"), list):
         return
     by_id = {r["id"]: r for r in res.models}
@@ -698,6 +796,14 @@ async def _enrich_xai(
             if a and a not in by_id:
                 res.models.append(_row(a, chat=cur.get("chat"), vision=cur.get("vision")))
                 by_id[a] = res.models[-1]
+
+
+async def _enrich_xai(
+    session: aiohttp.ClientSession, base_url: str, api_key: str, res: DiscoveryResult, verify_ssl: bool
+) -> None:
+    url = base_url.rstrip("/") + "/language-models"
+    _s, body, _e = await _get_json(session, url, headers=_bearer(api_key), verify_ssl=verify_ssl)
+    _apply_xai_language_models(res, body)
 
 
 # --------------------------------------------------------------------------
@@ -738,42 +844,77 @@ async def discover_models(
         return DiscoveryResult(attempted=False, error="no base URL")
     if verify_ssl is None:
         verify_ssl = not _is_local_url(base_url)
+    if (
+        _PRECHECK_LOCAL_LISTEN
+        and _is_local_url(base_url)
+        and not await _local_host_listening(base_url)
+    ):
+        return DiscoveryResult(
+            attempted=True,
+            url=base_url,
+            error="not listening",
+        )
     order = _flavour_order(provider_hint, base_url)
     hint = (provider_hint or "").strip().lower()
     last: DiscoveryResult | None = None
     client_timeout = aiohttp.ClientTimeout(total=timeout, connect=min(_CONNECT_TIMEOUT, timeout))
     try:
         async with aiohttp.ClientSession(timeout=client_timeout) as session:
-            for flavour in order:
-                if flavour == "ollama":
-                    res = await _probe_ollama(session, base_url, api_key, verify_ssl)
-                elif flavour == "anthropic":
-                    res = await _probe_anthropic(session, base_url, api_key, verify_ssl)
-                elif flavour == "gemini":
-                    res = await _probe_gemini(session, base_url, api_key, verify_ssl)
-                else:
-                    res = await _probe_openai(session, base_url, api_key, verify_ssl)
-                if res.ok and not res.models:
-                    # A listing with nothing in it is not a usable answer —
-                    # short cache TTL and a message the UI can show.
-                    res.ok = False
-                    res.error = res.error or "endpoint listed no models"
-                if res.ok:
-                    if flavour == "openai":
-                        await _enrich_openai_host(session, base_url, api_key, hint, res, verify_ssl)
-                    # Google: the OpenAI bridge lists ids only; native listing
-                    # adds token limits + generation methods when reachable.
-                    if flavour == "openai" and "gemini" in order:
-                        native = await _probe_gemini(session, base_url, api_key, verify_ssl)
-                        if native.ok and native.models:
-                            _merge_rows(res, native.models)
-                    _remember(hint, res)
-                    return res
-                # Auth failures are authoritative — do not try other flavours
-                # with the same key and mask the real reason.
-                if res.status in (401, 403) and last is None and len(order) > 1 and hint:
-                    return res
-                last = res if (last is None or res.status is not None) else last
+            # First live xAI listing was two RTTs (/models then /language-models).
+            # Fire both; merge aliases/modalities without dropping ids.
+            xai_lang_task: asyncio.Task[tuple[int | None, Any, str | None]] | None = None
+            if hint == "xai":
+                xai_lang_task = asyncio.create_task(
+                    _get_json(
+                        session,
+                        base_url.rstrip("/") + "/language-models",
+                        headers=_bearer(api_key),
+                        verify_ssl=verify_ssl,
+                    )
+                )
+            try:
+                for flavour in order:
+                    if flavour == "ollama":
+                        res = await _probe_ollama(session, base_url, api_key, verify_ssl)
+                    elif flavour == "anthropic":
+                        res = await _probe_anthropic(session, base_url, api_key, verify_ssl)
+                    elif flavour == "gemini":
+                        res = await _probe_gemini(session, base_url, api_key, verify_ssl)
+                    else:
+                        res = await _probe_openai(session, base_url, api_key, verify_ssl)
+                    if res.ok and not res.models:
+                        # A listing with nothing in it is not a usable answer —
+                        # short cache TTL and a message the UI can show.
+                        res.ok = False
+                        res.error = res.error or "endpoint listed no models"
+                    if res.ok:
+                        if flavour == "openai":
+                            if xai_lang_task is not None:
+                                _s, body, _e = await xai_lang_task
+                                xai_lang_task = None
+                                _apply_xai_language_models(res, body)
+                            else:
+                                await _enrich_openai_host(
+                                    session, base_url, api_key, hint, res, verify_ssl
+                                )
+                        # Google: the OpenAI bridge lists ids only; native listing
+                        # adds token limits + generation methods when reachable.
+                        if flavour == "openai" and "gemini" in order:
+                            native = await _probe_gemini(session, base_url, api_key, verify_ssl)
+                            if native.ok and native.models:
+                                _merge_rows(res, native.models)
+                        _remember(hint, res)
+                        return res
+                    # Auth failures are authoritative — do not try other flavours
+                    # with the same key and mask the real reason.
+                    if res.status in (401, 403) and last is None and len(order) > 1 and hint:
+                        return res
+                    last = res if (last is None or res.status is not None) else last
+            finally:
+                if xai_lang_task is not None:
+                    xai_lang_task.cancel()
+                    with suppress(asyncio.CancelledError, Exception):
+                        await xai_lang_task
     except Exception as exc:  # pragma: no cover - session construction
         return DiscoveryResult(attempted=True, url=base_url, error=f"{type(exc).__name__}: {exc}")
     return last or DiscoveryResult(attempted=True, url=base_url, error="no probe ran")
@@ -888,10 +1029,29 @@ def choose_default(
     return ids[0] if ids else None
 
 
-def detect_ollama_sync(base_url: str | None = None, timeout: float = 1.5) -> dict[str, Any]:
+def invalidate_ollama_detect_cache() -> None:
+    """Drop the short-lived Ollama probe cache (tests / explicit re-detect)."""
+    with _ollama_detect_lock:
+        _ollama_detect_cache["key"] = None
+        _ollama_detect_cache["ts"] = 0.0
+        _ollama_detect_cache["value"] = None
+    with _listen_lock:
+        _listen_cache.clear()
+        _listen_inflight.clear()
+
+
+def detect_ollama_sync(
+    base_url: str | None = None,
+    timeout: float = 1.5,
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
     """Synchronous Ollama detection (tags only) for CLI / bootstrap paths.
 
     Resolution: explicit arg → ``OLLAMA_HOST`` → catalog default.
+    Local hosts get a 150ms TCP precheck so a down daemon cannot burn the
+    caller's 1.5s urllib timeout (Windows firewall often drops the SYN).
+    Results are cached for a few seconds so desktop chrome polls stay cheap.
     """
     import json
     import urllib.error
@@ -901,6 +1061,29 @@ def detect_ollama_sync(base_url: str | None = None, timeout: float = 1.5) -> dic
 
     url = (base_url or ollama_base_url_from_env() or PROVIDER_CATALOG["ollama"]["base_url"] or "").rstrip("/")
     tags_url = _root(url) + "/api/tags"
+    now = time.monotonic()
+    if not force:
+        with _ollama_detect_lock:
+            cached = _ollama_detect_cache["value"]
+            if (
+                _ollama_detect_cache["key"] == url
+                and isinstance(cached, dict)
+                and (now - float(_ollama_detect_cache["ts"] or 0)) < _OLLAMA_DETECT_TTL_S
+            ):
+                return dict(cached)
+
+    def _store(result: dict[str, Any]) -> dict[str, Any]:
+        with _ollama_detect_lock:
+            _ollama_detect_cache["key"] = url
+            _ollama_detect_cache["ts"] = time.monotonic()
+            _ollama_detect_cache["value"] = dict(result)
+        return dict(result)
+
+    if _PRECHECK_LOCAL_LISTEN and url and _is_local_url(url) and not _local_host_listening_sync(url):
+        return _store(
+            {"available": False, "base_url": url, "models": [], "tags_url": tags_url}
+        )
+
     models: list[str] = []
     try:
         req = urllib.request.Request(
@@ -916,6 +1099,6 @@ def detect_ollama_sync(base_url: str | None = None, timeout: float = 1.5) -> dic
                 short = name.removesuffix(":latest")
                 if short not in models:
                     models.append(short)
-        return {"available": True, "base_url": url, "models": models, "tags_url": tags_url}
+        return _store({"available": True, "base_url": url, "models": models, "tags_url": tags_url})
     except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, ValueError):
-        return {"available": False, "base_url": url, "models": [], "tags_url": tags_url}
+        return _store({"available": False, "base_url": url, "models": [], "tags_url": tags_url})

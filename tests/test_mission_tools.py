@@ -146,6 +146,66 @@ async def test_an_explicit_verify_command_is_not_overridden(missions, monkeypatc
     assert store_for(missions).latest("mission-session").verify_command == "make check"
 
 
+@pytest.mark.asyncio
+async def test_verify_command_as_a_list_is_a_real_shell_command(missions):
+    """Grok sends arrays; .strip() on a list crashed, JSON text never ran tests."""
+    await missions["tools"]["mission_start"](
+        goal="Build", verify_command=["pytest -q"]
+    )
+    assert store_for(missions).latest("mission-session").verify_command == "pytest -q"
+
+
+@pytest.mark.asyncio
+async def test_verify_command_json_array_string_is_a_real_shell_command(missions):
+    from remedy.skills.tool_registry import _coerce_handler_arguments
+    handler = missions["tools"]["mission_start"]
+    args = _coerce_handler_arguments(
+        handler, {"goal": "Build", "verify_command": ["pytest -q"]}
+    )
+    await handler(**args)
+    assert store_for(missions).latest("mission-session").verify_command == "pytest -q"
+
+
+@pytest.mark.asyncio
+async def test_verify_command_argv_list_joins_with_spaces(missions):
+    await missions["tools"]["mission_start"](
+        goal="Build", verify_command=["pytest", "-q"]
+    )
+    assert store_for(missions).latest("mission-session").verify_command == "pytest -q"
+
+
+@pytest.mark.asyncio
+async def test_goal_and_steps_as_lists_are_plain_text(missions):
+    """Grok wraps string fields in arrays; .strip() on a list crashed Aug 21."""
+    out = await missions["tools"]["mission_start"](
+        goal=["Ship the parser"],
+        steps=["write the test", "make it pass"],
+        verify_command="true",
+    )
+    assert "Mission started" in out
+    m = store_for(missions).latest("mission-session")
+    assert m.goal == "Ship the parser"
+    assert [s.title for s in m.steps] == ["write the test", "make it pass"]
+
+
+@pytest.mark.asyncio
+async def test_goal_tuple_joins_into_one_string(missions):
+    await missions["tools"]["mission_start"](goal=("Ship", "the parser"))
+    assert store_for(missions).latest("mission-session").goal == "Ship the parser"
+
+
+def test_create_mission_does_not_strip_a_list_goal(missions):
+    from remedy.core.mission import create_mission
+
+    m = create_mission(
+        ["Ship it"],
+        steps=["one", ["nested", "step"]],
+        home=str(missions["home"]),
+    )
+    assert m.goal == "Ship it"
+    assert [s.title for s in m.steps] == ["one", "nested step"]
+
+
 # --- status -----------------------------------------------------------------
 
 

@@ -1616,15 +1616,21 @@ def public_provider_catalog(config: dict[str, Any] | None = None) -> list[dict[s
     return items
 
 
-def detect_ollama(base_url: str | None = None, timeout: float = 1.5) -> dict[str, Any]:
+def detect_ollama(
+    base_url: str | None = None,
+    timeout: float = 1.5,
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
     """Probe Ollama (tags API). Returns available flag + model names.
 
     Host resolution: explicit arg → ``OLLAMA_HOST`` → catalog default, and the
     returned ``base_url`` is the one that actually answered.
+    ``force=True`` skips the short-lived process cache (setup / explicit detect).
     """
     from remedy.interfaces.model_discovery import detect_ollama_sync
 
-    return detect_ollama_sync(base_url, timeout=timeout)
+    return detect_ollama_sync(base_url, timeout=timeout, force=force)
 
 
 def apply_env_provider_bootstrap(config: dict[str, Any] | None = None) -> dict[str, Any]:

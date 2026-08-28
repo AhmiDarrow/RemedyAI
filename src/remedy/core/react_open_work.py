@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import re
 
+from remedy.core.build_oracle import coerce_text_arg
+
 _FINISH_EVERYTHING_RE = re.compile(
     r"(?:\buntil\s+(?:we\s+)?(?:run\s+out|none\s+remain|(?:it'?s\s+|they'?re\s+)?"
     r"(?:all\s+)?(?:done|complete|finished|green))"
@@ -76,7 +78,7 @@ OPEN_WORK_CONTINUE_NUDGE = (
 
 def message_asks_to_finish_everything(message: str | None) -> bool:
     """Owner asked for the whole job, not one hop ("until none remain", "close all gaps")."""
-    m = (message or "").strip()
+    m = coerce_text_arg(message)
     if not m:
         return False
     return bool(_FINISH_EVERYTHING_RE.search(m))
@@ -88,7 +90,7 @@ def final_declares_open_work(text: str | None) -> list[str]:
     Returns the matching lines (empty when the final is genuinely complete).
     A line that only names *optional* leftovers does not count.
     """
-    t = (text or "").strip()
+    t = coerce_text_arg(text)
     if not t:
         return []
     found: list[str] = []
@@ -121,7 +123,7 @@ _NUMBERED_FINDING_RE = re.compile(
 
 def extract_review_findings(text: str | None) -> list[str]:
     """Numbered issues from a review report. Empty on a '1-10 fixed' wrap-up."""
-    t = (text or "").strip()
+    t = coerce_text_arg(text)
     if not t:
         return []
     if re.search(r"(?i)\bissues?\s*1\s*[–-]\s*10\s*fixed\b", t) and len(t) < 2500:

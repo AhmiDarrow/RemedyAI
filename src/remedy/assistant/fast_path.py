@@ -13,6 +13,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from remedy.core.build_oracle import coerce_text_arg
+
 
 @dataclass(frozen=True)
 class FastPathPlan:
@@ -117,7 +119,7 @@ _COMPLEX_RE = re.compile(
 
 def match_assistant_fast_path(message: str) -> FastPathPlan | None:
     """Return a plan if *message* is a high-confidence PA-only request."""
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg or len(msg) > 160:
         return None
     if _COMPLEX_RE.search(msg):

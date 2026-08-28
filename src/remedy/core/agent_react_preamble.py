@@ -12,6 +12,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
+from remedy.core.build_oracle import coerce_text_arg
 from remedy.core.provider_sanitize import sanitize_chat_body  # noqa: F401 — re-export habit
 from remedy.core.react_policy import TOOL_RESULT_CHAR_CAP as _TOOL_RESULT_CHAR_CAP
 from remedy.core.react_stream import (
@@ -64,15 +65,16 @@ async def distill_user_message(
     session_id: str | None,
 ) -> None:
     """Partner-memory distill before tools/LLM (explicit remember is awaited)."""
+    message = coerce_text_arg(message)
     with suppress(Exception):
         from remedy.core.turn_context import set_turn_last_user_text
 
-        set_turn_last_user_text((message or "")[:4000], runtime)
+        set_turn_last_user_text(message[:4000], runtime)
     with suppress(Exception):
         from remedy.core.agent_post_turn import distill_user_message_now_async
         from remedy.memory.partner_memory import distill_user_text, is_explicit_remember_intent
 
-        msg0 = message or ""
+        msg0 = message
         if is_explicit_remember_intent(msg0) and getattr(runtime, "memory", None) is not None:
             project_path = str(
                 getattr(getattr(runtime, "config", None), "project_path", None)
@@ -97,6 +99,7 @@ async def distill_user_message(
 
 def parse_browse_intent(message: str) -> BrowseIntentFlags:
     flags = BrowseIntentFlags()
+    message = coerce_text_arg(message)
     with suppress(Exception):
         from remedy.core.computer.browse_intent import (
             is_clear_goals_intent,
@@ -106,11 +109,11 @@ def parse_browse_intent(message: str) -> BrowseIntentFlags:
             wants_page_interaction,
         )
 
-        flags.browse_pre_url = parse_browse_navigate_url(message or "")
-        flags.clear_goals_only = is_clear_goals_intent(message or "")
-        flags.pure_action_kick = is_pure_action_kick(message or "")
-        flags.open_only_browse = is_open_only_browse(message or "")
-        flags.page_interaction = wants_page_interaction(message or "")
+        flags.browse_pre_url = parse_browse_navigate_url(message)
+        flags.clear_goals_only = is_clear_goals_intent(message)
+        flags.pure_action_kick = is_pure_action_kick(message)
+        flags.open_only_browse = is_open_only_browse(message)
+        flags.page_interaction = wants_page_interaction(message)
     return flags
 
 
@@ -122,6 +125,7 @@ def append_plan_and_computer_addenda(
     runtime: Any,
     message: str = "",
 ) -> str:
+    message = coerce_text_arg(message)
     with suppress(Exception):
 
         from remedy.core.plan_store import PlanStore
@@ -143,9 +147,9 @@ def append_plan_and_computer_addenda(
                     is_feeling_presence_question,
                 )
 
-                chat_only = is_chat_only_message(message or "") or (
-                    bool((message or "").strip())
-                    and is_feeling_presence_question(message or "")
+                chat_only = is_chat_only_message(message) or (
+                    bool(message)
+                    and is_feeling_presence_question(message)
                 )
             if not chat_only:
                 with suppress(Exception):
@@ -176,7 +180,7 @@ def append_plan_and_computer_addenda(
             )
             from remedy.core.turn_context import current_last_user_text
 
-            um = current_last_user_text(runtime)
+            um = coerce_text_arg(current_last_user_text(runtime))
             if looks_like_companion_request(um):
                 snap = gather_companion_snapshot(runtime)
                 block = format_companion_block(snap)
@@ -197,7 +201,7 @@ def append_plan_and_computer_addenda(
             from remedy.core.away_mode import format_away_block, looks_like_away_request
             from remedy.core.turn_context import current_last_user_text
 
-            um_a = current_last_user_text(runtime)
+            um_a = coerce_text_arg(current_last_user_text(runtime))
             if looks_like_away_request(um_a):
                 context = (context or "") + "\n\n" + format_away_block()
                 with suppress(Exception):
@@ -212,7 +216,7 @@ def append_plan_and_computer_addenda(
             from remedy.core.companion_inbox import format_inbox_block, poll_new_drops
             from remedy.core.turn_context import current_last_user_text
 
-            um_i = current_last_user_text(runtime)
+            um_i = coerce_text_arg(current_last_user_text(runtime))
             if looks_like_companion_request(um_i):
                 drops = poll_new_drops(runtime, mark_seen=True)
                 ib = format_inbox_block(drops)
@@ -225,7 +229,7 @@ def append_plan_and_computer_addenda(
             )
             from remedy.core.turn_context import current_last_user_text
 
-            um = message or current_last_user_text(runtime)
+            um = message or coerce_text_arg(current_last_user_text(runtime))
             if needs_computer_use_guidance(um):
                 context = (context or "") + "\n\n" + COMPUTER_USE_SYSTEM_ADDENDUM
         # Skill memory: steer toward the click approach that has worked on the
@@ -249,12 +253,13 @@ def try_early_l0(
 ) -> str | None:
     if plan_mode or attachments:
         return None
+    message = coerce_text_arg(message)
     with suppress(Exception):
         from remedy.core.metabolism.l0 import try_l0_system_reply
         from remedy.core.metabolism.tier import TurnTier, classify_turn_tier
 
-        if classify_turn_tier(message or "", tools_enabled=False) == TurnTier.L0_INSTANT:
-            l0_early = try_l0_system_reply(runtime, message or "", preclassified=True)
+        if classify_turn_tier(message, tools_enabled=False) == TurnTier.L0_INSTANT:
+            l0_early = try_l0_system_reply(runtime, message, preclassified=True)
             if l0_early:
                 with suppress(Exception):
                     from remedy.core.session_quality import get_session_quality
@@ -374,6 +379,7 @@ def apply_metabolism_injects(
     browse: BrowseIntentFlags,
     pure_action_kick: bool,
 ) -> None:
+    message = coerce_text_arg(message)
     with suppress(Exception):
         from remedy.core.metabolism.turn import begin_turn_metabolism
 
@@ -453,10 +459,6 @@ def apply_metabolism_injects(
         injects = list(meta.get("injects") or [])
         with suppress(Exception):
             pending = take_pending_verify_remedy(sid_m)
-            if pending is None:
-                pending = getattr(runtime, "_pending_verify_remedy", None)
-                if pending:
-                    runtime._pending_verify_remedy = None
             if pending:
                 injects.append(str(pending))
         if injects:
@@ -481,6 +483,7 @@ async def prepare_turn_preamble(
     from remedy.core.llm_binding import get_llm_binding
     from remedy.interfaces.attachments import build_multimodal_user_content
 
+    message = coerce_text_arg(message)
     await distill_user_message(runtime, message, session_id)
     context = await runtime._build_context()
     context = append_plan_and_computer_addenda(
@@ -488,7 +491,7 @@ async def prepare_turn_preamble(
         session_id=session_id,
         plan_mode=plan_mode,
         runtime=runtime,
-        message=message or "",
+        message=message,
     )
     history = await runtime._load_session_history(session_id, message)
 
@@ -509,7 +512,7 @@ async def prepare_turn_preamble(
             early_reply=early,
         )
 
-    browse = parse_browse_intent(message or "")
+    browse = parse_browse_intent(message)
     with suppress(Exception):
         from remedy.core.turn_context import (
             set_turn_browse,

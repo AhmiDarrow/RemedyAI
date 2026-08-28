@@ -215,14 +215,12 @@ async def test_the_state_command_is_used_when_none_is_passed(rt, verify):
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("no_discovery")
-async def test_a_whitespace_command_argument_currently_discards_the_state_command(rt, verify):
-    """Documents today's behaviour: `command or state.verify_command` treats "   "
-    as a real command, so it strips to empty and the state's oracle is skipped
-    rather than used as the fallback the signature implies."""
+async def test_a_whitespace_command_argument_falls_back_to_the_state_command(rt, verify):
+    """Spaces are not a command; fall back to the stored oracle."""
     st = BuildTurnState(active=True, verify_command="npm test")
     res = await run_auto_verify(rt, st, command="   ")
-    assert verify.calls == []
-    assert res["oracle_missing"] is True
+    assert verify.command == "npm test"
+    assert res.get("oracle_missing") is not True
 
 
 @pytest.mark.asyncio

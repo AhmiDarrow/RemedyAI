@@ -9,6 +9,8 @@ import time
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException
+
+from remedy.core.build_oracle import coerce_text_arg
 from fastapi.responses import StreamingResponse
 
 from remedy.interfaces.api_models import (
@@ -166,7 +168,7 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             except Exception:
                 logger.exception("attachment path jail failed; dropping attachments")
                 att_dicts = []
-            user_text = (req.message or "").strip()
+            user_text = coerce_text_arg(req.message)
             if not user_text and not att_dicts:
                 raise HTTPException(400, "Message or attachment required")
 

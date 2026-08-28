@@ -1588,7 +1588,7 @@ async def test_signal_without_the_binary_starts_no_poll_loop(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stopping_signal_cancels_the_poll_loop(tmp_path):
-    ch = SignalChannel(FakeGateway(), cli_path=_fake_binary(tmp_path), account="+15550100")
+    ch = SignalChannel(FakeGateway(), cli_path=_fake_binary(tmp_path), account="+15550100", home_dir=str(tmp_path))
     started = asyncio.Event()
     blocked = asyncio.Event()
 

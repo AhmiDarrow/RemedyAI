@@ -259,6 +259,58 @@ async def test_consume_http_cancels_when_turn_aborted() -> None:
         end_turn("sse-abort", *toks)
 
 
+@pytest.mark.asyncio
+async def test_consume_http_drop_without_stop_is_a_disconnect() -> None:
+    """A cancelled wait with no owner Stop is a drop, not Generation stopped."""
+    import asyncio
+
+    from remedy.core.react_loop.stream_consume import (
+        PROVIDER_DROP_ERROR,
+        consume_llm_http_response,
+    )
+    from remedy.core.react_stream import StreamRoundState
+    from remedy.core.turn_context import begin_turn, end_turn
+
+    class _DropContent:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise asyncio.CancelledError()
+
+    class _Resp:
+        headers = {"Content-Type": "text/event-stream"}
+        content = _DropContent()
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    class _Bind:
+        model = "t"
+        provider = "t"
+
+    toks = begin_turn("sse-drop", project_raw=None, active_path=".")
+    resp = _Resp()
+    try:
+        with pytest.raises(ConnectionError, match="connection reset") as ei:
+            async for _ in consume_llm_http_response(
+                resp,
+                round_state=StreamRoundState(),
+                collected={},
+                adapter=None,
+                bind=_Bind(),
+                body={"stream": True},
+                use_openai_sse=True,
+                stream_live=True,
+            ):
+                pass
+        assert PROVIDER_DROP_ERROR in str(ei.value)
+        assert resp.closed is True
+    finally:
+        end_turn("sse-drop", *toks)
+
+
 def test_synthesis_leftover_emits_json_or_reasoning():
     """JSON completions fill round_state without yielding; leftover is the answer."""
     rs = StreamRoundState()

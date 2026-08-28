@@ -117,15 +117,13 @@ def rmb_server_running(home_dir: str | Path | None = None) -> bool:
 
 
 def should_skip_vision_stack(cfg: dict[str, Any] | None = None) -> bool:
-    """When RMB owns GPU/local host, never *start* SmolVLM.
+    """When RMB owns the GPU host, never *start* SmolVLM.
 
-    True if:
-    - chat provider is RMB, or
-    - RMB server is currently running / starting, or
-    - rmb.json marks vision_suspended (set on start until stop)
+    RMB is "on" only when the owner called it on: Start, auto_start, or a
+    live/starting llama-server. A leftover ``llm_provider=rmb`` in config
+    while 8787 is closed is not a call-on — live 2026-08-27 skipped vision
+    and logged "Local model auto-started" during Grok sessions.
     """
-    if is_local_agent_mode(cfg):
-        return True
     try:
         from remedy.runtime.rmb.config import load_rmb_json, merge_state
         from remedy.runtime.rmb.service import is_starting, managed_process_alive
@@ -135,6 +133,9 @@ def should_skip_vision_stack(cfg: dict[str, Any] | None = None) -> bool:
             home = cfg.get("home_dir")
         st = merge_state(load_rmb_json(home))
         if st.get("vision_suspended"):
+            return True
+        # Owner asked RMB to come up with Remedy — GPU is reserved.
+        if st.get("auto_start"):
             return True
         if is_starting() or managed_process_alive():
             return True

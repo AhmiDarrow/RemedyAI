@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import re
 
+from remedy.core.build_oracle import coerce_text_arg
+
 _AWAY_RE = re.compile(
     r"(?i)\b("
     r"work alone|on your own|handle this on your own|"
@@ -35,7 +37,7 @@ You are finishing this request without check-ins.
 
 
 def looks_like_away_request(message: str) -> bool:
-    return bool(_AWAY_RE.search(message or ""))
+    return bool(_AWAY_RE.search(coerce_text_arg(message)))
 
 
 def format_away_block() -> str:

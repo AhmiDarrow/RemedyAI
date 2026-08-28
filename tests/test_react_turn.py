@@ -7,6 +7,7 @@ from remedy.core.react_policy import REACT_MAX_STALE_EPOCHS
 from remedy.core.react_turn import (
     LOCAL_MAX_TOOLS_PER_STEP,
     MAX_PSEUDO_RECOVERIES,
+    WORK_MAX_TOOLS_PER_STEP,
     TurnState,
     apply_tools_decision,
     cap_tools_for_step,
@@ -602,7 +603,72 @@ def test_cap_tools_local():
     assert capped is not None
     assert len(capped) == LOCAL_MAX_TOOLS_PER_STEP
     assert cap_tools_for_step(tools, local=False) is tools
+    fat = [_tool(f"t{i}") for i in range(40)]
+    cloud = cap_tools_for_step(fat, local=False)
+    assert cloud is not None
+    assert len(cloud) == WORK_MAX_TOOLS_PER_STEP
 
+
+def test_work_turn_does_not_send_the_whole_catalog():
+    """Live 2026-08-27: proceed-until-finished armed 194 tools every grok step."""
+    all_t = [_tool(f"extra_{i}") for i in range(180)] + [
+        _tool("file_write"),
+        _tool("file_read"),
+        _tool("host_run"),
+        _tool("help_list"),
+        _tool("goal_add"),
+    ]
+    d = resolve_tools(
+        message="proceed with project until it is finished",
+        all_tools=all_t,
+        turn_tier=1,
+        provider="xai",
+        model="grok-4.6",
+        base_url="https://api.x.ai/v1",
+    )
+    assert d.run_until_done is True
+    assert d.tools is not None
+    assert len(d.tools) <= WORK_MAX_TOOLS_PER_STEP
+    names = {((t.get("function") or {}).get("name") or "") for t in d.tools}
+    assert "file_write" in names
+    assert "help_list" not in names
+
+
+
+
+def test_work_cap_keeps_computer_hands():
+    """Operate pack must still be able to see and click, not only navigate."""
+    all_t = [_tool(f"extra_{i}") for i in range(180)] + [
+        _tool("file_write"),
+        _tool("computer_navigate"),
+        _tool("computer_snapshot"),
+        _tool("computer_click"),
+        _tool("computer_type"),
+        _tool("computer_act"),
+        _tool("web_fetch"),
+        _tool("help_list"),
+    ]
+    d = resolve_tools(
+        message="proceed with project until it is finished",
+        all_tools=all_t,
+        turn_tier=1,
+        provider="xai",
+        model="grok-4.6",
+        base_url="https://api.x.ai/v1",
+    )
+    assert d.run_until_done is True
+    assert d.tools is not None
+    assert len(d.tools) <= WORK_MAX_TOOLS_PER_STEP
+    names = {((t.get("function") or {}).get("name") or "") for t in d.tools}
+    for n in (
+        "computer_snapshot",
+        "computer_click",
+        "computer_type",
+        "computer_act",
+        "web_fetch",
+    ):
+        assert n in names, n
+    assert "help_list" not in names
 
 def test_cap_tools_keeps_operate_core_over_help_goal():
     tools = [

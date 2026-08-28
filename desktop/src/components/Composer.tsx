@@ -542,7 +542,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   }, [])
 
   const handleSubmit = useCallback(
-    (mode: 'after' | 'interrupt' | 'steer' = 'after') => {
+    (mode: 'after' | 'interrupt' | 'steer' = 'steer') => {
       const text = input.trim()
       if ((!text && attachments.length === 0) || disabled || uploading) return
       // Commands still require a quiet moment (no concurrent turn side-effects).
@@ -575,7 +575,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
             is_image: a.is_image,
             is_text: a.is_text,
           }))
-          // Streaming: queue (after) or interrupt depending on mode.
+          // Streaming: steer the live turn by default; after / interrupt stay explicit.
           onSend(text, payload.length ? payload : undefined, streaming ? { mode } : undefined)
         }
         setInput('')
@@ -681,11 +681,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
-        // Ctrl/Cmd+Enter while streaming → interrupt; plain Enter → queue after.
+        // Ctrl/Cmd+Enter while streaming → interrupt; Alt+Enter → queue after;
+        // plain Enter → steer the live turn.
         if (streaming && (e.ctrlKey || e.metaKey)) {
           handleSubmit('interrupt')
-        } else {
+        } else if (streaming && e.altKey) {
           handleSubmit('after')
+        } else {
+          handleSubmit('steer')
         }
       }
     },
@@ -1407,7 +1410,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           disabled={disabled}
           title={
             streaming
-              ? 'Enter queues after this turn. Ctrl+Enter interrupts and sends now.'
+              ? 'Enter steers the live turn. Ctrl+Enter interrupts. Alt+Enter queues after.'
               : chatMode
                 ? 'Chat: conversation. Shift+Tab for Plan.'
                 : planMode
@@ -1451,7 +1454,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
         <button
           type="button"
-          onClick={() => handleSubmit('after')}
+          onClick={() => handleSubmit('steer')}
           onContextMenu={(e) => {
             if (!streaming || !canSend) return
             e.preventDefault()
@@ -1464,10 +1467,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               : editingQueueId
                 ? 'Save edited text to the queue'
                 : streaming
-                  ? 'Queue after current turn (right-click or Ctrl+Enter to interrupt)'
+                  ? 'Steer the live turn (right-click or Ctrl+Enter interrupts, Alt+Enter queues)'
                   : 'Send'
           }
-          aria-label="Send"
+          aria-label={
+            streaming ? 'Steer the live turn' : 'Send'
+          }
           className="flex items-center justify-center rounded-xl flex-shrink-0 transition-colors"
           style={{
             width: 40,

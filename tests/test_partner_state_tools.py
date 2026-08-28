@@ -62,6 +62,20 @@ async def test_opening_a_subgoal_reports_the_protection_it_buys(partner):
 
 
 @pytest.mark.asyncio
+async def test_subgoal_open_joins_list_title(partner):
+    """subgoal_open(title=["Fix the parser"]) stores prose, not a crash."""
+    out = await partner["tools"]["subgoal_open"](title=["Fix the parser"])
+    assert "Fix the parser" in out
+    assert "['Fix the parser']" not in out
+
+
+@pytest.mark.asyncio
+async def test_subgoal_open_empty_list_title_refuses(partner):
+    out = await partner["tools"]["subgoal_open"](title=[])
+    assert "short subgoal title" in out
+
+
+@pytest.mark.asyncio
 async def test_the_first_subgoal_becomes_the_session_intent(partner):
     """Otherwise a resumed session has no idea what it was doing."""
     await partner["tools"]["subgoal_open"](title="Fix the parser")

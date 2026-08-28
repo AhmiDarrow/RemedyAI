@@ -120,6 +120,11 @@ def http(monkeypatch):
             return fake.respond(url)
 
     monkeypatch.setattr(aiohttp, "ClientSession", _Session)
+    # FakeHTTP answers localhost; skip the 150ms TCP precheck (same as
+    # tests/test_model_discovery.py). Production still fail-fasts closed ports.
+    monkeypatch.setattr(
+        "remedy.interfaces.model_discovery._PRECHECK_LOCAL_LISTEN", False
+    )
     return fake
 
 

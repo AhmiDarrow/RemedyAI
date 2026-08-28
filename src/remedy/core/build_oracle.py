@@ -6,12 +6,95 @@ without waiting for the model to choose — falsification is not optional.
 
 from __future__ import annotations
 
+import json
 import re
 from contextlib import suppress
 from typing import Any
 
 # Tools that mutate source (not shell — shell may be verify)
 _MUTATE_TOOLS = frozenset({"file_write", "file_edit"})
+
+
+def coerce_verify_command(raw: Any) -> str:
+    """Normalize a model/tool verify arg into one shell command.
+
+    Grok sends JSON arrays (`["pytest -q"]`). The registry dumps those onto a
+    ``str`` parameter as JSON text. Whitespace-only strings are not commands.
+    A one-element list is that command; argv-style tokens join with spaces;
+    multiple full commands join with `` && `` so a two-step verify still runs.
+    """
+    if raw is None:
+        return ""
+    if isinstance(raw, list | tuple):
+        parts = [coerce_verify_command(x) for x in raw]
+        parts = [p for p in parts if p]
+        if not parts:
+            return ""
+        if len(parts) == 1:
+            return parts[0]
+        if all((" " not in p and "&&" not in p) for p in parts):
+            return " ".join(parts)
+        return " && ".join(parts)
+    text = str(raw).strip()
+    if len(text) >= 2 and text[0] == "[" and text[-1] == "]":
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return text
+        if isinstance(parsed, list):
+            return coerce_verify_command(parsed)
+    return text
+
+
+def coerce_text_arg(raw: Any, *, sep: str = " ") -> str:
+    """Join list/tuple (and JSON-array strings) into one stripped string.
+
+    Models send a JSON array for a ``str`` field. ``(raw or "").strip()``
+    then dies with ``'list' object has no attribute 'strip'``. Unlike
+    ``coerce_verify_command`` this never inserts ``&&`` — it is for goals,
+    paths, notes, and other prose. Nested lists flatten; dicts prefer a
+    human field (``text``/``content``/``title``/``goal``/``value``).
+    """
+    if raw is None:
+        return ""
+    if isinstance(raw, bool):
+        return "true" if raw else "false"
+    if isinstance(raw, list | tuple):
+        parts = [coerce_text_arg(x, sep=sep) for x in raw]
+        return sep.join(p for p in parts if p).strip()
+    if isinstance(raw, dict):
+        for key in ("text", "content", "title", "goal", "value"):
+            if key in raw:
+                inner = coerce_text_arg(raw[key], sep=sep)
+                if inner:
+                    return inner
+        try:
+            return json.dumps(raw, ensure_ascii=False, default=str)
+        except Exception:
+            return str(raw).strip()
+    text = str(raw).strip()
+    if len(text) >= 2 and text[0] == "[" and text[-1] == "]":
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return text
+        if isinstance(parsed, list):
+            return coerce_text_arg(parsed, sep=sep)
+    return text
+
+
+def coerce_json_text(raw: Any) -> str:
+    """JSON-text tool args: dump list/tuple/dict, otherwise strip a string."""
+    if raw is None:
+        return ""
+    if isinstance(raw, tuple):
+        raw = list(raw)
+    if isinstance(raw, list | dict):
+        try:
+            return json.dumps(raw, ensure_ascii=False, default=str)
+        except Exception:
+            return str(raw)
+    return str(raw).strip()
 
 
 def _discover_c_verify_command(root: Any) -> str:
@@ -62,9 +145,10 @@ def discover_verify_command(runtime: Any, *, path: str = "") -> str:
     with suppress(Exception):
         from remedy.core.project_fingerprint import fingerprint_path
 
-        if (path or "").strip():
+        path_s = coerce_text_arg(path)
+        if path_s:
             with suppress(Exception):
-                root = runtime.resolve_tool_path(path)
+                root = runtime.resolve_tool_path(path_s)
                 if root is not None and root.is_file():
                     root = root.parent
         if root is None:
@@ -216,7 +300,9 @@ async def run_auto_verify(
     """
     from remedy.core.jobs import run_verify_job
 
-    cmd = (command or getattr(state, "verify_command", None) or "").strip()
+    cmd = coerce_verify_command(command) or coerce_verify_command(
+        getattr(state, "verify_command", None)
+    )
     if not cmd:
         cmd = discover_verify_command(runtime)
     if cmd and hasattr(state, "verify_command"):

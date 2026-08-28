@@ -19,6 +19,45 @@ from remedy.core.react_stream import (
 
 logger = logging.getLogger(__name__)
 
+# Matches is_disconnect_error ("connection reset") so a dropped wait retries
+# the same turn instead of painting "Generation stopped".
+PROVIDER_DROP_ERROR = "connection reset (provider stream dropped)"
+
+
+def is_owner_stop(abort_ev: asyncio.Event | None = None) -> bool:
+    """True when the owner pressed Stop / abort_session set the event."""
+    if abort_ev is not None and abort_ev.is_set():
+        return True
+    with contextlib.suppress(Exception):
+        from remedy.core.turn_context import is_turn_aborted
+
+        if is_turn_aborted():
+            return True
+    return False
+
+
+def uncancel_current_task() -> None:
+    """CPython 3.12 sticky cancel: the next await would re-raise without this."""
+    task = asyncio.current_task()
+    if task is None:
+        return
+    with contextlib.suppress(Exception):
+        uncancel = getattr(task, "uncancel", None)
+        if callable(uncancel):
+            uncancel()
+
+
+def raise_drop_or_cancel(abort_ev: asyncio.Event | None = None) -> None:
+    """Call from ``except CancelledError``.
+
+    Owner Stop keeps CancelledError (turn ends). A provider/socket drop
+    becomes ConnectionError so the ReAct loop retries the same turn.
+    """
+    if is_owner_stop(abort_ev):
+        raise asyncio.CancelledError()
+    uncancel_current_task()
+    raise ConnectionError(PROVIDER_DROP_ERROR) from None
+
 
 def _sse_idle_timeout_s() -> float:
     try:
@@ -58,6 +97,8 @@ async def _await_or_abort(awaitable: Any, abort_ev: asyncio.Event | None) -> Any
     except asyncio.CancelledError:
         wait_task.cancel()
         abort_task.cancel()
+        # Keep CancelledError: asyncio.wait_for idle-timeout relies on it
+        # becoming TimeoutError. consume / loop_http decide drop vs Stop.
         raise
     finally:
         if not wait_task.done():
@@ -121,7 +162,7 @@ async def consume_llm_http_response(
                 break
             except asyncio.CancelledError:
                 _close_http_response(resp)
-                raise
+                raise_drop_or_cancel(abort_ev)
             except TimeoutError:
                 logger.warning(
                     "SSE stream idle >%.0fs; ending this model round "
@@ -172,7 +213,7 @@ async def consume_llm_http_response(
             data = await _await_or_abort(resp.json(), abort_ev)
         except asyncio.CancelledError:
             _close_http_response(resp)
-            raise
+            raise_drop_or_cancel(abort_ev)
         try:
             from remedy.core.usage import usage_from_provider_payload
 

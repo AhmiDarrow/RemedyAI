@@ -12,7 +12,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import sys
+import time
+from logging.handlers import RotatingFileHandler
 from contextlib import suppress
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -152,6 +155,78 @@ class TextFormatter(logging.Formatter):
         return f"{ts} {record.levelname:5s}{extra} {record.name}: {msg}"
 
 
+
+class DurableRotatingFileHandler(RotatingFileHandler):
+    """RotatingFileHandler that cannot go silent after a failed rollover.
+
+    On Windows, rename() of a log still held by this process, a sibling
+    sidecar, or the AV scanner raises PermissionError. CPython then leaves
+    ``stream`` closed/None and every later emit is swallowed by handleError
+    — which is how debug.log went empty mid-Grok-turn after an 8MB rotate.
+    Keep writing even when a backup cannot be moved.
+    """
+
+    _ROLLOVER_BACKOFF_S = 30.0
+
+    def shouldRollover(self, record: logging.LogRecord) -> bool:
+        until = getattr(self, "_rollover_blocked_until", 0.0)
+        if until and time.monotonic() < until:
+            return False
+        return bool(super().shouldRollover(record))
+
+    def doRollover(self) -> None:
+        try:
+            super().doRollover()
+            self._rollover_blocked_until = 0.0
+        except OSError:
+            self._rollover_blocked_until = time.monotonic() + self._ROLLOVER_BACKOFF_S
+            self._reopen()
+        if self.stream is None and not self.delay:
+            self._reopen()
+
+    def rotate(self, source: str, dest: str) -> None:
+        try:
+            super().rotate(source, dest)
+            return
+        except OSError:
+            pass
+        # Copy + truncate in place when rename is locked (Windows).
+        shutil.copy2(source, dest)
+        with open(source, "w", encoding=self.encoding or "utf-8", errors="replace"):
+            pass
+
+    def emit(self, record: logging.LogRecord) -> None:
+        # FileHandler.emit swallows OSError, so write ourselves and retry
+        # once after reopen — otherwise a failed 8MB rotate goes silent.
+        try:
+            if self.shouldRollover(record):
+                self.doRollover()
+            self._write_record(record)
+        except Exception:
+            self._reopen()
+            try:
+                self._write_record(record)
+            except Exception:
+                self.handleError(record)
+
+    def _write_record(self, record: logging.LogRecord) -> None:
+        if self.stream is None:
+            self._reopen()
+        if self.stream is None:
+            raise OSError("log stream closed")
+        msg = self.format(record)
+        self.stream.write(msg + self.terminator)
+        self.flush()
+
+    def _reopen(self) -> None:
+        with suppress(OSError):
+            if self.stream:
+                self.stream.close()
+        self.stream = None
+        with suppress(OSError):
+            self.stream = self._open()
+
+
 # -- setup --------------------------------------------------------------------
 
 
@@ -162,7 +237,6 @@ def setup_logging(
     console_output: bool = True,
 ) -> None:
     """Configure root logger with structured output, optional file rotation, and context propagation."""
-    from logging.handlers import RotatingFileHandler
 
     global _hot_debug
     lvl_name = (level or "INFO").upper()
@@ -185,7 +259,7 @@ def setup_logging(
         p = Path(log_dir).expanduser().resolve()
         p.mkdir(parents=True, exist_ok=True)
         # Rotate so long desktop sessions don't grow unbounded.
-        fh = RotatingFileHandler(
+        fh = DurableRotatingFileHandler(
             p / "remedy.log",
             maxBytes=5 * 1024 * 1024,
             backupCount=5,
@@ -195,7 +269,7 @@ def setup_logging(
         root.addHandler(fh)
 
         # Error-only log (smaller, easy to skim for failures)
-        eh = RotatingFileHandler(
+        eh = DurableRotatingFileHandler(
             p / "errors.log",
             maxBytes=2 * 1024 * 1024,
             backupCount=3,
@@ -208,7 +282,7 @@ def setup_logging(
         # Debug ring — always captures DEBUG+ even when console is INFO.
         # Enable via REMEDY_LOG_LEVEL=DEBUG or config log_level=DEBUG for console;
         # this file is always DEBUG so perf issues leave a trail without spam.
-        dh = RotatingFileHandler(
+        dh = DurableRotatingFileHandler(
             p / "debug.log",
             maxBytes=8 * 1024 * 1024,
             backupCount=3,

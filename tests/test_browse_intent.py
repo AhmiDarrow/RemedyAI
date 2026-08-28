@@ -254,3 +254,38 @@ def test_retail_query_stops_at_first_clause():
     assert u == "https://www.kroger.com/search?query=dozen+large+eggs"
     u = parse_browse_navigate_url("go to walmart, find paper towels please")
     assert u == "https://www.walmart.com/search?q=paper+towels"
+
+
+def test_list_message_does_not_crash_strip() -> None:
+    """Models send a JSON array; (message or "").strip() after looks_like_url died.
+
+    Same Aug 21 family as todo_write / computer_click: a one-element URL list
+    or tokenized goto still has to resolve, not AttributeError.
+    """
+    from remedy.core.computer.browse_intent import (
+        is_clear_goals_intent,
+        is_open_only_browse,
+        is_pure_action_kick,
+        parse_browse_navigate_url,
+        parse_retail_search,
+        resolve_site_alias,
+        short_site_label,
+        wants_page_interaction,
+    )
+
+    assert parse_browse_navigate_url(["https://mail.google.com"]) == "https://mail.google.com"
+    assert parse_browse_navigate_url(("https://mail.google.com",)) == "https://mail.google.com"
+    assert parse_browse_navigate_url('["https://mail.google.com"]') == "https://mail.google.com"
+    assert parse_browse_navigate_url(["goto", "gmail"]) == "https://mail.google.com"
+    assert parse_browse_navigate_url(["hi"]) is None
+    assert parse_browse_navigate_url([]) is None
+    assert parse_browse_navigate_url(None) is None
+    assert is_open_only_browse(["goto", "gmail"]) is True
+    assert is_pure_action_kick(["goto", "gmail"]) is True
+    assert is_clear_goals_intent(["clear", "goals"]) is True
+    assert wants_page_interaction(["goto gmail and click Sign in"]) is True
+    assert parse_retail_search(["go to walmart and find whole milk"]) == (
+        "https://www.walmart.com/search?q=whole+milk"
+    )
+    assert resolve_site_alias(["gmail"]) == "https://mail.google.com"
+    assert short_site_label(["https://mail.google.com"]) == "Gmail"

@@ -930,17 +930,19 @@ async def test_a_last_ditch_round_that_also_dies_still_leaves_the_tool_summary(
 @pytest.mark.asyncio
 async def test_a_stop_during_the_last_ditch_round_keeps_the_tool_history(tmp_path):
     from remedy.core.react_loop import loop as loop_mod
+    from remedy.core.turn_context import abort_session
 
+    runtime = make_runtime(tmp_path)
+    runtime._max_react_steps = 1
     real_consume = loop_mod.consume_llm_http_response
 
     def _consume(*args: Any, **kwargs: Any):
         blob = jsonlib.dumps(kwargs.get("body") or {}, default=str)
         if FINAL_SYNTHESIS_MARKER in blob:
+            abort_session(str(runtime.config.home_dir))
             raise asyncio.CancelledError()
         return real_consume(*args, **kwargs)
 
-    runtime = make_runtime(tmp_path)
-    runtime._max_react_steps = 1
     registry = FakeToolRegistry().install(runtime)
     registry.add("add", description="add", results=["5"])
     fake = FakeLLM([tool_turn("add", {"a": 1})], when_exhausted=empty_turn())

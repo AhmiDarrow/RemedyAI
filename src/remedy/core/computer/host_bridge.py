@@ -444,6 +444,9 @@ class ComputerHostBridge:
         self._host_seen_at: float = 0.0
         # Last jobs/next or ui/command poll (real Desktop poller — not a one-shot hello).
         self._last_poll_at: float = 0.0
+        # Set True after a full claim_next scan finds nothing pending. Cleared on
+        # enqueue so idle host polls (~150ms) skip glob+read until new work lands.
+        self._poll_idle_empty: bool = False
         self._last_claim_at: float = 0.0
         self._browser_bounds: dict[str, float] | None = None
         self._browser_scale: float = 1.0
@@ -564,13 +567,22 @@ class ComputerHostBridge:
         width: int | None = None,
         height: int | None = None,
         path: str = "",
+        scale: float | None = None,
     ) -> None:
-        info = {
+        info: dict[str, Any] = {
             "origin": dict(origin or {}),
             "width": int(width or 0),
             "height": int(height or 0),
             "path": path or "",
         }
+        if scale is not None:
+            try:
+                sc = float(scale)
+            except (TypeError, ValueError):
+                sc = 0.0
+            if sc > 0:
+                info["scale"] = sc
+                info["coord_scale"] = sc
         self._last_shot = info
         sid = self._session_key()
         if sid:
@@ -852,6 +864,7 @@ class ComputerHostBridge:
         )
         with self._lock:
             self._write(job)
+            self._poll_idle_empty = False
         # Always request rail open for browser actions (Desktop pops panel like Settings)
         raw_ui = pl.get("ui")
         ui: dict[str, Any] = raw_ui if isinstance(raw_ui, dict) else {}
@@ -936,7 +949,12 @@ class ComputerHostBridge:
         want = str(session_id or self._focused_session_id or "").strip()
         with self._lock:
             self.mark_host_alive(poller=True)
+            # Skip disk scan only after a scan saw zero pending jobs.
+            # Filtered pollers must not set this when they merely skip siblings.
+            if self._poll_idle_empty:
+                return None
             files = sorted(self.root.glob("*.json"), key=lambda p: p.stat().st_mtime)
+            saw_pending = False
             for path in files:
                 try:
                     raw = json.loads(path.read_text(encoding="utf-8"))
@@ -949,6 +967,7 @@ class ComputerHostBridge:
                     continue
                 if job.status != "pending":
                     continue
+                saw_pending = True
                 act = job.action.lower()
                 if act in skip:
                     continue
@@ -962,7 +981,11 @@ class ComputerHostBridge:
                 job.status = "running"
                 self._write(job)
                 self._last_claim_at = time.time()
+                self._poll_idle_empty = False
                 return job
+            # Truly nothing pending on disk (filters may have skipped zero).
+            if not saw_pending:
+                self._poll_idle_empty = True
         return None
 
     def complete(

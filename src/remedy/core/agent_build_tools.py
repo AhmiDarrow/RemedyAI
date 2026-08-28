@@ -101,7 +101,9 @@ def register_build_tools(runtime: Any) -> None:
         """
         from remedy.core.build_live_hop import live_unit_hop
 
-        rel = (path or "").strip()
+        from remedy.core.build_oracle import coerce_text_arg
+
+        rel = coerce_text_arg(path)
         if not rel:
             return "path= required (unit file to build/check)"
         try:
@@ -162,7 +164,9 @@ def register_build_tools(runtime: Any) -> None:
         """Multi-unit live reducer: materialize + disk oracle + import dry-run."""
         from remedy.core.build_live_hop import live_build_project
 
-        raw = (units_json or "").strip()
+        from remedy.core.build_oracle import coerce_json_text
+
+        raw = coerce_json_text(units_json)
         if not raw:
             return "units_json= required (JSON array of {path,symbol,behavior,...})"
         try:
@@ -267,7 +271,9 @@ def register_build_tools(runtime: Any) -> None:
 
         from remedy.core.build_spec_compiler import compile_goal_to_spec, save_locked_spec
 
-        g = (goal or "").strip()
+        from remedy.core.build_oracle import coerce_text_arg
+
+        g = coerce_text_arg(goal)
         if not g:
             st = None
             with contextlib.suppress(Exception):
@@ -291,7 +297,9 @@ def register_build_tools(runtime: Any) -> None:
         from remedy.core.build_engine import begin_build_turn, get_build_state
         from remedy.core.build_tdd import tdd_bootstrap
 
-        g = (goal or "").strip()
+        from remedy.core.build_oracle import coerce_text_arg
+
+        g = coerce_text_arg(goal)
         if not g:
             st = get_build_state(runtime)
             g = str(getattr(st, "goal", "") or "") if st else ""
@@ -425,7 +433,9 @@ def register_build_tools(runtime: Any) -> None:
         root = Path(proj)
         if root.is_file():
             root = root.parent
-        act = (action or "list").strip().lower()
+        from remedy.core.build_oracle import coerce_text_arg
+
+        act = coerce_text_arg(action or "list").lower()
         if act == "list":
             snaps = load_manifest(root)
             if not snaps:
@@ -472,9 +482,9 @@ def register_build_tools(runtime: Any) -> None:
         """Create or update the turn/project build checklist (Claude-class)."""
         from remedy.core.build_todos import format_todos_block, load_todos, upsert_todos
 
-        if isinstance(todos_json, list | dict):
-            todos_json = json.dumps(todos_json, ensure_ascii=False, default=str)
-        raw = str(todos_json or "").strip()
+        from remedy.core.build_oracle import coerce_json_text
+
+        raw = coerce_json_text(todos_json)
         if not raw:
             items = load_todos(runtime)
             return format_todos_block(items) or "No todos yet. Pass todos_json=[{id,content,status}]."
@@ -504,10 +514,11 @@ def register_build_tools(runtime: Any) -> None:
     ) -> str:
         """Machine-owned implement-verify-fix: spec → TDD → hops → gates → repair."""
         from remedy.core.build_drive import drive_build
+        from remedy.core.build_oracle import coerce_text_arg
 
         res = drive_build(
             runtime,
-            goal=goal or "",
+            goal=coerce_text_arg(goal),
             use_llm=bool(use_llm),
             max_units=max_units,
             max_repairs=max_repairs,
@@ -531,8 +542,9 @@ def register_build_tools(runtime: Any) -> None:
     async def apply_patch(patch: str = "") -> str:
         """Apply a unified diff or Begin-Patch block through the write jail."""
         from remedy.core.build_apply_patch import apply_patch_text
+        from remedy.core.build_oracle import coerce_text_arg
 
-        raw = (patch or "").strip()
+        raw = coerce_text_arg(patch, sep="\n")
         if not raw:
             return "patch= required (unified diff or *** Begin Patch block)"
         res = apply_patch_text(runtime, raw)
@@ -547,7 +559,9 @@ def register_build_tools(runtime: Any) -> None:
         """Isolated parallel hops — merge a unit only if its oracle is green."""
         from remedy.core.build_isolated import parallel_isolated_hops
 
-        raw = (units_json or "").strip()
+        from remedy.core.build_oracle import coerce_json_text
+
+        raw = coerce_json_text(units_json)
         if not raw:
             return "units_json= required (JSON array of {path,symbol,behavior,...})"
         try:

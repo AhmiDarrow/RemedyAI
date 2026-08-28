@@ -210,6 +210,15 @@ class BasicRuntime(AgentRuntime):
 
     @_session_id.setter
     def _session_id(self, value: str | None) -> None:
+        # Hive / sibling turns share this runtime. Session id is frozen in
+        # begin_turn's ContextVar; writing live here would steal the owner tab.
+        try:
+            from remedy.core.turn_context import in_active_turn
+
+            if in_active_turn():
+                return
+        except Exception:
+            pass
         self.__dict__["_session_id_live"] = value
 
     @property
@@ -225,14 +234,15 @@ class BasicRuntime(AgentRuntime):
 
     @_session_brief.setter
     def _session_brief(self, value: Any) -> None:
-        self.__dict__["_session_brief_live"] = value
         try:
             from remedy.core.turn_context import in_active_turn, set_turn_session_brief
 
             if in_active_turn():
                 set_turn_session_brief(value)
+                return
         except Exception:
             pass
+        self.__dict__["_session_brief_live"] = value
 
     @property
     def _partner_state(self) -> Any:
@@ -247,14 +257,15 @@ class BasicRuntime(AgentRuntime):
 
     @_partner_state.setter
     def _partner_state(self, value: Any) -> None:
-        self.__dict__["_partner_state_live"] = value
         try:
             from remedy.core.turn_context import in_active_turn, set_turn_partner_state
 
             if in_active_turn():
                 set_turn_partner_state(value)
+                return
         except Exception:
             pass
+        self.__dict__["_partner_state_live"] = value
 
     @property
     def _work_roots(self) -> list[str]:
@@ -270,14 +281,15 @@ class BasicRuntime(AgentRuntime):
     @_work_roots.setter
     def _work_roots(self, value: list[str] | None) -> None:
         roots = list(value or [])
-        self.__dict__["_work_roots_live"] = roots
         try:
             from remedy.core.turn_context import in_active_turn, set_turn_work_roots
 
             if in_active_turn():
                 set_turn_work_roots(roots)
+                return
         except Exception:
             pass
+        self.__dict__["_work_roots_live"] = roots
 
     def project_path_is_unset(self) -> bool:
         """True when no real project folder is configured (→ full access).

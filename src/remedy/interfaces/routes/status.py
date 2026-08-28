@@ -135,6 +135,11 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         at work: which sessions are building, on what, holding which files.
         ``session_id`` (optional) marks that beacon as "you" in the payload.
         """
+        import asyncio
+
+        return await asyncio.to_thread(_coordination_presence_payload, session_id)
+
+    def _coordination_presence_payload(session_id: str | None) -> dict[str, Any]:
         import os as _os
 
         beacons: list[dict[str, Any]] = []

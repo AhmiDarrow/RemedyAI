@@ -2,7 +2,9 @@
  * Desktop host loop for in-house computer use.
  *
  * 1) Polls UI commands so Browser rail opens like Settings (no user pre-open).
- * 2) Claims browser jobs and drives WebView2 (navigate / click / …).
+ * 2) Claims browser jobs and drives WebView2 (click / type / …). Rust owns navigate.
+ * 3) Hello (~4s) is bounds + session only. GET /jobs/next is the host_connected
+ *    heartbeat — never POST /host/hello on the claim hot path (dual-spam with Rust).
  */
 import { useEffect, useRef } from 'react'
 import { isTauri, tauriInvoke } from '../api/tauri'
@@ -344,7 +346,18 @@ async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>>
       x2: p.x2 != null ? Number(p.x2) : null,
       y2: p.y2 != null ? Number(p.y2) : null,
       text,
-      key: p.key != null ? String(p.key) : null,
+      key:
+        p.key != null
+          ? String(p.key)
+          : action === 'type' || action === 'select'
+            ? (p.query != null
+                ? String(p.query)
+                : p.label != null
+                  ? String(p.label)
+                  : p.hint != null
+                    ? String(p.hint)
+                    : null)
+            : null,
       button: p.button != null ? String(p.button) : null,
       dy: p.dy != null ? Number(p.dy) : null,
       job_id: null,
@@ -418,8 +431,8 @@ export function useComputerHost(
      * SPA only opens the rail — Rust computer-host owns navigate (avoids double
      * navigate + 30s races). Listen to computer-open-browser for URL bar sync.
      */
-    const tickUiCommand = async () => {
-      if (cancelled || uiBusy.current) return
+    const tickUiCommand = async (): Promise<boolean> => {
+      if (cancelled || uiBusy.current) return false
       uiBusy.current = true
       try {
         // Peek only (do not take) — Rust uses take=1. Just ensure rail is open
@@ -430,14 +443,16 @@ export function useComputerHost(
         ).catch(() => null)
         if (cmd?.action === 'open_browser' || cmd?.job_action === 'navigate') {
           openRail()
+          return true
         }
+        return false
       } finally {
         uiBusy.current = false
       }
     }
 
-    const tickJobs = async () => {
-      if (cancelled || busy.current) return
+    const tickJobs = async (): Promise<boolean> => {
+      if (cancelled || busy.current) return false
       // Do not claim rail jobs while the window is hidden/minimized and no job
       // is already in flight — the rail has no eyes then and Rust drives it.
       // The event-driven reschedule() pause could be missed (a job was in
@@ -446,14 +461,11 @@ export function useComputerHost(
       const hiddenNow =
         typeof document !== 'undefined' &&
         (document.hidden || document.visibilityState === 'hidden')
-      if (hiddenNow && !claimedRef.current) return
+      if (hiddenNow && !claimedRef.current) return false
       busy.current = true
       try {
-        try {
-          await hello()
-        } catch (e) {
-          console.warn('[computer-host] hello failed', e)
-        }
+        // jobs/next marks poller=True (host_connected). Hello is bounds-only
+        // on a 4s timer — posting it here dual-fired with Rust every 120ms.
         let job: ComputerJob | null = null
         try {
           // Never claim navigate — Rust computer-host owns rail navigates via
@@ -496,65 +508,125 @@ export function useComputerHost(
             }).catch(() => null)
           }
           claimedRef.current = false
+          return true
         }
+        return false
       } finally {
         busy.current = false
       }
     }
 
-    // Immediate kick — don't wait for first interval
+    // Hello is bounds/session only (jobs/next is the poller heartbeat).
+    // Job/UI back off when idle so we do not dual-spam with the Rust poller.
+    // Escalate idle further — host_connected max_age is 15s, so 2s is safe.
+    const HELLO_MS = 4000
+    const JOB_BUSY_MS = 120
+    const JOB_IDLE_MS = 800
+    const JOB_IDLE_MAX_MS = 2000
+    const UI_BUSY_MS = 250
+    const UI_IDLE_MS = 800
+    const UI_IDLE_MAX_MS = 2000
+    let helloIv = 0
+    let uiIv = 0
+    let jobIv = 0
+    let loopsOn = false
+    let loopGen = 0
+    let jobIdleStreak = 0
+    let uiIdleStreak = 0
+
+    const stopLoops = () => {
+      loopGen += 1
+      window.clearTimeout(helloIv)
+      window.clearTimeout(uiIv)
+      window.clearTimeout(jobIv)
+      helloIv = 0
+      uiIv = 0
+      jobIv = 0
+      loopsOn = false
+    }
+
+    const isHidden = () =>
+      typeof document !== 'undefined' &&
+      (document.hidden || document.visibilityState === 'hidden')
+
+    const scheduleHello = () => {
+      const my = loopGen
+      window.clearTimeout(helloIv)
+      helloIv = window.setTimeout(() => {
+        void hello().finally(() => {
+          if (!cancelled && loopsOn && my === loopGen) scheduleHello()
+        })
+      }, HELLO_MS)
+    }
+
+    const scheduleJobs = (ms: number) => {
+      const my = loopGen
+      window.clearTimeout(jobIv)
+      jobIv = window.setTimeout(() => {
+        void tickJobs().then((hadJob) => {
+          if (cancelled || !loopsOn || my !== loopGen) return
+          if (hadJob) {
+            jobIdleStreak = 0
+            scheduleJobs(JOB_BUSY_MS)
+            return
+          }
+          jobIdleStreak += 1
+          const idleMs =
+            jobIdleStreak >= 8 ? JOB_IDLE_MAX_MS : JOB_IDLE_MS
+          scheduleJobs(idleMs)
+        })
+      }, ms)
+    }
+
+    const scheduleUi = (ms: number) => {
+      const my = loopGen
+      window.clearTimeout(uiIv)
+      uiIv = window.setTimeout(() => {
+        void tickUiCommand().then((hadCmd) => {
+          if (cancelled || !loopsOn || my !== loopGen) return
+          if (hadCmd) {
+            uiIdleStreak = 0
+            scheduleUi(UI_BUSY_MS)
+            return
+          }
+          uiIdleStreak += 1
+          const idleMs = uiIdleStreak >= 8 ? UI_IDLE_MAX_MS : UI_IDLE_MS
+          scheduleUi(idleMs)
+        })
+      }, ms)
+    }
+
+    const reschedule = () => {
+      stopLoops()
+      // Pause only when hidden AND no claimed job — keep 120ms claim loop snappy.
+      if (isHidden() && !claimedRef.current && !busy.current) {
+        // Rust computer-host still claims navigate. SPA must not claim
+        // click/type/page_text against a hidden rail (ok-fallback "success").
+        return
+      }
+      loopsOn = true
+      jobIdleStreak = 0
+      uiIdleStreak = 0
+      scheduleHello()
+      scheduleUi(UI_BUSY_MS)
+      scheduleJobs(JOB_BUSY_MS)
+    }
+
+    // Immediate kick — don't wait for first interval. Start loops after so
+    // the kick does not overlap a 120ms timer (and does not hello+claim).
     void (async () => {
       await hello().catch(() => null)
       await tickUiCommand()
       await tickJobs()
+      if (!cancelled) reschedule()
     })()
-    // Back off when document is hidden or window unfocused to cut idle load.
-    let helloMs = 4000
-    let uiMs = 250
-    let jobMs = 120
-    let helloIv = 0
-    let uiIv = 0
-    let jobIv = 0
-
-    const reschedule = () => {
-      window.clearInterval(helloIv)
-      window.clearInterval(uiIv)
-      window.clearInterval(jobIv)
-      const hidden =
-        typeof document !== 'undefined' &&
-        (document.hidden || document.visibilityState === 'hidden')
-      // Pause only when hidden AND no claimed job — keep 120ms claim loop snappy.
-      if (hidden && !claimedRef.current && !busy.current) {
-        // Rust computer-host still claims navigate. SPA must not claim
-        // click/type/page_text against a hidden rail (ok-fallback "success").
-        helloIv = 0
-        uiIv = 0
-        jobIv = 0
-        return
-      }
-      helloMs = 4000
-      uiMs = 250
-      jobMs = 120
-      helloIv = window.setInterval(() => {
-        void hello()
-      }, helloMs)
-      uiIv = window.setInterval(() => {
-        void tickUiCommand()
-      }, uiMs)
-      jobIv = window.setInterval(() => {
-        void tickJobs()
-      }, jobMs)
-    }
-    reschedule()
     const onVis = () => reschedule()
     document.addEventListener('visibilitychange', onVis)
 
     return () => {
       cancelled = true
       document.removeEventListener('visibilitychange', onVis)
-      window.clearInterval(helloIv)
-      window.clearInterval(uiIv)
-      window.clearInterval(jobIv)
+      stopLoops()
     }
   }, [enabled])
 

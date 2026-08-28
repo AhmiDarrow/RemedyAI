@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from remedy.core.build_oracle import coerce_text_arg
 from remedy.home import default_home
 
 _COMPANION_RE = re.compile(
@@ -327,7 +328,7 @@ def get_companion_backend() -> CompanionBackend:
 
 
 def looks_like_companion_request(message: str) -> bool:
-    return bool(_COMPANION_RE.search(message or ""))
+    return bool(_COMPANION_RE.search(coerce_text_arg(message)))
 
 
 def _dib_to_png_bytes(dib: bytes) -> bytes | None:

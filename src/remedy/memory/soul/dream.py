@@ -213,10 +213,16 @@ def dream_cycle(
         if len(t) >= 8 and not looks_like_secret_soul(t):
             thread_counts[t[:160]] += 1
     promoted_threads = 0
+    from remedy.core.metabolism.time_crystal import looks_like_job_resume_fact
+
     for thr, n in thread_counts.most_common(5):
         if n >= 2:
             # Title-case lightly for human inject
             pretty = thr[:1].upper() + thr[1:] if thr else thr
+            # Job-resume residue ("Continue: …", "Stay with: Continue…")
+            # is not a life pledge and must not become a mission.
+            if looks_like_job_resume_fact(pretty):
+                continue
             if pretty not in sf.relational.open_threads:
                 sf.relational.open_threads.append(pretty[:160])
                 promoted_threads += 1
@@ -224,6 +230,8 @@ def dream_cycle(
             # recurring thread is a recall of it — reconsolidate its trace.
             if n >= 3:
                 stay = f"Stay with: {pretty[:140]}"
+                if looks_like_job_resume_fact(stay):
+                    continue
                 if stay not in sf.pledges:
                     sf.pledges.append(stay)
                 pledge_trace_touch(sf, stay)

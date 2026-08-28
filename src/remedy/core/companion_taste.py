@@ -14,6 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.core.build_oracle import coerce_text_arg
 from remedy.home import default_home
 
 _TASTE_HINT = re.compile(
@@ -66,7 +67,7 @@ def save_taste(items: list[dict[str, str]], runtime: Any = None) -> Path:
 
 
 def remember_taste(fact: str, runtime: Any = None) -> dict[str, str]:
-    text = (fact or "").strip()
+    text = coerce_text_arg(fact)
     if not text:
         return {"id": "", "fact": ""}
     items = load_taste(runtime)
@@ -99,7 +100,7 @@ def remember_taste(fact: str, runtime: Any = None) -> dict[str, str]:
 
 def extract_taste(message: str) -> list[str]:
     """Pull explicit design preferences from a user line."""
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg or not _TASTE_HINT.search(msg):
         return []
     # Keep short imperative / preference sentences

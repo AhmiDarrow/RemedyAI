@@ -15,6 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.core.build_oracle import coerce_text_arg
 from remedy.home import default_home
 
 # Lifecycle sets used by store + desktop Plan banner.
@@ -278,7 +279,7 @@ class PlanStore:
         for i, s in enumerate(steps or []):
             if isinstance(s, str):
                 step_objs.append(
-                    PlanStep(id=f"s{i+1}", title=s.strip() or f"Step {i+1}")
+                    PlanStep(id=f"s{i+1}", title=coerce_text_arg(s) or f"Step {i+1}")
                 )
             elif isinstance(s, dict):
                 if not s.get("id"):
@@ -299,10 +300,12 @@ class PlanStore:
                     old.status = "cancelled"
                     self.save(old)
         pid = uuid4().hex[:12]
+        title_s = coerce_text_arg(title) or "Untitled plan"
+        goal_s = coerce_text_arg(goal) or coerce_text_arg(title)
         plan = TaskPlan(
             id=pid,
-            title=(title or "Untitled plan").strip()[:200],
-            goal=(goal or title or "").strip()[:2000],
+            title=title_s[:200],
+            goal=goal_s[:2000],
             steps=step_objs,
             risks=[str(r) for r in (risks or [])],
             session_id=session_id,
@@ -406,20 +409,20 @@ class PlanStore:
 
 def _strip_step_title_status_prefix(title: str) -> str:
     """Remove agent hacks like ``[done]`` / ``[x]`` from step titles."""
-    t = (title or "").strip()
+    t = coerce_text_arg(title)
     t = re.sub(
         r"^\s*\[(?:done|x|complete|completed|ok|skip(?:ped)?|active|>)\]\s*",
         "",
         t,
         flags=re.IGNORECASE,
     )
-    return t.strip() or (title or "").strip()
+    return t.strip() or coerce_text_arg(title)
 
 
 def parse_steps_from_text(text: str) -> list[str]:
     """Best-effort extract numbered / bulleted steps from free text."""
     steps: list[str] = []
-    for line in (text or "").splitlines():
+    for line in coerce_text_arg(text, sep="\n").splitlines():
         m = re.match(r"^\s*(?:\d+[\.\)]\s+|[-*•]\s+)(.+)$", line)
         if m:
             title = m.group(1).strip()

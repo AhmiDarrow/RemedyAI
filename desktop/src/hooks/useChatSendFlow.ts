@@ -393,7 +393,7 @@ export function useChatSendFlow(opts: {
         if (sid && useProvider && useModel) {
           setSessionBind(sid, String(useProvider), String(useModel))
         }
-        // While streaming, send() queues (after) or interrupts based on opts.mode.
+        // While streaming, send() steers the live turn unless opts.mode is after/interrupt.
         if (sid) notifyArmRef.current = sid
         bumpStick()
         void send(text, useModel, sid, attachments, usePlan, {
