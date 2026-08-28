@@ -6,6 +6,7 @@ loop. They never open a second chat personality.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -58,73 +59,77 @@ async def run_explore_job(
         )
     parts: list[str] = [f"Explore job under {target}"]
 
-    # Fingerprint + orientation for this path (not mandatory project root)
-    try:
-        orient_root = target if target.is_dir() else target.parent
-        fp = fingerprint_path(orient_root)
-        fp_lines = fp.context_lines()
-        if fp_lines:
-            parts.append("\n".join(fp_lines))
-        orient = orientation_block(orient_root)
-        if orient:
-            parts.append(orient)
-    except Exception as e:
-        parts.append(f"fingerprint/orientation error: {e}")
+    def _survey() -> list[str]:
+        extra: list[str] = []
+        try:
+            orient_root = target if target.is_dir() else target.parent
+            fp = fingerprint_path(orient_root)
+            fp_lines = fp.context_lines()
+            if fp_lines:
+                extra.append("\n".join(fp_lines))
+            orient = orientation_block(orient_root)
+            if orient:
+                extra.append(orient)
+        except Exception as e:
+            extra.append(f"fingerprint/orientation error: {e}")
 
-    try:
-        if target.is_dir():
-            # Level-0 listing
-            entries = sorted(
-                target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())
-            )
-            visible = [p for p in entries if not p.name.startswith(".")][:max_files]
-            lines = []
-            for p in visible:
-                try:
-                    rel = p.relative_to(root).as_posix()
-                except ValueError:
-                    try:
-                        rel = p.relative_to(target).as_posix()
-                    except ValueError:
-                        rel = p.name
-                lines.append(f"{'dir ' if p.is_dir() else 'file'} {rel}")
-            parts.append("Listing:\n" + ("\n".join(lines) if lines else "(empty)"))
-
-            # One level of subdirectory names (budgeted) for tree feel
-            sub_lines: list[str] = []
-            for p in visible:
-                if not p.is_dir():
-                    continue
-                try:
-                    kids = sorted(
-                        x for x in p.iterdir() if not x.name.startswith(".")
-                    )[:8]
-                except OSError:
-                    continue
-                if not kids:
-                    continue
-                try:
-                    pref = p.relative_to(target).as_posix()
-                except ValueError:
-                    pref = p.name
-                names = ", ".join(
-                    (k.name + "/") if k.is_dir() else k.name for k in kids
+        try:
+            if target.is_dir():
+                entries = sorted(
+                    target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())
                 )
-                sub_lines.append(f"  {pref}/ → {names}")
-                if len(sub_lines) >= 12:
-                    break
-            if sub_lines:
-                parts.append("Subdirs (sample):\n" + "\n".join(sub_lines))
-        elif target.is_file():
-            try:
-                rel = target.relative_to(root).as_posix()
-            except ValueError:
-                rel = str(target)
-            parts.append(f"File: {rel}")
-        else:
-            parts.append(f"path not found: {target}")
-    except Exception as e:
-        parts.append(f"list error: {e}")
+                visible = [p for p in entries if not p.name.startswith(".")][:max_files]
+                lines = []
+                for p in visible:
+                    try:
+                        rel = p.relative_to(root).as_posix()
+                    except ValueError:
+                        try:
+                            rel = p.relative_to(target).as_posix()
+                        except ValueError:
+                            rel = p.name
+                    lines.append(f"{'dir ' if p.is_dir() else 'file'} {rel}")
+                extra.append(
+                    "Listing:\n" + ("\n".join(lines) if lines else "(empty)")
+                )
+
+                sub_lines: list[str] = []
+                for p in visible:
+                    if not p.is_dir():
+                        continue
+                    try:
+                        kids = sorted(
+                            x for x in p.iterdir() if not x.name.startswith(".")
+                        )[:8]
+                    except OSError:
+                        continue
+                    if not kids:
+                        continue
+                    try:
+                        pref = p.relative_to(target).as_posix()
+                    except ValueError:
+                        pref = p.name
+                    names = ", ".join(
+                        (k.name + "/") if k.is_dir() else k.name for k in kids
+                    )
+                    sub_lines.append(f"  {pref}/ → {names}")
+                    if len(sub_lines) >= 12:
+                        break
+                if sub_lines:
+                    extra.append("Subdirs (sample):\n" + "\n".join(sub_lines))
+            elif target.is_file():
+                try:
+                    rel = target.relative_to(root).as_posix()
+                except ValueError:
+                    rel = str(target)
+                extra.append(f"File: {rel}")
+            else:
+                extra.append(f"path not found: {target}")
+        except Exception as e:
+            extra.append(f"list error: {e}")
+        return extra
+
+    parts.extend(await asyncio.to_thread(_survey))
 
     if (query or "").strip():
         if not target.exists():
@@ -193,7 +198,7 @@ async def run_verify_job(
     if not cmd:
         # Fingerprint-suggested verify when command omitted
         try:
-            fp = fingerprint_path(workdir)
+            fp = await asyncio.to_thread(fingerprint_path, workdir)
             cmd = (fp.suggest_verify or "").strip()
         except Exception:
             cmd = ""
@@ -370,20 +375,20 @@ async def run_diff_job(runtime: Any, *, path: str = ".") -> JobResult:
     )
     chunks: list[str] = []
     last_code = 0
-    for argv in (
-        ["git", "status", "-sb"],
-        ["git", "diff", "--stat"],
-        ["git", "diff", "--cached", "--stat"],
-    ):
-        result = await sandbox.execute(argv, workdir=workdir, timeout_seconds=60.0)
+    results = await asyncio.gather(
+        sandbox.execute(["git", "status", "-sb"], workdir=workdir, timeout_seconds=60.0),
+        sandbox.execute(["git", "diff", "--stat"], workdir=workdir, timeout_seconds=60.0),
+        sandbox.execute(
+            ["git", "diff", "--cached", "--stat"],
+            workdir=workdir,
+            timeout_seconds=60.0,
+        ),
+    )
+    for result in results:
         last_code = result.exit_code
         part = ((result.stdout or "") + (result.stderr or "")).strip()
         if part:
             chunks.append(part)
-        if result.exit_code != 0 and "not a git repository" in (
-            (result.stderr or "") + (result.stdout or "")
-        ).lower():
-            break
     ok = last_code == 0 or any(chunks)
     body = "\n".join(chunks)[:6000]
     return JobResult(

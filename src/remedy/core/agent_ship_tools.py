@@ -8,6 +8,7 @@ Keeps credentials via scrub allowlist (GH_TOKEN) and sticky VCS approvals.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import re
 from typing import Any
@@ -163,9 +164,11 @@ def register_ship_tools(runtime: Any) -> None:
 
     async def git_status() -> str:
         """Show branch, tracking, and short status (ship precondition)."""
-        code, out, err = await _run_git(["status", "-sb"])
-        code2, log, _ = await _run_git(["log", "-3", "--oneline"])
-        code3, rem, _ = await _run_git(["remote", "-v"])
+        (code, out, err), (code2, log, _), (code3, rem, _) = await asyncio.gather(
+            _run_git(["status", "-sb"]),
+            _run_git(["log", "-3", "--oneline"]),
+            _run_git(["remote", "-v"]),
+        )
         lines = [
             f"**git_status** exit={code}",
             out.strip() or "(empty)",
