@@ -117,11 +117,12 @@ def test_last_user_text_is_per_turn_not_runtime():
         assert current_last_user_text(runtime) == ""
         set_turn_last_user_text("tab-B actual prompt", runtime)
         assert current_last_user_text(runtime) == "tab-B actual prompt"
-        assert runtime._last_user_text == "tab-B actual prompt"
+        # Live mirror stays tab A — B must not steal the owner's leftover prompt.
+        assert runtime._last_user_text == "tab-A secret prompt"
     finally:
         end_turn("tab-b", *toks)
-    # Outside a turn, the runtime field is the legacy fallback.
-    assert current_last_user_text(runtime) == "tab-B actual prompt"
+    # Outside a turn, the runtime field is the legacy fallback (unstolen).
+    assert current_last_user_text(runtime) == "tab-A secret prompt"
 
 
 def test_create_session_integrity_race(tmp_path):
@@ -410,11 +411,14 @@ def test_context_snapshot_lives_on_turn_flags():
         try:
             set_turn_context_snapshot("b", runtime)
             assert turn_context_snapshot(runtime) == "b"
+            assert runtime._last_context_snapshot == "global"
         finally:
             end_turn("snap-b", *t_b)
         assert turn_context_snapshot(runtime) == "a"
+        assert runtime._last_context_snapshot == "global"
     finally:
         end_turn("snap-a", *t_a)
+    assert turn_context_snapshot(runtime) == "global"
 
 
 def test_skip_ask_is_turn_local(monkeypatch):
@@ -483,3 +487,44 @@ def test_any_stream_claimed_sees_all_sessions():
     finally:
         release_session_stream_claim(sid)
     assert any_stream_claimed() is False
+
+
+def test_build_verify_green_isolated_across_nested_turns():
+    """Hive / daughter ReAct must not paint the shared runtime green."""
+    from remedy.core.turn_context import (
+        set_turn_build_verify_green,
+        set_turn_last_auto_checkpoint_n,
+        turn_build_verify_green,
+        turn_last_auto_checkpoint_n,
+    )
+
+    runtime = MagicMock()
+    runtime._build_verify_green = False
+    runtime._last_auto_checkpoint_n = 0
+    t_a = begin_turn("owner", project_raw=None, active_path=".")
+    try:
+        set_turn_build_verify_green(True, runtime)
+        set_turn_last_auto_checkpoint_n(7, runtime)
+        assert turn_build_verify_green(runtime) is True
+        assert turn_last_auto_checkpoint_n(runtime) == 7
+        assert runtime._build_verify_green is False
+        assert runtime._last_auto_checkpoint_n == 0
+        t_b = begin_turn("hive", project_raw=None, active_path=".")
+        try:
+            assert turn_build_verify_green(runtime) is False
+            set_turn_build_verify_green(True, runtime)
+            set_turn_last_auto_checkpoint_n(99, runtime)
+            assert turn_build_verify_green(runtime) is True
+            assert runtime._build_verify_green is False
+            assert runtime._last_auto_checkpoint_n == 0
+        finally:
+            end_turn("hive", *t_b)
+        # Owner latch restored; live mirrors still idle.
+        assert turn_build_verify_green(runtime) is True
+        assert turn_last_auto_checkpoint_n(runtime) == 7
+        assert runtime._build_verify_green is False
+    finally:
+        end_turn("owner", *t_a)
+    assert turn_build_verify_green(runtime) is False
+    assert runtime._build_verify_green is False
+

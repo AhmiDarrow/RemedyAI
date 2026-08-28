@@ -25,6 +25,7 @@ loopback guard, the headers and the timeout are exercised for real.
 from __future__ import annotations
 
 import os
+import time
 import socket
 import subprocess
 import types
@@ -545,6 +546,53 @@ def test_discover_ggufs_serves_a_cached_list_within_its_ttl(
     assert svc.discover_ggufs(str(tmp_path)) == first
     svc._discover_ggufs_cache.update({"ts": 0.0, "key": "", "value": []})
     assert len(svc.discover_ggufs(str(tmp_path))) == 2
+
+
+def test_a_huge_downloads_folder_does_not_stall_gguf_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Live GET /api/providers/connected was 1473ms after the 5:52pm CT restart
+    because pathlib glob listed every file in Downloads (Windows Defender)."""
+    dumps = tmp_path / "Downloads"
+    dumps.mkdir()
+    for i in range(12):
+        (dumps / f"photo-{i}.jpg").write_bytes(b"x")
+    (dumps / "late-7B-Q4_K_M.gguf").write_bytes(b"gguf")
+    root = models_dir(str(tmp_path))
+    (root / "house-7B-Q4_K_M.gguf").write_bytes(b"gguf")
+    _seed(tmp_path)
+    monkeypatch.setattr(svc, "_model_search_roots", lambda home: [root, dumps])
+    svc._discover_ggufs_cache.update({"ts": 0.0, "key": "", "value": []})
+
+    real = svc.os.scandir
+
+    def slow_scandir(path):
+        it = real(path)
+        if Path(path).name.lower() != "downloads":
+            return it
+
+        class _Slow:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return it.__exit__(*a)
+
+            def __iter__(self):
+                for ent in it:
+                    time.sleep(0.03)
+                    yield ent
+
+        return _Slow()
+
+    monkeypatch.setattr(svc.os, "scandir", slow_scandir)
+    t0 = time.perf_counter()
+    found = svc.discover_ggufs(str(tmp_path))
+    ms = (time.perf_counter() - t0) * 1000
+    names = [g["name"] for g in found]
+    assert "house-7B-Q4_K_M.gguf" in names
+    # 12 * 30ms would be 360ms+ without the dump-dir budget.
+    assert ms < 220, f"discover_ggufs stalled {ms:.0f}ms on Downloads"
 
 
 def test_the_cached_list_is_a_copy_so_a_caller_cannot_poison_it(
@@ -1356,10 +1404,30 @@ def test_status_never_wakes_the_host_when_auto_start_is_off(
     monkeypatch.setattr(
         svc, "adopt_existing_host", lambda home=None: pytest.fail("auto_start is off")
     )
+    monkeypatch.setattr(
+        svc,
+        "ensure_rmb_watchdog",
+        lambda *a, **k: pytest.fail("watchdog must not start when RMB is off"),
+    )
     status = svc.get_rmb_status({"home_dir": str(tmp_path)})
     assert status["running"] is False
     assert status["ready"] is False
     assert status["auto_start"] is False
+
+
+def test_watchdog_stays_off_until_owner_starts_rmb(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed(tmp_path, enabled=True, auto_start=False)
+    monkeypatch.setattr(svc, "is_starting", lambda: False)
+    monkeypatch.setattr(svc, "managed_process_alive", lambda: False)
+    monkeypatch.setattr(svc, "_watchdog_thread", None)
+
+    def _no_thread(*_a, **_k):
+        raise AssertionError("watchdog thread must not start when RMB is off")
+
+    monkeypatch.setattr(svc.threading, "Thread", _no_thread)
+    svc.ensure_rmb_watchdog(str(tmp_path))
 
 
 def test_status_tells_the_user_which_piece_is_missing(

@@ -10,6 +10,7 @@ import json
 from contextlib import suppress
 from typing import Any
 
+from remedy.core.build_oracle import coerce_text_arg
 from remedy.home import default_home
 
 
@@ -23,7 +24,8 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
         return LifeGoalStore(home)
 
     async def goal_add(title: str = "", description: str = "") -> str:
-        t = (title or "").strip()
+        t = coerce_text_arg(title)
+        desc = coerce_text_arg(description)
         if not t:
             return "Provide a goal title."
         life = None
@@ -34,7 +36,7 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
             store = _life_store()
             life = store.add(
                 t,
-                why=description or "",
+                why=desc,
                 source="goal_add",
             )
             if life and not life.next_action:
@@ -43,7 +45,7 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
                 getattr(getattr(runtime, "config", None), "home_dir", None),
                 force=True,
             )
-        task = runtime.create_task(t, description=description or "", tags=["goal"])
+        task = runtime.create_task(t, description=desc, tags=["goal"])
         with suppress(Exception):
             from remedy.memory.harness.brief import SessionBrief
 
@@ -64,7 +66,7 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
 
                     sid = turn_session_id(runtime)
                     profile = await mem.get_or_create_profile()
-                    text = t if not description else f"{t} — {description.strip()[:160]}"
+                    text = t if not desc else f"{t} — {desc[:160]}"
                     upsert_profile_fact(
                         profile,
                         f"Goal: {text[:240]}",
@@ -168,7 +170,8 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
 
         from remedy.models import TaskStatus
 
-        needle = (title or "").strip().lower()
+        title_s = coerce_text_arg(title)
+        needle = title_s.lower()
         if not needle:
             return "Provide goal title (or partial) to complete."
         matches = [
@@ -178,12 +181,12 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
         ]
         if not matches:
             with suppress(Exception):
-                life = _life_store().complete(title, evidence=evidence or "")
+                life = _life_store().complete(title_s, evidence=evidence or "")
                 if life is not None:
                     return f"Goal completed: {life.title}" + (
                         f" evidence={evidence[:200]}" if evidence else ""
                     )
-            return f"No open goal matching: {title}"
+            return f"No open goal matching: {title_s}"
         task = matches[0]
         task.status = TaskStatus.COMPLETED
         task.result_summary = (evidence or "done").strip()[:500]
@@ -231,15 +234,15 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
     async def goal_set_next(
         title: str = "", action: str = "", next_by: str = ""
     ) -> str:
-        t = (title or "").strip()
-        a = (action or "").strip()
+        t = coerce_text_arg(title)
+        a = coerce_text_arg(action)
         if not t or not a:
             return "Provide title and next action."
         g = None
         with suppress(Exception):
             g = _life_store().set_next(t, a, next_by=next_by or "")
         if g is None:
-            return f"No open life goal matching: {title}"
+            return f"No open life goal matching: {t}"
         due = f" by {g.next_by}" if g.next_by else ""
         drove = None
         with suppress(Exception):
@@ -346,8 +349,10 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
         status: str = "draft",
     ) -> str:
         """Save a structured plan. steps/risks: native array, JSON array, or bullets."""
+        from remedy.core.build_oracle import coerce_text_arg
+
         store = _plan_store()
-        t = str(title or goal or "Session plan").strip()
+        t = coerce_text_arg(title) or coerce_text_arg(goal) or "Session plan"
         if not t:
             return "Provide a plan title."
 
@@ -357,7 +362,7 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
         sid = getattr(runtime, "_session_id", None)
         plan = store.create(
             t,
-            goal=str(goal or t),
+            goal=coerce_text_arg(goal) or t,
             steps=step_list,
             risks=risk_list,
             session_id=str(sid) if sid else None,

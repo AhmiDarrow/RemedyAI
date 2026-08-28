@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import re
 
+from remedy.core.build_oracle import coerce_text_arg
+
 # When this matches, the full playbook is worth the tokens. Coding "implement X"
 # must not pay for grocery/CUA liturgy on every turn.
 _CU_HINT_RE = re.compile(
@@ -37,7 +39,7 @@ def needs_computer_use_guidance(message: str) -> bool:
     It is also thousands of tokens. Coding turns keep every computer_* tool
     on the API — they just do not recap the shopping/CUA syllabus.
     """
-    m = (message or "").strip()
+    m = coerce_text_arg(message)
     if not m:
         return False
     try:

@@ -725,9 +725,11 @@ def turn_build_verify_green(runtime: Any = None) -> bool:
 
 
 def set_turn_build_verify_green(value: bool, runtime: Any = None) -> None:
+    """Turn-local green latch. Never paint the shared runtime during a turn
+    (a hive daughter / sibling tab used to steal the owner's next summary)."""
     flag = bool(value)
     _turn_build_verify_green.set(flag)
-    if runtime is not None:
+    if runtime is not None and not in_active_turn() and not _turn_session_id.get():
         runtime._build_verify_green = flag
 
 
@@ -742,7 +744,7 @@ def turn_last_auto_checkpoint_n(runtime: Any = None) -> int:
 def set_turn_last_auto_checkpoint_n(n: int, runtime: Any = None) -> None:
     val = int(n or 0)
     _turn_last_auto_checkpoint_n.set(val)
-    if runtime is not None:
+    if runtime is not None and not in_active_turn() and not _turn_session_id.get():
         runtime._last_auto_checkpoint_n = val
 
 
@@ -777,12 +779,14 @@ def current_last_user_text(runtime: Any = None) -> str:
 
 
 def set_turn_last_user_text(text: str, runtime: Any = None) -> None:
-    """Stamp this turn's user text; mirror onto runtime for legacy readers."""
+    """Stamp this turn's user text. Do not overwrite process-live
+    ``runtime._last_user_text`` while a turn is active — a hive / sibling
+    tab used to replace the owner's prompt for every leftover reader."""
     clipped = (text or "")[:4000]
     flags = _react_flags()
     if flags is not None:
         flags.last_user_text = clipped
-    if runtime is not None:
+    elif runtime is not None:
         with contextlib.suppress(Exception):
             runtime._last_user_text = clipped
 
@@ -893,7 +897,7 @@ def set_turn_context_snapshot(value: Any, runtime: Any = None) -> None:
     flags = _react_flags()
     if flags is not None:
         flags.context_snapshot = value
-    if runtime is not None:
+    elif runtime is not None:
         runtime._last_context_snapshot = value
 
 
@@ -962,7 +966,7 @@ def set_turn_skip_ask(value: bool, runtime: Any = None) -> None:
     flags = _react_flags()
     if flags is not None:
         flags.skip_ask = bool(value)
-    if runtime is not None:
+    elif runtime is not None:
         with contextlib.suppress(Exception):
             runtime._turn_skip_ask = bool(value)
 

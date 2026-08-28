@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 
 import yaml
 from fastapi import FastAPI, HTTPException, Query, Response
@@ -49,6 +50,21 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         # outdated desktop EXE (or vice versa).
         current_raw = (current or "").strip() or python_version
         current_norm = str(current_raw).lstrip("vV").strip() or python_version
+        # Chrome polls this; PyPI + GitHub are ~500ms. Cache per current
+        # version on this app so a restart still fetches once.
+        now = time.monotonic()
+        cache = getattr(app.state, "_updates_check_cache", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            app.state._updates_check_cache = cache
+        hit = cache.get(current_norm)
+        if (
+            isinstance(hit, tuple)
+            and len(hit) == 2
+            and (now - float(hit[0])) < 300.0
+            and isinstance(hit[1], dict)
+        ):
+            return dict(hit[1])
         latest_python = None
         latest_desktop = None
         release_url = None
@@ -140,7 +156,7 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             # Still flag available so the UI can open the releases page.
             # Install button needs installer_url; UpdateScreen checks it.
 
-        return {
+        result = {
             "current_version": current_norm,
             "python_version": python_version,
             "latest_python": latest_python,
@@ -150,6 +166,8 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             "update_available": update_available,
             "error": " · ".join(errors) if errors else None,
         }
+        cache[current_norm] = (now, dict(result))
+        return result
 
     def _yaml_schema() -> str:
         import io

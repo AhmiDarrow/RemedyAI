@@ -365,3 +365,14 @@ async def test_a_real_json_array_for_todos_json_is_accepted(build):
     )
     assert "Scout" in out
     assert "strip" not in out
+
+
+@pytest.mark.asyncio
+async def test_a_tuple_of_todos_is_accepted(build):
+    out = await build["tools"]["todo_write"](
+        todos_json=(
+            {"id": "1", "content": ["Scout", "the repo"], "status": "pending"},
+        )
+    )
+    assert "Scout the repo" in out
+    assert "strip" not in out

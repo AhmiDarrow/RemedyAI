@@ -156,6 +156,103 @@ window.__rmdyCtx=function(el){
   }
   return '';
 };
+window.__rmdyClickSel='a,button,input,textarea,select,[role=button],[role=link],[role=tab],[role=menuitem],[role=option],[role=radio],[role=checkbox],[contenteditable=true],summary,label,[onclick]';
+window.__rmdyHoldSel=window.__rmdyClickSel+',[role=switch],div,span';
+window.__rmdyTypeSel='input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]):not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]):not([type=color]),textarea,[role=textbox],[role=searchbox],[role=combobox],[contenteditable=true],[contenteditable=""],[contenteditable=plaintext-only],label';
+window.__rmdyIsField=function(el){
+  if(!el) return false;
+  const tag=(el.tagName||'').toLowerCase();
+  const role=((el.getAttribute&&el.getAttribute('role'))||'').toLowerCase();
+  const itype=(el.type||'').toLowerCase();
+  const skip={hidden:1,submit:1,button:1,reset:1,image:1,checkbox:1,radio:1,file:1,range:1,color:1};
+  if(tag==='input') return !skip[itype];
+  return tag==='textarea'||el.isContentEditable||role==='textbox'||role==='searchbox'||role==='combobox';
+};
+window.__rmdyFieldOf=function(el){
+  if(!el) return null;
+  if(window.__rmdyIsField(el)) return el;
+  const fieldSel='input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]):not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]):not([type=color]),textarea,[role=textbox],[role=searchbox],[role=combobox],[contenteditable=true],[contenteditable=""],[contenteditable=plaintext-only]';
+  if((el.tagName||'').toLowerCase()==='label'){
+    let f=null;
+    const id=el.htmlFor||(el.getAttribute&&el.getAttribute('for'))||'';
+    if(id){ try{ f=(el.ownerDocument||document).getElementById(id); }catch(e){} }
+    if(f && !window.__rmdyIsField(f)) f=null;
+    if(!f){ try{ f=el.querySelector(fieldSel); }catch(e){} }
+    if(!f){
+      try{
+        let n=el.nextElementSibling;
+        for(let i=0;i<2 && n && !f;i++,n=n.nextElementSibling){
+          if(window.__rmdyIsField(n)) f=n;
+        }
+      }catch(e){}
+    }
+    return f||null;
+  }
+  try{
+    const id=el.id;
+    if(id){
+      const hit=window.__rmdyDeep(fieldSel).find(n=>
+        ((n.getAttribute&&n.getAttribute('aria-labelledby'))||'').split(/\s+/).indexOf(id)>=0);
+      if(hit) return hit;
+    }
+  }catch(e){}
+  return null;
+};
+window.__rmdySTOP=new Set(['the','a','an','to','of','in','on','at','for','and','or','my','me','it','one','some','this','that','with','from','into','your','their']);
+window.__rmdyACTION=new Set(['post','submit','send','tweet','publish','share','continue','next','save','create','reply','comment','search','confirm','go','done','apply','update']);
+window.__rmdyScore=function(el,q){
+  if(!window.__rmdyVisible(el)) return -1;
+  const r=window.__rmdyRect(el)||el.getBoundingClientRect();
+  const name=window.__rmdyName(el).toLowerCase();
+  if(!name) return -1;
+  q=(q||'').toLowerCase().trim();
+  if(!q) return -1;
+  const tag=(el.tagName||'').toLowerCase();
+  const role=((el.getAttribute&&el.getAttribute('role'))||'').toLowerCase();
+  const itype=(el.type||'').toLowerCase();
+  const STOP=window.__rmdySTOP;
+  const qt=q.split(/[^a-z0-9]+/).filter(Boolean);
+  const mqt=qt.filter(t=>t.length>=3 && !STOP.has(t));
+  let s=0;
+  if(name===q) s=100;
+  else if(q.length>=3 && name.includes(q)) s=70;
+  else if(q.includes(name)&&name.length>=3) s=40;
+  else {
+    const nt=name.split(/[^a-z0-9]+/).filter(t=>t.length>=3 && !STOP.has(t));
+    const use=mqt.length?mqt:qt.filter(t=>t.length>=3 && !STOP.has(t));
+    // Exact tokens only — "add" must not hit "address" / "happening" via includes.
+    const hit=use.filter(t=>nt.some(n=>n===t)).length;
+    s = use.length ? 22*(hit/use.length) : 0;
+  }
+  let ctx=''; try { ctx=window.__rmdyCtx(el).toLowerCase(); } catch(e) {}
+  const nameHasQuery=mqt.some(t=>name.includes(t));
+  if(ctx && mqt.length>1 && nameHasQuery){
+    const missing=mqt.filter(t=>!name.includes(t));
+    const inCtx=missing.filter(t=>ctx.includes(t)).length;
+    if(inCtx) s+=20*(inCtx/mqt.length);
+  }
+  if(ctx && /view in .{0,24}app|get the app|download (the )?app|open (in|the) app|install (the )?app/.test(ctx)) s-=40;
+  if(mqt.some(t=>window.__rmdyACTION.has(t))){
+    if(tag==='button'||role==='button'||itype==='submit') s+=25;
+    else if(tag==='a'||role==='link') s-=20;
+  }
+  if(/happen|write a|write your|compose|post text|\btitle\b|\bbody\b|caption|what.s on/.test(q)){
+    if(tag==='textarea'||el.isContentEditable||role==='textbox'||role==='searchbox'||itype==='text'||itype==='search') s+=30;
+    else if(tag==='button'||role==='button') s-=15;
+  }
+  if(s<=0) return -1;
+  if(r.width>8&&r.width<900&&r.height>8&&r.height<220) s+=5;
+  return s;
+};
+window.__rmdyPick=function(q, sel){
+  let best=null, bestS=-1, second=null, secondS=-1;
+  for(const el of window.__rmdyDeep(sel)){
+    const s=window.__rmdyScore(el,q);
+    if(s>bestS){ second=best; secondS=bestS; bestS=s; best=el; }
+    else if(s>secondS){ secondS=s; second=el; }
+  }
+  return {best:best, bestS:bestS, second:second, secondS:secondS};
+};
 "#;
 
 /// Same-window OAuth for redirect-style SSO. GIS / sized IdP windows still
@@ -1725,6 +1822,127 @@ fn attach_fullscreen_handler(_app: AppHandle, _wv: tauri::Webview) {}
 // input + human-held checkout is the honest posture.
 // ---------------------------------------------------------------------------
 
+/// JS prelude that binds `el` for type/type_text.
+///
+/// Prefers a snapshot ref, then a visible-text query among editable fields
+/// (placeholder / aria / associated <label>), then the focused node. A stale
+/// ref with a query relocates in the same pass instead of failing closed.
+/// Early `return` strings (`missing-ref:…` / `no-match:…`) are for the
+/// wrapping IIFE. Empty ref+query keeps the old activeElement path.
+/// Routing tokens (`browser` / `desktop` / ...) are not field locators.
+fn type_locate_js(r#ref: Option<&str>, query: Option<&str>) -> String {
+    let rf = r#ref.filter(|s| !s.is_empty()).unwrap_or("");
+    let q_raw = query.filter(|s| !s.is_empty()).unwrap_or("");
+    const ROUTING: &[&str] = &[
+        "browser", "desktop", "auto", "system", "grove", "alongside", "studio",
+        "chrome", "rail", "web", "os",
+    ];
+    let q = if ROUTING.iter().any(|r| q_raw.eq_ignore_ascii_case(r)) {
+        ""
+    } else {
+        q_raw
+    };
+    if rf.is_empty() && q.is_empty() {
+        return "const el=document.activeElement||document.body;".into();
+    }
+    let er = rf.replace('\\', "\\\\").replace('\'', "\\'");
+    let eq = q
+        .replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace('\n', " ")
+        .replace('\r', " ");
+    let pick = if q.is_empty() {
+        String::new()
+    } else {
+        String::from(
+            r#"
+  if(!el && q){
+    const sel=window.__rmdyTypeSel;
+    let hit=window.__rmdyPick(q, sel);
+    if(!hit.best||hit.bestS<40){
+      for(let pass=0; pass<4 && (!hit.best||hit.bestS<40); pass++){
+        window.scrollBy(0, Math.floor(innerHeight*0.75));
+        hit=window.__rmdyPick(q, sel);
+      }
+    }
+    if(hit.best&&hit.bestS>=40){
+      if(hit.second && hit.bestS-hit.secondS<8 && hit.bestS>=70){
+        const bn=window.__rmdyName(hit.best).slice(0,40);
+        const sn=window.__rmdyName(hit.second).slice(0,40);
+        return 'ambiguous:'+bn+' vs '+sn+' -- pass ref= from computer_snapshot';
+      }
+      el=window.__rmdyFieldOf(hit.best);
+    }
+    if(!el) return 'no-match:'+q;
+  }"#,
+        )
+    };
+    format!(
+        r#"{dom}
+  const _rf='{er}';
+  const q='{eq}'.toLowerCase().trim();
+  let el=null;
+  if(_rf){{
+    el=window.__rmdyFind(_rf);
+  }}{pick}
+  if(_rf && !el) return 'missing-ref:'+_rf;
+  if(!el) el=document.activeElement||document.body;
+  try{{ el.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
+"#,
+        dom = REMEDY_DOM_JS,
+        er = er,
+        eq = eq,
+        pick = pick,
+    )
+}
+
+
+#[cfg(test)]
+mod type_locate_tests {
+    use super::type_locate_js;
+
+    #[test]
+    fn empty_uses_focused_node() {
+        let js = type_locate_js(None, None);
+        assert!(js.contains("activeElement"));
+        assert!(!js.contains("__rmdyPick"));
+    }
+
+    #[test]
+    fn query_picks_an_editable_field() {
+        let js = type_locate_js(None, Some("What's happening?"));
+        assert!(js.contains("__rmdyPick"));
+        assert!(js.contains("__rmdyTypeSel"));
+        assert!(js.contains("__rmdyFieldOf"));
+        assert!(js.contains("no-match"));
+        assert!(js.contains("happening"));
+    }
+
+    #[test]
+    fn ref_still_finds_by_data_remedy_ref() {
+        let js = type_locate_js(Some("e4"), None);
+        assert!(js.contains("__rmdyFind"));
+        assert!(js.contains("missing-ref"));
+        assert!(!js.contains("__rmdyPick"));
+    }
+
+    #[test]
+    fn stale_ref_falls_through_to_query() {
+        let js = type_locate_js(Some("e4"), Some("Email"));
+        assert!(js.contains("__rmdyFind"));
+        assert!(js.contains("__rmdyPick"));
+        assert!(js.contains("Email"));
+        assert!(js.contains("no-match"));
+    }
+
+    #[test]
+    fn routing_hint_does_not_pick() {
+        let js = type_locate_js(None, Some("browser"));
+        assert!(js.contains("activeElement"));
+        assert!(!js.contains("__rmdyPick"));
+    }
+}
+
 /// Resolve a viewport point for a gesture: explicit x/y if given, else locate
 /// the element by text/ref (deep query — shadow DOM + same-origin iframes) and
 /// return its center. Used by press-and-hold so the model can target a control
@@ -1767,18 +1985,18 @@ fn resolve_point(
             r#"(function(){{
   {dom}
   const q='{escaped}'.toLowerCase().trim();
-  const sel='a,button,input,[role=button],[role=link],[role=checkbox],[role=switch],label,[onclick],div,span';
-  let best=null,bestS=-1;
-  for(const el of window.__rmdyDeep(sel)){{
-    if(!window.__rmdyVisible(el)) continue;
-    const name=window.__rmdyName(el).toLowerCase();
-    if(!name) continue;
-    let s=name===q?100:(name.includes(q)?70:(q.includes(name)&&name.length>=3?40:0));
-    if(s>bestS){{ bestS=s; best=el; }}
+  if(!q) return 'no-match';
+  const sel=window.__rmdyHoldSel;
+  let hit=window.__rmdyPick(q, sel);
+  if(!hit.best||hit.bestS<40){{
+    for(let pass=0; pass<4 && (!hit.best||hit.bestS<40); pass++){{
+      window.scrollBy(0, Math.floor(innerHeight*0.75));
+      hit=window.__rmdyPick(q, sel);
+    }}
   }}
-  if(!best||bestS<40) return 'no-match';
-  try{{ best.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
-  const r=window.__rmdyRect(best)||best.getBoundingClientRect();
+  if(!hit.best||hit.bestS<40) return 'no-match';
+  try{{ hit.best.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
+  const r=window.__rmdyRect(hit.best)||hit.best.getBoundingClientRect();
   return 'xy:'+(r.x+r.width/2)+':'+(r.y+r.height/2);
 }})()"#,
             dom = REMEDY_DOM_JS
@@ -2582,20 +2800,24 @@ fn computer_host_loop(app: AppHandle) {
     // Track last *completed* navigate job so renudge take of the same id is a
     // real re-navigate (never fake-complete without opening the URL).
     let mut last_completed_nav = String::new();
-    let mut hello_tick: u32 = 0;
+    // jobs/next already marks poller=True every tick. POSTing /host/hello here
+    // was pure spam (no bounds, no session) on top of the SPA 4s bounds hello.
+    let mut idle_streak: u32 = 0;
     loop {
-        // Navigate-only poll — 50ms is enough for open-url without dual-claiming DOM jobs.
-        std::thread::sleep(Duration::from_millis(50));
-        hello_tick = hello_tick.wrapping_add(1);
-        // Hello ~every 2s
-        if hello_tick % 80 == 0 {
-            let _ = auth_req(
-                agent
-                    .post(&api_url("/api/computer/host/hello"))
-                    .set("Content-Type", "application/json"),
-            )
-            .send_string(r#"{"client":"desktop-rust"}"#);
-        }
+        // Busy 50ms. Idle matches SPA: 150ms, then 800ms, then 2s.
+        // host_connected max_age is 15s so 2s idle stays driveable.
+        // A flat 150ms idle filled debug.log (8MB / ~40min) even after SPA backoff.
+        let sleep_ms: u64 = if idle_streak == 0 {
+            50
+        } else if idle_streak < 8 {
+            150
+        } else if idle_streak < 16 {
+            800
+        } else {
+            2000
+        };
+        std::thread::sleep(Duration::from_millis(sleep_ms));
+        let mut saw_work = false;
 
         // take=1 clears command atomically — prevents reloading the same wiki forever
         if let Ok(resp) = auth_req(
@@ -2612,6 +2834,7 @@ fn computer_host_loop(app: AppHandle) {
                         .to_string();
                     // Always handle — never drop a take without navigate+complete.
                     // Renudge may re-deliver the same job_id; re-navigate is correct.
+                    saw_work = true;
                     handle_ui_command(&app, &agent, cmd);
                     if !jid.is_empty() {
                         last_completed_nav = jid;
@@ -2662,6 +2885,7 @@ fn computer_host_loop(app: AppHandle) {
                         .and_then(|i| i.as_str())
                         .unwrap_or("")
                         .to_string();
+                    saw_work = true;
                     // NEVER fake-complete navigate. If still claimable, navigate for real.
                     if action == "navigate" && !jid.is_empty() && jid == last_completed_nav {
                         log::info!(
@@ -2690,6 +2914,11 @@ fn computer_host_loop(app: AppHandle) {
                 }
             }
         }
+        idle_streak = if saw_work {
+            0
+        } else {
+            idle_streak.saturating_add(1)
+        };
     }
 }
 
@@ -2993,10 +3222,19 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
     // (desktop minimized). browser_agent_action already implements them.
     if matches!(action.as_str(), "type" | "key" | "scroll" | "drag" | "select") {
         let text = payload.get("text").and_then(|t| t.as_str()).map(String::from);
-        // select: the field label travels as `hint`; browser_agent_action has
-        // no hint slot, so ride it in `key` (unused by select).
+        // select: the field label travels as `hint`; type: query/label/hint.
+        // browser_agent_action has no extra slot, so ride those in `key`
+        // (unused by select/type). Routing tokens are stripped in type_locate_js.
         let key = if action == "select" {
             payload.get("hint").and_then(|t| t.as_str()).map(String::from)
+        } else if action == "type" {
+            ["query", "label", "hint"].iter().find_map(|k| {
+                payload
+                    .get(*k)
+                    .and_then(|t| t.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+            })
         } else {
             payload.get("key").and_then(|t| t.as_str()).map(String::from)
         };
@@ -3659,87 +3897,27 @@ pub fn browser_agent_action(
   {dom}
   const q='{escaped}'.toLowerCase().trim();
   if(!q) return 'missing-text';
-  const qt=q.split(/[^a-z0-9]+/).filter(Boolean);
-  // Meaningful tokens only — a fuzzy hit on a stopword ("to","a","the") or a
-  // 1-2 char fragment must NOT fire a click for a label that isn't there.
-  const STOP=new Set(['the','a','an','to','of','in','on','at','for','and','or',
-    'my','me','it','one','some','this','that','with','from','into','your','their']);
-  const mqt=qt.filter(t=>t.length>=3 && !STOP.has(t));
-  const sel='a,button,input,textarea,select,[role=button],[role=link],[role=tab],[role=menuitem],[role=option],[role=radio],[role=checkbox],[contenteditable=true],summary,label,[onclick]';
-  function score(el){{
-    if(!window.__rmdyVisible(el)) return -1;
-    const r=window.__rmdyRect(el)||el.getBoundingClientRect();
-    const name=window.__rmdyName(el).toLowerCase();
-    if(!name) return -1;
-    const tag=(el.tagName||'').toLowerCase();
-    const role=((el.getAttribute&&el.getAttribute('role'))||'').toLowerCase();
-    const itype=(el.type||'').toLowerCase();
-    let s=0;
-    if(name===q) s=100;
-    else if(name.includes(q)) s=70;
-    else if(q.includes(name)&&name.length>=3) s=40;
-    else {{
-      // Strip punctuation so "happening?" still matches "happening".
-      const nt=name.split(/[^a-z0-9]+/).filter(t=>t.length>=3 && !STOP.has(t));
-      const use=mqt.length?mqt:qt.filter(t=>t.length>=3 && !STOP.has(t));
-      // BOTH sides must be ≥3 chars. `t.includes(n)` with n="a" (from
-      // "Add a GIF") matched almost every English query ("what's" contains "a")
-      // and fired a 27-score click on the GIF button instead of the composer.
-      const hit=use.filter(t=>nt.some(n=>n===t||(n.length>=3&&t.length>=3&&(n.includes(t)||t.includes(n))))).length;
-      s = use.length ? 22*(hit/use.length) : 0;
-    }}
-    // Context-aware disambiguation: ONLY when the LABEL already overlaps the
-    // query (generic "Set as store"). Do not promote a sibling whose card
-    // happens to contain the composer placeholder.
-    let ctx=''; try {{ ctx=window.__rmdyCtx(el).toLowerCase(); }} catch(e) {{}}
-    const nameHasQuery=mqt.some(t=>name.includes(t));
-    if(ctx && mqt.length>1 && nameHasQuery){{
-      const missing=mqt.filter(t=>!name.includes(t));
-      const inCtx=missing.filter(t=>ctx.includes(t)).length;
-      if(inCtx) s+=20*(inCtx/mqt.length);
-    }}
-    if(ctx && /view in .{{0,24}}app|get the app|download (the )?app|open (in|the) app|install (the )?app/.test(ctx)) s-=40;
-    const ACTION=new Set(['post','submit','send','tweet','publish','share','continue','next','save','create','reply','comment','search','confirm']);
-    if(mqt.some(t=>ACTION.has(t))){{
-      if(tag==='button'||role==='button'||itype==='submit') s+=25;
-      else if(tag==='a'||role==='link') s-=20;
-    }}
-    if(/happen|write a|write your|compose|post text|\\btitle\\b|\\bbody\\b|caption|what.s on/.test(q)){{
-      if(tag==='textarea'||el.isContentEditable||role==='textbox'||role==='searchbox'||itype==='text'||itype==='search') s+=30;
-      else if(tag==='button'||role==='button') s-=15;
-    }}
-    if(s<=0) return -1;
-    if(r.width>8&&r.width<900&&r.height>8&&r.height<220) s+=5;
-    return s;
-  }}
-  let best=null, bestS=-1, second=null, secondS=-1;
-  for(const el of window.__rmdyDeep(sel)){{
-    const s=score(el);
-    if(s>bestS){{ second=best; secondS=bestS; bestS=s; best=el; }}
-    else if(s>secondS){{ secondS=s; second=el; }}
-  }}
+  const sel=window.__rmdyClickSel;
+  let hit=window.__rmdyPick(q, sel);
   // Scroll passes: find off-screen matches (OSWorld: re-observe after scroll)
-  if(!best||bestS<40){{
-    for(let pass=0; pass<4 && (!best||bestS<40); pass++){{
+  if(!hit.best||hit.bestS<40){{
+    for(let pass=0; pass<4 && (!hit.best||hit.bestS<40); pass++){{
       window.scrollBy(0, Math.floor(innerHeight*0.75));
-      for(const el of window.__rmdyDeep(sel)){{
-        const s=score(el);
-        if(s>bestS){{ second=best; secondS=bestS; bestS=s; best=el; }}
-        else if(s>secondS){{ secondS=s; second=el; }}
-      }}
+      hit=window.__rmdyPick(q, sel);
     }}
   }}
+  const best=hit.best, bestS=hit.bestS, second=hit.second, secondS=hit.secondS;
   if(!best||bestS<40) return 'no-match:'+q;
   if(second && bestS-secondS<8 && bestS>=70){{
-    const bn=(best.getAttribute('aria-label')||best.innerText||best.placeholder||'').trim().slice(0,40);
-    const sn=(second.getAttribute('aria-label')||second.innerText||second.placeholder||'').trim().slice(0,40);
+    const bn=window.__rmdyName(best).slice(0,40);
+    const sn=window.__rmdyName(second).slice(0,40);
     return 'ambiguous:'+bn+' vs '+sn+' — pass ref= from computer_snapshot';
   }}
   try{{ best.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}}); }}catch(e){{}}
   try{{ best.focus({{preventScroll:true}}); }}catch(e){{}}
   const r=window.__rmdyRect(best)||best.getBoundingClientRect();
   const x=r.x+r.width/2, y=r.y+r.height/2;
-  const name=(best.getAttribute('aria-label')||best.innerText||best.placeholder||best.tagName||'').trim().replace(/\s+/g,' ').slice(0,80);
+  const name=window.__rmdyName(best).replace(/\s+/g,' ').slice(0,80);
   const tag=(best.tagName||'').toLowerCase();
   const itype=(best.type||'').toLowerCase();
   // Locate only — the host dispatches a TRUSTED click at these coords
@@ -3824,16 +4002,12 @@ pub fn browser_agent_action(
                 .replace('\'', "\\'")
                 .replace('\n', "\\n")
                 .replace('\r', "\\r");
-            let locate = if let Some(rf) = r#ref.clone().filter(|s| !s.is_empty()) {
-                let er = rf.replace('\\', "\\\\").replace('\'', "\\'");
-                format!(
-                    "{dom}\n  const el=window.__rmdyFind('{er}')||document.activeElement||document.body;\n  if(!window.__rmdyFind('{er}')) return 'missing-ref:{er}';",
-                    dom = REMEDY_DOM_JS,
-                    er = er
-                )
-            } else {
-                "const el=document.activeElement||document.body;".into()
-            };
+            // key= carries query/label/hint (see handle_job). Ref still wins;
+            // a stale ref falls through to the visible-text pick.
+            let locate = type_locate_js(
+                r#ref.as_deref().filter(|s| !s.is_empty()),
+                key.as_deref().filter(|s| !s.is_empty()),
+            );
             format!(
                 r#"(function(){{
   {locate}
@@ -4016,27 +4190,26 @@ pub fn browser_agent_action(
         if matches!(act.as_str(), "type" | "type_text") {
             if let Some(txt) = text_cdp.as_deref().filter(|s| !s.is_empty()) {
                 let (ftx, frx) = std::sync::mpsc::channel::<String>();
-                // Field-targeted type: focus the snapshot ref first. Typing
-                // into whatever happens to be focused was the old hole —
-                // computer_type ref=eN would land in the wrong box and still
-                // report ok:trusted-type.
-                let focus_js = if let Some(rf) = ref_cdp.as_deref().filter(|s| !s.is_empty()) {
-                    let er = rf.replace('\\', "\\\\").replace('\'', "\\'");
+                // Field-targeted type: focus the snapshot ref first (or the
+                // field found by visible-text query). Typing into whatever
+                // happens to be focused was the old hole — computer_type
+                // ref=eN would land in the wrong box and still report
+                // ok:trusted-type. query= relocates a stale ref in-process.
+                let focus_js = {
+                    let locate = type_locate_js(
+                        ref_cdp.as_deref().filter(|s| !s.is_empty()),
+                        key_cdp.as_deref().filter(|s| !s.is_empty()),
+                    );
                     format!(
-                        "(function(){{{dom}\
-const el=window.__rmdyFind('{er}');\
-if(!el) return 'rm-missing-ref';\
-try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}\
-return (el.isContentEditable||/^(INPUT|TEXTAREA)$/.test(el.tagName))\
-?'rm-editable':'rm-not-editable';}})()",
-                        dom = REMEDY_DOM_JS,
-                        er = er
+                        r#"(function(){{
+  {locate}
+  try{{ el.focus({{preventScroll:true}}); }}catch(e){{}}
+  return (el&&(el.isContentEditable||/^(INPUT|TEXTAREA)$/.test(el.tagName)
+    ||/^(textbox|searchbox|combobox)$/.test(((el.getAttribute&&el.getAttribute('role'))||'').toLowerCase())))
+    ?'rm-editable':'rm-not-editable';
+}})()"#,
+                        locate = locate
                     )
-                } else {
-                    "(function(){const el=document.activeElement;\
-return (el&&(el.isContentEditable||/^(INPUT|TEXTAREA)$/.test(el.tagName)))\
-?'rm-editable':'rm-not-editable';})()"
-                        .into()
                 };
                 if wv
                     .eval_with_callback(&focus_js, move |r| {
@@ -4046,6 +4219,13 @@ return (el&&(el.isContentEditable||/^(INPUT|TEXTAREA)$/.test(el.tagName)))\
                 {
                     if let Ok(chk) = frx.recv_timeout(Duration::from_secs(2)) {
                         let flag = chk.trim().trim_matches('"');
+                        if flag.starts_with("no-match")
+                            || flag.starts_with("missing-ref")
+                            || flag.starts_with("ambiguous")
+                        {
+                            log::info!("browser agent action {act} -> {flag}");
+                            return Ok(flag.to_string());
+                        }
                         let typed = {
                             #[cfg(windows)]
                             {

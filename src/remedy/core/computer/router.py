@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import re
 from enum import StrEnum
+from typing import Any
+
+from remedy.core.build_oracle import coerce_text_arg
 
 
 class ComputerTarget(StrEnum):
@@ -81,13 +84,13 @@ _SYSTEM_BROWSER_HINTS = re.compile(
 
 def wants_system_browser(hint: str | None = None, target: str | None = None) -> bool:
     """True only when the user/model explicitly asks for OS browser."""
-    t = (target or "").strip().lower()
+    t = coerce_text_arg(target).lower()
     # Never treat "remedy browser" / "rail" as system browser
     if wants_rail_browser(hint):
         return False
     if t in ("external", "system"):
         return True
-    return bool(_SYSTEM_BROWSER_HINTS.search(hint or ""))
+    return bool(_SYSTEM_BROWSER_HINTS.search(coerce_text_arg(hint)))
 
 
 _RAIL_HINTS = re.compile(
@@ -100,11 +103,11 @@ _RAIL_HINTS = re.compile(
 
 def wants_rail_browser(hint: str | None = None) -> bool:
     """User asked for the in-app Browser rail specifically."""
-    return bool(_RAIL_HINTS.search(hint or ""))
+    return bool(_RAIL_HINTS.search(coerce_text_arg(hint)))
 
 
-def looks_like_url(text: str | None) -> bool:
-    t = (text or "").strip()
+def looks_like_url(text: Any = None) -> bool:
+    t = coerce_text_arg(text)
     if not t:
         return False
     # Reject emails and multi-word phrases (user task text is not a URL)
@@ -123,13 +126,13 @@ def looks_like_url(text: str | None) -> bool:
     ))
 
 
-def is_valid_navigate_url(url: str | None) -> bool:
+def is_valid_navigate_url(url: Any = None) -> bool:
     """True only for real http(s)/about URLs safe to load in the Browser rail.
 
     Blocks leaked task text like \"gmail sign in, type user@…\" which used to
     become ``https://gmail sign in…`` and show in the address bar.
     """
-    u = (url or "").strip()
+    u = coerce_text_arg(url)
     if not u:
         return False
     if any(c in u for c in (" ", "\n", "\t", ",", ";", '"', "'")):
@@ -171,9 +174,9 @@ def is_valid_navigate_url(url: str | None) -> bool:
         return False
 
 
-def normalize_url(url: str) -> str:
+def normalize_url(url: Any = None) -> str:
     """Normalize nicknames/bare hosts to https URL; return \"\" if invalid."""
-    u = (url or "").strip()
+    u = coerce_text_arg(url)
     if not u:
         return ""
     # Never promote task prose / emails to https://
@@ -235,14 +238,17 @@ def resolve_target(
     *hint*: free text from the tool call or last user intent.
     *action*: tool action name (navigate defaults toward browser when URL present).
     """
-    req = (requested or "auto").strip().lower()
+    req = (coerce_text_arg(requested) or "auto").lower()
+    url = coerce_text_arg(url)
+    hint = coerce_text_arg(hint)
+    action = coerce_text_arg(action)
     if req in ("browser", "web", "rail"):
         return ComputerTarget.BROWSER
     if req in ("desktop", "os", "screen", "system"):
         return ComputerTarget.DESKTOP
 
     # auto
-    blob = " ".join(x for x in (hint or "", url or "", action or "") if x)
+    blob = " ".join(x for x in (hint, url, action) if x)
 
     if looks_like_url(url) or looks_like_url(blob):
         # Explicit desktop override still wins via requested; here auto + URL → browser
@@ -296,39 +302,41 @@ def infer_sticky_target(
     (game / window / .exe) override a stale browser sticky so playing a
     compiled app is not sent to the in-app rail.
     """
-    req = (requested or "auto").strip().lower()
+    req = (coerce_text_arg(requested) or "auto").lower()
     if req in ("browser", "web", "rail"):
         return "browser"
     if req in ("desktop", "os", "screen", "system", "external"):
         return "desktop"
 
-    ref_s = (ref or "").strip()
+    ref_s = coerce_text_arg(ref)
     if _REF_DESKTOP_RE.match(ref_s):
         return "desktop"
     if _REF_BROWSER_RE.match(ref_s):
         return "browser"
     if _REF_OCR_RE.match(ref_s):
-        last_el = (last_elements_target or "").strip().lower()
+        last_el = coerce_text_arg(last_elements_target).lower()
         if last_el in ("browser", "web", "rail"):
             return "browser"
         if last_el in ("desktop", "os", "screen"):
             return "desktop"
 
-    act = (action or "").strip().lower()
+    act = coerce_text_arg(action).lower()
     if act in ("app", "windows", "monitors"):
         return "desktop"
     if act in ("navigate", "computer_navigate", "page_text"):
         return "browser"
 
-    blob = " ".join(x for x in (hint or "", url or "", act) if x)
-    if looks_like_url(url) or looks_like_url((url or "").strip()):
+    hint_s = coerce_text_arg(hint)
+    url_s = coerce_text_arg(url)
+    blob = " ".join(x for x in (hint_s, url_s, act) if x)
+    if looks_like_url(url_s):
         return "browser"
     if _DESKTOP_HINTS.search(blob) and not _BROWSER_HINTS.search(blob):
         return "desktop"
     if _BROWSER_HINTS.search(blob):
         return "browser"
 
-    last = (last_target or last_elements_target or "").strip().lower()
+    last = coerce_text_arg(last_target or last_elements_target).lower()
     if last in ("desktop", "os", "screen"):
         return "desktop"
     if last in ("browser", "web", "rail"):

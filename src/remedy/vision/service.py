@@ -61,15 +61,26 @@ _status_slow_last_warn: dict[tuple[bool, bool, bool], float] = {}
 def _log_status_timing(
     ms: float, *, light: bool, installed: bool, running: bool, now: float | None = None
 ) -> None:
-    """Rate-limited slow-status logging (WARN only when running and >= 1 s)."""
+    """Rate-limited status logging.
+
+    WARN only when running and >= 1 s. Idle light polls (StatusBar /
+    download bar) used to DEBUG every ~150ms TCP miss — keep those to
+    one line per interval so debug.log stays usable mid-Grok-turn.
+    """
     level = logging.DEBUG
+    key = (bool(light), bool(installed), bool(running))
+    t = time.monotonic() if now is None else now
     if ms >= _STATUS_SLOW_WARN_MS and running:
-        key = (bool(light), bool(installed), bool(running))
-        t = time.monotonic() if now is None else now
         last = _status_slow_last_warn.get(key)
         if last is None or (t - last) >= _STATUS_SLOW_WARN_INTERVAL_S:
             _status_slow_last_warn[key] = t
             level = logging.WARNING
+    elif not running:
+        # Idle / not-running: rate-limit DEBUG (and drop sub-threshold noise).
+        last = _status_slow_last_warn.get(key)
+        if last is not None and (t - last) < _STATUS_SLOW_WARN_INTERVAL_S:
+            return
+        _status_slow_last_warn[key] = t
     logger.log(
         level,
         "vision get_status%s light=%s installed=%s running=%s (%.0fms)",

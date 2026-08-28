@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from remedy.gateway.channels.allowlist import is_allowed, parse_ids
 from remedy.gateway.channels.base_http import HttpSessionMixin
@@ -13,6 +14,9 @@ from remedy.gateway.channels.emit_util import emit_message
 from remedy.gateway.router import ChannelAdapter
 from remedy.home import default_home
 from remedy.models import ChannelKind
+
+if TYPE_CHECKING:
+    from remedy.gateway.poll_lock import MessengerPollLock
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +69,8 @@ class MatrixChannel(HttpSessionMixin, ChannelAdapter):
             self._allowed = self._allowed | frozenset({self.room_id})
         self.allow_all = bool(allow_all)
         self._sync_task: asyncio.Task | None = None
+        self._lock_retry_task: asyncio.Task | None = None
+        self._poll_lock: MessengerPollLock | None = None
         self._since: str | None = None
         self._http_timeout_s = 90.0
         self._typing_tasks: set[asyncio.Task] = set()
@@ -94,17 +100,66 @@ class MatrixChannel(HttpSessionMixin, ChannelAdapter):
                 logger.exception("Matrix whoami failed")
         self._since = _load_matrix_since(self._home_dir)
         logger.info("Matrix channel active (room=%s)", self.room_id)
+        started = await self._try_start_sync()
+        if not started:
+            logger.error(
+                "Matrix sync deferred — another process holds the bot lock "
+                "(or a stale lock). Will retry every 20s until acquired."
+            )
+            self._lock_retry_task = asyncio.create_task(self._lock_retry_loop())
+
+    async def _try_start_sync(self) -> bool:
+        """Acquire exclusive lock and start /sync. False if locked out."""
+        if self._sync_task is not None and not self._sync_task.done():
+            return True
+        from remedy.gateway.poll_lock import MessengerPollLock
+
+        if self._poll_lock is not None and getattr(self._poll_lock, "held", False):
+            pass
+        else:
+            if self._poll_lock is not None:
+                with contextlib.suppress(Exception):
+                    self._poll_lock.release()
+            self._poll_lock = MessengerPollLock(self._home_dir, "matrix")
+            if not self._poll_lock.try_acquire():
+                self._poll_lock = None
+                return False
         self._sync_task = asyncio.create_task(self._sync_loop())
+        logger.info("Matrix sync task scheduled")
+        return True
+
+    async def _lock_retry_loop(self) -> None:
+        while self._running:
+            await asyncio.sleep(20.0)
+            if not self._running:
+                return
+            try:
+                if await self._try_start_sync():
+                    logger.info("Matrix sync acquired after retry")
+                    return
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Matrix poll lock retry failed")
 
     async def stop(self) -> None:
         for t in self._typing_tasks:
             t.cancel()
         self._typing_tasks.clear()
+        if self._lock_retry_task:
+            self._lock_retry_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._lock_retry_task
+            self._lock_retry_task = None
         if self._sync_task:
             self._sync_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._sync_task
             self._sync_task = None
+        if self._poll_lock is not None:
+            with contextlib.suppress(Exception):
+                self._poll_lock.release()
+            self._poll_lock = None
         await self.close_http()
         await super().stop()
 
@@ -152,6 +207,9 @@ class MatrixChannel(HttpSessionMixin, ChannelAdapter):
     async def _sync_loop(self) -> None:
         while self._running:
             try:
+                if self._poll_lock is not None:
+                    with contextlib.suppress(Exception):
+                        self._poll_lock.heartbeat()
                 session = await self.ensure_http()
                 params: dict = {"timeout": 30000}
                 if self._since:

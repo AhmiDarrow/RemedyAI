@@ -29,6 +29,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from remedy.core.build_oracle import coerce_text_arg
+
 _BUCKETS = 1 << 15
 _LR = 0.05
 _TEACHER_WEIGHT = 0.2
@@ -62,7 +64,7 @@ def _home(home: str | Path | None) -> Path:
 
 
 def _features(text: str) -> list[int]:
-    msg = " " + (text or "").strip().lower()[:_MAX_TEXT] + " "
+    msg = " " + coerce_text_arg(text).lower()[:_MAX_TEXT] + " "
     feats: set[int] = set()
     words = [w for w in msg.split() if w]
     for w in words:
@@ -151,7 +153,7 @@ def consult(
     overridden to True only with enough outcome evidence and a confident
     score — cold or uncertain, the regexes rule.
     """
-    if not _enabled() or not (message or "").strip():
+    if not _enabled() or not coerce_text_arg(message):
         return bool(regex_verdict)
     verdict = bool(regex_verdict)
     with suppress(Exception):
@@ -177,7 +179,7 @@ def consult(
 
 def record_confirmed_work(message: str, home: str | Path | None = None) -> None:
     """A turn for this message really executed tools — strong work label."""
-    if not _enabled() or not (message or "").strip():
+    if not _enabled() or not coerce_text_arg(message):
         return
     with suppress(Exception):
         m = _model(home)
@@ -188,7 +190,7 @@ def record_confirmed_work(message: str, home: str | Path | None = None) -> None:
 
 def record_tools_declined(message: str, home: str | Path | None = None) -> None:
     """Offered tools twice, answered in words — strong not-work label."""
-    if not _enabled() or not (message or "").strip():
+    if not _enabled() or not coerce_text_arg(message):
         return
     with suppress(Exception):
         m = _model(home)

@@ -235,6 +235,28 @@ def resolve_llm_slot(
     on DeepSeek (or both on Grok) each get their own slot.
     """
     cfg = _load_config_cached()
+    # Live runtime already applied first-run demo; do not let factory
+    # openai.toml + dummy key "unused" send the turn to api.openai.com.
+    if (
+        runtime is not None
+        and not str(provider_override or "").strip()
+        and str(getattr(runtime, "_llm_provider", "") or "").strip().lower() == "demo"
+    ):
+        try:
+            from remedy.interfaces.config import (
+                normalize_llm_settings,
+                resolve_provider_api_key,
+            )
+
+            provider, model, base_url = normalize_llm_settings(
+                "demo",
+                getattr(runtime, "_llm_model", None),
+                getattr(runtime, "_llm_base_url", None) or None,
+            )
+            api_key = resolve_provider_api_key({"llm_provider": "demo"}, "demo")
+            return provider, model, base_url, api_key or ""
+        except Exception as exc:
+            logger.debug("runtime demo slot bind failed: %s", exc)
     cfg_provider = str(
         cfg.get("llm_provider")
         or os.environ.get("REMEDY_LLM_PROVIDER")
@@ -297,6 +319,32 @@ def resolve_llm_slot(
         "custom",
     ):
         api_key = "local" if provider.lower() != "rmb" else "rmb"
+    # Factory openai+no key: Settings overlay is demo, but the turn bind
+    # used to read raw config.toml and hit api.openai.com with "unused".
+    _dummy = str(api_key or "").strip().lower() in ("", "unused", "local", "rmb", "none")
+    if (
+        _dummy
+        and not str(provider_override or "").strip()
+        and provider in ("", "openai")
+    ):
+        try:
+            from remedy.interfaces.config import (
+                apply_env_provider_bootstrap,
+                normalize_llm_settings,
+                resolve_provider_api_key,
+            )
+
+            boot = apply_env_provider_bootstrap(cfg)
+            boot_p = str(boot.get("llm_provider") or "").strip().lower()
+            if boot_p and boot_p not in ("", "openai"):
+                provider, model, base_url = normalize_llm_settings(
+                    boot_p,
+                    boot.get("llm_model"),
+                    None,
+                )
+                api_key = resolve_provider_api_key(boot, provider)
+        except Exception as exc:
+            logger.debug("first-run demo slot bootstrap failed: %s", exc)
     return provider, model, base_url, api_key or ""
 
 

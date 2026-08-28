@@ -216,3 +216,73 @@ def test_resolve_llm_slot_falls_back_to_runtime_key(monkeypatch):
         runtime=rt,
     )
     assert key == "sk-test-runtime"
+
+
+def test_resolve_llm_slot_first_run_uses_demo(monkeypatch):
+    """Live 2026-08-27: first-run toml is openai/gpt-4o-mini; Settings showed
+    demo but the turn hit api.openai.com with dummy key 'unused'."""
+    from remedy.interfaces import api_support
+
+    monkeypatch.setattr(
+        api_support,
+        "_load_config_cached",
+        lambda: {
+            "llm_provider": "openai",
+            "llm_model": "gpt-4o-mini",
+            "llm_base_url": "https://api.openai.com/v1",
+            "llm_api_key": "",
+        },
+    )
+    for key in (
+        "REMEDY_LLM_API_KEY",
+        "REMEDY_LLM_PROVIDER",
+        "REMEDY_LLM_MODEL",
+        "REMEDY_LLM_BASE_URL",
+        "OPENAI_API_KEY",
+        "XAI_API_KEY",
+        "REMEDY_XAI_API_KEY",
+        "REMEDY_DEMO_DISABLED",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("REMEDY_PREFER_DEMO", "1")
+    p, m, url, key = api_support.resolve_llm_slot()
+    assert p == "demo"
+    assert "llm7.io" in url
+    assert key == "unused"
+    assert m
+
+
+def test_resolve_llm_slot_runtime_demo_wins(monkeypatch):
+    """Serve bootstraps AgentConfig to demo; toml still says openai."""
+    from types import SimpleNamespace
+    from remedy.interfaces import api_support
+
+    monkeypatch.setattr(
+        api_support,
+        "_load_config_cached",
+        lambda: {
+            "llm_provider": "openai",
+            "llm_model": "gpt-4o-mini",
+            "llm_base_url": "https://api.openai.com/v1",
+            "llm_api_key": "",
+        },
+    )
+    for key in (
+        "REMEDY_LLM_API_KEY",
+        "REMEDY_LLM_PROVIDER",
+        "OPENAI_API_KEY",
+        "XAI_API_KEY",
+        "REMEDY_DEMO_DISABLED",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    rt = SimpleNamespace(
+        _llm_provider="demo",
+        _llm_model="codestral-latest",
+        _llm_base_url="https://api.llm7.io/v1",
+        _llm_api_key="unused",
+    )
+    p, m, url, key = api_support.resolve_llm_slot(runtime=rt)
+    assert p == "demo"
+    assert "llm7.io" in url
+    assert key == "unused"
+    assert "codestral" in (m or "")

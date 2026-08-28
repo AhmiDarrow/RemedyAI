@@ -32,6 +32,8 @@ def test_companion_intent():
     assert looks_like_companion_request("design this landing page")
     assert looks_like_companion_request("what am I looking at")
     assert not looks_like_companion_request("thanks")
+    assert looks_like_companion_request(["look at this mockup"])
+    assert not looks_like_companion_request(["thanks"])
     assert message_wants_tools("look at my screen and fix the contrast")
 
 
@@ -135,3 +137,48 @@ def test_recent_files_prefers_new(tmp_path: Path, monkeypatch):
     hits = recent_files(limit=5)
     names = [h["name"] for h in hits]
     assert "fresh.png" in names
+
+def test_companion_taste_joins_list_fact(tmp_path, monkeypatch):
+    """companion_taste(fact=["soft spacing"]) stores prose, not a crash."""
+    import asyncio
+
+    from remedy.core.agent_companion_tools import register_companion_tools
+
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    handlers: dict[str, object] = {}
+
+    class _Reg:
+        def register_builtin_handler(self, name, desc, fn, schema):
+            handlers[name] = fn
+
+    rt = SimpleNamespace(
+        tool_registry=_Reg(),
+        config=SimpleNamespace(home_dir=tmp_path),
+    )
+    register_companion_tools(rt)
+    out = asyncio.run(handlers["companion_taste"](fact=["soft spacing"]))
+    assert "soft spacing" in out
+    assert "['soft spacing']" not in out
+
+
+def test_companion_taste_empty_list_is_a_show_not_a_save(tmp_path, monkeypatch):
+    import asyncio
+
+    from remedy.core.agent_companion_tools import register_companion_tools
+
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    handlers: dict[str, object] = {}
+
+    class _Reg:
+        def register_builtin_handler(self, name, desc, fn, schema):
+            handlers[name] = fn
+
+    rt = SimpleNamespace(
+        tool_registry=_Reg(),
+        config=SimpleNamespace(home_dir=tmp_path),
+    )
+    register_companion_tools(rt)
+    out = asyncio.run(handlers["companion_taste"](fact=[]))
+    assert isinstance(out, str)
+    assert "Remembered taste" not in out
+

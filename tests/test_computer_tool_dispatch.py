@@ -222,6 +222,8 @@ def test_a_known_ref_resolves_to_its_accessible_name():
     assert _resolve_ref_label(ex, "e3") == "Place order"
     # Surrounding whitespace from the model must not defeat the match.
     assert _resolve_ref_label(ex, "  e3 ") == "Place order"
+    # JSON-array wrapper from the model must not crash on .strip().
+    assert _resolve_ref_label(ex, ["e3"]) == "Place order"
 
 
 def test_a_ref_with_no_name_falls_back_to_its_text():
@@ -420,6 +422,64 @@ async def test_screenshot_defaults_to_auto_routing_and_no_marks(tools):
 async def test_an_empty_target_falls_back_to_auto_routing(tools, name):
     await tools.t[name](target="")
     assert tools.ex.last_kwargs["target"] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_click_joins_a_list_text_arg_instead_of_crashing(tools):
+    """Handlers run without registry coerce; grok still sends JSON arrays."""
+    tools.approvals.set_mode("auto")
+    await tools.t["computer_click"](text=["Sign in"])
+    assert tools.ex.last_kwargs["text"] == "Sign in"
+
+
+@pytest.mark.asyncio
+async def test_press_hold_joins_a_list_text_arg_instead_of_crashing(tools):
+    tools.approvals.set_mode("auto")
+    await tools.t["computer_press_hold"](text=["Hold to confirm"])
+    assert tools.ex.last_kwargs["text"] == "Hold to confirm"
+
+
+@pytest.mark.asyncio
+async def test_select_joins_a_list_value_instead_of_crashing(tools):
+    tools.approvals.set_mode("auto")
+    await tools.t["computer_select"](value=["Oregon"])
+    assert tools.ex.last_kwargs["value"] == "Oregon"
+
+
+@pytest.mark.asyncio
+async def test_act_joins_a_list_click_instead_of_crashing(tools):
+    tools.approvals.set_mode("auto")
+    await tools.t["computer_act"](click=["Sign in"])
+    assert tools.ex.last_kwargs["click"] == "Sign in"
+    assert tools.ex.last_kwargs["text"] == "Sign in"
+
+
+@pytest.mark.asyncio
+async def test_key_joins_a_list_instead_of_crashing(tools):
+    tools.approvals.set_mode("auto")
+    await tools.t["computer_key"](key=["enter"])
+    assert tools.ex.last_kwargs["key"] == "Enter"
+
+
+@pytest.mark.asyncio
+async def test_type_joins_a_list_text_arg_instead_of_crashing(tools):
+    tools.approvals.set_mode("auto")
+    await tools.t["computer_type"](text=["hello"])
+    assert tools.ex.last_kwargs["text"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_navigate_joins_a_list_url_instead_of_crashing(tools):
+    await tools.t["computer_navigate"](url=["https://example.com"])
+    assert tools.ex.last_kwargs["url"] == "https://example.com"
+
+
+@pytest.mark.asyncio
+async def test_find_joins_a_list_query_instead_of_crashing(tools):
+    await tools.t["computer_find"](query=["Sign in"])
+    kwargs = tools.ex.last_kwargs
+    assert kwargs["query"] == "Sign in"
+    assert kwargs["text"] == "Sign in"
 
 
 @pytest.mark.asyncio
@@ -818,6 +878,24 @@ async def test_type_forwards_the_target_control_ref(tools):
     assert action is ComputerAction.TYPE
     assert kwargs["text"] == "hello"
     assert kwargs["ref"] == "c4"
+
+
+@pytest.mark.asyncio
+async def test_type_forwards_query_as_the_field_locator(tools):
+    tools.approvals.set_mode("auto")
+    await tools.t["computer_type"](text="Ada", query="First name")
+    action, kwargs = tools.ex.last
+    assert action is ComputerAction.TYPE
+    assert kwargs["text"] == "Ada"
+    assert kwargs["query"] == "First name"
+
+
+@pytest.mark.asyncio
+async def test_type_label_alias_fills_query(tools):
+    tools.approvals.set_mode("auto")
+    await tools.t["computer_type"](text="hi@x.com", label="Email")
+    assert tools.ex.last_kwargs["query"] == "Email"
+    assert tools.ex.last_kwargs["text"] == "hi@x.com"
 
 
 @pytest.mark.asyncio

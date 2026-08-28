@@ -47,6 +47,13 @@ def test_match_expense_log():
     assert p2.arguments["amount"] == 12.5
 
 
+def test_list_message_does_not_crash_strip():
+    p = match_assistant_fast_path(["What's on my calendar this week?"])
+    assert p is not None
+    assert p.tool == "calendar_list_events"
+    assert match_assistant_fast_path([]) is None
+
+
 def test_reject_complex_and_long():
     assert match_assistant_fast_path("") is None
     assert (

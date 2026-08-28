@@ -146,3 +146,24 @@ def test_review_write_set_maps_tests(tmp_path):
     )
     rev = review_write_set(_rt(root), ["mylib.py"])
     assert any("test_mylib" in t for t in (rev.get("tests") or []))
+
+def test_goal_wants_machine_implement_joins_list():
+    assert goal_wants_machine_implement(["implement parse_csv in module io_utils.py"])
+    assert goal_wants_machine_implement(["review the auth module"]) is False
+
+
+def test_drive_build_joins_list_goal(tmp_path):
+    """build_drive(goal=["do the thing"]) must not .strip() a list."""
+    root = tmp_path / "proj"
+    root.mkdir()
+    rt = _rt(root)
+    res = drive_build(
+        rt,
+        goal=["implement function greet in module hello.py"],
+        use_llm=False,
+    )
+    assert res.get("compiled", {}).get("ok") is True, res
+    st = getattr(rt, "_build_turn", None)
+    assert st is not None
+    assert st.goal == "implement function greet in module hello.py"
+

@@ -141,6 +141,7 @@ def register_messenger_channels(
                     team_id=str(s.get("team_id") or ""),
                     allow_ids=parse_list_field(s.get("allow_ids") or s.get("allow_chat_ids")),
                     allow_all=bool(s.get("allow_all")),
+                    home_dir=str(home) if home else None,
                 )
             )
             registered.append("mattermost")
@@ -234,6 +235,7 @@ def register_messenger_channels(
                 account=str(s.get("account") or ""),
                 allow_from=parse_list_field(s.get("allow_from") or s.get("allow_ids")),
                 allow_all=bool(s.get("allow_all")),
+                home_dir=str(home) if home else None,
             )
         )
         registered.append("signal")

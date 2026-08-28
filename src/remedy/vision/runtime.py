@@ -24,8 +24,17 @@ _last_used: float = 0.0
 
 # Short-lived probe cache — Settings + status poll this often; never block the
 # asyncio event loop for multi-second urlopen timeouts on a dead vision port.
+# Asymmetric TTL: stay fresh while running (catch crashes), linger longer when
+# the port is closed so StatusBar (20s then 45s) + download-bar (45s) polls do
+# not re-burn a Windows SYN-drop (~150ms) on closed :8740. Live 2026-08-27:
+# 12s NEG TTL expired before every chrome poll, so GET /api/vision/status
+# stayed ~150ms (1022ms on the 5:52pm CT restart stampede).
 _running_cache: dict[str, Any] = {"ts": 0.0, "value": False, "key": ""}
 _RUNNING_CACHE_TTL_S = 2.5
+_RUNNING_CACHE_NEG_TTL_S = 60.0
+_NOT_RUNNING_LOG_INTERVAL_S = 30.0
+_not_running_log_ts = 0.0
+_PORT_OPEN_TIMEOUT_S = 0.05
 _HEALTH_TIMEOUT_S = 0.35
 # vision.json mtime cache — avoid re-reading JSON on every is_running() call
 _vision_json_cache: dict[str, Any] = {"path": "", "mtime": -1.0, "data": {}}
@@ -36,7 +45,9 @@ def _proc_ref() -> subprocess.Popen[Any] | None:
     return _proc
 
 
-def _port_open(host: str, port: int, timeout: float = 0.15) -> bool:
+def _port_open(host: str, port: int, timeout: float = _PORT_OPEN_TIMEOUT_S) -> bool:
+    """Fail-fast TCP. Windows often drops the SYN to a closed loopback port
+    instead of refusing, so the timeout *is* the cost of a miss."""
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
@@ -130,16 +141,21 @@ def is_running(
     base = str(state.get("base_url") or f"http://{host}:{port}/v1")
     cache_key = f"{host}:{port}:{base}"
     now = time.time()
+    ttl = (
+        _RUNNING_CACHE_TTL_S
+        if _running_cache.get("value")
+        else _RUNNING_CACHE_NEG_TTL_S
+    )
     if (
         not force
         and _running_cache.get("key") == cache_key
-        and (now - float(_running_cache.get("ts") or 0)) < _RUNNING_CACHE_TTL_S
+        and (now - float(_running_cache.get("ts") or 0)) < ttl
     ):
         return bool(_running_cache.get("value"))
 
     proc = _proc_ref()
     child_alive = proc is not None and proc.poll() is None
-    port_up = _port_open(host, port)
+    port_up = _port_open(host, port, timeout=_PORT_OPEN_TIMEOUT_S)
 
     if child_alive and port_up:
         # Child we own + port open → treat as running without HTTP (avoids
@@ -162,7 +178,16 @@ def is_running(
     _running_cache["value"] = ok
     _running_cache["key"] = cache_key
     if not ok:
-        logger.debug("vision not running host=%s port=%s child=%s port_up=%s", host, port, child_alive, port_up)
+        global _not_running_log_ts
+        if (now - float(_not_running_log_ts or 0)) >= _NOT_RUNNING_LOG_INTERVAL_S:
+            _not_running_log_ts = now
+            logger.debug(
+                "vision not running host=%s port=%s child=%s port_up=%s",
+                host,
+                port,
+                child_alive,
+                port_up,
+            )
     return ok
 
 

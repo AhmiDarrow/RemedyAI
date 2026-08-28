@@ -35,6 +35,13 @@ def _safe_err(msg: object) -> str:
     return redact_messenger_secrets(str(msg) if msg is not None else "")[:200]
 
 
+def telegram_409_backoff(now: float, poll_started_at: float) -> tuple[float, bool]:
+    """Backoff after HTTP 409. Short+jitter in the 90s takeover window."""
+    insist = poll_started_at > 0 and (now - poll_started_at) < 90.0
+    wait = (2.0 + (now % 1.7)) if insist else 25.0
+    return wait, insist
+
+
 class TelegramChannel(ChannelAdapter):
     """Telegram bot with long-poll getUpdates + sendMessage."""
 
@@ -64,6 +71,7 @@ class TelegramChannel(ChannelAdapter):
         self._conflict_until = 0.0
         self._last_err_log = 0.0
         self._last_heartbeat = 0.0
+        self._poll_started_at = 0.0  # monotonic; 409 insist window after start/reclaim
         self._typing_tasks: set[asyncio.Task] = set()
 
     async def _ensure_session(self):
@@ -97,7 +105,7 @@ class TelegramChannel(ChannelAdapter):
             # temporary second instance — keep retrying so messenger recovers.
             logger.error(
                 "Telegram long-poll deferred — another process holds the bot lock "
-                "(or a stale lock). Will retry every 20s until acquired."
+                "(or a stale lock). Will retry (2s, then backing off to 20s) until acquired."
             )
             self._lock_retry_task = asyncio.create_task(self._lock_retry_loop())
 
@@ -120,6 +128,11 @@ class TelegramChannel(ChannelAdapter):
             if not self._poll_lock.try_acquire():
                 self._poll_lock = None
                 return False
+
+        # Restart reclaim: we own the local lock. Insist on getUpdates for 90s
+        # so a leftover Telegram-side poller (dying previous serve) is displaced
+        # instead of lock-stepping HTTP 409 for minutes.
+        self._poll_started_at = time.monotonic()
 
         # Resume offset so restarts do not re-process a huge backlog ("catch-up flood").
         self._last_update_id = load_update_offset(self._home_dir, "telegram")
@@ -146,9 +159,15 @@ class TelegramChannel(ChannelAdapter):
         return True
 
     async def _lock_retry_loop(self) -> None:
-        """Retry exclusive poll ownership until we get it or channel stops."""
+        """Retry exclusive poll ownership until we get it or channel stops.
+
+        Start at 2s so a dying previous serve (lock still busy for a moment)
+        is picked up on restart instead of sitting silent for 20s.
+        """
+        delay = 2.0
         while self._running:
-            await asyncio.sleep(20.0)
+            await asyncio.sleep(delay)
+            delay = min(20.0, delay * 2.0)
             if not self._running:
                 return
             if self._poll_task is not None and not self._poll_task.done():
@@ -319,16 +338,22 @@ class TelegramChannel(ChannelAdapter):
             await asyncio.sleep(30.0)
             return
         if status == 409:
-            # Another process is polling this bot — back off hard.
-            self._conflict_until = now + 25.0
+            # Another process is polling this bot. If we just started / reclaimed
+            # the local lock, insist with a short backoff so we displace the
+            # leftover getUpdates instead of lock-stepping 25s for minutes.
+            # After the takeover window, back off hard (true dual instance).
+            wait, insist = telegram_409_backoff(now, self._poll_started_at)
+            self._conflict_until = now + wait
             if now - self._last_err_log > 20:
                 logger.warning(
                     "Telegram getUpdates 409 (another poller). "
                     "Only one Remedy instance should own the bot "
-                    "(or a leftover serve / other machine). Backing off 25s."
+                    "(or a leftover serve / other machine). Backing off %.1fs%s.",
+                    wait,
+                    " (takeover)" if insist else "",
                 )
                 self._last_err_log = now
-            await asyncio.sleep(5.0)
+            await asyncio.sleep(1.0 if insist else 5.0)
             return
         if now - self._last_err_log > 15:
             logger.warning("Telegram getUpdates %s: %s", status, _safe_err(text[:160]))

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from remedy.core.atomic_json import write_json_atomic
+from remedy.core.build_oracle import coerce_text_arg, coerce_verify_command
 from remedy.home import default_home
 
 
@@ -177,13 +178,13 @@ def create_mission(
     store = MissionStore(home)
     m = Mission(
         id=str(uuid.uuid4()),
-        goal=goal.strip(),
+        goal=coerce_text_arg(goal),
         session_id=session_id,
-        verify_command=(verify_command or "").strip() or None,
+        verify_command=coerce_verify_command(verify_command) or None,
         steps=[
-            MissionStep(id=str(uuid.uuid4())[:8], title=t.strip())
+            MissionStep(id=str(uuid.uuid4())[:8], title=title)
             for t in (steps or [])
-            if (t or "").strip()
+            if (title := coerce_text_arg(t))
         ],
     )
     if m.steps:

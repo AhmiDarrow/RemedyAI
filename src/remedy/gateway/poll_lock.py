@@ -3,6 +3,12 @@
 Telegram returns HTTP 409 when two getUpdates pollers share a bot token — realtime
 dies for the loser and feels like "sync stuck". Hold a PID + heartbeat lock file
 under ``~/.remedy/locks/``.
+
+On serve restart the new process must be able to take over a leftover file from a
+*dead* previous process (Windows STILL_ACTIVE / PID reuse used to look "live"
+and lock the new poller out). The OS exclusive lock is the source of truth:
+a leftover file whose flock/msvcrt lock is free is reclaimed; a true live
+holder still wins.
 """
 
 from __future__ import annotations
@@ -96,6 +102,7 @@ class MessengerPollLock:
         self.channel = channel
         self._fh: TextIO | None = None  # keep open so Windows exclusive share holds
         self.held = False
+        self.reclaimed = False  # True if we took over a leftover file this acquire
 
     def __enter__(self) -> MessengerPollLock:
         return self
@@ -114,24 +121,48 @@ class MessengerPollLock:
             return str(self.path)
 
     def try_acquire(self) -> bool:
-        """Return True if this process owns the poller. False → do not start poll loop."""
+        """Return True if this process owns the poller. False → do not start poll loop.
+
+        Never refuse solely because a PID in the file looks alive: Windows can
+        report STILL_ACTIVE for an exited process, and PIDs recycle. Try the OS
+        exclusive lock. If it is free, this serve takes over (restart reclaim).
+        If it is busy, a true live poller still holds it — we stay out.
+        """
         if self.held:
             return True
         key = self._key()
         other = _PROCESS_HOLDERS.get(key)
         if other is not None and other is not self and getattr(other, "held", False):
-            logger.warning(
-                "%s poll lock already held in-process — not starting long-poll (avoid dual poll)",
+            fh = getattr(other, "_fh", None)
+            still = fh is not None and not getattr(fh, "closed", True)
+            if still:
+                logger.warning(
+                    "%s poll lock already held in-process — not starting long-poll (avoid dual poll)",
+                    self.channel,
+                )
+                return False
+            # Handle gone: leftover holder from a failed stop. Reclaim.
+            logger.info(
+                "%s poll lock reclaim (stale in-process holder)",
                 self.channel,
             )
-            return False
+            with contextlib.suppress(Exception):
+                other.held = False
+                _PROCESS_HOLDERS.pop(key, None)
+
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         except OSError as e:
             logger.warning("%s poll lock mkdir failed: %s", self.channel, e)
             return False
 
-        # Stale lock: previous owner dead, or heartbeat expired → remove.
+        foreign_pid: int | None = None
+        foreign_alive = False
+
+        # Leftover file: previous owner dead, heartbeat expired, or PID reuse.
+        # Unlink only when we *know* the PID is dead (Windows cannot delete a
+        # file another process still has locked). If the PID looks live, leave
+        # the file and let the OS exclusive lock decide.
         if self.path.is_file():
             try:
                 raw = self.path.read_text(encoding="utf-8")
@@ -140,27 +171,32 @@ class MessengerPollLock:
                     old_pid, old_ts = parsed
                     now = time.time()
                     stale_hb = old_ts > 0 and (now - old_ts) > STALE_LOCK_SECONDS
-                    if old_pid != os.getpid() and _pid_alive(old_pid):
-                        logger.warning(
-                            "%s poll lock held by live pid=%s — this process will not "
-                            "long-poll (avoid HTTP 409). Quit the other Remedy instance "
-                            "or wait for it to exit.",
-                            self.channel,
-                            old_pid,
-                        )
-                        return False
-                    if old_pid != os.getpid() and not _pid_alive(old_pid):
-                        why = "stale heartbeat" if stale_hb else "dead pid"
-                        logger.info(
-                            "%s poll lock reclaim (%s pid=%s age=%.0fs)",
-                            self.channel,
-                            why,
-                            old_pid,
-                            (now - old_ts) if old_ts else -1,
-                        )
-                        with contextlib.suppress(OSError):
-                            self.path.unlink(missing_ok=True)
+                    if old_pid != os.getpid():
+                        foreign_pid = old_pid
+                        foreign_alive = _pid_alive(old_pid)
+                        if not foreign_alive:
+                            why = "stale heartbeat" if stale_hb else "dead pid"
+                            logger.info(
+                                "%s poll lock reclaim (%s pid=%s age=%.0fs)",
+                                self.channel,
+                                why,
+                                old_pid,
+                                (now - old_ts) if old_ts else -1,
+                            )
+                            with contextlib.suppress(OSError):
+                                self.path.unlink(missing_ok=True)
+                        else:
+                            logger.info(
+                                "%s poll lock file names live pid=%s age=%.0fs — "
+                                "trying OS lock (reclaim if free; refuse if busy)",
+                                self.channel,
+                                old_pid,
+                                (now - old_ts) if old_ts else -1,
+                            )
             except (OSError, ValueError, IndexError):
+                # Windows: msvcrt lock can make read_text PermissionError while
+                # another process still holds the byte lock. Fall through and
+                # try the OS exclusive lock — that is the real exclusion.
                 pass
 
         try:
@@ -175,10 +211,19 @@ class MessengerPollLock:
                 except OSError:
                     self._fh.close()
                     self._fh = None
-                    logger.warning(
-                        "%s poll lock busy (msvcrt) — not starting long-poll",
-                        self.channel,
-                    )
+                    if foreign_alive and foreign_pid is not None:
+                        logger.warning(
+                            "%s poll lock held by live pid=%s — this process will not "
+                            "long-poll (avoid HTTP 409). Quit the other Remedy instance "
+                            "or wait for it to exit.",
+                            self.channel,
+                            foreign_pid,
+                        )
+                    else:
+                        logger.warning(
+                            "%s poll lock busy (msvcrt) — not starting long-poll",
+                            self.channel,
+                        )
                     return False
             else:
                 import fcntl
@@ -188,21 +233,40 @@ class MessengerPollLock:
                 except OSError:
                     self._fh.close()
                     self._fh = None
-                    logger.warning(
-                        "%s poll lock busy (fcntl) — not starting long-poll",
-                        self.channel,
-                    )
+                    if foreign_alive and foreign_pid is not None:
+                        logger.warning(
+                            "%s poll lock held by live pid=%s — this process will not "
+                            "long-poll (avoid HTTP 409). Quit the other Remedy instance "
+                            "or wait for it to exit.",
+                            self.channel,
+                            foreign_pid,
+                        )
+                    else:
+                        logger.warning(
+                            "%s poll lock busy (fcntl) — not starting long-poll",
+                            self.channel,
+                        )
                     return False
 
             self._write_payload()
             self.held = True
+            self.reclaimed = bool(foreign_pid is not None and foreign_pid != os.getpid())
             _PROCESS_HOLDERS[self._key()] = self
-            logger.info(
-                "%s poll lock acquired (pid=%s path=%s)",
-                self.channel,
-                os.getpid(),
-                self.path,
-            )
+            if self.reclaimed:
+                logger.info(
+                    "%s poll lock acquired (pid=%s took over pid=%s path=%s)",
+                    self.channel,
+                    os.getpid(),
+                    foreign_pid,
+                    self.path,
+                )
+            else:
+                logger.info(
+                    "%s poll lock acquired (pid=%s path=%s)",
+                    self.channel,
+                    os.getpid(),
+                    self.path,
+                )
             return True
         except OSError as e:
             logger.warning("%s poll lock acquire failed: %s", self.channel, e)
@@ -254,6 +318,7 @@ class MessengerPollLock:
                         self.path.unlink(missing_ok=True)
         finally:
             self.held = False
+            self.reclaimed = False
             key = self._key()
             if _PROCESS_HOLDERS.get(key) is self:
                 _PROCESS_HOLDERS.pop(key, None)

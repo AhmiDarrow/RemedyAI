@@ -183,3 +183,31 @@ async def test_goal_list_output_is_readable_not_raw_json(tools, rt):
     listed = await tools["goal_list"]()
     with pytest.raises(json.JSONDecodeError):
         json.loads(listed)
+
+@pytest.mark.asyncio
+async def test_goal_add_joins_list_title(tools, rt):
+    """goal_add(title=["Ship it"]) stores prose, not a crash."""
+    out = await tools["goal_add"](title=["Ship it"])
+    assert "Ship it" in out
+    assert "['Ship it']" not in out
+    assert [t.title for t in rt._tasks] == ["Ship it"]
+
+
+@pytest.mark.asyncio
+async def test_goal_add_empty_list_title_refuses(tools, rt):
+    out = await tools["goal_add"](title=[])
+    assert "Provide a goal title" in out
+    assert rt._tasks == []
+
+
+@pytest.mark.asyncio
+async def test_goal_set_next_joins_list_title_and_action(tools):
+    await tools["goal_add"](title="Learn Spanish")
+    out = await tools["goal_set_next"](
+        title=["Learn Spanish"], action=["Twenty minutes of vocabulary"]
+    )
+    assert "Learn Spanish" in out
+    assert "Twenty minutes of vocabulary" in out
+    assert "['Learn Spanish']" not in out
+    assert "['Twenty minutes of vocabulary']" not in out
+

@@ -216,6 +216,9 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         Connected = has credentials / OAuth / local detect / demo.
         Enabled = listed in config enabled_providers (default: all connected).
         """
+        return await asyncio.to_thread(_list_connected_providers_sync)
+
+    def _list_connected_providers_sync() -> dict[str, Any]:
         from remedy.interfaces.config import (
             PROVIDER_CATALOG,
             classify_provider_connection,
@@ -426,7 +429,7 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
     @app.get("/api/providers/ollama/detect")
     async def ollama_detect():
         """Probe local Ollama for first-run / setup suggestions."""
-        return detect_ollama()
+        return await asyncio.to_thread(detect_ollama, force=True)
 
     @app.post("/api/providers/probe")
     async def probe_provider(req: ProviderProbeRequest):

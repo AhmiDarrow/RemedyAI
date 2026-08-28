@@ -36,7 +36,9 @@ _REVIEW_ONLY_RE = re.compile(
 
 def goal_wants_machine_implement(goal: str) -> bool:
     """False for review-only asks so auto-drive does not plant TDD tests."""
-    g = goal or ""
+    from remedy.core.build_oracle import coerce_text_arg
+
+    g = coerce_text_arg(goal)
     if _IMPLEMENT_RE.search(g):
         return True
     return not _REVIEW_ONLY_RE.search(g)
@@ -127,8 +129,10 @@ def drive_build(
     from remedy.core.build_tdd import tdd_bootstrap
     from remedy.core.build_todos import seed_drive_todos, upsert_todos
 
+    from remedy.core.build_oracle import coerce_text_arg
+
     st = get_build_state(runtime)
-    g = (goal or "").strip() or str(getattr(st, "goal", "") or "")
+    g = coerce_text_arg(goal) or coerce_text_arg(getattr(st, "goal", "") or "")
     if not g:
         return {"ok": False, "error": "goal= required (or active build turn)", "phase": "idle"}
     if use_llm is None:

@@ -172,6 +172,20 @@ def test_resolve_target_url_prefers_browser():
     assert resolve_target("browser", url="https://x.com") is ComputerTarget.BROWSER
 
 
+def test_looks_like_url_joins_list_args():
+    """Grok sends JSON arrays for url=; (text or '').strip() used to crash."""
+    from remedy.core.computer.router import infer_sticky_target, looks_like_url
+
+    assert looks_like_url(["https://example.com"]) is True
+    assert looks_like_url(("https://example.com",)) is True
+    assert looks_like_url('["https://example.com"]') is True
+    assert looks_like_url(["not", "a url"]) is False
+    assert looks_like_url([]) is False
+    assert looks_like_url(None) is False
+    assert resolve_target("auto", url=["https://example.com"]) is ComputerTarget.BROWSER
+    assert infer_sticky_target("auto", url=["https://example.com"]) == "browser"
+
+
 def test_normalize_url_rejects_task_text_leak():
     """User prose must never become the Browser rail address bar."""
     from remedy.core.computer.router import is_valid_navigate_url, normalize_url
@@ -1540,6 +1554,25 @@ def test_computer_guidance_present():
     assert not needs_computer_use_guidance("hi")
 
 
+def test_list_user_message_still_loads_computer_guidance() -> None:
+    """browse_intent coerces arrays; guidance still did (message or "").strip().
+
+    AttributeError was swallowed in the ReAct preamble, so a list kick
+    never loaded the computer-use playbook.
+    """
+    from remedy.core.computer.guidance import needs_computer_use_guidance
+
+    assert needs_computer_use_guidance(["https://mail.google.com"]) is True
+    assert needs_computer_use_guidance(["goto", "gmail"]) is True
+    assert needs_computer_use_guidance(("goto gmail",)) is True
+    assert needs_computer_use_guidance({"content": "goto gmail and sign in"}) is True
+    assert needs_computer_use_guidance(["click the", "Submit button"]) is True
+    assert needs_computer_use_guidance(["play the game"]) is True
+    assert needs_computer_use_guidance(["implement a calculator"]) is False
+    assert needs_computer_use_guidance([]) is False
+    assert needs_computer_use_guidance(None) is False
+
+
 def test_hello_alone_not_host_connected(tmp_path: Path):
     from remedy.core.computer.host_bridge import ComputerHostBridge
 
@@ -2583,6 +2616,9 @@ def test_fill_walks_each_field(tmp_path):
     sel = next(kw for act, kw in calls if act is ComputerAction.SELECT)
     assert sel.get("ref") == "e4"
     assert sel.get("value") == "CA"
+    ty = next(kw for act, kw in calls if act is ComputerAction.TYPE)
+    assert ty.get("query") == "Name"
+    assert ty.get("text") == "Ada"
 
 
 def test_select_enqueues_select_action(tmp_path, monkeypatch):
@@ -2623,6 +2659,25 @@ def test_select_enqueues_select_action(tmp_path, monkeypatch):
     assert seen[0][0] == "select"
     assert seen[0][1].get("ref") == "e4"
     assert seen[0][1].get("value") == "CA" or seen[0][1].get("text") == "CA"
+
+
+def test_host_type_relocate_uses_rmdy_pick_not_a_substring_scorer():
+    """Host type_text must relocate via __rmdyPick / exact-token __rmdyScore."""
+    from pathlib import Path
+
+    host = Path(__file__).resolve().parents[1] / "desktop" / "src-tauri" / "src" / "browser_host.rs"
+    t = host.read_text(encoding="utf-8")
+    assert "fn type_locate_js" in t
+    assert "__rmdyTypeSel" in t
+    assert "__rmdyFieldOf" in t
+    assert "window.__rmdyPick(q, sel)" in t
+    assert t.count("window.__rmdyScore=function") == 1
+    # Exact tokens only — "add" must not hit "address" via includes.
+    assert "const hit=use.filter(t=>nt.some(n=>n===t)).length;" in t
+    body = t.split("window.__rmdyScore=function", 1)[1].split("window.__rmdyPick=function", 1)[0]
+    assert "n===t" in body
+    assert ".includes(" not in body.split("const hit=")[1].split("let ctx")[0]
+    assert 'flag.starts_with("no-match")' in t
 
 
 def test_host_browser_launch_is_refused(tmp_path):
@@ -2688,6 +2743,465 @@ def test_press_hold_learns_per_site():
     assert approach_of("press_hold", {"text": "Press & Hold"}) == "text"
     assert approach_of("press_hold", {"ref": "e3"}) == "ref"
     assert approach_of("press_hold", {"x": 400, "y": 300}) == "coords"
+    assert approach_of("drag", {"from_text": "Knob", "to_text": "Max"}) == "text"
+    assert approach_of("drag", {"from_ref": "c1", "to_ref": "c2"}) == "ref"
+    assert approach_of("drag", {"x": 10, "y": 10, "x2": 90, "y2": 10}) == "coords"
+    assert approach_of("scroll", {"text": "Inbox"}) == "text"
+    assert approach_of("scroll", {"ref": "c3"}) == "ref"
+    assert approach_of("scroll", {"x": 100, "y": 200, "dy": -3}) == "coords"
+
+
+def test_executor_press_hold_text_locates_native_control(tmp_path: Path, monkeypatch):
+    """Native press-hold with text= must find the control like click.
+
+    computer_press_hold advertises text= as "Visible label to press-hold".
+    The rail host already locates by text; the desktop path used to ignore
+    the label and demand x/y or a snapshot ref, so a hold button in a
+    native app (or after computer_app) always failed.
+    """
+    import json
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    win = native()
+
+    monkeypatch.setattr(
+        win,
+        "open_app",
+        lambda app, search_dirs=None: {"ok": True, "app": app},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        win,
+        "desktop_snapshot",
+        lambda limit=60, mode="auto", hwnd=None: [
+            {
+                "ref": "c1",
+                "name": "Hold to confirm",
+                "tag": "button",
+                "x": 42,
+                "y": 84,
+            }
+        ],
+    )
+    held: list[tuple[int, int, int]] = []
+
+    def fake_press_hold(x, y, hold_ms=2600, abort_check=None):
+        held.append((int(x), int(y), int(hold_ms)))
+        return {"held_ms": int(hold_ms), "x": int(x), "y": int(y)}
+
+    monkeypatch.setattr(win, "press_hold", fake_press_hold, raising=False)
+    monkeypatch.setattr(
+        win,
+        "foreground_window_info",
+        lambda: {"title": "Confirm", "hwnd": 1},
+        raising=False,
+    )
+
+    enqueued: list[str] = []
+    ex = ComputerExecutor(home_dir=tmp_path)
+    orig_enqueue = ex.bridge.enqueue
+
+    def track_enqueue(action, payload=None, session_id=None):
+        enqueued.append(str(action))
+        return orig_enqueue(action, payload, session_id=session_id)
+
+    monkeypatch.setattr(ex.bridge, "enqueue", track_enqueue)
+
+    app = json.loads(ex.run(ComputerAction.APP, app="notepad"))
+    assert app.get("ok") is True
+    assert ex.bridge.last_drive_target() == "desktop"
+
+    out = json.loads(
+        ex.run(
+            ComputerAction.PRESS_HOLD,
+            text="Hold to confirm",
+            target="auto",
+            hold_ms=1500,
+        )
+    )
+    assert out.get("ok") is True, out
+    assert out.get("target") == "desktop"
+    assert out.get("action") == "press_hold"
+    assert held == [(42, 84, 1500)]
+    assert "Hold to confirm" in str(out.get("message") or "")
+    assert "press_hold" not in enqueued
+
+
+def test_executor_press_hold_text_miss_names_the_label(tmp_path: Path, monkeypatch):
+    """A missing native hold label must say so — not 'needs x/y or a ref'."""
+    import json
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    win = native()
+    monkeypatch.setattr(
+        win,
+        "desktop_snapshot",
+        lambda limit=60, mode="auto", hwnd=None: [
+            {"ref": "c1", "name": "Cancel", "tag": "button", "x": 1, "y": 1}
+        ],
+    )
+    held: list[tuple[int, int, int]] = []
+    monkeypatch.setattr(
+        win,
+        "press_hold",
+        lambda *a, **k: held.append((0, 0, 0)) or {"held_ms": 0, "x": 0, "y": 0},
+        raising=False,
+    )
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    out = json.loads(
+        ex.run(
+            ComputerAction.PRESS_HOLD,
+            text="HoldToTalkXYZ-no-such-control",
+            target="desktop",
+        )
+    )
+    assert out.get("ok") is False, out
+    msg = str(out.get("message") or "")
+    assert "HoldToTalkXYZ-no-such-control" in msg
+    assert "computer_snapshot" in msg
+    assert held == []
+
+
+def test_executor_drag_from_text_to_text_locates_native(tmp_path: Path, monkeypatch):
+    """Native drag with from_text/to_text must find both controls like click.
+
+    Guidance already addresses computer_drag by label; the tool was coords-only
+    so a slider / kanban move by visible names always forced a screenshot.
+    """
+    import json
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    win = native()
+    monkeypatch.setattr(
+        win,
+        "open_app",
+        lambda app, search_dirs=None: {"ok": True, "app": app},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        win,
+        "desktop_snapshot",
+        lambda limit=60, mode="auto", hwnd=None: [
+            {"ref": "c1", "name": "Volume", "tag": "thumb", "x": 40, "y": 80},
+            {"ref": "c2", "name": "Max", "tag": "button", "x": 200, "y": 80},
+        ],
+    )
+    dragged: list[tuple[int, int, int, int]] = []
+
+    def fake_drag(x1, y1, x2, y2, steps=12):
+        dragged.append((int(x1), int(y1), int(x2), int(y2)))
+
+    monkeypatch.setattr(win, "drag", fake_drag, raising=False)
+    monkeypatch.setattr(
+        win,
+        "foreground_window_info",
+        lambda: {"title": "Mixer", "hwnd": 1},
+        raising=False,
+    )
+
+    enqueued: list[str] = []
+    ex = ComputerExecutor(home_dir=tmp_path)
+    orig_enqueue = ex.bridge.enqueue
+
+    def track_enqueue(action, payload=None, session_id=None):
+        enqueued.append(str(action))
+        return orig_enqueue(action, payload, session_id=session_id)
+
+    monkeypatch.setattr(ex.bridge, "enqueue", track_enqueue)
+
+    app = json.loads(ex.run(ComputerAction.APP, app="notepad"))
+    assert app.get("ok") is True
+    assert ex.bridge.last_drive_target() == "desktop"
+
+    out = json.loads(
+        ex.run(
+            ComputerAction.DRAG,
+            from_text="Volume",
+            to_text="Max",
+            target="auto",
+        )
+    )
+    assert out.get("ok") is True, out
+    assert out.get("target") == "desktop"
+    assert out.get("action") == "drag"
+    assert dragged == [(40, 80, 200, 80)]
+    assert "Volume" in str(out.get("message") or "")
+    assert "Max" in str(out.get("message") or "")
+    assert "drag" not in enqueued
+
+
+def test_executor_drag_text_miss_names_the_label(tmp_path: Path, monkeypatch):
+    """A missing drag endpoint label must name it — not silently drag 0,0."""
+    import json
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    win = native()
+    monkeypatch.setattr(
+        win,
+        "desktop_snapshot",
+        lambda limit=60, mode="auto", hwnd=None: [
+            {"ref": "c1", "name": "Min", "tag": "button", "x": 1, "y": 1}
+        ],
+    )
+    dragged: list[tuple] = []
+    monkeypatch.setattr(
+        win,
+        "drag",
+        lambda *a, **k: dragged.append(a),
+        raising=False,
+    )
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    out = json.loads(
+        ex.run(
+            ComputerAction.DRAG,
+            from_text="VolumeThumbXYZ-no-such",
+            to_text="Max",
+            target="desktop",
+        )
+    )
+    assert out.get("ok") is False, out
+    msg = str(out.get("message") or "")
+    assert "VolumeThumbXYZ-no-such" in msg
+    assert "computer_snapshot" in msg
+    assert dragged == []
+
+
+def test_executor_drag_coords_still_work(tmp_path: Path, monkeypatch):
+    """Bare x/y/x2/y2 drag must keep working (canvas / pixel targets)."""
+    import json
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    win = native()
+    dragged: list[tuple[int, int, int, int]] = []
+    monkeypatch.setattr(
+        win,
+        "drag",
+        lambda x1, y1, x2, y2, steps=12: dragged.append(
+            (int(x1), int(y1), int(x2), int(y2))
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        win,
+        "foreground_window_info",
+        lambda: {"title": "Canvas", "hwnd": 1},
+        raising=False,
+    )
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    out = json.loads(
+        ex.run(
+            ComputerAction.DRAG,
+            x=11,
+            y=22,
+            x2=33,
+            y2=44,
+            target="desktop",
+        )
+    )
+    assert out.get("ok") is True, out
+    assert dragged == [(11, 22, 33, 44)]
+
+
+
+def test_executor_scroll_text_locates_native(tmp_path: Path, monkeypatch):
+    """Native scroll with text= must find the pane like click/drag.
+
+    Guidance already addresses computer_scroll by label; the tool was coords-
+    only so a named list/pane always scrolled the foreground center instead.
+    """
+    import json
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    win = native()
+    monkeypatch.setattr(
+        win,
+        "open_app",
+        lambda app, search_dirs=None: {"ok": True, "app": app},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        win,
+        "desktop_snapshot",
+        lambda limit=60, mode="auto", hwnd=None: [
+            {"ref": "c1", "name": "Inbox", "tag": "list", "x": 120, "y": 240},
+            {"ref": "c2", "name": "Toolbar", "tag": "toolbar", "x": 10, "y": 10},
+        ],
+    )
+    scrolled: list[tuple[int, int, int]] = []
+
+    def fake_scroll(x, y, dy=-3, dx=0):
+        scrolled.append((int(x), int(y), int(dy)))
+
+    monkeypatch.setattr(win, "scroll", fake_scroll, raising=False)
+    monkeypatch.setattr(
+        win,
+        "foreground_window_info",
+        lambda: {"title": "Mail", "hwnd": 1},
+        raising=False,
+    )
+
+    enqueued: list[str] = []
+    ex = ComputerExecutor(home_dir=tmp_path)
+    orig_enqueue = ex.bridge.enqueue
+
+    def track_enqueue(action, payload=None, session_id=None):
+        enqueued.append(str(action))
+        return orig_enqueue(action, payload, session_id=session_id)
+
+    monkeypatch.setattr(ex.bridge, "enqueue", track_enqueue)
+
+    app = json.loads(ex.run(ComputerAction.APP, app="notepad"))
+    assert app.get("ok") is True
+    assert ex.bridge.last_drive_target() == "desktop"
+
+    out = json.loads(
+        ex.run(
+            ComputerAction.SCROLL,
+            text="Inbox",
+            dy=-5,
+            target="auto",
+        )
+    )
+    assert out.get("ok") is True, out
+    assert out.get("target") == "desktop"
+    assert out.get("action") == "scroll"
+    assert scrolled == [(120, 240, -5)]
+    assert "Inbox" in str(out.get("message") or "")
+    assert "scroll" not in enqueued
+
+
+def test_executor_scroll_text_miss_names_the_label(tmp_path: Path, monkeypatch):
+    """A missing scroll label must name it — not silently scroll at 0,0."""
+    import json
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    win = native()
+    monkeypatch.setattr(
+        win,
+        "desktop_snapshot",
+        lambda limit=60, mode="auto", hwnd=None: [
+            {"ref": "c1", "name": "Sidebar", "tag": "pane", "x": 1, "y": 1}
+        ],
+    )
+    scrolled: list[tuple] = []
+    monkeypatch.setattr(
+        win,
+        "scroll",
+        lambda *a, **k: scrolled.append((a, k)),
+        raising=False,
+    )
+    # If we wrongly fell through to (0,0) FG center, list_windows would matter
+    monkeypatch.setattr(
+        win,
+        "foreground_window_info",
+        lambda: {"title": "Mail", "hwnd": 99},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        win,
+        "list_windows",
+        lambda limit=40: [
+            {
+                "hwnd": 99,
+                "title": "Mail",
+                "bounds": {"left": 0, "top": 0, "right": 800, "bottom": 600},
+            }
+        ],
+        raising=False,
+    )
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    out = json.loads(
+        ex.run(
+            ComputerAction.SCROLL,
+            text="PaneXYZ-no-such",
+            dy=-3,
+            target="desktop",
+        )
+    )
+    assert out.get("ok") is False, out
+    msg = str(out.get("message") or "")
+    assert "PaneXYZ-no-such" in msg
+    assert "computer_snapshot" in msg
+    assert scrolled == []
+
+
+def test_executor_scroll_coords_and_dy_still_work(tmp_path: Path, monkeypatch):
+    """Bare x/y/dy scroll must keep working (canvas / pixel targets)."""
+    import json
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    monkeypatch.setattr(hb, "_bridge", None)
+    win = native()
+    scrolled: list[tuple[int, int, int]] = []
+    monkeypatch.setattr(
+        win,
+        "scroll",
+        lambda x, y, dy=-3, dx=0: scrolled.append((int(x), int(y), int(dy))),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        win,
+        "foreground_window_info",
+        lambda: {"title": "Canvas", "hwnd": 1},
+        raising=False,
+    )
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+    out = json.loads(
+        ex.run(
+            ComputerAction.SCROLL,
+            x=55,
+            y=66,
+            dy=-7,
+            target="desktop",
+        )
+    )
+    assert out.get("ok") is True, out
+    assert scrolled == [(55, 66, -7)]
+
 
 
 def test_stale_ref_click_recovers_by_remembered_label(tmp_path, monkeypatch):
@@ -2733,3 +3247,44 @@ def test_stale_ref_click_recovers_by_remembered_label(tmp_path, monkeypatch):
     assert out.get("recovered_from") == "stale_ref"
     assert calls and "Make this my store" in calls[0]
     assert "Hueytown" in calls[0]  # context words help pick the right one
+
+
+def test_claim_next_idle_empty_skips_disk(tmp_path: Path, monkeypatch):
+    """After an empty scan, idle polls must not re-glob job JSON until enqueue."""
+    from pathlib import Path as PathCls
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    assert b.claim_next() is None
+    assert b._poll_idle_empty is True
+
+    calls = {"n": 0}
+    real_glob = PathCls.glob
+
+    def counting_glob(self, pattern):
+        if self == b.root:
+            calls["n"] += 1
+        return real_glob(self, pattern)
+
+    monkeypatch.setattr(PathCls, "glob", counting_glob)
+    assert b.claim_next() is None
+    assert b.claim_next(exclude_actions={"navigate"}) is None
+    assert calls["n"] == 0
+
+    job = b.enqueue("click", {"x": 1, "y": 2})
+    assert b._poll_idle_empty is False
+    claimed = b.claim_next()
+    assert claimed is not None and claimed.id == job.id
+    assert calls["n"] >= 1
+
+
+def test_claim_next_filter_skip_does_not_mark_idle_empty(tmp_path: Path):
+    """Rust only=navigate must not mark idle-empty while a click job waits."""
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    job = b.enqueue("click", {"x": 3, "y": 4})
+    assert b.claim_next(only_actions={"navigate"}) is None
+    assert b._poll_idle_empty is False
+    claimed = b.claim_next(exclude_actions={"navigate"})
+    assert claimed is not None and claimed.id == job.id

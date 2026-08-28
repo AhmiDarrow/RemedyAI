@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from remedy.core.build_oracle import coerce_text_arg
+
 
 def register_companion_tools(runtime: Any) -> None:
     """Register personal-PC companion tools (clipboard, foreground, design pass)."""
@@ -49,8 +51,8 @@ def register_companion_tools(runtime: Any) -> None:
         """Copy text onto the OS clipboard so the owner can paste it anywhere."""
         from remedy.core.companion import get_companion_backend
 
-        body = text if isinstance(text, str) else str(text or "")
-        if not body.strip():
+        body = coerce_text_arg(text)
+        if not body:
             return "text= required (nothing to copy)"
         ok = bool(get_companion_backend().set_clipboard_text(body))
         if not ok:
@@ -62,7 +64,7 @@ def register_companion_tools(runtime: Any) -> None:
         from remedy.core.companion import design_pass, format_companion_block
         from remedy.core.companion_observe import design_observe_paths
 
-        res = design_pass(runtime, goal=goal)
+        res = design_pass(runtime, goal=coerce_text_arg(goal))
         block = format_companion_block(res.get("snapshot") or {})
         ev = res.get("evidence") or []
         ev_s = "\n".join(f"- {e}" for e in ev) or "- (no image/file yet — computer_screenshot if needed)"
@@ -156,8 +158,9 @@ def register_companion_tools(runtime: Any) -> None:
             remember_taste,
         )
 
-        if (fact or "").strip():
-            row = remember_taste(fact.strip(), runtime)
+        fact_s = coerce_text_arg(fact)
+        if fact_s:
+            row = remember_taste(fact_s, runtime)
             return f"Remembered taste `{row.get('id')}`: {row.get('fact')}"
         return format_taste_block(load_taste(runtime)) or "No taste facts yet."
 

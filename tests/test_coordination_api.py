@@ -53,3 +53,21 @@ def test_presence_empty_when_quiet(tmp_path, monkeypatch) -> None:
     r = client.get("/api/coordination/presence")
     assert r.status_code == 200
     assert r.json() == {"beacons": [], "count": 0, "ts": r.json()["ts"]}
+
+
+def test_presence_get_does_not_rewrite_registry(tmp_path, monkeypatch) -> None:
+    """Chrome polls must not take the exclusive write txn / rewrite presence.json."""
+    home = tmp_path / "rh"
+    monkeypatch.setenv("REMEDY_HOME", str(home))
+    C.register("s1", muscle="xai/grok", phase="scout")
+    path = C._registry_path(home)
+    before = path.read_bytes()
+    mtime = path.stat().st_mtime_ns
+    client = TestClient(create_app())
+    r = client.get("/api/coordination/presence")
+    assert r.status_code == 200
+    assert r.json()["count"] == 1
+    assert r.json()["beacons"][0]["session_id"] == "s1"
+    assert path.read_bytes() == before
+    assert path.stat().st_mtime_ns == mtime
+

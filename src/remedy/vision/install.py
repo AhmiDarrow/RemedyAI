@@ -281,8 +281,39 @@ def _safe_member_path(dest: Path, name: str, *, kind: str) -> Path:
     return target
 
 
+def _safe_tar_link(dest: Path, member_name: str, linkname: str, *, kind: str) -> Path:
+    """Allow relative links whose resolved target stays under *dest*.
+
+    Official llama.cpp Linux tarballs ship versioned ``.so`` symlinks
+    (``libllama.so.0 -> libllama.so.0.0.N``). Blocking every symlink left
+    Linux vision install dead on first run.
+    """
+    link = (linkname or "").strip()
+    if not link:
+        raise ValueError(f"{kind} empty link blocked: {member_name}")
+    # Absolute / drive-letter / home escapes never leave the archive root.
+    if link.startswith(("/", "\\")) or (len(link) >= 2 and link[1] == ":"):
+        raise ValueError(f"{kind} absolute link blocked: {member_name} -> {link}")
+    if ".." in Path(link).parts:
+        # Relative escapes are ok only after resolve-under-dest check below.
+        pass
+    member = _safe_member_path(dest, member_name or "", kind=kind)
+    resolved = (member.parent / link).resolve()
+    try:
+        resolved.relative_to(dest)
+    except ValueError as exc:
+        raise ValueError(
+            f"{kind} link escape blocked: {member_name} -> {link}"
+        ) from exc
+    return member
+
+
 def _extract_tar(tar_path: Path, dest_dir: Path) -> None:
-    """Extract tar.gz with path-traversal + symlink protection."""
+    """Extract tar.gz with path-traversal + symlink protection.
+
+    Relative in-archive ``.so`` version symlinks are created after files;
+    absolute / escaping links stay refused.
+    """
     _check_cancel()
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir.resolve()
@@ -291,11 +322,15 @@ def _extract_tar(tar_path: Path, dest_dir: Path) -> None:
     max_total_bytes = min(max_files * max_member_bytes, max_member_bytes * 50)
     count = 0
     total_written = 0
+    pending_links: list[tarfile.TarInfo] = []
     with tarfile.open(tar_path, "r:*") as tf:
         for info in tf.getmembers():
             _check_cancel()
             if info.issym() or info.islnk():
-                raise ValueError(f"Tar symlink blocked: {info.name}")
+                # Validate now; create after files so hardlink targets exist.
+                _safe_tar_link(dest, info.name or "", info.linkname or "", kind="Tar")
+                pending_links.append(info)
+                continue
             if not info.isfile():
                 continue
             name = info.name or ""
@@ -321,6 +356,26 @@ def _extract_tar(tar_path: Path, dest_dir: Path) -> None:
             if info.mode & 0o111:
                 with contextlib.suppress(OSError):
                     target.chmod(target.stat().st_mode | 0o755)
+        for info in pending_links:
+            _check_cancel()
+            member = _safe_tar_link(
+                dest, info.name or "", info.linkname or "", kind="Tar"
+            )
+            member.parent.mkdir(parents=True, exist_ok=True)
+            if member.exists() or member.is_symlink():
+                with contextlib.suppress(OSError):
+                    member.unlink()
+            if info.issym():
+                member.symlink_to(info.linkname)
+            else:
+                # Hard link: target must already be extracted under dest.
+                link_target = (member.parent / (info.linkname or "")).resolve()
+                link_target.relative_to(dest)
+                if not link_target.is_file():
+                    raise ValueError(
+                        f"Tar hardlink target missing: {info.name} -> {info.linkname}"
+                    )
+                os.link(link_target, member)
 
 
 def _ensure_posix_executables(root: Path) -> None:

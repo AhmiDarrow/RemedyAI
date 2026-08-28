@@ -34,6 +34,11 @@ MAX_PSEUDO_RECOVERIES = 4
 MAX_DISCONNECT_RETRIES = 8
 # Local: max tool schemas per model step after write-first pack.
 LOCAL_MAX_TOOLS_PER_STEP = 8
+# Cloud work pack. Live 2026-08-27: grok-4.6 "proceed until finished" sent 194
+# schemas every step (33k→61k prompt, 145s thinking). The catalog is ability;
+# the live round is an operate pack. 32 still dwarfs 194; it has to fit coding
+# plus computer/web hands or a socials turn drives the rail blind.
+WORK_MAX_TOOLS_PER_STEP = 32
 # Prefer these when capping — first-N used to drop host_run behind help/goal.
 _OPERATE_CORE_TOOLS = (
     "file_read",
@@ -41,10 +46,28 @@ _OPERATE_CORE_TOOLS = (
     "file_edit",
     "file_edit_batch",
     "list_dir",
+    "file_glob",
     "repo_search",
     "host_run",
+    "host_mkdir",
+    "host_which",
     "bash_exec",
+    "todo_write",
+    "todo_read",
+    "mission_start",
+    "mission_update",
+    "mission_verify",
+    "git_status",
+    "skill_activate",
     "computer_navigate",
+    "computer_snapshot",
+    "computer_click",
+    "computer_type",
+    "computer_act",
+    "computer_key",
+    "computer_fill",
+    "web_search",
+    "web_fetch",
 )
 _OPERATE_DEFER_TOOLS = frozenset(
     {
@@ -171,7 +194,12 @@ class TurnState:
             self.arm_reason = reason
             logger.info("react_tools rearm plan_mode reason=%s", reason)
             return
-        self.tools = list(self.all_tools)
+        packed = cap_tools_for_step(
+            list(self.all_tools),
+            local=False,
+            max_tools=WORK_MAX_TOOLS_PER_STEP,
+        )
+        self.tools = list(packed or self.all_tools)
         self.run_until_done = True
         self.arm_reason = reason
         logger.info("react_tools rearm reason=%s count=%d", reason, len(self.tools))
@@ -527,11 +555,12 @@ def resolve_tools(
                     tools = filtered
                     pack = "write_first"
                     reason = "task_write_first"
-        if local and tools and len(tools) > LOCAL_MAX_TOOLS_PER_STEP:
-            capped = cap_tools_for_step(tools, local=True)
+        cap_n = LOCAL_MAX_TOOLS_PER_STEP if local else WORK_MAX_TOOLS_PER_STEP
+        if tools and len(tools) > cap_n:
+            capped = cap_tools_for_step(tools, local=local, max_tools=cap_n)
             if capped is not None:
                 tools = capped
-            reason = reason + "+local_cap"
+            reason = reason + ("+local_cap" if local else "+work_cap")
         logger.info(
             "react_tools arm reason=%s pack=%s count=%d local=%s step=%d",
             reason,
@@ -591,8 +620,20 @@ def resolve_tools(
         # Live 2026-08-26: "ok on to assets" / "fix the movement issues"
         # became "are we just talking?" and killed the build.
         if not ack and not knowledge:
-            logger.info("react_tools arm reason=open_work_continue pack=full")
-            return ToolsDecision(all_t, True, "open_work_continue", pack="full")
+            packed = cap_tools_for_step(
+                all_t,
+                local=local,
+                max_tools=(
+                    LOCAL_MAX_TOOLS_PER_STEP if local else WORK_MAX_TOOLS_PER_STEP
+                ),
+            )
+            logger.info(
+                "react_tools arm reason=open_work_continue pack=full count=%d",
+                len(packed or []),
+            )
+            return ToolsDecision(
+                packed or all_t, True, "open_work_continue", pack="full"
+            )
         # One peek round, then the one question. Extra peek steps were the
         # 2026-08-27 Firefox turn: 18 file_reads, no writes, minutes of "loop".
         if int(step_index or 0) > 0:
@@ -754,12 +795,18 @@ def cap_tools_for_step(
     tools: list[dict[str, Any]] | None,
     *,
     local: bool,
-    max_tools: int = LOCAL_MAX_TOOLS_PER_STEP,
+    max_tools: int | None = None,
 ) -> list[dict[str, Any]] | None:
-    if not tools or not local:
+    if not tools:
         return tools
-    if len(tools) <= max_tools:
+    cap = (
+        int(max_tools)
+        if max_tools is not None
+        else (LOCAL_MAX_TOOLS_PER_STEP if local else WORK_MAX_TOOLS_PER_STEP)
+    )
+    if len(tools) <= cap:
         return tools
+    max_tools = cap
     by_name: dict[str, dict[str, Any]] = {}
     for t in tools:
         n = _tool_schema_name(t)

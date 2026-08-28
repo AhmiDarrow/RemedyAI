@@ -55,9 +55,11 @@ def _isolate_runtime_globals():
         dict(vr._running_cache),
         dict(vr._vision_json_cache),
         vr._idle_thread_started,
+        vr._not_running_log_ts,
     )
     vr._proc = None
     vr._last_used = 0.0
+    vr._not_running_log_ts = 0.0
     vr._running_cache.update({"ts": 0.0, "value": False, "key": ""})
     vr._vision_json_cache.update({"path": "", "mtime": -1.0, "size": -1, "data": {}})
     try:
@@ -70,6 +72,7 @@ def _isolate_runtime_globals():
         vr._vision_json_cache.clear()
         vr._vision_json_cache.update(saved[3])
         vr._idle_thread_started = saved[4]
+        vr._not_running_log_ts = saved[5]
 
 
 class _SubprocessShim:
@@ -388,7 +391,7 @@ def probes(monkeypatch):
     calls: dict[str, list[Any]] = {"port": [], "health": []}
     state = {"port_open": False, "healthy": False}
 
-    def _port_open(host: str, port: int, timeout: float = 0.15) -> bool:
+    def _port_open(host: str, port: int, timeout: float = 0.05) -> bool:
         calls["port"].append((host, port))
         return bool(state["port_open"])
 
@@ -474,6 +477,61 @@ def test_a_repeat_call_is_answered_from_cache_without_probing(
 
     monkeypatch.setattr(vr, "_port_open", explode)
     assert vr.is_running(home) is True
+
+
+def test_a_closed_port_is_not_re_probed_across_the_chrome_poll_interval(
+    tmp_path: Path, probes, monkeypatch
+) -> None:
+    """StatusBar idles at 20s then 45s; a 12s NEG TTL missed every poll."""
+    home = _write_state(tmp_path / "home")
+    probes.state["port_open"] = False
+    clock = {"t": 1_000_000.0}
+    monkeypatch.setattr(vr.time, "time", lambda: clock["t"])
+    assert vr.is_running(home) is False
+    n = len(probes.calls["port"])
+    clock["t"] += 45.0
+    assert vr.is_running(home) is False
+    assert len(probes.calls["port"]) == n
+    clock["t"] += 20.0  # past 60s not-running TTL
+    assert vr.is_running(home) is False
+    assert len(probes.calls["port"]) == n + 1
+
+
+def test_a_running_decoder_is_re_probed_before_the_not_running_ttl(
+    tmp_path: Path, probes, monkeypatch
+) -> None:
+    """Crashes must still show up in a couple of seconds, not after a minute."""
+    home = _write_state(tmp_path / "home")
+    probes.state["port_open"] = True
+    clock = {"t": 1_000_000.0}
+    monkeypatch.setattr(vr.time, "time", lambda: clock["t"])
+    assert vr.is_running(home) is True
+    n = len(probes.calls["port"])
+    clock["t"] += 2.6
+    probes.state["port_open"] = False
+    assert vr.is_running(home) is False
+    assert len(probes.calls["port"]) == n + 1
+
+
+def test_is_running_never_claims_running_when_the_port_is_closed(
+    tmp_path: Path, probes
+) -> None:
+    home = _write_state(tmp_path / "home")
+    probes.state["port_open"] = False
+    assert vr.is_running(home) is False
+    assert vr.is_running(home, force=True) is False
+
+
+def test_port_open_fail_fast_timeout_is_well_under_the_old_150ms(monkeypatch) -> None:
+    seen: dict[str, float] = {}
+
+    def _conn(_addr: object, timeout: float = 0.0):
+        seen["timeout"] = float(timeout)
+        raise OSError("refused")
+
+    monkeypatch.setattr(vr.socket, "create_connection", _conn)
+    assert vr._port_open("127.0.0.1", 8740) is False
+    assert seen["timeout"] <= 0.05
 
 
 def test_force_bypasses_the_probe_cache(tmp_path: Path, probes) -> None:

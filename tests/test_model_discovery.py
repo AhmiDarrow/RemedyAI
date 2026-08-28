@@ -81,6 +81,7 @@ def http(monkeypatch):
             return fake.respond(url)
 
     monkeypatch.setattr(aiohttp, "ClientSession", _Session)
+    monkeypatch.setattr(md, "_PRECHECK_LOCAL_LISTEN", False)
     return fake
 
 
@@ -285,6 +286,52 @@ def test_a_rejected_key_reports_status_and_message_and_stops(http):
     assert len(http.requests) == 1
 
 
+def test_closed_local_port_fails_fast_without_http_wait():
+    """Live 2026-08-27 boot: GET /api/models waited 2s on RMB refused and stalled the UI."""
+    import time
+
+    t0 = time.perf_counter()
+    res = asyncio.run(md.discover_models("http://127.0.0.1:9/v1", "", provider_hint="rmb"))
+    elapsed = time.perf_counter() - t0
+    assert not res.ok
+    assert "not listening" in (res.error or "").lower()
+    assert elapsed < 0.8
+
+
+def test_closed_port_listen_is_cached_for_the_next_probe():
+    """Second GET /api/models in the same chrome tick must not pay another 150ms TCP."""
+    import time
+
+    md.invalidate_ollama_detect_cache()
+    first = asyncio.run(md.discover_models("http://127.0.0.1:9/v1", "", provider_hint="rmb"))
+    assert "not listening" in (first.error or "").lower()
+    t0 = time.perf_counter()
+    second = asyncio.run(md.discover_models("http://127.0.0.1:9/v1", "", provider_hint="rmb"))
+    elapsed = time.perf_counter() - t0
+    assert "not listening" in (second.error or "").lower()
+    assert elapsed < 0.05
+
+
+def test_concurrent_closed_port_probes_share_one_tcp_wait():
+    import time
+
+    md.invalidate_ollama_detect_cache()
+
+    async def both():
+        return await asyncio.gather(
+            md.discover_models("http://127.0.0.1:9/v1", "", provider_hint="rmb"),
+            md.discover_models("http://127.0.0.1:9/v1", "", provider_hint="ollama"),
+        )
+
+    t0 = time.perf_counter()
+    a, b = asyncio.run(both())
+    elapsed = time.perf_counter() - t0
+    assert "not listening" in (a.error or "").lower()
+    assert "not listening" in (b.error or "").lower()
+    # One 150ms SYN wait, not two serialized on the loop.
+    assert elapsed < 0.8
+
+
 def test_an_unreachable_host_reports_the_connection_error(http):
     http.on("/models", error=aiohttp.ClientConnectorError(None, OSError("refused")))
     res = discover("http://127.0.0.1:9/v1", "", provider_hint="rmb")
@@ -303,6 +350,34 @@ def test_no_base_url_is_not_attempted(http):
     res = discover("", "sk", provider_hint="openai")
     assert res.attempted is False and http.requests == []
 
+
+
+
+def test_xai_language_models_run_with_the_openai_listing(http):
+    """First live xAI discovery must not stack /models then /language-models RTTs."""
+    http.on(
+        "/language-models",
+        payload={
+            "models": [
+                {
+                    "id": "grok-4.5",
+                    "input_modalities": ["text", "image"],
+                    "output_modalities": ["text"],
+                    "aliases": ["grok-4"],
+                }
+            ]
+        },
+    )
+    http.on("/models", payload={"data": [{"id": "grok-4.5"}]})
+    res = discover("https://api.x.ai/v1", "xai-key", provider_hint="xai")
+    assert res.ok
+    ids = [m["id"] for m in res.models]
+    assert "grok-4.5" in ids and "grok-4" in ids
+    by = {m["id"]: m for m in res.models}
+    assert by["grok-4.5"]["vision"] is True
+    urls = http.urls
+    assert any("/models" in u and "language-models" not in u for u in urls)
+    assert any("language-models" in u for u in urls)
 
 # --- helpers ------------------------------------------------------------------
 

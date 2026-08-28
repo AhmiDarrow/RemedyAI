@@ -8,6 +8,8 @@ from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query
 
+from remedy.core.build_oracle import coerce_text_arg
+
 from remedy.interfaces.api_models import (
     SendMessageRequest,
 )
@@ -123,7 +125,7 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         reads in order. ``{"steered": false}`` means no turn was running —
         send it as a normal message instead.
         """
-        text = str(req.message or "").strip()
+        text = coerce_text_arg(req.message)
         if not text:
             raise HTTPException(400, "Message is empty")
         from remedy.core.turn_context import push_nudge
@@ -151,7 +153,7 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         # Empty composer submits create noisy greeting turns; require real text
         # unless attachments are present.
         has_atts = bool(getattr(req, "attachments", None))
-        if not str(req.message or "").strip() and not has_atts:
+        if not coerce_text_arg(req.message) and not has_atts:
             raise HTTPException(400, "Message is empty")
 
         from remedy.core.turn_context import (
@@ -243,7 +245,7 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         except Exception:
             logger.exception("attachment path jail failed; dropping attachments")
             att_dicts = []
-        user_text = (req.message or "").strip()
+        user_text = coerce_text_arg(req.message)
         display_content = user_text
         if att_dicts:
             with contextlib.suppress(Exception):

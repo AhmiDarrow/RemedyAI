@@ -5,6 +5,8 @@ from __future__ import annotations
 from contextlib import suppress
 from typing import Any
 
+from remedy.core.build_oracle import coerce_text_arg
+
 
 def register_memory_tools(runtime: Any) -> None:
     """Memory + Memory Harness tools (search, save, compress)."""
@@ -12,7 +14,7 @@ def register_memory_tools(runtime: Any) -> None:
     async def memory_search(query: str = "", limit: int = 8) -> str:
         if runtime.memory is None:
             return "Memory store not available."
-        q = (query or "").strip()
+        q = coerce_text_arg(query)
         if not q:
             return "Provide a search query."
         try:
@@ -44,9 +46,10 @@ def register_memory_tools(runtime: Any) -> None:
     ) -> str:
         if runtime.memory is None:
             return "Memory store not available."
-        text = (content or "").strip()
+        text = coerce_text_arg(content)
         if not text:
             return "Nothing to save — provide content."
+        ttl = coerce_text_arg(title) or "Remembered"
         try:
             from remedy.memory.authority import (
                 looks_like_instruction_launder,
@@ -87,7 +90,7 @@ def register_memory_tools(runtime: Any) -> None:
             )
             await runtime.memory.upsert(
                 MemoryEntry(
-                    title=(title or "Remembered")[:120],
+                    title=ttl[:120],
                     content=text,
                     entry_type=MemoryEntryType.NOTE,
                     importance=0.75,
@@ -127,9 +130,9 @@ def register_memory_tools(runtime: Any) -> None:
             if not parent_ok:
                 return (
                     "Hive cannot write parent Partner Memory. "
-                    f"Saved a session-scoped note: {(title or 'Remembered')[:80]}"
+                    f"Saved a session-scoped note: {ttl[:80]}"
                 )
-            return f"Saved to memory: {(title or 'Remembered')[:80]}"
+            return f"Saved to memory: {ttl[:80]}"
         except Exception as e:
             return f"Memory save failed: {e}"
 

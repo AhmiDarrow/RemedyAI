@@ -152,3 +152,83 @@ def test_provider_keys_cache_hit(tmp_path: Path, monkeypatch):
     a["xai"] = "mutated"
     c = secret_store.load_provider_keys(tmp_path)
     assert c["xai"] == "sk-x"
+
+
+def test_connected_providers_fast_without_ollama(tmp_path: Path, monkeypatch):
+    """GET /providers/connected must not burn a 1.5s Ollama timeout on the loop."""
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    from remedy.interfaces.model_discovery import invalidate_ollama_detect_cache
+
+    invalidate_ollama_detect_cache()
+    app = create_app(api_key=None)
+    client = TestClient(app)
+    t0 = time.perf_counter()
+    r = client.get("/api/providers/connected")
+    ms = (time.perf_counter() - t0) * 1000
+    assert r.status_code == 200
+    body = r.json()
+    ids = {p["id"] for p in body.get("providers") or []}
+    assert "demo" in ids
+    demo = next(p for p in body["providers"] if p["id"] == "demo")
+    assert demo["connected"] is True
+    # Closed Ollama + cache/precheck should be tens of ms, not ~1500.
+    assert ms < 800, f"/api/providers/connected took {ms:.0f}ms"
+
+
+
+def test_request_log_level_silences_fast_quiet():
+    from remedy.interfaces.api import request_log_level, should_warn_slow
+
+    assert should_warn_slow("GET", "/api/computer/jobs/next", 200, 12.0) is False
+    assert (
+        request_log_level(quiet=True, status_code=200, duration_ms=12.0, slow=False)
+        is None
+    )
+    assert (
+        request_log_level(quiet=True, status_code=200, duration_ms=250.0, slow=False)
+        == "debug"
+    )
+    assert (
+        request_log_level(quiet=False, status_code=200, duration_ms=12.0, slow=False)
+        == "info"
+    )
+    assert (
+        request_log_level(quiet=True, status_code=500, duration_ms=12.0, slow=True)
+        == "warning"
+    )
+
+def test_is_running_neg_cache_skips_port_probe(tmp_path: Path):
+    """Closed-port miss must be cached longer than the old 2.5s TTL.
+
+    Live desktop polls vision/status every few seconds; without a longer
+    negative cache each poll re-does a ~150ms Windows TCP connect.
+    """
+    home = tmp_path / "remedy-home"
+    home.mkdir()
+    from remedy.vision.config import save_vision_json
+    import remedy.vision.runtime as rt
+
+    save_vision_json(
+        {
+            "enabled": True,
+            "host": "127.0.0.1",
+            "port": 18741,
+            "base_url": "http://127.0.0.1:18741/v1",
+        },
+        home,
+    )
+    invalidate_running_cache()
+    with patch.object(rt, "_port_open", return_value=False) as port_open:
+        assert is_running(home, force=True) is False
+        assert port_open.call_count == 1
+        assert is_running(home, force=False) is False
+        assert port_open.call_count == 1  # neg cache hit
+        # Within neg TTL still cached.
+        rt._running_cache["ts"] = time.time() - (rt._RUNNING_CACHE_NEG_TTL_S - 1.0)
+        assert is_running(home, force=False) is False
+        assert port_open.call_count == 1
+        # Past neg TTL → probe again.
+        rt._running_cache["ts"] = time.time() - (rt._RUNNING_CACHE_NEG_TTL_S + 0.5)
+        assert is_running(home, force=False) is False
+        assert port_open.call_count == 2
+

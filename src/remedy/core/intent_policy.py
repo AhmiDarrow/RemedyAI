@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from remedy.core.build_oracle import coerce_text_arg
+
 # Read-only intents (review / analyze / explain) must NOT be force-fit into the
 # write-and-verify build loop — that is what strands "review the project" in an
 # endless RESEARCH→PLAN→BUILD spiral. This detector is shared with the build
@@ -65,7 +67,7 @@ def looks_like_readonly_request(message: str) -> bool:
     a read-only turn to a full build the instant the model writes a file, so a
     misclassified edit is never stranded.
     """
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg:
         return False
     if _STRONG_READONLY_RE.search(msg):
@@ -231,10 +233,10 @@ _PACKS: dict[str, dict[str, Any]] = {
 
 def policy_for_intent(intent: str, *, user_text: str = "") -> dict[str, Any]:
     """Return a policy pack for an intent label."""
-    key = (intent or "chat").strip().lower()
+    key = (coerce_text_arg(intent) or "chat").lower()
     pack = dict(_PACKS.get(key) or _PACKS["chat"])
     # Light boosts from raw text when classifier is generic
-    ut = (user_text or "").lower()
+    ut = coerce_text_arg(user_text).lower()
     # Autonomous / work-alone always wins when phrased clearly
     if any(
         p in ut

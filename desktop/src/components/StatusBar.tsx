@@ -430,10 +430,12 @@ export function StatusBar({
         } else if (!vs?.enabled && !vs?.installed) {
           // Not opted in — barely poll.
           idleMisses = 0
-          nextMs = 45_000
+          nextMs = 60_000
         } else if (!vs?.running) {
+          // Installed but stopped: escalate quickly so we do not keep
+          // probing a closed :8740 alongside the download-bar poller.
           idleMisses += 1
-          nextMs = idleMisses >= 3 ? 30_000 : 12_000
+          nextMs = idleMisses >= 2 ? 45_000 : 20_000
         } else {
           idleMisses = 0
           nextMs = 15_000

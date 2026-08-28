@@ -741,6 +741,34 @@ async def test_a_dropped_connection_is_retried_without_streaming(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_cancelled_provider_wait_without_stop_keeps_the_turn(tmp_path):
+    """WinError 64 / mid-JSON RST often arrives as CancelledError.
+
+    That must retry the same turn, not paint Generation stopped / @@aborted.
+    Owner Stop still aborts (see test_a_stop_after_tools_ran).
+    """
+    import asyncio
+
+    runtime = make_runtime(tmp_path)
+    FakeToolRegistry().install(runtime)
+    fake = FakeLLM(
+        [
+            exception_turn(asyncio.CancelledError()),
+            text_turn("kept going after the drop"),
+        ]
+    )
+
+    with fake.patch(), patch(NO_TOOLS, return_value=False):
+        chunks = await drain(runtime, "say hello")
+
+    assert "@@aborted\n" not in chunks
+    assert "Generation stopped" not in "".join(chunks)
+    assert "kept going after the drop" in answer(chunks)
+    assert fake.request_count == 2
+    assert fake.requests[1].stream is False
+
+
+@pytest.mark.asyncio
 async def test_a_connection_that_never_comes_back_leaves_a_durable_explanation(
     tmp_path,
 ):

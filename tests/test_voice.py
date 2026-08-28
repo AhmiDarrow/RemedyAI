@@ -273,7 +273,8 @@ def test_install_voice_pack_runs_extras_then_models(
 def test_run_pip_packages_pulses_then_succeeds(monkeypatch: pytest.MonkeyPatch):
     import remedy.voice.service as svc
 
-    monkeypatch.setattr(svc.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(svc, "_ensure_pip", lambda *a, **k: True)
+    monkeypatch.setattr(svc, "_find_uv", lambda python=None: None)
     monkeypatch.setattr(svc.sys, "frozen", False, raising=False)
     monkeypatch.setattr(
         svc,
@@ -283,6 +284,161 @@ def test_run_pip_packages_pulses_then_succeeds(monkeypatch: pytest.MonkeyPatch):
     state: dict = {"pack": {"status": "downloading", "percent": 5.0}}
     svc.run_pip_packages(("kokoro-onnx",), state, "pack", cap=40.0)
     assert state["pack"]["status"] == "downloading"
+
+
+def test_find_uv_looks_beside_python_when_not_on_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import remedy.voice.service as svc
+
+    (tmp_path / "python.exe").write_bytes(b"")
+    (tmp_path / "uv.exe").write_bytes(b"")
+    (tmp_path / "uv").write_bytes(b"")
+    monkeypatch.setattr(svc.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(svc.sys, "executable", str(tmp_path / "python.exe"))
+    found = svc._find_uv()
+    assert found is not None
+    assert Path(found).name in ("uv.exe", "uv")
+    assert Path(found).parent == tmp_path
+
+
+def test_ensure_pip_uses_ensurepip_when_venv_has_none(monkeypatch: pytest.MonkeyPatch):
+    import remedy.voice.service as svc
+    from types import SimpleNamespace
+
+    has = {"pip": False, "ensurepip": True}
+    hidden: list[list[str]] = []
+
+    monkeypatch.setattr(svc, "_python_has_module", lambda py, env, name: has[name])
+    monkeypatch.setattr(svc, "_find_uv", lambda python=None: None)
+
+    def fake_hidden(args, env, *, timeout=120.0):
+        hidden.append(list(args))
+        if "ensurepip" in args:
+            has["pip"] = True
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        raise AssertionError(f"unexpected {args}")
+
+    monkeypatch.setattr(svc, "_run_hidden", fake_hidden)
+    monkeypatch.setattr(
+        svc, "_download_get_pip", lambda dest: (_ for _ in ()).throw(AssertionError("get-pip"))
+    )
+    assert svc._ensure_pip("/venv/python", {}) is True
+    assert has["pip"] is True
+    assert any("ensurepip" in a for a in hidden)
+
+
+def test_ensure_pip_uses_uv_when_ensurepip_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import remedy.voice.service as svc
+    from types import SimpleNamespace
+
+    has = {"pip": False, "ensurepip": False}
+    uv = str(tmp_path / "uv.exe")
+    hidden: list[list[str]] = []
+
+    monkeypatch.setattr(svc, "_python_has_module", lambda py, env, name: has[name])
+    monkeypatch.setattr(svc, "_find_uv", lambda python=None: uv)
+
+    def fake_hidden(args, env, *, timeout=120.0):
+        hidden.append(list(args))
+        if args and args[0] == uv:
+            has["pip"] = True
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        raise AssertionError(f"unexpected {args}")
+
+    monkeypatch.setattr(svc, "_run_hidden", fake_hidden)
+    monkeypatch.setattr(
+        svc, "_download_get_pip", lambda dest: (_ for _ in ()).throw(AssertionError("get-pip"))
+    )
+    assert svc._ensure_pip("/venv/python", {}) is True
+    assert has["pip"] is True
+    assert hidden[0][:3] == [uv, "pip", "install"]
+    assert "pip" in hidden[0]
+
+
+def test_ensure_pip_falls_back_to_get_pip(monkeypatch: pytest.MonkeyPatch):
+    import remedy.voice.service as svc
+    from types import SimpleNamespace
+
+    has = {"pip": False, "ensurepip": False}
+    downloaded: list[Path] = []
+
+    monkeypatch.setattr(svc, "_python_has_module", lambda py, env, name: has[name])
+    monkeypatch.setattr(svc, "_find_uv", lambda python=None: None)
+
+    def fake_dl(dest: Path) -> None:
+        downloaded.append(dest)
+        dest.write_text("# fake get-pip", encoding="utf-8")
+
+    def fake_hidden(args, env, *, timeout=120.0):
+        if downloaded and str(downloaded[0]) in list(args):
+            has["pip"] = True
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        raise AssertionError(f"unexpected {args}")
+
+    monkeypatch.setattr(svc, "_download_get_pip", fake_dl)
+    monkeypatch.setattr(svc, "_run_hidden", fake_hidden)
+    assert svc._ensure_pip("/venv/python", {}) is True
+    assert has["pip"] is True
+    assert downloaded, "get-pip.py should be fetched"
+    assert not downloaded[0].exists()  # temp file cleaned up
+
+
+def test_run_pip_packages_bootstraps_then_installs(monkeypatch: pytest.MonkeyPatch):
+    import remedy.voice.service as svc
+
+    seen: dict[str, object] = {}
+
+    def fake_ensure(py, env, *, on_message=None):
+        seen["py"] = py
+        if on_message:
+            on_message("Preparing the voice installer")
+        return True
+
+    cmds: list[list[str]] = []
+
+    def fake_stream(cmd, env, set_state, lo, cap, *, label="the voice pack"):
+        cmds.append(list(cmd))
+        return 0, ["Successfully installed kokoro-onnx"]
+
+    monkeypatch.setattr(svc, "_ensure_pip", fake_ensure)
+    monkeypatch.setattr(svc, "_find_uv", lambda python=None: None)
+    monkeypatch.setattr(svc.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(svc, "_stream_pip", fake_stream)
+    state: dict = {"pack": {"status": "downloading", "percent": 5.0, "message": "Installing"}}
+    svc.run_pip_packages(("kokoro-onnx",), state, "pack", cap=40.0)
+    assert seen["py"]
+    assert cmds and cmds[0][1:3] == ["-m", "pip"]
+    assert "kokoro-onnx" in cmds[0]
+    assert state["pack"]["message"] == "Preparing the voice installer"
+
+
+def test_run_pip_packages_falls_back_to_uv_after_no_module_pip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    import remedy.voice.service as svc
+
+    uv = str(tmp_path / "uv.exe")
+    cmds: list[list[str]] = []
+
+    def fake_stream(cmd, env, set_state, lo, cap, *, label="the voice pack"):
+        cmds.append(list(cmd))
+        if cmd[0] == uv:
+            return 0, ["ok"]
+        return 1, ["No module named pip"]
+
+    monkeypatch.setattr(svc, "_ensure_pip", lambda *a, **k: False)
+    monkeypatch.setattr(svc, "_find_uv", lambda python=None: uv)
+    monkeypatch.setattr(svc.sys, "frozen", False, raising=False)
+    monkeypatch.setattr(svc, "_stream_pip", fake_stream)
+    state: dict = {"pack": {"status": "downloading", "percent": 5.0}}
+    svc.run_pip_packages(("kokoro-onnx",), state, "pack", cap=40.0)
+    assert len(cmds) == 2
+    assert cmds[0][1:3] == ["-m", "pip"]
+    assert cmds[1][0] == uv
+    assert cmds[1][1:3] == ["pip", "install"]
 
 
 def test_owner_pack_error_never_leaks_a_pip_command():

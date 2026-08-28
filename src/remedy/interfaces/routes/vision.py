@@ -49,9 +49,14 @@ def register_vision_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
 
         from remedy.vision.service import get_status
 
-        cfg = load_config()
-        # Default light: skip GPU/catalog on the 1.5–12s poll. ?full=1 for Settings.
-        return await asyncio.to_thread(get_status, cfg, light=not full)
+        # load_config + get_status both stay off the asyncio loop. Chrome
+        # (StatusBar + download-bar) polls this; a disk/YAML hitch here
+        # used to stall chat SSE until the worker ran.
+        def _run() -> dict[str, Any]:
+            return get_status(load_config(), light=not full)
+
+        # Default light: skip GPU/catalog on the poll. ?full=1 for Settings.
+        return await asyncio.to_thread(_run)
 
     @app.get("/api/vision/catalog")
     async def vision_catalog() -> dict[str, Any]:

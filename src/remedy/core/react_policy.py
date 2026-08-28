@@ -14,6 +14,7 @@ from contextlib import suppress
 from typing import Any
 from uuid import uuid4
 
+from remedy.core.build_oracle import coerce_text_arg
 from remedy.interfaces.config import persona_system_addendum
 
 logger = logging.getLogger(__name__)
@@ -458,7 +459,7 @@ _AMBIGUOUS_ACK_RE = re.compile(
 
 def is_ambiguous_ack_message(message: str) -> bool:
     """True for short agrees that must not inherit leftover tools."""
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg or "\n" in msg:
         return False
     return bool(_SOFT_AFFIRM_RE.match(msg) or _AMBIGUOUS_ACK_RE.match(msg))
@@ -621,7 +622,7 @@ def message_asks_to_stop(message: str) -> bool:
     explicit stop request. Conservative: whole-word stop intents only, so
     normal prose ("stop and also…") still counts when unambiguous.
     """
-    msg = (message or "").strip().lower()
+    msg = coerce_text_arg(message).lower()
     if not msg or len(msg) > 200:
         return False
     # Whole-clause match: "never mind, forget it" trips because each clause
@@ -675,7 +676,7 @@ def is_chat_only_message(message: str) -> bool:
     message. A greeting *prefix* is not enough: "Hi keep going" / "Hey,
     continue" is work. Bare "Hi" / "Hi!" stays chat-only.
     """
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg:
         return True
     # Continue / resume / keep going — even after "Hi,"
@@ -716,9 +717,10 @@ def runtime_turn_is_chat_only(runtime: Any = None, message: str | None = None) -
         from remedy.core.turn_context import current_last_user_text
 
         msg = current_last_user_text(runtime)
-    if not (msg or "").strip():
+    msg = coerce_text_arg(msg)
+    if not msg:
         return False
-    return is_chat_only_message(str(msg))
+    return is_chat_only_message(msg)
 
 
 # Polite wrappers that look like questions but are work ("can you add…").
@@ -784,7 +786,7 @@ _HOST_WORK_RE = re.compile(
 
 def is_feeling_presence_question(message: str) -> bool:
     """True for short presence/feeling asks — not 'how do I fix…' work."""
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg or "\n" in msg or len(msg) > 120:
         return False
     if _ACTION_KICK_RE.search(msg) or _REQUEST_WORK_RE.search(msg):
@@ -802,7 +804,7 @@ def is_knowledge_question(message: str) -> bool:
     shape stay work. The model may still answer from knowledge; the loop
     must not *require* a tool call to finish these.
     """
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg or "\n" in msg or len(msg) > 160:
         return False
     if is_chat_only_message(msg):
@@ -831,7 +833,7 @@ _VERBAL_ONLY_RE = re.compile(
 
 def is_verbal_only_request(message: str) -> bool:
     """True for short 'reply only STILLALIVE' style asks — no tools needed."""
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg or "\n" in msg or len(msg) > 120:
         return False
     if _TOOL_HINT_RE.search(msg) or _WORK_SHAPE_RE.search(msg):
@@ -843,7 +845,7 @@ def is_verbal_only_request(message: str) -> bool:
 
 def looks_like_injected_tool_markup(message: str) -> bool:
     """True when the user pasted DSML/XML tool markup (not a real work ask)."""
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg:
         return False
     return bool(_DSML_TOOL_RE.search(msg) or _PSEUDO_TOOL_RE.search(msg))
@@ -851,7 +853,7 @@ def looks_like_injected_tool_markup(message: str) -> bool:
 
 def is_pure_trivia_message(message: str) -> bool:
     """Arithmetic / verbal-only / pasted markup — never inherit Build tools."""
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg:
         return False
     if is_verbal_only_request(msg) or looks_like_injected_tool_markup(msg):
@@ -867,7 +869,7 @@ def build_keeps_tools_armed(message: str, *, build_active: bool) -> bool:
     """
     if not build_active:
         return False
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg:
         return False
     if is_chat_only_message(msg) or is_pure_trivia_message(msg):
@@ -891,7 +893,7 @@ def message_has_work_request(message: str) -> bool:
     line (shape, kick, path, debug follow-up, a real brief) — not leftover
     todos and not “missing from the hi/thanks list.”
     """
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg:
         return False
     if _ACTION_KICK_RE.search(msg) or _REQUEST_WORK_RE.search(msg):
@@ -916,7 +918,7 @@ def message_wants_tools(message: str) -> bool:
     Chat, acks, and knowledge questions stay one-shot. Product asks still
     match on shape/kick/path so a verb-less UI change stays armed.
     """
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg:
         return False
     if is_chat_only_message(msg):
@@ -961,9 +963,9 @@ def unfinished_work_blocks_final(
         return False
     if int(tools_executed or 0) > 0:
         return False
-    if is_chat_only_message(message or ""):
+    if is_chat_only_message(message):
         return False
-    return message_wants_tools(message or "")
+    return message_wants_tools(message)
 
 
 # Remedy asked "want me to add X, or are we just talking?" — a yes is work.
@@ -993,7 +995,7 @@ def confirmation_continues_offered_work(
     Bare 'yes' is chat-only in isolation. After an offer-to-work question it
     is a continue — live 2026-08-27 asked again instead of adding Firefox.
     """
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg or not history:
         return False
     if not _CONFIRM_WORK_RE.search(msg):

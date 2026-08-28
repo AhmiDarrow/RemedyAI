@@ -505,3 +505,42 @@ async def test_a_daughters_step_budget_never_lands_on_the_mothers_runtime(
         assert rt._max_react_steps == 9999
     finally:
         set_pulse_impl(None)
+
+
+@pytest.mark.asyncio
+async def test_forager_does_not_clobber_mother_partner_live(hive_home: Path):
+    """Daughter ensure_partner_state must not overwrite the owner tab live store."""
+    from remedy.core.agent import BasicRuntime
+    from remedy.memory.partner_state.state import ensure_partner_state
+    from remedy.models import AgentConfig
+
+    cfg = AgentConfig(
+        name="t",
+        project_path=str(hive_home),
+        home_dir=str(hive_home),
+        llm_provider="openai",
+        llm_model="x",
+        llm_api_key="k",
+    )
+    rt = BasicRuntime(cfg, memory=None)
+    rt._session_id = "owner-sess"
+    mother = ensure_partner_state(rt)
+    mother.add_node(kind="artifact", text="owner secret", path=r"C:\\Owner\\x.rs")
+    assert rt.__dict__["_partner_state_live"] is mother
+
+    async def pulse(runtime, daughter):
+        st = ensure_partner_state(runtime)
+        assert st is not mother
+        assert str(getattr(st, "session_id", "")).startswith("hive_")
+        return ReturnPacket(goal=daughter.goal, done=True, outcome="ok")
+
+    set_pulse_impl(pulse)
+    try:
+        store = HiveStore(hive_home)
+        d = store.hire("scan the repo", parent_session_id="owner-sess")
+        await run_forager(rt, d)
+        live = rt.__dict__.get("_partner_state_live")
+        assert live is mother
+        assert any("Owner" in (n.path or n.text or "") for n in live.nodes.values())
+    finally:
+        set_pulse_impl(None)

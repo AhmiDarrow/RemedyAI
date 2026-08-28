@@ -492,6 +492,7 @@ class ComputerExecutor:
                     width=int(width) if width else None,
                     height=int(height) if height else None,
                     path=path,
+                    scale=float(result.get("coord_scale") or result.get("scale") or 0) or None,
                 )
             return result
 
@@ -659,8 +660,20 @@ class ComputerExecutor:
             )
         )
 
-    def _ocr_click_text(self, text_q: str, *, surface: str) -> dict[str, Any] | None:
-        """Match a label against OCR word boxes and click that coordinate."""
+    def _ocr_click_scale(self, shot: dict[str, Any], *, web: bool) -> float:
+        """HiDPI rail captures are physical pixels; clicks are CSS coords."""
+        try:
+            scale = float(shot.get("coord_scale") or shot.get("scale") or 0)
+        except (TypeError, ValueError):
+            scale = 0.0
+        if web and scale <= 0:
+            with contextlib.suppress(Exception):
+                bounds = self.bridge.get_browser_bounds()
+                scale = float((bounds or {}).get("scale") or 1.0)
+        return scale if scale > 0 else 1.0
+
+    def _ocr_locate_text(self, text_q: str, *, surface: str) -> dict[str, Any] | None:
+        """Match a label against OCR word boxes. Returns the element or None."""
         from remedy.core.computer.elements import find_best_element
         from remedy.core.computer.ocr import (
             merge_ocr_elements,
@@ -668,17 +681,46 @@ class ComputerExecutor:
             words_to_elements,
         )
 
-        shot = {}
+        shot: dict[str, Any] = {}
         with contextlib.suppress(Exception):
             shot = self.bridge.last_shot() or {}
+        web = surface == "browser"
         path = str(shot.get("path") or "")
+        if (not path or not Path(path).is_file()) and web:
+            with contextlib.suppress(Exception):
+                bounds = self.bridge.get_browser_bounds()
+                if bounds and int(bounds.get("width") or 0) > 40:
+                    from remedy.core.computer.desktop_os import native
+
+                    sc = float(bounds.get("scale") or 1.0)
+                    info = native().screenshot_region_png(
+                        int(bounds["x"]),
+                        int(bounds["y"]),
+                        int(bounds["width"]),
+                        int(bounds["height"]),
+                        scale=sc,
+                    )
+                    path = str(info.get("path") or "")
+                    shot = {
+                        **shot,
+                        "path": path,
+                        "coord_scale": sc,
+                        "scale": sc,
+                        "origin": {},
+                    }
+                    self.bridge.set_last_shot(
+                        origin={},
+                        width=int(info.get("width") or 0) or None,
+                        height=int(info.get("height") or 0) or None,
+                        path=path,
+                        scale=sc,
+                    )
         if not path or not Path(path).is_file():
             return None
         ocr = read_screenshot_ocr(path)
         if not ocr.get("ok") or not ocr.get("words"):
             return None
-        web = surface == "browser"
-        scale = 1.0
+        scale = self._ocr_click_scale(shot, web=web)
         ox = float((shot.get("origin") or {}).get("x") or 0)
         oy = float((shot.get("origin") or {}).get("y") or 0)
         info = {}
@@ -694,10 +736,19 @@ class ComputerExecutor:
         merged = merge_ocr_elements(list(info.get("elements") or []), els)
         with contextlib.suppress(Exception):
             self.bridge.set_last_elements(merged, target=surface)
-        el = find_best_element(els, text_q)
+        # Floor 40 matches Rust host click_text — weak 1-word overlaps stay misses.
+        el = find_best_element(els, text_q, min_score=40.0)
+        if el is None:
+            return None
+        return el
+
+    def _ocr_click_text(self, text_q: str, *, surface: str) -> dict[str, Any] | None:
+        """Match a label against OCR word boxes and click that coordinate."""
+        el = self._ocr_locate_text(text_q, surface=surface)
         if el is None:
             return None
         x, y = int(el.get("x") or 0), int(el.get("y") or 0)
+        web = surface == "browser"
         if web:
             job = self._enqueue(
                 "click",
@@ -738,6 +789,165 @@ class ComputerExecutor:
                 f"({str(el.get('name') or '')[:40]}) at ({x},{y})"
             ),
             extra={"ref": el.get("ref"), "x": x, "y": y, "source": "ocr", "text": text_q},
+        )
+
+
+
+    def _resolve_label_point(
+        self,
+        win: Any,
+        *,
+        text: str = "",
+        ref: str = "",
+        x: int = 0,
+        y: int = 0,
+        surface: str = "desktop",
+    ) -> tuple[int, int, dict[str, Any]] | None:
+        """Resolve text=/ref=/x,y into a screen (or page) point.
+
+        Explicit non-zero coords win. Otherwise last snapshot / UIA tree,
+        then OCR word boxes — same family as click and press_hold.
+        Returns (x, y, meta) or None when the locator misses.
+        """
+        text_q = str(text or "").strip()
+        ref_q = str(ref or "").strip()
+        px, py = int(x or 0), int(y or 0)
+        if (px or py) and not text_q and not ref_q:
+            return px, py, {"source": "coords", "x": px, "y": py}
+        if ref_q and not text_q:
+            el = self.bridge.get_element_by_ref(ref_q)
+            if el is None and surface == "desktop" and win is not None:
+                with contextlib.suppress(Exception):
+                    elements = win.desktop_snapshot(limit=60, mode="auto")
+                    self.bridge.set_last_elements(elements, target="desktop")
+                    el = self.bridge.get_element_by_ref(ref_q)
+            if el is not None:
+                if surface == "desktop" and el.get("offscreen") and el.get("hwnd"):
+                    with contextlib.suppress(Exception):
+                        from remedy.core.computer.desktop_uia import element_action
+                        from remedy.core.computer.elements import find_best_element
+
+                        res = element_action(
+                            int(el["hwnd"]),
+                            str(el.get("name") or ""),
+                            role=str(el.get("role") or ""),
+                            action="scroll_into_view",
+                        )
+                        if res.get("ok"):
+                            time.sleep(0.15)
+                            fresh = win.desktop_snapshot(
+                                limit=80, mode="controls", hwnd=int(el["hwnd"])
+                            )
+                            upd = find_best_element(fresh, str(el.get("name") or ""))
+                            if upd is not None and not upd.get("offscreen"):
+                                el = upd
+                hx, hy = int(el.get("x") or 0), int(el.get("y") or 0)
+                return hx, hy, {
+                    "source": "ref",
+                    "ref": ref_q,
+                    "x": hx,
+                    "y": hy,
+                    "name": str(el.get("name") or "")[:40],
+                }
+            return None
+        if text_q:
+            info = self.bridge.last_elements_info()
+            want = "desktop" if surface == "desktop" else str(info.get("target") or "")
+            elements = (
+                list(info.get("elements") or [])
+                if (surface == "desktop" and want == "desktop")
+                or (surface == "browser" and want == "browser")
+                else []
+            )
+            if not elements and surface == "desktop" and win is not None:
+                elements = win.desktop_snapshot(limit=60, mode="auto")
+                self.bridge.set_last_elements(elements, target="desktop")
+            from remedy.core.computer.elements import find_best_element
+
+            el = find_best_element(elements, text_q) if elements else None
+            if el is None:
+                ocr_el = self._ocr_locate_text(text_q, surface=surface)
+                if ocr_el is None:
+                    return None
+                hx, hy = int(ocr_el.get("x") or 0), int(ocr_el.get("y") or 0)
+                return hx, hy, {
+                    "source": "ocr",
+                    "ref": ocr_el.get("ref"),
+                    "text": text_q,
+                    "x": hx,
+                    "y": hy,
+                    "name": str(ocr_el.get("name") or "")[:40],
+                }
+            if surface == "desktop" and el.get("offscreen") and el.get("hwnd") and win is not None:
+                with contextlib.suppress(Exception):
+                    from remedy.core.computer.desktop_uia import element_action
+
+                    res = element_action(
+                        int(el["hwnd"]),
+                        str(el.get("name") or ""),
+                        role=str(el.get("role") or ""),
+                        action="scroll_into_view",
+                    )
+                    if res.get("ok"):
+                        time.sleep(0.15)
+                        fresh = win.desktop_snapshot(
+                            limit=80, mode="controls", hwnd=int(el["hwnd"])
+                        )
+                        upd = find_best_element(fresh, text_q)
+                        if upd is not None and not upd.get("offscreen"):
+                            el = upd
+            hx, hy = int(el.get("x") or 0), int(el.get("y") or 0)
+            return hx, hy, {
+                "source": "text",
+                "ref": el.get("ref"),
+                "text": text_q,
+                "x": hx,
+                "y": hy,
+                "name": str(el.get("name") or "")[:40],
+                "match_score": el.get("match_score"),
+            }
+        if px or py:
+            return px, py, {"source": "coords", "x": px, "y": py}
+        return None
+
+    def _ocr_press_hold_text(
+        self, text_q: str, *, hold_ms: int
+    ) -> dict[str, Any] | None:
+        """Match a label against OCR word boxes and press-hold that coordinate.
+
+        Same locate as click-by-text OCR so a native hold button that UIA
+        cannot name (a game, a canvas, a custom control) still works.
+        """
+        el = self._ocr_locate_text(text_q, surface="desktop")
+        if el is None:
+            return None
+        x, y = int(el.get("x") or 0), int(el.get("y") or 0)
+        try:
+            from remedy.core.computer.desktop_os import native
+
+            info = native().press_hold(
+                x, y, hold_ms=hold_ms, abort_check=self._abort_check
+            )
+        except Exception:
+            return None
+        return public_result(
+            ok=True,
+            target="desktop",
+            action="press_hold",
+            message=(
+                f"Held text={text_q!r} via OCR {el.get('ref')} "
+                f"({str(el.get('name') or '')[:40]}) at ({x},{y}) for "
+                f"{int(info.get('held_ms') or hold_ms)}ms"
+            ),
+            extra={
+                "ref": el.get("ref"),
+                "x": x,
+                "y": y,
+                "source": "ocr",
+                "text": text_q,
+                **info,
+                **self._desktop_evidence(),
+            },
         )
 
     @staticmethod
@@ -1270,16 +1480,99 @@ class ComputerExecutor:
         if act is ComputerAction.DRAG:
             if self._abort_check():
                 raise RuntimeError("Aborted by user")
-            x1, y1 = int(kwargs.get("x", 0)), int(kwargs.get("y", 0))
-            x2 = int(kwargs.get("x2", x1))
-            y2 = int(kwargs.get("y2", y1))
+            # Guidance advertises drag addressed by label (text/ref) like click /
+            # press_hold. Schema still accepts bare x/y/x2/y2; from_text/to_text
+            # (and text=/ref= aliases for the start) locate endpoints.
+            from_text = str(
+                kwargs.get("from_text") or kwargs.get("text") or ""
+            ).strip()
+            to_text = str(kwargs.get("to_text") or "").strip()
+            from_ref = str(
+                kwargs.get("from_ref") or kwargs.get("ref") or ""
+            ).strip()
+            to_ref = str(kwargs.get("to_ref") or "").strip()
+            x1, y1 = int(kwargs.get("x") or 0), int(kwargs.get("y") or 0)
+            x2, y2 = int(kwargs.get("x2") or 0), int(kwargs.get("y2") or 0)
+            start_meta: dict[str, Any] = {}
+            end_meta: dict[str, Any] = {}
+            start_unset = (x1, y1) == (0, 0)
+            if from_text or from_ref or start_unset:
+                got = self._resolve_label_point(
+                    win,
+                    text=from_text,
+                    ref=from_ref,
+                    x=x1,
+                    y=y1,
+                    surface="desktop",
+                )
+                if got is None:
+                    label = from_text or from_ref or f"({x1},{y1})"
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="drag",
+                        message=(
+                            f"No desktop control matching drag start "
+                            f"{label!r} — try computer_snapshot or pass x/y"
+                        ),
+                    )
+                x1, y1, start_meta = got
+            else:
+                start_meta = {"source": "coords", "x": x1, "y": y1}
+            end_unset = (x2, y2) == (0, 0)
+            if to_text or to_ref or end_unset:
+                got = self._resolve_label_point(
+                    win,
+                    text=to_text,
+                    ref=to_ref,
+                    x=x2,
+                    y=y2,
+                    surface="desktop",
+                )
+                if got is None:
+                    label = to_text or to_ref or f"({x2},{y2})"
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="drag",
+                        message=(
+                            f"No desktop control matching drag end "
+                            f"{label!r} — try computer_snapshot or pass x2/y2"
+                        ),
+                    )
+                x2, y2, end_meta = got
+            else:
+                end_meta = {"source": "coords", "x": x2, "y": y2}
+            if not ((x1 or y1) or (x2 or y2)):
+                return public_result(
+                    ok=False,
+                    target="desktop",
+                    action="drag",
+                    message=(
+                        "drag needs from_text=/to_text= (or text=/ref=), "
+                        "from_ref=/to_ref=, or explicit x/y/x2/y2"
+                    ),
+                )
             win.drag(x1, y1, x2, y2)
+            bits = [f"Drag ({x1},{y1})→({x2},{y2})"]
+            if from_text:
+                bits.append(f"from_text={from_text!r}")
+            if to_text:
+                bits.append(f"to_text={to_text!r}")
             return public_result(
                 ok=True,
                 target="desktop",
                 action="drag",
-                message=f"Drag ({x1},{y1})→({x2},{y2})",
-                extra={"x": x1, "y": y1, "x2": x2, "y2": y2},
+                message=" ".join(bits),
+                extra={
+                    "x": x1,
+                    "y": y1,
+                    "x2": x2,
+                    "y2": y2,
+                    "from": start_meta,
+                    "to": end_meta,
+                    **self._desktop_evidence(),
+                },
             )
         if act is ComputerAction.TYPE:
             text = str(kwargs.get("text") or "")
@@ -1419,8 +1712,36 @@ class ComputerExecutor:
                 extra={"key": key, **self._desktop_evidence()},
             )
         if act is ComputerAction.SCROLL:
-            x, y = int(kwargs.get("x", 0)), int(kwargs.get("y", 0))
-            if x == 0 and y == 0:
+            # Guidance addresses scroll by label (text/ref) like click /
+            # press_hold / drag. Schema still accepts bare x/y; text=/ref=
+            # locate the pane then wheel at that point.
+            text_q = str(kwargs.get("text") or "").strip()
+            ref_q = str(kwargs.get("ref") or "").strip()
+            x, y = int(kwargs.get("x") or 0), int(kwargs.get("y") or 0)
+            point_usable = (x, y) != (0, 0)
+            scroll_meta: dict[str, Any] = {}
+            if (text_q or ref_q) and not point_usable:
+                got = self._resolve_label_point(
+                    win,
+                    text=text_q,
+                    ref=ref_q,
+                    x=x,
+                    y=y,
+                    surface="desktop",
+                )
+                if got is None:
+                    label = text_q or ref_q or f"({x},{y})"
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="scroll",
+                        message=(
+                            f"No desktop control matching scroll target "
+                            f"{label!r} — try computer_snapshot or pass x/y"
+                        ),
+                    )
+                x, y, scroll_meta = got
+            elif not point_usable:
                 # No point given → scroll the FOREGROUND window's center, not the
                 # top-left corner of the screen (which scrolled nothing useful).
                 with contextlib.suppress(Exception):
@@ -1431,15 +1752,23 @@ class ComputerExecutor:
                             x = (int(b.get("left") or 0) + int(b.get("right") or 0)) // 2
                             y = (int(b.get("top") or 0) + int(b.get("bottom") or 0)) // 2
                             break
+                scroll_meta = {"source": "foreground_center", "x": x, "y": y}
+            else:
+                scroll_meta = {"source": "coords", "x": x, "y": y}
             raw_dy = kwargs.get("dy")
             dy = int(raw_dy) if raw_dy is not None else -3
             win.scroll(x, y, dy=dy)
+            bits = [f"Scrolled at ({x},{y}) dy={dy}"]
+            if text_q:
+                bits.append(f"text={text_q!r}")
+            if ref_q and not text_q:
+                bits.append(f"ref={ref_q!r}")
             return public_result(
                 ok=True,
                 target="desktop",
                 action="scroll",
-                message=f"Scrolled at ({x},{y}) dy={dy}",
-                extra={"x": x, "y": y, "dy": dy},
+                message=" ".join(bits),
+                extra={"x": x, "y": y, "dy": dy, **scroll_meta},
             )
         if act is ComputerAction.WINDOWS:
             mode = str(kwargs.get("mode") or "list").lower()
@@ -1679,20 +2008,141 @@ class ComputerExecutor:
         if act is ComputerAction.PRESS_HOLD:
             if self._abort_check():
                 raise RuntimeError("Aborted by user")
-            x, y = int(kwargs.get("x") or 0), int(kwargs.get("y") or 0)
             ref = str(kwargs.get("ref") or "").strip()
+            text_q = str(kwargs.get("text") or "").strip()
+            hold_ms = int(kwargs.get("hold_ms") or 2600)
+            x, y = int(kwargs.get("x") or 0), int(kwargs.get("y") or 0)
+
+            def _hold_at(
+                hx: int,
+                hy: int,
+                *,
+                message: str,
+                extra: dict[str, Any],
+            ) -> dict[str, Any]:
+                info = win.press_hold(
+                    hx, hy, hold_ms=hold_ms, abort_check=self._abort_check
+                )
+                return public_result(
+                    ok=True,
+                    target="desktop",
+                    action="press_hold",
+                    message=message,
+                    extra={**info, **extra, **self._desktop_evidence()},
+                )
+
+            def _bring_on_screen(el: dict[str, Any]) -> dict[str, Any]:
+                if not (el.get("offscreen") and el.get("hwnd")):
+                    return el
+                with contextlib.suppress(Exception):
+                    from remedy.core.computer.desktop_uia import element_action
+                    from remedy.core.computer.elements import find_best_element
+
+                    res = element_action(
+                        int(el["hwnd"]),
+                        str(el.get("name") or ""),
+                        role=str(el.get("role") or ""),
+                        action="scroll_into_view",
+                    )
+                    if res.get("ok"):
+                        time.sleep(0.15)
+                        fresh = win.desktop_snapshot(
+                            limit=80, mode="controls", hwnd=int(el["hwnd"])
+                        )
+                        upd = find_best_element(fresh, str(el.get("name") or ""))
+                        if upd is not None and not upd.get("offscreen"):
+                            return upd
+                return el
+
+            # text= is the advertised locator (same as computer_click). The
+            # tool handler still forwards schema-default (0, 0) alongside a
+            # label — resolve the control, do not demand x/y from the model.
+            if text_q and not ref:
+                info = self.bridge.last_elements_info()
+                elements = (
+                    list(info.get("elements") or [])
+                    if str(info.get("target") or "") == "desktop"
+                    else []
+                )
+                if not elements:
+                    elements = win.desktop_snapshot(limit=60, mode="auto")
+                    self.bridge.set_last_elements(elements, target="desktop")
+                from remedy.core.computer.elements import find_best_element
+
+                el = find_best_element(elements, text_q)
+                if el is None:
+                    ocr_hit = self._ocr_press_hold_text(text_q, hold_ms=hold_ms)
+                    if ocr_hit is not None:
+                        return ocr_hit
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="press_hold",
+                        message=(
+                            f"No desktop control matching text={text_q!r} — "
+                            "try computer_snapshot"
+                        ),
+                    )
+                el = _bring_on_screen(el)
+                hx, hy = int(el.get("x") or 0), int(el.get("y") or 0)
+                return _hold_at(
+                    hx,
+                    hy,
+                    message=(
+                        f"Held text={text_q!r} → {el.get('ref')} "
+                        f"({str(el.get('name') or '')[:40]}) for "
+                        f"{hold_ms}ms"
+                    ),
+                    extra={
+                        "ref": el.get("ref"),
+                        "text": text_q,
+                        "x": hx,
+                        "y": hy,
+                        "match_score": el.get("match_score"),
+                    },
+                )
+            if ref.lower().startswith("o") and not (x or y):
+                el = self.bridge.get_element_by_ref(ref)
+                if el is None:
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="press_hold",
+                        message=(
+                            f"Unknown OCR ref {ref} — run computer_screenshot "
+                            "first and press-hold ref=oN from that list"
+                        ),
+                    )
+                hx, hy = int(el.get("x") or 0), int(el.get("y") or 0)
+                return _hold_at(
+                    hx,
+                    hy,
+                    message=(
+                        f"Held OCR {ref} ({str(el.get('name') or '')[:40]}) "
+                        f"at ({hx},{hy}) for {hold_ms}ms"
+                    ),
+                    extra={
+                        "ref": ref,
+                        "x": hx,
+                        "y": hy,
+                        "source": "ocr",
+                    },
+                )
             if ref and not (x or y):
                 el = self.bridge.get_element_by_ref(ref)
                 if el is not None:
+                    el = _bring_on_screen(el)
                     x, y = int(el.get("x") or 0), int(el.get("y") or 0)
             if not (x or y):
                 return public_result(
                     ok=False,
                     target="desktop",
                     action="press_hold",
-                    message="press_hold needs x/y or a ref from computer_snapshot",
+                    message=(
+                        "press_hold needs text=, x/y, or a ref from "
+                        "computer_snapshot"
+                    ),
                 )
-            hold_ms = int(kwargs.get("hold_ms") or 2600)
             info = win.press_hold(
                 x, y, hold_ms=hold_ms, abort_check=self._abort_check
             )
@@ -1717,21 +2167,130 @@ class ComputerExecutor:
         asked for it, or the Desktop host fails to claim the job quickly.
         """
         payload = {k: v for k, v in kwargs.items() if v is not None}
+        # Drag-by-label: guidance + approach_of treat drag like click. The rail
+        # host only accepts x/y/x2/y2 today — resolve labels to coords here so
+        # from_text/to_text work without a desktop rebuild.
+        if act is ComputerAction.DRAG and (
+            payload.get("from_text")
+            or payload.get("to_text")
+            or payload.get("text")
+            or payload.get("from_ref")
+            or payload.get("to_ref")
+            or payload.get("ref")
+        ):
+            from_text = str(
+                payload.get("from_text") or payload.get("text") or ""
+            ).strip()
+            to_text = str(payload.get("to_text") or "").strip()
+            from_ref = str(
+                payload.get("from_ref") or payload.get("ref") or ""
+            ).strip()
+            to_ref = str(payload.get("to_ref") or "").strip()
+            sx = int(payload.get("x") or 0)
+            sy = int(payload.get("y") or 0)
+            ex_ = int(payload.get("x2") or 0)
+            ey = int(payload.get("y2") or 0)
+            start = self._resolve_label_point(
+                None,
+                text=from_text,
+                ref=from_ref,
+                x=sx,
+                y=sy,
+                surface="browser",
+            )
+            if start is None and (from_text or from_ref or not (sx or sy)):
+                label = from_text or from_ref or f"({sx},{sy})"
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="drag",
+                    message=(
+                        f"No browser control matching drag start {label!r} — "
+                        "try computer_snapshot or pass x/y"
+                    ),
+                )
+            if start is not None:
+                sx, sy, _ = start
+            end = self._resolve_label_point(
+                None,
+                text=to_text,
+                ref=to_ref,
+                x=ex_,
+                y=ey,
+                surface="browser",
+            )
+            if end is None and (to_text or to_ref or not (ex_ or ey)):
+                label = to_text or to_ref or f"({ex_},{ey})"
+                return public_result(
+                    ok=False,
+                    target="browser",
+                    action="drag",
+                    message=(
+                        f"No browser control matching drag end {label!r} — "
+                        "try computer_snapshot or pass x2/y2"
+                    ),
+                )
+            if end is not None:
+                ex_, ey, _ = end
+            payload["x"], payload["y"] = sx, sy
+            payload["x2"], payload["y2"] = ex_, ey
+            for drop in ("from_text", "to_text", "from_ref", "to_ref", "text", "ref"):
+                payload.pop(drop, None)
+        # Scroll-by-label: guidance + approach_of treat scroll like click. The
+        # rail host only accepts x/y/dy today — resolve text=/ref= to coords
+        # here so named panes scroll without a desktop rebuild.
+        if act is ComputerAction.SCROLL and (
+            payload.get("text") or payload.get("ref")
+        ):
+            text_q = str(payload.get("text") or "").strip()
+            ref_q = str(payload.get("ref") or "").strip()
+            sx = int(payload.get("x") or 0)
+            sy = int(payload.get("y") or 0)
+            if (text_q or ref_q) and (sx, sy) == (0, 0):
+                hit = self._resolve_label_point(
+                    None,
+                    text=text_q,
+                    ref=ref_q,
+                    x=sx,
+                    y=sy,
+                    surface="browser",
+                )
+                if hit is None:
+                    label = text_q or ref_q or f"({sx},{sy})"
+                    return public_result(
+                        ok=False,
+                        target="browser",
+                        action="scroll",
+                        message=(
+                            f"No browser control matching scroll target "
+                            f"{label!r} — try computer_snapshot or pass x/y"
+                        ),
+                    )
+                sx, sy, _ = hit
+                payload["x"], payload["y"] = sx, sy
+            for drop in ("text", "ref"):
+                payload.pop(drop, None)
         # Vault tokens in typed text expand machine-side, bound to the rail's
         # current site — the model and job log only ever saw the handle.
         if act is ComputerAction.TYPE and payload.get("text"):
             text = str(payload.get("text") or "")
             had_vault = "{{" in text
             set_ref = str(payload.get("ref") or kwargs.get("ref") or "").strip()
-            if had_vault and not set_ref:
+            set_query = str(
+                payload.get("query") or kwargs.get("query") or kwargs.get("label") or ""
+            ).strip()
+            if set_query:
+                payload["query"] = set_query
+            if had_vault and not set_ref and not set_query:
                 return public_result(
                     ok=False,
                     target="browser",
                     action="type",
                     message=(
                         "Vault secrets only type into a named field. Pass ref= "
-                        "from computer_snapshot so the value lands in that control, "
-                        "not whatever currently has focus."
+                        "from computer_snapshot or query= the visible label so "
+                        "the value lands in that control, not whatever currently "
+                        "has focus."
                     ),
                     extra={"needs": "ref"},
                 )
@@ -2283,6 +2842,7 @@ class ComputerExecutor:
                         "ui": {"open_browser": True},
                         "text": text,
                         "ref": str(el.get("ref")),
+                        "query": str(el.get("name") or "") or None,
                     },
                 )
                 fin2 = self.bridge.wait(
@@ -2314,7 +2874,11 @@ class ComputerExecutor:
                 if focused.get("ok"):
                     job3 = self._enqueue(
                         "type",
-                        {"ui": {"open_browser": True}, "text": text},
+                        {
+                            "ui": {"open_browser": True},
+                            "text": text,
+                            "query": query,
+                        },
                     )
                     fin3 = self.bridge.wait(
                         job3.id,
@@ -2688,7 +3252,9 @@ class ComputerExecutor:
             elif value:
                 if label and not ref:
                     # A missed label must not fall through to typing into
-                    # whatever happens to have focus.
+                    # whatever happens to have focus. Click still focuses the
+                    # field on an un-rebuilt host; query= lets the host
+                    # relocate after a desktop rebuild.
                     clicked = self._run_browser(ComputerAction.CLICK, text=label)
                     if not clicked.get("ok"):
                         fail = dict(clicked)
@@ -2702,6 +3268,7 @@ class ComputerExecutor:
                     ComputerAction.TYPE,
                     text=value,
                     ref=ref or None,
+                    query=label or None,
                 )
             else:
                 return public_result(

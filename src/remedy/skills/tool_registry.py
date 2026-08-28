@@ -103,9 +103,10 @@ def _coerce_handler_arguments(
             continue
         ann = _annotation_name(p)
         if ann in _STR_ANNOTATIONS:
-            if isinstance(val, list | dict):
+            if isinstance(val, list | tuple | dict):
+                dumped = list(val) if isinstance(val, tuple) else val
                 try:
-                    out[name] = json.dumps(val, ensure_ascii=False, default=str)
+                    out[name] = json.dumps(dumped, ensure_ascii=False, default=str)
                 except Exception:
                     out[name] = str(val)
             elif isinstance(val, bool):

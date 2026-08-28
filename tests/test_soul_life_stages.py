@@ -180,3 +180,53 @@ def test_a_relative_export_with_a_subdirectory_lands_under_exports(tmp_path, mon
         export_soul_plain("../x.json", home=tmp_path)
     with pytest.raises(ValueError):
         export_soul_plain(tmp_path / "outside.json", home=tmp_path)
+
+def test_job_resume_residue_does_not_arm_missions(tmp_path):
+    """Live 2026-08-27: leftover 'Stay with: Continue: what is the day?'
+    armed as a real mission and stole the next session."""
+    from remedy.memory.soul.field import save_soul_field
+
+    clear_soul_cache()
+    sf = load_soul_field(tmp_path)
+    sf.pledges.append("Stay with: Continue: what is the day?")
+    sf.pledges.append("Ship tests green before every release")
+    sf.relational.open_threads.append("Continue: how we feeling?")
+    save_soul_field(sf, tmp_path)
+    clear_soul_cache()
+    cands = collect_soul_mission_candidates(tmp_path, limit=8)
+    goals = [c["goal"] for c in cands]
+    assert any("Ship tests green" in g for g in goals)
+    assert not any("Stay with: Continue" in g for g in goals)
+    assert not any(g.lower().startswith("continue:") for g in goals)
+    res = arm_soul_missions(home=tmp_path, session_id="resume-skip", max_new=3, auto=True)
+    armed = [a["goal"] for a in res.get("armed") or []]
+    assert not any("Stay with: Continue" in g for g in armed)
+    assert not any(g.lower().startswith("continue:") for g in armed)
+
+
+def test_dream_does_not_pledge_job_resume_threads(tmp_path):
+    from remedy.memory.soul.dream import dream_cycle
+    from remedy.memory.soul.field import save_soul_field
+
+    clear_soul_cache()
+    reset_dream_cooldown()
+    for i in range(3):
+        update_soul_after_turn(
+            user_text=f"what is the day leftover {i}",
+            assistant_text="ok",
+            session_id="dream-resume",
+            home=tmp_path,
+        )
+    sf = load_soul_field(tmp_path)
+    for ep in sf.episodes:
+        ep.open_thread = "Continue: what is the day?"
+    save_soul_field(sf, tmp_path)
+    clear_soul_cache()
+    reset_dream_cooldown()
+    result = dream_cycle(home=tmp_path, force=True, use_local=False)
+    assert result.get("ok")
+    sf2 = load_soul_field(tmp_path)
+    pledges = "\n".join(sf2.pledges).lower()
+    threads = "\n".join(sf2.relational.open_threads).lower()
+    assert "stay with: continue" not in pledges
+    assert "continue: what is the day?" not in threads

@@ -197,3 +197,55 @@ def test_drop_session_continuity_cache():
     assert rt._session_brief.session_id == "cache-a"
     assert (rt._session_brief.intent or "") != "keep me"
     assert rt._work_roots == []
+
+
+def test_active_turn_setters_do_not_clobber_live(tmp_path):
+    """Hive/sibling pulse must not steal the owner tab's live continuity.
+
+    BasicRuntime setters used to write ``_session_*_live`` even inside
+    begin_turn. A daughter calling ensure_partner_state (or compress_context)
+    then left the owner's PartnerState/brief/roots as hive_* after she
+    finished, so the next owner action read the wrong tab.
+    """
+    from types import SimpleNamespace
+
+    from remedy.core.agent import BasicRuntime
+    from remedy.core.turn_context import begin_turn, end_turn
+    from remedy.models import AgentConfig
+
+    cfg = AgentConfig(
+        name="t",
+        project_path=str(tmp_path),
+        home_dir=str(tmp_path),
+        llm_provider="openai",
+        llm_model="x",
+        llm_api_key="k",
+    )
+    rt = BasicRuntime(cfg, memory=None)
+    owner_brief = SessionBrief(session_id="owner", intent="owner work")
+    mother_partner = SimpleNamespace(session_id="owner", tag="mother")
+    rt._session_id = "owner"
+    rt._session_brief = owner_brief
+    rt._work_roots = [r"C:\owner"]
+    rt._partner_state = mother_partner
+
+    toks = begin_turn("hive_abc", session_brief=None, partner_state=None, work_roots=[])
+    try:
+        rt._session_id = "hive_abc"
+        rt._session_brief = SessionBrief(session_id="hive_abc", intent="daughter")
+        rt._work_roots = [r"C:\hive"]
+        rt._partner_state = SimpleNamespace(session_id="hive_abc", tag="daughter")
+        assert rt.__dict__["_session_id_live"] == "owner"
+        assert rt.__dict__["_session_brief_live"] is owner_brief
+        assert rt.__dict__["_work_roots_live"] == [r"C:\owner"]
+        assert rt.__dict__["_partner_state_live"] is mother_partner
+        assert rt._session_id == "hive_abc"
+        assert rt._session_brief.session_id == "hive_abc"
+        assert rt._work_roots == [r"C:\hive"]
+        assert rt._partner_state.tag == "daughter"
+    finally:
+        end_turn("hive_abc", *toks)
+    assert rt._session_id == "owner"
+    assert rt._session_brief is owner_brief
+    assert rt._work_roots == [r"C:\owner"]
+    assert rt._partner_state is mother_partner

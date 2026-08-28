@@ -5,6 +5,8 @@ from __future__ import annotations
 from contextlib import suppress
 from typing import Any
 
+from remedy.core.build_oracle import coerce_text_arg
+
 
 def try_l0_system_reply(
     runtime: Any,
@@ -32,7 +34,7 @@ def try_l0_system_reply(
         classify_turn_tier,
     )
 
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg:
         return None
     # Re-confirm L0 unless the caller already did (early exit / agent gate)

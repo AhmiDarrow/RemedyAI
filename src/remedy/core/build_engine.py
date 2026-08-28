@@ -23,6 +23,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
+from remedy.core.build_oracle import coerce_text_arg
 from remedy.core.relpath import norm_rel
 
 # ---------------------------------------------------------------------------
@@ -211,7 +212,7 @@ _SHIP_GOAL_RE = re.compile(
 
 
 def looks_like_ship_goal(goal: str) -> bool:
-    return bool(_SHIP_GOAL_RE.search(goal or ""))
+    return bool(_SHIP_GOAL_RE.search(coerce_text_arg(goal)))
 
 
 # Generic continuation = the message IS essentially just "continue" / "keep
@@ -230,7 +231,7 @@ def _is_generic_continuation(goal: str) -> bool:
     build regardless of its stored goal. A specific goal stays goal-keyed so it
     can't inherit a sibling goal's green watermark.
     """
-    g = (goal or "").strip()
+    g = coerce_text_arg(goal)
     if not g:
         return True
     return bool(_CONTINUATION_RE.match(g))
@@ -635,7 +636,7 @@ class BuildTurnState:
 
 def looks_like_build_request(message: str) -> bool:
     """True when the user message is a *task* (research → plan → build default)."""
-    msg = (message or "").strip()
+    msg = coerce_text_arg(message)
     if not msg:
         return False
     # Pure social / meta — never force the build engine
@@ -673,6 +674,7 @@ def begin_build_turn(
     force: bool = False,
 ) -> BuildTurnState | None:
     """Start machine supervision for task work (research → plan → build)."""
+    message = coerce_text_arg(message)
     if not force:
         try:
             from remedy.core.turn_context import current_plan_mode
@@ -730,7 +732,7 @@ def begin_build_turn(
             from remedy.core.build_todos import has_open_review_finding_todos
             from remedy.core.intent_policy import _CHANGE_VERB_RE
 
-            if _CHANGE_VERB_RE.search(message or "") and has_open_review_finding_todos(
+            if _CHANGE_VERB_RE.search(message) and has_open_review_finding_todos(
                 runtime
             ):
                 wants = True
@@ -740,7 +742,7 @@ def begin_build_turn(
         enable_build_host_drive(runtime)
         return None
     # Tiny muscle: soft supervision only (higher explore tolerance)
-    goal_txt = (message or "").strip()[:300]
+    goal_txt = coerce_text_arg(message)[:300]
     html_or_serve = bool(
         _HTML_PAGE_GOAL_RE.search(goal_txt)
         or re.search(
@@ -1806,6 +1808,7 @@ def deactivate_build_for_session(runtime: Any, session_id: str | None) -> bool:
 
 def should_force_tools_for_build(runtime: Any, message: str) -> bool:
     """True when L1 must not strip tools (build request or active build turn)."""
+    message = coerce_text_arg(message)
     st = get_build_state(runtime)
     if st is not None and st.active:
         return True
