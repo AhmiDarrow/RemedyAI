@@ -183,12 +183,9 @@ def register_search_tools(runtime: Any) -> None:
             off = max(0, int(offset or 0))
         except (TypeError, ValueError):
             off = 0
-        lines: list[str] = []
-        total = 0
-        try:
-            entries = sorted(
-                target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())
-            )
+        import asyncio
+
+        def _list() -> tuple[list[str], int]:
             # Dotted entries are shown. Hiding every one of them made
             # .github/, .gitignore and .env.example undiscoverable — Remedy
             # could read them only by guessing the name. Only the machine
@@ -196,19 +193,26 @@ def register_search_tools(runtime: Any) -> None:
             # withheld, matching what repo_search and file_glob already skip.
             # Credential files (.env, .npmrc, .pypirc, .ssh/, *.pem, …) are
             # withheld too: a listing should not advertise where keys live.
+            entries = sorted(
+                target.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())
+            )
             visible = [
                 p
                 for p in entries
                 if p.name not in _SKIP_DIR_NAMES and not is_credential_filename(p.name)
             ]
-            total = len(visible)
             page = visible[off : off + lim]
+            lines: list[str] = []
             for p in page:
                 try:
                     rel = p.relative_to(root).as_posix()
                 except ValueError:
                     rel = str(p)
                 lines.append(f"{'dir ' if p.is_dir() else 'file'} {rel}")
+            return lines, len(visible)
+
+        try:
+            lines, total = await asyncio.to_thread(_list)
         except OSError as e:
             return format_tool_error(
                 f"cannot list {path}: {e}",
@@ -235,7 +239,7 @@ def register_search_tools(runtime: Any) -> None:
         max_results: int = 80,
     ) -> str:
         """Find files by glob (recursive). Prefer this over serial list_dir."""
-        from remedy.core.file_glob import format_glob_hits, glob_files
+        from remedy.core.file_glob import format_glob_hits, glob_search
 
         pat = (pattern or "").strip()
         if not pat:
@@ -278,9 +282,11 @@ def register_search_tools(runtime: Any) -> None:
             cap = 80
         import asyncio
 
-        hits = await asyncio.to_thread(glob_files, target, pat, max_results=cap)
+        result = await asyncio.to_thread(glob_search, target, pat, max_results=cap)
         _note_path(target)
-        return format_glob_hits(hits, pattern=pat, truncated=len(hits) >= cap)
+        return format_glob_hits(
+            result.hits, pattern=pat, truncated=result.truncated
+        )
 
     runtime.tool_registry.register_builtin_handler(
         "repo_search",

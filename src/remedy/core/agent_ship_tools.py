@@ -1,7 +1,7 @@
-"""Ship tools — git status/push and GitHub release without shell thrash.
+"""Ship tools — git status/diff/push and GitHub release without shell thrash.
 
 Partner path after green verify:
-  git_status → git_push → gh_release (if tag/release goal)
+  git_status → git_diff (read) → git_push → gh_release (if tag/release goal)
 
 Keeps credentials via scrub allowlist (GH_TOKEN) and sticky VCS approvals.
 """
@@ -47,7 +47,7 @@ def approval_required_for_ship(
 
 
 def register_ship_tools(runtime: Any) -> None:
-    """Register git_status / git_push / gh_release / ship_status."""
+    """Register git_status / git_diff / git_push / gh_release / ship_status."""
 
     def _project() -> str:
         try:
@@ -179,6 +179,29 @@ def register_ship_tools(runtime: Any) -> None:
             lines.append("remotes:")
             lines.append(rem.strip()[:400])
         return "\n".join(lines)[:3500]
+
+    async def git_diff(staged: bool = False, path: str = "") -> str:
+        """Show the unstaged (or staged) patch. Read-only — no approval."""
+        args = ["diff", "--no-color"]
+        if staged:
+            args.append("--cached")
+        loc = (path or "").strip()
+        if loc:
+            args.extend(["--", loc])
+        code, out, err = await _run_git(args, timeout=60.0)
+        if code == 127:
+            return "git_diff: git not found on PATH"
+        blob = (out or "").strip()
+        if not blob:
+            extra = (err or "").strip()
+            if extra:
+                return f"git_diff exit={code}\n{extra[:800]}"
+            where = "staged" if staged else "unstaged"
+            return f"git_diff: no {where} changes" + (f" in {loc}" if loc else "")
+        if len(blob) > 12_000:
+            overflow = len(blob) - 12_000
+            blob = blob[:12_000] + f"\n…[truncated {overflow} chars; pass path=]"
+        return f"**git_diff** exit={code} staged={bool(staged)}\n{blob}"
 
     async def git_push(
         remote: str = "origin",
@@ -362,6 +385,19 @@ def register_ship_tools(runtime: Any) -> None:
         "Ship: git status -sb + recent log + remotes. Use before git_push.",
         git_status,
         {"type": "object", "properties": {}},
+    )
+    reg.register_builtin_handler(
+        "git_diff",
+        "Read-only git diff (unstaged working tree, or staged=true). "
+        "path= limits to one file. Use before git_push or to review edits.",
+        git_diff,
+        {
+            "type": "object",
+            "properties": {
+                "staged": {"type": "boolean"},
+                "path": {"type": "string"},
+            },
+        },
     )
     reg.register_builtin_handler(
         "git_push",
