@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.request import Request
 
+from remedy.execution.process import hidden_subprocess_kwargs
 from remedy.vision.catalog import DEFAULT_HOST, DEFAULT_PORT
 from remedy.vision.config import load_vision_json, save_vision_json
 from remedy.vision.install import runtime_binary_path
@@ -453,10 +454,6 @@ def start_server(
     if n_gpu_layers is not None:
         cmd.extend(["-ngl", str(int(n_gpu_layers))])
 
-    creationflags = 0
-    if os.name == "nt":
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-
     # Re-check exclusive host immediately before spawn (RMB may have started mid-path)
     try:
         from remedy.runtime.rmb.mode import should_skip_vision_stack
@@ -489,7 +486,7 @@ def start_server(
             cwd=str(binary.parent),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            creationflags=creationflags,
+            **hidden_subprocess_kwargs(),
         )
     except OSError as e:
         return {"ok": False, "error": f"Failed to start llama-server: {e}"}
@@ -543,14 +540,13 @@ def _kill_pid_tree(pid: int, *, force: bool = True) -> bool:
             args = ["taskkill", "/PID", str(pid), "/T"]
             if force:
                 args.insert(1, "/F")
-            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             subprocess.run(
                 args,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=15,
                 check=False,
-                creationflags=creationflags,
+                **hidden_subprocess_kwargs(),
             )
             return True
         # POSIX: terminate process group when possible
@@ -589,7 +585,6 @@ def _windows_process_name(pid: int) -> str:
     """Lowercased ProcessName, or empty if gone / denied / not Windows."""
     if os.name != "nt" or pid <= 0:
         return ""
-    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     out = subprocess.run(
         [
             "powershell",
@@ -600,8 +595,8 @@ def _windows_process_name(pid: int) -> str:
         capture_output=True,
         text=True,
         timeout=5,
-        creationflags=creationflags,
         check=False,
+        **hidden_subprocess_kwargs(),
     )
     return (out.stdout or "").strip().lower()
 

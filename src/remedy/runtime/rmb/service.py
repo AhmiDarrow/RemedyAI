@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 from urllib.request import Request
 
+from remedy.execution.process import hidden_subprocess_kwargs
 from remedy.home import default_home
 from remedy.runtime.rmb.autofit import (
     apply_plan_to_state,
@@ -346,7 +347,6 @@ def _looks_like_llama_server(pid: int) -> bool:
         except OSError:
             return True
     try:
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         # ProcessName + Path (CUDA builds report ProcessName=llama-server)
         out = subprocess.run(
             [
@@ -362,7 +362,7 @@ def _looks_like_llama_server(pid: int) -> bool:
             capture_output=True,
             text=True,
             timeout=4,
-            creationflags=creationflags,
+            **hidden_subprocess_kwargs(),
         )
         name = (out.stdout or "").strip().lower()
         if not name:
@@ -385,16 +385,15 @@ def _kill_pid(pid: int) -> bool:
         return False
     try:
         if os.name == "nt":
-            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            hide = hidden_subprocess_kwargs()
             r = subprocess.run(
                 ["taskkill", "/PID", str(int(pid)), "/T", "/F"],
                 capture_output=True,
-                creationflags=flags,
                 timeout=8,
+                **hide,
             )
             if r.returncode == 0:
                 return True
-            # Fallback: PowerShell Stop-Process (taskkill sometimes fails on protected trees)
             r2 = subprocess.run(
                 [
                     "powershell",
@@ -403,8 +402,8 @@ def _kill_pid(pid: int) -> bool:
                     f"Stop-Process -Id {int(pid)} -Force -ErrorAction SilentlyContinue",
                 ],
                 capture_output=True,
-                creationflags=flags,
                 timeout=8,
+                **hide,
             )
             return r2.returncode == 0
         os.kill(pid, 15)
@@ -427,7 +426,7 @@ def _find_pid_on_port(port: int) -> int | None:
                 capture_output=True,
                 text=True,
                 timeout=8,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                **hidden_subprocess_kwargs(),
             )
             needle = f":{int(port)}"
             for line in (out.stdout or "").splitlines():
@@ -631,7 +630,7 @@ def _kill_listeners_on_port(port: int) -> int:
                 capture_output=True,
                 text=True,
                 timeout=8,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                **hidden_subprocess_kwargs(),
             )
             needle = f":{int(port)}"
             for line in (out.stdout or "").splitlines():
@@ -1120,7 +1119,7 @@ def _live_process_has_mtp_flags(state: dict[str, Any] | None = None) -> bool:
                 capture_output=True,
                 text=True,
                 timeout=4,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                **hidden_subprocess_kwargs(),
             )
             cmd = (r.stdout or "").lower()
             if "draft-mtp" in cmd or "--spec-type" in cmd:
@@ -2361,10 +2360,6 @@ def _start_rmb_server_impl(
                 "the next non-MTP start.",
             ]
 
-        creation = 0
-        if os.name == "nt":
-            creation = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-
         env = os.environ.copy()
         cuda = os.environ.get("CUDA_PATH") or os.path.join(
             os.environ.get("LOCALAPPDATA", ""), "cuda_toolkit"
@@ -2386,7 +2381,7 @@ def _start_rmb_server_impl(
                 stderr=subprocess.STDOUT,
                 env=env,
                 cwd=str(binary.parent),
-                creationflags=creation,
+                **hidden_subprocess_kwargs(),
             )
 
         try:

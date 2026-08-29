@@ -484,50 +484,10 @@ def _cmd_computer(args) -> None:
         )
 
         if getattr(args, "api", False):
-            # Optional HTTP poller against remedy serve (separate process bridge)
-            try:
-                import sys
-                from pathlib import Path as _P
-
-                # Walk up from this file (src tree *or* site-packages) until
-                # scripts/computer_host_poller.py exists. Counting parents
-                # assumed a src/ layout and missed editable/CI installs.
-                here = _P(__file__).resolve()
-                poller = None
-                repo = here.parent
-                for parent in here.parents:
-                    candidate = parent / "scripts" / "computer_host_poller.py"
-                    if candidate.is_file():
-                        poller = candidate
-                        repo = parent
-                        break
-                if poller is None:
-                    poller = here.parents[4] / "scripts" / "computer_host_poller.py"
-                if poller.is_file():
-                    import subprocess
-
-                    env = os.environ.copy()
-                    env.setdefault("REMEDY_API", "http://127.0.0.1:7400")
-                    env.setdefault("REMEDY_HOME", str(home))
-                    popen_kw: dict[str, Any] = {
-                        "cwd": str(repo),
-                        "env": env,
-                        "stdout": subprocess.DEVNULL,
-                        "stderr": subprocess.DEVNULL,
-                    }
-                    if sys.platform == "win32":
-                        popen_kw["creationflags"] = getattr(
-                            subprocess, "CREATE_NO_WINDOW", 0
-                        )
-                    subprocess.Popen([sys.executable, str(poller)], **popen_kw)
-                    console.print(
-                        "[dim]Also started HTTP host poller → "
-                        f"{env.get('REMEDY_API')}[/dim]"
-                    )
-                else:
-                    console.print(f"[yellow]HTTP poller script missing:[/yellow] {poller}")
-            except Exception as exc:
-                console.print(f"[yellow]HTTP poller not started:[/yellow] {exc}")
+            console.print(
+                "[yellow]--api HTTP poller skipped: this CLI host already claims "
+                "jobs/next. Use Desktop or this host, not both.[/yellow]"
+            )
 
         if action == "run":
             console.print("[dim]Foreground host running — Ctrl+C to stop[/dim]")

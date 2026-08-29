@@ -135,13 +135,15 @@ def stop_tier(tier_name: str) -> dict[str, Any]:
     if os.name == "nt" and proc is not None and proc.pid:
         try:
             args = ["taskkill", "/F", "/PID", str(proc.pid), "/T"]
+            from remedy.execution.process import hidden_subprocess_kwargs
+
             subprocess.run(
                 args,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=10,
                 check=False,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                **hidden_subprocess_kwargs(),
             )
             killed = True
         except (OSError, subprocess.TimeoutExpired):
@@ -213,9 +215,7 @@ def start_tier(
     if mmproj_path and Path(mmproj_path).is_file():
         cmd.extend(["--mmproj", str(mmproj_path)])
 
-    creationflags = 0
-    if os.name == "nt":
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    from remedy.execution.process import hidden_subprocess_kwargs
 
     logger.info("Starting MDL tier %s: %s", tier_name, " ".join(cmd))
     try:
@@ -224,7 +224,7 @@ def start_tier(
             cwd=str(binary.parent),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            creationflags=creationflags,
+            **hidden_subprocess_kwargs(),
         )
         _tier_procs[tier_name] = proc
     except OSError as e:

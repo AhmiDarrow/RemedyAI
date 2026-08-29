@@ -2,14 +2,7 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
-
-# Never allow these keys into tool JSON shown to the model
-_SECRET_KEY_RE = re.compile(
-    r"(?i)(access_token|refresh_token|id_token|client_secret|authorization|"
-    r"api_key|password|passwd|bearer|cookie|set-cookie|private_key)"
-)
 
 # Hard cap on body/snippet text in tool results (characters)
 MAIL_SNIPPET_MAX = 160
@@ -56,22 +49,9 @@ def require_consent(home: Any = None) -> None:
 
 
 def redact_secrets(obj: Any) -> Any:
-    """Deep-copy-ish redaction of secret-looking keys from dict/list structures."""
-    if isinstance(obj, dict):
-        out: dict[str, Any] = {}
-        for k, v in obj.items():
-            if _SECRET_KEY_RE.search(str(k)):
-                out[str(k)] = "[redacted]"
-            else:
-                out[str(k)] = redact_secrets(v)
-        return out
-    if isinstance(obj, list):
-        return [redact_secrets(x) for x in obj]
-    if isinstance(obj, str) and len(obj) > 40:
-        # Bearer-looking strings
-        if re.match(r"(?i)^(ya29\.|1//|eyJ|sk-|xox)", obj.strip()):
-            return "[redacted]"
-    return obj
+    from remedy.core.metabolism.redact import redact_obj
+
+    return redact_obj(obj)
 
 
 def clip(text: str, max_len: int) -> str:

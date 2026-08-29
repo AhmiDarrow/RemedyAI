@@ -4,6 +4,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed — one hide-window helper; no second HTTP computer poller
+
+- RMB / vision / MDL / OpenSERP / secret ACL / uninstall use
+  ``hidden_subprocess_kwargs``. ``--api`` no longer starts a stub jobs/next
+  poller next to the CLI host. Assistant redact uses ``redact_obj``.
+  Turn ContextVars catch ``ImportError`` only.
+
 ### Fixed — peek is not the desktop poller; fail closed on secret/approval gaps
 
 - SPA ``ui/command`` peek no longer marks the computer host connected. Only

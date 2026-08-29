@@ -163,7 +163,7 @@ def _apply_llm_to_runtime(
 
             APPROVALS.set_mode(str(approval_mode))
         except Exception:
-            pass
+            logger.exception("failed to apply approval_mode=%s", approval_mode)
 
 
 # Cache config disk reads across chat messages; invalidate on mtime/size change.
@@ -423,7 +423,7 @@ def _sync_runtime_llm_from_config(
 
         APPROVALS.sync_from_config(cfg)
     except Exception:
-        pass
+        logger.exception("failed to sync approval mode from config")
     return str(getattr(runtime, "_llm_api_key", "") or api_key or "")
 
 

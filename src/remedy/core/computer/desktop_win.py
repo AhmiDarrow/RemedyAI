@@ -1557,9 +1557,9 @@ def open_app(
                 if resolved.is_file():
                     if is_text_document_path(resolved):
                         return refuse_os_open_text_document(resolved)
-                    subprocess.Popen(
-                        [str(resolved)], shell=False, close_fds=True
-                    )
+                    from remedy.execution.process import popen_hidden
+
+                    popen_hidden([str(resolved)], close_fds=True)
                     return {
                         "app": raw,
                         "method": "project_path",
@@ -1568,7 +1568,9 @@ def open_app(
     if path_candidate.is_file() and path_candidate.is_absolute():
         if is_text_document_path(path_candidate):
             return refuse_os_open_text_document(path_candidate)
-        subprocess.Popen([str(path_candidate)], shell=False, close_fds=True)
+        from remedy.execution.process import popen_hidden
+
+        popen_hidden([str(path_candidate)], close_fds=True)
         return {"app": raw, "method": "path", "target": str(path_candidate)}
     if path_candidate.is_dir() and (
         path_candidate.is_absolute() or (search_dirs and path_candidate.exists())
@@ -1586,7 +1588,9 @@ def open_app(
         raise ValueError(f"open_app path not found: {target[:80]}")
     which = shutil.which(target) or shutil.which(raw)
     if which:
-        subprocess.Popen([which], shell=False, close_fds=True)
+        from remedy.execution.process import popen_hidden
+
+        popen_hidden([which], close_fds=True)
         return {"app": raw, "method": "which", "target": which}
     # Appliances: anything in her house (Start Menu inventory), natural name.
     # "spotify", "word", "steam" resolve here without hardcoded aliases.
