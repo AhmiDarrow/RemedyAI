@@ -40,9 +40,14 @@ def hidden_startupinfo() -> Any | None:
 def hidden_subprocess_kwargs() -> dict[str, Any]:
     """Kwargs mergeable into subprocess.run / Popen / create_subprocess_exec.
 
-    On Windows: CREATE_NO_WINDOW + SW_HIDE so tool/spread children do not flash
-    a cmd/console window. Does not prevent a *third-party* tool that itself
-    forces a new console (rare); Remedy-spawned shells and rg should stay quiet.
+    On Windows: CREATE_NO_WINDOW + SW_HIDE so *this* process has no console.
+    The packaged desktop sidecar is a GUI process (no console). A console
+    child (git, python, uv, cmd) without this flag opens a visible CMD —
+    that flash is a bug, not intended.
+
+    CREATE_NO_WINDOW is not inherited. ``cmd /c uv run pytest`` hides cmd
+    but uv's python child still pops a window. Prefer exec'ing python/git
+    directly (see ``deflate_uv_run``).
     """
     if sys.platform != "win32":
         return {}

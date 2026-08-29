@@ -105,6 +105,62 @@ def coerce_argv(argv: Any) -> list[str]:
         return text.split()
 
 
+# Modules `uv run <name>` should exec as `python -m <name>` so the Windows
+# desktop (a GUI process) does not flash a CMD for uv's python child.
+_UV_RUN_MODULES = frozenset(
+    {
+        "pytest",
+        "ruff",
+        "mypy",
+        "pip",
+        "httpx",
+        "uvicorn",
+        "http.server",
+    }
+)
+
+
+def deflate_uv_run(
+    argv: list[str], *, project_path: Path | str | None = None
+) -> list[str]:
+    """Turn ``uv run pytest`` into ``python -m pytest``.
+
+    CREATE_NO_WINDOW hides *uv.exe*, but uv then CreateProcess's python.exe
+    without that flag. The desktop sidecar has no console, so that python
+    child opens a visible CMD for every test/lint. Exec the project
+    interpreter ourselves and the flag sticks.
+    """
+    if len(argv) < 3:
+        return argv
+    head = argv[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if head.endswith(".exe"):
+        head = head[:-4]
+    if head != "uv" or str(argv[1]).lower() != "run":
+        return argv
+    rest = list(argv[2:])
+    while rest and str(rest[0]).startswith("-"):
+        flag = str(rest[0]).lower()
+        if flag in {"--directory", "--project", "-p", "--package"} and len(rest) > 1:
+            rest = rest[2:]
+            continue
+        rest = rest[1:]
+    if not rest:
+        return argv
+    py = resolve_which("python", cwd=project_path)
+    if not py:
+        return argv
+    tool = str(rest[0]).replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if tool.endswith(".exe"):
+        tool = tool[:-4]
+    if tool in {"python", "python3", "py"}:
+        return [py, *rest[1:]]
+    if tool in _UV_RUN_MODULES:
+        return [py, "-m", tool, *rest[1:]]
+    if tool.endswith(".py"):
+        return [py, *rest]
+    return argv
+
+
 def looks_like_plain_argv(command: str) -> bool:
     """True when *command* is a single native process + args (no shell)."""
     cmd = (command or "").strip()
@@ -198,6 +254,7 @@ def prepare_host_command(
             resolved = resolve_which(argv[0], cwd=project_path)
             if resolved:
                 argv[0] = resolved
+            argv = deflate_uv_run(argv, project_path=project_path)
             notes.append("plain argv — no shell")
             return PreparedCommand(
                 argv=argv,
@@ -231,6 +288,11 @@ def prepare_host_op(
     """Prepare argv from a structured HostOp (no command-string parsing)."""
     if op.kind == "run":
         argv = [str(a) for a in op.argv if str(a)]
+        if argv:
+            resolved = resolve_which(argv[0], cwd=project_path)
+            if resolved:
+                argv[0] = resolved
+            argv = deflate_uv_run(argv, project_path=project_path)
         return PreparedCommand(
             argv=argv,
             display=" ".join(argv),
