@@ -78,7 +78,10 @@ def sse_card(card: dict[str, Any] | None) -> dict[str, Any]:
                 "title": s.get("title") or "",
                 "status": s.get("status") or "",
                 "observed": str(s.get("observed") or "")[:240],
+                "intended": str(s.get("intended") or "")[:240],
                 "block_reason": s.get("block_reason") or "",
+                "evidence_hash": s.get("evidence_hash") or "",
+                "screenshot": s.get("screenshot") or "",
             }
         )
         if len(steps_out) >= 20:

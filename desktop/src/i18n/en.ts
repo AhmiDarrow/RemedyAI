@@ -95,6 +95,7 @@ export const EN: Record<string, string> = {
   'lifeTask.needsYou': 'Needs you',
   'lifeTask.done': 'Done',
   'lifeTask.blocked': 'Stopped',
+  'lifeTask.review': 'What Remedy did',
   'userName.title': 'What should Remedy call you?',
   'userName.hint': 'Used in chat and memory — change anytime in Settings.',
   'userName.placeholder': 'Your name',

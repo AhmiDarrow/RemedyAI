@@ -99,6 +99,8 @@ def test_verified_steps_mark_the_goal_done():
     assert out["status"] == "done"
     assert all(s["status"] == "done" for s in out["steps"])
     assert "observed" in out["markdown"].lower()
+    assert out["steps"][0].get("evidence_hash")
+    assert len(out["steps"][0]["evidence_hash"]) == 16
 
 
 def test_plan_plain_language_names_the_owner_stop():

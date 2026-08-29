@@ -61,6 +61,7 @@ export function LifeTaskBanner({
   const [busy, setBusy] = useState(false)
   const [explain, setExplain] = useState('')
   const [message, setMessage] = useState('')
+  const [reviewOpen, setReviewOpen] = useState(false)
   const spokenRef = useRef('')
 
   const refresh = useCallback(async () => {
@@ -203,9 +204,20 @@ export function LifeTaskBanner({
                 <span className="plan-step-n tabular-nums">{i + 1}.</span>
                 <span className="flex min-w-0 flex-col gap-0.5">
                   <span className="plan-step-title min-w-0 break-words">{s.title}</span>
+                  {reviewOpen && s.intended ? (
+                    <span className="text-[0.68rem] opacity-80 break-words" style={{ color: 'var(--text-muted)' }}>
+                      meant: {s.intended}
+                    </span>
+                  ) : null}
                   {seen ? (
                     <span className="text-[0.68rem] opacity-80 break-words" style={{ color: 'var(--text-muted)' }}>
-                      {seen}
+                      {reviewOpen ? `saw: ${seen}` : seen}
+                    </span>
+                  ) : null}
+                  {reviewOpen && s.evidence_hash ? (
+                    <span className="text-[0.68rem] font-mono opacity-70" style={{ color: 'var(--text-muted)' }}>
+                      {s.evidence_hash}
+                      {s.screenshot ? ` · ${s.screenshot}` : ''}
                     </span>
                   ) : null}
                 </span>
@@ -261,6 +273,16 @@ export function LifeTaskBanner({
         >
           {t('lifeTask.explain')}
         </button>
+        {steps.length > 0 && (
+          <button
+            type="button"
+            className="ui-btn ui-btn-ghost"
+            onClick={() => setReviewOpen((v) => !v)}
+            data-life-task-review
+          >
+            {t('lifeTask.review')}
+          </button>
+        )}
       </div>
     </div>
   )

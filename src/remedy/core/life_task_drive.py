@@ -61,6 +61,8 @@ class DriveStepResult:
     block_reason: str = ""
     retries: int = 0
     ok: bool = False
+    evidence_hash: str = ""
+    screenshot: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -73,6 +75,8 @@ class DriveStepResult:
             "block_reason": self.block_reason,
             "retries": self.retries,
             "ok": self.ok,
+            "evidence_hash": self.evidence_hash,
+            "screenshot": self.screenshot,
         }
 
 
@@ -242,6 +246,22 @@ def _kwargs_for_step(step: dict[str, Any]) -> dict[str, Any]:
     if click and "text" not in kw:
         kw["text"] = click
     return kw
+
+
+def _stamp_evidence(rec: DriveStepResult) -> None:
+    """Hash intended vs observed; attach last screenshot path if the rail saved one."""
+    import hashlib
+
+    blob = f"{rec.intended}\n{rec.observed}\n{rec.evidence}".encode()
+    rec.evidence_hash = hashlib.sha256(blob).hexdigest()[:16]
+    try:
+        from remedy.core.computer.host_bridge import get_host_bridge
+
+        path = str((get_host_bridge().last_shot() or {}).get("path") or "")
+        if path:
+            rec.screenshot = path
+    except Exception:
+        rec.screenshot = rec.screenshot or ""
 
 
 def _intended(step: dict[str, Any]) -> str:
@@ -431,6 +451,7 @@ def drive_life_task(
         return _parse_run_blob(str(raw))
 
     def _note(rec: DriveStepResult, st: str | None = None) -> None:
+        _stamp_evidence(rec)
         results.append(rec)
         live = st or ("running" if rec.status == "done" else rec.status)
         _publish_drive(
@@ -703,6 +724,7 @@ def resume_after_handoff(
             "password, or CAPTCHA."
         ),
     )
+    _stamp_evidence(skip_rec)
     prior = [
         s
         for s in (rec.get("steps") or [])

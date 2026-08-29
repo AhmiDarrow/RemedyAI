@@ -183,7 +183,10 @@ export type LifeTaskStep = {
   title: string
   status?: string
   observed?: string
+  intended?: string
   block_reason?: string
+  evidence_hash?: string
+  screenshot?: string
 }
 
 export type LifeTaskHandoff = {
