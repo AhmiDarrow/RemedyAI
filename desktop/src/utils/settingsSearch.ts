@@ -5,6 +5,7 @@ export type SettingsSectionId =
   | 'you-agent'
   | 'voice'
   | 'phone'
+  | 'connect'
   | 'workspace'
   | 'access'
   | 'security-power'
@@ -52,6 +53,12 @@ export const SETTINGS_SECTION_META: Record<
     title: 'Phone',
     summary: 'A voice on the line',
     keywords: 'phone call sip telephony baresip line dial talk hq chatterbox',
+  },
+  connect: {
+    title: 'Connect',
+    summary: 'Use this PC from a phone on the same network',
+    keywords:
+      'connect grove phone remote pair qr lan wifi live ui approvals sessions rails pause relay',
   },
   workspace: {
     title: 'Project workspace',

@@ -9,6 +9,7 @@ import time
 from remedy.core.stream_lock import (
     STALE_AFTER_S,
     acquire_stream_lock,
+    active_session_ids,
     clear_stale_stream_locks,
     release_stream_lock,
 )
@@ -21,8 +22,10 @@ def _lock_file(home):
 def test_acquire_release_owns_one_pid_file(tmp_path):
     acquire_stream_lock(tmp_path, "sid-a")
     assert _lock_file(tmp_path).is_file()
+    assert "sid-a" in active_session_ids()
     release_stream_lock(tmp_path, "sid-a")
     assert not _lock_file(tmp_path).exists()
+    assert "sid-a" not in active_session_ids()
 
 
 def test_release_keeps_lock_while_other_session_streams(tmp_path):

@@ -142,6 +142,12 @@ SETTABLE_KEYS = frozenset(
         "enabled_channels",
         "messengers",
         "assistant",
+        "connect_enabled",
+        "connect_bind_host",
+        "connect_bind_port",
+        "connect_paused",
+        "connect_panes",
+        "connect_relay_url",
     }
 )
 
@@ -276,7 +282,19 @@ def public_settings_snapshot(cfg: dict[str, Any] | None = None) -> dict[str, Any
         "vision_force_decode": bool(vision.get("force_decode")),
         "setup_completed": bool(raw.get("setup_completed", False)),
         "config_path": str(_find_config_path() or _default_config_path()),
+        "connect_enabled": bool(raw.get("connect_enabled", False)),
+        "connect_bind_host": str(raw.get("connect_bind_host") or "").strip(),
+        "connect_bind_port": _int_or(raw.get("connect_bind_port"), 7401),
+        "connect_paused": bool(raw.get("connect_paused", False)),
+        "connect_panes": _connect_panes_public(raw.get("connect_panes")),
+        "connect_relay_url": str(raw.get("connect_relay_url") or "").strip(),
     }
+    try:
+        from remedy.connect.store import device_public_meta
+
+        out["connect_devices"] = device_public_meta()
+    except Exception:
+        out["connect_devices"] = []
     # Live Sleev install/gateway so agent can configure + report status.
     try:
         from remedy.core.sleev import sleev_status
@@ -631,6 +649,52 @@ async def _apply_settings_update_inner(
 
         patch["enabled_channels"] = normalize_enabled_channels(patch["enabled_channels"])
 
+    if "connect_enabled" in patch and patch["connect_enabled"] is not None:
+        patch["connect_enabled"] = _as_bool(patch["connect_enabled"])
+    if "connect_paused" in patch and patch["connect_paused"] is not None:
+        patch["connect_paused"] = _as_bool(patch["connect_paused"])
+    if "connect_bind_host" in patch and patch["connect_bind_host"] is not None:
+        patch["connect_bind_host"] = str(patch["connect_bind_host"] or "").strip()
+    if "connect_bind_port" in patch and patch["connect_bind_port"] is not None:
+        try:
+            patch["connect_bind_port"] = max(1, min(65535, int(patch["connect_bind_port"])))
+        except (TypeError, ValueError):
+            patch["connect_bind_port"] = 7401
+    if "connect_relay_url" in patch and patch["connect_relay_url"] is not None:
+        relay = str(patch["connect_relay_url"] or "").strip()
+        if relay:
+            from remedy.connect.rendezvous import parse_relay_endpoint
+
+            host_r, port_r = parse_relay_endpoint(relay)
+            if ":" in host_r:
+                patch["connect_relay_url"] = f"[{host_r}]:{port_r}"
+            else:
+                patch["connect_relay_url"] = f"{host_r}:{port_r}"
+        else:
+            patch["connect_relay_url"] = ""
+    if "connect_panes" in patch and patch["connect_panes"] is not None:
+        patch["connect_panes"] = _connect_panes_public(patch["connect_panes"])
+    if patch.get("connect_enabled"):
+        bind_host = str(
+            patch.get("connect_bind_host")
+            if "connect_bind_host" in patch
+            else (cfg.get("connect_bind_host") or "")
+        ).strip()
+        if not bind_host or bind_host in ("0.0.0.0", "::", "[::]", "*"):
+            raise ValueError("connect bind must be a chosen IPv4, not wildcard")
+        try:
+            from remedy.connect.bind import assert_chosen_bind, is_chosen_ipv4, is_wildcard_bind
+
+            if is_wildcard_bind(bind_host) or not is_chosen_ipv4(bind_host):
+                raise ValueError("connect bind must be a chosen IPv4, not wildcard")
+            assert_chosen_bind(bind_host)
+        except ImportError:
+            pass
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError(str(exc) or "invalid connect bind") from exc
+
     if "setup_completed" in patch and patch["setup_completed"] is not None:
         patch["setup_completed"] = _as_bool(patch["setup_completed"])
 
@@ -859,6 +923,13 @@ async def _apply_settings_update_inner(
         changes.append("messengers")
 
     snap = public_settings_snapshot(cfg)
+    if any(k.startswith("connect_") for k in patch):
+        try:
+            from remedy.connect.lifecycle import on_connect_settings_changed
+
+            on_connect_settings_changed(cfg)
+        except Exception:
+            logger.debug("connect settings apply", exc_info=True)
     out: dict[str, Any] = {
         "status": "saved",
         "changes": changes,
@@ -908,6 +979,13 @@ async def _apply_settings_update_inner(
         "start_in_tray",
         "close_to_tray",
         "harness_mode",
+        "connect_enabled",
+        "connect_bind_host",
+        "connect_bind_port",
+        "connect_paused",
+        "connect_panes",
+        "connect_relay_url",
+        "connect_devices",
     ):
         if k in snap:
             out[k] = snap[k]
@@ -918,6 +996,23 @@ def _normalize_trust_profile_value(raw: object | None) -> str:
     from remedy.core.trust_profile import normalize_trust_profile
 
     return normalize_trust_profile(raw).value
+
+
+def _connect_panes_public(raw: object | None) -> dict[str, bool]:
+    try:
+        from remedy.connect.panes import normalize_panes
+
+        return normalize_panes(raw)
+    except Exception:
+        return {
+            "live_ui": True,
+            "chat": True,
+            "approvals": True,
+            "sessions": True,
+            "rails": True,
+            "computer_preview": False,
+            "settings_write": False,
+        }
 
 
 def _as_bool(v: object) -> bool:

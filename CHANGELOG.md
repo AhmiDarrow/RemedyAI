@@ -4,6 +4,15 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — Grove Connect (phone remote for this PC)
+
+- Settings → Connect (off). Pair a phone with a 60s QR. The phone drives this PC; it does not run Remedy.
+- Chosen IPv4 only; `:7400` stays loopback. Computer-use poller and local-bootstrap are refused on Connect.
+- Same-LAN discovery (`_remedy-connect._udp`) advertises a host-pub hash only — never the API token, Bearer, or pair secret.
+- Owner-run relay: `remedy connect-relay --host 127.0.0.1 --port 7402` forwards framed blobs without decrypting. Wildcard binds (`0.0.0.0` / `*` / `::`) are refused.
+- Connect proxy pins `127.0.0.1`, strips phone Bearer/`X-Remedy-Token`, refuses absolute URIs and `..` job-theft paths, and will not let a phone rewrite Connect/relay/API-key settings even if Settings-write is on. `/api/connect` management and dedicated API-key routes are denied on the pipe (the proxy hop is not treated as a loopback owner). Global IPv6 listen is off unless opted in. LAN handshake rate-limit still applies when a relay is configured. Android shim requires a per-session URL token (cookie is minted only after that token is presented). Pair envelopes treat the 32-byte secret as opaque (NUL inside the secret no longer truncates it). Inner HTTP streams instead of blocking the only session reader. Revoke drops that phone only. Bind/address lists prefer LAN over `127.0.0.1`.
+- Optional global IPv6 listener (same port, never `::`). Public STUN binding parser (RFC 5389) and a one-byte UDP punch helper for reachability tests.
+
 ### Fixed — honesty of done, Linux hands, hive recall, CI gates
 
 - Life-task drive no longer treats optimistic navigate (`ok` + `pending_load`)

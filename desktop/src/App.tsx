@@ -97,6 +97,7 @@ import { patchVoiceSettings } from './api/voice'
 import { useVoice, announceVoiceSettingsChanged } from './voice/useVoice'
 import type { GenderRole } from './voice/pickVoice'
 import { saveLastSettingsSection } from './utils/settingsSearch'
+import { isConnectCompact } from './utils/connectMode'
 import { subscribeXaiOAuth } from './api/xaiOAuth'
 
 import { tauriInvoke, tauriListen } from './api/tauri'
@@ -132,8 +133,12 @@ function AppShell({
   helpArticleId?: string | null
   onCloseHelp?: () => void
 }) {
+  const compact = isConnectCompact()
   return (
-    <div className="flex flex-col h-full min-h-0" style={{ background: 'var(--bg-primary)' }}>
+    <div
+      className={`flex flex-col h-full min-h-0${compact ? ' connect-compact' : ''}`}
+      style={{ background: 'var(--bg-primary)' }}
+    >
       <TitleBar
         version={version}
         updateAvailable={updateAvailable}
@@ -356,7 +361,8 @@ export default function App() {
     openSlideInRail,
     swapSides,
   } = useWorkspaceChrome({ setPanel })
-  useComputerHost(true, openBrowserInRail, activeId)
+  const connectCompact = isConnectCompact()
+  useComputerHost(!connectCompact, openBrowserInRail, activeId)
 
   /**
    * Settings always open in the **right** workspace rail.
@@ -1823,7 +1829,7 @@ export default function App() {
       {/* Grove: partner surface (default). Studio stays mounted underneath
           (display:none) so terminals / streams / the computer-host loop
           survive the switch. */}
-      {surface === 'grove' && (
+      {surface === 'grove' && !connectCompact && (
         <GroveApp
           sessions={sessions}
           activeId={activeId}
@@ -1853,8 +1859,8 @@ export default function App() {
 
       {/* True three-column shell: Left | Chat | Right (rails on outer edges) */}
       <div
-        className="flex flex-1 min-h-0 h-full items-stretch"
-        style={surface === 'grove' ? { display: 'none' } : undefined}>
+        className="studio-shell flex flex-1 min-h-0 h-full items-stretch"
+        style={surface === 'grove' && !connectCompact ? { display: 'none' } : undefined}>
         <WorkspaceSide
           side="left"
           active={wsLayout.left}
@@ -1924,7 +1930,7 @@ export default function App() {
             onTogglePlanMode={togglePlanMode}
           />
 
-          <div style={{ position: 'relative', zIndex: 6 }}>
+          <div className="chat-middle-banners" style={{ position: 'relative', zIndex: 6 }}>
             <ApprovalBanner sessionId={activeId} />
             <LifeTaskBanner
               sessionId={activeId}

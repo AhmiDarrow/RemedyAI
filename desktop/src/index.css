@@ -3045,3 +3045,55 @@ textarea:disabled {
     animation: none;
   }
 }
+
+/* ?connect=1 compact phone chrome — same SPA, Dark Forest tokens */
+.connect-compact {
+  width: 100%;
+}
+.connect-compact .titlebar {
+  /* In-app menu strip only; OS min/max/close stay native decorations */
+  display: none;
+}
+.connect-compact [data-workspace-side] {
+  display: none;
+}
+.connect-compact .grove-surface,
+.connect-compact .grove-settings-sheet,
+.connect-compact .grove-settings-backdrop {
+  display: none !important;
+}
+.connect-compact .studio-shell {
+  display: flex !important;
+  width: 100%;
+}
+.connect-compact .chat-middle {
+  min-width: 0 !important;
+  width: 100%;
+  flex: 1 1 auto !important;
+}
+.connect-compact .chat-middle > :has([role="region"]),
+.connect-compact .chat-middle-banners {
+  order: -1;
+}
+.connect-compact .chat-session-chips {
+  display: none;
+}
+.connect-compact [data-popout-overlay] {
+  display: none;
+}
+.connect-compact button[aria-label="Stop"],
+.connect-compact .chat-status-btn-danger {
+  min-width: 3.25rem !important;
+  min-height: 3.25rem !important;
+  font-size: 1rem !important;
+  padding: 0.45rem 0.9rem !important;
+}
+.connect-compact [role="region"] button {
+  min-height: 2.75rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.95rem;
+}
+.connect-compact [data-remedy-status-bar] {
+  flex-wrap: wrap;
+  row-gap: 0.35rem;
+}

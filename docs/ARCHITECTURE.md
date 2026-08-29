@@ -52,6 +52,15 @@ Install and status are HTTP. Desktop and WebUI share Settings/Grove/Studio.
 CLI stays text-only. Capability/policy contracts live in `src/remedy/policy/`
 and `src/remedy/tools/`.
 
+## Grove Connect
+
+Phone remote for **this PC** (`src/remedy/connect/`). **Not** the messenger
+gateway (`src/remedy/gateway/`). Default **off**. When on, it is a **second
+listener** on a chosen IPv4 (never `0.0.0.0`); `:7400` stays loopback.
+Owner-run relay (`remedy connect-relay`) forwards framed blobs without
+decrypting. Same-LAN mDNS (`_remedy-connect._udp`) advertises a host-pub hash
+only. See `docs/manual/29-grove-connect.md`.
+
 ## Versioning
 
 `pyproject.toml`, `desktop/package.json`, and `desktop/src-tauri/Cargo.toml` share one version. Tag + push only when the owner asks; local HEAD may be ahead of origin without a matching tag.

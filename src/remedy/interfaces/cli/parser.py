@@ -390,6 +390,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--check", action="store_true", help="Check only, don't apply"
     )
 
+    # remedy connect-relay — owner-run Grove Connect splice (does not decrypt)
+    connect_relay = sub.add_parser(
+        "connect-relay",
+        help="Owner-run Grove Connect relay (forwards framed blobs, does not decrypt)",
+    )
+    connect_relay.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Chosen IPv4 to bind (not 0.0.0.0 / * / ::)",
+    )
+    connect_relay.add_argument("--port", type=int, default=7402)
+
     # remedy setup
     setup_cmd = sub.add_parser("setup", help="Interactive setup wizard")
     setup_cmd.add_argument(

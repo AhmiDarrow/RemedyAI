@@ -82,6 +82,10 @@ def main(args: list[str] | None = None) -> None:
         raise SystemExit(2)
     elif parsed.command == "desktop":
         _cmd_desktop(parsed)
+    elif parsed.command == "connect-relay":
+        from remedy.connect.relay import main as connect_relay_main
+
+        raise SystemExit(connect_relay_main(host=parsed.host, port=parsed.port))
     elif parsed.command == "setup":
         run_wizard(
             quick=parsed.quick,

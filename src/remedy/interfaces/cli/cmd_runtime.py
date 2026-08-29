@@ -182,6 +182,10 @@ def _cmd_serve(args) -> None:
         version=__version__,
         api_key=api_key,
     )
+    try:
+        app.state.sidecar_port = int(getattr(args, "port", 7400) or 7400)
+    except (TypeError, ValueError):
+        app.state.sidecar_port = 7400
     if api_key:
         console.print(
             "[dim]API auth:[/dim]   enabled (Bearer token in ~/.remedy/auth/local_api_token)"
@@ -233,6 +237,18 @@ def _cmd_serve(args) -> None:
             )
         except Exception as exc:
             console.print(f"[yellow]Computer host failed:[/yellow] {exc}")
+
+    try:
+        from remedy.connect.lifecycle import maybe_start_connect
+
+        maybe_start_connect(
+            app,
+            config if isinstance(config, dict) else {},
+            api_key=str(api_key or ""),
+            sidecar_port=int(getattr(args, "port", 7400) or 7400),
+        )
+    except Exception as exc:
+        console.print(f"[yellow]Connect gateway skipped:[/yellow] {exc}")
 
     log_level = config.get("log_level", "INFO").upper()
     # Access logs spam the desktop console (status polls every few seconds).

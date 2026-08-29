@@ -15,6 +15,7 @@ import {
 import { Field, PERSONAS } from './shared'
 import { VoiceSection } from './VoiceSection'
 import { PhoneSection } from './PhoneSection'
+import { ConnectSection } from './ConnectSection'
 import { TOOL_PROCESS_MODES } from '../../utils/toolLabels'
 import { isLinuxDesktop } from '../../utils/platform'
 
@@ -264,6 +265,7 @@ export function SettingsSections_identity(p: SettingsFormProps): ReactNode {
         settingsMode={settingsMode}
       />
       <PhoneSection sectionProps={sectionProps('phone')} />
+      <ConnectSection sectionProps={sectionProps('connect')} />
 
       {/* Project */}
       <SettingsSection
