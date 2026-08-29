@@ -22,7 +22,7 @@ project access scope).
 | **Home surface** | **Grove** (partner). **Studio** is one tap away (workbench). |
 | **Data home** | `~/.remedy` (config, memory, voice, Vault, skills; DPAPI on Windows) |
 | **Models** | *Your* provider keys or Ollama / RMB — continuity stays on disk |
-| **Current** | **v0.41.6** — steer-by-default, first-run talks, leftover jobs, Linux vision. Public: GitHub **v0.41.5** · PyPI **`remedy-ai==0.41.5`** |
+| **Current** | **v0.41.7** — life-task owner card, recipes, verify after writes. Public: GitHub **v0.41.5** · PyPI **`remedy-ai==0.41.5`** |
 | **Install** | [Windows](01-install-windows.md) · [Linux](01-install-linux.md) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · PyPI `remedy-ai` |
 
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.  

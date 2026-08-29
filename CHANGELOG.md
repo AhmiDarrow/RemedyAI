@@ -4,6 +4,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.41.7] - 2026-08-29
+
+Life-task owner card (Yes / No / Explain, Step N of M), recipes without
+model JSON, resume after password/CAPTCHA, What Remedy did, verify after
+casual writes, UIA Invoke/Toggle before click-at-center, and voice on
+the same card. Pay / send / delete still cannot be waived.
+
 ### Added — voice Yes / No / Explain on the life-task card
 
 - The card's spoken sentence is read aloud when Speak replies is on.
