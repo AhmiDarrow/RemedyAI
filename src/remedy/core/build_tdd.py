@@ -74,14 +74,20 @@ def synthesize_failing_test(module_path: str, symbol: str, *, behavior: str = ""
         parts = parts[1:]
     mod_name = ".".join(parts) if parts else symbol
     beh = (behavior or "").replace('"""', "'")[:200]
+    fail = (f"unimplemented: {beh}" if beh else f"unimplemented: {symbol}").replace(
+        "'", "\\'"
+    )
     return (
         '"""Auto-generated TDD oracle — must go green for DONE."""\n'
         "import importlib\n\n"
+        "import pytest\n\n"
         f"# behavior: {beh}\n\n"
         f"def test_{symbol}_importable():\n"
         f"    mod = importlib.import_module({mod_name!r})\n"
         f"    assert hasattr(mod, {symbol!r}), "
-        f"'missing {symbol} on {mod_name}'\n"
+        f"'missing {symbol} on {mod_name}'\n\n"
+        f"def test_{symbol}_contract():\n"
+        f"    pytest.fail('{fail}')\n"
     )
 
 

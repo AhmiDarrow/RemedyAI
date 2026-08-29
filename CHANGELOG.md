@@ -32,6 +32,9 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   path is allowed; ``sudo`` stays denied. Quit after **Use existing server**
   does not kill that serve. Memory panel can search notes and show Partner
   facts. Soul inject drops whole tail sections instead of cutting mid-line.
+- Hop memo re-runs tests before reuse. TDD stubs fail until a contract assert
+  exists. Apply-patch restores earlier files if a later write raises. Rust
+  skips a jobs/next navigate that ``ui/command`` already drove.
 
 ### Fixed — one path jail; Desktop wins over the CLI computer host
 

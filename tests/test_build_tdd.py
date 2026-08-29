@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from remedy.core.build_tdd import materialize_tdd_tests
+from remedy.core.build_tdd import materialize_tdd_tests, synthesize_failing_test
 from remedy.core.errors import SecurityError
 
 
@@ -42,3 +42,11 @@ def test_tdd_any_exception_fail_closed(tmp_path: Path):
     )
     assert out.get("ok") is False
     assert not (tmp_path / "tests" / "test_greet.py").exists()
+
+
+def test_synthesize_failing_test_has_contract_assert():
+    src = synthesize_failing_test("pkg/hello.py", "hello", behavior="say hi")
+    compile(src, "<t>", "exec")
+    assert "hasattr" in src
+    assert "pytest.fail" in src
+    assert "unimplemented: say hi" in src

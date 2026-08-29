@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -90,15 +89,33 @@ def try_reuse(
     key: str,
     *,
     oracle_fn: Any | None = None,
+    behavioral_fn: Any | None = None,
     unit: Any | None = None,
 ) -> str | None:
-    """Lookup + optional oracle re-check (stale cache is dropped)."""
+    """Lookup + oracle re-check (stale cache is dropped).
+
+    Units with tests= must re-run the behavioral oracle (or refuse the cache).
+    """
     src = lookup_hop(root, key)
     if not src:
         return None
     if oracle_fn is not None and unit is not None:
-        with suppress(Exception):
+        try:
             errs = oracle_fn(unit, src)
             if errs:
                 return None
+        except Exception:
+            return None
+    tests = ""
+    if unit is not None:
+        tests = str(getattr(unit, "tests", "") or "")
+    if tests.strip():
+        if behavioral_fn is None:
+            return None
+        try:
+            errs = behavioral_fn(unit, src)
+            if errs:
+                return None
+        except Exception:
+            return None
     return src

@@ -232,7 +232,11 @@ def apply_patch_text(
                 "applied": [],
             }
         if fp.is_delete:
-            staged.append((dest, None, rel, "delete"))
+            prev_del = ""
+            existed_del = dest.is_file()
+            if existed_del:
+                prev_del = dest.read_text(encoding="utf-8", errors="replace")
+            staged.append((dest, None, rel, "delete", prev_del, existed_del))
             continue
         prev = ""
         existed = dest.is_file()
@@ -253,17 +257,35 @@ def apply_patch_text(
                 "error": f"{rel}: {err}",
                 "applied": [],
             }
-        staged.append((dest, nxt, rel, "add" if not existed else "update"))
+        staged.append((dest, nxt, rel, "add" if not existed else "update", prev, existed))
     applied: list[dict[str, Any]] = []
-    for dest, nxt, rel, action in staged:
-        if action == "delete":
-            if dest.is_file():
-                dest.unlink()
-        else:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(nxt or "", encoding="utf-8")
-        applied.append({"path": rel, "action": action})
-        _mark_write(runtime, rel)
+    done: list[tuple[Path, str, bool, str]] = []
+    from remedy.core.atomic_json import write_text_atomic
+
+    try:
+        for dest, nxt, rel, action, prev, existed in staged:
+            if action == "delete":
+                if dest.is_file():
+                    dest.unlink()
+            else:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                write_text_atomic(dest, nxt or "")
+            done.append((dest, prev, existed, action))
+            applied.append({"path": rel, "action": action})
+    except OSError as exc:
+        for dest, prev, existed, _action in reversed(done):
+            with suppress(OSError):
+                if existed:
+                    write_text_atomic(dest, prev)
+                elif dest.is_file():
+                    dest.unlink()
+        return {
+            "ok": False,
+            "error": f"write failed: {exc}",
+            "applied": [],
+        }
+    for item in applied:
+        _mark_write(runtime, str(item.get("path") or ""))
     return {"ok": True, "applied": applied, "files": len(applied)}
 
 
