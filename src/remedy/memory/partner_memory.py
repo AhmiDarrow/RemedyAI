@@ -177,9 +177,9 @@ _EXPLICIT_REMEMBER_RE = re.compile(
 # at the first hyphen, which meant an Anthropic key did not match at all.
 _SECRET_RE = re.compile(
     r"(?i)("
-    r"api[_-]?key\s*[:=]\s*\S+|secret[_-]?key\s*[:=]\s*\S+|"
+    r"api[_-]?key\s*(?:[:=]|\bis\b)\s*\S+|secret[_-]?key\s*(?:[:=]|\bis\b)\s*\S+|"
     r"secret[_-]?access[_-]?key\s*[:=]\s*\S+"
-    r"|password\s*[:=]\s*\S+|passwd\s*[:=]\s*\S+|bearer\s+[a-z0-9\-._~+/]+=*"
+    r"|password\s*(?:[:=]|\bis\b)\s*\S+|passwd\s*(?:[:=]|\bis\b)\s*\S+|bearer\s+[a-z0-9\-._~+/]+=*"
     # OpenAI / Anthropic / xAI / OpenRouter / Mistral / DeepSeek style
     # Left boundary: "task-tracking-app" and "risk-tolerance" contain "sk-"
     # mid-word and must not be mistaken for a key.

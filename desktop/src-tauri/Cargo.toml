@@ -46,6 +46,7 @@ adblock = { version = "0.13.2", default-features = false, features = [
 # default vbox (which splits the window in half). Also used for themed chrome.
 [target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
 gtk = "0.18"
+libc = "0.2"
 
 # WebView2 COM for in-rail video fullscreen (ContainsFullScreenElementChanged).
 [target.'cfg(windows)'.dependencies]

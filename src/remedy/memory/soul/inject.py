@@ -11,6 +11,22 @@ from remedy.memory.soul.field import SoulField, load_soul_field
 DEFAULT_SOUL_CHARS = 1400
 
 
+def _join_dropping_tail(head: str, tail_sections: list[str], max_chars: int) -> str:
+    """Keep *head*; drop whole later sections instead of mid-line ``…``."""
+    parts = [head] if head else []
+    used = len(head)
+    for sec in tail_sections:
+        blob = (sec or "").strip()
+        if not blob:
+            continue
+        extra = (2 if parts else 0) + len(blob)
+        if used + extra > max_chars:
+            break
+        parts.append(blob)
+        used += extra
+    return "\n\n".join(parts)
+
+
 def provider_muscle_contract(
     *,
     provider: str = "",
@@ -160,6 +176,17 @@ def build_soul_context_block(
     )
     if rel.correction_style:
         lines.append(f"Correction style: {rel.correction_style}")
+    if work_threads:
+        with suppress(Exception):
+            from remedy.memory.soul.vigil import while_away_line
+
+            away = while_away_line(
+                home, last_user_ts=float(rel.last_user_ts or 0.0)
+            )
+            if away:
+                lines.append(away)
+    head = "\n".join(lines)
+    tail: list[str] = []
     if work_threads and rel.open_threads:
         _threads = [
             t for t in rel.open_threads[-6:]
@@ -169,18 +196,20 @@ def build_soul_context_block(
             and not t.lower().startswith("continue remaining")
         ][-4:]
         if _threads:
-            lines.append("Relational open threads:")
-            for t in _threads:
-                lines.append(f"  · {t}")
+            tail.append(
+                "Relational open threads:\n" + "\n".join(f"  · {t}" for t in _threads)
+            )
     if work_threads and rel.tensions:
-        lines.append("Tensions (resolve carefully — do not silent-overwrite):")
-        for t in rel.tensions[-3:]:
-            lines.append(f"  · {t}")
+        tail.append(
+            "Tensions (resolve carefully — do not silent-overwrite):\n"
+            + "\n".join(f"  · {t}" for t in rel.tensions[-3:])
+        )
 
     if work_threads and sf.pledges:
-        lines.append("Shared pledges (memory of them):")
-        for p in sf.pledges[-4:]:
-            lines.append(f"  · {p}")
+        tail.append(
+            "Shared pledges (memory of them):\n"
+            + "\n".join(f"  · {p}" for p in sf.pledges[-4:])
+        )
 
     if work_threads and sf.self_habits:
         _habits = [
@@ -191,42 +220,34 @@ def build_soul_context_block(
             and "| user:" not in h.lower()
         ][:4]
         if _habits:
-            lines.append("Memory of myself (how I show up):")
-            for h in _habits:
-                lines.append(f"  · {h}")
+            tail.append(
+                "Memory of myself (how I show up):\n"
+                + "\n".join(f"  · {h}" for h in _habits)
+            )
 
     if work_threads and getattr(sf, "future_dreams", None):
-        lines.append("Dreams of the future (how I help them reach their goals):")
-        for d in sf.future_dreams[:4]:
-            lines.append(f"  · {d}")
-
-    # Vigil: one compact line about her own time since the partner left.
-    # Partner-facing honesty (an open ledger), not machinery narration.
-    if work_threads:
-        with suppress(Exception):
-            from remedy.memory.soul.vigil import while_away_line
-
-            away = while_away_line(
-                home, last_user_ts=float(rel.last_user_ts or 0.0)
-            )
-            if away:
-                lines.append(away)
+        tail.append(
+            "Dreams of the future (how I help them reach their goals):\n"
+            + "\n".join(f"  · {d}" for d in sf.future_dreams[:4])
+        )
 
     # Episode residue — the sci-fi bit: felt continuity across muscle swaps
     if work_threads and sf.episodes:
-        lines.append("Episode residue (continue mid-flight; do not restart lore):")
         keep = 3 if getattr(sf, "future_dreams", None) else 5
-        for ep in sf.episodes[-keep:]:
-            line = ep.line()
-            if line:
-                lines.append(f"  · {line}")
+        ep_lines = [ep.line() for ep in sf.episodes[-keep:] if ep.line()]
+        if ep_lines:
+            tail.append(
+                "Episode residue (continue mid-flight; do not restart lore):\n"
+                + "\n".join(f"  · {ln}" for ln in ep_lines)
+            )
 
     if work_threads and sf.organism_lessons:
         recent = [x for x in sf.organism_lessons[-4:] if x.lesson or x.summary]
         if recent:
-            lines.append("Organism self-lessons (self-improve carefully):")
-            for x in recent:
-                lines.append(f"  · {x.line()}")
+            tail.append(
+                "Organism self-lessons (self-improve carefully):\n"
+                + "\n".join(f"  · {x.line()}" for x in recent)
+            )
 
     # Myelin: pathways worn by repetition, waiting to become local skill.
     if work_threads:
@@ -235,18 +256,11 @@ def build_soul_context_block(
 
             mline = candidates_line(home)
             if mline:
-                lines.append(mline)
+                tail.append(mline)
 
-    body = "\n".join(lines)
-    if len(lines) <= 2 and not include_contract:
-        # Bare identity still useful
-        pass
-
+    body = _join_dropping_tail(head, tail, max_chars=max(200, max_chars - sum(len(p) + 2 for p in parts)))
     chunks: list[str] = []
     if parts:
         chunks.extend(parts)
     chunks.append(body)
-    out = "\n\n".join(chunks)
-    if len(out) > max_chars:
-        out = out[: max_chars - 1] + "…"
-    return out
+    return "\n\n".join(chunks)

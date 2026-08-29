@@ -482,7 +482,8 @@ def test_clearing_a_field_with_an_empty_value_is_allowed_and_verified():
     with install_fake_win32(uia=_tree(box)):
         got = desktop_uia.element_action(101, "Amount", action="set_value", text="")
     assert got["verified"] is True
-    assert "0 chars, verified" in got["message"]
+    assert "verified" in got["message"]
+    assert "chars" not in got["message"]
     assert box.value == ""
 
 

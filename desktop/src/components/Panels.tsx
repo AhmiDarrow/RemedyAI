@@ -149,6 +149,8 @@ export function MemoryPanel({
   const [lastStep, setLastStep] = useState<{ did?: string; path?: string } | null>(null)
   const [lifeDigest, setLifeDigest] = useState<string | null>(null)
   const [entries, setEntries] = useState<{ id: string; title: string; content: string; type: string }[]>([])
+  const [facts, setFacts] = useState<{ text: string; category: string }[]>([])
+  const [memoryQuery, setMemoryQuery] = useState('')
   const [checkpointMd, setCheckpointMd] = useState<string | null>(null)
   const [checkpoint, setCheckpoint] = useState<{
     id: string
@@ -173,11 +175,16 @@ export function MemoryPanel({
     setLoading(true)
     void Promise.all([
       import('../api/client').then(({ apiFetch }) =>
-        apiFetch<{ results?: { id: string; title: string; content: string; type: string }[] }>(
-          '/memory/search?query=&limit=20',
-        )
-          .then((d) => setEntries(d.results || []))
-          .catch(() => setEntries([])),
+        Promise.all([
+          apiFetch<{ results?: { id: string; title: string; content: string; type: string }[] }>(
+            `/memory/search?query=${encodeURIComponent(memoryQuery)}&limit=20`,
+          )
+            .then((d) => setEntries(d.results || []))
+            .catch(() => setEntries([])),
+          apiFetch<{ facts?: { text: string; category: string }[] }>('/memory/facts?limit=12')
+            .then((d) => setFacts(d.facts || []))
+            .catch(() => setFacts([])),
+        ]),
       ),
       import('../api/partner').then(({ getLatestCheckpoint, getLatestPlan, getLifeBoard }) =>
         Promise.all([
@@ -227,9 +234,10 @@ export function MemoryPanel({
 
   useEffect(() => {
     if (!open) return
-    load()
+    const t = window.setTimeout(() => load(), memoryQuery ? 250 : 0)
+    return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, sessionId])
+  }, [open, sessionId, memoryQuery])
 
   const approve = async () => {
     if (!plan?.id) return
@@ -291,11 +299,43 @@ export function MemoryPanel({
       {loading ? (
         <div style={{ color: 'var(--text-muted)' }}>Loading…</div>
       ) : tab === 'memory' ? (
-        entries.length === 0 ? (
+        <div className="space-y-2">
+          <input
+            type="search"
+            value={memoryQuery}
+            onChange={(e) => setMemoryQuery(e.target.value)}
+            placeholder="Search notes"
+            aria-label="Search notes"
+            className="w-full text-[12px] px-2 py-1.5 rounded"
+            style={{
+              background: 'var(--bg-primary)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-primary)',
+            }}
+          />
+          {facts.length > 0 ? (
+            <div>
+              <div
+                className="text-[10px] uppercase tracking-wide mb-1"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                Partner facts
+              </div>
+              {facts.map((f) => (
+                <div
+                  key={f.text}
+                  className="mb-1.5 p-2 rounded text-[12px]"
+                  style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+                >
+                  {f.text}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        {entries.length === 0 ? (
           <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', lineHeight: 1.45 }}>
             No notes yet. When Remedy saves progress (memory tools, goals, long tasks), recent
-            notes appear here. Partner profile facts are separate and only fill in when you ask
-            to remember something about yourself.
+            notes appear here. Search above to look through them.
           </div>
         ) : (
           entries.map((e) => (
@@ -322,7 +362,8 @@ export function MemoryPanel({
               </div>
             </div>
           ))
-        )
+        )}
+        </div>
       ) : tab === 'life' ? (
         <div className="space-y-2">
           <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', lineHeight: 1.45 }}>

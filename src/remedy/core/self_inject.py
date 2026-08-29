@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import time
 import uuid
 from contextlib import suppress
@@ -855,8 +856,21 @@ async def _maybe_ruff_self_heal(
     src = repo / "src" / "remedy"
     if not src.is_dir():
         return None
-    fix_cmd = "uv run ruff check --fix src/remedy"
-    gate_cmd = "uv run ruff check src/remedy"
+    from remedy.core.build_python import python_cmd_for_subprocess
+
+    py = python_cmd_for_subprocess(repo) or ["python"]
+
+    def _cmd(*parts: str) -> str:
+        argv = [*py, *parts]
+        if os.name == "nt":
+            return subprocess.list2cmdline(argv)
+        import shlex
+
+        return shlex.join(argv)
+
+    fix_cmd = _cmd("-m", "ruff", "check", "--fix", "src/remedy")
+    gate_cmd = _cmd("-m", "ruff", "check", "src/remedy")
+    test_cmd = _cmd("-m", "pytest", "-q", "--tb=line", "tests/test_security.py")
     code_fix, out_fix, err_fix = await _run_one(fix_cmd, repo, 120.0)
     after = await git_capture(repo)
     if not after.get("changed"):
@@ -865,13 +879,18 @@ async def _maybe_ruff_self_heal(
         tree="python",
         summary="unattended ruff --fix self-heal",
     )
-    round_.gate_cmds = [gate_cmd]
+    round_.gate_cmds = [gate_cmd, test_cmd]
     code_gate, out_g, err_g = await _run_one(gate_cmd, repo, 120.0)
+    code_test, out_t, err_t = await _run_one(test_cmd, repo, 180.0)
     round_.gate_exit_codes[gate_cmd] = code_gate
-    round_.detail["gate_output"] = {gate_cmd: (out_g + err_g)[-1500:]}
+    round_.gate_exit_codes[test_cmd] = code_test
+    round_.detail["gate_output"] = {
+        gate_cmd: (out_g + err_g)[-1500:],
+        test_cmd: (out_t + err_t)[-1500:],
+    }
     round_.detail["ruff_fix_exit"] = code_fix
     round_.detail["ruff_fix_tail"] = (out_fix + err_fix)[-400:]
-    round_.status = "green" if code_gate == 0 else "red"
+    round_.status = "green" if code_gate == 0 and code_test == 0 else "red"
     round_ = await apply_or_rollback(round_, repo, snap, home=home)
     append_ledger(round_, home)
     return {

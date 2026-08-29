@@ -27,6 +27,11 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Vault fills require a real editable field (Windows UIA Value; Linux AT-SPI
   entry). Submit buttons and OCR labels are refused. Linux computer jobs
   with secrets are sealed; navigate DNS miss fails closed.
+- ``computer_fill`` is unverified until a snapshot; ``focus_window`` reports
+  failure when the window did not come forward. ``chmod +x`` on a project
+  path is allowed; ``sudo`` stays denied. Quit after **Use existing server**
+  does not kill that serve. Memory panel can search notes and show Partner
+  facts. Soul inject drops whole tail sections instead of cutting mid-line.
 
 ### Fixed — one path jail; Desktop wins over the CLI computer host
 

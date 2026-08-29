@@ -471,13 +471,6 @@ def start_server(
             }
     except Exception:
         logger.warning("RMB exclusive-host re-check failed", exc_info=True)
-        if not ignore_rmb:
-            return {
-                "ok": False,
-                "skipped": True,
-                "reason": "rmb_check_failed",
-                "error": "Could not confirm RMB is off; not starting SmolVLM",
-            }
 
     logger.info("Starting vision llama-server: %s", " ".join(cmd))
     try:
