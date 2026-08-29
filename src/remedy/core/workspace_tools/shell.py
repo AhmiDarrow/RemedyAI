@@ -73,11 +73,19 @@ def _spawn_background(
         "close_fds": True,
     }
     if os.name == "nt":
-        # Visible console + GUI. DETACHED_PROCESS hides many pygame/SDL windows.
-        kwargs["creationflags"] = (
-            getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
-            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-        )
+        from remedy.execution.process import CREATE_NO_WINDOW
+
+        # Games/GUIs get a real window. Servers and "run in background" must
+        # not flash a CMD — the desktop sidecar has no console to inherit.
+        if auto:
+            kwargs["creationflags"] = (
+                getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
+                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+            )
+        else:
+            kwargs["creationflags"] = CREATE_NO_WINDOW | getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
+            )
     else:
         kwargs["start_new_session"] = True
     try:
@@ -97,7 +105,7 @@ def _spawn_background(
     win_note = (
         "\nHeads up: a new console/app window will appear on screen for this "
         "process — that's expected, not an error."
-        if os.name == "nt"
+        if os.name == "nt" and auto
         else ""
     )
     return (

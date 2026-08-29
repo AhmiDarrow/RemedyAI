@@ -277,6 +277,8 @@ def get_hidden_imports() -> list[str]:
         "yarl",
         "charset_normalizer",
         "charset_normalizer.md",
+        "cffi",
+        "_cffi_backend",
         # ASGI / servers
         "h11",
         "httptools",

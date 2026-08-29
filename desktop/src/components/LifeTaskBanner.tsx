@@ -91,9 +91,12 @@ export function LifeTaskBanner({
 
   useEffect(() => {
     void refresh()
-    const id = window.setInterval(() => void refresh(), 1500)
+    // Empty: slow poll so a coding turn does not fight GET /life-tasks/current
+    // on the event loop. Live drive: 1.5s so Step N of M stays current.
+    const ms = shouldShowLifeTaskBanner(card) ? 1500 : 8000
+    const id = window.setInterval(() => void refresh(), ms)
     return () => window.clearInterval(id)
-  }, [refresh, sessionId])
+  }, [refresh, sessionId, card?.status, card?.task_id])
 
   const autoHandoff = Boolean(card?.handoff?.auto) && String(card?.status || '') === 'need_you'
   useEffect(() => {

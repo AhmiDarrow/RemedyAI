@@ -122,6 +122,24 @@ def test_translate_start_md_types_instead_of_os_open() -> None:
     assert "type" in r5.text.lower()
 
 
+def test_deflate_uv_run_pytest_uses_python_dash_m(tmp_path, monkeypatch) -> None:
+    from remedy.execution.host import runner as host_runner
+
+    py = tmp_path / "python.exe"
+    py.write_text("", encoding="utf-8")
+    monkeypatch.setattr(host_runner, "resolve_which", lambda name, cwd=None: str(py) if name == "python" else None)
+    out = host_runner.deflate_uv_run(
+        ["uv", "run", "pytest", "-q"], project_path=tmp_path
+    )
+    assert out[0] == str(py)
+    assert out[1:3] == ["-m", "pytest"]
+    assert out[3:] == ["-q"]
+    py_out = host_runner.deflate_uv_run(
+        ["uv", "run", "python", "script.py"], project_path=tmp_path
+    )
+    assert py_out == [str(py), "script.py"]
+
+
 def test_prepare_strips_pytest_last_failed() -> None:
     from remedy.execution.host.runner import prepare_host_command
 

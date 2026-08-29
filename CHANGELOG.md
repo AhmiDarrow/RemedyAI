@@ -4,6 +4,15 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed — no CMD flash for ``uv run pytest`` on Windows desktop
+
+- The packaged app has no console. ``uv run`` hid itself then spawned
+  python without the hide flag, so a CMD blinked on every test. Remedy
+  now runs the project interpreter as ``python -m pytest`` (and the same
+  for ruff/mypy). Background servers stay hidden; games still get a
+  window. The life-task card polls slowly when idle so it does not fight
+  a coding turn.
+
 ## [0.41.7] - 2026-08-29
 
 Life-task owner card (Yes / No / Explain, Step N of M), recipes without
