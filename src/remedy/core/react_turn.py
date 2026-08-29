@@ -32,8 +32,10 @@ MAX_PSEUDO_RECOVERIES = 4
 # Disconnect / transient transport retries (non-stream re-POST).
 # Partner path: WinError 64 / mid-load drops are common on local RMB — retry hard.
 MAX_DISCONNECT_RETRIES = 8
-# Local: max tool schemas per model step after write-first pack.
-LOCAL_MAX_TOOLS_PER_STEP = 8
+# Local / RMB: max tool schemas per model step after write-first pack.
+# 8 dropped job_run and bash_exec so a local muscle could not verify.
+# 16 still fits a small window and keeps edit + search + verify + recall.
+LOCAL_MAX_TOOLS_PER_STEP = 16
 # Cloud work pack. A 194-schema dump (33k→61k prompt) is never the live
 # round. Tight pack (xAI / Grok window) vs richer pack (Claude / GPT /
 # DeepSeek / Gemini / OpenRouter-non-Grok). Recall, job_run, git_diff,
