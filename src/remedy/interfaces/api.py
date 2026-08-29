@@ -61,6 +61,8 @@ _SLOW_EXEMPT_PATHS = frozenset(
         "/api/voice/status",
         "/api/rmb/hf/progress",
         "/api/vision/status",
+        "/api/life-tasks/current",
+        "/api/approvals",
     }
 )
 _SLOW_WARN_MS = 500.0

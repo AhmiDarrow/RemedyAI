@@ -52,12 +52,15 @@ def _python_cmd(root: Path | None = None) -> list[str]:
 
 def _run(cmd: list[str], cwd: Path, timeout_s: float = 60.0) -> tuple[bool, str]:
     try:
+        from remedy.execution.process import hidden_subprocess_kwargs
+
         proc = subprocess.run(
             cmd,
             cwd=str(cwd),
             capture_output=True,
             text=True,
             timeout=timeout_s,
+            **hidden_subprocess_kwargs(),
         )
         out = ((proc.stdout or "") + (proc.stderr or ""))[-1500:]
         return proc.returncode == 0, out

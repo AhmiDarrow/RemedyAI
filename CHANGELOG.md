@@ -4,6 +4,27 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed — auto-learn skills no longer mint tool-name titles or store secrets
+
+- Learned skill titles prefer the owner's sentence (paths stripped). Tool
+  names are never concatenated into the id. Vault tokens, ``api_key=`` /
+  Bearer blobs, and provider key shapes are redacted or omitted so they
+  cannot land in the skill catalog.
+
+### Fixed — unattended git/gh never prompts and never inherits LLM keys
+
+- Self-inject, ship, and issue-submit spawn git/gh with a scrubbed env:
+  no ``GIT_ASKPASS`` GUI, ``GIT_TERMINAL_PROMPT=0``, and no XAI/OpenAI
+  keys in the child. Hidden CREATE_NO_WINDOW on the remaining pytest /
+  tesseract / Signal / gate-tower sites so those children do not flash
+  a CMD either.
+
+### Fixed — life-task and approval polls are not SLOW-spam
+
+- ``GET /api/life-tasks/current`` and ``GET /api/approvals`` skip the
+  500ms SLOW warning. A fat coding turn used to fill debug.log with
+  those two hot polls.
+
 ### Fixed — no CMD flash for ``uv run pytest`` on Windows desktop
 
 - The packaged app has no console. ``uv run`` hid itself then spawned

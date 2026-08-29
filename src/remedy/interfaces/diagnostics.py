@@ -142,6 +142,8 @@ def _process_stats() -> dict[str, Any]:
 def _cpu_brand() -> str | None:
     try:
         if platform.system() == "Windows":
+            from remedy.execution.process import hidden_subprocess_kwargs
+
             r = subprocess.run(
                 [
                     "powershell",
@@ -152,7 +154,7 @@ def _cpu_brand() -> str | None:
                 capture_output=True,
                 text=True,
                 timeout=3,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                **hidden_subprocess_kwargs(),
             )
             name = (r.stdout or "").strip().splitlines()
             if name:
@@ -186,6 +188,8 @@ def _hardware_stats() -> dict[str, Any]:
     except Exception:
         if os.name == "nt":
             try:
+                from remedy.execution.process import hidden_subprocess_kwargs
+
                 r = subprocess.run(
                     [
                         "powershell",
@@ -199,7 +203,7 @@ def _hardware_stats() -> dict[str, Any]:
                     capture_output=True,
                     text=True,
                     timeout=4,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    **hidden_subprocess_kwargs(),
                 )
                 lines = [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
                 if len(lines) >= 2:

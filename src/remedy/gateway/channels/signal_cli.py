@@ -131,7 +131,9 @@ class SignalChannel(ChannelAdapter):
         if not bin_path:
             return 1, "", "signal-cli not found"
         cmd = [bin_path, "-a", self.account, *args]
-        proc = await asyncio.create_subprocess_exec(
+        from remedy.execution.process import create_hidden_subprocess_exec
+
+        proc = await create_hidden_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

@@ -326,3 +326,45 @@ async def test_hijacked_inbox_cache_does_not_comment(tmp_path, monkeypatch):
         # create parsed 99 then verify must accept title — fake view only
         # handles the hijacked id; create+verify of 99 also hits issue view.
         assert out.get("error") in ("inbox_failed", "comment_failed", "no_repo_write")
+
+
+@pytest.mark.asyncio
+async def test_run_exec_scrubs_llm_keys_and_askpass(monkeypatch, tmp_path):
+    """gh children must not inherit LLM keys or a GUI GIT_ASKPASS."""
+    from remedy.core import self_inject_pr as mod
+
+    captured: dict = {}
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return b"ok", b""
+
+        def kill(self):
+            return None
+
+    async def fake_hidden(*argv, **kwargs):
+        captured["env"] = dict(kwargs.get("env") or {})
+        return FakeProc()
+
+    monkeypatch.setenv("XAI_API_KEY", "xai_must_drop")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk_must_drop")
+    monkeypatch.setenv("GIT_ASKPASS", "gui-helper")
+    monkeypatch.setenv("GH_TOKEN", "ghp_test_keep")
+    monkeypatch.setattr(
+        "remedy.execution.process.create_hidden_subprocess_exec",
+        fake_hidden,
+    )
+    code, out, _err = await mod._run_exec(
+        tmp_path, ["gh", "repo", "view"], timeout=5
+    )
+    assert code == 0
+    assert out == "ok"
+    env = captured["env"]
+    assert "XAI_API_KEY" not in env
+    assert "OPENAI_API_KEY" not in env
+    assert "GIT_ASKPASS" not in env
+    assert env.get("GH_TOKEN") == "ghp_test_keep"
+    assert env.get("GIT_TERMINAL_PROMPT") == "0"
+    assert env.get("GCM_INTERACTIVE") == "never"

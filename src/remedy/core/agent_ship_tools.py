@@ -79,32 +79,26 @@ def register_ship_tools(runtime: Any) -> None:
 
     async def _run_git(args: list[str], *, timeout: float = 120.0) -> tuple[int, str, str]:
         import asyncio
-        import os
-        import subprocess
         from pathlib import Path
 
-        from remedy.execution.sandbox import scrub_subprocess_env
+        from remedy.execution.process import create_hidden_subprocess_exec
+        from remedy.execution.sandbox import unattended_vcs_env
 
         proj = _project()
         cwd = Path(proj).expanduser() if proj else Path.cwd()
         if cwd.is_file():
             cwd = cwd.parent
-        env = scrub_subprocess_env(argv=["git"])
-        # Ensure git finds same identity as interactive
-        env.setdefault("GIT_TERMINAL_PROMPT", "0")
-        creationflags = 0
-        if os.name == "nt":
-            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        env = unattended_vcs_env(["git"])
 
         try:
-            proc = await asyncio.create_subprocess_exec(
+            proc = await create_hidden_subprocess_exec(
                 "git",
                 *args,
                 cwd=str(cwd),
                 env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                creationflags=creationflags if os.name == "nt" else 0,
+                stdin=asyncio.subprocess.DEVNULL,
             )
             try:
                 out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -122,31 +116,25 @@ def register_ship_tools(runtime: Any) -> None:
 
     async def _run_gh(args: list[str], *, timeout: float = 180.0) -> tuple[int, str, str]:
         import asyncio
-        import os
         from pathlib import Path
 
-        from remedy.execution.sandbox import scrub_subprocess_env
+        from remedy.execution.process import create_hidden_subprocess_exec
+        from remedy.execution.sandbox import unattended_vcs_env
 
         proj = _project()
         cwd = Path(proj).expanduser() if proj else Path.cwd()
         if cwd.is_file():
             cwd = cwd.parent
-        env = scrub_subprocess_env(argv=["gh"])
-        env.setdefault("GH_PROMPT_DISABLED", "1")
-        creationflags = 0
-        if os.name == "nt":
-            import subprocess
-
-            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        env = unattended_vcs_env(["gh"])
         try:
-            proc = await asyncio.create_subprocess_exec(
+            proc = await create_hidden_subprocess_exec(
                 "gh",
                 *args,
                 cwd=str(cwd),
                 env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                creationflags=creationflags if os.name == "nt" else 0,
+                stdin=asyncio.subprocess.DEVNULL,
             )
             try:
                 out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)

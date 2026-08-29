@@ -15,6 +15,7 @@ import pytest
 from remedy.core.agent_learn import (
     _skill_title_from_steps,
     auto_learn_from_turn,
+    safe_learn_description,
     should_auto_learn_from_steps,
 )
 
@@ -130,24 +131,64 @@ def test_a_step_is_read_whichever_key_names_its_tool(key):
 # --- titles ------------------------------------------------------------------
 
 
-def test_a_title_is_built_from_the_tools_used():
-    title = _skill_title_from_steps("anything", work("repo_search", "file_write"))
-    assert title == "repo_search-file_write"
+def test_a_title_prefers_the_owner_sentence():
+    title = _skill_title_from_steps("fix the login form", work("repo_search", "file_write"))
+    assert title == "fix the login form"
+    assert "file_write" not in title
 
 
-def test_a_title_stops_at_three_tools():
-    title = _skill_title_from_steps("", work("a", "b", "c", "d", "e"))
-    assert title == "a-b-c"
+def test_tool_names_are_not_the_skill_id():
+    title = _skill_title_from_steps("", work("host_run", "file_read", "file_edit"))
+    assert title == "host-read"
+    assert "host_run" not in title
+    assert "file_edit" not in title
 
 
 def test_meta_tools_are_left_out_of_the_title():
     title = _skill_title_from_steps("", work("skill_search", "repo_search", "file_write"))
     assert "skill_search" not in title
+    assert title == "search-write"
 
 
 def test_a_repeated_tool_appears_once():
     title = _skill_title_from_steps("", work("file_read", "file_read", "file_write"))
-    assert title == "file_read-file_write"
+    assert title == "read-write"
+
+
+def test_learn_description_redacts_secrets():
+    text = safe_learn_description(
+        "put api_key=sk-live-not-real and {{vault:card-visa}} in the form"
+    )
+    assert "sk-live-not-real" not in text
+    assert "{{vault:card-visa}}" not in text
+    assert "[redacted]" in text
+    assert "{{vault}}" in text
+
+
+def test_learn_description_redacts_json_and_bearer():
+    text = safe_learn_description(
+        '{"api_key": "sk-live-not-real"} Authorization: Bearer eyJhbGciOi.pad'
+    )
+    assert "sk-live-not-real" not in text
+    assert "eyJhbGciOi" not in text
+    assert "[redacted]" in text
+
+
+def test_learn_description_omits_provider_key_shapes():
+    """looks_like_secret is the durable guard — split so scanners ignore fixtures."""
+    key = "".join(("sk-ant-", "api03-", "AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH"))
+    text = safe_learn_description(f"use {key} for the API")
+    assert "AAAABBBB" not in text
+    assert "sk-ant" not in text
+    assert text == "Owner task (secrets omitted)."
+
+
+def test_a_title_with_a_key_shape_falls_back_to_verbs():
+    key = "".join(("sk-ant-", "api03-", "AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH"))
+    title = _skill_title_from_steps(f"use {key}", work("file_read", "file_write"))
+    assert "sk-ant" not in title
+    assert "AAAABBBB" not in title
+    assert title == "read-write"
 
 
 def test_without_tools_the_title_falls_back_to_the_message():
