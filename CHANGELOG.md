@@ -4,6 +4,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — local / RMB operate pack can verify and recall
+
+- Local (RMB / llama.cpp / Ollama) live rounds keep 16 schemas, including
+  ``job_run``, ``bash_exec``, and ``memory_search``, instead of 8 that could
+  only edit. Still far below the 194-schema dump.
+
 ### Added — on-PC code map and verify-after-writes
 
 - ``code_map`` lists class/def/fn symbols under a tree (time-budgeted, same

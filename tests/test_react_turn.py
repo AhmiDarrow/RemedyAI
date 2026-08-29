@@ -599,6 +599,26 @@ def test_is_disconnect_error():
     assert not is_disconnect_error("model_not_found")
 
 
+def test_local_pack_keeps_verify_and_recall():
+    """RMB / llama.cpp must still be able to remember and run tests."""
+    flood = [_tool(f"extra_{i}") for i in range(80)] + [
+        _tool("file_read"),
+        _tool("file_write"),
+        _tool("memory_search"),
+        _tool("job_run"),
+        _tool("bash_exec"),
+        _tool("help_list"),
+    ]
+    capped = cap_tools_for_step(flood, local=True)
+    names = {((t.get("function") or {}).get("name") or "") for t in (capped or [])}
+    assert "file_write" in names
+    assert "memory_search" in names
+    assert "job_run" in names
+    assert "bash_exec" in names
+    assert "help_list" not in names
+    assert len(capped or []) <= LOCAL_MAX_TOOLS_PER_STEP
+
+
 def test_cap_tools_local():
     tools = [_tool(f"t{i}") for i in range(20)]
     capped = cap_tools_for_step(tools, local=True, max_tools=LOCAL_MAX_TOOLS_PER_STEP)
