@@ -1880,12 +1880,11 @@ export default function App() {
               : undefined
           }
         >
-          {/* Unmount when this slide is in popout OR Grove is the surface —
-              avoids a second BrowserSlide/PTY fighting Grove's stage over the
-              native embed's bounds (hidden Studio rects read as zero). */}
-          {surface !== 'grove'
-          && wsLayout.leftRail === 'open'
+          {/* Unmount Browser on Grove (native HWND bounds). Keep TerminalSlide
+              mounted so a live PTY survives Grove ↔ Studio. */}
+          {wsLayout.leftRail === 'open'
           && popout?.id !== wsLayout.left
+          && (surface !== 'grove' || wsLayout.left === 'terminal')
             ? renderSlide(wsLayout.left)
             : null}
         </WorkspaceSide>
@@ -2156,9 +2155,9 @@ export default function App() {
               : undefined
           }
         >
-          {surface !== 'grove'
-          && wsLayout.rightRail === 'open'
+          {wsLayout.rightRail === 'open'
           && popout?.id !== wsLayout.right
+          && (surface !== 'grove' || wsLayout.right === 'terminal')
             ? renderSlide(wsLayout.right)
             : null}
         </WorkspaceSide>
@@ -2166,7 +2165,7 @@ export default function App() {
         {/* Shared by Terminal / Browser / Scratch — same exit chrome + Esc.
             Unmount while Grove is up: a leftover browser popout would fight
             Grove's BrowserSlide for the single native WebView2. */}
-        {popout && surface !== 'grove' && (
+        {popout && (surface !== 'grove' || popout.id === 'terminal') && (
           <PopoutOverlay
             title={(SLIDE_META[popout.id] ?? SLIDE_META.sessions).label}
             fullscreen={popout.fullscreen}

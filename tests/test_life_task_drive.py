@@ -23,7 +23,12 @@ def test_parse_steps_accepts_json_and_list():
 def test_place_order_is_a_checkpoint():
     assert step_is_checkpoint({"title": "Place order", "action": "click", "text": "Place order"})
     assert step_is_checkpoint({"title": "Pay now", "checkpoint": True})
+    assert step_is_checkpoint({"title": "Send", "action": "click", "text": "Send"})
+    assert step_is_checkpoint({"title": "Delete", "action": "click", "text": "Delete"})
+    assert step_is_checkpoint({"title": "Submit", "action": "click", "text": "Submit"})
+    assert step_is_checkpoint({"title": "Confirm order", "action": "click", "text": "Confirm order"})
     assert not step_is_checkpoint({"title": "Add milk", "action": "click", "text": "Add"})
+    assert not step_is_checkpoint({"title": "Add to cart", "action": "click", "text": "Add to cart"})
 
 
 def test_checkpoint_never_runs_the_hand():
@@ -101,6 +106,54 @@ def test_verified_steps_mark_the_goal_done():
     assert "observed" in out["markdown"].lower()
     assert out["steps"][0].get("evidence_hash")
     assert len(out["steps"][0]["evidence_hash"]) == 16
+
+
+def test_optimistic_pending_load_is_not_done():
+    def run(action, **_kw):
+        return json.dumps(
+            {
+                "ok": True,
+                "observed": False,
+                "pending_load": True,
+                "via": "optimistic",
+                "message": "opening",
+            }
+        )
+
+    out = drive_life_task(
+        goal="open shop",
+        steps=[{"title": "Open", "action": "navigate", "url": "https://shop.example"}],
+        run_action=run,
+        max_retries=0,
+    )
+    assert out["ok"] is False
+    assert out["steps"][0]["status"] != "done"
+
+
+def test_unsuccessful_substring_is_not_done():
+    def run(action, **_kw):
+        return "Navigate unsuccessful — rail_failed"
+
+    out = drive_life_task(
+        goal="open shop",
+        steps=[{"title": "Open", "action": "navigate", "url": "https://shop.example"}],
+        run_action=run,
+        max_retries=0,
+    )
+    assert out["ok"] is False
+
+
+def test_json_ok_false_is_not_done():
+    def run(action, **_kw):
+        return json.dumps({"ok": False, "message": "click missed"})
+
+    out = drive_life_task(
+        goal="add milk",
+        steps=[{"title": "Add milk", "action": "click", "text": "Add to cart"}],
+        run_action=run,
+        max_retries=0,
+    )
+    assert out["ok"] is False
 
 
 def test_plan_plain_language_names_the_owner_stop():

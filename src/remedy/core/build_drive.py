@@ -246,8 +246,10 @@ def drive_build(
             # (tests + more targets) before giving up. Drives to actually
             # passing, from more than one angle.
             gate = _verify()
-            if gate.get("ok"):
+            if gate.get("ok") and gate.get("verified"):
                 drive_green = {"ok": True, "rounds": 0, "reason": "green"}
+            elif gate.get("ok") and not gate.get("verified"):
+                drive_green = {"ok": False, "rounds": 0, "reason": "unverified"}
             else:
                 # Strategy selection steered by what has landed green before:
                 # if the broadened angle keeps winning, start bold sooner.
@@ -295,7 +297,7 @@ def drive_build(
     if hop_results and not scout_only:
         ok = ok and hops_ok
     if gate:
-        ok = ok and bool(gate.get("ok"))
+        ok = ok and bool(gate.get("ok")) and bool(gate.get("verified"))
 
     verify_status = "pending"
     if gate.get("verified"):
@@ -335,7 +337,7 @@ def drive_build(
         "compiled": {"ok": compiled.get("ok"), "units": len(units), "lock": compiled.get("lock")},
         "tdd": tdd.get("tdd") or {},
         "hops": hop_results,
-        "gate": {k: gate.get(k) for k in ("ok", "message") if k in gate} if gate else {},
+        "gate": {k: gate.get(k) for k in ("ok", "message", "verified") if k in gate} if gate else {},
         "drive_to_green": drive_green,
         "repair": repair,
         "review": review,
@@ -372,11 +374,18 @@ def _drive_summary(
     hop_n = len(hops)
     gate_s = "n/a"
     if gate:
-        gate_s = "green" if gate.get("ok") else "red"
+        if gate.get("verified"):
+            gate_s = "green"
+        elif gate.get("ok"):
+            gate_s = "unverified"
+        else:
+            gate_s = "red"
     if scout_only:
         next_s = "file_write the unit bodies, then build_drive again or file_edit + verify."
     elif ok:
         next_s = "Machine loop green. Summarize and stop (or ship if required)."
+    elif gate.get("ok") and not gate.get("verified"):
+        next_s = "create/run real tests — do not claim DONE."
     else:
         next_s = "Continue: file_edit failing units, then verify. Do not restart from scratch."
     return (

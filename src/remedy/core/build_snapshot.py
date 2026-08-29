@@ -180,6 +180,7 @@ def bisect_red_wave(
     if verify_fn is not None and len(snaps) >= 2:
         lo, hi = 0, len(snaps) - 1
         last_good = None
+        pre_sid = snaps[-1].get("snap_id")
         while lo <= hi:
             mid = (lo + hi) // 2
             sid = snaps[mid].get("snap_id")
@@ -193,6 +194,9 @@ def bisect_red_wave(
                 lo = mid + 1
             else:
                 hi = mid - 1
+        restore_to = (last_good or {}).get("snap_id") or pre_sid
+        if restore_to:
+            restore_snapshot(project, str(restore_to))
         return {
             "ok": True,
             "mode": "bisect",

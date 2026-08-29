@@ -138,13 +138,21 @@ def seed_python_smoke_oracle(
 
     body = "\n".join(lines)
     try:
-        # Prefer jail-aware write if available
-        try:
-            dest = runtime.resolve_tool_path(
-                str(smoke_path.relative_to(root)), for_write=True
-            )
-        except Exception:
-            dest = smoke_path
+        dest = runtime.resolve_tool_path(
+            str(smoke_path.relative_to(root)), for_write=True
+        )
+    except Exception as exc:
+        from remedy.core.errors import SecurityError
+
+        if isinstance(exc, (SecurityError, PermissionError, ValueError)):
+            return {
+                "ok": False,
+                "error": f"write jail refused: {exc}",
+                "command": "",
+                "path": "",
+            }
+        return {"ok": False, "error": str(exc), "command": "", "path": ""}
+    try:
         Path(dest).write_text(body, encoding="utf-8")
     except OSError as e:
         return {"ok": False, "error": f"write failed: {e}", "command": "", "path": ""}

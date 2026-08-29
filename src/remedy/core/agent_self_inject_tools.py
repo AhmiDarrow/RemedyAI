@@ -22,6 +22,27 @@ from remedy.core.self_inject import (
 )
 
 
+def round_write_paths(snapshot: dict[str, Any], after: dict[str, Any]) -> list[str]:
+    """Round write set for restore.
+
+    Delta vs the handler-start snap when the tree moved during the tool.
+    Empty delta (gate-after-writes): untracked vs HEAD, minus tracked files
+    already dirty at handler start (owner WIP).
+    """
+    files = [str(p).replace("\\", "/") for p in (after.get("changed") or []) if str(p).strip()]
+    untracked = [
+        str(p).replace("\\", "/") for p in (after.get("untracked") or []) if str(p).strip()
+    ]
+    before = {str(p).replace("\\", "/") for p in (snapshot.get("changed") or [])} | {
+        str(p).replace("\\", "/") for p in (snapshot.get("untracked") or [])
+    }
+    delta = (set(files) | set(untracked)) - before
+    if delta:
+        return sorted(delta)
+    already_tracked = {str(p).replace("\\", "/") for p in (snapshot.get("changed") or [])}
+    return sorted((set(files) | set(untracked)) - already_tracked)
+
+
 def _repo_root(runtime: Any) -> str | None:
     """The RemedyAI monorepo root (this codebase).
 
@@ -156,13 +177,7 @@ def register_self_inject_tools(runtime: Any) -> None:
             round_.detail["head"] = snapshot.get("head")
             after = await git_capture(repo)
             files = list(after.get("changed") or [])
-            untracked = list(after.get("untracked") or [])
-            before = set(snapshot.get("changed") or []) | set(
-                snapshot.get("untracked") or []
-            )
-            round_paths = sorted(
-                (set(files) | set(untracked)) - before
-            ) or sorted(set(files) | set(untracked))
+            round_paths = round_write_paths(snapshot, after)
             from remedy.core.self_inject_guard import run_both_passes
 
             scan = run_both_passes(round_paths or files, str(after.get("diff") or ""))
@@ -170,13 +185,21 @@ def register_self_inject_tools(runtime: Any) -> None:
                 "ok": bool(scan.get("ok")),
                 "blocks": list(scan.get("blocks") or [])[:12],
             }
+            snap_was_clean = not (
+                snapshot.get("changed") or snapshot.get("untracked")
+            )
             if not scan.get("ok"):
                 round_.status = "red"
                 round_.summary = "self-inject guard blocked apply: " + "; ".join(
                     str(b) for b in (scan.get("blocks") or ["blocked"])[:4]
                 )
                 round_ = await apply_or_rollback(
-                    round_, repo, snapshot, home=home, round_paths=round_paths
+                    round_,
+                    repo,
+                    snapshot,
+                    home=home,
+                    round_paths=round_paths,
+                    reapply_snapshot=bool(snap_was_clean),
                 )
             else:
                 round_ = await run_gate(round_, repo, timeout=timeout)
@@ -187,6 +210,7 @@ def register_self_inject_tools(runtime: Any) -> None:
                         snapshot,
                         home=home,
                         round_paths=round_paths,
+                        reapply_snapshot=bool(snap_was_clean),
                     )
                 else:
                     round_.status = "gated_only"

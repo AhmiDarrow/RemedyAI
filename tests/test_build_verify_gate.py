@@ -28,7 +28,8 @@ def test_defers_while_feature_todos_open() -> None:
     out = maybe_short_circuit_verify(rt, argv=["npm", "test"])
     assert out is not None
     assert out.startswith(VERIFY_DEFERRED_PREFIX)
-    assert "exit_code=0" in out
+    assert "exit_code=0" not in out
+    assert "deferred=true" in out
 
 
 def test_caches_when_green_and_no_new_source() -> None:

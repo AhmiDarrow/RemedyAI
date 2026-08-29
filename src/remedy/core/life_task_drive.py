@@ -22,13 +22,15 @@ from typing import Any
 from remedy.core.build_oracle import coerce_json_text, coerce_text_arg
 from remedy.core.computer.types import ComputerAction
 
-# Verbs that must never auto-complete — owner moment, not a retry.
+# Owner-moment verbs. "Add to cart" is deliberately omitted.
 _CHECKPOINT_RE = re.compile(
     r"(?is)\b("
-    r"place order|pay now|buy now|complete purchase|submit (the )?(order|payment|application)|"
+    r"place order|place your order|pay now|buy now|complete purchase|"
+    r"submit (the )?(order|payment|application)|"
     r"send (the )?(email|message|form)|delete (the )?(account|file|forever)|"
-    r"confirm (payment|delete|purchase)|enter (your )?password|"
-    r"captcha|not a robot"
+    r"confirm (payment|delete|purchase|order)|enter (your )?password|"
+    r"captcha|not a robot|"
+    r"send|delete|pay|submit"
     r")\b"
 )
 
@@ -213,14 +215,28 @@ def _parse_run_blob(raw: str) -> dict[str, Any]:
             return data
     except json.JSONDecodeError:
         pass
+    from remedy.core.react_loop.loop_util import browse_tool_ok
+
+    ok_true, ok_false = browse_tool_ok(text)
     low = text.lower()
-    ok = "success" in low and "unverified" not in low and "approval_required" not in low
     return {
-        "ok": ok,
+        "ok": bool(ok_true) and not ok_false,
         "message": text[:800],
         "unverified": "unverified" in low,
         "approval_required": "approval_required" in low,
     }
+
+
+def _step_blob_ok(blob: dict[str, Any]) -> bool:
+    extra = blob.get("extra") if isinstance(blob.get("extra"), dict) else {}
+    if not blob.get("ok") or blob.get("unverified") or extra.get("unverified"):
+        return False
+    if blob.get("pending_load") or extra.get("pending_load"):
+        return False
+    observed = blob.get("observed")
+    if observed is None:
+        observed = extra.get("observed")
+    return observed is not False
 
 
 def _kwargs_for_step(step: dict[str, Any]) -> dict[str, Any]:
@@ -500,7 +516,7 @@ def drive_life_task(
         blob = _do(mapped, **kw)
         rec.evidence = str(blob.get("message") or "")[:500]
         rec.observed = _observed_line(blob)
-        rec.ok = bool(blob.get("ok")) and not blob.get("unverified")
+        rec.ok = _step_blob_ok(blob)
         if blob.get("approval_required") or "APPROVAL_REQUIRED" in rec.evidence:
             rec.status = "need_you"
             rec.block_reason = "need_you"
@@ -523,7 +539,7 @@ def drive_life_task(
             blob = _do(mapped, **kw)
             rec.evidence = str(blob.get("message") or "")[:500]
             rec.observed = _observed_line(blob)
-            rec.ok = bool(blob.get("ok")) and not blob.get("unverified")
+            rec.ok = _step_blob_ok(blob)
             if rec.ok:
                 rec.status = "done"
                 recovered = True

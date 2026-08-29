@@ -75,6 +75,27 @@ def test_apply_refuses_ambiguous(tmp_path: Path):
     assert (tmp_path / "foo.py").read_text(encoding="utf-8") == "x = 1\nx = 1\n"
 
 
+def test_two_file_second_hunk_miss_leaves_first_unchanged(tmp_path: Path):
+    (tmp_path / "a.py").write_text("old\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("keep\n", encoding="utf-8")
+    diff = (
+        "--- a/a.py\n"
+        "+++ b/a.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+        "--- a/b.py\n"
+        "+++ b/b.py\n"
+        "@@ -1 +1 @@\n"
+        "-missing_this\n"
+        "+newb\n"
+    )
+    res = apply_patch_text(_rt(tmp_path), diff, root=tmp_path)
+    assert res["ok"] is False
+    assert (tmp_path / "a.py").read_text(encoding="utf-8") == "old\n"
+    assert (tmp_path / "b.py").read_text(encoding="utf-8") == "keep\n"
+
+
 def test_apply_refuses_write_jail_exception(tmp_path: Path):
     """resolve_tool_path refusals must not fall through to an absolute dest."""
     from remedy.core.errors import SecurityError

@@ -14,6 +14,7 @@ import base64
 import contextlib
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -122,6 +123,11 @@ def _payload_has_secrets(payload: dict[str, Any] | None) -> bool:
     """True when *payload* looks like it carries typed secrets."""
     if not payload or not isinstance(payload, dict):
         return False
+    if payload.get("_has_secret"):
+        return True
+    text = str(payload.get("text") or "")
+    if "{{" in text and "vault" in text.lower():
+        return True
     for key, val in payload.items():
         kl = str(key).lower().replace("-", "_")
         if kl in _PAYLOAD_SECRET_KEYS or kl.endswith("_password") or kl.endswith("_secret"):
@@ -130,6 +136,42 @@ def _payload_has_secrets(payload: dict[str, Any] | None) -> bool:
             if isinstance(val, dict):
                 return True
     return False
+
+
+def _jobs_nacl_key() -> bytes:
+    """32-byte file-mode key (0o600) for Linux job seals when DPAPI is absent."""
+    from nacl import utils as nacl_utils
+    from nacl.secret import SecretBox
+
+    p = default_home() / "computer" / "jobs.key"
+    if p.is_file():
+        raw = p.read_bytes()
+        if len(raw) >= SecretBox.KEY_SIZE:
+            return raw[: SecretBox.KEY_SIZE]
+    key = nacl_utils.random(SecretBox.KEY_SIZE)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(key)
+    with contextlib.suppress(OSError):
+        os.chmod(p, 0o600)
+    return key
+
+
+def _seal_payload_nacl(plain: bytes) -> dict[str, Any]:
+    from nacl.secret import SecretBox
+
+    box = SecretBox(_jobs_nacl_key())
+    cipher = box.encrypt(plain)
+    return {
+        "_sealed": True,
+        "encoding": "nacl",
+        "blob": base64.b64encode(bytes(cipher)).decode("ascii"),
+    }
+
+
+def _jobs_nacl_unprotect(ciphertext: bytes) -> bytes:
+    from nacl.secret import SecretBox
+
+    return bytes(SecretBox(_jobs_nacl_key()).decrypt(ciphertext))
 
 
 def _job_dpapi_available() -> bool:
@@ -164,21 +206,23 @@ def _seal_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
         return {}
     if payload.get("_sealed"):
         return payload
-    if not _job_dpapi_available():
-        return dict(payload)
     plain = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    try:
-        cipher = _job_dpapi_protect(plain)
-    except Exception:
-        if _payload_has_secrets(payload):
-            raise
-        logger.warning("computer job DPAPI protect failed; writing non-secret payload plain")
-        return dict(payload)
-    return {
-        "_sealed": True,
-        "encoding": "dpapi",
-        "blob": base64.b64encode(cipher).decode("ascii"),
-    }
+    if _job_dpapi_available():
+        try:
+            cipher = _job_dpapi_protect(plain)
+            return {
+                "_sealed": True,
+                "encoding": "dpapi",
+                "blob": base64.b64encode(cipher).decode("ascii"),
+            }
+        except Exception:
+            if _payload_has_secrets(payload):
+                return _seal_payload_nacl(plain)
+            logger.warning("computer job DPAPI protect failed; writing non-secret payload plain")
+            return dict(payload)
+    if _payload_has_secrets(payload):
+        return _seal_payload_nacl(plain)
+    return dict(payload)
 
 
 def _unseal_payload(payload: Any) -> dict[str, Any]:
@@ -189,10 +233,12 @@ def _unseal_payload(payload: Any) -> dict[str, Any]:
         return dict(payload)
     enc = str(payload.get("encoding") or "").strip().lower()
     blob = payload.get("blob")
-    if enc != "dpapi" or not isinstance(blob, str) or not blob.strip():
+    if enc not in ("dpapi", "nacl") or not isinstance(blob, str) or not blob.strip():
         raise ValueError("computer job payload seal is unreadable")
     cipher = base64.b64decode(blob)
-    plain = _job_dpapi_unprotect(cipher)
+    plain = (
+        _jobs_nacl_unprotect(cipher) if enc == "nacl" else _job_dpapi_unprotect(cipher)
+    )
     inner = json.loads(plain.decode("utf-8"))
     if not isinstance(inner, dict):
         raise ValueError("computer job payload seal is not an object")
@@ -336,17 +382,18 @@ def _scrub_job_error(error: str | None) -> str | None:
 def _scrub_retained_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
     """After a job finishes, strip typed secrets from the on-disk payload.
 
-    Host needs plaintext while pending/running; once terminal, only lengths remain.
+    Host needs plaintext while pending/running; once terminal, secrets are gone.
     """
     if not payload or not isinstance(payload, dict):
         return {}
     out = dict(payload)
+    secretish = bool(out.get("_has_secret")) or _payload_has_secrets(payload)
     for key in list(out.keys()):
         kl = str(key).lower().replace("-", "_")
         val = out.get(key)
         if kl in _PAYLOAD_SECRET_KEYS or kl.endswith("_password") or kl.endswith("_secret"):
             if isinstance(val, str) and val:
-                out[key] = f"[redacted chars={len(val)}]"
+                out[key] = "[redacted]" if secretish else f"[redacted chars={len(val)}]"
             elif val is not None and not isinstance(val, (int, float, bool)):
                 out[key] = "[redacted]"
     # Nested ui dict may hold free text — keep structure, scrub strings that look secret

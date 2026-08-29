@@ -218,18 +218,18 @@ def update_soul_after_turn(
     sf = field if field is not None else load_soul_field(home)
     ut = (user_text or "").strip()
     at = (assistant_text or "").strip()
-    if looks_like_secret_soul(ut) or looks_like_secret_soul(at):
-        # Still bump turns if non-secret residue exists elsewhere
-        ut = re.sub(
-            r"(?i)(api[_-]?key|password|sk-[a-z0-9]{8,}|bearer\s+\S+)",
-            "[redacted]",
-            ut,
-        )
-        at = re.sub(
-            r"(?i)(api[_-]?key|password|sk-[a-z0-9]{8,}|bearer\s+\S+)",
-            "[redacted]",
-            at,
-        )
+    secret_hit = looks_like_secret_soul(ut) or looks_like_secret_soul(at)
+    if secret_hit:
+        from remedy.memory.partner_memory import redact_secrets
+
+        ut = redact_secrets(ut)
+        at = redact_secrets(at)
+        rel = sf.relational
+        rel.turns_together += 1
+        rel.last_user_ts = time.time()
+        sf.touch()
+        save_soul_field(sf, home)
+        return sf
 
     rel = sf.relational
     rel.turns_together += 1

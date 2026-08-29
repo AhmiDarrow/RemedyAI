@@ -642,7 +642,10 @@ async def test_an_expired_xai_token_is_refreshed_and_the_call_retried(
     monkeypatch.setattr(xa, "refresh_if_needed", _refresh)
     monkeypatch.setattr(xa, "resolve_bearer", lambda home=None: "xai-fresh-token")
     bound(provider="xai", api_key="xai-stale-token", base_url="https://api.x.ai/v1")
-    runtime = SimpleNamespace(config=SimpleNamespace(home_dir=str(tmp_path)))
+    runtime = SimpleNamespace(
+        config=SimpleNamespace(home_dir=str(tmp_path)),
+        _llm_api_key="xai-stale-runtime",
+    )
     fake = session(_FakeResponse(401, text="expired"), _FakeResponse(200, {"ok": "retried"}))
 
     out = await agent_llm.post_chat(runtime, {"messages": []})
@@ -650,8 +653,8 @@ async def test_an_expired_xai_token_is_refreshed_and_the_call_retried(
     assert out == {"ok": "retried"}
     assert len(fake.calls) == 2
     assert fake.calls[1]["headers"]["Authorization"] == "Bearer xai-fresh-token"
-    assert runtime._llm_api_key == "xai-fresh-token"
     assert get_llm_binding().api_key == "xai-fresh-token"
+    assert runtime._llm_api_key == "xai-stale-runtime"
     assert seen_home["home"] == Path(str(tmp_path)).expanduser()
 
 

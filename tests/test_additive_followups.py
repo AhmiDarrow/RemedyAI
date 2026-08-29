@@ -224,6 +224,39 @@ def test_models_get_refuses_stored_key_to_foreign_host(monkeypatch) -> None:
     assert "Refused" in str(body.get("error") or "")
 
 
+def test_models_get_refuses_active_foreign_host_while_listing_other_provider(
+    monkeypatch,
+) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import remedy.interfaces.routes.catalog as catalog_mod
+    from remedy.interfaces.routes.catalog import register_catalog_routes
+
+    monkeypatch.setattr(
+        catalog_mod,
+        "load_config",
+        lambda: {
+            "llm_provider": "custom",
+            "llm_base_url": "http://127.0.0.1:9/v1",
+        },
+    )
+    monkeypatch.setattr(
+        "remedy.interfaces.config.resolve_provider_api_key",
+        lambda cfg, provider: "sk-not-a-real-key-for-tests",
+    )
+    app = FastAPI()
+    register_catalog_routes(app, runtime=None, gateway=None, memory=None)
+    r = TestClient(app).get(
+        "/api/models",
+        params={"provider": "openai", "base_url": "http://127.0.0.1:9/v1"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("models") == []
+    assert "Refused" in str(body.get("error") or "")
+
+
 def test_synthesize_standard_quality_skips_chatterbox_even_if_ready(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -400,3 +433,18 @@ def test_resolve_tools_does_not_or_task_detector() -> None:
     )
     assert game.tools is not None
     assert game.reason != "no_work_request"
+    like = resolve_tools(message="I like godot", all_tools=all_t, turn_tier=1)
+    assert like.pack in ("none", "peek")
+    assert like.reason != "task"
+    research = resolve_tools(
+        message="research this later", all_tools=all_t, turn_tier=1
+    )
+    assert research.pack in ("none", "peek")
+    make_game = resolve_tools(message="make a game", all_tools=all_t, turn_tier=1)
+    assert make_game.tools is not None
+    assert make_game.pack == "full"
+    platformer = resolve_tools(
+        message="build a platformer", all_tools=all_t, turn_tier=1
+    )
+    assert platformer.tools is not None
+    assert platformer.pack == "full"

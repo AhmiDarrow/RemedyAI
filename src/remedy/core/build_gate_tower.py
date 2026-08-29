@@ -150,7 +150,13 @@ def gate_l2_import(root: Path, paths: list[str]) -> GateResult:
 
     py = [p for p in paths if str(p).endswith(".py")]
     if not py:
-        return GateResult(level="L2_import", ok=True, command="(no py)", summary="skip")
+        return GateResult(
+            level="L2_import",
+            ok=True,
+            verified=False,
+            command="(no py)",
+            summary="skip",
+        )
     results = dry_run_imports_for_paths(py, root)
     bad = [r for r in results if not r.get("ok")]
     # Sidecar/interpreter failures are machine config, not product red.

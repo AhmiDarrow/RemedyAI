@@ -63,6 +63,11 @@ MOTHER_ONLY_TOOLS = frozenset(
         "browser_act",
         "session_export",
         "session_import",
+        "soul_import",
+        "soul_dream",
+        "soul_vigil",
+        "soul_arm_missions",
+        "soul_export",
     }
 )
 

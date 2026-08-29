@@ -349,12 +349,15 @@ class LocalComputerHost:
                 extra={"via": "cli_host"},
             )
 
-        # Unknown / compound: acknowledge so agent is not stuck
+        # Unknown / compound rail actions need Desktop — do not claim success.
         return public_result(
-            ok=True,
+            ok=False,
             target="cli",
             action=act,
-            message=f"CLI host acknowledged {act} (no-op / limited without Desktop rail)",
+            message=(
+                f"CLI host cannot complete {act}. Start Remedy Desktop for "
+                "Browser rail controls (fill/select/press_hold/act/hover)."
+            ),
             extra={"via": "cli_host", "payload_keys": list(payload.keys())[:12]},
         )
 

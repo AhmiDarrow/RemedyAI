@@ -65,6 +65,13 @@ def test_todo_list_dir_verify_clipboard_which_goals():
     assert p12 is not None and p12.tool == "computer_windows"
     assert p12.arguments.get("mode") == "list"
     assert match_in_app_fast_path("look at this") is None
+    assert match_in_app_fast_path("look at my screen") is None
+    assert match_in_app_fast_path("what changed") is None
+    assert match_in_app_fast_path("what's changed") is None
+    assert match_in_app_fast_path("show me what changed") is None
+    assert match_in_app_fast_path("recall the login flow") is None
+    git_changed = match_in_app_fast_path("what changed in git")
+    assert git_changed is not None and git_changed.tool == "git_status"
     assert match_in_app_fast_path("what's the mission") is None
     assert match_in_app_fast_path("start rmb") is None
     assert match_in_app_fast_path("close the window") is None

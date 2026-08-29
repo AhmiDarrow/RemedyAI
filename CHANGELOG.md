@@ -4,6 +4,30 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed — honesty of done, Linux hands, hive recall, CI gates
+
+- Life-task drive no longer treats optimistic navigate (`ok` + `pending_load`)
+  or `"success"` inside `"unsuccessful"` as a finished step.
+- Linux click/hold/scroll/drag/restore fail closed when xdotool/ydotool/grim
+  are missing; `focus_window` is implemented. The `.deb` Recommends those tools.
+- Vault type refuses when the locator did not produce a settable control.
+  CLI unknown rail actions (`fill`/`select`/`press_hold`) return `ok: false`.
+- Gmail **Send** / **Delete** / **Pay** / **Submit** are owner checkpoints;
+  **Add to cart** is not. CAPTCHA walls also stop `computer_click` / `act`.
+- Build drive/persist treat skip-pass as unverified, not "Machine loop green".
+  Casual writes inject "Do not claim green" when no suite exists. Apply-patch
+  is all-or-nothing; snapshot bisect restores last green.
+- Parent memory search drops hive notes. Soul tools are mother-only. Hive
+  pulses do not dream or arm missions.
+- New messenger sessions seed the focused tab's current provider, not the
+  previous `last_llm_provider`. `/api/models` will not send a stored key to
+  the active custom URL while listing another provider.
+- Grove keeps the Studio terminal mounted so a live PTY survives the switch.
+  CI runs `ruff check --no-fix`, `cargo check` for Tauri, and Windows lock tests.
+- Vault fills require a real editable field (Windows UIA Value; Linux AT-SPI
+  entry). Submit buttons and OCR labels are refused. Linux computer jobs
+  with secrets are sealed; navigate DNS miss fails closed.
+
 ### Fixed — one path jail; Desktop wins over the CLI computer host
 
 - ``path_in_roots`` is the containment check for sandbox hops, open_app

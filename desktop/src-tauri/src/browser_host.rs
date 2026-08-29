@@ -3343,24 +3343,34 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
         {
             Ok(resp) => {
                 let v: serde_json::Value = resp.into_json().unwrap_or_else(|_| json!({}));
-                let capture = v.get("capture").cloned().unwrap_or(json!({}));
-                let mut result = json!({
-                    "ok": true,
-                    "target": "browser",
-                    "action": "screenshot",
-                    "message": "Browser rail capture",
-                    "via": "rust-host",
-                    "url": page_url,
-                    "scale": scale,
-                });
-                if let Some(obj) = capture.as_object() {
-                    if let Some(map) = result.as_object_mut() {
-                        for (k, val) in obj {
-                            map.insert(k.clone(), val.clone());
+                let api_ok = v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false);
+                if !api_ok {
+                    let err = v
+                        .get("error")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("capture refused")
+                        .to_string();
+                    complete_job(agent, &id, false, json!({ "ok": false }), Some(err));
+                } else {
+                    let capture = v.get("capture").cloned().unwrap_or(json!({}));
+                    let mut result = json!({
+                        "ok": true,
+                        "target": "browser",
+                        "action": "screenshot",
+                        "message": "Browser rail capture",
+                        "via": "rust-host",
+                        "url": page_url,
+                        "scale": scale,
+                    });
+                    if let Some(obj) = capture.as_object() {
+                        if let Some(map) = result.as_object_mut() {
+                            for (k, val) in obj {
+                                map.insert(k.clone(), val.clone());
+                            }
                         }
                     }
+                    complete_job(agent, &id, true, result, None);
                 }
-                complete_job(agent, &id, true, result, None);
             }
             Err(e) => complete_job(
                 agent,

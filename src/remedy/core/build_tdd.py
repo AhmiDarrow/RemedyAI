@@ -42,14 +42,14 @@ def materialize_tdd_tests(
             tests_src = synthesize_failing_test(path, sym, behavior=str(u.get("behavior") or ""))
         test_rel = f"tests/test_{_safe(sym)}.py"
         dest = root / test_rel
-        # resolve write jail if available
         try:
             dest = Path(runtime.resolve_tool_path(test_rel, for_write=True))
-        except Exception:
-            try:
-                dest = Path(runtime.resolve_tool_path(test_rel))
-            except Exception:
-                dest = root / test_rel
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": f"write jail refused: {exc}",
+                "written": written,
+            }
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(tests_src, encoding="utf-8")
         written.append(test_rel)

@@ -24,7 +24,7 @@ jobs:
         run: uv sync --dev
 
       - name: Lint
-        run: uv run ruff check .
+        run: uv run ruff check . --no-fix
 
       - name: Type-check (core helpers)
         run: uv run mypy
@@ -81,6 +81,11 @@ jobs:
           tests/test_zip_import_security.py
           tests/test_secret_acl_no_everyone.py
           tests/test_project_scan_jail.py
+          tests/test_instance_lock.py
+          tests/test_poll_lock.py
+          tests/test_stream_lock.py
+          tests/test_additive_followups.py
+          tests/test_quality_adversarial.py
 
   desktop:
     runs-on: ubuntu-latest
@@ -104,3 +109,41 @@ jobs:
 
       - name: Typecheck + production build
         run: npm run build
+
+  cargo-check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install WebKitGTK / Tauri deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libfuse2
+        working-directory: .
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: cargo check
+        run: cargo check --locked

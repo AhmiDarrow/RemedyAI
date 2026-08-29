@@ -115,6 +115,72 @@ def _expect_url_matches(want: str, hay: str) -> bool:
     return not (wq and wq not in hq)
 
 
+_EDIT_ITYPES = frozenset({"password", "text", "email", "search", "tel", "url", "number"})
+_DENY_ITYPES = frozenset({"submit", "button", "checkbox", "hidden", "radio", "reset", "image"})
+_EDIT_ROLES = frozenset(
+    {
+        "textbox",
+        "textarea",
+        "edit",
+        "searchbox",
+        "combobox",
+        "spinbutton",
+        "entry",
+        "password text",
+        "password",
+        "editbar",
+        "spin button",
+        "editable text",
+    }
+)
+_DENY_ROLES = frozenset(
+    {
+        "submit",
+        "button",
+        "push button",
+        "checkbox",
+        "check box",
+        "hidden",
+        "radio",
+        "radio button",
+        "toggle button",
+        "link",
+        "hyperlink",
+    }
+)
+
+
+def _element_is_editable(el: dict[str, Any] | None) -> bool:
+    """True only for real text/password fields — not OCR labels or submit."""
+    if not el:
+        return False
+    role = str(el.get("role") or "").strip().lower()
+    tag = str(el.get("tag") or el.get("control_type") or "").strip().lower()
+    itype = str(el.get("type") or el.get("input_type") or "").strip().lower()
+    if itype in _DENY_ITYPES or role in _DENY_ROLES or tag in _DENY_ROLES:
+        return False
+    if itype in _EDIT_ITYPES:
+        return True
+    if role in _EDIT_ROLES or tag in _EDIT_ROLES:
+        return True
+    # "editbar" / "editable-text" — never bare "text" or "input"
+    return "edit" in role or "edit" in tag
+
+
+def _desktop_vault_uia(el: dict[str, Any] | None) -> bool:
+    """Windows Value pattern destination."""
+    return bool(el is not None and el.get("hwnd") and el.get("uia"))
+
+
+def _atspi_vault_fillable(el: dict[str, Any] | None) -> bool:
+    """Linux AT-SPI entry/password with this control's center — not any x/y."""
+    if not el or not _element_is_editable(el):
+        return False
+    if str(el.get("source") or "").strip().lower() != "atspi":
+        return False
+    return el.get("x") is not None and el.get("y") is not None
+
+
 def _is_host_browser(name: str) -> bool:
     """True when *name* names one of the owner's own web browsers.
 
@@ -1050,6 +1116,24 @@ class ComputerExecutor:
             return el
         return None
 
+    def _browser_vault_target_editable(
+        self, *, ref: str = "", query: str = ""
+    ) -> bool | None:
+        """True/False from last snapshot; None if the destination is unknown."""
+        if ref:
+            bel = self.bridge.get_element_by_ref(ref)
+            if bel is not None:
+                return _element_is_editable(bel)
+        if query:
+            with contextlib.suppress(Exception):
+                from remedy.core.computer.elements import find_best_element
+
+                els = list((self.bridge.last_elements_info() or {}).get("elements") or [])
+                el = find_best_element(els, query) if els else None
+                if el is not None:
+                    return _element_is_editable(el)
+        return None
+
     def _click_matches_query(self, text_q: str, out: dict[str, Any]) -> bool:
         from remedy.core.computer.elements import (
             label_matches_query,
@@ -1683,19 +1767,9 @@ class ComputerExecutor:
             )
         if act is ComputerAction.TYPE:
             text = str(kwargs.get("text") or "")
-            # Report the pre-expansion length so a vault secret's true length
-            # never leaks to the model via char counts.
+            # Pre-expansion length so a vault secret's true length never leaks.
             reported_len = len(text)
             had_vault = "{{" in text
-            # Desktop destination is unverifiable → domain-bound vault items
-            # refuse here by design (owner can store an unbound item if wanted).
-            text, vault_err = self._expand_vault_text(
-                text, destination_url="", action="type", target="desktop"
-            )
-            if vault_err is not None:
-                return vault_err
-            # query=/label= is the same locator family as click text=. ref=
-            # still wins when query is empty; stale ref + query relocates.
             set_ref = str(kwargs.get("ref") or "").strip()
             set_query = field_locator(kwargs.get("query"), kwargs.get("label"))
             locate_meta: dict[str, Any] = {}
@@ -1731,73 +1805,182 @@ class ComputerExecutor:
                         "the value lands in that control, not whatever currently "
                         "has focus."
                     ),
-                    extra={"length": reported_len, "needs": "ref"},
+                    extra={"length": None, "needs": "ref"},
                 )
             if self._web_task_in_flight() and not (
                 set_ref.lower().startswith("c") or set_ref.lower().startswith("w")
             ):
                 return self._refuse_off_rail_desktop("type")
             focused = False
+            el = None
             if set_ref:
                 el = self.bridge.get_element_by_ref(set_ref)
-                if el is not None and el.get("hwnd") and el.get("uia"):
-                    from remedy.core.computer.desktop_uia import element_action
-
-                    res = element_action(
-                        int(el["hwnd"]),
-                        str(el.get("name") or ""),
-                        role=str(el.get("role") or ""),
-                        action="set_value",
-                        text=text,
+            if had_vault:
+                if el is None or not _element_is_editable(el):
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="type",
+                        message=(
+                            "Vault secrets only type into an editable field. "
+                            "Snapshot again and pass ref= for the input, not a "
+                            "button or unlabeled click target."
+                        ),
+                        extra={"length": None, "needs": "ref"},
                     )
-                    if res.get("ok"):
-                        extra = {
-                            "ref": set_ref,
-                            "length": reported_len,
-                            "method": "uia_set_value",
-                            "verified": bool(res.get("verified")),
-                            **self._desktop_evidence(),
-                        }
-                        if set_query:
-                            extra["query"] = set_query
-                        if locate_meta:
-                            extra["located"] = locate_meta
+                if not _desktop_vault_uia(el) and not _atspi_vault_fillable(el):
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="type",
+                        message=(
+                            "Vault secrets only type into an editable field "
+                            "(UIA Value or AT-SPI entry). Will not click a "
+                            "generic x/y target."
+                        ),
+                        extra={"length": None, "needs": "ref"},
+                    )
+            text, vault_err = self._expand_vault_text(
+                text, destination_url="", action="type", target="desktop"
+            )
+            if vault_err is not None:
+                return vault_err
+            if _desktop_vault_uia(el):
+                from remedy.core.computer.desktop_uia import element_action
+
+                res = element_action(
+                    int(el["hwnd"]),
+                    str(el.get("name") or ""),
+                    role=str(el.get("role") or ""),
+                    action="set_value",
+                    text=text,
+                )
+                if res.get("ok"):
+                    extra = {
+                        "ref": set_ref,
+                        "length": None if had_vault else reported_len,
+                        "method": "uia_set_value",
+                        "verified": bool(res.get("verified")),
+                        **self._desktop_evidence(),
+                    }
+                    if set_query:
+                        extra["query"] = set_query
+                    if locate_meta:
+                        extra["located"] = locate_meta
+                    return public_result(
+                        ok=True,
+                        target="desktop",
+                        action="type",
+                        message=str(res.get("message") or "Set value"),
+                        extra=extra,
+                    )
+                if had_vault:
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="type",
+                        message=(
+                            "Vault secrets only type into an editable field "
+                            "(UIA Value). This control is not settable — "
+                            "will not click and keystroke the secret."
+                        ),
+                        extra={"length": None, "needs": "ref"},
+                    )
+                with contextlib.suppress(Exception):
+                    win.click_element(el)
+                    time.sleep(0.1)
+                focused = True
+            elif had_vault and _atspi_vault_fillable(el):
+                with contextlib.suppress(Exception):
+                    win.click_element(el)
+                    time.sleep(0.1)
+                typed_box: list[int] = [0]
+                try:
+                    win.type_text(
+                        text,
+                        abort_check=self._abort_check,
+                        chars_typed=typed_box,
+                    )
+                except RuntimeError as e:
+                    if "abort" in str(e).lower():
+                        self._cancel_open_jobs(reason="aborted")
                         return public_result(
-                            ok=True,
+                            ok=False,
                             target="desktop",
                             action="type",
-                            message=str(res.get("message") or "Set value"),
-                            extra=extra,
+                            message="Aborted by user during type",
+                            extra={"length": None, "typed": None, "aborted": True},
                         )
-                    # Not settable → click it to focus, then fall through to keys.
-                    with contextlib.suppress(Exception):
-                        win.click_element(el)
-                        time.sleep(0.1)
-                    focused = True
+                    raise
+                extra = {
+                    "ref": set_ref,
+                    "length": None,
+                    "method": "atspi_type",
+                    **self._desktop_evidence(),
+                }
+                if set_query:
+                    extra["query"] = set_query
+                return public_result(
+                    ok=True,
+                    target="desktop",
+                    action="type",
+                    message="Typed a stored secret",
+                    extra=extra,
+                )
+            elif el is not None:
+                if had_vault:
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="type",
+                        message=(
+                            "Vault secrets only type into an editable field. "
+                            "Will not click and keystroke the secret."
+                        ),
+                        extra={"length": None, "needs": "ref"},
+                    )
+                with contextlib.suppress(Exception):
+                    win.click_element(el)
+                    time.sleep(0.1)
+                focused = True
             if locate_meta and not focused:
+                if had_vault:
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="type",
+                        message=(
+                            "Vault secrets only type into an editable field. "
+                            "Will not click and keystroke the secret."
+                        ),
+                        extra={"length": None, "needs": "ref"},
+                    )
                 with contextlib.suppress(Exception):
                     win.click(
                         int(locate_meta.get("x") or 0),
                         int(locate_meta.get("y") or 0),
                     )
                     time.sleep(0.1)
+            if had_vault:
+                return public_result(
+                    ok=False,
+                    target="desktop",
+                    action="type",
+                    message=(
+                        "Vault secrets only type into an editable field. "
+                        "Will not click and keystroke the secret."
+                    ),
+                    extra={"length": None, "needs": "ref"},
+                )
             typed_box: list[int] = [0]
             type_method = "keystrokes"
             try:
-                # Secrets always go per-char (never through the clipboard).
-                if had_vault:
-                    win.type_text(
-                        text,
-                        abort_check=self._abort_check,
-                        chars_typed=typed_box,
-                    )
-                else:
-                    tf = win.type_text_fast(
-                        text,
-                        abort_check=self._abort_check,
-                        chars_typed=typed_box,
-                    )
-                    type_method = str(tf.get("method") or "keystrokes")
+                tf = win.type_text_fast(
+                    text,
+                    abort_check=self._abort_check,
+                    chars_typed=typed_box,
+                )
+                type_method = str(tf.get("method") or "keystrokes")
             except RuntimeError as e:
                 if "abort" in str(e).lower():
                     self._cancel_open_jobs(reason="aborted")
@@ -1806,10 +1989,14 @@ class ComputerExecutor:
                         ok=False,
                         target="desktop",
                         action="type",
-                        message=f"Aborted by user during type after {n} chars",
+                        message=(
+                            "Aborted by user during type"
+                            if had_vault
+                            else f"Aborted by user during type after {n} chars"
+                        ),
                         extra={
                             "length": None if had_vault else reported_len,
-                            "typed": n,
+                            "typed": None if had_vault else n,
                             "aborted": True,
                         },
                     )
@@ -1821,10 +2008,14 @@ class ComputerExecutor:
                     ok=False,
                     target="desktop",
                     action="type",
-                    message=f"Aborted by user during type after {n} chars",
+                    message=(
+                        "Aborted by user during type"
+                        if had_vault
+                        else f"Aborted by user during type after {n} chars"
+                    ),
                     extra={
                         "length": None if had_vault else reported_len,
-                        "typed": n,
+                        "typed": None if had_vault else n,
                         "aborted": True,
                     },
                 )
@@ -2449,6 +2640,21 @@ class ComputerExecutor:
                     ),
                     extra={"needs": "ref"},
                 )
+            if had_vault:
+                editable = self._browser_vault_target_editable(
+                    ref=set_ref, query=set_query
+                )
+                if editable is not True:
+                    return public_result(
+                        ok=False,
+                        target="browser",
+                        action="type",
+                        message=(
+                            "Vault secrets only type into an editable field. "
+                            "That control is not an input."
+                        ),
+                        extra={"needs": "ref"},
+                    )
             # Binding domain is the LIVE page (probed inside), not last navigate.
             expanded, vault_err = self._expand_vault_text(
                 text,
@@ -2458,6 +2664,8 @@ class ComputerExecutor:
             if vault_err is not None:
                 return vault_err
             payload["text"] = expanded
+            if had_vault:
+                payload["_has_secret"] = True
             if set_ref:
                 payload["ref"] = set_ref
         if act is ComputerAction.NAVIGATE and payload.get("url"):
@@ -2662,6 +2870,15 @@ class ComputerExecutor:
                     )
             except Exception:
                 pass
+            return public_result(
+                ok=False,
+                target="browser",
+                action="screenshot",
+                message=(
+                    "Browser rail bounds missing — open the Browser rail and "
+                    "wait for bounds. Not capturing the full desktop as a rail shot."
+                ),
+            )
 
         if act is ComputerAction.FILL:
             return self._computer_fill(kwargs)
@@ -3421,11 +3638,8 @@ class ComputerExecutor:
                     hint=label or None,
                 )
             elif value:
-                if label and not ref:
-                    # A missed label must not fall through to typing into
-                    # whatever happens to have focus. Click still focuses the
-                    # field on an un-rebuilt host; query= lets the host
-                    # relocate after a desktop rebuild.
+                if label and not ref and "{{" not in value:
+                    # Vault values must not click-then-type; TYPE checks editable.
                     clicked = self._run_browser(ComputerAction.CLICK, text=label)
                     if not clicked.get("ok"):
                         fail = dict(clicked)
@@ -3573,14 +3787,6 @@ class ComputerExecutor:
             nonlocal type_text
             had_vault = "{{" in type_text
             typed_reported = "a stored secret" if had_vault else f"{len(type_text)} chars"
-            type_text, vault_err = self._expand_vault_text(
-                type_text,
-                action="act",
-                target="browser",
-            )
-            if vault_err is not None:
-                vault_err["steps"] = log
-                return vault_err
             type_query = field_locator(click)
             if had_vault and not type_query:
                 return public_result(
@@ -3595,6 +3801,27 @@ class ComputerExecutor:
                     ),
                     extra={"steps": log, "needs": "ref"},
                 )
+            if had_vault:
+                editable = self._browser_vault_target_editable(query=type_query)
+                if editable is not True:
+                    return public_result(
+                        ok=False,
+                        target="browser",
+                        action="act",
+                        message=(
+                            "Vault secrets only type into an editable field. "
+                            "That control is not an input — will not type the secret."
+                        ),
+                        extra={"steps": log, "needs": "ref"},
+                    )
+            type_text, vault_err = self._expand_vault_text(
+                type_text,
+                action="act",
+                target="browser",
+            )
+            if vault_err is not None:
+                vault_err["steps"] = log
+                return vault_err
             if not click and any(
                 w in (goal + " " + type_text).lower()
                 for w in ("email", "user", "login", "@")

@@ -489,8 +489,9 @@ def register_auth_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
 
             allowed_hosts = {
                 _host(str(meta.get("base_url") or "")),
-                _host(str(cfg.get("llm_base_url") or "")),
             }
+            if pid == str(cfg.get("llm_provider") or "").strip().lower():
+                allowed_hosts.add(_host(str(cfg.get("llm_base_url") or "")))
             allowed_hosts.discard("")
             if _host(base) not in allowed_hosts:
                 return {

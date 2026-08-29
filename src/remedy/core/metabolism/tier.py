@@ -69,16 +69,14 @@ _L0_CWD = re.compile(
 )
 _L0_LIFE_DRIVE = re.compile(
     r"(?is)^\s*("
-    r"what should i (do|work on|focus on)|"
-    r"what('?s| is) next|"
-    r"what now|"
-    r"next (step|action|move)|"
+    r"what should i (do|work on|focus on).*(life|goals?|/goal)|"
+    r"(what('?s| is) next|what now|next (step|action|move)).*(life|goals?|/goal)|"
     r"work on my goals?|"
     r"handle my goals?|"
     r"keep going on my (life )?goals?|"
     r"make progress on my goals?|"
     r"do the next (life )?step|"
-    r"take the next step"
+    r"take the next (life )?step"
     r")\s*[.?!]?\s*$"
 )
 _L0_LIFE_PULSE = re.compile(

@@ -186,10 +186,14 @@ def test_looks_like_url_joins_list_args():
     assert infer_sticky_target("auto", url=["https://example.com"]) == "browser"
 
 
-def test_normalize_url_rejects_task_text_leak():
+def test_normalize_url_rejects_task_text_leak(monkeypatch):
     """User prose must never become the Browser rail address bar."""
     from remedy.core.computer.router import is_valid_navigate_url, normalize_url
 
+    monkeypatch.setattr(
+        "remedy.core.agent_web_tools._resolve_public_ips",
+        lambda host: ["8.8.8.8"] if host else [],
+    )
     junk = "gmail sign in, once I want you to log me in the login input my username user@example.com"
     assert normalize_url(junk) == ""
     assert is_valid_navigate_url(junk) is False
@@ -841,10 +845,34 @@ def test_secret_job_fails_closed_when_seal_fails(tmp_path: Path, monkeypatch):
         "_job_dpapi_protect",
         lambda _b: (_ for _ in ()).throw(OSError("dpapi down")),
     )
+    monkeypatch.setattr(
+        hb,
+        "_seal_payload_nacl",
+        lambda _p: (_ for _ in ()).throw(OSError("nacl down")),
+    )
     b = ComputerHostBridge(home_dir=tmp_path)
     with pytest.raises(OSError):
         b.enqueue("type", {"text": "s3cret-password"})
     assert list((tmp_path / "computer" / "jobs").glob("*.json")) == []
+
+
+def test_secret_job_uses_nacl_when_dpapi_fails(tmp_path: Path, monkeypatch):
+    from remedy.core.computer import host_bridge as hb
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    monkeypatch.setattr(hb, "_job_dpapi_available", lambda: True)
+    monkeypatch.setattr(
+        hb,
+        "_job_dpapi_protect",
+        lambda _b: (_ for _ in ()).throw(OSError("dpapi down")),
+    )
+    b = ComputerHostBridge(home_dir=tmp_path)
+    job = b.enqueue("type", {"text": "s3cret-password", "ref": "e3"})
+    on_disk = json.loads((tmp_path / "computer" / "jobs" / f"{job.id}.json").read_text())
+    dumped = json.dumps(on_disk)
+    assert "s3cret-password" not in dumped
+    assert on_disk["payload"]["_sealed"] is True
+    assert on_disk["payload"]["encoding"] == "nacl"
 
 
 def test_navigate_job_writes_plain_when_dpapi_unavailable(tmp_path: Path, monkeypatch):

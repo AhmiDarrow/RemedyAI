@@ -26,6 +26,12 @@
           "xdg-utils",
           "libvulkan1",
           "libgomp1"
+        ],
+        "recommends": [
+          "grim",
+          "xdotool | ydotool",
+          "wmctrl",
+          "scrot"
         ]
       },
       "appimage": {

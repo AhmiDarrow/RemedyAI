@@ -205,6 +205,19 @@ class EternalCAS:
                 self._invalidate_snap()
             return cur.rowcount > 0
 
+    def tombstone_hive_sessions(self) -> int:
+        """Tombstone CAS rows written under hive_* session ids."""
+        with self._lock:
+            cur = self._db_req().execute(
+                "UPDATE objects SET tombstone = 1 "
+                "WHERE tombstone = 0 AND session_id LIKE 'hive_%'"
+            )
+            self._db_req().commit()
+            n = int(cur.rowcount or 0)
+            if n:
+                self._invalidate_snap()
+            return n
+
     def fetch_hot(
         self,
         *,
