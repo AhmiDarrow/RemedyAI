@@ -80,4 +80,5 @@ def test_spa_does_not_claim_jobs_next() -> None:
     host = _host()
     assert "only=navigate,ready,snapshot,page_text" not in host
     assert 'action == "screenshot"' in host
+    assert "fn rust_action_ok" in host
     assert "/api/computer/jobs/next?wait_ms=" in host or '/api/computer/jobs/next"' in host

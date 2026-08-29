@@ -1,5 +1,5 @@
 /** Loopback computer-host API (hello, rail UI). Rust owns jobs/next. */
-import { apiFetch, authHeaders, clearApiToken, ensureApiToken, getServerUrl } from './client'
+import { authHeaders, clearApiToken, ensureApiToken, getServerUrl } from './client'
 
 function loopbackApi(): string {
   return `${getServerUrl()}/api`
@@ -54,18 +54,6 @@ export async function computerHostHello(opts?: {
       session_id: opts?.sessionId || undefined,
     }),
   })
-}
-
-export async function computerHostStatus(): Promise<{
-  host_connected?: boolean
-  browser_bounds?: (BrowserBoundsPayload & { scale?: number }) | null
-  pending_jobs?: number
-}> {
-  try {
-    return await hostFetch('/computer/host/status')
-  } catch {
-    return apiFetch('/computer/host/status')
-  }
 }
 
 export type ComputerUiCommand = {
