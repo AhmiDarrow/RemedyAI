@@ -2839,7 +2839,7 @@ fn computer_host_loop(app: AppHandle) {
 
         // take=1 clears command atomically — prevents reloading the same wiki forever
         if let Ok(resp) = auth_req(
-            agent.get(&api_url("/api/computer/ui/command?take=1")),
+            agent.get(&api_url("/api/computer/ui/command?take=1&driver=rust")),
         )
         .call()
         {
@@ -2865,9 +2865,11 @@ fn computer_host_loop(app: AppHandle) {
         // it no longer claims jobs/next. Two drivers used to race snapshot
         // and dual-spam the API during a fat ReAct turn.
         let url = if wait_ms > 0 {
-            api_url(&format!("/api/computer/jobs/next?wait_ms={wait_ms}"))
+            api_url(&format!(
+                "/api/computer/jobs/next?wait_ms={wait_ms}&driver=rust"
+            ))
         } else {
-            api_url("/api/computer/jobs/next")
+            api_url("/api/computer/jobs/next?driver=rust")
         };
         if let Ok(resp) = auth_req(agent.get(&url)).call()
         {

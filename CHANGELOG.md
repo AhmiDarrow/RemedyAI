@@ -4,6 +4,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed — one path jail; Desktop wins over the CLI computer host
+
+- ``path_in_roots`` is the containment check for sandbox hops, open_app
+  search dirs, and attachment paths. CLI host will not start (and will
+  yield) when the Desktop rust poller owns ``jobs/next``.
+
 ### Fixed — one hide-window helper; no second HTTP computer poller
 
 - RMB / vision / MDL / OpenSERP / secret ACL / uninstall use

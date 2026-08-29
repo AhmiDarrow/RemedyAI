@@ -1603,6 +1603,19 @@ def test_ui_command_peek_is_not_the_poller(tmp_path, monkeypatch):
     assert st2.json().get("host_connected") is True
 
 
+def test_host_driver_rust_vs_cli(tmp_path: Path):
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    assert b.host_driver() == ""
+    b.mark_host_alive(poller=True, driver="cli")
+    assert b.host_driver() == "cli"
+    b.mark_host_alive(poller=True, driver="rust")
+    assert b.host_driver() == "rust"
+    b.mark_host_dead()
+    assert b.host_driver() == ""
+
+
 def test_hello_alone_not_host_connected(tmp_path: Path):
     from remedy.core.computer.host_bridge import ComputerHostBridge
 

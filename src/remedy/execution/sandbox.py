@@ -219,32 +219,14 @@ class SubprocessSandbox(Sandbox):
         )
 
     def _resolve_path(self, cwd: Path | None, raw: str) -> Path:
-        dest = Path(raw)
-        if not dest.is_absolute():
-            dest = (cwd or Path(".")) / dest
-        try:
-            return dest.expanduser().resolve(strict=False)
-        except OSError:
-            return dest.expanduser().absolute()
+        from remedy.core.workspace import resolve_existing_path
+
+        return resolve_existing_path(raw, cwd=cwd)
 
     def _path_in_jail(self, dest: Path) -> bool:
-        if not self.allowed_paths:
-            return True
-        try:
-            resolved = dest.expanduser().resolve(strict=False)
-        except OSError:
-            resolved = dest.expanduser().absolute()
-        for p in self.allowed_paths:
-            try:
-                root = p.expanduser().resolve(strict=False)
-            except OSError:
-                root = p.expanduser().absolute()
-            try:
-                if resolved == root or resolved.is_relative_to(root):
-                    return True
-            except (ValueError, TypeError, OSError):
-                continue
-        return False
+        from remedy.core.workspace import path_in_roots
+
+        return path_in_roots(dest, self.allowed_paths)
 
     async def _execute_shell_chain(
         self,

@@ -33,12 +33,17 @@ class FakeBridge:
         self.alive_calls = 0
         self._connected = False
 
-    def mark_host_alive(self, *, poller: bool = False) -> None:
+    def mark_host_alive(self, *, poller: bool = False, driver: str = "") -> None:
         self.alive_calls += 1
         self._connected = True
+        if driver:
+            self._driver = driver
 
     def host_connected(self, **_kw) -> bool:
         return self._connected
+
+    def host_driver(self, **_kw) -> str:
+        return getattr(self, "_driver", "")
 
     def pending_count(self) -> int:
         return 0
@@ -258,6 +263,40 @@ def test_a_later_home_does_not_move_an_existing_host(tmp_path, monkeypatch):
     first = CH.get_local_computer_host(tmp_path)
     assert CH.get_local_computer_host(tmp_path / "elsewhere").home_dir == tmp_path
     assert first.home_dir == tmp_path
+
+
+def test_cli_host_refuses_when_desktop_owns(tmp_path, monkeypatch):
+    monkeypatch.setattr(CH, "_local_host", None)
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    b.mark_host_alive(poller=True, driver="rust")
+    monkeypatch.setattr(
+        "remedy.core.computer.host_bridge.get_host_bridge", lambda *a, **kw: b
+    )
+    host = CH.start_cli_computer_host(tmp_path)
+    assert host.running is False
+    assert host.last_error == "desktop_owns_host"
+
+
+def test_cli_host_yields_when_desktop_takes_over(tmp_path, monkeypatch):
+    import time
+
+    monkeypatch.setattr(CH, "_local_host", None)
+    from remedy.core.computer.host_bridge import ComputerHostBridge
+
+    b = ComputerHostBridge(home_dir=tmp_path)
+    monkeypatch.setattr(
+        "remedy.core.computer.host_bridge.get_host_bridge", lambda *a, **kw: b
+    )
+    host = CH.start_cli_computer_host(tmp_path)
+    assert host.running is True
+    b.mark_host_alive(poller=True, driver="rust")
+    deadline = time.time() + 2.0
+    while host.running and time.time() < deadline:
+        time.sleep(0.05)
+    assert host.running is False
+    host.stop(force=True)
 
 
 def test_stopping_a_host_that_was_never_created_is_fine(monkeypatch):
