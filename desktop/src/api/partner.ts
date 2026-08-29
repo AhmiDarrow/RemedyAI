@@ -186,6 +186,12 @@ export type LifeTaskStep = {
   block_reason?: string
 }
 
+export type LifeTaskHandoff = {
+  kind?: string
+  auto?: boolean
+  paused_url?: string
+}
+
 export type LifeTaskCard = {
   task_id?: string | null
   goal?: string
@@ -202,6 +208,7 @@ export type LifeTaskCard = {
   kind?: string
   session_id?: string | null
   updated_at?: number
+  handoff?: LifeTaskHandoff
 }
 
 export type LifeTaskCurrent = {
@@ -236,6 +243,25 @@ export async function listLifeTasks(
 
 export async function getLifeTask(taskId: string): Promise<Record<string, unknown>> {
   return apiFetch(`/life-tasks/${encodeURIComponent(taskId)}`)
+}
+
+export async function probeLifeTask(opts?: {
+  sessionId?: string | null
+  taskId?: string | null
+  pageText?: string
+  url?: string
+  railReady?: boolean | null
+}): Promise<LifeTaskActResult & { cleared?: boolean; resumed?: boolean }> {
+  return apiFetch('/life-tasks/probe', {
+    method: 'POST',
+    body: JSON.stringify({
+      session_id: opts?.sessionId || undefined,
+      task_id: opts?.taskId || undefined,
+      page_text: opts?.pageText || '',
+      url: opts?.url || '',
+      rail_ready: opts?.railReady ?? null,
+    }),
+  })
 }
 
 export async function actLifeTask(

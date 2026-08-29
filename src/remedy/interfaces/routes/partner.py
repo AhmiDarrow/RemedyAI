@@ -101,6 +101,14 @@ class LifeTaskActRequest(BaseModel):
     approval_id: str | None = None
 
 
+class LifeTaskProbeRequest(BaseModel):
+    session_id: str | None = None
+    task_id: str | None = None
+    page_text: str = ""
+    url: str = ""
+    rail_ready: bool | None = None
+
+
 class IdentityExportRequest(BaseModel):
     passphrase: str = Field(..., min_length=8, description="User passphrase (never stored)")
     dest: str = Field(
@@ -209,6 +217,23 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                 session_id=req.session_id,
                 task_id=req.task_id,
                 approval_id=req.approval_id,
+                home=_life_home(),
+                runtime=runtime,
+            )
+
+        return await asyncio.to_thread(_run)
+
+    @app.post("/api/life-tasks/probe")
+    async def probe_life_task_wall(req: LifeTaskProbeRequest):
+        from remedy.core.life_task_drive import probe_handoff
+
+        def _run():
+            return probe_handoff(
+                session_id=req.session_id,
+                task_id=req.task_id,
+                page_text=req.page_text,
+                url=req.url,
+                rail_ready=req.rail_ready,
                 home=_life_home(),
                 runtime=runtime,
             )

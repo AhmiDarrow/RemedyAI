@@ -3,6 +3,7 @@ import { useI18n } from '../i18n'
 import {
   actLifeTask,
   getCurrentLifeTask,
+  probeLifeTask,
   type LifeTaskCard,
   type LifeTaskStep,
 } from '../api/partner'
@@ -76,6 +77,31 @@ export function LifeTaskBanner({
     const id = window.setInterval(() => void refresh(), 1500)
     return () => window.clearInterval(id)
   }, [refresh, sessionId])
+
+  const autoHandoff = Boolean(card?.handoff?.auto) && String(card?.status || '') === 'need_you'
+  useEffect(() => {
+    if (!autoHandoff) return
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const res = await probeLifeTask({
+          sessionId,
+          taskId: card?.task_id,
+        })
+        if (cancelled) return
+        if (res.task) setCard(res.task)
+        if (res.spoken && res.cleared) setMessage(res.spoken)
+      } catch {
+        // server down
+      }
+    }
+    void tick()
+    const id = window.setInterval(() => void tick(), 2500)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [autoHandoff, sessionId, card?.task_id])
 
   useEffect(() => {
     if (refreshSignal === 0) return

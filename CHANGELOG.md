@@ -4,6 +4,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — resume after password / 2FA / CAPTCHA
+
+- When a life-task stops for sign-in or a human-check wall, the Browser
+  rail stays interactive. After the wall URL/text is gone, remaining
+  steps continue. Pay / send / delete never auto-resume.
+
 ### Added — life-task recipes (no model JSON)
 
 - ``life_drive`` accepts ``recipe=open|search|shop|fill|sign_in`` plus
