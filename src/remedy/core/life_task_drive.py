@@ -313,6 +313,28 @@ def _publish_drive(
         markdown=markdown,
         session_id=session_id,
     )
+    if status == "need_you":
+        from remedy.core.life_task_handoff import handoff_payload
+
+        src = next((s for s in parsed if step_is_checkpoint(s)), None)
+        paused = ""
+        for r in reversed(results):
+            obs = r.observed or ""
+            if "://" in obs:
+                part = obs.split("@")[-1].strip()
+                if part.startswith("http"):
+                    paused = part
+                    break
+        if not paused:
+            try:
+                from remedy.core.computer.host_bridge import get_host_bridge
+
+                paused = get_host_bridge().last_observed_url()
+            except Exception:
+                paused = ""
+        payload = handoff_payload(src or (results[-1].as_dict() if results else None), paused_url=paused)
+        if payload:
+            card["handoff"] = payload
     return publish(card, session_id=session_id)
 
 
@@ -901,6 +923,86 @@ def act_life_task(
         }
 
     return {"ok": False, "action": act, "spoken": "Say Yes, No, or Explain.", "task": sse_card(card)}
+
+
+def probe_handoff(
+    *,
+    session_id: str | None = None,
+    task_id: str | None = None,
+    page_text: str = "",
+    url: str = "",
+    rail_ready: bool | None = None,
+    home: Any = None,
+    run_action: RunAction | None = None,
+    runtime: Any = None,
+) -> dict[str, Any]:
+    """If the owner finished a captcha/password/2FA wall, continue the drive."""
+    from remedy.core.life_task_handoff import auto_resume_kind, wall_cleared
+    from remedy.core.life_task_hub import current, publish, sse_card
+
+    card = current(session_id)
+    tid = (task_id or (card or {}).get("task_id") or "").strip()
+    if not card or str(card.get("status") or "") != "need_you":
+        return {"ok": True, "cleared": False, "task": sse_card(card)}
+    hand = card.get("handoff") if isinstance(card.get("handoff"), dict) else {}
+    kind = str((hand or {}).get("kind") or "")
+    if not auto_resume_kind(kind):
+        return {
+            "ok": True,
+            "cleared": False,
+            "reason": "needs_yes",
+            "task": sse_card(card),
+        }
+    ready = rail_ready
+    live_url = coerce_text_arg(url)
+    if ready is None or not live_url:
+        try:
+            from remedy.core.computer.host_bridge import get_host_bridge
+
+            br = get_host_bridge()
+            if ready is None:
+                ready = bool(br.host_connected())
+            if not live_url:
+                live_url = br.last_observed_url()
+        except Exception:
+            if ready is None:
+                ready = False
+    paused = str((hand or {}).get("paused_url") or "")
+    if wall_cleared(
+        kind,
+        page_text=page_text,
+        url=live_url,
+        paused_url=paused,
+        rail_ready=bool(ready),
+    ):
+        if tid:
+            out = resume_after_handoff(
+                tid, run_action=run_action, runtime=runtime, home=home
+            )
+            return {
+                "ok": True,
+                "cleared": True,
+                "resumed": True,
+                "spoken": str(out.get("spoken") or out.get("markdown") or ""),
+                "task": sse_card(current(session_id)),
+            }
+        return {"ok": True, "cleared": True, "resumed": False, "task": sse_card(card)}
+    spoken = (
+        "Open the Browser rail, then finish the sign-in or CAPTCHA. "
+        "Remedy will continue after."
+        if not ready
+        else "The Browser rail is ready. Finish the sign-in or CAPTCHA, "
+        "then Remedy will continue."
+    )
+    card = dict(card)
+    card["spoken"] = spoken
+    publish(card, session_id=session_id)
+    return {
+        "ok": True,
+        "cleared": False,
+        "spoken": spoken,
+        "task": sse_card(card),
+    }
 
 
 def _observed_line(blob: dict[str, Any]) -> str:

@@ -98,11 +98,14 @@ def sse_card(card: dict[str, Any] | None) -> dict[str, Any]:
         "kind",
         "session_id",
         "updated_at",
+        "handoff",
     )
-    out = {k: card.get(k) for k in keys if card.get(k) not in (None, "")}
+    out = {k: card.get(k) for k in keys if card.get(k) not in (None, "", {})}
     out["steps"] = steps_out
     if card.get("choices"):
         out["choices"] = list(card.get("choices") or [])
+    if isinstance(card.get("handoff"), dict) and card["handoff"]:
+        out["handoff"] = dict(card["handoff"])
     return out
 
 
