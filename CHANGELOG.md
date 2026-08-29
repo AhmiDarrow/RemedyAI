@@ -4,6 +4,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — life-task recipes (no model JSON)
+
+- ``life_drive`` accepts ``recipe=open|search|shop|fill|sign_in`` plus
+  ``url`` / ``query`` / ``vault`` handles. A goal like "buy milk on
+  instacart" expands on this PC. Place order / sign-in / submit stay
+  checkpoints.
+
 ### Added — owner card for a life-task drive
 
 - Desktop renders the plan as one spoken sentence, Yes / No / Explain, and

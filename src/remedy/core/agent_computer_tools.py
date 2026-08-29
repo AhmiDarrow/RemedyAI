@@ -1482,6 +1482,10 @@ def register_computer_tools(runtime: Any) -> None:
         steps: Any = "",
         max_retries: int = 1,
         task_id: str = "",
+        recipe: str = "",
+        url: str = "",
+        query: str = "",
+        vault: str = "",
     ) -> str:
         """Machine-owned computer drive: act → verify → one retry → escalate."""
         from remedy.core.life_task_drive import (
@@ -1494,7 +1498,11 @@ def register_computer_tools(runtime: Any) -> None:
         tid = coerce_text_arg(task_id)
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
         sid = turn_session_id(runtime)
-        if tid and not coerce_text_arg(steps):
+        rec = coerce_text_arg(recipe)
+        dest = coerce_text_arg(url)
+        q = coerce_text_arg(query)
+        vault_h = coerce_text_arg(vault)
+        if tid and not coerce_text_arg(steps) and not rec and not dest:
             result = resume_life_task(
                 tid,
                 runtime=runtime,
@@ -1511,6 +1519,10 @@ def register_computer_tools(runtime: Any) -> None:
             session_id=sid,
             home=home,
             task_id=tid or None,
+            recipe=rec,
+            url=dest,
+            query=q,
+            vault=vault_h,
         )
         return format_drive_result(result)
 
@@ -1545,13 +1557,26 @@ def register_computer_tools(runtime: Any) -> None:
         "Drive a life task on this PC (navigate/click/type/fill) with "
         "act→verify→retry→escalate. Never marks the goal done without an "
         "observed ok. Pay/send/password/CAPTCHA steps stop for the owner. "
-        "steps=[{title, action, url?, text?, expect_text?}]. "
-        "task_id= resumes a saved drive (checkpoints still stop).",
+        "Prefer recipe=open|search|shop|fill|sign_in with url= / query= / "
+        "vault=handles — do not invent a JSON plan when a recipe fits. "
+        "steps=[{title, action, url?, text?, expect_text?}] only when the "
+        "recipe cannot express it. task_id= resumes a saved drive "
+        "(checkpoints still stop).",
         life_drive,
         {
             "type": "object",
             "properties": {
                 "goal": {"type": "string"},
+                "recipe": {
+                    "type": "string",
+                    "description": "open | search | shop | fill | sign_in",
+                },
+                "url": {"type": "string"},
+                "query": {"type": "string"},
+                "vault": {
+                    "type": "string",
+                    "description": "Comma-separated vault handles, never values",
+                },
                 "steps": {
                     "description": "JSON array of {title, action, url?, text?, expect_text?}",
                     "anyOf": [
