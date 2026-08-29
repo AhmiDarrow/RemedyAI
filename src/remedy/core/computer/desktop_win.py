@@ -1625,10 +1625,13 @@ def open_app(
             f"open_app refuses unsafe app name for shell start: {raw[:48]!r}"
             + (f" · {hint}" if hint else "")
         )
+    from remedy.execution.process import hidden_subprocess_kwargs
+
     subprocess.Popen(
         ["cmd", "/c", "start", "", raw],
         shell=False,
         close_fds=True,
+        **hidden_subprocess_kwargs(),
     )
     return {"app": raw, "method": "cmd start", "target": raw}
 
@@ -1676,10 +1679,13 @@ def open_url(url: str) -> dict[str, Any]:
             import subprocess
 
             # Empty title arg after start is required for URLs with &
+            from remedy.execution.process import hidden_subprocess_kwargs
+
             subprocess.Popen(
                 ["cmd", "/c", "start", "", u],
                 shell=False,
                 close_fds=True,
+                **hidden_subprocess_kwargs(),
             )
             return {"url": u, "method": "cmd start"}
     import webbrowser

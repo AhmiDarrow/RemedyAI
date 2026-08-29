@@ -178,10 +178,11 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
     ):
         """Desktop host claims the next pending browser job (or null).
 
-        *exclude*: comma-separated actions to leave pending (SPA should pass
-        ``exclude=navigate`` so Rust owns in-rail navigates via ui_command).
-        *only*: if set, only claim these actions (Rust backup: ``only=navigate``).
+        *exclude*: comma-separated actions to leave pending.
+        *only*: if set, only claim these actions.
         *wait_ms*: block until enqueue or timeout (wake-on-enqueue; max 5000).
+
+        Packaged desktop: Rust computer-host is the only poller.
         """
         b = _bridge()
         b.mark_host_alive(poller=True)

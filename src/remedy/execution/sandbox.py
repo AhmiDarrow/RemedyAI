@@ -11,7 +11,10 @@ import contextlib
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from remedy.execution.host.runner import ChainHop
 
 from remedy.core.security import check_dangerous_command
 
@@ -164,40 +167,21 @@ class SubprocessSandbox(Sandbox):
                 duration_ms=0.0,
             )
 
-        # Enforce allowed_paths jail: verify workdir is within allowed paths.
-        # Resolve both sides the same way so symlinks / mixed path forms compare equal.
-        if self.allowed_paths and workdir:
-            try:
-                resolved = workdir.expanduser().resolve(strict=False)
-            except OSError:
-                resolved = workdir.expanduser().absolute()
-            allowed = False
-            for p in self.allowed_paths:
-                try:
-                    root = p.expanduser().resolve(strict=False)
-                except OSError:
-                    root = p.expanduser().absolute()
-                try:
-                    if resolved == root or resolved.is_relative_to(root):
-                        allowed = True
-                        break
-                except (ValueError, TypeError, OSError):
-                    continue
-            if not allowed:
-                return ExecutionResult(
-                    exit_code=-1,
-                    stderr=f"Workdir {workdir} not in allowed paths: {self.allowed_paths}",
-                    duration_ms=0.0,
-                )
+        if self.allowed_paths and workdir and not self._path_in_jail(Path(workdir)):
+            return ExecutionResult(
+                exit_code=-1,
+                stderr=f"Workdir {workdir} not in allowed paths: {self.allowed_paths}",
+                duration_ms=0.0,
+            )
 
-        from remedy.execution.host.runner import expand_and_chain_argv
+        from remedy.execution.host.runner import expand_shell_chain
 
-        hops = expand_and_chain_argv(
+        hops = expand_shell_chain(
             list(command),
             project_path=workdir,
         )
         if hops and len(hops) >= 2:
-            return await self._execute_and_chain(
+            return await self._execute_shell_chain(
                 hops,
                 workdir=workdir,
                 timeout_seconds=timeout_seconds,
@@ -212,23 +196,59 @@ class SubprocessSandbox(Sandbox):
             start=start,
         )
 
-    async def _execute_and_chain(
+    def _resolve_path(self, cwd: Path | None, raw: str) -> Path:
+        dest = Path(raw)
+        if not dest.is_absolute():
+            dest = (cwd or Path(".")) / dest
+        try:
+            return dest.expanduser().resolve(strict=False)
+        except OSError:
+            return dest.expanduser().absolute()
+
+    def _path_in_jail(self, dest: Path) -> bool:
+        if not self.allowed_paths:
+            return True
+        try:
+            resolved = dest.expanduser().resolve(strict=False)
+        except OSError:
+            resolved = dest.expanduser().absolute()
+        for p in self.allowed_paths:
+            try:
+                root = p.expanduser().resolve(strict=False)
+            except OSError:
+                root = p.expanduser().absolute()
+            try:
+                if resolved == root or resolved.is_relative_to(root):
+                    return True
+            except (ValueError, TypeError, OSError):
+                continue
+        return False
+
+    async def _execute_shell_chain(
         self,
-        hops: list[list[str]],
+        hops: list[ChainHop],
         *,
         workdir: Path | None,
         timeout_seconds: float,
         env: dict[str, str] | None,
         start: float,
     ) -> ExecutionResult:
-        """Run ``A && B`` as hidden processes (CREATE_NO_WINDOW is not inherited)."""
+        """Run ``cd``/``mkdir``/process hops without cmd.exe (no inherited console)."""
         from remedy.core.turn_context import is_turn_aborted
+        from remedy.execution.host.runner import ChainHop
 
         stdout_parts: list[str] = []
         stderr_parts: list[str] = []
         last = ExecutionResult(exit_code=0)
         remaining = float(timeout_seconds)
+        cwd: Path | None = Path(workdir) if workdir is not None else None
         for hop in hops:
+            if not isinstance(hop, ChainHop):
+                return ExecutionResult(
+                    exit_code=-1,
+                    stderr="internal: malformed shell chain",
+                    duration_ms=(time.monotonic() - start) * 1000,
+                )
             if is_turn_aborted():
                 return ExecutionResult(
                     exit_code=-1,
@@ -240,12 +260,55 @@ class SubprocessSandbox(Sandbox):
                     exit_code=-1,
                     stdout=_clip_output("\n".join(stdout_parts), "stdout"),
                     stderr=_clip_output(
-                        "\n".join([*stderr_parts, f"Command timed out after {timeout_seconds}s"]),
+                        "\n".join(
+                            [*stderr_parts, f"Command timed out after {timeout_seconds}s"]
+                        ),
                         "stderr",
                     ),
                     duration_ms=(time.monotonic() - start) * 1000,
                 )
-            hop_danger = check_dangerous_command(hop)
+            hop_start = time.monotonic()
+            if hop.kind == "cd":
+                raw = hop.paths[0] if hop.paths else ""
+                target = self._resolve_path(cwd, raw)
+                if not self._path_in_jail(target):
+                    return ExecutionResult(
+                        exit_code=-1,
+                        stderr=f"cd {raw}: not in allowed paths",
+                        duration_ms=(time.monotonic() - start) * 1000,
+                    )
+                if not target.is_dir():
+                    return ExecutionResult(
+                        exit_code=1,
+                        stderr=f"cd: {target} is not a directory",
+                        duration_ms=(time.monotonic() - start) * 1000,
+                    )
+                cwd = target
+                remaining -= max(0.0, (time.monotonic() - hop_start))
+                last = ExecutionResult(exit_code=0)
+                continue
+            if hop.kind == "mkdir":
+                try:
+                    for p in hop.paths:
+                        dest = self._resolve_path(cwd, p)
+                        if not self._path_in_jail(dest):
+                            return ExecutionResult(
+                                exit_code=-1,
+                                stderr=f"mkdir {p}: not in allowed paths",
+                                duration_ms=(time.monotonic() - start) * 1000,
+                            )
+                        dest.mkdir(parents=True, exist_ok=True)
+                except OSError as exc:
+                    return ExecutionResult(
+                        exit_code=1,
+                        stderr=f"mkdir failed: {exc}",
+                        duration_ms=(time.monotonic() - start) * 1000,
+                    )
+                remaining -= max(0.0, (time.monotonic() - hop_start))
+                last = ExecutionResult(exit_code=0)
+                continue
+            argv = list(hop.argv)
+            hop_danger = check_dangerous_command(argv)
             if hop_danger:
                 return ExecutionResult(
                     exit_code=-1,
@@ -253,8 +316,8 @@ class SubprocessSandbox(Sandbox):
                     duration_ms=(time.monotonic() - start) * 1000,
                 )
             last = await self._execute_one(
-                hop,
-                workdir=workdir,
+                argv,
+                workdir=cwd,
                 timeout_seconds=remaining,
                 env=env,
                 start=time.monotonic(),
@@ -283,7 +346,14 @@ class SubprocessSandbox(Sandbox):
         start: float,
     ) -> ExecutionResult:
         # Always scrub secrets; infer VCS grants only when argv is git/gh/ssh.
-        safe_env = scrub_subprocess_env(env, argv=command)
+        # Unattended git/gh must not hang on a GUI credential prompt.
+        head = Path(command[0]).name.lower() if command else ""
+        if head.endswith(".exe"):
+            head = head[:-4]
+        if head in {"git", "gh"}:
+            safe_env = unattended_vcs_env(command, env)
+        else:
+            safe_env = scrub_subprocess_env(env, argv=command)
         # Force UTF-8 in the child so non-ASCII stdout/stderr survives the
         # decode("utf-8") below (mirrors the persistent-session path). Without
         # this, a child Python on Windows emits cp1252 and unicode output is
@@ -313,6 +383,7 @@ class SubprocessSandbox(Sandbox):
                 *command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.DEVNULL,
                 cwd=str(workdir) if workdir else None,
                 env=safe_env,
             )

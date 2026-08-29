@@ -945,14 +945,11 @@ class ComputerHostBridge:
     ) -> ComputerJob | None:
         """Desktop host: claim oldest pending job.
 
-        *exclude_actions*: skip these actions (leave pending). SPA uses
-        exclude=navigate so Rust owns rail navigates via ui_command and
-        the two pollers cannot deadlock the WebView main thread.
-
-        *only_actions*: if set, only claim jobs whose action is in this set
-        (Rust backup path: only=navigate).
-
+        *exclude_actions*: skip these actions (leave pending).
+        *only_actions*: if set, only claim jobs whose action is in this set.
         *wait_s*: block until a job is enqueued or the timeout (wake-on-enqueue).
+
+        The packaged desktop's Rust computer-host is the only jobs/next poller.
         """
         deadline = time.monotonic() + max(0.0, float(wait_s or 0.0))
         while True:

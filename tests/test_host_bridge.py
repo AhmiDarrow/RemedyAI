@@ -143,6 +143,88 @@ def test_expand_and_chain_splits_git_without_cmd(monkeypatch) -> None:
     assert host_runner.split_plain_and_chain("mkdir -p a && git add .") is None
 
 
+def test_expand_shell_chain_cd_and_mkdir(monkeypatch) -> None:
+    from remedy.execution.host import runner as host_runner
+
+    monkeypatch.setattr(host_runner, "resolve_which", lambda name, cwd=None: name)
+    cd_hops = host_runner.expand_shell_chain(["cmd.exe", "/c", "cd src && pytest -q"])
+    assert cd_hops is not None
+    assert [h.kind for h in cd_hops] == ["cd", "run"]
+    assert cd_hops[0].paths == ("src",)
+    assert cd_hops[1].argv[0] == "pytest"
+    mk_hops = host_runner.expand_shell_chain(
+        ["cmd.exe", "/c", '(if not exist "out\\." mkdir "out") && git add .']
+    )
+    assert mk_hops is not None
+    assert [h.kind for h in mk_hops] == ["mkdir", "run"]
+    assert mk_hops[0].paths == ("out",)
+    posix_mk = host_runner.expand_shell_chain(["sh", "-c", "mkdir -p build && git status"])
+    assert posix_mk is not None
+    assert posix_mk[0].kind == "mkdir"
+    assert "build" in posix_mk[0].paths
+
+
+@pytest.mark.asyncio
+async def test_sandbox_mkdir_chain_creates_dir(tmp_path) -> None:
+    from remedy.execution.sandbox import SubprocessSandbox
+
+    py = sys.executable
+
+    def q(s: str) -> str:
+        return f'"{s}"' if " " in str(s) else str(s)
+
+    dest = tmp_path / "made"
+    body = f"mkdir -p {q(dest)} && {q(py)} -c \"print('mkdir-ok')\""
+    argv = ["cmd.exe", "/c", body] if os.name == "nt" else ["sh", "-c", body]
+    res = await SubprocessSandbox(allowed_paths=[tmp_path]).execute(
+        argv, workdir=tmp_path, timeout_seconds=20
+    )
+    assert res.exit_code == 0, res.stderr
+    assert dest.is_dir()
+    assert "mkdir-ok" in (res.stdout or "")
+
+
+@pytest.mark.asyncio
+async def test_sandbox_cd_chain_runs_in_subdir(tmp_path) -> None:
+    from remedy.execution.sandbox import SubprocessSandbox
+
+    py = sys.executable
+
+    def q(s: str) -> str:
+        return f'"{s}"' if " " in str(s) else str(s)
+
+    sub = tmp_path / "src"
+    sub.mkdir()
+    (sub / "marker.py").write_text("print('from-src')\n", encoding="utf-8")
+    body = f"cd src && {q(py)} marker.py"
+    argv = ["cmd.exe", "/c", body] if os.name == "nt" else ["sh", "-c", body]
+    res = await SubprocessSandbox(allowed_paths=[tmp_path]).execute(
+        argv, workdir=tmp_path, timeout_seconds=20
+    )
+    assert res.exit_code == 0, res.stderr
+    assert "from-src" in (res.stdout or "")
+
+
+@pytest.mark.asyncio
+async def test_sandbox_cd_chain_stays_in_jail(tmp_path) -> None:
+    from remedy.execution.sandbox import SubprocessSandbox
+
+    py = sys.executable
+
+    def q(s: str) -> str:
+        return f'"{s}"' if " " in str(s) else str(s)
+
+    outside = tmp_path.parent
+    body = f"cd {q(outside)} && {q(py)} -c \"print('escaped')\""
+    argv = ["cmd.exe", "/c", body] if os.name == "nt" else ["sh", "-c", body]
+    res = await SubprocessSandbox(allowed_paths=[tmp_path]).execute(
+        argv, workdir=tmp_path, timeout_seconds=20
+    )
+    assert res.exit_code != 0
+    assert "escaped" not in (res.stdout or "")
+    assert "allowed" in (res.stderr or "").lower() or "jail" in (res.stderr or "").lower() or "not in allowed" in (res.stderr or "")
+
+
 @pytest.mark.asyncio
 async def test_sandbox_and_chain_runs_both_hops() -> None:
     from remedy.execution.sandbox import SubprocessSandbox
