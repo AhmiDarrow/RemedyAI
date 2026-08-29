@@ -108,6 +108,7 @@ def list_life_tasks(
                 "status": rec.get("status"),
                 "ok": rec.get("ok"),
                 "updated_at": rec.get("updated_at"),
+                "steps": len(rec.get("steps") or []),
             }
         )
         if len(rows) >= max(1, min(50, int(limit or 20))):

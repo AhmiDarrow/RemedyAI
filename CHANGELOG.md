@@ -4,6 +4,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — What Remedy did (life-task review)
+
+- Each drive step stores intended vs observed plus a short hash, and the
+  last screenshot path when the rail saved one. The owner card has
+  **What Remedy did**.
+
 ### Added — resume after password / 2FA / CAPTCHA
 
 - When a life-task stops for sign-in or a human-check wall, the Browser
