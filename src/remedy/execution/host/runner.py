@@ -9,7 +9,7 @@ import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from remedy.execution.host.ir import HostOp
 from remedy.execution.host.scriptfile import (
@@ -161,12 +161,55 @@ def deflate_uv_run(
     return argv
 
 
-def split_plain_and_chain(text: str) -> list[str] | None:
-    """Split ``A && B && C`` into segments when every hop is a plain argv.
+def _exe_stem(name: str) -> str:
+    """``C:\\bin\\git.exe`` / ``git`` → ``git``."""
+    head = str(name or "").replace("\\", "/").rsplit("/", 1)[-1].lower()
+    return head[:-4] if head.endswith(".exe") else head
 
-    Quote-aware so ``git commit -m "a && b"`` stays one hop. Pipes, ``||``,
-    redirects, parens, and cmd builtins still need a real shell.
-    """
+
+def _unquote_cmd_token(tok: str) -> str:
+    t = (tok or "").strip()
+    if len(t) >= 2 and t[0] == '"' and t[-1] == '"':
+        return t[1:-1].replace('""', '"')
+    return t
+
+
+def _argv_for_hidden_hop(part: str) -> list[str]:
+    """Argv for one ``&&`` hop. Strip cmd.exe's leftover quotes on Windows."""
+    hop = coerce_argv(part)
+    if os.name != "nt":
+        return hop
+    return [_unquote_cmd_token(tok) for tok in hop]
+
+
+@dataclass(frozen=True)
+class ChainHop:
+    """One hop of an ``A && B`` chain the sandbox can run without cmd.exe."""
+
+    kind: Literal["run", "cd", "mkdir"]
+    argv: tuple[str, ...] = ()
+    paths: tuple[str, ...] = ()
+
+    @staticmethod
+    def run(argv: list[str]) -> ChainHop:
+        return ChainHop(kind="run", argv=tuple(argv))
+
+    @staticmethod
+    def cd(path: str) -> ChainHop:
+        return ChainHop(kind="cd", paths=(path,))
+
+    @staticmethod
+    def mkdir(paths: list[str]) -> ChainHop:
+        return ChainHop(kind="mkdir", paths=tuple(paths))
+
+
+_IF_MKDIR = re.compile(
+    r"(?is)^\(\s*if\s+not\s+exist\s+(?:\"[^\"]*\"|\S+)\s+mkdir\s+(\"[^\"]*\"|\S+)\s*\)$"
+)
+
+
+def split_and_segments(text: str) -> list[str] | None:
+    """Quote-aware ``&&`` split. None if fewer than two hops or quotes never close."""
     raw = (text or "").strip()
     if not raw or "||" in raw:
         return None
@@ -198,11 +241,117 @@ def split_plain_and_chain(text: str) -> list[str] | None:
         return None
     parts.append("".join(buf).strip())
     parts = [p for p in parts if p]
-    if len(parts) < 2:
-        return None
-    if any(not looks_like_plain_argv(p) for p in parts):
+    return parts if len(parts) >= 2 else None
+
+
+def split_plain_and_chain(text: str) -> list[str] | None:
+    """Split ``A && B && C`` into segments when every hop is a plain argv.
+
+    Quote-aware so ``git commit -m "a && b"`` stays one hop. Pipes, ``||``,
+    redirects, parens, and cmd builtins still need a real shell.
+    """
+    parts = split_and_segments(text)
+    if not parts or any(not looks_like_plain_argv(p) for p in parts):
         return None
     return parts
+
+
+def _shell_chain_text(argv: list[str]) -> str | None:
+    if len(argv) < 3:
+        return None
+    head = _exe_stem(argv[0])
+    flag = str(argv[1]).lower()
+    if head == "cmd" and flag == "/c":
+        return str(argv[2]) if len(argv) == 3 else " ".join(str(a) for a in argv[2:])
+    if head in {"sh", "bash"} and flag == "-c":
+        return str(argv[2]) if len(argv) == 3 else " ".join(str(a) for a in argv[2:])
+    return None
+
+
+def _parse_cd_hop(text: str) -> str | None:
+    toks = _argv_for_hidden_hop(text)
+    if not toks or _exe_stem(toks[0]) != "cd":
+        return None
+    rest = list(toks[1:])
+    if rest and rest[0].lower() == "/d":
+        rest = rest[1:]
+    if len(rest) != 1:
+        return None
+    return rest[0]
+
+
+def _parse_one_mkdir(text: str) -> list[str] | None:
+    t = (text or "").strip()
+    matched = _IF_MKDIR.match(t)
+    if matched:
+        return [_unquote_cmd_token(matched.group(1))]
+    toks = _argv_for_hidden_hop(t)
+    if not toks or _exe_stem(toks[0]) not in {"mkdir", "md"}:
+        return None
+    paths = [p for p in toks[1:] if p not in {"-p", "--parents"} and not p.startswith("-")]
+    return paths or None
+
+
+def _parse_mkdir_hop(text: str) -> list[str] | None:
+    t = (text or "").strip()
+    if " & " in t and "&&" not in t:
+        paths: list[str] = []
+        for part in t.split(" & "):
+            one = _parse_one_mkdir(part.strip())
+            if not one:
+                return None
+            paths.extend(one)
+        return paths or None
+    return _parse_one_mkdir(t)
+
+
+def classify_chain_hop(
+    text: str,
+    *,
+    project_path: Path | str | None = None,
+) -> ChainHop | None:
+    """Map one ``&&`` segment to cd / mkdir / a hidden argv. None = needs a shell."""
+    cd = _parse_cd_hop(text)
+    if cd is not None:
+        return ChainHop.cd(cd)
+    mk = _parse_mkdir_hop(text)
+    if mk:
+        return ChainHop.mkdir(mk)
+    if not looks_like_plain_argv(text):
+        return None
+    hop = _argv_for_hidden_hop(text)
+    if not hop:
+        return None
+    if not Path(hop[0]).is_file():
+        resolved = resolve_which(hop[0], cwd=project_path)
+        if resolved:
+            hop[0] = resolved
+    return ChainHop.run(deflate_uv_run(hop, project_path=project_path))
+
+
+def expand_shell_chain(
+    argv: list[str],
+    *,
+    project_path: Path | str | None = None,
+) -> list[ChainHop] | None:
+    """Deflate ``cmd /c A && B`` into cd/mkdir/run hops the sandbox can hide.
+
+    CREATE_NO_WINDOW on cmd.exe is not inherited. ``cd src && pytest`` and
+    ``mkdir -p out && gcc`` used to flash a console for the second hop.
+    """
+    text = _shell_chain_text(argv)
+    if not text:
+        return None
+    parts = split_and_segments(text)
+    if not parts:
+        return None
+    hops: list[ChainHop] = []
+    for part in parts:
+        hop = classify_chain_hop(part, project_path=project_path)
+        if hop is None:
+            return None
+        hops.append(hop)
+    return hops if len(hops) >= 2 else None
 
 
 def expand_and_chain_argv(
@@ -210,53 +359,11 @@ def expand_and_chain_argv(
     *,
     project_path: Path | str | None = None,
 ) -> list[list[str]] | None:
-    """If *argv* is ``cmd /c A && B`` (or ``sh -c``), return hidden-safe hops.
-
-    CREATE_NO_WINDOW on cmd.exe is not inherited. git/python children of that
-    shell flash a console on the packaged desktop. Exec each hop ourselves.
-    """
-    if len(argv) < 3:
+    """If *argv* is ``cmd /c A && B`` of plain processes, return those argvs."""
+    hops = expand_shell_chain(argv, project_path=project_path)
+    if not hops or any(h.kind != "run" for h in hops):
         return None
-    head = str(argv[0]).replace("\\", "/").rsplit("/", 1)[-1].lower()
-    if head.endswith(".exe"):
-        head = head[:-4]
-    flag = str(argv[1]).lower()
-    if head == "cmd" and flag == "/c":
-        text = str(argv[2]) if len(argv) == 3 else " ".join(str(a) for a in argv[2:])
-    elif head in {"sh", "bash"} and flag == "-c":
-        text = str(argv[2]) if len(argv) == 3 else " ".join(str(a) for a in argv[2:])
-    else:
-        return None
-    parts = split_plain_and_chain(text)
-    if not parts:
-        return None
-    out: list[list[str]] = []
-    for part in parts:
-        hop = _argv_for_hidden_hop(part)
-        if not hop:
-            return None
-        head = hop[0]
-        if not Path(head).is_file():
-            resolved = resolve_which(head, cwd=project_path)
-            if resolved:
-                hop[0] = resolved
-        hop = deflate_uv_run(hop, project_path=project_path)
-        out.append(hop)
-    return out if len(out) >= 2 else None
-
-
-def _argv_for_hidden_hop(part: str) -> list[str]:
-    """Argv for one ``&&`` hop. Strip cmd.exe's leftover quotes on Windows."""
-    hop = coerce_argv(part)
-    if os.name != "nt":
-        return hop
-    cleaned: list[str] = []
-    for tok in hop:
-        if len(tok) >= 2 and tok[0] == '"' and tok[-1] == '"':
-            cleaned.append(tok[1:-1].replace('""', '"'))
-        else:
-            cleaned.append(tok)
-    return cleaned
+    return [list(h.argv) for h in hops]
 
 
 def _unquoted_has_shell_meta(cmd: str) -> bool:
@@ -296,10 +403,7 @@ def looks_like_plain_argv(command: str) -> bool:
         return False
     if not toks:
         return False
-    head = toks[0].lower().rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
-    if head.endswith(".exe"):
-        head = head[:-4]
-    return head not in _CMD_BUILTINS
+    return _exe_stem(toks[0]) not in _CMD_BUILTINS
 
 
 def prepare_host_command(

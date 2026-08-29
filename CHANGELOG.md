@@ -4,10 +4,13 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
-### Fixed — ``git add && git commit`` no longer flashes a CMD on Windows
+### Fixed — ``cd`` / ``mkdir -p`` / ``git add &&`` no longer flash a CMD
 
-- ``CREATE_NO_WINDOW`` hid ``cmd.exe`` but not its git/python children.
-  Plain ``A && B`` chains now run as sequential hidden processes.
+- ``CREATE_NO_WINDOW`` hid ``cmd.exe`` but not its children. Plain ``A && B``,
+  ``cd src && pytest``, and ``mkdir -p out && gcc`` now run as hidden hops
+  (cd/mkdir in-process). Git/gh children get a no-prompt env and closed
+  stdin so a credential GUI cannot hang the turn. ``cmd /c start`` for
+  open-app hides the wrapper console.
 
 ### Fixed — one computer-host poller, not two
 

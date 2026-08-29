@@ -71,19 +71,13 @@ def test_handle_job_type_reads_query_label_hint() -> None:
     assert '"hint"' in chunk
 
 
-def test_spa_passes_hint_query_for_type() -> None:
-    t = SPA.read_text(encoding="utf-8")
-    assert "action === 'type' || action === 'select'" in t
-    assert "p.query" in t
-    assert "p.hint" in t
-
-
 def test_spa_does_not_claim_jobs_next() -> None:
     """Rust is the only jobs/next poller. Dual claim raced snapshot and flashed load."""
     t = SPA.read_text(encoding="utf-8")
     assert "claimComputerJob" not in t
     assert "tickJobs" not in t
+    assert "runBrowserJob" not in t
     host = _host()
     assert "only=navigate,ready,snapshot,page_text" not in host
     assert 'action == "screenshot"' in host
-    assert "/api/computer/jobs/next?wait_ms=" in host or "/api/computer/jobs/next\"" in host
+    assert "/api/computer/jobs/next?wait_ms=" in host or '/api/computer/jobs/next"' in host
