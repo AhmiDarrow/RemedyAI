@@ -6,6 +6,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -217,6 +218,9 @@ struct ServerState {
     desktop_prefs: Arc<Mutex<DesktopPrefs>>,
     /// Kept so tray restore still works after hide/minimize (label lookup can fail).
     main_window: Mutex<Option<tauri::WebviewWindow>>,
+    /// True when Desktop attached to a foreign `remedy serve` (Use existing).
+    /// Quit must not tree-kill that process.
+    attached_existing: Arc<AtomicBool>,
 }
 
 fn current_exe_dir() -> Option<std::path::PathBuf> {
@@ -904,6 +908,10 @@ fn shutdown_sidecar(state: &ServerState) {
             kill_child(&mut guard);
         }
     }
+    if state.attached_existing.load(Ordering::SeqCst) {
+        log::info!("attached to existing serve — not killing foreign process");
+        return;
+    }
     force_stop_remedy_processes();
     // Belt-and-suspenders: kill orphaned vision decoder processes by image name.
     force_stop_vision_processes();
@@ -1041,6 +1049,7 @@ fn start_sidecar(
     process: &Arc<Mutex<Option<Child>>>,
     cmd: &str,
     mode: SidecarStartMode,
+    attached_existing: &AtomicBool,
 ) -> Result<(), String> {
     let mut guard = process
         .lock()
@@ -1088,6 +1097,7 @@ fn start_sidecar(
                                 "User chose Use existing server — Desktop will use :{} as-is",
                                 api_port()
                             );
+                            attached_existing.store(true, Ordering::SeqCst);
                             return Ok(());
                         }
                         ForeignServeChoice::TakeOver => {
@@ -1134,6 +1144,7 @@ fn start_sidecar(
     }
 
     kill_child(&mut guard);
+    attached_existing.store(false, Ordering::SeqCst);
     // Free our API port for managed process (after user consent when interactive).
     force_stop_remedy_processes();
     #[cfg(target_os = "windows")]
@@ -4314,7 +4325,12 @@ fn restart_sidecar_and_wait(state: &ServerState, wait: Duration) -> bool {
         log::error!("self-inject apply: sidecar cmd unknown");
         return false;
     }
-    match start_sidecar(&state.process, &cmd, SidecarStartMode::ForceRestart) {
+    match start_sidecar(
+        &state.process,
+        &cmd,
+        SidecarStartMode::ForceRestart,
+        &state.attached_existing,
+    ) {
         Ok(()) => wait_for_health(wait),
         Err(e) => {
             log::error!("self-inject apply: sidecar restart failed: {e}");
@@ -4467,9 +4483,15 @@ async fn restart_server(app: AppHandle, state: State<'_, ServerState>) -> Result
     log::info!("Restarting remedy sidecar: {}", cmd);
     let _ = app.emit("server-starting", ());
     let process = state.process.clone();
+    let attached = state.attached_existing.clone();
     let handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        start_sidecar(&process, &cmd, SidecarStartMode::ForceRestart)?;
+        start_sidecar(
+            &process,
+            &cmd,
+            SidecarStartMode::ForceRestart,
+            &attached,
+        )?;
         if wait_for_health(Duration::from_secs(30)) {
             log::info!("Remedy server ready after restart");
             let _ = handle.emit("server-ready", ());
@@ -4664,17 +4686,31 @@ fn reclaim_desktop_instance() -> bool {
 
 #[cfg(target_os = "linux")]
 fn acquire_desktop_single_instance() -> bool {
-    let path = remedy_home().join("desktop.pid");
-    if let Ok(s) = std::fs::read_to_string(&path) {
-        if let Ok(pid) = s.trim().parse::<u32>() {
-            if pid > 0 && std::path::Path::new(&format!("/proc/{pid}")).exists() {
-                log::warn!("desktop already running (pid {pid}); refusing second instance");
-                return false;
-            }
+    use std::fs::OpenOptions;
+    use std::os::unix::io::AsRawFd;
+
+    let dir = remedy_home();
+    let _ = std::fs::create_dir_all(&dir);
+    let lock_path = dir.join("desktop.lock");
+    let file = match OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)
+    {
+        Ok(f) => f,
+        Err(e) => {
+            log::warn!("desktop lock open failed: {e}");
+            return true;
         }
+    };
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if rc != 0 {
+        log::warn!("desktop already running (flock); refusing second instance");
+        return false;
     }
-    let _ = std::fs::create_dir_all(remedy_home());
-    let _ = std::fs::write(&path, format!("{}\n", std::process::id()));
+    let _ = std::fs::write(dir.join("desktop.pid"), format!("{}\n", std::process::id()));
+    std::mem::forget(file);
     true
 }
 
@@ -4810,6 +4846,7 @@ pub fn run() {
             pending_drops: Arc::new(Mutex::new(Vec::new())),
             desktop_prefs: Arc::new(Mutex::new(load_desktop_prefs())),
             main_window: Mutex::new(None),
+            attached_existing: Arc::new(AtomicBool::new(false)),
         })
         .manage(pty_host::PtyState::default())
         .manage(browser_host::BrowserState::default())
@@ -5093,6 +5130,7 @@ pub fn run() {
                     &state.process,
                     &remedy_cmd,
                     SidecarStartMode::InteractiveLaunch,
+                    &state.attached_existing,
                 ) {
                     Ok(()) => {
                         // Do not block GTK/WebView setup for up to 90s.
@@ -5286,14 +5324,17 @@ pub fn run() {
             match event {
                 tauri::RunEvent::ExitRequested { .. } => {
                     let state = app_handle.state::<ServerState>();
-                    // Only tree-kill leftovers; main quit_app already stopped the child.
-                    force_stop_remedy_processes();
-                    force_stop_vision_processes();
-                    let _ = state; // keep lock pattern available if needed later
+                    if !state.attached_existing.load(Ordering::SeqCst) {
+                        force_stop_remedy_processes();
+                        force_stop_vision_processes();
+                    }
                 }
                 tauri::RunEvent::Exit => {
-                    force_stop_remedy_processes();
-                    force_stop_vision_processes();
+                    let state = app_handle.state::<ServerState>();
+                    if !state.attached_existing.load(Ordering::SeqCst) {
+                        force_stop_remedy_processes();
+                        force_stop_vision_processes();
+                    }
                 }
                 _ => {}
             }

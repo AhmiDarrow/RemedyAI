@@ -832,6 +832,35 @@ def test_memory_search_api_drops_hive(tmp_path):
     assert "hive_zz" not in blob
 
 
+def test_memory_facts_route_skips_hive(tmp_path):
+    import asyncio
+
+    from fastapi.testclient import TestClient
+
+    from remedy.interfaces.api import create_app
+    from remedy.memory.profile import UserFact, UserProfile
+    from remedy.memory.store import MemoryStore
+
+    mem = MemoryStore(tmp_path / "memory.db")
+    asyncio.run(mem.initialize())
+    profile = UserProfile(user_id="default")
+    profile.facts.append(UserFact(fact="likes oat milk", authority="owner"))
+    profile.facts.append(UserFact(fact="hive should hide", authority="hive"))
+    asyncio.run(mem.save_user_profile(profile))
+
+    class RT:
+        config = SimpleNamespace(home_dir=str(tmp_path))
+
+        def list_tasks(self):
+            return []
+
+    client = TestClient(create_app(runtime=RT(), memory=mem, api_key=""))
+    body = client.get("/api/memory/facts").json()
+    texts = [str(f.get("text") or "") for f in body.get("facts") or []]
+    assert any("oat milk" in t for t in texts)
+    assert not any("hive should hide" in t for t in texts)
+
+
 def test_authorize_unknown_denied_memory_save_not_unknown():
     from remedy.core.hive.policy import reset_hive_depth, set_hive_depth
     from remedy.core.turn_pipeline import authorize_tool
@@ -893,6 +922,22 @@ def test_computer_fill_vault_does_not_click_then_type(tmp_path, monkeypatch):
     assert "click" not in calls
     assert "type" in calls
     assert out.get("ok") is False
+
+
+def test_computer_fill_success_is_unverified(tmp_path, monkeypatch):
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    ex = ComputerExecutor(home_dir=tmp_path)
+
+    def fake_run(act, **_kw):
+        return {"ok": True, "action": getattr(act, "value", act), "message": "ok"}
+
+    monkeypatch.setattr(ex, "_run_browser", fake_run)
+    out = ex._computer_fill({"fields": [{"text": "Name", "value": "Ada"}]})
+    assert out.get("ok") is False
+    assert out.get("unverified") is True
+    assert ComputerAction.FILL.value == "fill"
 
 
 def test_hwnd_uia_button_vault_refuses_no_set_value(tmp_path, monkeypatch):

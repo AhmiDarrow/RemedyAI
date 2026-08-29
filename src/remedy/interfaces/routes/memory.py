@@ -81,6 +81,32 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             ],
         }
 
+    @app.get("/api/memory/facts")
+    async def memory_partner_facts(limit: int = Query(default=20, le=50)):
+        """Owner Partner Memory facts for the Memory panel — never hive."""
+        if memory is None:
+            raise HTTPException(503, "Memory store not available")
+
+        profile = await memory.get_or_create_profile()
+        facts = []
+        for f in list(getattr(profile, "facts", None) or []):
+            auth = str(getattr(f, "authority", "") or "")
+            if auth == "hive":
+                continue
+            text = str(getattr(f, "fact", "") or "").strip()
+            if not text:
+                continue
+            facts.append(
+                {
+                    "text": text[:300],
+                    "category": str(getattr(f, "category", "") or "general"),
+                    "authority": auth or "agent",
+                }
+            )
+            if len(facts) >= limit:
+                break
+        return {"facts": facts}
+
     # -- memory add ----------------------------------------------------------
     @app.post("/api/memory/add")
     async def add_memory(req: MemoryAddRequest):

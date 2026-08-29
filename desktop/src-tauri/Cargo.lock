@@ -106,6 +106,7 @@ dependencies = [
  "adblock",
  "base64 0.22.1",
  "gtk",
+ "libc",
  "log",
  "minisign-verify",
  "portable-pty",

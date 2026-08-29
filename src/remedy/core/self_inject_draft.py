@@ -800,6 +800,35 @@ async def run_unattended_draft(
             ),
         }
 
+    from remedy.core.self_inject_guard import run_both_passes
+
+    scan = run_both_passes(changed, str(after.get("diff") or ""))
+    if not scan.get("ok"):
+        await git_restore(repo_p, snap, round_paths=changed)
+        record_red(home, tgt.key())
+        blocks = list(scan.get("blocks") or ["blocked"])[:4]
+        round_ = SelfInjectRound(
+            tree="python",
+            summary="unattended draft guard blocked: " + "; ".join(str(b) for b in blocks),
+            status="red",
+        )
+        round_.detail["target"] = tgt.to_public()
+        round_.detail["guard"] = {
+            "ok": False,
+            "blocks": list(scan.get("blocks") or [])[:12],
+        }
+        round_.outcome = "rolled_back"
+        round_.status = "rolled_back"
+        round_.finished_utc = _now_utc()
+        append_ledger(round_, home)
+        return {
+            "outcome": "rolled_back",
+            "reason": "guard",
+            "changed": changed,
+            "target": tgt.to_public(),
+            "round_id": round_.round_id,
+        }
+
     jail = _jail_violation(changed, tgt.allowed)
     if jail or _diff_too_large(str(after.get("diff") or "")):
         await git_restore(repo_p, snap, round_paths=changed)

@@ -2646,6 +2646,31 @@ def test_select_and_fill_are_first_class_actions():
     assert action_from_tool("computer_fill") is ComputerAction.FILL
 
 
+def test_focus_window_false_is_not_ok(tmp_path, monkeypatch):
+    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.executor import ComputerExecutor
+    from remedy.core.computer.types import ComputerAction
+
+    win = native()
+    monkeypatch.setattr(win, "focus_window", lambda *_a, **_k: False, raising=False)
+    monkeypatch.setattr(
+        win,
+        "foreground_window_info",
+        lambda: {"title": "Other App"},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        win,
+        "list_windows",
+        lambda limit=40: [{"hwnd": 42, "title": "Game"}],
+        raising=False,
+    )
+    ex = ComputerExecutor(home_dir=tmp_path)
+    out = json.loads(ex.run(ComputerAction.WINDOWS, mode="focus", hwnd=42))
+    assert out.get("ok") is False
+    assert "other app" in str(out.get("message") or "").lower()
+
+
 def test_fill_without_fields_fails_closed(tmp_path):
     import json as _json
 
@@ -2678,8 +2703,10 @@ def test_fill_walks_each_field(tmp_path):
             ]
         }
     )
-    assert d["ok"] is True
+    assert d["ok"] is False
+    assert d.get("unverified") is True
     assert d["action"] == "fill"
+    assert "unverified" in str(d.get("message") or "").lower()
     kinds = [c[0] for c in calls]
     assert ComputerAction.CLICK in kinds
     assert ComputerAction.TYPE in kinds

@@ -342,7 +342,7 @@ def test_element_action_sets_a_value_atomically_and_verifies_the_readback():
         got = desktop_uia.element_action(101, "Text Editor", action="set_value", text="typed")
     assert got == {
         "ok": True,
-        "message": "Set edit 'Text Editor' value (5 chars, verified)",
+        "message": "Set edit 'Text Editor' value, verified",
         "verified": True,
     }
     assert editor.value == "typed"

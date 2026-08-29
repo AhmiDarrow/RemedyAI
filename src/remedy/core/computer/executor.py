@@ -2199,7 +2199,23 @@ class ComputerExecutor:
                             message=_HOST_BROWSER_REFUSAL,
                             extra={"refused": "host_browser", "title": real},
                         )
-                    win.focus_window(int(match["hwnd"]))
+                    brought = bool(win.focus_window(int(match["hwnd"])))
+                    seen = ""
+                    with contextlib.suppress(Exception):
+                        seen = str(
+                            (win.foreground_window_info() or {}).get("title") or ""
+                        )
+                    if not brought:
+                        return public_result(
+                            ok=False,
+                            target="desktop",
+                            action="windows",
+                            message=(
+                                f"Could not bring {real[:80]!r} forward — "
+                                f"I see: {seen[:80] or 'no window'}"
+                            ),
+                            extra={"hwnd": int(match["hwnd"]), "title": real, "seen": seen},
+                        )
                     return public_result(
                         ok=True,
                         target="desktop",
@@ -2228,7 +2244,21 @@ class ComputerExecutor:
                                     extra={"refused": "host_browser", "title": real},
                                 )
                             break
-                win.focus_window(hwnd)
+                brought = bool(win.focus_window(hwnd))
+                seen = ""
+                with contextlib.suppress(Exception):
+                    seen = str((win.foreground_window_info() or {}).get("title") or "")
+                if not brought:
+                    return public_result(
+                        ok=False,
+                        target="desktop",
+                        action="windows",
+                        message=(
+                            f"Could not bring hwnd={hwnd} forward — "
+                            f"I see: {seen[:80] or 'no window'}"
+                        ),
+                        extra={"hwnd": hwnd, "seen": seen},
+                    )
                 return public_result(
                     ok=True,
                     target="desktop",
@@ -3676,14 +3706,14 @@ class ComputerExecutor:
                 fail["filled"] = results
                 return fail
         return public_result(
-            ok=True,
+            ok=False,
             target="browser",
             action="fill",
             message=(
-                f"Filled {len(results)} field(s). Values were not read back — "
-                "computer_page_text or snapshot before Submit."
+                f"UNVERIFIED: filled {len(results)} field(s) but did not read "
+                "them back — computer_page_text or snapshot before Submit."
             ),
-            extra={"fields": results, "verified": False},
+            extra={"fields": results, "verified": False, "unverified": True},
         )
 
     def _computer_act(

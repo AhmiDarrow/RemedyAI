@@ -570,6 +570,44 @@ def validate_execution_command(command: list[str]) -> list[str]:
     return command
 
 
+_CHMOD_PLUS_X = frozenset(
+    {"+x", "a+x", "u+x", "ug+x", "ugo+x", "a+rx", "u+rx", "755", "0755", "744", "0744"}
+)
+
+
+def _chmod_path_ok(path: str) -> bool:
+    """Relative project path — not absolute, not parent traversal."""
+    p = (path or "").strip().strip('"').strip("'")
+    if not p or p.startswith("/") or p.startswith("~"):
+        return False
+    if len(p) >= 2 and p[1] == ":":
+        return False
+    return ".." not in Path(p).parts
+
+
+def _is_chmod_plus_x(argv: list[str]) -> bool:
+    """``chmod +x rel`` / ``chmod 755 rel`` inside the project — not privilege."""
+    if len(argv) < 3:
+        return False
+    mode = str(argv[1]).strip()
+    if mode not in _CHMOD_PLUS_X:
+        return False
+    paths = [str(a) for a in argv[2:]]
+    return bool(paths) and all(_chmod_path_ok(p) for p in paths)
+
+
+def _chmod_plus_x_text(payload: str) -> bool:
+    parts = (payload or "").strip().split()
+    if len(parts) < 3:
+        return False
+    base = Path(parts[0]).name.lower()
+    if base.endswith(".exe"):
+        base = base[:-4]
+    if base != "chmod":
+        return False
+    return _is_chmod_plus_x(parts)
+
+
 _DANGEROUS_COMMANDS = {
     # Unix privilege / disk
     "sudo", "su", "chmod", "chown", "mkfs", "dd", "fdisk",
@@ -843,6 +881,10 @@ def check_dangerous_command(command: list[str]) -> str | None:
     # strip extension on Windows
     if base.endswith(".exe"):
         base = base[:-4]
+    if base == "chmod":
+        if _is_chmod_plus_x(command):
+            return None
+        return "Dangerous command: chmod"
     if base in _DANGEROUS_COMMANDS:
         return f"Dangerous command: {base}"
 
@@ -862,6 +904,8 @@ def check_dangerous_command(command: list[str]) -> str | None:
             # Also treat a bare first token of a simple payload
             first = (payload.strip().split(None, 1) or [""])[0]
             dang = _dangerous_base_name(first)
+            if dang == "chmod" and _chmod_plus_x_text(payload):
+                continue
             if dang:
                 return f"Dangerous nested command: {dang}"
 

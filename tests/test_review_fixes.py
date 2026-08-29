@@ -115,6 +115,14 @@ class TestListBySession:
 
 
 class TestSecurity:
+    def test_chmod_plus_x_in_project_is_allowed(self):
+        assert check_dangerous_command(["chmod", "+x", "hello"]) is None
+        assert check_dangerous_command(["chmod", "755", "out/game"]) is None
+        assert check_dangerous_command(["bash", "-c", "chmod +x src/app"]) is None
+        assert check_dangerous_command(["chmod", "+x", "/etc/passwd"]) is not None
+        assert check_dangerous_command(["chmod", "777", "hello"]) is not None
+        assert check_dangerous_command(["sudo", "apt-get", "install", "x"]) is not None
+
     def test_blocks_dangerous_rm(self):
         assert check_dangerous_command(["rm", "-rf", "/"]) is not None
 

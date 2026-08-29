@@ -40,6 +40,18 @@ def test_muscle_contract_mentions_continuity():
     assert "xai" in c.lower()
 
 
+def test_soul_inject_drops_whole_tail_sections(tmp_path):
+    clear_soul_cache()
+    sf = load_soul_field(tmp_path)
+    sf.pledges = [f"pledge-{i} " + ("x" * 40) for i in range(8)]
+    sf.future_dreams = [f"dream-{i} " + ("y" * 40) for i in range(8)]
+    save_soul_field(sf, tmp_path)
+    block = build_soul_context_block(home=tmp_path, max_chars=420, include_contract=False)
+    assert "…" not in block
+    assert "Soul Field" in block or "Bond:" in block
+    assert block.strip().endswith((".", "friend.")) or "Voice" in block
+
+
 def test_roundtrip_persist(tmp_path):
     clear_soul_cache()
     sf = load_soul_field(tmp_path)
