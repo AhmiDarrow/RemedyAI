@@ -523,7 +523,6 @@ export function useComputerHost(
     const HELLO_MS = 4000
     const JOB_BUSY_MS = 120
     const JOB_IDLE_MS = 800
-    const JOB_IDLE_MAX_MS = 2000
     const JOB_WAIT_MS = 2000
     const UI_BUSY_MS = 250
     const UI_IDLE_MS = 800

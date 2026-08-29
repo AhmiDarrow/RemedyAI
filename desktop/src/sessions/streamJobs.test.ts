@@ -65,6 +65,7 @@ describe('streamJobs', () => {
     const order: string[] = []
     vi.mocked(abortSession).mockImplementation(async () => {
       order.push('abort')
+      return { status: 'aborted' }
     })
     const c = new AbortController()
     c.signal.addEventListener('abort', () => order.push('controller'))

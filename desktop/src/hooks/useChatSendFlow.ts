@@ -336,19 +336,20 @@ export function useChatSendFlow(opts: {
           try {
             const cur = await getCurrentLifeTask(sid)
             const task = cur.task
-            const asking =
-              Boolean(task)
+            const asking = Boolean(
+              task
               && (
                 String(task.status || '') === 'need_you'
                 || task.kind === 'plan_gate'
                 || Boolean(task.approval_id)
                 || Boolean(task.checkpoint)
-              )
-            if (asking) {
+              ),
+            )
+            if (asking && task) {
               const res = await actLifeTask(choice, {
                 sessionId: sid,
-                taskId: task?.task_id,
-                approvalId: task?.approval_id,
+                taskId: task.task_id,
+                approvalId: task.approval_id,
               })
               addCommandMessage(
                 text.trim(),
