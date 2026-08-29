@@ -4,6 +4,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — verify actually runs after casual writes
+
+- After ``file_write`` / ``file_edit`` with no build engine, Remedy runs
+  ``job_run kind=verify`` itself. Ask still gates the shell; a missing
+  suite is not treated as green.
+
 ### Added — What Remedy did (life-task review)
 
 - Each drive step stores intended vs observed plus a short hash, and the
