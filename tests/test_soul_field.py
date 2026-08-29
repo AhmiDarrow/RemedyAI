@@ -28,6 +28,8 @@ def test_looks_like_secret_soul_catches_password_prose():
 
     assert looks_like_secret_soul("my password is hunter2")
     assert looks_like_secret_soul("token: abcdef")
+    key = "".join(("sk-ant-", "api03-", "AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH"))
+    assert looks_like_secret_soul(f"use {key}")
     assert not looks_like_secret_soul("we walked through the garden")
 
 

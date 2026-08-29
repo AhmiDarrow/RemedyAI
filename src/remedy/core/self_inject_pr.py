@@ -20,7 +20,6 @@ import asyncio
 import hashlib
 import json
 import re
-import subprocess
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -138,25 +137,9 @@ def format_inbox_comment(
 
 
 def _git(repo: Path, *args: str, timeout: float = 60.0) -> tuple[int, str, str]:
-    from remedy.execution.process import hidden_subprocess_kwargs
-    from remedy.execution.sandbox import unattended_vcs_env
+    from remedy.execution.sandbox import run_unattended_git
 
-    try:
-        proc = subprocess.run(
-            ["git", "-C", str(repo), *args],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            stdin=subprocess.DEVNULL,
-            env=unattended_vcs_env(["git"]),
-            **hidden_subprocess_kwargs(),
-        )
-    except FileNotFoundError:
-        return 127, "", "git not found"
-    except subprocess.TimeoutExpired:
-        return 124, "", "git timeout"
-    return int(proc.returncode or 0), proc.stdout or "", proc.stderr or ""
+    return run_unattended_git(repo, *args, timeout=timeout)
 
 
 async def _run_exec(

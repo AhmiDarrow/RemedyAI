@@ -326,20 +326,16 @@ def collect_git_diff(
     base: str | None = None,
 ) -> tuple[list[str], str]:
     """Return (paths, unified diff) vs *base*...HEAD or vs HEAD (worktree)."""
-    import subprocess
+    from remedy.execution.sandbox import run_unattended_git
 
     root = Path(repo)
     if base:
-        files_cmd = ["git", "-C", str(root), "diff", "--name-only", f"{base}...HEAD"]
-        diff_cmd = ["git", "-C", str(root), "diff", f"{base}...HEAD"]
+        files_args = ("diff", "--name-only", f"{base}...HEAD")
+        diff_args = ("diff", f"{base}...HEAD")
     else:
-        files_cmd = ["git", "-C", str(root), "diff", "--name-only", "HEAD"]
-        diff_cmd = ["git", "-C", str(root), "diff", "HEAD"]
-    files_p = subprocess.run(
-        files_cmd, capture_output=True, text=True, timeout=30, check=False
-    )
-    diff_p = subprocess.run(
-        diff_cmd, capture_output=True, text=True, timeout=30, check=False
-    )
-    files = [ln.strip() for ln in (files_p.stdout or "").splitlines() if ln.strip()]
-    return files, diff_p.stdout or ""
+        files_args = ("diff", "--name-only", "HEAD")
+        diff_args = ("diff", "HEAD")
+    _code, files_out, _err = run_unattended_git(root, *files_args, timeout=30)
+    _code, diff_out, _err = run_unattended_git(root, *diff_args, timeout=30)
+    files = [ln.strip() for ln in files_out.splitlines() if ln.strip()]
+    return files, diff_out

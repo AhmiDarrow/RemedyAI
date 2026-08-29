@@ -515,13 +515,20 @@ def _from_ruff(repo: Path) -> DraftTarget | None:
     if not src.is_dir():
         return None
     try:
+        from remedy.core.build_python import python_cmd_for_subprocess
+        from remedy.execution.process import hidden_subprocess_kwargs
+
+        py = python_cmd_for_subprocess(repo)
+        if not py:
+            return None
         proc = subprocess.run(
-            ["uv", "run", "ruff", "check", "--output-format=json", "src/remedy"],
+            [*py, "-m", "ruff", "check", "--output-format=json", "src/remedy"],
             cwd=str(repo),
             capture_output=True,
             text=True,
             timeout=60,
             check=False,
+            **hidden_subprocess_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -885,17 +892,12 @@ def origin_wins_if_dirty(repo: str | Path) -> dict[str, Any]:
             "reason": "packaged_or_pip",
             "merge": False,
         }
-    try:
-        dirty = subprocess.run(
-            ["git", "-C", str(repo_p), "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+    from remedy.execution.sandbox import run_unattended_git
+
+    code, out, _err = run_unattended_git(repo_p, "status", "--porcelain", timeout=15)
+    if code != 0:
         return {"action": "abort", "reason": "git_status_failed", "merge": False}
-    if (dirty.stdout or "").strip():
+    if (out or "").strip():
         return {
             "action": "abort_dirty",
             "reason": "local_self_improve_or_wip",

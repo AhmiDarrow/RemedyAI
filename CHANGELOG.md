@@ -4,6 +4,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed — one hidden git helper; soul uses the durable secret guard
+
+- Draft/guard/PR git calls share ``run_unattended_git``. Ruff drafts use
+  ``python -m ruff``. Soul secrets use ``looks_like_secret``. Dead SPA
+  job-claim helpers are gone.
+
 ### Fixed — ``cd`` / ``mkdir -p`` / ``git add &&`` no longer flash a CMD
 
 - ``CREATE_NO_WINDOW`` hid ``cmd.exe`` but not its children. Plain ``A && B``,

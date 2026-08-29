@@ -334,11 +334,7 @@ def expand_shell_chain(
     *,
     project_path: Path | str | None = None,
 ) -> list[ChainHop] | None:
-    """Deflate ``cmd /c A && B`` into cd/mkdir/run hops the sandbox can hide.
-
-    CREATE_NO_WINDOW on cmd.exe is not inherited. ``cd src && pytest`` and
-    ``mkdir -p out && gcc`` used to flash a console for the second hop.
-    """
+    """Turn ``cmd /c A && B`` into hidden cd/mkdir/run hops."""
     text = _shell_chain_text(argv)
     if not text:
         return None
