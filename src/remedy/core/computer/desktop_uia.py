@@ -302,6 +302,19 @@ def _find_live_element(hwnd: int, name: str, role: str = ""):
         return None, None
 
 
+_TOGGLE_ROLES = frozenset(
+    {"checkbox", "togglebutton", "switch", "radiobutton"}
+)
+
+
+def preferred_click_action(role: str = "") -> str:
+    """Which UIA pattern to try before a pixel click-at-center."""
+    r = (role or "").strip().lower()
+    if r in _TOGGLE_ROLES:
+        return "toggle"
+    return "invoke"
+
+
 def element_action(
     hwnd: int,
     name: str,
