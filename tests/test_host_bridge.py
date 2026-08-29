@@ -122,6 +122,66 @@ def test_translate_start_md_types_instead_of_os_open() -> None:
     assert "type" in r5.text.lower()
 
 
+def test_expand_and_chain_splits_git_without_cmd(monkeypatch) -> None:
+    from remedy.execution.host import runner as host_runner
+
+    monkeypatch.setattr(
+        host_runner, "resolve_which", lambda name, cwd=None: name
+    )
+    hops = host_runner.expand_and_chain_argv(
+        ["cmd.exe", "/c", 'git add . && git commit -m "wip"']
+    )
+    assert hops is not None
+    assert hops[0] == ["git", "add", "."]
+    assert hops[1][:3] == ["git", "commit", "-m"]
+    assert hops[1][3] == "wip"
+    quoted = host_runner.split_plain_and_chain(
+        'git commit -m "fix: a && b" && git status'
+    )
+    assert quoted == ['git commit -m "fix: a && b"', "git status"]
+    assert host_runner.expand_and_chain_argv(["cmd", "/c", "git status"]) is None
+    assert host_runner.split_plain_and_chain("mkdir -p a && git add .") is None
+
+
+@pytest.mark.asyncio
+async def test_sandbox_and_chain_runs_both_hops() -> None:
+    from remedy.execution.sandbox import SubprocessSandbox
+
+    py = sys.executable
+
+    def q(s: str) -> str:
+        return f'"{s}"' if " " in s else s
+
+    body = f"{q(py)} -c \"print('chain-a')\" && {q(py)} -c \"print('chain-b')\""
+    argv = (
+        ["cmd.exe", "/c", body] if os.name == "nt" else ["sh", "-c", body]
+    )
+    res = await SubprocessSandbox().execute(argv, timeout_seconds=20)
+    assert res.exit_code == 0
+    assert "chain-a" in (res.stdout or "")
+    assert "chain-b" in (res.stdout or "")
+
+
+@pytest.mark.asyncio
+async def test_sandbox_and_chain_stops_on_failure() -> None:
+    from remedy.execution.sandbox import SubprocessSandbox
+
+    py = sys.executable
+
+    def q(s: str) -> str:
+        return f'"{s}"' if " " in s else s
+
+    body = (
+        f"{q(py)} -c \"raise SystemExit(3)\" && {q(py)} -c \"print('chain-nope')\""
+    )
+    argv = (
+        ["cmd.exe", "/c", body] if os.name == "nt" else ["sh", "-c", body]
+    )
+    res = await SubprocessSandbox().execute(argv, timeout_seconds=20)
+    assert res.exit_code == 3
+    assert "chain-nope" not in (res.stdout or "")
+
+
 def test_deflate_uv_run_pytest_uses_python_dash_m(tmp_path, monkeypatch) -> None:
     from remedy.execution.host import runner as host_runner
 
@@ -312,6 +372,7 @@ def test_prepare_plain_argv_no_shell() -> None:
     assert "python" in Path(prep.argv[0]).name.lower()
     assert "py_compile" in prep.argv
     assert looks_like_plain_argv("python -m py_compile app.py")
+    assert looks_like_plain_argv('python -c "print(1)"')
     assert not looks_like_plain_argv("echo hello")
     assert not looks_like_plain_argv("mkdir -p a && ls")
 

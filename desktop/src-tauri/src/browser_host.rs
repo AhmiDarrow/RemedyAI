@@ -2861,41 +2861,15 @@ fn computer_host_loop(app: AppHandle) {
             }
         }
 
-        // Claim navigate leftovers + DOM jobs (SPA may also claim; only one wins).
-        // page_text/ready must be claimable by Rust — SPA alone is not enough when
-        // the React host is busy or mid-bootstrap after navigate.
-        //
-        // While the main window is hidden (tray) or minimized the SPA pauses
-        // its claim loop entirely, so observe jobs (snapshot/page_text/ready)
-        // would sit pending until the executor timed out — Remedy went blind
-        // exactly when the owner drove her from the WebUI with the desktop
-        // tucked away. Rust owns those jobs whenever the SPA cannot.
-        let spa_can_claim = main_window(&app)
-            .map(|w| w.is_visible().unwrap_or(true) && !w.is_minimized().unwrap_or(false))
-            .unwrap_or(true);
-        // `ready` is a Rust-only probe (the SPA rejects it) — always ours.
-        // When the SPA is down (desktop minimized / tray — the common WebUI
-        // case), Rust must drive EVERYTHING, interactive actions included, or
-        // click/type/press-hold sit unclaimed until the executor times out
-        // ("timeout waiting for desktop host"). handle_job runs them all.
-        // Observe jobs (snapshot/page_text) must not sit unclaimed for 5s
-        // just because the SPA poller is busy on a heavy page (X/Reddit).
-        // Click/type stay SPA-owned while the window is visible so two
-        // drivers don't inject into the same webview. Observe is read-only.
-        let only = if spa_can_claim {
-            "navigate,ready,snapshot,page_text"
+        // One poller. The SPA only opens the rail + sends bounds hello —
+        // it no longer claims jobs/next. Two drivers used to race snapshot
+        // and dual-spam the API during a fat ReAct turn.
+        let url = if wait_ms > 0 {
+            api_url(&format!("/api/computer/jobs/next?wait_ms={wait_ms}"))
         } else {
-            "navigate,snapshot,a11y,page_text,ready,click,type,key,scroll,drag,press_hold,select,hover"
+            api_url("/api/computer/jobs/next")
         };
-        let wait_q = if wait_ms > 0 {
-            format!("&wait_ms={wait_ms}")
-        } else {
-            String::new()
-        };
-        if let Ok(resp) = auth_req(agent.get(
-            &api_url(&format!("/api/computer/jobs/next?only={only}{wait_q}")),
-        ))
-        .call()
+        if let Ok(resp) = auth_req(agent.get(&url)).call()
         {
             if let Ok(v) = resp.into_json::<serde_json::Value>() {
                 if let Some(job) = v.get("job").filter(|j| !j.is_null() && j.is_object()) {
@@ -2921,7 +2895,7 @@ fn computer_host_loop(app: AppHandle) {
                         action,
                         "snapshot" | "a11y" | "page_text" | "ready" | "click"
                             | "type" | "key" | "scroll" | "drag" | "press_hold" | "select"
-                            | "hover"
+                            | "hover" | "screenshot"
                     ) {
                         let app2 = app.clone();
                         let agent2 = agent.clone();
@@ -3320,7 +3294,78 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
         return;
     }
 
-    log::info!("computer-host: job {id} action={action} left for SPA or next tick");
+    if action == "screenshot" {
+        let _ = app.emit("computer-open-browser", json!({ "job_id": id }));
+        std::thread::sleep(Duration::from_millis(200));
+        let scale = main_window(app)
+            .ok()
+            .and_then(|w| w.scale_factor().ok())
+            .unwrap_or(1.0);
+        let mut body = json!({ "label": "browser_rail", "scale": scale });
+        if let Some(state) = app.try_state::<BrowserState>() {
+            if let Ok(g) = state.last_bounds.lock() {
+                if let Some(b) = g.clone() {
+                    if b.width > 40.0 && b.height > 40.0 {
+                        body["x"] = json!(b.x.round() as i64);
+                        body["y"] = json!(b.y.round() as i64);
+                        body["width"] = json!(b.width.round() as i64);
+                        body["height"] = json!(b.height.round() as i64);
+                    }
+                }
+            }
+        }
+        let page_url = app
+            .try_state::<BrowserState>()
+            .and_then(|s| s.current_url.lock().ok().map(|g| g.clone()))
+            .unwrap_or_default();
+        match auth_req(
+            agent
+                .post(&api_url("/api/computer/capture"))
+                .set("Content-Type", "application/json"),
+        )
+        .send_json(body)
+        {
+            Ok(resp) => {
+                let v: serde_json::Value = resp.into_json().unwrap_or_else(|_| json!({}));
+                let capture = v.get("capture").cloned().unwrap_or(json!({}));
+                let mut result = json!({
+                    "ok": true,
+                    "target": "browser",
+                    "action": "screenshot",
+                    "message": "Browser rail capture",
+                    "via": "rust-host",
+                    "url": page_url,
+                    "scale": scale,
+                });
+                if let Some(obj) = capture.as_object() {
+                    if let Some(map) = result.as_object_mut() {
+                        for (k, val) in obj {
+                            map.insert(k.clone(), val.clone());
+                        }
+                    }
+                }
+                complete_job(agent, &id, true, result, None);
+            }
+            Err(e) => complete_job(
+                agent,
+                &id,
+                false,
+                json!({}),
+                Some(format!("screenshot capture failed: {e}")),
+            ),
+        }
+        ack_ui_command(agent, &id);
+        return;
+    }
+
+    log::warn!("computer-host: job {id} action={action} has no Rust handler");
+    complete_job(
+        agent,
+        &id,
+        false,
+        json!({}),
+        Some(format!("unsupported browser job action: {action}")),
+    );
 }
 
 /// Poll document.readyState briefly so snapshot/page_text do not eval mid-nav.

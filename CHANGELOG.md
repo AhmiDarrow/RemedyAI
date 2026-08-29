@@ -4,6 +4,18 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Fixed — ``git add && git commit`` no longer flashes a CMD on Windows
+
+- ``CREATE_NO_WINDOW`` hid ``cmd.exe`` but not its git/python children.
+  Plain ``A && B`` chains now run as sequential hidden processes.
+
+### Fixed — one computer-host poller, not two
+
+- The desktop SPA no longer claims ``/api/computer/jobs/next``. Rust drives
+  every rail job (click, type, snapshot, screenshot). Hello + rail-open
+  peek stay in the SPA. Dual claim was racing snapshots and double-hitting
+  the API on every coding turn.
+
 ### Fixed — auto-learn skills no longer mint tool-name titles or store secrets
 
 - Learned skill titles prefer the owner's sentence (paths stripped). Tool
