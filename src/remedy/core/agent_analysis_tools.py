@@ -265,8 +265,13 @@ def _approval_block(runtime: Any, tool: str, command: str) -> str | None:
     try:
         from remedy.core.approvals import APPROVALS
         from remedy.core.turn_context import turn_session_id
-    except Exception:
-        return None
+    except ImportError as exc:
+        return (
+            f"APPROVAL_REQUIRED id=unavailable\n"
+            f"reason=approval gate unavailable: {exc}\n"
+            f"command={command[:400]}\n"
+            "Do not invent success. Tell the user this needs approval in the UI."
+        )
     reason = APPROVALS.needs_ask(command, tool_name=tool)
     sid = turn_session_id(runtime)
     if not reason or APPROVALS.is_approved(tool, command, session_id=sid):

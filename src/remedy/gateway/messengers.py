@@ -104,7 +104,7 @@ def redact_messenger_secrets(text: str) -> str:
 
         out = redact_text(out)
     except Exception:
-        pass
+        return "[redacted]"
     return out
 
 

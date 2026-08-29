@@ -19,6 +19,19 @@ from remedy.execution.sandbox import ExecutionResult, Sandbox
 logger = logging.getLogger(__name__)
 
 
+async def _wait_docker(proc: asyncio.subprocess.Process, timeout_s: float, what: str) -> int:
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=timeout_s)
+        return int(proc.returncode or 0)
+    except TimeoutError:
+        with contextlib.suppress(ProcessLookupError, OSError):
+            proc.kill()
+        with contextlib.suppress(Exception):
+            await proc.wait()
+        logger.warning("%s timed out after %.0fs", what, timeout_s)
+        return 124
+
+
 class DockerSandbox(Sandbox):
     """Execute commands inside ephemeral Docker containers.
 
@@ -70,8 +83,7 @@ class DockerSandbox(Sandbox):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            await proc.wait()
-            if proc.returncode == 0:
+            if await _wait_docker(proc, 8.0, "docker image inspect") == 0:
                 return True
 
             proc = await create_hidden_subprocess_exec(
@@ -79,8 +91,7 @@ class DockerSandbox(Sandbox):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            await proc.wait()
-            return proc.returncode == 0
+            return await _wait_docker(proc, 120.0, "docker pull") == 0
         except Exception:
             return False
 

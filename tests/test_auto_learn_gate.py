@@ -174,6 +174,16 @@ def test_learn_description_redacts_json_and_bearer():
     assert "[redacted]" in text
 
 
+def test_learn_description_omits_when_detector_breaks(monkeypatch):
+    def boom(_text: str) -> bool:
+        raise RuntimeError("detector down")
+
+    monkeypatch.setattr("remedy.memory.partner_memory.looks_like_secret", boom)
+    assert safe_learn_description("tidy the desk") == "Owner task (secrets omitted)."
+    title = _skill_title_from_steps("tidy the desk", work("file_read", "file_write"))
+    assert title == "read-write"
+
+
 def test_learn_description_omits_provider_key_shapes():
     """looks_like_secret is the durable guard — split so scanners ignore fixtures."""
     key = "".join(("sk-ant-", "api03-", "AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH"))

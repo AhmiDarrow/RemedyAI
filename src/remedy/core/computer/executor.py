@@ -3969,8 +3969,7 @@ class ComputerExecutor:
 
     def _browser_page_text(self) -> dict[str, Any]:
         self.bridge.settle_after_navigate(min_s=0.6, max_s=1.5)
-        # Prefer dedicated action so Rust host can claim (only=…page_text).
-        # Legacy SPA path still handles payload.browser_action on click jobs.
+        # Dedicated action so the desktop host can claim page_text.
         last_err = "page_text failed — open a page in the rail first"
         last_job_id = ""
         # Both attempts still run with Desktop closed; they just do not each

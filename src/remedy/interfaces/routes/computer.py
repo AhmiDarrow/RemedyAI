@@ -81,13 +81,7 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
 
     @app.post("/api/computer/host/hello")
     async def computer_host_hello(req: HostHelloRequest | None = None):
-        """Desktop pings this while open (bounds + soft liveness).
-
-        Does **not** alone mark the rail driveable — host_connected requires
-        jobs/next or ui/command polling (see host_bridge.host_connected).
-        Clients must not POST this on the jobs/next hot path; bounds/session
-        every few seconds is enough. jobs/next already carries session_id.
-        """
+        """Bounds + session ping. Does not mark the rail driveable (jobs/next does)."""
         b = _bridge()
         # Soft touch only — real poller marks via jobs/ui routes.
         b.mark_host_alive(poller=False)
@@ -112,17 +106,14 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "pending_jobs": b.pending_count(),
             "ui_command": b.peek_ui_command(),
             "jobs_root": str(b.root),
-            "pending_hint": "claim via GET /api/computer/jobs/next",
+            "pending_hint": "Rust computer-host claims GET /api/computer/jobs/next",
         }
 
     @app.get("/api/computer/ui/command")
     async def computer_ui_command(take: bool = False, session_id: str = ""):
-        """Desktop polls this to open Browser rail (like Settings) without user action.
-
-        *take*=1 atomically clears the command so hosts do not re-navigate the same URL.
-        """
+        """Open the Browser rail. take=1 is the Rust consumer; peek is not the poller."""
         b = _bridge()
-        b.mark_host_alive(poller=True)
+        b.mark_host_alive(poller=bool(take))
         if session_id.strip():
             b.set_focused_session(session_id)
         cmd = (

@@ -1006,7 +1006,7 @@ def test_claim_next_rail_follows_driver_when_focused_tab_idle(tmp_path: Path, mo
     _streaming(monkeypatch, "sess-b")  # only the driver is mid-turn
     other = b.enqueue("page_text", {}, session_id="sess-b")
     b.set_focused_session("sess-a")
-    claimed = b.claim_next(session_id="sess-a")  # SPA polls with its own tab
+    claimed = b.claim_next(session_id="sess-a")
     assert claimed is not None
     assert claimed.id == other.id
 
@@ -1571,6 +1571,36 @@ def test_list_user_message_still_loads_computer_guidance() -> None:
     assert needs_computer_use_guidance(["implement a calculator"]) is False
     assert needs_computer_use_guidance([]) is False
     assert needs_computer_use_guidance(None) is False
+
+
+def test_ui_command_peek_is_not_the_poller(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from remedy.core.computer import host_bridge as hb
+    from remedy.interfaces.api import create_app
+
+    monkeypatch.setattr(hb, "_bridge", None)
+
+    class Cfg:
+        home_dir = str(tmp_path)
+
+    class RT:
+        config = Cfg()
+
+        def list_tasks(self):
+            return []
+
+    app = create_app(runtime=RT(), api_key="")
+    client = TestClient(app)
+    r = client.get("/api/computer/ui/command")
+    assert r.status_code == 200
+    st = client.get("/api/computer/host/status")
+    assert st.status_code == 200
+    assert st.json().get("host_connected") is False
+    r2 = client.get("/api/computer/ui/command?take=1")
+    assert r2.status_code == 200
+    st2 = client.get("/api/computer/host/status")
+    assert st2.json().get("host_connected") is True
 
 
 def test_hello_alone_not_host_connected(tmp_path: Path):

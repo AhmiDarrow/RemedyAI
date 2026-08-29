@@ -58,7 +58,7 @@ def _sanitize_title_line(message: str) -> str:
         if looks_like_secret(line):
             return ""
     except Exception:
-        pass
+        return ""
     return line[:60]
 
 
@@ -80,7 +80,7 @@ def safe_learn_description(message: str) -> str:
         if looks_like_secret(probe):
             return _OMITTED
     except Exception:
-        pass
+        return _OMITTED
     return text[:400]
 
 

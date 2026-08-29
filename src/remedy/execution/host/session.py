@@ -90,9 +90,20 @@ class HostSession:
             return
         self._lock = asyncio.Lock()
         argv = _session_argv(self.host)
-        env = dict(self.env or os.environ)
+        if self.env is not None:
+            env = dict(self.env)
+        else:
+            from remedy.execution.sandbox import scrub_subprocess_env
+
+            env = scrub_subprocess_env()
         env.setdefault("PYTHONIOENCODING", "utf-8")
         env.setdefault("PYTHONUTF8", "1")
+        env.setdefault("GIT_TERMINAL_PROMPT", "0")
+        env.setdefault("GCM_INTERACTIVE", "never")
+        env.setdefault("GH_PROMPT_DISABLED", "1")
+        for key in list(env):
+            if key.upper() == "GIT_ASKPASS":
+                env.pop(key, None)
         if os.name == "nt":
             env.setdefault("CHCP", "65001")
         from remedy.execution.process import create_hidden_subprocess_exec

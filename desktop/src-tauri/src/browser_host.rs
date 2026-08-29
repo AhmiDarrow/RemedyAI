@@ -2974,6 +2974,25 @@ fn handle_ui_command(app: &AppHandle, agent: &ureq::Agent, cmd: &serde_json::Val
     fire_navigate(app, &url);
 }
 
+fn rust_action_ok(raw: &str) -> bool {
+    let s = raw.trim();
+    if s.is_empty() {
+        return false;
+    }
+    if s.starts_with("missing-ref:")
+        || s.starts_with("no-match:")
+        || s.starts_with("no-option:")
+        || s.starts_with("not-select:")
+        || s.starts_with("no element")
+        || s.starts_with("ambiguous:")
+        || s.starts_with("error:")
+        || s.starts_with("browser:")
+    {
+        return false;
+    }
+    s == "ok" || s.starts_with("ok:") || s.starts_with("ok-")
+}
+
 fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
     let id = job.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
     let action = job
@@ -3148,9 +3167,7 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
             r#ref.clone(),
         ) {
             Ok(raw) => {
-                let ok = !raw.starts_with("no-match")
-                    && !raw.starts_with("missing-ref")
-                    && !raw.starts_with("missing-text");
+                let ok = rust_action_ok(&raw);
                 complete_job(
                     agent,
                     &id,
@@ -3201,7 +3218,7 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
             r#ref,
         ) {
             Ok(raw) => {
-                let ok = raw.starts_with("ok:");
+                let ok = rust_action_ok(&raw);
                 complete_job(
                     agent,
                     &id,
@@ -3268,10 +3285,7 @@ fn handle_job(app: &AppHandle, agent: &ureq::Agent, job: &serde_json::Value) {
             r#ref,
         ) {
             Ok(raw) => {
-                // Match SPA rustBrowserActionOk: success is ok / ok:… / ok-fallback.
-                // "not-select:" used to pass the old "doesn't start with no-/missing"
-                // check and get reported as success.
-                let ok = raw.starts_with("ok");
+                let ok = rust_action_ok(&raw);
                 complete_job(
                     agent,
                     &id,
