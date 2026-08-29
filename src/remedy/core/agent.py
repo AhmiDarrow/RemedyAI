@@ -285,7 +285,7 @@ class BasicRuntime(AgentRuntime):
             ws = current_turn_workspace()
             if ws is not None:
                 return is_unset_project_path(ws.project_raw)
-        except Exception:
+        except ImportError:
             pass
         return is_unset_project_path(getattr(self, "_project_path_raw", None))
 
@@ -300,7 +300,7 @@ class BasicRuntime(AgentRuntime):
             ws = current_turn_workspace()
             if ws is not None and ws.active_path:
                 return ensure_project_dir(Path(ws.active_path))
-        except Exception:
+        except ImportError:
             pass
         try:
             return ensure_project_dir(self._active_project_path)
@@ -316,7 +316,7 @@ class BasicRuntime(AgentRuntime):
             ws = current_turn_workspace()
             if ws is not None:
                 raw = ws.project_raw
-        except Exception:
+        except ImportError:
             pass
         return effective_access_scope(
             getattr(self, "_access_scope", None),
