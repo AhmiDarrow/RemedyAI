@@ -190,6 +190,98 @@ class SubprocessSandbox(Sandbox):
                     duration_ms=0.0,
                 )
 
+        from remedy.execution.host.runner import expand_and_chain_argv
+
+        hops = expand_and_chain_argv(
+            list(command),
+            project_path=workdir,
+        )
+        if hops and len(hops) >= 2:
+            return await self._execute_and_chain(
+                hops,
+                workdir=workdir,
+                timeout_seconds=timeout_seconds,
+                env=env,
+                start=start,
+            )
+        return await self._execute_one(
+            list(command),
+            workdir=workdir,
+            timeout_seconds=timeout_seconds,
+            env=env,
+            start=start,
+        )
+
+    async def _execute_and_chain(
+        self,
+        hops: list[list[str]],
+        *,
+        workdir: Path | None,
+        timeout_seconds: float,
+        env: dict[str, str] | None,
+        start: float,
+    ) -> ExecutionResult:
+        """Run ``A && B`` as hidden processes (CREATE_NO_WINDOW is not inherited)."""
+        from remedy.core.turn_context import is_turn_aborted
+
+        stdout_parts: list[str] = []
+        stderr_parts: list[str] = []
+        last = ExecutionResult(exit_code=0)
+        remaining = float(timeout_seconds)
+        for hop in hops:
+            if is_turn_aborted():
+                return ExecutionResult(
+                    exit_code=-1,
+                    stderr="Aborted before start (session stop)",
+                    duration_ms=(time.monotonic() - start) * 1000,
+                )
+            if remaining <= 0.05:
+                return ExecutionResult(
+                    exit_code=-1,
+                    stdout=_clip_output("\n".join(stdout_parts), "stdout"),
+                    stderr=_clip_output(
+                        "\n".join([*stderr_parts, f"Command timed out after {timeout_seconds}s"]),
+                        "stderr",
+                    ),
+                    duration_ms=(time.monotonic() - start) * 1000,
+                )
+            hop_danger = check_dangerous_command(hop)
+            if hop_danger:
+                return ExecutionResult(
+                    exit_code=-1,
+                    stderr=f"Blocked by security policy: {hop_danger}",
+                    duration_ms=(time.monotonic() - start) * 1000,
+                )
+            last = await self._execute_one(
+                hop,
+                workdir=workdir,
+                timeout_seconds=remaining,
+                env=env,
+                start=time.monotonic(),
+            )
+            if last.stdout:
+                stdout_parts.append(last.stdout)
+            if last.stderr:
+                stderr_parts.append(last.stderr)
+            remaining -= max(0.0, last.duration_ms / 1000.0)
+            if last.exit_code != 0:
+                break
+        return ExecutionResult(
+            exit_code=last.exit_code,
+            stdout=_clip_output("\n".join(stdout_parts), "stdout"),
+            stderr=_clip_output("\n".join(stderr_parts), "stderr"),
+            duration_ms=(time.monotonic() - start) * 1000,
+        )
+
+    async def _execute_one(
+        self,
+        command: list[str],
+        *,
+        workdir: Path | None,
+        timeout_seconds: float,
+        env: dict[str, str] | None,
+        start: float,
+    ) -> ExecutionResult:
         # Always scrub secrets; infer VCS grants only when argv is git/gh/ssh.
         safe_env = scrub_subprocess_env(env, argv=command)
         # Force UTF-8 in the child so non-ASCII stdout/stderr survives the

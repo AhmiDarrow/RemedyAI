@@ -65,7 +65,7 @@ _CMD_BUILTINS = frozenset(
     }
 )
 
-_SHELL_META = re.compile(r"[|<>&^%()]|&&|\|\|")
+_SHELL_META_CHARS = set("|<>&^%()")
 
 
 @dataclass
@@ -161,10 +161,132 @@ def deflate_uv_run(
     return argv
 
 
+def split_plain_and_chain(text: str) -> list[str] | None:
+    """Split ``A && B && C`` into segments when every hop is a plain argv.
+
+    Quote-aware so ``git commit -m "a && b"`` stays one hop. Pipes, ``||``,
+    redirects, parens, and cmd builtins still need a real shell.
+    """
+    raw = (text or "").strip()
+    if not raw or "||" in raw:
+        return None
+    parts: list[str] = []
+    buf: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(raw):
+        ch = raw[i]
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch in "\"'":
+            quote = ch
+            buf.append(ch)
+            i += 1
+            continue
+        if raw.startswith("&&", i):
+            parts.append("".join(buf).strip())
+            buf = []
+            i += 2
+            continue
+        buf.append(ch)
+        i += 1
+    if quote:
+        return None
+    parts.append("".join(buf).strip())
+    parts = [p for p in parts if p]
+    if len(parts) < 2:
+        return None
+    if any(not looks_like_plain_argv(p) for p in parts):
+        return None
+    return parts
+
+
+def expand_and_chain_argv(
+    argv: list[str],
+    *,
+    project_path: Path | str | None = None,
+) -> list[list[str]] | None:
+    """If *argv* is ``cmd /c A && B`` (or ``sh -c``), return hidden-safe hops.
+
+    CREATE_NO_WINDOW on cmd.exe is not inherited. git/python children of that
+    shell flash a console on the packaged desktop. Exec each hop ourselves.
+    """
+    if len(argv) < 3:
+        return None
+    head = str(argv[0]).replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if head.endswith(".exe"):
+        head = head[:-4]
+    flag = str(argv[1]).lower()
+    if head == "cmd" and flag == "/c":
+        text = str(argv[2]) if len(argv) == 3 else " ".join(str(a) for a in argv[2:])
+    elif head in {"sh", "bash"} and flag == "-c":
+        text = str(argv[2]) if len(argv) == 3 else " ".join(str(a) for a in argv[2:])
+    else:
+        return None
+    parts = split_plain_and_chain(text)
+    if not parts:
+        return None
+    out: list[list[str]] = []
+    for part in parts:
+        hop = _argv_for_hidden_hop(part)
+        if not hop:
+            return None
+        head = hop[0]
+        if not Path(head).is_file():
+            resolved = resolve_which(head, cwd=project_path)
+            if resolved:
+                hop[0] = resolved
+        hop = deflate_uv_run(hop, project_path=project_path)
+        out.append(hop)
+    return out if len(out) >= 2 else None
+
+
+def _argv_for_hidden_hop(part: str) -> list[str]:
+    """Argv for one ``&&`` hop. Strip cmd.exe's leftover quotes on Windows."""
+    hop = coerce_argv(part)
+    if os.name != "nt":
+        return hop
+    cleaned: list[str] = []
+    for tok in hop:
+        if len(tok) >= 2 and tok[0] == '"' and tok[-1] == '"':
+            cleaned.append(tok[1:-1].replace('""', '"'))
+        else:
+            cleaned.append(tok)
+    return cleaned
+
+
+def _unquoted_has_shell_meta(cmd: str) -> bool:
+    """True if shell metacharacters appear outside quotes (or quotes never close)."""
+    quote = ""
+    i = 0
+    n = len(cmd)
+    while i < n:
+        ch = cmd[i]
+        if quote:
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch in "\"'":
+            quote = ch
+            i += 1
+            continue
+        if ch in _SHELL_META_CHARS:
+            return True
+        if cmd.startswith("&&", i) or cmd.startswith("||", i):
+            return True
+        i += 1
+    return bool(quote)
+
+
 def looks_like_plain_argv(command: str) -> bool:
     """True when *command* is a single native process + args (no shell)."""
     cmd = (command or "").strip()
-    if not cmd or _SHELL_META.search(cmd):
+    if not cmd or _unquoted_has_shell_meta(cmd):
         return False
     if looks_like_powershell(cmd):
         return False

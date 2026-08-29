@@ -106,7 +106,7 @@ export async function computerCapture(body: {
   })
 }
 
-/** Claim next job. SPA must exclude navigate — Rust owns rail navigates. */
+/** Claim next job. Desktop Tauri no longer uses this — Rust is the only poller. */
 export async function claimComputerJob(
   opts?: { exclude?: string; sessionId?: string | null; waitMs?: number },
 ): Promise<ComputerJob | null> {

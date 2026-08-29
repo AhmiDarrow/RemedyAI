@@ -2,16 +2,14 @@
  * Desktop host loop for in-house computer use.
  *
  * 1) Polls UI commands so Browser rail opens like Settings (no user pre-open).
- * 2) Claims browser jobs and drives WebView2 (click / type / …). Rust owns navigate.
- * 3) Hello (~4s) is bounds + session only. GET /jobs/next is the host_connected
- *    heartbeat — never POST /host/hello on the claim hot path (dual-spam with Rust).
+ * 2) Hello (~4s) is bounds + session only.
+ * 3) Rust computer-host is the only jobs/next poller. This hook used to claim
+ *    click/type/snapshot too, which dual-spammed the API and raced the native
+ *    driver. Keep runBrowserJob for tests / a future fallback.
  */
 import { useEffect, useRef } from 'react'
 import { isTauri, tauriInvoke } from '../api/tauri'
 import {
-  ackComputerUiCommand,
-  claimComputerJob,
-  completeComputerJob,
   computerCapture,
   computerHostHello,
   emitComputerUi,
@@ -81,7 +79,7 @@ async function navigateInRail(url: string): Promise<string> {
   return opened || url
 }
 
-async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>> {
+export async function runBrowserJob(job: ComputerJob): Promise<Record<string, unknown>> {
   const action = (job.action || '').toLowerCase()
   const p = job.payload || {}
   const ui = (p.ui && typeof p.ui === 'object' ? p.ui : {}) as {
@@ -394,7 +392,6 @@ export function useComputerHost(
   onOpenBrowser?: () => void,
   sessionId?: string | null,
 ): void {
-  const busy = useRef(false)
   const uiBusy = useRef(false)
   const openBrowserRef = useRef(onOpenBrowser)
   openBrowserRef.current = onOpenBrowser
@@ -407,7 +404,6 @@ export function useComputerHost(
     if (!enabled) return
 
     let cancelled = false
-    const claimedRef = { current: false }
 
     const openRail = () => {
       try {
@@ -428,15 +424,13 @@ export function useComputerHost(
     }
 
     /**
-     * SPA only opens the rail — Rust computer-host owns navigate (avoids double
-     * navigate + 30s races). Listen to computer-open-browser for URL bar sync.
+     * SPA only opens the rail — Rust computer-host owns every browser job.
+     * Peek (do not take) so the native poller still consumes ui/command.
      */
     const tickUiCommand = async (): Promise<boolean> => {
       if (cancelled || uiBusy.current) return false
       uiBusy.current = true
       try {
-        // Peek only (do not take) — Rust uses take=1. Just ensure rail is open
-        // if anything is pending for UX when SPA is focused.
         const cmd = await fetchComputerUiCommand(
           false,
           sessionIdRef.current,
@@ -451,100 +445,22 @@ export function useComputerHost(
       }
     }
 
-    const tickJobs = async (): Promise<boolean> => {
-      if (cancelled || busy.current) return false
-      // Do not claim rail jobs while the window is hidden/minimized and no job
-      // is already in flight — the rail has no eyes then and Rust drives it.
-      // The event-driven reschedule() pause could be missed (a job was in
-      // flight at the visibilitychange, and nothing re-pauses afterward), so
-      // gate here too, on every tick.
-      const hiddenNow =
-        typeof document !== 'undefined' &&
-        (document.hidden || document.visibilityState === 'hidden')
-      if (hiddenNow && !claimedRef.current) return false
-      busy.current = true
-      try {
-        // jobs/next marks poller=True (host_connected). Hello is bounds-only
-        // on a 4s timer — posting it here dual-fired with Rust every 120ms.
-        let job: ComputerJob | null = null
-        try {
-          // Never claim navigate — Rust computer-host owns rail navigates via
-          // ui_command take. Dual claim was racing the WebView main thread and
-          // causing second-nav timeouts (Google ok, wiki 8s fail).
-          // `ready` is a Rust-only probe (unsupported here) — leave it too.
-          job = await claimComputerJob({
-            exclude: 'navigate,ready',
-            sessionId: sessionIdRef.current,
-            waitMs: jobWaitMs(),
-          })
-        } catch (e) {
-          console.warn('[computer-host] claim failed', e)
-          job = null
-        }
-        if (job?.id && (job.action || '').toLowerCase() === 'navigate') {
-          // Belt-and-suspenders: leave for Rust (should not be claimed)
-          job = null
-        }
-        claimedRef.current = Boolean(job?.id)
-        if (job?.id) {
-          openRail()
-          try {
-            const result = await runBrowserJob(job)
-            if (result._host_defers_complete) {
-              /* a11y push completes */
-            } else {
-              await completeComputerJob(job.id, {
-                ok: result.ok !== false,
-                result,
-                error:
-                  result.ok === false ? String(result.message || 'failed') : undefined,
-              })
-            }
-            await ackComputerUiCommand(job.id).catch(() => null)
-          } catch (e) {
-            console.warn('[computer-host] job failed', job.id, e)
-            await completeComputerJob(job.id, {
-              ok: false,
-              error: e instanceof Error ? e.message : String(e),
-            }).catch(() => null)
-          }
-          claimedRef.current = false
-          return true
-        }
-        return false
-      } finally {
-        busy.current = false
-      }
-    }
-
-    // Hello is bounds/session only (jobs/next is the poller heartbeat).
-    // Job/UI back off when idle so we do not dual-spam with the Rust poller.
-    // Escalate idle further — host_connected max_age is 15s, so 2s is safe.
     const HELLO_MS = 4000
-    const JOB_BUSY_MS = 120
-    const JOB_IDLE_MS = 800
-    const JOB_WAIT_MS = 2000
     const UI_BUSY_MS = 250
     const UI_IDLE_MS = 800
     const UI_IDLE_MAX_MS = 2000
     let helloIv = 0
     let uiIv = 0
-    let jobIv = 0
     let loopsOn = false
     let loopGen = 0
-    let jobIdleStreak = 0
     let uiIdleStreak = 0
-    const jobWaitMs = () =>
-      jobIdleStreak >= 8 ? JOB_WAIT_MS : jobIdleStreak >= 1 ? JOB_IDLE_MS : 0
 
     const stopLoops = () => {
       loopGen += 1
       window.clearTimeout(helloIv)
       window.clearTimeout(uiIv)
-      window.clearTimeout(jobIv)
       helloIv = 0
       uiIv = 0
-      jobIv = 0
       loopsOn = false
     }
 
@@ -560,24 +476,6 @@ export function useComputerHost(
           if (!cancelled && loopsOn && my === loopGen) scheduleHello()
         })
       }, HELLO_MS)
-    }
-
-    const scheduleJobs = (ms: number) => {
-      const my = loopGen
-      window.clearTimeout(jobIv)
-      jobIv = window.setTimeout(() => {
-        void tickJobs().then((hadJob) => {
-          if (cancelled || !loopsOn || my !== loopGen) return
-          if (hadJob) {
-            jobIdleStreak = 0
-            scheduleJobs(JOB_BUSY_MS)
-            return
-          }
-          jobIdleStreak += 1
-          // Long-poll already waited; loop immediately (wake-on-enqueue).
-          scheduleJobs(jobIdleStreak >= 1 ? 0 : JOB_BUSY_MS)
-        })
-      }, ms)
     }
 
     const scheduleUi = (ms: number) => {
@@ -600,26 +498,16 @@ export function useComputerHost(
 
     const reschedule = () => {
       stopLoops()
-      // Pause only when hidden AND no claimed job — keep 120ms claim loop snappy.
-      if (isHidden() && !claimedRef.current && !busy.current) {
-        // Rust computer-host still claims navigate. SPA must not claim
-        // click/type/page_text against a hidden rail (ok-fallback "success").
-        return
-      }
+      if (isHidden()) return
       loopsOn = true
-      jobIdleStreak = 0
       uiIdleStreak = 0
       scheduleHello()
       scheduleUi(UI_BUSY_MS)
-      scheduleJobs(JOB_BUSY_MS)
     }
 
-    // Immediate kick — don't wait for first interval. Start loops after so
-    // the kick does not overlap a 120ms timer (and does not hello+claim).
     void (async () => {
       await hello().catch(() => null)
       await tickUiCommand()
-      await tickJobs()
       if (!cancelled) reschedule()
     })()
     const onVis = () => reschedule()
