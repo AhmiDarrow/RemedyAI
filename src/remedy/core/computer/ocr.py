@@ -408,7 +408,8 @@ def _ocr_powershell(path: Path) -> list[dict[str, Any]] | None:
     if sys.platform != "win32":
         return None
     # Hidden, no profile — this is a local OS capability, not a shell the owner sees.
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    from remedy.execution.process import hidden_subprocess_kwargs
+
     escaped = str(path.resolve()).replace("'", "''")
     script = f"$Path = '{escaped}'\n" + _PS_SCRIPT
     proc = subprocess.run(
@@ -424,8 +425,8 @@ def _ocr_powershell(path: Path) -> list[dict[str, Any]] | None:
         capture_output=True,
         text=True,
         timeout=_PS_TIMEOUT_S,
-        creationflags=flags,
         env={**os.environ, "TERM": "dumb"},
+        **hidden_subprocess_kwargs(),
     )
     if proc.returncode != 0:
         logger.debug("ocr powershell rc=%s err=%s", proc.returncode, (proc.stderr or "")[:300])
@@ -468,11 +469,14 @@ def _ocr_tesseract(path: Path) -> list[dict[str, Any]] | None:
     exe = shutil.which("tesseract")
     if not exe:
         return None
+    from remedy.execution.process import hidden_subprocess_kwargs
+
     proc = subprocess.run(
         [exe, str(path), "stdout", "tsv", "-l", "eng"],
         capture_output=True,
         text=True,
         timeout=_TESS_TIMEOUT_S,
+        **hidden_subprocess_kwargs(),
     )
     if proc.returncode != 0:
         return None

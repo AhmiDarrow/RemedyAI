@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import os
 import re
 import subprocess
 from contextlib import suppress
@@ -139,6 +138,9 @@ def format_inbox_comment(
 
 
 def _git(repo: Path, *args: str, timeout: float = 60.0) -> tuple[int, str, str]:
+    from remedy.execution.process import hidden_subprocess_kwargs
+    from remedy.execution.sandbox import unattended_vcs_env
+
     try:
         proc = subprocess.run(
             ["git", "-C", str(repo), *args],
@@ -146,6 +148,9 @@ def _git(repo: Path, *args: str, timeout: float = 60.0) -> tuple[int, str, str]:
             text=True,
             timeout=timeout,
             check=False,
+            stdin=subprocess.DEVNULL,
+            env=unattended_vcs_env(["git"]),
+            **hidden_subprocess_kwargs(),
         )
     except FileNotFoundError:
         return 127, "", "git not found"
@@ -157,16 +162,19 @@ def _git(repo: Path, *args: str, timeout: float = 60.0) -> tuple[int, str, str]:
 async def _run_exec(
     repo: Path, argv: list[str], *, timeout: float
 ) -> tuple[int, str, str]:
-    env = os.environ.copy()
-    env.setdefault("GIT_TERMINAL_PROMPT", "0")
-    env.setdefault("GH_PROMPT_DISABLED", "1")
+    from remedy.execution.sandbox import unattended_vcs_env
+
+    env = unattended_vcs_env(argv)
     try:
-        proc = await asyncio.create_subprocess_exec(
+        from remedy.execution.process import create_hidden_subprocess_exec
+
+        proc = await create_hidden_subprocess_exec(
             *argv,
             cwd=str(repo),
             env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,
         )
         try:
             out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)

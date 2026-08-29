@@ -11,6 +11,8 @@ def test_poller_paths_skip_slow_on_200():
         "/api/computer/host/status",
         "/api/status",
         "/api/ping",
+        "/api/life-tasks/current",
+        "/api/approvals",
     ):
         assert should_warn_slow("GET", path, 200, 6259) is False
     assert should_warn_slow("POST", "/api/computer/host/hello", 200, 1711) is False

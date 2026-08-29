@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from remedy.execution.sandbox import scrub_subprocess_env
+from remedy.execution.sandbox import scrub_subprocess_env, unattended_vcs_env
 
 
 def test_generic_shell_drops_vcs_and_llm_tokens(monkeypatch):
@@ -69,6 +69,19 @@ def test_path_env_must_use_scrubbed_base(monkeypatch, tmp_path):
     )
     assert "GH_TOKEN" not in safe
     assert "PATH" in safe or "Path" in safe
+
+
+def test_unattended_git_never_inherits_askpass_or_llm_keys(monkeypatch):
+    monkeypatch.setenv("GIT_ASKPASS", r"C:\Program Files\Git\mingw64\bin\git-credential-manager.exe")
+    monkeypatch.setenv("GH_TOKEN", "ghp_test_keep")
+    monkeypatch.setenv("XAI_API_KEY", "xai_must_drop")
+    env = unattended_vcs_env(["git"])
+    assert "GIT_ASKPASS" not in env
+    assert env.get("GIT_TERMINAL_PROMPT") == "0"
+    assert env.get("GCM_INTERACTIVE") == "never"
+    assert env.get("GH_PROMPT_DISABLED") == "1"
+    assert env.get("GH_TOKEN") == "ghp_test_keep"
+    assert "XAI_API_KEY" not in env
 
 
 def test_ssh_agent_only_with_git_or_ssh_argv(monkeypatch):

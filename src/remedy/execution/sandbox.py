@@ -53,6 +53,27 @@ def scrub_subprocess_env(
     return child_environment(env, grants=inferred)
 
 
+def unattended_vcs_env(
+    argv: list[str],
+    env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Scrubbed git/gh env that must never prompt or open a credential UI.
+
+    A GUI ``GIT_ASKPASS`` / Git Credential Manager dialog is a hang (and a
+    secret leak surface) for unattended rounds. Tokens for git/gh still pass
+    when the argv grant allows them; LLM keys never do.
+    """
+    out = scrub_subprocess_env(env, argv=argv)
+    out["GIT_TERMINAL_PROMPT"] = "0"
+    out["GH_PROMPT_DISABLED"] = "1"
+    out["GCM_INTERACTIVE"] = "never"
+    # Inherited askpass is often a GUI helper; drop it so git fails closed.
+    for key in list(out):
+        if key.upper() == "GIT_ASKPASS":
+            out.pop(key, None)
+    return out
+
+
 def _clip_output(text: str, stream: str) -> str:
     """Soft ExecutionBudget cap so a child cannot flood the turn."""
     from remedy.execution.budgets import ExecutionBudget

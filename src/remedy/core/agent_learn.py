@@ -18,23 +18,90 @@ _META_TOOLS = frozenset(
 )
 
 
-def _skill_title_from_steps(message: str, steps: list[dict[str, Any]]) -> str:
-    """Build a short, stable skill title from tool names — not the full user path dump."""
-    tools: list[str] = []
-    for s in steps:
-        name = str(s.get("tool") or s.get("name") or "").strip()
-        if name and name not in _META_TOOLS and name not in tools:
-            tools.append(name)
-        if len(tools) >= 3:
-            break
-    if tools:
-        return ("-".join(tools))[:60]
-    # Fallback: first line of user message, strip drive paths.
-    line = (message or "session-task").strip().split("\n")[0]
+_TOOL_VERB = {
+    "file_write": "write",
+    "file_edit": "edit",
+    "file_edit_batch": "edit",
+    "apply_patch": "edit",
+    "bash_exec": "shell",
+    "host_run": "host",
+    "job_run": "verify",
+    "repo_search": "search",
+    "file_read": "read",
+    "list_dir": "browse",
+    "computer_click": "click",
+    "computer_type": "type",
+}
+
+_SECRETISH = re.compile(
+    r"(?i)['\"]?(api[_-]?key|secret|token|password|passwd|bearer|authorization)['\"]?"
+    r"\s*[:=]\s*['\"]?\S+"
+)
+_AUTH_HEADER = re.compile(
+    r"(?i)(?:authorization\s*[:=]\s*)?bearer\s+\S+"
+)
+_VAULT_TOKEN = re.compile(r"\{\{\s*vault:[^}]+\}\}")
+_OMITTED = "Owner task (secrets omitted)."
+
+
+def _sanitize_title_line(message: str) -> str:
+    line = (message or "").strip().split("\n")[0]
     line = re.sub(r"[A-Za-z]:\\[^\s]+", "", line)
     line = re.sub(r"/[^\s]+", "", line)
+    line = _VAULT_TOKEN.sub("", line)
+    line = _AUTH_HEADER.sub("", line)
+    line = _SECRETISH.sub("", line)
     line = re.sub(r"\s+", " ", line).strip(" -_.,")
-    return (line or "session-task")[:60]
+    try:
+        from remedy.memory.partner_memory import looks_like_secret
+
+        if looks_like_secret(line):
+            return ""
+    except Exception:
+        pass
+    return line[:60]
+
+
+def safe_learn_description(message: str) -> str:
+    """User text for a learned skill — never a vault token or key blob."""
+    text = _VAULT_TOKEN.sub("{{vault}}", message or "")
+    text = _AUTH_HEADER.sub("Bearer [redacted]", text)
+    text = _SECRETISH.sub(r"\1=[redacted]", text)
+    probe = re.sub(
+        r"(?i)(?:api[_-]?key|secret|token|password|passwd|bearer|authorization)"
+        r"=\[redacted\]",
+        "",
+        text,
+    )
+    probe = probe.replace("Bearer [redacted]", "").replace("{{vault}}", "")
+    try:
+        from remedy.memory.partner_memory import looks_like_secret
+
+        if looks_like_secret(probe):
+            return _OMITTED
+    except Exception:
+        pass
+    return text[:400]
+
+
+def _skill_title_from_steps(message: str, steps: list[dict[str, Any]]) -> str:
+    """Owner-facing title. Never a raw tool-name chain (those became catalog junk)."""
+    line = _sanitize_title_line(message)
+    if len(re.sub(r"[^A-Za-z0-9]", "", line)) >= 4:
+        return line
+    verbs: list[str] = []
+    for s in steps:
+        name = str(s.get("tool") or s.get("name") or "").strip()
+        if name in _META_TOOLS or not name:
+            continue
+        verb = _TOOL_VERB.get(name, "")
+        if verb and verb not in verbs:
+            verbs.append(verb)
+        if len(verbs) >= 2:
+            break
+    if verbs:
+        return "-".join(verbs)[:60]
+    return "session-task"
 
 
 def _step_tool_name(step: dict[str, Any]) -> str:
@@ -104,8 +171,6 @@ def auto_learn_from_turn(
         return None
 
     # Pattern nanobot pre-gate: skip learning noisy / rejectable traces.
-    # Prefer a short tool-pattern title over the raw user prompt (paths make
-    # garbage skill ids like "file_read-i-like-our-assets-for-remedy-located-…").
     title = _skill_title_from_steps(message, steps_list)
     try:
         from remedy.nanoswarm import get_swarm
@@ -128,7 +193,7 @@ def auto_learn_from_turn(
         title=title or "multi-tool-task",
         steps=steps_list,
         session_id=session_id,
-        description=(message or "")[:400],
+        description=safe_learn_description(message),
         overall_success=True,
     )
     if skill is not None:
