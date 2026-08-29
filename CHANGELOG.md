@@ -4,6 +4,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — native snapshot steers UIA first, screenshot last
+
+- Desktop ``computer_snapshot`` reports how many window vs control refs it
+  found and tells the model to click ``cN`` / names first. When UI Automation
+  is empty it names screenshot/OCR as the fallback and forbids guessed x/y.
+
 ### Added — local / RMB operate pack can verify and recall
 
 - Local (RMB / llama.cpp / Ollama) live rounds keep 16 schemas, including

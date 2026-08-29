@@ -1284,12 +1284,23 @@ class ComputerExecutor:
             self.bridge.set_last_elements(elements, target="desktop")
             n_w = sum(1 for e in elements if str(e.get("ref", "")).startswith("w"))
             n_c = sum(1 for e in elements if str(e.get("ref", "")).startswith("c"))
+            from remedy.core.computer.desktop_uia import structured_observe_hint
+
+            hint_obs = structured_observe_hint(n_windows=n_w, n_controls=n_c)
             return public_result(
                 ok=True,
                 target="desktop",
                 action="snapshot",
-                message=f"{len(elements)} elements (windows={n_w}, controls={n_c})",
-                extra={"elements": elements, "mode": mode},
+                message=(
+                    f"{len(elements)} elements (windows={n_w}, controls={n_c}). "
+                    f"{hint_obs}"
+                ),
+                extra={
+                    "elements": elements,
+                    "mode": mode,
+                    "observe": hint_obs,
+                    "structured": n_c > 0,
+                },
             )
         if act is ComputerAction.WAIT:
             raw_sec = kwargs.get("seconds")

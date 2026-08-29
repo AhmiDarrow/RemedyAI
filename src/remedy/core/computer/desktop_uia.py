@@ -51,6 +51,25 @@ _CONTROL_TYPES = {
     50037: "titlebar",
 }
 
+def structured_observe_hint(*, n_windows: int, n_controls: int) -> str:
+    """What to do next: UIA/DOM first, screenshot/OCR last."""
+    if int(n_controls or 0) > 0:
+        return (
+            "Use control refs (cN) or names. Do not guess pixels. "
+            "Screenshot/OCR only if a custom-drawn control is missing."
+        )
+    if int(n_windows or 0) > 0:
+        return (
+            "Window list only — UI Automation found no controls. "
+            "Focus the app and snapshot again, or computer_screenshot for OCR "
+            "(ref=oN). Do not click guessed x/y."
+        )
+    return (
+        "No structured controls. computer_screenshot then click OCR ref=oN "
+        "or marked boxes — never guessed coordinates."
+    )
+
+
 # Prefer clickable / typeable types
 _PREFERRED = frozenset(
     {
