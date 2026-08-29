@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest'
-import { lifeTaskHeadline, shouldShowLifeTaskBanner } from './LifeTaskBanner'
+import {
+  lifeTaskHeadline,
+  parseLifeTaskChoice,
+  shouldShowLifeTaskBanner,
+} from './LifeTaskBanner'
+
+describe('parseLifeTaskChoice', () => {
+  it('maps short Yes / No / Explain answers', () => {
+    expect(parseLifeTaskChoice('Yes')).toBe('yes')
+    expect(parseLifeTaskChoice('go ahead.')).toBe('yes')
+    expect(parseLifeTaskChoice('No')).toBe('no')
+    expect(parseLifeTaskChoice('not now')).toBe('no')
+    expect(parseLifeTaskChoice('Explain')).toBe('explain')
+    expect(parseLifeTaskChoice('why?')).toBe('explain')
+  })
+
+  it('does not steal a longer message', () => {
+    expect(parseLifeTaskChoice('yes, and also run the tests')).toBe(null)
+    expect(parseLifeTaskChoice('explain the plan then buy milk')).toBe(null)
+  })
+})
 
 describe('lifeTaskHeadline', () => {
   it('prefers the spoken sentence', () => {

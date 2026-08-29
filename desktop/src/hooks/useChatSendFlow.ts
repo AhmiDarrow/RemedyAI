@@ -16,6 +16,8 @@ import { shouldConfirmNewTurn } from '../sessions/concurrentTurns'
 import type { ChatSession } from '../types'
 import { looksLikeBuildKick, looksLikeLeaveChat } from '../utils/buildKick'
 import { isPlaceholderTitle, titleFromPrompt } from '../utils/sessionTitle'
+import { actLifeTask, getCurrentLifeTask } from '../api/partner'
+import { parseLifeTaskChoice } from '../components/LifeTaskBanner'
 
 type AttachmentMeta = {
   path: string
@@ -329,6 +331,38 @@ export function useChatSendFlow(opts: {
           })
           return
         }
+        const choice = parseLifeTaskChoice(text)
+        if (choice && !attachments?.length) {
+          try {
+            const cur = await getCurrentLifeTask(sid)
+            const task = cur.task
+            const asking =
+              Boolean(task)
+              && (
+                String(task.status || '') === 'need_you'
+                || task.kind === 'plan_gate'
+                || Boolean(task.approval_id)
+                || Boolean(task.checkpoint)
+              )
+            if (asking) {
+              const res = await actLifeTask(choice, {
+                sessionId: sid,
+                taskId: task?.task_id,
+                approvalId: task?.approval_id,
+              })
+              addCommandMessage(
+                text.trim(),
+                String(
+                  res.spoken
+                  || (choice === 'explain' ? 'Explain' : choice === 'yes' ? 'Yes.' : 'Stopped.'),
+                ),
+              )
+              return
+            }
+          } catch {
+            // Card miss must not eat the owner's words.
+          }
+        }
         // Ensure a model id is set before streaming (first paint race after boot).
         // Never pull global settings into the status bar when a session is open —
         // that flipped the second tab (e.g. SecretFolder) between providers.
@@ -428,6 +462,7 @@ export function useChatSendFlow(opts: {
       barModel,
       setSessionBind,
       bumpStick,
+      addCommandMessage,
     ],
   )
 

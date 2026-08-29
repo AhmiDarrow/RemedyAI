@@ -9,6 +9,22 @@ import {
 } from '../api/partner'
 import { stepStatusChip } from './PlanBanner'
 
+/** Short composer / voice answers for the life-task card. */
+export function parseLifeTaskChoice(text: string): 'yes' | 'no' | 'explain' | null {
+  const t = (text || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]+$/g, '')
+    .trim()
+  if (!t || t.length > 48) return null
+  if (/^(y|yes|yeah|yep|ok|okay|go ahead|yes go ahead|approve|please do)$/.test(t)) {
+    return 'yes'
+  }
+  if (/^(n|no|nope|not now|stop|deny|cancel|don't|do not)$/.test(t)) return 'no'
+  if (/^(explain|why|what does that mean|tell me more)$/.test(t)) return 'explain'
+  return null
+}
+
 export function lifeTaskHeadline(card: LifeTaskCard | null): string {
   if (!card) return ''
   const spoken = String(card.spoken || '').trim()
@@ -110,6 +126,8 @@ export function LifeTaskBanner({
   }, [refreshSignal, refresh])
 
   useEffect(() => {
+    const st = String(card?.status || '').toLowerCase()
+    if (!['need_you', 'blocked', 'done'].includes(st)) return
     const spoken = lifeTaskHeadline(card)
     if (spoken && spoken !== spokenRef.current) {
       spokenRef.current = spoken
