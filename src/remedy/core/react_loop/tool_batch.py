@@ -13,6 +13,33 @@ from remedy.core.react_turn import extract_tool_names, extract_write_paths
 logger = logging.getLogger(__name__)
 
 
+def _batch_ran_verify(fresh_calls: list[Any]) -> bool:
+    """True when this batch already ran job_run kind=verify (don't double-run)."""
+    import json
+
+    for t in fresh_calls or []:
+        if not isinstance(t, dict):
+            continue
+        fn = t.get("function") or {}
+        name = str(fn.get("name") or "")
+        if name == "mission_verify":
+            return True
+        if name != "job_run":
+            continue
+        args = fn.get("arguments") or t.get("arguments") or {}
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                args = {}
+        if not isinstance(args, dict):
+            continue
+        kind = str(args.get("kind") or "").lower()
+        if kind in {"verify", "test", "check"}:
+            return True
+    return False
+
+
 @contextmanager
 def _soft(stage: str) -> Iterator[None]:
     """A best-effort stage: it may fail, but it may not fail *silently*.
@@ -149,21 +176,18 @@ async def apply_build_engine_after_batch(
         )
         if (bst is None or not getattr(bst, "active", False)) and wrote_now:
             with _soft("casual-write-verify"):
-                from remedy.core.build_oracle import discover_verify_command
+                from remedy.core.build_oracle import run_casual_verify
 
-                cmd = discover_verify_command(runtime)
-                if cmd:
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                "[Machine · verify] After those writes, run "
-                                f"`{cmd}` (job_run kind=verify). Do not claim "
-                                "green until it exits 0."
-                            ),
-                        }
-                    )
-                    yield "@@status:Verify after writes\n"
+                if not _batch_ran_verify(fresh_calls):
+                    cv = await run_casual_verify(runtime)
+                    if cv.get("ran") or cv.get("approval"):
+                        messages.append(
+                            {
+                                "role": "system",
+                                "content": str(cv.get("message") or ""),
+                            }
+                        )
+                        yield "@@status:Verify after writes\n"
         if bst is not None and bst.active:
             observe_tool_batch(bst, fresh_calls, batch_tool_msgs, runtime=runtime)
             with _soft("todos-flush"):

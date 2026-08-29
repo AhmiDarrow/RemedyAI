@@ -286,6 +286,50 @@ def oracle_missing_nudge(state: Any) -> dict[str, str]:
     }
 
 
+async def run_casual_verify(runtime: Any, *, command: str = "") -> dict[str, Any]:
+    """Run ``job_run kind=verify`` after casual writes (no build engine).
+
+    Ask still gates the shell — this never bypasses approval. Empty command
+    means no known suite; we do not invent green.
+    """
+    from remedy.core.jobs import run_verify_job
+
+    cmd = coerce_verify_command(command) or discover_verify_command(runtime)
+    if not cmd:
+        return {
+            "ran": False,
+            "ok": False,
+            "approval": False,
+            "message": (
+                "[Machine · verify] No project test command found. "
+                "Do not claim green."
+            ),
+        }
+    result = await run_verify_job(runtime, command=cmd)
+    summary = str(result.summary or "")
+    approval = "APPROVAL_REQUIRED" in summary
+    if approval:
+        msg = (
+            "[Machine · verify] The project's test command needs your go-ahead "
+            f"before it can run (`{cmd}`). Do not claim green.\n{summary}"
+        )
+    elif result.ok:
+        msg = f"[Machine · verify] `{cmd}` exited 0.\n{summary}"
+    else:
+        msg = (
+            f"[Machine · verify] `{cmd}` did not pass. Do not claim green.\n"
+            f"{summary}"
+        )
+    return {
+        "ran": not approval,
+        "ok": bool(result.ok),
+        "approval": approval,
+        "command": cmd,
+        "message": msg,
+        "summary": summary,
+    }
+
+
 async def run_auto_verify(
     runtime: Any,
     state: Any,
