@@ -71,6 +71,35 @@ def test_path_env_must_use_scrubbed_base(monkeypatch, tmp_path):
     assert "PATH" in safe or "Path" in safe
 
 
+def test_run_unattended_git_uses_scrubbed_env(monkeypatch, tmp_path):
+    from remedy.execution.sandbox import run_unattended_git
+
+    monkeypatch.setenv("XAI_API_KEY", "xai_must_drop")
+    monkeypatch.setenv("GIT_ASKPASS", "gui-helper")
+    captured: dict = {}
+
+    def fake_run(argv, **kwargs):
+        captured["env"] = dict(kwargs.get("env") or {})
+        captured["argv"] = list(argv)
+
+        class R:
+            returncode = 0
+            stdout = "ok\n"
+            stderr = ""
+
+        return R()
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    code, out, _err = run_unattended_git(tmp_path, "status", timeout=5)
+    assert code == 0
+    assert out == "ok\n"
+    env = captured["env"]
+    assert "XAI_API_KEY" not in env
+    assert "GIT_ASKPASS" not in env
+    assert env.get("GIT_TERMINAL_PROMPT") == "0"
+    assert captured["argv"][:3] == ["git", "-C", str(tmp_path)]
+
+
 def test_unattended_git_never_inherits_askpass_or_llm_keys(monkeypatch):
     monkeypatch.setenv("GIT_ASKPASS", r"C:\Program Files\Git\mingw64\bin\git-credential-manager.exe")
     monkeypatch.setenv("GH_TOKEN", "ghp_test_keep")

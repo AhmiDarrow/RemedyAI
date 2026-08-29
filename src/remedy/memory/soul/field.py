@@ -666,10 +666,12 @@ def clear_soul_cache() -> None:
         _cache.clear()
 
 
-_SECRET_RE = re.compile(
-    r"(?i)(api[_-]?key|password|secret|token|sk-[a-z0-9]{8,}|bearer\s+\S+)"
+_SOUL_PROSE = re.compile(
+    r"(?i)\b(password|passwd|token|secret)\s*(?:is|[:=])\s*\S+"
 )
 
 
 def looks_like_secret_soul(text: str) -> bool:
-    return bool(_SECRET_RE.search(text or ""))
+    from remedy.memory.partner_memory import looks_like_secret
+
+    return looks_like_secret(text) or bool(_SOUL_PROSE.search(text or ""))

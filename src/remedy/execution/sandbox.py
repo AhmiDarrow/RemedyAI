@@ -60,21 +60,43 @@ def unattended_vcs_env(
     argv: list[str],
     env: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    """Scrubbed git/gh env that must never prompt or open a credential UI.
-
-    A GUI ``GIT_ASKPASS`` / Git Credential Manager dialog is a hang (and a
-    secret leak surface) for unattended rounds. Tokens for git/gh still pass
-    when the argv grant allows them; LLM keys never do.
-    """
+    """git/gh env: VCS tokens only, no prompt / GIT_ASKPASS / LLM keys."""
     out = scrub_subprocess_env(env, argv=argv)
     out["GIT_TERMINAL_PROMPT"] = "0"
     out["GH_PROMPT_DISABLED"] = "1"
     out["GCM_INTERACTIVE"] = "never"
-    # Inherited askpass is often a GUI helper; drop it so git fails closed.
     for key in list(out):
         if key.upper() == "GIT_ASKPASS":
             out.pop(key, None)
     return out
+
+
+def run_unattended_git(
+    repo: Path | str,
+    *args: str,
+    timeout: float = 30.0,
+) -> tuple[int, str, str]:
+    """Hidden git. Never prompts. Returns (code, stdout, stderr)."""
+    import subprocess
+
+    from remedy.execution.process import hidden_subprocess_kwargs
+
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            env=unattended_vcs_env(["git"]),
+            **hidden_subprocess_kwargs(),
+        )
+    except FileNotFoundError:
+        return 127, "", "git not found"
+    except subprocess.TimeoutExpired:
+        return 124, "", "git timeout"
+    return int(proc.returncode or 0), proc.stdout or "", proc.stderr or ""
 
 
 def _clip_output(text: str, stream: str) -> str:

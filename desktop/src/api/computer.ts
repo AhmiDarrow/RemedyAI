@@ -1,17 +1,8 @@
-/** Computer-use host bridge (desktop claims browser jobs from the local API). */
+/** Loopback computer-host API (hello, rail UI). Rust owns jobs/next. */
 import { apiFetch, authHeaders, clearApiToken, ensureApiToken, getServerUrl } from './client'
 
 function loopbackApi(): string {
   return `${getServerUrl()}/api`
-}
-
-export type ComputerJob = {
-  id: string
-  action: string
-  payload: Record<string, unknown>
-  status: string
-  result?: Record<string, unknown> | null
-  error?: string | null
 }
 
 export type BrowserBoundsPayload = {
@@ -21,13 +12,7 @@ export type BrowserBoundsPayload = {
   height: number
 }
 
-/**
- * Loopback host calls — Bearer required (S-AUTH-04). We still try ensureApiToken
- * first so late SPA bootstrap does not 401; Rust poller loads the DPAPI token
- * independently when the React host is not mounted.
- */
-async function hostFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  await ensureApiToken().catch(() => null)
+function hostHeaders(init?: RequestInit): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
     ...authHeaders(),
@@ -36,25 +21,16 @@ async function hostFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (init?.body && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json'
   }
-  let res = await fetch(`${loopbackApi()}${path}`, {
-    ...init,
-    headers,
-  })
+  return headers
+}
+
+async function hostFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  await ensureApiToken().catch(() => null)
+  let res = await fetch(`${loopbackApi()}${path}`, { ...init, headers: hostHeaders(init) })
   if (res.status === 401) {
     clearApiToken()
     await ensureApiToken().catch(() => null)
-    const retryHeaders: Record<string, string> = {
-      Accept: 'application/json',
-      ...authHeaders(),
-      ...(init?.headers as Record<string, string> | undefined),
-    }
-    if (init?.body && !retryHeaders['Content-Type']) {
-      retryHeaders['Content-Type'] = 'application/json'
-    }
-    res = await fetch(`${loopbackApi()}${path}`, {
-      ...init,
-      headers: retryHeaders,
-    })
+    res = await fetch(`${loopbackApi()}${path}`, { ...init, headers: hostHeaders(init) })
   }
   if (!res.ok) {
     const text = await res.text().catch(() => '')
@@ -92,47 +68,6 @@ export async function computerHostStatus(): Promise<{
   }
 }
 
-export async function computerCapture(body: {
-  x?: number
-  y?: number
-  width?: number
-  height?: number
-  scale?: number
-  label?: string
-}): Promise<{ ok?: boolean; capture?: Record<string, unknown> }> {
-  return apiFetch('/computer/capture', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  })
-}
-
-/** Claim next job. Desktop Tauri no longer uses this — Rust is the only poller. */
-export async function claimComputerJob(
-  opts?: { exclude?: string; sessionId?: string | null; waitMs?: number },
-): Promise<ComputerJob | null> {
-  const exclude = opts?.exclude ?? 'navigate'
-  const params = new URLSearchParams()
-  if (exclude) params.set('exclude', exclude)
-  if (opts?.sessionId) params.set('session_id', opts.sessionId)
-  const waitMs = Math.max(0, Math.min(5000, Math.floor(opts?.waitMs ?? 0)))
-  if (waitMs > 0) params.set('wait_ms', String(waitMs))
-  const q = params.toString() ? `?${params.toString()}` : ''
-  const data = await hostFetch<{ job?: ComputerJob | null }>(
-    `/computer/jobs/next${q}`,
-  )
-  return data.job || null
-}
-
-export async function completeComputerJob(
-  jobId: string,
-  body: { ok: boolean; result?: Record<string, unknown>; error?: string },
-): Promise<void> {
-  await hostFetch(`/computer/jobs/${encodeURIComponent(jobId)}/complete`, {
-    method: 'POST',
-    body: JSON.stringify(body),
-  })
-}
-
 export type ComputerUiCommand = {
   action?: string
   url?: string
@@ -142,7 +77,7 @@ export type ComputerUiCommand = {
   ts?: string
 }
 
-/** Server asks Desktop to open Browser rail (like Settings) + optional URL. */
+/** Peek/take the next rail-open command. */
 export async function fetchComputerUiCommand(
   take = false,
   sessionId?: string | null,
@@ -157,12 +92,7 @@ export async function fetchComputerUiCommand(
   return data.command || null
 }
 
-export async function ackComputerUiCommand(jobId?: string | null): Promise<void> {
-  const q = jobId ? `?job_id=${encodeURIComponent(jobId)}` : ''
-  await hostFetch(`/computer/ui/command/ack${q}`, { method: 'POST' })
-}
-
-/** UI event: open the Browser rail for agent computer use. */
+/** UI event: open the Browser rail. */
 export const COMPUTER_UI_EVENT = 'remedy:computer-ui'
 
 export function emitComputerUi(detail: {
@@ -184,13 +114,7 @@ export async function closeBrowserRail(): Promise<void> {
   }
 }
 
-/**
- * Open a URL in Remedy's in-rail Browser (default for webpages).
- * Falls back to system browser only if Tauri navigate is unavailable.
- *
- * `openRail: false` navigates the embed without opening the workspace rail
- * (setup wizard has no rail chrome — caller supplies a host + Close).
- */
+/** Open a URL in the in-rail Browser. `openRail: false` for wizard hosts. */
 export async function openUrlInBrowserRail(
   url: string,
   opts?: { keepSettings?: boolean; openRail?: boolean },
