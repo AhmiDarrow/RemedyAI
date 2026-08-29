@@ -154,14 +154,15 @@ def _stop_llama_server_processes() -> None:
     import subprocess
 
     if os.name == "nt":
-        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        from remedy.execution.process import hidden_subprocess_kwargs
+
         with contextlib.suppress(Exception):
             subprocess.run(
                 ["taskkill", "/F", "/IM", "llama-server.exe", "/T"],
                 capture_output=True,
                 timeout=15,
-                creationflags=flags,
                 check=False,
+                **hidden_subprocess_kwargs(),
             )
     else:
         with contextlib.suppress(Exception):

@@ -29,7 +29,6 @@ from remedy.runtime import gpu_probe
 from remedy.runtime.gpu_probe import (
     GpuDevice,
     GpuSnapshot,
-    _creationflags,
     _find_nvidia_smi,
     _mb_from_unknown,
     _parse_amd_smi_json,
@@ -221,16 +220,6 @@ def test_real_adapters_are_not_refused(name: str) -> None:
 # --------------------------------------------------------------------------
 # subprocess plumbing
 # --------------------------------------------------------------------------
-
-
-def test_creationflags_is_zero_when_the_platform_has_no_such_flag(monkeypatch) -> None:
-    monkeypatch.delattr(gpu_probe.subprocess, "CREATE_NO_WINDOW", raising=False)
-    assert _creationflags() == 0
-
-
-def test_creationflags_is_zero_when_the_flag_is_none(monkeypatch) -> None:
-    monkeypatch.setattr(gpu_probe.subprocess, "CREATE_NO_WINDOW", None, raising=False)
-    assert _creationflags() == 0
 
 
 def test_run_returns_stdout_and_hides_the_console_window(monkeypatch) -> None:

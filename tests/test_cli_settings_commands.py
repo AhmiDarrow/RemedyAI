@@ -805,43 +805,14 @@ def test_host_run_always_stops_the_host_on_the_way_out(home, fake_computer) -> N
     assert len(fake_computer.calls["stop"]) == 1
 
 
-def test_the_api_poller_is_spawned_from_the_repo_root(
-    home, fake_computer, monkeypatch
+def test_api_poller_is_not_started_alongside_the_cli_host(
+    home, fake_computer, capsys
 ) -> None:
-    """It resolved parents[3], which is <root>/src, so the poller was looked
-    for at <root>/src/scripts/ and never found: the flag printed "script
-    missing" and silently did nothing, every time.
-
-    The poller file is gitignored (live helper). Pretend it exists so the
-    walk is what we assert — cwd must be the repo root, not src/.
-    """
-    import subprocess
-
-    orig_is_file = Path.is_file
-
-    def is_file(self: Path) -> bool:
-        if (
-            self.name == "computer_host_poller.py"
-            and self.parent.name == "scripts"
-            and orig_is_file(self.parent.parent / "pyproject.toml")
-        ):
-            return True
-        return orig_is_file(self)
-
-    monkeypatch.setattr(Path, "is_file", is_file)
-    spawned: list = []
-
-    def capture(*a, **kw):
-        spawned.append((a, kw))
-        return SimpleNamespace(pid=0)
-
-    monkeypatch.setattr(subprocess, "Popen", capture)
     cmd_settings._cmd_computer(_args(home, computer_cmd="host", action="start", api=True))
-    assert spawned, "the poller was still not started"
-    args, kw = spawned[0]
-    assert "computer_host_poller.py" in str(args)
-    cwd = Path(kw.get("cwd") or "")
-    assert (cwd / "pyproject.toml").is_file(), f"poller cwd was {cwd}, not the repo root"
+    assert len(fake_computer.calls["start"]) == 1
+    out = _out(capsys)
+    assert "HTTP poller skipped" in out
+    assert "computer_host_poller" not in out.lower() or "skipped" in out
 
 
 def test_an_unknown_computer_subcommand_prints_usage(home, fake_computer, capsys) -> None:

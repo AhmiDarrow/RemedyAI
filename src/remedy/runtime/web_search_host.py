@@ -237,9 +237,8 @@ def start(
         "-p",
         str(OPENSERP_PORT),
     ]
-    creationflags = 0
-    if os.name == "nt":
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    from remedy.execution.process import hidden_subprocess_kwargs
+
     try:
         with _lock:
             if is_healthy():
@@ -249,7 +248,7 @@ def start(
                 cwd=str(binary.parent),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                creationflags=creationflags,
+                **hidden_subprocess_kwargs(),
             )
         _register_atexit()
     except OSError as exc:

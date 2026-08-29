@@ -93,8 +93,9 @@ def _harden_path(path: Path, *, is_dir: bool = False) -> None:
     try:
         import subprocess
 
-        flags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
-        # Directory vs file ACE syntax
+        from remedy.execution.process import hidden_subprocess_kwargs
+
+        hide = hidden_subprocess_kwargs()
         user_ace = f"{user}:(OI)(CI)F" if is_dir else f"{user}:F"
         adm_ace = "Administrators:(OI)(CI)F" if is_dir else "Administrators:F"
         sys_ace = "SYSTEM:(OI)(CI)F" if is_dir else "SYSTEM:F"
@@ -104,8 +105,8 @@ def _harden_path(path: Path, *, is_dir: bool = False) -> None:
                 args,
                 check=False,
                 capture_output=True,
-                creationflags=flags,
                 timeout=8,
+                **hide,
             )
 
         # Remove inheritance, then grant a safe set of principals.

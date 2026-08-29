@@ -115,7 +115,7 @@ def _llm_timeout(bind: Any) -> aiohttp.ClientTimeout:
             if raw_override:
                 with contextlib.suppress(TypeError, ValueError):
                     total = float(raw_override)
-    except Exception:
+    except ImportError:
         pass
     return aiohttp.ClientTimeout(total=total, connect=30)
 

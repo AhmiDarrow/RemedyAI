@@ -195,12 +195,6 @@ def _skip_name(name: str) -> bool:
     return any(s in low for s in _SKIP_NAMES) or not low.strip()
 
 
-def _creationflags() -> int:
-    """``CREATE_NO_WINDOW`` on Windows, 0 elsewhere (never a console flash)."""
-    flag = getattr(subprocess, "CREATE_NO_WINDOW", None)
-    return int(flag) if isinstance(flag, int) else 0
-
-
 def _run(argv: list[str], *, timeout: float = 4.0) -> str:
     from remedy.execution.process import hidden_subprocess_kwargs
 

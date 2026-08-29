@@ -197,98 +197,80 @@ class BasicRuntime(AgentRuntime):
 
     # -- turn-local continuity (properties) ---------------------------------
 
+    @staticmethod
+    def _in_active_turn() -> bool:
+        try:
+            from remedy.core.turn_context import in_active_turn
+
+            return bool(in_active_turn())
+        except ImportError:
+            return False
+
     @property
     def _session_id(self) -> str | None:
-        try:
-            from remedy.core.turn_context import current_session_id, in_active_turn
+        if self._in_active_turn():
+            from remedy.core.turn_context import current_session_id
 
-            if in_active_turn():
-                return current_session_id()
-        except Exception:
-            pass
+            return current_session_id()
         return self.__dict__.get("_session_id_live")
 
     @_session_id.setter
     def _session_id(self, value: str | None) -> None:
-        # Hive / sibling turns share this runtime. Session id is frozen in
-        # begin_turn's ContextVar; writing live here would steal the owner tab.
-        try:
-            from remedy.core.turn_context import in_active_turn
-
-            if in_active_turn():
-                return
-        except Exception:
-            pass
+        # Hive / sibling turns share this runtime. Frozen in begin_turn.
+        if self._in_active_turn():
+            return
         self.__dict__["_session_id_live"] = value
 
     @property
     def _session_brief(self) -> Any:
-        try:
-            from remedy.core.turn_context import in_active_turn, turn_session_brief
+        if self._in_active_turn():
+            from remedy.core.turn_context import turn_session_brief
 
-            if in_active_turn():
-                return turn_session_brief()
-        except Exception:
-            pass
+            return turn_session_brief()
         return self.__dict__.get("_session_brief_live")
 
     @_session_brief.setter
     def _session_brief(self, value: Any) -> None:
-        try:
-            from remedy.core.turn_context import in_active_turn, set_turn_session_brief
+        if self._in_active_turn():
+            from remedy.core.turn_context import set_turn_session_brief
 
-            if in_active_turn():
-                set_turn_session_brief(value)
-                return
-        except Exception:
-            pass
+            set_turn_session_brief(value)
+            return
         self.__dict__["_session_brief_live"] = value
 
     @property
     def _partner_state(self) -> Any:
-        try:
-            from remedy.core.turn_context import in_active_turn, turn_partner_state
+        if self._in_active_turn():
+            from remedy.core.turn_context import turn_partner_state
 
-            if in_active_turn():
-                return turn_partner_state()
-        except Exception:
-            pass
+            return turn_partner_state()
         return self.__dict__.get("_partner_state_live")
 
     @_partner_state.setter
     def _partner_state(self, value: Any) -> None:
-        try:
-            from remedy.core.turn_context import in_active_turn, set_turn_partner_state
+        if self._in_active_turn():
+            from remedy.core.turn_context import set_turn_partner_state
 
-            if in_active_turn():
-                set_turn_partner_state(value)
-                return
-        except Exception:
-            pass
+            set_turn_partner_state(value)
+            return
         self.__dict__["_partner_state_live"] = value
 
     @property
     def _work_roots(self) -> list[str]:
-        try:
-            from remedy.core.turn_context import in_active_turn, turn_work_roots
+        if self._in_active_turn():
+            from remedy.core.turn_context import turn_work_roots
 
-            if in_active_turn():
-                return turn_work_roots()
-        except Exception:
-            pass
+            return turn_work_roots()
         return list(self.__dict__.get("_work_roots_live") or [])
 
     @_work_roots.setter
     def _work_roots(self, value: list[str] | None) -> None:
         roots = list(value or [])
-        try:
-            from remedy.core.turn_context import in_active_turn, set_turn_work_roots
+        if self._in_active_turn():
+            from remedy.core.turn_context import set_turn_work_roots
 
-            if in_active_turn():
-                set_turn_work_roots(roots)
-                return
-        except Exception:
-            pass
+            set_turn_work_roots(roots)
+            return
         self.__dict__["_work_roots_live"] = roots
 
     def project_path_is_unset(self) -> bool:
