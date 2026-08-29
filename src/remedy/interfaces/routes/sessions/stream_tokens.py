@@ -38,5 +38,15 @@ def parse_tool_result_token(token: str) -> dict[str, Any]:
     return {"name": "tool", "result": raw}
 
 
+def parse_life_task_token(token: str) -> dict[str, Any]:
+    """Parse ``@@life_task:…`` into the owner-card payload."""
+    raw = token[len("@@life_task:") :] if token.startswith("@@life_task:") else token
+    try:
+        obj = json.loads(raw) if raw else {}
+    except Exception:
+        return {}
+    return obj if isinstance(obj, dict) else {}
+
+
 def sse_event(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"

@@ -14,6 +14,8 @@ export interface PendingApproval {
   session_id?: string | null
   status: string
   created_at?: number
+  /** Yes / No / Explain for life-task plan cards. */
+  choices?: string[]
 }
 
 export interface ProviderHealthHint {
@@ -174,6 +176,80 @@ export async function resolveApproval(
   return apiFetch(`/approvals/${encodeURIComponent(id)}/resolve`, {
     method: 'POST',
     body: JSON.stringify({ approve, scope }),
+  })
+}
+
+export type LifeTaskStep = {
+  title: string
+  status?: string
+  observed?: string
+  block_reason?: string
+}
+
+export type LifeTaskCard = {
+  task_id?: string | null
+  goal?: string
+  status?: string
+  ok?: boolean
+  spoken?: string
+  step?: number
+  total?: number
+  title?: string
+  steps?: LifeTaskStep[]
+  approval_id?: string | null
+  choices?: string[]
+  checkpoint?: boolean
+  kind?: string
+  session_id?: string | null
+  updated_at?: number
+}
+
+export type LifeTaskCurrent = {
+  task: LifeTaskCard | null
+  approval?: PendingApproval | null
+}
+
+export type LifeTaskActResult = {
+  ok?: boolean
+  action?: string
+  spoken?: string
+  task?: LifeTaskCard | null
+  result?: { status?: string; task_id?: string }
+}
+
+export async function getCurrentLifeTask(
+  sessionId?: string | null,
+): Promise<LifeTaskCurrent> {
+  const q = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
+  return apiFetch<LifeTaskCurrent>(`/life-tasks/current${q}`)
+}
+
+export async function listLifeTasks(
+  sessionId?: string | null,
+): Promise<{ id?: string; goal?: string; status?: string }[]> {
+  const q = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
+  const data = await apiFetch<{ tasks?: { id?: string; goal?: string; status?: string }[] }>(
+    `/life-tasks${q}`,
+  )
+  return data.tasks || []
+}
+
+export async function getLifeTask(taskId: string): Promise<Record<string, unknown>> {
+  return apiFetch(`/life-tasks/${encodeURIComponent(taskId)}`)
+}
+
+export async function actLifeTask(
+  action: 'yes' | 'no' | 'explain',
+  opts?: { sessionId?: string | null; taskId?: string | null; approvalId?: string | null },
+): Promise<LifeTaskActResult> {
+  return apiFetch<LifeTaskActResult>('/life-tasks/act', {
+    method: 'POST',
+    body: JSON.stringify({
+      action,
+      session_id: opts?.sessionId || undefined,
+      task_id: opts?.taskId || undefined,
+      approval_id: opts?.approvalId || undefined,
+    }),
   })
 }
 

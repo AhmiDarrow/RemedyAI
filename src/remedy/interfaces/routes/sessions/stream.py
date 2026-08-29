@@ -22,6 +22,7 @@ from remedy.interfaces.api_support import (
 )
 from remedy.interfaces.attachments import filter_jailed_attachments
 from remedy.interfaces.routes.sessions.stream_tokens import (
+    parse_life_task_token,
     parse_tool_call_token,
     sse_event,
 )
@@ -635,6 +636,13 @@ def register_stream_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
                                 full_response += ("\n\n" if full_response else "") + strip_inline_images(md)
                         elif token == "@@tool_calls":
                             pass
+                        elif isinstance(token, str) and token.startswith("@@life_task:"):
+                            payload = parse_life_task_token(token)
+                            if payload:
+                                yield sse_event(
+                                    "life_task",
+                                    {"type": "life_task", **payload},
+                                )
                         elif isinstance(token, str) and token.startswith("@@todos:"):
                             raw = token[len("@@todos:") :]
                             try:

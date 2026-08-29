@@ -286,6 +286,8 @@ class PendingApproval:
     sensitive: bool = False
     # Live page host at create time. One-shot consume must match this host.
     origin: str = ""
+    # Owner-facing sentence when the default plain_summary would say the tool name.
+    summary_override: str = ""
 
 
 class ApprovalQueue:
@@ -683,6 +685,7 @@ class ApprovalQueue:
         reason: str,
         session_id: str | None = None,
         origin: str = "",
+        summary: str = "",
     ) -> PendingApproval:
         item = PendingApproval(
             id=uuid4().hex[:12],
@@ -693,6 +696,7 @@ class ApprovalQueue:
             fingerprint=self.fingerprint(tool_name, command),
             sensitive=(reason or "").startswith(SENSITIVE_PREFIX),
             origin=_origin_host(origin),
+            summary_override=(summary or "").strip(),
         )
         with self._lock:
             self._items[item.id] = item
@@ -785,6 +789,8 @@ class ApprovalQueue:
         Approval cards lead with this; the raw command stays available under a
         details expander (docs/LIFE_TASK_PARTNER.md §3).
         """
+        if (item.summary_override or "").strip():
+            return item.summary_override.strip()
         tool = (item.tool_name or "").strip()
         cmd = (item.command or "").strip()
 
@@ -833,6 +839,14 @@ class ApprovalQueue:
             return f"Remedy wants to change a file: {cmd[:120]}"
         if tool == "mail_send":
             return "Remedy wants to send an email."
+        if tool == "life_drive":
+            first = (cmd.splitlines() or [""])[0].strip()
+            if first.lower().startswith("remedy will"):
+                return first if first.endswith("?") else first.rstrip(".") + ". Yes, No, or Explain?"
+            return (
+                "Remedy wants to drive this computer through a plan. "
+                "Yes, No, or Explain?"
+            )
         return f"Remedy wants to run {tool}: {cmd[:120]}"
 
     def to_public(self, item: PendingApproval) -> dict[str, Any]:
@@ -856,6 +870,11 @@ class ApprovalQueue:
                 else "Approve for this session, or set Approvals → Auto (in-project) "
                 "to finish work without prompts. Full (warn) turns the write jail "
                 "into a warning only — auth secrets stay closed."
+            ),
+            "choices": (
+                ["yes", "no", "explain"]
+                if item.tool_name == "life_drive"
+                else ["yes", "no"]
             ),
         }
 

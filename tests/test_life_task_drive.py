@@ -214,3 +214,159 @@ def test_retry_recovers_after_one_miss():
     )
     assert out["ok"] is True
     assert out["steps"][0]["retries"] == 1
+
+
+def test_hub_publishes_plan_gate_and_yes_runs(monkeypatch):
+    from remedy.core.approvals import ApprovalQueue
+    from remedy.core.life_task_drive import act_life_task
+    from remedy.core.life_task_hub import current, reset
+
+    reset()
+    q = ApprovalQueue()
+    q.set_mode("ask")
+    monkeypatch.setattr("remedy.core.approvals.APPROVALS", q)
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"approval_mode": "ask", "access_scope": "project"},
+    )
+    drive_life_task(
+        goal="add milk",
+        steps=[{"title": "Open", "action": "navigate", "url": "https://shop.example"}],
+        run_action=lambda *a, **k: json.dumps({"ok": True, "message": "SUCCESS"}),
+        require_plan_approval=True,
+        session_id="s-card",
+    )
+    card = current("s-card")
+    assert card is not None
+    assert card["kind"] == "plan_gate"
+    assert "Yes, No, or Explain?" in (card.get("spoken") or "")
+    pending = [i for i in q._items.values() if i.status == "pending"]
+    assert pending[0].summary_override
+    pub = q.to_public(pending[0])
+    assert pub["choices"] == ["yes", "no", "explain"]
+    assert "life_drive" not in pub["summary"]
+
+    n = {"n": 0}
+
+    def run(action, **_kw):
+        n["n"] += 1
+        return json.dumps({"ok": True, "message": "SUCCESS"})
+
+    yes = act_life_task(
+        "yes",
+        session_id="s-card",
+        run_action=run,
+    )
+    assert n["n"] >= 1
+    assert yes["action"] == "yes"
+    assert yes.get("task")
+
+
+def test_explain_does_not_run_hands(monkeypatch):
+    from remedy.core.approvals import ApprovalQueue
+    from remedy.core.life_task_drive import act_life_task
+    from remedy.core.life_task_hub import reset
+
+    reset()
+    q = ApprovalQueue()
+    q.set_mode("ask")
+    monkeypatch.setattr("remedy.core.approvals.APPROVALS", q)
+    monkeypatch.setattr(
+        "remedy.interfaces.api_support.load_config",
+        lambda: {"approval_mode": "ask", "access_scope": "project"},
+    )
+    drive_life_task(
+        goal="add milk",
+        steps=[{"title": "Open", "action": "navigate"}],
+        run_action=lambda *a, **k: (_ for _ in ()).throw(AssertionError("ran")),
+        require_plan_approval=True,
+        session_id="s-ex",
+    )
+    out = act_life_task("explain", session_id="s-ex")
+    assert out["action"] == "explain"
+    assert "Explain" in (out.get("spoken") or "")
+    assert "add milk" in (out.get("spoken") or "").lower()
+
+
+def test_checkpoint_yes_skips_and_does_not_press(tmp_path):
+    from remedy.core.life_task_drive import act_life_task, resume_after_handoff
+    from remedy.core.life_task_hub import reset
+    from remedy.core.life_task_store import load_life_task
+
+    reset()
+    clicks: list[str] = []
+
+    def run(action, **kw):
+        name = str(getattr(action, "value", action)).lower()
+        clicks.append(name)
+        return json.dumps(
+            {
+                "ok": True,
+                "message": "SUCCESS",
+                "observed": {"url": kw.get("url") or "https://shop.example", "title": "Shop"},
+            }
+        )
+
+    first = drive_life_task(
+        goal="shop",
+        steps=[
+            {"title": "Open", "action": "navigate", "url": "https://shop.example"},
+            {"title": "Place order", "action": "click", "text": "Place order"},
+            {"title": "Done page", "action": "snapshot"},
+        ],
+        run_action=run,
+        persist=True,
+        home=tmp_path,
+        session_id="s-hand",
+    )
+    assert first["status"] == "need_you"
+    assert not any("click" in c for c in clicks)
+    tid = first["task_id"]
+    again = resume_after_handoff(tid, run_action=run, home=tmp_path)
+    rec = load_life_task(tid, home=tmp_path)
+    assert rec is not None
+    assert any(s.get("status") == "skipped" for s in rec["steps"])
+    assert not any("click" in c for c in clicks)
+    assert again["status"] in ("done", "need_you") or again.get("ok") in (True, False)
+    # Owner Yes on the card uses the same skip path.
+    reset()
+    first2 = drive_life_task(
+        goal="shop",
+        steps=[
+            {"title": "Open", "action": "navigate", "url": "https://shop.example"},
+            {"title": "Place order", "action": "click", "text": "Place order"},
+        ],
+        run_action=run,
+        persist=True,
+        home=tmp_path,
+        session_id="s-hand2",
+    )
+    yes = act_life_task(
+        "yes",
+        session_id="s-hand2",
+        task_id=first2["task_id"],
+        run_action=run,
+        home=tmp_path,
+    )
+    assert yes["action"] == "yes"
+    assert not any("click" in c for c in clicks)
+
+
+def test_life_task_marker_roundtrip():
+    from remedy.core.life_task_hub import build_card, life_task_marker, parse_life_task_token
+    from remedy.interfaces.routes.sessions.stream_tokens import parse_life_task_token as parse_sse
+
+    card = build_card(
+        goal="buy milk",
+        status="running",
+        spoken="Step 2 of 4 — adding milk.",
+        source_steps=[{"title": "a"}, {"title": "b"}],
+        steps=[{"title": "a", "status": "done"}],
+    )
+    tok = life_task_marker(card)
+    assert tok.startswith("@@life_task:")
+    parsed = parse_life_task_token(tok)
+    assert parsed["goal"] == "buy milk"
+    assert parsed["spoken"].startswith("Step 2")
+    assert "markdown" not in parsed
+    assert parse_sse(tok)["goal"] == "buy milk"

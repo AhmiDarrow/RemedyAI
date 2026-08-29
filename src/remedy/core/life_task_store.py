@@ -122,7 +122,7 @@ def remaining_source_steps(rec: dict[str, Any]) -> tuple[list[dict[str, Any]], s
     for st in rec.get("steps") or []:
         if not isinstance(st, dict):
             break
-        if st.get("status") == "done":
+        if st.get("status") in ("done", "skipped"):
             done_n += 1
             continue
         if st.get("status") == "need_you":

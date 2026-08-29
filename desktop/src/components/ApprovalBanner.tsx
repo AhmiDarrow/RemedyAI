@@ -31,7 +31,8 @@ export function ApprovalBanner({ sessionId, onResolved }: ApprovalBannerProps) {
   const refresh = useCallback(async () => {
     try {
       const items = await listApprovals(sessionId)
-      setItems(items)
+      // life_drive has its own Yes/No/Explain card (LifeTaskBanner).
+      setItems(items.filter((i) => i.tool_name !== 'life_drive'))
     } catch {
       // server down
     }
