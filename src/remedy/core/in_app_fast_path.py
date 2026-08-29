@@ -34,9 +34,7 @@ _GIT_STATUS_RE = re.compile(
     r"git\s+status(\s+-sb)?"
     r"|what('?s| is) (the )?(git |repo |working.?tree )?status"
     r"|show (me )?(the )?(git )?status"
-    r"|what changed"
-    r"|what('?s| is) changed"
-    r"|any (unstaged |uncommitted )?changes\??"
+    r"|any (unstaged |uncommitted )changes\??"
     r")\s*[.?!]?\s*$"
 )
 
@@ -46,7 +44,6 @@ _GIT_DIFF_RE = re.compile(
     r"|show (me )?(the )?(git |unstaged |working.?tree )?diff"
     r"|what('?s| is) (the )?diff"
     r"|unstaged (changes|diff)"
-    r"|show (me )?what changed"
     r")\s*[.?!]?\s*$"
 )
 
@@ -150,7 +147,6 @@ _SCREEN_RE = re.compile(
     r"what('?s| is) on (my |the )?(screen|display|monitor)"
     r"|what am i looking at"
     r"|what('?s| is) (the )?(focused|foreground|active) window"
-    r"|look at (my |the )?screen"
     r"|companion_context"
     r")\s*[.?!]?\s*$"
 )
@@ -235,7 +231,8 @@ _MEMORY_SEARCH_RE = re.compile(
     r"(?is)^\s*("
     r"what do you remember about\s+(?P<q>.+?)"
     r"|do you remember\s+(?P<q2>.+?)"
-    r"|recall\s+(?P<q3>.+?)"
+    r"|recall\s+(?:from\s+)?(?:memory|what we remembered)\s+(?P<q3>.+?)"
+    r"|search (my |the )?memory (for )?(?P<q4>.+?)"
     r")\s*[.?!]?\s*$"
 )
 
@@ -315,6 +312,10 @@ def match_in_app_fast_path(message: str) -> FastPathPlan | None:
 
     if _GIT_STATUS_RE.match(msg):
         return FastPathPlan("git_status", {}, "git_status")
+    if re.search(r"(?is)^\s*what(\s+is|'?s)?\s+changed", msg) and re.search(
+        r"(?i)\bgit\b", msg
+    ):
+        return FastPathPlan("git_status", {}, "git_status")
     if _GIT_DIFF_RE.match(msg):
         return FastPathPlan("git_diff", {}, "git_diff")
     if _GIT_LOG_RE.match(msg):
@@ -391,7 +392,17 @@ def match_in_app_fast_path(message: str) -> FastPathPlan | None:
         return FastPathPlan("skill_search", args, "skill_search")
     ms = _MEMORY_SEARCH_RE.match(msg)
     if ms:
-        q = (ms.group("q") or ms.group("q2") or ms.group("q3") or "").strip(" .,-")
+        q = (
+            ms.group("q")
+            or ms.group("q2")
+            or ms.group("q3")
+            or ms.group("q4")
+            or ""
+        ).strip(" .,-")
+        low_q = q.lower()
+        if re.search(r"(?i)\b(login|flow|code|file|function|path|src)\b", low_q):
+            if "memory" not in msg.lower() and "remember" not in msg.lower():
+                q = ""
         if q and len(q) >= 2:
             return FastPathPlan("memory_search", {"query": q}, "memory_search")
     mem = _MEMORY_SAVE_RE.match(msg) or _MEMORY_SAVE_BARE_RE.match(msg)

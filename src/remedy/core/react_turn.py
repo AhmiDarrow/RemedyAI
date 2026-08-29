@@ -536,9 +536,9 @@ def resolve_tools(
             if re.fullmatch(r"make\s+(it|me)", hit):
                 rest = raw[: m.start()] + raw[m.end() :]
                 if _BUILD_RE.search(rest):
-                    msg_wants = True
+                    task_like = True
             else:
-                msg_wants = True
+                task_like = True
 
     # Learned per-partner intent (arm-only): teaches toward the regex verdict
     # every turn and may override False→True once confidently trained. It can

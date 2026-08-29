@@ -204,12 +204,32 @@ def _structural_oracle(unit: UnitSpec, state: dict[str, str]) -> list[OracleErro
     return run_oracle(unit, state.get(unit.path, ""))
 
 
+def _jail_rel(rel: str | Path, root: Path) -> Path:
+    """Resolve *rel* under *root*; refuse absolute paths and ``..`` escapes."""
+    raw = str(rel or "").replace("\\", "/").strip()
+    if not raw:
+        raise PermissionError("empty materialize path")
+    while raw.startswith("./"):
+        raw = raw[2:]
+    p = Path(raw)
+    if p.is_absolute() or p.drive:
+        raise PermissionError(f"absolute materialize path refused: {rel}")
+    if ".." in p.parts:
+        raise PermissionError(f"parent traversal refused: {rel}")
+    dest = (root / p).resolve()
+    try:
+        dest.relative_to(root.resolve())
+    except ValueError as exc:
+        raise PermissionError(f"materialize path outside root: {rel}") from exc
+    return dest
+
+
 def materialize(files: dict[str, str], root: str | Path) -> Path:
     """Write the produced files under root (creating dirs); returns root."""
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
     for rel, source in files.items():
-        p = root / rel
+        p = _jail_rel(rel, root)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(source, encoding="utf-8")
     return root
@@ -225,7 +245,7 @@ def run_project_tests(
     """Materialize the project and run pytest; returns (ok, summary, failures)."""
     root = Path(materialize(files, root))
     for rel, test_src in (extra_tests or {}).items():
-        p = root / rel
+        p = _jail_rel(rel, root)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(test_src, encoding="utf-8")
     try:

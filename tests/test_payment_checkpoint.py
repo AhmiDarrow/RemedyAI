@@ -205,6 +205,18 @@ def test_challenge_wall_press_hold_is_an_owner_handoff():
         )
         is None
     )
+    click = challenge_wall_checkpoint(
+        "computer_click",
+        "https://shop.example.com turnstile",
+        label="I'm not a robot",
+    )
+    assert click and click.startswith(SENSITIVE_PREFIX)
+    act = challenge_wall_checkpoint(
+        "computer_act",
+        "cloudflare challenge",
+        label="Verify you are human",
+    )
+    assert act and act.startswith(SENSITIVE_PREFIX)
 
 
 def test_mail_send_asks_in_every_mode(monkeypatch):

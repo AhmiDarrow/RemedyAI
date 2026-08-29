@@ -85,6 +85,8 @@ def _wipe_cas_personhood(home: Path) -> int:
             key = str(getattr(item, "key", "") or "")
             if key and cas.tombstone(key):
                 n += 1
+    with contextlib.suppress(Exception):
+        n += int(cas.tombstone_hive_sessions() or 0)
     return n
 
 
@@ -107,6 +109,27 @@ def _wipe_persona_files(home: Path) -> int:
                 n += 1
     if myelin_sheaths.is_dir():
         for p in myelin_sheaths.glob("*"):
+            if p.is_file():
+                with contextlib.suppress(OSError):
+                    p.unlink()
+                    n += 1
+    crystal = home / "time_crystal"
+    if crystal.is_dir():
+        for p in crystal.glob("*.json"):
+            if p.is_file():
+                with contextlib.suppress(OSError):
+                    p.unlink()
+                    n += 1
+    life_dir = home / "life"
+    if life_dir.is_dir():
+        for p in life_dir.rglob("*"):
+            if p.is_file():
+                with contextlib.suppress(OSError):
+                    p.unlink()
+                    n += 1
+    docs_life = Path.home() / "Documents" / "Remedy Life"
+    if docs_life.is_dir():
+        for p in docs_life.glob("*.md"):
             if p.is_file():
                 with contextlib.suppress(OSError):
                     p.unlink()
@@ -162,6 +185,8 @@ async def wipe_persona(
     if memory is not None:
         with contextlib.suppress(Exception):
             stats["note_entries"] = int(await memory.delete_by_type("note") or 0)
+        with contextlib.suppress(Exception):
+            stats["session_entries"] = int(await memory.delete_by_type("session") or 0)
 
     with contextlib.suppress(Exception):
         stats["cas_tombstoned"] = _wipe_cas_personhood(root)
@@ -171,6 +196,10 @@ async def wipe_persona(
     if runtime is not None:
         with contextlib.suppress(Exception):
             runtime._partner_state = None
+    with contextlib.suppress(Exception):
+        from remedy.memory.middleman import reset_middleman_state
+
+        reset_middleman_state()
 
     logger.info("persona wipe: %s", stats)
     return stats

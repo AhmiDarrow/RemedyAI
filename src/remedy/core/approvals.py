@@ -58,7 +58,9 @@ _SENSITIVE_COMPUTER_RE = re.compile(
     # Money movement
     r"send\s+money|transfer\s+funds|wire\s+transfer|donate\s+now|"
     # Payment credentials as click/typed context
-    r"card\s*number|cvv|cvc|security\s+code"
+    r"card\s*number|cvv|cvc|security\s+code|"
+    # Rail click labels that finalize send/delete/pay (Gmail Send, etc.)
+    r"send|delete|pay|submit"
     r")\b"
     # Vault secret use (handle-based fill) — always an owner moment
     r"|vault=|\{\{\s*vault:"
@@ -109,7 +111,9 @@ def looks_like_payment_surface(page_context: str) -> bool:
 
 _CHALLENGE_WALL_RE = re.compile(
     r"(?is)("
-    r"captcha|hcaptcha|recaptcha|turnstile|cloudflare|"
+    r"captcha|hcaptcha|recaptcha|turnstile|"
+    r"cloudflare.{0,40}(challenge|captcha|turnstile|just.?a.?moment)|"
+    r"(challenge|captcha|turnstile|just.?a.?moment).{0,40}cloudflare|"
     r"i.?m not a robot|press.?and.?hold|press.?&.?hold|"
     r"human.?check|verify you are human"
     r")"
@@ -118,7 +122,8 @@ _CHALLENGE_WALL_RE = re.compile(
 
 def challenge_wall_checkpoint(tool_name: str, page_context: str, label: str = "") -> str | None:
     """Owner handoff for CAPTCHA / press-and-hold walls (LIFE_TASK §7)."""
-    if (tool_name or "").strip() != "computer_press_hold":
+    tool = (tool_name or "").strip()
+    if tool not in ("computer_press_hold", "computer_click", "computer_act"):
         return None
     blob = f"{page_context or ''} {label or ''}"
     if not _CHALLENGE_WALL_RE.search(blob):
@@ -509,13 +514,19 @@ class ApprovalQueue:
         except Exception:
             profile = None
             conservative = False
-        # Local/RMB turn may skip Ask for this turn only (never persist Settings).
         if not untrusted:
             try:
                 from remedy.core.turn_context import turn_skip_ask
 
                 if turn_skip_ask():
-                    return None
+                    t = (tool_name or "").strip()
+                    if t in (
+                        "file_write",
+                        "file_edit",
+                        "file_edit_batch",
+                        "bash_exec",
+                    ):
+                        return None
             except Exception:
                 pass
         with self._lock:

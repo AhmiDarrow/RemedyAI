@@ -357,14 +357,25 @@ def element_action(
             with contextlib.suppress(Exception):
                 got = str(vp.CurrentValue or "")
             okv = got == str(text)
+            role_l = (_el_role(el) or "").lower()
+            name_l = (_el_name(el) or "").lower()
+            is_password = "password" in role_l or "password" in name_l
+            if is_password and not okv:
+                return {
+                    "ok": True,
+                    "verified": False,
+                    "message": (
+                        f"Set {label} value (unverified — password fields "
+                        "typically do not read back)"
+                    ),
+                }
             return {
                 "ok": True,
-                "message": (
-                    f"Set {label} value ({len(str(text))} chars"
-                    + (", verified" if okv else ", readback differs")
-                    + ")"
-                ),
                 "verified": okv,
+                "message": (
+                    f"Set {label} value"
+                    + (", verified" if okv else ", readback differs")
+                ),
             }
         if action == "toggle":
             pat = el.GetCurrentPattern(_PAT_TOGGLE)

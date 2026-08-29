@@ -470,10 +470,6 @@ async def run_react_http(
                         refresh_if_needed(home)
                         new_token = resolve_bearer(home)
                         if new_token and new_token != _bind.api_key:
-                            # Prefer turn binding; avoid racing other tabs on
-                            # runtime._llm_api_key. Persist only as fallback.
-                            with suppress(Exception):
-                                runtime._llm_api_key = new_token
                             _bind = LlmBinding(
                                 provider=_bind.provider,
                                 model=_bind.model,

@@ -96,7 +96,7 @@ def maybe_short_circuit_verify(
             f"{VERIFY_DEFERRED_PREFIX} reason=feature_items_open count={n}\n"
             "Not a test failure. Finish the current Build item with file_write / "
             "file_edit. The full suite runs after that slice exists.\n"
-            "exit_code=0"
+            "deferred=true"
         )
     # Green + no new source writes: replay, do not spawn.
     if last_ok is True and not pending:

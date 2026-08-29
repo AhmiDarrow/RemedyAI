@@ -39,15 +39,33 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
 
         # Empty query: recent human notes (panel open) — not FTS heartbeats.
         q = (query or "").strip()
+        from remedy.memory.authority import is_hive_memory_hit, is_hive_writer
+
+        def _keep(e: Any) -> bool:
+            meta = getattr(e, "metadata", None) or {}
+            if not isinstance(meta, dict):
+                meta = {}
+            if is_hive_writer(getattr(e, "session_id", None)):
+                return False
+            return not is_hive_memory_hit(
+                {
+                    "authority": meta.get("authority"),
+                    "session_id": getattr(e, "session_id", None),
+                }
+            )
+
         if not q:
             raw = await memory.list_recent(limit=max(limit * 3, 30))
             entries = [
                 e
                 for e in raw
                 if str(getattr(e.entry_type, "value", e.entry_type) or "") != "system"
+                and _keep(e)
             ][:limit]
         else:
-            entries = await memory.search(query, limit=limit)
+            entries = [e for e in await memory.search(query, limit=limit * 2) if _keep(e)][
+                :limit
+            ]
         return {
             "query": query,
             "results": [

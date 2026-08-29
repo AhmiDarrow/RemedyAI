@@ -738,6 +738,10 @@ _REQUEST_WORK_RE = re.compile(
     # Imperative 'modify' only at a clause start — "why did you modify X?"
     # and "don't modify anything" are questions/limits, not work requests.
     r"|(?:^|[.!;]\s+|\b(?:and|then|also)\s+)modify\b"
+    r"|\b(?:make|create|build)\s+(?:a|an|the)\s+(?:[\w-]+\s+){0,4}"
+    r"(?:game|app|program|platformer|website|site|tool|calculator)\b"
+    r"|\bmake\s+me\s+(?:a|an|the)\s+(?:[\w-]+\s+){0,4}"
+    r"(?:game|app|program|platformer|website|site|tool|calculator)\b"
 )
 # World/agent trivia openers — only a knowledge question when nothing
 # locates the request in this machine / project / UI.

@@ -177,8 +177,9 @@ _EXPLICIT_REMEMBER_RE = re.compile(
 # at the first hyphen, which meant an Anthropic key did not match at all.
 _SECRET_RE = re.compile(
     r"(?i)("
-    r"api[_-]?key|secret[_-]?key|secret[_-]?access[_-]?key"
-    r"|password\s*[:=]|passwd\s*[:=]|bearer\s+[a-z0-9\-._~+/]+=*"
+    r"api[_-]?key\s*[:=]\s*\S+|secret[_-]?key\s*[:=]\s*\S+|"
+    r"secret[_-]?access[_-]?key\s*[:=]\s*\S+"
+    r"|password\s*[:=]\s*\S+|passwd\s*[:=]\s*\S+|bearer\s+[a-z0-9\-._~+/]+=*"
     # OpenAI / Anthropic / xAI / OpenRouter / Mistral / DeepSeek style
     # Left boundary: "task-tracking-app" and "risk-tolerance" contain "sk-"
     # mid-word and must not be mistaken for a key.
@@ -223,6 +224,13 @@ def looks_like_secret(text: str) -> bool:
         if not re.search(r"[a-z]{4,}", tok, re.I):  # no words → likely key material
             return True
     return False
+
+
+def redact_secrets(text: str) -> str:
+    """Hyphen-aware substitution using the same matcher as looks_like_secret."""
+    if not text:
+        return text
+    return _SECRET_RE.sub("[redacted]", text)
 
 
 def normalize_fact_key(text: str) -> str:
@@ -994,21 +1002,26 @@ async def search_partner_and_entries(
                 meta = getattr(h, "metadata", None) or {}
                 if not isinstance(meta, dict):
                     meta = {}
-                results.append(
-                    {
-                        "kind": "entry",
-                        "title": title,
-                        "content": content[:400],
-                        "score": score,
-                        "importance": imp,
-                        "authority": str(meta.get("authority") or ""),
-                        # Unstamped notes are owner-era; only drop when marked.
-                        "inferred": bool(meta["inferred"])
-                        if "inferred" in meta
-                        else False,
-                        "why": str(meta.get("why") or ""),
-                    }
-                )
+                sid = str(getattr(h, "session_id", None) or meta.get("session_id") or "")
+                from remedy.memory.authority import is_hive_memory_hit
+
+                hit = {
+                    "kind": "entry",
+                    "title": title,
+                    "content": content[:400],
+                    "score": score,
+                    "importance": imp,
+                    "authority": str(meta.get("authority") or ""),
+                    "session_id": sid,
+                    # Unstamped notes are owner-era; only drop when marked.
+                    "inferred": bool(meta["inferred"])
+                    if "inferred" in meta
+                    else False,
+                    "why": str(meta.get("why") or ""),
+                }
+                if is_hive_memory_hit(hit, session_id=sid):
+                    continue
+                results.append(hit)
     except Exception:
         pass
     results.sort(key=lambda r: float(r.get("score") or 0), reverse=True)

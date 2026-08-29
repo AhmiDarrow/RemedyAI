@@ -169,7 +169,15 @@ def is_valid_navigate_url(url: Any = None) -> bool:
             return True
         if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host):
             return host.startswith("127.")
-        return bool(re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", host))
+        looks_public = bool(re.match(r"^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", host))
+        if not looks_public:
+            return False
+        try:
+            from remedy.core.agent_web_tools import _resolve_public_ips
+
+            return bool(_resolve_public_ips(host))
+        except OSError:
+            return False
     except Exception:
         return False
 

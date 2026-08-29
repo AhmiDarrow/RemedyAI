@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -155,6 +156,12 @@ class ScoutNanobot:
             root = Path(project_path).expanduser()
         if not root.is_dir():
             return {"ok": False, "error": "not_a_directory"}
+        with suppress(Exception):
+            from remedy.core.work_roots import discover_work_root
+
+            wr = discover_work_root(root)
+            if wr is not None:
+                root = wr
 
         key = str(root)
         if not force:
@@ -197,13 +204,17 @@ class ScoutNanobot:
         if git_dir.exists() or "git" in markers:
             try:
                 from remedy.execution.process import run_hidden
+                from remedy.execution.sandbox import scrub_subprocess_env
 
+                git_env = scrub_subprocess_env()
+                git_env["GIT_TERMINAL_PROMPT"] = "0"
                 r = run_hidden(
                     ["git", "rev-parse", "--abbrev-ref", "HEAD"],
                     cwd=str(root),
                     timeout=2.5,
                     capture_output=True,
                     text=True,
+                    env=git_env,
                 )
                 if r.returncode == 0:
                     git_branch = (r.stdout or "").strip() or None
@@ -213,6 +224,7 @@ class ScoutNanobot:
                     timeout=3.0,
                     capture_output=True,
                     text=True,
+                    env=git_env,
                 )
                 if r2.returncode == 0:
                     lines = [ln for ln in (r2.stdout or "").splitlines() if ln.strip()]

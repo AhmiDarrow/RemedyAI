@@ -51,6 +51,27 @@ def _which(*names: str) -> str | None:
     return None
 
 
+_LINUX_HANDS_HINT = (
+    "install grim (or scrot), xdotool or ydotool, and wmctrl "
+    "(Debian Recommends on the .deb)"
+)
+
+
+def _pointer_backend() -> tuple[str, str] | None:
+    """('xdotool'|'ydotool', path) — keep both platforms."""
+    xd = _which("xdotool")
+    if xd:
+        return ("xdotool", xd)
+    yd = _which("ydotool")
+    if yd:
+        return ("ydotool", yd)
+    return None
+
+
+def _missing_hands(need: str) -> RuntimeError:
+    return RuntimeError(f"Linux {need} needs xdotool or ydotool — {_LINUX_HANDS_HINT}")
+
+
 def _png_size(path: Path) -> tuple[int, int]:
     data = path.read_bytes()
     if len(data) >= 24 and data[:8] == b"\x89PNG\r\n\x1a\n":
@@ -146,13 +167,10 @@ def screenshot_region_png(
                 "requested": {"x": x, "y": y, "width": width, "height": height, "scale": sc},
                 "method": "import",
             }
-    full = screenshot_png()
-    return {
-        **full,
-        "origin": {"x": 0, "y": 0},
-        "requested": {"x": x, "y": y, "width": width, "height": height, "scale": sc},
-        "note": "region crop unavailable; full desktop captured",
-    }
+    raise RuntimeError(
+        "Linux region screenshot needs grim or ImageMagick import — "
+        f"{_LINUX_HANDS_HINT}. Not returning a full-desktop PNG as a rail crop."
+    )
 
 
 def screenshot_monitor_png(index: int, path: Path | None = None) -> dict[str, Any]:
@@ -847,14 +865,20 @@ def detect_ui_candidates(
 
 
 def drag(x1: int, y1: int, x2: int, y2: int) -> None:
-    xd = _which("xdotool")
-    if not xd:
-        click(x2, y2)
+    backend = _pointer_backend()
+    if not backend:
+        raise _missing_hands("drag")
+    kind, tool = backend
+    if kind == "xdotool":
+        _run([tool, "mousemove", "--sync", str(int(x1)), str(int(y1))])
+        _run([tool, "mousedown", "1"])
+        _run([tool, "mousemove", "--sync", str(int(x2)), str(int(y2))])
+        _run([tool, "mouseup", "1"])
         return
-    _run([xd, "mousemove", "--sync", str(int(x1)), str(int(y1))])
-    _run([xd, "mousedown", "1"])
-    _run([xd, "mousemove", "--sync", str(int(x2)), str(int(y2))])
-    _run([xd, "mouseup", "1"])
+    _run([tool, "mousemove", str(int(x1)), str(int(y1))])
+    _run([tool, "click", "0x40"])
+    _run([tool, "mousemove", str(int(x2)), str(int(y2))])
+    _run([tool, "click", "0x80"])
 
 
 def foreground_window_info() -> dict[str, Any]:
@@ -872,6 +896,25 @@ def foreground_window_info() -> dict[str, Any]:
     if proc.returncode == 0:
         title = proc.stdout.decode("utf-8", "replace").strip()[:200]
     return {"hwnd": hwnd, "title": title}
+
+
+def focus_window(hwnd: int) -> bool:
+    """Activate hwnd via xdotool windowactivate / wmctrl -i -a."""
+    _require_linux()
+    if not hwnd:
+        return False
+    wid = str(int(hwnd))
+    xd = _which("xdotool")
+    wm = _which("wmctrl")
+    if xd:
+        _run([xd, "windowactivate", "--sync", wid])
+    elif wm:
+        _run([wm, "-i", "-a", wid])
+    else:
+        return False
+    info = foreground_window_info()
+    got = int(info.get("hwnd") or 0)
+    return got == int(hwnd)
 
 
 def move_mouse(x: int, y: int) -> None:
@@ -900,9 +943,10 @@ def click(x: int, y: int, *, button: str = "left", clicks: int = 1) -> None:
         return
     yd = _which("ydotool")
     if yd:
+        ybtn = {"1": "0xC0", "2": "0xC2", "3": "0xC1"}.get(btn, "0xC0")
         _run([yd, "mousemove", str(int(x)), str(int(y))])
         for _ in range(n):
-            _run([yd, "click", btn])
+            _run([yd, "click", ybtn])
         return
     raise RuntimeError("Linux click needs xdotool (X11) or ydotool (Wayland)")
 
@@ -990,30 +1034,69 @@ def type_text_fast(
 def scroll(x: int, y: int, *, dy: int = -3, dx: int = 0) -> None:
     """Scroll at (x,y). dy>0 = up, dy<0 = down (matches Windows notch sign)."""
     _require_linux()
-    xd = _which("xdotool")
-    if not xd:
+    backend = _pointer_backend()
+    if not backend:
+        raise _missing_hands("scroll")
+    kind, tool = backend
+    if kind == "xdotool":
+        _run([tool, "mousemove", "--sync", str(int(x)), str(int(y))])
+        notches = abs(int(dy or 0))
+        btn = "4" if int(dy or 0) > 0 else "5"
+        for _ in range(max(1, notches) if dy else 0):
+            _run([tool, "click", btn])
+        if dx:
+            hbtn = "7" if int(dx) > 0 else "6"
+            for _ in range(abs(int(dx))):
+                _run([tool, "click", hbtn])
         return
-    _run([xd, "mousemove", "--sync", str(int(x)), str(int(y))])
-    # xdotool click 4 = up, 5 = down
+    _run([tool, "mousemove", str(int(x)), str(int(y))])
     notches = abs(int(dy or 0))
-    btn = "4" if int(dy or 0) > 0 else "5"
+    ybtn = "0xC4" if int(dy or 0) > 0 else "0xC5"
     for _ in range(max(1, notches) if dy else 0):
-        _run([xd, "click", btn])
+        _run([tool, "click", ybtn])
     if dx:
-        hbtn = "7" if int(dx) > 0 else "6"
+        yh = "0xC7" if int(dx) > 0 else "0xC6"
         for _ in range(abs(int(dx))):
-            _run([xd, "click", hbtn])
+            _run([tool, "click", yh])
+
+
+_YDOTOOL_KEYCODES: dict[str, int] = {
+    "ctrl": 29,
+    "control": 29,
+    "alt": 56,
+    "shift": 42,
+    "meta": 125,
+    "win": 125,
+    "super": 125,
+    "enter": 28,
+    "return": 28,
+    "tab": 15,
+    "esc": 1,
+    "escape": 1,
+    "space": 57,
+    "backspace": 14,
+    "delete": 111,
+    "up": 103,
+    "down": 108,
+    "left": 105,
+    "right": 106,
+    "home": 102,
+    "end": 107,
+    "pageup": 104,
+    "pagedown": 109,
+}
 
 
 def press_key(key: str) -> None:
-    """Press a key or combo like 'ctrl+s', 'enter', 'shift+f6' via xdotool."""
+    """Press a key or combo like 'ctrl+s', 'enter', 'shift+f6' via xdotool/ydotool."""
     _require_linux()
     raw = (key or "").strip()
     if not raw:
         return
-    xd = _which("xdotool")
-    if not xd:
-        raise RuntimeError("Linux press_key needs xdotool")
+    backend = _pointer_backend()
+    if not backend:
+        raise _missing_hands("press_key")
+    kind, tool = backend
     parts = [p.strip().lower() for p in raw.replace("-", "+").split("+") if p.strip()]
     mapping = {
         "ctrl": "ctrl",
@@ -1040,6 +1123,24 @@ def press_key(key: str) -> None:
         "pageup": "Page_Up",
         "pagedown": "Page_Down",
     }
+    if kind == "ydotool":
+        codes: list[int] = []
+        for p in parts:
+            if p in _YDOTOOL_KEYCODES:
+                codes.append(_YDOTOOL_KEYCODES[p])
+            elif len(p) == 1 and p.isalpha():
+                codes.append(ord(p.lower()) - ord("a") + 30)
+            elif len(p) == 1 and p.isdigit():
+                codes.append(11 if p == "0" else int(p) + 1)
+            elif p.startswith("f") and p[1:].isdigit():
+                n = int(p[1:])
+                codes.append(58 + n if 1 <= n <= 10 else 87 + (n - 11))
+            else:
+                raise RuntimeError(f"ydotool cannot map key {p!r}")
+        down = [f"{c}:1" for c in codes]
+        up = [f"{c}:0" for c in reversed(codes)]
+        _run([tool, "key", *down, *up])
+        return
     mapped: list[str] = []
     for p in parts:
         if p in mapping:
@@ -1051,7 +1152,7 @@ def press_key(key: str) -> None:
         else:
             mapped.append(p)
     combo = "+".join(mapped)
-    _run([xd, "key", combo])
+    _run([tool, "key", combo])
 
 
 def press_hold(
@@ -1061,14 +1162,18 @@ def press_hold(
     hold_ms: int = 2600,
     abort_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    """Press-and-hold at (x,y) via xdotool mousedown/up."""
+    """Press-and-hold at (x,y) via xdotool/ydotool mousedown/up."""
     _require_linux()
-    xd = _which("xdotool")
-    if not xd:
-        click(x, y)
-        return {"held_ms": 0, "x": x, "y": y}
-    _run([xd, "mousemove", "--sync", str(int(x)), str(int(y))])
-    _run([xd, "mousedown", "1"])
+    backend = _pointer_backend()
+    if not backend:
+        raise _missing_hands("press_hold")
+    kind, tool = backend
+    if kind == "xdotool":
+        _run([tool, "mousemove", "--sync", str(int(x)), str(int(y))])
+        _run([tool, "mousedown", "1"])
+    else:
+        _run([tool, "mousemove", str(int(x)), str(int(y))])
+        _run([tool, "click", "0x40"])
     held = 0.0
     step = 0.1
     total = max(0.1, float(hold_ms) / 1000.0)
@@ -1079,7 +1184,10 @@ def press_hold(
             if abort_check is not None and abort_check():
                 break
     finally:
-        _run([xd, "mouseup", "1"])
+        if kind == "xdotool":
+            _run([tool, "mouseup", "1"])
+        else:
+            _run([tool, "click", "0x80"])
     return {"held_ms": int(min(held, total) * 1000), "x": x, "y": y}
 
 
@@ -1117,7 +1225,13 @@ def manage_window(
         if wm:
             _run([wm, "-i", "-r", wid, "-b", "remove,maximized_vert,maximized_horz"])
             return {"ok": True, "message": f"restore hwnd={hwnd}"}
-        return {"ok": True, "message": f"restore hwnd={hwnd}"}
+        if xd:
+            _run([xd, "windowmap", wid])
+            return {"ok": True, "message": f"restore hwnd={hwnd}"}
+        return {
+            "ok": False,
+            "message": f"wmctrl/xdotool required for restore — {_LINUX_HANDS_HINT}",
+        }
     if v == "close":
         if xd:
             _run([xd, "windowclose", wid])

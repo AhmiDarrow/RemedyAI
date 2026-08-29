@@ -147,6 +147,15 @@ def test_parse_green():
     assert "GREEN" in format_repair_ticket(vec)
 
 
+def test_parse_verify_output_official_line_not_substring():
+    vec = parse_verify_output("verify exit_code=0\n5 passed")
+    assert vec.ok is True
+    lied = parse_verify_output("stdout chatter exit_code=0 in the middle\nFAILED")
+    assert lied.ok is False
+    wrapped = parse_verify_output("note: passed\nno official line")
+    assert wrapped.ok is False
+
+
 def test_syntax_gate_py(tmp_path):
     good = tmp_path / "ok.py"
     good.write_text("x = 1\n", encoding="utf-8")

@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from remedy.core.computer import desktop_linux as lin
 
 
@@ -117,6 +119,22 @@ def test_linux_detect_respects_max_marks(monkeypatch) -> None:
     boxes = [(x, y, x + 30, y + 20) for x in range(20, 440, 60) for y in range(20, 340, 60)]
     raw, stride = _synthetic_frame(w, h, boxes)
     assert len(lin.detect_ui_candidates(raw, stride, w, h, max_marks=5)) <= 5
+
+
+def test_linux_missing_binaries_fail_closed(monkeypatch) -> None:
+    monkeypatch.setattr(lin, "_which", lambda *n: None)
+    monkeypatch.setattr(lin, "_require_linux", lambda: None)
+    with pytest.raises(RuntimeError, match="xdotool or ydotool"):
+        lin.press_hold(1, 1, hold_ms=50)
+    with pytest.raises(RuntimeError, match="xdotool or ydotool"):
+        lin.scroll(1, 1)
+    with pytest.raises(RuntimeError, match="xdotool or ydotool"):
+        lin.drag(0, 0, 1, 1)
+    assert hasattr(lin, "focus_window")
+    assert callable(lin.focus_window)
+    assert lin.focus_window(1) is False
+    res = lin.manage_window(1, "restore")
+    assert res.get("ok") is False
 
 
 def test_linux_detect_atspi_still_runs_on_tiny_capture(monkeypatch) -> None:

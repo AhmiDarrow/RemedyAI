@@ -31,23 +31,19 @@ logger = logging.getLogger(__name__)
 
 
 def _last_desktop_muscle() -> tuple[str | None, str | None]:
-    """Provider/model the owner last used on desktop — remote should match."""
+    """Provider/model the owner currently uses — Settings current, not previous."""
     with suppress(Exception):
         from remedy.interfaces.api_support import load_config
 
         cfg = load_config() or {}
-        last_p = str(cfg.get("last_llm_provider") or "").strip().lower() or None
         cfg_p = str(cfg.get("llm_provider") or "").strip().lower() or None
         by_p = cfg.get("last_model_by_provider") or {}
         last_m = None
-        if last_p and isinstance(by_p, dict):
-            last_m = str(by_p.get(last_p) or "").strip() or None
-        # Do not pair xAI with the launch DeepSeek id (or the reverse).
-        if not last_m and last_p and (not cfg_p or last_p == cfg_p):
+        if cfg_p and isinstance(by_p, dict):
+            last_m = str(by_p.get(cfg_p) or "").strip() or None
+        if not last_m:
             last_m = str(cfg.get("llm_model") or "").strip() or None
-        if not last_p:
-            last_p = cfg_p
-        return last_p, last_m
+        return cfg_p, last_m
     return None, None
 
 
@@ -213,6 +209,19 @@ async def ensure_session_for_event(
     agent = None
     llm_provider = None
     last_p, last_m = _last_desktop_muscle()
+    with suppress(Exception):
+        from remedy.core.computer.host_bridge import get_host_bridge
+
+        focused = str(get_host_bridge().focused_session_id() or "").strip()
+        if focused and not focused.startswith("msg:") and memory is not None:
+            sess = await memory.get_chat_session(focused)
+            if sess is not None:
+                fp = str(getattr(sess, "llm_provider", None) or "").strip().lower()
+                fm = str(getattr(sess, "model", None) or "").strip()
+                if fp:
+                    last_p = fp
+                if fm:
+                    last_m = fm
     if last_p:
         llm_provider = last_p
     if last_m:

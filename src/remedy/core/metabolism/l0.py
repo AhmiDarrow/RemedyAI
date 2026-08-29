@@ -133,6 +133,12 @@ def try_l0_system_reply(
         return "Nothing new on life goals."
 
     if _L0_LIFE_DRIVE.match(msg):
+        with suppress(Exception):
+            from remedy.core.build_engine import get_build_state
+
+            bst = get_build_state(runtime)
+            if bst is not None and getattr(bst, "active", False):
+                return None
         home = getattr(getattr(runtime, "config", None), "home_dir", None)
         with suppress(Exception):
             from remedy.memory.life_drive import take_step

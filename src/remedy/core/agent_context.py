@@ -184,30 +184,40 @@ async def build_turn_context(runtime: Any) -> str:
                     or ""
                 ) or None
             # Taste.json is a facet of the organism — fold into Partner Memory
+            hive_turn = False
+            taste_sid = None
             with suppress(Exception):
-                from remedy.core.companion_taste import load_taste
-                from remedy.memory.partner_memory import upsert_profile_fact
+                from remedy.core.turn_context import turn_session_id
+                from remedy.memory.authority import is_hive_writer
 
-                dirty = False
-                for row in load_taste(runtime)[:16]:
-                    fact = str(row.get("fact") or "").strip()
-                    if not fact:
-                        continue
-                    _uf, action = upsert_profile_fact(
-                        profile,
-                        fact,
-                        category="design",
-                        confidence=0.9,
-                        source="taste",
-                    )
-                    if action in ("added", "reinforced"):
-                        dirty = True
-                if dirty:
-                    await runtime.memory.save_user_profile(profile)
-            # Light reinforce of matching facts (same session continuity)
-            with suppress(Exception):
-                if q and reinforce_matching(profile, q):
-                    await runtime.memory.save_user_profile(profile)
+                taste_sid = turn_session_id(runtime)
+                hive_turn = is_hive_writer(taste_sid)
+            if not hive_turn:
+                with suppress(Exception):
+                    from remedy.core.companion_taste import load_taste
+                    from remedy.memory.partner_memory import upsert_profile_fact
+
+                    dirty = False
+                    for row in load_taste(runtime)[:16]:
+                        fact = str(row.get("fact") or "").strip()
+                        if not fact:
+                            continue
+                        _uf, action = upsert_profile_fact(
+                            profile,
+                            fact,
+                            category="design",
+                            confidence=0.9,
+                            source="taste",
+                            session_id=taste_sid,
+                        )
+                        if action in ("added", "reinforced"):
+                            dirty = True
+                    if dirty:
+                        await runtime.memory.save_user_profile(profile)
+                # Light reinforce of matching facts (same session continuity)
+                with suppress(Exception):
+                    if q and reinforce_matching(profile, q):
+                        await runtime.memory.save_user_profile(profile)
             block = build_partner_memory_block(
                 profile, query=q, project_path=project_path
             )
@@ -377,6 +387,16 @@ async def build_turn_context(runtime: Any) -> str:
     if recent:
         lines = []
         for e in recent:
+            with suppress(Exception):
+                from remedy.memory.authority import is_hive_memory_hit, is_hive_writer
+
+                meta = getattr(e, "metadata", None) or {}
+                if not isinstance(meta, dict):
+                    meta = {}
+                if is_hive_writer(getattr(e, "session_id", None)) or is_hive_memory_hit(
+                    {"authority": meta.get("authority"), "session_id": getattr(e, "session_id", None)}
+                ):
+                    continue
             content = (e.content or "").strip()
             # Skip noisy fallback/self-chat noise that poisons simple answers.
             if "fallback mode" in content.lower() or content.startswith("Received:"):

@@ -74,7 +74,7 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
                     sid = turn_session_id(runtime)
                     profile = await mem.get_or_create_profile()
                     text = t if not desc else f"{t} — {desc[:160]}"
-                    upsert_profile_fact(
+                    _f, action = upsert_profile_fact(
                         profile,
                         f"Goal: {text[:240]}",
                         category="goal",
@@ -82,7 +82,8 @@ def register_goal_and_plan_tools(runtime: Any) -> None:
                         source="goal_add",
                         session_id=sid,
                     )
-                    await mem.save_user_profile(profile)
+                    if action != "skipped":
+                        await mem.save_user_profile(profile)
 
                 await _remember()
         # Dream immediately: a new goal should shape how I partner *now*

@@ -76,7 +76,13 @@ def test_mother_only_tools_stripped():
     assert is_mother_only_tool("hive_collect")
     assert is_mother_only_tool("browser_click")
     assert is_mother_only_tool("computer_drag")
+    assert is_mother_only_tool("soul_dream")
+    assert is_mother_only_tool("soul_import")
+    assert is_mother_only_tool("soul_vigil")
+    assert is_mother_only_tool("soul_arm_missions")
     assert not is_mother_only_tool("file_read")
+    assert not is_mother_only_tool("memory_save")
+    assert not is_mother_only_tool("soul_status")
 
 
 def test_store_roundtrip(hive_home: Path):

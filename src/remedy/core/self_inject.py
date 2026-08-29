@@ -224,20 +224,13 @@ async def git_restore(
     snapshot: dict[str, Any],
     *,
     round_paths: list[str] | None = None,
+    reapply_snapshot: bool = True,
 ) -> str:
-    """Restore the tree to the pre-round snapshot without nuking unrelated work.
+    """Restore pre-round state without wiping unrelated work.
 
-    1. ``git reset --hard HEAD`` — discard tracked changes made during the round
-       (index + worktree) back to the current HEAD.
-    2. Re-apply the **captured** pre-round patch so sibling dirty work that was
-       already present when the round started returns (not wiped forever).
-    3. Delete untracked files **this round created** — and only those.
-
-    ``round_paths`` is the round's own write set. Without it there is no way to
-    tell round debris from a file the owner (or a concurrent session) just
-    created, so nothing untracked is deleted at all. Leaving a stray artifact is
-    always better than destroying someone's new work: this loop has silently
-    eaten concurrent edits before.
+    Empty ``round_paths`` never falls back to every dirty path. ``reset --hard``
+    runs only when reapplying a snapshot (or scoped checkout when the round
+    declared its write set). Untracked deletes are only paths in ``round_paths``.
     """
     import tempfile
 
@@ -256,7 +249,7 @@ async def git_restore(
     # paths. A blanket `reset --hard` would also wipe tracked edits the owner
     # made while the round was drafting — which is how this loop ate real work.
     snap_was_clean = not (snapshot.get("changed") or snapshot.get("untracked"))
-    scoped = bool(round_paths) and snap_was_clean
+    scoped = bool(round_paths) and (snap_was_clean or not reapply_snapshot)
     if scoped:
         paths = [
             str(p).replace("\\", "/")
@@ -265,16 +258,14 @@ async def git_restore(
         ]
         if paths:
             code, _out, err = await _git_out(repo, "checkout", "HEAD", "--", *paths)
-            # Paths that only ever existed untracked have no HEAD version —
-            # not an error worth surfacing.
             if code != 0 and err.strip() and "did not match" not in err.lower():
                 errors.append(err.strip())
-    else:
+    elif reapply_snapshot:
         code, _out, err = await _git_out(repo, "reset", "--hard", "HEAD")
         if code != 0 and err.strip():
             errors.append(err.strip())
 
-    diff = "" if scoped else str(snapshot.get("diff") or "")
+    diff = "" if scoped or not reapply_snapshot else str(snapshot.get("diff") or "")
     if diff.strip():
         # Apply via temp file so binary patches and large diffs work.
         try:
@@ -326,10 +317,10 @@ async def git_restore(
             if not rel:
                 continue
             norm = rel.replace("\\", "/")
-            if norm in snap_untracked:
-                continue  # already dirty before the round started
             if norm not in mine:
-                continue  # someone else's file — not ours to delete
+                continue
+            if reapply_snapshot and norm in snap_untracked:
+                continue
             target = repo / rel
             with suppress(Exception):
                 if str(target.resolve()).replace("\\", "/").lower() in protected:
@@ -431,6 +422,7 @@ async def apply_or_rollback(
     apply: Any = None,
     home: str | Path | None = None,
     round_paths: list[str] | None = None,
+    reapply_snapshot: bool = True,
 ) -> SelfInjectRound:
     """Green -> call ``apply`` (default noop, records applied). Red -> roll back.
 
@@ -454,7 +446,12 @@ async def apply_or_rollback(
             if round_.tree in ("desktop", "both"):
                 ok = await rebuild_spa(repo)
                 if not ok:
-                    err = await git_restore(repo, snapshot, round_paths=round_paths)
+                    err = await git_restore(
+                        repo,
+                        snapshot,
+                        round_paths=round_paths,
+                        reapply_snapshot=reapply_snapshot,
+                    )
                     round_.outcome = "rolled_back"
                     round_.status = "rolled_back"
                     round_.detail["rollback_reason"] = "spa_build_failed"
@@ -472,7 +469,12 @@ async def apply_or_rollback(
         round_.outcome = "applied"
         round_.status = "applied"
     else:
-        err = await git_restore(repo, snapshot, round_paths=round_paths)
+        err = await git_restore(
+            repo,
+            snapshot,
+            round_paths=round_paths,
+            reapply_snapshot=reapply_snapshot,
+        )
         round_.outcome = "rolled_back"
         round_.status = "rolled_back"
         round_.detail["rollback_error"] = err or ""

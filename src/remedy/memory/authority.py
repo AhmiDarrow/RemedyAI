@@ -106,6 +106,17 @@ def format_search_hits(hits: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def is_hive_memory_hit(hit: dict[str, Any] | None, *, session_id: str | None = None) -> bool:
+    """True when a recall hit is hive-session or authority=hive."""
+    if not hit and not session_id:
+        return False
+    sid = str(session_id or (hit or {}).get("session_id") or "")
+    if is_hive_writer(sid):
+        return True
+    auth = str((hit or {}).get("authority") or "").strip().lower()
+    return auth == "hive"
+
+
 def budget_hits(
     hits: list[dict[str, Any]],
     *,
@@ -113,8 +124,16 @@ def budget_hits(
     max_chars: int = 900,
 ) -> list[dict[str, Any]]:
     """Keep owner/stated hits first; drop inferred when the budget is spent."""
-    owner = [h for h in hits if not h.get("inferred")]
-    inferred = [h for h in hits if h.get("inferred")]
+    owner = [
+        h
+        for h in hits
+        if not h.get("inferred") and not is_hive_memory_hit(h)
+    ]
+    inferred = [
+        h
+        for h in hits
+        if h.get("inferred") and not is_hive_memory_hit(h)
+    ]
     out: list[dict[str, Any]] = []
     used = 0
     for hit in owner + inferred:

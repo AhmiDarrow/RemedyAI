@@ -28,7 +28,16 @@ Remedy Desktop now runs on Linux (including WSLg) as well as Windows. Same partn
 The **`.deb`** asks apt for the same class of deps Windows bundles or assumes:
 `libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libayatana-appindicator3-1`, `librsvg2-2`,
 `xdg-utils`, `libvulkan1`, `libgomp1`. `sudo apt install ./Remedy.Desktop_*_amd64.deb`
-pulls them. The **AppImage** is more self-contained (media framework included);
+pulls them. Computer-use hands are **Recommends** (not hard Depends): `grim`,
+`xdotool` or `ydotool`, `wmctrl`, and `scrot`. Install them so click/type/scroll
+and region screenshots work:
+
+```bash
+sudo apt install grim xdotool wmctrl scrot
+# Wayland extra: sudo apt install ydotool
+```
+
+The **AppImage** is more self-contained (media framework included);
 you still need FUSE to run it (`libfuse2` / `libfuse2t64` on Ubuntu).
 
 The **local vision / nano** stack is **not** in the installer (same as Windows):

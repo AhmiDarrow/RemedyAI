@@ -68,4 +68,6 @@ def test_casual_verify_silent_when_no_command(monkeypatch):
     )
     out = asyncio.run(run_casual_verify(SimpleNamespace()))
     assert out["ran"] is False
+    assert out["ok"] is False
     assert "No project test command" in out["message"]
+    assert "Do not claim green" in out["message"]

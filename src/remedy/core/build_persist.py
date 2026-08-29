@@ -63,6 +63,7 @@ class DriveOutcome:
             "no_progress": "stopped making progress (anti-thrash)",
             "strategies_exhausted": "every repair strategy stalled",
             "verify_error": "the verifier could not run",
+            "unverified": "gate skipped real tests (do not claim DONE)",
         }.get(self.reason, self.reason)
         return (
             f"Not yet green after {self.rounds} round(s) — {why}. "
@@ -70,7 +71,17 @@ class DriveOutcome:
         )
 
 
+def _is_verified_green(result: dict[str, Any]) -> bool:
+    if not result.get("ok"):
+        return False
+    if "verified" in result:
+        return bool(result.get("verified"))
+    return not ("passed_levels" in result or "results" in result)
+
+
 def _progress_of(result: dict[str, Any]) -> float:
+    if result.get("verified") is False:
+        return 0.0
     with_ = result.get("progress")
     if isinstance(with_, (int, float)):
         return float(with_)
@@ -124,9 +135,14 @@ def iterate_to_green_multi(
         v = verify_fn() or {}
     except Exception as exc:
         return DriveOutcome(False, 0, "verify_error", history=[{"error": str(exc)}])
-    if v.get("ok"):
+    if _is_verified_green(v):
         name0 = strats[0][0]
         return DriveOutcome(True, 0, "green", _progress_of(v), [{"verify": "ok"}], name0)
+    if v.get("ok") and v.get("verified") is False:
+        name0 = strats[0][0]
+        return DriveOutcome(
+            False, 0, "unverified", _progress_of(v), [{"verify": "unverified"}], name0
+        )
 
     best_progress = _progress_of(v)
     si = 0            # current strategy index
@@ -158,8 +174,10 @@ def iterate_to_green_multi(
              "ok": bool(v.get("ok")), "progress": prog}
         )
 
-        if v.get("ok"):
+        if _is_verified_green(v):
             return DriveOutcome(True, rnd, "green", prog, history, name)
+        if v.get("ok") and v.get("verified") is False:
+            return DriveOutcome(False, rnd, "unverified", prog, history, name)
 
         multi = len(strats) > 1
         # (a) The repair changed nothing — this angle is spent. Rotate to the

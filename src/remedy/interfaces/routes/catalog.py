@@ -197,8 +197,10 @@ def register_catalog_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                 allowed_hosts = {
                     _host(base_url),
                     _host(str(catalog_meta.get("base_url") or "")),
-                    _host(str(cfg.get("llm_base_url") or "")),
                 }
+                # Active provider's custom URL only when listing that provider.
+                if configured_provider == str(active_provider or "").strip().lower():
+                    allowed_hosts.add(_host(str(cfg.get("llm_base_url") or "")))
                 allowed_hosts.discard("")
                 if _host(override_url) not in allowed_hosts:
                     return {

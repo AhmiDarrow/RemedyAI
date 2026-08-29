@@ -160,11 +160,31 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
                 )
             return win.screenshot_png()
 
+        label_l = (req.label or "").lower()
+        browserish = "browser" in label_l or "rail" in label_l
+        has_bounds = (
+            req.x is not None
+            and req.y is not None
+            and req.width is not None
+            and req.height is not None
+        )
+        if browserish and not has_bounds:
+            return {
+                "ok": False,
+                "error": (
+                    "Browser rail bounds missing — open the Browser rail and "
+                    "wait for bounds. Not capturing the full desktop as a rail shot."
+                ),
+                "target": "desktop",
+            }
         try:
             info = await asyncio.to_thread(_grab)
         except Exception as e:
             raise HTTPException(500, str(e)) from e
-        return {"ok": True, "capture": info}
+        out: dict[str, Any] = {"ok": True, "capture": info}
+        if not has_bounds:
+            out["target"] = "desktop"
+        return out
 
     @app.get("/api/computer/jobs/next")
     async def computer_job_next(

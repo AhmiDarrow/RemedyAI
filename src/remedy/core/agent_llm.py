@@ -403,8 +403,8 @@ async def post_chat(
     """POST chat completions; one xAI re-auth attempt on 401/403.
 
     Uses per-turn ``LlmBinding`` (ContextVar) so concurrent multi-provider
-    turns do not share host/key/model. May update ``runtime._llm_api_key``
-    and the turn binding after a successful OAuth refresh.
+    turns do not share host/key/model. OAuth refresh updates the turn
+    binding only.
 
     Every outcome — success, HTTP error, abort, exception — emits one
     ``remedy.llm`` line (see :mod:`remedy.core.llm_log`).
@@ -544,7 +544,6 @@ async def _post_chat_inner(
                     refresh_if_needed(home)
                     new_token = resolve_bearer(home)
                     if new_token and new_token != bind.api_key:
-                        runtime._llm_api_key = new_token
                         bind = LlmBinding(
                             provider=bind.provider,
                             model=bind.model,

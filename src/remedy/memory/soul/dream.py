@@ -179,6 +179,7 @@ def dream_cycle(
     field: SoulField | None = None,
     use_local: bool = True,
     local_base_url: str = "",
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Consolidate episodes → pledges / habits / optional partner facts.
 
@@ -327,6 +328,7 @@ def dream_cycle(
                     category="workflow",
                     confidence=0.78,
                     source="soul_dream",
+                    session_id=session_id,
                 )
                 await memory.save_user_profile(profile)
                 return 1 if action in ("added", "reinforced") else 0

@@ -3959,9 +3959,7 @@ try {
                     }
                 }
                 if !booted {
-                    // One more hard retry via schtasks only, then re-check.
-                    log::warn!("Install script not alive yet; re-running schedule");
-                    let _ = schedule_update_install_script(&ps1_path);
+                    log::warn!("Install script not alive yet; waiting longer (not re-scheduling)");
                     for i in 0..30 {
                         thread::sleep(Duration::from_millis(200));
                         if let Ok(txt) = std::fs::read_to_string(&log_full) {

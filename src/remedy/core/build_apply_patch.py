@@ -211,30 +211,28 @@ def apply_patch_text(
     *,
     root: Path | str | None = None,
 ) -> dict[str, Any]:
-    """Apply *patch* through the runtime write jail. All-or-nothing per file."""
+    """Apply *patch* through the runtime write jail. All-or-nothing across files."""
     files = parse_patch(patch)
     if not files:
         return {"ok": False, "error": "no file hunks in patch", "applied": []}
 
-    applied: list[dict[str, Any]] = []
+    staged: list[tuple[Path, str | None, str, str]] = []
     for fp in files:
         rel = (fp.path or "").replace("\\", "/")
         while rel.startswith("./"):
             rel = rel[2:]
         if not rel:
-            return {"ok": False, "error": "patch file missing path", "applied": applied}
+            return {"ok": False, "error": "patch file missing path", "applied": []}
         try:
             dest = _resolve_patch_dest(rel, runtime, root, for_write=True)
         except Exception as exc:
             return {
                 "ok": False,
                 "error": f"{rel}: write jail refused ({exc})",
-                "applied": applied,
+                "applied": [],
             }
         if fp.is_delete:
-            if dest.is_file():
-                dest.unlink()
-            applied.append({"path": rel, "action": "delete"})
+            staged.append((dest, None, rel, "delete"))
             continue
         prev = ""
         existed = dest.is_file()
@@ -242,23 +240,29 @@ def apply_patch_text(
             return {
                 "ok": False,
                 "error": f"{rel}: Add File refused — path already exists",
-                "applied": applied,
+                "applied": [],
             }
         if existed:
             prev = dest.read_text(encoding="utf-8", errors="replace")
         elif not fp.is_new and fp.hunks:
-            # treat as new if missing
             fp.is_new = True
         ok, nxt, err = _apply_hunks(prev, fp.hunks)
         if not ok:
             return {
                 "ok": False,
                 "error": f"{rel}: {err}",
-                "applied": applied,
+                "applied": [],
             }
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(nxt, encoding="utf-8")
-        applied.append({"path": rel, "action": "add" if not existed else "update"})
+        staged.append((dest, nxt, rel, "add" if not existed else "update"))
+    applied: list[dict[str, Any]] = []
+    for dest, nxt, rel, action in staged:
+        if action == "delete":
+            if dest.is_file():
+                dest.unlink()
+        else:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(nxt or "", encoding="utf-8")
+        applied.append({"path": rel, "action": action})
         _mark_write(runtime, rel)
     return {"ok": True, "applied": applied, "files": len(applied)}
 

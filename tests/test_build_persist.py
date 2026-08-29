@@ -30,6 +30,17 @@ def test_already_green_zero_rounds():
     assert out.ok and out.rounds == 0 and out.reason == "green"
 
 
+def test_skip_pass_is_not_drive_green():
+    from remedy.core.build_persist import iterate_to_green_multi
+
+    def skip_pass() -> dict:
+        return {"ok": True, "verified": False, "passed_levels": ["L3_unit"]}
+
+    out = iterate_to_green_multi(skip_pass, [("noop", lambda _v: {"ran": False})])
+    assert out.ok is False
+    assert out.reason == "unverified"
+
+
 def test_green_after_two_repairs():
     # red, red, green — progress climbing so anti-thrash never trips
     out = iterate_to_green(

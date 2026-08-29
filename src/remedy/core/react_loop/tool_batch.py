@@ -180,7 +180,7 @@ async def apply_build_engine_after_batch(
 
                 if not _batch_ran_verify(fresh_calls):
                     cv = await run_casual_verify(runtime)
-                    if cv.get("ran") or cv.get("approval"):
+                    if cv.get("ran") or cv.get("approval") or not cv.get("ok"):
                         messages.append(
                             {
                                 "role": "system",

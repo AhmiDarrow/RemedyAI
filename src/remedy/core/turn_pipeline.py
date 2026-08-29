@@ -163,6 +163,15 @@ def authorize_tool(runtime: Any, name: str, args: dict[str, Any]) -> str | None:
         from remedy.policy.capabilities import Capability as Cap
 
         if hive_depth() > 0:
+            from remedy.tools.catalog import is_default_inferred
+
+            if is_default_inferred(name):
+                hive_block = format_tool_error(
+                    "Hive workers cannot use unknown tools.",
+                    code="HIVE_CAPABILITY",
+                    tool_name=name,
+                    suggestion="Ask the mother to do this step.",
+                )
             blocked = {
                 Cap.CREDENTIAL_USE,
                 Cap.TRANSACT,
@@ -170,7 +179,9 @@ def authorize_tool(runtime: Any, name: str, args: dict[str, Any]) -> str | None:
                 Cap.COMPUTER_INPUT,
                 Cap.BROWSER_WRITE,
             }
-            if is_mother_only_tool(name) or (desc.capabilities & blocked):
+            if hive_block is None and (
+                is_mother_only_tool(name) or (desc.capabilities & blocked)
+            ):
                 hive_block = format_tool_error(
                     "Hive workers cannot use credentials or transact.",
                     code="HIVE_CAPABILITY",
@@ -197,7 +208,17 @@ def authorize_tool(runtime: Any, name: str, args: dict[str, Any]) -> str | None:
                         suggestion="Ask the mother to do this step.",
                     )
     except Exception:
-        hive_block = None
+        if hive_block is None:
+            with suppress(Exception):
+                from remedy.core.hive.policy import hive_depth as _hd
+
+                if _hd() > 0:
+                    hive_block = format_tool_error(
+                        "Hive workers cannot use this tool.",
+                        code="HIVE_CAPABILITY",
+                        tool_name=name,
+                        suggestion="Ask the mother to do this step.",
+                    )
     if hive_block:
         inc("tool_failure", tool=name)
         return hive_block

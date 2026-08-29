@@ -178,7 +178,8 @@ def test_take_step_writes_note_and_advances(tmp_path, monkeypatch):
 def test_classify_life_drive_is_l0():
     from remedy.core.metabolism.tier import TurnTier, classify_turn_tier
 
-    assert classify_turn_tier("what should I do?") == TurnTier.L0_INSTANT
+    assert classify_turn_tier("what should I do on my goals?") == TurnTier.L0_INSTANT
+    assert classify_turn_tier("what should I do?") != TurnTier.L0_INSTANT
     assert classify_turn_tier("how am I doing?") == TurnTier.L0_INSTANT
 
 
@@ -190,7 +191,7 @@ def test_l0_what_should_i_do(tmp_path, monkeypatch):
 
     LifeGoalStore(tmp_path).add("Land the job", next_action="Rewrite the resume")
     rt = SimpleNamespace(config=SimpleNamespace(home_dir=str(tmp_path)))
-    text = try_l0_system_reply(rt, "what should I do?", preclassified=True)
+    text = try_l0_system_reply(rt, "what should I do on my goals?", preclassified=True)
     assert text and "Land the job" in text
     pulse = try_l0_system_reply(rt, "how am I doing?", preclassified=True)
     assert pulse and "This week" in pulse

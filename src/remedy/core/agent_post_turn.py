@@ -156,35 +156,52 @@ def schedule_post_turn_prep(
                         home=home,
                     )
                 # Occasional dream densification (cooldown inside dream_cycle)
+                sid_soul = str(sid or "")
+                hive_pulse = False
                 with suppress(Exception):
-                    from remedy.memory.soul.dream import dream_cycle, should_dream
-                    from remedy.memory.soul.field import load_soul_field
+                    from remedy.core.turn_context import turn_session_id as _tsid_soul
+                    from remedy.memory.authority import is_hive_writer
 
-                    sf = load_soul_field(home)
-                    ready = len(sf.episodes) >= 3 or bool(sf.pledges) or bool(sf.future_dreams)
-                    if ready and should_dream(home):
-                        # Off the request task so SSE finally can release the
-                        # stream claim — a follow-up send must not 409.
-                        import threading
+                    sid_soul = str(_tsid_soul(runtime) or sid or "")
+                    hive_pulse = is_hive_writer(sid_soul)
+                if not hive_pulse:
+                    with suppress(Exception):
+                        from remedy.memory.soul.dream import dream_cycle, should_dream
+                        from remedy.memory.soul.field import load_soul_field
 
-                        threading.Thread(
-                            target=dream_cycle,
-                            kwargs={
-                                "home": home,
-                                "memory": getattr(runtime, "memory", None),
-                                "field": sf,
-                            },
-                            daemon=True,
-                            name="remedy-dream",
-                        ).start()
-                # Soft arm mission from soul when idle-ish (no active mission)
-                with suppress(Exception):
-                    from remedy.memory.soul.field import load_soul_field
-                    from remedy.memory.soul.missions_bridge import arm_soul_missions
+                        sf = load_soul_field(home)
+                        ready = (
+                            len(sf.episodes) >= 3
+                            or bool(sf.pledges)
+                            or bool(sf.future_dreams)
+                        )
+                        if ready and should_dream(home):
+                            # Off the request task so SSE finally can release the
+                            # stream claim — a follow-up send must not 409.
+                            import threading
 
-                    sf2 = load_soul_field(home)
-                    if sf2.relational.turns_together > 0 and sf2.relational.turns_together % 8 == 0:
-                        arm_soul_missions(runtime, home=home, max_new=1, auto=True)
+                            threading.Thread(
+                                target=dream_cycle,
+                                kwargs={
+                                    "home": home,
+                                    "memory": getattr(runtime, "memory", None),
+                                    "field": sf,
+                                    "session_id": sid_soul,
+                                },
+                                daemon=True,
+                                name="remedy-dream",
+                            ).start()
+                    # Soft arm mission from soul when idle-ish (no active mission)
+                    with suppress(Exception):
+                        from remedy.memory.soul.field import load_soul_field
+                        from remedy.memory.soul.missions_bridge import arm_soul_missions
+
+                        sf2 = load_soul_field(home)
+                        if (
+                            sf2.relational.turns_together > 0
+                            and sf2.relational.turns_together % 8 == 0
+                        ):
+                            arm_soul_missions(runtime, home=home, max_new=1, auto=True)
             # Always refresh somatic signal for tray / status bar (organism visible)
             with suppress(Exception):
                 from remedy.core.metabolism.organism import (
