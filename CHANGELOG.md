@@ -4,6 +4,11 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — UIA Invoke/Toggle before click-at-center
+
+- Desktop clicks try the control's Invoke or Toggle pattern first. Pixel
+  click-at-center is the fallback when the pattern is missing.
+
 ### Added — verify actually runs after casual writes
 
 - After ``file_write`` / ``file_edit`` with no build engine, Remedy runs

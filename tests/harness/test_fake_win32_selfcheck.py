@@ -308,6 +308,15 @@ def test_focused_element_info_is_none_when_nothing_has_focus():
         assert desktop_uia.focused_element_info() is None
 
 
+def test_preferred_click_action_toggle_vs_invoke():
+    from remedy.core.computer.desktop_uia import preferred_click_action
+
+    assert preferred_click_action("checkbox") == "toggle"
+    assert preferred_click_action("switch") == "toggle"
+    assert preferred_click_action("button") == "invoke"
+    assert preferred_click_action("menuitem") == "invoke"
+
+
 def test_element_action_invoke_drives_the_pattern_and_says_so():
     tree = _notepad_uia()
     with install_fake_win32(uia=tree):

@@ -1133,8 +1133,29 @@ class ComputerExecutor:
                     upd = find_best_element(fresh, str(el.get("name") or ""))
                     if upd is not None and not upd.get("offscreen"):
                         el = upd
+        hwnd = el.get("hwnd")
+        if hwnd and clicks == 1 and str(button or "left").lower() == "left":
+            with contextlib.suppress(Exception):
+                from remedy.core.computer.desktop_uia import (
+                    element_action,
+                    preferred_click_action,
+                )
+
+                action = preferred_click_action(str(el.get("role") or el.get("tag") or ""))
+                res = element_action(
+                    int(hwnd),
+                    str(el.get("name") or ""),
+                    role=str(el.get("role") or ""),
+                    action=action,
+                )
+                if res.get("ok"):
+                    out = dict(el)
+                    out["_method"] = f"uia_{action}"
+                    return out
         win.click_element(el, button=button, clicks=clicks)
-        return el
+        out = dict(el)
+        out["_method"] = "click_center"
+        return out
 
     def _run_desktop(self, act: ComputerAction, **kwargs: Any) -> dict[str, Any]:
         from remedy.core.computer.desktop_os import native
@@ -1408,17 +1429,23 @@ class ComputerExecutor:
                     button=str(kwargs.get("button") or "left"),
                     clicks=int(kwargs.get("clicks") or 1),
                 )
+                method = str(el.get("_method") or "click_center")
                 return public_result(
                     ok=True,
                     target="desktop",
                     action="click",
-                    message=f"Clicked text={text_q!r} → {el.get('ref')} ({str(el.get('name') or '')[:40]})",
+                    message=(
+                        f"{'Invoked' if method.startswith('uia_') else 'Clicked'} "
+                        f"text={text_q!r} → {el.get('ref')} "
+                        f"({str(el.get('name') or '')[:40]})"
+                    ),
                     extra={
                         "ref": el.get("ref"),
                         "text": text_q,
                         "x": el.get("x"),
                         "y": el.get("y"),
                         "match_score": el.get("match_score"),
+                        "method": method,
                         **self._desktop_evidence(),
                     },
                 )
@@ -1467,16 +1494,21 @@ class ComputerExecutor:
                     button=str(kwargs.get("button") or "left"),
                     clicks=int(kwargs.get("clicks") or 1),
                 )
+                method = str(el.get("_method") or "click_center")
                 return public_result(
                     ok=True,
                     target="desktop",
                     action="click",
-                    message=f"Clicked ref={ref} ({el.get('name', '')[:40]})",
+                    message=(
+                        f"{'Invoked' if method.startswith('uia_') else 'Clicked'} "
+                        f"ref={ref} ({el.get('name', '')[:40]})"
+                    ),
                     extra={
                         "ref": ref,
                         "x": el.get("x"),
                         "y": el.get("y"),
                         "hwnd": el.get("hwnd"),
+                        "method": method,
                         **self._desktop_evidence(),
                     },
                 )
