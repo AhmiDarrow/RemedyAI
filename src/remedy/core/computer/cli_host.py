@@ -108,7 +108,10 @@ class LocalComputerHost:
         logger.info("CLI computer host started (home=%s)", bridge.root)
         while not self._stop.is_set():
             try:
-                bridge.mark_host_alive(poller=True)
+                if bridge.host_driver() == "rust":
+                    logger.info("CLI computer host yielding to Desktop")
+                    break
+                bridge.mark_host_alive(poller=True, driver="cli")
                 # Drain UI commands (Desktop opens rail; CLI just clears + may open URL)
                 cmd = bridge.take_ui_command()
                 if cmd and isinstance(cmd, dict):
@@ -373,7 +376,14 @@ def get_local_computer_host(
 
 
 def start_cli_computer_host(home_dir: Path | str | None = None) -> LocalComputerHost:
+    from remedy.core.computer.host_bridge import get_host_bridge
+
     host = get_local_computer_host(home_dir)
+    if get_host_bridge(home_dir).host_driver() == "rust":
+        logger.info("CLI computer host not started — Desktop owns jobs/next")
+        host.last_error = "desktop_owns_host"
+        return host
+    host.last_error = ""
     host.start()
     return host
 

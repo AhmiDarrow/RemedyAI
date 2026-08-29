@@ -444,6 +444,7 @@ class ComputerHostBridge:
         self._host_seen_at: float = 0.0
         # Last jobs/next or ui/command poll (real Desktop poller — not a one-shot hello).
         self._last_poll_at: float = 0.0
+        self._last_poll_driver: str = ""
         # Set True after a full claim_next scan finds nothing pending. Cleared on
         # enqueue so idle host polls (~150ms) skip glob+read until new work lands.
         self._poll_idle_empty: bool = False
@@ -484,21 +485,27 @@ class ComputerHostBridge:
         self._ui_path = home / "computer" / "ui_command.json"
         self._ui_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def mark_host_alive(self, *, poller: bool = False) -> None:
-        """Note that something on loopback touched the host API.
-
-        *poller*=True only for jobs/next or ui/command polls (real Desktop).
-        A one-shot ``/host/hello`` alone must not claim the rail is driveable.
-        """
+    def mark_host_alive(self, *, poller: bool = False, driver: str = "") -> None:
+        """Note a loopback touch. poller=True is jobs/next or ui/command take."""
         now = time.time()
         self._host_seen_at = now
         if poller:
             self._last_poll_at = now
+            d = str(driver or "").strip().lower()
+            if d in ("rust", "cli"):
+                self._last_poll_driver = d
+
+    def host_driver(self, *, max_age_s: float = 15.0) -> str:
+        """``rust`` | ``cli`` | ``""`` while the poller is still fresh."""
+        if not self.host_connected(max_age_s=max_age_s):
+            return ""
+        return str(self._last_poll_driver or "")
 
     def mark_host_dead(self) -> None:
         """Forget host liveness after unclaimed jobs / failed drive."""
         self._host_seen_at = 0.0
         self._last_poll_at = 0.0
+        self._last_poll_driver = ""
 
     def pending_count(self) -> int:
         n = 0

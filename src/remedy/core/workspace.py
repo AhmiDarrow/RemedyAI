@@ -205,6 +205,36 @@ def jail_path(user_path: str, project_root: Path) -> Path:
     return resolve_under_roots(user_path, [project_root])
 
 
+def resolve_existing_path(raw: str | Path, *, cwd: Path | str | None = None) -> Path:
+    """Expand + resolve. Missing files are fine (strict=False)."""
+    dest = Path(raw)
+    if not dest.is_absolute() and cwd is not None:
+        dest = Path(cwd) / dest
+    dest = dest.expanduser()
+    try:
+        return dest.resolve(strict=False)
+    except OSError:
+        return dest.absolute()
+
+
+def path_in_roots(dest: Path | str, roots: list[Path] | None) -> bool:
+    """True if *dest* is under one of *roots*. Empty roots = no jail."""
+    if not roots:
+        return True
+    resolved = resolve_existing_path(dest)
+    for root in roots:
+        try:
+            r = resolve_existing_path(root)
+        except (TypeError, ValueError):
+            continue
+        try:
+            if resolved == r or resolved.is_relative_to(r):
+                return True
+        except (ValueError, TypeError, OSError):
+            continue
+    return False
+
+
 def normalize_access_scope(raw: str | None) -> str:
     """Return project | home | full | untrusted.
 
@@ -463,19 +493,8 @@ def resolve_under_roots(
                     detail={"input": user_path},
                 )
             return resolved
-        for root in roots:
-            try:
-                r = ensure_project_dir(root) if root.exists() else root.resolve()
-            except Exception:
-                try:
-                    r = root.resolve()
-                except OSError:
-                    r = root.absolute()
-            try:
-                resolved.relative_to(r)
-                return resolved
-            except ValueError:
-                continue
+        if path_in_roots(resolved, roots):
+            return resolved
         raise SecurityError(
             _outside_roots_message(user_path, roots, scope, for_write=for_write),
             rule="path_traversal",

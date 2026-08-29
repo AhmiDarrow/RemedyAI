@@ -12,9 +12,27 @@ from remedy.core.workspace import (
     allowed_roots_for_scope,
     effective_access_scope,
     normalize_access_scope,
+    path_in_roots,
+    resolve_existing_path,
     resolve_under_roots,
     write_roots_for_scope,
 )
+
+
+def test_path_in_roots_empty_is_no_jail(tmp_path: Path):
+    assert path_in_roots(tmp_path / "x", []) is True
+    assert path_in_roots(tmp_path / "x", None) is True
+
+
+def test_path_in_roots_blocks_escape(tmp_path: Path):
+    inside = tmp_path / "proj" / "a.txt"
+    inside.parent.mkdir()
+    inside.write_text("x", encoding="utf-8")
+    assert path_in_roots(inside, [tmp_path / "proj"]) is True
+    assert path_in_roots(tmp_path / "proj", [tmp_path / "proj"]) is True
+    assert path_in_roots(tmp_path / "other.txt", [tmp_path / "proj"]) is False
+    escaped = resolve_existing_path(tmp_path / "proj" / ".." / "other.txt")
+    assert path_in_roots(escaped, [tmp_path / "proj"]) is False
 
 
 def test_normalize_access_scope():

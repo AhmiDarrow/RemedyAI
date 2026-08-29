@@ -476,6 +476,11 @@ def _cmd_computer(args) -> None:
             return
 
         host = start_cli_computer_host(home)
+        if host.last_error == "desktop_owns_host":
+            console.print(
+                "[yellow]Desktop already owns jobs/next; CLI host not started.[/yellow]"
+            )
+            return
         st = host.status()
         connected = st.get("host_connected")
         console.print(

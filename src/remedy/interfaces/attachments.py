@@ -115,13 +115,11 @@ def is_path_under_attachments(
             _add(attachments_root(home_dir))
         _add(attachments_root(None))
         _add(default_home() / "attachments")
-    for root in roots:
-        try:
-            candidate.relative_to(root)
-            return True
-        except ValueError:
-            continue
-    return False
+    if not roots:
+        return False
+    from remedy.core.workspace import path_in_roots
+
+    return path_in_roots(candidate, roots)
 
 
 def filter_jailed_attachments(

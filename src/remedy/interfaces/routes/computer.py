@@ -107,13 +107,19 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "ui_command": b.peek_ui_command(),
             "jobs_root": str(b.root),
             "pending_hint": "Rust computer-host claims GET /api/computer/jobs/next",
+            "host_driver": b.host_driver(),
         }
 
     @app.get("/api/computer/ui/command")
-    async def computer_ui_command(take: bool = False, session_id: str = ""):
+    async def computer_ui_command(
+        take: bool = False, session_id: str = "", driver: str = ""
+    ):
         """Open the Browser rail. take=1 is the Rust consumer; peek is not the poller."""
         b = _bridge()
-        b.mark_host_alive(poller=bool(take))
+        b.mark_host_alive(
+            poller=bool(take),
+            driver=(driver or "rust") if take else "",
+        )
         if session_id.strip():
             b.set_focused_session(session_id)
         cmd = (
@@ -166,6 +172,7 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         only: str = "",
         session_id: str = "",
         wait_ms: int = 0,
+        driver: str = "",
     ):
         """Desktop host claims the next pending browser job (or null).
 
@@ -176,7 +183,7 @@ def register_computer_routes(app: FastAPI, *, runtime=None, gateway=None, memory
         Packaged desktop: Rust computer-host is the only poller.
         """
         b = _bridge()
-        b.mark_host_alive(poller=True)
+        b.mark_host_alive(poller=True, driver=driver or "rust")
         skip: set[str] | None = None
         only_set: set[str] | None = None
         if exclude and str(exclude).strip():

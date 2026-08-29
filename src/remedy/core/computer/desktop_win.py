@@ -1543,16 +1543,19 @@ def open_app(
         rel = Path(target)
         if ".." in rel.parts:
             raise ValueError("open_app refuses parent-directory traversal")
+        from remedy.core.workspace import path_in_roots, resolve_existing_path
+
         for d in search_dirs:
             try:
-                root = Path(d).expanduser().resolve(strict=False)
-            except OSError:
+                root = resolve_existing_path(d)
+            except (OSError, TypeError, ValueError):
                 continue
             for cand in (root / rel, root / rel.name):
                 try:
-                    resolved = cand.resolve(strict=False)
-                    resolved.relative_to(root)
-                except (OSError, ValueError):
+                    resolved = resolve_existing_path(cand)
+                except (OSError, TypeError, ValueError):
+                    continue
+                if not path_in_roots(resolved, [root]):
                     continue
                 if resolved.is_file():
                     if is_text_document_path(resolved):

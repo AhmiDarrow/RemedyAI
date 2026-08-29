@@ -714,6 +714,7 @@ class FakeBridge:
 class FakeHost:
     def __init__(self, **status) -> None:
         self.running = bool(status.pop("running", False))
+        self.last_error = str(status.get("last_error", "") or "")
         self._status = {"jobs_completed": 0, "home": "tmp", **status}
 
     def status(self) -> dict:
