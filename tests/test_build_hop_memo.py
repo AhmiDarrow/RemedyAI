@@ -26,3 +26,33 @@ def test_try_reuse_rejects_oracle_red(tmp_path: Path):
 
     unit = UnitSpec(id="f", path="a.py")
     assert try_reuse(tmp_path, key, oracle_fn=oracle, unit=unit) is None
+
+
+def test_try_reuse_with_tests_refuses_without_behavioral(tmp_path: Path):
+    key = memo_key(path="a.py", symbol="f", tests="assert False")
+    store_hop(tmp_path, key, "def f():\n    return 1\n", ok=True, path="a.py")
+    unit = UnitSpec(id="f", path="a.py", tests="def test_f():\n    assert False\n")
+
+    def oracle(u, src):  # noqa: ARG001
+        return []
+
+    assert try_reuse(tmp_path, key, oracle_fn=oracle, unit=unit) is None
+
+    def beh_ok(u, src):  # noqa: ARG001
+        return []
+
+    def beh_red(u, src):  # noqa: ARG001
+        return [OracleError("f", "failed")]
+
+    assert (
+        try_reuse(
+            tmp_path, key, oracle_fn=oracle, behavioral_fn=beh_ok, unit=unit
+        )
+        == "def f():\n    return 1\n"
+    )
+    assert (
+        try_reuse(
+            tmp_path, key, oracle_fn=oracle, behavioral_fn=beh_red, unit=unit
+        )
+        is None
+    )

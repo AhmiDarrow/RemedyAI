@@ -2885,15 +2885,11 @@ fn computer_host_loop(app: AppHandle) {
                         .unwrap_or("")
                         .to_string();
                     saw_work = true;
-                    // NEVER fake-complete navigate. If still claimable, navigate for real.
                     if action == "navigate" && !jid.is_empty() && jid == last_completed_nav {
                         log::info!(
-                            "computer-host: re-claim navigate {jid} after prior complete — navigating again"
+                            "computer-host: skip jobs/next navigate {jid} — ui/command already drove it"
                         );
-                    }
-                    // DOM jobs can take several seconds (page load + eval).
-                    // Run them off the poller thread so navigate stays snappy.
-                    if matches!(
+                    } else if matches!(
                         action,
                         "snapshot" | "a11y" | "page_text" | "ready" | "click"
                             | "type" | "key" | "scroll" | "drag" | "press_hold" | "select"

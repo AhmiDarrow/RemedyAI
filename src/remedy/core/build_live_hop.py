@@ -289,7 +289,21 @@ def live_unit_hop(
             errors=[],
         )
         if not body and use_llm:
-            cached = try_reuse(memo_root, memo_k, oracle_fn=run_oracle, unit=unit)
+            def _behavioral(u: Any, src: str) -> list[Any]:
+                if not str(getattr(u, "tests", "") or "").strip():
+                    return []
+                from remedy.core.builds.reducer import PytestOracle
+
+                path = str(getattr(u, "path", "") or rel)
+                return PytestOracle(root)(u, {path: src})
+
+            cached = try_reuse(
+                memo_root,
+                memo_k,
+                oracle_fn=run_oracle,
+                behavioral_fn=_behavioral,
+                unit=unit,
+            )
             if cached:
                 body = cached
                 memo_hit = True
