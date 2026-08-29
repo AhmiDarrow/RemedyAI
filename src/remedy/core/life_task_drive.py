@@ -319,7 +319,7 @@ def _publish_drive(
 def drive_life_task(
     *,
     goal: str,
-    steps: Any,
+    steps: Any = None,
     run_action: RunAction | None = None,
     runtime: Any = None,
     max_retries: int = 1,
@@ -328,6 +328,10 @@ def drive_life_task(
     home: Any = None,
     task_id: str | None = None,
     require_plan_approval: bool | None = None,
+    recipe: str = "",
+    url: str = "",
+    query: str = "",
+    vault: Any = None,
 ) -> dict[str, Any]:
     """Run *steps* on this PC. Never claims done without an observed ok.
 
@@ -336,6 +340,17 @@ def drive_life_task(
     """
     g = coerce_text_arg(goal) or "life task"
     parsed = parse_steps(steps)
+    if not parsed and (recipe or url or vault or g):
+        from remedy.core.life_task_routines import expand_recipe
+
+        parsed = expand_recipe(
+            goal=g,
+            recipe=recipe,
+            url=url,
+            query=query,
+            vault=vault,
+            home=home,
+        )
     results: list[DriveStepResult] = []
     if not parsed:
         return {
@@ -345,7 +360,8 @@ def drive_life_task(
             "steps": [],
             "markdown": (
                 f"**Toward {g}** — no steps to drive. Pass steps= "
-                "[{title, action, …}]."
+                "[{title, action, …}] or recipe=open|search|shop|fill|sign_in "
+                "with a url=."
             ),
         }
 
