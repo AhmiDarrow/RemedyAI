@@ -584,7 +584,12 @@ export function GroveApp({
             {needsYou > 0 && (
               <ApprovalBanner sessionId={null} onResolved={refreshBoard} />
             )}
-            <LifeTaskBanner sessionId={null} />
+            <LifeTaskBanner
+              sessionId={null}
+              onSpeak={(spoken) => {
+                void voice.speak(spoken)
+              }}
+            />
           </div>
 
           <div className="grove-mode-row" role="group" aria-label="How we work">
@@ -877,7 +882,12 @@ export function GroveApp({
 
       <div className="grove-approvals">
         <ApprovalBanner sessionId={activeId} onResolved={refreshBoard} />
-        <LifeTaskBanner sessionId={activeId} />
+        <LifeTaskBanner
+          sessionId={activeId}
+          onSpeak={(spoken) => {
+            void voice.speak(spoken)
+          }}
+        />
       </div>
 
       {tab === 'alongside' ? (

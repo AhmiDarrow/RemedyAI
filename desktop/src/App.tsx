@@ -1930,6 +1930,13 @@ export default function App() {
             <LifeTaskBanner
               sessionId={activeId}
               refreshSignal={planRefreshSignal}
+              onSpeak={
+                studioSpeakReplies
+                  ? (spoken) => {
+                      void studioVoice.speak(spoken)
+                    }
+                  : undefined
+              }
             />
             <PlanBanner
               planMode={planMode}

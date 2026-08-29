@@ -4,6 +4,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — voice Yes / No / Explain on the life-task card
+
+- The card's spoken sentence is read aloud when Speak replies is on.
+  Saying or typing Yes, No, or Explain acts on the card without a model
+  round.
+
 ### Added — UIA Invoke/Toggle before click-at-center
 
 - Desktop clicks try the control's Invoke or Toggle pattern first. Pixel
