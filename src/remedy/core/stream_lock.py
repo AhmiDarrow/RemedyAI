@@ -49,6 +49,15 @@ def any_stream_active() -> bool:
         return any(_active.values())
 
 
+def active_session_ids() -> list[str]:
+    """Session keys currently streaming in this process (excludes ``_anon``)."""
+    with _mutex:
+        out: list[str] = []
+        for sids in _active.values():
+            out.extend(s for s in sids if s and s != "_anon")
+        return out
+
+
 def acquire_stream_lock(home: str | Path, session_key: str) -> None:
     """Mark *session_key* as streaming; write/refresh this process's lock file."""
     base = Path(home).expanduser()

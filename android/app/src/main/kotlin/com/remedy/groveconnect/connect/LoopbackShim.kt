@@ -1,0 +1,239 @@
+package com.remedy.groveconnect.connect
+
+import com.remedy.groveconnect.core.DenyPath
+import com.remedy.groveconnect.core.RecordCodec
+import com.remedy.groveconnect.core.ShimAuth
+import java.io.InputStream
+import java.io.OutputStream
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+
+/**
+ * Tiny loopback HTTP reverse proxy. WebView talks here; we encrypt to the PC.
+ *
+ * Auth is a high-entropy path prefix (or cookie/header after a token-bearing
+ * request). Unauthenticated GET / is 403 and must not Set-Cookie.
+ */
+fun interface ShimPipe {
+    fun pipeHttp(method: String, target: String, headers: String, body: ByteArray, output: OutputStream)
+}
+
+class LoopbackShim(
+    private val pipe: ShimPipe,
+) {
+    constructor(client: ConnectClient) : this(
+        ShimPipe { method, target, headers, body, output ->
+            client.pipeHttp(method, target, headers, body, output)
+        },
+    )
+
+    private val running = AtomicBoolean(false)
+    private var server: ServerSocket? = null
+    private val shimToken: String = ShimAuth.newToken()
+    private val pool = Executors.newCachedThreadPool { r ->
+        Thread(r, "grove-shim").apply { isDaemon = true }
+    }
+
+    val port: Int get() = server?.localPort ?: 0
+    val token: String get() = shimToken
+
+    fun webViewUrl(): String = ShimAuth.webViewUrl(port, shimToken)
+
+    fun start(): Int {
+        val ss = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+        server = ss
+        running.set(true)
+        Thread({
+            while (running.get()) {
+                try {
+                    val sock = ss.accept()
+                    pool.execute { handle(sock) }
+                } catch (_: Exception) {
+                    if (!running.get()) break
+                }
+            }
+        }, "grove-shim-accept").apply {
+            isDaemon = true
+            start()
+        }
+        return ss.localPort
+    }
+
+    fun stop() {
+        running.set(false)
+        try {
+            server?.close()
+        } catch (_: Exception) {
+        }
+        pool.shutdownNow()
+    }
+
+    private fun handle(sock: Socket) {
+        sock.use { s ->
+            try {
+                val input = s.getInputStream()
+                val output = s.getOutputStream()
+                val req = readRequest(input) ?: return
+                if (!ShimAuth.allowed(req.target, req.headers, shimToken)) {
+                    writeResponse(output, 403, "text/plain; charset=utf-8", "shim".toByteArray())
+                    return
+                }
+                val destTarget = ShimAuth.strip(req.target, shimToken)
+                if (DenyPath.isForbidden(destTarget, req.method)) {
+                    writeResponse(
+                        output,
+                        403,
+                        "text/plain; charset=utf-8",
+                        (DenyPath.forbiddenReason(destTarget) ?: "forbidden").toByteArray(),
+                    )
+                    return
+                }
+                val dest = HeaderInjectingOutput(output, ShimAuth.cookieValue(shimToken))
+                pipe.pipeHttp(req.method, destTarget, req.headers, req.body, dest)
+            } catch (e: Exception) {
+                try {
+                    val msg = (e.message ?: "pipe error").toByteArray()
+                    writeResponse(s.getOutputStream(), 502, "text/plain; charset=utf-8", msg)
+                } catch (_: Exception) {
+                }
+            }
+        }
+    }
+
+    private data class ShimReq(val method: String, val target: String, val headers: String, val body: ByteArray)
+
+    private fun readRequest(input: InputStream): ShimReq? {
+        val headerBlock = readHeaders(input) ?: return null
+        val text = headerBlock.toString(Charsets.ISO_8859_1)
+        val lines = text.split("\r\n")
+        if (lines.isEmpty()) return null
+        val parts = lines[0].split(" ")
+        if (parts.size < 2) return null
+        val method = parts[0]
+        val target = parts[1]
+        val headers = lines.drop(1).filter { it.isNotBlank() }
+        val cl = headers.firstOrNull { it.startsWith("Content-Length:", ignoreCase = true) }
+            ?.substringAfter(":")?.trim()?.toIntOrNull() ?: 0
+        val body = if (cl > 0) RecordCodec.readExact(input, cl.coerceAtMost(1024 * 1024)) else ByteArray(0)
+        val forwarded = headers.filterNot {
+            it.startsWith("Host:", ignoreCase = true) ||
+                it.startsWith("Content-Length:", ignoreCase = true) ||
+                it.startsWith("Connection:", ignoreCase = true)
+        }.joinToString("\r\n")
+        return ShimReq(method, target, forwarded, body)
+    }
+
+    private fun readHeaders(input: InputStream): ByteArray? {
+        val buf = ArrayList<Byte>(512)
+        var n = 0
+        while (n < 64 * 1024) {
+            val c = input.read()
+            if (c < 0) return if (buf.isEmpty()) null else buf.toByteArray()
+            buf.add(c.toByte())
+            n++
+            val sz = buf.size
+            if (sz >= 4 &&
+                buf[sz - 4] == '\r'.code.toByte() &&
+                buf[sz - 3] == '\n'.code.toByte() &&
+                buf[sz - 2] == '\r'.code.toByte() &&
+                buf[sz - 1] == '\n'.code.toByte()
+            ) {
+                return buf.toByteArray()
+            }
+        }
+        return buf.toByteArray()
+    }
+
+    /** Rewrite the first HTTP header block to mint the shim cookie (authenticated only). */
+    private class HeaderInjectingOutput(
+        private val dest: OutputStream,
+        private val setCookie: String,
+    ) : OutputStream() {
+        private val buf = java.io.ByteArrayOutputStream(512)
+        private var headersDone = false
+
+        override fun write(b: Int) {
+            write(byteArrayOf(b.toByte()))
+        }
+
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            if (headersDone) {
+                dest.write(b, off, len)
+                return
+            }
+            buf.write(b, off, len)
+            val bytes = buf.toByteArray()
+            val idx = indexOfHeaderEnd(bytes) ?: return
+            val head = bytes.copyOfRange(0, idx).toString(Charsets.ISO_8859_1)
+            val rest = bytes.copyOfRange(idx + 4, bytes.size)
+            val injected = if (head.contains("Set-Cookie:", ignoreCase = true)) {
+                "$head\r\n\r\n"
+            } else {
+                "$head\r\nSet-Cookie: $setCookie\r\n\r\n"
+            }
+            dest.write(injected.toByteArray(Charsets.ISO_8859_1))
+            if (rest.isNotEmpty()) dest.write(rest)
+            headersDone = true
+            buf.reset()
+        }
+
+        override fun flush() {
+            dest.flush()
+        }
+
+        private fun indexOfHeaderEnd(bytes: ByteArray): Int? {
+            if (bytes.size < 4) return null
+            for (i in 0..bytes.size - 4) {
+                if (bytes[i] == '\r'.code.toByte() &&
+                    bytes[i + 1] == '\n'.code.toByte() &&
+                    bytes[i + 2] == '\r'.code.toByte() &&
+                    bytes[i + 3] == '\n'.code.toByte()
+                ) {
+                    return i
+                }
+            }
+            return null
+        }
+    }
+
+    private fun writeResponse(
+        out: OutputStream,
+        status: Int,
+        contentType: String,
+        body: ByteArray,
+        extraHeaders: String = "",
+        setCookie: String? = null,
+    ) {
+        val reason = when (status) {
+            200 -> "OK"
+            403 -> "Forbidden"
+            404 -> "Not Found"
+            502 -> "Bad Gateway"
+            else -> "OK"
+        }
+        val skip = setOf(
+            "content-length", "connection", "transfer-encoding",
+            "authorization", "www-authenticate", "set-cookie",
+        )
+        val extra = extraHeaders.lineSequence()
+            .filter { it.contains(':') }
+            .filter { it.substringBefore(':').trim().lowercase() !in skip }
+            .joinToString("\r\n")
+        val sb = StringBuilder()
+        sb.append("HTTP/1.1 ").append(status).append(' ').append(reason).append("\r\n")
+        sb.append("Content-Type: ").append(contentType).append("\r\n")
+        sb.append("Content-Length: ").append(body.size).append("\r\n")
+        sb.append("Connection: close\r\n")
+        if (!setCookie.isNullOrBlank()) {
+            sb.append("Set-Cookie: ").append(setCookie).append("\r\n")
+        }
+        if (extra.isNotEmpty()) sb.append(extra).append("\r\n")
+        sb.append("\r\n")
+        out.write(sb.toString().toByteArray(Charsets.ISO_8859_1))
+        out.write(body)
+        out.flush()
+    }
+}

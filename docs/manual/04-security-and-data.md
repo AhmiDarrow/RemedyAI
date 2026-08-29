@@ -93,6 +93,16 @@ API keys and OAuth tokens never leave as model input either way. Env override: `
 - CORS `*` is **refused** while auth is on.  
 - Auth-off + non-loopback bind requires `REMEDY_ALLOW_INSECURE_BIND=1` (owner escape hatch).  
 
+## Grove Connect (phone remote, default off)
+
+Grove Connect is a **second listener** on a chosen IPv4 you pick — **not** the
+messenger gateway, and **not** `:7400`. The local API stays on loopback. The
+computer-use poller and browser token bootstrap are refused on Connect. Pairing
+uses a 60-second QR on this PC; the phone is a remote, not another Remedy.
+Wildcard binds (`0.0.0.0` / `*` / `::`) are refused. An optional owner-run
+relay (`remedy connect-relay`) copies framed bytes and cannot decrypt them.
+See [Grove Connect](29-grove-connect).
+
 ## Web tools (`web_fetch` / `web_search`)
 
 - **On by default** after install (`web_tools_enabled = true`). Turn off in Settings → Security & power if you want her offline.
@@ -184,4 +194,4 @@ Toggle from the status bar or **Ctrl+B**.
 
 ## Related
 
-- [Providers & auth](03-providers-and-auth) · [Skills](07-skills) · [Updates & uninstall](08-updates-and-uninstall)
+- [Providers & auth](03-providers-and-auth) · [Skills](07-skills) · [Updates & uninstall](08-updates-and-uninstall) · [Grove Connect](29-grove-connect)

@@ -220,6 +220,7 @@ You → Grove / Studio (chat + Files / Terminal / Browser / Scratch)
 |---------|--------|
 | [How Remedy works](16-continuity-philosophy) | Continuity philosophy |
 | [Grove](22-grove) | Partner home (default surface) |
+| [Grove Connect](29-grove-connect) | Phone remote for this PC (default off) |
 | [Personal assistant](21-personal-assistant) | Reminders, mail, calendar, life tasks |
 | [Vault](23-vault) | Cards and credentials |
 | [Hive](28-hive) | Silent daughters |

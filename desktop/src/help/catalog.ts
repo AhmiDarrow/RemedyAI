@@ -289,6 +289,15 @@ const META: HelpArticleMeta[] = [
       'Silent daughters Remedy hires for independent work. They report packets to her, never as extra chats. Standing posts survive Stop and restart.',
   },
   {
+    id: '29-grove-connect',
+    title: 'Grove Connect (phone remote)',
+    category: 'Daily use',
+    order: 4.55,
+    tags: ['connect', 'phone', 'remote', 'qr', 'lan', 'relay'],
+    summary:
+      'Phone remote for this PC. Default off. Pair with a 60-second QR. Chosen IPv4 only; not a second Remedy.',
+  },
+  {
     id: '21-personal-assistant',
     title: 'Personal assistant',
     category: 'Daily use',

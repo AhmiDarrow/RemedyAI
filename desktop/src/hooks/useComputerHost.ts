@@ -11,6 +11,7 @@ import {
   emitComputerUi,
   fetchComputerUiCommand,
 } from '../api/computer'
+import { isConnectCompact } from '../utils/connectMode'
 
 /** Rust in-band failures are strings like missing-ref: / no-match: / no element. */
 export function rustBrowserActionOk(res: unknown): boolean {
@@ -75,8 +76,10 @@ export function useComputerHost(
 
   useEffect(() => {
     // Desktop shell only. Do not gate on server "ready" — host routes are loopback.
+    // Phone compact (?connect=1) is not the jobs/next poller — skip hello/peek.
     if (!isTauri()) return
     if (!enabled) return
+    if (isConnectCompact()) return
 
     let cancelled = false
 
@@ -198,6 +201,7 @@ export function useComputerHost(
   // Stamp focused session as soon as the open tab changes (do not wait 4s hello).
   useEffect(() => {
     if (!isTauri() || !enabled || !sessionId) return
+    if (isConnectCompact()) return
     void computerHostHello({ sessionId }).catch(() => null)
   }, [enabled, sessionId])
 }
