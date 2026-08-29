@@ -4,6 +4,14 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### Added — owner card for a life-task drive
+
+- Desktop renders the plan as one spoken sentence, Yes / No / Explain, and
+  live ``Step N of M``. Pay / password / CAPTCHA still stop; Yes on that
+  stop means you handled it — Remedy does not press it.
+- ``GET /api/life-tasks/current`` + ``POST /api/life-tasks/act`` drive the
+  card. Stream ``@@life_task`` updates the same surface.
+
 ### Added — native snapshot steers UIA first, screenshot last
 
 - Desktop ``computer_snapshot`` reports how many window vs control refs it

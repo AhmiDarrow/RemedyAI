@@ -1009,6 +1009,15 @@ async def execute_tool_calls(runtime, tool_calls_list: list[dict[str, Any]],
             todos_tok = take_todos_event(runtime)
             if todos_tok:
                 yield todos_tok, {}
+        if (name or "") == "life_drive":
+            with suppress(Exception):
+                from remedy.core.life_task_hub import current as hub_current
+                from remedy.core.life_task_hub import life_task_marker
+                from remedy.core.turn_context import turn_session_id
+
+                card = hub_current(turn_session_id(runtime))
+                if card:
+                    yield life_task_marker(card), {}
 
     # Evict non-idempotent tool results from the TURN-scoped cache/seen set so a
     # later step re-issuing the identical command (e.g. `pytest -q` after a fix)

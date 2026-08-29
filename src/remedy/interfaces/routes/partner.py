@@ -94,6 +94,13 @@ class PlanStepStatusRequest(BaseModel):
     )
 
 
+class LifeTaskActRequest(BaseModel):
+    action: str = Field(..., description="yes | no | explain")
+    session_id: str | None = None
+    task_id: str | None = None
+    approval_id: str | None = None
+
+
 class IdentityExportRequest(BaseModel):
     passphrase: str = Field(..., min_length=8, description="User passphrase (never stored)")
     dest: str = Field(
@@ -150,6 +157,63 @@ def register_partner_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             except Exception:
                 home = None
         return home
+
+    @app.get("/api/life-tasks/current")
+    async def current_life_task(session_id: str | None = None):
+        from remedy.core.approvals import APPROVALS
+        from remedy.core.life_task_hub import current, sse_card
+
+        card = current(session_id)
+        pending = [
+            i
+            for i in APPROVALS.list_pending(session_id=session_id)
+            if i.tool_name == "life_drive"
+        ]
+        approval = APPROVALS.to_public(pending[0]) if pending else None
+        if card is None and approval is not None:
+            card = {
+                "status": "need_you",
+                "spoken": approval.get("summary") or "",
+                "approval_id": approval.get("id"),
+                "kind": "plan_gate",
+                "choices": ["yes", "no", "explain"],
+                "checkpoint": False,
+            }
+        return {"task": sse_card(card) if card else None, "approval": approval}
+
+    @app.get("/api/life-tasks")
+    async def list_life_task_rows(session_id: str | None = None, limit: int = 20):
+        from remedy.core.life_task_store import list_life_tasks
+
+        rows = list_life_tasks(
+            session_id=session_id, home=_life_home(), limit=limit
+        )
+        return {"tasks": rows}
+
+    @app.get("/api/life-tasks/{task_id}")
+    async def get_life_task(task_id: str):
+        from remedy.core.life_task_store import load_life_task
+
+        rec = load_life_task(task_id, home=_life_home())
+        if rec is None:
+            raise HTTPException(404, "Life task not found")
+        return rec
+
+    @app.post("/api/life-tasks/act")
+    async def act_on_life_task(req: LifeTaskActRequest):
+        from remedy.core.life_task_drive import act_life_task
+
+        def _run():
+            return act_life_task(
+                req.action,
+                session_id=req.session_id,
+                task_id=req.task_id,
+                approval_id=req.approval_id,
+                home=_life_home(),
+                runtime=runtime,
+            )
+
+        return await asyncio.to_thread(_run)
 
     @app.get("/api/goals")
     async def list_goals():

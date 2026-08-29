@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef, lazy, Suspense } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { ApprovalBanner } from './components/ApprovalBanner'
+import { LifeTaskBanner } from './components/LifeTaskBanner'
 import { MessageFeed } from './components/MessageFeed'
 import { Composer, type ComposerHandle } from './components/Composer'
 import { StatusBar, type ThinkingLevel, type ApprovalMode } from './components/StatusBar'
@@ -1926,6 +1927,10 @@ export default function App() {
 
           <div style={{ position: 'relative', zIndex: 6 }}>
             <ApprovalBanner sessionId={activeId} />
+            <LifeTaskBanner
+              sessionId={activeId}
+              refreshSignal={planRefreshSignal}
+            />
             <PlanBanner
               planMode={planMode}
               sessionId={activeId}

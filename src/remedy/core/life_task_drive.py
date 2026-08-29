@@ -141,12 +141,6 @@ def life_plan_gate(
         return None
     if APPROVALS.is_approved("life_drive", cmd, session_id=session_id):
         return None
-    item = APPROVALS.create(
-        tool_name="life_drive",
-        command=cmd,
-        reason=ask,
-        session_id=session_id,
-    )
     from remedy.core.speakable import speakable_plan
 
     titles = [
@@ -159,6 +153,28 @@ def life_plan_gate(
         if step_is_checkpoint(s)
     ]
     spoken = speakable_plan(goal, titles, stops=stops)
+    item = APPROVALS.create(
+        tool_name="life_drive",
+        command=cmd,
+        reason=ask,
+        session_id=session_id,
+        summary=spoken,
+    )
+    from remedy.core.life_task_hub import build_card, publish
+
+    publish(
+        build_card(
+            goal=goal,
+            status="need_you",
+            source_steps=steps,
+            spoken=spoken,
+            approval_id=item.id,
+            kind="plan_gate",
+            markdown=cmd,
+            session_id=session_id,
+        ),
+        session_id=session_id,
+    )
     return (
         f"APPROVAL_REQUIRED id={item.id}\n"
         f"reason={ask}\n"
@@ -238,6 +254,68 @@ def _intended(step: dict[str, Any]) -> str:
     return " · ".join(bits)[:400]
 
 
+def _spoken_for(
+    goal: str,
+    results: list[DriveStepResult],
+    status: str,
+    *,
+    total: int | None = None,
+) -> str:
+    from remedy.core.speakable import (
+        speakable_blocked,
+        speakable_checkpoint,
+        speakable_done,
+        speakable_progress,
+    )
+
+    last = results[-1] if results else None
+    if status == "need_you":
+        return speakable_checkpoint(last.title if last else "this step")
+    if status == "blocked":
+        return speakable_blocked(
+            last.title if last else "that step",
+            last.block_reason if last else "",
+        )
+    if status == "done":
+        return speakable_done(goal)
+    tot = max(int(total or 0), len(results), 1)
+    step_n = min(len(results) + 1, tot) if (not last or last.status == "done") else len(results)
+    title = last.title if last else "the next step"
+    return speakable_progress(max(1, step_n), tot, title)
+
+
+def _publish_drive(
+    *,
+    goal: str,
+    status: str,
+    results: list[DriveStepResult],
+    parsed: list[dict[str, Any]],
+    session_id: str | None,
+    task_id: str | None = None,
+    approval_id: str | None = None,
+    kind: str = "",
+    ok: bool = False,
+    markdown: str = "",
+) -> dict[str, Any]:
+    from remedy.core.life_task_hub import build_card, publish
+
+    spoken = _spoken_for(goal, results, status, total=len(parsed))
+    card = build_card(
+        goal=goal,
+        status=status,
+        steps=[r.as_dict() for r in results],
+        source_steps=parsed,
+        spoken=spoken,
+        task_id=task_id,
+        approval_id=approval_id,
+        kind=kind or status,
+        ok=ok,
+        markdown=markdown,
+        session_id=session_id,
+    )
+    return publish(card, session_id=session_id)
+
+
 def drive_life_task(
     *,
     goal: str,
@@ -285,6 +363,16 @@ def drive_life_task(
                 "markdown": blocked,
             }
 
+    _publish_drive(
+        goal=g,
+        status="running",
+        results=[],
+        parsed=parsed,
+        session_id=session_id,
+        task_id=task_id,
+        kind="running",
+    )
+
     runner = run_action
     if runner is None:
         from remedy.core.computer.executor import get_computer_executor
@@ -303,6 +391,19 @@ def drive_life_task(
         if isinstance(raw, dict):
             return raw
         return _parse_run_blob(str(raw))
+
+    def _note(rec: DriveStepResult, st: str | None = None) -> None:
+        results.append(rec)
+        live = st or ("running" if rec.status == "done" else rec.status)
+        _publish_drive(
+            goal=g,
+            status=live,
+            results=results,
+            parsed=parsed,
+            session_id=session_id,
+            task_id=task_id,
+            kind="checkpoint" if rec.status == "need_you" else live,
+        )
 
     halted = ""
     for step in parsed:
@@ -323,7 +424,7 @@ def drive_life_task(
                 "Stopped on purpose — this step is an owner moment "
                 "(pay, send, password, or CAPTCHA). Nothing was pressed."
             )
-            results.append(rec)
+            _note(rec, "need_you")
             halted = "need_you"
             break
 
@@ -332,7 +433,7 @@ def drive_life_task(
             rec.status = "blocked"
             rec.block_reason = "tool_failed"
             rec.observed = f"Unknown action {action_name!r}."
-            results.append(rec)
+            _note(rec, "blocked")
             halted = "tool_failed"
             break
 
@@ -346,13 +447,13 @@ def drive_life_task(
             rec.block_reason = "need_you"
             rec.ok = False
             rec.observed = rec.evidence or rec.observed
-            results.append(rec)
+            _note(rec, "need_you")
             halted = "need_you"
             break
 
         if rec.ok:
             rec.status = "done"
-            results.append(rec)
+            _note(rec, "running")
             continue
 
         # One re-observe + retry. Same action, fresh snapshot first.
@@ -369,7 +470,7 @@ def drive_life_task(
                 recovered = True
                 break
         if recovered:
-            results.append(rec)
+            _note(rec, "running")
             continue
         rec.status = "blocked"
         rec.block_reason = (
@@ -377,7 +478,7 @@ def drive_life_task(
         )
         if not rec.observed:
             rec.observed = rec.evidence or "Step did not verify."
-        results.append(rec)
+        _note(rec, "blocked")
         halted = rec.block_reason
         break
 
@@ -387,12 +488,14 @@ def drive_life_task(
         status = "blocked"
         all_done = False
     md = _markdown(g, results, status)
+    final_status = status if status in {"done", "need_you", "blocked"} else "blocked"
     out = {
         "ok": bool(all_done),
-        "status": status if status in {"done", "need_you", "blocked"} else "blocked",
+        "status": final_status,
         "goal": g,
         "steps": [r.as_dict() for r in results],
         "markdown": md,
+        "spoken": _spoken_for(g, results, final_status, total=len(parsed)),
     }
     if persist:
         from remedy.core.life_task_store import save_life_task
@@ -415,6 +518,20 @@ def drive_life_task(
             + f"\n\nEvidence id=`{out.get('task_id')}` — resume with "
             "life_drive(task_id=…) or review the saved steps."
         )
+        sid = sid or session_id
+    else:
+        sid = session_id
+    _publish_drive(
+        goal=g,
+        status=str(out.get("status") or final_status),
+        results=results,
+        parsed=parsed,
+        session_id=sid,
+        task_id=str(out.get("task_id") or task_id or "") or None,
+        kind=str(out.get("status") or final_status),
+        ok=bool(out.get("ok")),
+        markdown=str(out.get("markdown") or md),
+    )
     return out
 
 
@@ -468,7 +585,7 @@ def resume_life_task(
     prior = [
         s
         for s in (rec.get("steps") or [])
-        if isinstance(s, dict) and s.get("status") == "done"
+        if isinstance(s, dict) and s.get("status") in ("done", "skipped")
     ]
     nxt = drive_life_task(
         goal=str(rec.get("goal") or ""),
@@ -480,10 +597,13 @@ def resume_life_task(
         session_id=rec.get("session_id"),
         home=h,
         task_id=str(rec.get("id") or task_id),
+        require_plan_approval=False,
     )
     merged = prior + list(nxt.get("steps") or [])
     nxt["steps"] = merged
-    all_done = bool(merged) and all(s.get("status") == "done" for s in merged)
+    all_done = bool(merged) and all(
+        s.get("status") in ("done", "skipped") for s in merged
+    )
     nxt["ok"] = all_done
     if all_done:
         nxt["status"] = "done"
@@ -497,6 +617,274 @@ def resume_life_task(
         task_id=str(rec.get("id") or task_id),
     )
     return nxt
+
+
+def resume_after_handoff(
+    task_id: str,
+    *,
+    run_action: RunAction | None = None,
+    runtime: Any = None,
+    home: Any = None,
+    max_retries: int = 1,
+) -> dict[str, Any]:
+    """Owner handled the wall. Skip the checkpoint — never press it — continue."""
+    from remedy.core.life_task_store import (
+        load_life_task,
+        remaining_source_steps,
+        save_life_task,
+    )
+
+    h = home
+    if h is None and runtime is not None:
+        h = getattr(getattr(runtime, "config", None), "home_dir", None)
+    rec = load_life_task(task_id, home=h)
+    if rec is None:
+        return {
+            "ok": False,
+            "status": "blocked",
+            "goal": "",
+            "steps": [],
+            "markdown": f"No saved life task `{task_id}`.",
+        }
+    remaining, halt = remaining_source_steps(rec)
+    if halt != "need_you" or not remaining or not step_is_checkpoint(remaining[0]):
+        return resume_life_task(
+            task_id, run_action=run_action, runtime=runtime, home=h
+        )
+    skipped_src = remaining[0]
+    skip_title = coerce_text_arg(skipped_src.get("title")) or coerce_text_arg(
+        skipped_src.get("action")
+    ) or "checkpoint"
+    skip_rec = DriveStepResult(
+        title=skip_title,
+        action=coerce_text_arg(skipped_src.get("action") or "checkpoint"),
+        status="skipped",
+        block_reason="owner_handled",
+        observed=(
+            "You handled this step. Remedy did not press pay, send, "
+            "password, or CAPTCHA."
+        ),
+    )
+    prior = [
+        s
+        for s in (rec.get("steps") or [])
+        if isinstance(s, dict) and s.get("status") in ("done", "skipped")
+    ]
+    rest = remaining[1:]
+    if not rest:
+        merged = prior + [skip_rec.as_dict()]
+        out = {
+            "ok": True,
+            "status": "done",
+            "goal": rec.get("goal") or "",
+            "steps": merged,
+            "markdown": str(rec.get("markdown") or ""),
+            "task_id": rec.get("id"),
+        }
+        out = save_life_task(
+            out,
+            source_steps=list(rec.get("source_steps") or remaining),
+            session_id=rec.get("session_id"),
+            home=h,
+            task_id=str(rec.get("id") or task_id),
+        )
+        from remedy.core.life_task_hub import build_card, publish
+        from remedy.core.speakable import speakable_done
+
+        spoken = speakable_done(str(out.get("goal") or ""))
+        publish(
+            build_card(
+                goal=str(out.get("goal") or ""),
+                status="done",
+                steps=merged,
+                source_steps=list(rec.get("source_steps") or []),
+                spoken=spoken,
+                task_id=str(out.get("task_id") or task_id),
+                kind="done",
+                ok=True,
+                markdown=str(out.get("markdown") or ""),
+                session_id=rec.get("session_id"),
+            ),
+            session_id=rec.get("session_id"),
+        )
+        out["spoken"] = spoken
+        return out
+    nxt = drive_life_task(
+        goal=str(rec.get("goal") or ""),
+        steps=rest,
+        run_action=run_action,
+        runtime=runtime,
+        max_retries=max_retries,
+        persist=False,
+        session_id=rec.get("session_id"),
+        home=h,
+        task_id=str(rec.get("id") or task_id),
+        require_plan_approval=False,
+    )
+    merged = prior + [skip_rec.as_dict()] + list(nxt.get("steps") or [])
+    nxt["steps"] = merged
+    all_done = all(s.get("status") in ("done", "skipped") for s in merged)
+    nxt["ok"] = all_done
+    if all_done:
+        nxt["status"] = "done"
+    nxt = save_life_task(
+        nxt,
+        source_steps=list(rec.get("source_steps") or remaining),
+        session_id=rec.get("session_id"),
+        home=h,
+        task_id=str(rec.get("id") or task_id),
+    )
+    return nxt
+
+
+def cancel_life_task(
+    task_id: str,
+    *,
+    home: Any = None,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    from remedy.core.life_task_hub import clear
+    from remedy.core.life_task_store import load_life_task, save_life_task
+
+    rec = load_life_task(task_id, home=home) if task_id else None
+    if rec is None:
+        clear(session_id)
+        return {"ok": True, "status": "cancelled", "steps": [], "goal": ""}
+    rec["status"] = "cancelled"
+    rec["ok"] = False
+    out = save_life_task(
+        rec,
+        source_steps=list(rec.get("source_steps") or []),
+        session_id=rec.get("session_id") or session_id,
+        home=home,
+        task_id=str(rec.get("id") or task_id),
+    )
+    clear(session_id or rec.get("session_id"))
+    return out
+
+
+def act_life_task(
+    action: str,
+    *,
+    session_id: str | None = None,
+    task_id: str | None = None,
+    approval_id: str | None = None,
+    home: Any = None,
+    run_action: RunAction | None = None,
+    runtime: Any = None,
+) -> dict[str, Any]:
+    """Owner Yes / No / Explain on the life-task card."""
+    from remedy.core.life_task_hub import current, sse_card
+    from remedy.core.speakable import explain_plan
+
+    act = (action or "").strip().lower()
+    card = current(session_id)
+    tid = (task_id or (card or {}).get("task_id") or "").strip()
+    appr = (approval_id or (card or {}).get("approval_id") or "").strip()
+    kind = str((card or {}).get("kind") or "")
+
+    if act in ("explain", "why"):
+        md = str((card or {}).get("markdown") or "")
+        goal = str((card or {}).get("goal") or "")
+        if tid:
+            from remedy.core.life_task_store import load_life_task
+
+            rec = load_life_task(tid, home=home)
+            if rec:
+                md = str(rec.get("markdown") or md)
+                goal = str(rec.get("goal") or goal)
+        spoken = explain_plan(goal, md)
+        return {
+            "ok": True,
+            "action": "explain",
+            "spoken": spoken,
+            "task": sse_card(card),
+        }
+
+    if act in ("no", "deny", "cancel"):
+        if appr:
+            from remedy.core.approvals import APPROVALS
+
+            APPROVALS.resolve(appr, approve=False, scope="session")
+        if tid:
+            out = cancel_life_task(tid, home=home, session_id=session_id)
+        else:
+            from remedy.core.life_task_hub import clear
+
+            clear(session_id)
+            out = {"ok": True, "status": "cancelled", "steps": [], "goal": ""}
+        return {
+            "ok": True,
+            "action": "no",
+            "spoken": "Stopped. Nothing else was pressed.",
+            "task": sse_card({**out, "status": "cancelled", "spoken": "Stopped."}),
+        }
+
+    if act in ("yes", "resume", "continue"):
+        if appr:
+            from remedy.core.approvals import APPROVALS
+
+            APPROVALS.resolve(appr, approve=True, scope="session")
+        src = list((card or {}).get("source_steps") or [])
+        goal = str((card or {}).get("goal") or "")
+        if src and kind == "plan_gate":
+            out = drive_life_task(
+                goal=goal,
+                steps=src,
+                run_action=run_action,
+                runtime=runtime,
+                persist=True,
+                session_id=session_id,
+                home=home,
+                require_plan_approval=False,
+            )
+            return {
+                "ok": bool(out.get("ok")),
+                "action": "yes",
+                "spoken": str(out.get("spoken") or ""),
+                "task": sse_card(current(session_id)),
+                "result": {
+                    "status": out.get("status"),
+                    "task_id": out.get("task_id"),
+                },
+            }
+        # Checkpoint: owner handled the wall — skip it, never press it.
+        if tid and (kind == "checkpoint" or (card or {}).get("checkpoint")):
+            out = resume_after_handoff(
+                tid, run_action=run_action, runtime=runtime, home=home
+            )
+            return {
+                "ok": bool(out.get("ok")),
+                "action": "yes",
+                "spoken": str(out.get("spoken") or out.get("markdown") or ""),
+                "task": sse_card(current(session_id)),
+                "result": {
+                    "status": out.get("status"),
+                    "task_id": out.get("task_id"),
+                },
+            }
+        if tid:
+            out = resume_life_task(
+                tid, run_action=run_action, runtime=runtime, home=home
+            )
+            return {
+                "ok": bool(out.get("ok")),
+                "action": "yes",
+                "spoken": str(out.get("spoken") or out.get("markdown") or ""),
+                "task": sse_card(current(session_id)),
+                "result": {
+                    "status": out.get("status"),
+                    "task_id": out.get("task_id"),
+                },
+            }
+        return {
+            "ok": True,
+            "action": "yes",
+            "spoken": "Yes. Ask Remedy to continue.",
+            "task": sse_card(card),
+        }
+
+    return {"ok": False, "action": act, "spoken": "Say Yes, No, or Explain.", "task": sse_card(card)}
 
 
 def _observed_line(blob: dict[str, Any]) -> str:
@@ -531,16 +919,16 @@ def _markdown(goal: str, results: list[DriveStepResult], status: str) -> str:
     if status == "need_you":
         from remedy.core.speakable import speakable_checkpoint
 
-        last = results[-1].title if results else "this step"
-        lines.append(speakable_checkpoint(last))
+        stop_title = results[-1].title if results else "this step"
+        lines.append(speakable_checkpoint(stop_title))
     if status == "blocked":
         from remedy.core.speakable import speakable_blocked
 
-        last = results[-1] if results else None
+        blocked = results[-1] if results else None
         lines.append(
             speakable_blocked(
-                last.title if last else "that step",
-                last.block_reason if last else "",
+                blocked.title if blocked else "that step",
+                blocked.block_reason if blocked else "",
             )
         )
     if status == "done":

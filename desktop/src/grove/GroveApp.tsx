@@ -20,6 +20,7 @@ import {
   type PendingApproval,
 } from '../api/partner'
 import { ApprovalBanner } from '../components/ApprovalBanner'
+import { LifeTaskBanner } from '../components/LifeTaskBanner'
 import { COMPUTER_UI_EVENT } from '../api/computer'
 import { RemedyLogo } from '../components/RemedyLogo'
 import { BrowserSlide } from '../components/slides/BrowserSlide'
@@ -579,11 +580,12 @@ export function GroveApp({
             )}
           </div>
 
-          {needsYou > 0 && (
-            <div className="grove-approvals">
+          <div className="grove-approvals">
+            {needsYou > 0 && (
               <ApprovalBanner sessionId={null} onResolved={refreshBoard} />
-            </div>
-          )}
+            )}
+            <LifeTaskBanner sessionId={null} />
+          </div>
 
           <div className="grove-mode-row" role="group" aria-label="How we work">
             {(
@@ -875,6 +877,7 @@ export function GroveApp({
 
       <div className="grove-approvals">
         <ApprovalBanner sessionId={activeId} onResolved={refreshBoard} />
+        <LifeTaskBanner sessionId={activeId} />
       </div>
 
       {tab === 'alongside' ? (

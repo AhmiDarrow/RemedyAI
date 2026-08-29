@@ -167,6 +167,7 @@ export function streamMessage(
   provider?: string,
   onTodos?: (payload: Record<string, unknown>) => void,
   chatMode?: boolean,
+  onLifeTask?: (payload: Record<string, unknown>) => void,
 ): AbortController {
   const controller = new AbortController()
 
@@ -353,6 +354,11 @@ export function streamMessage(
           case 'todos':
             if (payload && typeof payload === 'object') {
               onTodos?.(payload)
+            }
+            break
+          case 'life_task':
+            if (payload && typeof payload === 'object') {
+              onLifeTask?.(payload)
             }
             break
           case 'start': {
