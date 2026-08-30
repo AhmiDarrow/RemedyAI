@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any
 
@@ -129,8 +130,70 @@ def _snapshot(cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _connect_me_session_id() -> str | None:
+    """Streaming turn first; focused desktop tab if nothing is on the wire."""
+    active: list[str] = []
+    with contextlib.suppress(Exception):
+        from remedy.core.stream_lock import active_session_ids
+
+        active = [str(s) for s in active_session_ids() if str(s).strip()]
+    focused = ""
+    with contextlib.suppress(Exception):
+        from remedy.core.computer.host_bridge import get_host_bridge
+
+        focused = str(get_host_bridge().focused_session_id() or "").strip()
+    if focused and focused in active:
+        return focused
+    if active:
+        return active[0]
+    return focused or None
+
+
+def _connect_me_payload() -> dict[str, Any]:
+    cfg = _load_cfg()
+    paused = bool(cfg.get("connect_paused", False)) or is_paused()
+    turn_active = False
+    with contextlib.suppress(Exception):
+        from remedy.core.stream_lock import any_stream_active
+
+        turn_active = bool(any_stream_active())
+    return {
+        "panes": normalize_panes(cfg.get("connect_panes")),
+        "paused": paused,
+        "reachable": "paused" if paused else "lan",
+        "device_id": None,
+        "session_id": _connect_me_session_id(),
+        "turn_active": turn_active,
+        "device": {"id": None, "name": None},
+    }
+
+
 def register_connect_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     _ = runtime, gateway, memory
+
+    @app.get("/connect/me")
+    @app.get("/api/connect/me")
+    async def connect_me():
+        """Phone identity snapshot: focused/streaming chat id for native Stop."""
+        return _connect_me_payload()
+
+    @app.post("/api/stop")
+    async def connect_stop():
+        """Abort the /connect/me session; never the first GET /api/sessions row."""
+        sid = _connect_me_session_id()
+        if not sid:
+            return {"status": "idle", "session_id": None, "notified": 0}
+        from remedy.core.turn_context import abort_session as _abort_turn
+        from remedy.core.turn_context import normalize_abort_reason
+
+        reason_n = normalize_abort_reason("stop")
+        n = _abort_turn(sid, reason=reason_n)
+        return {
+            "status": "aborted",
+            "session_id": sid,
+            "notified": n,
+            "reason": reason_n,
+        }
 
     @app.get("/api/connect")
     async def get_connect(request: Request):
@@ -283,7 +346,12 @@ def register_connect_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
 
             drop_sessions_for_device(str(rec.get("id") or device_id))
         except Exception:
-            pass
+            try:
+                from remedy.connect.lifecycle import drop_all_sessions
+
+                drop_all_sessions()
+            except Exception:
+                pass
         return {"ok": True, "id": rec.get("id"), "revoked": True}
 
     @app.post("/api/connect/pause")

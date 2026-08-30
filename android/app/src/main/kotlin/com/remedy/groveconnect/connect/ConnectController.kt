@@ -165,11 +165,7 @@ class ConnectController(private val ctx: Context) {
                 if (sid.isNullOrBlank()) {
                     sid = fetchSessionId(c)
                 }
-                if (sid.isNullOrBlank()) {
-                    publish(state.copy(error = "No active session to stop."))
-                    return@execute
-                }
-                c.http("POST", "/api/sessions/$sid/abort?reason=stop", "Content-Type: application/json\r\n")
+                c.http("POST", ConnectMe.abortPath(sid), "Content-Type: application/json\r\n")
             } catch (e: Exception) {
                 publish(state.copy(error = e.message ?: "Stop failed"))
             }

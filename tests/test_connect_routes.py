@@ -123,3 +123,100 @@ def test_connect_me_not_on_management_surface_as_sidecar_secret(home):
     text = r.text.lower()
     assert "ps=" not in text
     assert "private" not in text
+
+
+def test_connect_me_includes_null_session_id_when_idle(home):
+    from remedy.core.computer.host_bridge import get_host_bridge
+
+    bridge = get_host_bridge()
+    prev = bridge.focused_session_id()
+    try:
+        bridge.set_focused_session(None)
+        client = _client()
+        r = client.get("/connect/me", headers=_auth())
+        assert r.status_code == 200
+        body = r.json()
+        assert "session_id" in body
+        assert body.get("session_id") in (None, "")
+        assert "turn_active" in body
+        assert body.get("turn_active") is False
+        blob = str(body)
+        assert "local_api_token" not in blob
+        assert "Bearer" not in blob
+        assert TOKEN not in blob
+        assert "ps=" not in blob
+    finally:
+        bridge.set_focused_session(prev)
+
+
+def test_connect_me_includes_streaming_session_id(home):
+    from remedy.core.stream_lock import acquire_stream_lock, release_stream_lock
+
+    client = _client()
+    acquire_stream_lock(home, "sid-connect-me-stream")
+    try:
+        r = client.get("/connect/me", headers=_auth())
+        assert r.status_code == 200
+        body = r.json()
+        assert body.get("session_id") == "sid-connect-me-stream"
+        assert body.get("turn_active") is True
+        alias = client.get("/api/connect/me", headers=_auth())
+        assert alias.status_code == 200
+        assert alias.json().get("session_id") == "sid-connect-me-stream"
+    finally:
+        release_stream_lock(home, "sid-connect-me-stream")
+
+
+def test_connect_me_prefers_focused_session_when_it_is_streaming(home):
+    from remedy.core.computer.host_bridge import get_host_bridge
+    from remedy.core.stream_lock import acquire_stream_lock, release_stream_lock
+
+    bridge = get_host_bridge()
+    prev = bridge.focused_session_id()
+    client = _client()
+    acquire_stream_lock(home, "sid-a")
+    acquire_stream_lock(home, "sid-b")
+    try:
+        bridge.set_focused_session("sid-b")
+        r = client.get("/connect/me", headers=_auth())
+        assert r.status_code == 200
+        assert r.json().get("session_id") == "sid-b"
+    finally:
+        release_stream_lock(home, "sid-a")
+        release_stream_lock(home, "sid-b")
+        bridge.set_focused_session(prev)
+
+
+def test_connect_me_falls_back_to_focused_when_idle(home):
+    from remedy.core.computer.host_bridge import get_host_bridge
+
+    bridge = get_host_bridge()
+    prev = bridge.focused_session_id()
+    try:
+        bridge.set_focused_session("sid-focused-idle")
+        r = _client().get("/connect/me", headers=_auth())
+        assert r.status_code == 200
+        assert r.json().get("session_id") == "sid-focused-idle"
+    finally:
+        bridge.set_focused_session(prev)
+
+
+def test_connect_stop_aborts_connect_me_session_not_list_row(home):
+    from remedy.core.stream_lock import acquire_stream_lock, release_stream_lock
+
+    client = _client()
+    idle = client.post("/api/stop", headers=_auth())
+    assert idle.status_code == 200
+    assert idle.json().get("status") == "idle"
+    assert idle.json().get("session_id") in (None, "")
+
+    acquire_stream_lock(home, "sid-connect-stop")
+    try:
+        live = client.post("/api/stop", headers=_auth())
+        assert live.status_code == 200
+        body = live.json()
+        assert body.get("session_id") == "sid-connect-stop"
+        assert body.get("status") == "aborted"
+        assert body.get("reason") == "stop"
+    finally:
+        release_stream_lock(home, "sid-connect-stop")

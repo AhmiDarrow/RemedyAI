@@ -7,7 +7,6 @@ import {
   type ConnectPaneKey,
   type ConnectStatus,
   filterConnectAddresses,
-  isConnectLoopbackBind,
   getConnect,
   getConnectAddresses,
   mergeConnectPanes,
@@ -17,6 +16,11 @@ import {
   revokeConnectDevice,
   startConnectPair,
 } from '../../api/connect'
+import {
+  CONNECT_LOOPBACK_BIND_WARNING,
+  isConnectLoopbackHost,
+  preferredConnectBindHost,
+} from '../../utils/connectMode'
 import { relativeTime } from '../../utils/relativeTime'
 import { SettingsSection } from '../SettingsSection'
 import {
@@ -193,12 +197,8 @@ export function ConnectSection({
     const base = st
     if (!base && patch.enabled !== true) return
     const panes = mergeConnectPanes(patch.panes ?? base?.panes)
-    const pickedHost =
-      patch.bind_host
-      ?? base?.bind_host
-      ?? addrs.find((ip) => !isConnectLoopbackBind(ip))
-      ?? addrs[0]
-      ?? ''
+    const existingHost = patch.bind_host !== undefined ? patch.bind_host : base?.bind_host
+    const pickedHost = preferredConnectBindHost(addrs, existingHost)
     const body = {
       enabled: patch.enabled ?? base?.enabled ?? false,
       bind_host: pickedHost,
@@ -227,10 +227,22 @@ export function ConnectSection({
     const list = [...addrs]
     const cur = st?.bind_host?.trim() || ''
     if (cur && !list.includes(cur) && filterConnectAddresses([cur]).length) {
-      list.unshift(cur)
+      list.push(cur)
     }
-    return list.map((ip) => ({ value: ip, label: ip }))
+    const ordered = [
+      ...list.filter((ip) => !isConnectLoopbackHost(ip)),
+      ...list.filter((ip) => isConnectLoopbackHost(ip)),
+    ]
+    return ordered.map((ip) => ({
+      value: ip,
+      label: isConnectLoopbackHost(ip) ? `${ip} — this computer only` : ip,
+    }))
   }, [addrs, st?.bind_host])
+
+  const selectedHost = preferredConnectBindHost(
+    hostOptions.map((o) => o.value),
+    st?.bind_host,
+  )
 
   const listen = st ? listenLabel(st) : ''
 
@@ -263,8 +275,8 @@ export function ConnectSection({
           {hostOptions.length ? (
             <FormSelect
               value={
-                st.bind_host && hostOptions.some((o) => o.value === st.bind_host)
-                  ? st.bind_host
+                selectedHost && hostOptions.some((o) => o.value === selectedHost)
+                  ? selectedHost
                   : hostOptions[0]!.value
               }
               onChange={(v) => void persist({ bind_host: v })}
@@ -274,11 +286,8 @@ export function ConnectSection({
           ) : (
             <FormHint>No IPv4 address yet — connect this PC to the network.</FormHint>
           )}
-          {isConnectLoopbackBind(st.bind_host) ? (
-            <FormNotice tone="warn">
-              127.0.0.1 is only reachable on this computer. Pick a LAN address so the
-              phone can connect.
-            </FormNotice>
+          {isConnectLoopbackHost(st.bind_host || selectedHost) ? (
+            <FormNotice tone="warn">{CONNECT_LOOPBACK_BIND_WARNING}</FormNotice>
           ) : null}
           <FormHint>
             {st.paused

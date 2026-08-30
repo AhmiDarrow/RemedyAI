@@ -39,7 +39,7 @@ def register_writer(writer: Any, device_id: str = "") -> None:
 
 def bind_writer_device(writer: Any, device_id: str) -> None:
     if writer in _writers:
-        _writers[writer] = str(device_id or "")
+        _writers[writer] = str(device_id or "").strip()
 
 
 def unregister_writer(writer: Any) -> None:
@@ -47,12 +47,18 @@ def unregister_writer(writer: Any) -> None:
 
 
 def drop_sessions_for_device(device_id: str) -> None:
-    """Close sockets bound to *device_id*. Unknown/empty ids are a no-op."""
+    """Close sockets bound to *device_id*. Unmapped sockets fail closed."""
     want = str(device_id or "").strip()
     if not want:
+        drop_all_sessions()
+        return
+    mapped = any(str(did or "").strip() for did in _writers.values())
+    if not mapped:
+        drop_all_sessions()
         return
     for writer, did in list(_writers.items()):
-        if did != want:
+        did_s = str(did or "").strip()
+        if did_s and did_s != want:
             continue
         with contextlib.suppress(Exception):
             writer.close()
