@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Remedy Desktop",
   "mainBinaryName": "Remedy Desktop",
-  "version": "0.41.7",
+  "version": "0.42.0",
   "identifier": "com.remedy.desktop",
   "build": {
     "frontendDist": "../dist",

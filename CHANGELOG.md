@@ -4,6 +4,8 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.42.0] — 2026-08-29
+
 ### Added — Grove Connect (phone remote for this PC)
 
 - Settings → Connect (off). Pair a phone with a 60s QR. The phone drives this PC; it does not run Remedy.
