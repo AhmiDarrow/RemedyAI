@@ -71,6 +71,15 @@ def prefer_lan_ipv4(addrs: list[str] | tuple[str, ...] | set[str]) -> list[str]:
     return sorted(lan) + sorted(loop)
 
 
+def pick_default_ipv4(addrs: list[str] | tuple[str, ...] | set[str] | None = None) -> str:
+    """First LAN unicast. Loopback only when it is the only chosen address."""
+    rows = prefer_lan_ipv4(addrs if addrs is not None else list_candidate_ipv4())
+    for ip in rows:
+        if not is_loopback_ipv4(ip):
+            return ip
+    return rows[0] if rows else ""
+
+
 def list_candidate_ipv4() -> list[str]:
     """Host IPv4s excluding 0.0.0.0. LAN unicast first; 127.0.0.1 last."""
     found: set[str] = {"127.0.0.1"}

@@ -10,6 +10,19 @@ data class ConnectMe(
     val reachable: String,
 ) {
     companion object {
+        /**
+         * Native Stop: abort the /connect/me session_id, never GET /api/sessions[0].
+         * Blank id falls back to POST /api/stop (process-active turn).
+         */
+        fun abortPath(sessionId: String?): String {
+            val sid = sessionId?.trim().orEmpty()
+            return if (sid.isNotEmpty()) {
+                "/api/sessions/$sid/abort?reason=stop"
+            } else {
+                "/api/stop"
+            }
+        }
+
         fun parseJson(text: String): ConnectMe {
             val sessionId = jsonString(text, "session_id") ?: jsonString(text, "sessionId")
             val deviceId = jsonString(text, "device_id") ?: jsonString(text, "deviceId")

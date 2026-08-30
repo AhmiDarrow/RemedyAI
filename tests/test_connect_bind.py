@@ -13,6 +13,7 @@ from remedy.connect.bind import (
     is_loopback_ipv4,
     is_wildcard_bind,
     list_candidate_ipv4,
+    pick_default_ipv4,
     prefer_lan_ipv4,
 )
 
@@ -114,6 +115,10 @@ def test_list_candidate_ipv4_excludes_wildcard() -> None:
         assert is_chosen_ipv4(ip)
         assert not is_wildcard_bind(ip)
     assert "127.0.0.1" in addrs
+    lan = [ip for ip in addrs if not is_loopback_ipv4(ip)]
+    if lan:
+        assert not is_loopback_ipv4(addrs[0])
+        assert addrs[0] == pick_default_ipv4(addrs)
 
 
 def test_list_candidate_ipv4_filters_wildcard_from_os(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -150,3 +155,16 @@ def test_prefer_lan_ipv4_puts_loopback_last() -> None:
     ]
     assert prefer_lan_ipv4(["127.0.0.1"]) == ["127.0.0.1"]
     assert prefer_lan_ipv4(["0.0.0.0", "10.1.2.3"]) == ["10.1.2.3"]
+    # Sorted order would put 127.0.0.1 first; LAN unicast must win.
+    assert prefer_lan_ipv4(["127.0.0.1", "10.0.0.5"])[0] == "10.0.0.5"
+
+
+def test_pick_default_ipv4_skips_loopback_when_lan_exists() -> None:
+    assert pick_default_ipv4(["127.0.0.1", "10.0.0.5", "192.168.1.20"]) == "10.0.0.5"
+    assert pick_default_ipv4(["127.0.0.1"]) == "127.0.0.1"
+    assert pick_default_ipv4(["127.0.0.2", "127.0.0.1"]) == "127.0.0.1"
+    assert pick_default_ipv4(["0.0.0.0", "*", "10.0.0.8"]) == "10.0.0.8"
+    assert pick_default_ipv4([]) == ""
+    assert pick_default_ipv4(["127.0.0.1", "10.0.0.5"]) == prefer_lan_ipv4(
+        ["127.0.0.1", "10.0.0.5"]
+    )[0]

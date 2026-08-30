@@ -45,7 +45,9 @@ Turn Connect off when you are done. Pairing is not a standing open door.
 ## Network (chosen IPv4 only)
 
 Connect listens on **one IPv4 address you choose** — typically this PC's LAN
-address (`192.168.x.x`), not `0.0.0.0`, not `*`, not `::`.
+address (`192.168.x.x`), not `0.0.0.0`, not `*`, not `::`. Settings prefers a
+LAN address. `127.0.0.1` stays in the list for this computer only; a phone
+cannot reach it. If you pick loopback on purpose, Connect warns you.
 
 The usual local API (`http://127.0.0.1:7400/`) does not move. Browser Web UI
 and Desktop keep talking to loopback. Connect is a **second listener**.
