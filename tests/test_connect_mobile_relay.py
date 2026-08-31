@@ -45,6 +45,7 @@ async def test_pair_over_owner_relay(home):
                 "connect_bind_host": "127.0.0.1",
                 "connect_bind_port": lan_port,
                 "connect_relay_url": f"127.0.0.1:{relay_port}",
+                "connect_rdv_enabled": False,
             },
             api_key="tok-connect-test-not-a-secret",
             sidecar_port=7400,

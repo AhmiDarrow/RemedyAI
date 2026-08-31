@@ -63,6 +63,65 @@ class QrPayloadTest {
     }
 
     @Test
+    fun parseOptionalRdv() {
+        val q = QrPayload.parse(
+            qr(extra = "rdv=broker.emqx.io:1883;broker.hivemq.com:1883"),
+            nowUnix = now,
+        )
+        assertEquals(listOf("broker.emqx.io" to 1883, "broker.hivemq.com" to 1883), q.rdvHosts)
+    }
+
+    @Test
+    fun rdvEmptyWhenAbsent() {
+        val q = QrPayload.parse(qr(), nowUnix = now)
+        assertTrue(q.rdvHosts.isEmpty())
+    }
+
+    @Test
+    fun parseOptionalTailscale() {
+        val q = QrPayload.parse(qr(extra = "ts=100.101.102.103:7401"), nowUnix = now)
+        assertEquals("100.101.102.103", q.tailscaleHost)
+        assertEquals(7401, q.tailscalePort)
+    }
+
+    @Test
+    fun tailscaleEmptyWhenAbsent() {
+        val q = QrPayload.parse(qr(), nowUnix = now)
+        assertNull(q.tailscaleHost)
+        assertNull(q.tailscalePort)
+    }
+
+    @Test
+    fun rejectSecretsInTailscale() {
+        val e = assertFailsWith<QrException> {
+            QrPayload.parse(qr(extra = "ts=100.101.102.103:7401;local_api_token x"), nowUnix = now)
+        }
+        assertTrue(e.message!!.contains("secrets"), e.message)
+    }
+
+    @Test
+    fun rejectGarbageTailscale() {
+        assertFailsWith<QrException> {
+            QrPayload.parse(qr(extra = "ts=not-an-ip:7401"), nowUnix = now)
+        }
+    }
+
+    @Test
+    fun rejectSecretsInRdv() {
+        val e = assertFailsWith<QrException> {
+            QrPayload.parse(qr(extra = "rdv=broker.emqx.io:1883;bearer x"), nowUnix = now)
+        }
+        assertTrue(e.message!!.contains("secrets"), e.message)
+    }
+
+    @Test
+    fun rejectGarbageRdv() {
+        assertFailsWith<QrException> {
+            QrPayload.parse(qr(extra = "rdv=not-a-host:port"), nowUnix = now)
+        }
+    }
+
+    @Test
     fun rejectHttpRelay() {
         val e = assertFailsWith<QrException> {
             QrPayload.parse(qr(extra = "relay=https://example.com/x"), nowUnix = now)

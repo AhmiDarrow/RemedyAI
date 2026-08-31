@@ -1364,7 +1364,19 @@ class ComputerHostBridge:
                         self.renudge_ui_for_job(job)
                     nudges_done = 1
                 elif nudges_done == 1 and elapsed >= 2.5:
-                    self.renudge_ui_for_job(job)
+                    # Idempotent re-publish: if a ui_command for this job is
+                    # still outstanding (peeked but not yet taken), do NOT
+                    # rewrite it — a fresh ts would make the SPA dedupe key
+                    # change and the Browser rail would pop open again on the
+                    # next poll (~250ms). Only nudge when the command is gone
+                    # (taken by the host, or lost) so the rail opens once.
+                    cmd = self.peek_ui_command()
+                    ui_for_job = (
+                        isinstance(cmd, dict)
+                        and str(cmd.get("job_id") or "") == str(job_id)
+                    )
+                    if not ui_for_job:
+                        self.renudge_ui_for_job(job)
                     nudges_done = 2
             # Fail fast only when no UI command is outstanding for this job
             if (

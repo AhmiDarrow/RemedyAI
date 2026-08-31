@@ -73,6 +73,11 @@ export function useComputerHost(
   openBrowserRef.current = onOpenBrowser
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
+  // Peek does not consume ui_command, and the command persists to disk. If the
+  // Rust host never takes it (host down, or written while the app was closed),
+  // a plain peek would re-open the Browser rail on every poll (~250ms) forever.
+  // Track the last-seen command identity so only NEW commands open the rail.
+  const lastUiCmdKeyRef = useRef('')
 
   useEffect(() => {
     // Desktop shell only. Do not gate on server "ready" — host routes are loopback.
@@ -114,8 +119,20 @@ export function useComputerHost(
           sessionIdRef.current,
         ).catch(() => null)
         if (cmd?.action === 'open_browser' || cmd?.job_action === 'navigate') {
-          openRail()
-          return true
+          // Identity key — deliberately EXCLUDES cmd.ts. The server re-publishes
+          // (renudge) with a fresh ts while a navigate job is still pending;
+          // including ts would make the same command look "new" every poll and
+          // the Browser rail would pop open repeatedly. Keying on job identity
+          // means the rail opens once per command.
+          const key = [cmd.job_id, cmd.action, cmd.job_action, cmd.url].join('|')
+          if (key !== lastUiCmdKeyRef.current) {
+            lastUiCmdKeyRef.current = key
+            openRail()
+            return true
+          }
+          // Same unconsumed command as last poll — the rail already opened for
+          // it once. Do NOT re-open on every poll (that was the popup loop).
+          return false
         }
         return false
       } finally {

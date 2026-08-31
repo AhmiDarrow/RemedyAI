@@ -3094,6 +3094,43 @@ textarea:disabled {
   font-size: 0.95rem;
 }
 .connect-compact [data-remedy-status-bar] {
-  flex-wrap: wrap;
-  row-gap: 0.35rem;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 0.45rem;
+  padding: 0.3rem 0.5rem;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.connect-compact [data-remedy-status-bar]::-webkit-scrollbar {
+  display: none;
+}
+/* Phone portal chrome — single line, no wrap, no horizontal bleed. */
+.connect-compact {
+  overflow: hidden;
+  max-width: 100vw;
+}
+.connect-compact .chat-middle {
+  height: 100%;
+}
+/* Slim chat header: title only — partner/model/count line stays on desktop. */
+.connect-compact .chat-session-sub {
+  display: none;
+}
+.connect-compact .chat-session-header {
+  min-height: 2.2rem;
+}
+.connect-compact .chat-session-title {
+  font-size: 0.95rem;
+}
+/* Composer stack on the phone: drop usage ticker + library chip, keep the
+   composer shell and any status banners (Stop stays reachable). */
+.connect-compact .chat-middle-composer > *:not(.composer-shell):not(.chat-status-banner) {
+  display: none !important;
+}
+.connect-compact .chat-middle-composer {
+  padding: 0.25rem 0.35rem;
+}
+/* Feed: full-bleed on the phone, tighter rhythm. */
+.connect-compact .chat-middle-feed {
+  padding-inline: 0.4rem;
 }

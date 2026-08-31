@@ -29,7 +29,6 @@ class DenyPathTest {
         "/api/connect/pause",
         "/api/connect/resume",
         "/api/connect/addresses",
-        "/api/connect/devices/abc/revoke",
         "/connect/pair/start",
         "/connect/pause",
         "/API/CONNECT/PAIR/START",
@@ -51,6 +50,12 @@ class DenyPathTest {
         "/api/connect/me",
         "/connect/preview",
         "/api/connect/preview",
+        // Self-revoke is allowed through the coarse phone gate: the *server*
+        // enforces the caller==target check (pipe.py), so the Settings
+        // "Revoke this phone" button can reach the PC. Pre-blocking it here
+        // made revoke fail client-side before it ever crossed the pipe.
+        "/api/connect/devices/abc/revoke",
+        "/connect/devices/abc/revoke",
     )
 
     @Test

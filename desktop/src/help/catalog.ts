@@ -290,7 +290,7 @@ const META: HelpArticleMeta[] = [
   },
   {
     id: '29-grove-connect',
-    title: 'Grove Connect (phone remote)',
+    title: 'RemedyConnect (phone remote)',
     category: 'Daily use',
     order: 4.55,
     tags: ['connect', 'phone', 'remote', 'qr', 'lan', 'relay'],

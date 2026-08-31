@@ -22,6 +22,7 @@ _server: asyncio.AbstractServer | None = None
 _extra_servers: list[asyncio.AbstractServer] = []
 _bind: tuple[str, int] | None = None
 _supervisor_task: asyncio.Task[Any] | None = None
+_rdv_task: asyncio.Task[Any] | None = None
 _mdns_stop: Any = None
 
 
@@ -162,6 +163,7 @@ async def start_connect_server(
     sidecar_port: int,
     api_key: str,
     config: dict[str, Any] | None = None,
+    tailscale_host: str = "",
 ) -> asyncio.AbstractServer:
     """Bind chosen IPv4:port. ``port=0`` picks an ephemeral port (tests)."""
     global _server, _bind, _supervisor_task
@@ -193,6 +195,9 @@ async def start_connect_server(
     _start_mdns(bound_host, bound_port)
     if bool(cfg.get("connect_allow_ipv6")):
         await _maybe_listen_v6(_cb, bound_port)
+    ts_host = str(tailscale_host or "").strip()
+    if ts_host and ts_host != bound_host:
+        await _maybe_listen_tailscale(_cb, bound_port, ts_host)
     raw_relay = str(cfg.get("connect_relay_url") or "").strip()
     if raw_relay:
         try:
@@ -206,6 +211,11 @@ async def start_connect_server(
                 _relay_supervisor(cfg, sidecar_port=side, api_key=key),
                 name="connect-relay-supervisor",
             )
+    if bool(cfg.get("connect_rdv_enabled", True)):
+        _rdv_task = asyncio.create_task(
+            _rdv_supervisor(sidecar_port=side, api_key=key, config=cfg),
+            name="connect-rdv-supervisor",
+        )
     return server
 
 
@@ -233,7 +243,7 @@ def _stop_mdns() -> None:
 
 
 async def stop_connect_server() -> None:
-    global _server, _bind, _supervisor_task
+    global _server, _bind, _supervisor_task, _rdv_task
     _stop_mdns()
     drop_all_sessions()
     task = _supervisor_task
@@ -242,6 +252,12 @@ async def stop_connect_server() -> None:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await task
+    rdv = _rdv_task
+    _rdv_task = None
+    if rdv is not None:
+        rdv.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await rdv
     for extra in list(_extra_servers):
         extra.close()
         with contextlib.suppress(Exception):
@@ -275,6 +291,27 @@ async def _maybe_listen_v6(cb: Any, port: int) -> None:
         return
     _extra_servers.append(extra)
     logger.info("connect gateway also on IPv6")
+
+
+async def _maybe_listen_tailscale(cb: Any, port: int, tailscale_host: str) -> None:
+    """Optional second listener on the Tailscale tailnet IPv4, same port."""
+    host = str(tailscale_host or "").strip()
+    if not host:
+        return
+    try:
+        from remedy.connect.bind import is_chosen_ipv4
+
+        if not is_chosen_ipv4(host):
+            return
+    except Exception:
+        return
+    try:
+        extra = await asyncio.start_server(cb, host=host, port=int(port), reuse_address=True)
+    except OSError:
+        logger.info("connect Tailscale listen skipped")
+        return
+    _extra_servers.append(extra)
+    logger.info("connect gateway also on Tailscale %s", host)
 
 
 def _rendezvous_sids() -> list[bytes]:
@@ -358,8 +395,91 @@ async def _relay_supervisor(
                     live[sid] = asyncio.create_task(_one(sid), name="connect-relay-dial")
             await asyncio.sleep(1.0)
     finally:
+        # Teardown can race a closing loop (test teardown / Ctrl-C): cancel
+        # is a call_soon, which raises "Event loop is closed" once the loop
+        # is gone. Guard each cancel so a shutdown never logs an unraisable.
         for task in live.values():
-            task.cancel()
+            with contextlib.suppress(Exception):
+                task.cancel()
+        if live:
+            with contextlib.suppress(Exception):
+                await asyncio.gather(*live.values(), return_exceptions=True)
+
+
+async def _rdv_supervisor(
+    *,
+    sidecar_port: int,
+    api_key: str,
+    config: dict[str, Any],
+) -> None:
+    """Zero-setup rendezvous: hold a public-broker session per active sid.
+
+    Both the PC and the phone dial *out* to a public MQTT broker (no account,
+    no binary, no VPS), so a phone on mobile data can meet a NATed PC. The
+    broker only ever sees the random session id and Noise ciphertext — the
+    same trust model as an owner relay.
+    """
+    from remedy.connect.rdv import PUBLIC_RDV_ENDPOINTS, MqttSession, RendezvousSession
+    from remedy.connect.store import is_paused
+
+    live: dict[bytes, asyncio.Task[Any]] = {}
+
+    async def _one(sid: bytes) -> None:
+        backoff = 1.0
+        while True:
+            if is_paused():
+                await asyncio.sleep(0.5)
+                continue
+            connected = False
+            for host, port in PUBLIC_RDV_ENDPOINTS:
+                mqtt: MqttSession | None = None
+                try:
+                    mqtt = MqttSession(host, port)
+                    await mqtt.connect()
+                    session = RendezvousSession(mqtt, sid, role="pc")
+                    reader, writer = await session.open()
+                    connected = True
+                    backoff = 1.0
+                    await _handle(
+                        reader,
+                        writer,
+                        sidecar_port=sidecar_port,
+                        api_key=api_key,
+                        config=config,
+                        skip_rate=True,
+                    )
+                    break
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    with contextlib.suppress(Exception):
+                        if mqtt is not None:
+                            mqtt.close()
+                    continue
+            if not connected:
+                await asyncio.sleep(backoff)
+                backoff = min(15.0, backoff * 1.5)
+
+    try:
+        while True:
+            wanted = set(_rendezvous_sids())
+            for sid in list(live):
+                task = live[sid]
+                if sid not in wanted or task.done():
+                    if not task.done():
+                        task.cancel()
+                    live.pop(sid, None)
+            for sid in wanted:
+                if sid not in live:
+                    live[sid] = asyncio.create_task(_one(sid), name="connect-rdv-dial")
+            await asyncio.sleep(1.0)
+    finally:
+        # Teardown can race a closing loop (test teardown / Ctrl-C): cancel
+        # is a call_soon, which raises "Event loop is closed" once the loop
+        # is gone. Guard each cancel so a shutdown never logs an unraisable.
+        for task in live.values():
+            with contextlib.suppress(Exception):
+                task.cancel()
         if live:
             with contextlib.suppress(Exception):
                 await asyncio.gather(*live.values(), return_exceptions=True)

@@ -8,13 +8,17 @@ import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.remedy.groveconnect.connect.Reachable
 import com.remedy.groveconnect.connect.RemoteState
+import com.remedy.groveconnect.api.RemedyApi
+import com.remedy.groveconnect.ui.HomeScreen
+import com.remedy.groveconnect.ui.HubScreen
 import com.remedy.groveconnect.ui.LockScreen
 import com.remedy.groveconnect.ui.PairScreen
-import com.remedy.groveconnect.ui.RemoteScreen
 import com.remedy.groveconnect.ui.theme.GroveTheme
 
 class MainActivity : FragmentActivity() {
@@ -27,19 +31,27 @@ class MainActivity : FragmentActivity() {
         ui = controller.state
         controller.onChange = {
             ui = controller.state
-            if ((ui.reachable == Reachable.OnLan || ui.reachable == Reachable.OnRelay) && ui.shimUrl != null) {
-                screen = UiScreen.Remote
+            if (screen != UiScreen.Lock && screen != UiScreen.Home &&
+                (ui.reachable == Reachable.OnLan || ui.reachable == Reachable.OnRelay) && ui.shimUrl != null
+            ) {
+                // Native portal is the home now — the old webview "hub" is gone.
+                screen = UiScreen.Home
             }
         }
         onBackPressedDispatcher.addCallback(
             this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
-                    if (screen == UiScreen.Remote) {
-                        controller.shutdown()
-                        screen = if (controller.state.paired) UiScreen.Pair else UiScreen.Pair
-                    } else {
-                        finish()
+                    when (screen) {
+                        UiScreen.Home -> {
+                            controller.shutdown()
+                            screen = UiScreen.Pair
+                        }
+                        UiScreen.Hub -> {
+                            controller.shutdown()
+                            screen = UiScreen.Pair
+                        }
+                        else -> finish()
                     }
                 }
             },
@@ -53,7 +65,7 @@ class MainActivity : FragmentActivity() {
                         onPair = { controller.pair(it) },
                         onUnpair = { controller.unpair() },
                     )
-                    UiScreen.Remote -> RemoteScreen(
+                    UiScreen.Hub -> HubScreen(
                         state = ui,
                         onStop = { controller.stopGeneration() },
                         onClose = {
@@ -65,7 +77,32 @@ class MainActivity : FragmentActivity() {
                             controller.shutdown()
                             screen = UiScreen.Pair
                         },
+                        onOpenFullRemote = { screen = UiScreen.Home },
                     )
+                    UiScreen.Home -> {
+                        val shim = ui.shimUrl
+                        if (shim != null) {
+                            // The shim URL is http://127.0.0.1:{port}/{token}/?connect=1 —
+                            // the API base must be the token path WITHOUT the query,
+                            // otherwise every request path lands after "?connect=1"
+                            // and the shim 403s it. substringBefore('?') fixes that.
+                            val apiBase = shim.substringBefore('?').trimEnd('/')
+                            val api = remember(apiBase) { RemedyApi(apiBase) }
+                            HomeScreen(
+                                state = ui,
+                                api = api,
+                                onClose = {
+                                    controller.shutdown()
+                                    screen = UiScreen.Pair
+                                },
+                                onStop = { controller.stopGeneration() },
+                                onRefresh = { controller.refreshNow() },
+                            )
+                        } else {
+                            // Not connected — bounce back to Pair.
+                            LaunchedEffect(Unit) { screen = UiScreen.Pair }
+                        }
+                    }
                 }
             }
         }
@@ -85,7 +122,12 @@ class MainActivity : FragmentActivity() {
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     controller.unlock()
-                    screen = UiScreen.Pair
+                    if (controller.state.paired) {
+                        controller.connectLast()
+                        screen = UiScreen.Hub
+                    } else {
+                        screen = UiScreen.Pair
+                    }
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
@@ -102,7 +144,7 @@ class MainActivity : FragmentActivity() {
         }
         prompt.authenticate(
             BiometricPrompt.PromptInfo.Builder()
-                .setTitle("Unlock Grove Connect")
+                .setTitle("Unlock RemedyConnect")
                 .setSubtitle("Confirm it's you to open the remote")
                 .setAllowedAuthenticators(authenticators)
                 .build(),
@@ -110,4 +152,4 @@ class MainActivity : FragmentActivity() {
     }
 }
 
-private enum class UiScreen { Lock, Pair, Remote }
+private enum class UiScreen { Lock, Pair, Hub, Home }

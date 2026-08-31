@@ -136,7 +136,19 @@ def ensure_setup_before_launch(
     console.print("  [bold]3[/bold]  Abort launch")
     console.print()
 
-    choice = Prompt.ask("Choose", choices=["1", "2", "3"], default="1", console=console)
+    choice = None
+    try:
+        choice = Prompt.ask("Choose", choices=["1", "2", "3"], default="1", console=console)
+    except (EOFError, KeyboardInterrupt):
+        # No interactive terminal (scripted / hidden-window launch, e.g. a
+        # --noconsole sidecar without REMEDY_DESKTOP_SIDECAR). Never crash the
+        # process on a missing answer — fall back to skip (fallback mode).
+        console.print(
+            "[yellow]No terminal input — skipping first-run setup "
+            "(fallback mode; configure later).[/yellow]"
+        )
+        path = mark_setup_completed(home_dir=home)
+        return True
     if choice == "3":
         console.print("[yellow]Launch cancelled.[/yellow]")
         return False

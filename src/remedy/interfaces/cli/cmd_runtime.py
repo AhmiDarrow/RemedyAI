@@ -25,12 +25,53 @@ from remedy.interfaces.wizard import ensure_setup_before_launch
 from remedy.memory.store import MemoryStore
 
 
+class _NullStream:
+    """Drop-in file-like for frozen windowed builds where sys.stdout/stderr are None.
+
+    uvicorn's ColourizedFormatter calls ``sys.stdout.isatty()`` at config time;
+    a --noconsole sidecar has ``sys.stdout is None`` and crashes with
+    ``AttributeError: 'NoneType' object has no attribute 'isatty'``. Give the
+    logging stack a real object that answers isatty()=False and swallows writes.
+    """
+
+    def write(self, data) -> None:
+        pass
+
+    def flush(self) -> None:
+        pass
+
+    def isatty(self) -> bool:
+        return False
+
+    def fileno(self) -> int:
+        raise OSError("no console attached")
+
+
+def _ensure_stdio() -> None:
+    """Never let uvicorn / logging see a None stdout/stderr.
+
+    PyInstaller windowed (--noconsole) builds start Python with both set to
+    None. Replace them with a null stream so formatter config (isatty) and
+    StreamHandler writes degrade gracefully instead of raising.
+    """
+    import sys as _sys
+
+    for name in ("stdout", "stderr"):
+        if getattr(_sys, name, None) is None:
+            setattr(_sys, name, _NullStream())
+
+
 def _cmd_serve(args) -> None:
     import sys
     import threading
     import time as _time
 
     import uvicorn
+
+    # Frozen windowed builds have sys.stdout/stderr == None; give logging a
+    # null stream BEFORE any formatter/handler touches them (uvicorn crashes
+    # on None.isatty()). Also covers setup_serve_logging and StructuredFormatter.
+    _ensure_stdio()
 
     from remedy.core.agent import BasicRuntime
     from remedy.gateway.router import Gateway
@@ -68,9 +109,15 @@ def _cmd_serve(args) -> None:
 
     skip = bool(getattr(args, "skip_setup", False)) or is_desktop_sidecar()
     force = bool(getattr(args, "force_setup", False))
-    is_tty = bool(sys.stdin is not None and sys.stdin.isatty())
     # Only interactive CLI (real TTY, not desktop) may gate on the wizard.
-    if force or (is_tty and not skip):
+    # isatty() alone lies on scripted/hidden launches (inherited console);
+    # guard stdin availability too so a --noconsole sidecar never prompts.
+    real_tty = bool(
+        sys.stdin is not None
+        and getattr(sys.stdin, "isatty", lambda: False)()
+        and not (sys.stdin.closed if hasattr(sys.stdin, "closed") else False)
+    )
+    if force or (real_tty and not skip):
         ok = ensure_setup_before_launch(
             home_dir=home,
             skip_setup=False,
@@ -264,7 +311,7 @@ def _cmd_serve(args) -> None:
             "default": {
                 "()": "uvicorn.logging.DefaultFormatter",
                 "fmt": "%(asctime)s %(levelprefix)s %(message)s",
-                "use_colors": None,
+                "use_colors": False,
             },
             "access": {
                 "()": "uvicorn.logging.AccessFormatter",

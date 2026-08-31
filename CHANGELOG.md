@@ -4,6 +4,186 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.44.1] — 2026-08-31
+
+### Fixed — frozen desktop crash + Browser rail popup loop
+
+- **Windowed sidecar logging crash** (`AttributeError: 'NoneType' object has
+  no attribute 'isatty'` at startup): PyInstaller `--noconsole` builds start
+  Python with `sys.stdout`/`sys.stderr` as `None`, and uvicorn's
+  `DefaultFormatter` calls `sys.stdout.isatty()` during dictConfig — so the
+  installed desktop app could die before serving. `cmd_runtime.py` now
+  normalizes both streams to a null stream at the top of `serve` and forces
+  `use_colors: False`, so the formatter config and stream handlers degrade
+  gracefully. Proven by booting the frozen windowed sidecar and hitting
+  `/api/ping`; regression tests in `tests/test_noconsole_logging.py`.
+- **Browser rail pops open on a loop**: the SPA peeked `open_browser`
+  ui-commands but never acked, so `wait()`'s 2.5s nudge kept re-publishing
+  with a fresh `ts` — and the frontend dedupe key included `ts`, so every
+  republish looked "new" and re-opened the rail on each ~250ms poll.
+  Fixes: the nudge is now idempotent (only re-publishes when the command for
+  that job is gone), and the frontend dedupe keys on job identity, not ts.
+- Help manual re-synced from source pages (docs gate green again).
+- Version surfaces all at 0.44.1 (Python, desktop, Android versionCode 11).
+
+## [0.44.0] — 2026-08-30
+
+### RemedyConnect (was Grove Connect) — Tailscale transport
+
+- **Rename**: the phone remote is now **RemedyConnect** everywhere user-visible
+  (app label, pair screens, Settings, help). The Android package/namespace
+  stays `com.remedy.groveconnect` to avoid a breaking reinstall.
+- **Tailscale-first transport**: when the PC has Tailscale running, the pairing
+  QR now advertises the tailnet address (`ts=`) and the Connect gateway opens a
+  second listener on it. The phone tries **Tailscale → LAN → IPv6 → relay**,
+  so pairing once works on Wi-Fi *and* mobile data — no broker, no VPS, no
+  account beyond the free Tailscale login on both devices.
+- **Pairing UX**: scan QR once, works everywhere. LAN stays the fast path on
+  the same Wi-Fi; Tailscale's DERP relays carry mobile data.
+- Version surfaces all at 0.44.0 (Python, desktop, Android versionCode 11).
+
+## [0.43.2] — 2026-08-30
+
+### Fixed — Grove Connect phone + desktop revoke (install this over 0.43.0)
+
+- **The installed 0.43.0 sidecar was missing the 0.43.1 fixes.** The phone
+  talks to the *running* sidecar, so a fresh 0.43.2 installer is required for
+  the phone to work: it contains the provider-glance allowance
+  (`GET /api/providers/connected` through the pipe), the revoked-device hiding
+  in the device list, and the phone self-revoke pipe handling.
+- Desktop revoke now visibly removes the phone from Settings → Connect
+  (revoked records stay on disk so reconnect is refused, but they are hidden
+  from `device_public_meta`).
+- Version sync: pyproject, package.json, tauri.conf, Cargo, latest.json,
+  Android all at 0.43.2. Android versionCode 10, versionName 0.43.2.
+
+## [0.43.0] — 2026-08-30
+
+### Added — native Grove Connect app (no more desktop-in-a-WebView)
+
+- The phone is no longer a shrunken Remedy desktop. It is a native Kotlin +
+  Compose client that talks to the PC's API directly through the same
+  encrypted tunnel: **Chat** (session picker + live streaming replies),
+  **Sessions** (full history), **Approvals** (native approve/decline cards),
+  **Terminal** (a real shell on the PC over HTTP/SSE), and **Status** (version,
+  session, stop). Bottom navigation, phone-first layout, rotation-safe.
+- WebView "Full remote" is gone from the default flow; the desktop SPA is no
+  longer rendered on the phone at all.
+- New server endpoint **`/api/terminal`**: open a PowerShell/cmd shell over
+  the Connect pipe, stream output as SSE, write input, resize, close. Uses
+  ConPTY on Windows (pipe fallback elsewhere). A dropped SSE stream does NOT
+  kill the shell — it stays alive 60s for the phone to re-attach, then closes.
+  Same blast radius as the desktop's in-app terminal; only reachable through
+  the Noise-authenticated Connect tunnel. No PII or machine info in any route
+  or test fixture.
+- Android versionCode 8, versionName 0.43.0.
+
+## [0.42.5] — 2026-08-29
+
+### Added — Grove Connect mobile data works out of the box (no VPS, no install)
+
+- **Automatic public rendezvous.** Both the PC and the phone already dial
+  *out*, so they now meet on a public MQTT broker instead of requiring the
+  user to run an owner relay server. Scan the QR — it works on Wi-Fi, on
+  mobile data, anywhere. The broker only ever sees a random 16-byte session
+  id and Noise ciphertext; it can never read chats (same trust model as the
+  owner relay). No downloaded binaries, no accounts, no advanced setup.
+- Desktop keeps rendezvous sessions alive for the pair window and every
+  paired device; the pairing QR advertises the broker list (`rdv=`).
+- Android: the app tries LAN → IPv6 → owner relay → public rendezvous in the
+  right order for the active network (mobile data skips the doomed LAN/v6
+  probes). Rendezvous is a minimal MQTT 3.1.1 client in the app — no new deps.
+- Settings copy updated: mobile data "just works"; the owner relay is now an
+  optional lower-latency / self-hosted choice.
+- Android versionCode 7, versionName 0.42.5.
+
+## [0.42.4] — 2026-08-29
+
+### Added — Grove Connect works on mobile data (owner relay)
+
+- The Android client now checks the active network class: on cellular data it
+  skips the doomed LAN/v6 probes entirely and dials the owner relay first, so
+  a phone out of the house connects in one hop instead of failing after
+  wasted LAN timeouts.
+- Clearer errors: no relay paired → "Add an Owner Relay in Remedy Desktop →
+  Settings → Connect to use this phone anywhere"; relay paired but unreachable
+  → points at the relay address / data connection.
+
+### Changed — Grove Connect phone view is a compact portal, not the desktop
+
+- The status bar on the phone is now a one-line strip (status dot, streaming,
+  reconnect) — model/provider/thinking/approval/theme/usage controls stay on
+  the desktop where they belong.
+- Chat header drops the partner/model/count line on the phone; composer stack
+  hides the usage ticker and library chip; feed goes full-bleed. No more
+  wrapping control rows eating the screen or clipped UI.
+- The SPA still powers it — `?connect=1` now renders the slim chrome instead
+  of a shrunken desktop.
+
+### Fixed — rotation no longer locks the app
+
+- `MainActivity` handles `orientation|screenSize|screenLayout|smallestScreenSize|
+  keyboardHidden|uiMode|density` config changes, so rotating the phone keeps
+  the current screen (Lock/Pair/Hub/Remote) instead of resetting to Lock and
+  dropping the connection.
+
+- Android versionCode 6, versionName 0.42.4.
+
+## [0.42.3] — 2026-08-29
+
+### Changed — Grove Connect is now a sleek phone remote, not the desktop app
+
+- The Android client no longer opens the full Remedy desktop web UI on the
+  phone by default. It is a native, phone-first hub: a status hero card
+  (connection state, LAN label, session), a **Full remote** button that opens
+  the desktop UI only when you want it (edge-to-edge, minimal chrome), quick
+  **Stop**, and a redesigned approvals feed (Approve / Decline on native
+  cards, sensitive requests flagged).
+- Pair screen is a segmented **Scan QR / Paste code** switcher with a
+  camera-first flow; the locked state shows a branded unlock. Everything is
+  Material 3 dark, rounded, and fast.
+- WebView is hardened: file/content access off, universal-access off, mixed
+  content never allowed, no zoom, safe-browsing on, only the local shim host
+  may load.
+- Connection: TCP keep-alive plus 64 KiB send/receive buffers for snappier
+  transfers on Wi-Fi.
+- Unlock with a saved pairing now reconnects to the last PC automatically
+  (previously you had to re-pair after every biometric unlock).
+- Android versionCode 5, versionName 0.42.3.
+
+## [0.42.2] — 2026-08-29
+
+### Fixed — pairing advertised the WSL NAT address, phone could not connect
+
+- The pairing QR and Connect bind picked the lexicographically-first candidate
+  (often the WSL/Docker/Hyper-V vEthernet NAT, e.g. a `172.16/12` address)
+  instead of the real Wi-Fi/Ethernet address, so a phone on the same LAN
+  failed with `failed to connect to /172.x.x.x(port 7401)`.
+- Address selection is now numeric and **default-route-first**: the source IP
+  the OS uses to reach the internet (the real LAN NIC) ranks above every other
+  unicast, and loopback stays last. Virtual-NAT ranges are demoted only when a
+  real route exists — an explicit non-virtual pick is kept as-is.
+- The heal applies at every layer: the candidate list the Settings UI shows,
+  the bind the Connect listener actually uses, and the `lan=` advertised in
+  the pairing QR. No real-world IPs or machine info are embedded anywhere.
+
+## [0.42.1] — 2026-08-29
+
+### Added — real QR pairing
+
+- Desktop Settings → Connect now renders the 60-second pairing secret as a
+  scannable QR (client-side `qrcode`), with Copy retained as fallback.
+- Android Grove Connect gains a **Scan QR** camera mode (CameraX + ML Kit
+  barcode). Paste still works — scanning is convenience, not a requirement.
+- CAMERA permission is requested at scan time; denial falls back to paste.
+
+### Fixed — Settings category headers no longer bounce open
+
+- Clicking a Settings section header to collapse it no longer instantly
+  reopens. The force-open pin is cleared when the user closes a section, and
+  the section only reacts to a *changed* force directive instead of a fresh
+  `onOpenChange` callback every parent render.
+
 ## [0.42.0] — 2026-08-29
 
 ### Added — Grove Connect (phone remote for this PC)

@@ -285,6 +285,16 @@ def register_connect_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             port = int(cfg.get("connect_bind_port") or 7401)
         except (TypeError, ValueError):
             port = 7401
+        try:
+            from remedy.connect.bind import reachable_lan_host
+
+            # Advertise the address a phone can reach even when a stale
+            # virtual-NAT bind (WSL/Docker/Hyper-V) is still in config.
+            host = reachable_lan_host(host)
+        except ImportError:
+            pass
+        except Exception:
+            logger.debug("reachable_lan_host failed", exc_info=True)
         if not host:
             try:
                 from remedy.connect.bind import list_candidate_ipv4, prefer_lan_ipv4
@@ -311,6 +321,13 @@ def register_connect_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
             except Exception:
                 v6 = ""
         relay = str(cfg.get("connect_relay_url") or "").strip()
+        ts_host = ""
+        try:
+            from remedy.connect.bind import tailscale_ipv4
+
+            ts_host = tailscale_ipv4()
+        except Exception:
+            ts_host = ""
         try:
             qr = start_pair(
                 loopback=True,
@@ -318,7 +335,17 @@ def register_connect_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
                 bind_port=port,
                 v6=v6,
                 relay=relay,
+                tailscale=ts_host,
             )
+            # Zero-setup mobile data: advertise the public rendezvous brokers
+            # the PC holds a session on, so a phone on LTE can meet it without
+            # the user running any relay server.
+            try:
+                from remedy.connect.rdv import rdv_qr_value
+
+                qr = f"{qr}\nrdv={rdv_qr_value()}"
+            except Exception:
+                logger.debug("rdv qr line skipped", exc_info=True)
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail="loopback only") from exc
         except ValueError as exc:

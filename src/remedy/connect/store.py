@@ -166,9 +166,13 @@ def active_device_count(home: Path | str | None = None) -> int:
 
 
 def device_public_meta(home: Path | str | None = None) -> list[dict[str, Any]]:
-    """Owner-visible metadata: no public keys, no secrets."""
+    """Owner-visible metadata: no public keys, no secrets.
+
+    Revoked devices are hidden so a revoke visibly removes the phone from
+    Connect settings. The record stays on disk so reconnects are refused.
+    """
     rows = []
-    for rec in list_devices(home, include_revoked=True):
+    for rec in list_devices(home, include_revoked=False):
         rows.append(
             {
                 "id": rec.get("id"),

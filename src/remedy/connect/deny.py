@@ -270,6 +270,10 @@ def connect_forbidden(
         if not flags.get("settings_write"):
             return "pane:settings_write"
 
+    # Read-only provider glance for the phone Settings pane (no secrets).
+    if method_u == "GET" and norm in ("/api/providers/connected", "/api/providers/free"):
+        return None
+
     if _credential_writer(norm) and not flags.get("settings_write"):
         return "pane:settings_write"
 
