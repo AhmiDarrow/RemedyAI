@@ -138,6 +138,7 @@ def start_pair(
     bind_port: int,
     v6: str = "",
     relay: str = "",
+    tailscale: str = "",
 ) -> str:
     """Mint a 60s one-use pair QR. Raises ``PermissionError`` off loopback."""
     if not loopback:
@@ -170,6 +171,12 @@ def start_pair(
 
         host_r, port_r = parse_relay_endpoint(relay_s)
         lines.append(f"relay={host_r}:{port_r}")
+    ts_s = str(tailscale or "").strip()
+    if ts_s:
+        from remedy.connect.bind import is_chosen_ipv4
+
+        if is_chosen_ipv4(ts_s):
+            lines.append(f"ts={ts_s}:{port}")
     lines.append(f"exp={exp}")
     text = "\n".join(lines)
     # Belt: never emit the local API token shape even if a caller stuffed it

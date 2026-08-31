@@ -67,6 +67,10 @@ export function useSettingsPanelState() {
             saveLastSettingsSection(id)
             if (id === 'vision') setVisionSectionOpen(true)
             if (id === 'rmb') setRmbSectionOpen(true)
+          } else {
+            // User explicitly collapsed — drop the force pin so a later
+            // parent re-render cannot reopen it.
+            setForceSection((cur) => (cur === id ? null : cur))
           }
         },
       }

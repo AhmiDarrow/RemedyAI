@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Grove Connect</string>
+    <string name="app_name">RemedyConnect</string>
     <string name="notif_channel">Remote session</string>
-    <string name="notif_title">Grove Connect</string>
+    <string name="notif_title">RemedyConnect</string>
     <string name="notif_text">Remote session open. Closing the app ends it.</string>
 </resources>

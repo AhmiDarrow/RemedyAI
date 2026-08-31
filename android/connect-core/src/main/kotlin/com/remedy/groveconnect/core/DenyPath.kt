@@ -26,6 +26,11 @@ object DenyPath {
         """(?:^|/)(?:api/)?connect(?:/|$|\?|#)""",
         RegexOption.IGNORE_CASE,
     )
+    // Self-revoke is allowed: the server checks the device id equals the caller.
+    private val CONNECT_REVOKE = Regex(
+        """(?:^|/)(?:api/)?connect/devices/[^/]+/revoke(?:/|$|\?|#)""",
+        RegexOption.IGNORE_CASE,
+    )
 
     fun isForbidden(target: String, method: String = "GET"): Boolean {
         val path = normalize(target)
@@ -36,7 +41,10 @@ object DenyPath {
             if (JOBS_NEXT.containsMatchIn(p) || JOBS_NEXT_END.containsMatchIn(p)) return true
             if (HOST.containsMatchIn(p) || BOOTSTRAP.containsMatchIn(p)) return true
             if (JOBS_ANY.containsMatchIn(p) || UI_COMMAND.containsMatchIn(p)) return true
-            if (CONNECT_MGMT.containsMatchIn(p) && !CONNECT_ME.containsMatchIn(p)) return true
+            if (CONNECT_MGMT.containsMatchIn(p) &&
+                !CONNECT_ME.containsMatchIn(p) &&
+                !CONNECT_REVOKE.containsMatchIn(p)
+            ) return true
         }
         if (method.equals("CONNECT", ignoreCase = true) ||
             method.equals("TRACE", ignoreCase = true)

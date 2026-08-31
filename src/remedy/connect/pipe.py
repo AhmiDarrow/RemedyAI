@@ -495,6 +495,30 @@ async def iter_request_http(
         )
         path = req.path
 
+    # A phone may revoke ITSELF (never another device): removes the record,
+    # drops its sockets, and the next reconnect is refused by the allowlist.
+    if (
+        req.method.upper() == "POST"
+        and path.startswith("/api/connect/devices/")
+        and path.endswith("/revoke")
+    ):
+        me_id = str(device.get("id") or "").strip().lower()
+        revoke_id = path.split("/")[4].strip().lower()
+        if not me_id or revoke_id != me_id:
+            yield _json_error(403, "connect:mgmt", "forbidden")
+            return
+        try:
+            from remedy.connect.lifecycle import drop_sessions_for_device
+            from remedy.connect.store import revoke_device
+
+            revoke_device(revoke_id)
+            drop_sessions_for_device(revoke_id)
+        except Exception:
+            yield _json_error(500, "revoke", "revoke failed")
+            return
+        yield _json_ok({"ok": True, "id": revoke_id, "revoked": True})
+        return
+
     reason = connect_forbidden(req.method, path, req.query, panes)
     if reason:
         yield _json_error(403, reason, "forbidden")

@@ -9,12 +9,14 @@ import pytest
 from remedy.connect.bind import (
     WILDCARD,
     assert_chosen_bind,
+    default_route_ipv4,
     is_chosen_ipv4,
     is_loopback_ipv4,
     is_wildcard_bind,
     list_candidate_ipv4,
     pick_default_ipv4,
     prefer_lan_ipv4,
+    reachable_lan_host,
 )
 
 
@@ -118,7 +120,10 @@ def test_list_candidate_ipv4_excludes_wildcard() -> None:
     lan = [ip for ip in addrs if not is_loopback_ipv4(ip)]
     if lan:
         assert not is_loopback_ipv4(addrs[0])
-        assert addrs[0] == pick_default_ipv4(addrs)
+        # Route-first order: the first candidate is the same reachable LAN
+        # host the default picker chooses (no-args uses the same route-first
+        # path, so a phone-visible address — not a WSL/Docker NAT — wins).
+        assert addrs[0] == pick_default_ipv4()
 
 
 def test_list_candidate_ipv4_filters_wildcard_from_os(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -168,3 +173,49 @@ def test_pick_default_ipv4_skips_loopback_when_lan_exists() -> None:
     assert pick_default_ipv4(["127.0.0.1", "10.0.0.5"]) == prefer_lan_ipv4(
         ["127.0.0.1", "10.0.0.5"]
     )[0]
+
+
+def test_prefer_lan_ipv4_preferred_default_route_wins() -> None:
+    """The default-route source beats higher-octet virtual NAT addrs.
+
+    Lexicographic AND numeric sorts would both put 172.x before 192.x;
+    ``preferred`` is what makes the real NIC win for phone pairing.
+    """
+    rows = prefer_lan_ipv4(
+        ["172.16.0.1", "192.168.0.4", "127.0.0.1"],
+        preferred=("192.168.0.4",),
+    )
+    assert rows[0] == "192.168.0.4"
+    assert rows[1] == "172.16.0.1"
+    assert rows[-1] == "127.0.0.1"
+    # Preferred that is not in the candidate set is simply ignored.
+    assert prefer_lan_ipv4(["10.0.0.5"], preferred=("192.168.0.4",)) == ["10.0.0.5"]
+
+
+def test_default_route_ipv4_empty_when_no_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    with patch("socket.socket") as sock_cls:
+        sock_cls.side_effect = OSError("no udp")
+        assert default_route_ipv4() == ""
+
+
+def test_reachable_lan_host_demotes_virtual_nat(monkeypatch: pytest.MonkeyPatch) -> None:
+    """WSL/Docker/Hyper-V NAT and loopback are demoted to the real route."""
+    monkeypatch.setattr(
+        "remedy.connect.bind.default_route_ipv4", lambda: "192.168.0.4"
+    )
+    # WSL vEthernet style address -> real LAN route wins.
+    assert reachable_lan_host("172.16.0.1") == "192.168.0.4"
+    # Loopback -> real LAN route wins.
+    assert reachable_lan_host("127.0.0.1") == "192.168.0.4"
+    # Empty config -> default route.
+    assert reachable_lan_host("") == "192.168.0.4"
+    # Explicit non-virtual LAN picks are kept.
+    assert reachable_lan_host("10.1.2.3") == "10.1.2.3"
+    assert reachable_lan_host("192.168.5.9") == "192.168.5.9"
+
+
+def test_reachable_lan_host_keeps_config_without_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("remedy.connect.bind.default_route_ipv4", lambda: "")
+    assert reachable_lan_host("172.16.0.1") == "172.16.0.1"
+    assert reachable_lan_host("127.0.0.1") == "127.0.0.1"
+    assert reachable_lan_host("10.1.2.3") == "10.1.2.3"

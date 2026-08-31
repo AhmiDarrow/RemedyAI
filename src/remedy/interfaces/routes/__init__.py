@@ -21,6 +21,7 @@ from remedy.interfaces.routes.settings import register_settings_routes
 from remedy.interfaces.routes.skills_library import register_skills_library_routes
 from remedy.interfaces.routes.status import register_status_routes
 from remedy.interfaces.routes.telephony import register_telephony_routes
+from remedy.interfaces.routes.terminal import register_terminal_routes
 from remedy.interfaces.routes.usage import register_usage_routes
 from remedy.interfaces.routes.vision import register_vision_routes
 from remedy.interfaces.routes.voice import register_voice_routes
@@ -61,3 +62,4 @@ def register_all_routes(
     register_hive_routes(app, **kw)
     register_usage_routes(app, **kw)
     register_webhook_routes(app, **kw)
+    register_terminal_routes(app)

@@ -22,6 +22,7 @@ import {
   preferredConnectBindHost,
 } from '../../utils/connectMode'
 import { relativeTime } from '../../utils/relativeTime'
+import QRCode from 'qrcode'
 import { SettingsSection } from '../SettingsSection'
 import {
   FormActionButton,
@@ -101,7 +102,25 @@ function PairModal({
   onClose: () => void
 }): ReactNode {
   const [copied, setCopied] = useState(false)
+  const [qrUrl, setQrUrl] = useState<string | null>(null)
   const image = qr.startsWith('data:image') || /\.(png|svg)(\?|$)/i.test(qr)
+
+  // The backend hands us the pairing text. Turn it into a scannable QR here
+  // (client-side) so the phone can scan instead of copy/paste.
+  useEffect(() => {
+    if (image) return
+    let alive = true
+    QRCode.toDataURL(qr, { width: 480, margin: 1, errorCorrectionLevel: 'M' })
+      .then((url: string) => {
+        if (alive) setQrUrl(url)
+      })
+      .catch(() => {
+        if (alive) setQrUrl(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [qr, image])
 
   return (
     <div
@@ -118,13 +137,15 @@ function PairModal({
           Pair phone
         </div>
         <FormHint>
-          Scan or copy this code on the phone. It is not a password — revoke the
-          phone anytime below.
+          Scan this QR from the RemedyConnect phone app (Tailscale on both
+          devices, signed into the same account — works on Wi-Fi and mobile
+          data), or copy the code and paste it there. It is not a password —
+          revoke the phone anytime below.
         </FormHint>
-        {image ? (
+        {image || qrUrl ? (
           <img
-            src={qr}
-            alt="Pairing code"
+            src={image ? qr : (qrUrl ?? undefined)}
+            alt="Pairing QR code"
             className="mx-auto mb-2 rounded-lg"
             style={{ maxWidth: '12rem', background: '#fff', padding: '0.5rem' }}
           />
@@ -254,8 +275,8 @@ export function ConnectSection({
     >
       <FormHint>
         Let a paired phone drive this PC. Same Wi‑Fi works with no extra setup.
-        For mobile data, run an owner relay (below). Off by default. Approvals
-        stay on. No Tailscale.
+        Mobile data works automatically through a public rendezvous relay — no
+        server to run. Approvals stay on. No Tailscale.
       </FormHint>
       {!available ? (
         <FormNotice tone="muted">
@@ -408,7 +429,7 @@ export function ConnectSection({
             description="Paired phones stay listed but cannot use this PC until you resume."
           />
 
-          <FormLabel htmlFor="connect-relay-url">Owner relay (for mobile data)</FormLabel>
+          <FormLabel htmlFor="connect-relay-url">Owner relay (optional — for lower latency)</FormLabel>
           <FormInput
             id="connect-relay-url"
             value={relayDraft}
@@ -418,11 +439,11 @@ export function ConnectSection({
             spellCheck={false}
           />
           <FormHint>
-            A machine you control that both this PC and the phone can reach.
-            Run <code>remedy connect-relay --host THAT_IPV4 --port 7402</code> on
-            it, then paste host:port here. The relay only forwards encrypted
-            bytes — it cannot read chats. Leave empty for same-Wi‑Fi only.
-            Not HTTP, not Tailscale.
+            Mobile data already works out of the box via the automatic public
+            rendezvous. Only fill this in if you host your own relay for lower
+            latency: run <code>remedy connect-relay --host THAT_IPV4 --port 7402</code>
+            on a machine you control, then paste host:port here. The relay only
+            forwards encrypted bytes — it cannot read chats. Not HTTP, not Tailscale.
           </FormHint>
           {relayDraft !== (st.relay_url || '') ? (
             <FormActionButton

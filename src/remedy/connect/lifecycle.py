@@ -62,13 +62,23 @@ def _enabled_chosen(config: dict[str, Any] | None) -> tuple[bool, str, int]:
     if not host:
         return False, "", port
     try:
-        from remedy.connect.bind import assert_chosen_bind, is_chosen_ipv4, is_wildcard_bind
+        from remedy.connect.bind import (
+            assert_chosen_bind,
+            is_chosen_ipv4,
+            is_wildcard_bind,
+            reachable_lan_host,
+        )
 
         if is_wildcard_bind(host):
             return False, host, port
         if not is_chosen_ipv4(host):
             return False, host, port
         assert_chosen_bind(host)
+        # Heal a stale/loopback/virtual-NAT bind (WSL/Docker/Hyper-V) to the
+        # address a phone on the LAN can reach, so the listener is reachable.
+        healed = reachable_lan_host(host)
+        if healed and healed != host and is_chosen_ipv4(healed):
+            host = healed
     except ImportError:
         # Sibling bind.py not imported yet — refuse rather than bind wildcard.
         if host in ("0.0.0.0", "::", "[::]", "*"):
@@ -97,6 +107,14 @@ def _thread_main(
     _loop = loop
     asyncio.set_event_loop(loop)
 
+    ts_host = ""
+    try:
+        from remedy.connect.bind import tailscale_ipv4
+
+        ts_host = tailscale_ipv4()
+    except Exception:
+        ts_host = ""
+
     async def _boot() -> None:
         await start_connect_server(
             host,
@@ -104,6 +122,7 @@ def _thread_main(
             sidecar_port=sidecar_port,
             api_key=api_key,
             config=config,
+            tailscale_host=ts_host,
         )
 
     try:

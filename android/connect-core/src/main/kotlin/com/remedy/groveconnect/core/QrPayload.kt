@@ -8,8 +8,10 @@ package com.remedy.groveconnect.core
  * hp=<urlsafe b64 of 32-byte host pub>
  * ps=<urlsafe b64 of 32-byte pair secret>
  * lan=<ipv4:port>
+ * ts=<ipv4:port>   (optional; Tailscale tailnet, works on mobile data)
  * v6=<optional>
  * relay=<host:port>   (optional; owner-run splice, no secrets)
+ * rdv=<host:port;host:port>  (optional; public rendezvous brokers)
  * exp=<unix>
  * ```
  */
@@ -21,7 +23,10 @@ data class QrPayload(
     val v6: String?,
     val relayHost: String?,
     val relayPort: Int?,
+    val rdvHosts: List<Pair<String, Int>>,
     val expUnix: Long,
+    val tailscaleHost: String?,
+    val tailscalePort: Int?,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -33,7 +38,10 @@ data class QrPayload(
             v6 == other.v6 &&
             relayHost == other.relayHost &&
             relayPort == other.relayPort &&
-            expUnix == other.expUnix
+            rdvHosts == other.rdvHosts &&
+            expUnix == other.expUnix &&
+            tailscaleHost == other.tailscaleHost &&
+            tailscalePort == other.tailscalePort
     }
 
     override fun hashCode(): Int {
@@ -44,7 +52,10 @@ data class QrPayload(
         r = 31 * r + (v6?.hashCode() ?: 0)
         r = 31 * r + (relayHost?.hashCode() ?: 0)
         r = 31 * r + (relayPort ?: 0)
+        r = 31 * r + rdvHosts.hashCode()
         r = 31 * r + expUnix.hashCode()
+        r = 31 * r + (tailscaleHost?.hashCode() ?: 0)
+        r = 31 * r + (tailscalePort ?: 0)
         return r
     }
 
@@ -55,7 +66,7 @@ data class QrPayload(
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
             if (lines.isEmpty() || lines[0] != Protocol.QR_HEADER) {
-                throw QrException("Not a Grove Connect pairing code.")
+                throw QrException("Not a RemedyConnect pairing code.")
             }
             val fields = linkedMapOf<String, String>()
             for (line in lines.drop(1)) {
@@ -82,9 +93,28 @@ data class QrPayload(
             ) {
                 throw QrException("Relay line must not carry secrets.")
             }
+            val rdvRaw = fields["rdv"]?.takeIf { it.isNotEmpty() }
+            if (rdvRaw != null && (
+                    rdvRaw.contains("bearer", ignoreCase = true) ||
+                        rdvRaw.contains("local_api_token", ignoreCase = true)
+                    )
+            ) {
+                throw QrException("Rendezvous line must not carry secrets.")
+            }
+            val rdvHosts = rdvRaw?.let { parseRdvList(it) } ?: emptyList()
+            val tsRaw = fields["ts"]?.takeIf { it.isNotEmpty() }
+            if (tsRaw != null && (
+                    tsRaw.contains("bearer", ignoreCase = true) ||
+                        tsRaw.contains("local_api_token", ignoreCase = true)
+                    )
+            ) {
+                throw QrException("Tailscale line must not carry secrets.")
+            }
+            val tsEp = tsRaw?.let { parseLan(it) }
             return QrPayload(
                 hostPub, pairSecret, host, port, v6,
-                relay?.first, relay?.second, exp,
+                relay?.first, relay?.second, rdvHosts, exp,
+                tsEp?.first, tsEp?.second,
             )
         }
 
@@ -135,6 +165,18 @@ data class QrPayload(
                 throw QrException("Relay must not be a wildcard.")
             }
             return host to port
+        }
+
+        private fun parseRdvList(raw: String): List<Pair<String, Int>> {
+            val out = ArrayList<Pair<String, Int>>()
+            for (chunk in raw.split(';')) {
+                val c = chunk.trim()
+                if (c.isEmpty()) continue
+                // Same host:port validation as relay (fail closed on tamper).
+                out += parseRelay(c)
+            }
+            if (out.isEmpty()) throw QrException("Rendezvous list is empty.")
+            return out
         }
     }
 }

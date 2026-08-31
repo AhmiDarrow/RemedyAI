@@ -1,4 +1,4 @@
-/** Grove Connect — LAN phone remote. No Tailscale UI. */
+/** RemedyConnect — phone remote (Tailscale + LAN). */
 
 import { apiFetch } from './client'
 

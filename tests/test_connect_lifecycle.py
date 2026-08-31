@@ -62,6 +62,7 @@ def test_wildcard_bind_refused_when_enabling(home):
             "connect_enabled": True,
             "connect_bind_host": "0.0.0.0",
             "connect_bind_port": 7401,
+            "connect_rdv_enabled": False,
         },
         api_key="k",
         sidecar_port=7400,

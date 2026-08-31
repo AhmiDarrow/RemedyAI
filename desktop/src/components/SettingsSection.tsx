@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 interface SettingsSectionProps {
   id: string
@@ -30,13 +30,23 @@ export function SettingsSection({
   children,
 }: SettingsSectionProps) {
   const [open, setOpen] = useState(defaultOpen)
+  // Track the last force directive we actually applied. A persistent
+  // `forceOpen === true` must NOT re-open a section the user just collapsed:
+  // the old effect depended on `onOpenChange` (a fresh function every parent
+  // render), so any re-render force-reopened the section.
+  const lastForce = useRef<boolean | undefined>(undefined)
 
   useEffect(() => {
+    if (forceOpen === lastForce.current) return
+    lastForce.current = forceOpen
     if (forceOpen === true) {
       setOpen(true)
       onOpenChange?.(true)
     }
-  }, [forceOpen, onOpenChange])
+    // Intentionally NOT depending on onOpenChange — its identity changes on
+    // every parent render and would re-run this effect (reopening sections).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forceOpen])
 
   if (hidden) return null
 

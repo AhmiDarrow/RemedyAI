@@ -60,7 +60,9 @@ class ConnectController(private val ctx: Context) {
                 Pin.check(store.pinnedHostPub(), qr.hostPub)
                 store.pinHost(qr.hostPub)
                 store.saveLan(qr.lanHost, qr.lanPort)
+                store.saveTailscale(qr.tailscaleHost, qr.tailscalePort)
                 store.saveRelay(qr.relayHost, qr.relayPort)
+                store.saveRdv(qr.rdvHosts)
                 publish(state.copy(paired = true, error = null, lanLabel = "${qr.lanHost}:${qr.lanPort}"))
                 open(qr)
             } catch (e: Exception) {
@@ -92,20 +94,30 @@ class ConnectController(private val ctx: Context) {
                 val lanHost = if (idx > 0) lan.substring(0, idx) else lan
                 val lanPort = if (idx > 0) lan.substring(idx + 1).toIntOrNull() ?: 7401 else 7401
                 val relay = store.lastRelay()
+                val rdv = store.lastRdv()
+                val ts = store.lastTailscale()
                 val (priv, pub) = keys.staticPair()
                 val c = ConnectClient(priv, pub)
-                c.reconnect(hp, lanHost, lanPort, relay?.first, relay?.second, pub)
+                c.reconnect(
+                    hp, lanHost, lanPort, ts?.first, ts?.second, relay?.first, relay?.second, rdv, pub,
+                    preferRelay = !NetProbe.isWifi(ctx),
+                )
                 client = c
                 val sh = LoopbackShim(c)
                 sh.start()
                 shim = sh
                 ConnectForegroundService.start(ctx)
-                val reachable = if (c.via == "relay") Reachable.OnRelay else Reachable.OnLan
+                val remote = c.via == "relay" || c.via == "rdv" || c.via == "tailscale"
+                val reachable = if (remote) Reachable.OnRelay else Reachable.OnLan
                 publish(
                     state.copy(
                         reachable = reachable,
                         shimUrl = sh.webViewUrl(),
-                        lanLabel = if (c.via == "relay") "via relay" else lan,
+                        lanLabel = when (c.via) {
+                            "tailscale" -> "via Tailscale"
+                            "relay", "rdv" -> "via relay"
+                            else -> lan
+                        },
                         paired = true,
                     ),
                 )
@@ -115,7 +127,7 @@ class ConnectController(private val ctx: Context) {
                 publish(
                     state.copy(
                         reachable = Reachable.Paused,
-                        error = e.message ?: "Could not reach the PC. Set a relay for mobile data.",
+                        error = e.message ?: "Could not reach the PC. Check that Remedy is running with Connect enabled, and that you have internet or Wi-Fi.",
                     ),
                 )
             }
@@ -129,18 +141,23 @@ class ConnectController(private val ctx: Context) {
             try {
                 val (priv, pub) = keys.staticPair()
                 val c = ConnectClient(priv, pub)
-                c.connect(qr)
+                c.connect(qr, preferRelay = !NetProbe.isWifi(ctx))
                 client = c
                 val sh = LoopbackShim(c)
                 sh.start()
                 shim = sh
                 ConnectForegroundService.start(ctx)
-                val reachable = if (c.via == "relay") Reachable.OnRelay else Reachable.OnLan
+                val remote = c.via == "relay" || c.via == "rdv" || c.via == "tailscale"
+                val reachable = if (remote) Reachable.OnRelay else Reachable.OnLan
                 publish(
                     state.copy(
                         reachable = reachable,
                         shimUrl = sh.webViewUrl(),
-                        lanLabel = if (c.via == "relay") "via relay" else "${qr.lanHost}:${qr.lanPort}",
+                        lanLabel = when (c.via) {
+                            "tailscale" -> "via Tailscale"
+                            "relay", "rdv" -> "via relay"
+                            else -> "${qr.lanHost}:${qr.lanPort}"
+                        },
                         paired = true,
                     ),
                 )
@@ -150,7 +167,7 @@ class ConnectController(private val ctx: Context) {
                 publish(
                     state.copy(
                         reachable = Reachable.Paused,
-                        error = e.message ?: "Could not reach the PC. Same Wi-Fi, or set a relay for mobile data.",
+                        error = e.message ?: "Could not reach the PC. Check that Remedy is running with Connect enabled, and that you have internet or Wi-Fi.",
                     ),
                 )
             }
@@ -168,6 +185,17 @@ class ConnectController(private val ctx: Context) {
                 c.http("POST", ConnectMe.abortPath(sid), "Content-Type: application/json\r\n")
             } catch (e: Exception) {
                 publish(state.copy(error = e.message ?: "Stop failed"))
+            }
+        }
+    }
+
+    /** One-shot refresh of connection + approvals (used by the native Home). */
+    fun refreshNow() {
+        io.execute {
+            try {
+                refreshMe()
+                refreshApprovals()
+            } catch (_: Exception) {
             }
         }
     }

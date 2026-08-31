@@ -683,11 +683,22 @@ async def _apply_settings_update_inner(
         if not bind_host or bind_host in ("0.0.0.0", "::", "[::]", "*"):
             raise ValueError("connect bind must be a chosen IPv4, not wildcard")
         try:
-            from remedy.connect.bind import assert_chosen_bind, is_chosen_ipv4, is_wildcard_bind
+            from remedy.connect.bind import (
+                assert_chosen_bind,
+                is_chosen_ipv4,
+                is_wildcard_bind,
+                reachable_lan_host,
+            )
 
             if is_wildcard_bind(bind_host) or not is_chosen_ipv4(bind_host):
                 raise ValueError("connect bind must be a chosen IPv4, not wildcard")
             assert_chosen_bind(bind_host)
+            # Heal a stale/loopback/virtual-NAT bind (WSL/Docker/Hyper-V) to the
+            # address a phone on the LAN can actually reach. An explicit
+            # non-virtual pick is kept as-is.
+            healed = reachable_lan_host(bind_host)
+            if healed and healed != bind_host:
+                patch["connect_bind_host"] = healed
         except ImportError:
             pass
         except ValueError:

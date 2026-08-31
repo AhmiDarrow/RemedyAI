@@ -1,4 +1,5 @@
 import { getServerUrl } from '../api/client'
+import { isConnectCompact } from '../utils/connectMode'
 import { useState, useEffect, useMemo } from 'react'
 import { getLatestCheckpoint, getPartnerStatus } from '../api/partner'
 import { getVisionStatus, type VisionStatus } from '../api/vision'
@@ -525,6 +526,63 @@ export function StatusBar({
       }
       window.open(getServerUrl() + '/', '_blank', 'noopener,noreferrer')
     })()
+  }
+
+  const compact = isConnectCompact()
+  if (compact) {
+    // Phone portal: one-line strip — status dot, streaming, reconnect.
+    // Every power control (model/provider/thinking/approval/theme/usage) stays
+    // on the desktop; the phone is a live portal, not a second control room.
+    return (
+      <div
+        data-remedy-status-bar
+        className="status-ctrl-row flex items-center px-2 gap-1.5 text-xs"
+        style={{ color: 'var(--text-muted)' }}
+      >
+        <div
+          className="flex items-center gap-1.5 flex-shrink-0 min-w-0"
+          title={status === 'connected' ? `Remedy ${version || ''}`.trim() : 'Server offline'}
+        >
+          <span
+            className={`inline-block w-2 h-2 rounded-full${
+              status === 'disconnected' ? ' status-offline-dot' : ''
+            }`}
+            style={{ background: dotColor }}
+            aria-hidden
+          />
+          <span className="font-medium truncate" style={{ color: 'var(--text-secondary)' }}>
+            {status === 'connected'
+              ? alerts ? `Connected · ${alerts}` : 'Connected'
+              : status === 'checking'
+                ? 'Connecting…'
+                : 'Offline'}
+          </span>
+        </div>
+        {streaming && (
+          <span
+            className="status-streaming-pill px-1.5 py-0.5 rounded font-medium flex-shrink-0 inline-flex items-center gap-1.5"
+            style={{
+              color: 'var(--accent)',
+              background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+            }}
+            title="Agent is generating a reply"
+          >
+            <span className="live-stream-dot" aria-hidden />
+            Streaming
+          </span>
+        )}
+        <span className="flex-1" />
+        {status === 'disconnected' && (
+          <button
+            onClick={() => window.location.reload()}
+            className="px-2 py-0.5 rounded text-xs flex-shrink-0"
+            style={{ background: 'var(--error)', color: '#fff' }}
+          >
+            Reconnect
+          </button>
+        )}
+      </div>
+    )
   }
 
   return (

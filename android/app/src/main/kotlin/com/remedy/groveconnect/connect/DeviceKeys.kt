@@ -84,6 +84,40 @@ class PairStore(ctx: Context) {
         return raw.substring(0, idx) to port
     }
 
+    fun saveTailscale(host: String?, port: Int?) {
+        if (host.isNullOrBlank() || port == null) {
+            prefs.edit().remove(TS).apply()
+        } else {
+            prefs.edit().putString(TS, "$host:$port").apply()
+        }
+    }
+
+    fun lastTailscale(): Pair<String, Int>? {
+        val raw = prefs.getString(TS, null) ?: return null
+        val idx = raw.lastIndexOf(':')
+        if (idx <= 0) return null
+        val port = raw.substring(idx + 1).toIntOrNull() ?: return null
+        return raw.substring(0, idx) to port
+    }
+
+    fun saveRdv(hosts: List<Pair<String, Int>>) {
+        if (hosts.isEmpty()) {
+            prefs.edit().remove(RDV).apply()
+        } else {
+            prefs.edit().putString(RDV, hosts.joinToString(";") { "${it.first}:${it.second}" }).apply()
+        }
+    }
+
+    fun lastRdv(): List<Pair<String, Int>> {
+        val raw = prefs.getString(RDV, null) ?: return emptyList()
+        return raw.split(';').mapNotNull { chunk ->
+            val idx = chunk.lastIndexOf(':')
+            if (idx <= 0) return@mapNotNull null
+            val port = chunk.substring(idx + 1).toIntOrNull() ?: return@mapNotNull null
+            chunk.substring(0, idx) to port
+        }
+    }
+
     fun saveDeviceId(id: String) {
         prefs.edit().putString(DEVICE, id).apply()
     }
@@ -93,13 +127,15 @@ class PairStore(ctx: Context) {
     fun isPaired(): Boolean = pinnedHostPub() != null
 
     fun clearPair() {
-        prefs.edit().remove(PIN).remove(LAN).remove(RELAY).remove(DEVICE).apply()
+        prefs.edit().remove(PIN).remove(LAN).remove(RELAY).remove(RDV).remove(DEVICE).remove(TS).apply()
     }
 
     companion object {
         private const val PIN = "pinned_host_pub"
         private const val LAN = "last_lan"
+        private const val TS = "last_tailscale"
         private const val RELAY = "last_relay"
+        private const val RDV = "rdv_hosts"
         private const val DEVICE = "device_id"
     }
 }
