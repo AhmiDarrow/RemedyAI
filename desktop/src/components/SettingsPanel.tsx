@@ -194,6 +194,7 @@ export function SettingsPanel({
   const [autoApproveThreshold, setAutoApproveThreshold] = useState(0.8)
   const [logLevel, setLogLevel] = useState('INFO')
   const [sarcasmMode, setSarcasmMode] = useState(false)
+  const [claimidxPublicLedger, setClaimidxPublicLedger] = useState(false)
   const [toolProcess, setToolProcess] = useState<ToolProcessMode>(
     () => toolProcessMode || 'off',
   )
@@ -463,6 +464,7 @@ export function SettingsPanel({
       }
       setLogLevel(String(s.log_level || 'INFO').toUpperCase())
       setSarcasmMode(Boolean(s.sarcasm_mode))
+      setClaimidxPublicLedger(Boolean(s.claimidx_public_ledger))
       setWebToolsEnabled(Boolean(s.web_tools_enabled))
       setHttpBootstrap(s.http_bootstrap === true)
       setPrivacyMode(Boolean(s.privacy_mode))
@@ -734,6 +736,7 @@ export function SettingsPanel({
       auto_approve_threshold: autoApproveThreshold,
       log_level: logLevel,
       sarcasm_mode: sarcasmMode,
+      claimidx_public_ledger: claimidxPublicLedger,
     }
     if (enabledProviders !== null) {
       const allIds = catalog.map((p) => p.id)
@@ -1304,6 +1307,8 @@ export function SettingsPanel({
               setLogLevel={setLogLevel}
               sarcasmMode={sarcasmMode}
               setSarcasmMode={setSarcasmMode}
+              claimidxPublicLedger={claimidxPublicLedger}
+              setClaimidxPublicLedger={setClaimidxPublicLedger}
               toolProcess={toolProcess}
               setToolProcess={setToolProcess}
               onToolProcessChange={onToolProcessChange}

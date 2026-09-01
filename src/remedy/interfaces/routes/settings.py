@@ -246,6 +246,7 @@ def register_settings_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             "auto_approve_threshold": float(cfg.get("auto_approve_threshold", 0.8)),
             "log_level": str(cfg.get("log_level") or "INFO").upper(),
             "sarcasm_mode": bool(cfg.get("sarcasm_mode", False)),
+            "claimidx_public_ledger": bool(cfg.get("claimidx_public_ledger", False)),
             "enabled_providers": cfg.get("enabled_providers"),
             "enabled_models": cfg.get("enabled_models") or {},
             "last_model_by_provider": cfg.get("last_model_by_provider") or {},

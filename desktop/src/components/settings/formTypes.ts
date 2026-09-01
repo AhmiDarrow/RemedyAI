@@ -124,6 +124,8 @@ export interface SettingsFormProps {
   setLogLevel: Dispatch<SetStateAction<string>>
   sarcasmMode: boolean
   setSarcasmMode: Dispatch<SetStateAction<boolean>>
+  claimidxPublicLedger: boolean
+  setClaimidxPublicLedger: Dispatch<SetStateAction<boolean>>
   toolProcess: ToolProcessMode
   setToolProcess: Dispatch<SetStateAction<ToolProcessMode>>
   onToolProcessChange?: (mode: ToolProcessMode) => void

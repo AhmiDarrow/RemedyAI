@@ -238,6 +238,8 @@ class SettingsUpdateRequest(BaseModel):
     auto_approve_threshold: float | None = None
     log_level: str | None = None  # DEBUG | INFO | WARNING | ERROR
     sarcasm_mode: bool | None = None
+    # Opt-in: submit claims to public GitHub ledger (github.com/claimidx/claimidx)
+    claimidx_public_ledger: bool | None = None
     # Provider picker catalog
     enabled_providers: list[str] | None = None
     enabled_models: dict[str, list[str]] | None = None

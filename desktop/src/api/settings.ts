@@ -94,6 +94,7 @@ export interface Settings {
   auto_approve_threshold?: number
   log_level?: string
   sarcasm_mode?: boolean
+  claimidx_public_ledger?: boolean
   /** Local visual decoder enabled in config */
   vision_enabled?: boolean
   vision_model_id?: string
@@ -254,6 +255,7 @@ export interface SettingsUpdate {
   auto_approve_threshold?: number
   log_level?: string
   sarcasm_mode?: boolean
+  claimidx_public_ledger?: boolean
   vision_enabled?: boolean
   vision_model_id?: string
   vision_force_decode?: boolean
