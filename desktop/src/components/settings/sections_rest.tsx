@@ -38,6 +38,8 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
     setLogLevel,
     sarcasmMode,
     setSarcasmMode,
+    claimidxPublicLedger,
+    setClaimidxPublicLedger,
     themeId,
     onThemeChange,
     density,
@@ -150,6 +152,15 @@ export function SettingsSections_rest(p: SettingsFormProps): ReactNode {
           onChange={setSarcasmMode}
           label="Sarcasm mode (tone flag)"
         />
+        <FormToggle
+          checked={claimidxPublicLedger}
+          onChange={setClaimidxPublicLedger}
+          label="Claimidx public ledger (opt-in claim submission)"
+        />
+        <FormHint>
+          When enabled, Remedy can submit sanitized claims to the public GitHub ledger at
+          github.com/claimidx/claimidx. Disabled by default — no data leaves your machine without this on.
+        </FormHint>
         <FormHint>
           Advanced knobs only — defaults keep full owner power. Skill creation stays on so Remedy can improve.
         </FormHint>

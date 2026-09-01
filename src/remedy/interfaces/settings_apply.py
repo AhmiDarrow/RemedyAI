@@ -134,6 +134,7 @@ SETTABLE_KEYS = frozenset(
         "auto_approve_threshold",
         "log_level",
         "sarcasm_mode",
+        "claimidx_public_ledger",
         "enabled_providers",
         "enabled_models",
         "last_model_by_provider",
@@ -399,19 +400,42 @@ async def _apply_settings_update_inner(
     )
     if llm_touched:
         merged = {**cfg, **patch}
-        provider, model, base_url = normalize_llm_settings(
-            merged.get("llm_provider"),
-            merged.get("llm_model"),
-            merged.get("llm_base_url"),
-        )
-        # Closed catalogs: if client sent an explicit invalid model, still snap.
-        if "llm_model" in clean_in or "llm_provider" in clean_in:
-            try:
-                from remedy.interfaces.config import validate_provider_model
+        try:
+            # Model discovery hits the provider's API (network). Guard it so a
+            # slow/flaky link can never stall a phone model switch past the
+            # client read timeout — that was the "HTTP errors on mobile" cause.
+            async def _norm() -> tuple[str, str, str]:
+                return await asyncio.to_thread(
+                    normalize_llm_settings,
+                    merged.get("llm_provider"),
+                    merged.get("llm_model"),
+                    merged.get("llm_base_url"),
+                )
 
-                model = validate_provider_model(provider, model)
-            except ValueError:
-                provider, model, base_url = normalize_llm_settings(provider, None, base_url)
+            provider, model, base_url = await asyncio.wait_for(_norm(), timeout=8.0)
+            # Closed catalogs: if client sent an explicit invalid model, still snap.
+            if "llm_model" in clean_in or "llm_provider" in clean_in:
+                try:
+                    from remedy.interfaces.config import validate_provider_model
+
+                    model = await asyncio.wait_for(
+                        asyncio.to_thread(validate_provider_model, provider, model),
+                        timeout=8.0,
+                    )
+                except (ValueError, asyncio.TimeoutError):
+                    provider, model, base_url = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            normalize_llm_settings, provider, None, base_url
+                        ),
+                        timeout=8.0,
+                    )
+        except Exception:
+            # Model discovery can hit the network; a flake must never 500 a
+            # provider/model switch from the phone. Keep prior values.
+            logger.warning("llm settings normalize failed; keeping prior", exc_info=True)
+            provider = str(cfg.get("llm_provider") or prev_provider or "openai")
+            model = str(cfg.get("llm_model") or "")
+            base_url = str(cfg.get("llm_base_url") or "")
         patch["llm_provider"] = provider
         patch["llm_model"] = model
         patch["llm_base_url"] = base_url
@@ -598,6 +622,9 @@ async def _apply_settings_update_inner(
 
     if "sarcasm_mode" in patch and patch["sarcasm_mode"] is not None:
         patch["sarcasm_mode"] = _as_bool(patch["sarcasm_mode"])
+
+    if "claimidx_public_ledger" in patch and patch["claimidx_public_ledger"] is not None:
+        patch["claimidx_public_ledger"] = _as_bool(patch["claimidx_public_ledger"])
 
     if "auto_approve_threshold" in patch and patch["auto_approve_threshold"] is not None:
         try:
