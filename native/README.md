@@ -43,6 +43,12 @@ capability, permission, and Draft 2020-12 input/output schemas. Every request an
 is validated, external schema loading is disabled, and Go, Zig, Python, and WASM
 executors share the same registry contract.
 
+Native memory uses a language-neutral append log with length and CRC32 framing, file-sync
+durability, recoverable partial tails, hard failure on checksum corruption, typed memory
+namespaces, latest-key indexing, and bounded lexical retrieval. Zig validates the same
+record framing while Go decides which episodic, semantic, procedural, working, or
+relational memories to retrieve.
+
 Local verification:
 
 ```text
