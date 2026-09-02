@@ -38,6 +38,11 @@ update, pause, completion, and failure as traceable transitions. It supports bou
 retries, deterministic tool batching with a concurrency ceiling, owner checkpoints,
 tool/iteration ceilings, and repeated-batch no-progress detection.
 
+The Tool ABI registers immutable, versioned descriptors carrying runtime, risk,
+capability, permission, and Draft 2020-12 input/output schemas. Every request and result
+is validated, external schema loading is disabled, and Go, Zig, Python, and WASM
+executors share the same registry contract.
+
 Local verification:
 
 ```text
