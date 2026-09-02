@@ -193,6 +193,7 @@ def _local_host_listening_sync(
         if leader:
             waiter = threading.Event()
             _listen_inflight[key] = waiter
+    assert waiter is not None
     if not leader:
         waiter.wait(timeout_s + 0.05)
         with _listen_lock:

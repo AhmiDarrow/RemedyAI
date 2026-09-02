@@ -27,10 +27,7 @@ def register_mission_tools(runtime: Any) -> None:
             from remedy.core.project_fingerprint import fingerprint_path
 
             path_s = coerce_verify_command(path)
-            if path_s:
-                root = runtime.resolve_tool_path(path_s)
-            else:
-                root = runtime.effective_project_path()
+            root = runtime.resolve_tool_path(path_s) if path_s else runtime.effective_project_path()
             if root.is_file():
                 root = root.parent
             return fingerprint_path(root).suggest_verify

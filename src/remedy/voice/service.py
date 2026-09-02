@@ -7,6 +7,7 @@ voices, /voice/transcribe returns 503 and the mic button explains itself.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib
 import io
@@ -598,10 +599,8 @@ def _find_uv(python: str | None = None) -> str | None:
     if local:
         progs = Path(local) / "Programs" / "Python"
         if progs.is_dir():
-            try:
+            with contextlib.suppress(OSError):
                 roots.extend(d / "Scripts" for d in progs.iterdir() if d.is_dir())
-            except OSError:
-                pass
     seen: set[str] = set()
     for root in roots:
         for name in names:

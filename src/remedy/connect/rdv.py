@@ -450,12 +450,10 @@ class RendezvousSession:
         sock = self._sock_b
         if sock is None or len(payload) > MAX_RECORD:
             return
-        try:
+        with contextlib.suppress(OSError):
             await asyncio.get_running_loop().sock_sendall(
                 sock, struct.pack("!I", len(payload)) + payload
             )
-        except OSError:
-            pass
 
     async def _pump_out(self) -> None:
         """Read u32be-framed records from the peer end and publish them."""

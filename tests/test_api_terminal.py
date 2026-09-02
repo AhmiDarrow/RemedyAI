@@ -14,7 +14,7 @@ import socket
 import threading
 import time
 import urllib.request
-from contextlib import closing
+from contextlib import closing, suppress
 
 import pytest
 from fastapi import FastAPI
@@ -108,10 +108,8 @@ def _clean_terminals(monkeypatch):
     monkeypatch.setattr(terminal_mod, "_SPAWN_OVERRIDE", fake_spawn)
     yield
     for sess in list(_TERMINALS.values()):
-        try:
+        with suppress(Exception):
             sess.proc.kill()
-        except Exception:
-            pass
     _TERMINALS.clear()
 
 
@@ -235,10 +233,8 @@ def test_stream_strips_ansi_end_to_end(uvicorn_server) -> None:
         text = ""
         for line in data.decode("utf-8", errors="replace").splitlines():
             if line.startswith("data: "):
-                try:
+                with suppress(Exception):
                     text += _json.loads(line[6:]).get("text", "")
-                except Exception:
-                    pass
         assert "\x1b" not in text, text
         assert "READY" in text
         assert "PWD" in text

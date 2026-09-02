@@ -547,7 +547,8 @@ class ComputerExecutor:
 
         hint = str(kwargs.get("hint") or kwargs.get("goal") or "")
         path = str(result.get("path") or "")
-        origin = result.get("origin") if isinstance(result.get("origin"), dict) else {}
+        raw_origin = result.get("origin")
+        origin: dict[str, Any] = raw_origin if isinstance(raw_origin, dict) else {}
         width = result.get("width")
         height = result.get("height")
 
@@ -1972,19 +1973,19 @@ class ComputerExecutor:
                     ),
                     extra={"length": None, "needs": "ref"},
                 )
-            typed_box: list[int] = [0]
+            typed_key_box: list[int] = [0]
             type_method = "keystrokes"
             try:
                 tf = win.type_text_fast(
                     text,
                     abort_check=self._abort_check,
-                    chars_typed=typed_box,
+                    chars_typed=typed_key_box,
                 )
                 type_method = str(tf.get("method") or "keystrokes")
             except RuntimeError as e:
                 if "abort" in str(e).lower():
                     self._cancel_open_jobs(reason="aborted")
-                    n = int(typed_box[0] if typed_box else 0)
+                    n = int(typed_key_box[0] if typed_key_box else 0)
                     return public_result(
                         ok=False,
                         target="desktop",
@@ -2003,7 +2004,7 @@ class ComputerExecutor:
                 raise
             if self._abort_check():
                 self._cancel_open_jobs(reason="aborted")
-                n = int(typed_box[0] if typed_box else 0)
+                n = int(typed_key_box[0] if typed_key_box else 0)
                 return public_result(
                     ok=False,
                     target="desktop",

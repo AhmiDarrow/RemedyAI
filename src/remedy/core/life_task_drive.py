@@ -228,7 +228,8 @@ def _parse_run_blob(raw: str) -> dict[str, Any]:
 
 
 def _step_blob_ok(blob: dict[str, Any]) -> bool:
-    extra = blob.get("extra") if isinstance(blob.get("extra"), dict) else {}
+    raw_extra = blob.get("extra")
+    extra: dict[str, Any] = raw_extra if isinstance(raw_extra, dict) else {}
     if not blob.get("ok") or blob.get("unverified") or extra.get("unverified"):
         return False
     if blob.get("pending_load") or extra.get("pending_load"):

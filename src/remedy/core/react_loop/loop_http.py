@@ -936,7 +936,7 @@ async def run_react_http(
                     yield _tok
             except asyncio.CancelledError:
                 from remedy.core.react_loop.stream_consume import (
-                    PROVIDER_DROP_ERROR as _drop_msg,
+                    PROVIDER_DROP_ERROR,
                 )
                 from remedy.core.react_loop.stream_consume import (
                     is_owner_stop as _owner_stop,
@@ -954,7 +954,7 @@ async def run_react_http(
                     s.turn_complete = True
                     return
                 _uncancel()
-                raise ConnectionError(_drop_msg) from None
+                raise ConnectionError(PROVIDER_DROP_ERROR) from None
             from remedy.core.turn_context import is_turn_aborted as _ab_mid
 
             if _ab_mid():
@@ -992,7 +992,7 @@ async def run_react_http(
          except BaseException as _stream_exc:
           if isinstance(_stream_exc, asyncio.CancelledError):
             from remedy.core.react_loop.stream_consume import (
-                PROVIDER_DROP_ERROR as _drop_msg,
+                PROVIDER_DROP_ERROR,
             )
             from remedy.core.react_loop.stream_consume import (
                 is_owner_stop as _owner_stop,
@@ -1014,7 +1014,7 @@ async def run_react_http(
             # Provider/socket drop arrived as CancelledError (WinError 64 /
             # mid-JSON RST). Keep the turn — same path as ClientPayloadError.
             _uncancel()
-            _stream_exc = ConnectionError(_drop_msg)
+            _stream_exc = ConnectionError(PROVIDER_DROP_ERROR)
           elif not isinstance(_stream_exc, Exception):
             raise
           _log_llm(

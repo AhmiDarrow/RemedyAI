@@ -364,9 +364,9 @@ def _ocr_winrt(path: Path) -> list[dict[str, Any]] | None:
     if sys.platform != "win32":
         return None
     try:
-        from winrt.windows.graphics.imaging import BitmapDecoder  # type: ignore
-        from winrt.windows.media.ocr import OcrEngine  # type: ignore
-        from winrt.windows.storage import FileAccessMode, StorageFile  # type: ignore
+        from winrt.windows.graphics.imaging import BitmapDecoder
+        from winrt.windows.media.ocr import OcrEngine
+        from winrt.windows.storage import FileAccessMode, StorageFile
     except Exception:
         return None
     import asyncio
