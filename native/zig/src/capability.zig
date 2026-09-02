@@ -6,6 +6,7 @@ pub const Right = enum(u6) {
     process_spawn = 2,
     system_read = 3,
     filesystem_delete = 4,
+    owner_checkpoint = 5,
 };
 
 pub const Set = struct {
@@ -21,6 +22,19 @@ pub const Set = struct {
 
     pub fn contains(self: Set, right: Right) bool {
         return self.bits & mask(right) != 0;
+    }
+
+    pub fn merged(self: Set, other: Set) Set {
+        return .{ .bits = self.bits | other.bits };
+    }
+
+    pub fn containsAll(self: Set, required: Set) bool {
+        return self.bits & required.bits == required.bits;
+    }
+
+    pub fn isValid(self: Set) bool {
+        const known_mask = (@as(u64, 1) << 6) - 1;
+        return self.bits != 0 and self.bits & ~known_mask == 0;
     }
 
     pub fn require(self: Set, right: Right) error{AccessDenied}!void {

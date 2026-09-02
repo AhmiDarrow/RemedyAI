@@ -2,7 +2,10 @@ const std = @import("std");
 
 pub const capability = @import("capability.zig");
 pub const filesystem = @import("filesystem.zig");
+pub const executor = @import("executor.zig");
 pub const process = @import("process.zig");
+pub const policy = @import("policy.zig");
+pub const security = @import("security.zig");
 pub const serialization = @import("serialization.zig");
 pub const system = @import("system.zig");
 
@@ -109,7 +112,10 @@ test "rejects malformed frame families" {
 test {
     _ = capability;
     _ = filesystem;
+    _ = executor;
     _ = process;
+    _ = policy;
+    _ = security;
     _ = serialization;
     _ = system;
 }
