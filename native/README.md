@@ -16,6 +16,12 @@ Capability bits are deny-by-default. Path validation is paired with the operatin
 resolve-beneath file-open option; process policy and signed capability tokens are added by
 the Phase 3 security boundary before the substrate is connected to production.
 
+The security boundary now authenticates short-lived grants with HMAC-SHA-256, binds them
+to an agent and workspace scope, consumes each nonce once, and requires a separate signed
+owner-checkpoint right for checkpointed operations. Process execution is default-deny and
+uses exact executable rules plus per-argument prefix constraints. Keys are supplied by the
+host secret store; no signing key is compiled into the library or repository.
+
 Local verification:
 
 ```text
