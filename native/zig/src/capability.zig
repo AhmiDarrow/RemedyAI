@@ -5,6 +5,7 @@ pub const Right = enum(u6) {
     filesystem_write = 1,
     process_spawn = 2,
     system_read = 3,
+    filesystem_delete = 4,
 };
 
 pub const Set = struct {

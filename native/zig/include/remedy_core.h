@@ -22,6 +22,7 @@ enum remedy_core_capability {
     REMEDY_CORE_FILESYSTEM_WRITE = UINT64_C(1) << 1,
     REMEDY_CORE_PROCESS_SPAWN = UINT64_C(1) << 2,
     REMEDY_CORE_SYSTEM_READ = UINT64_C(1) << 3,
+    REMEDY_CORE_FILESYSTEM_DELETE = UINT64_C(1) << 4,
 };
 
 uint32_t remedy_core_abi_version(void);
