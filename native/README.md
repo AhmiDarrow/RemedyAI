@@ -22,6 +22,11 @@ owner-checkpoint right for checkpointed operations. Process execution is default
 uses exact executable rules plus per-argument prefix constraints. Keys are supplied by the
 host secret store; no signing key is compiled into the library or repository.
 
+The Go runtime owns explicit new/running/stopping/stopped transitions, named worker
+supervision, bounded restarts, panic recovery, cancellation causes, and deadline-aware
+shutdown. Provider selection is bound per session so desktop, messenger, and background
+work cannot overwrite one another through process-global model state.
+
 Local verification:
 
 ```text
