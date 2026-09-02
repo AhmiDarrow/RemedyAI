@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -168,6 +169,7 @@ private fun SegmentTab(label: String, selected: Boolean, modifier: Modifier = Mo
 fun PairScreen(
     state: RemoteState,
     onPair: (String) -> Unit,
+    onReconnect: () -> Unit,
     onUnpair: () -> Unit,
 ) {
     var text by remember { mutableStateOf("") }
@@ -244,6 +246,7 @@ fun PairScreen(
                     fontSize = 13.sp,
                     modifier = Modifier.weight(1f),
                 )
+                TextButton(onClick = onReconnect) { Text("Reconnect", color = Accent) }
                 TextButton(onClick = onUnpair) { Text("Unpair", color = TextSecondary) }
             }
         }
@@ -262,6 +265,7 @@ fun HubScreen(
     onResolve: (String, Boolean) -> Unit,
     onPairAnother: () -> Unit,
     onOpenFullRemote: () -> Unit,
+    onReconnect: () -> Unit,
 ) {
     Column(
         Modifier.fillMaxSize().background(BgPrimary).padding(horizontal = 20.dp, vertical = 16.dp),
@@ -276,7 +280,7 @@ fun HubScreen(
         Spacer(Modifier.height(20.dp))
 
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            HeroCard(state, onOpenFullRemote, onStop)
+            HeroCard(state, onOpenFullRemote, onReconnect, onStop)
             Spacer(Modifier.height(18.dp))
             PaneRow(state.panes)
             Spacer(Modifier.height(18.dp))
@@ -305,6 +309,7 @@ fun HubScreen(
 private fun HeroCard(
     state: RemoteState,
     onOpenFullRemote: () -> Unit,
+    onReconnect: () -> Unit,
     onStop: () -> Unit,
 ) {
     val (statusLabel, statusColor) = when (state.reachable) {
@@ -337,14 +342,21 @@ private fun HeroCard(
             Spacer(Modifier.height(18.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
-                    onClick = onOpenFullRemote,
+                    onClick = if (state.shimUrl != null) onOpenFullRemote else onReconnect,
                     colors = ButtonDefaults.buttonColors(containerColor = Accent),
                     modifier = Modifier.weight(1f).height(52.dp),
                     shape = RoundedCornerShape(16.dp),
                 ) {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                    Icon(
+                        if (state.shimUrl != null) Icons.Filled.PlayArrow else Icons.Filled.Refresh,
+                        contentDescription = null,
+                    )
                     Spacer(Modifier.width(6.dp))
-                    Text("Full remote", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (state.shimUrl != null) "Full remote" else "Reconnect",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
                 OutlinedButton(
                     onClick = onStop,

@@ -58,6 +58,7 @@ pub fn issue(
 pub const Verifier = struct {
     key: []const u8,
     seen: std.AutoHashMap([16]u8, u64),
+    mutex: std.atomic.Mutex = .unlocked,
 
     pub fn init(allocator: std.mem.Allocator, key: []const u8) Verifier {
         return .{ .key = key, .seen = std.AutoHashMap([16]u8, u64).init(allocator) };
@@ -92,6 +93,12 @@ pub const Verifier = struct {
         }
         const rights = capability.Set.fromBits(token.rights);
         if (!rights.isValid() or !rights.containsAll(required)) return error.AccessDenied;
+        while (!self.mutex.tryLock()) std.atomic.spinLoopHint();
+        defer self.mutex.unlock();
+        var entries = self.seen.iterator();
+        while (entries.next()) |entry| {
+            if (entry.value_ptr.* <= now_ms) _ = self.seen.remove(entry.key_ptr.*);
+        }
         if (self.seen.contains(token.nonce)) return error.Replayed;
         try self.seen.put(token.nonce, token.expires_at_ms);
         return .{ .capabilities = rights, .expires_at_ms = token.expires_at_ms, .nonce = token.nonce };
@@ -177,4 +184,15 @@ test "issuer rejects invalid lifetime, unknown rights, and short keys" {
         error.InvalidGrant,
         issue(&key, "agent", "scope", capability.Set.one(.filesystem_read), 1, max_lifetime_ms + 2, nonce),
     );
+}
+
+test "verifier prunes expired consumed nonces" {
+    const key = [_]u8{0x3c} ** Hmac.key_length;
+    var verifier = Verifier.init(std.testing.allocator, &key);
+    defer verifier.deinit();
+    const first = try issue(&key, "agent", "scope", capability.Set.one(.filesystem_read), 1000, 2000, [_]u8{0x01} ** 16);
+    _ = try verifier.verifyAndConsume(&first, "agent", "scope", capability.Set.one(.filesystem_read), 1500);
+    const second = try issue(&key, "agent", "scope", capability.Set.one(.filesystem_read), 2000, 3000, [_]u8{0x02} ** 16);
+    _ = try verifier.verifyAndConsume(&second, "agent", "scope", capability.Set.one(.filesystem_read), 2500);
+    try std.testing.expectEqual(@as(usize, 1), verifier.seen.count());
 }

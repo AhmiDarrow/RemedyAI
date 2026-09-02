@@ -1,6 +1,7 @@
 package com.remedy.groveconnect.api
 
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Sessions + approvals API over the tunnel. All calls go through [RemedyApi]
@@ -43,6 +44,8 @@ class SessionsApi(private val api: RemedyApi) {
         onError: (String) -> Unit,
     ): () -> Unit {
         val body = JSONObject().put("message", text)
+        val completed = AtomicBoolean(false)
+        val finish = { if (completed.compareAndSet(false, true)) onDone() }
         return api.streamSsePost(
             "/api/sessions/$sessionId/messages/stream",
             body,
@@ -52,10 +55,10 @@ class SessionsApi(private val api: RemedyApi) {
                     "thinking" -> payload.optString("text").takeIf { it.isNotEmpty() }?.let(onThinking)
                     "tool_call" -> payload.optString("name").takeIf { it.isNotEmpty() }?.let(onTool)
                     "tool_result" -> payload.optString("name").takeIf { it.isNotEmpty() }?.let { onTool("$it ✓") }
-                    "aborted", "done", "exit" -> onDone()
+                    "aborted", "done", "exit" -> finish()
                 }
             },
-            onDone = onDone,
+            onDone = finish,
             onError = onError,
         )
     }

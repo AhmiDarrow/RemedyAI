@@ -4,6 +4,40 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### RemedyConnect mobile hardening and recovery
+
+- Added a visible reconnect action, host-controlled native navigation, and
+  correct per-session Stop behavior without removing any remote capability.
+- Bounded QR, HTTP-frame, MQTT, SSE, and loopback-proxy inputs; serialized MQTT
+  writes, validated acknowledgements, added network deadlines, and made close
+  wake blocked readers.
+- Added durable atomic pairing storage, derived device public keys from the
+  validated private key, excluded secrets from Android backup/transfer, and
+  cleaned up camera, HTTP, and socket resources deterministically.
+- Added Android tests, lint, and APK compilation to public CI and Android app
+  version checking to `scripts/sync_version.py`.
+
+### Native runtime stability and security
+
+- Closed link/junction escapes in native filesystem copy, move, and delete;
+  serialized one-use capability verification; rejected duplicate IPC request
+  IDs and bounded each connection's active calls.
+- Made event publication rollback-safe, rejected recovery sequence gaps, and
+  made scheduler cancellation stop live work without rearming recurring jobs.
+- Native workers now replay failed calls only when explicitly idempotent,
+  release completed stream contexts, and reconnect after incomplete streams.
+- Scoped Hive messages to their delegation tree, rejected trailing RDNA data,
+  extended language-boundary checks to command packages, fixed Go benchmark
+  name parsing, and connected the configured native selector to startup while
+  retaining automatic Python compatibility fallback.
+- Reaped Connect rendezvous transports and child tasks during restart and
+  shutdown so an old gateway cannot retain state or overlap its replacement.
+- The desktop now records an unexpectedly exited server's OS status and
+  performs bounded automatic recovery. Closing, losing, or revoking a phone
+  connection can no longer leave the desktop API offline without recovery.
+- Made the Go module's minimum patch version explicit so older Linux Go
+  installations can bootstrap the declared 1.24 toolchain reliably.
+
 ## [0.48.0] — 2026-09-02
 
 ### Next Evolution native runtime

@@ -163,6 +163,15 @@ def _thread_main(
     finally:
         with contextlib.suppress(Exception):
             loop.run_until_complete(stop_connect_server())
+        # Defensive drain: the gateway loop owns no unrelated application
+        # tasks, so nothing may survive into loop.close().  This catches a
+        # transport/helper task created immediately before shutdown.
+        pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            with contextlib.suppress(Exception):
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         loop.close()
         if _loop is loop:
             _loop = None
@@ -174,7 +183,6 @@ def stop_connect() -> None:
     with _lock:
         loop = _loop
         thread = _thread
-        _thread = None
     if loop is not None:
         try:
 
@@ -189,6 +197,12 @@ def stop_connect() -> None:
                 loop.call_soon_threadsafe(loop.stop)
     if thread is not None and thread.is_alive() and thread is not threading.current_thread():
         thread.join(timeout=5)
+    with _lock:
+        # Do not lose ownership of a thread that did not finish within the
+        # bounded join.  A later stop can still finish it instead of starting
+        # a second gateway beside it.
+        if _thread is thread and (thread is None or not thread.is_alive()):
+            _thread = None
     drop_all_sessions()
 
 
@@ -203,6 +217,7 @@ def maybe_start_connect(
 
     Missing / default-off config is a no-op. Never changes the :7400 bind.
     """
+    global _thread
     _saved["app"] = app
     _saved["api_key"] = str(api_key or "")
     _saved["sidecar_port"] = int(sidecar_port or 7400)
@@ -216,6 +231,11 @@ def maybe_start_connect(
         # live config published above, so a Settings change applies now.
         return
     stop_connect()
+    with _lock:
+        existing = _thread
+    if existing is not None and existing.is_alive():
+        logger.warning("connect gateway restart deferred until prior listener stops")
+        return
     ready = threading.Event()
     err: list[BaseException] = []
     thread = threading.Thread(
@@ -225,7 +245,6 @@ def maybe_start_connect(
         daemon=True,
     )
     with _lock:
-        global _thread
         _thread = thread
     thread.start()
     if not ready.wait(timeout=5):

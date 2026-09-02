@@ -1,6 +1,7 @@
 package com.remedy.groveconnect.api
 
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Terminal API — talks to the /api/terminal SSE route the phone gets over the
@@ -27,20 +28,24 @@ class TerminalApi(private val api: RemedyApi) {
         onOutput: (String) -> Unit,
         onExit: (Int?) -> Unit,
         onError: (String) -> Unit,
-    ): () -> Unit = api.streamSse(
-        "/api/terminal/$terminalId/stream",
-        onEvent = { event, payload ->
-            when (event) {
-                "output" -> {
-                    val text = payload.optString("text")
-                    if (text.isNotEmpty()) onOutput(text)
+    ): () -> Unit {
+        val completed = AtomicBoolean(false)
+        val finish = { code: Int? -> if (completed.compareAndSet(false, true)) onExit(code) }
+        return api.streamSse(
+            "/api/terminal/$terminalId/stream",
+            onEvent = { event, payload ->
+                when (event) {
+                    "output" -> {
+                        val text = payload.optString("text")
+                        if (text.isNotEmpty()) onOutput(text)
+                    }
+                    "exit" -> finish(payload.optInt("code", -1).let { if (it < 0) null else it })
                 }
-                "exit" -> onExit(payload.optInt("code", -1).let { if (it < 0) null else it })
-            }
-        },
-        onDone = { onExit(null) },
-        onError = onError,
-    )
+            },
+            onDone = { finish(null) },
+            onError = onError,
+        )
+    }
 
     /** Write text to the shell's stdin. */
     fun input(terminalId: String, data: String): Boolean =

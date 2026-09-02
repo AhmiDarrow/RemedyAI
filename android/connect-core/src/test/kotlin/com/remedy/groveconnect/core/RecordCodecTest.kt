@@ -77,4 +77,16 @@ class RecordCodecTest {
             RecordCodec.encodeTransport(send, ByteArray(Protocol.MAX_PLAINTEXT + 1))
         }
     }
+
+    @Test
+    fun httpFramesRejectTruncationTrailingDataAndLengthOverflow() {
+        val req = HttpFrame.encodeRequest(HttpFrame.HttpRequest("GET", "/", "", byteArrayOf(1)))
+        assertFailsWith<NoiseException> { HttpFrame.decodeRequest(req.copyOf(req.size - 1)) }
+        assertFailsWith<NoiseException> { HttpFrame.decodeRequest(req + 0) }
+        assertFailsWith<IllegalArgumentException> {
+            HttpFrame.encodeRequest(HttpFrame.HttpRequest("GET", "/".repeat(65536), "", ByteArray(0)))
+        }
+        val inner = HttpFrame.encode(HttpFrame.TYPE_PING, 1, byteArrayOf(1))
+        assertFailsWith<NoiseException> { HttpFrame.decode(inner + 0) }
+    }
 }

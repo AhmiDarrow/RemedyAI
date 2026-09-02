@@ -12,8 +12,8 @@ android {
         applicationId = "com.remedy.groveconnect"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
-        versionName = "0.47.0"
+        versionCode = 17
+        versionName = "0.48.0"
     }
 
     buildTypes {

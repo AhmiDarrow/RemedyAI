@@ -73,6 +73,7 @@ type Snapshot struct {
 type Scheduler struct {
 	mu       sync.Mutex
 	jobs     map[string]*Job
+	running  map[string]context.CancelFunc
 	executor Executor
 	now      func() time.Time
 }
@@ -81,7 +82,7 @@ func New(executor Executor, now func() time.Time) *Scheduler {
 	if now == nil {
 		now = time.Now
 	}
-	return &Scheduler{jobs: make(map[string]*Job), executor: executor, now: now}
+	return &Scheduler{jobs: make(map[string]*Job), running: make(map[string]context.CancelFunc), executor: executor, now: now}
 }
 func (s *Scheduler) Add(job Job) error {
 	s.mu.Lock()
@@ -111,6 +112,9 @@ func (s *Scheduler) Cancel(id string) error {
 		return ErrJobNotFound
 	}
 	job.Status = Canceled
+	if cancel := s.running[id]; cancel != nil {
+		cancel()
+	}
 	return nil
 }
 func (s *Scheduler) HandleEvent(event events.Event) {
@@ -132,26 +136,49 @@ func (s *Scheduler) GoalReady(goalID string) {
 	}
 }
 func (s *Scheduler) Tick(ctx context.Context, now time.Time) []Job {
+	type scheduled struct {
+		job    *Job
+		ctx    context.Context
+		cancel context.CancelFunc
+	}
 	s.mu.Lock()
-	ready := make([]*Job, 0)
+	ready := make([]scheduled, 0)
 	for _, job := range s.jobs {
 		if s.runnable(job, now) {
 			job.Status = Running
-			ready = append(ready, job)
+			jobCtx, cancel := context.WithCancel(ctx)
+			s.running[job.ID] = cancel
+			ready = append(ready, scheduled{job: job, ctx: jobCtx, cancel: cancel})
 		}
 	}
-	sort.SliceStable(ready, func(i, j int) bool { return ready[i].Priority > ready[j].Priority })
+	sort.SliceStable(ready, func(i, j int) bool { return ready[i].job.Priority > ready[j].job.Priority })
 	s.mu.Unlock()
 	completed := make([]Job, 0, len(ready))
-	for _, job := range ready {
+	for _, scheduledJob := range ready {
+		job := scheduledJob.job
+		s.mu.Lock()
+		if job.Status == Canceled {
+			delete(s.running, job.ID)
+			scheduledJob.cancel()
+			job.Ready = false
+			completed = append(completed, clone(*job))
+			s.mu.Unlock()
+			continue
+		}
+		s.mu.Unlock()
 		start := s.now()
-		err := s.executor.Execute(ctx, clone(*job))
+		err := s.executor.Execute(scheduledJob.ctx, clone(*job))
+		scheduledJob.cancel()
 		elapsed := s.now().Sub(start)
 		s.mu.Lock()
+		delete(s.running, job.ID)
 		job.Runs++
 		job.Runtime += elapsed
 		job.Ready = false
-		if err != nil {
+		if job.Status == Canceled || errors.Is(err, context.Canceled) {
+			job.Status = Canceled
+			job.LastError = ""
+		} else if err != nil {
 			job.Status = Failed
 			job.LastError = err.Error()
 		} else if job.Trigger == Recurring {

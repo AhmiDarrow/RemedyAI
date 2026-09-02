@@ -110,6 +110,25 @@ jobs:
       - name: Typecheck + production build
         run: npm run build
 
+  android-connect:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Unit tests, lint, and APK build
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon test lintDebug assembleDebug
+
   cargo-check:
     strategy:
       fail-fast: false

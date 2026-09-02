@@ -12,6 +12,7 @@ import org.json.JSONObject
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 enum class Reachable { Connecting, OnLan, OnRelay, Paused }
 
@@ -28,7 +29,7 @@ data class RemoteState(
     val paired: Boolean = false,
     val reachable: Reachable = Reachable.Paused,
     val shimUrl: String? = null,
-    val panes: PaneFlags = PaneFlags.allOn(),
+    val panes: PaneFlags = PaneFlags.defaults(),
     val approvals: List<ApprovalItem> = emptyList(),
     val sessionId: String? = null,
     val error: String? = null,
@@ -39,12 +40,18 @@ class ConnectController(private val ctx: Context) {
     private val keys = DeviceKeys(ctx)
     private val store = PairStore(ctx)
     private val main = Handler(Looper.getMainLooper())
-    private val io = Executors.newScheduledThreadPool(2) { r ->
+    // All connection lifecycle work is serialized. The generation guard also
+    // prevents a slow dial from resurrecting a connection after Unpair/Close.
+    private val io = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "grove-ctrl").apply { isDaemon = true }
     }
+    private val generation = AtomicLong(0)
+    @Volatile
     private var client: ConnectClient? = null
+    @Volatile
     private var shim: LoopbackShim? = null
     private var poll: ScheduledFuture<*>? = null
+    @Volatile
     var state = RemoteState(paired = store.isPaired(), lanLabel = store.lastLan())
         private set
     var onChange: (() -> Unit)? = null
@@ -54,6 +61,7 @@ class ConnectController(private val ctx: Context) {
     }
 
     fun pair(text: String) {
+        val op = generation.incrementAndGet()
         // Called from the UI while the activity is resumed: start the foreground
         // service here, not after a dial that may finish once we are backgrounded
         // (Android 12+ refuses a late startForeground and crashes the app).
@@ -62,10 +70,14 @@ class ConnectController(private val ctx: Context) {
             try {
                 val qr = QrPayload.parse(text)
                 Pin.check(store.pinnedHostPub(), qr.hostPub)
+                if (generation.get() != op) return@execute
                 publish(state.copy(error = null, lanLabel = "${qr.lanHost}:${qr.lanPort}"))
-                open(qr)
+                openNow(qr, op)
             } catch (e: Exception) {
-                publish(state.copy(error = e.message ?: "Pairing failed"))
+                if (generation.get() == op) {
+                    ConnectForegroundService.stop(ctx)
+                    publish(state.copy(reachable = Reachable.Paused, error = e.message ?: "Pairing failed"))
+                }
             }
         }
     }
@@ -76,11 +88,7 @@ class ConnectController(private val ctx: Context) {
      * relay/rendezvous endpoints) — fail closed on a forged or stale code.
      */
     private fun persistPair(qr: QrPayload) {
-        store.pinHost(qr.hostPub)
-        store.saveLan(qr.lanHost, qr.lanPort)
-        store.saveTailscale(qr.tailscaleHost, qr.tailscalePort)
-        store.saveRelay(qr.relayHost, qr.relayPort)
-        store.saveRdv(qr.rdvHosts)
+        store.savePair(qr)
     }
 
     fun unpair() {
@@ -90,6 +98,7 @@ class ConnectController(private val ctx: Context) {
     }
 
     fun connectLast() {
+        val op = generation.incrementAndGet()
         val lan = store.lastLan()
         val hp = store.pinnedHostPub()
         if (lan == null || hp == null) return
@@ -101,6 +110,7 @@ class ConnectController(private val ctx: Context) {
         // Start the foreground service while the app is still in front (see pair()).
         ConnectForegroundService.start(ctx)
         io.execute {
+            if (generation.get() != op) return@execute
             shutdownInner()
             publish(state.copy(reachable = Reachable.Connecting, error = null, shimUrl = null))
             try {
@@ -116,6 +126,10 @@ class ConnectController(private val ctx: Context) {
                     hp, lanHost, lanPort, ts?.first, ts?.second, relay?.first, relay?.second, rdv, pub,
                     preferRelay = !NetProbe.isWifi(ctx),
                 )
+                if (generation.get() != op) {
+                    c.close()
+                    return@execute
+                }
                 client = c
                 val sh = LoopbackShim(c)
                 sh.start()
@@ -132,12 +146,13 @@ class ConnectController(private val ctx: Context) {
                 startPoll()
             } catch (e: Exception) {
                 shutdownInner()
-                publish(
+                if (generation.get() == op) publish(
                     state.copy(
                         reachable = Reachable.Paused,
                         error = e.message ?: "Could not reach the PC. Check that Remedy is running with Connect enabled, and that you have internet or Wi-Fi.",
                     ),
-                )
+                ) else return@execute
+                ConnectForegroundService.stop(ctx)
             }
         }
     }
@@ -159,13 +174,25 @@ class ConnectController(private val ctx: Context) {
     }
 
     fun open(qr: QrPayload) {
+        val op = generation.incrementAndGet()
+        ConnectForegroundService.start(ctx)
         io.execute {
+            openNow(qr, op)
+        }
+    }
+
+    private fun openNow(qr: QrPayload, op: Long) {
+            if (generation.get() != op) return
             shutdownInner()
             publish(state.copy(reachable = Reachable.Connecting, error = null, shimUrl = null))
             try {
                 val (priv, pub) = keys.staticPair()
                 val c = ConnectClient(priv, pub)
                 c.connect(qr, preferRelay = !NetProbe.isWifi(ctx), deviceName = deviceLabel())
+                if (generation.get() != op) {
+                    c.close()
+                    return
+                }
                 persistPair(qr)
                 client = c
                 val sh = LoopbackShim(c)
@@ -183,14 +210,14 @@ class ConnectController(private val ctx: Context) {
                 startPoll()
             } catch (e: Exception) {
                 shutdownInner()
-                publish(
+                if (generation.get() == op) publish(
                     state.copy(
                         reachable = Reachable.Paused,
                         error = e.message ?: "Could not reach the PC. Check that Remedy is running with Connect enabled, and that you have internet or Wi-Fi.",
                     ),
-                )
+                ) else return
+                ConnectForegroundService.stop(ctx)
             }
-        }
     }
 
     fun stopGeneration() {
@@ -201,7 +228,8 @@ class ConnectController(private val ctx: Context) {
                 if (sid.isNullOrBlank()) {
                     sid = fetchSessionId(c)
                 }
-                c.http("POST", ConnectMe.abortPath(sid), "Content-Type: application/json\r\n")
+                val response = c.http("POST", ConnectMe.abortPath(sid), "Content-Type: application/json\r\n")
+                if (response.status !in 200..299) throw IllegalStateException("PC refused Stop (HTTP ${response.status})")
             } catch (e: Exception) {
                 publish(state.copy(error = e.message ?: "Stop failed"))
             }
@@ -224,12 +252,15 @@ class ConnectController(private val ctx: Context) {
             try {
                 val body = JSONObject().put("approve", approve).put("scope", "session").toString()
                     .toByteArray()
-                client?.http(
+                val response = client?.http(
                     "POST",
                     "/api/approvals/$id/resolve",
                     "Content-Type: application/json\r\n",
                     body,
-                )
+                ) ?: throw IllegalStateException("Phone is not connected")
+                if (response.status !in 200..299) {
+                    throw IllegalStateException("PC refused approval response (HTTP ${response.status})")
+                }
                 refreshApprovals()
             } catch (e: Exception) {
                 publish(state.copy(error = e.message ?: "Could not resolve"))
@@ -238,9 +269,20 @@ class ConnectController(private val ctx: Context) {
     }
 
     fun shutdown() {
+        generation.incrementAndGet()
         poll?.cancel(true)
         poll = null
-        shutdownInner()
+        // Closing the live endpoints immediately unblocks a poll/request that
+        // is ahead of the serialized cleanup task.
+        try {
+            shim?.stop()
+        } catch (_: Exception) {
+        }
+        try {
+            client?.close()
+        } catch (_: Exception) {
+        }
+        io.execute { shutdownInner() }
         ConnectForegroundService.stop(ctx)
         publish(
             state.copy(
@@ -282,9 +324,14 @@ class ConnectController(private val ctx: Context) {
     private fun pollTick() {
         val c = client
         if (c != null && !c.closed) {
-            refreshMe()
-            refreshApprovals()
-            return
+            val healthy = refreshMe() && refreshApprovals()
+            if (healthy) {
+                consecutiveProbeFailures = 0
+                return
+            }
+            consecutiveProbeFailures++
+            if (consecutiveProbeFailures < MAX_PROBE_FAILURES) return
+            shutdownInner()
         }
         if (!store.isPaired() || store.deviceId().isNullOrBlank()) return
         val now = System.currentTimeMillis()
@@ -301,11 +348,12 @@ class ConnectController(private val ctx: Context) {
         if (now < nextReconnectAt) return
         nextReconnectAt = now + reconnectBackoffMs
         reconnectBackoffMs = (reconnectBackoffMs * 2).coerceAtMost(RECONNECT_MAX_MS)
-        redial()
+        redial(generation.get())
     }
 
     /** Synchronous redial on the poll thread; success resets the backoff. */
-    private fun redial() {
+    private fun redial(op: Long) {
+        if (generation.get() != op) return
         val lan = store.lastLan() ?: return
         val hp = store.pinnedHostPub() ?: return
         shutdownInner()
@@ -322,11 +370,16 @@ class ConnectController(private val ctx: Context) {
                 hp, lanHost, lanPort, ts?.first, ts?.second, relay?.first, relay?.second, rdv, pub,
                 preferRelay = !NetProbe.isWifi(ctx),
             )
+            if (generation.get() != op) {
+                c.close()
+                return
+            }
             client = c
             val sh = LoopbackShim(c)
             sh.start()
             shim = sh
             reconnectBackoffMs = RECONNECT_MIN_MS
+            consecutiveProbeFailures = 0
             publish(
                 state.copy(
                     reachable = reachableFor(c.via),
@@ -338,6 +391,7 @@ class ConnectController(private val ctx: Context) {
             )
         } catch (e: Exception) {
             shutdownInner()
+            if (generation.get() != op) return
             publish(
                 state.copy(
                     reachable = Reachable.Connecting,
@@ -353,13 +407,16 @@ class ConnectController(private val ctx: Context) {
     @Volatile
     private var nextReconnectAt = 0L
 
+    private var consecutiveProbeFailures = 0
+
     private companion object {
         const val RECONNECT_MIN_MS = 2_000L
         const val RECONNECT_MAX_MS = 30_000L
+        const val MAX_PROBE_FAILURES = 3
     }
 
-    private fun refreshMe() {
-        val c = client ?: return
+    private fun refreshMe(): Boolean {
+        val c = client ?: return false
         val me = try {
             val r = c.http("GET", "/connect/me")
             if (r.status in 200..299) ConnectMe.parseJson(r.body.toString(Charsets.UTF_8)) else null
@@ -379,10 +436,9 @@ class ConnectController(private val ctx: Context) {
                     },
                 ),
             )
-            return
+            return true
         }
-        val sid = fetchSessionId(c)
-        if (sid != null) publish(state.copy(sessionId = sid))
+        return false
     }
 
     private fun fetchSessionId(c: ConnectClient): String? {
@@ -396,16 +452,17 @@ class ConnectController(private val ctx: Context) {
         }
     }
 
-    private fun refreshApprovals() {
-        val c = client ?: return
+    private fun refreshApprovals(): Boolean {
+        val c = client ?: return false
         val r = try {
             c.http("GET", "/api/approvals")
         } catch (_: Exception) {
-            return
+            return false
         }
-        if (r.status !in 200..299) return
+        if (r.status !in 200..299) return false
         val items = parseApprovals(r.body.toString(Charsets.UTF_8))
         publish(state.copy(approvals = items))
+        return true
     }
 
     private fun parseApprovals(json: String): List<ApprovalItem> {

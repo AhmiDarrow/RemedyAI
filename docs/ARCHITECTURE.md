@@ -30,6 +30,11 @@ and Zig ABI 1 must both probe healthy before the native route becomes effective.
 Fallback after a native attempt is allowed only for operations declared
 idempotent. The first cutover is read-only system topology; Python/FastAPI stays
 available as the compatibility surface and as the long-term AI/ML worker runtime.
+Startup performs one bounded readiness probe only when native mode is requested;
+the liveness route remains probe-free. Native durability requires contiguous event
+replay and rollback-safe appends; native cancellation cannot be overwritten or
+rearm recurring work; filesystem mutations resolve no-follow parent handles beneath
+their granted root.
 
 Desktop installers bundle the Go executable and Zig shared library on Windows
 and Linux alongside the Python sidecar. `/api/ping` reports cached selector and

@@ -88,3 +88,19 @@ func TestConcurrentPublishPreservesMonotonicLog(t *testing.T) {
 		}
 	}
 }
+
+func TestFailedPublishDoesNotAdvanceSequenceOrMemory(t *testing.T) {
+	bus, err := Open(filepath.Join(t.TempDir(), "events.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bus.file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bus.Publish(Event{Type: "Failed", Source: "test"}); err == nil {
+		t.Fatal("publish to closed log succeeded")
+	}
+	if bus.next != 1 || len(bus.Replay(1, 10)) != 0 {
+		t.Fatalf("next=%d events=%d", bus.next, len(bus.events))
+	}
+}

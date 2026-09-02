@@ -175,4 +175,18 @@ class QrPayloadTest {
             QrPayload.parse(qr(hpB64 = UrlSafeB64.encode(ByteArray(16))), nowUnix = now)
         }
     }
+
+    @Test
+    fun rejectDuplicateSecurityFields() {
+        assertFailsWith<QrException> {
+            QrPayload.parse(qr(extra = "hp=${UrlSafeB64.encode(hp)}"), nowUnix = now)
+        }
+    }
+
+    @Test
+    fun rejectOversizedCodeAndRendezvousList() {
+        assertFailsWith<QrException> { QrPayload.parse("x".repeat(16 * 1024 + 1), nowUnix = now) }
+        val endpoints = (1..9).joinToString(";") { "broker$it.example:1883" }
+        assertFailsWith<QrException> { QrPayload.parse(qr(extra = "rdv=$endpoints"), nowUnix = now) }
+    }
 }

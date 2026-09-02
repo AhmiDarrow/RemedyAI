@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/AhmiDarrow/RemedyAI/native/go/events"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/events"
 )
 
 func TestTriggersDependenciesPrioritiesAndBudgets(t *testing.T) {
@@ -31,6 +33,73 @@ func TestTriggersDependenciesPrioritiesAndBudgets(t *testing.T) {
 	raw, _ := s.Snapshot()
 	if !json.Valid(raw) {
 		t.Fatal("invalid snapshot")
+	}
+}
+
+func TestCancelStopsRunningJobAndCannotBeOverwrittenOrRearmed(t *testing.T) {
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	s := New(ExecutorFunc(func(ctx context.Context, _ Job) error {
+		close(started)
+		<-ctx.Done()
+		close(stopped)
+		return ctx.Err()
+	}), time.Now)
+	now := time.Now()
+	_ = s.Add(Job{ID: "recurring", Trigger: Recurring, NextRun: now, Interval: time.Minute})
+	done := make(chan []Job, 1)
+	go func() { done <- s.Tick(context.Background(), now) }()
+	<-started
+	if err := s.Cancel("recurring"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("executor did not receive cancellation")
+	}
+	completed := <-done
+	if len(completed) != 1 || completed[0].Status != Canceled {
+		t.Fatalf("completed = %#v", completed)
+	}
+	if rerun := s.Tick(context.Background(), now.Add(time.Minute)); len(rerun) != 0 {
+		t.Fatalf("canceled recurring job was rearmed: %#v", rerun)
+	}
+}
+
+func TestCancelSkipsJobQueuedBehindAnotherExecution(t *testing.T) {
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var order []string
+	var orderMu sync.Mutex
+	s := New(ExecutorFunc(func(_ context.Context, job Job) error {
+		orderMu.Lock()
+		order = append(order, job.ID)
+		orderMu.Unlock()
+		if job.ID == "first" {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		return nil
+	}), time.Now)
+	now := time.Now()
+	_ = s.Add(Job{ID: "first", Trigger: OneShot, NextRun: now, Priority: 2})
+	_ = s.Add(Job{ID: "second", Trigger: OneShot, NextRun: now, Priority: 1})
+	done := make(chan []Job, 1)
+	go func() { done <- s.Tick(context.Background(), now) }()
+	<-firstStarted
+	if err := s.Cancel("second"); err != nil {
+		t.Fatal(err)
+	}
+	close(releaseFirst)
+	completed := <-done
+	if len(completed) != 2 || completed[1].Status != Canceled {
+		t.Fatalf("completed = %#v", completed)
+	}
+	orderMu.Lock()
+	defer orderMu.Unlock()
+	if len(order) != 1 || order[0] != "first" {
+		t.Fatalf("order = %v", order)
 	}
 }
 

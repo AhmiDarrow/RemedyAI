@@ -8,7 +8,12 @@ import java.io.OutputStream
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.util.concurrent.Executors
+import java.net.SocketTimeoutException
+import java.util.Collections
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -22,10 +27,11 @@ fun interface ShimPipe {
 }
 
 class LoopbackShim(
+    private val headerDeadlineMs: Int = HEADER_TIMEOUT_MS,
     private val pipe: ShimPipe,
 ) {
     constructor(client: ConnectClient) : this(
-        ShimPipe { method, target, headers, body, output ->
+        pipe = ShimPipe { method, target, headers, body, output ->
             client.pipeHttp(method, target, headers, body, output)
         },
     )
@@ -33,9 +39,11 @@ class LoopbackShim(
     private val running = AtomicBoolean(false)
     private var server: ServerSocket? = null
     private val shimToken: String = ShimAuth.newToken()
-    private val pool = Executors.newCachedThreadPool { r ->
-        Thread(r, "grove-shim").apply { isDaemon = true }
-    }
+    private val clients = Collections.synchronizedSet(mutableSetOf<Socket>())
+    private val pool = ThreadPoolExecutor(
+        2, MAX_CLIENTS, 30, TimeUnit.SECONDS, ArrayBlockingQueue(MAX_PENDING),
+        { r -> Thread(r, "grove-shim").apply { isDaemon = true } },
+    )
 
     val port: Int get() = server?.localPort ?: 0
     val token: String get() = shimToken
@@ -50,7 +58,14 @@ class LoopbackShim(
             while (running.get()) {
                 try {
                     val sock = ss.accept()
-                    pool.execute { handle(sock) }
+                    sock.soTimeout = HEADER_TIMEOUT_MS
+                    clients += sock
+                    try {
+                        pool.execute { handle(sock) }
+                    } catch (_: RejectedExecutionException) {
+                        clients -= sock
+                        sock.close()
+                    }
                 } catch (_: Exception) {
                     if (!running.get()) break
                 }
@@ -68,6 +83,15 @@ class LoopbackShim(
             server?.close()
         } catch (_: Exception) {
         }
+        synchronized(clients) {
+            clients.toList().forEach {
+                try {
+                    it.close()
+                } catch (_: Exception) {
+                }
+            }
+            clients.clear()
+        }
         pool.shutdownNow()
     }
 
@@ -76,7 +100,7 @@ class LoopbackShim(
             try {
                 val input = s.getInputStream()
                 val output = s.getOutputStream()
-                val req = readRequest(input) ?: return
+                val req = readRequest(s, input) ?: return
                 if (!ShimAuth.allowed(req.target, req.headers, shimToken)) {
                     writeResponse(output, 403, "text/plain; charset=utf-8", "shim".toByteArray())
                     return
@@ -99,12 +123,29 @@ class LoopbackShim(
                     writeResponse(s.getOutputStream(), 413, "text/plain; charset=utf-8", msg)
                 } catch (_: Exception) {
                 }
+            } catch (_: HeaderTooLarge) {
+                try {
+                    writeResponse(s.getOutputStream(), 431, "text/plain; charset=utf-8", "Request headers are too large.".toByteArray())
+                } catch (_: Exception) {
+                }
+            } catch (_: HeaderTimedOut) {
+                try {
+                    writeResponse(s.getOutputStream(), 408, "text/plain; charset=utf-8", "Request headers timed out.".toByteArray())
+                } catch (_: Exception) {
+                }
+            } catch (e: BadRequest) {
+                try {
+                    writeResponse(s.getOutputStream(), 400, "text/plain; charset=utf-8", e.message.orEmpty().toByteArray())
+                } catch (_: Exception) {
+                }
             } catch (e: Exception) {
                 try {
                     val msg = (e.message ?: "pipe error").toByteArray()
                     writeResponse(s.getOutputStream(), 502, "text/plain; charset=utf-8", msg)
                 } catch (_: Exception) {
                 }
+            } finally {
+                clients -= s
             }
         }
     }
@@ -113,14 +154,23 @@ class LoopbackShim(
 
     /** Refuse instead of forwarding a silently truncated body. */
     private class BodyTooLarge(val size: Int) : Exception("request body too large")
+    private class HeaderTooLarge : Exception("request headers too large")
+    private class HeaderTimedOut : Exception("request headers timed out")
+    private class BadRequest(message: String) : Exception(message)
 
     private companion object {
         /** Matches the PC pipe's MAX_BODY for raw requests. */
         const val MAX_BODY = 1024 * 1024
+        const val MAX_CLIENTS = 8
+        const val MAX_PENDING = 16
+        const val HEADER_TIMEOUT_MS = 10_000
     }
 
-    private fun readRequest(input: InputStream): ShimReq? {
-        val headerBlock = readHeaders(input) ?: return null
+    private fun readRequest(sock: Socket, input: InputStream): ShimReq? {
+        val headerBlock = readHeaders(sock, input) ?: return null
+        // Header reads tighten SO_TIMEOUT to the absolute time remaining.
+        // Restore the normal inactivity budget before reading a legitimate body.
+        sock.soTimeout = HEADER_TIMEOUT_MS
         val text = headerBlock.toString(Charsets.ISO_8859_1)
         val lines = text.split("\r\n")
         if (lines.isEmpty()) return null
@@ -129,8 +179,14 @@ class LoopbackShim(
         val method = parts[0]
         val target = parts[1]
         val headers = lines.drop(1).filter { it.isNotBlank() }
-        val cl = headers.firstOrNull { it.startsWith("Content-Length:", ignoreCase = true) }
-            ?.substringAfter(":")?.trim()?.toIntOrNull() ?: 0
+        if (headers.any { it.startsWith("Transfer-Encoding:", ignoreCase = true) }) {
+            throw BadRequest("Transfer-Encoding is not accepted by the phone remote.")
+        }
+        val contentLengths = headers.filter { it.startsWith("Content-Length:", ignoreCase = true) }
+            .map { it.substringAfter(":").trim().toIntOrNull() ?: throw BadRequest("Invalid Content-Length.") }
+        if (contentLengths.distinct().size > 1) throw BadRequest("Conflicting Content-Length headers.")
+        val cl = contentLengths.firstOrNull() ?: 0
+        if (cl < 0) throw BadRequest("Invalid Content-Length.")
         if (cl > MAX_BODY) throw BodyTooLarge(cl)
         val body = if (cl > 0) RecordCodec.readExact(input, cl) else ByteArray(0)
         val forwarded = headers.filterNot {
@@ -141,20 +197,34 @@ class LoopbackShim(
         return ShimReq(method, target, forwarded, body)
     }
 
-    private fun readHeaders(input: InputStream): ByteArray? {
+    private fun readHeaders(sock: Socket, input: InputStream): ByteArray? {
         val buf = java.io.ByteArrayOutputStream(512)
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(headerDeadlineMs.toLong())
         // Track the last four bytes so we never re-scan the whole buffer.
         var tail = 0
         var n = 0
         while (n < 64 * 1024) {
-            val c = input.read()
-            if (c < 0) return if (buf.size() == 0) null else buf.toByteArray()
+            val remainingNanos = deadline - System.nanoTime()
+            if (remainingNanos <= 0) throw HeaderTimedOut()
+            sock.soTimeout = TimeUnit.NANOSECONDS.toMillis(remainingNanos)
+                .coerceAtLeast(1)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
+            val c = try {
+                input.read()
+            } catch (_: SocketTimeoutException) {
+                throw HeaderTimedOut()
+            }
+            if (c < 0) {
+                if (buf.size() == 0) return null
+                throw BadRequest("Incomplete request headers.")
+            }
             buf.write(c)
             n++
             tail = (tail shl 8) or (c and 0xff)
             if (tail == 0x0d0a0d0a) return buf.toByteArray()
         }
-        return buf.toByteArray()
+        throw HeaderTooLarge()
     }
 
     /** Rewrite the first HTTP header block to mint the shim cookie (authenticated only). */
@@ -224,9 +294,12 @@ class LoopbackShim(
     ) {
         val reason = when (status) {
             200 -> "OK"
+            400 -> "Bad Request"
             403 -> "Forbidden"
+            408 -> "Request Timeout"
             404 -> "Not Found"
             413 -> "Payload Too Large"
+            431 -> "Request Header Fields Too Large"
             502 -> "Bad Gateway"
             else -> "OK"
         }

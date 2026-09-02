@@ -48,9 +48,6 @@ func check(goRoot string) ([]string, error) {
 		}
 		relative, _ := filepath.Rel(goRoot, path)
 		pkg := strings.Split(filepath.ToSlash(relative), "/")[0]
-		if pkg == "cmd" {
-			return nil
-		}
 		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
 		if err != nil {
 			return err

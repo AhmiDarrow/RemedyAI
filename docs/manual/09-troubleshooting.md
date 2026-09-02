@@ -99,6 +99,11 @@ If it still flaps:
 2. Check `%USERPROFILE%\.remedy\logs\debug.log` for `SLOW GET` lines (requests ≥500ms).  
 3. Quit fully and relaunch so the sidecar reloads with file logging.
 
+Current desktop builds also supervise their managed local server. An unexpected
+server exit is written to `%LOCALAPPDATA%\com.remedy.desktop\logs\remedy-desktop.log`
+with its OS exit status, followed by up to three recovery attempts. Disconnecting
+or unpairing RemedyConnect should close only the phone session, never this server.
+
 ## Where logs live
 
 | File | Contents |

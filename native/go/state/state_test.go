@@ -3,16 +3,34 @@ package state
 import (
 	"encoding/json"
 	"errors"
-	"github.com/AhmiDarrow/RemedyAI/native/go/events"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/events"
 )
 
 func mutationEvent(sequence uint64, area, key string, value any) events.Event {
 	raw, _ := json.Marshal(value)
 	data, _ := json.Marshal(Mutation{Area: area, Key: key, Value: raw})
 	return events.Event{Sequence: sequence, Type: "StateChanged", Source: "runtime", Data: data}
+}
+
+func TestApplyRejectsSequenceGapWithoutAdvancingState(t *testing.T) {
+	store, _ := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err := store.Apply(mutationEvent(1, "environment", "one", "applied")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Apply(mutationEvent(3, "environment", "three", "skipped")); !errors.Is(err, ErrEventGap) {
+		t.Fatalf("Apply = %v", err)
+	}
+	snapshot := store.Snapshot()
+	if snapshot.LastEvent != 1 || snapshot.Environment["three"] != "" {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	if err := store.Apply(mutationEvent(2, "environment", "two", "recovered")); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestCheckpointRestartAndIdempotentReplay(t *testing.T) {

@@ -14,6 +14,7 @@ const ProtocolVersion = 1
 var (
 	ErrNoCapability     = errors.New("no worker supplies capability")
 	ErrProtocolMismatch = errors.New("worker protocol version mismatch")
+	ErrUncertainOutcome = errors.New("worker call outcome is uncertain; automatic replay blocked")
 )
 
 type Capability string
@@ -41,6 +42,10 @@ type Request struct {
 	Capability Capability
 	Operation  string
 	Payload    []byte
+	// Idempotent explicitly permits a retry after a transport failure. The
+	// default is false so sends, payments, deletes, and other mutations are
+	// never duplicated merely because their response was lost.
+	Idempotent bool
 }
 type Response struct {
 	ID      string
@@ -62,10 +67,11 @@ type FactoryFunc func(context.Context, Spec) (Worker, error)
 func (f FactoryFunc) Connect(ctx context.Context, spec Spec) (Worker, error) { return f(ctx, spec) }
 
 type managed struct {
-	mu       sync.Mutex
-	spec     Spec
-	worker   Worker
-	restarts int
+	mu         sync.Mutex
+	spec       Spec
+	worker     Worker
+	restarts   int
+	generation uint64
 }
 type Manager struct {
 	mu      sync.RWMutex
@@ -152,6 +158,9 @@ func (w *managed) call(ctx context.Context, factory Factory, request Request) (R
 			_ = worker.Close()
 			w.worker = nil
 			w.restarts++
+			if !request.Idempotent {
+				return Response{}, fmt.Errorf("worker %q: %w: %v", w.spec.ID, ErrUncertainOutcome, callErr)
+			}
 		}
 	}
 	return Response{}, fmt.Errorf("worker %q exhausted restarts: %w", w.spec.ID, last)
@@ -163,14 +172,53 @@ func (w *managed) stream(ctx context.Context, factory Factory, request Request) 
 	if err != nil {
 		return nil, err
 	}
-	streamCtx, _ := bounded(ctx, w.spec.CallTimeout)
+	generation := w.generation
+	streamCtx, cancel := bounded(ctx, w.spec.CallTimeout)
 	stream, err := worker.Stream(streamCtx, request)
 	if err != nil {
+		cancel()
 		_ = worker.Close()
 		w.worker = nil
 		w.restarts++
+		return nil, err
 	}
-	return stream, err
+	forwarded := make(chan Response)
+	go func() {
+		defer close(forwarded)
+		defer cancel()
+		final := false
+		for {
+			select {
+			case <-streamCtx.Done():
+				return
+			case response, ok := <-stream:
+				if !ok {
+					if !final && streamCtx.Err() == nil {
+						w.invalidateGeneration(generation)
+					}
+					return
+				}
+				final = final || response.Final
+				select {
+				case forwarded <- response:
+				case <-streamCtx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return forwarded, nil
+}
+
+func (w *managed) invalidateGeneration(generation uint64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.generation != generation || w.worker == nil {
+		return
+	}
+	_ = w.worker.Close()
+	w.worker = nil
+	w.restarts++
 }
 func (w *managed) ready(ctx context.Context, factory Factory) (Worker, error) {
 	if w.worker == nil {
@@ -179,6 +227,7 @@ func (w *managed) ready(ctx context.Context, factory Factory) (Worker, error) {
 			return nil, err
 		}
 		w.worker = worker
+		w.generation++
 	}
 	health, err := w.worker.Health(ctx)
 	if err != nil {

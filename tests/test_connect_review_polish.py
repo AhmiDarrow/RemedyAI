@@ -198,6 +198,87 @@ async def test_stop_connect_server_cancels_rdv_supervisor(home, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_start_connect_server_reaps_previous_background_tasks(home, monkeypatch):
+    from remedy.connect import server
+
+    started: list[asyncio.Event] = []
+
+    async def fake_rdv(**_k):
+        stopped = asyncio.Event()
+        started.append(stopped)
+        try:
+            await asyncio.Future()
+        finally:
+            stopped.set()
+
+    monkeypatch.setattr(server, "_rdv_supervisor", fake_rdv)
+    monkeypatch.setattr(server, "_start_mdns", lambda *a, **k: None)
+    await server.start_connect_server(
+        "127.0.0.1", 0, sidecar_port=7400, api_key="k", config={"connect_rdv_enabled": True}
+    )
+    first = server._rdv_task
+    assert first is not None
+    await asyncio.sleep(0)
+
+    await server.start_connect_server(
+        "127.0.0.1", 0, sidecar_port=7400, api_key="k", config={"connect_rdv_enabled": True}
+    )
+    try:
+        assert first.done()
+        assert started[0].is_set()
+        assert server._rdv_task is not first
+    finally:
+        await server.stop_connect_server()
+
+
+@pytest.mark.asyncio
+async def test_rdv_supervisor_awaits_session_cleanup_on_cancel(home, monkeypatch):
+    from remedy.connect import rdv, server
+
+    opened = asyncio.Event()
+    closed = asyncio.Event()
+
+    class FakeMqtt:
+        def __init__(self, *_a, **_k):
+            pass
+
+        async def connect(self):
+            return None
+
+        async def aclose(self):
+            closed.set()
+
+    class FakeSession:
+        def __init__(self, mqtt, *_a, **_k):
+            self.mqtt = mqtt
+
+        async def open(self):
+            opened.set()
+            return object(), object()
+
+        async def aclose(self):
+            await self.mqtt.aclose()
+
+    async def hold_handle(*_a, **_k):
+        await asyncio.Future()
+
+    monkeypatch.setattr(rdv, "PUBLIC_RDV_ENDPOINTS", (("example.invalid", 1883),))
+    monkeypatch.setattr(rdv, "MqttSession", FakeMqtt)
+    monkeypatch.setattr(rdv, "RendezvousSession", FakeSession)
+    monkeypatch.setattr(server, "_rendezvous_sids", lambda: [b"x" * 16])
+    monkeypatch.setattr(server, "_handle", hold_handle)
+
+    task = asyncio.create_task(
+        server._rdv_supervisor(sidecar_port=7400, api_key="k", config={})
+    )
+    await asyncio.wait_for(opened.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert closed.is_set()
+
+
+@pytest.mark.asyncio
 async def test_drop_sessions_from_another_thread_closes_on_gateway_loop(home):
     from remedy.connect import server
 

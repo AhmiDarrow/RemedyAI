@@ -61,10 +61,12 @@ data class QrPayload(
 
     companion object {
         fun parse(text: String, nowUnix: Long = System.currentTimeMillis() / 1000L): QrPayload {
+            if (text.length > MAX_QR_CHARS) throw QrException("Pairing code is too large.")
             val lines = text.replace("\r\n", "\n").replace('\r', '\n')
                 .split('\n')
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
+            if (lines.size > MAX_QR_LINES) throw QrException("Pairing code has too many fields.")
             if (lines.isEmpty() || lines[0] != Protocol.QR_HEADER) {
                 throw QrException("Not a RemedyConnect pairing code.")
             }
@@ -72,7 +74,9 @@ data class QrPayload(
             for (line in lines.drop(1)) {
                 val eq = line.indexOf('=')
                 if (eq <= 0) continue
-                fields[line.substring(0, eq).trim().lowercase()] = line.substring(eq + 1).trim()
+                val key = line.substring(0, eq).trim().lowercase()
+                if (key in fields) throw QrException("Pairing code repeats field $key.")
+                fields[key] = line.substring(eq + 1).trim()
             }
             val hp = fields["hp"] ?: throw QrException("Pairing code is missing the PC key (hp).")
             val ps = fields["ps"] ?: throw QrException("Pairing code is missing the pair secret (ps).")
@@ -176,8 +180,13 @@ data class QrPayload(
                 out += parseRelay(c)
             }
             if (out.isEmpty()) throw QrException("Rendezvous list is empty.")
+            if (out.size > MAX_RDV_HOSTS) throw QrException("Rendezvous list has too many hosts.")
             return out
         }
+
+        private const val MAX_QR_CHARS = 16 * 1024
+        private const val MAX_QR_LINES = 32
+        private const val MAX_RDV_HOSTS = 8
     }
 }
 

@@ -1,11 +1,16 @@
 package com.remedy.groveconnect.core
 
+import java.io.IOException
+import java.io.InputStream
+import java.net.ServerSocket
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
+import kotlin.concurrent.thread
 
 class MqttRendezvousTest {
 
@@ -89,6 +94,48 @@ class MqttRendezvousTest {
     }
 
     @Test
+    fun queueCloseWakesBlockedReader() {
+        val q = QueueInputStream()
+        var result = 99
+        val reader = thread { result = q.read() }
+        Thread.sleep(50)
+        q.close()
+        reader.join(1_000)
+        assertFalse(reader.isAlive)
+        assertEquals(-1, result)
+    }
+
+    @Test
+    fun packetIdParsingRejectsTruncatedAck() {
+        assertEquals(0x1234, MqttClient.packetId(byteArrayOf(0x40, 0x02, 0x12, 0x34)))
+        assertNull(MqttClient.packetId(byteArrayOf(0x40, 0x02, 0x12)))
+    }
+
+    @Test
+    fun brokerDisconnectCannotMasqueradeAsPublishAck() {
+        ServerSocket(0).use { server ->
+            val broker = thread(isDaemon = true) {
+                server.accept().use { socket ->
+                    readPacket(socket.getInputStream()) // CONNECT
+                    socket.getOutputStream().write(byteArrayOf(0x20, 0x02, 0x00, 0x00))
+                    socket.getOutputStream().flush()
+                    readPacket(socket.getInputStream()) // PUBLISH, then disconnect without PUBACK
+                }
+            }
+            val client = MqttClient("127.0.0.1", server.localPort, timeoutMs = 1_000)
+            try {
+                client.connect()
+                assertFailsWith<IOException> {
+                    client.publish("remedy/test/pc", byteArrayOf(1, 2, 3))
+                }
+            } finally {
+                client.close()
+                broker.join(1_000)
+            }
+        }
+    }
+
+    @Test
     fun framePumpParsesSplitFrames() {
         val frames = ArrayList<ByteArray>()
         val pump = FramePumpOutputStream { payload -> frames += payload }
@@ -119,4 +166,25 @@ class MqttRendezvousTest {
         (n ushr 8).toByte(),
         n.toByte(),
     )
+
+    private fun readPacket(input: InputStream): ByteArray {
+        val output = ArrayList<Byte>()
+        output += input.read().also { if (it < 0) throw IOException("closed") }.toByte()
+        var remaining = 0
+        var multiplier = 1
+        while (true) {
+            val next = input.read()
+            if (next < 0) throw IOException("closed")
+            output += next.toByte()
+            remaining += (next and 0x7f) * multiplier
+            if (next and 0x80 == 0) break
+            multiplier *= 128
+        }
+        repeat(remaining) {
+            val next = input.read()
+            if (next < 0) throw IOException("closed")
+            output += next.toByte()
+        }
+        return output.toByteArray()
+    }
 }

@@ -1934,7 +1934,9 @@ mod type_locate_tests {
         let js = type_locate_js(Some("e4"), None);
         assert!(js.contains("__rmdyFind"));
         assert!(js.contains("missing-ref"));
-        assert!(!js.contains("__rmdyPick"));
+        // The shared DOM helper defines __rmdyPick, but a ref-only lookup must
+        // not invoke the fuzzy text picker.
+        assert!(!js.contains("window.__rmdyPick(q, sel)"));
     }
 
     #[test]

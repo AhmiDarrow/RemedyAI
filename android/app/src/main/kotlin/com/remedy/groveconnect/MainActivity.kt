@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -78,6 +79,7 @@ class MainActivity : FragmentActivity() {
                     UiScreen.Pair -> PairScreen(
                         state = ui,
                         onPair = { controller.pair(it) },
+                        onReconnect = { controller.connectLast() },
                         onUnpair = { controller.unpair() },
                     )
                     UiScreen.Hub -> HubScreen(
@@ -93,6 +95,7 @@ class MainActivity : FragmentActivity() {
                             screen = UiScreen.Pair
                         },
                         onOpenFullRemote = { screen = UiScreen.Home },
+                        onReconnect = { controller.connectLast() },
                     )
                     UiScreen.Home -> {
                         val shim = ui.shimUrl
@@ -103,6 +106,9 @@ class MainActivity : FragmentActivity() {
                             // and the shim 403s it. substringBefore('?') fixes that.
                             val apiBase = shim.substringBefore('?').trimEnd('/')
                             val api = remember(apiBase) { RemedyApi(apiBase) }
+                            DisposableEffect(api) {
+                                onDispose { api.shutdown() }
+                            }
                             HomeScreen(
                                 state = ui,
                                 api = api,

@@ -44,6 +44,10 @@ func TestInvalidFamiliesAndVersionRejected(t *testing.T) {
 	if _, err := Decode([]byte(`{"version":1,"id":"x","action":"acquire_information","target":"x","expected":["x"],"constraints":{},"unknown":true}`)); err == nil {
 		t.Fatal("unknown field accepted")
 	}
+	valid, _ := Canonical(validIntent())
+	if _, err := Decode(append(valid, []byte(` {"second":true}`)...)); err == nil {
+		t.Fatal("trailing JSON value accepted")
+	}
 }
 
 type executorFunc func(context.Context, Step) error

@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
@@ -35,12 +36,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -54,6 +55,7 @@ import com.remedy.groveconnect.ui.theme.TextMuted
 import com.remedy.groveconnect.ui.theme.TextPrimary
 import com.remedy.groveconnect.ui.theme.TextSecondary
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Camera preview that scans a Grove Connect pairing QR and hands the raw
@@ -64,6 +66,7 @@ import java.util.concurrent.Executors
  * [rearmKey] re-arms it whenever its value changes — the caller passes the
  * pairing error so a bad scan can be retried without leaving the screen.
  */
+@androidx.annotation.OptIn(markerClass = [ExperimentalGetImage::class])
 @Composable
 fun QrScanBox(
     onScanned: (String) -> Unit,
@@ -98,9 +101,11 @@ fun QrScanBox(
         )
     }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+    val cameraProvider = remember { AtomicReference<ProcessCameraProvider?>(null) }
 
     DisposableEffect(Unit) {
         onDispose {
+            cameraProvider.getAndSet(null)?.unbindAll()
             scanner.close()
             analysisExecutor.shutdown()
         }
@@ -158,6 +163,7 @@ fun QrScanBox(
                         providerFuture.addListener({
                             try {
                                 val provider = providerFuture.get()
+                                cameraProvider.set(provider)
                                 val preview = Preview.Builder().build().also {
                                     it.surfaceProvider = previewView.surfaceProvider
                                 }
@@ -212,6 +218,7 @@ fun QrScanBox(
     }
 }
 
+@androidx.annotation.OptIn(markerClass = [ExperimentalGetImage::class])
 private fun analyzeFrame(
     imageProxy: ImageProxy,
     scanner: BarcodeScanner,

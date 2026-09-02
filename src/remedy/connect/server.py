@@ -231,6 +231,11 @@ async def start_connect_server(
     """Bind chosen IPv4:port. ``port=0`` picks an ephemeral port (tests)."""
     global _server, _bind, _supervisor_task, _rdv_task
     _assert_bind(host)
+    # A restart must never overwrite the only references to the old listener
+    # or its background dialers.  Normal lifecycle callers stop first, but
+    # this guard also makes direct/API-driven restarts safe and idempotent.
+    if _server is not None or _supervisor_task is not None or _rdv_task is not None:
+        await stop_connect_server()
     # Keep the caller's dict (lifecycle mutates it in place on Settings
     # changes) so pane flags read per request are the live ones.
     cfg = config if isinstance(config, dict) else {}
@@ -449,12 +454,15 @@ async def _relay_supervisor(
     try:
         while True:
             wanted = set(_rendezvous_sids())
+            retired: list[asyncio.Task[Any]] = []
             for sid in list(live):
                 task = live[sid]
                 if sid not in wanted or task.done():
                     if not task.done():
                         task.cancel()
-                    live.pop(sid, None)
+                    retired.append(live.pop(sid))
+            if retired:
+                await asyncio.gather(*retired, return_exceptions=True)
             for sid in wanted:
                 if sid not in live:
                     live[sid] = asyncio.create_task(_one(sid), name="connect-relay-dial")
@@ -498,6 +506,7 @@ async def _rdv_supervisor(
             connected = False
             for host, port in PUBLIC_RDV_ENDPOINTS:
                 mqtt: MqttSession | None = None
+                session: RendezvousSession | None = None
                 try:
                     mqtt = MqttSession(host, port)
                     await mqtt.connect()
@@ -517,10 +526,17 @@ async def _rdv_supervisor(
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    with contextlib.suppress(Exception):
-                        if mqtt is not None:
-                            mqtt.close()
                     continue
+                finally:
+                    # RendezvousSession owns three child tasks plus a socket
+                    # pair.  Always await its teardown; merely cancelling the
+                    # supervisor otherwise leaves those tasks on a closing
+                    # loop and can retain the previous owner home.
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        if session is not None:
+                            await session.aclose()
+                        elif mqtt is not None:
+                            await mqtt.aclose()
             if not connected:
                 await asyncio.sleep(backoff)
                 backoff = min(15.0, backoff * 1.5)
@@ -528,12 +544,15 @@ async def _rdv_supervisor(
     try:
         while True:
             wanted = set(_rendezvous_sids())
+            retired: list[asyncio.Task[Any]] = []
             for sid in list(live):
                 task = live[sid]
                 if sid not in wanted or task.done():
                     if not task.done():
                         task.cancel()
-                    live.pop(sid, None)
+                    retired.append(live.pop(sid))
+            if retired:
+                await asyncio.gather(*retired, return_exceptions=True)
             for sid in wanted:
                 if sid not in live:
                     live[sid] = asyncio.create_task(_one(sid), name="connect-rdv-dial")

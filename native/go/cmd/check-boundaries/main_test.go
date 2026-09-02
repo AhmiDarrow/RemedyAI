@@ -18,12 +18,13 @@ func TestBoundaryCheckerFindsForbiddenAndMisownedImports(t *testing.T) {
 	}
 	write("runtime/good.go", "package runtime\nimport \"context\"\n")
 	write("runtime/bad.go", "package runtime\nimport (\"os/exec\"; _ \"github.com/Microsoft/go-winio\")\n")
+	write("cmd/bad/main.go", "package main\nimport \"unsafe\"\n")
 	violations, err := check(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	joined := strings.Join(violations, "\n")
-	if !strings.Contains(joined, "forbidden os/exec") || !strings.Contains(joined, "owned by ipc") {
+	if !strings.Contains(joined, "forbidden os/exec") || !strings.Contains(joined, "owned by ipc") || !strings.Contains(joined, "cmd/bad/main.go imports forbidden unsafe") {
 		t.Fatalf("violations=%v", violations)
 	}
 }
