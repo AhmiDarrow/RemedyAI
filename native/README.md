@@ -49,6 +49,11 @@ namespaces, latest-key indexing, and bounded lexical retrieval. Zig validates th
 record framing while Go decides which episodic, semantic, procedural, working, or
 relational memories to retrieve.
 
+The durable event bus assigns monotonic sequence IDs, replays after restart, filters by
+type and source, and exposes bounded subscriber queues with drop-newest, drop-oldest, or
+disconnect policies. Publishing and replay remain race-safe, and slow-consumer loss is
+reported rather than silently blocking the runtime.
+
 Local verification:
 
 ```text
