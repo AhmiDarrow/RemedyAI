@@ -3,6 +3,37 @@ const capability = @import("capability.zig");
 
 pub const max_read_bytes = 16 * 1024 * 1024;
 
+const ParentDir = struct {
+    dir: std.Io.Dir,
+    basename: []const u8,
+    owned: bool,
+
+    fn close(self: ParentDir, io: std.Io) void {
+        if (self.owned) self.dir.close(io);
+    }
+};
+
+/// Resolve each parent one handle at a time without following links. Path-only
+/// validation is insufficient because an in-root symlink or junction can point
+/// outside the granted root between ordinary string checks and mutation.
+fn openParentBeneath(io: std.Io, root: std.Io.Dir, relative_path: []const u8) !ParentDir {
+    var segments = std.mem.splitAny(u8, relative_path, "/\\");
+    var basename = segments.next() orelse return error.InvalidPath;
+    var current = root;
+    var owned = false;
+    while (segments.next()) |next| {
+        const child = current.openDir(io, basename, .{ .follow_symlinks = false }) catch |err| {
+            if (owned) current.close(io);
+            return err;
+        };
+        if (owned) current.close(io);
+        current = child;
+        owned = true;
+        basename = next;
+    }
+    return .{ .dir = current, .basename = basename, .owned = owned };
+}
+
 pub const SearchResult = struct {
     paths: [][]u8,
 
@@ -91,7 +122,36 @@ pub fn copyInDir(
     try capabilities.require(.filesystem_write);
     try capability.validateRelativePath(source_path);
     try capability.validateRelativePath(destination_path);
-    try root.copyFile(source_path, root, destination_path, io, .{ .replace = false });
+    const source_parent = try openParentBeneath(io, root, source_path);
+    defer source_parent.close(io);
+    var source_guard = try source_parent.dir.openFile(io, source_parent.basename, .{
+        .follow_symlinks = false,
+        .resolve_beneath = true,
+    });
+    defer source_guard.close(io);
+    const source_stat = try source_guard.stat(io);
+    if (source_stat.kind != .file) return error.InvalidPath;
+    var source = try source_parent.dir.openFile(io, source_parent.basename, .{
+        .follow_symlinks = true,
+        .resolve_beneath = true,
+    });
+    defer source.close(io);
+
+    const destination_parent = try openParentBeneath(io, root, destination_path);
+    defer destination_parent.close(io);
+    var atomic_file = try destination_parent.dir.createFileAtomic(io, destination_parent.basename, .{
+        .permissions = source_stat.permissions,
+        .replace = false,
+    });
+    defer atomic_file.deinit(io);
+    var file_reader = source.reader(io, &.{});
+    const content = try file_reader.interface.allocRemaining(
+        std.heap.page_allocator,
+        .limited(max_read_bytes),
+    );
+    defer std.heap.page_allocator.free(content);
+    try atomic_file.file.writeStreamingAll(io, content);
+    try atomic_file.link(io);
 }
 
 pub fn moveInDir(
@@ -104,7 +164,16 @@ pub fn moveInDir(
     try capabilities.require(.filesystem_write);
     try capability.validateRelativePath(source_path);
     try capability.validateRelativePath(destination_path);
-    try root.renamePreserve(source_path, root, destination_path, io);
+    const source_parent = try openParentBeneath(io, root, source_path);
+    defer source_parent.close(io);
+    const destination_parent = try openParentBeneath(io, root, destination_path);
+    defer destination_parent.close(io);
+    try source_parent.dir.renamePreserve(
+        source_parent.basename,
+        destination_parent.dir,
+        destination_parent.basename,
+        io,
+    );
 }
 
 pub fn deleteFileInDir(
@@ -115,7 +184,9 @@ pub fn deleteFileInDir(
 ) !void {
     try capabilities.require(.filesystem_delete);
     try capability.validateRelativePath(relative_path);
-    try root.deleteFile(io, relative_path);
+    const parent = try openParentBeneath(io, root, relative_path);
+    defer parent.close(io);
+    try parent.dir.deleteFile(io, parent.basename);
 }
 
 pub fn searchNames(
@@ -223,4 +294,29 @@ test "filesystem mutation, traversal, search, and watch snapshots compose" {
         error.AccessDenied,
         deleteFileInDir(io, capability.Set.one(.filesystem_write), tmp.dir, "alpha.txt"),
     );
+}
+
+test "filesystem mutations reject an in-root link to an outside directory" {
+    const io = std.testing.io;
+    var container = std.testing.tmpDir(.{});
+    defer container.cleanup();
+    try container.dir.createDirPath(io, "root");
+    try container.dir.createDirPath(io, "outside");
+    try container.dir.writeFile(io, .{ .sub_path = "outside/victim.txt", .data = "keep" });
+    container.dir.symLink(io, "../outside", "root/link", .{ .is_directory = true }) catch return error.SkipZigTest;
+    var root = try container.dir.openDir(io, "root", .{});
+    defer root.close(io);
+    const rights = capability.Set.fromBits(
+        capability.Set.one(.filesystem_read).bits |
+            capability.Set.one(.filesystem_write).bits |
+            capability.Set.one(.filesystem_delete).bits,
+    );
+
+    if (copyInDir(io, rights, root, "link/victim.txt", "copy.txt")) |_| return error.TestUnexpectedResult else |_| {}
+    if (moveInDir(io, rights, root, "link/victim.txt", "moved.txt")) |_| return error.TestUnexpectedResult else |_| {}
+    if (deleteFileInDir(io, rights, root, "link/victim.txt")) |_| return error.TestUnexpectedResult else |_| {}
+
+    const content = try readAllInDir(std.testing.allocator, io, rights, container.dir, "outside/victim.txt");
+    defer std.testing.allocator.free(content);
+    try std.testing.expectEqualStrings("keep", content);
 }

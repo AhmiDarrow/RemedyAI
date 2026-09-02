@@ -190,6 +190,27 @@ def create_app(
             atexit.register(_shutdown_vision_decoder)
             _vision_atexit_registered = True
 
+        # Prime the optional native route once at startup. Compatibility mode
+        # returns immediately; auto/native probe only signed, bundled paths and
+        # fall back to Python when unavailable. Keep /api/ping probe-free.
+        try:
+            import asyncio as _asyncio_native
+
+            from remedy.runtime.native_runtime import initialize_native_runtime
+
+            _cfg_native = load_config()
+            await _asyncio_native.wait_for(
+                _asyncio_native.to_thread(
+                    initialize_native_runtime,
+                    _cfg_native if isinstance(_cfg_native, dict) else None,
+                ),
+                timeout=3.0,
+            )
+        except TimeoutError:
+            logger.warning("Native runtime startup probe timed out; using compatibility")
+        except Exception:
+            logger.debug("Native runtime startup probe skipped", exc_info=True)
+
         # Start gateway messengers on uvicorn's event loop (not the pre-uvicorn
         # asyncio.run used during serve bootstrap — that loop is already closed).
         if gateway is not None and not getattr(gateway, "running", False):

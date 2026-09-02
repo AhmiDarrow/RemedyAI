@@ -221,6 +221,10 @@ struct ServerState {
     /// True when Desktop attached to a foreign `remedy serve` (Use existing).
     /// Quit must not tree-kill that process.
     attached_existing: Arc<AtomicBool>,
+    /// Stops the recovery watchdog before an intentional quit/update tears the
+    /// managed process down.  Without this gate, a crash detected in the same
+    /// instant as Quit could be mistaken for a process that needs recovery.
+    app_exiting: Arc<AtomicBool>,
 }
 
 fn current_exe_dir() -> Option<std::path::PathBuf> {
@@ -759,6 +763,111 @@ fn forward_output(label: &str, reader: impl BufRead + Send + 'static) {
     });
 }
 
+/// Watch the managed API process after startup and recover an unexpected exit.
+///
+/// Connect clients are intentionally disposable: closing or unpairing a phone
+/// may close its gateway socket, but it must never be able to leave the whole
+/// desktop API offline.  The Python logs cannot record an abrupt process exit,
+/// so this parent-side watcher also preserves the OS exit status for diagnosis.
+fn sidecar_watchdog(app: AppHandle) {
+    let _ = thread::Builder::new()
+        .name("sidecar-watchdog".into())
+        .spawn(move || loop {
+            thread::sleep(Duration::from_secs(2));
+            let state = app.state::<ServerState>();
+            if state.app_exiting.load(Ordering::SeqCst) {
+                return;
+            }
+            if state.attached_existing.load(Ordering::SeqCst) {
+                continue;
+            }
+
+            let exit = match state.process.lock() {
+                Ok(mut guard) => match guard.as_mut().map(Child::try_wait) {
+                    Some(Ok(Some(status))) => {
+                        let _ = guard.take();
+                        Some(status.to_string())
+                    }
+                    Some(Err(error)) => {
+                        log::warn!("Could not inspect managed sidecar status: {error}");
+                        None
+                    }
+                    _ => None,
+                },
+                Err(poisoned) => {
+                    let mut guard = poisoned.into_inner();
+                    match guard.as_mut().map(Child::try_wait) {
+                        Some(Ok(Some(status))) => {
+                            let _ = guard.take();
+                            Some(status.to_string())
+                        }
+                        Some(Err(error)) => {
+                            log::warn!("Could not inspect managed sidecar status: {error}");
+                            None
+                        }
+                        _ => None,
+                    }
+                }
+            };
+            let Some(status) = exit else {
+                continue;
+            };
+
+            log::error!("Managed Remedy server exited unexpectedly ({status}); recovering");
+            let _ = app.emit("server-starting", ());
+            let cmd = state
+                .sidecar_cmd
+                .lock()
+                .map(|guard| guard.clone().unwrap_or_default())
+                .unwrap_or_default();
+            if cmd.is_empty() {
+                let message = format!(
+                    "Remedy server exited unexpectedly ({status}) and its launch path is unavailable"
+                );
+                log::error!("{message}");
+                let _ = app.emit("server-error", &message);
+                continue;
+            }
+
+            let mut recovered = false;
+            for (attempt, delay) in [0_u64, 2, 5].into_iter().enumerate() {
+                if delay > 0 {
+                    thread::sleep(Duration::from_secs(delay));
+                }
+                if state.app_exiting.load(Ordering::SeqCst) {
+                    return;
+                }
+                log::info!("Sidecar recovery attempt {} after exit {status}", attempt + 1);
+                let spawned = start_sidecar(
+                    &state.process,
+                    &cmd,
+                    SidecarStartMode::ForceRestart,
+                    &state.attached_existing,
+                );
+                if spawned.is_ok() && wait_for_health(Duration::from_secs(30)) {
+                    recovered = true;
+                    break;
+                }
+                if let Err(error) = spawned {
+                    log::error!("Sidecar recovery spawn failed: {error}");
+                } else {
+                    log::error!("Sidecar recovery process did not become healthy");
+                }
+            }
+
+            if recovered {
+                log::info!("Remedy server recovered after unexpected exit ({status})");
+                let _ = app.emit("server-ready", ());
+            } else {
+                let message = format!(
+                    "Remedy server exited unexpectedly ({status}) and did not recover after 3 attempts"
+                );
+                log::error!("{message}");
+                let _ = app.emit("server-error", &message);
+            }
+        });
+}
+
 fn check_health(timeout: Duration) -> bool {
     match TcpStream::connect_timeout(&status_addr(), timeout) {
         Ok(mut stream) => {
@@ -899,6 +1008,7 @@ fn try_stop_vision_http() {
 /// Stop the managed sidecar and any leftover remedy-desktop processes / :7400 listeners.
 /// Must never hang — tray "Quit and stop server" depends on this returning quickly.
 fn shutdown_sidecar(state: &ServerState) {
+    state.app_exiting.store(true, Ordering::SeqCst);
     try_stop_vision_http();
 
     match state.process.lock() {
@@ -3554,7 +3664,9 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
         .latest_version
         .clone();
     // Clone Arc before spawn - State<'_, T> cannot be borrowed inside the worker.
-    let process_slot = app.state::<ServerState>().process.clone();
+    let server_state = app.state::<ServerState>();
+    let process_slot = server_state.process.clone();
+    let app_exiting = server_state.app_exiting.clone();
     // Stage 1 is in-app only. Stage 2 host is launched by the install script after exit.
     // Pre-stage the PS1 in TEMP so the script can start the install popup immediately.
     let _ = ensure_update_ui_ps1_in_temp();
@@ -3681,6 +3793,7 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
             );
 
             // 1) Drop our Child handle for the sidecar.
+            app_exiting.store(true, Ordering::SeqCst);
             match process_slot.lock() {
                 Ok(mut guard) => kill_child(&mut guard),
                 Err(poisoned) => {
@@ -4847,6 +4960,7 @@ pub fn run() {
             desktop_prefs: Arc::new(Mutex::new(load_desktop_prefs())),
             main_window: Mutex::new(None),
             attached_existing: Arc::new(AtomicBool::new(false)),
+            app_exiting: Arc::new(AtomicBool::new(false)),
         })
         .manage(pty_host::PtyState::default())
         .manage(browser_host::BrowserState::default())
@@ -5141,6 +5255,7 @@ pub fn run() {
                                 let _ = handle.emit("server-ready", ());
                                 browser_host::start_computer_host_poller(handle.clone());
                                 self_inject_apply_poller(handle.clone());
+                                sidecar_watchdog(handle.clone());
                             } else {
                                 log::error!("Server failed to start within 90s");
                                 let _ = handle

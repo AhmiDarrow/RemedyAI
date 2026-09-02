@@ -548,7 +548,14 @@ class ConnectClient(
                     p.onChunk(hdr.payload)
                     if (hdr.fin) p.complete()
                 } else {
+                    if (!fragments.containsKey(hdr.id) && fragments.size >= MAX_UNSOLICITED_RESPONSES) {
+                        throw NoiseException("too many unsolicited responses")
+                    }
                     val list = fragments.getOrPut(hdr.id) { ArrayList() }
+                    if (list.sumOf { it.size.toLong() } + hdr.payload.size > MAX_RESPONSE_BYTES) {
+                        fragments.remove(hdr.id)
+                        throw NoiseException("response too large")
+                    }
                     list += hdr.payload
                     if (hdr.fin) {
                         fragments.remove(hdr.id)
@@ -568,8 +575,14 @@ class ConnectClient(
         private val done = LinkedBlockingQueue<Boolean>(1)
         @Volatile
         var error: Exception? = null
+        private var received = 0L
 
         fun onChunk(b: ByteArray) {
+            received += b.size
+            if (received > MAX_RESPONSE_BYTES) {
+                fail(NoiseException("response too large"))
+                return
+            }
             try {
                 stream?.write(b)
                 stream?.flush()
@@ -609,6 +622,8 @@ class ConnectClient(
     companion object {
         /** Mirrors the host's MAX_BAD_RECORDS for relay / rendezvous sessions. */
         private const val MAX_BAD_RECORDS = 32
+        private const val MAX_RESPONSE_BYTES = 16L * 1024 * 1024
+        private const val MAX_UNSOLICITED_RESPONSES = 32
 
         private fun concat(parts: List<ByteArray>): ByteArray {
             val n = parts.sumOf { it.size }

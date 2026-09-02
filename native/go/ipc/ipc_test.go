@@ -82,3 +82,43 @@ func TestDisconnectUnblocksPendingCall(t *testing.T) {
 		t.Fatal("pending call remained blocked")
 	}
 }
+
+func TestServerRejectsDuplicateActiveCorrelationID(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	release := make(chan struct{})
+	started := make(chan struct{})
+	go ServeConn(context.Background(), serverConn, HandlerFunc(func(_ context.Context, request protocol.Frame) ([]protocol.Frame, error) {
+		close(started)
+		<-release
+		return []protocol.Frame{{Kind: protocol.KindToolResult, Payload: request.Payload}}, nil
+	}))
+	defer clientConn.Close()
+	id := [16]byte{7}
+	first := protocol.Frame{Kind: protocol.KindToolRequest, CorrelationID: id, Payload: []byte("first")}
+	if err := protocol.WriteFrame(clientConn, first); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	wroteDuplicate := make(chan error, 1)
+	go func() {
+		wroteDuplicate <- protocol.WriteFrame(clientConn, protocol.Frame{Kind: protocol.KindToolRequest, CorrelationID: id, Payload: []byte("second")})
+	}()
+	rejected, err := protocol.ReadFrame(clientConn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-wroteDuplicate; err != nil {
+		t.Fatal(err)
+	}
+	if rejected.Flags != 1 || string(rejected.Payload) != ErrDuplicateCall.Error() {
+		t.Fatalf("duplicate response = %#v", rejected)
+	}
+	close(release)
+	original, err := protocol.ReadFrame(clientConn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(original.Payload) != "first" {
+		t.Fatalf("original response = %#v", original)
+	}
+}

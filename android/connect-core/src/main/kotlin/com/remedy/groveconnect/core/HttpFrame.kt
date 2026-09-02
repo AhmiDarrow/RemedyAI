@@ -66,6 +66,7 @@ object HttpFrame {
         if (buf.remaining() < len) throw NoiseException("short inner payload")
         val payload = ByteArray(len)
         buf.get(payload)
+        if (buf.hasRemaining()) throw NoiseException("trailing inner frame data")
         return Header(type, id, flags, payload)
     }
 
@@ -89,7 +90,9 @@ object HttpFrame {
         val buf = ByteBuffer.allocate(
             1 + method.size + 2 + target.size + 2 + headers.size + 4 + req.body.size,
         ).order(ByteOrder.BIG_ENDIAN)
-        require(method.size <= 255)
+        require(method.size <= 255) { "HTTP method too long" }
+        require(target.size <= 65535) { "HTTP target too long" }
+        require(headers.size <= 65535) { "HTTP headers too long" }
         buf.put(method.size.toByte())
         buf.put(method)
         buf.putShort(target.size.toShort())
@@ -102,6 +105,7 @@ object HttpFrame {
     }
 
     fun decodeRequest(payload: ByteArray): HttpRequest {
+        if (payload.size < 9) throw NoiseException("short http request")
         val buf = ByteBuffer.wrap(payload).order(ByteOrder.BIG_ENDIAN)
         val mlen = buf.get().toInt() and 0xff
         val method = ByteArray(mlen).also { buf.get(it) }.toString(Charsets.US_ASCII)
@@ -110,13 +114,15 @@ object HttpFrame {
         val hlen = buf.short.toInt() and 0xffff
         val headers = ByteArray(hlen).also { buf.get(it) }.toString(Charsets.UTF_8)
         val blen = buf.int
-        if (blen < 0 || buf.remaining() < blen) throw NoiseException("short http body")
+        if (blen < 0 || buf.remaining() != blen) throw NoiseException("invalid http body length")
         val body = ByteArray(blen).also { buf.get(it) }
         return HttpRequest(method, target, headers, body)
     }
 
     fun encodeResponse(res: HttpResponse): ByteArray {
         val headers = res.headers.toByteArray(Charsets.UTF_8)
+        require(res.status in 100..999) { "invalid HTTP status" }
+        require(headers.size <= 65535) { "HTTP headers too long" }
         val buf = ByteBuffer.allocate(2 + 2 + headers.size + 4 + res.body.size).order(ByteOrder.BIG_ENDIAN)
         buf.putShort(res.status.toShort())
         buf.putShort(headers.size.toShort())
@@ -128,12 +134,13 @@ object HttpFrame {
 
     fun decodeResponse(payload: ByteArray): HttpResponse {
         if (looksLikeHttp1(payload)) return decodeHttp1(payload)
+        if (payload.size < 8) throw NoiseException("short http response")
         val buf = ByteBuffer.wrap(payload).order(ByteOrder.BIG_ENDIAN)
         val status = buf.short.toInt() and 0xffff
         val hlen = buf.short.toInt() and 0xffff
         val headers = ByteArray(hlen).also { buf.get(it) }.toString(Charsets.UTF_8)
         val blen = buf.int
-        if (blen < 0 || buf.remaining() < blen) throw NoiseException("short http body")
+        if (blen < 0 || buf.remaining() != blen) throw NoiseException("invalid http body length")
         val body = ByteArray(blen).also { buf.get(it) }
         return HttpResponse(status, headers, body)
     }

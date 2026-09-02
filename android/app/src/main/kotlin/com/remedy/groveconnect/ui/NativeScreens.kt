@@ -23,6 +23,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
@@ -30,13 +32,11 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -126,6 +126,10 @@ fun HomeScreen(
     val sessionsApi = remember { SessionsApi(api) }
     val terminalApi = remember { TerminalApi(api) }
     var preferredModel by remember { mutableStateOf<String?>(null) }
+    val visibleTabs = HomeTab.entries.filter { it.isAllowed(state) }
+    LaunchedEffect(state.panes) {
+        if (tab !in visibleTabs) tab = visibleTabs.firstOrNull() ?: HomeTab.Approvals
+    }
 
     Column(Modifier.fillMaxSize().background(BgPrimary).statusBarsPadding()) {
         Row(
@@ -165,11 +169,11 @@ fun HomeScreen(
             }
         }
         NavigationBar(containerColor = BgSecondary, contentColor = TextPrimary) {
-            HomeTab.entries.forEach { t ->
+            visibleTabs.forEach { t ->
                 NavigationBarItem(
                     selected = tab == t,
                     onClick = { tab = t },
-                    icon = { Icon(HomeTabIcon(t), contentDescription = t.label, modifier = Modifier.size(22.dp)) },
+                    icon = { Icon(homeTabIcon(t), contentDescription = t.label, modifier = Modifier.size(22.dp)) },
                     label = { Text(t.label, fontSize = 11.sp) },
                     colors = androidx.compose.material3.NavigationBarItemDefaults.colors(
                         selectedIconColor = Accent,
@@ -184,10 +188,18 @@ fun HomeScreen(
     }
 }
 
-@Composable
-private fun HomeTabIcon(tab: HomeTab) = when (tab) {
-    HomeTab.Chat -> Icons.Filled.Chat
-    HomeTab.Sessions -> Icons.Filled.List
+internal fun HomeTab.isAllowed(state: RemoteState): Boolean = when (this) {
+    HomeTab.Chat -> state.panes.isVisible("chat") && state.panes.isVisible("sessions")
+    HomeTab.Sessions -> state.panes.isVisible("sessions")
+    HomeTab.Approvals -> true // Safety controls are never hidden.
+    HomeTab.Terminal -> state.panes.isVisible("rails")
+    HomeTab.Grove -> state.panes.isVisible("live_ui")
+    HomeTab.Settings -> state.panes.isVisible("settings_write")
+}
+
+private fun homeTabIcon(tab: HomeTab) = when (tab) {
+    HomeTab.Chat -> Icons.AutoMirrored.Filled.Chat
+    HomeTab.Sessions -> Icons.AutoMirrored.Filled.List
     HomeTab.Approvals -> Icons.Filled.Warning
     HomeTab.Terminal -> Icons.Filled.Terminal
     HomeTab.Grove -> Icons.Filled.Menu
@@ -377,7 +389,6 @@ private fun ChatTab(
         ChatScreen(
             sessionsApi, sessionId!!,
             onBack = { sessionId = null; following = false },
-            onStop = onStop,
             following = following,
             onToggleFollow = { following = !following },
         )
@@ -471,7 +482,6 @@ private fun ChatScreen(
     sessionsApi: SessionsApi,
     sessionId: String,
     onBack: () -> Unit,
-    onStop: () -> Unit,
     following: Boolean,
     onToggleFollow: () -> Unit,
 ) {
@@ -514,7 +524,12 @@ private fun ChatScreen(
                 Text(if (following) "Following" else "Follow", color = if (following) Accent else TextMuted, fontSize = 12.sp)
             }
             if (streaming) {
-                IconButton(onClick = onStop) {
+                IconButton(onClick = {
+                    scope.launch {
+                        val stopped = withContext(Dispatchers.IO) { sessionsApi.stop(sessionId) }
+                        if (!stopped) error = "Could not stop this session."
+                    }
+                }) {
                     Icon(Icons.Filled.Stop, contentDescription = "Stop", tint = Error, modifier = Modifier.size(22.dp))
                 }
             }

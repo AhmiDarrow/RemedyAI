@@ -14,7 +14,10 @@ import (
 
 const Version = 1
 
-var ErrUnsupportedVersion = errors.New("unsupported runtime-state version")
+var (
+	ErrUnsupportedVersion = errors.New("unsupported runtime-state version")
+	ErrEventGap           = errors.New("runtime-state event sequence gap")
+)
 
 type Goal struct {
 	ID          string `json:"id"`
@@ -72,6 +75,9 @@ func (s *Store) Apply(event events.Event) error {
 	defer s.mu.Unlock()
 	if event.Sequence <= s.snapshot.LastEvent {
 		return nil
+	}
+	if event.Sequence != s.snapshot.LastEvent+1 {
+		return fmt.Errorf("%w: got %d after %d", ErrEventGap, event.Sequence, s.snapshot.LastEvent)
 	}
 	var mutation Mutation
 	if err := json.Unmarshal(event.Data, &mutation); err != nil {

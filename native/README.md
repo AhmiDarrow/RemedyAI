@@ -13,12 +13,14 @@ not weaken owner checkpoints, write-jail rules, credential isolation, or Windows
 
 The Zig library exposes its versioned C surface through `zig/include/remedy_core.h`.
 Capability bits are deny-by-default. Path validation is paired with the operating system's
-resolve-beneath file-open option; process policy and signed capability tokens are added by
-the Phase 3 security boundary before the substrate is connected to production.
+resolve-beneath file-open option and handle-relative, no-follow parent traversal for every
+mutation; process policy and signed capability tokens are added by the Phase 3 security
+boundary before the substrate is connected to production.
 
 The security boundary now authenticates short-lived grants with HMAC-SHA-256, binds them
-to an agent and workspace scope, consumes each nonce once, and requires a separate signed
-owner-checkpoint right for checkpointed operations. Process execution is default-deny and
+to an agent and workspace scope, consumes each nonce once under synchronization, prunes
+expired nonces, and requires a separate signed owner-checkpoint right for checkpointed
+operations. Process execution is default-deny and
 uses exact executable rules plus per-argument prefix constraints. Keys are supplied by the
 host secret store; no signing key is compiled into the library or repository.
 
@@ -31,7 +33,8 @@ Local IPC uses the shared bounded frame format over current-user Windows named p
 mode-0600 Unix sockets. Calls retain correlation IDs across concurrent work, propagate
 cancellation, and unblock on disconnect. A loopback-only HTTP compatibility handler keeps
 the existing FastAPI product reachable during reversible migration and blocks off-machine
-targets and redirects.
+targets and redirects. Duplicate active correlation IDs are rejected and each connection
+has a fixed in-flight ceiling.
 
 The Go cognition engine represents observation, model streaming, policy, action, state
 update, pause, completion, and failure as traceable transitions. It supports bounded model
@@ -51,33 +54,40 @@ relational memories to retrieve.
 
 The durable event bus assigns monotonic sequence IDs, replays after restart, filters by
 type and source, and exposes bounded subscriber queues with drop-newest, drop-oldest, or
-disconnect policies. Publishing and replay remain race-safe, and slow-consumer loss is
-reported rather than silently blocking the runtime.
+disconnect policies. Failed writes roll back their partial record before a sequence is
+committed. Publishing and replay remain race-safe, and slow-consumer loss is reported
+rather than silently blocking the runtime.
 
 Persistent runtime state checkpoints goals, tasks, environment, relationships, and
 self-state with schema versions and the last applied event sequence. Checkpoints use
 atomic replacement on Windows and Linux; restart replay ignores duplicate events and
-never treats abandoned temporary files as authoritative state.
+never treats abandoned temporary files as authoritative state. A gap stops replay instead
+of silently advancing past missing mutations.
 
 The scheduler supports one-shot, recurring, event-triggered, and goal-triggered jobs;
 dependency DAGs; priority ordering; deadlines; run/time budgets; cancellation; and
 snapshot/restore. Its tick input is deterministic for tests, while its run loop can be
-supervised by the persistent runtime.
+supervised by the persistent runtime. Canceling a running or queued job cancels its context,
+preserves the canceled status, and never rearms recurring work.
 
 Hive agents are lightweight supervised goroutines with explicit identity, goals, memory
 scope, and capability sets. Child capabilities must be a subset of the parent's delegated
 set, mailboxes are bounded, terminal agents remain inspectable without consuming active
 quota, crashes are isolated, and parent shutdown cancels the whole tree.
+Messages sent by agents are identity-bound and remain within the same memory scope and
+delegation tree; the trusted manager retains an explicit control-plane delivery path.
 
 Python is represented as a supervised capability-worker protocol for model, vision,
 speech, and research operations. Workers negotiate a protocol version and health state,
 support unary and streaming calls, inherit request cancellation/deadlines, restart within
-a bounded budget after transport failure, and cannot take down the Go runtime.
+a bounded budget after transport failure, and cannot take down the Go runtime. Automatic
+replay after an uncertain unary failure requires an explicit idempotency declaration;
+incomplete streams are retired and reconnected without removing streaming capability.
 
 Language ownership is machine-checked: Go cannot directly spawn processes or use
 unsafe/syscall packages, third-party dependencies have named package owners, and native
-Go cannot import Python packages. See `BOUNDARIES.md`; the same check runs in Windows and
-Linux CI.
+Go cannot import Python packages. Command entry points are checked too. See `BOUNDARIES.md`;
+the same check runs in Windows and Linux CI.
 
 RDNA v1 represents semantic action, target, constraints, expected evidence, and fallback
 intent without embedding executable code. Compilation is deterministic and preserves

@@ -22,7 +22,7 @@ class PaneFlagsTest {
         assertTrue(p.isVisible("chat"))
         assertFalse(p.isVisible("rails"))
         assertFalse(p.isVisible("computer_preview"))
-        assertTrue(p.isVisible("settings_write"))
+        assertFalse(p.isVisible("settings_write"))
     }
 
     @Test
@@ -44,10 +44,12 @@ class PaneFlagsTest {
     }
 
     @Test
-    fun nullMeansAllOn() {
+    fun nullUsesPcSecurityDefaults() {
         val p = PaneFlags.parse(null)
-        assertTrue(PaneFlags.KNOWN.all { p.isVisible(it) })
-        assertEquals(emptyList(), p.hidden())
+        assertTrue(p.isVisible("chat"))
+        assertTrue(p.isVisible("approvals"))
+        assertFalse(p.isVisible("computer_preview"))
+        assertFalse(p.isVisible("settings_write"))
     }
 
     @Test

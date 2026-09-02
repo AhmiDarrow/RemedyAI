@@ -25,7 +25,13 @@ data class PaneFlags(
             "settings_write",
         )
 
-        fun allOn(): PaneFlags = PaneFlags(KNOWN.associateWith { true })
+        /** Mirrors DEFAULT_PANES on the PC; sensitive capabilities fail closed. */
+        fun defaults(): PaneFlags = PaneFlags(
+            KNOWN.associateWith { it != "computer_preview" && it != "settings_write" },
+        )
+
+        @Deprecated("Use defaults() so missing host data does not enable sensitive panes")
+        fun allOn(): PaneFlags = defaults()
 
         /**
          * Accepts:
@@ -36,11 +42,11 @@ data class PaneFlags(
          */
         fun parse(raw: Any?): PaneFlags {
             when (raw) {
-                null -> return allOn()
+                null -> return defaults()
                 is PaneFlags -> return raw
                 is Map<*, *> -> {
                     val m = linkedMapOf<String, Boolean>()
-                    for (id in KNOWN) m[id] = true
+                    for ((id, enabled) in defaults().flags) m[id] = enabled
                     for ((k, v) in raw) {
                         val key = k?.toString()?.lowercase()?.trim() ?: continue
                         m[key] = truthy(v)
@@ -57,13 +63,13 @@ data class PaneFlags(
                 }
                 is String -> {
                     val s = raw.trim()
-                    if (s.isEmpty()) return allOn()
+                    if (s.isEmpty()) return defaults()
                     if (s.startsWith("{")) return parseObjectString(s)
                     if (s.startsWith("[")) return parseArrayString(s)
                     val on = s.split(',', ' ').map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
                     return fromAllowlist(on)
                 }
-                else -> return allOn()
+                else -> return defaults()
             }
         }
 
@@ -94,9 +100,9 @@ data class PaneFlags(
 
         private fun parseObjectString(s: String): PaneFlags {
             val inner = s.trim().removePrefix("{").removeSuffix("}")
-            if (inner.isBlank()) return allOn()
+            if (inner.isBlank()) return defaults()
             val m = linkedMapOf<String, Boolean>()
-            for (id in KNOWN) m[id] = true
+            for ((id, enabled) in defaults().flags) m[id] = enabled
             for (part in inner.split(',')) {
                 val idx = part.indexOf(':')
                 if (idx <= 0) continue

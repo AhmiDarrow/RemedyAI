@@ -10,7 +10,22 @@ import (
 	"strconv"
 )
 
-var benchmarkLine = regexp.MustCompile(`^(Benchmark\S+?)(?:-\d+)?\s+\d+\s+([0-9.]+)\s+ns/op`)
+var (
+	benchmarkLine      = regexp.MustCompile(`^(Benchmark\S+)\s+\d+\s+([0-9.]+)\s+ns/op`)
+	benchmarkCPUSuffix = regexp.MustCompile(`-\d+$`)
+)
+
+func parseBenchmarkLine(line string) (string, float64, bool) {
+	match := benchmarkLine.FindStringSubmatch(line)
+	if match == nil {
+		return "", 0, false
+	}
+	value, err := strconv.ParseFloat(match[2], 64)
+	if err != nil {
+		return "", 0, false
+	}
+	return benchmarkCPUSuffix.ReplaceAllString(match[1], ""), value, true
+}
 
 func main() {
 	budgetPath := flag.String("budgets", "../benchmarks/budgets.json", "budget file")
@@ -36,18 +51,17 @@ func main() {
 	failed := false
 	scanner := bufio.NewScanner(input)
 	for scanner.Scan() {
-		match := benchmarkLine.FindStringSubmatch(scanner.Text())
-		if match == nil {
-			continue
-		}
-		value, _ := strconv.ParseFloat(match[2], 64)
-		limit, ok := budgets[match[1]]
+		name, value, ok := parseBenchmarkLine(scanner.Text())
 		if !ok {
 			continue
 		}
-		seen[match[1]] = true
+		limit, ok := budgets[name]
+		if !ok {
+			continue
+		}
+		seen[name] = true
 		if value > limit {
-			fmt.Fprintf(os.Stderr, "%s %.0f ns/op exceeds %.0f ns/op\n", match[1], value, limit)
+			fmt.Fprintf(os.Stderr, "%s %.0f ns/op exceeds %.0f ns/op\n", name, value, limit)
 			failed = true
 		}
 	}

@@ -125,7 +125,6 @@ func (b *Bus) Publish(event Event) (Event, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	event.Sequence = b.next
-	b.next++
 	if event.At.IsZero() {
 		event.At = time.Now().UTC()
 	}
@@ -139,15 +138,27 @@ func (b *Bus) Publish(event Event) (Event, error) {
 	var header [8]byte
 	binary.LittleEndian.PutUint32(header[:4], uint32(len(payload)))
 	binary.LittleEndian.PutUint32(header[4:], crc32.ChecksumIEEE(payload))
-	if _, err = b.file.Write(header[:]); err != nil {
+	start, err := b.file.Seek(0, io.SeekCurrent)
+	if err != nil {
 		return Event{}, err
 	}
-	if _, err = b.file.Write(payload); err != nil {
+	rollback := func() {
+		_ = b.file.Truncate(start)
+		_, _ = b.file.Seek(start, io.SeekStart)
+	}
+	if err = writeAll(b.file, header[:]); err != nil {
+		rollback()
+		return Event{}, err
+	}
+	if err = writeAll(b.file, payload); err != nil {
+		rollback()
 		return Event{}, err
 	}
 	if err = b.file.Sync(); err != nil {
+		rollback()
 		return Event{}, err
 	}
+	b.next++
 	b.events = append(b.events, clone(event))
 	for id, sub := range b.subscribers {
 		if !sub.filter.matches(event) {
@@ -189,6 +200,20 @@ func (b *Bus) Publish(event Event) (Event, error) {
 		}
 	}
 	return clone(event), nil
+}
+
+func writeAll(writer io.Writer, payload []byte) error {
+	for len(payload) > 0 {
+		written, err := writer.Write(payload)
+		if err != nil {
+			return err
+		}
+		if written == 0 {
+			return io.ErrShortWrite
+		}
+		payload = payload[written:]
+	}
+	return nil
 }
 
 func (b *Bus) Subscribe(filter Filter, capacity int, overflow Overflow) Subscription {

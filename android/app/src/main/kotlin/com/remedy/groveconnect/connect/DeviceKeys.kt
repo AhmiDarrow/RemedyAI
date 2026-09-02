@@ -1,5 +1,6 @@
 package com.remedy.groveconnect.connect
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
@@ -19,19 +20,27 @@ import com.remedy.groveconnect.core.UrlSafeB64
 class DeviceKeys(ctx: Context) {
     private val prefs: SharedPreferences = encryptedPrefs(ctx)
 
+    @SuppressLint("ApplySharedPref") // Key durability is required before a handshake can be reported successful.
     fun staticPair(): Pair<ByteArray, ByteArray> {
         val existing = prefs.getString(KEY_PRIV, null)
         if (existing != null) {
-            val priv = UrlSafeB64.decode(existing)
-            val pub = prefs.getString(KEY_PUB, null)?.let { UrlSafeB64.decode(it) }
-                ?: Crypto.x25519Public(priv)
-            return priv to pub
+            try {
+                val priv = UrlSafeB64.decode(existing)
+                require(priv.size == Protocol.KEY_LEN)
+                // The private key is authoritative; deriving prevents a corrupt
+                // cached public key from permanently breaking Noise handshakes.
+                return priv to Crypto.x25519Public(priv)
+            } catch (e: Exception) {
+                Log.w(TAG, "device key invalid, clearing pairing: ${e.javaClass.simpleName}")
+                prefs.edit().clear().commit()
+                throw IllegalStateException("Phone security key was repaired. Pair this phone again.", e)
+            }
         }
         val (priv, pub) = Crypto.generateX25519()
-        prefs.edit()
+        check(prefs.edit()
             .putString(KEY_PRIV, UrlSafeB64.encode(priv))
             .putString(KEY_PUB, UrlSafeB64.encode(pub))
-            .apply()
+            .commit()) { "Could not save the phone security key." }
         return priv to pub
     }
 
@@ -80,8 +89,19 @@ class DeviceKeys(ctx: Context) {
 class PairStore(ctx: Context) {
     private val prefs = DeviceKeys.encryptedPrefs(ctx)
 
-    fun pinnedHostPub(): ByteArray? =
-        prefs.getString(PIN, null)?.let { UrlSafeB64.decode(it) }
+    fun pinnedHostPub(): ByteArray? {
+        val raw = prefs.getString(PIN, null) ?: return null
+        return try {
+            val decoded = UrlSafeB64.decode(raw)
+            if (decoded.size == Protocol.KEY_LEN) decoded else {
+                clearPair()
+                null
+            }
+        } catch (_: Exception) {
+            clearPair()
+            null
+        }
+    }
 
     fun pinHost(hostPub: ByteArray) {
         require(hostPub.size == Protocol.KEY_LEN)
@@ -144,16 +164,37 @@ class PairStore(ctx: Context) {
         }
     }
 
+    @SuppressLint("ApplySharedPref")
     fun saveDeviceId(id: String) {
-        prefs.edit().putString(DEVICE, id).apply()
+        check(prefs.edit().putString(DEVICE, id).commit()) { "Could not save paired device identity." }
     }
 
     fun deviceId(): String? = prefs.getString(DEVICE, null)
 
     fun isPaired(): Boolean = pinnedHostPub() != null
 
+    /** Persist a complete, versioned pairing in one durable transaction. */
+    @SuppressLint("ApplySharedPref") // Pairing fields must land atomically and durably.
+    fun savePair(qr: com.remedy.groveconnect.core.QrPayload) {
+        val edit = prefs.edit()
+            .putInt(VERSION, 1)
+            .putString(PIN, UrlSafeB64.encode(qr.hostPub))
+            .putString(LAN, "${qr.lanHost}:${qr.lanPort}")
+        if (qr.tailscaleHost.isNullOrBlank() || qr.tailscalePort == null) edit.remove(TS)
+        else edit.putString(TS, "${qr.tailscaleHost}:${qr.tailscalePort}")
+        if (qr.relayHost.isNullOrBlank() || qr.relayPort == null) edit.remove(RELAY)
+        else edit.putString(RELAY, "${qr.relayHost}:${qr.relayPort}")
+        if (qr.rdvHosts.isEmpty()) edit.remove(RDV)
+        else edit.putString(RDV, qr.rdvHosts.joinToString(";") { "${it.first}:${it.second}" })
+        check(edit.commit()) { "Could not save pairing securely." }
+    }
+
+    @SuppressLint("ApplySharedPref") // Revocation must be durable before returning to the UI.
     fun clearPair() {
-        prefs.edit().remove(PIN).remove(LAN).remove(RELAY).remove(RDV).remove(DEVICE).remove(TS).apply()
+        check(
+            prefs.edit().remove(VERSION).remove(PIN).remove(LAN).remove(RELAY)
+                .remove(RDV).remove(DEVICE).remove(TS).commit(),
+        ) { "Could not securely remove this pairing." }
     }
 
     companion object {
@@ -163,5 +204,6 @@ class PairStore(ctx: Context) {
         private const val RELAY = "last_relay"
         private const val RDV = "rdv_hosts"
         private const val DEVICE = "device_id"
+        private const val VERSION = "pair_version"
     }
 }

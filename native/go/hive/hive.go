@@ -15,6 +15,7 @@ var (
 	ErrAgentNotFound        = errors.New("agent not found")
 	ErrCapabilityEscalation = errors.New("child capability exceeds parent delegation")
 	ErrMailboxFull          = errors.New("agent mailbox is full")
+	ErrMessageScope         = errors.New("message crosses the agent delegation scope")
 )
 
 type Status string
@@ -60,7 +61,7 @@ type Agent struct {
 
 func (a *Agent) ID() string                 { return a.id }
 func (a *Agent) Inbox() <-chan Message      { return a.inbox }
-func (a *Agent) Send(message Message) error { message.From = a.id; return a.send(message) }
+func (a *Agent) Send(message Message) error { return a.send(message) }
 
 type managed struct {
 	spec      Spec
@@ -140,7 +141,9 @@ func (m *Manager) run(ctx context.Context, managed *managed) {
 	m.mu.Lock()
 	managed.status = Running
 	m.mu.Unlock()
-	agent := &Agent{id: managed.spec.ID, inbox: managed.inbox, send: m.Send}
+	agent := &Agent{id: managed.spec.ID, inbox: managed.inbox, send: func(message Message) error {
+		return m.sendFrom(managed.spec.ID, message)
+	}}
 	err := invoke(ctx, func() error { return managed.spec.Run(ctx, agent) })
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -154,6 +157,30 @@ func (m *Manager) run(ctx context.Context, managed *managed) {
 	}
 }
 func (m *Manager) Send(message Message) error {
+	// Manager.Send is the trusted control-plane delivery path. Never preserve a
+	// caller-supplied From value that could impersonate a supervised agent.
+	message.From = ""
+	return m.deliver(message)
+}
+func (m *Manager) sendFrom(senderID string, message Message) error {
+	m.mu.RLock()
+	sender := m.agents[senderID]
+	target := m.agents[message.To]
+	if sender == nil || target == nil {
+		m.mu.RUnlock()
+		return ErrAgentNotFound
+	}
+	allowed := sender.spec.MemoryScope != "" &&
+		sender.spec.MemoryScope == target.spec.MemoryScope &&
+		m.rootLocked(senderID) == m.rootLocked(message.To)
+	m.mu.RUnlock()
+	if !allowed {
+		return ErrMessageScope
+	}
+	message.From = senderID
+	return m.deliver(message)
+}
+func (m *Manager) deliver(message Message) error {
 	message.Payload = append([]byte(nil), message.Payload...)
 	message.At = time.Now().UTC()
 	m.mu.RLock()
@@ -167,6 +194,16 @@ func (m *Manager) Send(message Message) error {
 		return nil
 	default:
 		return ErrMailboxFull
+	}
+}
+
+func (m *Manager) rootLocked(id string) string {
+	for {
+		agent := m.agents[id]
+		if agent == nil || agent.spec.Parent == "" {
+			return id
+		}
+		id = agent.spec.Parent
 	}
 }
 func (m *Manager) Cancel(id string) error {

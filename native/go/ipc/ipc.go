@@ -14,7 +14,11 @@ import (
 var (
 	ErrInvalidEndpoint = errors.New("invalid Remedy IPC endpoint")
 	ErrDisconnected    = errors.New("Remedy IPC disconnected")
+	ErrDuplicateCall   = errors.New("duplicate active correlation ID")
+	ErrTooManyCalls    = errors.New("too many concurrent Remedy IPC calls")
 )
+
+const maxConcurrentCalls = 256
 
 type Handler interface {
 	Handle(context.Context, protocol.Frame) ([]protocol.Frame, error)
@@ -67,6 +71,18 @@ func ServeConn(ctx context.Context, conn net.Conn, handler Handler) {
 		}
 		callCtx, cancel := context.WithCancel(ctx)
 		callsMu.Lock()
+		if _, exists := calls[frame.CorrelationID]; exists {
+			callsMu.Unlock()
+			cancel()
+			writeError(conn, &writeMu, frame.CorrelationID, ErrDuplicateCall)
+			continue
+		}
+		if len(calls) >= maxConcurrentCalls {
+			callsMu.Unlock()
+			cancel()
+			writeError(conn, &writeMu, frame.CorrelationID, ErrTooManyCalls)
+			continue
+		}
 		calls[frame.CorrelationID] = cancel
 		callsMu.Unlock()
 		go func(request protocol.Frame) {
@@ -86,6 +102,17 @@ func ServeConn(ctx context.Context, conn net.Conn, handler Handler) {
 			}
 		}(frame)
 	}
+}
+
+func writeError(conn net.Conn, mu *sync.Mutex, id [16]byte, err error) {
+	mu.Lock()
+	defer mu.Unlock()
+	_ = protocol.WriteFrame(conn, protocol.Frame{
+		Kind:          protocol.KindToolResult,
+		Flags:         1,
+		CorrelationID: id,
+		Payload:       []byte(err.Error()),
+	})
 }
 
 type Client struct {

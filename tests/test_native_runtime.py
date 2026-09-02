@@ -14,9 +14,9 @@ def _clear_native_runtime(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("REMEDY_NATIVE_RUNTIME", raising=False)
     monkeypatch.delenv("REMEDY_NATIVE_RUNTIME_BIN", raising=False)
     monkeypatch.delenv("REMEDY_NATIVE_CORE_LIB", raising=False)
-    native_runtime.invalidate_native_runtime_cache()
+    native_runtime.invalidate_native_runtime_cache(reset_config=True)
     yield
-    native_runtime.invalidate_native_runtime_cache()
+    native_runtime.invalidate_native_runtime_cache(reset_config=True)
 
 
 def test_compatibility_is_default_and_never_probes(monkeypatch: pytest.MonkeyPatch):
@@ -65,6 +65,27 @@ def test_nonblocking_status_never_starts_probe(monkeypatch: pytest.MonkeyPatch):
     assert status["fallback"] == "probe-pending"
     go_probe.assert_not_called()
     zig_probe.assert_not_called()
+
+
+def test_startup_initialization_primes_configured_selector(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        native_runtime,
+        "_probe_go",
+        lambda: native_runtime._ComponentProbe(True, detail={"protocol": 1}),
+    )
+    monkeypatch.setattr(
+        native_runtime,
+        "_load_zig",
+        lambda: (native_runtime._ComponentProbe(True, detail={"abi": 1}), object()),
+    )
+
+    initialized = native_runtime.initialize_native_runtime({"native_runtime": "auto"})
+    cached = native_runtime.native_runtime_status(probe=False)
+
+    assert initialized["effective"] == "native"
+    assert cached["effective"] == "native"
 
 
 def test_auto_falls_back_with_public_evidence(monkeypatch: pytest.MonkeyPatch):

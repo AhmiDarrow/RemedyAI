@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 )
 
 const Version = 1
@@ -151,6 +152,13 @@ func Decode(raw []byte) (Intent, error) {
 	decoder.DisallowUnknownFields()
 	var intent Intent
 	if err := decoder.Decode(&intent); err != nil {
+		return Intent{}, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return Intent{}, errors.New("trailing RDNA intent data")
+		}
 		return Intent{}, err
 	}
 	if err := Validate(intent); err != nil {

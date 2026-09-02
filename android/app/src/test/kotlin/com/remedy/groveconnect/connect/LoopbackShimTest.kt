@@ -6,6 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.Socket
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlin.concurrent.thread
 
 class LoopbackShimTest {
     private val unauthenticated = listOf(
@@ -71,6 +72,53 @@ class LoopbackShimTest {
             )
             assertTrue(headerReq.startsWith("HTTP/1.1 200"))
             assertEquals("/assets/index-abc.js", forwarded.last())
+        } finally {
+            shim.stop()
+        }
+    }
+
+    @Test
+    fun rejectsUnterminatedHeadersAndInvalidLengths() {
+        val shim = LoopbackShim { _, _, _, _, output -> writeOk(output) }
+        val port = shim.start()
+        try {
+            val oversized = "GET / HTTP/1.1\r\nX-Fill: " + "x".repeat(64 * 1024)
+            assertTrue(exchange(port, oversized).startsWith("HTTP/1.1 431"))
+            val negative = "POST /${shim.token}/ HTTP/1.1\r\nContent-Length: -1\r\n\r\n"
+            assertTrue(exchange(port, negative).startsWith("HTTP/1.1 400"))
+            val conflicting = "POST /${shim.token}/ HTTP/1.1\r\nContent-Length: 0\r\nContent-Length: 1\r\n\r\n"
+            assertTrue(exchange(port, conflicting).startsWith("HTTP/1.1 400"))
+        } finally {
+            shim.stop()
+        }
+    }
+
+    @Test
+    fun trickledHeadersCannotExtendTheAbsoluteDeadline() {
+        val shim = LoopbackShim(
+            pipe = ShimPipe { _, _, _, _, output -> writeOk(output) },
+            headerDeadlineMs = 150,
+        )
+        val port = shim.start()
+        try {
+            Socket("127.0.0.1", port).use { sock ->
+                sock.soTimeout = 2_000
+                val sender = thread(isDaemon = true) {
+                    try {
+                        val output = sock.getOutputStream()
+                        for (byte in "GET /${shim.token}/ HTTP/1.1\r\n".toByteArray()) {
+                            output.write(byte.toInt())
+                            output.flush()
+                            Thread.sleep(30)
+                        }
+                    } catch (_: Exception) {
+                        // Expected once the deadline closes the connection.
+                    }
+                }
+                val response = sock.getInputStream().readBytes().toString(Charsets.ISO_8859_1)
+                sender.join(1_000)
+                assertTrue(response.startsWith("HTTP/1.1 408"))
+            }
         } finally {
             shim.stop()
         }

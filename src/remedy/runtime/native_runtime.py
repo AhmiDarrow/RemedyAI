@@ -55,11 +55,16 @@ class _ComponentProbe:
 
 _probe_lock = threading.Lock()
 _probe_cache: tuple[float, str, dict[str, Any]] | None = None
+_config_lock = threading.Lock()
+_runtime_config: dict[str, Any] = {}
 
 
 def configured_mode(config: Mapping[str, Any] | None = None) -> NativeRuntimeMode:
     """Resolve env-over-config selection; invalid values fail closed to compatibility."""
     raw = os.environ.get("REMEDY_NATIVE_RUNTIME")
+    if config is None:
+        with _config_lock:
+            config = dict(_runtime_config)
     if raw is None and config is not None:
         raw = str(config.get("native_runtime") or "")
     normalized = (raw or "compatibility").strip().lower()
@@ -204,10 +209,27 @@ def native_runtime_status(
         return dict(payload)
 
 
-def invalidate_native_runtime_cache() -> None:
-    global _probe_cache
+def invalidate_native_runtime_cache(*, reset_config: bool = False) -> None:
+    global _probe_cache, _runtime_config
     with _probe_lock:
         _probe_cache = None
+    if reset_config:
+        with _config_lock:
+            _runtime_config = {}
+
+
+def initialize_native_runtime(
+    config: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Prime one bounded startup probe and retain the product configuration.
+
+    The compatibility default returns without launching anything. ``auto`` and
+    ``native`` probe only already-bundled components; they never download code.
+    """
+    global _runtime_config
+    with _config_lock:
+        _runtime_config = dict(config or {})
+    return native_runtime_status(force=True)
 
 
 def execute_with_fallback[T](

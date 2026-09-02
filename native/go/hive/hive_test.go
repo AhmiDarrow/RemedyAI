@@ -99,3 +99,41 @@ func TestMailboxBackpressure(t *testing.T) {
 	close(release)
 	manager.Shutdown()
 }
+
+func TestAgentMessagesCannotSpoofOrCrossDelegationScope(t *testing.T) {
+	manager := New(context.Background(), 4)
+	defer manager.Shutdown()
+	rootReady := make(chan *Agent, 1)
+	otherReady := make(chan struct{})
+	_ = manager.Spawn(Spec{ID: "root", MemoryScope: "goal:a", Capabilities: []string{"read"}, Run: func(ctx context.Context, agent *Agent) error {
+		rootReady <- agent
+		<-ctx.Done()
+		return ctx.Err()
+	}})
+	_ = manager.Spawn(Spec{ID: "other", MemoryScope: "goal:b", Capabilities: []string{"read"}, Run: func(ctx context.Context, _ *Agent) error {
+		close(otherReady)
+		<-ctx.Done()
+		return ctx.Err()
+	}})
+	agent := <-rootReady
+	<-otherReady
+	if err := agent.Send(Message{From: "other", To: "other", Type: "spoof"}); !errors.Is(err, ErrMessageScope) {
+		t.Fatalf("cross-scope Send = %v", err)
+	}
+	received := make(chan Message, 1)
+	_ = manager.Spawn(Spec{ID: "child", Parent: "root", MemoryScope: "goal:a", Capabilities: []string{"read"}, Run: func(ctx context.Context, child *Agent) error {
+		select {
+		case message := <-child.Inbox():
+			received <- message
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}})
+	if err := agent.Send(Message{From: "other", To: "child", Type: "task"}); err != nil {
+		t.Fatal(err)
+	}
+	if message := <-received; message.From != "root" {
+		t.Fatalf("From = %q, want root", message.From)
+	}
+}

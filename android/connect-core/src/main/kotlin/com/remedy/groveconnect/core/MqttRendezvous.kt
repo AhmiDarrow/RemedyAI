@@ -5,7 +5,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -156,14 +156,16 @@ object MqttCodec {
 
 /** InputStream that serves bytes from queued arrays (one Noise record each). */
 class QueueInputStream : InputStream() {
-    private val queue = LinkedBlockingQueue<ByteArray>()
+    private val queue = ArrayBlockingQueue<ByteArray>(MAX_QUEUED_RECORDS)
+    private val closeSentinel = ByteArray(0)
     @Volatile
     private var closed = false
     private var head: ByteArray = ByteArray(0)
     private var pos = 0
 
-    fun enqueue(data: ByteArray) {
-        if (data.isNotEmpty()) queue.put(data)
+    fun enqueue(data: ByteArray): Boolean {
+        if (data.isEmpty() || closed) return false
+        return queue.offer(data)
     }
 
     override fun read(): Int {
@@ -176,7 +178,7 @@ class QueueInputStream : InputStream() {
         while (pos >= head.size) {
             if (closed) return -1
             val next = queue.take()
-            if (next.isEmpty()) continue
+            if (next === closeSentinel || closed) return -1
             head = next
             pos = 0
         }
@@ -187,7 +189,14 @@ class QueueInputStream : InputStream() {
     }
 
     override fun close() {
+        if (closed) return
         closed = true
+        queue.clear()
+        queue.offer(closeSentinel)
+    }
+
+    private companion object {
+        const val MAX_QUEUED_RECORDS = 64
     }
 }
 
@@ -203,6 +212,7 @@ class FramePumpOutputStream(private val onFrame: (ByteArray) -> Unit) : OutputSt
 
     override fun write(b: Int) {
         synchronized(lock) {
+            if (closed) throw IOException("frame pump closed")
             buf.write(b)
             pumpLocked()
         }
@@ -210,6 +220,7 @@ class FramePumpOutputStream(private val onFrame: (ByteArray) -> Unit) : OutputSt
 
     override fun write(b: ByteArray, off: Int, len: Int) {
         synchronized(lock) {
+            if (closed) throw IOException("frame pump closed")
             buf.write(b, off, len)
             pumpLocked()
         }
@@ -256,6 +267,7 @@ class MqttClient(
 
     private val pktIds = AtomicInteger(1)
     private val pubWait = Object()
+    private val writeLock = Object()
     private var pubPending = 0
     private val subWait = Object()
     private var subPendingId = 0
@@ -269,18 +281,19 @@ class MqttClient(
     private var keepaliveThread: Thread? = null
     @Volatile
     private var closed = false
+    @Volatile
+    private var terminalError: IOException? = null
 
     fun connect() {
         val s = Socket()
         s.tcpNoDelay = true
         try {
             s.connect(InetSocketAddress(host, port), timeoutMs)
-            s.soTimeout = 0
+            s.soTimeout = timeoutMs
             sock = s
             input = s.getInputStream()
             output = s.getOutputStream()
-            output!!.write(MqttCodec.buildConnect(clientId, 30))
-            output!!.flush()
+            writePacket(MqttCodec.buildConnect(clientId, 30))
             val resp = readPacket(input!!, 4)
             val code = MqttCodec.connackCode(resp)
                 ?: throw IOException("bad MQTT CONNACK")
@@ -288,6 +301,7 @@ class MqttClient(
                 close()
                 throw IOException("MQTT broker refused ($code)")
             }
+            s.soTimeout = 0
             startReader()
             startKeepalive()
         } catch (e: Exception) {
@@ -300,34 +314,34 @@ class MqttClient(
     }
 
     fun subscribe(topics: List<String>, qos: Int = 1) {
-        val id = pktIds.getAndIncrement()
+        val id = nextPacketId()
         synchronized(subWait) {
             subPendingId = id
             subPendingCount = topics.size
             subGranted = false
         }
-        output!!.write(MqttCodec.buildSubscribe(id, topics, qos))
-        output!!.flush()
+        writePacket(MqttCodec.buildSubscribe(id, topics, qos))
         synchronized(subWait) {
             val deadline = System.currentTimeMillis() + 5_000
             while (subPendingCount > 0 && System.currentTimeMillis() < deadline) {
                 (subWait as Object).wait(200)
             }
             if (subPendingCount > 0) throw IOException("SUBACK timeout")
+            terminalError?.let { throw it }
             if (!subGranted) throw IOException("MQTT broker refused subscription")
         }
     }
 
     fun publish(topic: String, payload: ByteArray) {
-        val id = pktIds.getAndIncrement()
+        val id = nextPacketId()
         synchronized(pubWait) {
             pubPending = id
-            output!!.write(MqttCodec.buildPublish(id, topic, payload, 1))
-            output!!.flush()
+            writePacket(MqttCodec.buildPublish(id, topic, payload, 1))
             val deadline = System.currentTimeMillis() + 20_000
             while (pubPending != 0 && System.currentTimeMillis() < deadline) {
                 (pubWait as Object).wait(200)
             }
+            terminalError?.let { throw it }
             if (pubPending != 0) throw IOException("PUBACK timeout")
         }
     }
@@ -344,27 +358,28 @@ class MqttClient(
                     when (kind and 0xF0) {
                         0x40 -> { // PUBACK
                             synchronized(pubWait) {
-                                pubPending = 0
-                                (pubWait as Object).notifyAll()
+                                val ackId = packetId(packet)
+                                if (ackId != null && ackId == pubPending) {
+                                    pubPending = 0
+                                    (pubWait as Object).notifyAll()
+                                }
                             }
                         }
                         0x90 -> { // SUBACK
                             synchronized(subWait) {
-                                subPendingCount = 0
-                                subGranted = MqttCodec.subackGranted(packet)
-                                (subWait as Object).notifyAll()
+                                val ackId = packetId(packet)
+                                if (ackId != null && ackId == subPendingId) {
+                                    subPendingCount = 0
+                                    subGranted = MqttCodec.subackGranted(packet)
+                                    (subWait as Object).notifyAll()
+                                }
                             }
                         }
                         0x30 -> { // PUBLISH
                             val msg = MqttCodec.parsePublish(packet)
                             if (msg != null) {
                                 if (msg.qos > 0) {
-                                    synchronized(this) {
-                                        if (!closed) {
-                                            output!!.write(MqttCodec.buildPuback(msg.packetId))
-                                            output!!.flush()
-                                        }
-                                    }
+                                    if (!closed) writePacket(MqttCodec.buildPuback(msg.packetId))
                                 }
                                 val h = onMessage
                                 if (h != null && msg.topic.isNotEmpty()) {
@@ -378,8 +393,8 @@ class MqttClient(
                         else -> Unit // PINGRESP / others: ignore
                     }
                 }
-            } catch (_: Exception) {
-                closed = true
+            } catch (e: Exception) {
+                close(IOException("MQTT connection lost", e))
             }
         }, "grove-rdv-mqtt")
         t.isDaemon = true
@@ -393,15 +408,10 @@ class MqttClient(
                 while (!closed) {
                     Thread.sleep(12_000)
                     if (closed) break
-                    synchronized(this) {
-                        if (!closed) {
-                            output!!.write(MqttCodec.PINGREQ_BYTES)
-                            output!!.flush()
-                        }
-                    }
+                    if (!closed) writePacket(MqttCodec.PINGREQ_BYTES)
                 }
-            } catch (_: Exception) {
-                closed = true
+            } catch (e: Exception) {
+                close(IOException("MQTT keepalive failed", e))
             }
         }, "grove-rdv-keepalive")
         t.isDaemon = true
@@ -419,6 +429,7 @@ class MqttClient(
             val b = readExact(inp, 1)[0].toInt() and 0xFF
             varint.write(b)
             value += (b and 0x7F) * multiplier
+            if (value > MAX_PACKET_REMAINING) throw IOException("MQTT packet too large")
             if (b and 0x80 == 0) break
             if (multiplier > 128 * 128 * 128) throw IOException("varint too long")
             multiplier *= 128
@@ -435,6 +446,7 @@ class MqttClient(
     }
 
     private fun readExact(inp: InputStream, n: Int): ByteArray {
+        if (n < 0 || n > MAX_PACKET_REMAINING) throw IOException("MQTT packet too large")
         val out = ByteArray(n)
         var off = 0
         while (off < n) {
@@ -445,7 +457,8 @@ class MqttClient(
         return out
     }
 
-    fun close() {
+    fun close(error: IOException? = IOException("MQTT connection closed")) {
+        if (terminalError == null && error != null) terminalError = error
         closed = true
         try {
             sock?.close()
@@ -464,6 +477,19 @@ class MqttClient(
     }
 
     companion object {
+        private const val MAX_PACKET_REMAINING = MqttCodec.MAX_RECORD + 1024
+
+        internal fun packetId(packet: ByteArray): Int? {
+            if (packet.size < 4) return null
+            return try {
+                val (_, consumed) = MqttCodec.decodeVarint(packet, 1)
+                val at = 1 + consumed
+                if (at + 2 > packet.size) null
+                else ((packet[at].toInt() and 0xff) shl 8) or (packet[at + 1].toInt() and 0xff)
+            } catch (_: Exception) {
+                null
+            }
+        }
         fun randomClientId(): String {
             val bytes = ByteArray(16)
             java.security.SecureRandom().nextBytes(bytes)
@@ -477,6 +503,21 @@ class MqttClient(
             val sb = StringBuilder(32)
             for (b in sid) sb.append("%02x".format(b))
             return sb.toString()
+        }
+    }
+
+    private fun nextPacketId(): Int {
+        while (true) {
+            val current = pktIds.getAndUpdate { if (it >= 65535 || it <= 0) 1 else it + 1 }
+            if (current in 1..65535) return current
+        }
+    }
+
+    private fun writePacket(packet: ByteArray) {
+        synchronized(writeLock) {
+            if (closed) throw IOException("MQTT connection closed")
+            output?.write(packet) ?: throw IOException("MQTT connection not open")
+            output?.flush()
         }
     }
 }
@@ -521,7 +562,10 @@ class RendezvousStreams(
                 framed[2] = (len ushr 8).toByte()
                 framed[3] = len.toByte()
                 System.arraycopy(payload, 0, framed, 4, len)
-                queueInput.enqueue(framed)
+                if (!queueInput.enqueue(framed)) {
+                    // A peer or broker flooding faster than Noise can consume is unsafe.
+                    close()
+                }
             }
         }
     }

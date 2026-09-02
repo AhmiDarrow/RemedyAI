@@ -19,6 +19,11 @@ in your hand.
 | **Who runs Remedy** | This PC. The phone is not Remedy and does not keep your chats. |
 | **Phone app** | Sideload the RemedyConnect APK next to the Desktop download. Not a store SKU. |
 
+The phone home includes native Chat, Sessions, Approvals, Terminal, Grove, and
+Settings views. The PC controls which panes are available; disabled panes stay
+out of the phone navigation. If a saved PC is temporarily offline, tap
+**Reconnect** instead of pairing again.
+
 ## Turn it on — 3 steps
 
 1. **On the PC**: **Settings → Connect** and switch it on. (It is off until
@@ -76,6 +81,15 @@ one on purpose.
 - **No PII in the QR**: the pairing text carries a host key hash, a one-time
   secret, LAN/tailnet addresses, and an expiry — never tokens, keys, or
   account material.
+- **Local hardening**: the phone bounds QR, HTTP, MQTT, and loopback-proxy
+  inputs; limits concurrent local proxy clients; and excludes device keys and
+  pairing records from Android backup and device transfer.
+- **Reliable cleanup**: leaving the scanner releases the camera, closing a
+  remote closes live streams, and stalled encrypted connections automatically
+  redial instead of remaining falsely green.
+- **Server isolation**: closing, losing, or revoking the phone closes only its
+  encrypted session. If the managed desktop server ever exits unexpectedly,
+  the desktop records the exit status and makes three bounded recovery attempts.
 
 ## Phone app
 

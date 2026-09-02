@@ -31,7 +31,7 @@ data class ConnectMe(
             val panes = when {
                 panesRaw != null && panesRaw.startsWith("[") -> PaneFlags.parse(panesRaw)
                 panesRaw != null -> PaneFlags.parse(panesRaw)
-                else -> PaneFlags.allOn()
+                else -> PaneFlags.defaults()
             }
             return ConnectMe(sessionId, deviceId, panes, reachable)
         }

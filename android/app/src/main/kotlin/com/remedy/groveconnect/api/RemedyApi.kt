@@ -3,12 +3,15 @@ package com.remedy.groveconnect.api
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Minimal HTTP client that talks to the PC's API through the loopback shim.
@@ -19,7 +22,7 @@ import java.util.concurrent.Executors
  * frames to a callback on a background thread.
  */
 class RemedyApi(private val baseUrl: String) {
-    private val io: ExecutorService = Executors.newCachedThreadPool { r ->
+    private val io: ExecutorService = Executors.newFixedThreadPool(6) { r ->
         Thread(r, "grove-api").apply { isDaemon = true }
     }
     // SSE callbacks must land on the main thread: the UI mutates Compose
@@ -184,16 +187,18 @@ class RemedyApi(private val baseUrl: String) {
         onDone: () -> Unit,
         onError: (String) -> Unit,
     ): () -> Unit {
-        var cancelled = false
+        val cancelled = AtomicBoolean(false)
+        val active = AtomicReference<HttpURLConnection?>(null)
         val fut = io.submit {
+            var c: HttpURLConnection? = null
             try {
-                val c = conn(path, "GET")
+                c = conn(path, "GET")
+                active.set(c)
                 c.setRequestProperty("Accept", "text/event-stream")
                 c.setRequestProperty("Cache-Control", "no-cache")
                 if (c.responseCode !in 200..299) {
                     val code = c.responseCode
-                    c.disconnect()
-                    main.post { if (!cancelled) onError("HTTP $code") }
+                    main.post { if (!cancelled.get()) onError("HTTP $code") }
                     return@submit
                 }
                 val reader = BufferedReader(
@@ -201,7 +206,7 @@ class RemedyApi(private val baseUrl: String) {
                 )
                 var event = ""
                 val data = StringBuilder()
-                while (!cancelled) {
+                while (!cancelled.get()) {
                     val line = reader.readLine() ?: break
                     if (line.isEmpty()) {
                         if (data.isNotEmpty()) {
@@ -213,7 +218,7 @@ class RemedyApi(private val baseUrl: String) {
                             val ev = event.ifEmpty { "message" }
                             event = ""
                             data.setLength(0)
-                            main.post { if (!cancelled) onEvent(ev, payload) }
+                            main.post { if (!cancelled.get()) onEvent(ev, payload) }
                         } else {
                             event = ""
                             data.setLength(0)
@@ -225,19 +230,30 @@ class RemedyApi(private val baseUrl: String) {
                         line.startsWith("data:") -> {
                             if (data.isNotEmpty()) data.append('\n')
                             data.append(line.substringAfter(':').trim())
+                            if (data.length > MAX_SSE_EVENT_CHARS) {
+                                throw IOException("stream event exceeds 1 MiB")
+                            }
                         }
                         line.startsWith(":") -> Unit // comment / keepalive
                     }
                 }
                 reader.close()
-                c.disconnect()
-                main.post { if (!cancelled) onDone() }
+                main.post { if (!cancelled.get()) onDone() }
             } catch (e: Exception) {
                 val msg = e.message ?: "stream error"
-                main.post { if (!cancelled) onError(msg) }
+                main.post { if (!cancelled.get()) onError(msg) }
+            } finally {
+                c?.let {
+                    active.compareAndSet(it, null)
+                    it.disconnect()
+                }
             }
         }
-        return { cancelled = true; fut.cancel(true) }
+        return {
+            cancelled.set(true)
+            active.getAndSet(null)?.disconnect()
+            fut.cancel(true)
+        }
     }
 
     /**
@@ -252,10 +268,13 @@ class RemedyApi(private val baseUrl: String) {
         onDone: () -> Unit,
         onError: (String) -> Unit,
     ): () -> Unit {
-        var cancelled = false
+        val cancelled = AtomicBoolean(false)
+        val active = AtomicReference<HttpURLConnection?>(null)
         val fut = io.submit {
+            var c: HttpURLConnection? = null
             try {
-                val c = conn(path, "POST")
+                c = conn(path, "POST")
+                active.set(c)
                 c.setRequestProperty("Accept", "text/event-stream")
                 c.setRequestProperty("Cache-Control", "no-cache")
                 c.doOutput = true
@@ -265,8 +284,7 @@ class RemedyApi(private val baseUrl: String) {
                 (c.outputStream as OutputStream).use { it.write(bytes) }
                 if (c.responseCode !in 200..299) {
                     val code = c.responseCode
-                    c.disconnect()
-                    main.post { if (!cancelled) onError("HTTP $code") }
+                    main.post { if (!cancelled.get()) onError("HTTP $code") }
                     return@submit
                 }
                 val reader = BufferedReader(
@@ -274,7 +292,7 @@ class RemedyApi(private val baseUrl: String) {
                 )
                 var event = ""
                 val data = StringBuilder()
-                while (!cancelled) {
+                while (!cancelled.get()) {
                     val line = reader.readLine() ?: break
                     if (line.isEmpty()) {
                         if (data.isNotEmpty()) {
@@ -286,7 +304,7 @@ class RemedyApi(private val baseUrl: String) {
                             val ev = event.ifEmpty { "message" }
                             event = ""
                             data.setLength(0)
-                            main.post { if (!cancelled) onEvent(ev, payload) }
+                            main.post { if (!cancelled.get()) onEvent(ev, payload) }
                         } else {
                             event = ""
                             data.setLength(0)
@@ -298,18 +316,33 @@ class RemedyApi(private val baseUrl: String) {
                         line.startsWith("data:") -> {
                             if (data.isNotEmpty()) data.append('\n')
                             data.append(line.substringAfter(':').trim())
+                            if (data.length > MAX_SSE_EVENT_CHARS) {
+                                throw IOException("stream event exceeds 1 MiB")
+                            }
                         }
                         line.startsWith(":") -> Unit // comment / keepalive
                     }
                 }
                 reader.close()
-                c.disconnect()
-                main.post { if (!cancelled) onDone() }
+                main.post { if (!cancelled.get()) onDone() }
             } catch (e: Exception) {
                 val msg = e.message ?: "stream error"
-                main.post { if (!cancelled) onError(msg) }
+                main.post { if (!cancelled.get()) onError(msg) }
+            } finally {
+                c?.let {
+                    active.compareAndSet(it, null)
+                    it.disconnect()
+                }
             }
         }
-        return { cancelled = true; fut.cancel(true) }
+        return {
+            cancelled.set(true)
+            active.getAndSet(null)?.disconnect()
+            fut.cancel(true)
+        }
+    }
+
+    private companion object {
+        const val MAX_SSE_EVENT_CHARS = 1024 * 1024
     }
 }
