@@ -64,6 +64,11 @@ dependency DAGs; priority ordering; deadlines; run/time budgets; cancellation; a
 snapshot/restore. Its tick input is deterministic for tests, while its run loop can be
 supervised by the persistent runtime.
 
+Hive agents are lightweight supervised goroutines with explicit identity, goals, memory
+scope, and capability sets. Child capabilities must be a subset of the parent's delegated
+set, mailboxes are bounded, terminal agents remain inspectable without consuming active
+quota, crashes are isolated, and parent shutdown cancels the whole tree.
+
 Local verification:
 
 ```text
