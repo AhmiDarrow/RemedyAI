@@ -77,7 +77,7 @@ def test_fourth_device_refused(home):
 
 
 def test_pair_envelope_secret_may_contain_nul(home):
-    from remedy.connect.pair import parse_handshake_payload, pair_payload
+    from remedy.connect.pair import pair_payload, parse_handshake_payload
 
     secret = b"\x00" + b"\x41" * 30 + b"\x00"
     payload = pair_payload(secret, "phone")

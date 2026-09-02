@@ -76,11 +76,14 @@ def _run_cli(*args: str, timeout: float = 8.0) -> tuple[int, str]:
         # and then blocks until the browser completes auth. Keep what it
         # printed so the caller can hand that URL to the user.
         parts = []
-        for chunk in (exc.stdout, exc.stderr):
-            if isinstance(chunk, bytes):
-                chunk = chunk.decode("utf-8", errors="replace")
+        for raw_chunk in (exc.stdout, exc.stderr):
+            chunk = (
+                raw_chunk.decode("utf-8", errors="replace")
+                if isinstance(raw_chunk, bytes)
+                else raw_chunk
+            )
             if chunk:
-                parts.append(str(chunk))
+                parts.append(chunk)
         out = "".join(parts).strip()
         return 124, out or "tailscale timed out"
     except OSError as exc:

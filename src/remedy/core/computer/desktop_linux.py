@@ -425,10 +425,10 @@ def _atspi_extents(acc: Any) -> tuple[int, int, int, int] | None:
         h = int(rect.height)
     except Exception:
         try:
-            x = int(rect[0])  # type: ignore[index]
-            y = int(rect[1])  # type: ignore[index]
-            w = int(rect[2])  # type: ignore[index]
-            h = int(rect[3])  # type: ignore[index]
+            x = int(rect[0])
+            y = int(rect[1])
+            w = int(rect[2])
+            h = int(rect[3])
         except Exception:
             return None
     if w < 4 or h < 4:
@@ -511,14 +511,14 @@ def _walk_atspi_tree(root: Any, *, max_marks: int = 40) -> list[dict[str, Any]]:
 def _load_atspi_desktop() -> Any | None:
     """Return the AT-SPI desktop root, or None when GI/pyatspi is missing."""
     with contextlib.suppress(Exception):
-        import gi  # type: ignore
+        import gi
 
         gi.require_version("Atspi", "2.0")
-        from gi.repository import Atspi  # type: ignore
+        from gi.repository import Atspi
 
         return Atspi.get_desktop(0)
     with contextlib.suppress(Exception):
-        import pyatspi  # type: ignore
+        import pyatspi
 
         return pyatspi.Registry.getDesktop(0)
     return None

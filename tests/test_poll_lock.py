@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
-
 import os
 import time
+
+import pytest
 
 from remedy.gateway.poll_lock import (
     MessengerPollLock,

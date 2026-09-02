@@ -17,12 +17,10 @@ import pytest
 from remedy.connect.rdv import (
     PUBLIC_RDV_ENDPOINTS,
     MqttError,
-    MqttMessage,
     MqttSession,
     RendezvousSession,
-    build_connect,
-    build_publish,
     build_puback,
+    build_publish,
     build_subscribe,
     decode_varint,
     encode_varint,
@@ -33,7 +31,6 @@ from remedy.connect.rdv import (
     rdv_qr_value,
     rdv_topic,
 )
-
 
 # ---------------------------------------------------------------------------
 # Codec unit tests.
@@ -328,5 +325,5 @@ async def test_mqtt_connect_refused() -> None:
 async def test_rdv_broker_down_is_graceful() -> None:
     """A dead broker raises, never hangs: supervisor backoff covers the rest."""
     mqtt = MqttSession("127.0.0.1", 1, timeout=1.0)  # port 1: nothing listens
-    with pytest.raises(Exception):
+    with pytest.raises((MqttError, OSError)):
         await asyncio.wait_for(mqtt.connect(), timeout=3.0)

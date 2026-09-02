@@ -205,8 +205,8 @@ def test_is_running_neg_cache_skips_port_probe(tmp_path: Path):
     """
     home = tmp_path / "remedy-home"
     home.mkdir()
-    from remedy.vision.config import save_vision_json
     import remedy.vision.runtime as rt
+    from remedy.vision.config import save_vision_json
 
     save_vision_json(
         {

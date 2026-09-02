@@ -303,8 +303,9 @@ def test_find_uv_looks_beside_python_when_not_on_path(
 
 
 def test_ensure_pip_uses_ensurepip_when_venv_has_none(monkeypatch: pytest.MonkeyPatch):
-    import remedy.voice.service as svc
     from types import SimpleNamespace
+
+    import remedy.voice.service as svc
 
     has = {"pip": False, "ensurepip": True}
     hidden: list[list[str]] = []
@@ -331,8 +332,9 @@ def test_ensure_pip_uses_ensurepip_when_venv_has_none(monkeypatch: pytest.Monkey
 def test_ensure_pip_uses_uv_when_ensurepip_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    import remedy.voice.service as svc
     from types import SimpleNamespace
+
+    import remedy.voice.service as svc
 
     has = {"pip": False, "ensurepip": False}
     uv = str(tmp_path / "uv.exe")
@@ -359,8 +361,9 @@ def test_ensure_pip_uses_uv_when_ensurepip_missing(
 
 
 def test_ensure_pip_falls_back_to_get_pip(monkeypatch: pytest.MonkeyPatch):
-    import remedy.voice.service as svc
     from types import SimpleNamespace
+
+    import remedy.voice.service as svc
 
     has = {"pip": False, "ensurepip": False}
     downloaded: list[Path] = []

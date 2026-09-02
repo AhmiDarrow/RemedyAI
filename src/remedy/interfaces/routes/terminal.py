@@ -80,9 +80,9 @@ def _strip_ansi(text: str) -> str:
 def _pick_shell() -> tuple[str, list[str]]:
     """Mirror desktop/src-tauri/src/pty_host.rs shell selection."""
     if os.name == "nt":
-        pf = str(Path(os.environ.get("ProgramFiles", r"C:\Program Files")).resolve())
-        pf86 = str(Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")).resolve())
-        sysroot = str(Path(os.environ.get("SystemRoot", r"C:\Windows")).resolve())
+        pf = str(Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")).resolve())
+        pf86 = str(Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")).resolve())
+        sysroot = str(Path(os.environ.get("SYSTEMROOT", r"C:\Windows")).resolve())
         args = ["-NoLogo", "-NoProfile", "-NoExit", "-Command", _WIN_UTF8_INIT]
         for c in (
             str(Path(pf) / "PowerShell" / "7" / "pwsh.exe"),
@@ -366,7 +366,7 @@ def register_terminal_routes(app: FastAPI) -> None:
             sess = await _spawn_terminal(cwd=cwd, cols=req.cols, rows=req.rows)
         except Exception as exc:
             logger.exception("terminal open failed")
-            raise HTTPException(500, f"Could not start terminal: {exc}")
+            raise HTTPException(500, f"Could not start terminal: {exc}") from exc
         _TERMINALS[sess.id] = sess
         return {
             "terminal_id": sess.id,
@@ -413,10 +413,8 @@ def register_terminal_routes(app: FastAPI) -> None:
                             # Shell exited mid-batch: flush what we already
                             # collected (the last lines before exit) and end
                             # on the next loop turn instead of dropping them.
-                            try:
+                            with contextlib.suppress(Exception):
                                 sess.q.put_nowait(None)
-                            except Exception:
-                                pass
                             break
                         parts.append(nxt)
                         total += len(nxt)

@@ -25,9 +25,9 @@ loopback guard, the headers and the timeout are exercised for real.
 from __future__ import annotations
 
 import os
-import time
 import socket
 import subprocess
+import time
 import types
 from pathlib import Path
 from typing import Any

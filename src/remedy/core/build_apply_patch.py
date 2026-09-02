@@ -271,7 +271,7 @@ def apply_patch_text(
     if not files:
         return {"ok": False, "error": "no file hunks in patch", "applied": []}
 
-    staged: list[tuple[Path, str | None, str, str]] = []
+    staged: list[tuple[Path, str | None, str, str, str, bool]] = []
     for fp in files:
         rel = (fp.path or "").replace("\\", "/")
         while rel.startswith("./"):
@@ -318,13 +318,13 @@ def apply_patch_text(
     from remedy.core.atomic_json import write_text_atomic
 
     try:
-        for dest, nxt, rel, action, prev, existed in staged:
+        for dest, staged_text, rel, action, prev, existed in staged:
             if action == "delete":
                 if dest.is_file():
                     dest.unlink()
             else:
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                write_text_atomic(dest, nxt or "")
+                write_text_atomic(dest, staged_text or "")
             done.append((dest, prev, existed, action))
             applied.append({"path": rel, "action": action})
     except OSError as exc:

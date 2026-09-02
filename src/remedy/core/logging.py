@@ -168,13 +168,13 @@ class DurableRotatingFileHandler(RotatingFileHandler):
 
     _ROLLOVER_BACKOFF_S = 30.0
 
-    def shouldRollover(self, record: logging.LogRecord) -> bool:
+    def shouldRollover(self, record: logging.LogRecord) -> bool:  # noqa: N802
         until = getattr(self, "_rollover_blocked_until", 0.0)
         if until and time.monotonic() < until:
             return False
         return bool(super().shouldRollover(record))
 
-    def doRollover(self) -> None:
+    def doRollover(self) -> None:  # noqa: N802
         try:
             super().doRollover()
             self._rollover_blocked_until = 0.0

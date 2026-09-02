@@ -20,7 +20,6 @@ from remedy.core.build_oracle import coerce_text_arg
 from remedy.home import default_home
 from remedy.memory.life_goals import LifeGoal, LifeGoalStore
 
-
 _IRREVERSIBLE = re.compile(
     r"(?i)\b("
     r"send|email|mail|submit|apply|post|publish|tweet|pay|buy|purchase|"
