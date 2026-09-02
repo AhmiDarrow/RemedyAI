@@ -1,4 +1,4 @@
-"""Noise_IK_25519_ChaChaPoly_BLAKE2s (revision 34) for Grove Connect.
+"""Noise_IK_25519_ChaChaPoly_BLAKE2s (revision 34) for RemedyConnect.
 
 No payload, key, or shared-secret material is logged.
 """

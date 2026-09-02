@@ -17,7 +17,9 @@ package com.remedy.groveconnect.core
  *   `u32be length | 12-byte nonce | ciphertext`
  *   length = 12 + ciphertext (tag included in ciphertext).
  *   nonce = 4 zero bytes || uint64le(n)  (Noise ChaChaPoly nonce).
- *   Max plaintext 64 KiB.
+ *   The host (record.py MAX_RECORD) refuses any record whose body
+ *   (nonce || ciphertext) exceeds 65536 bytes, so the largest plaintext a
+ *   record may carry is 65536 - 12 - 16 = 65508 bytes.
  *
  * Rekey: 2^16 records or 15 minutes. Sender emits an inner REKEY frame, then
  * Rekey()s the send cipher. Receiver Rekey()s the receive cipher after
@@ -31,12 +33,16 @@ object Protocol {
     const val PROLOGUE = "remedy-connect/1"
     const val QR_HEADER = "remedy-connect/1"
     const val DEFAULT_PORT = 7401
-    const val MAX_PLAINTEXT = 65536
     const val TAG_LEN = 16
     const val NONCE_LEN = 12
     const val KEY_LEN = 32
     const val HASH_LEN = 32
     const val REKEY_AFTER_RECORDS = 65536L
     const val REKEY_AFTER_MS = 15L * 60L * 1000L
-    const val MAX_RECORD_BODY = NONCE_LEN + MAX_PLAINTEXT + TAG_LEN
+
+    /** Hard cap on `nonce || ciphertext`; mirrors the host's MAX_RECORD. */
+    const val MAX_RECORD_BODY = 65536
+
+    /** Largest plaintext one record can carry without the host dropping the session. */
+    const val MAX_PLAINTEXT = MAX_RECORD_BODY - NONCE_LEN - TAG_LEN
 }

@@ -1,8 +1,12 @@
 package com.remedy.groveconnect
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -25,9 +29,20 @@ class MainActivity : FragmentActivity() {
     private val controller get() = (application as GroveApp).controller
     private var screen by mutableStateOf(UiScreen.Lock)
     private var ui by mutableStateOf(RemoteState())
+    // Android 13+ needs runtime consent before the foreground service's
+    // notification is visible. Denial is fine: the service still runs, the
+    // user just does not see the "remote is live" tile.
+    private val notifPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* no-op */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         ui = controller.state
         controller.onChange = {
             ui = controller.state

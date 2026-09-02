@@ -125,11 +125,10 @@ def drive_build(
 ) -> dict[str, Any]:
     """Run the machine loop for *goal* (or the active build-turn goal)."""
     from remedy.core.build_engine import begin_build_turn, get_build_state
+    from remedy.core.build_oracle import coerce_text_arg
     from remedy.core.build_spec_compiler import compile_goal_to_spec, save_locked_spec
     from remedy.core.build_tdd import tdd_bootstrap
     from remedy.core.build_todos import seed_drive_todos, upsert_todos
-
-    from remedy.core.build_oracle import coerce_text_arg
 
     st = get_build_state(runtime)
     g = coerce_text_arg(goal) or coerce_text_arg(getattr(st, "goal", "") or "")

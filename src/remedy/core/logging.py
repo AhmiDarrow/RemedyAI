@@ -15,10 +15,10 @@ import os
 import shutil
 import sys
 import time
-from logging.handlers import RotatingFileHandler
 from contextlib import suppress
 from contextvars import ContextVar
 from datetime import UTC, datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 

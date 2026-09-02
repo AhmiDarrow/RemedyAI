@@ -294,24 +294,29 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
             "target",
             "auth",
         }
-        for f in target.rglob("*"):
-            if not f.is_file():
-                continue
-            if any(p in ignored for p in f.parts):
-                continue
-            # Skip any path that resolves into protected secrets mid-walk
-            # (symlink escape / nested .remedy/auth).
-            if is_protected_secret_path(f):
-                continue
-            ext = f.suffix.lower()
-            cat = exts_map.get(ext, "other")
-            try:
-                rel = str(f.relative_to(target))
-            except ValueError:
-                continue
-            files[cat].append(rel)
-            if len(files[cat]) >= 100:
-                continue
+        def _walk_tree() -> None:
+            # rglob + is_file stat every entry: on a deep or network/OneDrive
+            # tree this blocks for seconds. Run it off the event loop so the
+            # walk never freezes other sessions.
+            for f in target.rglob("*"):
+                if not f.is_file():
+                    continue
+                if any(p in ignored for p in f.parts):
+                    continue
+                # Skip any path that resolves into protected secrets mid-walk
+                # (symlink escape / nested .remedy/auth).
+                if is_protected_secret_path(f):
+                    continue
+                ext = f.suffix.lower()
+                cat = exts_map.get(ext, "other")
+                try:
+                    rel = str(f.relative_to(target))
+                except ValueError:
+                    continue
+                if len(files[cat]) < 100:
+                    files[cat].append(rel)
+
+        await asyncio.to_thread(_walk_tree)
 
         summary = {
             "path": str(target),

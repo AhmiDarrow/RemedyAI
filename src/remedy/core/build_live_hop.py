@@ -47,8 +47,18 @@ def _resolve_write(runtime: Any, rel: str, root: Path) -> Path:
     if runtime is not None and hasattr(runtime, "resolve_tool_path"):
         try:
             return Path(runtime.resolve_tool_path(rel, for_write=True))
-        except TypeError:
-            return Path(runtime.resolve_tool_path(rel))
+        except TypeError as exc:
+            # Only retry for the missing-kwarg case; a TypeError raised INSIDE a
+            # correct resolve_tool_path is a real fault, not a signature miss.
+            if not _is_missing_kwarg(exc, "for_write"):
+                raise
+            dest = Path(runtime.resolve_tool_path(rel))
+            # The fallback dropped for_write, so re-jail the result under root.
+            try:
+                dest.resolve().relative_to(root.resolve())
+            except (OSError, ValueError) as exc2:
+                raise PermissionError(f"hop path outside project: {rel}") from exc2
+            return dest
     dest = (root / rel)
     try:
         dest_res = dest.resolve()
@@ -56,6 +66,13 @@ def _resolve_write(runtime: Any, rel: str, root: Path) -> Path:
     except (OSError, ValueError) as exc:
         raise PermissionError(f"hop path outside project: {rel}") from exc
     return dest_res
+
+
+def _is_missing_kwarg(exc: TypeError, name: str) -> bool:
+    """True when *exc* is 'unexpected keyword argument name' — a signature
+    mismatch — not a TypeError raised from inside the callee."""
+    msg = str(exc)
+    return "argument" in msg and (name in msg or "keyword" in msg)
 
 
 def disk_oracle(unit: UnitSpec, files: dict[str, str]) -> list[OracleError]:
@@ -78,6 +95,16 @@ def materialize_files(runtime: Any, files: dict[str, str], root: Path) -> list[s
 def make_runtime_llm_model(runtime: Any, *, max_tokens: int = 4096) -> Any:
     """Stateless ModelFn using the live turn's LLM binding (sync)."""
 
+    def _current_body(rel: str) -> str:
+        # A repair must see the file it is repairing; rewriting from the symbol
+        # closure alone regressed anything non-trivial.
+        with suppress(Exception):
+            root = Path(str(runtime.effective_project_path() or ""))
+            p = root / rel
+            if root.is_dir() and p.is_file():
+                return p.read_text(encoding="utf-8", errors="replace")[:12000]
+        return ""
+
     def model(unit: UnitSpec, closure: str, errs: list[OracleError]) -> str:
         err_txt = "\n".join(f"- {e.message}" for e in (errs or [])[:12])
         prompt = (
@@ -89,6 +116,12 @@ def make_runtime_llm_model(runtime: Any, *, max_tokens: int = 4096) -> Any:
             f"Imports: {unit.imports}\n"
             f"Machine context:\n{closure}\n"
         )
+        current = _current_body(unit.path)
+        if current:
+            prompt += (
+                f"\nCurrent source of `{unit.path}` (repair it; keep what works):\n"
+                f"{current}\n"
+            )
         if err_txt:
             prompt += f"\nPrevious oracle errors to fix:\n{err_txt}\n"
         prompt += "\nOutput ONLY the raw file source. No markdown fences."
@@ -292,10 +325,17 @@ def live_unit_hop(
             def _behavioral(u: Any, src: str) -> list[Any]:
                 if not str(getattr(u, "tests", "") or "").strip():
                     return []
+                import tempfile
+
                 from remedy.core.builds.reducer import PytestOracle
 
                 path = str(getattr(u, "path", "") or rel)
-                return PytestOracle(root)(u, {path: src})
+                # Never validate a cached candidate against the LIVE tree: that
+                # would write the unvalidated body over the real source (and
+                # drop a stray test_*.py at the project root) BEFORE the pre-hop
+                # snapshot, corrupting rollback. Validate in a throwaway tree.
+                with tempfile.TemporaryDirectory(prefix="remedy-memo-") as td:
+                    return PytestOracle(td, timeout_s=30.0)(u, {path: src})
 
             cached = try_reuse(
                 memo_root,

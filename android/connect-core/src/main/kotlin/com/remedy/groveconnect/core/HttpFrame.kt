@@ -181,16 +181,16 @@ object HttpFrame {
     }
 
     private fun decodeChunked(data: ByteArray): ByteArray {
-        val out = ArrayList<Byte>(data.size)
+        val out = java.io.ByteArrayOutputStream(data.size)
         var pos = 0
         while (pos < data.size) {
             val nl = indexOfFrom(data, pos, 13, 10) ?: break
             val sizeLine = data.copyOfRange(pos, nl).toString(Charsets.US_ASCII)
             val n = sizeLine.substringBefore(';').trim().toIntOrNull(16) ?: break
             pos = nl + 2
-            if (n == 0) break
+            if (n <= 0) break
             val end = (pos + n).coerceAtMost(data.size)
-            for (i in pos until end) out += data[i]
+            out.write(data, pos, end - pos)
             pos = end
             if (pos + 1 < data.size && data[pos] == 13.toByte() && data[pos + 1] == 10.toByte()) {
                 pos += 2
@@ -208,12 +208,18 @@ object HttpFrame {
         return null
     }
 
-    /** Split a large inner frame into Noise-record-sized pieces. */
-    fun fragment(type: Byte, id: Int, payload: ByteArray, maxPlain: Int = Protocol.MAX_PLAINTEXT - 16): List<ByteArray> {
-        if (payload.size <= maxPlain - 11) {
+    const val HEADER_LEN = 11
+
+    /**
+     * Split a large inner frame into Noise-record-sized pieces. Every returned
+     * frame (header + payload) fits one transport record, so the encrypted
+     * record body never exceeds [Protocol.MAX_RECORD_BODY].
+     */
+    fun fragment(type: Byte, id: Int, payload: ByteArray, maxPlain: Int = Protocol.MAX_PLAINTEXT): List<ByteArray> {
+        val chunk = (maxPlain - HEADER_LEN).coerceAtLeast(1)
+        if (payload.size <= chunk) {
             return listOf(encode(type, id, payload, fin = true))
         }
-        val chunk = (maxPlain - 11).coerceAtLeast(1)
         val out = ArrayList<ByteArray>()
         var off = 0
         while (off < payload.size) {

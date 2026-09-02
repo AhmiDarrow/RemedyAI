@@ -93,6 +93,12 @@ class LoopbackShim(
                 }
                 val dest = HeaderInjectingOutput(output, ShimAuth.cookieValue(shimToken))
                 pipe.pipeHttp(req.method, destTarget, req.headers, req.body, dest)
+            } catch (e: BodyTooLarge) {
+                try {
+                    val msg = "Request body is ${e.size} bytes; the phone remote accepts up to $MAX_BODY.".toByteArray()
+                    writeResponse(s.getOutputStream(), 413, "text/plain; charset=utf-8", msg)
+                } catch (_: Exception) {
+                }
             } catch (e: Exception) {
                 try {
                     val msg = (e.message ?: "pipe error").toByteArray()
@@ -104,6 +110,14 @@ class LoopbackShim(
     }
 
     private data class ShimReq(val method: String, val target: String, val headers: String, val body: ByteArray)
+
+    /** Refuse instead of forwarding a silently truncated body. */
+    private class BodyTooLarge(val size: Int) : Exception("request body too large")
+
+    private companion object {
+        /** Matches the PC pipe's MAX_BODY for raw requests. */
+        const val MAX_BODY = 1024 * 1024
+    }
 
     private fun readRequest(input: InputStream): ShimReq? {
         val headerBlock = readHeaders(input) ?: return null
@@ -117,7 +131,8 @@ class LoopbackShim(
         val headers = lines.drop(1).filter { it.isNotBlank() }
         val cl = headers.firstOrNull { it.startsWith("Content-Length:", ignoreCase = true) }
             ?.substringAfter(":")?.trim()?.toIntOrNull() ?: 0
-        val body = if (cl > 0) RecordCodec.readExact(input, cl.coerceAtMost(1024 * 1024)) else ByteArray(0)
+        if (cl > MAX_BODY) throw BodyTooLarge(cl)
+        val body = if (cl > 0) RecordCodec.readExact(input, cl) else ByteArray(0)
         val forwarded = headers.filterNot {
             it.startsWith("Host:", ignoreCase = true) ||
                 it.startsWith("Content-Length:", ignoreCase = true) ||
@@ -127,22 +142,17 @@ class LoopbackShim(
     }
 
     private fun readHeaders(input: InputStream): ByteArray? {
-        val buf = ArrayList<Byte>(512)
+        val buf = java.io.ByteArrayOutputStream(512)
+        // Track the last four bytes so we never re-scan the whole buffer.
+        var tail = 0
         var n = 0
         while (n < 64 * 1024) {
             val c = input.read()
-            if (c < 0) return if (buf.isEmpty()) null else buf.toByteArray()
-            buf.add(c.toByte())
+            if (c < 0) return if (buf.size() == 0) null else buf.toByteArray()
+            buf.write(c)
             n++
-            val sz = buf.size
-            if (sz >= 4 &&
-                buf[sz - 4] == '\r'.code.toByte() &&
-                buf[sz - 3] == '\n'.code.toByte() &&
-                buf[sz - 2] == '\r'.code.toByte() &&
-                buf[sz - 1] == '\n'.code.toByte()
-            ) {
-                return buf.toByteArray()
-            }
+            tail = (tail shl 8) or (c and 0xff)
+            if (tail == 0x0d0a0d0a) return buf.toByteArray()
         }
         return buf.toByteArray()
     }
@@ -169,10 +179,15 @@ class LoopbackShim(
             val idx = indexOfHeaderEnd(bytes) ?: return
             val head = bytes.copyOfRange(0, idx).toString(Charsets.ISO_8859_1)
             val rest = bytes.copyOfRange(idx + 4, bytes.size)
+            // The PC strips Connection headers and this shim closes the socket
+            // after one response, so say so: otherwise the client pools the
+            // connection and a streamed POST dies with "unexpected end of stream".
+            val lines = head.split("\r\n").filterNot { it.startsWith("Connection:", ignoreCase = true) }
+            val base = lines.joinToString("\r\n") + "\r\nConnection: close"
             val injected = if (head.contains("Set-Cookie:", ignoreCase = true)) {
-                "$head\r\n\r\n"
+                "$base\r\n\r\n"
             } else {
-                "$head\r\nSet-Cookie: $setCookie\r\n\r\n"
+                "$base\r\nSet-Cookie: $setCookie\r\n\r\n"
             }
             dest.write(injected.toByteArray(Charsets.ISO_8859_1))
             if (rest.isNotEmpty()) dest.write(rest)
@@ -211,6 +226,7 @@ class LoopbackShim(
             200 -> "OK"
             403 -> "Forbidden"
             404 -> "Not Found"
+            413 -> "Payload Too Large"
             502 -> "Bad Gateway"
             else -> "OK"
         }

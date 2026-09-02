@@ -1,4 +1,4 @@
-"""One-shot pairing for Grove Connect.
+"""One-shot pairing for RemedyConnect.
 
 QR text carries the host static public and a 60s pair secret. It never includes
 ``local_api_token`` or a Bearer. ``hp`` / ``ps`` are URL-safe base64 without

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import threading
 import time
 from collections import defaultdict, deque
 from typing import Any
@@ -17,6 +18,10 @@ HANDSHAKE_RATE = 10
 HANDSHAKE_WINDOW_S = 60.0
 
 _writers: dict[Any, str] = {}
+# Loop each writer's transport belongs to; closes from another thread must
+# hop onto it (asyncio transports are not thread-safe).
+_writer_loops: dict[Any, asyncio.AbstractEventLoop] = {}
+_writers_lock = threading.Lock()
 _rate: dict[str, deque[float]] = defaultdict(deque)
 _server: asyncio.AbstractServer | None = None
 _extra_servers: list[asyncio.AbstractServer] = []
@@ -27,7 +32,8 @@ _mdns_stop: Any = None
 
 
 def live_writers() -> set[Any]:
-    return set(_writers)
+    with _writers_lock:
+        return set(_writers)
 
 
 def listening_addr() -> tuple[str, int] | None:
@@ -35,16 +41,54 @@ def listening_addr() -> tuple[str, int] | None:
 
 
 def register_writer(writer: Any, device_id: str = "") -> None:
-    _writers[writer] = str(device_id or "")
+    loop: asyncio.AbstractEventLoop | None
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    with _writers_lock:
+        _writers[writer] = str(device_id or "")
+        if loop is not None:
+            _writer_loops[writer] = loop
 
 
 def bind_writer_device(writer: Any, device_id: str) -> None:
-    if writer in _writers:
-        _writers[writer] = str(device_id or "").strip()
+    with _writers_lock:
+        if writer in _writers:
+            _writers[writer] = str(device_id or "").strip()
+
+
+def writer_device(writer: Any) -> str:
+    with _writers_lock:
+        return str(_writers.get(writer) or "")
 
 
 def unregister_writer(writer: Any) -> None:
-    _writers.pop(writer, None)
+    with _writers_lock:
+        _writers.pop(writer, None)
+        _writer_loops.pop(writer, None)
+
+
+def _close_writer(writer: Any) -> None:
+    """Close on the owning loop; direct when already there (or loop unknown)."""
+    with _writers_lock:
+        loop = _writer_loops.get(writer)
+    on_loop = False
+    if loop is not None:
+        try:
+            on_loop = asyncio.get_running_loop() is loop
+        except RuntimeError:
+            on_loop = False
+    if loop is not None and not on_loop and not loop.is_closed():
+        with contextlib.suppress(Exception):
+            loop.call_soon_threadsafe(lambda: _safe_close(writer))
+        return
+    _safe_close(writer)
+
+
+def _safe_close(writer: Any) -> None:
+    with contextlib.suppress(Exception):
+        writer.close()
 
 
 def drop_sessions_for_device(device_id: str) -> None:
@@ -53,25 +97,31 @@ def drop_sessions_for_device(device_id: str) -> None:
     if not want:
         drop_all_sessions()
         return
-    mapped = any(str(did or "").strip() for did in _writers.values())
+    with _writers_lock:
+        items = list(_writers.items())
+    mapped = any(str(did or "").strip() for _w, did in items)
     if not mapped:
         drop_all_sessions()
         return
-    for writer, did in list(_writers.items()):
+    for writer, did in items:
         did_s = str(did or "").strip()
         if did_s and did_s != want:
             continue
-        with contextlib.suppress(Exception):
-            writer.close()
-        _writers.pop(writer, None)
+        _close_writer(writer)
+        with _writers_lock:
+            _writers.pop(writer, None)
+            _writer_loops.pop(writer, None)
 
 
 def drop_all_sessions() -> None:
     """Close every live Connect socket (pause)."""
-    for writer in list(_writers):
-        with contextlib.suppress(Exception):
-            writer.close()
-    _writers.clear()
+    with _writers_lock:
+        items = list(_writers)
+    for writer in items:
+        _close_writer(writer)
+    with _writers_lock:
+        _writers.clear()
+        _writer_loops.clear()
 
 
 def _peer_ip(writer: Any) -> str:
@@ -130,6 +180,16 @@ async def _handle(
             logger.warning("connect handshake rate-limited")
             return
         from remedy.connect.pipe import session_loop
+        from remedy.connect.store import is_revoked_live
+
+        def _should_stop() -> bool:
+            # Checked before every record: pause, or a revoke that landed while
+            # this socket was mid-session (the close itself is dispatched onto
+            # this loop; this is the belt to that suspender).
+            if is_paused():
+                return True
+            did = writer_device(writer)
+            return bool(did) and is_revoked_live(did)
 
         await session_loop(
             reader,
@@ -138,8 +198,11 @@ async def _handle(
             sidecar_port=sidecar_port,
             api_key=api_key,
             config=config,
-            should_stop=is_paused,
+            should_stop=_should_stop,
             on_device=lambda rec: bind_writer_device(writer, str((rec or {}).get("id") or "")),
+            # skip_rate is only set for outbound relay / rendezvous dials: the
+            # same sessions a third party can inject junk records into.
+            lenient_decrypt=skip_rate,
         )
     except (asyncio.IncompleteReadError, ConnectionResetError, BrokenPipeError, OSError):
         return
@@ -166,9 +229,11 @@ async def start_connect_server(
     tailscale_host: str = "",
 ) -> asyncio.AbstractServer:
     """Bind chosen IPv4:port. ``port=0`` picks an ephemeral port (tests)."""
-    global _server, _bind, _supervisor_task
+    global _server, _bind, _supervisor_task, _rdv_task
     _assert_bind(host)
-    cfg = dict(config or {})
+    # Keep the caller's dict (lifecycle mutates it in place on Settings
+    # changes) so pane flags read per request are the live ones.
+    cfg = config if isinstance(config, dict) else {}
     side = int(sidecar_port or 7400)
     key = str(api_key or "")
 

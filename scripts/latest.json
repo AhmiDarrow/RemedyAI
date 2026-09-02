@@ -1,11 +1,11 @@
 {
-  "version": "v0.44.1",
-  "notes": "Remedy Desktop v0.44.1 \u2014 Windows installer (fixes: windowed-sidecar logging crash, Browser rail popup loop)",
-  "pub_date": "2026-08-30T18:00:00Z",
+  "version": "v0.47.0",
+  "notes": "Remedy Desktop v0.47.0 \u2014 Windows installer",
+  "pub_date": "2026-08-31T23:18:47Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "",
-      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.44.1/Remedy.Desktop_0.44.1_x64-setup.exe"
+      "url": "https://github.com/AhmiDarrow/RemedyAI/releases/download/v0.47.0/Remedy.Desktop_0.47.0_x64-setup.exe"
     }
   }
 }

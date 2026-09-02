@@ -737,7 +737,10 @@ async def run_unattended_improve(
         "idle_s": round(_idle_seconds(), 1),
         "idle_ready": should_run_now(home),
     }
-    result["organism"] = _organism_tick(runtime, home=home)
+    # Skill promotion/prune + soul persistence is synchronous file I/O and
+    # compute; it runs on the shared event loop every 60s, so offload it or it
+    # hitches every live stream on a busy sidecar.
+    result["organism"] = await asyncio.to_thread(_organism_tick, runtime, home=home)
 
     if repo is None:
         repo = _guess_repo(runtime)

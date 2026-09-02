@@ -209,8 +209,18 @@ def _read_ledger_map(path: Path) -> tuple[dict[str, BuildLedgerEntry], str]:
     active = ""
     if not path.is_file():
         return builds, active
-    with suppress(Exception):
+    try:
         raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        # A torn/corrupt ledger must not be silently replaced by a one-build
+        # file on the next save (that loses every sibling goal). Set it aside
+        # where a human can recover it and start clean.
+        with suppress(Exception):
+            path.replace(path.with_name(f"{path.name}.corrupt-{int(time.time())}"))
+        return builds, active
+    except OSError:
+        return builds, active
+    with suppress(Exception):
         if isinstance(raw, dict) and isinstance(raw.get("builds"), dict):
             for k, v in raw["builds"].items():
                 if isinstance(v, dict):
@@ -227,6 +237,17 @@ def _read_ledger_map(path: Path) -> tuple[dict[str, BuildLedgerEntry], str]:
     return builds, active
 
 
+STALE_AFTER_H = 72.0
+
+
+def is_stale_entry(entry: BuildLedgerEntry | None, *, now: float | None = None) -> bool:
+    """Older than :data:`STALE_AFTER_H` since its last update."""
+    if entry is None:
+        return True
+    age_h = ((now if now is not None else time.time()) - float(entry.updated_ts or 0)) / 3600.0
+    return age_h > STALE_AFTER_H
+
+
 def _pick_active(builds: dict[str, BuildLedgerEntry], active: str) -> BuildLedgerEntry | None:
     """The build a bare ``load_ledger(project)`` should resume: prefer an
     unfinished build, most-recently-updated; else the recorded active."""
@@ -236,7 +257,9 @@ def _pick_active(builds: dict[str, BuildLedgerEntry], active: str) -> BuildLedge
     def _finished(e: BuildLedgerEntry) -> bool:
         return e.phase == "done" and e.last_verify_ok is True
 
-    unfinished = [e for e in builds.values() if not _finished(e)]
+    # A red build nobody touched for days is history, not the thing a bare
+    # "continue" should resurrect (same 72h wall as resume_hint).
+    unfinished = [e for e in builds.values() if not _finished(e) and not is_stale_entry(e)]
     pool = unfinished or list(builds.values())
     # Prefer the recorded active when it is in the pool (stable resume target).
     if active in builds and builds[active] in pool:
@@ -525,6 +548,10 @@ def needs_resume_drive(entry: BuildLedgerEntry | None) -> bool:
     if entry.phase == "done" and entry.last_verify_ok is True:
         return False
     if entry.last_verify_ok is not False:
+        return False
+    if is_stale_entry(entry):
+        # Days-old red work is not "mid-ship"; a bare "continue" must not
+        # silently resurrect it with a real verify subprocess.
         return False
     return bool(entry.write_set)
 

@@ -61,8 +61,41 @@ class SessionsApi(private val api: RemedyApi) {
     }
 
     /** Abort the running turn in a session. */
-    fun stop(sessionId: String?): Boolean =
-        api.post("/api/stop", sessionId?.let { JSONObject().put("session_id", it).toString() })
+    fun stop(sessionId: String?): Boolean {
+        if (sessionId.isNullOrBlank()) return false
+        return api.post("/api/sessions/$sessionId/abort")
+    }
+
+    /** The PC's active session (streaming turn first, else focused tab). */
+    fun activeSessionId(): String? =
+        api.getJson("/connect/me")?.optString("session_id")?.takeIf { it.isNotBlank() }
+
+    /** Live provider + model from the PC (GET /api/settings). */
+    fun currentSettings(): Pair<String?, String?> {
+        val j = api.getJson("/api/settings") ?: return null to null
+        return j.optString("llm_provider").takeIf { it.isNotBlank() } to
+            j.optString("llm_model").takeIf { it.isNotBlank() }
+    }
+
+    /** Switch the PC's active provider / model (safe keys only, no secrets). */
+    fun setProvider(provider: String?, model: String?): Boolean {
+        val body = JSONObject()
+        if (!provider.isNullOrBlank()) body.put("llm_provider", provider)
+        if (!model.isNullOrBlank()) body.put("llm_model", model)
+        if (body.length() == 0) return false
+        return api.putJson("/api/settings", body) != null
+    }
+
+    /**
+     * Reset the PC's model to the provider default. The server merges patches
+     * and drops nulls, so an explicit empty `llm_model` is the only way to say
+     * "clear it" — normalize_llm_settings then picks the provider default.
+     */
+    fun resetModel(provider: String?): Boolean {
+        val body = JSONObject().put("llm_model", "")
+        if (!provider.isNullOrBlank()) body.put("llm_provider", provider)
+        return api.putJson("/api/settings", body) != null
+    }
 
     /** Pending approvals. */
     fun approvals(): List<Approval> {

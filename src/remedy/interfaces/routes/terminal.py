@@ -23,7 +23,8 @@ import json
 import logging
 import os
 import queue
-import sys
+import re
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -38,9 +39,42 @@ from remedy.interfaces.api_support import sse_headers
 logger = logging.getLogger(__name__)
 
 _MAX_TERMINALS = 16
-_IDLE_KEEPALIVE_S = 15.0
+_IDLE_KEEPALIVE_S = 10.0
 _IDLE_GRACE_S = 60.0
 _READ_CHUNK = 8192
+_MAX_INPUT_BYTES = 65536  # one input POST (security: no unbounded writes)
+_MAX_QUEUE_BYTES = 512 * 1024  # output flood cap: drop + notice beyond this
+_MAX_SSE_BATCH = 16 * 1024  # coalesce output into one SSE event (speed)
+
+# Windows: force the console to UTF-8 so ConPTY output arrives as UTF-8 bytes
+# regardless of the OEM codepage (cp437/cp850). Without this, PowerShell 5.1
+# writes box-drawing/unicode as OEM bytes and the phone renders mojibake.
+_WIN_UTF8_INIT = (
+    "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+    " [Console]::InputEncoding=[System.Text.Encoding]::UTF8;"
+    " chcp 65001 > $null"
+)
+
+# ANSI/VT escape sequences (CSI, OSC, charset-select). The phone shows plain
+# text, so strip them server-side instead of shipping raw control bytes.
+_ANSI_RE = re.compile(
+    r"\x1b\[[0-9;?]*[ -/]*[@-~]"  # CSI: colors, cursor, erase
+    r"|\x1b\][^\x07]*(?:\x07|\x1b\\)"  # OSC: title/kitty sequences
+    r"|\x1b[()][0-9A-Za-z]"  # charset select
+    r"|\x1b[=>]"  # keypad/alt modes
+)
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove terminal escape sequences; keep \n and \t for plain rendering."""
+    text = _ANSI_RE.sub("", text)
+    out = []
+    for ch in text:
+        if ch in "\n\t":
+            out.append(ch)
+        elif ch == "\r" or ord(ch) >= 32:
+            out.append(ch)
+    return "".join(out)
 
 
 def _pick_shell() -> tuple[str, list[str]]:
@@ -49,6 +83,7 @@ def _pick_shell() -> tuple[str, list[str]]:
         pf = str(Path(os.environ.get("ProgramFiles", r"C:\Program Files")).resolve())
         pf86 = str(Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")).resolve())
         sysroot = str(Path(os.environ.get("SystemRoot", r"C:\Windows")).resolve())
+        args = ["-NoLogo", "-NoProfile", "-NoExit", "-Command", _WIN_UTF8_INIT]
         for c in (
             str(Path(pf) / "PowerShell" / "7" / "pwsh.exe"),
             str(Path(pf86) / "PowerShell" / "7" / "pwsh.exe"),
@@ -56,8 +91,8 @@ def _pick_shell() -> tuple[str, list[str]]:
             r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
         ):
             if Path(c).is_file():
-                return c, ["-NoLogo", "-NoExit"]
-        return "powershell.exe", ["-NoLogo", "-NoExit"]
+                return c, list(args)
+        return "powershell.exe", list(args)
     shell = (os.environ.get("SHELL") or "").strip() or "/bin/sh"
     low = shell.lower()
     win_interop = low.endswith(".exe") or "/mnt/" in low or "\\" in low
@@ -96,26 +131,63 @@ class _TerminalSession:
         self.closed = False
         self.returncode: int | None = None
         self.created = time.time()
+        self._dropped = 0  # output bytes dropped by the flood cap
+        self._thread: threading.Thread | None = None
         self._reader: asyncio.Task | None = None
         self._idle_task: asyncio.Task | None = None
 
     async def start(self) -> None:
-        self._reader = asyncio.create_task(self._pump())
+        # ONE dedicated reader thread per shell (ConPTY): a blocked ReadFile
+        # must never occupy the asyncio thread pool. Thread-per-chunk read
+        # starves the whole sidecar when a shell is idle — the "server dies
+        # when the phone drops" symptom. Pipe fallback (StreamReader) stays
+        # async because its read() is a coroutine bound to this loop.
+        if getattr(self.proc.stdout, "_read_sync", None) is not None:
+            self._thread = threading.Thread(
+                target=self._pump_sync,
+                name=f"term-read-{self.id}",
+                daemon=True,
+            )
+            self._thread.start()
+        else:
+            self._reader = asyncio.create_task(self._pump_async())
 
-    async def _pump(self) -> None:
+    def _push(self, data: bytes) -> bool:
+        """Bound the output queue; return False when the session is closed."""
+        if self.closed:
+            return False
+        if self.q.qsize() * _READ_CHUNK >= _MAX_QUEUE_BYTES:
+            self._dropped += len(data)  # flood cap: drop, keep reading
+            return True
+        self.q.put(data)
+        return True
+
+    def _pump_sync(self) -> None:
+        """ConPTY reader: blocking ReadFile in one dedicated thread."""
         try:
-            read = getattr(self.proc.stdout, "_read_sync", None)
+            read = self.proc.stdout._read_sync
             while True:
-                if read is not None:
-                    # ConPTY _HandleStream.read is sync-blocking inside an
-                    # async def — call the underlying read in a worker thread
-                    # or the blocking ReadFile starves the SSE generator.
-                    data = await asyncio.to_thread(read, _READ_CHUNK)
-                else:
-                    data = await self.proc.stdout.read(_READ_CHUNK)
+                data = read(_READ_CHUNK)
                 if not data:
                     break
-                self.q.put(data)
+                if not self._push(data):
+                    break
+        except Exception:
+            pass
+        finally:
+            with contextlib.suppress(Exception):
+                self.returncode = self.proc.poll()
+            self.q.put(None)
+
+    async def _pump_async(self) -> None:
+        """Pipe fallback: StreamReader coroutine on this event loop."""
+        try:
+            while True:
+                data = await self.proc.stdout.read(_READ_CHUNK)
+                if not data:
+                    break
+                if not self._push(data):
+                    break
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -128,16 +200,26 @@ class _TerminalSession:
     async def write(self, data: str) -> None:
         if self.closed:
             raise HTTPException(410, "Terminal closed")
+        if len(data) > _MAX_INPUT_BYTES:
+            raise HTTPException(
+                413, f"Input too large (max {_MAX_INPUT_BYTES} bytes)"
+            )
         raw = data.encode("utf-8", errors="replace")
         if not raw:
             return
         writer = getattr(self.proc.stdin, "write", None)
         if writer is None:
             return
-        if getattr(self.proc.stdin, "_write_sync", None) is not None:
-            await asyncio.to_thread(writer, raw)
-        else:
+        # Both real stdins have a SYNCHRONOUS write: the ConPTY _HandleStream
+        # (blocking WriteFile) and the asyncio StreamWriter (transport.write,
+        # returns None). Awaiting either raised `TypeError: NoneType can't be
+        # awaited`, which BaseHTTPMiddleware surfaced as a 404 "Request
+        # aborted" — so typing into the phone terminal did nothing. Only await
+        # a genuinely async write (test doubles / future transports).
+        if asyncio.iscoroutinefunction(writer):
             await writer(raw)
+        else:
+            writer(raw)
         drain = getattr(self.proc.stdin, "drain", None)
         if drain is not None:
             with contextlib.suppress(Exception):
@@ -158,6 +240,7 @@ class _TerminalSession:
             self._reader.cancel()
             with contextlib.suppress(BaseException):
                 await self._reader
+        # Kill the process to unblock the dedicated reader thread's ReadFile.
         with contextlib.suppress(Exception):
             self.proc.kill()
         with contextlib.suppress(Exception):
@@ -180,7 +263,10 @@ class _TerminalSession:
 
         if self._idle_task is not None:
             self._idle_task.cancel()
-        self._idle_task = asyncio.create_task(_do())
+        # Loop may be closing (test teardown / app shutdown): never let a
+        # create_task raise inside an SSE generator's finally.
+        with contextlib.suppress(RuntimeError):
+            self._idle_task = asyncio.create_task(_do())
 
     def cancel_idle_close(self) -> None:
         if self._idle_task is not None:
@@ -297,6 +383,7 @@ def register_terminal_routes(app: FastAPI) -> None:
         async def gen():
             sess.cancel_idle_close()  # a stream is attached again
             last_touch = time.time()
+            dropped = sess._dropped
             try:
                 yield ": connected\n\n"
                 while True:
@@ -306,12 +393,46 @@ def register_terminal_routes(app: FastAPI) -> None:
                         if time.time() - last_touch >= _IDLE_KEEPALIVE_S:
                             yield ": keepalive\n\n"
                             last_touch = time.time()
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(0.05)
                         continue
                     last_touch = time.time()
                     if chunk is None:
                         break
-                    text = chunk.decode("utf-8", errors="replace")
+                    # Coalesce pending output into ONE SSE event: fast shells
+                    # emit many tiny chunks, and one event per chunk floods
+                    # the tunnel with micro-frames (the "terminal is very
+                    # slow" symptom). Batch up to the cap, then flush.
+                    parts = [chunk]
+                    total = len(chunk)
+                    while total < _MAX_SSE_BATCH:
+                        try:
+                            nxt = sess.q.get_nowait()
+                        except queue.Empty:
+                            break
+                        if nxt is None:
+                            # Shell exited mid-batch: flush what we already
+                            # collected (the last lines before exit) and end
+                            # on the next loop turn instead of dropping them.
+                            try:
+                                sess.q.put_nowait(None)
+                            except Exception:
+                                pass
+                            break
+                        parts.append(nxt)
+                        total += len(nxt)
+                    if sess._dropped != dropped:
+                        parts.insert(
+                            0,
+                            (
+                                "\n[output truncated: "
+                                f"{sess._dropped - dropped} bytes dropped]\n"
+                            ).encode("utf-8", errors="replace"),
+                        )
+                        dropped = sess._dropped
+                    text = b"".join(parts).decode("utf-8", errors="replace")
+                    if not text:
+                        continue
+                    text = _strip_ansi(text)
                     if not text:
                         continue
                     payload = json.dumps({"type": "output", "text": text})
@@ -324,9 +445,15 @@ def register_terminal_routes(app: FastAPI) -> None:
                 yield f"event: exit\ndata: {payload}\n\n"
             finally:
                 # Phone dropped the SSE (rotation / network blip): do NOT kill
-                # the shell instantly — give the app time to re-attach.
+                # the shell instantly — give the app time to re-attach. The
+                # idle grace close also runs when the stream ends normally.
                 if not sess.closed:
                     sess.schedule_idle_close()
+                else:
+                    # Stream ended because the shell closed; drop the registry
+                    # entry so a stale id can't linger (caps stay honest).
+                    with contextlib.suppress(Exception):
+                        _TERMINALS.pop(sess.id, None)
 
         return StreamingResponse(
             gen(),

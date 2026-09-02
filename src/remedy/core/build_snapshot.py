@@ -55,7 +55,17 @@ def load_manifest(project: Path | str) -> list[dict[str, Any]]:
 
 def _save_manifest(project: Path, snaps: list[dict[str, Any]]) -> None:
     p = _manifest_path(project)
-    write_json_atomic(p, {"snaps": snaps[-80:], "updated": time.time()})
+    kept = snaps[-80:]
+    # Delete the on-disk snapshot dirs the manifest just dropped. Without this a
+    # long build (hundreds of hops, each auto-snapshotting before write) leaves
+    # hundreds of orphaned snapshots/<sid>/ dirs that nothing ever references.
+    kept_ids = {str(s.get("snap_id") or "") for s in kept}
+    root = _snap_root(project)
+    for s in snaps[:-80] if len(snaps) > 80 else []:
+        sid = str(s.get("snap_id") or "")
+        if sid and sid not in kept_ids:
+            shutil.rmtree(root / sid, ignore_errors=True)
+    write_json_atomic(p, {"snaps": kept, "updated": time.time()})
 
 
 def snapshot_paths(

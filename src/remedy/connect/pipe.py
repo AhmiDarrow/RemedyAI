@@ -37,6 +37,14 @@ MAX_FRAGMENTS = 16
 MAX_FRAG_BYTES = 256 * 1024
 MAX_INNER_TASKS = 8
 HANDSHAKE_TIMEOUT_S = 20.0
+# The phone polls /connect/me every 2.5s while attached, so a socket that is
+# silent this long belongs to a phone that vanished (mobile data drop, app
+# killed) and would otherwise stay registered until TCP keepalive gives up.
+IDLE_TIMEOUT_S = 180.0
+# Relay / rendezvous only: undecryptable records tolerated before the
+# session is dropped (a public-broker subscriber can publish junk on any
+# topic it enumerates; the phone applies the same bound).
+MAX_BAD_RECORDS = 32
 _BLOCKED_METHODS = frozenset({"CONNECT", "TRACE", "TRACK"})
 
 
@@ -415,12 +423,19 @@ async def _send_plain(
 
 def _json_error(status: int, reason: str, code: str) -> bytes:
     body = json.dumps({"error": code, "reason": reason}).encode("utf-8")
-    phrase = "Forbidden" if status == 403 else "OK"
-    if status == 401:
-        phrase = "Unauthorized"
-    if status >= 500:
-        phrase = "Error"
+    phrase = _PHRASES.get(status, "Error" if status >= 500 else "OK")
     return encode_http_error(status, phrase, body)
+
+
+_PHRASES = {
+    400: "Bad Request",
+    401: "Unauthorized",
+    403: "Forbidden",
+    404: "Not Found",
+    413: "Payload Too Large",
+    429: "Too Many Requests",
+    502: "Bad Gateway",
+}
 
 
 def _json_ok(obj: dict[str, Any]) -> bytes:
@@ -460,7 +475,11 @@ async def iter_request_http(
 ) -> AsyncIterator[bytes]:
     panes = panes_from_config(config)
     path = req.path or "/"
-    from remedy.connect.deny import sanitize_origin_path, settings_write_locked
+    from remedy.connect.deny import (
+        sanitize_origin_path,
+        settings_body_safe_provider,
+        settings_write_locked,
+    )
 
     safe = sanitize_origin_path(path)
     if safe is None:
@@ -479,6 +498,12 @@ async def iter_request_http(
         if locked:
             yield _json_error(403, locked, "forbidden")
             return
+        # Provider/model switch is safe for the phone: no secrets, no connect
+        # keys (the body lock above already rejected those). Without this the
+        # settings_write pane (off by default) blocks even a plain switch.
+        if settings_body_safe_provider(req.body):
+            panes = dict(panes)
+            panes["settings_write"] = True
     if path in ("/connect/me", "/api/connect/me"):
         yield _json_ok(_me_body(device, panes))
         return
@@ -603,8 +628,13 @@ async def _stream_inner_http(
     api_key: str,
     config: dict[str, Any] | None,
 ) -> None:
-    """Yield TYPE_HTTP_RES as raw HTTP chunks. SSE is not fully buffered."""
-    last: bytes | None = None
+    """Yield TYPE_HTTP_RES as raw HTTP chunks, each forwarded as it arrives.
+
+    Every piece goes out immediately with ``fin=False`` and an empty
+    ``fin=True`` frame closes the message, so an SSE event (or a terminal
+    line) reaches the phone now rather than when the *next* one arrives.
+    """
+    sent_any = False
     try:
         async for piece in iter_request_http(
             req,
@@ -615,12 +645,14 @@ async def _stream_inner_http(
         ):
             if not piece:
                 continue
-            if last is not None:
-                await _send_inner_raw(writer, crypto, msg_id, last, fin=False)
-            last = piece
-        if last is None:
-            last = _json_error(502, "empty", "empty")
-        await _send_inner_raw(writer, crypto, msg_id, last, fin=True)
+            await _send_inner_raw(writer, crypto, msg_id, piece, fin=False)
+            sent_any = True
+        if not sent_any:
+            await _send_inner_raw(
+                writer, crypto, msg_id, _json_error(502, "empty", "empty"), fin=True
+            )
+            return
+        await _send_inner_raw(writer, crypto, msg_id, b"", fin=True)
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -659,11 +691,23 @@ async def handle_inner_frame(
     buf = fragments.get(msg_id)
     if buf is None:
         if len(fragments) >= MAX_FRAGMENTS:
+            # Too many half-received messages: evict the oldest partial so a
+            # client that lost a FIN cannot wedge itself, and tell this one.
+            oldest = next(iter(fragments))
+            fragments.pop(oldest, None)
+            await _send_inner_raw(
+                writer, crypto, msg_id, _json_error(429, "fragments", "busy"), fin=True
+            )
             return
         buf = bytearray()
         fragments[msg_id] = buf
     if len(buf) + len(payload) > MAX_FRAG_BYTES:
+        # Answer instead of dropping silently; the phone would otherwise
+        # wait on its own timeout with no idea why.
         fragments.pop(msg_id, None)
+        await _send_inner_raw(
+            writer, crypto, msg_id, _json_error(413, "too large", "too_large"), fin=True
+        )
         return
     buf.extend(payload)
     if not (flags & FLAG_FIN):
@@ -732,10 +776,11 @@ async def authenticate_payload(
     rec = get_device(device_id)
     if rec is None or rec.get("revoked"):
         raise ValueError("not allowlisted")
-    if device_pub is not None:
-        want = str(rec.get("public_hex") or "").strip().lower()
-        if want and device_pub.hex() != want:
-            raise ValueError("static mismatch")
+    # Fail closed: a record with no stored public key must not accept any
+    # static, and a hello must always be bound to the Noise-proven key.
+    want = str(rec.get("public_hex") or "").strip().lower()
+    if not want or device_pub is None or device_pub.hex() != want:
+        raise ValueError("static mismatch")
     return rec
 
 
@@ -749,9 +794,17 @@ async def session_loop(
     config: dict[str, Any] | None,
     should_stop: Callable[[], bool] | None = None,
     on_device: Callable[[dict[str, Any]], None] | None = None,
+    lenient_decrypt: bool = False,
 ) -> dict[str, Any] | None:
-    """Handshake + request loop. Returns the device record if authenticated."""
+    """Handshake + request loop. Returns the device record if authenticated.
+
+    ``lenient_decrypt`` is for relay / public-rendezvous transports, where any
+    ``remedy/#`` subscriber can publish junk on the session topic. A record
+    that fails the nonce/tag check leaves the cipher untouched, so skipping
+    it is safe; on the LAN it stays fatal (fail closed).
+    """
     inflight: set[asyncio.Task[Any]] = set()
+    bad_records = 0
     if is_paused():
         return None
     try:
@@ -775,12 +828,21 @@ async def session_loop(
                 return device
             if is_paused():
                 return device
-            rec = await read_transport(reader)
+            try:
+                rec = await asyncio.wait_for(read_transport(reader), timeout=IDLE_TIMEOUT_S)
+            except TimeoutError:
+                # Silent for too long: the phone is gone. Drop the socket so
+                # the device row goes offline and the slot is freed.
+                return device
             try:
                 plain = _decrypt(crypto.recv, rec)
             except Exception:
-                # Replay / auth failure fail closed.
-                return device
+                # Replay / auth failure fail closed on the LAN; on a shared
+                # broker tolerate a bounded amount of third-party noise.
+                bad_records += 1
+                if not lenient_decrypt or bad_records > MAX_BAD_RECORDS:
+                    return device
+                continue
             if plain[:1] == b"\x01":
                 crypto.inner = True
                 await handle_inner_frame(

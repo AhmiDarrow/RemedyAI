@@ -36,8 +36,11 @@ class RemedyApi(private val baseUrl: String) {
         val url = URL(baseUrl.trimEnd('/') + path)
         val c = url.openConnection() as HttpURLConnection
         c.requestMethod = method
-        c.connectTimeout = 8_000
-        c.readTimeout = 15_000
+        // Mobile data rides the relay/tunnel: 8s connect / 15s read is too
+        // tight for a settings/model switch (server-side model discovery is a
+        // network call). Generous timeouts; SSE streams get their own below.
+        c.connectTimeout = 15_000
+        c.readTimeout = 45_000
         c.setRequestProperty("Accept", "application/json")
         c.setRequestProperty("Connection", "keep-alive")
         return c
@@ -55,6 +58,10 @@ class RemedyApi(private val baseUrl: String) {
         return try {
             if (c.responseCode !in 200..299) null
             else JSONObject(readBody(c))
+        } catch (e: android.os.NetworkOnMainThreadException) {
+            // Never swallow this: a Main-thread call is a programming error
+            // that must crash loudly instead of silently returning null.
+            throw e
         } catch (_: Exception) {
             null
         } finally {
@@ -68,6 +75,10 @@ class RemedyApi(private val baseUrl: String) {
         return try {
             if (c.responseCode !in 200..299) null
             else JSONArray(readBody(c))
+        } catch (e: android.os.NetworkOnMainThreadException) {
+            // Never swallow this: a Main-thread call is a programming error
+            // that must crash loudly instead of silently returning null.
+            throw e
         } catch (_: Exception) {
             null
         } finally {
@@ -88,6 +99,10 @@ class RemedyApi(private val baseUrl: String) {
             }
             if (c.responseCode !in 200..299) null
             else JSONObject(readBody(c))
+        } catch (e: android.os.NetworkOnMainThreadException) {
+            // Never swallow this: a Main-thread call is a programming error
+            // that must crash loudly instead of silently returning null.
+            throw e
         } catch (_: Exception) {
             null
         } finally {
@@ -107,8 +122,36 @@ class RemedyApi(private val baseUrl: String) {
                 (c.outputStream as OutputStream).use { it.write(bytes) }
             }
             c.responseCode in 200..299
+        } catch (e: android.os.NetworkOnMainThreadException) {
+            // Never swallow this: a Main-thread call is a programming error
+            // that must crash loudly instead of silently returning null.
+            throw e
         } catch (_: Exception) {
             false
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    /** PUT JSON body; returns parsed response object or null on non-2xx. */
+    fun putJson(path: String, body: JSONObject?): JSONObject? {
+        val c = conn(path, "PUT")
+        return try {
+            if (body != null) {
+                c.doOutput = true
+                c.setRequestProperty("Content-Type", "application/json")
+                val bytes = body.toString().toByteArray(Charsets.UTF_8)
+                c.setFixedLengthStreamingMode(bytes.size)
+                (c.outputStream as OutputStream).use { it.write(bytes) }
+            }
+            if (c.responseCode !in 200..299) null
+            else JSONObject(readBody(c))
+        } catch (e: android.os.NetworkOnMainThreadException) {
+            // Never swallow this: a Main-thread call is a programming error
+            // that must crash loudly instead of silently returning null.
+            throw e
+        } catch (_: Exception) {
+            null
         } finally {
             c.disconnect()
         }
@@ -119,6 +162,10 @@ class RemedyApi(private val baseUrl: String) {
         val c = conn(path, "DELETE")
         return try {
             c.responseCode in 200..299
+        } catch (e: android.os.NetworkOnMainThreadException) {
+            // Never swallow this: a Main-thread call is a programming error
+            // that must crash loudly instead of silently returning null.
+            throw e
         } catch (_: Exception) {
             false
         } finally {

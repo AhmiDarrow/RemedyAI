@@ -73,8 +73,11 @@ def compile_goal_to_spec(
         for i, p in enumerate(py_paths[:8]):
             rel = norm_rel(p)
             stem = Path(rel).stem
-            sym = _safe_ident(funcs[i] if i < len(funcs) else stem)
-            units.append(_make_unit(rel, sym, goal))
+            named = i < len(funcs)
+            sym = _safe_ident(funcs[i] if named else stem)
+            # "fix the bug in utils.py" names a file, not a symbol: the stub
+            # must only prove the module imports, never assert ``utils.utils``.
+            units.append(_make_unit(rel, sym, goal, assert_symbol=named))
     elif modules:
         for i, m in enumerate(modules[:8]):
             m = m.replace("\\", "/").rstrip("/")
@@ -152,19 +155,25 @@ def compile_goal_to_spec(
     }
 
 
-def _make_unit(path: str, symbol: str, goal: str) -> UnitSpec:
+def _make_unit(path: str, symbol: str, goal: str, *, assert_symbol: bool = True) -> UnitSpec:
     path = norm_rel(path)
     symbol = _safe_ident(symbol)
+    check = (
+        f"    assert hasattr(mod, {symbol!r}), {symbol!r} + ' missing'\n"
+        if assert_symbol
+        else "    assert mod is not None\n"
+    )
     test_src = (
         f"import importlib\n"
         f"import pytest\n\n"
         f"def test_{symbol}_exists():\n"
-        f"    # TDD red: module must import and expose {symbol}\n"
+        f"    # TDD red: module must import"
+        f"{' and expose ' + symbol if assert_symbol else ''}\n"
         f"    mod_name = {path!r}.replace('/', '.').removesuffix('.py')\n"
         f"    if mod_name.startswith('src.'):\n"
         f"        mod_name = mod_name[4:]\n"
         f"    mod = importlib.import_module(mod_name)\n"
-        f"    assert hasattr(mod, {symbol!r}), {symbol!r} + ' missing'\n"
+        f"{check}"
     )
     return UnitSpec(
         id=symbol,

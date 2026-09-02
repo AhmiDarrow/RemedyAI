@@ -8,31 +8,31 @@ import kotlin.test.assertTrue
 class PaneFlagsTest {
     @Test
     fun missingKeysStayVisible() {
-        val p = PaneFlags.parse(mapOf("terminal" to false))
+        val p = PaneFlags.parse(mapOf("live_ui" to false))
         assertTrue(p.isVisible("chat"))
-        assertTrue(p.isVisible("browser"))
-        assertFalse(p.isVisible("terminal"))
-        assertTrue("terminal" in p.hidden())
+        assertTrue(p.isVisible("rails"))
+        assertFalse(p.isVisible("live_ui"))
+        assertTrue("live_ui" in p.hidden())
         assertTrue("chat" in p.visible())
     }
 
     @Test
     fun objectHidesOffPanes() {
-        val p = PaneFlags.parse("""{"chat": true, "browser": false, "files": false}""")
+        val p = PaneFlags.parse("""{"chat": true, "rails": false, "computer_preview": false}""")
         assertTrue(p.isVisible("chat"))
-        assertFalse(p.isVisible("browser"))
-        assertFalse(p.isVisible("files"))
-        assertTrue(p.isVisible("settings"))
+        assertFalse(p.isVisible("rails"))
+        assertFalse(p.isVisible("computer_preview"))
+        assertTrue(p.isVisible("settings_write"))
     }
 
     @Test
     fun listFormOnlyThoseOn() {
-        val p = PaneFlags.parse(listOf("chat", "browser"))
+        val p = PaneFlags.parse(listOf("chat", "rails"))
         assertTrue(p.isVisible("chat"))
-        assertTrue(p.isVisible("browser"))
-        assertFalse(p.isVisible("terminal"))
-        assertFalse(p.isVisible("files"))
-        assertFalse(p.isVisible("settings"))
+        assertTrue(p.isVisible("rails"))
+        assertFalse(p.isVisible("live_ui"))
+        assertFalse(p.isVisible("computer_preview"))
+        assertFalse(p.isVisible("settings_write"))
     }
 
     @Test
@@ -40,7 +40,7 @@ class PaneFlagsTest {
         val p = PaneFlags.parse("""["chat","sessions"]""")
         assertTrue(p.isVisible("chat"))
         assertTrue(p.isVisible("sessions"))
-        assertFalse(p.isVisible("studio"))
+        assertFalse(p.isVisible("settings_write"))
     }
 
     @Test
@@ -48,5 +48,14 @@ class PaneFlagsTest {
         val p = PaneFlags.parse(null)
         assertTrue(PaneFlags.KNOWN.all { p.isVisible(it) })
         assertEquals(emptyList(), p.hidden())
+    }
+
+    @Test
+    fun knownMatchesPcPaneKeys() {
+        // Must stay in lockstep with PANE_KEYS in src/remedy/connect/panes.py.
+        assertEquals(
+            listOf("live_ui", "chat", "approvals", "sessions", "rails", "computer_preview", "settings_write"),
+            PaneFlags.KNOWN,
+        )
     }
 }

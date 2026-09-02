@@ -289,13 +289,13 @@ const META: HelpArticleMeta[] = [
       'Silent daughters Remedy hires for independent work. They report packets to her, never as extra chats. Standing posts survive Stop and restart.',
   },
   {
-    id: '29-grove-connect',
+    id: '29-remedy-connect',
     title: 'RemedyConnect (phone remote)',
     category: 'Daily use',
     order: 4.55,
-    tags: ['connect', 'phone', 'remote', 'qr', 'lan', 'relay'],
+    tags: ['connect', 'phone', 'remote', 'qr', 'tailscale', 'lan'],
     summary:
-      'Phone remote for this PC. Default off. Pair with a 60-second QR. Chosen IPv4 only; not a second Remedy.',
+      'Phone remote for this PC. Default off. Pair with a 60-second QR; Tailscale makes mobile data work anywhere.',
   },
   {
     id: '21-personal-assistant',

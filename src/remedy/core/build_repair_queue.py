@@ -245,6 +245,41 @@ def _project_root(runtime: Any) -> Path:
     return _repo_root(None)
 
 
+def _repair_behavior(path: str, target: Any, queue: Any) -> str:
+    """Repair brief for one hop: the ranking reason plus error-vector lines
+    that mention this file (or its stem), capped so the prompt stays small."""
+    reason = str(getattr(target, "reason", "") or "").strip()
+    node = str(getattr(target, "node", "") or "").strip()
+    lines = [f"Repair `{path}` so the failing verify goes green."]
+    if reason:
+        lines.append(f"Why it was picked: {reason}")
+    if node:
+        lines.append(f"Failing node: {node}")
+    vec = getattr(queue, "vector", None)
+    if isinstance(vec, dict):
+        stem = Path(path).stem.lower()
+        picked: list[str] = []
+        for key in ("errors", "failures", "lines", "tail", "summary"):
+            val = vec.get(key)
+            items = val if isinstance(val, list) else ([val] if isinstance(val, str) else [])
+            for item in items:
+                s = str(item).strip()
+                if not s:
+                    continue
+                low = s.lower()
+                if path.lower() in low or stem in low or key == "summary":
+                    picked.append(s[:300])
+                if len(picked) >= 12:
+                    break
+            if len(picked) >= 12:
+                break
+        if picked:
+            lines.append("Verify output for this file:")
+            lines.extend(f"- {p}" for p in picked)
+    lines.append("Keep every behaviour that already works; change only what the errors need.")
+    return "\n".join(lines)[:1600]
+
+
 def run_auto_repair_hops(
     runtime: Any,
     queue: RepairQueue,
@@ -282,16 +317,27 @@ def run_auto_repair_hops(
                 # Nothing to redirect to. Hopping the test itself is a last
                 # resort, and only when it is the sole target.
                 continue
+        # Tell the model WHY this file is being hopped: the failing test /
+        # error lines that ranked it. Without this the hop was a blind
+        # rewrite from the symbol closure alone.
+        behavior = _repair_behavior(path, t, queue)
         try:
             res = live_unit_hop(
                 runtime,
                 path=path,
+                behavior=behavior,
                 symbol=t.symbol or Path(path).stem,
                 use_llm=use_llm,
                 max_repairs=max_repairs,
                 tests="",  # behavioral filled if locked spec later
             )
-        except TypeError:
+        except TypeError as exc:
+            # Retry with the minimal keyword set only for a genuine signature
+            # mismatch (older / stubbed hop). A TypeError raised INSIDE
+            # live_unit_hop is a real bug and must surface, not be retried away.
+            msg = str(exc)
+            if not ("argument" in msg and ("behavior" in msg or "keyword" in msg)):
+                raise
             res = live_unit_hop(
                 runtime,
                 path=path,

@@ -155,7 +155,10 @@ def _blob_is_verify_command(blob: str) -> bool:
 
 PHASES = ("scout", "implement", "verify", "repair", "ship", "done")
 
-# Source extensions that invalidate green verify (not docs/yml alone)
+# Prose-only writes: the one class that leaves a green verify valid.
+_DOC_ONLY_SUFFIXES = (".md", ".markdown", ".txt", ".rst", ".adoc", ".log", ".remedy-build")
+
+# Source extensions that always invalidate green verify (fast path).
 _SOURCE_WRITE_SUFFIXES = frozenset(
     {
         ".py",
@@ -350,7 +353,14 @@ def _is_source_path(path: str) -> bool:
     # Ignore tmp / probe scripts / ledger
     if _is_build_meta_path(p) or p.startswith("_") or "/_dump" in p:
         return False
-    return any(p.endswith(suf) for suf in _SOURCE_WRITE_SUFFIXES)
+    low = p.lower()
+    if any(low.endswith(suf) for suf in _SOURCE_WRITE_SUFFIXES):
+        return True
+    # Manifests, configs and scripts (package.json, pyproject.toml, Makefile,
+    # *.sh) change what a suite does; only pure prose leaves green intact.
+    if low.endswith(_DOC_ONLY_SUFFIXES):
+        return False
+    return bool(low.strip())
 
 
 @dataclass
@@ -743,6 +753,23 @@ def begin_build_turn(
         return None
     # Tiny muscle: soft supervision only (higher explore tolerance)
     goal_txt = coerce_text_arg(message)[:300]
+    if force and prior_active:
+        # build_drive / build_tdd / build_resume call with force=True on every
+        # hop. Replacing the live state here would zero every cap (auto-verify
+        # cycles, machine injects, one-shot nudges, write_set) mid-turn, so a
+        # model that re-drives each hop could loop past the walls that exist
+        # to stop it. Keep the state; only refresh what the caller may change.
+        with suppress(Exception):
+            prev = get_build_state(runtime)
+            if prev is not None and getattr(prev, "active", False):
+                if goal_txt:
+                    prev.goal = goal_txt
+                if finish_everything:
+                    prev.drive_to_done = True
+                if implement_from_review:
+                    prev.read_only = False
+                    prev.require_green_to_finish = True
+                return prev
     html_or_serve = bool(
         _HTML_PAGE_GOAL_RE.search(goal_txt)
         or re.search(

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.GroveConnect" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.RemedyConnect" parent="android:Theme.Material.NoActionBar">
         <item name="android:statusBarColor">#0a0e0b</item>
         <item name="android:navigationBarColor">#0a0e0b</item>
         <item name="android:windowBackground">#0a0e0b</item>

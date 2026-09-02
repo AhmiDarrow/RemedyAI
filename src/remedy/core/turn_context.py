@@ -124,6 +124,9 @@ _TURN_CONTEXT_VARS: tuple[ContextVar[Any], ...] = (
 
 # session_id -> list of abort events (overlapping streams rare but possible)
 _registry: dict[str, list[asyncio.Event]] = {}
+# Strong refs to detached session-teardown tasks (else the GC can drop them
+# mid-flight). Self-clearing via add_done_callback.
+_abort_cleanups: set[asyncio.Task[Any]] = set()
 # session_id -> live subprocesses for this turn (killed on abort)
 _session_procs: dict[str, list[Any]] = {}
 # Early 409 claim — taken before persist so two POSTs cannot both start.
@@ -613,7 +616,13 @@ def abort_session(
         except RuntimeError:
             loop = None
         if loop is not None:
-            loop.create_task(close_shared_session(sid))
+            # Hold a strong ref: a bare create_task is only weakly held, so the
+            # GC can collect it before close_shared_session tears down the
+            # session's shell subprocess + its pipes — leaking a process and
+            # handles on every Stop.
+            _t = loop.create_task(close_shared_session(sid))
+            _abort_cleanups.add(_t)
+            _t.add_done_callback(_abort_cleanups.discard)
     # Foragers hired by this owner turn die with Stop. Standing posts stay (PR2).
     with contextlib.suppress(Exception):
         from remedy.core.hive.runner import cancel_children

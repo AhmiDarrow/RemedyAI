@@ -25,8 +25,9 @@ import logging
 import os
 import socket
 import struct
-from dataclasses import dataclass, field
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -462,7 +463,14 @@ class RendezvousSession:
         loop = asyncio.get_running_loop()
         try:
             while sock is not None:
-                header = await loop.sock_recv(sock, 4)
+                # sock_recv may return 1-3 bytes under a burst; a short header
+                # is not EOF unless a read returns nothing.
+                header = b""
+                while len(header) < 4:
+                    piece = await loop.sock_recv(sock, 4 - len(header))
+                    if not piece:
+                        break
+                    header += piece
                 if len(header) < 4:
                     break
                 (length,) = struct.unpack("!I", header)

@@ -6,9 +6,15 @@ import {
   CONNECT_PANE_LABELS,
   type ConnectPaneKey,
   type ConnectStatus,
+  type TailscaleStatus,
+  connectListenLabel,
+  connectPairedLabel,
   filterConnectAddresses,
   getConnect,
   getConnectAddresses,
+  getTailscaleStatus,
+  installTailscale,
+  loginTailscale,
   mergeConnectPanes,
   pauseConnect,
   putConnect,
@@ -16,12 +22,13 @@ import {
   revokeConnectDevice,
   startConnectPair,
 } from '../../api/connect'
+import { openExternalUrl } from '../../api/auth'
+import { tauriInvoke } from '../../api/tauri'
 import {
   CONNECT_LOOPBACK_BIND_WARNING,
   isConnectLoopbackHost,
   preferredConnectBindHost,
 } from '../../utils/connectMode'
-import { relativeTime } from '../../utils/relativeTime'
 import QRCode from 'qrcode'
 import { SettingsSection } from '../SettingsSection'
 import {
@@ -44,27 +51,10 @@ type SectionProps = {
   onOpenChange?: (open: boolean) => void
 }
 
-function listenLabel(st: ConnectStatus): string {
-  if (st.listen && st.listen.trim()) return st.listen.trim()
-  const host = st.bind_host.trim()
-  if (!host) return ''
-  return st.bind_port > 0 ? `${host}:${st.bind_port}` : host
-}
-
-function pairedLabel(at?: string): string {
-  if (!at) return ''
-  if (/^\d+$/.test(at)) {
-    const n = Number(at)
-    const ms = n < 1e12 ? n * 1000 : n
-    return relativeTime(new Date(ms).toISOString())
-  }
-  return relativeTime(at)
-}
-
-function expLabel(exp?: number): string {
+function expLabel(exp: number | undefined, now: number): string {
   if (exp == null || !Number.isFinite(exp)) return ''
   const ms = exp < 1e12 ? exp * 1000 : exp
-  const sec = Math.max(0, Math.round((ms - Date.now()) / 1000))
+  const sec = Math.max(0, Math.round((ms - now) / 1000))
   if (sec <= 0) return 'This code has expired. Pair again.'
   if (sec < 60) return `Expires in ${sec}s`
   return `Expires in ${Math.ceil(sec / 60)} min`
@@ -103,7 +93,16 @@ function PairModal({
 }): ReactNode {
   const [copied, setCopied] = useState(false)
   const [qrUrl, setQrUrl] = useState<string | null>(null)
+  const [now, setNow] = useState(() => Date.now())
   const image = qr.startsWith('data:image') || /\.(png|svg)(\?|$)/i.test(qr)
+  const expires = expLabel(exp, now)
+
+  // Tick once a second so "Expires in Ns" counts down and flips to expired.
+  useEffect(() => {
+    if (exp == null) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [exp])
 
   // The backend hands us the pairing text. Turn it into a scannable QR here
   // (client-side) so the phone can scan instead of copy/paste.
@@ -161,7 +160,7 @@ function PairModal({
             {qr}
           </pre>
         )}
-        {expLabel(exp) ? <FormHint>{expLabel(exp)}</FormHint> : null}
+        {expires ? <FormHint>{expires}</FormHint> : null}
         <div className="flex flex-wrap gap-2">
           <FormActionButton
             variant="primary"
@@ -191,6 +190,22 @@ export function ConnectSection({
   const [relayDraft, setRelayDraft] = useState('')
   const [pair, setPair] = useState<{ qr: string; exp?: number } | null>(null)
   const [available, setAvailable] = useState(true)
+  const [ts, setTs] = useState<TailscaleStatus | null>(null)
+  const [tsBusy, setTsBusy] = useState(false)
+  const [tsMsg, setTsMsg] = useState('')
+
+  const refreshTs = useCallback(async () => {
+    setTsBusy(true)
+    setTsMsg('')
+    try {
+      const s = await getTailscaleStatus()
+      setTs(s)
+    } catch {
+      setTs(null)
+    } finally {
+      setTsBusy(false)
+    }
+  }, [])
 
   const refresh = useCallback(async () => {
     try {
@@ -214,6 +229,11 @@ export function ConnectSection({
     void refresh()
   }, [refresh])
 
+  useEffect(() => {
+    if (st?.enabled) void refreshTs()
+    else setTs(null)
+  }, [st?.enabled, refreshTs])
+
   const persist = async (patch: Partial<ConnectStatus>) => {
     const base = st
     if (!base && patch.enabled !== true) return
@@ -231,7 +251,9 @@ export function ConnectSection({
     setBusy(true)
     setMsg('')
     try {
-      const next = await putConnect(body)
+      const saved = await putConnect(body)
+      // PUT echoes config only; GET carries what the listener actually bound.
+      const next = await getConnect().catch(() => saved)
       setSt(next)
       setRelayDraft(next.relay_url)
       if (next.addresses?.length) {
@@ -265,7 +287,8 @@ export function ConnectSection({
     st?.bind_host,
   )
 
-  const listen = st ? listenLabel(st) : ''
+  const listen = st ? connectListenLabel(st) : ''
+  const notListening = Boolean(st?.enabled) && st?.listening === null
 
   return (
     <SettingsSection
@@ -274,9 +297,9 @@ export function ConnectSection({
       summary="Use this PC from a paired phone — Wi‑Fi or mobile data"
     >
       <FormHint>
-        Let a paired phone drive this PC. Same Wi‑Fi works with no extra setup.
-        Mobile data works automatically through a public rendezvous relay — no
-        server to run. Approvals stay on. No Tailscale.
+        Let a paired phone drive this PC. Same Wi‑Fi works with no extra setup;
+        add the free Tailscale app for mobile data anywhere (install it below,
+        on this PC and on your phone — same account). Approvals stay on.
       </FormHint>
       {!available ? (
         <FormNotice tone="muted">
@@ -310,12 +333,94 @@ export function ConnectSection({
           {isConnectLoopbackHost(st.bind_host || selectedHost) ? (
             <FormNotice tone="warn">{CONNECT_LOOPBACK_BIND_WARNING}</FormNotice>
           ) : null}
+          {notListening && !st.paused ? (
+            <FormNotice tone="warn">
+              Not listening. Connect is on but nothing is bound
+              {st.bind_host ? ` at ${st.bind_host}${st.bind_port > 0 ? `:${st.bind_port}` : ''}` : ''}
+              {msg ? ` — ${msg}` : ''}. Pick another address or restart the server below.
+            </FormNotice>
+          ) : (
+            <FormHint>
+              {st.paused
+                ? 'Remote is paused. Phones stay paired but cannot use this PC until you resume.'
+                : listen
+                  ? `Listening at ${listen}`
+                  : 'Pick an address so the phone can find this PC.'}
+            </FormHint>
+          )}
+
+          <FormLabel>Tailscale (mobile data)</FormLabel>
+          {ts ? (
+            ts.logged_in && ts.tailnet_ipv4 ? (
+              <FormNotice tone="muted">
+                Connected — tailnet {ts.tailnet_ipv4}
+                {ts.version ? ` (Tailscale ${ts.version})` : ''}. The pairing QR
+                carries this address, so the phone works on Wi‑Fi and mobile data.
+              </FormNotice>
+            ) : ts.installed ? (
+              <FormNotice tone="warn">
+                Tailscale is installed but {ts.running ? 'not signed in' : 'not running'}.
+                {ts.error ? ` ${ts.error}` : ''}
+              </FormNotice>
+            ) : (
+              <FormNotice tone="warn">
+                Tailscale is not installed. Install it free so your phone works
+                on mobile data, not just your home Wi‑Fi.
+              </FormNotice>
+            )
+          ) : (
+            <FormHint>Checking Tailscale…</FormHint>
+          )}
+          {ts && !ts.installed ? (
+            <FormActionButton
+              variant="primary"
+              disabled={tsBusy}
+              onClick={async () => {
+                setTsBusy(true)
+                setTsMsg('')
+                try {
+                  const r = await installTailscale()
+                  setTsMsg(r.message)
+                  setTs(await getTailscaleStatus())
+                } catch (err) {
+                  setTsMsg(err instanceof Error ? err.message : String(err))
+                } finally {
+                  setTsBusy(false)
+                }
+              }}
+            >
+              Install Tailscale (free)
+            </FormActionButton>
+          ) : null}
+          {ts && ts.installed && !ts.logged_in ? (
+            <FormActionButton
+              variant="primary"
+              disabled={tsBusy}
+              onClick={async () => {
+                setTsBusy(true)
+                setTsMsg('')
+                try {
+                  const r = await loginTailscale()
+                  setTsMsg(r.message)
+                  if (r.login_url) {
+                    await openExternalUrl(r.login_url)
+                  }
+                  setTs(await getTailscaleStatus())
+                } catch (err) {
+                  setTsMsg(err instanceof Error ? err.message : String(err))
+                } finally {
+                  setTsBusy(false)
+                }
+              }}
+            >
+              Sign in to Tailscale
+            </FormActionButton>
+          ) : null}
+          {tsMsg ? <FormHint>{tsMsg}</FormHint> : null}
           <FormHint>
-            {st.paused
-              ? 'Remote is paused. Phones stay paired but cannot use this PC until you resume.'
-              : listen
-                ? `Listening at ${listen}`
-                : 'Pick an address so the phone can find this PC.'}
+            On the phone: install the free Tailscale app from the Play Store and
+            sign into the same account as this PC. Then scan the pairing QR —
+            it includes the tailnet address, so RemedyConnect works anywhere.
           </FormHint>
 
           <FormLabel>Remote shows</FormLabel>
@@ -377,9 +482,9 @@ export function ConnectSection({
                     <span className="block text-xs font-medium" style={{ color: 'var(--text-primary)' }}>
                       {d.name}
                     </span>
-                    {pairedLabel(d.paired_at) ? (
+                    {connectPairedLabel(d.paired_at) ? (
                       <span className="block text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                        Paired {pairedLabel(d.paired_at)}
+                        Paired {connectPairedLabel(d.paired_at)}
                       </span>
                     ) : null}
                   </span>
@@ -416,8 +521,11 @@ export function ConnectSection({
               setBusy(true)
               setMsg('')
               try {
-                const next = on ? await pauseConnect() : await resumeConnect()
-                if (next) setSt({ ...next, paused: on })
+                // /pause and /resume answer {ok, paused}; that is the whole
+                // change, so no follow-up PUT unless the server balked.
+                const r = on ? await pauseConnect() : await resumeConnect()
+                if (r.status) setSt({ ...r.status, paused: r.paused })
+                else if (r.ok) setSt((prev) => (prev ? { ...prev, paused: r.paused } : prev))
                 else await persist({ paused: on })
               } catch {
                 await persist({ paused: on })
@@ -428,6 +536,29 @@ export function ConnectSection({
             label="Pause remote"
             description="Paired phones stay listed but cannot use this PC until you resume."
           />
+
+          <FormActionButton
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true)
+              setMsg('')
+              try {
+                await tauriInvoke('restart_server')
+                setMsg('Server restarted.')
+              } catch (err) {
+                setMsg(err instanceof Error ? err.message : String(err))
+              } finally {
+                setBusy(false)
+              }
+            }}
+          >
+            Restart server
+          </FormActionButton>
+          <FormHint>
+            Kills and respawns the Remedy server. Use this when the server is
+            hung or unreachable — Reconnect alone cannot help if the server
+            itself is down.
+          </FormHint>
 
           <FormLabel htmlFor="connect-relay-url">Owner relay (optional — for lower latency)</FormLabel>
           <FormInput
@@ -457,7 +588,15 @@ export function ConnectSection({
       ) : null}
       {msg ? <FormNotice tone="error">{msg}</FormNotice> : null}
       {pair ? (
-        <PairModal qr={pair.qr} exp={pair.exp} onClose={() => setPair(null)} />
+        <PairModal
+          qr={pair.qr}
+          exp={pair.exp}
+          onClose={() => {
+            setPair(null)
+            // A phone may have paired while the QR was up; pick up the new row.
+            void refresh()
+          }}
+        />
       ) : null}
     </SettingsSection>
   )

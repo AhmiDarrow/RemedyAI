@@ -1,11 +1,5 @@
 package com.remedy.groveconnect.ui
 
-import android.annotation.SuppressLint
-import android.view.ViewGroup
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -21,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -30,7 +23,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
@@ -38,7 +30,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -63,7 +54,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import com.remedy.groveconnect.connect.ApprovalItem
 import com.remedy.groveconnect.connect.Reachable
 import com.remedy.groveconnect.connect.RemoteState
@@ -202,6 +192,8 @@ fun PairScreen(
             QrScanBox(
                 onScanned = { raw -> onPair(raw) },
                 onError = { err -> scanError = err },
+                // A failed pair re-arms the scanner so the next QR is picked up.
+                rearmKey = state.error,
             )
             Spacer(Modifier.height(10.dp))
             Text(
@@ -464,78 +456,4 @@ private fun ApprovalsBlock(items: List<ApprovalItem>, onResolve: (String, Boolea
             }
         }
     }
-}
-
-@Composable
-fun FullRemoteScreen(
-    state: RemoteState,
-    onClose: () -> Unit,
-) {
-    val url = state.shimUrl
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        if (url != null && (state.reachable == Reachable.OnLan || state.reachable == Reachable.OnRelay)) {
-            ConnectWebView(url)
-        } else {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Remote unavailable", color = TextSecondary)
-                    Spacer(Modifier.height(8.dp))
-                    TextButton(onClick = onClose) { Text("Back") }
-                }
-            }
-        }
-        Row(
-            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ReachableChip(state.reachable)
-            Box(
-                Modifier.size(40.dp).clip(CircleShape).background(BgPrimary.copy(alpha = 0.85f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Filled.Close, contentDescription = "Close remote", tint = TextPrimary)
-                }
-            }
-        }
-    }
-}
-
-@SuppressLint("SetJavaScriptEnabled")
-@Composable
-private fun ConnectWebView(url: String) {
-    AndroidView(
-        modifier = Modifier.fillMaxSize(),
-        factory = { ctx ->
-            WebView(ctx).apply {
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.allowFileAccess = false
-                settings.allowContentAccess = false
-                settings.allowFileAccessFromFileURLs = false
-                settings.allowUniversalAccessFromFileURLs = false
-                settings.javaScriptCanOpenWindowsAutomatically = false
-                settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                settings.mediaPlaybackRequiresUserGesture = true
-                settings.setSupportZoom(false)
-                settings.safeBrowsingEnabled = true
-                settings.cacheMode = WebSettings.LOAD_DEFAULT
-                webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                        val host = request.url.host
-                        return host != "127.0.0.1" && host != "localhost"
-                    }
-                }
-                loadUrl(url)
-            }
-        },
-        update = { view ->
-            if (view.url != url) view.loadUrl(url)
-        },
-    )
 }

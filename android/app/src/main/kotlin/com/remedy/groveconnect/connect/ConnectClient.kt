@@ -53,7 +53,16 @@ class ConnectClient(
 
     private var rdv: RendezvousStreams? = null
 
-    fun connect(qr: QrPayload, timeoutMs: Int = 8_000, preferRelay: Boolean = false) {
+    /** True on relay / rendezvous transports, where junk records are tolerated. */
+    @Volatile
+    private var lenientRecords = false
+
+    /**
+     * First contact after scanning a QR. [deviceName] (e.g. the phone model)
+     * is sent inside the encrypted handshake payload so the PC lists this
+     * device by name instead of the generic "phone".
+     */
+    fun connect(qr: QrPayload, timeoutMs: Int = 8_000, preferRelay: Boolean = false, deviceName: String? = null) {
         val errors = ArrayList<Exception>()
         val lanMs = 1_500
         val relayHost = qr.relayHost
@@ -61,11 +70,12 @@ class ConnectClient(
         val rdvHosts = qr.rdvHosts
         val tsHost = qr.tailscaleHost
         val tsPort = qr.tailscalePort
+        val payload = pairPayload(qr.pairSecret, deviceName)
         // Tailscale first: the tailnet IP works on Wi-Fi AND mobile data
         // (DERP relays handle NAT), so it is the universal path when present.
         if (tsHost != null && tsPort != null) {
             try {
-                connectTcp(tsHost, tsPort, timeoutMs, qr.hostPub, qr.pairSecret, hello = null)
+                connectTcp(tsHost, tsPort, timeoutMs, qr.hostPub, qr.pairSecret, hello = payload)
                 via = "tailscale"
                 return
             } catch (e: Exception) {
@@ -78,7 +88,7 @@ class ConnectClient(
             if (relayHost != null && relayPort != null) {
                 try {
                     val sid = SessionId.pair(qr.hostPub, qr.pairSecret)
-                    connectTcp(relayHost, relayPort, timeoutMs, qr.hostPub, qr.pairSecret, hello = null, sessionId = sid)
+                    connectTcp(relayHost, relayPort, timeoutMs, qr.hostPub, qr.pairSecret, hello = payload, sessionId = sid)
                     via = "relay"
                     return
                 } catch (e: Exception) {
@@ -88,7 +98,7 @@ class ConnectClient(
             if (rdvHosts.isNotEmpty()) {
                 try {
                     val sid = SessionId.pair(qr.hostPub, qr.pairSecret)
-                    connectRendezvous(rdvHosts, sid, qr.hostPub, qr.pairSecret, hello = null, timeoutMs = timeoutMs)
+                    connectRendezvous(rdvHosts, sid, qr.hostPub, qr.pairSecret, hello = payload, timeoutMs = timeoutMs)
                     via = "rdv"
                     return
                 } catch (e: Exception) {
@@ -98,7 +108,7 @@ class ConnectClient(
             throw errors.lastOrNull() ?: NoiseException("Could not reach the PC")
         }
         try {
-            connectTcp(qr.lanHost, qr.lanPort, lanMs, qr.hostPub, qr.pairSecret, hello = null)
+            connectTcp(qr.lanHost, qr.lanPort, lanMs, qr.hostPub, qr.pairSecret, hello = payload)
             via = "lan"
             return
         } catch (e: Exception) {
@@ -108,7 +118,7 @@ class ConnectClient(
         if (!v6.isNullOrBlank()) {
             try {
                 val (h, p) = parseHostPort(v6, qr.lanPort)
-                connectTcp(h, p, lanMs, qr.hostPub, qr.pairSecret, hello = null)
+                connectTcp(h, p, lanMs, qr.hostPub, qr.pairSecret, hello = payload)
                 via = "v6"
                 return
             } catch (e: Exception) {
@@ -118,7 +128,7 @@ class ConnectClient(
         if (relayHost != null && relayPort != null) {
             try {
                 val sid = SessionId.pair(qr.hostPub, qr.pairSecret)
-                connectTcp(relayHost, relayPort, timeoutMs, qr.hostPub, qr.pairSecret, hello = null, sessionId = sid)
+                connectTcp(relayHost, relayPort, timeoutMs, qr.hostPub, qr.pairSecret, hello = payload, sessionId = sid)
                 via = "relay"
                 return
             } catch (e: Exception) {
@@ -128,7 +138,7 @@ class ConnectClient(
         if (rdvHosts.isNotEmpty()) {
             try {
                 val sid = SessionId.pair(qr.hostPub, qr.pairSecret)
-                connectRendezvous(rdvHosts, sid, qr.hostPub, qr.pairSecret, hello = null, timeoutMs = timeoutMs)
+                connectRendezvous(rdvHosts, sid, qr.hostPub, qr.pairSecret, hello = payload, timeoutMs = timeoutMs)
                 via = "rdv"
                 return
             } catch (e: Exception) {
@@ -136,6 +146,25 @@ class ConnectClient(
             }
         }
         throw errors.lastOrNull() ?: NoiseException("Could not reach the PC")
+    }
+
+    /**
+     * Handshake payload for an unpaired phone. With no name the raw 32-byte
+     * secret is sent (the host accepts that shape); with a name the host's
+     * `pair\0<secret>\0<name>` form is used so the device gets a real label.
+     */
+    private fun pairPayload(secret: ByteArray, deviceName: String?): ByteArray? {
+        var label = deviceName
+            ?.replace("\u0000", "")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return null
+        // The host caps the label at 80 bytes; cut on a character boundary.
+        while (label.isNotEmpty() && label.toByteArray(Charsets.UTF_8).size > 80) {
+            label = label.dropLast(1)
+        }
+        val head = "pair".toByteArray(Charsets.UTF_8) + byteArrayOf(0)
+        return head + secret + byteArrayOf(0) + label.toByteArray(Charsets.UTF_8)
     }
 
     fun reconnect(
@@ -153,11 +182,12 @@ class ConnectClient(
     ) {
         val hello = ("hello\u0000" + SessionId.deviceIdHex(devicePub)).toByteArray(Charsets.UTF_8)
         val errors = ArrayList<Exception>()
-        // Tailscale first: universal path (Wi-Fi + mobile data).
+        // Tailscale first: universal path (Wi-Fi + mobile data). This is the
+        // PC's own listener, not a relay splice: no session-id preamble (the
+        // host would read those 16 bytes as a bogus record length and drop us).
         if (tailscaleHost != null && tailscalePort != null) {
             try {
-                val sid = SessionId.device(hostPub, devicePub)
-                connectTcp(tailscaleHost, tailscalePort, timeoutMs, hostPub, pairSecret = null, hello = hello, sessionId = sid)
+                connectTcp(tailscaleHost, tailscalePort, timeoutMs, hostPub, pairSecret = null, hello = hello)
                 via = "tailscale"
                 return
             } catch (e: Exception) {
@@ -218,14 +248,26 @@ class ConnectClient(
         throw errors.lastOrNull() ?: NoiseException("Could not reach the PC")
     }
 
+    /**
+     * `host:port`, `[v6]:port`, bare `[v6]` or bare `v6` (no port). A bracketed
+     * literal keeps its inner text; an unbracketed string with more than one
+     * colon is a bare IPv6 address, not host:port.
+     */
     private fun parseHostPort(raw: String, defaultPort: Int): Pair<String, Int> {
-        val t = raw.trim().trim('[', ']')
+        val t = raw.trim()
+        if (t.startsWith("[")) {
+            val close = t.indexOf(']')
+            if (close < 0) return t.trim('[', ']') to defaultPort
+            val host = t.substring(1, close)
+            val rest = t.substring(close + 1)
+            val port = if (rest.startsWith(":")) rest.substring(1).toIntOrNull() ?: defaultPort else defaultPort
+            return host to port
+        }
+        val colons = t.count { it == ':' }
+        if (colons != 1) return t to defaultPort
         val idx = t.lastIndexOf(':')
-        if (idx <= 0) return t to defaultPort
         val port = t.substring(idx + 1).toIntOrNull() ?: defaultPort
-        var host = t.substring(0, idx)
-        if (host.startsWith("[")) host = host.trim('[', ']')
-        return host to port
+        return t.substring(0, idx) to port
     }
 
     private fun connectTcp(
@@ -244,14 +286,20 @@ class ConnectClient(
             sock.receiveBufferSize = 64 * 1024
             sock.sendBufferSize = 64 * 1024
             sock.connect(InetSocketAddress(host, port), timeoutMs)
-            sock.soTimeout = 0
+            // A relay/rendezvous splice may accept the TCP connection and then
+            // wait minutes for a PC that is offline; bound the handshake read so
+            // the app never sits in "Connecting" forever. Transport reads after
+            // the handshake are unbounded (SSE streams can be silent for long).
+            sock.soTimeout = maxOf(timeoutMs, 5_000)
             val out = sock.getOutputStream()
             val inp = sock.getInputStream()
             if (sessionId != null) {
                 out.write(sessionId)
                 out.flush()
             }
-            completeHandshake(inp, out, hostPub, pairSecret, hello)
+            // A session-id preamble means an owner relay splice (shared box).
+            lenientRecords = sessionId != null
+            completeHandshake(inp, out, hostPub, pairSecret, hello) { sock.soTimeout = 0 }
             socket = sock
         } catch (e: Exception) {
             try {
@@ -272,12 +320,15 @@ class ConnectClient(
         hostPub: ByteArray,
         pairSecret: ByteArray?,
         hello: ByteArray?,
+        onHandshook: (() -> Unit)? = null,
     ) {
         val hs = HandshakeState.initiator(localStaticPriv, localStaticPub, hostPub, pairSecret)
         val msg1 = hs.writeMessage(hello ?: ByteArray(0))
         RecordCodec.writeFully(out, RecordCodec.encodeHandshake(msg1))
         val msg2 = RecordCodec.readLengthPrefixed(inp, Protocol.MAX_PLAINTEXT)
         hs.readMessage(msg2)
+        // Lift any handshake read deadline before the reader thread starts.
+        onHandshook?.invoke()
         input = inp
         output = out
         send = hs.sendCipher()
@@ -307,6 +358,7 @@ class ConnectClient(
                 client.connect()
                 val streams = RendezvousStreams(client, sid, role = "phone")
                 streams.start()
+                lenientRecords = true // public broker: third-party junk is expected
                 // Handshake with a deadline: a dead peer must not hang forever.
                 var hsError: Exception? = null
                 val t = Thread({
@@ -320,7 +372,16 @@ class ConnectClient(
                 t.start()
                 t.join(maxOf(timeoutMs.toLong(), 5_000L))
                 if (hsError != null) throw hsError as Exception
-                if (t.isAlive) throw NoiseException("rendezvous handshake timed out")
+                if (t.isAlive) {
+                    // Close the streams so the abandoned thread fails out
+                    // instead of finishing later and overwriting the ciphers
+                    // of whichever broker actually won.
+                    try {
+                        streams.close()
+                    } catch (_: Exception) {
+                    }
+                    throw NoiseException("rendezvous handshake timed out")
+                }
                 rdv = streams
                 socket = null
                 return
@@ -431,17 +492,40 @@ class ConnectClient(
 
     private fun startReader() {
         val t = Thread({
+            // Relay / public rendezvous: anyone who enumerates the broker topic
+            // can publish junk. A record that fails the nonce/tag check leaves
+            // the cipher untouched, so skip a bounded number instead of
+            // tearing the session down. On the LAN a bad record stays fatal.
+            val lenient = lenientRecords
+            var bad = 0
             try {
                 while (!closed) {
                     val body = RecordCodec.readLengthPrefixed(input!!)
-                    val pt = RecordCodec.decodeTransport(recv!!, body)
+                    val pt = try {
+                        RecordCodec.decodeTransport(recv!!, body)
+                    } catch (e: NoiseException) {
+                        bad += 1
+                        if (!lenient || bad > MAX_BAD_RECORDS) throw e
+                        continue
+                    }
                     handleInner(pt)
                 }
             } catch (_: Exception) {
+                // Any read/decrypt failure ends the session (fail closed) and
+                // releases the socket so the controller can dial again.
                 closed = true
                 pending.values.forEach { it.fail(NoiseException("pipe closed")) }
+                pending.clear()
+                try {
+                    socket?.close()
+                } catch (_: Exception) {
+                }
+                try {
+                    rdv?.close()
+                } catch (_: Exception) {
+                }
             }
-        }, "grove-connect-recv")
+        }, "remedy-connect-recv")
         t.isDaemon = true
         t.start()
         reader = t
@@ -523,6 +607,9 @@ class ConnectClient(
     }
 
     companion object {
+        /** Mirrors the host's MAX_BAD_RECORDS for relay / rendezvous sessions. */
+        private const val MAX_BAD_RECORDS = 32
+
         private fun concat(parts: List<ByteArray>): ByteArray {
             val n = parts.sumOf { it.size }
             val out = ByteArray(n)

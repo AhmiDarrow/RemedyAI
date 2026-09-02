@@ -693,6 +693,61 @@ async def test_iter_request_http_denies_pair_start_and_apikey(home):
 
 
 @pytest.mark.asyncio
+async def test_iter_request_http_allows_provider_switch_without_settings_write(home):
+    """Phone can switch provider/model with settings_write off (safe keys only)."""
+    from remedy.connect.pipe import HttpRequest, iter_request_http
+
+    device = {"id": "dev1", "name": "phone"}
+    req = HttpRequest(
+        method="PUT",
+        path="/api/settings",
+        query="",
+        headers={"content-type": "application/json"},
+        body=b'{"llm_provider":"deepseek","llm_model":"deepseek-v4-flash"}',
+    )
+    # Gate passed → the pipe tries the real upstream. sidecar_port=9 has no
+    # listener, so the connect is refused — that refusal is the proof the
+    # request was forwarded instead of 403'd (a gate rejection would have
+    # yielded a JSON error before ever touching upstream).
+    reached_upstream = False
+    try:
+        async for p in iter_request_http(
+            req, device=device, sidecar_port=9, api_key="t", config=None
+        ):
+            assert b"403" not in p
+            reached_upstream = True
+    except Exception:
+        reached_upstream = True
+    assert reached_upstream
+
+
+@pytest.mark.asyncio
+async def test_iter_request_http_denies_secret_settings_body_without_pane(home):
+    """Secret/connect keys in a settings body stay blocked even when the
+    safe provider switch is allowed."""
+    from remedy.connect.pipe import HttpRequest, iter_request_http
+
+    device = {"id": "dev1", "name": "phone"}
+    req = HttpRequest(
+        method="PUT",
+        path="/api/settings",
+        query="",
+        headers={"content-type": "application/json"},
+        body=b'{"llm_api_key":"supersecret"}',
+    )
+    blob = b"".join(
+        [
+            p
+            async for p in iter_request_http(
+                req, device=device, sidecar_port=9, api_key="t", config=None
+            )
+        ]
+    )
+    assert b"403" in blob
+    assert b"supersecret" not in blob
+
+
+@pytest.mark.asyncio
 async def test_inner_http_does_not_block_second_request(monkeypatch):
     """SSE inner request must not stall the only session reader."""
     hang = asyncio.Event()

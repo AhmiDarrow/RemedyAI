@@ -133,7 +133,20 @@ def save_device(record: dict[str, Any], home: Path | str | None = None) -> dict[
     }
     with _lock:
         _write_sealed_json(_device_path(device_id, home), clean)
+    if clean["revoked"]:
+        _revoked_live.add(device_id)
+    else:
+        _revoked_live.discard(device_id)
     return clean
+
+
+# Device ids revoked in this process. The gateway checks this before every
+# record so a live session ends at the next frame, without a disk read.
+_revoked_live: set[str] = set()
+
+
+def is_revoked_live(device_id: str) -> bool:
+    return str(device_id or "").strip().lower() in _revoked_live
 
 
 def get_device(device_id: str, home: Path | str | None = None) -> dict[str, Any] | None:
@@ -190,6 +203,7 @@ def revoke_device(device_id: str, home: Path | str | None = None) -> dict[str, A
         return None
     rec["revoked"] = True
     save_device(rec, home)
+    _revoked_live.add(str(rec["id"]))
     try:
         from remedy.connect.audit import append_event
 
@@ -229,13 +243,32 @@ def save_state(state: dict[str, Any], home: Path | str | None = None) -> dict[st
     return clean
 
 
+# ``is_paused`` runs before every inbound record on every phone socket; a
+# short cache keeps that off the disk, and a torn read (Windows can raise
+# PermissionError during an atomic replace) falls back to the last good value
+# instead of momentarily reporting "not paused".
+_PAUSED_TTL_S = 0.5
+_paused_cache: dict[str, tuple[bool, float]] = {}
+
+
 def is_paused(home: Path | str | None = None) -> bool:
-    return bool(load_state(home).get("paused"))
+    key = str(state_path(home))
+    now = time.monotonic()
+    hit = _paused_cache.get(key)
+    if hit is not None and now - hit[1] < _PAUSED_TTL_S:
+        return hit[0]
+    try:
+        val = bool(load_state(home).get("paused"))
+    except Exception:
+        val = hit[0] if hit is not None else False
+    _paused_cache[key] = (val, now)
+    return val
 
 
 def set_paused(paused: bool, home: Path | str | None = None) -> None:
     was = is_paused(home)
     save_state({"paused": bool(paused)}, home)
+    _paused_cache[str(state_path(home))] = (bool(paused), time.monotonic())
     if bool(paused) and not was:
         try:
             from remedy.connect.audit import append_event
