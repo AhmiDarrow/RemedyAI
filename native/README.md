@@ -74,6 +74,11 @@ speech, and research operations. Workers negotiate a protocol version and health
 support unary and streaming calls, inherit request cancellation/deadlines, restart within
 a bounded budget after transport failure, and cannot take down the Go runtime.
 
+Language ownership is machine-checked: Go cannot directly spawn processes or use
+unsafe/syscall packages, third-party dependencies have named package owners, and native
+Go cannot import Python packages. See `BOUNDARIES.md`; the same check runs in Windows and
+Linux CI.
+
 Local verification:
 
 ```text
