@@ -194,3 +194,5 @@ Thumbs.db
 **/routes/claimidx_ops.py
 # Local compiler caches
 .cache/
+native/zig/.zig-cache/
+native/zig/zig-out/

@@ -14,6 +14,8 @@ pub fn build(b: *std.Build) void {
         .root_module = module,
     });
     b.installArtifact(lib);
+    const install_header = b.addInstallHeaderFile(b.path("include/remedy_core.h"), "remedy_core.h");
+    b.getInstallStep().dependOn(&install_header.step);
 
     const tests = b.addTest(.{
         .root_module = b.createModule(.{

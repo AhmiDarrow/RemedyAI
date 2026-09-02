@@ -1,8 +1,21 @@
 const std = @import("std");
 
+pub const capability = @import("capability.zig");
+pub const filesystem = @import("filesystem.zig");
+pub const process = @import("process.zig");
+pub const serialization = @import("serialization.zig");
+pub const system = @import("system.zig");
+
 pub const abi_version: u32 = 1;
 pub const header_size: usize = 32;
 pub const max_payload_size: u32 = 16 << 20;
+
+pub const Status = enum(i32) {
+    ok = 0,
+    invalid_argument = 1,
+    access_denied = 2,
+    operation_failed = 3,
+};
 
 export fn remedy_core_abi_version() callconv(.c) u32 {
     return abi_version;
@@ -11,6 +24,45 @@ export fn remedy_core_abi_version() callconv(.c) u32 {
 export fn remedy_core_validate_frame(ptr: ?[*]const u8, len: usize) callconv(.c) u8 {
     const raw_ptr = ptr orelse return 0;
     return if (validateFrame(raw_ptr[0..len])) 1 else 0;
+}
+
+export fn remedy_core_file_size(
+    capability_bits: u64,
+    root_ptr: ?[*]const u8,
+    root_len: usize,
+    path_ptr: ?[*]const u8,
+    path_len: usize,
+    out_size: ?*u64,
+) callconv(.c) i32 {
+    const root_raw = root_ptr orelse return @intFromEnum(Status.invalid_argument);
+    const path_raw = path_ptr orelse return @intFromEnum(Status.invalid_argument);
+    const output = out_size orelse return @intFromEnum(Status.invalid_argument);
+
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    const size = filesystem.fileSize(
+        threaded.io(),
+        capability.Set.fromBits(capability_bits),
+        root_raw[0..root_len],
+        path_raw[0..path_len],
+    ) catch |err| return switch (err) {
+        error.AccessDenied => @intFromEnum(Status.access_denied),
+        error.InvalidPath => @intFromEnum(Status.invalid_argument),
+        else => @intFromEnum(Status.operation_failed),
+    };
+    output.* = size;
+    return @intFromEnum(Status.ok);
+}
+
+export fn remedy_core_logical_cpu_count(capability_bits: u64, out_count: ?*usize) callconv(.c) i32 {
+    const output = out_count orelse return @intFromEnum(Status.invalid_argument);
+    const result = system.snapshot(capability.Set.fromBits(capability_bits)) catch |err| {
+        return switch (err) {
+            error.AccessDenied => @intFromEnum(Status.access_denied),
+            else => @intFromEnum(Status.operation_failed),
+        };
+    };
+    output.* = result.logical_cpu_count;
+    return @intFromEnum(Status.ok);
 }
 
 pub fn validateFrame(raw: []const u8) bool {
@@ -52,4 +104,12 @@ test "rejects malformed frame families" {
     frame[6] = 3;
     frame[12] = 2;
     try std.testing.expect(!validateFrame(&frame));
+}
+
+test {
+    _ = capability;
+    _ = filesystem;
+    _ = process;
+    _ = serialization;
+    _ = system;
 }
