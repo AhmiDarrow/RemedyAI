@@ -1,7 +1,9 @@
 package protocol
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"testing"
 )
 
@@ -30,6 +32,25 @@ func TestFrameGoldenAndRoundTrip(t *testing.T) {
 	}
 	if got.Kind != KindToolRequest || got.Flags != 5 || got.CorrelationID != wantID || string(got.Payload) != "ping" {
 		t.Fatalf("unexpected round trip: %#v", got)
+	}
+}
+
+func TestStreamReadWriteAndTruncation(t *testing.T) {
+	var wire bytes.Buffer
+	want := Frame{Kind: KindHealth, Payload: []byte("ready")}
+	if err := WriteFrame(&wire, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadFrame(&wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Kind != want.Kind || string(got.Payload) != "ready" {
+		t.Fatalf("frame = %#v", got)
+	}
+	raw, _ := want.MarshalBinary()
+	if _, err := ReadFrame(bytes.NewReader(raw[:len(raw)-1])); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("truncated stream: %v", err)
 	}
 }
 

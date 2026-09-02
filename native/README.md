@@ -27,6 +27,12 @@ supervision, bounded restarts, panic recovery, cancellation causes, and deadline
 shutdown. Provider selection is bound per session so desktop, messenger, and background
 work cannot overwrite one another through process-global model state.
 
+Local IPC uses the shared bounded frame format over current-user Windows named pipes or
+mode-0600 Unix sockets. Calls retain correlation IDs across concurrent work, propagate
+cancellation, and unblock on disconnect. A loopback-only HTTP compatibility handler keeps
+the existing FastAPI product reachable during reversible migration and blocks off-machine
+targets and redirects.
+
 Local verification:
 
 ```text
