@@ -79,6 +79,11 @@ unsafe/syscall packages, third-party dependencies have named package owners, and
 Go cannot import Python packages. See `BOUNDARIES.md`; the same check runs in Windows and
 Linux CI.
 
+RDNA v1 represents semantic action, target, constraints, expected evidence, and fallback
+intent without embedding executable code. Compilation is deterministic and preserves
+read-only, credential, capability, and owner-checkpoint constraints. RDNVM execution is
+hard-disabled unless an explicit experimental flag is set and is not on the production path.
+
 Local verification:
 
 ```text
