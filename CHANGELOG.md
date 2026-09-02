@@ -4,6 +4,31 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.48.0] — 2026-09-02
+
+### Next Evolution native runtime
+
+- Added the versioned Go runtime and Zig capability core under `native/`. Go now
+  provides supervised lifecycle, local IPC, ReAct state, the Tool ABI, durable
+  memory/events/state, scheduling, scoped Hive workers, Python worker
+  supervision, and the experimental RDNA intent layer. Zig provides the
+  capability-checked filesystem/process/system substrate, compact records,
+  signed one-use grants, and the public C ABI.
+- Added a layered production selector: `REMEDY_NATIVE_RUNTIME=compatibility`
+  (default), `auto`, or `native`. Native readiness requires both the Go
+  protocol/tool ABI and Zig ABI to match. `/api/ping` exposes cached, path-free
+  selection/fallback evidence without launching processes on the liveness path.
+- The first production-safe vertical slice reads logical CPU topology through
+  Zig. A failed native attempt can replay through Python only when the operation
+  is explicitly declared idempotent; potentially partial side effects stop
+  instead of being duplicated.
+- Windows and Linux desktop release jobs now build and bundle
+  `remedy-runtime` plus the Zig shared library alongside the existing Python
+  sidecar. Compatibility remains available throughout the staged migration.
+- Added comparative native benchmarks and CI budgets. Results are tracked per
+  operation; this release does not claim that every native path beats Python.
+- Version surfaces aligned at 0.48.0.
+
 ## [0.47.0] — 2026-08-31
 
 ### RemedyConnect — phone can never kill the server, native Grove, fixed sessions

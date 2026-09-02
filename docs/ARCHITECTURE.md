@@ -11,18 +11,30 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 | Desktop SPA | `desktop/` | Tauri 2 + React 19 (Grove / Alongside / Studio) |
 | Tests | `tests/` | Jail, SSRF, hive caps, memory authority, plan store, build engine, ReAct policy |
 | Gateway | `src/remedy/gateway/` | Serve bootstrap, session bridge, messenger flush |
-| Native foundation | `native/` | Versioned Go runtime + Zig capability core; compatibility-only until gated cutover |
+| Native runtime | `native/` | Versioned Go nervous system + Zig capability core; layered cutover with Python compatibility/ML workers |
 
 Entry: `serve.py` / `uv run` · verify: `uv run pytest -q`
 
 ## Next Evolution native boundary
 
 `native/protocol/` defines the versioned binary frame shared across languages.
-`native/go/` owns supervised runtime lifecycle and will absorb orchestration only
-behind parity tests. `native/zig/` exports a small C ABI and independently validates
-every frame before machine-facing execution. Python remains the production path;
-native cutovers must be observable, reversible, and preserve the policy/checkpoint
-contract. Native CI runs Go and Zig on Windows and Linux.
+`native/go/` owns supervised runtime lifecycle, local IPC, deterministic ReAct
+state, the Tool ABI, durable state/events/memory, scheduling, scoped agents, and
+replaceable Python workers. `native/zig/` exports a small C ABI and independently
+checks capabilities before machine-facing execution.
+
+`src/remedy/runtime/native_runtime.py` is the production cutover seam. The
+selector accepts `compatibility` (the default), `auto`, or `native` through
+`REMEDY_NATIVE_RUNTIME` or `native_runtime` in config. Go protocol/tool ABI 1
+and Zig ABI 1 must both probe healthy before the native route becomes effective.
+Fallback after a native attempt is allowed only for operations declared
+idempotent. The first cutover is read-only system topology; Python/FastAPI stays
+available as the compatibility surface and as the long-term AI/ML worker runtime.
+
+Desktop installers bundle the Go executable and Zig shared library on Windows
+and Linux alongside the Python sidecar. `/api/ping` reports cached selector and
+fallback evidence but never launches a probe, preserving the liveness route's
+low-latency contract. Native CI and release builds cover both operating systems.
 
 ## Surfaces (one SPA)
 
