@@ -8,12 +8,22 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    const lib = b.addLibrary(.{
+    const static_lib = b.addLibrary(.{
         .name = "remedy_core",
         .linkage = .static,
         .root_module = module,
     });
-    b.installArtifact(lib);
+    b.installArtifact(static_lib);
+    const shared_lib = b.addLibrary(.{
+        .name = "remedy_core",
+        .linkage = .dynamic,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    b.installArtifact(shared_lib);
     const install_header = b.addInstallHeaderFile(b.path("include/remedy_core.h"), "remedy_core.h");
     b.getInstallStep().dependOn(&install_header.step);
 

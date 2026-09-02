@@ -21,6 +21,7 @@ def test_ping_is_public_and_fast():
     assert r.status_code == 200
     assert r.json().get("status") == "ok"
     assert "version" in r.json()
+    assert r.json()["native_runtime"]["effective"] == "compatibility"
     # Local TestClient should be well under 100ms; keep a loose bound for CI.
     assert ms < 500, f"/api/ping took {ms:.0f}ms"
 

@@ -81,7 +81,15 @@ def register_status_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         No DB, no gateway stats — must stay sub-ms even when other handlers are busy
         with vision install / model discovery. Public (no auth).
         """
-        return {"status": "ok", "version": _remedy_version, "ts": time.time()}
+        from remedy.runtime.native_runtime import native_runtime_status
+
+        return {
+            "status": "ok",
+            "version": _remedy_version,
+            "ts": time.time(),
+            # Never launch a process or load a library on this liveness route.
+            "native_runtime": native_runtime_status(probe=False),
+        }
 
     @app.get("/api/turn-active")
     async def turn_active():

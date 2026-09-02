@@ -26,6 +26,17 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: native/go/go.mod
+          cache-dependency-path: native/go/go.sum
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
       - name: Install dependencies
         run: uv sync --dev
 
@@ -51,11 +62,25 @@ jobs:
         env:
           REMEDY_RELEASE_VERSION: ${{ env.REMEDY_RELEASE_VERSION }}
 
+      - name: Build native runtime
+        shell: pwsh
+        run: |
+          Push-Location native/go
+          go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime.exe ./cmd/remedy-runtime
+          Pop-Location
+          Push-Location native/zig
+          zig build -Doptimize=ReleaseSafe
+          Pop-Location
+          Copy-Item native/zig/zig-out/bin/remedy_core.dll desktop/bin/remedy_core.dll
+
       - name: Upload sidecar artifact
         uses: actions/upload-artifact@v4
         with:
           name: remedy-sidecar
-          path: desktop/bin/remedy-desktop*.exe
+          path: |
+            desktop/bin/remedy-desktop*.exe
+            desktop/bin/remedy-runtime.exe
+            desktop/bin/remedy_core.dll
           retention-days: 1
 
   build-tauri:
@@ -177,6 +202,17 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: native/go/go.mod
+          cache-dependency-path: native/go/go.sum
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
       - name: Install dependencies
         run: uv sync --dev
 
@@ -203,6 +239,15 @@ jobs:
           REMEDY_RELEASE_VERSION: ${{ env.REMEDY_RELEASE_VERSION }}
           TAURI_ENV_TARGET_TRIPLE: x86_64-unknown-linux-gnu
 
+      - name: Build Linux native runtime
+        run: |
+          cd native/go
+          go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime ./cmd/remedy-runtime
+          cd ../zig
+          zig build -Doptimize=ReleaseSafe
+          cp zig-out/lib/libremedy_core.so ../../desktop/bin/libremedy_core.so
+          chmod +x ../../desktop/bin/remedy-runtime
+
       - name: Upload Linux sidecar artifact
         uses: actions/upload-artifact@v4
         with:
@@ -210,6 +255,8 @@ jobs:
           path: |
             desktop/bin/remedy-desktop
             desktop/bin/remedy-desktop-x86_64-unknown-linux-gnu
+            desktop/bin/remedy-runtime
+            desktop/bin/libremedy_core.so
           retention-days: 1
 
   build-tauri-linux:
@@ -249,8 +296,8 @@ jobs:
           name: remedy-sidecar-linux
           path: desktop/bin/
 
-      - name: Mark sidecar executable
-        run: chmod +x desktop/bin/remedy-desktop desktop/bin/remedy-desktop-x86_64-unknown-linux-gnu
+      - name: Mark sidecars executable
+        run: chmod +x desktop/bin/remedy-desktop desktop/bin/remedy-desktop-x86_64-unknown-linux-gnu desktop/bin/remedy-runtime
 
       - name: Setup Python
         uses: astral-sh/setup-uv@v5
