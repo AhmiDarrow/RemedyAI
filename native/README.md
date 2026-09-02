@@ -33,6 +33,11 @@ cancellation, and unblock on disconnect. A loopback-only HTTP compatibility hand
 the existing FastAPI product reachable during reversible migration and blocks off-machine
 targets and redirects.
 
+The Go cognition engine represents observation, model streaming, policy, action, state
+update, pause, completion, and failure as traceable transitions. It supports bounded model
+retries, deterministic tool batching with a concurrency ceiling, owner checkpoints,
+tool/iteration ceilings, and repeated-batch no-progress detection.
+
 Local verification:
 
 ```text
