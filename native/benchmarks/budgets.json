@@ -1,0 +1,10 @@
+{
+  "BenchmarkFrame1KiBRoundTrip": 10000,
+  "BenchmarkRuntimeStartStop": 1000000,
+  "BenchmarkIPCRoundTrip": 5000000,
+  "BenchmarkToolDispatchValidated": 1000000,
+  "BenchmarkMemorySearch1000": 100000000,
+  "BenchmarkEventPublishDurable": 100000000,
+  "BenchmarkSchedulerTick": 1000000,
+  "BenchmarkReActCompleteTurn": 1000000
+}

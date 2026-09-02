@@ -10,7 +10,6 @@ import (
 	"hash/crc32"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -51,10 +50,11 @@ type Match struct {
 }
 
 type Store struct {
-	mu      sync.RWMutex
-	file    *os.File
-	records []Record
-	latest  map[string]int
+	mu         sync.RWMutex
+	file       *os.File
+	records    []Record
+	searchText []string
+	latest     map[string]int
 }
 
 func Open(path string) (*Store, error) {
@@ -140,31 +140,42 @@ func (s *Store) Search(query Query) []Match {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	matches := make([]Match, 0)
-	for _, record := range s.records {
+	type candidate struct{ index, score int }
+	candidates := make([]candidate, 0, limit)
+	for index, record := range s.records {
 		if record.Namespace != query.Namespace {
 			continue
 		}
 		if len(allowed) > 0 && !allowed[record.Kind] {
 			continue
 		}
-		haystack := strings.ToLower(record.Key + " " + record.Content)
+		haystack := s.searchText[index]
 		score := 0
 		for _, term := range terms {
 			score += strings.Count(haystack, term)
 		}
 		if len(terms) == 0 || score > 0 {
-			matches = append(matches, Match{Record: clone(record), Score: score})
+			value := candidate{index: index, score: score}
+			position := len(candidates)
+			for position > 0 {
+				prior := candidates[position-1]
+				if prior.score > value.score || (prior.score == value.score && !s.records[value.index].CreatedAt.After(s.records[prior.index].CreatedAt)) {
+					break
+				}
+				position--
+			}
+			if position < limit {
+				if len(candidates) < limit {
+					candidates = append(candidates, candidate{})
+				}
+				copy(candidates[position+1:], candidates[position:len(candidates)-1])
+				candidates[position] = value
+			}
 		}
 	}
-	sort.SliceStable(matches, func(i, j int) bool {
-		if matches[i].Score == matches[j].Score {
-			return matches[i].Record.CreatedAt.After(matches[j].Record.CreatedAt)
-		}
-		return matches[i].Score > matches[j].Score
-	})
-	if len(matches) > limit {
-		matches = matches[:limit]
+	matches := make([]Match, len(candidates))
+	for index, candidate := range candidates {
+		matches[index] = Match{Record: clone(s.records[candidate.index]), Score: candidate.score}
 	}
 	return matches
 }
@@ -208,6 +219,7 @@ func (s *Store) replay() (int64, error) {
 
 func (s *Store) index(record Record) {
 	s.records = append(s.records, clone(record))
+	s.searchText = append(s.searchText, strings.ToLower(record.Key+" "+record.Content))
 	s.latest[indexKey(record.Namespace, record.Kind, record.Key)] = len(s.records) - 1
 }
 func indexKey(namespace string, kind Kind, key string) string {

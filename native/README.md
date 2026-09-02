@@ -84,6 +84,11 @@ intent without embedding executable code. Compilation is deterministic and prese
 read-only, credential, capability, and owner-checkpoint constraints. RDNVM execution is
 hard-disabled unless an explicit experimental flag is set and is not on the production path.
 
+Native performance has a reproducible benchmark scorecard and broad CI regression ceilings
+for framing, lifecycle, IPC, validated tool dispatch, memory retrieval, durable events,
+scheduling, and ReAct overhead. Python comparison kernels are recorded separately, and
+microbenchmark results are never treated as proof of complete-task speed.
+
 Local verification:
 
 ```text
