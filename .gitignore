@@ -168,3 +168,27 @@ NUL
 
 # Harness run artifacts (scorecards, LLM traces). Regenerate with scripts/rig.
 out/
+
+# --- Grok Bot / external agent artifacts — must never enter the repo ---
+# The Grok bot operates ON this tree; its scratch, reviews, logs, and lock
+# leftovers are not source and must never be committed.
+Grok Bot/
+grok-bot/
+.grok/
+*grok-bot*
+**/_review_*grok*.md
+*.grok
+grok_*.json
+grok_*.log
+# Stray editor/OS + agent lock leftovers
+*.orig
+*.rej
+.DS_Store
+Thumbs.db
+
+# --- Private, local-only features — keep OUT of the public repo ---
+# Present in the working tree (and the local installer) but never committed to
+# the public master. Tracked separately on the private branch.
+**/slides/AutomationsSlide.tsx
+**/api/claimidxOps.ts
+**/routes/claimidx_ops.py
