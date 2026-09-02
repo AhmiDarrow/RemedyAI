@@ -69,6 +69,11 @@ scope, and capability sets. Child capabilities must be a subset of the parent's 
 set, mailboxes are bounded, terminal agents remain inspectable without consuming active
 quota, crashes are isolated, and parent shutdown cancels the whole tree.
 
+Python is represented as a supervised capability-worker protocol for model, vision,
+speech, and research operations. Workers negotiate a protocol version and health state,
+support unary and streaming calls, inherit request cancellation/deadlines, restart within
+a bounded budget after transport failure, and cannot take down the Go runtime.
+
 Local verification:
 
 ```text
