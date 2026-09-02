@@ -192,3 +192,5 @@ Thumbs.db
 # committed to the public master.
 **/api/claimidxOps.ts
 **/routes/claimidx_ops.py
+# Local compiler caches
+.cache/

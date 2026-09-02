@@ -11,8 +11,18 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 | Desktop SPA | `desktop/` | Tauri 2 + React 19 (Grove / Alongside / Studio) |
 | Tests | `tests/` | Jail, SSRF, hive caps, memory authority, plan store, build engine, ReAct policy |
 | Gateway | `src/remedy/gateway/` | Serve bootstrap, session bridge, messenger flush |
+| Native foundation | `native/` | Versioned Go runtime + Zig capability core; compatibility-only until gated cutover |
 
 Entry: `serve.py` / `uv run` · verify: `uv run pytest -q`
+
+## Next Evolution native boundary
+
+`native/protocol/` defines the versioned binary frame shared across languages.
+`native/go/` owns supervised runtime lifecycle and will absorb orchestration only
+behind parity tests. `native/zig/` exports a small C ABI and independently validates
+every frame before machine-facing execution. Python remains the production path;
+native cutovers must be observable, reversible, and preserve the policy/checkpoint
+contract. Native CI runs Go and Zig on Windows and Linux.
 
 ## Surfaces (one SPA)
 
