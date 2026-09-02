@@ -196,3 +196,4 @@ Thumbs.db
 .cache/
 native/zig/.zig-cache/
 native/zig/zig-out/
+native/benchmarks/latest*.txt

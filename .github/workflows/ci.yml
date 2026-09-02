@@ -178,6 +178,10 @@ jobs:
           run: go run ./cmd/check-boundaries -root ..
           working-directory: native/go
 
+        - name: Native performance budgets
+          run: go test -run=NONE -bench=. -benchtime=20x -benchmem ./benchmarks | go run ./cmd/benchcheck -budgets ../benchmarks/budgets.json -input -
+          working-directory: native/go
+
       - name: Zig tests
         run: zig build test
         working-directory: native/zig
