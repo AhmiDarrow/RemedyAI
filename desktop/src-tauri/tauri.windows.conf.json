@@ -2,6 +2,8 @@
   "bundle": {
     "resources": {
       "../bin/remedy-desktop.exe": "remedy-desktop.exe",
+      "../bin/remedy-runtime.exe": "remedy-runtime.exe",
+      "../bin/remedy_core.dll": "remedy_core.dll",
       "../dist": "webui",
       "windows/uninstall_options.ps1": "windows/uninstall_options.ps1",
       "windows/uninstall_wipe.ps1": "windows/uninstall_wipe.ps1",

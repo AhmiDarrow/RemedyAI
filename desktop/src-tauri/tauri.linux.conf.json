@@ -13,6 +13,8 @@
     "targets": ["deb", "appimage"],
     "externalBin": ["../bin/remedy-desktop"],
     "resources": {
+      "../bin/remedy-runtime": "remedy-runtime",
+      "../bin/libremedy_core.so": "libremedy_core.so",
       "../dist": "webui",
       "windows/wslg_workarea.ps1": "windows/wslg_workarea.ps1"
     },
