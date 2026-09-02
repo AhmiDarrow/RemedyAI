@@ -59,6 +59,11 @@ self-state with schema versions and the last applied event sequence. Checkpoints
 atomic replacement on Windows and Linux; restart replay ignores duplicate events and
 never treats abandoned temporary files as authoritative state.
 
+The scheduler supports one-shot, recurring, event-triggered, and goal-triggered jobs;
+dependency DAGs; priority ordering; deadlines; run/time budgets; cancellation; and
+snapshot/restore. Its tick input is deterministic for tests, while its run loop can be
+supervised by the persistent runtime.
+
 Local verification:
 
 ```text
