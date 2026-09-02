@@ -4,7 +4,7 @@
 
 **Remedy Desktop** is the recommended way to use Remedy — your personal AI
 partner for knowledge, design, code, computer use, and get-it-done work (not a
-medical or clinical product). Current package series: **0.20.x** (see root
+medical or clinical product). Current package series: **0.48.x** (see root
 `CHANGELOG.md`).
 
 ### Dev workflow (single build)
@@ -61,6 +61,21 @@ The worker imports the bundled `remedy` *source* (`sys._MEIPASS`, from
 and versions cannot drift. Only stdlib-backed modules may be imported on
 the worker path (`remedy.voice.*`, `remedy.core.atomic_json`,
 `remedy.telephony.narrowband`).
+
+### Native runtime cutover (0.48+)
+
+Installers include two small native components in addition to the Python
+sidecar: the Go `remedy-runtime` probe/runtime and the Zig `remedy_core` shared
+library (`.dll` on Windows, `.so` on Linux). Python is deliberately retained for
+compatibility and AI/ML workers while parity moves over in tested slices.
+
+The default is `REMEDY_NATIVE_RUNTIME=compatibility`. Developers can select
+`auto` to use a native slice only when both versioned probes are healthy, or
+`native` to request it explicitly. A mismatch or missing artifact is visible in
+`/api/ping` as path-free fallback evidence. Liveness polling never starts a
+process or loads a library. A native failure is replayed through compatibility
+only for an operation that declares itself idempotent; sends, payments, deletes,
+and other potentially partial side effects are never silently repeated.
 
 
 ### Skills panel (0.10.30+; HITL + packs in 0.10.44)
