@@ -41,3 +41,48 @@ export async function retireHiveDaughter(hiveId: string): Promise<{ ok: boolean;
     body: JSON.stringify({ hive_id: hiveId }),
   })
 }
+
+export interface HiveSpawnResult {
+  ok: boolean
+  error?: string
+  hive_id?: string
+  cadence?: string
+  status?: string
+  started?: boolean
+  goal?: string
+}
+
+export interface HiveAssignResult {
+  ok: boolean
+  error?: string
+  hive_id?: string
+  goal?: string
+  status?: string
+}
+
+export async function spawnHiveDaughter(params: {
+  goal: string
+  cadence?: 'forager' | 'post'
+  budget_steps?: number
+  pulse_s?: number
+}): Promise<HiveSpawnResult> {
+  return apiFetch<HiveSpawnResult>('/hive/spawn', {
+    method: 'POST',
+    body: JSON.stringify({
+      goal: params.goal,
+      cadence: params.cadence ?? 'forager',
+      budget_steps: params.budget_steps ?? 8,
+      pulse_s: params.pulse_s ?? 0,
+    }),
+  })
+}
+
+export async function assignHiveDaughter(
+  hiveId: string,
+  goal: string,
+): Promise<HiveAssignResult> {
+  return apiFetch<HiveAssignResult>('/hive/assign', {
+    method: 'POST',
+    body: JSON.stringify({ hive_id: hiveId, goal }),
+  })
+}

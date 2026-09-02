@@ -186,9 +186,9 @@ grok_*.log
 .DS_Store
 Thumbs.db
 
-# --- Private, local-only features — keep OUT of the public repo ---
-# Present in the working tree (and the local installer) but never committed to
-# the public master. Tracked separately on the private branch.
-**/slides/AutomationsSlide.tsx
+# --- Private, local-only Claimidx code — keep OUT of the public repo ---
+# The general Automations feature is public; only Claimidx ops (and bots,
+# above) stay private. Present in the working tree / local installer but never
+# committed to the public master.
 **/api/claimidxOps.ts
 **/routes/claimidx_ops.py

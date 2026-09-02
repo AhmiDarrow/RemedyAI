@@ -5,6 +5,7 @@ export type SlideId =
   | 'terminal'
   | 'browser'
   | 'scratch'
+  | 'automations'
 
 export const SLIDE_META: Record<
   SlideId,
@@ -16,6 +17,7 @@ export const SLIDE_META: Record<
   terminal: { label: 'Terminal', short: '>_', popout: true },
   browser: { label: 'Browser', short: '🌐', popout: true },
   scratch: { label: 'Scratch', short: '✎', popout: true },
+  automations: { label: 'Automations', short: '⚡', popout: false },
 }
 
 export const ALL_SLIDES: SlideId[] = [
@@ -25,4 +27,5 @@ export const ALL_SLIDES: SlideId[] = [
   'terminal',
   'browser',
   'scratch',
+  'automations',
 ]
