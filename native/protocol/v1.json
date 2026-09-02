@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Remedy Native Frame v1",
+  "description": "A 32-byte little-endian header followed by opaque payload bytes.",
+  "type": "object",
+  "required": ["magic", "version", "kind", "flags", "payload_length", "correlation_id"],
+  "properties": {
+    "magic": { "const": "RMDY" },
+    "version": { "const": 1 },
+    "kind": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "flags": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "payload_length": { "type": "integer", "minimum": 0, "maximum": 16777216 },
+    "correlation_id": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{32}$"
+    }
+  },
+  "additionalProperties": false
+}

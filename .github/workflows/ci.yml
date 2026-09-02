@@ -147,3 +147,37 @@ jobs:
 
       - name: cargo check
         run: cargo check --locked
+
+  native-core:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: native/go/go.mod
+          cache-dependency-path: native/go/go.mod
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Go tests
+        run: go test ./...
+        working-directory: native/go
+
+      - name: Go vet
+        run: go vet ./...
+        working-directory: native/go
+
+      - name: Zig tests
+        run: zig build test
+        working-directory: native/zig
+
+      - name: Zig build
+        run: zig build
+        working-directory: native/zig
