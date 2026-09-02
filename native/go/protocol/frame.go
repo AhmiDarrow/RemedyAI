@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 )
 
 const (
@@ -22,6 +23,9 @@ const (
 	KindToolResult
 	KindEvent
 	KindControl
+	KindStream
+	KindCancel
+	KindHealth
 )
 
 var (
@@ -38,6 +42,41 @@ type Frame struct {
 	Flags         uint32
 	CorrelationID [16]byte
 	Payload       []byte
+}
+
+func WriteFrame(w io.Writer, frame Frame) error {
+	raw, err := frame.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	for len(raw) > 0 {
+		n, writeErr := w.Write(raw)
+		if writeErr != nil {
+			return writeErr
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+		raw = raw[n:]
+	}
+	return nil
+}
+
+func ReadFrame(r io.Reader) (Frame, error) {
+	header := make([]byte, HeaderSize)
+	if _, err := io.ReadFull(r, header); err != nil {
+		return Frame{}, err
+	}
+	payloadLen := binary.LittleEndian.Uint32(header[12:16])
+	if payloadLen > MaxPayloadSize {
+		return Frame{}, ErrPayloadTooLarge
+	}
+	raw := make([]byte, HeaderSize+int(payloadLen))
+	copy(raw, header)
+	if _, err := io.ReadFull(r, raw[HeaderSize:]); err != nil {
+		return Frame{}, err
+	}
+	return Parse(raw)
 }
 
 func (f Frame) MarshalBinary() ([]byte, error) {
