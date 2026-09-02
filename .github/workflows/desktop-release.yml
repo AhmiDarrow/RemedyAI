@@ -27,7 +27,7 @@ jobs:
           python-version: '3.12'
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: native/go/go.mod
           cache-dependency-path: native/go/go.sum
@@ -203,7 +203,7 @@ jobs:
           python-version: '3.12'
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: native/go/go.mod
           cache-dependency-path: native/go/go.sum
