@@ -54,6 +54,11 @@ type and source, and exposes bounded subscriber queues with drop-newest, drop-ol
 disconnect policies. Publishing and replay remain race-safe, and slow-consumer loss is
 reported rather than silently blocking the runtime.
 
+Persistent runtime state checkpoints goals, tasks, environment, relationships, and
+self-state with schema versions and the last applied event sequence. Checkpoints use
+atomic replacement on Windows and Linux; restart replay ignores duplicate events and
+never treats abandoned temporary files as authoritative state.
+
 Local verification:
 
 ```text
