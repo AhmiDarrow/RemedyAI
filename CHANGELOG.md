@@ -4,6 +4,155 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.47.0] — 2026-08-31
+
+### RemedyConnect — phone can never kill the server, native Grove, fixed sessions
+
+- **Phone has ZERO ability to end the Remedy server.** `/api/app/command`,
+  `/api/shutdown`, `/api/quit`, `/api/restart` and `/api/exit` are hard-denied
+  in the Connect pipe before any pane flag runs — no pane combination can
+  re-enable them. `POST /api/stop` stays reachable: it only aborts the phone's
+  own `/connect/me` session (the Android Stop button's fallback). Everything
+  under `/api` that no pane covers is now refused (`unknown:family`) instead of
+  proxied with the owner's token. Regression-tested.
+- **Wire fix:** the phone's record cap was 28 bytes over the PC's, so any
+  request over ~65 KB dropped the session. Both sides now agree on 65 508.
+- **Phone reconnects.** A dropped pipe (PC paused, laptop slept, Wi-Fi gone)
+  shows "reconnecting" and redials with backoff instead of a green dot on a
+  dead socket. Handshakes time out; pairing is stored only after it succeeds;
+  the PC lists the phone by model name; Tailscale reconnect no longer sends a
+  relay preamble the PC's own listener cannot parse.
+- **Phone terminal input fixed.** Typing into the phone terminal did nothing:
+  the server awaited the shell's *synchronous* stdin write (both the Windows
+  ConPTY handle and the pipe fallback), which raised a `TypeError` that the
+  HTTP middleware masked as a 404 "Request aborted". Input now reaches the
+  shell and the command runs. The old tests missed it because they injected a
+  fake shell whose write was async; a regression test now uses the real
+  synchronous-stdin shape.
+- **Host hardening:** `%23`/`%3F` no longer slip past the deny list; paths keep
+  their case; pane changes apply to the running gateway; revoke ends the live
+  session on the gateway loop; SSE events reach the phone as they happen;
+  oversize or runaway fragments get 413/429 instead of silence; silent sockets
+  time out after 3 minutes; relay/rendezvous sessions tolerate a bounded
+  amount of third-party junk instead of dropping.
+- **Tailscale card:** install/status/login run off the event loop; the sign-in
+  URL is actually captured; "logged out" is reported as needs-sign-in.
+- Android targets SDK 35; main-thread network calls (approvals, revoke,
+  terminal close) fixed; notification permission requested; encrypted-prefs
+  corruption recovers instead of crashing at launch.
+
+### Build engine
+
+- Reading a file named in a checklist row no longer closes it; only a write
+  can. TDD stubs never overwrite a real test file. `build_drive`, auto-implement
+  and auto-repair run off the event loop. `force=True` keeps the live turn's
+  caps. Patch hunks honour their `@@` anchor; anchorless additions to a
+  non-empty file are refused. Manifest/config writes invalidate a cached green
+  verify. Stale (72 h) red ledgers are not resumed; a corrupt ledger is set
+  aside, never overwritten.
+- **Sessions history is now selectable**: tapping a session card in the
+  phone's Sessions tab opens that session in Chat (jumps the feed to the
+  bottom). Previously the list was display-only — a dead end.
+- **Terminal input fixed**: the command field's send did a blocking network
+  call on the UI thread, so it silently did nothing. It now sends on
+  `Dispatchers.IO`; the shell also auto-starts the moment the tab opens.
+- **Grove is native, not the desktop**: the phone's Grove tab now renders
+  Remedy's goals + partner status as native cards from `/api/goals` and
+  `/api/partner/status` — the live-desktop WebView portal is gone. Grove on
+  the phone is the same Grove tab as Remedy Desktop, not a desktop clone.
+- **Desktop: Restart server button** in Settings → Connect. Kills and
+  respawns the sidecar (existing `restart_server` command) — Reconnect alone
+  cannot help when the server itself is down; this can.
+- Version surfaces all at 0.47.0 (Python, desktop, Android versionCode 16).
+
+## [0.46.1] — 2026-08-31
+
+### RemedyConnect — mobile data reliability, fast terminal, safe provider switch
+
+- **Model / provider switch no longer HTTP-errors on mobile**: the settings
+  apply ran provider model discovery (a network call) synchronously and could
+  stall past the phone's 15 s read timeout. `normalize_llm_settings` /
+  `validate_provider_model` now run off-loop with an 8 s cap and fall back to
+  the prior provider/model on any failure instead of 500. Android client
+  timeouts raised to 15 s connect / 45 s read.
+- **Terminal speed**: output chunks are coalesced into one SSE event per batch
+  (up to 16 KB) instead of one event per chunk — no more micro-frame flood over
+  the tunnel. Keepalive cadence tightened to 10 s.
+- **Terminal no longer kills the sidecar on phone disconnect**: the old pump
+  used `asyncio.to_thread` per ConPTY read chunk, which starved the default
+  executor when a shell sat idle. Each terminal now owns one dedicated daemon
+  reader thread; the SSE proxy's aiohttp session close is exception-guarded;
+  the gateway loop has an exception handler so a stray task error never
+  surfaces as unraisable during a drop.
+- **Terminal hardening**: output queue capped at 512 KB (flood → truncation
+  notice instead of OOM), input capped at 64 KB per write, idle close guarded
+  against a closing loop, and the terminal registry entry is dropped when the
+  shell exits.
+- Claimidx: 2 prior-art claims ingested for these fixes.
+
+## [0.46.0] — 2026-08-31
+
+### RemedyConnect — follow the PC, Grove portal, clean terminal, provider switch
+
+- **Chat follows the PC's active session**: opening Chat auto-joins the session
+  Remedy is working on and switches live when the desktop moves to another one
+  (polls `/connect/me` every 4 s). A Following / Follow toggle detaches;
+  picking a session manually turns following off.
+- **Grove access on the phone**: new Grove tab opens the desktop web UI in an
+  edge-to-edge WebView through the same encrypted tunnel (compact `connect=1`
+  mode). Hardened: no file/content access, no universal access, mixed content
+  never allowed.
+- **Terminal output fixed**: Windows shells now start with UTF-8 console
+  encoding (`chcp 65001` + `[Console]::OutputEncoding`) so ConPTY bytes decode
+  cleanly on every codepage; ANSI/VT escape sequences are stripped server-side
+  (colors/cursor/title) — the phone shows readable plain text, no mojibake.
+- **Provider switch from the phone**: Settings lists connected providers and
+  the live model list; tapping one switches Remedy's active provider/model via
+  `PUT /api/settings` with **safe keys only** (`llm_provider`/`llm_model`).
+  The pipe allows that without the settings_write pane while secret/connect
+  keys stay hard-blocked (regression-tested).
+- **Session history loads at the bottom** of the feed (auto-scroll to newest)
+  and keeps following new tokens as they stream.
+- Version surfaces all at 0.46.0 (Python, desktop, Android versionCode 14).
+
+## [0.45.0] — 2026-08-31
+
+### Added — RemedyConnect Tailscale opt-in: autodownload + guidance
+
+- **One-tap Tailscale setup on the PC**: Settings → Connect now shows a
+  Tailscale card that detects the PC's Tailscale state (installed / running /
+  signed in / tailnet IPv4). When Tailscale is missing, **Install Tailscale
+  (free)** downloads the official Windows MSI (version resolved from the
+  stable pkgs.tailscale.com JSON feed) and launches the installer for you —
+  no hunting, no admin steps beyond the normal UAC prompt. When it is
+  installed but not signed in, **Sign in to Tailscale** captures the login URL
+  from `tailscale up` and opens it.
+- **Pairing guidance**: the card explains the 3-step flow (install on PC →
+  install the free Tailscale app on the phone, same account → scan the QR).
+  Once connected, the pairing QR already advertises the tailnet address
+  (`ts=`), so the phone works on Wi‑Fi *and* mobile data.
+- New loopback-only endpoints: `GET /api/connect/tailscale/status`,
+  `POST /api/connect/tailscale/install`, `POST /api/connect/tailscale/login`
+  (management — refused through the phone pipe, loopback-only like pair start).
+- **Renamed Grove Connect → RemedyConnect** everywhere user-visible: help
+  article `29-remedy-connect.md` (was `29-grove-connect.md`), help catalog id,
+  docs cross-links, Android project name / theme / thread names. The Android
+  package stays `com.remedy.groveconnect` to avoid a breaking reinstall.
+- Version surfaces all at 0.45.0 (Python, desktop, Android versionCode 13).
+
+## [0.44.2] — 2026-08-31
+
+### Fixed — chat thinking panel no longer takes over the screen
+
+- The agent "Thinking" panel in the desktop chat had `max-height: min(60vh, 32rem)` —
+  still more than half the viewport, so a long reasoning trace pushed the
+  conversation off-screen. It now has a **fixed compact height (10rem)** with
+  internal scrolling; the panel never grows, the answer stays in view.
+- Frozen-runtime smoke mirrors now carry the real `logging/config.py` and
+  `uvicorn/logging.py` (the two files named in the windowed-sidecar crash
+  traceback), so the frozen sidecar boot path can be exercised end-to-end.
+- Version surfaces all at 0.44.2 (Python, desktop, Android versionCode 12).
+
 ## [0.44.1] — 2026-08-31
 
 ### Fixed — frozen desktop crash + Browser rail popup loop

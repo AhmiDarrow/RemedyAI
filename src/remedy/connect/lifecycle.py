@@ -31,6 +31,25 @@ _saved: dict[str, Any] = {
     "sidecar_port": 7400,
 }
 
+# The one config dict the running gateway reads per request. Mutated in place
+# (never rebound) so the listener thread's reference stays current after a
+# Settings change that does not require a re-bind (panes, relay, rdv).
+_live_cfg: dict[str, Any] = {}
+
+
+_RESTART_KEYS = ("connect_relay_url", "connect_rdv_enabled", "connect_allow_ipv6")
+
+
+def _publish_config(config: dict[str, Any] | None) -> None:
+    cfg = config if isinstance(config, dict) else {}
+    _live_cfg.clear()
+    _live_cfg.update(cfg)
+
+
+def current_config() -> dict[str, Any]:
+    """Live Connect config as the gateway sees it (read-only for callers)."""
+    return _live_cfg
+
 
 def connect_listening_addr() -> tuple[str, int] | None:
     return listening_addr()
@@ -107,6 +126,15 @@ def _thread_main(
     _loop = loop
     asyncio.set_event_loop(loop)
 
+    # A stray task exception on the gateway loop must never surface as an
+    # unraisable during a phone disconnect — log it and keep serving.
+    def _on_loop_error(_loop: object, context: dict[str, object]) -> None:
+        exc = context.get("exception")
+        msg = context.get("message") or "connect loop error"
+        logger.warning("connect loop handler: %s (%s)", msg, exc)
+
+    loop.set_exception_handler(_on_loop_error)
+
     ts_host = ""
     try:
         from remedy.connect.bind import tailscale_ipv4
@@ -178,11 +206,14 @@ def maybe_start_connect(
     _saved["app"] = app
     _saved["api_key"] = str(api_key or "")
     _saved["sidecar_port"] = int(sidecar_port or 7400)
+    _publish_config(config)
     ok, host, port = _enabled_chosen(config)
     if not ok:
         return
     addr = listening_addr()
     if addr is not None and addr[0] == host and (port == 0 or addr[1] == port):
+        # Same bind: the gateway keeps running and reads panes/relay from the
+        # live config published above, so a Settings change applies now.
         return
     stop_connect()
     ready = threading.Event()
@@ -190,7 +221,7 @@ def maybe_start_connect(
     thread = threading.Thread(
         target=_thread_main,
         name="remedy-connect",
-        args=(host, port, str(api_key or ""), int(sidecar_port or 7400), dict(config or {}), ready, err),
+        args=(host, port, str(api_key or ""), int(sidecar_port or 7400), _live_cfg, ready, err),
         daemon=True,
     )
     with _lock:
@@ -220,6 +251,12 @@ def on_connect_settings_changed(config: dict[str, Any] | None) -> None:
     if not bool(cfg.get("connect_enabled")):
         stop_connect()
         return
+    # Listener-shaped keys (relay dial, rendezvous, IPv6 second socket) are
+    # wired at start; panes apply live, these need a re-bind.
+    for key in _RESTART_KEYS:
+        if listening_addr() is not None and _live_cfg.get(key) != cfg.get(key):
+            stop_connect()
+            break
     maybe_start_connect(
         _saved.get("app"),
         cfg,

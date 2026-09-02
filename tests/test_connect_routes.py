@@ -33,6 +33,66 @@ def _auth() -> dict[str, str]:
     return {"Authorization": f"Bearer {TOKEN}"}
 
 
+_CANNED_STATUS = {
+    "installed": False,
+    "running": False,
+    "logged_in": False,
+    "tailnet_ipv4": "",
+    "version": "",
+    "error": "canned",
+}
+
+
+@pytest.fixture(autouse=True)
+def _no_real_tailscale(monkeypatch):
+    """Never run the real CLI / MSI download / ``tailscale up`` from a test."""
+    import remedy.connect.tailscale_bootstrap as tsb
+
+    monkeypatch.setattr(tsb, "tailscale_status", lambda: dict(_CANNED_STATUS))
+    monkeypatch.setattr(
+        tsb,
+        "ensure_tailscale",
+        lambda *a, **k: {"status": "error", "message": "canned", "msi_path": "", "installer_url": ""},
+    )
+    monkeypatch.setattr(
+        tsb,
+        "start_tailscale_login",
+        lambda: {"status": "needs_login", "message": "canned", "login_url": ""},
+    )
+
+
+def test_tailscale_status_route_loopback_only(home):
+    """Tailscale management routes exist, refuse the phone pipe, and are loopback-only."""
+    client = _client()
+    # Hop header (phone pipe) → refused before anything else.
+    r = client.get(
+        "/api/connect/tailscale/status",
+        headers={**_auth(), "X-Remedy-Connect-Hop": "1"},
+    )
+    assert r.status_code == 403
+    # Non-loopback client → refused.
+    r2 = client.get(
+        "/api/connect/tailscale/status",
+        headers={**_auth(), "Host": "10.9.8.7:7400"},
+    )
+    assert r2.status_code == 403
+    # Loopback + auth → 200 with the status shape (may be installed or not on this host).
+    r3 = client.get("/api/connect/tailscale/status", headers=_auth())
+    assert r3.status_code == 200
+    body = r3.json()
+    for key in ("installed", "running", "logged_in", "tailnet_ipv4", "version", "error"):
+        assert key in body
+
+
+def test_tailscale_install_and_login_loopback_only(home):
+    client = _client()
+    for path in ("/api/connect/tailscale/install", "/api/connect/tailscale/login"):
+        r = client.post(path, headers={**_auth(), "X-Remedy-Connect-Hop": "1"})
+        assert r.status_code == 403
+        r2 = client.post(path, headers=_auth())
+        assert r2.status_code in (200, 500)  # 200 when callable, 500 only on real failure
+
+
 def test_get_connect_default_off(home):
     client = _client()
     r = client.get("/api/connect", headers=_auth())

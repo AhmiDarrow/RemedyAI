@@ -1,4 +1,4 @@
-"""Fail-closed path families for the Grove Connect proxy.
+"""Fail-closed path families for the RemedyConnect proxy.
 
 Hard denies run before pane flags so a phone can never become the computer
 host poller or mint ``local_api_token``. Pane-off denies are prefix families,
@@ -68,16 +68,31 @@ _RAILS_PREFIXES = (
 
 _CHAT_PREFIXES = (
     "/api/chat",
+    # Hive spawn/assign runs tool-using foragers; gate it like chat so a phone
+    # with every pane off cannot start work the owner never sees.
+    "/api/hive",
 )
 _SESSIONS_PREFIX = "/api/sessions"
 _LIVE_UI_PREFIXES = (
     "/api/events",
-    "/api/app/command",
     "/api/partner",
 )
 
 
 _BLOCKED_METHODS = frozenset({"CONNECT", "TRACE", "TRACK"})
+
+# Server-control surface. A phone can drive Remedy but must NEVER end the
+# server or fire app commands (restart / shutdown / quit flavors). Hard-denied
+# before pane flags so no pane combination can re-enable them. ``/api/stop``
+# is NOT here: routes/connect.py defines it as "abort the phone's own turn"
+# and the phone's Stop button falls back to it when no session id is known.
+_SERVER_KILL_PREFIXES = (
+    "/api/shutdown",
+    "/api/quit",
+    "/api/restart",
+    "/api/exit",
+    "/api/app/command",
+)
 
 
 def sanitize_origin_path(path: str) -> str | None:
@@ -99,6 +114,12 @@ def sanitize_origin_path(path: str) -> str | None:
         raw = nxt
         if "://" in raw.lower() or raw.startswith("//"):
             return None
+    # A ``#`` / ``?`` that only appeared after percent-decoding (``%23``,
+    # ``%3F``) would be re-parsed by the upstream client as fragment / query,
+    # truncating the path *after* the deny check ran. Nothing legitimate needs
+    # them (or a leftover ``%``) in a decoded path: refuse.
+    if "#" in raw or "?" in raw or "%" in raw or "\\" in raw or "\x00" in raw:
+        return None
     if not raw.startswith("/"):
         raw = "/" + raw
     parts: list[str] = []
@@ -110,12 +131,14 @@ def sanitize_origin_path(path: str) -> str | None:
                 parts.pop()
             continue
         parts.append(seg)
-    out = "/" + "/".join(parts)
-    return out.lower()
+    # Original case: session ids and workspace file names are case-sensitive
+    # on the sidecar. Callers that *match* lowercase via ``_norm_path``.
+    return "/" + "/".join(parts)
 
 
 def _norm_path(path: str) -> str:
-    return sanitize_origin_path(path) or "/__invalid__"
+    safe = sanitize_origin_path(path)
+    return safe.lower() if safe is not None else "/__invalid__"
 
 
 def _norm_query(query: str) -> str:
@@ -135,7 +158,7 @@ def _query_keys(query: str) -> set[str]:
 def _starts(path: str, prefixes: tuple[str, ...]) -> bool:
     for prefix in prefixes:
         p = prefix.rstrip("/")
-        if path == p or path.startswith(p + "/") or path.startswith(p + "?"):
+        if path == p or path.startswith((p + "/", p + "?", p + "#")):
             return True
     return False
 
@@ -172,15 +195,22 @@ def _credential_writer(path: str) -> bool:
 
 
 def _is_stop_or_approval(method: str, path: str) -> bool:
-    """Stop and approvals stay reachable; they are part of the approvals pane."""
-    _ = method
+    """Approvals and turn-control stay reachable; server control never is.
+
+    App-command (restart/shutdown/quit) is hard-denied in
+    ``_SERVER_KILL_PREFIXES``. A phone may abort a turn via
+    ``/api/sessions/{id}/abort`` or the connect-scoped ``POST /api/stop``
+    (which aborts only the phone's own session), never end the server.
+    """
+    if path == "/api/stop" and (method or "").upper() == "POST":
+        return True
     if path.startswith("/api/approvals"):
         return True
     if path.endswith("/abort") and path.startswith("/api/sessions/"):
         return True
     if "/abort" in path and path.startswith("/api/sessions/"):
         return True
-    return path in ("/api/turn-active", "/api/stop")
+    return path in ("/api/turn-active",)
 
 
 def _jobs_next_family(path: str, query: str) -> bool:
@@ -193,6 +223,12 @@ def _jobs_next_family(path: str, query: str) -> bool:
     return bool(path.startswith("/api/computer/jobs") and keys & {"wait_ms", "driver", "only", "take"})
 
 
+# Provider/model switch is safe for the phone: no secrets, no connect keys.
+# The body lock above rejects everything sensitive; these keys only retarget
+# which model the PC uses.
+_PROVIDER_SAFE_KEYS = frozenset({"llm_provider", "llm_model", "provider", "model"})
+
+
 _SETTINGS_LOCK_KEYS = frozenset(
     {
         "connect_enabled",
@@ -202,6 +238,7 @@ _SETTINGS_LOCK_KEYS = frozenset(
         "connect_paused",
         "connect_panes",
         "connect_allow_ipv6",
+        "connect_rdv_enabled",
         "llm_api_key",
         "api_key",
         "http_bootstrap",
@@ -210,6 +247,26 @@ _SETTINGS_LOCK_KEYS = frozenset(
         "assistant",
     }
 )
+
+
+def settings_body_safe_provider(body: bytes) -> bool:
+    """True when a /api/settings body only switches provider/model."""
+    if not body:
+        return False
+    try:
+        import json
+
+        obj = json.loads(body.decode("utf-8", errors="replace"))
+    except Exception:
+        return False
+    if not isinstance(obj, dict) or not obj:
+        return False
+    for key, value in obj.items():
+        if str(key).strip().lower() not in _PROVIDER_SAFE_KEYS:
+            return False
+        if value is not None and not isinstance(value, str):
+            return False
+    return True
 
 
 def settings_write_locked(body: bytes) -> str | None:
@@ -254,6 +311,8 @@ def connect_forbidden(
         return "host-poller"
     if _starts(norm, _BOOTSTRAP_PREFIXES) or "local-bootstrap" in norm:
         return "auth:local-bootstrap"
+    if _starts(norm, _SERVER_KILL_PREFIXES):
+        return "server:kill"
     if _connect_mgmt(norm):
         return "connect:mgmt"
 
@@ -289,4 +348,39 @@ def connect_forbidden(
     if not flags.get("live_ui") and _starts(norm, _LIVE_UI_PREFIXES):
         return "pane:live_ui"
 
+    # Fail closed on everything the phone has no pane for. Every route the
+    # phone app calls is in a family above or in _PHONE_FAMILIES; anything
+    # else under /api (memory, updates, claimidx, future routes) is not
+    # proxied with the owner's Bearer just because nobody listed it yet.
+    if (
+        norm.startswith("/api/")
+        and not _starts(norm, _PHONE_FAMILIES)
+        and not _credential_writer(norm)  # already gated on settings_write above
+    ):
+        return "unknown:family"
+
     return None
+
+
+# Families the phone may reach once the pane checks above pass. Unlisted
+# /api prefixes are refused (see the tail of ``connect_forbidden``).
+_PHONE_FAMILIES = (
+    *_RAILS_PREFIXES,
+    *_CHAT_PREFIXES,
+    *_LIVE_UI_PREFIXES,
+    _SESSIONS_PREFIX,
+    "/api/approvals",
+    "/api/turn-active",
+    "/api/stop",
+    "/api/goals",
+    "/api/models",
+    "/api/ping",
+    "/api/health",
+    "/api/status",
+    "/api/providers/connected",
+    "/api/providers/free",
+    "/api/settings",
+    "/api/computer/capture",
+    "/api/connect/me",
+    "/api/connect/preview",
+)

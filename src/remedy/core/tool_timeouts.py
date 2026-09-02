@@ -26,6 +26,8 @@ TOOL_TIMEOUTS: dict[str, float | None] = {
     "bash_exec": 660.0,
     "run_python_file": 660.0,
     # long supervised work: own budgets / sub-process trees.
+    # build_drive owns its own budgets / sub-process trees, and now runs via
+    # asyncio.to_thread so it never blocks the event loop — no outer guard.
     "build_drive": None,
     "build_parallel": None,
     "build_review_fix": None,

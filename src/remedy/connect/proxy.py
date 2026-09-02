@@ -6,6 +6,7 @@ The phone never sees ``local_api_token``. Bearer is injected only on the
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
@@ -212,9 +213,10 @@ async def iter_proxy_response(
         if owns_session:
             close = getattr(client, "close", None)
             if close is not None:
-                result = close()
-                if hasattr(result, "__await__"):
-                    await result
+                with contextlib.suppress(Exception):
+                    result = close()
+                    if hasattr(result, "__await__"):
+                        await result
 
 
 def _chunked_block(chunk: bytes) -> bytes:

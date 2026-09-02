@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 from typing import Any
@@ -100,7 +101,6 @@ def register_build_tools(runtime: Any) -> None:
         replace (G). Machine owns write + oracle + snapshot (E).
         """
         from remedy.core.build_live_hop import live_unit_hop
-
         from remedy.core.build_oracle import coerce_text_arg
 
         rel = coerce_text_arg(path)
@@ -110,7 +110,8 @@ def register_build_tools(runtime: Any) -> None:
             repairs = max(1, min(8, int(max_repairs or 3)))
         except (TypeError, ValueError):
             repairs = 3
-        res = live_unit_hop(
+        res = await asyncio.to_thread(
+            live_unit_hop,
             runtime,
             path=rel,
             behavior=behavior or "",
@@ -163,7 +164,6 @@ def register_build_tools(runtime: Any) -> None:
     ) -> str:
         """Multi-unit live reducer: materialize + disk oracle + import dry-run."""
         from remedy.core.build_live_hop import live_build_project
-
         from remedy.core.build_oracle import coerce_json_text
 
         raw = coerce_json_text(units_json)
@@ -269,9 +269,8 @@ def register_build_tools(runtime: Any) -> None:
         """B: Compile goal → locked BuildSpec DAG (machine-owned API surface)."""
         from pathlib import Path
 
-        from remedy.core.build_spec_compiler import compile_goal_to_spec, save_locked_spec
-
         from remedy.core.build_oracle import coerce_text_arg
+        from remedy.core.build_spec_compiler import compile_goal_to_spec, save_locked_spec
 
         g = coerce_text_arg(goal)
         if not g:
@@ -295,9 +294,8 @@ def register_build_tools(runtime: Any) -> None:
     async def build_tdd(goal: str = "", use_llm: bool = False) -> str:
         """H: TDD-as-OS — write failing tests first, optional implement hops."""
         from remedy.core.build_engine import begin_build_turn, get_build_state
-        from remedy.core.build_tdd import tdd_bootstrap
-
         from remedy.core.build_oracle import coerce_text_arg
+        from remedy.core.build_tdd import tdd_bootstrap
 
         g = coerce_text_arg(goal)
         if not g:
@@ -367,8 +365,14 @@ def register_build_tools(runtime: Any) -> None:
             st.repair_queue = q.to_public()
         msg = format_repair_queue_message(q)["content"]
         if run_hops and q.targets:
-            ran = run_auto_repair_hops(
-                runtime, q, use_llm=bool(use_llm), max_targets=3, max_repairs=2
+            # Blocking gates/LLM hops must not stall the sidecar loop.
+            ran = await asyncio.to_thread(
+                run_auto_repair_hops,
+                runtime,
+                q,
+                use_llm=bool(use_llm),
+                max_targets=3,
+                max_repairs=2,
             )
             msg += f"\n\nauto_hops ran={ran.get('ran')} ok={ran.get('ok')}"
         return msg[:4000]
@@ -480,9 +484,8 @@ def register_build_tools(runtime: Any) -> None:
 
     async def todo_write(todos_json: str = "", merge: bool = True) -> str:
         """Create or update the turn/project build checklist (Claude-class)."""
-        from remedy.core.build_todos import format_todos_block, load_todos, upsert_todos
-
         from remedy.core.build_oracle import coerce_json_text
+        from remedy.core.build_todos import format_todos_block, load_todos, upsert_todos
 
         raw = coerce_json_text(todos_json)
         if not raw:
@@ -516,7 +519,11 @@ def register_build_tools(runtime: Any) -> None:
         from remedy.core.build_drive import drive_build
         from remedy.core.build_oracle import coerce_text_arg
 
-        res = drive_build(
+        # drive_build runs subprocess gate towers and LLM hops for minutes;
+        # keep it off the event loop so SSE streams, Stop and approvals stay
+        # responsive. to_thread copies contextvars (turn_session_id).
+        res = await asyncio.to_thread(
+            drive_build,
             runtime,
             goal=coerce_text_arg(goal),
             use_llm=bool(use_llm),
@@ -558,7 +565,6 @@ def register_build_tools(runtime: Any) -> None:
     async def build_parallel(units_json: str = "", use_llm: bool = False) -> str:
         """Isolated parallel hops — merge a unit only if its oracle is green."""
         from remedy.core.build_isolated import parallel_isolated_hops
-
         from remedy.core.build_oracle import coerce_json_text
 
         raw = coerce_json_text(units_json)

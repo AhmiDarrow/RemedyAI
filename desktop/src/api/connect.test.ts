@@ -2,9 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_CONNECT_PANES,
   CONNECT_PANE_LABELS,
+  connectListenLabel,
+  connectPairedLabel,
   filterConnectAddresses,
   mergeConnectPanes,
   normalizeConnectStatus,
+  parseConnectPauseResult,
+  parseTailscaleStatus,
+  parseTailscaleAction,
 } from './connect'
 
 describe('mergeConnectPanes', () => {
@@ -106,5 +111,132 @@ describe('normalizeConnectStatus', () => {
     expect(st.panes.approvals).toBe(true)
     expect(st.panes.chat).toBe(false)
     expect(st.devices).toEqual([{ id: 'p1', name: 'Pixel' }])
+  })
+
+  it('maps the server listening tuple, even when it differs from the bind', () => {
+    const st = normalizeConnectStatus({
+      enabled: true,
+      bind_host: '10.0.0.4',
+      bind_port: 7401,
+      listening: ['192.168.1.5', 7401],
+    })
+    expect(st.listening).toEqual(['192.168.1.5', 7401])
+    expect(connectListenLabel(st)).toBe('192.168.1.5:7401')
+  })
+
+  it('keeps listening null when enabled but nothing is bound', () => {
+    const st = normalizeConnectStatus({
+      enabled: true,
+      bind_host: '10.0.0.4',
+      bind_port: 7401,
+      listening: null,
+    })
+    expect(st.listening).toBeNull()
+    expect(connectListenLabel(st)).toBe('')
+  })
+
+  it('leaves listening unknown when the payload omits it and falls back to the bind', () => {
+    const st = normalizeConnectStatus({ enabled: true, bind_host: '10.0.0.4', bind_port: 7401 })
+    expect(st.listening).toBeUndefined()
+    expect(connectListenLabel(st)).toBe('10.0.0.4:7401')
+  })
+
+  it('keeps a float paired_at from the store as text', () => {
+    const st = normalizeConnectStatus({
+      devices: [{ id: 'p1', name: 'Pixel', paired_at: 1725000000.5 }],
+    })
+    expect(st.devices[0]?.paired_at).toBe('1725000000.5')
+  })
+})
+
+describe('connectPairedLabel', () => {
+  const now = 1725000000.5 * 1000 + 3 * 60 * 1000
+
+  it('reads float epoch seconds', () => {
+    expect(connectPairedLabel('1725000000.5', now)).toBe('3m ago')
+    expect(connectPairedLabel(1725000000.5, now)).toBe('3m ago')
+  })
+
+  it('reads integer seconds, epoch ms, and ISO strings', () => {
+    expect(connectPairedLabel('1725000000', now)).toBe('3m ago')
+    expect(connectPairedLabel(1725000000500, now)).toBe('3m ago')
+    expect(connectPairedLabel(new Date(1725000000500).toISOString(), now)).toBe('3m ago')
+  })
+
+  it('is empty for nothing or garbage', () => {
+    expect(connectPairedLabel(undefined, now)).toBe('')
+    expect(connectPairedLabel('', now)).toBe('')
+    expect(connectPairedLabel('not a date', now)).toBe('')
+  })
+})
+
+describe('parseConnectPauseResult', () => {
+  it('treats the {ok, paused} reply from /pause and /resume as done', () => {
+    expect(parseConnectPauseResult({ ok: true, paused: true }, true)).toEqual({
+      ok: true,
+      paused: true,
+    })
+    expect(parseConnectPauseResult({ ok: true, paused: false }, false)).toEqual({
+      ok: true,
+      paused: false,
+    })
+  })
+
+  it('asks for a PUT fallback when the reply is not a pause ack', () => {
+    expect(parseConnectPauseResult(null, true).ok).toBe(false)
+    expect(parseConnectPauseResult({}, true).ok).toBe(false)
+    expect(parseConnectPauseResult({ ok: false, paused: true }, true).ok).toBe(false)
+  })
+
+  it('accepts a full status snapshot too', () => {
+    const r = parseConnectPauseResult({ enabled: true, paused: true, panes: {}, devices: [] }, true)
+    expect(r.ok).toBe(true)
+    expect(r.paused).toBe(true)
+    expect(r.status?.enabled).toBe(true)
+  })
+})
+
+describe('parseTailscaleStatus', () => {
+  it('parses a connected status with a tailnet ip', () => {
+    const st = parseTailscaleStatus({
+      installed: true,
+      running: true,
+      logged_in: true,
+      tailnet_ipv4: '100.101.102.103',
+      version: '1.102.3',
+      error: '',
+    })
+    expect(st.installed).toBe(true)
+    expect(st.logged_in).toBe(true)
+    expect(st.tailnet_ipv4).toBe('100.101.102.103')
+    expect(st.version).toBe('1.102.3')
+  })
+
+  it('degrades when fields are missing', () => {
+    const st = parseTailscaleStatus(null)
+    expect(st.installed).toBe(false)
+    expect(st.logged_in).toBe(false)
+    expect(st.tailnet_ipv4).toBe('')
+    expect(st.error).toBe('')
+  })
+})
+
+describe('parseTailscaleAction', () => {
+  it('keeps optional login url and msi path', () => {
+    const a = parseTailscaleAction({
+      status: 'needs_login',
+      message: 'Open the sign-in link',
+      login_url: 'https://login.tailscale.com/a/abc123',
+    })
+    expect(a.status).toBe('needs_login')
+    expect(a.login_url).toBe('https://login.tailscale.com/a/abc123')
+    expect(a.msi_path).toBeUndefined()
+  })
+
+  it('degrades to empty strings', () => {
+    const a = parseTailscaleAction(undefined)
+    expect(a.status).toBe('')
+    expect(a.message).toBe('')
+    expect(a.login_url).toBeUndefined()
   })
 })

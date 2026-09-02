@@ -48,6 +48,28 @@ class RecordCodecTest {
     }
 
     @Test
+    fun maxFragmentFitsHostRecordLimit() {
+        // The host refuses any record body over 65536 bytes. A payload that
+        // needs the largest possible fragment must still encrypt into a record
+        // the host accepts, otherwise one big upload kills the session.
+        val k = ByteArray(32) { 6 }
+        val send = CipherState(k)
+        val payload = ByteArray(Protocol.MAX_PLAINTEXT * 3 + 17) { (it and 0xff).toByte() }
+        val frames = HttpFrame.fragment(HttpFrame.TYPE_HTTP_REQ, 9, payload)
+        assertTrue(frames.size >= 4)
+        var total = 0
+        for ((i, f) in frames.withIndex()) {
+            val rec = RecordCodec.encodeTransport(send, f)
+            val bodyLen = RecordCodec.readU32be(rec)
+            assertTrue(bodyLen <= Protocol.MAX_RECORD_BODY, "record $i body $bodyLen exceeds host cap")
+            val hdr = HttpFrame.decode(f)
+            assertEquals(i == frames.lastIndex, hdr.fin)
+            total += hdr.payload.size
+        }
+        assertEquals(payload.size, total)
+    }
+
+    @Test
     fun oversizedPlaintextRejected() {
         val k = ByteArray(32) { 5 }
         val send = CipherState(k)

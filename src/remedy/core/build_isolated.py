@@ -26,6 +26,12 @@ class OverlayRuntime:
         object.__setattr__(self, "_overlay", overlay)
         object.__setattr__(self, "_project", project)
         object.__setattr__(self, "_build_turn", None)
+        # Shadow the build-state map too: without this, get_build_state()
+        # delegates to the real runtime and every parallel overlay hop does a
+        # non-atomic st.write_steps += 1 / write_set.append on the shared live
+        # state — including hops whose merge is later rolled back. The
+        # successful-merge branch records each write exactly once instead.
+        object.__setattr__(self, "_build_turns", {})
 
     def effective_project_path(self) -> Path:
         return self._overlay

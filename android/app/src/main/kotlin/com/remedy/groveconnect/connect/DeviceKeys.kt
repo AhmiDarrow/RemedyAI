@@ -2,6 +2,7 @@ package com.remedy.groveconnect.connect
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 import com.remedy.groveconnect.core.Crypto
@@ -35,13 +36,38 @@ class DeviceKeys(ctx: Context) {
     }
 
     companion object {
+        private const val TAG = "DeviceKeys"
         private const val KEY_PRIV = "device_x25519_priv"
         private const val KEY_PUB = "device_x25519_pub"
 
+        private const val PREFS_NAME = "grove_connect"
+
+        /**
+         * Opens the encrypted prefs. After a Keystore reset (device restore,
+         * lock-screen change on some OEMs) the wrapping key no longer matches
+         * the on-disk keyset and Tink throws (AEADBadTagException et al.) at
+         * process start — which made the app unlaunchable. Wipe the file and
+         * recreate once; the user re-pairs. A second failure is a real bug.
+         */
         fun encryptedPrefs(ctx: Context): SharedPreferences {
+            return try {
+                openEncryptedPrefs(ctx)
+            } catch (first: Exception) {
+                Log.w(TAG, "encrypted prefs unreadable, recreating: ${first.javaClass.simpleName}")
+                ctx.deleteSharedPreferences(PREFS_NAME)
+                try {
+                    openEncryptedPrefs(ctx)
+                } catch (second: Exception) {
+                    second.addSuppressed(first)
+                    throw second
+                }
+            }
+        }
+
+        private fun openEncryptedPrefs(ctx: Context): SharedPreferences {
             val alias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
             return EncryptedSharedPreferences.create(
-                "grove_connect",
+                PREFS_NAME,
                 alias,
                 ctx,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,

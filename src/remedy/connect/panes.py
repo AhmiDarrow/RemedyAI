@@ -1,4 +1,4 @@
-"""Phone pane flags for Grove Connect.
+"""Phone pane flags for RemedyConnect.
 
 Approvals (including Stop / abort) stay on even if a stored payload tries to
 turn them off. Preview and settings writes stay off until the owner opts in.

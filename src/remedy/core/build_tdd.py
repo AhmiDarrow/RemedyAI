@@ -50,6 +50,22 @@ def materialize_tdd_tests(
                 "error": f"write jail refused: {exc}",
                 "written": written,
             }
+        if dest.exists():
+            # Never replace a real test file with a red stub: the owner's
+            # tests are the oracle, and a permanently-red stub in their place
+            # would send the repair loop after the test file itself.
+            test_rel = f"tests/test_{_safe(sym)}_remedy_tdd.py"
+            try:
+                dest = Path(runtime.resolve_tool_path(test_rel, for_write=True))
+            except Exception as exc:
+                return {
+                    "ok": False,
+                    "error": f"write jail refused: {exc}",
+                    "written": written,
+                }
+            if dest.exists():
+                u["test_path"] = test_rel
+                continue
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(tests_src, encoding="utf-8")
         written.append(test_rel)

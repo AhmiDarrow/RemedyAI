@@ -14,17 +14,15 @@ data class PaneFlags(
     fun visible(): List<String> = KNOWN.filter { isVisible(it) }
 
     companion object {
+        /** Mirrors PANE_KEYS in src/remedy/connect/panes.py on the PC. */
         val KNOWN: List<String> = listOf(
+            "live_ui",
             "chat",
+            "approvals",
             "sessions",
-            "browser",
-            "terminal",
-            "files",
-            "settings",
-            "scratch",
-            "studio",
-            "voice",
-            "computer",
+            "rails",
+            "computer_preview",
+            "settings_write",
         )
 
         fun allOn(): PaneFlags = PaneFlags(KNOWN.associateWith { true })

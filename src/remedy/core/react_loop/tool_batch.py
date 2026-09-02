@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
@@ -212,8 +213,12 @@ async def apply_build_engine_after_batch(
                 if allow_background_drive(bst) and can_machine_inject(
                     bst, consume=False
                 ):
-                    driven = maybe_auto_implement(
-                        runtime, bst, use_llm=should_use_live_llm(runtime)
+                    # Off-loop: spec/TDD/hops run subprocesses and LLM calls.
+                    driven = await asyncio.to_thread(
+                        maybe_auto_implement,
+                        runtime,
+                        bst,
+                        use_llm=should_use_live_llm(runtime),
                     )
                 if driven:
                     can_machine_inject(bst, consume=True)
@@ -257,7 +262,9 @@ async def apply_build_engine_after_batch(
                     and "write_review" not in bst.nudges_emitted
                     and not should_auto_verify(bst)
                 ):
-                    rev = review_write_set(runtime, list(bst.write_set))
+                    rev = await asyncio.to_thread(
+                        review_write_set, runtime, list(bst.write_set)
+                    )
                     tests = rev.get("tests") or []
                     if tests or rev.get("cone"):
                         bst.nudges_emitted.append("write_review")
@@ -293,7 +300,14 @@ async def apply_build_engine_after_batch(
                 from remedy.core.build_syntax import resolve_write_paths
 
                 resolved = resolve_write_paths(runtime, list(bst.write_set)[-8:])
-                syn = check_paths_syntax(resolved) if resolved else []
+                # py_compile / subprocess / AST walks below are blocking: run
+                # them off the event loop so one build turn never stalls every
+                # other session's stream, approvals, or Stop.
+                syn = (
+                    await asyncio.to_thread(check_paths_syntax, resolved)
+                    if resolved
+                    else []
+                )
                 bad = [r for r in syn if not r.get("ok")]
                 # Unresolved paths are skipped, not red — do not block verify
                 bst.syntax_ok = (not bad) if resolved else None
@@ -319,8 +333,8 @@ async def apply_build_engine_after_batch(
                             if str(p).endswith(".py")
                         ]
                         if py_paths:
-                            imp = dry_run_imports_for_paths(
-                                py_paths, root_p
+                            imp = await asyncio.to_thread(
+                                dry_run_imports_for_paths, py_paths, root_p
                             )
                             imsg = format_import_dry_run_message(imp)
                             if imsg is not None:
@@ -332,8 +346,10 @@ async def apply_build_engine_after_batch(
                                     messages.append(imsg)
                                     yield "@@status:Build import dry-run skipped (no CPython)\n"
                                     with _soft("mutation-score"):
-                                        ms = mutation_score_paths(
-                                            root_p, list(bst.write_set)
+                                        ms = await asyncio.to_thread(
+                                            mutation_score_paths,
+                                            root_p,
+                                            list(bst.write_set),
                                         )
                                         bst.last_mutation_score = ms
                                 else:
@@ -344,8 +360,10 @@ async def apply_build_engine_after_batch(
                             else:
                                 # mutation score for next scoped verify
                                 with _soft("mutation-score"):
-                                    ms = mutation_score_paths(
-                                        root_p, list(bst.write_set)
+                                    ms = await asyncio.to_thread(
+                                        mutation_score_paths,
+                                        root_p,
+                                        list(bst.write_set),
                                     )
                                     bst.last_mutation_score = ms
                                     if ms.get("cone_mods"):
@@ -515,8 +533,11 @@ async def apply_build_engine_after_batch(
                             should_use_live_llm,
                         )
 
-                        hopped = maybe_auto_repair(
-                            runtime, bst, use_llm=should_use_live_llm(runtime)
+                        hopped = await asyncio.to_thread(
+                            maybe_auto_repair,
+                            runtime,
+                            bst,
+                            use_llm=should_use_live_llm(runtime),
                         )
                         if hopped:
                             live_h = get_build_state(runtime)

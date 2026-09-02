@@ -444,9 +444,14 @@ def sync_todos_with_build(runtime: Any, state: Any = None) -> list[TodoItem]:
     wrote = int(getattr(state, "write_steps", 0) or 0) > 0
     verify_ok = getattr(state, "last_verify_ok", None) is True
 
-    write_names = _write_match_tokens(
-        list(getattr(state, "write_set", None) or [])
-        + list(getattr(state, "paths_touched", None) or [])
+    # Only files the turn actually WROTE can close a file-named row. Every
+    # tool-arg path (file_read included) lands in paths_touched, so matching
+    # on it closed "Implement tabScore.ts" the moment the model merely read
+    # tabScore.ts — and the DONE gate then opened with zero writes.
+    write_names = (
+        _write_match_tokens(list(getattr(state, "write_set", None) or []))
+        if wrote
+        else []
     )
 
     changed = False
@@ -575,4 +580,5 @@ def seed_drive_todos(
             }
         )
     rows.append({"id": "verify", "content": "Verify green (gate tower / tests)", "status": "pending"})
-    return upsert_todos(runtime, rows, merge=False)
+    # merge=True: never wipe the owner's rows (rf-* review findings gate DONE).
+    return upsert_todos(runtime, rows, merge=True)

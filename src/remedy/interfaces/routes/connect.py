@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 from typing import Any
@@ -241,17 +242,21 @@ def register_connect_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         fresh = _load_cfg()
+        # Applying settings starts/stops the gateway thread and blocks on a
+        # up-to-5s ready.wait / thread.join. Off the event loop so a slow bind
+        # never freezes every other session's stream, approvals, or Stop.
         try:
             from remedy.connect.lifecycle import on_connect_settings_changed
 
-            on_connect_settings_changed(fresh)
+            await asyncio.to_thread(on_connect_settings_changed, fresh)
         except Exception:
             logger.debug("connect apply lifecycle", exc_info=True)
         if bool(fresh.get("connect_enabled")):
             try:
                 from remedy.connect.lifecycle import maybe_start_connect
 
-                maybe_start_connect(
+                await asyncio.to_thread(
+                    maybe_start_connect,
                     request.app,
                     fresh,
                     api_key=_api_key(app),
@@ -412,3 +417,56 @@ def register_connect_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         except Exception:
             logger.debug("connect resume config", exc_info=True)
         return {"ok": True, "paused": False}
+
+    @app.get("/api/connect/tailscale/status")
+    async def connect_tailscale_status(request: Request):
+        """Tailscale state for the Settings card (loopback only)."""
+        _refuse_connect_proxy(request)
+        _require_loopback(request)
+        try:
+            from remedy.connect.tailscale_bootstrap import tailscale_status
+
+            return await asyncio.to_thread(tailscale_status)
+        except Exception as exc:
+            logger.debug("tailscale status failed", exc_info=True)
+            return {
+                "installed": False,
+                "running": False,
+                "logged_in": False,
+                "tailnet_ipv4": "",
+                "version": "",
+                "error": str(exc) or "could not read Tailscale status",
+            }
+
+    @app.post("/api/connect/tailscale/install")
+    async def connect_tailscale_install(request: Request):
+        """Opt-in: download + launch the official Tailscale installer."""
+        _refuse_connect_proxy(request)
+        _require_loopback(request)
+        try:
+            from remedy.connect.tailscale_bootstrap import ensure_tailscale
+
+            return await asyncio.to_thread(ensure_tailscale)
+        except Exception as exc:
+            logger.debug("tailscale install failed", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=str(exc) or "could not start Tailscale install",
+            ) from exc
+
+    @app.post("/api/connect/tailscale/login")
+    async def connect_tailscale_login(request: Request):
+        """Start Tailscale sign-in; return the login URL when printed."""
+        _refuse_connect_proxy(request)
+        _require_loopback(request)
+        try:
+            from remedy.connect.tailscale_bootstrap import start_tailscale_login
+
+            return await asyncio.to_thread(start_tailscale_login)
+        except Exception as exc:
+            logger.debug("tailscale login failed", exc_info=True)
+            return {
+                "status": "error",
+                "message": str(exc) or "could not start Tailscale sign-in",
+                "login_url": "",
+            }

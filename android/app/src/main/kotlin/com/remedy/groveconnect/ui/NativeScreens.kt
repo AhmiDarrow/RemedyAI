@@ -42,6 +42,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -90,6 +93,7 @@ import com.remedy.groveconnect.ui.theme.TextMuted
 import com.remedy.groveconnect.ui.theme.TextPrimary
 import com.remedy.groveconnect.ui.theme.TextSecondary
 import com.remedy.groveconnect.ui.theme.Warning
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -101,6 +105,7 @@ enum class HomeTab(val label: String) {
     Sessions("Sessions"),
     Approvals("Approvals"),
     Terminal("Terminal"),
+    Grove("Grove"),
     Settings("Settings"),
 }
 
@@ -117,6 +122,7 @@ fun HomeScreen(
     onRefresh: () -> Unit,
 ) {
     var tab by remember { mutableStateOf(HomeTab.Chat) }
+    var pendingSessionId by remember { mutableStateOf<String?>(null) }
     val sessionsApi = remember { SessionsApi(api) }
     val terminalApi = remember { TerminalApi(api) }
     var preferredModel by remember { mutableStateOf<String?>(null) }
@@ -137,12 +143,24 @@ fun HomeScreen(
                 Icon(Icons.Filled.Close, contentDescription = "Close", tint = TextSecondary, modifier = Modifier.size(20.dp))
             }
         }
+        ProviderModelBar(api, preferredModel, onModelPicked = { preferredModel = it })
         Box(Modifier.weight(1f)) {
             when (tab) {
-                HomeTab.Chat -> ChatTab(sessionsApi, state, onStop, preferredModel)
-                HomeTab.Sessions -> SessionsTab(sessionsApi)
+                HomeTab.Chat -> ChatTab(
+                    sessionsApi, api, state, onStop, preferredModel,
+                    initialSessionId = pendingSessionId,
+                    onInitialConsumed = { pendingSessionId = null },
+                )
+                HomeTab.Sessions -> SessionsTab(
+                    sessionsApi,
+                    onOpen = { s ->
+                        pendingSessionId = s.id
+                        tab = HomeTab.Chat
+                    },
+                )
                 HomeTab.Approvals -> ApprovalsTab(sessionsApi)
                 HomeTab.Terminal -> TerminalTab(terminalApi)
+                HomeTab.Grove -> GroveTab(api)
                 HomeTab.Settings -> SettingsTab(api, state, onStop, onClose, onModelPicked = { preferredModel = it })
             }
         }
@@ -172,6 +190,7 @@ private fun HomeTabIcon(tab: HomeTab) = when (tab) {
     HomeTab.Sessions -> Icons.Filled.List
     HomeTab.Approvals -> Icons.Filled.Warning
     HomeTab.Terminal -> Icons.Filled.Terminal
+    HomeTab.Grove -> Icons.Filled.Menu
     HomeTab.Settings -> Icons.Filled.Info
 }
 
@@ -185,6 +204,138 @@ private fun StatusDot(r: Reachable) {
     Box(Modifier.size(9.dp).background(color, CircleShape))
 }
 
+/**
+ * Slim, always-visible provider·model status bar under the title. Shows the
+ * PC's live LLM provider/model and lets the phone switch either in-session
+ * without opening Settings. Provider/model writes are allowed regardless of
+ * the settings_write pane (see connect/deny.py _PROVIDER_SAFE_KEYS).
+ */
+@Composable
+private fun ProviderModelBar(
+    api: RemedyApi,
+    preferredModel: String?,
+    onModelPicked: (String?) -> Unit,
+) {
+    val sessionsApi = remember { SessionsApi(api) }
+    val scope = rememberCoroutineScope()
+    var providers by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    var models by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    var currentProvider by remember { mutableStateOf<String?>(null) }
+    var currentModel by remember { mutableStateOf<String?>(null) }
+    var open by remember { mutableStateOf(false) }
+    var refreshKey by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(refreshKey) {
+        val snap = withContext(Dispatchers.IO) { SettingsSnapshot.load(api) }
+        providers = snap.providers
+        models = snap.models
+        currentProvider = snap.currentProvider
+        currentModel = snap.currentModel
+    }
+
+    val provs = providers
+    // A model picked in this session (or from Settings) wins over the last
+    // fetched value so the label updates immediately.
+    val shownModel = preferredModel ?: currentModel
+    val provLabel = provs?.firstOrNull { it.first == currentProvider }?.second ?: currentProvider
+    val hasProviders = provs == null || provs.isNotEmpty()
+    val label = when {
+        provs != null && provs.isEmpty() -> "No providers connected"
+        provLabel == null -> "Loading…"
+        !shownModel.isNullOrBlank() -> "$provLabel · $shownModel"
+        else -> "$provLabel · Default model"
+    }
+
+    Box {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(38.dp)
+                .background(BgSecondary)
+                .clickable(enabled = hasProviders) { open = true }
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                label,
+                color = if (hasProviders) TextSecondary else TextMuted,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (hasProviders) {
+                Spacer(Modifier.width(8.dp))
+                Text("▾", color = TextMuted, fontSize = 13.sp)
+            }
+        }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.background(BgSecondary),
+        ) {
+            Text(
+                "Provider",
+                color = TextMuted,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 16.dp, top = 6.dp, bottom = 2.dp),
+            )
+            provs?.forEach { (id, plabel) ->
+                val sel = id == currentProvider
+                DropdownMenuItem(
+                    text = { Text(plabel, color = if (sel) Accent else TextPrimary, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    trailingIcon = { if (sel) Icon(Icons.Filled.Check, contentDescription = null, tint = Accent, modifier = Modifier.size(16.dp)) },
+                    onClick = {
+                        // Switch provider, reset to its default model, keep the
+                        // menu open so a model can be chosen next.
+                        scope.launch {
+                            withContext(Dispatchers.IO) { sessionsApi.setProvider(id, null) }
+                            onModelPicked(null)
+                            refreshKey++
+                        }
+                    },
+                )
+            }
+            HorizontalDivider(color = Border)
+            Text(
+                "Model",
+                color = TextMuted,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 16.dp, top = 6.dp, bottom = 2.dp),
+            )
+            DropdownMenuItem(
+                text = { Text("Provider default", color = if (shownModel.isNullOrBlank()) Accent else TextPrimary, fontSize = 14.sp) },
+                trailingIcon = { if (shownModel.isNullOrBlank()) Icon(Icons.Filled.Check, contentDescription = null, tint = Accent, modifier = Modifier.size(16.dp)) },
+                onClick = {
+                    open = false
+                    scope.launch {
+                        withContext(Dispatchers.IO) { sessionsApi.resetModel(currentProvider) }
+                        onModelPicked(null)
+                        refreshKey++
+                    }
+                },
+            )
+            models?.take(12)?.forEach { (mid, mlabel) ->
+                val sel = mid == shownModel
+                DropdownMenuItem(
+                    text = { Text(mlabel, color = if (sel) Accent else TextPrimary, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    trailingIcon = { if (sel) Icon(Icons.Filled.Check, contentDescription = null, tint = Accent, modifier = Modifier.size(16.dp)) },
+                    onClick = {
+                        open = false
+                        scope.launch {
+                            withContext(Dispatchers.IO) { sessionsApi.setProvider(currentProvider, mid) }
+                            onModelPicked(mid)
+                            refreshKey++
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Chat
 // ---------------------------------------------------------------------------
@@ -192,15 +343,44 @@ private fun StatusDot(r: Reachable) {
 @Composable
 private fun ChatTab(
     sessionsApi: SessionsApi,
+    api: RemedyApi,
     state: RemoteState,
     onStop: () -> Unit,
     preferredModel: String?,
+    initialSessionId: String? = null,
+    onInitialConsumed: () -> Unit = {},
 ) {
     var sessionId by remember { mutableStateOf<String?>(null) }
+    var following by remember { mutableStateOf(true) }
+    // A session picked from the Sessions tab opens here directly.
+    LaunchedEffect(initialSessionId) {
+        if (initialSessionId != null) {
+            sessionId = initialSessionId
+            following = false
+            onInitialConsumed()
+        }
+    }
+    // Follow the PC's active session: open it automatically and switch when
+    // the desktop moves to another session. The phone mirrors what Remedy is
+    // actually working on, instead of staying pinned to a stale session.
+    LaunchedEffect(following) {
+        if (!following) return@LaunchedEffect
+        while (true) {
+            val sid = withContext(Dispatchers.IO) { sessionsApi.activeSessionId() }
+            if (sid != null) sessionId = sid
+            delay(4000)
+        }
+    }
     if (sessionId == null) {
-        SessionPicker(sessionsApi, preferredModel, onPick = { sessionId = it })
+        SessionPicker(sessionsApi, preferredModel, onPick = { sessionId = it; following = false })
     } else {
-        ChatScreen(sessionsApi, sessionId!!, onBack = { sessionId = null }, onStop = onStop)
+        ChatScreen(
+            sessionsApi, sessionId!!,
+            onBack = { sessionId = null; following = false },
+            onStop = onStop,
+            following = following,
+            onToggleFollow = { following = !following },
+        )
     }
 }
 
@@ -292,13 +472,17 @@ private fun ChatScreen(
     sessionId: String,
     onBack: () -> Unit,
     onStop: () -> Unit,
+    following: Boolean,
+    onToggleFollow: () -> Unit,
 ) {
     val messages = remember { mutableStateListOf<ChatMessage>() }
     val loading = remember { mutableStateOf(true) }
     var input by remember { mutableStateOf("") }
     var streaming by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var streamCancel: () -> Unit = remember { {} }
+    // State-backed so the DisposableEffect below sees the latest cancel
+    // handle — a plain local is re-created on every recomposition.
+    val streamCancel = remember { mutableStateOf<() -> Unit>({}) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
@@ -308,8 +492,15 @@ private fun ChatScreen(
         messages.addAll(withContext(Dispatchers.IO) { sessionsApi.messages(sessionId) })
         loading.value = false
     }
+    // Loading a session with history: land at the bottom of the feed, and
+    // keep following the newest message while a turn streams in.
+    LaunchedEffect(messages.size, loading.value) {
+        if (!loading.value && messages.isNotEmpty()) {
+            listState.scrollToItem(messages.size - 1)
+        }
+    }
     DisposableEffect(sessionId) {
-        onDispose { streamCancel() }
+        onDispose { streamCancel.value() }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -319,6 +510,9 @@ private fun ChatScreen(
         ) {
             TextButton(onClick = onBack) { Text("←", color = TextSecondary, fontSize = 18.sp) }
             Text("Session", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            TextButton(onClick = onToggleFollow) {
+                Text(if (following) "Following" else "Follow", color = if (following) Accent else TextMuted, fontSize = 12.sp)
+            }
             if (streaming) {
                 IconButton(onClick = onStop) {
                     Icon(Icons.Filled.Stop, contentDescription = "Stop", tint = Error, modifier = Modifier.size(22.dp))
@@ -383,7 +577,7 @@ private fun ChatScreen(
                     scope.launch {
                         listState.scrollToItem((messages.size - 1).coerceAtLeast(0))
                     }
-                    streamCancel = sessionsApi.sendStream(
+                    streamCancel.value = sessionsApi.sendStream(
                         sessionId,
                         text,
                         onToken = { tok ->
@@ -406,7 +600,7 @@ private fun ChatScreen(
                             if (i >= startIdx && messages[i].content.isBlank()) {
                                 messages.removeAt(i)
                             }
-                            refreshTail(sessionsApi, sessionId, messages, startIdx)
+                            scope.launch { refreshTail(sessionsApi, sessionId, messages, startIdx) }
                         },
                         onError = { msg ->
                             streaming = false
@@ -433,13 +627,14 @@ private fun onToolNote(messages: androidx.compose.runtime.snapshots.SnapshotStat
     }
 }
 
-private fun refreshTail(
+// Fetch on IO (the onDone callback lands on Main), mutate state on Main.
+private suspend fun refreshTail(
     sessionsApi: SessionsApi,
     sessionId: String,
     messages: androidx.compose.runtime.snapshots.SnapshotStateList<ChatMessage>,
     fromIdx: Int,
 ) {
-    val fresh = sessionsApi.messages(sessionId, limit = 200)
+    val fresh = withContext(Dispatchers.IO) { sessionsApi.messages(sessionId, limit = 200) }
     if (fresh.isNotEmpty()) {
         while (messages.size > fromIdx) messages.removeAt(messages.lastIndex)
         messages.addAll(fresh)
@@ -488,7 +683,10 @@ private fun MessageBubble(m: ChatMessage) {
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun SessionsTab(sessionsApi: SessionsApi) {
+private fun SessionsTab(
+    sessionsApi: SessionsApi,
+    onOpen: (ChatSession) -> Unit,
+) {
     var sessions by remember { mutableStateOf<List<ChatSession>?>(null) }
     var refreshKey by remember { mutableIntStateOf(0) }
     LaunchedEffect(refreshKey) { sessions = withContext(Dispatchers.IO) { sessionsApi.listSessions() } }
@@ -510,7 +708,7 @@ private fun SessionsTab(sessionsApi: SessionsApi) {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(list, key = { it.id }) { s ->
                     Card(
-                        Modifier.fillMaxWidth(),
+                        Modifier.fillMaxWidth().clickable { onOpen(s) },
                         shape = RoundedCornerShape(14.dp),
                         colors = CardDefaults.cardColors(containerColor = BgSecondary),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Border),
@@ -555,7 +753,8 @@ private fun relTime(ms: Long): String {
 private fun ApprovalsTab(sessionsApi: SessionsApi) {
     var approvals by remember { mutableStateOf<List<Approval>?>(null) }
     var refreshKey by remember { mutableIntStateOf(0) }
-    LaunchedEffect(refreshKey) { approvals = sessionsApi.approvals() }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(refreshKey) { approvals = withContext(Dispatchers.IO) { sessionsApi.approvals() } }
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Approvals", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
@@ -580,8 +779,10 @@ private fun ApprovalsTab(sessionsApi: SessionsApi) {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(list, key = { it.id }) { a ->
                     ApprovalCard(a, onResolve = { yes ->
-                        sessionsApi.resolveApproval(a.id, yes)
-                        refreshKey++
+                        scope.launch {
+                            withContext(Dispatchers.IO) { sessionsApi.resolveApproval(a.id, yes) }
+                            refreshKey++
+                        }
                     })
                 }
             }
@@ -644,24 +845,26 @@ private fun ApprovalCard(a: Approval, onResolve: (Boolean) -> Unit) {
 @Composable
 private fun TerminalTab(terminalApi: TerminalApi) {
     var tid by remember { mutableStateOf<String?>(null) }
-    var output by remember { mutableStateOf("") }
     var input by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var cancelStream: () -> Unit = remember { {} }
+    // State-backed so onDispose sees the live cancel handle, not a stale no-op.
+    val cancelStream = remember { mutableStateOf<() -> Unit>({}) }
     val listState = rememberLazyListState()
     val lines = remember { mutableStateListOf<String>() }
     val scope = rememberCoroutineScope()
 
     DisposableEffect(Unit) {
         onDispose {
-            cancelStream()
-            tid?.let { terminalApi.close(it) }
+            cancelStream.value()
+            // The composition scope is gone by now; fire-and-forget off Main.
+            tid?.let { id -> CoroutineScope(Dispatchers.IO).launch { terminalApi.close(id) } }
         }
     }
 
+    val ansiRe = Regex("\u001B\\[[0-9;?]*[ -/]*[@-~]|\u001B\\][^\u0007]*(?:\u0007|\u001B\\\\)")
     fun append(text: String) {
-        val cleaned = text.replace("\r\n", "\n").replace("\r", "\n")
+        val cleaned = ansiRe.replace(text, "").replace("\r\n", "\n").replace("\r", "\n")
         for (part in cleaned.split("\n")) {
             if (lines.isNotEmpty() && lines.last().endsWith("\u0000")) {
                 lines[lines.lastIndex] = lines.last().dropLast(1) + part
@@ -681,7 +884,7 @@ private fun TerminalTab(terminalApi: TerminalApi) {
                 tid = newTid
                 running = true
                 error = null
-                cancelStream = terminalApi.stream(
+                cancelStream.value = terminalApi.stream(
                     newTid,
                     onOutput = { append(it) },
                     onExit = {
@@ -708,21 +911,21 @@ private fun TerminalTab(terminalApi: TerminalApi) {
                 Spacer(Modifier.width(6.dp))
             }
             IconButton(onClick = {
-                if (tid != null) {
-                    cancelStream()
-                    terminalApi.close(tid!!)
+                val closing = tid
+                if (closing != null) {
+                    cancelStream.value()
                     tid = null
                     lines.clear()
-                    output = ""
                     running = false
                 }
                 scope.launch {
+                    if (closing != null) withContext(Dispatchers.IO) { terminalApi.close(closing) }
                     val newTid = withContext(Dispatchers.IO) { terminalApi.open() }
                     if (newTid != null) {
                         tid = newTid
                         running = true
                         error = null
-                        cancelStream = terminalApi.stream(
+                        cancelStream.value = terminalApi.stream(
                             newTid,
                             onOutput = { append(it) },
                             onExit = {
@@ -807,7 +1010,10 @@ private fun TerminalTab(terminalApi: TerminalApi) {
                     val text = input
                     if (text.isBlank()) return@Button
                     input = ""
-                    terminalApi.input(tid!!, text + "\n")
+                    val id = tid!!
+                    scope.launch {
+                        withContext(Dispatchers.IO) { terminalApi.input(id, text + "\n") }
+                    }
                 },
                 enabled = tid != null && input.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = Accent),
@@ -821,22 +1027,110 @@ private fun TerminalTab(terminalApi: TerminalApi) {
 }
 
 // ---------------------------------------------------------------------------
+// Grove (goals + partner status, rendered natively)
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun GroveTab(api: RemedyApi) {
+    // Grove is the goals/partner tab from Remedy Desktop — rendered natively,
+    // never the live desktop UI on the phone.
+    var goals by remember { mutableStateOf<List<GroveGoal>?>(null) }
+    var partnerLine by remember { mutableStateOf<String?>(null) }
+    var refreshKey by remember { mutableIntStateOf(0) }
+    LaunchedEffect(refreshKey) {
+        val (g, p) = withContext(Dispatchers.IO) {
+            val gj = api.getJson("/api/goals")
+            val list = gj?.optJSONArray("goals")?.let { arr ->
+                buildList {
+                    for (i in 0 until arr.length()) {
+                        val o = arr.optJSONObject(i) ?: continue
+                        add(
+                            GroveGoal(
+                                title = o.optString("title").ifBlank { o.optString("id") },
+                                status = o.optString("status").ifBlank { "active" },
+                            )
+                        )
+                    }
+                }
+            }
+            val pj = api.getJson("/api/partner/status")
+            val pl = pj?.optString("mood")?.takeIf { it.isNotBlank() }
+                ?: pj?.optString("status")?.takeIf { it.isNotBlank() }
+            list to pl
+        }
+        goals = g
+        partnerLine = p
+    }
+    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Grove", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = { refreshKey++ }) {
+                Icon(Icons.Filled.Refresh, contentDescription = "Refresh", tint = TextSecondary, modifier = Modifier.size(20.dp))
+            }
+        }
+        partnerLine?.let { line ->
+            Card(
+                Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = BgSecondary),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+            ) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Info, contentDescription = null, tint = Accent, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text(line, color = TextPrimary, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                }
+            }
+        }
+        val list = goals
+        if (list == null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Accent, strokeWidth = 3.dp)
+            }
+        } else if (list.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No goals yet.", color = TextMuted)
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(list.size) { i ->
+                    val g = list[i]
+                    Card(
+                        Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = BgSecondary),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+                    ) {
+                        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(g.title, color = TextPrimary, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Spacer(Modifier.width(10.dp))
+                            Text(g.status, color = TextMuted, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class GroveGoal(val title: String, val status: String)
+
+// ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
 
-private fun labelsOf(arr: org.json.JSONArray?, preferName: Boolean): List<String>? {
+private fun pairsOf(arr: org.json.JSONArray?, preferName: Boolean): List<Pair<String, String>>? {
     if (arr == null) return null
-    val primary = if (preferName) "name" else "id"
-    val secondary = if (preferName) "id" else "name"
     return buildList {
         for (i in 0 until arr.length()) {
-            val o = arr.optJSONObject(i)
-            val n = if (o != null) {
-                o.optString(primary).ifBlank { o.optString(secondary) }
-            } else {
-                ""
+            val o = arr.optJSONObject(i) ?: continue
+            val id = o.optString("id").ifBlank { o.optString("name") }
+            val name = o.optString("name").ifBlank { o.optString("id") }
+            if (id.isNotBlank()) {
+                val label = if (preferName) name.ifBlank { id } else id.ifBlank { name }
+                add(id to label)
             }
-            if (n.isNotBlank()) add(n)
         }
     }
 }
@@ -845,8 +1139,10 @@ private data class SettingsSnapshot(
     val ping: String?,
     val sessionId: String?,
     val deviceId: String?,
-    val providers: List<String>?,
-    val models: List<String>?,
+    val providers: List<Pair<String, String>>?,
+    val models: List<Pair<String, String>>?,
+    val currentProvider: String?,
+    val currentModel: String?,
 ) {
     companion object {
         fun load(api: RemedyApi): SettingsSnapshot {
@@ -854,19 +1150,22 @@ private data class SettingsSnapshot(
             val conn = api.getJson("/connect/me")
             val sessionId = conn?.optString("session_id")?.takeIf { it.isNotBlank() }
             val deviceId = conn?.optString("device_id")?.takeIf { it.isNotBlank() }
+            val settings = api.getJson("/api/settings")
+            val currentProvider = settings?.optString("llm_provider")?.takeIf { it.isNotBlank() }
+            val currentModel = settings?.optString("llm_model")?.takeIf { it.isNotBlank() }
             val provArr = api.getJson("/api/providers/connected")?.let { j ->
                 j.optJSONArray("connected")
                     ?: j.optJSONArray("providers")
                     ?: j.optJSONArray("data")
             }
-            val providers = labelsOf(provArr, preferName = true)
+            val providers = pairsOf(provArr, preferName = true)
             val modelsArr = api.getJson("/api/models")?.let { j ->
                 j.optJSONArray("models")
                     ?: j.optJSONArray("data")
                     ?: j.optJSONArray("items")
             }
-            val models = labelsOf(modelsArr, preferName = false)
-            return SettingsSnapshot(ping, sessionId, deviceId, providers, models)
+            val models = pairsOf(modelsArr, preferName = false)
+            return SettingsSnapshot(ping, sessionId, deviceId, providers, models, currentProvider, currentModel)
         }
     }
 }
@@ -882,12 +1181,15 @@ private fun SettingsTab(
     var me by remember { mutableStateOf<String?>(null) }
     var ping by remember { mutableStateOf<String?>(null) }
     var deviceId by remember { mutableStateOf<String?>(null) }
-    var providers by remember { mutableStateOf<List<String>?>(null) }
-    var models by remember { mutableStateOf<List<String>?>(null) }
+    var providers by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    var models by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
     var chosenModel by remember { mutableStateOf<String?>(null) }
+    var currentProvider by remember { mutableStateOf<String?>(null) }
     var revoking by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
     var refreshKey by remember { mutableIntStateOf(0) }
+    val sessionsApi = remember { SessionsApi(api) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(refreshKey) {
         val snap = withContext(Dispatchers.IO) { SettingsSnapshot.load(api) }
@@ -896,6 +1198,8 @@ private fun SettingsTab(
         deviceId = snap.deviceId
         providers = snap.providers
         models = snap.models
+        currentProvider = snap.currentProvider
+        chosenModel = snap.currentModel
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -905,6 +1209,9 @@ private fun SettingsTab(
             IconButton(onClick = { refreshKey++ }) {
                 Icon(Icons.Filled.Refresh, contentDescription = "Refresh", tint = TextSecondary, modifier = Modifier.size(20.dp))
             }
+        }
+        if (msg != null) {
+            Text(msg ?: "", color = Success, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 4.dp))
         }
 
         Card(
@@ -965,7 +1272,22 @@ private fun SettingsTab(
                 } else if (provs.isEmpty()) {
                     Text("No providers connected on the PC.", color = TextMuted, fontSize = 13.sp)
                 } else {
-                    Text(provs.joinToString(", "), color = TextSecondary, fontSize = 13.sp)
+                    provs.forEach { (id, label) ->
+                        val sel = id == currentProvider
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable {
+                                scope.launch {
+                                    val ok = withContext(Dispatchers.IO) { sessionsApi.setProvider(id, null) }
+                                    msg = if (ok) "Provider set to $label" else "Could not switch provider"
+                                    refreshKey++
+                                }
+                            }.padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(label, color = if (sel) Accent else TextPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            if (sel) Icon(Icons.Filled.Check, contentDescription = null, tint = Accent, modifier = Modifier.size(16.dp))
+                        }
+                    }
                 }
                 Spacer(Modifier.height(4.dp))
                 Text("Model for new chats", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
@@ -975,24 +1297,32 @@ private fun SettingsTab(
                 } else {
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable {
-                            chosenModel = null
-                            onModelPicked(null)
+                            scope.launch {
+                                val ok = withContext(Dispatchers.IO) { sessionsApi.resetModel(currentProvider) }
+                                chosenModel = null
+                                onModelPicked(null)
+                                msg = if (ok) "Model reset to default" else "Could not reset model"
+                            }
                         }.padding(vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text("Default", color = if (chosenModel == null) Accent else TextPrimary, fontSize = 13.sp, modifier = Modifier.weight(1f))
                         if (chosenModel == null) Icon(Icons.Filled.Check, contentDescription = null, tint = Accent, modifier = Modifier.size(16.dp))
                     }
-                    mods.take(12).forEach { m ->
-                        val sel = chosenModel == m
+                    mods.take(12).forEach { (mid, label) ->
+                        val sel = chosenModel == mid
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable {
-                                chosenModel = m
-                                onModelPicked(m)
+                                scope.launch {
+                                    val ok = withContext(Dispatchers.IO) { sessionsApi.setProvider(currentProvider, mid) }
+                                    chosenModel = mid
+                                    onModelPicked(mid)
+                                    msg = if (ok) "Model set to $label" else "Could not set model"
+                                }
                             }.padding(vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(m, color = if (sel) Accent else TextPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Text(label, color = if (sel) Accent else TextPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                             if (sel) Icon(Icons.Filled.Check, contentDescription = null, tint = Accent, modifier = Modifier.size(16.dp))
                         }
                     }
@@ -1025,9 +1355,13 @@ private fun SettingsTab(
                         }
                         revoking = true
                         msg = null
-                        val ok = api.postJson("/api/connect/devices/$did/revoke", null) != null
-                        revoking = false
-                        if (ok) onClose() else msg = "Revoke failed — the PC refused it."
+                        scope.launch {
+                            val ok = withContext(Dispatchers.IO) {
+                                api.postJson("/api/connect/devices/$did/revoke", null) != null
+                            }
+                            revoking = false
+                            if (ok) onClose() else msg = "Revoke failed — the PC refused it."
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Error),
                     shape = RoundedCornerShape(12.dp),

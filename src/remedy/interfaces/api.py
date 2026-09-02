@@ -111,22 +111,24 @@ def request_log_level(
 
 
 
+_CLIENT_GONE_NAMES = frozenset({"EndOfStream", "ClientDisconnect", "BrokenResourceError"})
+
+
 def _is_client_gone(exc: BaseException) -> bool:
-    """True when the HTTP client disconnected mid-request (not a server fault)."""
-    seen: set[int] = set()
-    cur: BaseException | None = exc
-    while cur is not None and id(cur) not in seen:
-        seen.add(id(cur))
-        name = type(cur).__name__
-        if name in {"EndOfStream", "ClientDisconnect", "BrokenResourceError"}:
-            return True
-        # Starlette "No response returned" is a *server* fault (a route forgot
-        # to return). Do not treat the phrase as a client disconnect.
-        low = name.lower()
-        if "endofstream" in low or "disconnect" in low:
-            return True
-        cur = cur.__cause__ or cur.__context__
-    return False
+    """True when the HTTP client disconnected mid-request (not a server fault).
+
+    Match only the exact anyio/Starlette disconnect types, and only at the head
+    of the exception or one ``__cause__`` hop. A broad substring scan over the
+    whole ``__cause__``/``__context__`` chain used to reclassify genuine server
+    bugs (a ``TypeError`` raised while a ``ClientDisconnect`` sat in its context)
+    as ``404 Request aborted`` — that is exactly how the phone terminal's
+    ``TypeError`` hid for so long. Fail loud on real faults instead.
+    """
+    if type(exc).__name__ in _CLIENT_GONE_NAMES:
+        return True
+    # One hop only — never a full-chain substring sweep.
+    nxt = exc.__cause__ or exc.__context__
+    return nxt is not None and type(nxt).__name__ in _CLIENT_GONE_NAMES
 
 
 # Re-export models for existing `from remedy.interfaces.api import ChatRequest` callers.
@@ -200,13 +202,18 @@ def create_app(
             except Exception:
                 logger.exception("Gateway start on lifespan failed")
 
-        # Retention pass (attachments / shots / undo / logs / optional sessions)
+        # Retention pass (attachments / shots / undo / logs / optional sessions).
+        # Off the loop: it scans the whole home on disk, so on a large home it
+        # would delay readiness and block the rest of lifespan startup.
         try:
+            import asyncio as _asyncio_ret
+
             from remedy.core.retention import run_retention_pass
 
             _cfg_ret = load_config()
             _mem = getattr(runtime, "memory", None) if runtime is not None else None
-            run_retention_pass(
+            await _asyncio_ret.to_thread(
+                run_retention_pass,
                 _cfg_ret if isinstance(_cfg_ret, dict) else None,
                 store=_mem,
             )

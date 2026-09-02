@@ -54,6 +54,13 @@ def _run(cmd: list[str], cwd: Path, timeout_s: float = 60.0) -> tuple[bool, str]
     try:
         from remedy.execution.process import hidden_subprocess_kwargs
 
+        # Windows: npm-installed tools are ``tsc.cmd`` / ``pyright.cmd`` shims.
+        # CreateProcess cannot find a bare "tsc" (WinError 2 → false red), but
+        # it runs the resolved shim path fine.
+        if cmd and not Path(cmd[0]).is_absolute():
+            found = shutil.which(cmd[0])
+            if found:
+                cmd = [found, *cmd[1:]]
         proc = subprocess.run(
             cmd,
             cwd=str(cwd),

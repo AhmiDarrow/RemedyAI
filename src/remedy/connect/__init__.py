@@ -1,4 +1,4 @@
-"""Grove Connect: Noise_IK transport, record framing, chosen-IPv4 bind, host keys."""
+"""RemedyConnect: Noise_IK transport, record framing, chosen-IPv4 bind, host keys."""
 
 from __future__ import annotations
 

@@ -79,6 +79,26 @@ def test_capture_403_when_preview_pane_off():
     assert connect_forbidden("POST", "/api/computer/capture", "", panes_on) is None
 
 
+def test_settings_body_safe_provider_only_switches_provider_model():
+    from remedy.connect.deny import settings_body_safe_provider
+
+    assert settings_body_safe_provider(b'{"llm_provider":"deepseek"}') is True
+    assert (
+        settings_body_safe_provider(
+            b'{"llm_model":"deepseek-v4-flash","llm_provider":"deepseek"}'
+        )
+        is True
+    )
+    assert settings_body_safe_provider(b'{"provider":"openai","model":"gpt-4o"}') is True
+    assert settings_body_safe_provider(b'{"llm_api_key":"x"}') is False
+    assert settings_body_safe_provider(b'{"connect_relay_url":"1.2.3.4:9"}') is False
+    assert settings_body_safe_provider(b'{"llm_provider":"deepseek","llm_api_key":"x"}') is False
+    assert settings_body_safe_provider(b"") is False
+    assert settings_body_safe_provider(b"[]") is False
+    assert settings_body_safe_provider(b"{}") is False
+    assert settings_body_safe_provider(b'{"llm_provider":123}') is False
+
+
 def test_settings_write_403_until_opted_in():
     off = normalize_panes({"settings_write": False})
     assert connect_forbidden("PUT", "/api/settings", "", off)
@@ -262,7 +282,9 @@ def test_connect_me_and_preview_are_not_mgmt_denies(path):
 
 def test_adjacent_connection_path_is_not_connect_mgmt():
     assert connect_forbidden("GET", "/api/status", "", DEFAULT) is None
-    assert connect_forbidden("GET", "/api/connection", "", DEFAULT) is None
+    # Not a management route (the regex must not over-match)... but also not a
+    # family the phone has any pane for, so it fails closed as unknown.
+    assert connect_forbidden("GET", "/api/connection", "", DEFAULT) == "unknown:family"
     assert connect_forbidden("GET", "/api/sessions", "", DEFAULT) is None
 
 
@@ -365,3 +387,81 @@ async def test_proxied_apikey_route_is_403_when_settings_write_off():
     blob = b"".join(chunks)
     assert b"HTTP/1.1 403" in blob
     assert b"settings_write" in blob
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "/api/shutdown"),
+        ("POST", "/api/quit"),
+        ("POST", "/api/restart"),
+        ("POST", "/api/exit"),
+        ("POST", "/api/app/command"),
+        ("GET", "/api/app/command/restart"),
+        ("POST", "/api/app/command/quit"),
+        ("POST", "/API/SHUTDOWN"),
+    ],
+)
+def test_server_kill_paths_are_hard_denied_even_with_all_panes_on(method, path):
+    """A phone must NEVER end the Remedy server, whatever panes are on."""
+    reason = connect_forbidden(method, path, "", ALL_PANES_ON)
+    assert reason == "server:kill"
+
+
+def test_phone_stop_is_a_turn_abort_and_stays_reachable():
+    """``POST /api/stop`` aborts only the phone's own /connect/me session
+    (routes/connect.py); the phone's Stop button falls back to it, so it must
+    not be lumped in with the server-kill family."""
+    assert connect_forbidden("POST", "/api/stop", "", ALL_PANES_ON) is None
+    assert connect_forbidden("POST", "/api/stop", "", {}) is None
+
+
+@pytest.mark.asyncio
+async def test_proxied_shutdown_is_403():
+    from remedy.connect.pipe import HttpRequest, iter_request_http
+
+    req = HttpRequest(method="POST", path="/api/shutdown", query="", body=b"{}")
+    chunks: list[bytes] = []
+    async for piece in iter_request_http(
+        req,
+        device={"id": "dev1", "name": "phone"},
+        sidecar_port=9,
+        api_key="[redacted]",
+        config={"connect_panes": dict(ALL_PANES_ON)},
+    ):
+        chunks.append(piece)
+    blob = b"".join(chunks)
+    assert b"HTTP/1.1 403" in blob
+    assert b"server:kill" in blob
+
+
+@pytest.mark.asyncio
+async def test_proxied_turn_abort_still_allowed():
+    """Aborting a running turn stays reachable — only server control is cut."""
+    from remedy.connect.pipe import HttpRequest, iter_request_http
+
+    # Deny gate: abort is NOT blocked (no server:kill / pane reason).
+    assert connect_forbidden("POST", "/api/sessions/sess_abc/abort", "", ALL_PANES_ON) is None
+    # A valid session-abort request passes the pipe gate (reaches the real
+    # server instead of being cut with 403). Port 9 refuses, so the proxy
+    # attempt errors — but that error is NOT a deny 403.
+    req = HttpRequest(
+        method="POST",
+        path="/api/sessions/sess_abc/abort",
+        query="",
+        body=b"{}",
+    )
+    chunks: list[bytes] = []
+    try:
+        async for piece in iter_request_http(
+            req,
+            device={"id": "dev1", "name": "phone"},
+            sidecar_port=9,
+            api_key="[redacted]",
+            config={"connect_panes": dict(ALL_PANES_ON)},
+        ):
+            chunks.append(piece)
+    except OSError:
+        pass  # dead proxy port — expected without a live server
+    blob = b"".join(chunks)
+    assert b"server:kill" not in blob

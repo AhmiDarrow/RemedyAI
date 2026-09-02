@@ -54,21 +54,33 @@ class ConnectController(private val ctx: Context) {
     }
 
     fun pair(text: String) {
+        // Called from the UI while the activity is resumed: start the foreground
+        // service here, not after a dial that may finish once we are backgrounded
+        // (Android 12+ refuses a late startForeground and crashes the app).
+        ConnectForegroundService.start(ctx)
         io.execute {
             try {
                 val qr = QrPayload.parse(text)
                 Pin.check(store.pinnedHostPub(), qr.hostPub)
-                store.pinHost(qr.hostPub)
-                store.saveLan(qr.lanHost, qr.lanPort)
-                store.saveTailscale(qr.tailscaleHost, qr.tailscalePort)
-                store.saveRelay(qr.relayHost, qr.relayPort)
-                store.saveRdv(qr.rdvHosts)
-                publish(state.copy(paired = true, error = null, lanLabel = "${qr.lanHost}:${qr.lanPort}"))
+                publish(state.copy(error = null, lanLabel = "${qr.lanHost}:${qr.lanPort}"))
                 open(qr)
             } catch (e: Exception) {
                 publish(state.copy(error = e.message ?: "Pairing failed"))
             }
         }
+    }
+
+    /**
+     * Persist the pairing only once the Noise handshake succeeded. A QR that
+     * never connects must not retarget every future reconnect (pinned key or
+     * relay/rendezvous endpoints) — fail closed on a forged or stale code.
+     */
+    private fun persistPair(qr: QrPayload) {
+        store.pinHost(qr.hostPub)
+        store.saveLan(qr.lanHost, qr.lanPort)
+        store.saveTailscale(qr.tailscaleHost, qr.tailscalePort)
+        store.saveRelay(qr.relayHost, qr.relayPort)
+        store.saveRdv(qr.rdvHosts)
     }
 
     fun unpair() {
@@ -86,6 +98,8 @@ class ConnectController(private val ctx: Context) {
             publish(state.copy(error = "Paste a fresh pairing code — the secret is not stored."))
             return
         }
+        // Start the foreground service while the app is still in front (see pair()).
+        ConnectForegroundService.start(ctx)
         io.execute {
             shutdownInner()
             publish(state.copy(reachable = Reachable.Connecting, error = null, shimUrl = null))
@@ -106,18 +120,12 @@ class ConnectController(private val ctx: Context) {
                 val sh = LoopbackShim(c)
                 sh.start()
                 shim = sh
-                ConnectForegroundService.start(ctx)
-                val remote = c.via == "relay" || c.via == "rdv" || c.via == "tailscale"
-                val reachable = if (remote) Reachable.OnRelay else Reachable.OnLan
+                reconnectBackoffMs = RECONNECT_MIN_MS
                 publish(
                     state.copy(
-                        reachable = reachable,
+                        reachable = reachableFor(c.via),
                         shimUrl = sh.webViewUrl(),
-                        lanLabel = when (c.via) {
-                            "tailscale" -> "via Tailscale"
-                            "relay", "rdv" -> "via relay"
-                            else -> lan
-                        },
+                        lanLabel = viaLabel(c.via, lan),
                         paired = true,
                     ),
                 )
@@ -134,6 +142,22 @@ class ConnectController(private val ctx: Context) {
         }
     }
 
+    /** Relay, rendezvous and Tailscale are all "not on the LAN" for the UI. */
+    private fun reachableFor(via: String?): Reachable =
+        if (via == "relay" || via == "rdv" || via == "tailscale") Reachable.OnRelay else Reachable.OnLan
+
+    private fun viaLabel(via: String?, lan: String?): String? = when (via) {
+        "tailscale" -> "via Tailscale"
+        "relay", "rdv" -> "via relay"
+        else -> lan
+    }
+
+    /** Phone model shown on the PC's device list (never the user's name). */
+    private fun deviceLabel(): String? {
+        val model = android.os.Build.MODEL?.trim().orEmpty()
+        return model.takeIf { it.isNotEmpty() }
+    }
+
     fun open(qr: QrPayload) {
         io.execute {
             shutdownInner()
@@ -141,23 +165,18 @@ class ConnectController(private val ctx: Context) {
             try {
                 val (priv, pub) = keys.staticPair()
                 val c = ConnectClient(priv, pub)
-                c.connect(qr, preferRelay = !NetProbe.isWifi(ctx))
+                c.connect(qr, preferRelay = !NetProbe.isWifi(ctx), deviceName = deviceLabel())
+                persistPair(qr)
                 client = c
                 val sh = LoopbackShim(c)
                 sh.start()
                 shim = sh
-                ConnectForegroundService.start(ctx)
-                val remote = c.via == "relay" || c.via == "rdv" || c.via == "tailscale"
-                val reachable = if (remote) Reachable.OnRelay else Reachable.OnLan
+                reconnectBackoffMs = RECONNECT_MIN_MS
                 publish(
                     state.copy(
-                        reachable = reachable,
+                        reachable = reachableFor(c.via),
                         shimUrl = sh.webViewUrl(),
-                        lanLabel = when (c.via) {
-                            "tailscale" -> "via Tailscale"
-                            "relay", "rdv" -> "via relay"
-                            else -> "${qr.lanHost}:${qr.lanPort}"
-                        },
+                        lanLabel = viaLabel(c.via, "${qr.lanHost}:${qr.lanPort}"),
                         paired = true,
                     ),
                 )
@@ -249,11 +268,94 @@ class ConnectController(private val ctx: Context) {
         poll?.cancel(false)
         poll = io.scheduleWithFixedDelay({
             try {
-                refreshMe()
-                refreshApprovals()
+                pollTick()
             } catch (_: Exception) {
             }
         }, 400, 2500, TimeUnit.MILLISECONDS)
+    }
+
+    /**
+     * One poll: refresh state while the pipe is alive; when the reader has
+     * died (PC paused, laptop slept, Wi-Fi dropped) tell the user and redial
+     * with exponential backoff instead of showing a green dot on a dead socket.
+     */
+    private fun pollTick() {
+        val c = client
+        if (c != null && !c.closed) {
+            refreshMe()
+            refreshApprovals()
+            return
+        }
+        if (!store.isPaired() || store.deviceId().isNullOrBlank()) return
+        val now = System.currentTimeMillis()
+        if (state.reachable != Reachable.Connecting) {
+            publish(
+                state.copy(
+                    reachable = Reachable.Connecting,
+                    shimUrl = null,
+                    error = "Connection to the PC dropped — reconnecting…",
+                ),
+            )
+            nextReconnectAt = now
+        }
+        if (now < nextReconnectAt) return
+        nextReconnectAt = now + reconnectBackoffMs
+        reconnectBackoffMs = (reconnectBackoffMs * 2).coerceAtMost(RECONNECT_MAX_MS)
+        redial()
+    }
+
+    /** Synchronous redial on the poll thread; success resets the backoff. */
+    private fun redial() {
+        val lan = store.lastLan() ?: return
+        val hp = store.pinnedHostPub() ?: return
+        shutdownInner()
+        try {
+            val idx = lan.lastIndexOf(':')
+            val lanHost = if (idx > 0) lan.substring(0, idx) else lan
+            val lanPort = if (idx > 0) lan.substring(idx + 1).toIntOrNull() ?: 7401 else 7401
+            val relay = store.lastRelay()
+            val rdv = store.lastRdv()
+            val ts = store.lastTailscale()
+            val (priv, pub) = keys.staticPair()
+            val c = ConnectClient(priv, pub)
+            c.reconnect(
+                hp, lanHost, lanPort, ts?.first, ts?.second, relay?.first, relay?.second, rdv, pub,
+                preferRelay = !NetProbe.isWifi(ctx),
+            )
+            client = c
+            val sh = LoopbackShim(c)
+            sh.start()
+            shim = sh
+            reconnectBackoffMs = RECONNECT_MIN_MS
+            publish(
+                state.copy(
+                    reachable = reachableFor(c.via),
+                    shimUrl = sh.webViewUrl(),
+                    lanLabel = viaLabel(c.via, lan),
+                    error = null,
+                    paired = true,
+                ),
+            )
+        } catch (e: Exception) {
+            shutdownInner()
+            publish(
+                state.copy(
+                    reachable = Reachable.Connecting,
+                    error = "Reconnecting… (${e.message ?: "PC unreachable"})",
+                ),
+            )
+        }
+    }
+
+    @Volatile
+    private var reconnectBackoffMs = RECONNECT_MIN_MS
+
+    @Volatile
+    private var nextReconnectAt = 0L
+
+    private companion object {
+        const val RECONNECT_MIN_MS = 2_000L
+        const val RECONNECT_MAX_MS = 30_000L
     }
 
     private fun refreshMe() {
@@ -273,8 +375,7 @@ class ConnectController(private val ctx: Context) {
                     panes = me.panes,
                     reachable = when {
                         me.reachable.lowercase() == "paused" -> Reachable.Paused
-                        via == "relay" -> Reachable.OnRelay
-                        else -> Reachable.OnLan
+                        else -> reachableFor(via)
                     },
                 ),
             )

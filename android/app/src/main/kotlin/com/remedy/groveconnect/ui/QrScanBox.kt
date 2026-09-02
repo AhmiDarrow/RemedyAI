@@ -26,6 +26,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,12 +59,17 @@ import java.util.concurrent.Executors
  * Camera preview that scans a Grove Connect pairing QR and hands the raw
  * pairing text to [onScanned]. Falls back to a permission request when the
  * camera is not granted. The user can still paste — scanning is convenience.
+ *
+ * The scanner disarms after the first hit so one QR does not fire twice.
+ * [rearmKey] re-arms it whenever its value changes — the caller passes the
+ * pairing error so a bad scan can be retried without leaving the screen.
  */
 @Composable
 fun QrScanBox(
     onScanned: (String) -> Unit,
     onError: (String) -> Unit,
     modifier: Modifier = Modifier,
+    rearmKey: Any? = null,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -75,6 +81,7 @@ fun QrScanBox(
     }
     var armed by remember { mutableStateOf(true) }
     var cameraError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(rearmKey) { armed = true }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),

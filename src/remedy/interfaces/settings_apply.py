@@ -422,7 +422,7 @@ async def _apply_settings_update_inner(
                         asyncio.to_thread(validate_provider_model, provider, model),
                         timeout=8.0,
                     )
-                except (ValueError, asyncio.TimeoutError):
+                except (TimeoutError, ValueError):
                     provider, model, base_url = await asyncio.wait_for(
                         asyncio.to_thread(
                             normalize_llm_settings, provider, None, base_url

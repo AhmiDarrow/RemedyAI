@@ -14,6 +14,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "GroveConnect"
+rootProject.name = "RemedyConnect"
 include(":connect-core")
 include(":app")

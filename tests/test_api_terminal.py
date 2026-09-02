@@ -31,7 +31,7 @@ PORT = 18741
 
 
 class _FakeStdout:
-    def __init__(self, fake: "_FakeProc") -> None:
+    def __init__(self, fake: _FakeProc) -> None:
         self._fake = fake
 
     async def read(self, n: int) -> bytes:
@@ -39,7 +39,7 @@ class _FakeStdout:
 
 
 class _FakeStdin:
-    def __init__(self, fake: "_FakeProc") -> None:
+    def __init__(self, fake: _FakeProc) -> None:
         self._fake = fake
 
     async def write(self, data: bytes) -> None:
@@ -83,6 +83,18 @@ class _FakeProc:
     def kill(self) -> None:
         self.killed = True
         self.returncode = 1
+
+
+class _AnsiFakeProc(_FakeProc):
+    """Fake shell that emits ANSI/VT escapes (colors, title, erase-line)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._out = [
+            b"\x1b[32mREADY\x1b[0m\n",
+            b"\x1b]0;remedy\x07PWD: ",
+            b"\x1b[K\x1b[1m>\x1b[0m ",
+        ]
 
 
 @pytest.fixture(autouse=True)
@@ -157,7 +169,7 @@ def _read_sse_until(tid: str, needle: bytes, timeout: float = 8.0) -> bytes:
                 return data
             try:
                 chunk = s.recv(4096)
-            except socket.timeout:
+            except TimeoutError:
                 break
             if not chunk:
                 break
@@ -197,6 +209,41 @@ def test_pick_shell_returns_list() -> None:
     shell, args = _pick_shell()
     assert isinstance(shell, str) and shell
     assert isinstance(args, list)
+
+
+def test_strip_ansi_removes_escapes_keeps_text() -> None:
+    from remedy.interfaces.routes.terminal import _strip_ansi
+
+    assert _strip_ansi("\x1b[32mOK\x1b[0m\n") == "OK\n"
+    assert _strip_ansi("\x1b]0;Remedy\x07Title") == "Title"
+    assert _strip_ansi("a\x1b[Kb") == "ab"
+    assert _strip_ansi("plain\ttext\n") == "plain\ttext\n"
+    assert _strip_ansi("\x00\x01\x02junk") == "junk"
+
+
+def test_stream_strips_ansi_end_to_end(uvicorn_server) -> None:
+    import json as _json
+
+    async def fake_spawn(*, cwd, cols, rows):
+        return _AnsiFakeProc()
+
+    terminal_mod._SPAWN_OVERRIDE = fake_spawn
+    try:
+        payload = _http_post_json("/api/terminal", {"cwd": None, "cols": 100, "rows": 28})
+        tid = payload["terminal_id"]
+        data = _read_sse_until(tid, b"> ", timeout=10.0)
+        text = ""
+        for line in data.decode("utf-8", errors="replace").splitlines():
+            if line.startswith("data: "):
+                try:
+                    text += _json.loads(line[6:]).get("text", "")
+                except Exception:
+                    pass
+        assert "\x1b" not in text, text
+        assert "READY" in text
+        assert "PWD" in text
+    finally:
+        terminal_mod._SPAWN_OVERRIDE = None
 
 
 def test_terminal_open_returns_id() -> None:
@@ -270,3 +317,42 @@ def test_terminal_delete_via_http(uvicorn_server):
     code = _http_delete(f"/api/terminal/{tid}")
     assert code == 200
     assert tid not in _TERMINALS
+
+
+class _SyncStdin:
+    """Stdin whose write() is SYNCHRONOUS — the real shape of both the ConPTY
+    _HandleStream and the asyncio StreamWriter. Awaiting it (the old bug) would
+    raise `TypeError: NoneType can't be awaited`."""
+
+    def __init__(self) -> None:
+        self.received = bytearray()
+
+    def write(self, data: bytes) -> None:  # noqa: D401 - sync on purpose
+        self.received.extend(data)
+
+    async def drain(self) -> None:
+        return None
+
+
+class _SyncStdinProc:
+    def __init__(self) -> None:
+        self.stdin = _SyncStdin()
+        self.stdout = _FakeStdout(_FakeProc())
+        self.returncode: int | None = None
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def kill(self) -> None:
+        self.returncode = 1
+
+
+def test_write_does_not_await_a_synchronous_stdin() -> None:
+    """Regression: typing into the phone terminal 404'd because write() awaited
+    the shell's synchronous stdin.write. It must deliver the bytes instead."""
+    from remedy.interfaces.routes.terminal import _TerminalSession
+
+    proc = _SyncStdinProc()
+    sess = _TerminalSession(proc, cwd=None)
+    asyncio.run(sess.write("echo hi\n"))
+    assert bytes(proc.stdin.received) == b"echo hi\n"

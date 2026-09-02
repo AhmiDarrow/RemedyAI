@@ -1,6 +1,7 @@
 /** RemedyConnect — phone remote (Tailscale + LAN). */
 
 import { apiFetch } from './client'
+import { relativeTime } from '../utils/relativeTime'
 
 export const CONNECT_PANE_KEYS = [
   'live_ui',
@@ -52,8 +53,16 @@ export interface ConnectStatus {
   devices: ConnectDevice[]
   addresses?: string[]
   qr?: string | null
-  listen?: string
+  /**
+   * What the Connect listener is actually bound to, per the server:
+   * `[host, port]` when up, `null` when enabled but nothing is bound
+   * (bind failed, or not started yet), `undefined` when the payload did
+   * not say (PUT echo, offline fallback).
+   */
+  listening?: [string, number] | null
 }
+
+export type ConnectListening = [string, number]
 
 export interface ConnectPutBody {
   enabled: boolean
@@ -158,6 +167,42 @@ function numPort(v: unknown, fallback: number): number {
   return Math.floor(n)
 }
 
+/** `[host, port]` from the server, `null` for an explicit null, else undefined. */
+function parseListening(raw: unknown): ConnectListening | null | undefined {
+  if (raw === null) return null
+  if (!Array.isArray(raw) || raw.length < 2) return undefined
+  const host = String(raw[0] ?? '').trim()
+  const port = numPort(raw[1], 0)
+  if (!host || port <= 0) return null
+  return [host, port]
+}
+
+/** "host:port" the phone can reach, or '' when nothing is bound / unknown. */
+export function connectListenLabel(st: Pick<ConnectStatus, 'listening' | 'bind_host' | 'bind_port'>): string {
+  if (st.listening === null) return ''
+  if (Array.isArray(st.listening)) {
+    const [host, port] = st.listening
+    return port > 0 ? `${host}:${port}` : host
+  }
+  const host = (st.bind_host || '').trim()
+  if (!host) return ''
+  return st.bind_port > 0 ? `${host}:${st.bind_port}` : host
+}
+
+/**
+ * "3m ago" for a device's paired_at. The store writes epoch seconds as a
+ * float; ISO strings are accepted too.
+ */
+export function connectPairedLabel(at?: string | number | null, now = Date.now()): string {
+  if (at == null || at === '') return ''
+  const n = typeof at === 'number' ? at : Number(at)
+  if (Number.isFinite(n)) {
+    const ms = n < 1e12 ? n * 1000 : n
+    return relativeTime(new Date(ms).toISOString(), now)
+  }
+  return relativeTime(String(at), now)
+}
+
 export function normalizeConnectStatus(
   raw: unknown,
   fallback?: Partial<ConnectStatus>,
@@ -167,12 +212,7 @@ export function normalizeConnectStatus(
   const bindHostRaw = String(o.bind_host ?? fb.bind_host ?? '').trim()
   const bind_host = bindHostRaw === '0.0.0.0' || bindHostRaw === '*' ? '' : bindHostRaw
   const addresses = filterConnectAddresses(o.addresses ?? fb.addresses)
-  const listen =
-    typeof o.listen === 'string' && o.listen.trim()
-      ? o.listen.trim()
-      : typeof fb.listen === 'string'
-        ? fb.listen
-        : undefined
+  const listening = 'listening' in o ? parseListening(o.listening) : fb.listening
   const qrRaw = o.qr === undefined ? fb.qr : o.qr
   return {
     enabled: Boolean(o.enabled ?? fb.enabled),
@@ -184,7 +224,7 @@ export function normalizeConnectStatus(
     devices: parseDevices(o.devices ?? fb.devices),
     addresses,
     qr: typeof qrRaw === 'string' && qrRaw ? qrRaw : qrRaw === null ? null : undefined,
-    listen,
+    listening,
   }
 }
 
@@ -199,8 +239,11 @@ export async function putConnect(body: ConnectPutBody): Promise<ConnectStatus> {
     body: JSON.stringify(body),
   })
   const o = asRecord(raw)
-  if (o && ('enabled' in o || 'panes' in o || 'devices' in o || 'listen' in o)) {
-    return normalizeConnectStatus(raw, body)
+  if (o && ('enabled' in o || 'panes' in o || 'devices' in o || 'listening' in o)) {
+    // PUT echoes a config snapshot whose `listening` is always null; it does
+    // not consult the lifecycle. Leave it unknown so the UI re-reads via GET.
+    const { listening: _ignored, ...rest } = o
+    return normalizeConnectStatus(rest, body)
   }
   return normalizeConnectStatus(body, body)
 }
@@ -231,17 +274,105 @@ export async function revokeConnectDevice(id: string): Promise<void> {
 }
 
 function looksLikeConnectStatus(o: Record<string, unknown>): boolean {
-  return 'panes' in o || 'devices' in o || 'bind_host' in o || 'listen' in o
+  return 'panes' in o || 'devices' in o || 'bind_host' in o || 'listening' in o
 }
 
-export async function pauseConnect(): Promise<ConnectStatus | void> {
+/**
+ * `/connect/pause` and `/connect/resume` answer `{ok, paused}`; `status` is
+ * filled only if a server ever returns a full snapshot instead. `ok: false`
+ * means the caller should fall back to a full PUT.
+ */
+export interface ConnectPauseResult {
+  ok: boolean
+  paused: boolean
+  status?: ConnectStatus
+}
+
+export function parseConnectPauseResult(raw: unknown, wanted: boolean): ConnectPauseResult {
+  const o = asRecord(raw)
+  if (!o) return { ok: false, paused: wanted }
+  if (looksLikeConnectStatus(o)) {
+    const status = normalizeConnectStatus(raw)
+    return { ok: true, paused: status.paused, status }
+  }
+  if (typeof o.paused === 'boolean') {
+    return { ok: o.ok !== false, paused: o.paused }
+  }
+  return { ok: o.ok === true, paused: wanted }
+}
+
+export async function pauseConnect(): Promise<ConnectPauseResult> {
   const raw = await apiFetch<unknown>('/connect/pause', { method: 'POST' })
-  const o = asRecord(raw)
-  if (o && looksLikeConnectStatus(o)) return normalizeConnectStatus(raw)
+  return parseConnectPauseResult(raw, true)
 }
 
-export async function resumeConnect(): Promise<ConnectStatus | void> {
+export async function resumeConnect(): Promise<ConnectPauseResult> {
   const raw = await apiFetch<unknown>('/connect/resume', { method: 'POST' })
-  const o = asRecord(raw)
-  if (o && looksLikeConnectStatus(o)) return normalizeConnectStatus(raw)
+  return parseConnectPauseResult(raw, false)
+}
+
+export interface TailscaleStatus {
+  installed: boolean
+  running: boolean
+  logged_in: boolean
+  tailnet_ipv4: string
+  version: string
+  error: string
+}
+
+export interface TailscaleAction {
+  status: string
+  message: string
+  login_url?: string
+  msi_path?: string
+  installer_url?: string
+}
+
+export function parseTailscaleStatus(raw: unknown): TailscaleStatus {
+  const o = asRecord(raw) || {}
+  return {
+    installed: Boolean(o.installed),
+    running: Boolean(o.running),
+    logged_in: Boolean(o.logged_in),
+    tailnet_ipv4: String(o.tailnet_ipv4 ?? ''),
+    version: String(o.version ?? ''),
+    error: String(o.error ?? ''),
+  }
+}
+
+export function parseTailscaleAction(raw: unknown): TailscaleAction {
+  const o = asRecord(raw) || {}
+  return {
+    status: String(o.status ?? ''),
+    message: String(o.message ?? ''),
+    login_url: typeof o.login_url === 'string' ? o.login_url : undefined,
+    msi_path: typeof o.msi_path === 'string' ? o.msi_path : undefined,
+    installer_url: typeof o.installer_url === 'string' ? o.installer_url : undefined,
+  }
+}
+
+export async function getTailscaleStatus(): Promise<TailscaleStatus> {
+  try {
+    const raw = await apiFetch<unknown>('/connect/tailscale/status')
+    return parseTailscaleStatus(raw)
+  } catch {
+    return {
+      installed: false,
+      running: false,
+      logged_in: false,
+      tailnet_ipv4: '',
+      version: '',
+      error: 'Tailscale status unavailable.',
+    }
+  }
+}
+
+export async function installTailscale(): Promise<TailscaleAction> {
+  const raw = await apiFetch<unknown>('/connect/tailscale/install', { method: 'POST' })
+  return parseTailscaleAction(raw)
+}
+
+export async function loginTailscale(): Promise<TailscaleAction> {
+  const raw = await apiFetch<unknown>('/connect/tailscale/login', { method: 'POST' })
+  return parseTailscaleAction(raw)
 }

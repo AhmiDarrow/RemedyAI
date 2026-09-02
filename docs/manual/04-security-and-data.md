@@ -101,7 +101,7 @@ computer-use poller and browser token bootstrap are refused on Connect. Pairing
 uses a 60-second QR on this PC; the phone is a remote, not another Remedy.
 Wildcard binds (`0.0.0.0` / `*` / `::`) are refused. An optional owner-run
 relay (`remedy connect-relay`) copies framed bytes and cannot decrypt them.
-See [Grove Connect](29-grove-connect).
+See [RemedyConnect](29-remedy-connect).
 
 ## Web tools (`web_fetch` / `web_search`)
 
@@ -194,4 +194,4 @@ Toggle from the status bar or **Ctrl+B**.
 
 ## Related
 
-- [Providers & auth](03-providers-and-auth) · [Skills](07-skills) · [Updates & uninstall](08-updates-and-uninstall) · [Grove Connect](29-grove-connect)
+- [Providers & auth](03-providers-and-auth) · [Skills](07-skills) · [Updates & uninstall](08-updates-and-uninstall) · [RemedyConnect](29-remedy-connect)

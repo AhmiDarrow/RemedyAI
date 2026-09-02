@@ -17,6 +17,17 @@ class FilePatch:
     hunks: list[tuple[list[str], list[str]]] = field(default_factory=list)
     is_new: bool = False
     is_delete: bool = False
+    # Parallel to ``hunks``: the ``@@`` context text ("def a():"), or "".
+    # A pure-addition hunk lands right after this anchor line instead of at EOF.
+    anchors: list[str] = field(default_factory=list)
+
+
+def _anchor_of(line: str) -> str:
+    """Context text after the hunk marker: ``@@ def a():`` / ``@@ -1,2 +1,3 @@ def a():``."""
+    body = line[2:]
+    if "@@" in body:
+        body = body.split("@@", 1)[1]
+    return body.strip()
 
 
 def parse_patch(text: str) -> list[FilePatch]:
@@ -33,12 +44,14 @@ def _parse_begin_patch(raw: str) -> list[FilePatch]:
     old: list[str] = []
     new: list[str] = []
     in_hunk = False
+    anchor = ""
 
     def flush_hunk() -> None:
-        nonlocal old, new, in_hunk
+        nonlocal old, new, in_hunk, anchor
         if current is not None and (old or new):
             current.hunks.append((old, new))
-        old, new, in_hunk = [], [], False
+            current.anchors.append(anchor)
+        old, new, in_hunk, anchor = [], [], False, ""
 
     for line in raw.split("\n"):
         if line.startswith("*** Update File:") or line.startswith("*** Add File:"):
@@ -62,6 +75,7 @@ def _parse_begin_patch(raw: str) -> list[FilePatch]:
         if line.startswith("@@"):
             flush_hunk()
             in_hunk = True
+            anchor = _anchor_of(line)
             continue
         if current is None:
             continue
@@ -90,12 +104,14 @@ def _parse_unified(raw: str) -> list[FilePatch]:
     current: FilePatch | None = None
     old: list[str] = []
     new: list[str] = []
+    anchor = ""
 
     def flush_hunk() -> None:
-        nonlocal old, new
+        nonlocal old, new, anchor
         if current is not None and (old or new):
             current.hunks.append((old, new))
-        old, new = [], []
+            current.anchors.append(anchor)
+        old, new, anchor = [], [], ""
 
     for line in raw.split("\n"):
         if line.startswith("--- "):
@@ -127,6 +143,7 @@ def _parse_unified(raw: str) -> list[FilePatch]:
             continue
         if line.startswith("@@"):
             flush_hunk()
+            anchor = _anchor_of(line)
             continue
         if current is None:
             continue
@@ -145,15 +162,41 @@ def _parse_unified(raw: str) -> list[FilePatch]:
     return files
 
 
-def _apply_hunks(original: str, hunks: list[tuple[list[str], list[str]]]) -> tuple[bool, str, str]:
+def _insert_after_anchor(text: str, anchor: str, new_block: str) -> tuple[bool, str, str]:
+    """Insert *new_block* right after the unique line containing *anchor*."""
+    lines = text.split("\n")
+    hits = [i for i, ln in enumerate(lines) if anchor and anchor in ln]
+    if not hits:
+        return False, text, f"hunk anchor not found: {anchor[:120]}"
+    if len(hits) > 1:
+        return False, text, f"hunk anchor matched {len(hits)} times — not unique: {anchor[:120]}"
+    at = hits[0] + 1
+    lines[at:at] = new_block.split("\n")
+    return True, "\n".join(lines), ""
+
+
+def _apply_hunks(
+    original: str,
+    hunks: list[tuple[list[str], list[str]]],
+    anchors: list[str] | None = None,
+) -> tuple[bool, str, str]:
     text = original.replace("\r\n", "\n")
-    for old, new in hunks:
+    for idx, (old, new) in enumerate(hunks):
         old_block = "\n".join(old)
         new_block = "\n".join(new)
+        anchor = (anchors[idx] if anchors and idx < len(anchors) else "").strip()
         if not old:
-            # append / new file
-            if text and not text.endswith("\n"):
-                text += "\n"
+            if anchor:
+                # ``@@ def a():`` + additions belong inside a(), not at EOF.
+                ok, text, err = _insert_after_anchor(text, anchor, new_block)
+                if not ok:
+                    return False, original, err
+                continue
+            if text.strip():
+                # Appending blind to a non-empty file silently misplaces code
+                # (a probe put a print() after the wrong function's return).
+                return False, original, "hunk has no context or @@ anchor; refusing to append to a non-empty file"
+            # new / empty file
             text += new_block
             if new_block and not new_block.endswith("\n"):
                 text += "\n"
@@ -184,8 +227,20 @@ def _resolve_patch_dest(
     if runtime is not None and hasattr(runtime, "resolve_tool_path"):
         try:
             return Path(runtime.resolve_tool_path(rel, for_write=for_write))
-        except TypeError:
-            return Path(runtime.resolve_tool_path(rel))
+        except TypeError as exc:
+            # Retry only for the missing-kwarg signature; a TypeError from
+            # inside a correct resolve_tool_path is a real fault, not a miss.
+            msg = str(exc)
+            if not ("argument" in msg and ("for_write" in msg or "keyword" in msg)):
+                raise
+            fallback = Path(runtime.resolve_tool_path(rel))
+            # for_write was dropped: re-jail the result under root before use.
+            base_r = (Path(root) if root else Path(".")).resolve()
+            try:
+                fallback.resolve().relative_to(base_r)
+            except (OSError, ValueError) as exc2:
+                raise PermissionError(f"patch path outside root: {rel}") from exc2
+            return fallback
         # SecurityError / PermissionError / ValueError propagate to the caller.
     base = Path(root) if root else Path(".")
     try:
@@ -250,7 +305,7 @@ def apply_patch_text(
             prev = dest.read_text(encoding="utf-8", errors="replace")
         elif not fp.is_new and fp.hunks:
             fp.is_new = True
-        ok, nxt, err = _apply_hunks(prev, fp.hunks)
+        ok, nxt, err = _apply_hunks(prev, fp.hunks, fp.anchors)
         if not ok:
             return {
                 "ok": False,
