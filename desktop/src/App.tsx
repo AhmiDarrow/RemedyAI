@@ -10,6 +10,7 @@ import { FilesSlide } from './components/slides/FilesSlide'
 import { TerminalSlide } from './components/slides/TerminalSlide'
 import { BrowserSlide } from './components/slides/BrowserSlide'
 import { ScratchSlide } from './components/slides/ScratchSlide'
+import { AutomationsSlide } from './components/slides/AutomationsSlide'
 import {
   saveWorkspaceLayout,
 } from './workspace/layoutPrefs'
@@ -1812,6 +1813,8 @@ export default function App() {
         return <BrowserSlide />
       case 'scratch':
         return <ScratchSlide sessionId={activeId} />
+      case 'automations':
+        return <AutomationsSlide />
       default:
         return null
     }
