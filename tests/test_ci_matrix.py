@@ -64,7 +64,11 @@ def test_ci_covers_every_shipped_runtime_and_artifact() -> None:
     rust = _run_commands(jobs["rust-desktop"])
     rust_job = jobs["rust-desktop"]
     assert isinstance(rust_job, dict)
-    assert "\"active\":false" in str(rust_job.get("env", {}).get("TAURI_CONFIG", ""))
+    rust_tauri_config = str(rust_job.get("env", {}).get("TAURI_CONFIG", ""))
+    assert "\"active\":false" in rust_tauri_config
+    assert "\"externalBin\":[]" in rust_tauri_config
+    assert "\"resources\":null" in rust_tauri_config
+    assert rust_job.get("env", {}).get("RUSTFLAGS") == "-D warnings"
     assert "cargo test --locked" in rust
     assert "cargo check --locked" in rust
 

@@ -2167,6 +2167,7 @@ fn cdp_named_key(wv: &tauri::Webview, key: &str) -> Option<Result<(), String>> {
     )
 }
 
+#[cfg(windows)]
 fn apply_page_fullscreen(app: &AppHandle, fullscreen: bool) {
     let Some(state) = app.try_state::<BrowserState>() else {
         return;
@@ -3529,44 +3530,6 @@ fn fire_navigate(app: &AppHandle, url: &str) {
     }) {
         log::warn!("fire_navigate schedule failed: {e}");
     }
-}
-
-fn run_navigate_on_main(app: &AppHandle, url: &str) -> Result<String, String> {
-    let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
-    let app2 = app.clone();
-    let url2 = url.to_string();
-    app.run_on_main_thread(move || {
-        let state = app2.state::<BrowserState>();
-        let r = navigate_embed(&app2, state.inner(), &url2, None);
-        let _ = tx.send(r);
-    })
-    .map_err(|e| format!("run_on_main_thread: {e}"))?;
-    rx.recv_timeout(Duration::from_secs(2))
-        .map_err(|_| "navigate timed out on main thread".to_string())?
-}
-
-fn run_resync_bounds_on_main(app: &AppHandle) -> Result<(), String> {
-    // Keep signature for potential future use; prefer browser_set_bounds from SPA.
-    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
-    let app2 = app.clone();
-    app.run_on_main_thread(move || {
-        let state = app2.state::<BrowserState>();
-        let b = state
-            .last_bounds
-            .lock()
-            .ok()
-            .and_then(|g| g.clone())
-            .filter(|bb| bb.width >= 200.0 && bb.height >= 160.0)
-            .unwrap_or_else(|| default_rail_bounds(&app2));
-        if let Some(wv) = app2.get_webview(LABEL) {
-            let may = embed_may_show(state.inner());
-            let _ = apply_bounds(&wv, &clamp_bounds(&b), may);
-        }
-        let _ = tx.send(Ok(()));
-    })
-    .map_err(|e| format!("run_on_main_thread: {e}"))?;
-    rx.recv_timeout(Duration::from_secs(5))
-        .map_err(|_| "resync bounds timeout".to_string())?
 }
 
 fn arm_pending_navigate(app: &AppHandle, job_id: String, url: String) {

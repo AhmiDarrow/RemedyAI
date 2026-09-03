@@ -78,6 +78,9 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   false missing-resource failures in clean checkouts while the separate
   Windows and Linux release jobs continue to build and validate real bundle
   resources.
+- Removed stale desktop host/update helpers, made preference-repair write
+  failures observable, and isolated Windows updater and Linux/WSLg code at
+  compile time. Rust warnings now fail CI on both operating systems.
 
 ### Correctness and stale-contract sweep
 

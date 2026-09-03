@@ -30,9 +30,6 @@ const LIST_HASHES_FILE: &str = "list_hashes.json";
 const LIST_MAX_AGE_SECS: u64 = 3 * 24 * 3600;
 /// Minimum credible EasyList body size (guards empty/truncated MitM pages).
 const LIST_MIN_BYTES: usize = 10_000;
-/// Disable EasyList/EasyPrivacy scriptlet injection by default (CSS hide only).
-const ALLOW_SCRIPTLET_INJECT: bool = false;
-
 const EASYLIST_URL: &str = "https://easylist.to/easylist/easylist.txt";
 const EASYPRIVACY_URL: &str = "https://easylist.to/easylist/easyprivacy.txt";
 
