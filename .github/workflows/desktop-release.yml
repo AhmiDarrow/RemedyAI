@@ -33,6 +33,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
       sha: ${{ steps.version.outputs.sha }}
+      prerelease: ${{ steps.channel.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,6 +68,28 @@ jobs:
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "tag=v${VER}" >> "$GITHUB_OUTPUT"
           echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Experimental versions publish as pre-releases
+        id: channel
+        shell: bash
+        env:
+          VER: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The CHANGELOG section for this version decides the channel. A
+          # pre-release never becomes GitHub's "latest", so installed apps do
+          # not auto-update to an experimental line.
+          SECTION="$(awk -v ver="${VER}" '
+            index($0, "## [" ver "]") == 1 { on = 1; next }
+            /^## \[/ { on = 0 }
+            on' CHANGELOG.md)"
+          if grep -qi 'experimental' <<<"${SECTION}"; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "${VER} is marked experimental in CHANGELOG.md: publishing as a pre-release"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "${VER} is a stable release"
+          fi
 
       - name: Every version surface must already read the release version
         shell: bash
@@ -513,8 +536,11 @@ jobs:
         with:
           tag_name: ${{ needs.verify.outputs.tag }}
           name: Remedy Desktop v${{ needs.verify.outputs.version }}
+          prerelease: ${{ needs.verify.outputs.prerelease == 'true' }}
           body: |
             ## Remedy Desktop v${{ needs.verify.outputs.version }}
+
+            ${{ needs.verify.outputs.prerelease == 'true' && '> **Experimental pre-release.** This line is still being proven in daily use. Installed apps do not auto-update to it; the stable release stays the one marked Latest.' || '' }}
 
             One partner on **Windows and Linux**. Continuity stays in `~/.remedy`.
 
