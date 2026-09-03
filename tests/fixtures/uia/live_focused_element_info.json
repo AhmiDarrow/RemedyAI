@@ -1,17 +1,17 @@
 {
-  "source": "comtypes",
-  "captured_at": "2026-09-03T21:32:03+00:00",
+  "source": "host_binding",
+  "captured_at": "2026-09-03T22:01:37+00:00",
   "platform": "win32",
-  "notes": "Live capture from comtypes UI Automation before the Zig port. Do not inject input; do not write clipboard. Window acquisition: existing.",
+  "notes": "Live capture via desktop_uia → host_binding → Zig COM. Do not inject input; do not write clipboard. Window acquisition: existing.",
   "window": {
-    "hwnd": 1967332,
+    "hwnd": 4066618,
     "how": "existing"
   },
   "api": "focused_element_info",
   "args": {},
   "result": {
-    "name": "YouTube Video Player",
-    "role": "group",
+    "name": "Play keyboard shortcut k",
+    "role": "button",
     "value": ""
   }
 }

@@ -1,6 +1,6 @@
-"""Write UIA JSON fixtures for Zig parity (Phase 2 cutover).
+"""Write UIA JSON fixtures for Zig / host_binding parity (Phase 2 cutover).
 
-Contract fixtures always come from fake_win32. Live comtypes capture runs on
+Contract fixtures always come from fake_host_binding. Live capture runs on
 Windows when UIA is available; failure still leaves contract JSON + README.
 """
 

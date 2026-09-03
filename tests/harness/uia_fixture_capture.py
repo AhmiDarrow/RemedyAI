@@ -1,7 +1,8 @@
-"""Capture comtypes UIA return shapes for Zig parity fixtures.
+"""Capture UIA return shapes for Zig / host_binding parity fixtures.
 
-Read-only: never SendInput / keybd_event / mouse_event, never write clipboard.
-Live path may launch Notepad briefly and terminate it; harness path is pure.
+Harness path mocks ``host_binding`` via ``fake_host_binding`` (no live COM).
+Live path may launch Notepad briefly and terminate it. Read-only: never
+SendInput / keybd_event / mouse_event, never write clipboard.
 """
 
 from __future__ import annotations
@@ -74,17 +75,19 @@ def harness_notepad_tree():
 
 
 def write_harness_contract_fixtures() -> list[Path]:
-    """Field-for-field contract JSON from fake_win32 (always available)."""
+    """Field-for-field contract JSON from fake_host_binding (always available)."""
     from remedy.core.computer import desktop_uia
-    from tests.harness.fake_win32 import install_fake_win32
+    from tests.harness.fake_host_binding import install_fake_host_uia
+    from tests.harness.fake_win32 import FakeUIAutomation, uia_element
 
     written: list[Path] = []
     notes = (
-        "Contract fixture from tests.harness.fake_win32 before Zig UIA port. "
-        "Shapes must match live comtypes output field-for-field."
+        "Contract fixture from tests.harness.fake_host_binding (reference walker "
+        "over FakeUIAutomation trees). Shapes must match live Zig UIA output "
+        "field-for-field."
     )
 
-    with install_fake_win32(uia=harness_notepad_tree()):
+    with install_fake_host_uia(harness_notepad_tree()):
         snap = desktop_uia.uia_control_snapshot(
             hwnd=101, max_elements=80, preferred_only=True
         )
@@ -95,7 +98,7 @@ def write_harness_contract_fixtures() -> list[Path]:
         _write(
             "contract_uia_control_snapshot.json",
             {
-                "source": "fake_win32",
+                "source": "fake_host_binding",
                 "captured_at": _now(),
                 "api": "uia_control_snapshot",
                 "platform": "harness",
@@ -132,7 +135,7 @@ def write_harness_contract_fixtures() -> list[Path]:
         _write(
             "contract_read_window_text.json",
             {
-                "source": "fake_win32",
+                "source": "fake_host_binding",
                 "captured_at": _now(),
                 "api": "read_window_text",
                 "platform": "harness",
@@ -157,7 +160,7 @@ def write_harness_contract_fixtures() -> list[Path]:
         _write(
             "contract_focused_element_info.json",
             {
-                "source": "fake_win32",
+                "source": "fake_host_binding",
                 "captured_at": _now(),
                 "api": "focused_element_info",
                 "platform": "harness",
@@ -174,22 +177,25 @@ def write_harness_contract_fixtures() -> list[Path]:
     )
 
     # element_action shapes (separate trees so actions don't collide)
-    from tests.harness.fake_win32 import FakeUIAutomation, uia_element
-
     action_cases: list[tuple[str, Any, dict[str, Any]]] = []
 
+    def _app_tree(*children: Any) -> FakeUIAutomation:
+        return FakeUIAutomation(
+            uia_element(
+                "Desktop",
+                "pane",
+                children=[uia_element("App", "window", hwnd=101, children=list(children))],
+            )
+        )
+
     btn = uia_element("Save", "button", invokable=True)
-    with install_fake_win32(uia=FakeUIAutomation(
-        uia_element("Desktop", "pane", children=[uia_element("App", "window", hwnd=101, children=[btn])])
-    )):
+    with install_fake_host_uia(_app_tree(btn)):
         action_cases.append(
             ("invoke", desktop_uia.element_action(101, "Save", action="invoke"), {"ok": "bool", "message": "str"})
         )
 
     box = uia_element("Amount", "edit", value="")
-    with install_fake_win32(uia=FakeUIAutomation(
-        uia_element("Desktop", "pane", children=[uia_element("App", "window", hwnd=101, children=[box])])
-    )):
+    with install_fake_host_uia(_app_tree(box)):
         action_cases.append(
             (
                 "set_value",
@@ -199,17 +205,13 @@ def write_harness_contract_fixtures() -> list[Path]:
         )
 
     chk = uia_element("Word wrap", "checkbox", toggle="off")
-    with install_fake_win32(uia=FakeUIAutomation(
-        uia_element("Desktop", "pane", children=[uia_element("App", "window", hwnd=101, children=[chk])])
-    )):
+    with install_fake_host_uia(_app_tree(chk)):
         action_cases.append(
             ("toggle", desktop_uia.element_action(101, "Word wrap", action="toggle"), {"ok": "bool", "message": "str"})
         )
 
     item = uia_element("Below", "listitem", offscreen=True, scrollable=True)
-    with install_fake_win32(uia=FakeUIAutomation(
-        uia_element("Desktop", "pane", children=[uia_element("App", "window", hwnd=101, children=[item])])
-    )):
+    with install_fake_host_uia(_app_tree(item)):
         action_cases.append(
             (
                 "scroll_into_view",
@@ -218,9 +220,7 @@ def write_harness_contract_fixtures() -> list[Path]:
             )
         )
 
-    with install_fake_win32(uia=FakeUIAutomation(
-        uia_element("Desktop", "pane", children=[uia_element("App", "window", hwnd=101, children=[])])
-    )):
+    with install_fake_host_uia(_app_tree()):
         action_cases.append(
             (
                 "not_found",
@@ -233,7 +233,7 @@ def write_harness_contract_fixtures() -> list[Path]:
         _write(
             "contract_element_action.json",
             {
-                "source": "fake_win32",
+                "source": "fake_host_binding",
                 "captured_at": _now(),
                 "api": "element_action",
                 "platform": "harness",
@@ -250,12 +250,12 @@ def write_harness_contract_fixtures() -> list[Path]:
         _write(
             "contract_misc.json",
             {
-                "source": "fake_win32",
+                "source": "fake_host_binding",
                 "captured_at": _now(),
                 "api": "misc",
                 "platform": "harness",
                 "notes": notes,
-                "uia_available": True,  # under install_fake_win32(platform=win32)
+                "uia_available": True,  # under install_fake_host_uia(platform=win32)
                 "preferred_click_action": {
                     "button": desktop_uia.preferred_click_action("button"),
                     "checkbox": desktop_uia.preferred_click_action("checkbox"),
@@ -344,7 +344,7 @@ def _terminate(proc: subprocess.Popen[bytes] | None) -> None:
 
 
 def try_live_capture() -> dict[str, Any]:
-    """Capture live comtypes shapes. Read-only UIA; optional Notepad launch.
+    """Capture live Zig/host_binding UIA shapes. Read-only; optional Notepad launch.
 
     Returns a status dict: ok, paths, error, source_window.
     """
@@ -385,12 +385,12 @@ def try_live_capture() -> dict[str, Any]:
         focus = desktop_uia.focused_element_info()
 
         notes = (
-            "Live capture from comtypes UI Automation before the Zig port. "
+            "Live capture via desktop_uia → host_binding → Zig COM. "
             "Do not inject input; do not write clipboard. "
             f"Window acquisition: {source}."
         )
         meta = {
-            "source": "comtypes",
+            "source": "host_binding",
             "captured_at": _now(),
             "platform": sys.platform,
             "notes": notes,
@@ -468,16 +468,16 @@ def write_readme(*, live_ok: bool, live_error: str | None = None) -> Path:
     lines = [
         "# UIA fixtures (Phase 2 native cutover)",
         "",
-        "Captured from the **comtypes** `desktop_uia` path before the Zig UI",
-        "Automation port. Zig parity tests should match these shapes",
-        "field-for-field.",
+        "Contract shapes from ``fake_host_binding``; live shapes from",
+        "``desktop_uia`` → ``host_binding`` → Zig COM. Parity tests should",
+        "match these shapes field-for-field.",
         "",
         "## Sources",
         "",
         "| Prefix | Meaning |",
         "|--------|---------|",
-        "| `contract_*` | Deterministic shapes from `tests.harness.fake_win32` |",
-        "| `live_*` | Real comtypes capture on Windows when UIA is available |",
+        "| `contract_*` | Deterministic shapes from `tests.harness.fake_host_binding` |",
+        "| `live_*` | Real Zig/host_binding capture on Windows when UIA is available |",
         "",
         "## Regenerating",
         "",

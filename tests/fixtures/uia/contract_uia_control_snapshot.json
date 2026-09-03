@@ -1,9 +1,9 @@
 {
-  "source": "fake_win32",
-  "captured_at": "2026-09-03T21:32:03+00:00",
+  "source": "fake_host_binding",
+  "captured_at": "2026-09-03T22:01:37+00:00",
   "api": "uia_control_snapshot",
   "platform": "harness",
-  "notes": "Contract fixture from tests.harness.fake_win32 before Zig UIA port. Shapes must match live comtypes output field-for-field.",
+  "notes": "Contract fixture from tests.harness.fake_host_binding (reference walker over FakeUIAutomation trees). Shapes must match live Zig UIA output field-for-field.",
   "args": {
     "hwnd": 101,
     "max_elements": 80,

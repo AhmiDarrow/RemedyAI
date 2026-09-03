@@ -9,9 +9,10 @@ extern "C" {
 #endif
 
 /*
- * ABI 2 adds the host surface: DPI, monitors, capture, PNG, input, windows,
- * clipboard and hidden process control. Every host function returns a
- * remedy_core_status. On a non-Windows build each host function returns
+ * ABI 3 adds UI Automation (reads, control snapshot, element actions) on top
+ * of the ABI 2 host surface (DPI, monitors, capture, PNG, input, windows,
+ * clipboard and hidden process control). Every host/UIA function returns a
+ * remedy_core_status. On a non-Windows build each host/UIA function returns
  * REMEDY_CORE_UNSUPPORTED and writes nothing.
  *
  * Memory: any buffer returned through an `out_*` pointer is owned by the
@@ -22,7 +23,7 @@ extern "C" {
  * Errors: when a call fails with REMEDY_CORE_OPERATION_FAILED the Win32 error
  * code is available from remedy_core_last_os_error() on the same thread.
  */
-#define REMEDY_CORE_ABI_VERSION 2u
+#define REMEDY_CORE_ABI_VERSION 3u
 
 enum remedy_core_status {
     REMEDY_CORE_OK = 0,
@@ -248,6 +249,60 @@ int32_t remedy_core_process_kill_tree(uint32_t pid);
 /* Close the process and job handles. A tree still running inside the job
  * is terminated by the job close. Frees the handle; do not reuse it. */
 int32_t remedy_core_process_close(uint64_t handle);
+
+/* ---- ABI 3: UI Automation --------------------------------------------- */
+
+/* 1 when CoCreateInstance(CUIAutomation) succeeds on this thread; 0 otherwise.
+ * Does not walk the tree. Non-Windows returns UNSUPPORTED with *out=0. */
+int32_t remedy_core_uia_available(uint8_t *out_available);
+
+/* UTF-8 JSON array of control dicts (ref/tag/role/name/x/y/w/h/hwnd/bounds/uia
+ * and optional offscreen), or the JSON literal null when UIA is unavailable
+ * or the walk found nothing. hwnd 0 = desktop root (named top-level windows).
+ * max_elements 0 defaults to 80; clamped to [1, 120]. */
+int32_t remedy_core_uia_control_snapshot(
+    uint64_t hwnd,
+    uint32_t max_elements,
+    uint8_t preferred_only,
+    uint8_t **out_json,
+    size_t *out_len
+);
+
+/* UTF-8 JSON object {title, text, fields:[{name,role,value}]} or null. */
+int32_t remedy_core_uia_read_window_text(
+    uint64_t hwnd,
+    uint32_t max_chars,
+    uint8_t **out_json,
+    size_t *out_len
+);
+
+/* UTF-8 JSON object {name, role, value} for the focused element, or null. */
+int32_t remedy_core_uia_focused_element(uint8_t **out_json, size_t *out_len);
+
+/* UTF-8 JSON object {ok, message, verified?}. Always an object (never null).
+ * action is invoke | set_value | toggle | scroll_into_view. */
+int32_t remedy_core_uia_element_action(
+    uint64_t hwnd,
+    const uint8_t *name, size_t name_len,
+    const uint8_t *role, size_t role_len,
+    const uint8_t *action, size_t action_len,
+    const uint8_t *text, size_t text_len,
+    uint8_t **out_json,
+    size_t *out_len
+);
+
+/* ---- ABI 3: Linux accessibility (AT-SPI) -------------------------------- */
+
+/* UTF-8 JSON array of clickable AT-SPI candidates
+ * {x,y,w,h,area,name,role,source:"atspi"} (centers in screen pixels).
+ * Linux only; other platforms return UNSUPPORTED. Empty array when the
+ * desktop root is missing. No invoke / set_value / toggle (parity with the
+ * former Python walker). */
+int32_t remedy_core_a11y_snapshot(
+    uint32_t limit,
+    uint8_t **out_json,
+    size_t *out_len
+);
 
 #ifdef __cplusplus
 }

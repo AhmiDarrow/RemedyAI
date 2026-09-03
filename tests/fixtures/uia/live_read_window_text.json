@@ -1,20 +1,20 @@
 {
-  "source": "comtypes",
-  "captured_at": "2026-09-03T21:32:03+00:00",
+  "source": "host_binding",
+  "captured_at": "2026-09-03T22:01:37+00:00",
   "platform": "win32",
-  "notes": "Live capture from comtypes UI Automation before the Zig port. Do not inject input; do not write clipboard. Window acquisition: existing.",
+  "notes": "Live capture via desktop_uia → host_binding → Zig COM. Do not inject input; do not write clipboard. Window acquisition: existing.",
   "window": {
-    "hwnd": 1967332,
+    "hwnd": 4066618,
     "how": "existing"
   },
   "api": "read_window_text",
   "args": {
-    "hwnd": 1967332,
+    "hwnd": 4066618,
     "max_chars": 12000
   },
   "result": {
-    "title": "New Text Document (6).txt - Notepad",
-    "text": "Notepad\nCannot find the C:\\Users\\Administrator\\OneDrive\\Desktop\\New Text Document (6).txt file.\nOK\ngoogle.txt. Unmodified.\ngoogle.txt\nNew Text Document (5).txt. Unmodified.\nNew Text Document (5).txt\nNew Text Document (6).txt. Unmodified.\nNew Text Document (6).txt\nClose Tab\nAdd New Tab\nFile\nEdit\nView\nHeadings\nLists\nBold (Ctrl+B)\nItalic (Ctrl+I)\nStrikethrough (Ctrl+Shift+X)\nLink (Ctrl+K)\nTable\nClear formatting (Ctrl+Space)\nWriting tools\nWhat's new\nUser avatar\nSettings\nLine 1,\nColumn 1\n0 characters\nPlain text\nZoom\nWindows (CRLF)\nUTF-8\nSystem\nMinimize\nMaximize\nClose",
+    "title": "Untitled - Notepad",
+    "text": "P\nC\nS\nT\nK\nG\nI\nB\nR\nL\nH\nE\nU\nF\nV\nUntitled. Unmodified.\nUntitled\nClose Tab\nAdd New Tab\nFile\nEdit\nView\nHeadings\nLists\nBold (Ctrl+B)\nItalic (Ctrl+I)\nStrikethrough (Ctrl+Shift+X)\nLink (Ctrl+K)\nTable\nClear formatting (Ctrl+Space)\nWriting tools\nWhat's new\nUser avatar\nSettings\nLine 1,\nColumn 1\n0 characters\nPlain text\nZoom\nWindows (CRLF)\nUTF-8\nSystem\nMinimize\nMaximize\nClose",
     "fields": [
       {
         "name": "Text editor",

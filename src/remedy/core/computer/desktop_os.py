@@ -1,4 +1,4 @@
-"""OS desktop capture/input: Windows native, Linux xdotool/xdg-open."""
+"""OS desktop capture/input: Windows or Linux via ``remedy_core`` bindings."""
 
 from __future__ import annotations
 

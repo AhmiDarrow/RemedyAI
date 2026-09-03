@@ -1,8 +1,17 @@
-"""Linux desktop capture + input (xdotool / grim / xdg-open). Additive to Windows."""
+"""Linux desktop capture + input over the ``remedy_core`` host.
+
+X11/XTest input, capture, windows, clipboard, and AT-SPI snapshots are made by
+``remedy_core`` through :mod:`remedy.core.computer.host_binding`. This module
+keeps policy on top: screenshot files under the Remedy home, Set-of-Mark /
+OCR / pixel candidates, key-name resolution, app and URL launch via xdg-open.
+AT-SPI invoke / set_value / toggle are not exposed (same gap as the former
+Python walker). Pointer and screenshot tools are not shelled out.
+"""
 
 from __future__ import annotations
 
 import contextlib
+import os
 import shutil
 import struct
 import subprocess
@@ -13,10 +22,73 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from remedy.core.computer import host_binding as H
 from remedy.home import default_home
+from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
 # Match Windows paste threshold so type_text_fast behaves the same under tests.
-PASTE_THRESHOLD = 120
+PASTE_THRESHOLD = 200
+
+_VK = {
+    "enter": 0x0D,
+    "return": 0x0D,
+    "tab": 0x09,
+    "escape": 0x1B,
+    "esc": 0x1B,
+    "backspace": 0x08,
+    "delete": 0x2E,
+    "del": 0x2E,
+    "space": 0x20,
+    "up": 0x26,
+    "down": 0x28,
+    "left": 0x25,
+    "right": 0x27,
+    "home": 0x24,
+    "end": 0x23,
+    "pageup": 0x21,
+    "pagedown": 0x22,
+    "f1": 0x70,
+    "f2": 0x71,
+    "f3": 0x72,
+    "f4": 0x73,
+    "f5": 0x74,
+    "f6": 0x75,
+    "f7": 0x76,
+    "f8": 0x77,
+    "f9": 0x78,
+    "f10": 0x79,
+    "f11": 0x7A,
+    "f12": 0x7B,
+    "insert": 0x2D,
+    "ins": 0x2D,
+    "ctrl": 0x11,
+    "control": 0x11,
+    "alt": 0x12,
+    "shift": 0x10,
+    "win": 0x5B,
+    "meta": 0x5B,
+    "super": 0x5B,
+    "cmd": 0x5B,
+}
+
+_MODIFIER_VKS = (0x10, 0x11, 0x12, 0x5B)
+
+_MOUSE_BUTTONS = {
+    "left": H.MOUSE_LEFT,
+    "l": H.MOUSE_LEFT,
+    "right": H.MOUSE_RIGHT,
+    "r": H.MOUSE_RIGHT,
+    "middle": H.MOUSE_MIDDLE,
+    "mid": H.MOUSE_MIDDLE,
+    "m": H.MOUSE_MIDDLE,
+}
+
+_TYPE_DELAY_MS = 5
+
+_LINUX_HANDS_HINT = (
+    "needs an X11 display with XTest (DISPLAY set; XWayland works). "
+    "Pure Wayland without XWayland is not supported yet"
+)
 
 
 def _require_linux() -> None:
@@ -24,551 +96,139 @@ def _require_linux() -> None:
         raise RuntimeError("desktop_linux is for POSIX desktops")
 
 
-def _home_shots() -> Path:
-    return default_home() / "computer" / "shots"
+def _host_fail(need: str, exc: BaseException) -> RuntimeError:
+    return RuntimeError(f"Linux {need} failed via remedy_core — {_LINUX_HANDS_HINT}: {exc}")
 
 
-def _default_shot_path(kind: str) -> Path:
-    root = _home_shots()
-    root.mkdir(parents=True, exist_ok=True)
-    return root / f"{kind}-{int(time.time() * 1000)}.png"
+def _remedy_home() -> Path:
+    env = (os.environ.get("REMEDY_HOME") or "").strip()
+    return Path(env).expanduser() if env else default_home()
 
 
-def _run(cmd: list[str], *, timeout: float = 8.0) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(  # noqa: S603 — fixed argv, no shell
-        cmd,
-        check=False,
-        capture_output=True,
-        timeout=timeout,
-    )
+def _default_shot_path(prefix: str = "desk") -> Path:
+    out_dir = _remedy_home() / "computer" / "shots"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir / f"{prefix}_{int(time.time() * 1000)}.png"
 
 
-def _which(*names: str) -> str | None:
-    for n in names:
-        p = shutil.which(n)
-        if p:
-            return p
-    return None
-
-
-_LINUX_HANDS_HINT = (
-    "install grim (or scrot), xdotool or ydotool, and wmctrl "
-    "(Debian Recommends on the .deb)"
-)
-
-
-def _pointer_backend() -> tuple[str, str] | None:
-    """('xdotool'|'ydotool', path) — keep both platforms."""
-    xd = _which("xdotool")
-    if xd:
-        return ("xdotool", xd)
-    yd = _which("ydotool")
-    if yd:
-        return ("ydotool", yd)
-    return None
-
-
-def _missing_hands(need: str) -> RuntimeError:
-    return RuntimeError(f"Linux {need} needs xdotool or ydotool — {_LINUX_HANDS_HINT}")
-
-
-def _png_size(path: Path) -> tuple[int, int]:
-    data = path.read_bytes()
-    if len(data) >= 24 and data[:8] == b"\x89PNG\r\n\x1a\n":
-        import struct
-
-        w, h = struct.unpack(">II", data[16:24])
-        return int(w), int(h)
-    return 0, 0
-
-
-def screenshot_png(
-    path: Path | None = None,
-    *,
-    marks: list[Any] | None = None,
-) -> dict[str, Any]:
-    """Full-desktop PNG via grim (Wayland) or import/scrot/gnome-screenshot (X11)."""
-    _require_linux()
-    _ = marks
-    out = Path(path) if path is not None else _default_shot_path("desktop")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    tools: list[list[str]] = []
-    grim = _which("grim")
-    if grim:
-        tools.append([grim, str(out)])
-    gnome = _which("gnome-screenshot")
-    if gnome:
-        tools.append([gnome, "-f", str(out)])
-    scrot = _which("scrot")
-    if scrot:
-        tools.append([scrot, "-o", str(out)])
-    magick = _which("import", "magick")
-    if magick:
-        if Path(magick).name == "magick":
-            tools.append([magick, "import", "-window", "root", str(out)])
-        else:
-            tools.append([magick, "-window", "root", str(out)])
-    last_err = "no screenshot tool (install grim, scrot, or ImageMagick import)"
-    for cmd in tools:
+def purge_old_shots(*, max_age_s: float = 900.0, home_dir: Path | str | None = None) -> int:
+    """Delete aged screenshots under computer/shots (privacy + disk)."""
+    roots: list[Path] = []
+    if home_dir is not None and str(home_dir).strip():
+        roots.append(Path(home_dir).expanduser() / "computer" / "shots")
+    else:
+        roots.append(_remedy_home() / "computer" / "shots")
+    cutoff = time.time() - float(max_age_s)
+    seen: set[str] = set()
+    n = 0
+    for root in roots:
         try:
-            proc = _run(cmd, timeout=12.0)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            last_err = str(exc)
+            key = str(root.resolve())
+        except OSError:
+            key = str(root)
+        if key in seen:
             continue
-        if proc.returncode == 0 and out.is_file() and out.stat().st_size > 32:
-            w, h = _png_size(out)
-            return {"path": str(out), "width": w, "height": h, "method": cmd[0]}
-        last_err = (proc.stderr or proc.stdout or b"").decode("utf-8", "replace")[:240]
-    raise RuntimeError(f"Linux screenshot failed: {last_err}")
+        seen.add(key)
+        if not root.is_dir():
+            continue
+        for path in list(root.iterdir()):
+            try:
+                if (
+                    path.is_file()
+                    and path.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".bmp")
+                    and path.stat().st_mtime < cutoff
+                ):
+                    path.unlink(missing_ok=True)
+                    n += 1
+            except OSError:
+                continue
+    return n
 
 
-def screenshot_region_png(
-    x: int,
-    y: int,
-    width: int,
-    height: int,
-    *,
-    path: Path | None = None,
-    scale: float = 1.0,
-) -> dict[str, Any]:
-    _require_linux()
-    sc = float(scale) if scale and scale > 0 else 1.0
-    rx, ry = int(round(int(x) * sc)), int(round(int(y) * sc))
-    rw, rh = max(1, int(round(int(width) * sc))), max(1, int(round(int(height) * sc)))
-    out = Path(path) if path is not None else _default_shot_path("region")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    grim = _which("grim")
-    if grim:
-        geom = f"{rx},{ry} {rw}x{rh}"
-        proc = _run([grim, "-g", geom, str(out)], timeout=12.0)
-        if proc.returncode == 0 and out.is_file():
-            w, h = _png_size(out)
-            return {
-                "path": str(out),
-                "width": w,
-                "height": h,
-                "origin": {"x": rx, "y": ry},
-                "requested": {"x": x, "y": y, "width": width, "height": height, "scale": sc},
-                "method": "grim",
-            }
-    magick = _which("import")
-    if magick:
-        proc = _run(
-            [magick, "-window", "root", "-crop", f"{rw}x{rh}+{rx}+{ry}", str(out)],
-            timeout=12.0,
-        )
-        if proc.returncode == 0 and out.is_file():
-            w, h = _png_size(out)
-            return {
-                "path": str(out),
-                "width": w,
-                "height": h,
-                "origin": {"x": rx, "y": ry},
-                "requested": {"x": x, "y": y, "width": width, "height": height, "scale": sc},
-                "method": "import",
-            }
-    raise RuntimeError(
-        "Linux region screenshot needs grim or ImageMagick import — "
-        f"{_LINUX_HANDS_HINT}. Not returning a full-desktop PNG as a rail crop."
-    )
+# 3x5 bitmap font for Set-of-Mark digit labels.
+_DIGITS_3x5 = {
+    "0": ("111", "101", "101", "101", "111"),
+    "1": ("010", "110", "010", "010", "111"),
+    "2": ("111", "001", "111", "100", "111"),
+    "3": ("111", "001", "111", "001", "111"),
+    "4": ("101", "101", "111", "001", "001"),
+    "5": ("111", "100", "111", "001", "111"),
+    "6": ("111", "100", "111", "101", "111"),
+    "7": ("111", "001", "010", "010", "010"),
+    "8": ("111", "101", "111", "101", "111"),
+    "9": ("111", "101", "111", "001", "111"),
+}
 
 
-def screenshot_monitor_png(index: int, path: Path | None = None) -> dict[str, Any]:
-    _ = index
-    return screenshot_png(path)
+def _set_px(buf: bytearray, stride: int, w: int, h: int, x: int, y: int, bgr: tuple) -> None:
+    if 0 <= x < w and 0 <= y < h:
+        o = y * stride + x * 3
+        buf[o], buf[o + 1], buf[o + 2] = bgr
 
 
-def print_window_png(hwnd: int | None = None, path: Path | None = None) -> dict[str, Any]:
-    _ = hwnd
-    return screenshot_png(path)
-
-
-def find_webview_host_hwnd() -> int | None:
-    return None
-
-
-def detect_system_prompt() -> dict[str, Any]:
-    """Linux has no UAC secure-desktop analogue we can detect yet."""
-    return {"blocked": False, "kind": "", "message": ""}
-
-
-def find_remedy_desktop_hwnd() -> int | None:
-    return None
-
-
-def desktop_snapshot(
-    limit: int = 40,
-    mode: str = "auto",
-    hwnd: int | None = None,
-) -> list[dict[str, Any]]:
-    """Linux interactive snapshot — AT-SPI controls (UIA analogue), else windows.
-
-    *mode*:
-      - ``windows`` — top-level windows only (refs w1…)
-      - ``controls`` / ``atspi`` — AT-SPI clickable widgets (refs c1…)
-      - ``auto`` — AT-SPI clickables when present, else windows
-    Empty auto/controls keeps Set-of-Mark on ``detect_ui_candidates``
-    (OCR / pixel edges) instead of marking huge window frames.
-    """
-    _ = hwnd
-    cap = max(1, min(int(limit or 40), 100))
-    mode_s = (mode or "auto").strip().lower()
-    if mode_s == "windows":
-        return _windows_as_elements(cap)
-    atspi = _atspi_snapshot_elements(cap)
-    if mode_s in ("controls", "uia", "deep", "atspi"):
-        return atspi[:cap]
-    if atspi:
-        return atspi[:cap]
-    return []
-
-
-def _windows_as_elements(cap: int) -> list[dict[str, Any]]:
-    wins = list_windows(limit=min(cap, 80))
-    out: list[dict[str, Any]] = []
-    for i, w in enumerate(wins):
-        b = w.get("bounds") or {}
-        left, top = int(b.get("left", 0)), int(b.get("top", 0))
-        right, bottom = int(b.get("right", 0)), int(b.get("bottom", 0))
-        width = int(w.get("width") or max(0, right - left))
-        height = int(w.get("height") or max(0, bottom - top))
-        out.append(
-            {
-                "ref": f"w{i + 1}",
-                "tag": "window",
-                "role": "window",
-                "name": str(w.get("title") or "")[:120],
-                "x": (left + right) // 2,
-                "y": (top + bottom) // 2,
-                "w": width,
-                "h": height,
-                "hwnd": w.get("hwnd"),
-                "bounds": b,
-            }
-        )
-        if len(out) >= cap:
-            break
-    return out
-
-
-def _atspi_snapshot_elements(cap: int) -> list[dict[str, Any]]:
-    """AT-SPI clickables in snapshot shape (refs c1…), never raises."""
-    out: list[dict[str, Any]] = []
-    for i, c in enumerate(_atspi_clickable_candidates(max_marks=cap)):
-        w = int(c.get("w") or 0)
-        h = int(c.get("h") or 0)
-        x = int(c.get("x") or 0)
-        y = int(c.get("y") or 0)
-        name = str(c.get("name") or c.get("role") or "widget")[:120]
-        role = str(c.get("role") or "widget")
-        out.append(
-            {
-                "ref": f"c{i + 1}",
-                "tag": role,
-                "role": role,
-                "name": name,
-                "x": x,
-                "y": y,
-                "w": w,
-                "h": h,
-                "source": "atspi",
-                "bounds": {
-                    "left": x - w // 2,
-                    "top": y - h // 2,
-                    "right": x - w // 2 + w,
-                    "bottom": y - h // 2 + h,
-                },
-            }
-        )
-    return out
+def _draw_marks_on_bgr(
+    buf: bytearray, stride: int, width: int, height: int, marks: list[dict[str, Any]]
+) -> None:
+    magenta = (255, 0, 255)
+    white = (255, 255, 255)
+    scale = 2
+    for m in marks:
+        label = str(int(m.get("n", 0)))
+        px = int(m.get("x", 0))
+        py = int(m.get("y", 0))
+        box_w = len(label) * (3 * scale + scale) + scale
+        box_h = 5 * scale + 2 * scale
+        bx = max(0, min(px, width - box_w - 1))
+        by = max(0, min(py, height - box_h - 1))
+        for yy in range(by, by + box_h):
+            for xx in range(bx, bx + box_w):
+                _set_px(buf, stride, width, height, xx, yy, magenta)
+        cx = bx + scale
+        for ch in label:
+            glyph = _DIGITS_3x5.get(ch)
+            if glyph:
+                for gy, rowbits in enumerate(glyph):
+                    for gx, bit in enumerate(rowbits):
+                        if bit == "1":
+                            for sy in range(scale):
+                                for sx in range(scale):
+                                    _set_px(
+                                        buf,
+                                        stride,
+                                        width,
+                                        height,
+                                        cx + gx * scale + sx,
+                                        by + scale + gy * scale + sy,
+                                        white,
+                                    )
+            cx += 3 * scale + scale
 
 
 def _capture_virtual_screen() -> tuple[bytes, int, int, int, int, int]:
-    """Best-effort frame for Set-of-Mark pixel / OCR fallback.
-
-    Linux CI often has no grim/scrot — return a tiny blank buffer so callers
-    (and tests that monkeypatch this) still get a stable shape instead of a
-    hard Windows-only error.
-    """
+    """Return (bgr_bytes, stride, width, height, origin_x, origin_y)."""
     _require_linux()
-    with contextlib.suppress(Exception):
-        info = screenshot_png()
-        path = Path(str(info.get("path") or ""))
-        if path.is_file():
-            decoded = _read_png_bgr(path)
-            if decoded is not None:
-                raw, stride, w, h = decoded
-                return raw, stride, w, h, 0, 0
-            w = int(info.get("width") or 0)
-            h = int(info.get("height") or 0)
-            if w > 0 and h > 0:
-                stride = (w * 3 + 3) & ~3
-                return b"\x00" * (stride * h), stride, w, h, 0, 0
-    w = h = 10
-    stride = (w * 3 + 3) & ~3
-    return b"\x00" * (stride * h), stride, w, h, 0, 0
-
-
-# GTK/Qt/GNOME roles that are worth a Set-of-Mark box. Huge chrome is skipped.
-_ATSPI_CLICK_ROLES = frozenset(
-    {
-        "push button",
-        "button",
-        "toggle button",
-        "toggle",
-        "radio button",
-        "radio",
-        "check box",
-        "checkbox",
-        "menu item",
-        "check menu item",
-        "radio menu item",
-        "link",
-        "hyperlink",
-        "entry",
-        "password text",
-        "text",
-        "edit",
-        "editbar",
-        "spin button",
-        "combo box",
-        "combobox",
-        "slider",
-        "page tab",
-        "tab",
-        "list item",
-        "tree item",
-        "heading",
-        "image",
-        "icon",
-        "split button",
-        "tool bar",
-        "toolbar",
-    }
-)
-_ATSPI_SKIP_ROLES = frozenset(
-    {
-        "application",
-        "frame",
-        "window",
-        "desktop frame",
-        "filler",
-        "separator",
-        "scroll bar",
-        "scrollbar",
-        "redundant object",
-        "bounding box",
-        "layered pane",
-        "html container",
-        "document web",
-        "document frame",
-        "page tab list",
-        "menu bar",
-        "menubar",
-        "status bar",
-        "statusbar",
-        "split pane",
-        "panel",
-        "unknown",
-        "invalid",
-    }
-)
-
-
-def _atspi_call(obj: Any, *names: str, default: Any = None) -> Any:
-    for name in names:
-        fn = getattr(obj, name, None)
-        if callable(fn):
-            with contextlib.suppress(Exception):
-                return fn()
-        elif fn is not None and not callable(fn):
-            return fn
-    return default
-
-
-def _atspi_extents(acc: Any) -> tuple[int, int, int, int] | None:
-    """Return (x, y, w, h) in screen pixels, or None."""
-    comp = None
-    for name in (
-        "get_component_iface",
-        "get_component",
-        "queryComponent",
-        "query_component",
-    ):
-        fn = getattr(acc, name, None)
-        if not callable(fn):
-            continue
-        with contextlib.suppress(Exception):
-            comp = fn()
-        if comp is not None:
-            break
-    if comp is None:
-        return None
-    rect = None
-    for name in ("get_extents", "getExtents"):
-        fn = getattr(comp, name, None)
-        if not callable(fn):
-            continue
-        for coord in (0, None):
-            with contextlib.suppress(Exception):
-                rect = fn() if coord is None else fn(coord)
-            if rect is not None:
-                break
-        if rect is not None:
-            break
-    if rect is None:
-        return None
     try:
-        x = int(rect.x)
-        y = int(rect.y)
-        w = int(rect.width)
-        h = int(rect.height)
-    except Exception:
-        try:
-            x = int(rect[0])
-            y = int(rect[1])
-            w = int(rect[2])
-            h = int(rect[3])
-        except Exception:
-            return None
-    if w < 4 or h < 4:
-        return None
-    return x, y, w, h
+        shot = H.capture_virtual_screen(3)
+    except (NativeRuntimeUnavailableError, H.HostError) as exc:
+        # Headless / no DISPLAY: tiny blank so Set-of-Mark callers stay stable.
+        w = h = 10
+        stride = (w * 3 + 3) & ~3
+        _ = exc
+        return b"\x00" * (stride * h), stride, w, h, 0, 0
+    return shot.pixels, shot.stride, shot.width, shot.height, shot.left, shot.top
 
 
-def _atspi_children(acc: Any) -> list[Any]:
-    n = 0
-    raw_n = _atspi_call(acc, "get_child_count", "getChildCount", default=None)
-    if raw_n is None:
-        raw_n = getattr(acc, "childCount", 0)
-    with contextlib.suppress(Exception):
-        n = int(raw_n or 0)
-    kids: list[Any] = []
-    for i in range(max(0, min(n, 80))):
-        child = None
-        for name in ("get_child_at_index", "getChildAtIndex"):
-            fn = getattr(acc, name, None)
-            if callable(fn):
-                with contextlib.suppress(Exception):
-                    child = fn(i)
-                if child is not None:
-                    break
-        if child is None:
-            with contextlib.suppress(Exception):
-                child = acc[i]
-        if child is not None:
-            kids.append(child)
-    return kids
-
-
-def _walk_atspi_tree(root: Any, *, max_marks: int = 40) -> list[dict[str, Any]]:
-    """BFS AT-SPI accessibles to candidate dicts. Pure; tests fake the tree."""
-    cap = max(1, int(max_marks or 40))
-    out: list[dict[str, Any]] = []
-    seen: set[int] = set()
-    queue: list[tuple[Any, int]] = [(root, 0)]
-    visited = 0
-    while queue and len(out) < cap and visited < 500:
-        acc, depth = queue.pop(0)
-        visited += 1
-        ident = id(acc)
-        if ident in seen or depth > 12:
-            continue
-        seen.add(ident)
-        role = str(
-            _atspi_call(acc, "get_role_name", "getRoleName", default="") or ""
-        ).strip().lower()
-        name = str(
-            _atspi_call(acc, "get_name", "getName", default="") or ""
-        ).strip()
-        extents = _atspi_extents(acc)
-        if (
-            extents is not None
-            and role not in _ATSPI_SKIP_ROLES
-            and (role in _ATSPI_CLICK_ROLES or (name and extents[2] < 800))
-        ):
-            x0, y0, w, h = extents
-            if w < 4000 and h < 3000:
-                out.append(
-                    {
-                        "x": x0 + w // 2,
-                        "y": y0 + h // 2,
-                        "w": w,
-                        "h": h,
-                        "area": w * h,
-                        "name": (name or role)[:80],
-                        "role": role or "widget",
-                        "source": "atspi",
-                    }
-                )
-        if depth < 12 and len(out) < cap:
-            for child in _atspi_children(acc):
-                queue.append((child, depth + 1))
-    out.sort(key=lambda c: -int(c["area"]))
-    return out[:cap]
-
-
-def _load_atspi_desktop() -> Any | None:
-    """Return the AT-SPI desktop root, or None when GI/pyatspi is missing."""
-    with contextlib.suppress(Exception):
-        import gi
-
-        gi.require_version("Atspi", "2.0")
-        from gi.repository import Atspi
-
-        return Atspi.get_desktop(0)
-    with contextlib.suppress(Exception):
-        import pyatspi
-
-        return pyatspi.Registry.getDesktop(0)
-    return None
-
-
-def _atspi_clickable_candidates(*, max_marks: int = 40) -> list[dict[str, Any]]:
-    """Live AT-SPI walk. Monkeypatch in tests — no live desktop required."""
-    root = _load_atspi_desktop()
-    if root is None:
-        return []
-    with contextlib.suppress(Exception):
-        return _walk_atspi_tree(root, max_marks=max_marks)
-    return []
-
-
-def _write_png_bgr(path: Path, width: int, height: int, raw: bytes, stride: int) -> None:
-    """Minimal PNG writer (RGB from BGR rows). Same shape as Windows."""
-    import binascii
-    import zlib
-
-    row_bytes = width * 3
-    scanlines = bytearray()
-    for y in range(height):
-        base = y * stride
-        row = raw[base : base + row_bytes]
-        if len(row) < row_bytes:
-            break
-        rgb = bytearray(row)
-        rgb[0::3] = row[2::3]
-        rgb[2::3] = row[0::3]
-        scanlines += b"\x00"
-        scanlines += rgb
-    compressed = zlib.compress(bytes(scanlines), 1)
-
-    def chunk(tag: bytes, data: bytes) -> bytes:
-        return (
-            struct.pack(">I", len(data))
-            + tag
-            + data
-            + struct.pack(">I", binascii.crc32(tag + data) & 0xFFFFFFFF)
-        )
-
-    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
-    png = (
-        b"\x89PNG\r\n\x1a\n"
-        + chunk(b"IHDR", ihdr)
-        + chunk(b"IDAT", compressed)
-        + chunk(b"IEND", b"")
-    )
-    path.write_bytes(png)
+def _write_png_bgr(
+    path: Path,
+    width: int,
+    height: int,
+    raw: bytes | bytearray | memoryview,
+    stride: int,
+    *,
+    bytes_per_pixel: int = 3,
+) -> None:
+    """Write BGR rows as an RGB PNG via ``remedy_core``."""
+    path.write_bytes(H.encode_png(raw, width, height, stride, bytes_per_pixel))
 
 
 def _paeth(a: int, b: int, c: int) -> int:
@@ -657,13 +317,248 @@ def _read_png_bgr(path: Path) -> tuple[bytes, int, int, int] | None:
     return bytes(buf), out_stride, width, height
 
 
+def screenshot_png(
+    path: Path | None = None,
+    *,
+    marks: list[Any] | None = None,
+) -> dict[str, Any]:
+    """Full-desktop PNG via X11 root capture in ``remedy_core``."""
+    raw, stride, width, height, left, top = _capture_virtual_screen()
+    if width < 2 or height < 2:
+        raise RuntimeError(f"Linux screenshot failed — {_LINUX_HANDS_HINT}")
+    out = Path(path) if path is not None else _default_shot_path("desk")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if marks:
+        buf = bytearray(raw)
+        img_marks = [
+            {
+                "n": mk.get("n"),
+                "x": int(mk.get("x", 0)) - left,
+                "y": int(mk.get("y", 0)) - top,
+            }
+            for mk in marks
+            if isinstance(mk, dict)
+        ]
+        _draw_marks_on_bgr(buf, stride, width, height, img_marks)
+        raw = bytes(buf)
+    try:
+        _write_png_bgr(out, width, height, raw, stride)
+    except (NativeRuntimeUnavailableError, H.HostError) as exc:
+        raise _host_fail("screenshot", exc) from exc
+    with contextlib.suppress(Exception):
+        purge_old_shots(max_age_s=900.0, home_dir=_remedy_home())
+    return {
+        "path": str(out),
+        "width": width,
+        "height": height,
+        "origin": {"x": left, "y": top},
+        "method": "remedy_core",
+    }
+
+
+def screenshot_region_png(
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    *,
+    path: Path | None = None,
+    scale: float = 1.0,
+) -> dict[str, Any]:
+    _require_linux()
+    sc = float(scale) if scale and scale > 0 else 1.0
+    rx = int(round(int(x) * sc))
+    ry = int(round(int(y) * sc))
+    rw = max(1, int(round(int(width) * sc)))
+    rh = max(1, int(round(int(height) * sc)))
+    try:
+        origin_x, origin_y, full_w, full_h = H.virtual_screen_rect()
+    except (NativeRuntimeUnavailableError, H.HostError) as exc:
+        raise _host_fail("region screenshot", exc) from exc
+    bx = rx - origin_x
+    by = ry - origin_y
+    if bx < 0:
+        rw += bx
+        bx = 0
+    if by < 0:
+        rh += by
+        by = 0
+    if bx >= full_w or by >= full_h or rw <= 0 or rh <= 0:
+        raise ValueError("region outside virtual screen")
+    rw = min(rw, full_w - bx)
+    rh = min(rh, full_h - by)
+    try:
+        crop = H.capture_region(origin_x + bx, origin_y + by, rw, rh, 3)
+    except (NativeRuntimeUnavailableError, H.HostError) as exc:
+        raise _host_fail("region screenshot", exc) from exc
+    out = Path(path) if path is not None else _default_shot_path("region")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _write_png_bgr(out, rw, rh, crop.pixels, crop.stride)
+    return {
+        "path": str(out),
+        "width": rw,
+        "height": rh,
+        "origin": {"x": origin_x + bx, "y": origin_y + by},
+        "requested": {"x": x, "y": y, "width": width, "height": height, "scale": sc},
+        "method": "remedy_core",
+    }
+
+
+def screenshot_monitor_png(index: int, path: Path | None = None) -> dict[str, Any]:
+    mons = list_monitors()
+    if not mons:
+        return screenshot_png(path)
+    idx = int(index)
+    if idx < 0 or idx >= len(mons):
+        raise ValueError(f"monitor index {idx} out of range 0..{len(mons) - 1}")
+    m = mons[idx]
+    return screenshot_region_png(
+        int(m.get("left", 0)),
+        int(m.get("top", 0)),
+        int(m.get("width") or max(0, int(m.get("right", 0)) - int(m.get("left", 0)))),
+        int(m.get("height") or max(0, int(m.get("bottom", 0)) - int(m.get("top", 0)))),
+        path=path,
+        scale=1.0,
+    )
+
+
+def print_window_png(hwnd: int | None = None, path: Path | None = None) -> dict[str, Any]:
+    _require_linux()
+    if not hwnd:
+        return screenshot_png(path)
+    try:
+        shot = H.print_window(int(hwnd), 3)
+    except (NativeRuntimeUnavailableError, H.HostError) as exc:
+        raise _host_fail("window capture", exc) from exc
+    out = Path(path) if path is not None else _default_shot_path("hwnd")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _write_png_bgr(out, shot.width, shot.height, shot.pixels, shot.stride)
+    return {
+        "path": str(out),
+        "width": shot.width,
+        "height": shot.height,
+        "origin": {"x": shot.left, "y": shot.top},
+        "method": "remedy_core",
+    }
+
+
+def find_webview_host_hwnd() -> int | None:
+    return None
+
+
+def detect_system_prompt() -> dict[str, Any]:
+    """Linux has no UAC secure-desktop analogue we can detect yet."""
+    return {"blocked": False, "kind": "", "message": ""}
+
+
+def find_remedy_desktop_hwnd() -> int | None:
+    with contextlib.suppress(Exception):
+        for w in list_windows(limit=80):
+            title = str(w.get("title") or "").strip()
+            if title == "Remedy Desktop" or title.startswith("Remedy Desktop"):
+                return int(w["hwnd"])
+    return None
+
+
+def _atspi_clickable_candidates(*, max_marks: int = 40) -> list[dict[str, Any]]:
+    """Live AT-SPI walk via ``remedy_core``. Monkeypatch in tests."""
+    try:
+        return list(H.a11y_snapshot(max(1, int(max_marks or 40))))
+    except (NativeRuntimeUnavailableError, H.HostError):
+        return []
+
+
+def _atspi_snapshot_elements(cap: int) -> list[dict[str, Any]]:
+    """AT-SPI clickables in snapshot shape (refs c1…), never raises."""
+    out: list[dict[str, Any]] = []
+    for i, c in enumerate(_atspi_clickable_candidates(max_marks=cap)):
+        w = int(c.get("w") or 0)
+        h = int(c.get("h") or 0)
+        x = int(c.get("x") or 0)
+        y = int(c.get("y") or 0)
+        name = str(c.get("name") or c.get("role") or "widget")[:120]
+        role = str(c.get("role") or "widget")
+        out.append(
+            {
+                "ref": f"c{i + 1}",
+                "tag": role,
+                "role": role,
+                "name": name,
+                "x": x,
+                "y": y,
+                "w": w,
+                "h": h,
+                "source": "atspi",
+                "bounds": {
+                    "left": x - w // 2,
+                    "top": y - h // 2,
+                    "right": x - w // 2 + w,
+                    "bottom": y - h // 2 + h,
+                },
+            }
+        )
+    return out
+
+
+def _windows_as_elements(cap: int) -> list[dict[str, Any]]:
+    wins = list_windows(limit=min(cap, 80))
+    out: list[dict[str, Any]] = []
+    for i, w in enumerate(wins):
+        b = w.get("bounds") or {}
+        left, top = int(b.get("left", 0)), int(b.get("top", 0))
+        right, bottom = int(b.get("right", 0)), int(b.get("bottom", 0))
+        width = int(w.get("width") or max(0, right - left))
+        height = int(w.get("height") or max(0, bottom - top))
+        out.append(
+            {
+                "ref": f"w{i + 1}",
+                "tag": "window",
+                "role": "window",
+                "name": str(w.get("title") or "")[:120],
+                "x": (left + right) // 2,
+                "y": (top + bottom) // 2,
+                "w": width,
+                "h": height,
+                "hwnd": w.get("hwnd"),
+                "bounds": b,
+            }
+        )
+        if len(out) >= cap:
+            break
+    return out
+
+
+def desktop_snapshot(
+    limit: int = 40,
+    mode: str = "auto",
+    hwnd: int | None = None,
+) -> list[dict[str, Any]]:
+    """Linux interactive snapshot — AT-SPI controls (UIA analogue), else windows.
+
+    *mode*:
+      - ``windows`` — top-level windows only (refs w1…)
+      - ``controls`` / ``atspi`` — AT-SPI clickable widgets (refs c1…)
+      - ``auto`` — AT-SPI clickables when present, else empty (SoM/OCR fallback)
+    """
+    _ = hwnd
+    cap = max(1, min(int(limit or 40), 100))
+    mode_s = (mode or "auto").strip().lower()
+    if mode_s == "windows":
+        return _windows_as_elements(cap)
+    atspi = _atspi_snapshot_elements(cap)
+    if mode_s in ("controls", "uia", "deep", "atspi"):
+        return atspi[:cap]
+    if atspi:
+        return atspi[:cap]
+    return []
+
+
 def _ocr_words_from_bgr(
     raw: bytes,
     stride: int,
     width: int,
     height: int,
 ) -> list[dict[str, Any]]:
-    """Tesseract word boxes from a BGR frame. Never raises. No-op if missing."""
     if width < 32 or height < 32 or not raw:
         return []
     path = _default_shot_path("ocr-detect")
@@ -689,7 +584,6 @@ def _ocr_word_candidates(
     *,
     max_marks: int = 20,
 ) -> list[dict[str, Any]]:
-    """OCR words to candidate centers (image pixels). Monkeypatch in tests."""
     cap = max(1, int(max_marks or 20))
     out: list[dict[str, Any]] = []
     for w in _ocr_words_from_bgr(raw, stride, width, height):
@@ -733,7 +627,6 @@ def _pixel_ui_candidates(
     *,
     max_marks: int = 20,
 ) -> list[dict[str, Any]]:
-    """Windows-equivalent pixel-edge Set-of-Mark fallback (games / canvas)."""
     if width < 32 or height < 32 or not raw:
         return []
     step = max(2, min(width, height) // 480 * 2) or 4
@@ -817,7 +710,6 @@ def _merge_candidates(
     extra: list[dict[str, Any]],
     cap: int,
 ) -> list[dict[str, Any]]:
-    """Keep primary first; add extra whose center is not already taken."""
     out: list[dict[str, Any]] = []
     seen: set[tuple[int, int]] = set()
     for c in list(primary) + list(extra):
@@ -845,14 +737,7 @@ def detect_ui_candidates(
     *,
     max_marks: int = 20,
 ) -> list[dict[str, Any]]:
-    """Clickable Linux targets: AT-SPI, then OCR word boxes, then pixels.
-
-    Same return shape as Windows (``x``/``y`` centers, ``w``/``h``/``area``)
-    so Set-of-Mark and click-by-xy share one executor path. AT-SPI still
-    runs when the capture is a tiny blank (headless grim miss) so GTK/Qt
-    apps keep named boxes. OCR and the Windows-equivalent edge detector
-    need a real frame.
-    """
+    """Clickable Linux targets: AT-SPI, then OCR word boxes, then pixels."""
     cap = max(1, int(max_marks or 20))
     atspi = _atspi_clickable_candidates(max_marks=cap)
     ocr: list[dict[str, Any]] = []
@@ -864,97 +749,43 @@ def detect_ui_candidates(
     return _pixel_ui_candidates(raw, stride, width, height, max_marks=cap)
 
 
-def drag(x1: int, y1: int, x2: int, y2: int) -> None:
-    backend = _pointer_backend()
-    if not backend:
-        raise _missing_hands("drag")
-    kind, tool = backend
-    if kind == "xdotool":
-        _run([tool, "mousemove", "--sync", str(int(x1)), str(int(y1))])
-        _run([tool, "mousedown", "1"])
-        _run([tool, "mousemove", "--sync", str(int(x2)), str(int(y2))])
-        _run([tool, "mouseup", "1"])
-        return
-    _run([tool, "mousemove", str(int(x1)), str(int(y1))])
-    _run([tool, "click", "0x40"])
-    _run([tool, "mousemove", str(int(x2)), str(int(y2))])
-    _run([tool, "click", "0x80"])
-
-
-def foreground_window_info() -> dict[str, Any]:
-    """Shape matches Windows: always ``hwnd`` + ``title`` keys when possible."""
-    xd = _which("xdotool")
-    if not xd:
-        return {"hwnd": 0, "title": ""}
-    wid = _run([xd, "getactivewindow"])
-    hwnd = 0
-    if wid.returncode == 0:
-        with contextlib.suppress(ValueError):
-            hwnd = int(wid.stdout.decode("utf-8", "replace").strip() or "0")
-    proc = _run([xd, "getactivewindow", "getwindowname"])
-    title = ""
-    if proc.returncode == 0:
-        title = proc.stdout.decode("utf-8", "replace").strip()[:200]
-    return {"hwnd": hwnd, "title": title}
-
-
-def focus_window(hwnd: int) -> bool:
-    """Activate hwnd via xdotool windowactivate / wmctrl -i -a."""
-    _require_linux()
-    if not hwnd:
-        return False
-    wid = str(int(hwnd))
-    xd = _which("xdotool")
-    wm = _which("wmctrl")
-    if xd:
-        _run([xd, "windowactivate", "--sync", wid])
-    elif wm:
-        _run([wm, "-i", "-a", wid])
-    else:
-        return False
-    info = foreground_window_info()
-    got = int(info.get("hwnd") or 0)
-    return got == int(hwnd)
-
-
 def move_mouse(x: int, y: int) -> None:
-    """Pointer only — menus and CSS :hover need the cursor on the control."""
     _require_linux()
-    xd = _which("xdotool")
-    if xd:
-        _run([xd, "mousemove", "--sync", str(int(x)), str(int(y))])
-        return
-    yd = _which("ydotool")
-    if yd:
-        _run([yd, "mousemove", str(int(x)), str(int(y))])
-        return
-    raise RuntimeError("Linux hover needs xdotool (X11) or ydotool (Wayland)")
+    try:
+        H.mouse_move(int(x), int(y))
+    except (NativeRuntimeUnavailableError, H.HostError) as exc:
+        raise _host_fail("hover", exc) from exc
 
 
 def click(x: int, y: int, *, button: str = "left", clicks: int = 1) -> None:
     _require_linux()
-    btn = {"left": "1", "middle": "2", "right": "3"}.get((button or "left").lower(), "1")
-    n = max(1, int(clicks or 1))
-    xd = _which("xdotool")
-    if xd:
-        _run([xd, "mousemove", "--sync", str(int(x)), str(int(y))])
-        for _ in range(n):
-            _run([xd, "click", btn])
-        return
-    yd = _which("ydotool")
-    if yd:
-        ybtn = {"1": "0xC0", "2": "0xC2", "3": "0xC1"}.get(btn, "0xC0")
-        _run([yd, "mousemove", str(int(x)), str(int(y))])
-        for _ in range(n):
-            _run([yd, "click", ybtn])
-        return
-    raise RuntimeError("Linux click needs xdotool (X11) or ydotool (Wayland)")
+    code = _MOUSE_BUTTONS.get((button or "left").lower(), H.MOUSE_LEFT)
+    try:
+        H.mouse_click(int(x), int(y), code, max(1, int(clicks or 1)))
+    except (NativeRuntimeUnavailableError, H.HostError) as exc:
+        raise _host_fail("click", exc) from exc
 
 
 def click_element(el: dict[str, Any], *, button: str = "left", clicks: int = 1) -> None:
     x = int(el.get("x") or el.get("cx") or 0)
     y = int(el.get("y") or el.get("cy") or 0)
     click(x, y, button=button, clicks=clicks)
+
+
+def drag(x1: int, y1: int, x2: int, y2: int, *, steps: int = 12) -> None:
+    _require_linux()
+    try:
+        H.mouse_drag(int(x1), int(y1), int(x2), int(y2), max(2, int(steps)))
+    except (NativeRuntimeUnavailableError, H.HostError) as exc:
+        raise _host_fail("drag", exc) from exc
+
+
+def scroll(x: int, y: int, *, dy: int = -3, dx: int = 0) -> None:
+    _require_linux()
+    try:
+        H.mouse_scroll(int(x), int(y), int(dx or 0), int(dy or 0))
+    except (NativeRuntimeUnavailableError, H.HostError) as exc:
+        raise _host_fail("scroll", exc) from exc
 
 
 def type_text(
@@ -965,13 +796,10 @@ def type_text(
     chars_typed: list[int] | None = None,
 ) -> int:
     """Type unicode text. Mirrors Windows abort_check / chars_typed contract."""
+    _ = per_char
     _require_linux()
-    raw = text or ""
     n = 0
-    xd = _which("xdotool")
-    yd = _which("ydotool") if not xd else None
-    if not xd and not yd:
-        raise RuntimeError("Linux type needs xdotool or ydotool")
+    raw = text or ""
     for i, ch in enumerate(raw):
         if abort_check is not None and i > 0 and i % 2 == 0:
             try:
@@ -983,26 +811,61 @@ def type_text(
                 raise
             except Exception:
                 pass
-        if xd:
-            if ch in ("\r", "\n"):
-                _run([xd, "key", "Return"])
-            elif per_char or len(raw) <= 4:
-                _run([xd, "type", "--delay", "12", ch])
-            else:
-                # Batch the remainder once we know we are not aborting mid-string.
-                rest = raw[i:]
-                _run([xd, "type", "--delay", "8", rest])
-                n += len(rest)
-                if chars_typed is not None:
-                    chars_typed[:] = [n]
-                return n
-        else:
-            assert yd is not None
-            _run([yd, "type", ch])
+        if ch == "\r" and i + 1 < len(raw) and raw[i + 1] == "\n":
+            n += 1
+            continue
+        try:
+            H.type_text(ch, _TYPE_DELAY_MS)
+        except (NativeRuntimeUnavailableError, H.HostError) as exc:
+            raise _host_fail("type", exc) from exc
         n += 1
     if chars_typed is not None:
         chars_typed[:] = [n]
     return n
+
+
+def resolve_key_combo(key: str, *, vk_scan=None) -> list[int]:
+    """'ctrl+s' / '?' / 'shift+f6' → ordered VK list (modifiers first)."""
+    parts = [p.strip().lower() for p in (key or "").replace("-", "+").split("+") if p.strip()]
+    if not parts:
+        return []
+    mods: list[int] = []
+    mains: list[int] = []
+    for p in parts:
+        if p in _VK:
+            vk = _VK[p]
+            (mods if vk in _MODIFIER_VKS else mains).append(vk)
+        elif len(p) == 1:
+            if vk_scan is None:
+                vk_scan = H.vk_key_scan
+            sc = int(vk_scan(ord(p)))
+            if sc == -1:
+                raise ValueError(f"Key has no VK mapping on this layout: {p!r}")
+            shift_state = (sc >> 8) & 0xFF
+            if shift_state & 1 and 0x10 not in mods:
+                mods.append(0x10)
+            if shift_state & 2 and 0x11 not in mods:
+                mods.append(0x11)
+            if shift_state & 4 and 0x12 not in mods:
+                mods.append(0x12)
+            mains.append(sc & 0xFF)
+        else:
+            raise ValueError(f"Unknown key: {p}")
+    return mods + mains
+
+
+def press_key(key: str) -> None:
+    _require_linux()
+    try:
+        vks = resolve_key_combo(key)
+    except (NativeRuntimeUnavailableError, H.HostError) as exc:
+        raise _host_fail("press_key", exc) from exc
+    if not vks:
+        return
+    try:
+        H.key_combo(vks)
+    except (NativeRuntimeUnavailableError, H.HostError) as exc:
+        raise _host_fail("press_key", exc) from exc
 
 
 def type_text_fast(
@@ -1011,7 +874,6 @@ def type_text_fast(
     abort_check: Callable[[], bool] | None = None,
     chars_typed: list[int] | None = None,
 ) -> dict[str, Any]:
-    """Type text — paste when long (clipboard), else keystrokes. Same shape as Windows."""
     data = str(text or "")
     if len(data) <= PASTE_THRESHOLD or "\r" in data or "\n" in data:
         n = type_text(data, abort_check=abort_check, chars_typed=chars_typed)
@@ -1031,130 +893,6 @@ def type_text_fast(
             set_clipboard_text(saved)
 
 
-def scroll(x: int, y: int, *, dy: int = -3, dx: int = 0) -> None:
-    """Scroll at (x,y). dy>0 = up, dy<0 = down (matches Windows notch sign)."""
-    _require_linux()
-    backend = _pointer_backend()
-    if not backend:
-        raise _missing_hands("scroll")
-    kind, tool = backend
-    if kind == "xdotool":
-        _run([tool, "mousemove", "--sync", str(int(x)), str(int(y))])
-        notches = abs(int(dy or 0))
-        btn = "4" if int(dy or 0) > 0 else "5"
-        for _ in range(max(1, notches) if dy else 0):
-            _run([tool, "click", btn])
-        if dx:
-            hbtn = "7" if int(dx) > 0 else "6"
-            for _ in range(abs(int(dx))):
-                _run([tool, "click", hbtn])
-        return
-    _run([tool, "mousemove", str(int(x)), str(int(y))])
-    notches = abs(int(dy or 0))
-    ybtn = "0xC4" if int(dy or 0) > 0 else "0xC5"
-    for _ in range(max(1, notches) if dy else 0):
-        _run([tool, "click", ybtn])
-    if dx:
-        yh = "0xC7" if int(dx) > 0 else "0xC6"
-        for _ in range(abs(int(dx))):
-            _run([tool, "click", yh])
-
-
-_YDOTOOL_KEYCODES: dict[str, int] = {
-    "ctrl": 29,
-    "control": 29,
-    "alt": 56,
-    "shift": 42,
-    "meta": 125,
-    "win": 125,
-    "super": 125,
-    "enter": 28,
-    "return": 28,
-    "tab": 15,
-    "esc": 1,
-    "escape": 1,
-    "space": 57,
-    "backspace": 14,
-    "delete": 111,
-    "up": 103,
-    "down": 108,
-    "left": 105,
-    "right": 106,
-    "home": 102,
-    "end": 107,
-    "pageup": 104,
-    "pagedown": 109,
-}
-
-
-def press_key(key: str) -> None:
-    """Press a key or combo like 'ctrl+s', 'enter', 'shift+f6' via xdotool/ydotool."""
-    _require_linux()
-    raw = (key or "").strip()
-    if not raw:
-        return
-    backend = _pointer_backend()
-    if not backend:
-        raise _missing_hands("press_key")
-    kind, tool = backend
-    parts = [p.strip().lower() for p in raw.replace("-", "+").split("+") if p.strip()]
-    mapping = {
-        "ctrl": "ctrl",
-        "control": "ctrl",
-        "alt": "alt",
-        "shift": "shift",
-        "meta": "super",
-        "win": "super",
-        "super": "super",
-        "enter": "Return",
-        "return": "Return",
-        "tab": "Tab",
-        "esc": "Escape",
-        "escape": "Escape",
-        "space": "space",
-        "backspace": "BackSpace",
-        "delete": "Delete",
-        "up": "Up",
-        "down": "Down",
-        "left": "Left",
-        "right": "Right",
-        "home": "Home",
-        "end": "End",
-        "pageup": "Page_Up",
-        "pagedown": "Page_Down",
-    }
-    if kind == "ydotool":
-        codes: list[int] = []
-        for p in parts:
-            if p in _YDOTOOL_KEYCODES:
-                codes.append(_YDOTOOL_KEYCODES[p])
-            elif len(p) == 1 and p.isalpha():
-                codes.append(ord(p.lower()) - ord("a") + 30)
-            elif len(p) == 1 and p.isdigit():
-                codes.append(11 if p == "0" else int(p) + 1)
-            elif p.startswith("f") and p[1:].isdigit():
-                n = int(p[1:])
-                codes.append(58 + n if 1 <= n <= 10 else 87 + (n - 11))
-            else:
-                raise RuntimeError(f"ydotool cannot map key {p!r}")
-        down = [f"{c}:1" for c in codes]
-        up = [f"{c}:0" for c in reversed(codes)]
-        _run([tool, "key", *down, *up])
-        return
-    mapped: list[str] = []
-    for p in parts:
-        if p in mapping:
-            mapped.append(mapping[p])
-        elif len(p) == 1:
-            mapped.append(p)
-        elif p.startswith("f") and p[1:].isdigit():
-            mapped.append(p.upper())
-        else:
-            mapped.append(p)
-    combo = "+".join(mapped)
-    _run([tool, "key", combo])
-
-
 def press_hold(
     x: int,
     y: int,
@@ -1162,18 +900,13 @@ def press_hold(
     hold_ms: int = 2600,
     abort_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
-    """Press-and-hold at (x,y) via xdotool/ydotool mousedown/up."""
     _require_linux()
-    backend = _pointer_backend()
-    if not backend:
-        raise _missing_hands("press_hold")
-    kind, tool = backend
-    if kind == "xdotool":
-        _run([tool, "mousemove", "--sync", str(int(x)), str(int(y))])
-        _run([tool, "mousedown", "1"])
-    else:
-        _run([tool, "mousemove", str(int(x)), str(int(y))])
-        _run([tool, "click", "0x40"])
+    try:
+        H.mouse_move(int(x), int(y))
+        time.sleep(0.05)
+        H.mouse_button(H.MOUSE_LEFT, True)
+    except (NativeRuntimeUnavailableError, H.HostError) as exc:
+        raise _host_fail("press_hold", exc) from exc
     held = 0.0
     step = 0.1
     total = max(0.1, float(hold_ms) / 1000.0)
@@ -1184,11 +917,27 @@ def press_hold(
             if abort_check is not None and abort_check():
                 break
     finally:
-        if kind == "xdotool":
-            _run([tool, "mouseup", "1"])
-        else:
-            _run([tool, "click", "0x80"])
+        with contextlib.suppress(NativeRuntimeUnavailableError, H.HostError):
+            H.mouse_button(H.MOUSE_LEFT, False)
     return {"held_ms": int(min(held, total) * 1000), "x": x, "y": y}
+
+
+def foreground_window_info() -> dict[str, Any]:
+    try:
+        hwnd, title = H.foreground_window()
+        return {"hwnd": int(hwnd), "title": str(title or "")[:200]}
+    except (NativeRuntimeUnavailableError, H.HostError):
+        return {"hwnd": 0, "title": ""}
+
+
+def focus_window(hwnd: int) -> bool:
+    _require_linux()
+    if not hwnd:
+        return False
+    try:
+        return bool(H.focus_window(int(hwnd)))
+    except (NativeRuntimeUnavailableError, H.HostError):
+        return False
 
 
 def manage_window(
@@ -1200,65 +949,93 @@ def manage_window(
     width: int | None = None,
     height: int | None = None,
 ) -> dict[str, Any]:
-    """minimize | maximize | restore | close | move | resize via xdotool/wmctrl."""
     _require_linux()
     v = (verb or "").strip().lower()
     if not hwnd:
         return {"ok": False, "message": "hwnd required"}
-    xd = _which("xdotool")
-    wm = _which("wmctrl")
-    wid = str(int(hwnd))
-    if v == "minimize":
-        if xd:
-            _run([xd, "windowminimize", wid])
-            return {"ok": True, "message": f"minimize hwnd={hwnd}"}
-        return {"ok": False, "message": "xdotool required for minimize"}
-    if v == "maximize":
-        if wm:
-            _run([wm, "-i", "-r", wid, "-b", "add,maximized_vert,maximized_horz"])
-            return {"ok": True, "message": f"maximize hwnd={hwnd}"}
-        if xd:
-            _run([xd, "windowsize", wid, "100%", "100%"])
-            return {"ok": True, "message": f"maximize hwnd={hwnd}"}
-        return {"ok": False, "message": "wmctrl/xdotool required for maximize"}
-    if v == "restore":
-        if wm:
-            _run([wm, "-i", "-r", wid, "-b", "remove,maximized_vert,maximized_horz"])
-            return {"ok": True, "message": f"restore hwnd={hwnd}"}
-        if xd:
-            _run([xd, "windowmap", wid])
-            return {"ok": True, "message": f"restore hwnd={hwnd}"}
-        return {
-            "ok": False,
-            "message": f"wmctrl/xdotool required for restore — {_LINUX_HANDS_HINT}",
-        }
+    action_map = {
+        "minimize": H.WINDOW_MINIMIZE,
+        "maximize": H.WINDOW_MAXIMIZE,
+        "restore": H.WINDOW_RESTORE,
+        "close": H.WINDOW_CLOSE,
+        "move": H.WINDOW_MOVE_RESIZE,
+        "resize": H.WINDOW_MOVE_RESIZE,
+    }
+    if v not in action_map:
+        return {"ok": False, "message": f"Unknown window verb {verb!r}"}
+    nx = int(x) if x is not None else 0
+    ny = int(y) if y is not None else 0
+    nw = int(width) if width is not None else 0
+    nh = int(height) if height is not None else 0
+    try:
+        if v in ("move", "resize"):
+            if v == "move" and (x is None or y is None):
+                return {"ok": False, "message": "move requires x and y"}
+            if v == "resize" and (width is None or height is None):
+                return {"ok": False, "message": "resize requires width and height"}
+            # Preserve unspecified axis from current geometry when only move or resize.
+            if v == "move" or width is None or height is None or x is None or y is None:
+                with contextlib.suppress(NativeRuntimeUnavailableError, H.HostError):
+                    left, top, right, bottom = H.window_rect(int(hwnd))
+                    if x is None:
+                        nx = left
+                    if y is None:
+                        ny = top
+                    if width is None:
+                        nw = max(0, right - left)
+                    if height is None:
+                        nh = max(0, bottom - top)
+        H.manage_window(int(hwnd), action_map[v], nx, ny, nw, nh)
+    except (NativeRuntimeUnavailableError, H.HostError) as exc:
+        return {"ok": False, "message": f"{v} hwnd={hwnd} failed: {exc}"}
     if v == "close":
-        if xd:
-            _run([xd, "windowclose", wid])
-            return {
-                "ok": True,
-                "message": (
-                    f"Sent close to hwnd={hwnd} (the app may show a save prompt — "
-                    "snapshot to see it)"
-                ),
-            }
-        if wm:
-            _run([wm, "-i", "-c", wid])
-            return {"ok": True, "message": f"Sent close to hwnd={hwnd}"}
-        return {"ok": False, "message": "xdotool/wmctrl required for close"}
+        return {
+            "ok": True,
+            "message": (
+                f"Sent close to hwnd={hwnd} (the app may show a save prompt — "
+                "snapshot to see it)"
+            ),
+        }
     if v in ("move", "resize"):
-        if not xd:
-            return {"ok": False, "message": "xdotool required for move/resize"}
-        if v == "move" and x is not None and y is not None:
-            _run([xd, "windowmove", wid, str(int(x)), str(int(y))])
-        if v == "resize" and width is not None and height is not None:
-            _run([xd, "windowsize", wid, str(int(width)), str(int(height))])
-        nx = int(x) if x is not None else 0
-        ny = int(y) if y is not None else 0
-        nw = int(width) if width is not None else 0
-        nh = int(height) if height is not None else 0
         return {"ok": True, "message": f"{v} hwnd={hwnd} → ({nx},{ny}) {nw}x{nh}"}
-    return {"ok": False, "message": f"Unknown window verb {verb!r}"}
+    return {"ok": True, "message": f"{v} hwnd={hwnd}"}
+
+
+def list_windows(limit: int = 40) -> list[dict[str, Any]]:
+    try:
+        return H.list_windows(max(1, int(limit)))
+    except (NativeRuntimeUnavailableError, H.HostError):
+        return []
+
+
+def list_monitors() -> list[dict[str, Any]]:
+    try:
+        return H.list_monitors()
+    except (NativeRuntimeUnavailableError, H.HostError):
+        return [{"index": 0, "primary": True}]
+
+
+def get_clipboard_text() -> str:
+    try:
+        return H.clipboard_get_text()
+    except (NativeRuntimeUnavailableError, H.HostError):
+        return ""
+
+
+def set_clipboard_text(text: str) -> bool:
+    try:
+        H.clipboard_set_text(str(text or ""))
+    except (NativeRuntimeUnavailableError, H.HostError):
+        return False
+    return True
+
+
+def _which(*names: str) -> str | None:
+    for n in names:
+        p = shutil.which(n)
+        if p:
+            return p
+    return None
 
 
 def open_app(name: str, search_dirs: list[str] | None = None) -> dict[str, Any]:
@@ -1268,9 +1045,7 @@ def open_app(name: str, search_dirs: list[str] | None = None) -> dict[str, Any]:
     if not raw:
         return {"ok": False, "message": "app name required"}
     if search_dirs:
-        from pathlib import Path as P
-
-        rel = P(raw)
+        rel = Path(raw)
         if not rel.is_absolute() and ".." in rel.parts:
             raise ValueError("open_app refuses parent-directory traversal")
     aliases = {
@@ -1340,80 +1115,3 @@ def open_url(url: str) -> dict[str, Any]:
         start_new_session=True,
     )
     return {"url": u, "method": "xdg-open"}
-
-
-def list_windows(limit: int = 40) -> list[dict[str, Any]]:
-    """Visible windows via xdotool (best-effort). Shape matches Windows list_windows."""
-    xd = _which("xdotool")
-    if not xd:
-        return []
-    proc = _run([xd, "search", "--onlyvisible", "--name", ".*"])
-    if proc.returncode != 0:
-        return []
-    ids = [
-        line.strip()
-        for line in proc.stdout.decode("utf-8", "replace").splitlines()
-        if line.strip().isdigit()
-    ]
-    out: list[dict[str, Any]] = []
-    for wid in ids[: max(1, int(limit))]:
-        name_p = _run([xd, "getwindowname", wid])
-        geo_p = _run([xd, "getwindowgeometry", "--shell", wid])
-        title = name_p.stdout.decode("utf-8", "replace").strip() if name_p.returncode == 0 else ""
-        if not title:
-            continue
-        geo: dict[str, int] = {}
-        if geo_p.returncode == 0:
-            for line in geo_p.stdout.decode("utf-8", "replace").splitlines():
-                if "=" in line:
-                    k, _, v = line.partition("=")
-                    with contextlib.suppress(ValueError):
-                        geo[k.strip()] = int(v.strip())
-        left = int(geo.get("X", 0))
-        top = int(geo.get("Y", 0))
-        width = int(geo.get("WIDTH", 0))
-        height = int(geo.get("HEIGHT", 0))
-        out.append(
-            {
-                "hwnd": int(wid),
-                "title": title[:200],
-                "bounds": {
-                    "left": left,
-                    "top": top,
-                    "right": left + width,
-                    "bottom": top + height,
-                },
-            }
-        )
-    return out
-
-
-def list_monitors() -> list[dict[str, Any]]:
-    return [{"index": 0, "primary": True}]
-
-
-def get_clipboard_text() -> str:
-    xsel = _which("xsel")
-    if xsel:
-        proc = _run([xsel, "-o", "-b"])
-        if proc.returncode == 0:
-            return proc.stdout.decode("utf-8", "replace")
-    return ""
-
-
-def set_clipboard_text(text: str) -> bool:
-    xsel = _which("xsel")
-    if not xsel:
-        return False
-    try:
-        subprocess.run(  # noqa: S603
-            [xsel, "-i", "-b"],
-            input=(text or "").encode("utf-8"),
-            check=False,
-            timeout=4.0,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        return True
-    except (OSError, subprocess.TimeoutExpired):
-        return False
