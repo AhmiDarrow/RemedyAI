@@ -66,7 +66,6 @@ def _cmd_serve(args) -> None:
     import threading
     import time as _time
 
-    import uvicorn
 
     # Frozen windowed builds have sys.stdout/stderr == None; give logging a
     # null stream BEFORE any formatter/handler touches them (uvicorn crashes
@@ -144,6 +143,15 @@ def _cmd_serve(args) -> None:
         console.print(f"[dim]Logs:[/dim]      {log_dir}")
     except Exception as exc:
         console.print(f"[yellow]Logging setup failed:[/yellow] {exc}")
+
+    # A hard crash (access violation inside a C extension, a stack overflow, a
+    # deadlocked thread killed by the OS) leaves nothing in the Python logs.
+    # faulthandler writes the native traceback of every thread to crash.log
+    # at the moment the process dies, so the desktop server panel can show
+    # *why* the sidecar vanished instead of only that it did.
+    from remedy.interfaces.serve_forensics import enable_crash_forensics
+
+    enable_crash_forensics(home)
 
     agent_config = config_to_agent_config(config)
 
@@ -341,7 +349,9 @@ def _cmd_serve(args) -> None:
             },
         },
     }
-    uvicorn.run(
+    from remedy.interfaces.serve_forensics import run_uvicorn_logged
+
+    run_uvicorn_logged(
         app,
         host=args.host,
         port=args.port,

@@ -9,6 +9,7 @@ import {
 } from '../api/coordination'
 import type { ConnectedProvider } from '../api/providers'
 import { ThemeSwitcher } from './ThemeSwitcher'
+import { ServerMenu } from './ServerMenu'
 import { FormSelect } from './settings/formUi'
 import type { ThemeId, Theme } from '../themes'
 import type { ModelInfo } from '../App'
@@ -499,8 +500,6 @@ export function StatusBar({
     return `Other Remedy sessions at work — their held files are protected from overwrites:\n${lines.join('\n')}`
   }, [siblings])
 
-  const dotColor =
-    status === 'connected' ? 'var(--success)' : status === 'checking' ? 'var(--warning)' : 'var(--error)'
   const autoApprove = approvalMode === 'auto'
   const fullControl = approvalMode === 'full'
 
@@ -539,25 +538,7 @@ export function StatusBar({
         className="status-ctrl-row flex items-center px-2 gap-1.5 text-xs"
         style={{ color: 'var(--text-muted)' }}
       >
-        <div
-          className="flex items-center gap-1.5 flex-shrink-0 min-w-0"
-          title={status === 'connected' ? `Remedy ${version || ''}`.trim() : 'Server offline'}
-        >
-          <span
-            className={`inline-block w-2 h-2 rounded-full${
-              status === 'disconnected' ? ' status-offline-dot' : ''
-            }`}
-            style={{ background: dotColor }}
-            aria-hidden
-          />
-          <span className="font-medium truncate" style={{ color: 'var(--text-secondary)' }}>
-            {status === 'connected'
-              ? alerts ? `Connected · ${alerts}` : 'Connected'
-              : status === 'checking'
-                ? 'Connecting…'
-                : 'Offline'}
-          </span>
-        </div>
+        <ServerMenu status={status} version={version} compact alerts={alerts} />
         {streaming && (
           <span
             className="status-streaming-pill px-1.5 py-0.5 rounded font-medium flex-shrink-0 inline-flex items-center gap-1.5"
@@ -596,25 +577,11 @@ export function StatusBar({
       {/* Server / vision / alerts — same row as the action buttons so
           maximize on WSLg does not hide the control strip under the taskbar. */}
       <div className="flex items-center gap-2 flex-shrink-0 min-w-0">
-        <div
-          className="flex items-center gap-1.5 flex-shrink-0"
-          title={status === 'connected' ? `Remedy ${version || ''}`.trim() : 'Server offline'}
-        >
-          <span
-            className={`inline-block w-2 h-2 rounded-full${
-              status === 'disconnected' ? ' status-offline-dot' : ''
-            }`}
-            style={{ background: dotColor }}
-            aria-hidden
-          />
-          <span className="font-medium" style={{ color: 'var(--text-secondary)' }}>
-            {status === 'connected'
-              ? 'Connected'
-              : status === 'checking'
-                ? 'Connecting…'
-                : 'Offline'}
-          </span>
-        </div>
+        <ServerMenu
+          status={status}
+          version={version}
+          onRestarted={() => setStatus('checking')}
+        />
 
         {streaming && (
           <span
