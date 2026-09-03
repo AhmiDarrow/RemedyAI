@@ -7,6 +7,7 @@ import pytest
 from remedy.core.approvals import APPROVALS, ApprovalQueue
 from remedy.core.self_inject_draft import write_pending_ship
 from remedy.core.self_inject_guard import (
+    collect_git_diff,
     normalize_rel,
     run_both_passes,
     scan_added_behavior,
@@ -96,6 +97,15 @@ def test_both_passes_clean_small_diff():
     assert out["ok"] is True
     assert out["passes"]["path_jail"]["ok"] is True
     assert out["passes"]["behavior"]["ok"] is True
+
+
+def test_collect_git_diff_fails_closed_when_git_errors(tmp_path, monkeypatch):
+    def failed_git(*_args, **_kwargs):
+        return 128, "", "invalid revision"
+
+    monkeypatch.setattr("remedy.execution.sandbox.run_unattended_git", failed_git)
+    with pytest.raises(RuntimeError, match="git file-list failed"):
+        collect_git_diff(tmp_path, base="missing-base")
 
 
 def test_fork_size_cap_stricter():

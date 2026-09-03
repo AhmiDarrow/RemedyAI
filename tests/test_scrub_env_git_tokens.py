@@ -81,6 +81,8 @@ def test_run_unattended_git_uses_scrubbed_env(monkeypatch, tmp_path):
     def fake_run(argv, **kwargs):
         captured["env"] = dict(kwargs.get("env") or {})
         captured["argv"] = list(argv)
+        captured["encoding"] = kwargs.get("encoding")
+        captured["errors"] = kwargs.get("errors")
 
         class R:
             returncode = 0
@@ -98,6 +100,8 @@ def test_run_unattended_git_uses_scrubbed_env(monkeypatch, tmp_path):
     assert "GIT_ASKPASS" not in env
     assert env.get("GIT_TERMINAL_PROMPT") == "0"
     assert captured["argv"][:3] == ["git", "-C", str(tmp_path)]
+    assert captured["encoding"] == "utf-8"
+    assert captured["errors"] == "replace"
 
 
 def test_unattended_git_never_inherits_askpass_or_llm_keys(monkeypatch):

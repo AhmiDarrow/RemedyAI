@@ -62,6 +62,8 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 - Removed a contradictory page-settle delay from unobserved optimistic Browser
   navigation; the rail opens immediately and still requires a snapshot before
   any follow-up input.
+- Made unattended Git output decode as UTF-8 on Windows and made security diff
+  collection fail closed on Git errors instead of returning an empty green scan.
 
 ### Complete verification matrix
 
