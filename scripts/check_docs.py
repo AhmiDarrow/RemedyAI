@@ -420,6 +420,7 @@ _ALLOWED_LINK_HOSTS = (
     "https://github.com/AhmiDarrow/",
     "https://raw.githubusercontent.com/AhmiDarrow/",
     "https://pypi.org/",
+    "https://img.shields.io/",  # live version badges (release, PyPI, master)
     "https://www.patreon.com/",
     "https://agentskills.io",
 )
