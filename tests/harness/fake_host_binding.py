@@ -328,7 +328,9 @@ class FakeHostUia:
                 role_l = (_el_role(el) or "").lower()
                 name_l = (_el_name(el) or "").lower()
                 is_password = "password" in role_l or "password" in name_l
-                if is_password and not okv:
+                # Password fields must never claim verified readback (and must
+                # not echo the secret or its length) — matches Zig/desktop_uia.
+                if is_password:
                     return {
                         "ok": True,
                         "verified": False,

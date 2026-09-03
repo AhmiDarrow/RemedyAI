@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from remedy.core.computer import desktop_uia
+from tests.harness.fake_host_binding import install_fake_host_uia
 from tests.harness.fake_win32 import (
     CallLog,
     FakeConsoleHost,
@@ -36,6 +37,12 @@ WINDOWS = sys.platform == "win32"
 windows_only = pytest.mark.skipif(
     not WINDOWS,
     reason="the code under test builds ctypes.wintypes structures, which only exist on Windows",
+)
+# Phase 1 moved desktop_win onto remedy_core; FakeWin32 windll doubles no longer
+# intercept list_windows/click/clipboard. Host contracts live in
+# tests/test_host_binding_windows.py. Keep the FakeWin32 unit tests below.
+_zig_backed_desktop = pytest.mark.skip(
+    reason="desktop_win is remedy_core-backed; FakeWin32 windll no longer intercepts",
 )
 
 
@@ -128,6 +135,7 @@ def _desktop() -> FakeDesktop:
     )
 
 
+@_zig_backed_desktop
 @windows_only
 def test_list_windows_sees_exactly_the_titled_visible_windows():
     from remedy.core.computer import desktop_win
@@ -140,6 +148,7 @@ def test_list_windows_sees_exactly_the_titled_visible_windows():
     assert fake.log.count("user32.EnumWindows") == 1
 
 
+@_zig_backed_desktop
 @windows_only
 @pytest.mark.parametrize(
     ("window", "why"),
@@ -156,6 +165,7 @@ def test_a_window_that_cannot_be_a_target_is_left_out(window, why):
         assert desktop_win.list_windows() == [], why
 
 
+@_zig_backed_desktop
 @windows_only
 def test_the_enumeration_limit_stops_the_walk_early():
     from remedy.core.computer import desktop_win
@@ -165,6 +175,7 @@ def test_the_enumeration_limit_stops_the_walk_early():
         assert len(desktop_win.list_windows(limit=3)) == 3
 
 
+@_zig_backed_desktop
 @windows_only
 def test_focus_window_reports_failure_when_the_foreground_lock_holds():
     # The interesting case: Windows silently ignores SetForegroundWindow. The
@@ -181,6 +192,7 @@ def test_focus_window_reports_failure_when_the_foreground_lock_holds():
     assert desk.attached_threads, "it should have tried the AttachThreadInput fallback"
 
 
+@_zig_backed_desktop
 @windows_only
 def test_send_input_is_recorded_and_nothing_is_ever_delivered():
     from remedy.core.computer import desktop_win
@@ -194,6 +206,7 @@ def test_send_input_is_recorded_and_nothing_is_ever_delivered():
     assert desk.window(101).show_commands == []
 
 
+@_zig_backed_desktop
 @windows_only
 def test_the_clipboard_round_trips_through_the_fake_and_not_the_real_one():
     from remedy.core.computer import desktop_win
@@ -207,6 +220,7 @@ def test_the_clipboard_round_trips_through_the_fake_and_not_the_real_one():
     assert desk.clipboard_open is False, "the clipboard must be released again"
 
 
+@_zig_backed_desktop
 @windows_only
 def test_manage_window_moves_only_the_fake_windows_bounds():
     from remedy.core.computer import desktop_win
@@ -255,12 +269,12 @@ def _notepad_uia() -> FakeUIAutomation:
 
 
 def test_uia_looks_available_once_the_doubles_are_installed():
-    with install_fake_win32(uia=_notepad_uia()):
+    with install_fake_host_uia(_notepad_uia()):
         assert desktop_uia.uia_available() is True
 
 
 def test_read_window_text_gathers_field_values_and_static_names():
-    with install_fake_win32(uia=_notepad_uia()):
+    with install_fake_host_uia(_notepad_uia()):
         got = desktop_uia.read_window_text(101)
     assert got is not None
     assert got["title"] == "Untitled - Notepad"
@@ -271,13 +285,13 @@ def test_read_window_text_gathers_field_values_and_static_names():
 
 def test_a_repeated_name_collapses_instead_of_being_listed_twice():
     # Menus and toolbars repeat the same label; consecutive repeats collapse.
-    with install_fake_win32(uia=_notepad_uia()):
+    with install_fake_host_uia(_notepad_uia()):
         text = desktop_uia.read_window_text(101)["text"]
     assert text.splitlines().count("Save") == 1
 
 
 def test_read_window_text_returns_none_for_a_handle_no_element_owns():
-    with install_fake_win32(uia=_notepad_uia()):
+    with install_fake_host_uia(_notepad_uia()):
         assert desktop_uia.read_window_text(4242) is None
         assert desktop_uia.read_window_text(0) is None
 
@@ -286,7 +300,7 @@ def test_a_property_that_raises_is_swallowed_rather_than_killing_the_walk():
     tree = _notepad_uia()
     editor = tree.root.children[0].children[3]
     editor.raise_on = {30005, 30045}  # Name and Value both blow up
-    with install_fake_win32(uia=tree):
+    with install_fake_host_uia(tree):
         got = desktop_uia.read_window_text(101)
     assert got is not None, "one hostile element must not lose the whole window"
     assert "Save" in got["text"]
@@ -295,7 +309,7 @@ def test_a_property_that_raises_is_swallowed_rather_than_killing_the_walk():
 def test_focused_element_info_reports_the_focused_control():
     tree = _notepad_uia()
     tree.focused = tree.root.children[0].children[3]
-    with install_fake_win32(uia=tree):
+    with install_fake_host_uia(tree):
         assert desktop_uia.focused_element_info() == {
             "name": "Text Editor",
             "role": "edit",
@@ -304,7 +318,7 @@ def test_focused_element_info_reports_the_focused_control():
 
 
 def test_focused_element_info_is_none_when_nothing_has_focus():
-    with install_fake_win32(uia=FakeUIAutomation()):
+    with install_fake_host_uia(FakeUIAutomation()):
         assert desktop_uia.focused_element_info() is None
 
 
@@ -319,7 +333,7 @@ def test_preferred_click_action_toggle_vs_invoke():
 
 def test_element_action_invoke_drives_the_pattern_and_says_so():
     tree = _notepad_uia()
-    with install_fake_win32(uia=tree):
+    with install_fake_host_uia(tree):
         got = desktop_uia.element_action(101, "Save", role="button", action="invoke")
     assert got["ok"] is True
     save = tree.root.children[0].children[0]
@@ -328,7 +342,7 @@ def test_element_action_invoke_drives_the_pattern_and_says_so():
 
 def test_element_action_prefers_the_requested_role_over_the_first_match():
     tree = _notepad_uia()
-    with install_fake_win32(uia=tree):
+    with install_fake_host_uia(tree):
         desktop_uia.element_action(101, "Save", role="menuitem", action="invoke")
     save_button, save_menu = tree.root.children[0].children[:2]
     assert save_menu.actions == [("invoke",)]
@@ -338,7 +352,7 @@ def test_element_action_prefers_the_requested_role_over_the_first_match():
 def test_element_action_sets_a_value_atomically_and_verifies_the_readback():
     tree = _notepad_uia()
     editor = tree.root.children[0].children[3]
-    with install_fake_win32(uia=tree):
+    with install_fake_host_uia(tree):
         got = desktop_uia.element_action(101, "Text Editor", action="set_value", text="typed")
     assert got == {
         "ok": True,
@@ -352,7 +366,7 @@ def test_a_readonly_field_reports_verified_false_rather_than_pretending():
     tree = _notepad_uia()
     editor = tree.root.children[0].children[3]
     editor.readonly = True
-    with install_fake_win32(uia=tree):
+    with install_fake_host_uia(tree):
         got = desktop_uia.element_action(101, "Text Editor", action="set_value", text="typed")
     assert got["verified"] is False
     assert "readback differs" in got["message"]
@@ -361,7 +375,7 @@ def test_a_readonly_field_reports_verified_false_rather_than_pretending():
 
 def test_toggling_a_checkbox_reports_the_state_it_landed_in():
     tree = _notepad_uia()
-    with install_fake_win32(uia=tree):
+    with install_fake_host_uia(tree):
         first = desktop_uia.element_action(101, "Word wrap", action="toggle")
         second = desktop_uia.element_action(101, "Word wrap", action="toggle")
     assert first["message"].endswith("→ on")
@@ -371,7 +385,7 @@ def test_toggling_a_checkbox_reports_the_state_it_landed_in():
 def test_scroll_into_view_brings_an_offscreen_item_onscreen():
     tree = _notepad_uia()
     far = tree.root.children[0].children[4]
-    with install_fake_win32(uia=tree):
+    with install_fake_host_uia(tree):
         got = desktop_uia.element_action(101, "Below the fold", action="scroll_into_view")
     assert got["ok"] is True
     assert far.offscreen is False
@@ -390,7 +404,7 @@ def test_scroll_into_view_brings_an_offscreen_item_onscreen():
 )
 def test_an_action_the_element_cannot_perform_is_refused_not_faked(name, action, fragment):
     tree = _notepad_uia()
-    with install_fake_win32(uia=tree):
+    with install_fake_host_uia(tree):
         got = desktop_uia.element_action(101, name, action=action)
     assert got["ok"] is False
     assert fragment in got["message"]
@@ -400,14 +414,14 @@ def test_a_pattern_that_throws_is_reported_as_a_failure_not_a_success():
     tree = _notepad_uia()
     save = tree.root.children[0].children[0]
     save.patterns[10000].error = RuntimeError("element is gone")
-    with install_fake_win32(uia=tree):
+    with install_fake_host_uia(tree):
         got = desktop_uia.element_action(101, "Save", role="button", action="invoke")
     assert got["ok"] is False
     assert "element is gone" in got["message"]
 
 
 def test_the_control_snapshot_walks_the_window_and_numbers_its_refs():
-    with install_fake_win32(uia=_notepad_uia()):
+    with install_fake_host_uia(_notepad_uia()):
         got = desktop_uia.uia_control_snapshot(hwnd=101)
     assert got is not None
     assert [e["ref"] for e in got] == [f"c{i + 1}" for i in range(len(got))]
@@ -423,13 +437,13 @@ def test_the_control_snapshot_walks_the_window_and_numbers_its_refs():
 
 
 def test_a_disabled_control_is_left_out_of_the_snapshot():
-    with install_fake_win32(uia=_notepad_uia()):
+    with install_fake_host_uia(_notepad_uia()):
         got = desktop_uia.uia_control_snapshot(hwnd=101)
     assert "Print" not in {e["name"] for e in got}
 
 
 def test_an_offscreen_control_is_kept_but_flagged():
-    with install_fake_win32(uia=_notepad_uia()):
+    with install_fake_host_uia(_notepad_uia()):
         got = desktop_uia.uia_control_snapshot(hwnd=101)
     fold = next(e for e in got if e["name"] == "Below the fold")
     assert fold["offscreen"] is True
@@ -443,7 +457,7 @@ def test_the_snapshot_stops_at_max_elements():
         children=[uia_element(f"b{i}", "button", invokable=True) for i in range(20)],
     )
     tree = FakeUIAutomation(uia_element("Desktop", "pane", children=[root]))
-    with install_fake_win32(uia=tree):
+    with install_fake_host_uia(tree):
         got = desktop_uia.uia_control_snapshot(hwnd=7, max_elements=5)
     assert len(got) == 5
 
@@ -452,7 +466,7 @@ def test_the_snapshot_is_none_rather_than_empty_when_nothing_qualifies():
     tree = FakeUIAutomation(
         uia_element("Desktop", "pane", children=[uia_element("", "window", hwnd=9)])
     )
-    with install_fake_win32(uia=tree):
+    with install_fake_host_uia(tree):
         assert desktop_uia.uia_control_snapshot(hwnd=9) is None
 
 
@@ -709,6 +723,8 @@ def test_the_installer_restores_every_attribute_it_touched():
     platform_before = sys.platform
     comtypes_before = sys.modules.get("comtypes")
 
+    # install_fake_win32 still owns the windll/comtypes surface used by
+    # ConPTY doubles; UIA production tests use install_fake_host_uia instead.
     with install_fake_win32(uia=FakeUIAutomation()) as fake:
         assert ctypes.windll is fake.windll
         assert sys.platform == "win32"
