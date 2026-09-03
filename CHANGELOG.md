@@ -4,6 +4,8 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-09-02
+
 ### First-run Claimidx service
 
 - Remedy now downloads a pinned, sha256-verified Claimidx wheel on first run,

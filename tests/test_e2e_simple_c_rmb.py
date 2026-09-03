@@ -59,6 +59,18 @@ async def test_simple_c_program_task_chain(tmp_path: Path):
         if bin_dir not in os.environ.get("PATH", ""):
             os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
 
+    # Bind the live test to the GGUF that RMB is actually serving.  A stale
+    # fixture model name can otherwise make this supposedly-local test fall
+    # through to the owner's current cloud-provider default.
+    from remedy.runtime.rmb.config import load_rmb_json, merge_state
+
+    rmb_state = merge_state(load_rmb_json())
+    model_path = str(rmb_state.get("model_path") or "").strip()
+    live_model = Path(model_path).stem if model_path else str(
+        rmb_state.get("model_id") or ""
+    ).strip()
+    assert live_model, "RMB is ready but did not report its loaded model"
+
     from remedy.core.agent import BasicRuntime
     from remedy.core.approvals import APPROVALS
     from remedy.models import AgentConfig
@@ -69,7 +81,7 @@ async def test_simple_c_program_task_chain(tmp_path: Path):
         memory_db_path=str(tmp_path / "remedy_home" / "memory.db"),
         llm_provider="rmb",
         llm_api_key="rmb",
-        llm_model="Qwopus3.5-9B-Coder-MTP-Q4_K_M",
+        llm_model=live_model,
         llm_base_url="http://127.0.0.1:8787/v1",
         project_path=str(root),
         access_scope="project",
@@ -95,7 +107,10 @@ async def test_simple_c_program_task_chain(tmp_path: Path):
     t0 = time.time()
     try:
         async for chunk in rt.stream_response(
-            task, session_id=f"e2e-c-pytest-{int(t0)}"
+            task,
+            session_id=f"e2e-c-pytest-{int(t0)}",
+            provider="rmb",
+            model=live_model,
         ):
             s = str(chunk)
             if s.startswith("@@"):
