@@ -1,4 +1,4 @@
-"""ctypes prototypes for the ``remedy_core`` host surface (ABI 3).
+"""ctypes prototypes for the ``remedy_core`` host surface (ABI 4).
 
 This is the one place Python describes the C ABI declared in
 ``native/zig/include/remedy_core.h``. Every function here is a thin call into
@@ -8,8 +8,8 @@ callers (``desktop_win``, ``desktop_uia``, ``desktop_linux``,
 ``execution.process``).
 
 Windows: host + UIA. Linux: host (X11/XTest) + AT-SPI a11y snapshot.
-Other platforms: host/UIA/a11y calls report :data:`STATUS_UNSUPPORTED`
-(:class:`HostError`).
+``host_op_prepare`` is portable. Other platforms: host/UIA/a11y calls report
+:data:`STATUS_UNSUPPORTED` (:class:`HostError`).
 """
 
 from __future__ import annotations
@@ -225,6 +225,10 @@ _PROTOTYPES: dict[str, tuple[list[Any], Any]] = {
     ),
     "remedy_core_a11y_snapshot": (
         [c_uint32, POINTER(_BytePtr), POINTER(c_size_t)],
+        c_int32,
+    ),
+    "remedy_core_host_op_prepare": (
+        [c_char_p, c_size_t, POINTER(_BytePtr), POINTER(c_size_t)],
         c_int32,
     ),
 }
@@ -784,4 +788,47 @@ def a11y_snapshot(limit: int = 40) -> list[dict[str, Any]]:
     result = _take_json(library, ptr, length)
     if not isinstance(result, list):
         return []
+    return result
+
+
+# --- Host Command IR prepare (ABI 4) -----------------------------------------
+
+
+def host_op_prepare(
+    op: Mapping[str, Any] | None = None,
+    *,
+    scratch_dir: str | None = None,
+    project_path: str | None = None,
+    raw: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Call ``remedy_core_host_op_prepare``; return a PreparedCommand dict.
+
+    Pass either a HostOp mapping as *op*, or a full request object as *raw*
+    (``{op, scratch_dir?, project_path?}`` or a bare HostOp). Does not replace
+    :func:`remedy.execution.host.runner.prepare_host_op` — callers stay on
+    Python until Zig prepare parity is proven.
+    """
+    if raw is not None:
+        payload: dict[str, Any] = dict(raw)
+    else:
+        if not isinstance(op, Mapping):
+            raise TypeError("host_op_prepare requires op= or raw=")
+        payload = {"op": dict(op)}
+        if scratch_dir:
+            payload["scratch_dir"] = scratch_dir
+        if project_path:
+            payload["project_path"] = project_path
+    encoded = _utf8(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    library = _lib()
+    ptr, length = _BytePtr(), c_size_t()
+    _check(
+        library,
+        "host_op_prepare",
+        library.remedy_core_host_op_prepare(
+            encoded, len(encoded), ctypes.byref(ptr), ctypes.byref(length)
+        ),
+    )
+    result = _take_json(library, ptr, length)
+    if not isinstance(result, dict):
+        raise HostError("host_op_prepare", STATUS_OPERATION_FAILED)
     return result

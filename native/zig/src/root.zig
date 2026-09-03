@@ -14,7 +14,7 @@ pub const uia = @import("uia.zig");
 pub const shell_ir = @import("shell_ir.zig");
 
 /// C ABI version of the exported surface (`remedy_core_abi_version`).
-pub const abi_version: u32 = 3;
+pub const abi_version: u32 = 4;
 /// Wire version of the language-neutral RMDY frame; independent of the C ABI.
 pub const protocol_version: u16 = 1;
 pub const header_size: usize = 32;
@@ -28,11 +28,12 @@ pub const Status = enum(i32) {
     unsupported = 4,
 };
 
-// Host and UIA exports live in their modules; referencing them here makes the
-// linker emit them from the library build as well as the test build.
+// Host, UIA, and shell_ir exports live in their modules; referencing them
+// here makes the linker emit them from the library build as well as tests.
 comptime {
     _ = host;
     _ = uia;
+    _ = shell_ir;
 }
 
 export fn remedy_core_abi_version() callconv(.c) u32 {
@@ -136,4 +137,5 @@ test {
     _ = system;
     _ = host;
     _ = uia;
+    _ = shell_ir;
 }

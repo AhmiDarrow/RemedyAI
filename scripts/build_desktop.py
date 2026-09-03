@@ -364,7 +364,7 @@ def resolve_core_library(override: str | Path | None = None) -> Path:
         sys.exit(1)
     # Keep in lockstep with remedy.runtime.native_runtime._ABI_VERSION and
     # REMEDY_CORE_ABI_VERSION in native/zig/include/remedy_core.h.
-    required_abi = 3
+    required_abi = 4
     if abi != required_abi:
         print(
             f"ERROR: {path} reports ABI {abi}; the sidecar requires ABI "
