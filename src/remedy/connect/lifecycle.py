@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import threading
+import time
 from typing import Any
 
 from remedy.connect.server import (
@@ -26,6 +27,20 @@ _thread: threading.Thread | None = None
 _loop: asyncio.AbstractEventLoop | None = None
 _restart_waiter: threading.Thread | None = None
 _lock = threading.Lock()
+# Set by stop_connect() so a gateway loop that ends on purpose is not
+# mistaken for a crash by the self-heal path below.
+_stop_requested = threading.Event()
+# Crash bookkeeping for the desktop server panel / GET /api/connect.
+_health: dict[str, Any] = {
+    "crashes": 0,
+    "last_crash": "",
+    "last_crash_ts": 0.0,
+    "healing": False,
+    # True while a gateway loop is past boot and serving phones.
+    "serving": False,
+}
+_HEAL_DELAYS_S = (1.0, 3.0, 8.0, 15.0)
+_MAX_HEALS = 8
 _saved: dict[str, Any] = {
     "app": None,
     "api_key": "",
@@ -55,6 +70,16 @@ def current_config() -> dict[str, Any]:
 
 def connect_listening_addr() -> tuple[str, int] | None:
     return listening_addr()
+
+
+def gateway_health() -> dict[str, Any]:
+    """Crash / self-heal state of the Connect gateway thread (read-only)."""
+    with _lock:
+        thread = _thread
+        snap = dict(_health)
+    snap["thread_alive"] = bool(thread is not None and thread.is_alive())
+    snap["listening"] = listening_addr()
+    return snap
 
 
 def drop_all_sessions() -> None:
@@ -155,12 +180,20 @@ def _thread_main(
             tailscale_host=ts_host,
         )
 
+    crashed: BaseException | None = None
+    booted = False
     try:
         loop.run_until_complete(_boot())
+        booted = True
+        with _lock:
+            _health["serving"] = True
         ready.set()
         loop.run_forever()
     except BaseException as exc:
         err.append(exc)
+        # A bind failure is reported to the caller through ``err``; only a
+        # listener that was already serving phones is self-healed.
+        crashed = exc if booted else None
         ready.set()
     finally:
         with contextlib.suppress(Exception):
@@ -175,13 +208,85 @@ def _thread_main(
             with contextlib.suppress(Exception):
                 loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         loop.close()
+        with _lock:
+            _health["serving"] = False
         if _loop is loop:
             _loop = None
+        if crashed is not None and not _stop_requested.is_set():
+            # The listener died on its own (a phone disconnect must never do
+            # this, but if it does the owner must not lose Connect until the
+            # next Settings change).  The API on :7400 is untouched either
+            # way; only the phone gateway is brought back.
+            _note_crash(crashed)
+            if int(_health.get("crashes") or 0) <= _MAX_HEALS:
+                _schedule_self_heal(threading.current_thread())
+            else:
+                logger.critical(
+                    "connect gateway crashed %s times; not restarting until Settings change",
+                    _health.get("crashes"),
+                )
+
+
+def _note_crash(exc: BaseException) -> None:
+    logger.critical("connect gateway thread crashed: %r — self-healing", exc, exc_info=exc)
+    with _lock:
+        _health["crashes"] = int(_health.get("crashes") or 0) + 1
+        _health["last_crash"] = f"{type(exc).__name__}: {exc}"[:300]
+        _health["last_crash_ts"] = time.time()
+
+
+def _schedule_self_heal(dead: threading.Thread) -> None:
+    """Restart the gateway after a crash, with a short backoff per crash."""
+    global _restart_waiter
+
+    def _heal() -> None:
+        global _restart_waiter, _thread
+        with _lock:
+            n = max(1, int(_health.get("crashes") or 1))
+            _health["healing"] = True
+        delay = _HEAL_DELAYS_S[min(n, len(_HEAL_DELAYS_S)) - 1]
+        # Wait out the delay in small steps so a stop_connect() during the
+        # backoff (Settings → disable) cancels the heal instead of racing it.
+        end = time.monotonic() + delay
+        while time.monotonic() < end:
+            if _stop_requested.is_set():
+                break
+            time.sleep(0.1)
+        with _lock:
+            if _thread is dead:
+                _thread = None
+            if _restart_waiter is threading.current_thread():
+                _restart_waiter = None
+            app = _saved.get("app")
+            api_key = str(_saved.get("api_key") or "")
+            sidecar_port = int(_saved.get("sidecar_port") or 7400)
+            config = dict(_saved.get("config") or {})
+        try:
+            if _stop_requested.is_set():
+                return
+            ok, _host, _port = _enabled_chosen(config)
+            if not ok:
+                return
+            try:
+                maybe_start_connect(app, config, api_key=api_key, sidecar_port=sidecar_port)
+            except Exception:
+                logger.warning("connect gateway self-heal failed", exc_info=True)
+        finally:
+            with _lock:
+                _health["healing"] = False
+
+    with _lock:
+        if _restart_waiter is not None and _restart_waiter.is_alive():
+            return
+        waiter = threading.Thread(target=_heal, name="remedy-connect-heal", daemon=True)
+        _restart_waiter = waiter
+        waiter.start()
 
 
 def stop_connect() -> None:
     """Stop the Connect listener and drop sessions."""
     global _thread, _loop
+    _stop_requested.set()
     with _lock:
         loop = _loop
         thread = _thread
@@ -272,6 +377,15 @@ def maybe_start_connect(
     ok, host, port = _enabled_chosen(config)
     if not ok:
         return
+    with _lock:
+        # An owner-driven start is a fresh slate for the crash budget, but a
+        # restart that is *part of* a self-heal (directly, or through the
+        # deferred-restart waiter) must not erase the crash it is recovering.
+        healing = bool(_health.get("healing")) or (
+            _restart_waiter is not None and _restart_waiter.is_alive()
+        )
+        if not healing:
+            _health["crashes"] = 0
     addr = listening_addr()
     if addr is not None and addr[0] == host and (port == 0 or addr[1] == port):
         # Same bind: the gateway keeps running and reads panes/relay from the
@@ -286,6 +400,7 @@ def maybe_start_connect(
         return
     ready = threading.Event()
     err: list[BaseException] = []
+    _stop_requested.clear()
     thread = threading.Thread(
         target=_thread_main,
         name="remedy-connect",

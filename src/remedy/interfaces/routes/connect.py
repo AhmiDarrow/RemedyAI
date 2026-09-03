@@ -201,11 +201,13 @@ def register_connect_routes(app: FastAPI, *, runtime=None, gateway=None, memory=
         _refuse_connect_proxy(request)
         snap = _snapshot(_load_cfg())
         try:
-            from remedy.connect.lifecycle import connect_listening_addr
+            from remedy.connect.lifecycle import connect_listening_addr, gateway_health
 
             snap["listening"] = connect_listening_addr()
+            snap["gateway"] = gateway_health()
         except Exception:
             snap["listening"] = None
+            snap["gateway"] = None
         return snap
 
     @app.put("/api/connect")

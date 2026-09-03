@@ -6,8 +6,10 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, DragDropEvent, Emitter, Manager, State};
@@ -44,6 +46,177 @@ fn remedy_home() -> PathBuf {
         env::var("HOME").unwrap_or_else(|_| ".".to_string())
     };
     PathBuf::from(home).join(".remedy")
+}
+
+
+// ---------------------------------------------------------------------------
+// Managed server forensics (the "server panel" behind the connection dot).
+//
+// Release builds keep no desktop log file, so an unexpected sidecar exit used
+// to vanish without a trace.  Everything the owner needs to understand a dead
+// server — OS exit status, when it happened, whether recovery worked, and the
+// last lines the process printed — is kept here and mirrored to
+// `<home>/logs/desktop.log` so it survives an app restart.
+// ---------------------------------------------------------------------------
+
+/// Lines of sidecar output retained for the panel (newest last).
+const SIDECAR_OUTPUT_LINES: usize = 200;
+
+#[derive(Default, Clone, serde::Serialize)]
+struct SidecarInfo {
+    /// Managed process id (None when attached to a foreign serve or not running).
+    pid: Option<u32>,
+    /// Unix ms when the managed process was spawned.
+    started_at_ms: Option<u64>,
+    /// Launch path/command of the managed sidecar.
+    launch_cmd: Option<String>,
+    /// How many times the managed process exited on its own.
+    unexpected_exits: u32,
+    /// OS exit status text of the most recent unexpected exit.
+    last_exit_status: Option<String>,
+    last_exit_at_ms: Option<u64>,
+    /// Recovery bookkeeping for the most recent unexpected exit.
+    recovery_attempts: u32,
+    recovered_at_ms: Option<u64>,
+    last_error: Option<String>,
+    /// Tail of stdout/stderr (routine access-log noise excluded).
+    output: VecDeque<String>,
+}
+
+fn sidecar_info() -> &'static Mutex<SidecarInfo> {
+    static INFO: OnceLock<Mutex<SidecarInfo>> = OnceLock::new();
+    INFO.get_or_init(|| Mutex::new(SidecarInfo::default()))
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn with_sidecar_info<R>(f: impl FnOnce(&mut SidecarInfo) -> R) -> R {
+    let mut guard = match sidecar_info().lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    f(&mut guard)
+}
+
+/// Remember one line of sidecar output for the panel.
+fn remember_sidecar_output(label: &str, text: &str) {
+    with_sidecar_info(|info| {
+        if info.output.len() >= SIDECAR_OUTPUT_LINES {
+            info.output.pop_front();
+        }
+        let mut line = String::with_capacity(text.len() + 8);
+        line.push('[');
+        line.push_str(label);
+        line.push_str("] ");
+        // Bound very long lines (tracebacks with huge reprs) so the panel stays light.
+        if text.len() > 600 {
+            let cut = text
+                .char_indices()
+                .nth(600)
+                .map(|(i, _)| i)
+                .unwrap_or(text.len());
+            line.push_str(&text[..cut]);
+            line.push('…');
+        } else {
+            line.push_str(text);
+        }
+        info.output.push_back(line);
+    });
+}
+
+/// Append one line to `<home>/logs/desktop.log` (always, release included).
+/// Best-effort and bounded: the file is truncated once it passes ~2 MB.
+fn desktop_log(line: &str) {
+    let dir = remedy_home().join("logs");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join("desktop.log");
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if meta.len() > 2 * 1024 * 1024 {
+            let _ = std::fs::write(&path, b"");
+        }
+    }
+    let stamp = {
+        let ms = now_ms();
+        let secs = ms / 1000;
+        format!("{}.{:03}", secs, ms % 1000)
+    };
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "{stamp} {line}");
+    }
+}
+
+/// Snapshot for the desktop server panel.
+#[tauri::command]
+fn get_server_info(state: State<'_, ServerState>) -> Result<serde_json::Value, String> {
+    let attached = state.attached_existing.load(Ordering::SeqCst);
+    let running = match state.process.lock() {
+        Ok(mut guard) => match guard.as_mut() {
+            Some(child) => matches!(child.try_wait(), Ok(None)),
+            None => false,
+        },
+        Err(_) => false,
+    };
+    let info = with_sidecar_info(|i| i.clone());
+    let healthy = check_health(Duration::from_millis(600));
+    let logs_dir = remedy_home().join("logs");
+    Ok(serde_json::json!({
+        "mode": if attached { "attached" } else { "managed" },
+        "running": running || attached,
+        "healthy": healthy,
+        "pid": info.pid,
+        "started_at_ms": info.started_at_ms,
+        "launch_cmd": info.launch_cmd,
+        "api_origin": api_base_url(),
+        "port": api_port(),
+        "unexpected_exits": info.unexpected_exits,
+        "last_exit_status": info.last_exit_status,
+        "last_exit_at_ms": info.last_exit_at_ms,
+        "recovery_attempts": info.recovery_attempts,
+        "recovered_at_ms": info.recovered_at_ms,
+        "last_error": info.last_error,
+        "output": info.output.iter().cloned().collect::<Vec<String>>(),
+        "logs_dir": logs_dir.to_string_lossy().to_string(),
+        "data_dir": remedy_home().to_string_lossy().to_string(),
+        "desktop_version": env!("CARGO_PKG_VERSION"),
+    }))
+}
+
+/// Open `<home>/logs` in the OS file manager.
+#[tauri::command]
+fn open_logs_folder() -> Result<String, String> {
+    let dir = remedy_home().join("logs");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create logs folder: {e}"))?;
+    let path_str = dir.to_string_lossy().to_string();
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer")
+            .arg(&path_str)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {e}"))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&path_str)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {e}"))?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let child = Command::new("xdg-open")
+            .arg(&path_str)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {e}"))?;
+        reap_detached(child);
+    }
+    Ok(path_str)
 }
 
 /// Local API port (default 7400).
@@ -750,6 +923,7 @@ fn forward_output(label: &str, reader: impl BufRead + Send + 'static) {
                     if is_routine_sidecar_log(&text) {
                         continue;
                     }
+                    remember_sidecar_output(&label, &text);
                     // Warnings/errors from sidecar → warn; rest quiet info
                     let lower = text.to_ascii_lowercase();
                     if lower.contains(" error")
@@ -822,6 +996,28 @@ fn sidecar_watchdog(app: AppHandle) {
             };
 
             log::error!("Managed Remedy server exited unexpectedly ({status}); recovering");
+            desktop_log(&format!("sidecar exited unexpectedly: {status}"));
+            let tail = with_sidecar_info(|i| {
+                i.unexpected_exits = i.unexpected_exits.saturating_add(1);
+                i.last_exit_status = Some(status.clone());
+                i.last_exit_at_ms = Some(now_ms());
+                i.recovery_attempts = 0;
+                i.recovered_at_ms = None;
+                i.pid = None;
+                i.output
+                    .iter()
+                    .rev()
+                    .take(12)
+                    .cloned()
+                    .collect::<Vec<String>>()
+            });
+            for line in tail.iter().rev() {
+                desktop_log(&format!("  last output: {line}"));
+            }
+            let _ = app.emit(
+                "server-exited",
+                serde_json::json!({ "status": status, "at_ms": now_ms() }),
+            );
             let _ = app.emit("server-starting", ());
             let cmd = state
                 .sidecar_cmd
@@ -833,6 +1029,8 @@ fn sidecar_watchdog(app: AppHandle) {
                     "Remedy server exited unexpectedly ({status}) and its launch path is unavailable"
                 );
                 log::error!("{message}");
+                desktop_log(&message);
+                with_sidecar_info(|i| i.last_error = Some(message.clone()));
                 let _ = app.emit("server-error", &message);
                 continue;
             }
@@ -846,6 +1044,7 @@ fn sidecar_watchdog(app: AppHandle) {
                     return;
                 }
                 log::info!("Sidecar recovery attempt {} after exit {status}", attempt + 1);
+                with_sidecar_info(|i| i.recovery_attempts = (attempt + 1) as u32);
                 let spawned = start_sidecar(
                     &state.process,
                     &cmd,
@@ -865,12 +1064,16 @@ fn sidecar_watchdog(app: AppHandle) {
 
             if recovered {
                 log::info!("Remedy server recovered after unexpected exit ({status})");
+                desktop_log(&format!("sidecar recovered after exit {status}"));
+                with_sidecar_info(|i| i.recovered_at_ms = Some(now_ms()));
                 let _ = app.emit("server-ready", ());
             } else {
                 let message = format!(
                     "Remedy server exited unexpectedly ({status}) and did not recover after 3 attempts"
                 );
                 log::error!("{message}");
+                desktop_log(&message);
+                with_sidecar_info(|i| i.last_error = Some(message.clone()));
                 let _ = app.emit("server-error", &message);
             }
         });
@@ -1278,7 +1481,20 @@ fn start_sidecar(
         std::thread::sleep(Duration::from_millis(400));
     }
 
-    let mut child = spawn_remedy(cmd).ok_or_else(|| format!("Failed to spawn: {cmd}"))?;
+    let mut child = spawn_remedy(cmd).ok_or_else(|| {
+        let msg = format!("Failed to spawn: {cmd}");
+        desktop_log(&format!("sidecar spawn failed: {cmd}"));
+        with_sidecar_info(|i| i.last_error = Some(msg.clone()));
+        msg
+    })?;
+    let pid = child.id();
+    with_sidecar_info(|i| {
+        i.pid = Some(pid);
+        i.started_at_ms = Some(now_ms());
+        i.launch_cmd = Some(cmd.to_string());
+        i.last_error = None;
+    });
+    desktop_log(&format!("sidecar spawned pid={pid} mode={mode:?} cmd={cmd}"));
     if let Some(stdout) = child.stdout.take() {
         forward_output("out", BufReader::new(stdout));
     }
@@ -4591,6 +4807,7 @@ async fn restart_server(app: AppHandle, state: State<'_, ServerState>) -> Result
     };
 
     log::info!("Restarting remedy sidecar: {}", cmd);
+    desktop_log("sidecar restart requested from the desktop");
     let _ = app.emit("server-starting", ());
     let process = state.process.clone();
     let attached = state.attached_existing.clone();
@@ -4964,6 +5181,8 @@ pub fn run() {
         .manage(std::sync::Arc::new(privacy_shield::PrivacyShieldState::default()))
         .invoke_handler(tauri::generate_handler![
             open_data_folder,
+            get_server_info,
+            open_logs_folder,
             pick_folder,
             open_path,
             open_terminal,
