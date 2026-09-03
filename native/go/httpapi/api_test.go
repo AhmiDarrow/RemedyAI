@@ -14,12 +14,19 @@ import (
 
 func startTestServer(t *testing.T, cfg Config) (baseURL string, shutdown func()) {
 	t.Helper()
+	if cfg.DBPath == "" {
+		cfg.DBPath = filepath.Join(t.TempDir(), "memory.db")
+	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := New(cfg)
+	s, err := New(cfg)
+	if err != nil {
+		_ = ln.Close()
+		t.Fatal(err)
+	}
 	done := make(chan struct{})
 	go func() {
 		_ = s.Serve(ctx, ln)
@@ -257,8 +264,13 @@ func TestListenAndServeOptInPort(t *testing.T) {
 	defer cancel()
 	boundCh := make(chan string, 1)
 	errCh := make(chan error, 1)
+	dbPath := filepath.Join(t.TempDir(), "memory.db")
 	go func() {
-		errCh <- ListenAndServe(ctx, "127.0.0.1:0", Config{Token: "", Version: "0.50.2"}, func(bound string) {
+		errCh <- ListenAndServe(ctx, "127.0.0.1:0", Config{
+			Token:   "",
+			Version: "0.50.2",
+			DBPath:  dbPath,
+		}, func(bound string) {
 			boundCh <- bound
 		})
 	}()
