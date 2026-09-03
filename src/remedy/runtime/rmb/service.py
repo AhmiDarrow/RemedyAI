@@ -1845,6 +1845,51 @@ def _clear_starting() -> None:
     _starting_until = 0.0
 
 
+def rmb_is_set_up(home_dir: str | Path | None = None) -> bool:
+    """True once the owner has set RMB up: an enabled rmb.json with a GGUF.
+
+    Implicit starts (mid-turn 503 recovery, provider wake) must stop here on a
+    machine where RMB was never configured. A bare default state, or a state
+    whose GGUF is gone, is "not set up" — only an explicit Start may proceed.
+    """
+    try:
+        from remedy.runtime.rmb.config import rmb_json_path
+
+        if not rmb_json_path(home_dir).is_file():
+            return False
+        st = merge_state(load_rmb_json(home_dir))
+        if not st.get("enabled", False):
+            return False
+        return _resolve_model_path(st, home_dir, trust_sticky_path=True) is not None
+    except Exception:
+        return False
+
+
+_NOT_SET_UP_ERROR = (
+    "RMB is not set up on this machine — start it from Settings before "
+    "Remedy can fall back to it"
+)
+
+
+def _implicit_start_refused(home_dir: str | Path | None) -> dict[str, Any] | None:
+    """Result to return when an implicit start must not spawn RMB, else None.
+
+    A host that is already up, starting or loading may always be waited on —
+    the owner (or an explicit Start) put it there. Only a cold spawn is gated
+    on ``rmb_is_set_up``.
+    """
+    if (
+        is_running(home_dir, force=True, require_http=True)
+        or is_starting()
+        or managed_process_alive()
+        or is_loading(home_dir)
+    ):
+        return None
+    if rmb_is_set_up(home_dir):
+        return None
+    return {"ok": False, "ready": False, "error": _NOT_SET_UP_ERROR, "not_set_up": True}
+
+
 def wait_rmb_ready(
     home_dir: str | Path | None = None,
     *,
@@ -1856,7 +1901,19 @@ def wait_rmb_ready(
     Partner path for HTTP 503 / WinError 64 / connection refused: restart the
     host if needed and wait for weights (typical 3–30s on GPU). Mid-turn
     recovery must not depend on the user.
+
+    Never spawns RMB on a machine where it was never set up (see
+    ``rmb_is_set_up``); the caller's cloud provider outage is not our cue to
+    unload the vision host and load a GGUF.
     """
+    if is_running(home_dir, force=True, require_http=True):
+        mark_used()
+        return {"ok": True, "ready": True}
+    if _refresh_user_stopped(home_dir):
+        return {"ok": False, "ready": False, "error": "RMB was stopped by user"}
+    refused = _implicit_start_refused(home_dir)
+    if refused is not None:
+        return refused
     deadline = time.time() + max(1.0, float(timeout_s))
     kicked_async = False
     kicked_sync = False
@@ -1920,23 +1977,35 @@ def wait_rmb_ready(
 
 
 def wake_rmb_async(home_dir: str | Path | None = None) -> dict[str, Any]:
-    """Start RMB in a daemon thread if needed (never blocks the chat path)."""
-    ensure_rmb_watchdog(home_dir, force=True)
+    """Start RMB in a daemon thread if needed (never blocks the chat path).
+
+    Refuses a cold spawn when RMB was never set up (``rmb_is_set_up``).
+    """
     # Adopt orphan host from previous API process before spawning a second one
     with contextlib.suppress(Exception):
         ad = adopt_existing_host(home_dir)
         if ad.get("ok") and (ad.get("adopted") or is_running(home_dir, force=True, require_http=True)):
             mark_used()
+            ensure_rmb_watchdog(home_dir, force=True)
             return {"ok": True, "already_running": True, "adopted": bool(ad.get("adopted"))}
     if is_running(home_dir, force=True, require_http=True):
         mark_used()
+        ensure_rmb_watchdog(home_dir, force=True)
         return {"ok": True, "already_running": True}
     if is_starting() or managed_process_alive():
+        ensure_rmb_watchdog(home_dir, force=True)
         return {"ok": True, "starting": True}
     if is_loading(home_dir):
+        ensure_rmb_watchdog(home_dir, force=True)
         return {"ok": True, "starting": True, "loading": True}
     if _refresh_user_stopped(home_dir):
         return {"ok": False, "error": "RMB was stopped by user; Start RMB to load again"}
+    # Cold spawn: only on a machine where the owner set RMB up. Nothing above
+    # ran the watchdog, so a refused wake leaves no thread behind.
+    refused = _implicit_start_refused(home_dir)
+    if refused is not None:
+        return refused
+    ensure_rmb_watchdog(home_dir, force=True)
 
     def _run() -> None:
         try:

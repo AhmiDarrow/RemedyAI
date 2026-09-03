@@ -92,3 +92,34 @@ def is_thinking_tool_choice_error(body: str) -> bool:
 
 # Back-compat alias used by older tests / imports
 _is_fatal_llm_api_error = is_fatal_llm_api_error
+
+
+def is_local_host_loading_error(
+    status: int,
+    body: str,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+) -> bool:
+    """True when a 502/503 is the *local* RMB host still loading weights.
+
+    llama-server answers ``503 Loading model`` for the seconds after a
+    (re)start; the loop waits for the host and retries the same body. A cloud
+    provider's 503 can carry the same words ("Service temporarily
+    unavailable") but is not our host — treating it as one woke RMB, unloaded
+    the vision model and started a GGUF on an xAI outage. The binding decides.
+    """
+    if status not in (502, 503):
+        return False
+    low = (body or "").lower()
+    if not (
+        "loading model" in low or "unavailable" in low or "not ready" in low
+    ):
+        return False
+    try:
+        from remedy.core.local_agent_optimize import is_local_binding
+
+        return bool(is_local_binding(provider, model, base_url))
+    except Exception:
+        return (provider or "").strip().lower() in ("rmb", "ollama", "llamacpp", "local")

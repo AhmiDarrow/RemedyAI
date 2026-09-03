@@ -645,14 +645,21 @@ async def run_react_http(
                     return
                 # Local RMB: 503 "Loading model" while weights load after
                 # restart — wait for ready and retry same body (partner path).
-                _loading = (
-                    resp.status in (503, 502)
-                    and (
-                        "loading model" in (safe_err or "").lower()
-                        or "unavailable" in (safe_err or "").lower()
-                        or "not ready" in (safe_err or "").lower()
+                # Only for a local binding: a cloud 503 that happens to say
+                # "unavailable" must never wake RMB (xAI outage, 2026-09-03).
+                _loading = False
+                with suppress(Exception):
+                    from remedy.core.react_loop.errors import (
+                        is_local_host_loading_error,
                     )
-                )
+
+                    _loading = is_local_host_loading_error(
+                        resp.status,
+                        safe_err,
+                        provider=_bind.provider,
+                        model=_bind.model,
+                        base_url=_bind.base_url,
+                    )
                 if _loading:
                     _load_waits = 0
                     with suppress(Exception):
