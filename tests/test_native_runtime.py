@@ -218,9 +218,14 @@ def test_core_library_search_order_ends_at_the_dev_checkout():
     assert root.name == ("bin" if native_runtime.sys.platform == "win32" else "lib")
 
 
-def test_core_library_loads_the_built_core_when_present():
-    if native_runtime._core_library_path() is None:
+def test_core_library_loads_the_built_core_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Drop any cached handle so a prior soname collision cannot stick.
+    monkeypatch.setattr(native_runtime, "_library_cache", None)
+    path = native_runtime._core_library_path()
+    if path is None:
         pytest.skip("remedy_core is not built in this checkout")
     library = native_runtime.core_library()
-    assert int(library.remedy_core_abi_version()) == 4
+    assert int(library.remedy_core_abi_version()) == 4, f"loaded from {path}"
     assert native_runtime.core_library() is library

@@ -181,9 +181,11 @@ def _core_library_path() -> Path | None:
 
 
 class _AbiMismatchError(NativeRuntimeUnavailableError):
-    def __init__(self, abi: int) -> None:
+    def __init__(self, abi: int, library_path: Path | None = None) -> None:
+        where = f" at {library_path}" if library_path is not None else ""
         super().__init__(
-            f"remedy_core ABI {abi} does not match the required ABI {_ABI_VERSION}"
+            f"remedy_core{where} reports ABI {abi}; required ABI is {_ABI_VERSION}. "
+            f"Remove stale copies of the library from the search path and rebuild."
         )
         self.abi = abi
 
@@ -205,7 +207,7 @@ def _open_core_library(library_path: Path) -> Any:
                 f"remedy_core failed to load ({exc.__class__.__name__}: {exc})"
             ) from exc
         if abi != _ABI_VERSION:
-            raise _AbiMismatchError(abi)
+            raise _AbiMismatchError(abi, library_path)
         _library_cache = (library_path, library)
         return library
 

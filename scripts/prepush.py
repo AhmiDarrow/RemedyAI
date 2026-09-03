@@ -333,7 +333,12 @@ def _wsl_zig_build_command() -> str | None:
         return None
     if shutil.which("wsl") is None:
         return ""
+    # Drop any checkout-local .so before building. A stale ABI under
+    # native/zig/zig-out/lib shares the soname with the /tmp install; Linux
+    # dlopen then returns the first handle and ABI checks see the wrong build.
+    checkout_so = _wsl_path(ROOT / "native" / "zig" / "zig-out" / "lib" / "libremedy_core.so")
     inner = (
+        f"rm -f {checkout_so} && "
         f"cd {_wsl_path(ROOT / 'native' / 'zig')} && "
         f"zig build -Doptimize=ReleaseSafe --prefix {WSL_ZIG_PREFIX} "
         f"--cache-dir {WSL_ZIG_PREFIX}-cache --global-cache-dir {WSL_ZIG_PREFIX}-global && "
