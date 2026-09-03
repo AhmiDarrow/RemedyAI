@@ -1,5 +1,12 @@
 name: Desktop Release
 
+# A release is a verified commit, never a build of whatever a tag points at.
+# `verify` refuses to build unless the tagged commit is on master, every
+# version surface already reads the release version, and the public CI
+# workflow completed green for that exact commit. The local pre-push gate
+# (scripts/prepush.py) checks the same three things before the tag leaves
+# the owner's machine.
+
 on:
   push:
     tags: ['v*']
@@ -16,8 +23,101 @@ env:
   REPO_NAME: RemedyAI
 
 jobs:
+  verify:
+    name: Gate — CI green, versions aligned, commit on master
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      sha: ${{ steps.version.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          INPUT="${{ inputs.version }}"
+          if [[ -n "${INPUT}" ]]; then
+            VER="${INPUT#v}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+          else
+            echo "::error::Need a tag push (v*) or a workflow_dispatch version input"
+            exit 1
+          fi
+          if [[ ! "${VER}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$ ]]; then
+            echo "::error::Invalid version '${VER}'. Expected semver like 0.10.0."
+            exit 1
+          fi
+          # Annotated tags make GITHUB_SHA the tag object; HEAD is the commit.
+          SHA="$(git rev-parse HEAD)"
+          echo "Releasing ${VER} from ${SHA}"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VER}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Every version surface must already read the release version
+        shell: bash
+        env:
+          VER: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          PY="$(sed -nE 's/^version *= *"([^"]+)".*/\1/p' pyproject.toml | head -1)"
+          if [[ "${PY}" != "${VER}" ]]; then
+            echo "::error::pyproject.toml reads ${PY} but the release is ${VER}. Run 'python scripts/sync_version.py ${VER}', commit, let CI go green, then tag that commit."
+            exit 1
+          fi
+          uv run python scripts/sync_version.py check
+
+      - name: Released commit must be on master
+        shell: bash
+        env:
+          SHA: ${{ steps.version.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin master
+          if ! git merge-base --is-ancestor "${SHA}" origin/master; then
+            echo "::error::${SHA} is not on master. Releases come from master only."
+            exit 1
+          fi
+
+      - name: Public CI must have completed green for this commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.version.outputs.sha }}
+        run: |
+          set -euo pipefail
+          RUN="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&per_page=1" \
+            --jq '.workflow_runs[0] // empty | "\(.status)|\(.conclusion)|\(.html_url)"')"
+          if [[ -z "${RUN}" ]]; then
+            echo "::error::CI has not run for ${SHA}. Push it to master, wait for green, then tag."
+            exit 1
+          fi
+          IFS='|' read -r STATUS CONCLUSION URL <<<"${RUN}"
+          if [[ "${STATUS}" != "completed" || "${CONCLUSION}" != "success" ]]; then
+            echo "::error::CI for ${SHA} is ${STATUS}/${CONCLUSION} (${URL}). Only a green commit is released."
+            exit 1
+          fi
+          echo "CI green: ${URL}"
+
   build-sidecar:
+    needs: verify
     runs-on: windows-latest
+    env:
+      REMEDY_RELEASE_VERSION: ${{ needs.verify.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -40,27 +140,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Resolve and stamp release version
+      - name: Stamp release version
         shell: bash
-        run: |
-          set -euo pipefail
-          INPUT="${{ inputs.version }}"
-          if [[ -n "${INPUT}" ]]; then
-            VER="${INPUT#v}"
-          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            VER="${GITHUB_REF_NAME#v}"
-          else
-            echo "::error::Need a tag push (v*) or workflow_dispatch version input"
-            exit 1
-          fi
-          echo "Stamping version ${VER}"
-          python scripts/sync_version.py "${VER}"
-          echo "REMEDY_RELEASE_VERSION=${VER}" >> "$GITHUB_ENV"
+        run: python scripts/sync_version.py "${REMEDY_RELEASE_VERSION}"
 
       - name: Build sidecar
         run: python scripts/build_desktop.py --clean --ci
-        env:
-          REMEDY_RELEASE_VERSION: ${{ env.REMEDY_RELEASE_VERSION }}
 
       - name: Build native runtime
         shell: pwsh
@@ -84,7 +169,7 @@ jobs:
           retention-days: 1
 
   build-tauri:
-    needs: build-sidecar
+    needs: [verify, build-sidecar]
     runs-on: windows-latest
     outputs:
       installer_name: ${{ steps.extract.outputs.installer_name }}
@@ -113,20 +198,9 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Stamp version (match sidecar job)
+      - name: Stamp release version (match sidecar job)
         shell: bash
-        run: |
-          set -euo pipefail
-          INPUT="${{ inputs.version }}"
-          if [[ -n "${INPUT}" ]]; then
-            VER="${INPUT#v}"
-          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            VER="${GITHUB_REF_NAME#v}"
-          else
-            echo "::error::Need a tag push (v*) or workflow_dispatch version input"
-            exit 1
-          fi
-          python scripts/sync_version.py "${VER}"
+        run: python scripts/sync_version.py "${{ needs.verify.outputs.version }}"
 
       - name: Install frontend deps
         run: npm ci
@@ -193,7 +267,10 @@ jobs:
           retention-days: 7
 
   build-sidecar-linux:
+    needs: verify
     runs-on: ubuntu-22.04
+    env:
+      REMEDY_RELEASE_VERSION: ${{ needs.verify.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -216,27 +293,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Resolve and stamp release version
+      - name: Stamp release version
         shell: bash
-        run: |
-          set -euo pipefail
-          INPUT="${{ inputs.version }}"
-          if [[ -n "${INPUT}" ]]; then
-            VER="${INPUT#v}"
-          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            VER="${GITHUB_REF_NAME#v}"
-          else
-            echo "::error::Need a tag push (v*) or workflow_dispatch version input"
-            exit 1
-          fi
-          echo "Stamping version ${VER}"
-          python scripts/sync_version.py "${VER}"
-          echo "REMEDY_RELEASE_VERSION=${VER}" >> "$GITHUB_ENV"
+        run: python scripts/sync_version.py "${REMEDY_RELEASE_VERSION}"
 
       - name: Build Linux sidecar
         run: python scripts/build_desktop.py --clean --ci
         env:
-          REMEDY_RELEASE_VERSION: ${{ env.REMEDY_RELEASE_VERSION }}
           TAURI_ENV_TARGET_TRIPLE: x86_64-unknown-linux-gnu
 
       - name: Build Linux native runtime
@@ -260,7 +323,7 @@ jobs:
           retention-days: 1
 
   build-tauri-linux:
-    needs: build-sidecar-linux
+    needs: [verify, build-sidecar-linux]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -304,20 +367,9 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Stamp version (match sidecar job)
+      - name: Stamp release version (match sidecar job)
         shell: bash
-        run: |
-          set -euo pipefail
-          INPUT="${{ inputs.version }}"
-          if [[ -n "${INPUT}" ]]; then
-            VER="${INPUT#v}"
-          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            VER="${GITHUB_REF_NAME#v}"
-          else
-            echo "::error::Need a tag push (v*) or workflow_dispatch version input"
-            exit 1
-          fi
-          python scripts/sync_version.py "${VER}"
+        run: python scripts/sync_version.py "${{ needs.verify.outputs.version }}"
 
       - name: Install frontend deps
         run: npm ci
@@ -356,35 +408,15 @@ jobs:
           retention-days: 7
 
   release:
-    needs: [build-tauri, build-tauri-linux]
+    needs: [verify, build-tauri, build-tauri-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      VER: ${{ needs.verify.outputs.version }}
+      TAG: ${{ needs.verify.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Determine version
-        id: version
-        shell: bash
-        run: |
-          set -euo pipefail
-          INPUT="${{ inputs.version }}"
-          if [[ -n "${INPUT}" ]]; then
-            VER="${INPUT#v}"
-            TAG="v${VER}"
-          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            TAG="${GITHUB_REF_NAME}"
-            VER="${TAG#v}"
-          else
-            echo "::error::Manual workflow_dispatch requires a version input (e.g. 0.10.0). Tag pushes use the tag name."
-            exit 1
-          fi
-          if [[ ! "${VER}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-].*)?$ ]]; then
-            echo "::error::Invalid version '${VER}'. Expected semver like 0.10.0 (got tag/ref that is not a version)."
-            exit 1
-          fi
-          echo "version=${VER}" >> $GITHUB_OUTPUT
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
 
       - name: Download installer
         uses: actions/download-artifact@v4
@@ -472,8 +504,6 @@ jobs:
           print("Wrote dist/latest.json for", asset_name, "sig_chars=", len(sig))
           PY
         env:
-          VER: ${{ steps.version.outputs.version }}
-          TAG: ${{ steps.version.outputs.tag }}
           ASSET_NAME: ${{ steps.installer.outputs.asset_name }}
           REPO_OWNER: ${{ env.REPO_OWNER }}
           REPO_NAME: ${{ env.REPO_NAME }}
@@ -481,10 +511,10 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Remedy Desktop v${{ steps.version.outputs.version }}
+          tag_name: ${{ needs.verify.outputs.tag }}
+          name: Remedy Desktop v${{ needs.verify.outputs.version }}
           body: |
-            ## Remedy Desktop v${{ steps.version.outputs.version }}
+            ## Remedy Desktop v${{ needs.verify.outputs.version }}
 
             One partner on **Windows and Linux**. Continuity stays in `~/.remedy`.
 

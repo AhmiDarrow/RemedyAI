@@ -5,11 +5,14 @@ on:
     branches: [master, main]
   pull_request:
     branches: [master, main]
+  workflow_dispatch:
 
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      # Report both Python versions; a cancelled sibling hides a second failure.
+      fail-fast: false
       matrix:
         python-version: ["3.12", "3.13"]
 
