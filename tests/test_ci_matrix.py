@@ -206,7 +206,7 @@ def test_build_desktop_bundles_the_core_library_at_the_archive_root(tmp_path: Pa
     with pytest.raises(SystemExit):
         build_desktop.resolve_core_library(wrong_name)
 
-    assert "required_abi = 3" in source
+    assert "required_abi = 4" in source
     assert "remedy_core_abi_version()" in source
 
     parser_help = source[source.index("__main__") :]

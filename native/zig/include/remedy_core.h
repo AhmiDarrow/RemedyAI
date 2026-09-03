@@ -9,11 +9,13 @@ extern "C" {
 #endif
 
 /*
- * ABI 3 adds UI Automation (reads, control snapshot, element actions) on top
- * of the ABI 2 host surface (DPI, monitors, capture, PNG, input, windows,
- * clipboard and hidden process control). Every host/UIA function returns a
- * remedy_core_status. On a non-Windows build each host/UIA function returns
- * REMEDY_CORE_UNSUPPORTED and writes nothing.
+ * ABI 4 adds host_op_prepare (Host Command IR → PreparedCommand JSON) on top
+ * of ABI 3 UI Automation / Linux AT-SPI and the ABI 2 host surface (DPI,
+ * monitors, capture, PNG, input, windows, clipboard and hidden process
+ * control). Every host/UIA function returns a remedy_core_status. On a
+ * non-Windows build each host/UIA function returns REMEDY_CORE_UNSUPPORTED
+ * and writes nothing; host_op_prepare is portable argv shaping and remains
+ * available.
  *
  * Memory: any buffer returned through an `out_*` pointer is owned by the
  * caller and must be released with remedy_core_free(ptr, len). Strings that
@@ -23,7 +25,7 @@ extern "C" {
  * Errors: when a call fails with REMEDY_CORE_OPERATION_FAILED the Win32 error
  * code is available from remedy_core_last_os_error() on the same thread.
  */
-#define REMEDY_CORE_ABI_VERSION 3u
+#define REMEDY_CORE_ABI_VERSION 4u
 
 enum remedy_core_status {
     REMEDY_CORE_OK = 0,
@@ -300,6 +302,21 @@ int32_t remedy_core_uia_element_action(
  * former Python walker). */
 int32_t remedy_core_a11y_snapshot(
     uint32_t limit,
+    uint8_t **out_json,
+    size_t *out_len
+);
+
+/* ---- ABI 4: Host Command IR prepare ------------------------------------- */
+
+/* Prepare a HostOp into a PreparedCommand. json_in is UTF-8 JSON: either a
+ * bare HostOp object ({kind,...}) or {op:<HostOp>, scratch_dir?, project_path?}.
+ * On success *out_json / *out_len hold UTF-8 PreparedCommand JSON
+ * {argv,display,kind,ir,host,script_path?,notes?,translated?} — caller frees
+ * with remedy_core_free. Supports run|script|mkdir|which|env|chain. raw
+ * (prepare_host_command / translate) returns UNSUPPORTED until that slice. */
+int32_t remedy_core_host_op_prepare(
+    const uint8_t *json_in,
+    size_t json_in_len,
     uint8_t **out_json,
     size_t *out_len
 );
