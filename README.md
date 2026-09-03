@@ -28,9 +28,8 @@ Remedy lives on **this computer** (Windows, Linux, WSLg). **Grove** is home. **S
 
 | | |
 |--|--|
-| **This tree** | **v0.48.0** |
-| **Last public release** | [v0.41.5](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.41.5) · [PyPI `remedy-ai==0.41.5`](https://pypi.org/project/remedy-ai/0.41.5/) |
-| **Source on `master`** | v0.50.2 — **experimental** line; see [What’s new](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/13-whats-new.md) |
+| **Latest release** | [![Latest GitHub release](https://img.shields.io/github/v/release/AhmiDarrow/RemedyAI?label=GitHub&color=2ea44f)](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · [![PyPI](https://img.shields.io/pypi/v/remedy-ai?label=PyPI&color=2ea44f)](https://pypi.org/project/remedy-ai/) |
+| **Source on `master`** | [![Version on master](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FAhmiDarrow%2FRemedyAI%2Fmaster%2Fpyproject.toml&query=%24.project.version&prefix=v&label=master&color=orange)](https://github.com/AhmiDarrow/RemedyAI/blob/master/CHANGELOG.md) · experimental lines ship as [pre-releases](https://github.com/AhmiDarrow/RemedyAI/releases) and never auto-update a stable install · [What’s new](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/13-whats-new.md) |
 | **Owner’s manual** | [docs/manual/](https://github.com/AhmiDarrow/RemedyAI/tree/master/docs/manual/) · [index](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/README.md) |
 | **Install** | [Windows](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/01-install-windows.md) · [Linux](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/01-install-linux.md) |
 | **Security / data** | [04-security-and-data](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/04-security-and-data.md) |
