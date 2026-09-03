@@ -1,7 +1,19 @@
-"""Subprocess helpers that never flash a console window on Windows.
+"""Child processes that never flash a console window and never outlive us.
 
 Desktop users must never see a brief cmd/powershell window when the agent
-runs tools. All Remedy-spawned child processes should go through this module.
+runs tools, and nothing Remedy starts may be left running after she stops
+it. Every Remedy-spawned child goes through this module:
+
+* :func:`run_hidden` / :func:`popen_hidden` /
+  :func:`create_hidden_subprocess_exec` wrap :mod:`subprocess` and
+  :mod:`asyncio` for callers that need pipes, and add the hidden creation
+  flags on Windows.
+* :func:`spawn_hidden` starts a process through ``remedy_core`` inside a
+  Windows job object, so the whole tree (``uv.exe`` and the python it
+  launches, ``cmd`` and its children) dies when the handle closes.
+* :func:`kill_tree` / :func:`kill_process_tree` terminate a process and every
+  descendant through ``remedy_core`` (toolhelp walk, deepest first) instead
+  of a shell helper.
 """
 
 from __future__ import annotations
@@ -10,31 +22,26 @@ import asyncio
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-# CREATE_NO_WINDOW — hide console windows for GUI / desktop tool runs.
-CREATE_NO_WINDOW: int = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
-
 
 def hidden_creationflags() -> int:
-    """Return Windows creation flags that suppress a console window."""
+    """Windows creation flags that suppress a console window (0 elsewhere)."""
     if sys.platform == "win32":
-        return CREATE_NO_WINDOW
+        return int(subprocess.CREATE_NO_WINDOW)
     return 0
 
 
 def hidden_startupinfo() -> Any | None:
-    """STARTUPINFO with SW_HIDE — belt-and-suspenders with CREATE_NO_WINDOW."""
+    """STARTUPINFO with SW_HIDE, belt and braces alongside CREATE_NO_WINDOW."""
     if sys.platform != "win32":
         return None
-    try:
-        si = subprocess.STARTUPINFO()
-        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        si.wShowWindow = subprocess.SW_HIDE
-        return si
-    except Exception:
-        return None
+    startup = subprocess.STARTUPINFO()
+    startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startup.wShowWindow = subprocess.SW_HIDE
+    return startup
 
 
 def hidden_subprocess_kwargs() -> dict[str, Any]:
@@ -42,24 +49,34 @@ def hidden_subprocess_kwargs() -> dict[str, Any]:
 
     On Windows: CREATE_NO_WINDOW + SW_HIDE so *this* process has no console.
     The packaged desktop sidecar is a GUI process (no console). A console
-    child (git, python, uv, cmd) without this flag opens a visible CMD —
-    that flash is a bug, not intended.
+    child (git, python, uv, cmd) without this flag opens a visible CMD.
 
-    CREATE_NO_WINDOW is not inherited. ``cmd /c uv run pytest`` hides cmd
-    but uv's python child still pops a window. Prefer exec'ing python/git
-    directly (see ``deflate_uv_run``).
+    CREATE_NO_WINDOW is not inherited: ``cmd /c uv run pytest`` hides cmd but
+    uv's python child still pops a window. Prefer exec'ing python/git
+    directly (see ``deflate_uv_run``), or :func:`spawn_hidden` when no pipes
+    are needed.
     """
     if sys.platform != "win32":
         return {}
-    out: dict[str, Any] = {"creationflags": CREATE_NO_WINDOW}
-    si = hidden_startupinfo()
-    if si is not None:
-        out["startupinfo"] = si
+    out: dict[str, Any] = {"creationflags": hidden_creationflags()}
+    startup = hidden_startupinfo()
+    if startup is not None:
+        out["startupinfo"] = startup
     return out
 
 
+def _merge_hidden(extra: dict[str, Any]) -> dict[str, Any]:
+    """Hidden kwargs plus *extra*; caller creation flags are OR-ed in."""
+    kwargs = hidden_subprocess_kwargs()
+    flags = extra.pop("creationflags", 0)
+    if flags:
+        kwargs["creationflags"] = int(kwargs.get("creationflags", 0)) | int(flags)
+    kwargs.update(extra)
+    return kwargs
+
+
 #: Default wall for a hidden child process. Every caller today passes its own,
-#: so this changes nothing now — it is here so the next one that forgets does
+#: so this changes nothing now; it is here so the next one that forgets does
 #: not get an unbounded wait. Pass ``timeout=None`` for a deliberately
 #: unbounded run (an interactive dev server, a long build).
 DEFAULT_RUN_TIMEOUT_S = 120.0
@@ -79,14 +96,13 @@ def run_hidden(
 ) -> subprocess.CompletedProcess[Any]:
     """subprocess.run with CREATE_NO_WINDOW on Windows."""
     kwargs: dict[str, Any] = {
-        **hidden_subprocess_kwargs(),
+        **_merge_hidden(extra),
         "capture_output": capture_output,
         "text": text,
         "timeout": timeout,
         "cwd": cwd,
         "env": env,
         "check": check,
-        **extra,
     }
     if input is not None:
         kwargs["input"] = input
@@ -103,7 +119,11 @@ def popen_hidden(
     stdin: Any = None,
     **extra: Any,
 ) -> subprocess.Popen[Any]:
-    """subprocess.Popen with CREATE_NO_WINDOW on Windows."""
+    """subprocess.Popen with CREATE_NO_WINDOW on Windows.
+
+    ``creationflags`` in *extra* are added to the hidden flags, so a caller
+    can still ask for CREATE_NEW_PROCESS_GROUP.
+    """
     return subprocess.Popen(
         list(args),
         cwd=cwd,
@@ -111,8 +131,7 @@ def popen_hidden(
         stdout=stdout,
         stderr=stderr,
         stdin=stdin,
-        **hidden_subprocess_kwargs(),
-        **extra,
+        **_merge_hidden(extra),
     )
 
 
@@ -135,32 +154,143 @@ async def create_hidden_subprocess_exec(
         stdin=stdin,
         cwd=cwd,
         env=env,
-        **hidden_subprocess_kwargs(),
-        **extra,
+        **_merge_hidden(extra),
     )
 
 
-def kill_process_tree(proc: Any) -> None:
-    """Kill *proc* and, on Windows, attempt to kill its child tree.
+# --- remedy_core process control -------------------------------------------
 
-    Accepts ``asyncio.subprocess.Process`` or ``subprocess.Popen``.
-    Safe to call if the process already exited.
+
+class HiddenProcess:
+    """A process started by :func:`spawn_hidden`.
+
+    The process runs inside a job object with ``KILL_ON_JOB_CLOSE``: calling
+    :meth:`close` (or leaving a ``with`` block) ends the process and every
+    descendant that is still running. Use :meth:`wait` first when the process
+    is meant to finish on its own.
+    """
+
+    def __init__(self, pid: int, handle: int) -> None:
+        self.pid = pid
+        self._handle = handle
+        self.returncode: int | None = None
+
+    def __repr__(self) -> str:
+        state = "open" if self._handle else "closed"
+        return f"HiddenProcess(pid={self.pid}, returncode={self.returncode}, {state})"
+
+    def __enter__(self) -> HiddenProcess:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def wait(self, timeout: float | None = DEFAULT_RUN_TIMEOUT_S) -> int | None:
+        """Exit code once the process ends, None if *timeout* seconds elapse."""
+        return wait(self, timeout)
+
+    def poll(self) -> int | None:
+        return wait(self, 0)
+
+    def kill_tree(self) -> None:
+        """Terminate the process and all descendants now."""
+        kill_tree(self.pid)
+
+    def close(self) -> None:
+        """Release the handles; a still-running tree is terminated."""
+        from remedy.core.computer import host_binding
+
+        handle, self._handle = self._handle, 0
+        if handle:
+            host_binding.process_close(handle)
+
+    @property
+    def handle(self) -> int:
+        return self._handle
+
+
+def spawn_hidden(
+    argv: Sequence[str],
+    *,
+    cwd: str | Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> HiddenProcess:
+    """Start *argv* hidden, inside a job that dies with its handle.
+
+    No pipes are attached; use :func:`popen_hidden` when output is needed.
+    ``argv[0]`` is resolved by ``CreateProcessW`` like ``subprocess.Popen``.
+    Raises :class:`remedy.core.computer.host_binding.HostError` (unsupported)
+    on platforms where ``remedy_core`` has no process host yet.
+    """
+    from remedy.core.computer import host_binding
+
+    pid, handle = host_binding.process_spawn_hidden(
+        [str(a) for a in argv], str(cwd) if cwd else None, env
+    )
+    return HiddenProcess(pid, handle)
+
+
+def wait(process: HiddenProcess, timeout: float | None = DEFAULT_RUN_TIMEOUT_S) -> int | None:
+    """Wait for a :class:`HiddenProcess`; None when *timeout* elapses first.
+
+    A closed handle always raises ``ValueError`` — read ``returncode`` on the
+    object after a prior successful wait instead of waiting again.
+    """
+    from remedy.core.computer import host_binding
+
+    if not process.handle:
+        raise ValueError("HiddenProcess is closed")
+    if process.returncode is not None:
+        return process.returncode
+    timeout_ms = host_binding.WAIT_FOREVER if timeout is None else int(max(0.0, timeout) * 1000)
+    code = host_binding.process_wait(process.handle, timeout_ms)
+    if code is not None:
+        process.returncode = code
+    return code
+
+
+def kill_tree(pid: int) -> None:
+    """Terminate *pid* and every descendant (deepest first) through ``remedy_core``."""
+    from remedy.core.computer import host_binding
+
+    host_binding.process_kill_tree(int(pid))
+
+
+def kill_process_tree(proc: Any) -> None:
+    """Kill *proc* and, on Windows, its whole child tree.
+
+    Accepts ``asyncio.subprocess.Process``, ``subprocess.Popen`` or
+    :class:`HiddenProcess`. Safe to call if the process already exited.
+
+    On Windows the kill-tree walks through ``remedy_core``. A missing or
+    mismatched core is a hard error — orphans must not be left behind by a
+    silent fallthrough to ``proc.kill()``.
     """
     if proc is None:
         return
+    if isinstance(proc, HiddenProcess):
+        try:
+            proc.kill_tree()
+        except ProcessLookupError:
+            return
+        return
     pid = getattr(proc, "pid", None)
-    # Prefer tree kill on Windows so pwsh/cmd children die with the shell.
     if sys.platform == "win32" and pid:
-        from contextlib import suppress
+        # The job/toolhelp walk reaches grandchildren (pwsh under cmd, python
+        # under uv) that a plain proc.kill() would orphan.
+        from remedy.core.computer.host_binding import HostError
+        from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
-        with suppress(Exception):
-            # /T = tree, /F = force; CREATE_NO_WINDOW so no flash
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                capture_output=True,
-                timeout=5,
-                **hidden_subprocess_kwargs(),
-            )
+        try:
+            kill_tree(int(pid))
+            return
+        except (HostError, NativeRuntimeUnavailableError):
+            raise
+        except ProcessLookupError:
+            return
+        except OSError:
+            # Process already gone; fall through only to confirm.
+            pass
     try:
         if getattr(proc, "returncode", None) is not None:
             return  # already exited (asyncio Process)
@@ -176,8 +306,6 @@ def kill_process_tree(proc: Any) -> None:
     except ProcessLookupError:
         return
     except Exception:
-        from contextlib import suppress
-
         with suppress(Exception):
             proc.terminate()
 

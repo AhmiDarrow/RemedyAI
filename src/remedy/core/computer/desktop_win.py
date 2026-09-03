@@ -1,18 +1,24 @@
-"""Windows desktop capture + input (in-process, no Tauri required)."""
+"""Windows desktop capture + input over the ``remedy_core`` host (no ctypes here).
+
+Every Win32 call (capture, SendInput, window control, clipboard, DPI, PNG
+encoding) is made by ``remedy_core`` through
+:mod:`remedy.core.computer.host_binding`. This module keeps the policy that
+sits on top: screenshot files under the Remedy home, Set-of-Mark labels,
+pixel candidate detection, key-name resolution, snapshots, app and URL
+launch rules.
+"""
 
 from __future__ import annotations
 
 import contextlib
-import ctypes
 import os
-import struct
 import sys
 import time
 from collections.abc import Callable
-from ctypes import wintypes
 from pathlib import Path
 from typing import Any
 
+from remedy.core.computer import host_binding as H
 from remedy.home import default_home
 
 # Virtual-key codes (subset)
@@ -60,100 +66,39 @@ _VK = {
     "cmd": 0x5B,
 }
 
+_MODIFIER_VKS = (0x10, 0x11, 0x12, 0x5B)
+
+_MOUSE_BUTTONS = {
+    "left": H.MOUSE_LEFT,
+    "l": H.MOUSE_LEFT,
+    "right": H.MOUSE_RIGHT,
+    "r": H.MOUSE_RIGHT,
+    "middle": H.MOUSE_MIDDLE,
+    "mid": H.MOUSE_MIDDLE,
+    "m": H.MOUSE_MIDDLE,
+}
+
+#: Delay between typed characters (ms); ~200 chars/s like the previous loop.
+_TYPE_DELAY_MS = 5
+
 
 def _require_windows() -> None:
     if sys.platform != "win32":
         raise RuntimeError("Desktop computer use requires Windows")
 
 
-_dpi_ready = False
-
-
 def _ensure_dpi_awareness() -> None:
-    """Make this process Per-Monitor-Aware v2, once, before touching any window.
-
-    The old SetProcessDPIAware() is system-DPI only: on a mixed-DPI setup
-    (150% laptop + 100% external) coordinates and captures on the scaled monitor
-    come out wrong, so clicks miss. PerMonitorV2 gives true physical pixels on
-    every display. Falls back gracefully on older Windows. Identical behaviour on
-    a single 100% monitor, so this only ever fixes the scaled case.
-    """
-    global _dpi_ready
-    if _dpi_ready or sys.platform != "win32":
+    """Per-Monitor-DPI-aware v2 once, so captures and clicks use physical pixels."""
+    if sys.platform != "win32":
         return
-    _dpi_ready = True
-    with contextlib.suppress(Exception):
-        user32 = ctypes.windll.user32
-        user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
-        user32.SetProcessDpiAwarenessContext.restype = wintypes.BOOL
-        # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
-        if user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
-            return
-    with contextlib.suppress(Exception):
-        # PROCESS_PER_MONITOR_DPI_AWARE = 2 (Windows 8.1+)
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)
-        return
-    with contextlib.suppress(Exception):
-        ctypes.windll.user32.SetProcessDPIAware()
+    H.dpi_awareness_enable()
 
 
 def _capture_virtual_screen() -> tuple[bytes, int, int, int, int, int]:
     """Return (bgr_bytes, stride, width, height, origin_x, origin_y)."""
     _require_windows()
-    user32 = ctypes.windll.user32
-    gdi32 = ctypes.windll.gdi32
-    _ensure_dpi_awareness()
-
-    left = user32.GetSystemMetrics(76)  # SM_XVIRTUALSCREEN
-    top = user32.GetSystemMetrics(77)  # SM_YVIRTUALSCREEN
-    width = user32.GetSystemMetrics(78)  # SM_CXVIRTUALSCREEN
-    height = user32.GetSystemMetrics(79)  # SM_CYVIRTUALSCREEN
-    if width <= 0 or height <= 0:
-        width = user32.GetSystemMetrics(0)
-        height = user32.GetSystemMetrics(1)
-        left, top = 0, 0
-
-    hdc = user32.GetDC(0)
-    memdc = gdi32.CreateCompatibleDC(hdc)
-    bmp = gdi32.CreateCompatibleBitmap(hdc, width, height)
-    old = gdi32.SelectObject(memdc, bmp)
-    gdi32.BitBlt(memdc, 0, 0, width, height, hdc, left, top, 0x00CC0020)  # SRCCOPY
-
-    class BITMAPINFOHEADER(ctypes.Structure):
-        _fields_ = [
-            ("biSize", wintypes.DWORD),
-            ("biWidth", wintypes.LONG),
-            ("biHeight", wintypes.LONG),
-            ("biPlanes", wintypes.WORD),
-            ("biBitCount", wintypes.WORD),
-            ("biCompression", wintypes.DWORD),
-            ("biSizeImage", wintypes.DWORD),
-            ("biXPelsPerMeter", wintypes.LONG),
-            ("biYPelsPerMeter", wintypes.LONG),
-            ("biClrUsed", wintypes.DWORD),
-            ("biClrImportant", wintypes.DWORD),
-        ]
-
-    class BITMAPINFO(ctypes.Structure):
-        _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", wintypes.DWORD * 3)]
-
-    stride = (width * 3 + 3) & ~3
-    buf = ctypes.create_string_buffer(stride * height)
-    bmi = BITMAPINFO()
-    bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-    bmi.bmiHeader.biWidth = width
-    bmi.bmiHeader.biHeight = -height
-    bmi.bmiHeader.biPlanes = 1
-    bmi.bmiHeader.biBitCount = 24
-    bmi.bmiHeader.biCompression = 0
-
-    gdi32.GetDIBits(memdc, bmp, 0, height, buf, ctypes.byref(bmi), 0)
-
-    gdi32.SelectObject(memdc, old)
-    gdi32.DeleteObject(bmp)
-    gdi32.DeleteDC(memdc)
-    user32.ReleaseDC(0, hdc)
-    return bytes(buf), stride, width, height, left, top
+    shot = H.capture_virtual_screen(3)
+    return shot.pixels, shot.stride, shot.width, shot.height, shot.left, shot.top
 
 
 def _remedy_home() -> Path:
@@ -414,17 +359,17 @@ def screenshot_region_png(
 
     *x*/*y*/*width*/*height* may be CSS/logical pixels when *scale* is devicePixelRatio.
     """
+    _require_windows()
     sc = float(scale) if scale and scale > 0 else 1.0
     rx = int(round(int(x) * sc))
     ry = int(round(int(y) * sc))
     rw = max(1, int(round(int(width) * sc)))
     rh = max(1, int(round(int(height) * sc)))
 
-    raw, stride, full_w, full_h, origin_x, origin_y = _capture_virtual_screen()
-    # Convert screen coords → bitmap coords
+    origin_x, origin_y, full_w, full_h = H.virtual_screen_rect()
+    # Convert screen coords → bitmap coords and clamp to the virtual screen
     bx = rx - origin_x
     by = ry - origin_y
-    # Clamp to bitmap
     if bx < 0:
         rw += bx
         bx = 0
@@ -436,16 +381,10 @@ def screenshot_region_png(
     rw = min(rw, full_w - bx)
     rh = min(rh, full_h - by)
 
-    crop_stride = (rw * 3 + 3) & ~3
-    crop = bytearray(crop_stride * rh)
-    for row in range(rh):
-        src_off = (by + row) * stride + bx * 3
-        dst_off = row * crop_stride
-        crop[dst_off : dst_off + rw * 3] = raw[src_off : src_off + rw * 3]
-
+    crop = H.capture_region(origin_x + bx, origin_y + by, rw, rh, 3)
     out = Path(path) if path is not None else _default_shot_path("region")
     out.parent.mkdir(parents=True, exist_ok=True)
-    _write_png_bgr(out, rw, rh, bytes(crop), crop_stride)
+    _write_png_bgr(out, rw, rh, crop.pixels, crop.stride)
     return {
         "path": str(out),
         "width": rw,
@@ -455,151 +394,35 @@ def screenshot_region_png(
     }
 
 
-def _write_png_bgr(path: Path, width: int, height: int, raw: bytes, stride: int) -> None:
-    """Minimal PNG writer (RGB from BGR rows).
+def _write_png_bgr(
+    path: Path,
+    width: int,
+    height: int,
+    raw: bytes | bytearray | memoryview,
+    stride: int,
+    *,
+    bytes_per_pixel: int = 3,
+) -> None:
+    """Write BGR (or BGRA with ``bytes_per_pixel=4``) rows as an RGB PNG.
 
-    BGR→RGB conversion is done with C-level extended-slice assignment per row
-    instead of a per-pixel Python loop — on a 4K frame that is ~8M interpreted
-    iterations removed, turning multi-second encodes into tens of ms. zlib
-    level 1 keeps compression fast (the model does not need max ratio).
+    Encoding (colour swap + zlib) runs in ``remedy_core``; this only names the
+    file. Works on every platform the library builds for.
     """
-    import binascii
-    import zlib
-
-    row_bytes = width * 3
-    scanlines = bytearray()
-    for y in range(height):
-        base = y * stride
-        row = raw[base : base + row_bytes]
-        rgb = bytearray(row)  # copy; G channel already in place
-        rgb[0::3] = row[2::3]  # R ← B-position bytes
-        rgb[2::3] = row[0::3]  # B ← R-position bytes
-        scanlines += b"\x00"
-        scanlines += rgb
-    compressed = zlib.compress(bytes(scanlines), 1)
-
-    def chunk(tag: bytes, data: bytes) -> bytes:
-        return (
-            struct.pack(">I", len(data))
-            + tag
-            + data
-            + struct.pack(">I", binascii.crc32(tag + data) & 0xFFFFFFFF)
-        )
-
-    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
-    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", compressed) + chunk(
-        b"IEND", b""
-    )
-    path.write_bytes(png)
+    path.write_bytes(H.encode_png(raw, width, height, stride, bytes_per_pixel))
 
 
 # --- input ---
 
-INPUT_MOUSE = 0
-INPUT_KEYBOARD = 1
-MOUSEEVENTF_MOVE = 0x0001
-MOUSEEVENTF_LEFTDOWN = 0x0002
-MOUSEEVENTF_LEFTUP = 0x0004
-MOUSEEVENTF_RIGHTDOWN = 0x0008
-MOUSEEVENTF_RIGHTUP = 0x0010
-MOUSEEVENTF_MIDDLEDOWN = 0x0020
-MOUSEEVENTF_MIDDLEUP = 0x0040
-MOUSEEVENTF_WHEEL = 0x0800
-MOUSEEVENTF_HWHEEL = 0x1000
-MOUSEEVENTF_ABSOLUTE = 0x8000
-MOUSEEVENTF_VIRTUALDESK = 0x4000
-KEYEVENTF_KEYUP = 0x0002
-KEYEVENTF_UNICODE = 0x0004
-
-
-class MOUSEINPUT(ctypes.Structure):
-    _fields_ = [
-        ("dx", wintypes.LONG),
-        ("dy", wintypes.LONG),
-        ("mouseData", wintypes.DWORD),
-        ("dwFlags", wintypes.DWORD),
-        ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
-    ]
-
-
-class KEYBDINPUT(ctypes.Structure):
-    _fields_ = [
-        ("wVk", wintypes.WORD),
-        ("wScan", wintypes.WORD),
-        ("dwFlags", wintypes.DWORD),
-        ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
-    ]
-
-
-class HARDWAREINPUT(ctypes.Structure):
-    _fields_ = [
-        ("uMsg", wintypes.DWORD),
-        ("wParamL", wintypes.WORD),
-        ("wParamH", wintypes.WORD),
-    ]
-
-
-class INPUT_UNION(ctypes.Union):
-    _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT), ("hi", HARDWAREINPUT)]
-
-
-class INPUT(ctypes.Structure):
-    _fields_ = [("type", wintypes.DWORD), ("union", INPUT_UNION)]
-
-
-def _send_input(*inputs: INPUT) -> None:
-    n = len(inputs)
-    arr = (INPUT * n)(*inputs)
-    sent = ctypes.windll.user32.SendInput(n, ctypes.byref(arr), ctypes.sizeof(INPUT))
-    if sent != n:
-        raise RuntimeError(f"SendInput sent {sent}/{n}")
-
-
-def _abs_coords(x: int, y: int) -> tuple[int, int]:
-    user32 = ctypes.windll.user32
-    _ensure_dpi_awareness()
-    left = user32.GetSystemMetrics(76)
-    top = user32.GetSystemMetrics(77)
-    width = user32.GetSystemMetrics(78) or 1
-    height = user32.GetSystemMetrics(79) or 1
-    # Map virtual-screen pixels → 0..65535 absolute
-    ax = int((x - left) * 65535 / max(width - 1, 1))
-    ay = int((y - top) * 65535 / max(height - 1, 1))
-    return ax, ay
-
 
 def move_mouse(x: int, y: int) -> None:
     _require_windows()
-    ax, ay = _abs_coords(int(x), int(y))
-    mi = MOUSEINPUT(
-        ax,
-        ay,
-        0,
-        MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
-        0,
-        None,
-    )
-    _send_input(INPUT(INPUT_MOUSE, INPUT_UNION(mi=mi)))
+    H.mouse_move(int(x), int(y))
 
 
 def click(x: int, y: int, *, button: str = "left", clicks: int = 1) -> None:
     _require_windows()
-    move_mouse(x, y)
-    time.sleep(0.02)
-    btn = (button or "left").lower()
-    down, up = MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP
-    if btn in ("right", "r"):
-        down, up = MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP
-    elif btn in ("middle", "mid", "m"):
-        down, up = MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP
-    for _ in range(max(1, int(clicks or 1))):
-        _send_input(
-            INPUT(INPUT_MOUSE, INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, down, 0, None))),
-            INPUT(INPUT_MOUSE, INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, up, 0, None))),
-        )
-        time.sleep(0.04)
+    code = _MOUSE_BUTTONS.get((button or "left").lower(), H.MOUSE_LEFT)
+    H.mouse_click(int(x), int(y), code, max(1, int(clicks or 1)))
 
 
 def drag(x1: int, y1: int, x2: int, y2: int, *, steps: int = 12) -> None:
@@ -610,42 +433,17 @@ def drag(x1: int, y1: int, x2: int, y2: int, *, steps: int = 12) -> None:
     register before button-up.
     """
     _require_windows()
-    move_mouse(x1, y1)
-    time.sleep(0.02)
-    _send_input(INPUT(INPUT_MOUSE, INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTDOWN, 0, None))))
-    time.sleep(0.05)
-    n = max(2, int(steps))
-    for i in range(1, n + 1):
-        t = i / n
-        move_mouse(int(x1 + (x2 - x1) * t), int(y1 + (y2 - y1) * t))
-        time.sleep(0.012)
-    # Let the drop target highlight/accept before release
-    time.sleep(0.12)
-    _send_input(INPUT(INPUT_MOUSE, INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, MOUSEEVENTF_LEFTUP, 0, None))))
+    H.mouse_drag(int(x1), int(y1), int(x2), int(y2), max(2, int(steps)))
 
 
 def scroll(x: int, y: int, *, dy: int = -3, dx: int = 0) -> None:
     _require_windows()
-    move_mouse(x, y)
-    time.sleep(0.02)
-    # wheel: +120 per notch up
-    if dy:
-        data = int(dy) * 120
-        _send_input(
-            INPUT(
-                INPUT_MOUSE,
-                INPUT_UNION(mi=MOUSEINPUT(0, 0, data & 0xFFFFFFFF, MOUSEEVENTF_WHEEL, 0, None)),
-            )
-        )
-    if dx:
-        # Horizontal wheel: +120 per notch right
-        data = int(dx) * 120
-        _send_input(
-            INPUT(
-                INPUT_MOUSE,
-                INPUT_UNION(mi=MOUSEINPUT(0, 0, data & 0xFFFFFFFF, MOUSEEVENTF_HWHEEL, 0, None)),
-            )
-        )
+    H.mouse_scroll(int(x), int(y), int(dx or 0), int(dy or 0))
+
+
+def _send_input(text: str) -> None:
+    """Deliver one typed chunk (a character or line break) through the host."""
+    H.type_text(text, _TYPE_DELAY_MS)
 
 
 def type_text(
@@ -662,7 +460,7 @@ def type_text(
     _require_windows()
     n = 0
     for i, ch in enumerate(text or ""):
-        # Check often so Stop mid-type reacts within ~2 keystrokes (was every 8).
+        # Check often so Stop mid-type reacts within ~2 keystrokes.
         if abort_check is not None and i > 0 and i % 2 == 0:
             try:
                 if abort_check():
@@ -673,31 +471,12 @@ def type_text(
                 raise
             except Exception:
                 pass
-        if ch in ("\r", "\n"):
-            # '\r\n' counts once; many apps ignore U+000A as a key event —
-            # send a real VK_RETURN press instead.
-            if ch == "\r" and i + 1 < len(text) and text[i + 1] == "\n":
-                n += 1
-                continue
-            _send_input(
-                INPUT(INPUT_KEYBOARD, INPUT_UNION(ki=KEYBDINPUT(0x0D, 0, 0, 0, None))),
-                INPUT(
-                    INPUT_KEYBOARD,
-                    INPUT_UNION(ki=KEYBDINPUT(0x0D, 0, KEYEVENTF_KEYUP, 0, None)),
-                ),
-            )
+        if ch == "\r" and i + 1 < len(text) and text[i + 1] == "\n":
+            # '\r\n' counts once; the '\n' sends the Return key.
             n += 1
-            time.sleep(0.005)
             continue
-        code = ord(ch)
-        down = KEYBDINPUT(0, code, KEYEVENTF_UNICODE, 0, None)
-        up = KEYBDINPUT(0, code, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP, 0, None)
-        _send_input(
-            INPUT(INPUT_KEYBOARD, INPUT_UNION(ki=down)),
-            INPUT(INPUT_KEYBOARD, INPUT_UNION(ki=up)),
-        )
+        _send_input(ch)
         n += 1
-        time.sleep(0.005)
     if chars_typed is not None:
         chars_typed[:] = [n]
     return n
@@ -718,10 +497,10 @@ def resolve_key_combo(key: str, *, vk_scan=None) -> list[int]:
     for p in parts:
         if p in _VK:
             vk = _VK[p]
-            (mods if vk in (0x10, 0x11, 0x12, 0x5B) else mains).append(vk)
+            (mods if vk in _MODIFIER_VKS else mains).append(vk)
         elif len(p) == 1:
             if vk_scan is None:
-                vk_scan = ctypes.windll.user32.VkKeyScanW
+                vk_scan = H.vk_key_scan
             sc = int(vk_scan(ord(p)))
             if sc == -1:
                 raise ValueError(f"Key has no VK mapping on this layout: {p!r}")
@@ -745,60 +524,17 @@ def press_key(key: str) -> None:
     vks = resolve_key_combo(key)
     if not vks:
         return
-    for vk in vks:
-        _send_input(INPUT(INPUT_KEYBOARD, INPUT_UNION(ki=KEYBDINPUT(vk, 0, 0, 0, None))))
-    for vk in reversed(vks):
-        _send_input(
-            INPUT(
-                INPUT_KEYBOARD,
-                INPUT_UNION(ki=KEYBDINPUT(vk, 0, KEYEVENTF_KEYUP, 0, None)),
-            )
-        )
+    H.key_combo(vks)
 
 
 def list_windows(limit: int = 40) -> list[dict[str, Any]]:
+    """Visible, titled top-level windows (at least 8x8), most recent z-order first.
+
+    Each entry: hwnd, title, class, pid, bounds{left,top,right,bottom},
+    width, height, visible, minimized.
+    """
     _require_windows()
-    user32 = ctypes.windll.user32
-    results: list[dict[str, Any]] = []
-
-    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def enum_proc(hwnd, _lparam):
-        if len(results) >= max(1, limit):
-            return False
-        if not user32.IsWindowVisible(hwnd):
-            return True
-        length = user32.GetWindowTextLengthW(hwnd)
-        if length <= 0:
-            return True
-        buf = ctypes.create_unicode_buffer(length + 1)
-        user32.GetWindowTextW(hwnd, buf, length + 1)
-        title = buf.value.strip()
-        if not title:
-            return True
-        rect = wintypes.RECT()
-        user32.GetWindowRect(hwnd, ctypes.byref(rect))
-        w = int(rect.right - rect.left)
-        h = int(rect.bottom - rect.top)
-        if w < 8 or h < 8:
-            return True
-        results.append(
-            {
-                "hwnd": int(hwnd),
-                "title": title[:200],
-                "bounds": {
-                    "left": int(rect.left),
-                    "top": int(rect.top),
-                    "right": int(rect.right),
-                    "bottom": int(rect.bottom),
-                },
-                "width": w,
-                "height": h,
-            }
-        )
-        return True
-
-    user32.EnumWindows(enum_proc, 0)
-    return results
+    return H.list_windows(max(1, int(limit)))
 
 
 def find_remedy_desktop_hwnd() -> int | None:
@@ -817,9 +553,7 @@ def find_remedy_desktop_hwnd() -> int | None:
 
 def _window_class(hwnd: int) -> str:
     with contextlib.suppress(Exception):
-        buf = ctypes.create_unicode_buffer(256)
-        ctypes.windll.user32.GetClassNameW(int(hwnd), buf, 256)
-        return buf.value
+        return H.window_class(int(hwnd))
     return ""
 
 
@@ -876,7 +610,7 @@ def find_dialog_window() -> dict[str, Any] | None:
         # Not foreground? scan visible windows for a dialog class.
         for w in list_windows(limit=30):
             wh = int(w.get("hwnd") or 0)
-            if wh and _window_class(wh).lower() == _DIALOG_CLASS.lower():
+            if wh and str(w.get("class") or "").lower() == _DIALOG_CLASS.lower():
                 return {"hwnd": wh, "title": str(w.get("title") or "")}
     return None
 
@@ -932,7 +666,7 @@ def desktop_snapshot(
         if root_hwnd is None and wins:
             # Prefer foreground window for control walk
             try:
-                fg = int(ctypes.windll.user32.GetForegroundWindow() or 0)
+                fg = int(H.foreground_window()[0] or 0)
                 if fg:
                     root_hwnd = fg
             except Exception:
@@ -961,76 +695,20 @@ def desktop_snapshot(
 
 
 def print_window_png(hwnd: int, path: Path | None = None) -> dict[str, Any]:
-    """Capture a single HWND via PrintWindow (better for layered/WebView hosts)."""
+    """Capture a single HWND via PrintWindow (better for layered/WebView hosts).
+
+    Raises RuntimeError when the window is too small or refuses PrintWindow.
+    """
     _require_windows()
-    user32 = ctypes.windll.user32
-    gdi32 = ctypes.windll.gdi32
-    _ensure_dpi_awareness()
-    rect = wintypes.RECT()
-    if not user32.GetWindowRect(int(hwnd), ctypes.byref(rect)):
-        raise RuntimeError("GetWindowRect failed")
-    width = int(rect.right - rect.left)
-    height = int(rect.bottom - rect.top)
-    if width < 2 or height < 2:
-        raise RuntimeError("window too small")
-
-    hwnd_dc = user32.GetWindowDC(int(hwnd))
-    memdc = gdi32.CreateCompatibleDC(hwnd_dc)
-    bmp = gdi32.CreateCompatibleBitmap(hwnd_dc, width, height)
-    old = gdi32.SelectObject(memdc, bmp)
-    # PW_RENDERFULLCONTENT = 2 (Win8.1+) — captures DirectComposition/WebView better
-    ok = user32.PrintWindow(int(hwnd), memdc, 2)
-    if not ok:
-        ok = user32.PrintWindow(int(hwnd), memdc, 0)
-    if not ok:
-        gdi32.SelectObject(memdc, old)
-        gdi32.DeleteObject(bmp)
-        gdi32.DeleteDC(memdc)
-        user32.ReleaseDC(int(hwnd), hwnd_dc)
-        raise RuntimeError("PrintWindow failed")
-
-    class BITMAPINFOHEADER(ctypes.Structure):
-        _fields_ = [
-            ("biSize", wintypes.DWORD),
-            ("biWidth", wintypes.LONG),
-            ("biHeight", wintypes.LONG),
-            ("biPlanes", wintypes.WORD),
-            ("biBitCount", wintypes.WORD),
-            ("biCompression", wintypes.DWORD),
-            ("biSizeImage", wintypes.DWORD),
-            ("biXPelsPerMeter", wintypes.LONG),
-            ("biYPelsPerMeter", wintypes.LONG),
-            ("biClrUsed", wintypes.DWORD),
-            ("biClrImportant", wintypes.DWORD),
-        ]
-
-    class BITMAPINFO(ctypes.Structure):
-        _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", wintypes.DWORD * 3)]
-
-    stride = (width * 3 + 3) & ~3
-    buf = ctypes.create_string_buffer(stride * height)
-    bmi = BITMAPINFO()
-    bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-    bmi.bmiHeader.biWidth = width
-    bmi.bmiHeader.biHeight = -height
-    bmi.bmiHeader.biPlanes = 1
-    bmi.bmiHeader.biBitCount = 24
-    bmi.bmiHeader.biCompression = 0
-    gdi32.GetDIBits(memdc, bmp, 0, height, buf, ctypes.byref(bmi), 0)
-
-    gdi32.SelectObject(memdc, old)
-    gdi32.DeleteObject(bmp)
-    gdi32.DeleteDC(memdc)
-    user32.ReleaseDC(int(hwnd), hwnd_dc)
-
+    shot = H.print_window(int(hwnd), 3)
     out = Path(path) if path is not None else _default_shot_path("hwnd")
     out.parent.mkdir(parents=True, exist_ok=True)
-    _write_png_bgr(out, width, height, bytes(buf), stride)
+    _write_png_bgr(out, shot.width, shot.height, shot.pixels, shot.stride)
     return {
         "path": str(out),
-        "width": width,
-        "height": height,
-        "origin": {"x": int(rect.left), "y": int(rect.top)},
+        "width": shot.width,
+        "height": shot.height,
+        "origin": {"x": shot.left, "y": shot.top},
         "hwnd": int(hwnd),
         "method": "PrintWindow",
     }
@@ -1044,49 +722,18 @@ def find_child_hwnd(
 ) -> int | None:
     """Find first child HWND matching class and/or title substring."""
     _require_windows()
-    user32 = ctypes.windll.user32
-    found: list[int] = []
-
-    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def enum_child(hwnd, _lp):
-        if found:
-            return False
-        if class_name:
-            buf = ctypes.create_unicode_buffer(256)
-            user32.GetClassNameW(hwnd, buf, 256)
-            if class_name.lower() not in buf.value.lower():
-                return True
-        if title_substr:
-            length = user32.GetWindowTextLengthW(hwnd)
-            tbuf = ctypes.create_unicode_buffer(length + 1)
-            user32.GetWindowTextW(hwnd, tbuf, length + 1)
-            if title_substr.lower() not in tbuf.value.lower():
-                return True
-        found.append(int(hwnd))
-        return False
-
-    user32.EnumChildWindows(int(parent), enum_child, 0)
-    return found[0] if found else None
+    found = H.find_child_hwnd(int(parent), class_name or "", title_substr or "")
+    return found or None
 
 
 def find_webview_host_hwnd() -> int | None:
     """Best-effort: locate a WebView2 / Chromium host under a Remedy-titled window."""
     _require_windows()
-    user32 = ctypes.windll.user32
-    candidates: list[int] = []
-
-    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def enum_top(hwnd, _lp):
-        if not user32.IsWindowVisible(hwnd):
-            return True
-        length = user32.GetWindowTextLengthW(hwnd)
-        if length <= 0:
-            return True
-        buf = ctypes.create_unicode_buffer(length + 1)
-        user32.GetWindowTextW(hwnd, buf, length + 1)
-        title = buf.value.lower()
+    for w in list_windows(limit=200):
+        title = str(w.get("title") or "").lower()
         if "remedy" not in title and "tauri" not in title:
-            return True
+            continue
+        hwnd = int(w["hwnd"])
         # Prefer Chromium / WebView2 child
         for cls in (
             "Chrome_WidgetWin_1",
@@ -1094,15 +741,11 @@ def find_webview_host_hwnd() -> int | None:
             "WebView2",
             "Intermediate D3D Window",
         ):
-            child = find_child_hwnd(int(hwnd), class_name=cls)
+            child = find_child_hwnd(hwnd, class_name=cls)
             if child:
-                candidates.append(child)
-                return False
-        candidates.append(int(hwnd))
-        return False
-
-    user32.EnumWindows(enum_top, 0)
-    return candidates[0] if candidates else None
+                return child
+        return hwnd
+    return None
 
 
 def click_element(el: dict[str, Any], *, button: str = "left", clicks: int = 1) -> None:
@@ -1122,78 +765,32 @@ def click_element(el: dict[str, Any], *, button: str = "left", clicks: int = 1) 
 def focus_window(hwnd: int) -> bool:
     """Restore + foreground *hwnd*, VERIFIED.
 
-    Windows' foreground lock can silently ignore SetForegroundWindow; we check
-    GetForegroundWindow and fall back to AttachThreadInput so input never lands
-    in the wrong app. Returns True when hwnd (or a child) is foreground.
+    Windows' foreground lock can silently ignore SetForegroundWindow; the host
+    checks GetForegroundWindow and falls back to AttachThreadInput and an ALT
+    tap so input never lands in the wrong app. Returns True when hwnd (or a
+    window sharing its root owner) is foreground.
     """
     _require_windows()
-    user32 = ctypes.windll.user32
-    kernel32 = ctypes.windll.kernel32
-    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-    user32.SetForegroundWindow(hwnd)
-    if _foreground_is(hwnd):
-        return True
-    # Foreground lock: attach our thread's input state to the foreground thread.
-    with contextlib.suppress(Exception):
-        fg = user32.GetForegroundWindow()
-        fg_tid = user32.GetWindowThreadProcessId(fg, None) if fg else 0
-        my_tid = kernel32.GetCurrentThreadId()
-        if fg_tid and fg_tid != my_tid:
-            user32.AttachThreadInput(my_tid, fg_tid, True)
-            try:
-                user32.BringWindowToTop(hwnd)
-                user32.SetForegroundWindow(hwnd)
-            finally:
-                user32.AttachThreadInput(my_tid, fg_tid, False)
-    if _foreground_is(hwnd):
-        return True
-    # Last resort: brief ALT tap releases the foreground lock for us.
-    with contextlib.suppress(Exception):
-        _send_input(
-            INPUT(INPUT_KEYBOARD, INPUT_UNION(ki=KEYBDINPUT(0x12, 0, 0, 0, None))),
-            INPUT(
-                INPUT_KEYBOARD,
-                INPUT_UNION(ki=KEYBDINPUT(0x12, 0, KEYEVENTF_KEYUP, 0, None)),
-            ),
-        )
-        user32.SetForegroundWindow(hwnd)
-    time.sleep(0.05)
-    return _foreground_is(hwnd)
-
-
-def _foreground_is(hwnd: int) -> bool:
-    """True when *hwnd* or one of its ancestors/owner is the foreground window."""
-    with contextlib.suppress(Exception):
-        user32 = ctypes.windll.user32
-        fg = user32.GetForegroundWindow()
-        if not fg:
-            return False
-        if int(fg) == int(hwnd):
-            return True
-        # Owned/child relationship either way counts (dialogs, WebView hosts).
-        GA_ROOTOWNER = 3
-        return int(user32.GetAncestor(fg, GA_ROOTOWNER)) == int(
-            user32.GetAncestor(hwnd, GA_ROOTOWNER)
-        )
-    return False
+    return H.focus_window(int(hwnd))
 
 
 def foreground_window_info() -> dict[str, Any]:
     """Title/hwnd of the current foreground window — act→verify evidence."""
     out: dict[str, Any] = {"hwnd": 0, "title": ""}
     with contextlib.suppress(Exception):
-        user32 = ctypes.windll.user32
-        fg = user32.GetForegroundWindow()
-        if fg:
-            buf = ctypes.create_unicode_buffer(256)
-            user32.GetWindowTextW(fg, buf, 256)
-            out = {"hwnd": int(fg), "title": buf.value}
+        hwnd, title = H.foreground_window()
+        if hwnd:
+            out = {"hwnd": int(hwnd), "title": title}
     return out
 
 
 # --- window management verbs (minimize / maximize / restore / close / move) --
 
-_SW = {"minimize": 6, "maximize": 3, "restore": 9}
+_WINDOW_ACTIONS = {
+    "minimize": H.WINDOW_MINIMIZE,
+    "maximize": H.WINDOW_MAXIMIZE,
+    "restore": H.WINDOW_RESTORE,
+}
 
 
 def manage_window(
@@ -1211,16 +808,14 @@ def manage_window(
     normal window Remedy can then drive). move/resize use SetWindowPos.
     """
     _require_windows()
-    user32 = ctypes.windll.user32
     v = (verb or "").strip().lower()
     if not hwnd:
         return {"ok": False, "message": "hwnd required"}
-    if v in _SW:
-        user32.ShowWindow(int(hwnd), _SW[v])
+    if v in _WINDOW_ACTIONS:
+        H.manage_window(int(hwnd), _WINDOW_ACTIONS[v])
         return {"ok": True, "message": f"{v} hwnd={hwnd}"}
     if v == "close":
-        WM_CLOSE = 0x0010
-        user32.PostMessageW(int(hwnd), WM_CLOSE, 0, 0)
+        H.manage_window(int(hwnd), H.WINDOW_CLOSE)
         return {
             "ok": True,
             "message": (
@@ -1229,17 +824,12 @@ def manage_window(
             ),
         }
     if v in ("move", "resize"):
-        rect = wintypes.RECT()
-        user32.GetWindowRect(int(hwnd), ctypes.byref(rect))
-        nx = int(x) if x is not None else rect.left
-        ny = int(y) if y is not None else rect.top
-        nw = int(width) if width is not None else rect.right - rect.left
-        nh = int(height) if height is not None else rect.bottom - rect.top
-        SWP_NOZORDER = 0x0004
-        SWP_NOACTIVATE = 0x0010
-        user32.SetWindowPos(
-            int(hwnd), 0, nx, ny, nw, nh, SWP_NOZORDER | SWP_NOACTIVATE
-        )
+        left, top, right, bottom = H.window_rect(int(hwnd))
+        nx = int(x) if x is not None else left
+        ny = int(y) if y is not None else top
+        nw = int(width) if width is not None else right - left
+        nh = int(height) if height is not None else bottom - top
+        H.manage_window(int(hwnd), H.WINDOW_MOVE_RESIZE, nx, ny, nw, nh)
         return {"ok": True, "message": f"{v} hwnd={hwnd} → ({nx},{ny}) {nw}x{nh}"}
     return {"ok": False, "message": f"Unknown window verb {verb!r}"}
 
@@ -1248,80 +838,22 @@ def manage_window(
 
 
 def get_clipboard_text() -> str:
-    """Read CF_UNICODETEXT from the clipboard ('' when empty/non-text)."""
+    """Read CF_UNICODETEXT from the clipboard ('' when empty/non-text/busy)."""
     _require_windows()
-    user32 = ctypes.windll.user32
-    kernel32 = ctypes.windll.kernel32
-    CF_UNICODETEXT = 13
-    for _ in range(5):  # clipboard can be briefly held by another app
-        if user32.OpenClipboard(0):
-            break
-        time.sleep(0.02)
-    else:
-        return ""
     try:
-        # 64-bit: default int restype truncates the HANDLE — declare it.
-        user32.GetClipboardData.restype = ctypes.c_void_p
-        h = user32.GetClipboardData(CF_UNICODETEXT)
-        if not h:
-            return ""
-        kernel32.GlobalLock.restype = ctypes.c_void_p
-        kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
-        kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
-        p = kernel32.GlobalLock(ctypes.c_void_p(h))
-        if not p:
-            return ""
-        try:
-            return ctypes.wstring_at(p)
-        finally:
-            kernel32.GlobalUnlock(ctypes.c_void_p(h))
-    except Exception:
+        return H.clipboard_get_text()
+    except H.HostError:
         return ""
-    finally:
-        user32.CloseClipboard()
 
 
 def set_clipboard_text(text: str) -> bool:
     """Put *text* on the clipboard as CF_UNICODETEXT."""
     _require_windows()
-    user32 = ctypes.windll.user32
-    kernel32 = ctypes.windll.kernel32
-    CF_UNICODETEXT = 13
-    GMEM_MOVEABLE = 0x0002
-    data = str(text or "")
-    for _ in range(5):
-        if user32.OpenClipboard(0):
-            break
-        time.sleep(0.02)
-    else:
-        return False
     try:
-        user32.EmptyClipboard()
-        nbytes = (len(data) + 1) * 2
-        kernel32.GlobalAlloc.restype = ctypes.c_void_p
-        kernel32.GlobalLock.restype = ctypes.c_void_p
-        kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
-        kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
-        kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
-        user32.SetClipboardData.restype = ctypes.c_void_p
-        user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
-        h = kernel32.GlobalAlloc(GMEM_MOVEABLE, nbytes)
-        if not h:
-            return False
-        p = kernel32.GlobalLock(ctypes.c_void_p(h))
-        if not p:
-            kernel32.GlobalFree(ctypes.c_void_p(h))
-            return False
-        ctypes.memmove(p, ctypes.create_unicode_buffer(data), nbytes)
-        kernel32.GlobalUnlock(ctypes.c_void_p(h))
-        if not user32.SetClipboardData(CF_UNICODETEXT, ctypes.c_void_p(h)):
-            kernel32.GlobalFree(ctypes.c_void_p(h))
-            return False
-        return True
-    except Exception:
+        H.clipboard_set_text(str(text or ""))
+    except H.HostError:
         return False
-    finally:
-        user32.CloseClipboard()
+    return True
 
 
 # Long text via per-char SendInput is slow (~200 chars/s) and any focus change
@@ -1371,9 +903,9 @@ def press_hold(
 ) -> dict[str, Any]:
     """Trusted press-AND-HOLD at (x,y) — accessibility gesture for native apps."""
     _require_windows()
-    move_mouse(x, y)
+    H.mouse_move(int(x), int(y))
     time.sleep(0.05)
-    _send_input(INPUT(INPUT_MOUSE, INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, 0x0002, 0, None))))
+    H.mouse_button(H.MOUSE_LEFT, True)
     held = 0.0
     step = 0.1
     total = max(0.1, float(hold_ms) / 1000.0)
@@ -1384,9 +916,7 @@ def press_hold(
             if abort_check is not None and abort_check():
                 break
     finally:
-        _send_input(
-            INPUT(INPUT_MOUSE, INPUT_UNION(mi=MOUSEINPUT(0, 0, 0, 0x0004, 0, None)))
-        )
+        H.mouse_button(H.MOUSE_LEFT, False)
     return {"held_ms": int(min(held, total) * 1000), "x": x, "y": y}
 
 
@@ -1490,7 +1020,8 @@ def open_app(
     """
     import re
     import shutil
-    import subprocess
+
+    from remedy.execution.process import popen_hidden
 
     raw = (app or "").strip()
     if not raw:
@@ -1560,8 +1091,6 @@ def open_app(
                 if resolved.is_file():
                     if is_text_document_path(resolved):
                         return refuse_os_open_text_document(resolved)
-                    from remedy.execution.process import popen_hidden
-
                     popen_hidden([str(resolved)], close_fds=True)
                     return {
                         "app": raw,
@@ -1571,8 +1100,6 @@ def open_app(
     if path_candidate.is_file() and path_candidate.is_absolute():
         if is_text_document_path(path_candidate):
             return refuse_os_open_text_document(path_candidate)
-        from remedy.execution.process import popen_hidden
-
         popen_hidden([str(path_candidate)], close_fds=True)
         return {"app": raw, "method": "path", "target": str(path_candidate)}
     if path_candidate.is_dir() and (
@@ -1591,8 +1118,6 @@ def open_app(
         raise ValueError(f"open_app path not found: {target[:80]}")
     which = shutil.which(target) or shutil.which(raw)
     if which:
-        from remedy.execution.process import popen_hidden
-
         popen_hidden([which], close_fds=True)
         return {"app": raw, "method": "which", "target": which}
     # Appliances: anything in her house (Start Menu inventory), natural name.
@@ -1632,14 +1157,7 @@ def open_app(
             f"open_app refuses unsafe app name for shell start: {raw[:48]!r}"
             + (f" · {hint}" if hint else "")
         )
-    from remedy.execution.process import hidden_subprocess_kwargs
-
-    subprocess.Popen(
-        ["cmd", "/c", "start", "", raw],
-        shell=False,
-        close_fds=True,
-        **hidden_subprocess_kwargs(),
-    )
+    popen_hidden(["cmd", "/c", "start", "", raw], close_fds=True)
     return {"app": raw, "method": "cmd start", "target": raw}
 
 
@@ -1683,17 +1201,10 @@ def open_url(url: str) -> dict[str, Any]:
             os.startfile(u)
             return {"url": u, "method": "os.startfile"}
         except OSError:
-            import subprocess
+            from remedy.execution.process import popen_hidden
 
             # Empty title arg after start is required for URLs with &
-            from remedy.execution.process import hidden_subprocess_kwargs
-
-            subprocess.Popen(
-                ["cmd", "/c", "start", "", u],
-                shell=False,
-                close_fds=True,
-                **hidden_subprocess_kwargs(),
-            )
+            popen_hidden(["cmd", "/c", "start", "", u], close_fds=True)
             return {"url": u, "method": "cmd start"}
     import webbrowser
 
@@ -1702,58 +1213,24 @@ def open_url(url: str) -> dict[str, Any]:
 
 
 def list_monitors() -> list[dict[str, Any]]:
-    """Enumerate display monitors (physical pixels, DPI-aware)."""
+    """Enumerate display monitors (physical pixels, DPI-aware).
+
+    Each entry: index, left, top, right, bottom, width, height, primary,
+    scale (effective DPI / 96) and remedy (True on the monitor that holds the
+    Remedy Desktop window).
+    """
     _require_windows()
-    user32 = ctypes.windll.user32
-    _ensure_dpi_awareness()
-    monitors: list[dict[str, Any]] = []
-
-    class RECT(ctypes.Structure):
-        _fields_ = [
-            ("left", wintypes.LONG),
-            ("top", wintypes.LONG),
-            ("right", wintypes.LONG),
-            ("bottom", wintypes.LONG),
-        ]
-
-    MonitorEnumProc = ctypes.WINFUNCTYPE(
-        wintypes.BOOL,
-        wintypes.HMONITOR,
-        wintypes.HDC,
-        ctypes.POINTER(RECT),
-        wintypes.LPARAM,
-    )
-
-    def _callback(hmon, _hdc, lprect, _lparam):
-        r = lprect.contents
-        idx = len(monitors)
-        monitors.append(
-            {
-                "index": idx,
-                "left": int(r.left),
-                "top": int(r.top),
-                "right": int(r.right),
-                "bottom": int(r.bottom),
-                "width": int(r.right - r.left),
-                "height": int(r.bottom - r.top),
-                "primary": idx == 0,  # refined below
-            }
-        )
-        return True
-
-    user32.EnumDisplayMonitors(0, 0, MonitorEnumProc(_callback), 0)
-    # Mark primary via GetSystemMetrics origin (0,0) usually on primary
+    monitors = H.list_monitors()
     for m in monitors:
-        m["primary"] = m["left"] == 0 and m["top"] == 0
         m["remedy"] = False
     if monitors and not any(m["primary"] for m in monitors):
         monitors[0]["primary"] = True
     hwnd = find_remedy_desktop_hwnd()
     if hwnd:
-        rect = wintypes.RECT()
-        if user32.GetWindowRect(int(hwnd), ctypes.byref(rect)):
-            cx = (int(rect.left) + int(rect.right)) // 2
-            cy = (int(rect.top) + int(rect.bottom)) // 2
+        with contextlib.suppress(H.HostError):
+            left, top, right, bottom = H.window_rect(hwnd)
+            cx = (left + right) // 2
+            cy = (top + bottom) // 2
             for m in monitors:
                 if m["left"] <= cx < m["right"] and m["top"] <= cy < m["bottom"]:
                     m["remedy"] = True

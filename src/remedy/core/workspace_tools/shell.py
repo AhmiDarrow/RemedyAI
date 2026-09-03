@@ -73,19 +73,18 @@ def _spawn_background(
         "close_fds": True,
     }
     if os.name == "nt":
-        from remedy.execution.process import CREATE_NO_WINDOW
+        from remedy.execution.process import hidden_subprocess_kwargs
 
         # Games/GUIs get a real window. Servers and "run in background" must
         # not flash a CMD — the desktop sidecar has no console to inherit.
+        new_group = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
         if auto:
             kwargs["creationflags"] = (
-                getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
-                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+                getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010) | new_group
             )
         else:
-            kwargs["creationflags"] = CREATE_NO_WINDOW | getattr(
-                subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
-            )
+            kwargs.update(hidden_subprocess_kwargs())
+            kwargs["creationflags"] = int(kwargs.get("creationflags", 0)) | new_group
     else:
         kwargs["start_new_session"] = True
     try:

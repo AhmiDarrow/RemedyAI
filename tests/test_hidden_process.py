@@ -9,7 +9,6 @@ import sys
 import pytest
 
 from remedy.execution.process import (
-    CREATE_NO_WINDOW,
     create_hidden_subprocess_exec,
     hidden_creationflags,
     hidden_subprocess_kwargs,
@@ -22,11 +21,11 @@ def test_hidden_creationflags_windows_only() -> None:
     flags = hidden_creationflags()
     kw = hidden_subprocess_kwargs()
     if sys.platform == "win32":
-        assert flags == CREATE_NO_WINDOW
+        assert flags == subprocess.CREATE_NO_WINDOW
         assert flags == 0x08000000
-        assert kw.get("creationflags") == CREATE_NO_WINDOW
-        # STARTUPINFO SW_HIDE is set when available (extra anti-flash)
-        assert "startupinfo" in kw or kw == {"creationflags": CREATE_NO_WINDOW}
+        assert kw.get("creationflags") == subprocess.CREATE_NO_WINDOW
+        # STARTUPINFO SW_HIDE is set alongside the flag (extra anti-flash)
+        assert kw["startupinfo"].wShowWindow == subprocess.SW_HIDE
     else:
         assert flags == 0
         assert kw == {}
@@ -73,7 +72,7 @@ def test_run_hidden_accepts_creationflags_merge() -> None:
     kw = hidden_subprocess_kwargs()
     if sys.platform == "win32":
         # Mimic what create_subprocess receives
-        assert kw.get("creationflags") == CREATE_NO_WINDOW
+        assert kw.get("creationflags") == subprocess.CREATE_NO_WINDOW
         # subprocess.Popen accepts the flag without error
         p = subprocess.Popen(
             [sys.executable, "-c", "pass"],

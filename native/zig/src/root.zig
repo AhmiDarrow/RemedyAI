@@ -9,8 +9,12 @@ pub const policy = @import("policy.zig");
 pub const security = @import("security.zig");
 pub const serialization = @import("serialization.zig");
 pub const system = @import("system.zig");
+pub const host = @import("host.zig");
 
-pub const abi_version: u32 = 1;
+/// C ABI version of the exported surface (`remedy_core_abi_version`).
+pub const abi_version: u32 = 2;
+/// Wire version of the language-neutral RMDY frame; independent of the C ABI.
+pub const protocol_version: u16 = 1;
 pub const header_size: usize = 32;
 pub const max_payload_size: u32 = 16 << 20;
 
@@ -19,7 +23,14 @@ pub const Status = enum(i32) {
     invalid_argument = 1,
     access_denied = 2,
     operation_failed = 3,
+    unsupported = 4,
 };
+
+// The host exports live in host.zig; referencing the module here makes the
+// linker emit them from the library build as well as the test build.
+comptime {
+    _ = host;
+}
 
 export fn remedy_core_abi_version() callconv(.c) u32 {
     return abi_version;
@@ -72,7 +83,7 @@ export fn remedy_core_logical_cpu_count(capability_bits: u64, out_count: ?*usize
 pub fn validateFrame(raw: []const u8) bool {
     if (raw.len < header_size) return false;
     if (!std.mem.eql(u8, raw[0..4], "RMDY")) return false;
-    if (std.mem.readInt(u16, raw[4..6], .little) != abi_version) return false;
+    if (std.mem.readInt(u16, raw[4..6], .little) != protocol_version) return false;
     if (std.mem.readInt(u16, raw[6..8], .little) == 0) return false;
     const payload_len = std.mem.readInt(u32, raw[12..16], .little);
     if (payload_len > max_payload_size) return false;
@@ -120,4 +131,5 @@ test {
     _ = security;
     _ = serialization;
     _ = system;
+    _ = host;
 }

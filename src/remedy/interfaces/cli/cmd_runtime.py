@@ -666,18 +666,14 @@ def _desktop_launch() -> None:
         candidate_paths.append(prog / "Remedy Desktop" / "Remedy Desktop.exe")
 
     # Detach from this console and never flash an extra console for the GUI app.
-    from remedy.execution.process import hidden_creationflags
+    from remedy.execution.process import popen_hidden
 
-    create_flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-    create_flags |= hidden_creationflags()
+    new_group = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
 
     for p in candidate_paths:
         if p.exists():
             console.print(f"[green]Launching: {p}[/green]")
-            kwargs: dict = {"close_fds": True}
-            if create_flags:
-                kwargs["creationflags"] = create_flags
-            subprocess.Popen([str(p)], **kwargs)
+            popen_hidden([str(p)], close_fds=True, creationflags=new_group)
             return
 
     console.print("[yellow]Installed desktop app not found.[/yellow]")
