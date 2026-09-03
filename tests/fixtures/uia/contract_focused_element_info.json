@@ -1,0 +1,18 @@
+{
+  "source": "fake_win32",
+  "captured_at": "2026-09-03T21:32:03+00:00",
+  "api": "focused_element_info",
+  "platform": "harness",
+  "notes": "Contract fixture from tests.harness.fake_win32 before Zig UIA port. Shapes must match live comtypes output field-for-field.",
+  "args": {},
+  "result": {
+    "name": "Query",
+    "role": "edit",
+    "value": "pinned"
+  },
+  "result_schema": {
+    "name": "str (<=120)",
+    "role": "str (or 'unknown')",
+    "value": "str (<=400)"
+  }
+}

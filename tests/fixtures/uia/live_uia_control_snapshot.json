@@ -1,0 +1,468 @@
+{
+  "source": "comtypes",
+  "captured_at": "2026-09-03T21:32:03+00:00",
+  "platform": "win32",
+  "notes": "Live capture from comtypes UI Automation before the Zig port. Do not inject input; do not write clipboard. Window acquisition: existing.",
+  "window": {
+    "hwnd": 1967332,
+    "how": "existing"
+  },
+  "api": "uia_control_snapshot",
+  "args": {
+    "hwnd": 1967332,
+    "max_elements": 80,
+    "preferred_only": true
+  },
+  "result": [
+    {
+      "ref": "c1",
+      "tag": "window",
+      "role": "window",
+      "name": "New Text Document (6).txt - Notepad",
+      "x": 943,
+      "y": 574,
+      "w": 1090,
+      "h": 748,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 398,
+        "top": 200,
+        "right": 1488,
+        "bottom": 948
+      },
+      "uia": true
+    },
+    {
+      "ref": "c2",
+      "tag": "button",
+      "role": "button",
+      "name": "OK",
+      "x": 1068,
+      "y": 634,
+      "w": 241,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 948,
+        "top": 618,
+        "right": 1189,
+        "bottom": 650
+      },
+      "uia": true
+    },
+    {
+      "ref": "c3",
+      "tag": "tabitem",
+      "role": "tabitem",
+      "name": "google.txt. Unmodified.",
+      "x": 571,
+      "y": 226,
+      "w": 239,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 452,
+        "top": 210,
+        "right": 691,
+        "bottom": 242
+      },
+      "uia": true
+    },
+    {
+      "ref": "c4",
+      "tag": "tabitem",
+      "role": "tabitem",
+      "name": "New Text Document (5).txt. Unmodified.",
+      "x": 810,
+      "y": 226,
+      "w": 239,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 691,
+        "top": 210,
+        "right": 930,
+        "bottom": 242
+      },
+      "uia": true
+    },
+    {
+      "ref": "c5",
+      "tag": "tabitem",
+      "role": "tabitem",
+      "name": "New Text Document (6).txt. Unmodified.",
+      "x": 1049,
+      "y": 226,
+      "w": 247,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 926,
+        "top": 210,
+        "right": 1173,
+        "bottom": 242
+      },
+      "uia": true
+    },
+    {
+      "ref": "c6",
+      "tag": "button",
+      "role": "button",
+      "name": "Close Tab",
+      "x": 1149,
+      "y": 226,
+      "w": 32,
+      "h": 24,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 1133,
+        "top": 214,
+        "right": 1165,
+        "bottom": 238
+      },
+      "uia": true
+    },
+    {
+      "ref": "c7",
+      "tag": "button",
+      "role": "button",
+      "name": "Add New Tab",
+      "x": 1193,
+      "y": 228,
+      "w": 32,
+      "h": 24,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 1177,
+        "top": 216,
+        "right": 1209,
+        "bottom": 240
+      },
+      "uia": true
+    },
+    {
+      "ref": "c8",
+      "tag": "menuitem",
+      "role": "menuitem",
+      "name": "File",
+      "x": 428,
+      "y": 258,
+      "w": 41,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 408,
+        "top": 242,
+        "right": 449,
+        "bottom": 274
+      },
+      "uia": true
+    },
+    {
+      "ref": "c9",
+      "tag": "menuitem",
+      "role": "menuitem",
+      "name": "Edit",
+      "x": 479,
+      "y": 258,
+      "w": 44,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 457,
+        "top": 242,
+        "right": 501,
+        "bottom": 274
+      },
+      "uia": true
+    },
+    {
+      "ref": "c10",
+      "tag": "menuitem",
+      "role": "menuitem",
+      "name": "View",
+      "x": 534,
+      "y": 258,
+      "w": 50,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 509,
+        "top": 242,
+        "right": 559,
+        "bottom": 274
+      },
+      "uia": true
+    },
+    {
+      "ref": "c11",
+      "tag": "button",
+      "role": "button",
+      "name": "Headings",
+      "x": 807,
+      "y": 258,
+      "w": 56,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 779,
+        "top": 242,
+        "right": 835,
+        "bottom": 274
+      },
+      "uia": true
+    },
+    {
+      "ref": "c12",
+      "tag": "button",
+      "role": "button",
+      "name": "Lists",
+      "x": 863,
+      "y": 258,
+      "w": 56,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 835,
+        "top": 242,
+        "right": 891,
+        "bottom": 274
+      },
+      "uia": true
+    },
+    {
+      "ref": "c13",
+      "tag": "button",
+      "role": "button",
+      "name": "Bold (Ctrl+B)",
+      "x": 907,
+      "y": 258,
+      "w": 32,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 891,
+        "top": 242,
+        "right": 923,
+        "bottom": 274
+      },
+      "uia": true
+    },
+    {
+      "ref": "c14",
+      "tag": "button",
+      "role": "button",
+      "name": "Italic (Ctrl+I)",
+      "x": 939,
+      "y": 258,
+      "w": 32,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 923,
+        "top": 242,
+        "right": 955,
+        "bottom": 274
+      },
+      "uia": true
+    },
+    {
+      "ref": "c15",
+      "tag": "button",
+      "role": "button",
+      "name": "Strikethrough (Ctrl+Shift+X)",
+      "x": 971,
+      "y": 258,
+      "w": 32,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 955,
+        "top": 242,
+        "right": 987,
+        "bottom": 274
+      },
+      "uia": true
+    },
+    {
+      "ref": "c16",
+      "tag": "button",
+      "role": "button",
+      "name": "Link (Ctrl+K)",
+      "x": 1003,
+      "y": 258,
+      "w": 32,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 987,
+        "top": 242,
+        "right": 1019,
+        "bottom": 274
+      },
+      "uia": true
+    },
+    {
+      "ref": "c17",
+      "tag": "button",
+      "role": "button",
+      "name": "Table",
+      "x": 1047,
+      "y": 258,
+      "w": 56,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 1019,
+        "top": 242,
+        "right": 1075,
+        "bottom": 274
+      },
+      "uia": true
+    },
+    {
+      "ref": "c18",
+      "tag": "button",
+      "role": "button",
+      "name": "Clear formatting (Ctrl+Space)",
+      "x": 1091,
+      "y": 258,
+      "w": 32,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 1075,
+        "top": 242,
+        "right": 1107,
+        "bottom": 274
+      },
+      "uia": true
+    },
+    {
+      "ref": "c19",
+      "tag": "button",
+      "role": "button",
+      "name": "Writing tools",
+      "x": 1344,
+      "y": 258,
+      "w": 56,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 1316,
+        "top": 242,
+        "right": 1372,
+        "bottom": 274
+      },
+      "uia": true
+    },
+    {
+      "ref": "c20",
+      "tag": "button",
+      "role": "button",
+      "name": "What's new",
+      "x": 1391,
+      "y": 258,
+      "w": 30,
+      "h": 30,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 1376,
+        "top": 243,
+        "right": 1406,
+        "bottom": 273
+      },
+      "uia": true
+    },
+    {
+      "ref": "c21",
+      "tag": "button",
+      "role": "button",
+      "name": "User avatar",
+      "x": 1425,
+      "y": 258,
+      "w": 30,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 1410,
+        "top": 242,
+        "right": 1440,
+        "bottom": 274
+      },
+      "uia": true
+    },
+    {
+      "ref": "c22",
+      "tag": "button",
+      "role": "button",
+      "name": "Settings",
+      "x": 1459,
+      "y": 258,
+      "w": 30,
+      "h": 32,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 1444,
+        "top": 242,
+        "right": 1474,
+        "bottom": 274
+      },
+      "uia": true
+    },
+    {
+      "ref": "c23",
+      "tag": "menuitem",
+      "role": "menuitem",
+      "name": "System",
+      "x": 417,
+      "y": 219,
+      "w": 22,
+      "h": 22,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 406,
+        "top": 208,
+        "right": 428,
+        "bottom": 230
+      },
+      "uia": true
+    },
+    {
+      "ref": "c24",
+      "tag": "button",
+      "role": "button",
+      "name": "Minimize",
+      "x": 1366,
+      "y": 216,
+      "w": 47,
+      "h": 30,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 1343,
+        "top": 201,
+        "right": 1390,
+        "bottom": 231
+      },
+      "uia": true
+    },
+    {
+      "ref": "c25",
+      "tag": "button",
+      "role": "button",
+      "name": "Close",
+      "x": 1459,
+      "y": 216,
+      "w": 47,
+      "h": 30,
+      "hwnd": 1967332,
+      "bounds": {
+        "left": 1436,
+        "top": 201,
+        "right": 1483,
+        "bottom": 231
+      },
+      "uia": true
+    }
+  ]
+}

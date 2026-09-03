@@ -236,10 +236,13 @@ def _check(library: Any, function: str, status: int) -> None:
 def _take(library: Any, ptr: Any, length: Any) -> bytes:
     """Copy a library-allocated buffer into Python and free it."""
     size = int(length.value)
-    if not ptr or size == 0:
+    address = ctypes.cast(ptr, c_void_p).value if ptr else None
+    if address is None or size == 0:
+        if ptr and size:
+            library.remedy_core_free(ptr, size)
         return b""
     try:
-        return ctypes.string_at(ctypes.cast(ptr, c_void_p).value, size)
+        return ctypes.string_at(address, size)
     finally:
         library.remedy_core_free(ptr, size)
 
