@@ -43,7 +43,7 @@ def test_auto_requires_go_and_zig(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         native_runtime,
         "_load_zig",
-        lambda: (native_runtime._ComponentProbe(True, detail={"abi": 1}), object()),
+        lambda: (native_runtime._ComponentProbe(True, detail={"abi": 2}), object()),
     )
 
     status = native_runtime.native_runtime_status()
@@ -78,7 +78,7 @@ def test_startup_initialization_primes_configured_selector(
     monkeypatch.setattr(
         native_runtime,
         "_load_zig",
-        lambda: (native_runtime._ComponentProbe(True, detail={"abi": 1}), object()),
+        lambda: (native_runtime._ComponentProbe(True, detail={"abi": 2}), object()),
     )
 
     initialized = native_runtime.initialize_native_runtime({"native_runtime": "auto"})
@@ -98,7 +98,7 @@ def test_auto_falls_back_with_public_evidence(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         native_runtime,
         "_load_zig",
-        lambda: (native_runtime._ComponentProbe(True, detail={"abi": 1}), object()),
+        lambda: (native_runtime._ComponentProbe(True, detail={"abi": 2}), object()),
     )
 
     status = native_runtime.native_runtime_status()
@@ -167,3 +167,60 @@ def test_compatibility_primary_path_allows_non_idempotent_work():
 def test_logical_cpu_count_uses_compatibility_by_default(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(os, "cpu_count", lambda: 7)
     assert native_runtime.logical_cpu_count() == 7
+
+
+# --- remedy_core loader (ABI 2) ------------------------------------------
+
+
+def test_the_python_side_requires_abi_two_from_the_zig_core():
+    assert native_runtime._ABI_VERSION == 2
+    # The Go probe contract is a separate version and did not move.
+    assert native_runtime._TOOL_ABI_VERSION == 1
+    assert native_runtime._PROTOCOL_VERSION == 1
+
+
+def test_core_library_fails_clearly_when_the_library_is_absent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path,
+):
+    monkeypatch.setenv("REMEDY_NATIVE_CORE_LIB", str(tmp_path / "missing" / "remedy_core.dll"))
+    with pytest.raises(native_runtime.NativeRuntimeUnavailableError, match="not found"):
+        native_runtime.core_library()
+    probe, library = native_runtime._load_zig()
+    assert probe.public() == {"ready": False, "reason": "not-installed"}
+    assert library is None
+
+
+def test_core_library_rejects_a_library_at_the_wrong_abi(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    fake = tmp_path / "remedy_core.dll"
+    fake.write_bytes(b"")
+    monkeypatch.setenv("REMEDY_NATIVE_CORE_LIB", str(fake))
+
+    class _OldLibrary:
+        class remedy_core_abi_version:  # noqa: N801 - mirrors the C symbol
+            argtypes: list = []
+            restype = None
+
+            def __call__(self):
+                return 1
+
+        remedy_core_abi_version = remedy_core_abi_version()
+
+    monkeypatch.setattr(native_runtime.ctypes, "CDLL", lambda _path: _OldLibrary())
+    with pytest.raises(native_runtime.NativeRuntimeUnavailableError, match="ABI 1"):
+        native_runtime.core_library()
+    probe, _ = native_runtime._load_zig()
+    assert probe.public() == {"ready": False, "reason": "version-mismatch", "abi": 1}
+
+
+def test_core_library_search_order_ends_at_the_dev_checkout():
+    root = native_runtime._dev_checkout_root()
+    assert root.parts[-3:-1] == ("zig", "zig-out")
+    assert root.name == ("bin" if native_runtime.sys.platform == "win32" else "lib")
+
+
+def test_core_library_loads_the_built_core_when_present():
+    if native_runtime._core_library_path() is None:
+        pytest.skip("remedy_core is not built in this checkout")
+    library = native_runtime.core_library()
+    assert int(library.remedy_core_abi_version()) == 2
+    assert native_runtime.core_library() is library

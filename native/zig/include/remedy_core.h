@@ -8,13 +8,28 @@
 extern "C" {
 #endif
 
-#define REMEDY_CORE_ABI_VERSION 1u
+/*
+ * ABI 2 adds the host surface: DPI, monitors, capture, PNG, input, windows,
+ * clipboard and hidden process control. Every host function returns a
+ * remedy_core_status. On a non-Windows build each host function returns
+ * REMEDY_CORE_UNSUPPORTED and writes nothing.
+ *
+ * Memory: any buffer returned through an `out_*` pointer is owned by the
+ * caller and must be released with remedy_core_free(ptr, len). Strings that
+ * cross this boundary are UTF-8 (WTF-8 when a Win32 string carried a lone
+ * surrogate). Handles (HWND) travel as uint64_t.
+ *
+ * Errors: when a call fails with REMEDY_CORE_OPERATION_FAILED the Win32 error
+ * code is available from remedy_core_last_os_error() on the same thread.
+ */
+#define REMEDY_CORE_ABI_VERSION 2u
 
 enum remedy_core_status {
     REMEDY_CORE_OK = 0,
     REMEDY_CORE_INVALID_ARGUMENT = 1,
     REMEDY_CORE_ACCESS_DENIED = 2,
     REMEDY_CORE_OPERATION_FAILED = 3,
+    REMEDY_CORE_UNSUPPORTED = 4,
 };
 
 enum remedy_core_capability {
@@ -25,6 +40,24 @@ enum remedy_core_capability {
     REMEDY_CORE_FILESYSTEM_DELETE = UINT64_C(1) << 4,
     REMEDY_CORE_OWNER_CHECKPOINT = UINT64_C(1) << 5,
 };
+
+/* Mouse buttons for remedy_core_mouse_click / remedy_core_mouse_button. */
+enum remedy_core_mouse_button {
+    REMEDY_CORE_MOUSE_LEFT = 0,
+    REMEDY_CORE_MOUSE_RIGHT = 1,
+    REMEDY_CORE_MOUSE_MIDDLE = 2,
+};
+
+/* Verbs for remedy_core_manage_window. */
+enum remedy_core_window_action {
+    REMEDY_CORE_WINDOW_MINIMIZE = 0,
+    REMEDY_CORE_WINDOW_MAXIMIZE = 1,
+    REMEDY_CORE_WINDOW_RESTORE = 2,
+    REMEDY_CORE_WINDOW_CLOSE = 3,       /* posts WM_CLOSE; the app may prompt */
+    REMEDY_CORE_WINDOW_MOVE_RESIZE = 4, /* SetWindowPos(x, y, width, height) */
+};
+
+/* ---- ABI 1 ------------------------------------------------------------- */
 
 uint32_t remedy_core_abi_version(void);
 uint8_t remedy_core_validate_frame(const uint8_t *ptr, size_t len);
@@ -42,6 +75,179 @@ int32_t remedy_core_logical_cpu_count(
     uint64_t capability_bits,
     size_t *out_count
 );
+
+/* ---- ABI 2: memory and errors ----------------------------------------- */
+
+/* Release a buffer returned by any function below. (NULL, 0) is a no-op. */
+void remedy_core_free(uint8_t *ptr, size_t len);
+
+/* Win32 error code recorded by the last failing host call on this thread. */
+uint32_t remedy_core_last_os_error(void);
+
+/* ---- ABI 2: DPI and monitors ------------------------------------------ */
+
+/* Make the process Per-Monitor-DPI-aware (v2, then v1, then system) once.
+ * Every capture and coordinate function calls this itself. */
+int32_t remedy_core_dpi_awareness_enable(void);
+
+/* Virtual screen origin and size in physical pixels. */
+int32_t remedy_core_virtual_screen_rect(
+    int32_t *out_left, int32_t *out_top, int32_t *out_width, int32_t *out_height
+);
+
+/* UTF-8 JSON array of
+ * {index, left, top, right, bottom, width, height, primary, scale}
+ * where scale is the effective DPI / 96 (1.0 at 100%). */
+int32_t remedy_core_list_monitors(uint8_t **out_json, size_t *out_len);
+
+/* ---- ABI 2: capture ---------------------------------------------------- */
+
+/* bytes_per_pixel selects the DIB layout: 3 = BGR rows padded to 4 bytes,
+ * 4 = BGRA with stride == width * 4. Rows run top-down. */
+int32_t remedy_core_capture_virtual_screen(
+    uint32_t bytes_per_pixel,
+    uint8_t **out_pixels, size_t *out_len,
+    int32_t *out_width, int32_t *out_height, size_t *out_stride,
+    int32_t *out_left, int32_t *out_top
+);
+
+/* Capture a rectangle in screen coordinates (no clamping: the caller keeps
+ * the rectangle inside the virtual screen). */
+int32_t remedy_core_capture_region(
+    int32_t left, int32_t top, int32_t width, int32_t height,
+    uint32_t bytes_per_pixel,
+    uint8_t **out_pixels, size_t *out_len, size_t *out_stride
+);
+
+/* PrintWindow(PW_RENDERFULLCONTENT), falling back to PrintWindow(0). Works
+ * for occluded windows. Fails with INVALID_ARGUMENT for windows under 2x2. */
+int32_t remedy_core_print_window(
+    uint64_t hwnd,
+    uint32_t bytes_per_pixel,
+    uint8_t **out_pixels, size_t *out_len,
+    int32_t *out_width, int32_t *out_height, size_t *out_stride,
+    int32_t *out_left, int32_t *out_top
+);
+
+/* Encode BGR (3) or BGRA (4, alpha dropped) rows into an 8-bit RGB PNG.
+ * Portable: also available on non-Windows builds. */
+int32_t remedy_core_encode_png(
+    const uint8_t *pixels, size_t pixels_len,
+    int32_t width, int32_t height, size_t stride, uint32_t bytes_per_pixel,
+    uint8_t **out_png, size_t *out_len
+);
+
+/* ---- ABI 2: input (SendInput) ----------------------------------------- */
+
+/* Coordinates are virtual-screen physical pixels, normalised to 0..65535
+ * with MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK. */
+int32_t remedy_core_mouse_move(int32_t x, int32_t y);
+
+/* Move, wait 20 ms, then `clicks` press/release pairs 40 ms apart. */
+int32_t remedy_core_mouse_click(int32_t x, int32_t y, uint32_t button, uint32_t clicks);
+
+/* Raw press (pressed != 0) or release of one button at the current position. */
+int32_t remedy_core_mouse_button(uint32_t button, uint8_t pressed);
+
+/* Press at (x1, y1), move through `steps` interpolated points, pause, release. */
+int32_t remedy_core_mouse_drag(int32_t x1, int32_t y1, int32_t x2, int32_t y2, uint32_t steps);
+
+/* Wheel notches: dy > 0 scrolls up, dx > 0 scrolls right (120 units each). */
+int32_t remedy_core_mouse_scroll(int32_t x, int32_t y, int32_t dx, int32_t dy);
+
+/* Type UTF-8 text with KEYEVENTF_UNICODE (surrogate pairs for astral code
+ * points). "\r\n", "\n" and "\r" each press VK_RETURN once. Sleeps
+ * per_char_delay_ms after every code point. */
+int32_t remedy_core_type_text(const uint8_t *utf8, size_t len, uint32_t per_char_delay_ms);
+
+/* Press virtual keys in order, release them in reverse order. */
+int32_t remedy_core_key_combo(const uint16_t *vks, size_t count);
+
+/* Press one virtual key, hold for hold_ms, release. */
+int32_t remedy_core_key_hold(uint16_t vk, uint32_t hold_ms);
+
+/* VkKeyScanW for a code point: low byte VK, high byte shift state, -1 when
+ * the current layout has no mapping. Code points above U+FFFF yield -1. */
+int32_t remedy_core_vk_key_scan(uint32_t codepoint, int32_t *out_scan);
+
+/* ---- ABI 2: windows ---------------------------------------------------- */
+
+/* UTF-8 JSON array (at most `limit` entries) of visible, titled windows of
+ * at least 8x8 pixels:
+ * {hwnd, title (<= 200 code points), class, pid,
+ *  bounds: {left, top, right, bottom}, width, height, visible, minimized} */
+int32_t remedy_core_list_windows(uint32_t limit, uint8_t **out_json, size_t *out_len);
+
+/* Window class name. */
+int32_t remedy_core_window_class(uint64_t hwnd, uint8_t **out_utf8, size_t *out_len);
+
+/* GetWindowRect. */
+int32_t remedy_core_window_rect(
+    uint64_t hwnd, int32_t *out_left, int32_t *out_top, int32_t *out_right, int32_t *out_bottom
+);
+
+/* Foreground window handle (0 when none) and its full title. */
+int32_t remedy_core_foreground_window(uint64_t *out_hwnd, uint8_t **out_title, size_t *out_len);
+
+/* Restore + SetForegroundWindow, verified; on a foreground lock retries via
+ * AttachThreadInput and then an ALT tap. out_focused is 1 when the window
+ * (or a window sharing its root owner) is foreground afterwards. */
+int32_t remedy_core_focus_window(uint64_t hwnd, uint8_t *out_focused);
+
+/* See remedy_core_window_action. x, y, width, height are used only by
+ * REMEDY_CORE_WINDOW_MOVE_RESIZE. INVALID_ARGUMENT for a dead handle. */
+int32_t remedy_core_manage_window(
+    uint64_t hwnd, uint32_t action, int32_t x, int32_t y, int32_t width, int32_t height
+);
+
+/* First descendant of `parent` whose class contains class_substr and whose
+ * title contains title_substr (ASCII case-insensitive; an empty substring
+ * matches everything). out_hwnd is 0 when nothing matched. */
+int32_t remedy_core_find_child_hwnd(
+    uint64_t parent,
+    const uint8_t *class_substr, size_t class_len,
+    const uint8_t *title_substr, size_t title_len,
+    uint64_t *out_hwnd
+);
+
+/* ---- ABI 2: clipboard -------------------------------------------------- */
+
+/* CF_UNICODETEXT as UTF-8; an empty buffer when the clipboard holds no text.
+ * Retries OpenClipboard five times, 20 ms apart, then fails. */
+int32_t remedy_core_clipboard_get_text(uint8_t **out_utf8, size_t *out_len);
+
+/* Replace the clipboard contents with UTF-8 text (same retry policy). */
+int32_t remedy_core_clipboard_set_text(const uint8_t *utf8, size_t len);
+
+/* ---- ABI 2: processes -------------------------------------------------- */
+
+/* Start argv_json (a JSON array of strings; argv[0] is resolved by
+ * CreateProcessW like subprocess.Popen) with CREATE_NO_WINDOW and
+ * STARTF_USESHOWWINDOW / SW_HIDE inside a job object whose
+ * JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE limit ends every descendant (uv.exe's
+ * python, cmd's children) when the handle is closed. cwd may be empty
+ * (inherit). env_json is a JSON object of strings replacing the whole
+ * environment, or empty to inherit. No standard handles are shared. */
+int32_t remedy_core_process_spawn_hidden(
+    const uint8_t *argv_json, size_t argv_len,
+    const uint8_t *cwd, size_t cwd_len,
+    const uint8_t *env_json, size_t env_len,
+    uint32_t *out_pid, uint64_t *out_handle
+);
+
+/* Wait up to timeout_ms (UINT32_MAX = forever). out_exited is 1 with the
+ * exit code when the process ended, 0 when the timeout elapsed. */
+int32_t remedy_core_process_wait(
+    uint64_t handle, uint32_t timeout_ms, uint8_t *out_exited, uint32_t *out_exit_code
+);
+
+/* Terminate pid and every descendant found by a toolhelp snapshot (deepest
+ * first, guarded against PID reuse). A pid that is already gone is OK. */
+int32_t remedy_core_process_kill_tree(uint32_t pid);
+
+/* Close the process and job handles. A tree still running inside the job
+ * is terminated by the job close. Frees the handle; do not reuse it. */
+int32_t remedy_core_process_close(uint64_t handle);
 
 #ifdef __cplusplus
 }

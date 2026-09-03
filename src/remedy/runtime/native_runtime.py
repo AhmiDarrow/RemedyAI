@@ -1,8 +1,14 @@
-"""Layered Go/Zig runtime selection with an always-available Python rollback.
+"""Layered Go/Zig runtime selection and the ``remedy_core`` library loader.
 
-Compatibility remains the default. ``auto`` and ``native`` require both the
-packaged Go probe and the versioned Zig C ABI before native work is attempted.
-The first production slice is intentionally read-only: logical CPU discovery.
+Compatibility remains the default for the Go runtime. ``auto`` and ``native``
+require both the packaged Go probe and the versioned Zig C ABI before native
+work is attempted through :func:`execute_with_fallback`.
+
+The Zig host surface (capture, input, windows, clipboard, hidden processes)
+is not optional on Windows: :func:`core_library` loads ``remedy_core`` at ABI
+:data:`_ABI_VERSION` and raises :class:`NativeRuntimeUnavailableError` when the
+library is missing or too old. Bindings call it directly; there is no Python
+implementation behind it any more.
 """
 
 from __future__ import annotations
@@ -22,8 +28,11 @@ from typing import Any
 
 from remedy.execution.process import run_hidden
 
-_ABI_VERSION = 1
+#: Zig C ABI (``remedy_core_abi_version``); see ``native/zig/include/remedy_core.h``.
+_ABI_VERSION = 2
+#: Go runtime probe contract (``--probe`` JSON ``protocol`` / ``tool_abi``).
 _PROTOCOL_VERSION = 1
+_TOOL_ABI_VERSION = 1
 _SYSTEM_READ = 1 << 3
 _CACHE_TTL_SECONDS = 30.0
 
@@ -36,6 +45,10 @@ class NativeRuntimeMode(StrEnum):
 
 class NativeExecutionError(RuntimeError):
     """Native work failed where replaying it might duplicate a side effect."""
+
+
+class NativeRuntimeUnavailableError(RuntimeError):
+    """``remedy_core`` could not be loaded at the ABI this build requires."""
 
 
 @dataclass(frozen=True)
@@ -57,6 +70,8 @@ _probe_lock = threading.Lock()
 _probe_cache: tuple[float, str, dict[str, Any]] | None = None
 _config_lock = threading.Lock()
 _runtime_config: dict[str, Any] = {}
+_library_lock = threading.Lock()
+_library_cache: tuple[Path, Any] | None = None
 
 
 def configured_mode(config: Mapping[str, Any] | None = None) -> NativeRuntimeMode:
@@ -123,39 +138,106 @@ def _probe_go() -> _ComponentProbe:
     if (
         payload.get("status") != "ready"
         or payload.get("protocol") != _PROTOCOL_VERSION
-        or payload.get("tool_abi") != _ABI_VERSION
+        or payload.get("tool_abi") != _TOOL_ABI_VERSION
     ):
         return _ComponentProbe(False, "version-mismatch")
     return _ComponentProbe(
         True,
         detail={
             "protocol": _PROTOCOL_VERSION,
-            "tool_abi": _ABI_VERSION,
+            "tool_abi": _TOOL_ABI_VERSION,
             "platform": f"{payload.get('os', 'unknown')}/{payload.get('arch', 'unknown')}",
         },
     )
 
 
-def _load_zig() -> tuple[_ComponentProbe, Any | None]:
+def _core_library_names() -> tuple[str, ...]:
     if sys.platform == "win32":
-        names = ("remedy_core.dll",)
-    elif sys.platform == "darwin":
-        names = ("libremedy_core.dylib",)
-    else:
-        names = ("libremedy_core.so",)
-    library_path = _resolve_component("REMEDY_NATIVE_CORE_LIB", names)
+        return ("remedy_core.dll",)
+    if sys.platform == "darwin":
+        return ("libremedy_core.dylib",)
+    return ("libremedy_core.so",)
+
+
+def _dev_checkout_root() -> Path:
+    """``native/zig/zig-out`` of a source checkout: DLLs land in bin, .so in lib."""
+    zig_out = Path(__file__).resolve().parents[3] / "native" / "zig" / "zig-out"
+    return zig_out / ("bin" if sys.platform == "win32" else "lib")
+
+
+def _core_library_path() -> Path | None:
+    """REMEDY_NATIVE_CORE_LIB, then the packaged roots, then a dev checkout."""
+    explicit = os.environ.get("REMEDY_NATIVE_CORE_LIB")
+    if explicit:
+        candidate = Path(explicit).expanduser()
+        return candidate if candidate.is_file() else None
+    names = _core_library_names()
+    for root in [*_candidate_roots(), _dev_checkout_root()]:
+        for name in names:
+            candidate = root / name
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+class _AbiMismatchError(NativeRuntimeUnavailableError):
+    def __init__(self, abi: int) -> None:
+        super().__init__(
+            f"remedy_core ABI {abi} does not match the required ABI {_ABI_VERSION}"
+        )
+        self.abi = abi
+
+
+def _open_core_library(library_path: Path) -> Any:
+    """Load the library and check its ABI; raises NativeRuntimeUnavailableError."""
+    global _library_cache
+    with _library_lock:
+        cached = _library_cache
+        if cached is not None and cached[0] == library_path:
+            return cached[1]
+        try:
+            library = ctypes.CDLL(str(library_path))
+            library.remedy_core_abi_version.argtypes = []
+            library.remedy_core_abi_version.restype = ctypes.c_uint32
+            abi = int(library.remedy_core_abi_version())
+        except (AttributeError, OSError, TypeError, ValueError) as exc:
+            raise NativeRuntimeUnavailableError(
+                f"remedy_core failed to load ({exc.__class__.__name__}: {exc})"
+            ) from exc
+        if abi != _ABI_VERSION:
+            raise _AbiMismatchError(abi)
+        _library_cache = (library_path, library)
+        return library
+
+
+def core_library() -> Any:
+    """The loaded ``remedy_core`` ctypes library at ABI :data:`_ABI_VERSION`.
+
+    Search order: ``REMEDY_NATIVE_CORE_LIB``, the packaged roots next to the
+    interpreter / bundle / ``desktop/bin``, then ``native/zig/zig-out`` of a
+    source checkout. Raises :class:`NativeRuntimeUnavailableError` when no library
+    is found or the ABI differs; there is no Python fallback behind it.
+    """
+    library_path = _core_library_path()
+    if library_path is None:
+        raise NativeRuntimeUnavailableError(
+            "remedy_core library not found: build it with 'zig build "
+            "-Doptimize=ReleaseSafe' in native/zig or set REMEDY_NATIVE_CORE_LIB"
+        )
+    return _open_core_library(library_path)
+
+
+def _load_zig() -> tuple[_ComponentProbe, Any | None]:
+    library_path = _core_library_path()
     if library_path is None:
         return _ComponentProbe(False, "not-installed"), None
     try:
-        library = ctypes.CDLL(str(library_path))
-        library.remedy_core_abi_version.argtypes = []
-        library.remedy_core_abi_version.restype = ctypes.c_uint32
-        abi = int(library.remedy_core_abi_version())
-    except (AttributeError, OSError, TypeError, ValueError):
+        library = _open_core_library(library_path)
+    except _AbiMismatchError as exc:
+        return _ComponentProbe(False, "version-mismatch", {"abi": exc.abi}), None
+    except NativeRuntimeUnavailableError:
         return _ComponentProbe(False, "load-failed"), None
-    if abi != _ABI_VERSION:
-        return _ComponentProbe(False, "version-mismatch", {"abi": abi}), None
-    return _ComponentProbe(True, detail={"abi": abi}), library
+    return _ComponentProbe(True, detail={"abi": _ABI_VERSION}), library
 
 
 def native_runtime_status(
@@ -210,12 +292,14 @@ def native_runtime_status(
 
 
 def invalidate_native_runtime_cache(*, reset_config: bool = False) -> None:
-    global _probe_cache, _runtime_config
+    global _probe_cache, _runtime_config, _library_cache
     with _probe_lock:
         _probe_cache = None
     if reset_config:
         with _config_lock:
             _runtime_config = {}
+        with _library_lock:
+            _library_cache = None
 
 
 def initialize_native_runtime(

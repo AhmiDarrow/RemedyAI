@@ -321,18 +321,15 @@ async def _spawn_terminal(
         except Exception as exc:
             logger.info("conpty spawn failed (%s); falling back to pipes", exc)
 
-    proc = await asyncio.create_subprocess_exec(
+    from remedy.execution.process import create_hidden_subprocess_exec
+
+    proc = await create_hidden_subprocess_exec(
         *argv,
         cwd=cwd,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
         env=os.environ.copy(),
-        creationflags=(
-            getattr(asyncio.subprocess, "CREATE_NO_WINDOW", 0)
-            if os.name == "nt"
-            else 0
-        ),
     )
     sess = _TerminalSession(proc, cwd=cwd)
     await sess.start()
