@@ -501,42 +501,35 @@ def prepare_host_command(
     )
 
 
+def _prepared_from_native(data: dict[str, Any]) -> PreparedCommand:
+    """Build a :class:`PreparedCommand` from ``remedy_core_host_op_prepare`` JSON."""
+    ir_raw = data.get("ir")
+    script = data.get("script_path") or None
+    notes_raw = data.get("notes") or []
+    return PreparedCommand(
+        argv=[str(a) for a in (data.get("argv") or []) if str(a)],
+        display=str(data.get("display") or ""),
+        kind=str(data.get("kind") or "raw"),
+        ir=HostOp.from_dict(ir_raw if isinstance(ir_raw, dict) else {}),
+        script_path=Path(str(script)) if script else None,
+        notes=[str(n) for n in notes_raw] if isinstance(notes_raw, list) else [],
+        translated=str(data.get("translated") or ""),
+        host=str(data.get("host") or ("cmd" if os.name == "nt" else "posix")),
+    )
+
+
 def prepare_host_op(
     op: HostOp,
     *,
     scratch_dir: Path | None = None,
     project_path: str | Path | None = None,
 ) -> PreparedCommand:
-    """Prepare argv from a structured HostOp (no command-string parsing)."""
-    if op.kind == "run":
-        argv = [str(a) for a in op.argv if str(a)]
-        if argv:
-            resolved = resolve_which(argv[0], cwd=project_path)
-            if resolved:
-                argv[0] = resolved
-            argv = deflate_uv_run(argv, project_path=project_path)
-        return PreparedCommand(
-            argv=argv,
-            display=" ".join(argv),
-            kind="argv",
-            ir=op,
-            host=op.host or ("cmd" if os.name == "nt" else "posix"),
-        )
-    if op.kind == "script":
-        launch = launch_script(
-            op.lang or "pwsh",
-            op.body,
-            scratch_dir=scratch_dir,
-            project_path=project_path,
-        )
-        return PreparedCommand(
-            argv=launch.argv,
-            display=f"{launch.lang} -File {launch.path}",
-            kind="script",
-            ir=op,
-            script_path=launch.path,
-            host=launch.lang,
-        )
+    """Prepare argv from a structured HostOp (no command-string parsing).
+
+    ``run`` / ``script`` / ``mkdir`` / ``which`` / ``env`` / ``chain`` go through
+    ``remedy_core_host_op_prepare`` (Zig ABI 4). ``raw`` still uses
+    :func:`prepare_host_command` until translate lands in Zig.
+    """
     if op.kind == "raw":
         return prepare_host_command(
             op.text,
@@ -544,13 +537,14 @@ def prepare_host_op(
             project_path=project_path,
             host=op.host or None,
         )
-    # mkdir / which / env are executed without a shell by the tools themselves
-    return PreparedCommand(
-        argv=[],
-        display=op.kind,
-        kind=op.kind,
-        ir=op,
-        host=op.host or ("cmd" if os.name == "nt" else "posix"),
+    from remedy.core.computer.host_binding import host_op_prepare
+
+    return _prepared_from_native(
+        host_op_prepare(
+            op=op.to_dict(),
+            scratch_dir=str(scratch_dir) if scratch_dir else None,
+            project_path=str(project_path) if project_path else None,
+        )
     )
 
 
