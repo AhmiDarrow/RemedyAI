@@ -898,7 +898,11 @@ test "shell_ir prepare_op cases match prepare_argv_scriptfile fixtures" {
         try std.testing.expectEqualStrings(exp_kind, prep.kind);
 
         if (jsonStringField(expected, "host")) |exp_host| {
-            try std.testing.expectEqualStrings(exp_host, prep.host_name);
+            const want = if (std.mem.eql(u8, exp_host, "<DEFAULT>"))
+                defaultHostName()
+            else
+                exp_host;
+            try std.testing.expectEqualStrings(want, prep.host_name);
         }
         if (jsonStringField(expected, "display")) |exp_display| {
             try std.testing.expectEqualStrings(exp_display, prep.display);

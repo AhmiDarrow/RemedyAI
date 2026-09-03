@@ -315,7 +315,8 @@ def main() -> None:
                 "kind": prep_run.kind,
                 "argv_template": [_norm_exe(a, None) for a in prep_run.argv],
                 "ir": prep_run.ir.to_dict(),
-                "host": prep_run.host,
+                # Platform default (cmd on Windows, posix elsewhere) — not a Windows-only literal.
+                "host": "<DEFAULT>",
             },
         }
     )
