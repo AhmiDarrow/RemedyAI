@@ -188,6 +188,8 @@ def test_read_window_text_rejects_hwnd_zero_without_calling_native(
 def test_element_action_is_refused_rather_than_raised_when_host_fails(
     monkeypatch: pytest.MonkeyPatch,
 ):
+    # Binding tests force win32: desktop_uia short-circuits UIA off Windows.
+    monkeypatch.setattr(desktop_uia.sys, "platform", "win32")
     monkeypatch.setattr(
         H,
         "uia_element_action",
@@ -204,6 +206,7 @@ def test_element_action_is_refused_rather_than_raised_when_host_fails(
 
 
 def test_binding_forwards_snapshot_args(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(desktop_uia.sys, "platform", "win32")
     seen: dict[str, Any] = {}
 
     def _fake(hwnd: int, max_elements: int, preferred_only: bool):
@@ -231,6 +234,7 @@ def test_binding_forwards_snapshot_args(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_binding_maps_desktop_root_hwnd_none_to_zero(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(desktop_uia.sys, "platform", "win32")
     seen: dict[str, Any] = {}
 
     def _fake(hwnd: int, max_elements: int, preferred_only: bool):
@@ -243,6 +247,7 @@ def test_binding_maps_desktop_root_hwnd_none_to_zero(monkeypatch: pytest.MonkeyP
 
 
 def test_element_action_forwards_and_preserves_dict(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(desktop_uia.sys, "platform", "win32")
     monkeypatch.setattr(
         H,
         "uia_element_action",
