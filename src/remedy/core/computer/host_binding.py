@@ -804,9 +804,9 @@ def host_op_prepare(
     """Call ``remedy_core_host_op_prepare``; return a PreparedCommand dict.
 
     Pass either a HostOp mapping as *op*, or a full request object as *raw*
-    (``{op, scratch_dir?, project_path?}`` or a bare HostOp). Does not replace
-    :func:`remedy.execution.host.runner.prepare_host_op` — callers stay on
-    Python until Zig prepare parity is proven.
+    (``{op, scratch_dir?, project_path?}`` or a bare HostOp).
+    :func:`remedy.execution.host.runner.prepare_host_op` routes structured ops
+    through this binding (``raw`` still uses Python ``prepare_host_command``).
     """
     if raw is not None:
         payload: dict[str, Any] = dict(raw)

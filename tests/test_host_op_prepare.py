@@ -1,0 +1,137 @@
+"""Phase 3: Zig ``host_op_prepare`` matches Host Command IR prepare fixtures."""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+from remedy.core.computer import host_binding as hb
+from remedy.execution.host.ir import HostOp
+from remedy.execution.host.runner import prepare_host_op
+from remedy.runtime import native_runtime
+
+FIXTURE = (
+    Path(__file__).resolve().parent / "fixtures" / "host_ir" / "prepare_argv_scriptfile.json"
+)
+
+_PLACEHOLDER_STEMS = {
+    "<PWSH>": {"pwsh", "powershell"},
+    "<CMD>": {"cmd"},
+    "<GIT>": {"git"},
+    "<PYTHON>": {"python", "python3", "pythonw"},
+}
+
+
+def _stem(token: str) -> str:
+    name = Path(token).name
+    if name.lower().endswith(".exe"):
+        name = name[:-4]
+    return name.lower()
+
+
+def _norm_argv_token(token: str, script_path: str | None) -> str:
+    if script_path and os.path.normcase(token) == os.path.normcase(script_path):
+        return "<SCRIPT_PATH>"
+    stem = _stem(token)
+    for placeholder, stems in _PLACEHOLDER_STEMS.items():
+        if stem in stems:
+            return placeholder
+    return token
+
+
+def _load_prepare_op_cases() -> list[dict]:
+    raw = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    return [c for c in raw["cases"] if c.get("kind") == "prepare_op"]
+
+
+@pytest.fixture(scope="module")
+def _require_abi4_core():
+    if native_runtime._core_library_path() is None:
+        pytest.skip("remedy_core is not built in this checkout")
+    library = native_runtime.core_library()
+    assert int(library.remedy_core_abi_version()) == 4
+
+
+@pytest.mark.usefixtures("_require_abi4_core")
+@pytest.mark.parametrize("case", _load_prepare_op_cases(), ids=lambda c: c["id"])
+def test_host_op_prepare_matches_fixture(case: dict, tmp_path: Path) -> None:
+    op = case["input"]["op"]
+    expected = case["expected"]
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    got = hb.host_op_prepare(op=op, scratch_dir=str(scratch))
+    assert got["kind"] == expected["kind"]
+
+    if "argv" in expected:
+        assert got.get("argv") == expected["argv"]
+    if "argv_template" in expected:
+        script_path = got.get("script_path")
+        assert isinstance(script_path, str) or script_path is None
+        normalized = [_norm_argv_token(a, script_path) for a in got.get("argv") or []]
+        assert normalized == expected["argv_template"]
+    if "display" in expected:
+        assert got.get("display") == expected["display"]
+    if "host" in expected:
+        assert got.get("host") == expected["host"]
+    if "script_suffix" in expected:
+        script_path = got["script_path"]
+        assert isinstance(script_path, str)
+        assert script_path.endswith(expected["script_suffix"])
+        body = Path(script_path).read_bytes()
+        if expected.get("script_has_bom"):
+            assert body.startswith(b"\xef\xbb\xbf")
+            body = body[3:]
+        else:
+            assert not body.startswith(b"\xef\xbb\xbf")
+        if "script_body_utf8_sig" in expected:
+            assert body.decode("utf-8") == expected["script_body_utf8_sig"]
+    if "ir" in expected:
+        ir = got.get("ir") or {}
+        for key, value in expected["ir"].items():
+            if key == "argv_template":
+                continue
+            assert ir.get(key) == value
+
+
+@pytest.mark.usefixtures("_require_abi4_core")
+def test_prepare_host_op_routes_structured_ops_through_zig(tmp_path: Path) -> None:
+    """Production prepare_host_op must not keep a Python twin for structured ops."""
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    op = HostOp(kind="run", argv=["git", "status"])
+    prepared = prepare_host_op(op, scratch_dir=scratch)
+    assert prepared.kind == "argv"
+    assert len(prepared.argv) >= 2
+    assert _stem(prepared.argv[0]) == "git"
+    assert prepared.argv[1:] == ["status"]
+    assert prepared.ir.kind == "run"
+
+    script = prepare_host_op(
+        HostOp(kind="script", lang="pwsh", body="Write-Output 'hi'"),
+        scratch_dir=scratch,
+    )
+    assert script.kind == "script"
+    assert script.script_path is not None
+    assert script.script_path.suffix.lower() == ".ps1"
+    assert script.host == "pwsh"
+    assert script.argv[1:5] == [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+    ]
+
+
+@pytest.mark.usefixtures("_require_abi4_core")
+def test_prepare_host_op_raw_still_uses_command_path() -> None:
+    """Translate / prepare_command remain Python until that Zig slice lands."""
+    if sys.platform != "win32":
+        pytest.skip("cmd host translation fixtures are Windows-oriented")
+    prepared = prepare_host_op(HostOp(kind="raw", text="chmod +x run.sh", host="cmd"))
+    assert prepared.kind == "noop"
+    assert prepared.argv == []

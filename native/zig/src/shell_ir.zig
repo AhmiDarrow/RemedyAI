@@ -1,6 +1,7 @@
 //! Host Command IR — Zig mirror of `remedy.execution.host.ir` + prepare.
 //! ABI 4: `remedy_core_host_op_prepare` (run|script|mkdir|which|env|chain).
-//! Translate / prepare_host_command / ConPTY remain Python until later slices.
+//! Python `prepare_host_op` routes those kinds here. Translate /
+//! prepare_host_command / ConPTY remain Python until later slices.
 
 const std = @import("std");
 const builtin = @import("builtin");
