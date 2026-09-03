@@ -1,11 +1,23 @@
 """PyInstaller build script for Remedy Desktop.
 
-Creates a standalone Windows .exe for the remedy CLI server,
+Creates a standalone executable for the remedy CLI server (``remedy-desktop``),
 suitable for bundling as a Tauri sidecar.
 
+The Zig native core travels inside the sidecar. PyInstaller receives it via
+``--add-binary`` with the archive root as destination, so at run time the
+onefile bootloader extracts it next to the frozen interpreter and
+``remedy.runtime.native_runtime`` resolves it through ``sys._MEIPASS``. The
+library is looked up at ``native/zig/zig-out`` (``bin/remedy_core.dll`` on
+Windows, ``lib/libremedy_core.so`` on Linux, ``lib/libremedy_core.dylib`` on
+macOS), where ``cd native/zig && zig build -Doptimize=ReleaseSafe`` installs
+it. The build refuses to run without it: a sidecar that silently lacks the
+core would report ``not-installed`` on every native call.
+
 Usage:
-    python scripts/build_desktop.py          # build standalone exe
-    python scripts/build_desktop.py --clean  # clean build from scratch
+    python scripts/build_desktop.py                      # build standalone exe
+    python scripts/build_desktop.py --clean              # clean build from scratch
+    python scripts/build_desktop.py --core-lib PATH      # bundle this core library
+    python scripts/build_desktop.py --ci                 # release mode (version gate)
 """
 
 from __future__ import annotations
@@ -304,6 +316,74 @@ def get_hidden_imports() -> list[str]:
     ]
 
 
+def core_library_name() -> str:
+    """File name ``native_runtime._load_zig`` looks for on this platform."""
+    if sys.platform == "win32":
+        return "remedy_core.dll"
+    if sys.platform == "darwin":
+        return "libremedy_core.dylib"
+    return "libremedy_core.so"
+
+
+def default_core_library_path() -> Path:
+    """Where ``zig build -Doptimize=ReleaseSafe`` installs the shared library."""
+    subdir = "bin" if sys.platform == "win32" else "lib"
+    return ROOT / "native" / "zig" / "zig-out" / subdir / core_library_name()
+
+
+def resolve_core_library(override: str | Path | None = None) -> Path:
+    """The Zig core to bundle, or exit with a message that says how to get one.
+
+    The file must carry the exact name the loader searches for; a differently
+    named override would be packed but never found inside the sidecar.
+    """
+    expected = core_library_name()
+    path = Path(override).expanduser() if override else default_core_library_path()
+    if not path.is_file():
+        print(
+            f"ERROR: native core library missing at {path}.\n"
+            "       Build it with: cd native/zig && zig build -Doptimize=ReleaseSafe\n"
+            f"       or pass --core-lib PATH pointing at a built {expected}."
+        )
+        sys.exit(1)
+    if path.name != expected:
+        print(
+            f"ERROR: --core-lib must point at a file named {expected} "
+            f"(got {path.name}); the sidecar loader only resolves that name."
+        )
+        sys.exit(1)
+    try:
+        import ctypes
+
+        library = ctypes.CDLL(str(path))
+        library.remedy_core_abi_version.argtypes = []
+        library.remedy_core_abi_version.restype = ctypes.c_uint32
+        abi = int(library.remedy_core_abi_version())
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        print(f"ERROR: {path} does not load as the Remedy native core: {exc}")
+        sys.exit(1)
+    # Keep in lockstep with remedy.runtime.native_runtime._ABI_VERSION and
+    # REMEDY_CORE_ABI_VERSION in native/zig/include/remedy_core.h.
+    required_abi = 2
+    if abi != required_abi:
+        print(
+            f"ERROR: {path} reports ABI {abi}; the sidecar requires ABI "
+            f"{required_abi}. Rebuild with: cd native/zig && "
+            "zig build -Doptimize=ReleaseSafe"
+        )
+        sys.exit(1)
+    return path.resolve()
+
+
+def core_library_add_binary(path: Path) -> list[str]:
+    """PyInstaller arguments that place the core at the archive root.
+
+    ``.`` as destination puts the file directly under ``sys._MEIPASS`` (the
+    onefile extraction directory), which is one of the loader's search roots.
+    """
+    return ["--add-binary", f"{path}{os.pathsep}."]
+
+
 def sidecar_target_triple() -> str:
     """Rust target triple Tauri uses for externalBin (`remedy-desktop-<triple>`)."""
     import platform
@@ -345,8 +425,8 @@ def sidecar_bin_paths() -> tuple[Path, Path]:
     )
 
 
-def build(cache_clean: bool = False, ci: bool = False):
-    """Build the standalone remedy-desktop.exe via PyInstaller."""
+def build(cache_clean: bool = False, ci: bool = False, core_lib: str | None = None):
+    """Build the standalone remedy-desktop executable via PyInstaller."""
     print(f"Building Remedy Desktop exe... (root={ROOT})")
 
     # Always sync package.json / tauri.conf / Cargo.toml from pyproject so CI
@@ -365,6 +445,9 @@ def build(cache_clean: bool = False, ci: bool = False):
             sys.exit(1)
 
     check_third_party_notices()
+
+    core_library = resolve_core_library(core_lib)
+    print(f"Native core: {core_library}")
 
     ensure_pyinstaller()
 
@@ -401,6 +484,7 @@ def build(cache_clean: bool = False, ci: bool = False):
         f"{ROOT / 'src' / 'remedy'}{os.pathsep}remedy",
         "--add-data",
         f"{ROOT / 'pyproject.toml'}{os.pathsep}.",
+        *core_library_add_binary(core_library),
     ]
     if sys.platform == "win32":
         # PE identity + no console — Windows-only PyInstaller flags.
@@ -462,9 +546,14 @@ if __name__ == "__main__":
         action="store_true",
         help="CI mode — require REMEDY_RELEASE_VERSION match when set; still syncs versions",
     )
+    p.add_argument(
+        "--core-lib",
+        metavar="PATH",
+        help="Zig core library to bundle (default: native/zig/zig-out/{bin,lib}/)",
+    )
     args = p.parse_args()
 
-    code = build(cache_clean=args.clean, ci=args.ci)
+    code = build(cache_clean=args.clean, ci=args.ci, core_lib=args.core_lib)
 
     if args.stage:
         candidates = sorted(

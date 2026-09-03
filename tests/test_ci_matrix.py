@@ -17,13 +17,33 @@ def _workflow_jobs(name: str) -> dict[str, object]:
     return jobs
 
 
-def _run_commands(job: object) -> str:
+def _steps(job: object) -> list[dict[str, object]]:
     assert isinstance(job, dict)
     steps = job.get("steps")
     assert isinstance(steps, list)
-    return "\n".join(
-        str(step.get("run", "")) for step in steps if isinstance(step, dict)
-    )
+    return [step for step in steps if isinstance(step, dict)]
+
+
+def _run_commands(job: object) -> str:
+    return "\n".join(str(step.get("run", "")) for step in _steps(job))
+
+
+def _step_index(job: object, needle: str) -> int:
+    """Index of the first step whose ``run`` contains ``needle``."""
+    for index, step in enumerate(_steps(job)):
+        if needle in str(step.get("run", "")):
+            return index
+    raise AssertionError(f"no step runs {needle!r}")
+
+
+def _uses_step(job: object, action: str) -> dict[str, object]:
+    for step in _steps(job):
+        if str(step.get("uses", "")).startswith(action + "@"):
+            return step
+    raise AssertionError(f"no step uses {action}")
+
+
+ZIG_BUILD = "zig build -Doptimize=ReleaseSafe"
 
 
 def test_ci_covers_every_shipped_runtime_and_artifact() -> None:
@@ -101,6 +121,98 @@ def test_release_builds_both_desktop_operating_systems_and_native_cores() -> Non
     assert "tauri build --bundles deb,appimage" in linux
 
 
+def test_ci_python_jobs_build_the_zig_core_before_pytest() -> None:
+    """Library-backed tests execute in CI instead of skipping.
+
+    Both pytest jobs install the same pinned Zig as native-core, build the
+    release-safe core before the suite, and hand its path to the loader via
+    REMEDY_NATIVE_CORE_LIB in $GITHUB_ENV.
+    """
+    jobs = _workflow_jobs("ci.yml")
+    pinned = _uses_step(jobs["native-core"], "mlugg/setup-zig")
+    for name, library in (
+        ("test", "zig-out/lib/libremedy_core.so"),
+        ("test-windows", "zig-out/bin/remedy_core.dll"),
+    ):
+        job = jobs[name]
+        setup = _uses_step(job, "mlugg/setup-zig")
+        assert setup["uses"] == pinned["uses"], f"{name} must pin the same setup-zig as native-core"
+        assert setup["with"] == pinned["with"], f"{name} must use the same Zig version as native-core"
+        build = _step_index(job, ZIG_BUILD)
+        assert build < _step_index(job, "pytest -q"), f"{name} must build Zig before pytest"
+        step = _steps(job)[build]
+        assert step.get("working-directory") == "native/zig"
+        run = str(step["run"])
+        assert "REMEDY_NATIVE_CORE_LIB=" in run, f"{name} must export the core library path"
+        assert "GITHUB_ENV" in run, f"{name} must export via $GITHUB_ENV so pytest sees it"
+        assert library in run
+
+
+def test_release_builds_native_before_the_sidecar_that_bundles_it() -> None:
+    jobs = _workflow_jobs("desktop-release.yml")
+    for name in ("build-sidecar", "build-sidecar-linux"):
+        job = jobs[name]
+        native = _step_index(job, ZIG_BUILD)
+        sidecar = _step_index(job, "build_desktop.py")
+        assert native < sidecar, f"{name}: the sidecar bundles the core, so Zig builds first"
+        assert "go build" in str(_steps(job)[native]["run"]), f"{name}: Go builds with Zig"
+
+
+def _build_desktop_module():
+    import importlib.util
+    import sys
+
+    path = ROOT / "scripts" / "build_desktop.py"
+    spec = importlib.util.spec_from_file_location("remedy_build_desktop", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_build_desktop_bundles_the_core_library_at_the_archive_root(tmp_path: Path) -> None:
+    """The sidecar carries the Zig core where sys._MEIPASS resolves it."""
+    import os
+    import sys
+
+    import pytest
+
+    build_desktop = _build_desktop_module()
+    source = (ROOT / "scripts" / "build_desktop.py").read_text("utf-8")
+    assert "--add-binary" in source
+    assert "core_library_add_binary(core_library)" in source, "build() must pass the core to PyInstaller"
+
+    expected = {
+        "win32": "remedy_core.dll",
+        "darwin": "libremedy_core.dylib",
+    }.get(sys.platform, "libremedy_core.so")
+    assert build_desktop.core_library_name() == expected
+    default = build_desktop.default_core_library_path()
+    assert default.name == expected
+    assert default.parent.parent == ROOT / "native" / "zig" / "zig-out"
+
+    library = tmp_path / expected
+    args = build_desktop.core_library_add_binary(library)
+    assert args[0] == "--add-binary"
+    src, dest = args[1].rsplit(os.pathsep, 1)
+    assert src == str(library)
+    assert dest == ".", "destination must be the archive root (sys._MEIPASS)"
+
+    with pytest.raises(SystemExit):
+        build_desktop.resolve_core_library(tmp_path / "missing" / expected)
+    wrong_name = tmp_path / "other.bin"
+    wrong_name.write_bytes(b"")
+    with pytest.raises(SystemExit):
+        build_desktop.resolve_core_library(wrong_name)
+
+    assert "required_abi = 2" in source
+    assert "remedy_core_abi_version()" in source
+
+    parser_help = source[source.index("__main__") :]
+    assert "--core-lib" in parser_help
+
+
 def _prepush_module():
     import importlib.util
     import sys
@@ -163,6 +275,37 @@ def test_prepush_gate_runs_every_public_ci_command() -> None:
     # The Linux suite is reproduced from this checkout when the host is Windows.
     assert any(step.command == "__wsl_pytest__" for step in prepush.LINUX.steps)
     assert prepush.PYTHON.serial_after_others, "pytest must not share the box with cargo/gradle"
+
+
+def test_prepush_python_lane_consumes_the_native_lane_core() -> None:
+    """Local pytest loads the core the native lane just built, or refuses to run."""
+    prepush = _prepush_module()
+    assert prepush.PYTHON.requires == ("native",)
+    assert "zig build -Doptimize=ReleaseSafe" in "\n".join(s.command for s in prepush.NATIVE.steps)
+    assert prepush.with_required_lanes({"python"}) == {"python", "native"}
+    assert prepush.LANES.index(prepush.NATIVE) < prepush.LANES.index(prepush.PYTHON)
+
+    library = prepush.native_core_library_path()
+    assert library.parent.parent == ROOT / "native" / "zig" / "zig-out"
+    assert library.name in {"remedy_core.dll", "libremedy_core.so", "libremedy_core.dylib"}
+    pytest_step = next(s for s in prepush.PYTHON.steps if s.name == "pytest")
+    assert pytest_step.env["REMEDY_NATIVE_CORE_LIB"] == str(library)
+    names = [s.name for s in prepush.PYTHON.steps]
+    assert names.index("native core present") < names.index("pytest")
+
+    # The WSL lane builds its own .so (into /tmp, never the checkout's zig-out)
+    # and hands it to the loader, when WSL has zig.
+    linux = [s.command for s in prepush.LINUX.steps]
+    assert linux.index(prepush.WSL_ZIG_BUILD) < linux.index(prepush.WSL_PYTEST)
+    assert prepush.WSL_NATIVE_CORE_LIB.startswith("/tmp/")
+    if prepush.IS_WINDOWS and prepush.shutil.which("wsl"):
+        build = prepush._wsl_zig_build_command()
+        assert build and "zig build -Doptimize=ReleaseSafe" in build
+        assert f"--prefix {prepush.WSL_ZIG_PREFIX}" in build
+        assert "--cache-dir" in build
+        pytest_cmd = prepush._wsl_pytest_command()
+        assert pytest_cmd
+        assert (f"REMEDY_NATIVE_CORE_LIB={prepush.WSL_NATIVE_CORE_LIB}" in pytest_cmd) == prepush._wsl_has_zig()
 
 
 def test_prepush_hook_is_wired_and_executable() -> None:

@@ -28,11 +28,21 @@ Rules the hook enforces (see AGENTS.md "Local CI"):
 
 Nothing here touches the live Remedy home: every test lane runs with
 ``REMEDY_HOME`` pointed at a scratch directory.
+
+Lane dependencies. The ``python`` lane runs library-backed tests against the
+Zig core the ``native`` lane builds (``native/zig/zig-out``), so it declares
+``requires=("native",)``: it runs after that lane succeeds, ``--only python``
+pulls the native lane in, and ``REMEDY_NATIVE_CORE_LIB`` is exported to the
+freshly built library. A missing library fails the lane rather than letting
+those tests skip. The ``linux`` lane builds its own ``libremedy_core.so``
+inside WSL (into ``/tmp``, never into the checkout's ``zig-out``) when WSL has
+``zig``; without it the loader reports ``not-installed`` and the log says so.
 """
 
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import platform
@@ -81,12 +91,35 @@ class Step:
 
 @dataclass(frozen=True)
 class Lane:
-    """A group of steps that runs in one worker. Lanes are independent."""
+    """A group of steps that runs in one worker.
+
+    ``requires`` names lanes whose output this lane consumes; such a lane runs
+    after the parallel phase and only once every required lane is green.
+    """
 
     key: str
     title: str
     steps: tuple[Step, ...]
     serial_after_others: bool = False
+    requires: tuple[str, ...] = ()
+
+
+def native_core_library_path() -> Path:
+    """Where the native lane's ``zig build -Doptimize=ReleaseSafe`` installs the core."""
+    if IS_WINDOWS:
+        return ROOT / "native" / "zig" / "zig-out" / "bin" / "remedy_core.dll"
+    if platform.system() == "Darwin":
+        return ROOT / "native" / "zig" / "zig-out" / "lib" / "libremedy_core.dylib"
+    return ROOT / "native" / "zig" / "zig-out" / "lib" / "libremedy_core.so"
+
+
+# Sentinel commands resolved at run time (see _run_lane).
+WSL_PYTEST = "__wsl_pytest__"
+WSL_ZIG_BUILD = "__wsl_zig_build__"
+REQUIRE_NATIVE_CORE = "__require_native_core__"
+NATIVE_CORE_ENV = {"REMEDY_NATIVE_CORE_LIB": str(native_core_library_path())}
+WSL_ZIG_PREFIX = "/tmp/remedy-prepush-zig"
+WSL_NATIVE_CORE_LIB = f"{WSL_ZIG_PREFIX}/lib/libremedy_core.so"
 
 
 RUST_ENV = {
@@ -111,18 +144,28 @@ PYTHON = Lane(
     "python",
     "Full pytest suite (this OS) + wheel",
     (
-        Step("pytest", "uv run pytest -q --tb=short -p no:cacheprovider"),
+        Step("native core present", REQUIRE_NATIVE_CORE),
+        Step(
+            "pytest",
+            "uv run pytest -q --tb=short -p no:cacheprovider",
+            env=NATIVE_CORE_ENV,
+        ),
         Step("uv build", "uv build"),
     ),
     # Timing-sensitive tests (telephony frame pacing) must not share the box
     # with cargo and gradle; this lane runs after the parallel lanes finish.
     serial_after_others=True,
+    # Library-backed tests load the core the native lane just built.
+    requires=("native",),
 )
 
 LINUX = Lane(
     "linux",
     "Full pytest suite on Linux (WSL)",
-    (Step("pytest (linux)", "__wsl_pytest__"),),
+    (
+        Step("zig build (linux)", WSL_ZIG_BUILD),
+        Step("pytest (linux)", WSL_PYTEST),
+    ),
 )
 
 DESKTOP = Lane(
@@ -264,19 +307,58 @@ def _wsl_path(path: Path) -> str:
     return f"/mnt/{drive[0].lower()}{rest.replace(os.sep, '/')}"
 
 
-def _wsl_pytest_command() -> str | None:
-    """The Linux CI pytest step, reproduced under WSL from this checkout.
+@functools.cache
+def _wsl_has_zig() -> bool:
+    """Whether a login shell inside WSL can find ``zig``."""
+    if not IS_WINDOWS or shutil.which("wsl") is None:
+        return False
+    proc = subprocess.run(
+        ["wsl", "-e", "bash", "-lc", "command -v zig"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return proc.returncode == 0 and bool(proc.stdout.strip())
 
-    Returns None on a non-Windows host (the `python` lane already is Linux).
+
+def _wsl_zig_build_command() -> str | None:
+    """Build the Linux core inside WSL, installed under /tmp so the Windows
+    native lane's ``zig-out`` and ``.zig-cache`` (running in parallel) are
+    never touched.
+
+    Returns None on a non-Windows host; "" when WSL is missing.
     """
     if not IS_WINDOWS:
         return None
     if shutil.which("wsl") is None:
         return ""
     inner = (
+        f"cd {_wsl_path(ROOT / 'native' / 'zig')} && "
+        f"zig build -Doptimize=ReleaseSafe --prefix {WSL_ZIG_PREFIX} "
+        f"--cache-dir {WSL_ZIG_PREFIX}-cache --global-cache-dir {WSL_ZIG_PREFIX}-global && "
+        f"test -f {WSL_NATIVE_CORE_LIB}"
+    )
+    return f'wsl -e bash -lc "{inner}"'
+
+
+def _wsl_pytest_command() -> str | None:
+    """The Linux CI pytest step, reproduced under WSL from this checkout.
+
+    Points the loader at the library ``_wsl_zig_build_command`` installed when
+    WSL has zig. Returns None on a non-Windows host (the `python` lane already
+    is Linux).
+    """
+    if not IS_WINDOWS:
+        return None
+    if shutil.which("wsl") is None:
+        return ""
+    core = f"REMEDY_NATIVE_CORE_LIB={WSL_NATIVE_CORE_LIB} " if _wsl_has_zig() else ""
+    inner = (
         f"cd {_wsl_path(ROOT)} && mkdir -p /tmp/remedy-prepush-home && "
         "REMEDY_HOME=/tmp/remedy-prepush-home "
         "UV_PROJECT_ENVIRONMENT=/tmp/remedy-prepush-venv "
+        f"{core}"
         "uv run pytest -q --tb=short -p no:cacheprovider"
     )
     return f'wsl -e bash -lc "{inner}"'
@@ -307,8 +389,21 @@ def _run_lane(lane: Lane, scratch_home: Path, log_dir: Path) -> LaneResult:
     with log.open("w", encoding="utf-8") as fh:
         for step in lane.steps:
             command = step.shell_command()
-            if command == "__wsl_pytest__":
-                resolved = _wsl_pytest_command()
+            if command == REQUIRE_NATIVE_CORE:
+                library = native_core_library_path()
+                if not library.is_file():
+                    fh.write(
+                        f"native core library missing at {library}; the native lane "
+                        "builds it (cd native/zig && zig build -Doptimize=ReleaseSafe). "
+                        "Library-backed tests would skip, so this lane refuses to run.\n"
+                    )
+                    return LaneResult(lane, False, time.monotonic() - started, step.name, log)
+                fh.write(f"native core: {library}\n")
+                continue
+            if command in (WSL_PYTEST, WSL_ZIG_BUILD):
+                resolved = (
+                    _wsl_pytest_command() if command == WSL_PYTEST else _wsl_zig_build_command()
+                )
                 if resolved is None:
                     fh.write("skipped: host is already Linux\n")
                     continue
@@ -317,6 +412,13 @@ def _run_lane(lane: Lane, scratch_home: Path, log_dir: Path) -> LaneResult:
                     return LaneResult(
                         lane, False, time.monotonic() - started, step.name, log
                     )
+                if command == WSL_ZIG_BUILD and not _wsl_has_zig():
+                    fh.write(
+                        "zig is not installed inside WSL; Linux pytest runs without the "
+                        "native core (the loader reports not-installed). Install zig in "
+                        "WSL to exercise library loading there.\n"
+                    )
+                    continue
                 command = resolved
             fh.write(f"\n=== {step.name}: {command}  (cwd={step.cwd})\n")
             fh.flush()
@@ -358,8 +460,28 @@ def run_matrix(lanes: Iterable[Lane], *, serial: bool) -> list[LaneResult]:
             _say(f"  [{mark}] {lane.key:8} {lane.title}  ({result.seconds / 60:.1f} min)")
 
     first = [ln for ln in lanes if ln.key == "checks"]
-    parallel = [ln for ln in lanes if ln.key != "checks" and not ln.serial_after_others]
-    last = [ln for ln in lanes if ln.serial_after_others]
+    parallel = [
+        ln for ln in lanes if ln.key != "checks" and not ln.serial_after_others and not ln.requires
+    ]
+    last = [ln for ln in lanes if ln.serial_after_others or ln.requires]
+
+    def unmet_requirement(lane: Lane) -> str | None:
+        done = {r.lane.key: r for r in results}
+        for key in lane.requires:
+            if key not in done:
+                return f"required lane '{key}' did not run"
+            if not done[key].ok:
+                return f"required lane '{key}' failed"
+        return None
+
+    def run_last(lane: Lane) -> bool:
+        """Run a dependent lane; False when it was skipped or failed."""
+        unmet = unmet_requirement(lane)
+        if unmet:
+            _say(f"  [skip] {lane.key:8} {lane.title}  ({unmet})")
+            return False
+        worker(lane)
+        return results[-1].ok
 
     for lane in first:
         worker(lane)
@@ -367,9 +489,12 @@ def run_matrix(lanes: Iterable[Lane], *, serial: bool) -> list[LaneResult]:
             return results
 
     if serial:
-        for lane in parallel + last:
+        for lane in parallel:
             worker(lane)
             if not results[-1].ok:
+                return results
+        for lane in last:
+            if not run_last(lane):
                 return results
         return results
 
@@ -380,8 +505,21 @@ def run_matrix(lanes: Iterable[Lane], *, serial: bool) -> list[LaneResult]:
         t.join()
     if all(r.ok for r in results):
         for lane in last:
-            worker(lane)
+            run_last(lane)
     return results
+
+
+def with_required_lanes(keys: set[str]) -> set[str]:
+    """Close a lane selection over ``Lane.requires`` (``--only python`` adds native)."""
+    wanted = set(keys)
+    while True:
+        pulled = {req for ln in LANES if ln.key in wanted for req in ln.requires} - wanted
+        if not pulled:
+            return wanted
+        for ln in LANES:
+            if ln.key in wanted and set(ln.requires) & pulled:
+                _say(f"prepush: {ln.key} requires {', '.join(ln.requires)}; adding")
+        wanted |= pulled
 
 
 def verify_tree(commit: str, *, serial: bool, force: bool, only: set[str] | None) -> bool:
@@ -396,6 +534,8 @@ def verify_tree(commit: str, *, serial: bool, force: bool, only: set[str] | None
         )
         return True
 
+    if only is not None:
+        only = with_required_lanes(only)
     lanes = LANES if only is None else tuple(ln for ln in LANES if ln.key in only)
     _say(f"prepush: verifying tree {tree[:12]} (commit {commit[:12]})")
     _say(f"  lanes: {', '.join(ln.key for ln in lanes)}  logs: {_state_dir() / 'logs'}")
@@ -601,12 +741,23 @@ def install_hook() -> None:
 
 def print_matrix() -> None:
     for lane in LANES:
-        _say(f"{lane.key}: {lane.title}")
+        suffix = f"  (after: {', '.join(lane.requires)})" if lane.requires else ""
+        _say(f"{lane.key}: {lane.title}{suffix}")
         for step in lane.steps:
             cmd = step.shell_command()
-            if cmd == "__wsl_pytest__":
+            if cmd == WSL_PYTEST:
                 cmd = _wsl_pytest_command() or "(host is Linux: covered by the python lane)"
-            _say(f"    {step.name:28} [{step.cwd}] {cmd}")
+            elif cmd == WSL_ZIG_BUILD:
+                if not IS_WINDOWS:
+                    cmd = "(host is Linux: covered by the native lane)"
+                elif not _wsl_has_zig():
+                    cmd = "(zig not installed in WSL: loader reports not-installed)"
+                else:
+                    cmd = _wsl_zig_build_command() or ""
+            elif cmd == REQUIRE_NATIVE_CORE:
+                cmd = f"require {native_core_library_path()}"
+            env = " ".join(f"{k}={v}" for k, v in step.env.items() if k == "REMEDY_NATIVE_CORE_LIB")
+            _say(f"    {step.name:28} [{step.cwd}] {cmd}{'  ' + env if env else ''}")
 
 
 def main(argv: list[str] | None = None) -> int:
