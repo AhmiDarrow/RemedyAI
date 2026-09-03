@@ -1,0 +1,183 @@
+{
+  "source": "remedy.execution.host.ir",
+  "captured_at": "2026-09-03",
+  "notes": "HostOp.to_dict/from_dict contract. Zig parse/roundtrip must emit byte-identical JSON object shapes (key order may differ; values must match).",
+  "schema": {
+    "kind": "run|mkdir|which|env|script|raw|chain",
+    "argv": "list[str] (run)",
+    "paths": "list[str] (mkdir)",
+    "name": "str (which|env)",
+    "lang": "pwsh|cmd|python (script)",
+    "body": "str (script)",
+    "host": "cmd|pwsh|posix (raw)",
+    "text": "str (raw)",
+    "cwd": "str",
+    "env": "dict[str,str]",
+    "ops": "list[HostOp] (chain)"
+  },
+  "cases": [
+    {
+      "id": "run_pytest",
+      "input": {
+        "kind": "run",
+        "argv": [
+          "python",
+          "-m",
+          "pytest",
+          "-q"
+        ],
+        "cwd": "."
+      },
+      "expected_dict": {
+        "kind": "run",
+        "argv": [
+          "python",
+          "-m",
+          "pytest",
+          "-q"
+        ],
+        "cwd": "."
+      }
+    },
+    {
+      "id": "mkdir_src_tests",
+      "input": {
+        "kind": "mkdir",
+        "paths": [
+          "src",
+          "tests"
+        ]
+      },
+      "expected_dict": {
+        "kind": "mkdir",
+        "paths": [
+          "src",
+          "tests"
+        ]
+      }
+    },
+    {
+      "id": "which_git",
+      "input": {
+        "kind": "which",
+        "name": "git"
+      },
+      "expected_dict": {
+        "kind": "which",
+        "name": "git"
+      }
+    },
+    {
+      "id": "script_pwsh_hi",
+      "input": {
+        "kind": "script",
+        "lang": "pwsh",
+        "body": "Write-Output 'hi'",
+        "cwd": "C:/tmp"
+      },
+      "expected_dict": {
+        "kind": "script",
+        "lang": "pwsh",
+        "body": "Write-Output 'hi'",
+        "cwd": "C:/tmp"
+      }
+    },
+    {
+      "id": "raw_dir",
+      "input": {
+        "kind": "raw",
+        "host": "cmd",
+        "text": "dir /b"
+      },
+      "expected_dict": {
+        "kind": "raw",
+        "host": "cmd",
+        "text": "dir /b"
+      }
+    },
+    {
+      "id": "chain_mkdir_git",
+      "input": {
+        "kind": "chain",
+        "ops": [
+          {
+            "kind": "mkdir",
+            "paths": [
+              "a"
+            ]
+          },
+          {
+            "kind": "run",
+            "argv": [
+              "git",
+              "status"
+            ]
+          }
+        ]
+      },
+      "expected_dict": {
+        "kind": "chain",
+        "ops": [
+          {
+            "kind": "mkdir",
+            "paths": [
+              "a"
+            ]
+          },
+          {
+            "kind": "run",
+            "argv": [
+              "git",
+              "status"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "env_path",
+      "input": {
+        "kind": "env",
+        "name": "PATH",
+        "text": "%PATH%",
+        "env": {
+          "FOO": "bar"
+        }
+      },
+      "expected_dict": {
+        "kind": "env",
+        "name": "PATH",
+        "text": "%PATH%",
+        "env": {
+          "FOO": "bar"
+        }
+      }
+    },
+    {
+      "id": "unknown_kind_coerced",
+      "input": {
+        "kind": "raw",
+        "argv": [
+          "1",
+          "2"
+        ]
+      },
+      "expected_dict": {
+        "kind": "raw",
+        "argv": [
+          "1",
+          "2"
+        ]
+      }
+    },
+    {
+      "id": "from_none",
+      "input": {
+        "kind": "raw"
+      },
+      "expected_dict": {
+        "kind": "raw"
+      }
+    }
+  ]
+}

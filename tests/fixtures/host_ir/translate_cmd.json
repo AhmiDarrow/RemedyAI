@@ -1,0 +1,587 @@
+{
+  "source": "remedy.execution.host.translate.translate_posix_to_host",
+  "captured_at": "2026-09-03",
+  "notes": "Byte-identical `expected.text` is the Phase 3 Zig translate proof. Notes may be advisory; text/changed/untranslatable/noop are normative. grep→rg path is machine-dependent when ripgrep is installed — those cases record the live rewrite; Zig should match the same decision table (prefer rg when found, else findstr).",
+  "cases": [
+    {
+      "id": "cmd:mkdir -p src/foo tests",
+      "input": {
+        "command": "mkdir -p src/foo tests",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "(if not exist \"src\\foo\\.\" mkdir \"src\\foo\") & (if not exist \"tests\\.\" mkdir \"tests\")",
+        "changed": true,
+        "notes": [
+          "mkdir -p → if not exist mkdir"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:rm -rf build",
+      "input": {
+        "command": "rm -rf build",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "(if exist \"build\\.\" (rmdir /s /q \"build\") else if exist \"build\" del /f /q \"build\")",
+        "changed": true,
+        "notes": [
+          "rm → del/rmdir"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:export FOO=bar && echo hi >/dev/null",
+      "input": {
+        "command": "export FOO=bar && echo hi >/dev/null",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "set \"FOO=bar\" && echo hi >NUL",
+        "changed": true,
+        "notes": [
+          "redirect /dev/null → NUL",
+          "export → set"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:rm -rf build && echo next",
+      "input": {
+        "command": "rm -rf build && echo next",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "(if exist \"build\\.\" (rmdir /s /q \"build\") else if exist \"build\" del /f /q \"build\") && echo next",
+        "changed": true,
+        "notes": [
+          "rm → del/rmdir"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:rm foo\"&calc",
+      "input": {
+        "command": "rm foo\"&calc",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "del /f /q \"foo\"\"&calc\"",
+        "changed": true,
+        "notes": [
+          "rm → del/rmdir"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:cat foo\"&calc",
+      "input": {
+        "command": "cat foo\"&calc",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "type \"foo\"\"&calc\"",
+        "changed": true,
+        "notes": [
+          "cat → type"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:ls",
+      "input": {
+        "command": "ls",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "dir",
+        "changed": true,
+        "notes": [
+          "ls → dir"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:cat README.md",
+      "input": {
+        "command": "cat README.md",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "type \"README.md\"",
+        "changed": true,
+        "notes": [
+          "cat → type"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:pwd",
+      "input": {
+        "command": "pwd",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "cd",
+        "changed": true,
+        "notes": [
+          "pwd → cd"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:which git",
+      "input": {
+        "command": "which git",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "where \"git\"",
+        "changed": true,
+        "notes": [
+          "which → where"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:which 'foo&calc'",
+      "input": {
+        "command": "which 'foo&calc'",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "where \"foo&calc\"",
+        "changed": true,
+        "notes": [
+          "which → where"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:start README.md",
+      "input": {
+        "command": "start README.md",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "type \"README.md\"",
+        "changed": true,
+        "notes": [
+          "start/explorer text → type (file_read, no OS window)"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:start \"\" notes.md",
+      "input": {
+        "command": "start \"\" notes.md",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "type \"notes.md\"",
+        "changed": true,
+        "notes": [
+          "start/explorer text → type (file_read, no OS window)"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:explorer README.md",
+      "input": {
+        "command": "explorer README.md",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "type \"README.md\"",
+        "changed": true,
+        "notes": [
+          "start/explorer text → type (file_read, no OS window)"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:cmd /c start index.html",
+      "input": {
+        "command": "cmd /c start index.html",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "type \"index.html\"",
+        "changed": true,
+        "notes": [
+          "cmd start text → type (file_read, no OS window)"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:start package.json",
+      "input": {
+        "command": "start package.json",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "type \"package.json\"",
+        "changed": true,
+        "notes": [
+          "start/explorer text → type (file_read, no OS window)"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:mkdir -p a && true",
+      "input": {
+        "command": "mkdir -p a && true",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "(if not exist \"a\\.\" mkdir \"a\") && cd .",
+        "changed": true,
+        "notes": [
+          "mkdir -p → if not exist mkdir",
+          "true → cd ."
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:echo $(pwd)",
+      "input": {
+        "command": "echo $(pwd)",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "echo $(pwd)",
+        "changed": false,
+        "notes": [
+          "untranslatable substitution $(…) / backticks — use host_script"
+        ],
+        "untranslatable": true,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:chmod +x run.sh",
+      "input": {
+        "command": "chmod +x run.sh",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "chmod +x run.sh",
+        "changed": true,
+        "notes": [
+          "chmod ignored on Windows host"
+        ],
+        "untranslatable": false,
+        "noop": true
+      }
+    },
+    {
+      "id": "cmd:chmod +x a && mkdir -p b",
+      "input": {
+        "command": "chmod +x a && mkdir -p b",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "(if not exist \"b\\.\" mkdir \"b\")",
+        "changed": true,
+        "notes": [
+          "chmod ignored on Windows host",
+          "mkdir -p → if not exist mkdir"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:grep foo bar.py",
+      "input": {
+        "command": "grep foo bar.py",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "\"<RG>\" -n \"foo\" \"bar.py\"",
+        "changed": true,
+        "notes": [
+          "grep → rg"
+        ],
+        "untranslatable": false,
+        "noop": false,
+        "rg_placeholder": true
+      }
+    },
+    {
+      "id": "cmd:grep foo",
+      "input": {
+        "command": "grep foo",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "\"<RG>\" -n \"foo\"",
+        "changed": true,
+        "notes": [
+          "grep → rg"
+        ],
+        "untranslatable": false,
+        "noop": false,
+        "rg_placeholder": true
+      }
+    },
+    {
+      "id": "cmd:dir | grep foo",
+      "input": {
+        "command": "dir | grep foo",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "dir | \"<RG>\" -n \"foo\"",
+        "changed": true,
+        "notes": [
+          "grep → rg"
+        ],
+        "untranslatable": false,
+        "noop": false,
+        "rg_placeholder": true
+      }
+    },
+    {
+      "id": "cmd:find . -name *.py",
+      "input": {
+        "command": "find . -name *.py",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "dir /s /b \".\\*.py\"",
+        "changed": true,
+        "notes": [
+          "find -name → dir /s /b"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:test -f app.py",
+      "input": {
+        "command": "test -f app.py",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "if exist \"app.py\" (echo exists) else (exit /b 1)",
+        "changed": true,
+        "notes": [
+          "test -f → if exist"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:[ -f app.py ]",
+      "input": {
+        "command": "[ -f app.py ]",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "if exist \"app.py\" (echo exists) else (exit /b 1)",
+        "changed": true,
+        "notes": [
+          "[ -f → if exist"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:true",
+      "input": {
+        "command": "true",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "cd .",
+        "changed": true,
+        "notes": [
+          "true → cd ."
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:false",
+      "input": {
+        "command": "false",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "cmd /c exit 1",
+        "changed": true,
+        "notes": [
+          "false → cmd /c exit 1"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:touch a.txt",
+      "input": {
+        "command": "touch a.txt",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "(if not exist \"a.txt\" type nul > \"a.txt\")",
+        "changed": true,
+        "notes": [
+          "touch → type nul"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:cp -r src dest",
+      "input": {
+        "command": "cp -r src dest",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "xcopy /e /i /y \"src\" \"dest\"",
+        "changed": true,
+        "notes": [
+          "cp -r → xcopy"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:mv a b",
+      "input": {
+        "command": "mv a b",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "move /y \"a\" \"b\"",
+        "changed": true,
+        "notes": [
+          "mv → move"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:cp src dest",
+      "input": {
+        "command": "cp src dest",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "copy /y \"src\" \"dest\"",
+        "changed": true,
+        "notes": [
+          "cp → copy"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:ls src tests",
+      "input": {
+        "command": "ls src tests",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "dir \"src\" & dir \"tests\"",
+        "changed": true,
+        "notes": [
+          "ls → dir"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:cat a.txt b.txt",
+      "input": {
+        "command": "cat a.txt b.txt",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "type \"a.txt\" & type \"b.txt\"",
+        "changed": true,
+        "notes": [
+          "cat → type"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "cmd:command -v git",
+      "input": {
+        "command": "command -v git",
+        "host": "cmd"
+      },
+      "expected": {
+        "text": "where \"git\"",
+        "changed": true,
+        "notes": [
+          "which → where"
+        ],
+        "untranslatable": false,
+        "noop": false
+      }
+    },
+    {
+      "id": "posix:mkdir -p a",
+      "input": {
+        "command": "mkdir -p a",
+        "host": "posix"
+      },
+      "expected": {
+        "text": "mkdir -p a",
+        "changed": false,
+        "notes": [],
+        "untranslatable": false,
+        "noop": false
+      }
+    }
+  ]
+}
