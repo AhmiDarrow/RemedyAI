@@ -1,0 +1,5 @@
+#!/bin/sh
+# Pre-push gate: run the public CI matrix locally before anything reaches
+# the public repo. Enable once per clone:  git config core.hooksPath .githooks
+# (or: uv run python scripts/prepush.py --install). See scripts/prepush.py.
+exec uv run python scripts/prepush.py --hook "$@"
