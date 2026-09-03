@@ -298,14 +298,18 @@ def test_prepush_python_lane_consumes_the_native_lane_core() -> None:
     linux = [s.command for s in prepush.LINUX.steps]
     assert linux.index(prepush.WSL_ZIG_BUILD) < linux.index(prepush.WSL_PYTEST)
     assert prepush.WSL_NATIVE_CORE_LIB.startswith("/tmp/")
+    assert prepush.REQUIRED_NATIVE_ABI == 4
     if prepush.IS_WINDOWS and prepush.shutil.which("wsl"):
         build = prepush._wsl_zig_build_command()
         assert build and "zig build -Doptimize=ReleaseSafe" in build
         assert f"--prefix {prepush.WSL_ZIG_PREFIX}" in build
         assert "--cache-dir" in build
         assert "rm -f" in build and "libremedy_core.so" in build
+        assert f"assert v=={prepush.REQUIRED_NATIVE_ABI}" in build
+        assert "wiping zig caches and rebuilding" in build
         pytest_cmd = prepush._wsl_pytest_command()
         assert pytest_cmd
+        assert "rm -f" in pytest_cmd and "libremedy_core.so" in pytest_cmd
         assert (f"REMEDY_NATIVE_CORE_LIB={prepush.WSL_NATIVE_CORE_LIB}" in pytest_cmd) == prepush._wsl_has_zig()
 
 

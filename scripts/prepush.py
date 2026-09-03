@@ -120,6 +120,9 @@ REQUIRE_NATIVE_CORE = "__require_native_core__"
 NATIVE_CORE_ENV = {"REMEDY_NATIVE_CORE_LIB": str(native_core_library_path())}
 WSL_ZIG_PREFIX = "/tmp/remedy-prepush-zig"
 WSL_NATIVE_CORE_LIB = f"{WSL_ZIG_PREFIX}/lib/libremedy_core.so"
+# Lockstep with remedy.runtime.native_runtime._ABI_VERSION and
+# REMEDY_CORE_ABI_VERSION in native/zig/include/remedy_core.h.
+REQUIRED_NATIVE_ABI = 4
 
 
 RUST_ENV = {
@@ -322,10 +325,31 @@ def _wsl_has_zig() -> bool:
     return proc.returncode == 0 and bool(proc.stdout.strip())
 
 
+def _wsl_zig_abi_assert() -> str:
+    """Shell snippet: load the WSL-installed .so and refuse a stale ABI.
+
+    Path is ``sys.argv[1]`` so the snippet needs no nested quotes inside
+    ``bash -lc "..."`` under Windows ``cmd.exe`` (``shell=True``).
+    """
+    return (
+        "python3 -c "
+        "'import ctypes,sys;"
+        "lib=ctypes.CDLL(sys.argv[1]);"
+        "v=int(lib.remedy_core_abi_version());"
+        f"assert v=={REQUIRED_NATIVE_ABI},v' "
+        f"{WSL_NATIVE_CORE_LIB}"
+    )
+
+
 def _wsl_zig_build_command() -> str | None:
     """Build the Linux core inside WSL, installed under /tmp so the Windows
     native lane's ``zig-out`` and ``.zig-cache`` (running in parallel) are
     never touched.
+
+    Also drops any checkout-local ``libremedy_core.so`` (same soname would make
+    Linux dlopen reuse a stale handle) and asserts ``REQUIRED_NATIVE_ABI`` on
+    the /tmp install. On ABI mismatch, wipe the WSL zig caches and rebuild
+    once — DrvFS mtimes can leave a cached older ABI after a bump.
 
     Returns None on a non-Windows host; "" when WSL is missing.
     """
@@ -333,16 +357,20 @@ def _wsl_zig_build_command() -> str | None:
         return None
     if shutil.which("wsl") is None:
         return ""
-    # Drop any checkout-local .so before building. A stale ABI under
-    # native/zig/zig-out/lib shares the soname with the /tmp install; Linux
-    # dlopen then returns the first handle and ABI checks see the wrong build.
     checkout_so = _wsl_path(ROOT / "native" / "zig" / "zig-out" / "lib" / "libremedy_core.so")
+    build = (
+        f"zig build -Doptimize=ReleaseSafe --prefix {WSL_ZIG_PREFIX} "
+        f"--cache-dir {WSL_ZIG_PREFIX}-cache --global-cache-dir {WSL_ZIG_PREFIX}-global"
+    )
+    assert_abi = _wsl_zig_abi_assert()
     inner = (
         f"rm -f {checkout_so} && "
         f"cd {_wsl_path(ROOT / 'native' / 'zig')} && "
-        f"zig build -Doptimize=ReleaseSafe --prefix {WSL_ZIG_PREFIX} "
-        f"--cache-dir {WSL_ZIG_PREFIX}-cache --global-cache-dir {WSL_ZIG_PREFIX}-global && "
-        f"test -f {WSL_NATIVE_CORE_LIB}"
+        f"{build} && test -f {WSL_NATIVE_CORE_LIB} && "
+        f"({assert_abi} || ("
+        f"echo 'prepush: WSL remedy_core ABI mismatch — wiping zig caches and rebuilding' && "
+        f"rm -rf {WSL_ZIG_PREFIX}-cache {WSL_ZIG_PREFIX}-global && "
+        f"{build} && test -f {WSL_NATIVE_CORE_LIB} && {assert_abi}))"
     )
     return f'wsl -e bash -lc "{inner}"'
 
@@ -359,7 +387,11 @@ def _wsl_pytest_command() -> str | None:
     if shutil.which("wsl") is None:
         return ""
     core = f"REMEDY_NATIVE_CORE_LIB={WSL_NATIVE_CORE_LIB} " if _wsl_has_zig() else ""
+    # Drop checkout-local .so again so a parallel Windows zig-out write cannot
+    # win the soname race against the /tmp install during pytest.
+    checkout_so = _wsl_path(ROOT / "native" / "zig" / "zig-out" / "lib" / "libremedy_core.so")
     inner = (
+        f"rm -f {checkout_so} && "
         f"cd {_wsl_path(ROOT)} && mkdir -p /tmp/remedy-prepush-home && "
         "REMEDY_HOME=/tmp/remedy-prepush-home "
         "UV_PROJECT_ENVIRONMENT=/tmp/remedy-prepush-venv "
