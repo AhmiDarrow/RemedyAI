@@ -344,8 +344,16 @@ fn pathExists(io: std.Io, path: []const u8) bool {
 }
 
 fn getEnvAlloc(gpa: std.mem.Allocator, key: []const u8) ?[]u8 {
-    const environ: std.process.Environ = .{ .block = .global };
-    return std.process.Environ.getAlloc(environ, gpa, key) catch null;
+    // Windows Environ.Block is GlobalBlock (`.global`). POSIX Block is a
+    // PosixBlock slice — use libc getenv instead of inventing a fake `.global`.
+    if (builtin.os.tag == .windows) {
+        const environ: std.process.Environ = .{ .block = .global };
+        return std.process.Environ.getAlloc(environ, gpa, key) catch null;
+    }
+    const key_z = gpa.dupeZ(u8, key) catch return null;
+    defer gpa.free(key_z);
+    const value = std.c.getenv(key_z) orelse return null;
+    return gpa.dupe(u8, std.mem.span(value)) catch null;
 }
 
 /// Resolve an executable on PATH (Windows also tries `.exe` and PATHEXT).
