@@ -4,6 +4,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.50.1] - 2026-09-03
+
+- Version bump for local testing of the Windows desktop installer and RemedyConnect APK.
+
 ## [0.50.0] - 2026-09-02
 
 ### First-run Claimidx service
