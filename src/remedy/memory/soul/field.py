@@ -404,6 +404,10 @@ class SoulField:
     def touch(self) -> None:
         self.updated_ts = time.time()
         self.relational.clamp()
+        # Owner-global stores never hold job residue (paths, "continue: …",
+        # build arcs). Enforced on every save so one bad writer cannot leak a
+        # project into the next tab.
+        scrub_work_residue(self)
         # Salience-weighted eviction (not raw FIFO): important, re-used, or
         # unfinished traces outlast trivial recent ones across every store.
         self.episodes = retain_episodes(self.episodes, self.updated_ts)
@@ -613,6 +617,68 @@ _lock = threading.Lock()
 _cache: dict[str, SoulField] = {}
 
 
+def scrub_work_residue(sf: SoulField) -> int:
+    """Drop job/project residue from the owner-global lists. Returns count.
+
+    Open threads, pledges, self-habits and dreams describe the person and how
+    Remedy partners with them. A build goal, a project path or a "continue the
+    last job" line is session work: it belongs to the build ledger, the mission
+    store and the session crystal. Before this scrub a stale thread from one
+    tab ("continue: C:\\…\\Old-Remedy review") was injected into a fresh
+    session bound to another project and the build engine resumed it.
+    """
+    try:
+        from remedy.core.metabolism.time_crystal import looks_like_work_residue
+    except Exception:
+        return 0
+
+    def _dream_is_residue(d: str) -> bool:
+        if looks_like_work_residue(d):
+            return True
+        # "Toward <goal>: <move>" — the goal half is what must be clean.
+        head = d.split(":", 1)[0]
+        return looks_like_work_residue(head)
+
+    removed = 0
+    rel = sf.relational
+    keep = [t for t in rel.open_threads if t and not looks_like_work_residue(t)]
+    removed += len(rel.open_threads) - len(keep)
+    rel.open_threads = keep
+    keep = [p for p in sf.pledges if p and not looks_like_work_residue(p)]
+    removed += len(sf.pledges) - len(keep)
+    for gone in set(sf.pledges) - set(keep):
+        sf.pledge_traces.pop(gone, None)
+    sf.pledges = keep
+    keep = [h for h in sf.self_habits if h and not looks_like_work_residue(h)]
+    removed += len(sf.self_habits) - len(keep)
+    sf.self_habits = keep
+    keep = [d for d in sf.future_dreams if d and not _dream_is_residue(d)]
+    removed += len(sf.future_dreams) - len(keep)
+    sf.future_dreams = keep
+    return removed
+
+
+def _raw_has_work_residue(raw: dict[str, Any]) -> bool:
+    """Does the on-disk field still hold job residue in an owner-global list?"""
+    try:
+        from remedy.core.metabolism.time_crystal import looks_like_work_residue
+    except Exception:
+        return False
+    rel = raw.get("relational") if isinstance(raw.get("relational"), dict) else {}
+    lists = [
+        list((rel or {}).get("open_threads") or []),
+        list(raw.get("pledges") or []),
+        list(raw.get("self_habits") or []),
+        list(raw.get("future_dreams") or []),
+    ]
+    for items in lists:
+        for it in items:
+            s = str(it or "")
+            if looks_like_work_residue(s) or looks_like_work_residue(s.split(":", 1)[0]):
+                return True
+    return False
+
+
 def load_soul_field(home: str | Path | None = None) -> SoulField:
     """Load (or create) the owner-global soul field. Process-cached."""
     key = str(_home(home).resolve())
@@ -630,8 +696,18 @@ def load_soul_field(home: str | Path | None = None) -> SoulField:
                 persist_blocked = True
             except OSError:
                 raw = {}
+        dirty = _raw_has_work_residue(raw)
         sf = SoulField.from_dict(raw)
         sf.persist_blocked = persist_blocked
+        scrub_work_residue(sf)
+        # A field written before the residue rule may still carry another
+        # project's job on disk; rewrite it clean so no reader ever sees it.
+        if dirty and not persist_blocked:
+            # Persist the cleaned field (lock already held — write directly).
+            with suppress(Exception):
+                from remedy.core.atomic_json import write_json_atomic
+
+                write_json_atomic(path, sf.to_dict())
         _cache[key] = sf
         return sf
 

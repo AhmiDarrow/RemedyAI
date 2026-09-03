@@ -59,6 +59,30 @@ def provider_muscle_contract(
     )
 
 
+def _norm_project(path: str) -> str:
+    return (path or "").strip().replace("\\", "/").rstrip("/").lower()
+
+
+def episode_in_scope(ep: Any, *, project_path: str = "", session_id: str = "") -> bool:
+    """May this episode be shown to the current turn?
+
+    Same session → yes. Same project (hint is a suffix of the bound project,
+    or vice versa) → yes. An episode with no project hint and no session stamp
+    is legacy → yes. Anything stamped for another project or another session
+    with no project match → no. With no project bound, only this session's own
+    episodes and unstamped ones qualify.
+    """
+    ep_sid = str(getattr(ep, "session_id", "") or "").strip()
+    ep_proj = _norm_project(str(getattr(ep, "project_hint", "") or ""))
+    sid = (session_id or "").strip()
+    proj = _norm_project(project_path)
+    if sid and ep_sid and ep_sid == sid:
+        return True
+    if not ep_proj:
+        return not ep_sid or not sid or ep_sid == sid
+    return bool(proj and (proj.endswith(ep_proj) or ep_proj.endswith(proj)))
+
+
 def build_soul_context_block(
     field: SoulField | None = None,
     *,
@@ -69,9 +93,17 @@ def build_soul_context_block(
     model: str = "",
     user_name: str = "",
     work_threads: bool = True,
+    project_path: str = "",
+    session_id: str = "",
 ) -> str:
-    """Markdown soul inject. Empty only if field truly blank and no contract."""
+    """Markdown soul inject. Empty only if field truly blank and no contract.
+
+    *project_path* / *session_id* scope the episode residue: only episodes
+    from this session or this project are shown. Threads, habits and dreams
+    that are work residue are never shown (see ``scrub_work_residue``).
+    """
     sf = field if field is not None else load_soul_field(home)
+    from remedy.core.metabolism.time_crystal import looks_like_work_residue
     # Prefer config identity when available
     try:
         from remedy.core.agent_identity import (
@@ -194,6 +226,7 @@ def build_soul_context_block(
             and "last successful tool" not in t.lower()
             and "retry or work around" not in t.lower()
             and not t.lower().startswith("continue remaining")
+            and not looks_like_work_residue(t)
         ][-4:]
         if _threads:
             tail.append(
@@ -218,6 +251,7 @@ def build_soul_context_block(
             and not h.lower().startswith("what is ")
             and "intent=" not in h.lower()
             and "| user:" not in h.lower()
+            and not looks_like_work_residue(h)
         ][:4]
         if _habits:
             tail.append(
@@ -225,16 +259,25 @@ def build_soul_context_block(
                 + "\n".join(f"  · {h}" for h in _habits)
             )
 
-    if work_threads and getattr(sf, "future_dreams", None):
+    _dreams = [
+        d for d in (getattr(sf, "future_dreams", None) or [])
+        if d and not looks_like_work_residue(d) and not looks_like_work_residue(d.split(":", 1)[0])
+    ][:4]
+    if work_threads and _dreams:
         tail.append(
             "Dreams of the future (how I help them reach their goals):\n"
-            + "\n".join(f"  · {d}" for d in sf.future_dreams[:4])
+            + "\n".join(f"  · {d}" for d in _dreams)
         )
 
-    # Episode residue — the sci-fi bit: felt continuity across muscle swaps
+    # Episode residue — the sci-fi bit: felt continuity across muscle swaps.
+    # Scoped: another tab's project must not be "mid-flight" here.
     if work_threads and sf.episodes:
-        keep = 3 if getattr(sf, "future_dreams", None) else 5
-        ep_lines = [ep.line() for ep in sf.episodes[-keep:] if ep.line()]
+        keep = 3 if _dreams else 5
+        scoped = [
+            ep for ep in sf.episodes
+            if episode_in_scope(ep, project_path=project_path, session_id=session_id)
+        ]
+        ep_lines = [ep.line() for ep in scoped[-keep:] if ep.line()]
         if ep_lines:
             tail.append(
                 "Episode residue (continue mid-flight; do not restart lore):\n"

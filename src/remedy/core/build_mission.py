@@ -6,6 +6,10 @@ from contextlib import suppress
 from typing import Any
 
 
+def _norm(path: str) -> str:
+    return (path or "").strip().replace("\\", "/").rstrip("/").lower()
+
+
 def ensure_build_mission(
     runtime: Any,
     state: Any,
@@ -26,9 +30,24 @@ def ensure_build_mission(
 
             sid = turn_session_id(runtime)
     store = MissionStore(home)
+    project = ""
+    with suppress(Exception):
+        project = str(getattr(state, "project_path", "") or "") or str(
+            runtime.effective_project_path() or ""
+        )
     latest = store.latest(sid)
     vcmd = str(getattr(state, "verify_command", "") or "")
     goal = str(getattr(state, "goal", "") or "Complete build")[:300]
+
+    # A mission from this session but another project (owner switched the
+    # bound folder mid-session) is not this build's mission either.
+    if (
+        latest is not None
+        and latest.project_path
+        and project
+        and _norm(latest.project_path) != _norm(project)
+    ):
+        latest = None
 
     if latest is not None and latest.status == "active":
         # Attach oracle command if mission lacks one
@@ -55,6 +74,7 @@ def ensure_build_mission(
         session_id=sid,
         verify_command=vcmd or None,
         home=home,
+        project_path=project or None,
     )
     if hasattr(state, "mission_id"):
         state.mission_id = m.id

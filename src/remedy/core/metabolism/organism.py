@@ -527,12 +527,14 @@ def collect_vitals(
             v["trust"] = float(rel.trust or 0)
             v["turns"] = int(rel.turns_together or 0)
             v["help_mode"] = str(rel.help_mode or "")
-            if rel.open_threads:
-                v["open_hint"] = str(rel.open_threads[-1])[:80]
+            _hint = _last_relational_thread(rel.open_threads)
+            if _hint:
+                v["open_hint"] = _hint[:80]
             if sf.episodes:
                 v["stance"] = str(sf.episodes[-1].user_stance or "steady")
-            if getattr(sf, "future_dreams", None):
-                v["dream"] = str(sf.future_dreams[0])[:140]
+            _dream = _first_clean_dream(getattr(sf, "future_dreams", None))
+            if _dream:
+                v["dream"] = _dream[:140]
     if extras:
         for k, val in extras.items():
             if str(k).startswith("_"):
@@ -540,6 +542,31 @@ def collect_vitals(
             if val is not None and k in v:
                 v[k] = val
     return v
+
+
+def _last_relational_thread(threads: Any) -> str:
+    """Newest open thread that is about the person, not a job in a project."""
+    try:
+        from remedy.core.metabolism.time_crystal import looks_like_work_residue
+    except Exception:
+        return str((threads or [""])[-1] or "") if threads else ""
+    for t in reversed(list(threads or [])):
+        s = str(t or "").strip()
+        if s and not looks_like_work_residue(s):
+            return s
+    return ""
+
+
+def _first_clean_dream(dreams: Any) -> str:
+    try:
+        from remedy.core.metabolism.time_crystal import looks_like_work_residue
+    except Exception:
+        return str((dreams or [""])[0] or "") if dreams else ""
+    for d in list(dreams or []):
+        s = str(d or "").strip()
+        if s and not looks_like_work_residue(s) and not looks_like_work_residue(s.split(":", 1)[0]):
+            return s
+    return ""
 
 
 def _stalled_from_clock(
@@ -939,9 +966,7 @@ def organism_pulse_block(
                 rapport = float(rel.rapport or 0)
                 trust = float(rel.trust or 0)
                 open_n = len(rel.open_threads or [])
-                open_hint = ""
-                if rel.open_threads:
-                    open_hint = str(rel.open_threads[-1])[:80]
+                open_hint = _last_relational_thread(rel.open_threads)[:80]
                 if sf.episodes:
                     stance = str(sf.episodes[-1].user_stance or "steady")
                 with suppress(Exception):

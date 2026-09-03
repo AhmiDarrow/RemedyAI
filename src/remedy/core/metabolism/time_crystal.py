@@ -45,6 +45,45 @@ def looks_like_job_resume_fact(text: str, *, source: str = "") -> bool:
     return bool(_JOB_RESUME_FACT_RE.search(t))
 
 
+# Work residue: anything that names a job rather than the person. A filesystem
+# path, a build-engine arc ("intent=… | user: …"), a tool-retry nudge, or a
+# "continue:" thread is *session/project* memory. It lives in the build ledger,
+# the mission store and the session crystal — never in the owner-global soul,
+# the organism vitals or Partner Memory, where a fresh tab in another project
+# would inherit it (2026-09-03: a claimidx session resumed "Old-Remedy review").
+_WORK_RESIDUE_RE = re.compile(
+    r"(?i)(?:"
+    r"(?<![\w])[a-z]:[\\/]|"  # Windows drive path  C:\ or D:/
+    r"(?<![\w])/(?:home|users|mnt|srv|opt|var|tmp|etc|c|d)/|"  # POSIX abs path
+    r"\bintent=|"
+    r"\|\s*user:|"
+    r"\|\s*did:|"
+    r"\|\s*tasks:|"
+    r"retry or work around|"
+    r"last failing tool|"
+    r"last successful tool|"
+    r"(?:^|:\s*)continue:\s|"
+    r"(?:^|:\s*)(?:resume|continue) (?:the |this )?(?:build|job|task|work)\b"
+    r")"
+)
+
+
+def looks_like_work_residue(text: str) -> bool:
+    """True when *text* is job/project residue rather than durable identity.
+
+    Superset of :func:`looks_like_job_resume_fact`: also catches paths, build
+    arcs and tool-retry nudges, and the same shapes after a "Toward …:" or
+    "Stay with:" prefix. Use it as the gate on every write into an owner-global
+    store and on every read out of one.
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    if _JOB_RESUME_FACT_RE.search(t):
+        return True
+    return bool(_WORK_RESIDUE_RE.search(t))
+
+
 @dataclass
 class CrystalFact:
     text: str

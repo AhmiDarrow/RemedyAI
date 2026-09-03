@@ -56,6 +56,14 @@ async def build_turn_context(runtime: Any) -> str:
                 from remedy.core.react_policy import runtime_turn_is_chat_only
 
                 lean = runtime_turn_is_chat_only(runtime)
+            _proj = ""
+            _sid = ""
+            with suppress(Exception):
+                _proj = str(runtime.effective_project_path() or "")
+            with suppress(Exception):
+                from remedy.core.turn_context import turn_session_id
+
+                _sid = str(turn_session_id(runtime) or "")
             soul = build_soul_context_block(
                 home=home,
                 include_contract=not lean,
@@ -64,6 +72,8 @@ async def build_turn_context(runtime: Any) -> str:
                 user_name=user_name,
                 max_chars=soul_budget,
                 work_threads=not lean,
+                project_path=_proj,
+                session_id=_sid,
             )
             if soul:
                 parts.append(soul)

@@ -68,16 +68,21 @@ def continuity_steering_block(
             h = home
             if h is None and runtime is not None:
                 h = getattr(getattr(runtime, "config", None), "home_dir", None)
+            from remedy.core.metabolism.time_crystal import looks_like_work_residue
+
             sf = load_soul_field(h)
+            # Owner-global lists: never surface another tab's job here.
             soul_threads = [
                 str(t).strip()
                 for t in (sf.relational.open_threads or [])
-                if str(t).strip()
+                if str(t).strip() and not looks_like_work_residue(str(t))
             ][:5]
             future_dreams_from_soul = [
                 str(d).strip()
                 for d in (getattr(sf, "future_dreams", None) or [])
                 if str(d).strip()
+                and not looks_like_work_residue(str(d))
+                and not looks_like_work_residue(str(d).split(":", 1)[0])
             ][:3]
 
     build_resume = ""
