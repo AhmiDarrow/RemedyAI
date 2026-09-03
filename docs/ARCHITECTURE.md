@@ -9,11 +9,17 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 |-------|------|------|
 | Python sidecar | `src/remedy/` | FastAPI/uvicorn API, ReAct loop, jail, PolicyEngine, hive, build engine, Soul/Partner memory |
 | Desktop SPA | `desktop/` | Tauri 2 + React 19 (Grove / Alongside / Studio) |
-| Tests | `tests/` | Jail, SSRF, hive caps, memory authority, plan store, build engine, ReAct policy |
+| Python tests | `tests/` | Sidecar, API, jail, policy, memory, Build, Connect host, packaging contracts |
+| SPA tests | `desktop/src/**/*.test.*` | React/TypeScript API, state, rails, sessions, and owner-facing behavior |
+| Shell tests | `desktop/src-tauri/src/` | Rust/Tauri browser host, privacy shield, lifecycle, Windows + Linux compile |
+| Connect tests | `android/**/src/test/` | Kotlin protocol, storage, networking, and mobile behavior; lint + both APK variants |
+| Native tests | `native/go/**/*_test.go`, `native/zig/src/` | Go race/unit/benchmark/boundary gates and Zig debug/ReleaseSafe capability tests |
 | Gateway | `src/remedy/gateway/` | Serve bootstrap, session bridge, messenger flush |
 | Native runtime | `native/` | Versioned Go nervous system + Zig capability core; layered cutover with Python compatibility/ML workers |
+| Claimidx host | `src/remedy/runtime/claimidx_host.py` | Pinned first-run install, private index, loopback lifecycle on `:17340` |
 
-Entry: `serve.py` / `uv run` · verify: `uv run pytest -q`
+Entry: `serve.py` / `uv run` · verification: `.github/workflows/ci.yml` is the
+authoritative multi-stack matrix; pytest alone is not a release gate.
 
 ## Next Evolution native boundary
 

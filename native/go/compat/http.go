@@ -50,8 +50,7 @@ func NewHTTPHandler(baseURL string, client *http.Client) (*HTTPHandler, error) {
 	guarded := *client
 	priorRedirect := client.CheckRedirect
 	guarded.CheckRedirect = func(request *http.Request, via []*http.Request) error {
-		ip := net.ParseIP(request.URL.Hostname())
-		if request.URL.Scheme != "http" || ip == nil || !ip.IsLoopback() {
+		if request.URL.Scheme != base.Scheme || !strings.EqualFold(request.URL.Host, base.Host) {
 			return ErrUnsafeTarget
 		}
 		if priorRedirect != nil {
@@ -70,8 +69,15 @@ func (h *HTTPHandler) Handle(ctx context.Context, frame protocol.Frame) ([]proto
 	if request.Path == "" || !strings.HasPrefix(request.Path, "/") || strings.HasPrefix(request.Path, "//") {
 		return nil, ErrUnsafeTarget
 	}
+	relative, err := url.ParseRequestURI(request.Path)
+	if err != nil || relative.IsAbs() || relative.Host != "" || relative.User != nil || !strings.HasPrefix(relative.Path, "/") {
+		return nil, ErrUnsafeTarget
+	}
 	target := *h.Base
-	target.Path = request.Path
+	target.Path = relative.Path
+	target.RawPath = relative.RawPath
+	target.RawQuery = relative.RawQuery
+	target.Fragment = ""
 	httpRequest, err := http.NewRequestWithContext(ctx, request.Method, target.String(), bytes.NewReader(request.Body))
 	if err != nil {
 		return nil, err
@@ -94,6 +100,9 @@ func (h *HTTPHandler) Handle(ctx context.Context, frame protocol.Frame) ([]proto
 	payload, err := json.Marshal(HTTPResponse{Status: response.StatusCode, Header: response.Header, Body: body})
 	if err != nil {
 		return nil, err
+	}
+	if len(payload) > protocol.MaxPayloadSize {
+		return nil, protocol.ErrPayloadTooLarge
 	}
 	return []protocol.Frame{{Kind: protocol.KindToolResult, Payload: payload}}, nil
 }

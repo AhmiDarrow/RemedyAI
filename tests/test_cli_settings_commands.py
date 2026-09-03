@@ -424,15 +424,8 @@ def test_anything_else_is_left_as_a_string(raw) -> None:
     assert cmd_settings._parse_setting_value(raw) == raw
 
 
-def test_a_leading_zero_number_still_loses_its_zeros_via_the_float_fallback() -> None:
-    """Documents current behaviour, not desired behaviour.
-
-    The int branch deliberately refuses "007" so identifier-shaped values keep
-    their zeros, but the float branch right below accepts the same string, so
-    what gets stored is 7.0 and not the string "007".
-    """
-    assert cmd_settings._parse_setting_value("007") == 7.0
-    assert isinstance(cmd_settings._parse_setting_value("007"), float)
+def test_a_leading_zero_number_remains_an_identifier_string() -> None:
+    assert cmd_settings._parse_setting_value("007") == "007"
 
 
 # --------------------------------------------------------------------------

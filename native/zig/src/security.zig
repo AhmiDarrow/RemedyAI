@@ -4,8 +4,10 @@ const capability = @import("capability.zig");
 const Hmac = std.crypto.auth.hmac.sha2.HmacSha256;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 
-pub const token_version: u8 = 1;
-pub const token_size = 137;
+// Version 2 adds the authenticated operation digest; v1 grants are rejected so
+// a pre-upgrade generic checkpoint token cannot cross the new boundary.
+pub const token_version: u8 = 2;
+pub const token_size = 169;
 pub const authenticated_size = token_size - Hmac.mac_length;
 pub const max_lifetime_ms: u64 = 15 * 60 * 1000;
 
@@ -16,6 +18,7 @@ pub const Token = struct {
     nonce: [16]u8,
     subject_hash: [Sha256.digest_length]u8,
     scope_hash: [Sha256.digest_length]u8,
+    operation_hash: [Sha256.digest_length]u8,
     mac: [Hmac.mac_length]u8,
 };
 
@@ -23,12 +26,14 @@ pub const Grant = struct {
     capabilities: capability.Set,
     expires_at_ms: u64,
     nonce: [16]u8,
+    operation_hash: [Sha256.digest_length]u8,
 };
 
 pub fn issue(
     key: []const u8,
     subject: []const u8,
     scope: []const u8,
+    operation_hash: [Sha256.digest_length]u8,
     rights: capability.Set,
     issued_at_ms: u64,
     expires_at_ms: u64,
@@ -46,6 +51,7 @@ pub fn issue(
         .nonce = nonce,
         .subject_hash = hash(subject),
         .scope_hash = hash(scope),
+        .operation_hash = operation_hash,
         .mac = undefined,
     };
     var encoded: [token_size]u8 = undefined;
@@ -73,6 +79,7 @@ pub const Verifier = struct {
         encoded: []const u8,
         subject: []const u8,
         scope: []const u8,
+        operation_hash: [Sha256.digest_length]u8,
         required: capability.Set,
         now_ms: u64,
     ) !Grant {
@@ -91,6 +98,9 @@ pub const Verifier = struct {
         if (!std.crypto.timing_safe.eql([Sha256.digest_length]u8, hash(scope), token.scope_hash)) {
             return error.ScopeMismatch;
         }
+        if (!std.crypto.timing_safe.eql([Sha256.digest_length]u8, operation_hash, token.operation_hash)) {
+            return error.OperationMismatch;
+        }
         const rights = capability.Set.fromBits(token.rights);
         if (!rights.isValid() or !rights.containsAll(required)) return error.AccessDenied;
         while (!self.mutex.tryLock()) std.atomic.spinLoopHint();
@@ -101,7 +111,12 @@ pub const Verifier = struct {
         }
         if (self.seen.contains(token.nonce)) return error.Replayed;
         try self.seen.put(token.nonce, token.expires_at_ms);
-        return .{ .capabilities = rights, .expires_at_ms = token.expires_at_ms, .nonce = token.nonce };
+        return .{
+            .capabilities = rights,
+            .expires_at_ms = token.expires_at_ms,
+            .nonce = token.nonce,
+            .operation_hash = token.operation_hash,
+        };
     }
 };
 
@@ -113,6 +128,7 @@ fn encodeAuthenticated(token: Token, out: []u8) void {
     @memcpy(out[25..41], &token.nonce);
     @memcpy(out[41..73], &token.subject_hash);
     @memcpy(out[73..105], &token.scope_hash);
+    @memcpy(out[105..137], &token.operation_hash);
 }
 
 fn decode(encoded: []const u8) !Token {
@@ -120,11 +136,13 @@ fn decode(encoded: []const u8) !Token {
     var nonce: [16]u8 = undefined;
     var subject_hash: [32]u8 = undefined;
     var scope_hash: [32]u8 = undefined;
+    var operation_hash: [32]u8 = undefined;
     var mac: [32]u8 = undefined;
     @memcpy(&nonce, encoded[25..41]);
     @memcpy(&subject_hash, encoded[41..73]);
     @memcpy(&scope_hash, encoded[73..105]);
-    @memcpy(&mac, encoded[105..137]);
+    @memcpy(&operation_hash, encoded[105..137]);
+    @memcpy(&mac, encoded[137..169]);
     return .{
         .rights = std.mem.readInt(u64, encoded[1..9], .little),
         .issued_at_ms = std.mem.readInt(u64, encoded[9..17], .little),
@@ -132,6 +150,7 @@ fn decode(encoded: []const u8) !Token {
         .nonce = nonce,
         .subject_hash = subject_hash,
         .scope_hash = scope_hash,
+        .operation_hash = operation_hash,
         .mac = mac,
     };
 }
@@ -145,28 +164,32 @@ fn hash(value: []const u8) [Sha256.digest_length]u8 {
 test "capability tokens bind rights, subject, scope, lifetime, and nonce" {
     const key = [_]u8{0x5a} ** Hmac.key_length;
     const nonce = [_]u8{0x11} ** 16;
-    const encoded = try issue(&key, "agent:7", "workspace:a", capability.Set.one(.filesystem_read), 1000, 2000, nonce);
+    const operation = hash("read:workspace/data.json");
+    const encoded = try issue(&key, "agent:7", "workspace:a", operation, capability.Set.one(.filesystem_read), 1000, 2000, nonce);
     var verifier = Verifier.init(std.testing.allocator, &key);
     defer verifier.deinit();
-    const grant = try verifier.verifyAndConsume(&encoded, "agent:7", "workspace:a", capability.Set.one(.filesystem_read), 1500);
+    const grant = try verifier.verifyAndConsume(&encoded, "agent:7", "workspace:a", operation, capability.Set.one(.filesystem_read), 1500);
     try grant.capabilities.require(.filesystem_read);
-    try std.testing.expectError(error.Replayed, verifier.verifyAndConsume(&encoded, "agent:7", "workspace:a", capability.Set.one(.filesystem_read), 1500));
+    try std.testing.expectEqualSlices(u8, &operation, &grant.operation_hash);
+    try std.testing.expectError(error.Replayed, verifier.verifyAndConsume(&encoded, "agent:7", "workspace:a", operation, capability.Set.one(.filesystem_read), 1500));
 }
 
 test "capability token rejects tampering and binding families" {
     const key = [_]u8{0x6b} ** Hmac.key_length;
     const nonce = [_]u8{0x22} ** 16;
-    var encoded = try issue(&key, "agent:9", "workspace:b", capability.Set.one(.process_spawn), 1000, 2000, nonce);
+    const operation = hash("process:/trusted/tool");
+    var encoded = try issue(&key, "agent:9", "workspace:b", operation, capability.Set.one(.process_spawn), 1000, 2000, nonce);
 
     var verifier = Verifier.init(std.testing.allocator, &key);
     defer verifier.deinit();
-    try std.testing.expectError(error.NotYetValid, verifier.verifyAndConsume(&encoded, "agent:9", "workspace:b", capability.Set.one(.process_spawn), 999));
-    try std.testing.expectError(error.Expired, verifier.verifyAndConsume(&encoded, "agent:9", "workspace:b", capability.Set.one(.process_spawn), 2000));
-    try std.testing.expectError(error.SubjectMismatch, verifier.verifyAndConsume(&encoded, "agent:x", "workspace:b", capability.Set.one(.process_spawn), 1500));
-    try std.testing.expectError(error.ScopeMismatch, verifier.verifyAndConsume(&encoded, "agent:9", "workspace:x", capability.Set.one(.process_spawn), 1500));
-    try std.testing.expectError(error.AccessDenied, verifier.verifyAndConsume(&encoded, "agent:9", "workspace:b", capability.Set.one(.filesystem_read), 1500));
+    try std.testing.expectError(error.NotYetValid, verifier.verifyAndConsume(&encoded, "agent:9", "workspace:b", operation, capability.Set.one(.process_spawn), 999));
+    try std.testing.expectError(error.Expired, verifier.verifyAndConsume(&encoded, "agent:9", "workspace:b", operation, capability.Set.one(.process_spawn), 2000));
+    try std.testing.expectError(error.SubjectMismatch, verifier.verifyAndConsume(&encoded, "agent:x", "workspace:b", operation, capability.Set.one(.process_spawn), 1500));
+    try std.testing.expectError(error.ScopeMismatch, verifier.verifyAndConsume(&encoded, "agent:9", "workspace:x", operation, capability.Set.one(.process_spawn), 1500));
+    try std.testing.expectError(error.OperationMismatch, verifier.verifyAndConsume(&encoded, "agent:9", "workspace:b", hash("process:/trusted/other"), capability.Set.one(.process_spawn), 1500));
+    try std.testing.expectError(error.AccessDenied, verifier.verifyAndConsume(&encoded, "agent:9", "workspace:b", operation, capability.Set.one(.filesystem_read), 1500));
     encoded[8] ^= 1;
-    try std.testing.expectError(error.InvalidToken, verifier.verifyAndConsume(&encoded, "agent:9", "workspace:b", capability.Set.one(.process_spawn), 1500));
+    try std.testing.expectError(error.InvalidToken, verifier.verifyAndConsume(&encoded, "agent:9", "workspace:b", operation, capability.Set.one(.process_spawn), 1500));
 }
 
 test "issuer rejects invalid lifetime, unknown rights, and short keys" {
@@ -174,15 +197,15 @@ test "issuer rejects invalid lifetime, unknown rights, and short keys" {
     const nonce = [_]u8{0x66} ** 16;
     try std.testing.expectError(
         error.InvalidGrant,
-        issue("short", "agent", "scope", capability.Set.one(.filesystem_read), 1, 2, nonce),
+        issue("short", "agent", "scope", hash("read"), capability.Set.one(.filesystem_read), 1, 2, nonce),
     );
     try std.testing.expectError(
         error.InvalidGrant,
-        issue(&key, "agent", "scope", capability.Set.fromBits(@as(u64, 1) << 63), 1, 2, nonce),
+        issue(&key, "agent", "scope", hash("read"), capability.Set.fromBits(@as(u64, 1) << 63), 1, 2, nonce),
     );
     try std.testing.expectError(
         error.InvalidGrant,
-        issue(&key, "agent", "scope", capability.Set.one(.filesystem_read), 1, max_lifetime_ms + 2, nonce),
+        issue(&key, "agent", "scope", hash("read"), capability.Set.one(.filesystem_read), 1, max_lifetime_ms + 2, nonce),
     );
 }
 
@@ -190,9 +213,10 @@ test "verifier prunes expired consumed nonces" {
     const key = [_]u8{0x3c} ** Hmac.key_length;
     var verifier = Verifier.init(std.testing.allocator, &key);
     defer verifier.deinit();
-    const first = try issue(&key, "agent", "scope", capability.Set.one(.filesystem_read), 1000, 2000, [_]u8{0x01} ** 16);
-    _ = try verifier.verifyAndConsume(&first, "agent", "scope", capability.Set.one(.filesystem_read), 1500);
-    const second = try issue(&key, "agent", "scope", capability.Set.one(.filesystem_read), 2000, 3000, [_]u8{0x02} ** 16);
-    _ = try verifier.verifyAndConsume(&second, "agent", "scope", capability.Set.one(.filesystem_read), 2500);
+    const operation = hash("read");
+    const first = try issue(&key, "agent", "scope", operation, capability.Set.one(.filesystem_read), 1000, 2000, [_]u8{0x01} ** 16);
+    _ = try verifier.verifyAndConsume(&first, "agent", "scope", operation, capability.Set.one(.filesystem_read), 1500);
+    const second = try issue(&key, "agent", "scope", operation, capability.Set.one(.filesystem_read), 2000, 3000, [_]u8{0x02} ** 16);
+    _ = try verifier.verifyAndConsume(&second, "agent", "scope", operation, capability.Set.one(.filesystem_read), 2500);
     try std.testing.expectEqual(@as(usize, 1), verifier.seen.count());
 }

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 
 import pytest
 
@@ -175,6 +176,40 @@ def test_settings_change_updates_live_config_without_rebind(home, monkeypatch):
     assert live["connect_panes"] == {"rails": False}
 
 
+def test_settings_change_rebinds_when_listener_configuration_changes(home, monkeypatch):
+    from remedy.connect import lifecycle
+
+    stops: list[bool] = []
+    starts: list[dict[str, object]] = []
+    lifecycle._publish_config(
+        {
+            "connect_enabled": True,
+            "connect_bind_host": "127.0.0.1",
+            "connect_bind_port": 7401,
+            "connect_relay_url": "wss://old.invalid",
+        }
+    )
+    monkeypatch.setattr(lifecycle, "listening_addr", lambda: ("127.0.0.1", 7401))
+    monkeypatch.setattr(lifecycle, "stop_connect", lambda: stops.append(True))
+    monkeypatch.setattr(
+        lifecycle,
+        "maybe_start_connect",
+        lambda _app, config, **_kwargs: starts.append(dict(config or {})),
+    )
+    updated = {
+        "connect_enabled": True,
+        "connect_bind_host": "127.0.0.1",
+        "connect_bind_port": 7401,
+        "connect_relay_url": "wss://new.invalid",
+    }
+
+    lifecycle.on_connect_settings_changed(updated)
+
+    assert stops == [True]
+    assert starts == [updated]
+    assert lifecycle.current_config()["connect_relay_url"] == "wss://new.invalid"
+
+
 @pytest.mark.asyncio
 async def test_stop_connect_server_cancels_rdv_supervisor(home, monkeypatch):
     from remedy.connect import server
@@ -195,6 +230,37 @@ async def test_stop_connect_server_cancels_rdv_supervisor(home, monkeypatch):
     await server.stop_connect_server()
     assert task.cancelled() or task.done()
     assert server._rdv_task is None
+
+
+@pytest.mark.asyncio
+async def test_stop_connect_server_reaps_listener_from_closed_loop(home, monkeypatch):
+    from remedy.connect import server
+
+    socket_closed: list[bool] = []
+
+    class RawSocket:
+        def close(self):
+            socket_closed.append(True)
+
+    class WrappedSocket:
+        _sock = RawSocket()
+
+    class StaleServer:
+        sockets = [WrappedSocket()]
+
+        def close(self):
+            raise AttributeError("disposed proactor")
+
+        async def wait_closed(self):
+            raise AssertionError("wait_closed must not run after close failed")
+
+    monkeypatch.setattr(server, "_extra_servers", [StaleServer()])
+    monkeypatch.setattr(server, "_server", None)
+
+    await server.stop_connect_server()
+
+    assert socket_closed == [True]
+    assert server._extra_servers == []
 
 
 @pytest.mark.asyncio
@@ -307,3 +373,44 @@ async def test_drop_sessions_from_another_thread_closes_on_gateway_loop(home):
         await asyncio.sleep(0.01)
     assert w.closed_on is loop_thread
     assert w not in server.live_writers()
+
+
+def test_deferred_restart_uses_latest_config_after_old_thread_exits(home, monkeypatch):
+    from remedy.connect import lifecycle
+
+    release = threading.Event()
+    old = threading.Thread(target=release.wait, daemon=True)
+    old.start()
+    monkeypatch.setattr(lifecycle, "_thread", old)
+    monkeypatch.setattr(lifecycle, "_restart_waiter", None)
+    monkeypatch.setattr(lifecycle, "stop_connect", lambda: None)
+    monkeypatch.setattr(lifecycle, "listening_addr", lambda: None)
+    monkeypatch.setattr(lifecycle, "_enabled_chosen", lambda _cfg: (True, "127.0.0.1", 7401))
+    monkeypatch.setitem(lifecycle._saved, "app", lifecycle._saved.get("app"))
+    monkeypatch.setitem(lifecycle._saved, "api_key", lifecycle._saved.get("api_key", ""))
+    monkeypatch.setitem(lifecycle._saved, "sidecar_port", lifecycle._saved.get("sidecar_port", 7400))
+    monkeypatch.setitem(lifecycle._saved, "config", dict(lifecycle._saved.get("config") or {}))
+
+    original_start = lifecycle.maybe_start_connect
+    first = {"connect_enabled": True, "connect_bind_host": "127.0.0.1", "marker": "first"}
+    original_start(None, first, api_key="k", sidecar_port=7400)
+    waiter = lifecycle._restart_waiter
+    assert waiter is not None and waiter.is_alive()
+
+    calls: list[dict[str, object]] = []
+
+    def fake_start(_app, config, *, api_key, sidecar_port):
+        calls.append({"config": dict(config), "api_key": api_key, "sidecar_port": sidecar_port})
+
+    monkeypatch.setattr(lifecycle, "maybe_start_connect", fake_start)
+    latest = dict(first, marker="latest")
+    lifecycle._saved["config"] = latest
+    release.set()
+    waiter.join(timeout=2)
+    for _ in range(50):
+        if calls:
+            break
+        time.sleep(0.01)
+
+    assert calls == [{"config": latest, "api_key": "k", "sidecar_port": 7400}]
+    assert lifecycle._thread is None

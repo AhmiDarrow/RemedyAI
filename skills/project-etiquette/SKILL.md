@@ -143,9 +143,10 @@ Use when `cwd` is the RemedyAI tree (or user says “this project”).
 | Gate | Remedy command / note |
 |------|------------------------|
 | Blast radius | Root `AGENTS.md` Change-safety protocol; skill **change-safety** |
-| Test (Python) | `uv run pytest -q --tb=short` |
-| Test (desktop) | `cd desktop && npm test && npm run build` |
-| **Local CI (before every push)** | Same as `.github/workflows/ci.yml`: `uv run ruff check .` · `uv run mypy` · `uv run python scripts/check_mypy_exclude.py` · import smoke · `uv run python scripts/check_docs.py` · full pytest · desktop npm test+build. After a red remote run, re-run **that step** locally before pushing again. |
+| Test (Python) | Full Windows + Linux `uv run pytest -q --tb=short`; never a hand-picked stale file list |
+| Test (desktop) | `cd desktop && npm test && npm run build`; `cd src-tauri && cargo test --locked && cargo check --locked` |
+| Test (native/mobile) | Go test + race + vet + boundaries + benchmark budgets; Zig debug + ReleaseSafe tests/build; Android unit + lint + debug/release APK |
+| **Local CI (before every push)** | Run the complete current matrix in root `AGENTS.md`, including docs/import/static checks and `uv build`. A first or follow-up push is forbidden while any local gate is red. After red remote CI, re-run the failed step locally before pushing again. |
 | Docs | Manuals in `docs/manual/`; `uv run python scripts/sync_help_manual.py`; gate `uv run python scripts/check_docs.py` |
 | Version | `uv run python scripts/sync_version.py {X.Y.Z}` |
 | Build wheel | `uv build` → `dist/remedy_ai-{ver}*` |

@@ -1494,8 +1494,12 @@ def observe_tool_batch(
         if "started background" in low:
             continue
         last_summary = content[:2000]
-        # Official runner line only (ignore "exit_code=0" inside stdout)
-        m_exit = re.search(r"(?im)^(?:verify\s+)?exit_code=(\d+)", content)
+        # Only the tool-result header is authoritative. Later lines are
+        # process stdout and can contain attacker- or test-authored text.
+        m_exit = re.match(
+            r"(?i)^\s*(?:verify\s+)?exit_code=(-?\d+)\s*(?:\r?\n|$)",
+            content,
+        )
         if m_exit:
             if m_exit.group(1) == "0":
                 saw_green = True

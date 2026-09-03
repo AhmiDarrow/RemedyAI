@@ -363,6 +363,18 @@ def create_app(
                     schedule_ensure(home0, enabled=web_on)
                 except Exception:
                     logger.exception("web search host first-run ensure failed")
+                # Claimidx is an isolated, private-by-default first-run
+                # dependency. Installation/start happen in their own daemon
+                # thread so an offline package index never delays Remedy.
+                try:
+                    from remedy.runtime.claimidx_host import (
+                        schedule_ensure as schedule_claimidx,
+                    )
+
+                    home0 = cfg0.get("home_dir") if isinstance(cfg0, dict) else None
+                    schedule_claimidx(home0)
+                except Exception:
+                    logger.exception("Claimidx first-run ensure failed")
                 # Her voice should be ready before she is asked to speak: load
                 # the engines now (Kokoro; Chatterbox too when HQ is on) so
                 # the first sentence is not a twenty-second wait.
@@ -540,6 +552,10 @@ def create_app(
                 from remedy.runtime.web_search_host import stop as stop_web_search_host
 
                 stop_web_search_host()
+            with suppress(Exception):
+                from remedy.runtime.claimidx_host import stop as stop_claimidx
+
+                stop_claimidx()
             # The shared aiohttp session behind every LLM call: nothing else
             # ever closed it, so its connection pool outlived the server.
             try:

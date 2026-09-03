@@ -328,19 +328,35 @@ async def stop_connect_server() -> None:
         rdv.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await rdv
-    for extra in list(_extra_servers):
-        extra.close()
-        with contextlib.suppress(Exception):
-            await extra.wait_closed()
+    # asyncio servers are bound to the loop that created them. A crashed or
+    # already-closed gateway loop can leave a stale global reference whose
+    # ``close`` calls back into a disposed proactor. Detach first, then close
+    # normally or close the underlying sockets as a last-resort resource
+    # cleanup. One stale secondary listener must never prevent the primary
+    # listener from starting again.
+    extras = list(_extra_servers)
     _extra_servers.clear()
     server = _server
     _server = None
     _bind = None
-    if server is None:
-        return
-    server.close()
-    with contextlib.suppress(Exception):
-        await server.wait_closed()
+    for listener in [*extras, server]:
+        if listener is None:
+            continue
+        closed_normally = False
+        try:
+            listener.close()
+            closed_normally = True
+        except Exception:
+            logger.debug("discarding listener from a closed event loop", exc_info=True)
+            with contextlib.suppress(Exception):
+                sockets = getattr(listener, "sockets", None)
+                for wrapped in list(sockets or []):
+                    raw = getattr(wrapped, "_sock", wrapped)
+                    with contextlib.suppress(Exception):
+                        raw.close()
+        if closed_normally:
+            with contextlib.suppress(Exception):
+                await listener.wait_closed()
 
 
 async def _maybe_listen_v6(cb: Any, port: int) -> None:

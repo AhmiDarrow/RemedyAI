@@ -996,8 +996,9 @@ def register_assistant_tools(runtime: Any) -> None:
         if raw:
             try:
                 parsed = json.loads(raw)
-                if isinstance(parsed, list):
-                    cats = [c for c in parsed if isinstance(c, dict)]
+                if not isinstance(parsed, list):
+                    return "categories_json must be a JSON list of {name, planned}"
+                cats = [c for c in parsed if isinstance(c, dict)]
             except json.JSONDecodeError:
                 return "categories_json must be a JSON list of {name, planned}"
         # Accept disclaimer on first money tool use

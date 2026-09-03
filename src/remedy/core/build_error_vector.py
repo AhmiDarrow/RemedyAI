@@ -89,13 +89,13 @@ def parse_verify_output(
 ) -> ErrorVector:
     """Parse tool/verify summary text into an ErrorVector."""
     text = summary or ""
-    official = re.search(r"(?m)^(verify )?exit_code=(-?\d+)\s*$", text)
+    official = re.match(r"(?i)^\s*(?:verify\s+)?exit_code=(-?\d+)\s*(?:\r?\n|$)", text)
     if ok is None:
-        ok = official.group(2) == "0" if official else False
+        ok = official.group(1) == "0" if official else False
 
     vec = ErrorVector(ok=bool(ok), command=command or "", raw_tail=text[-1500:])
     if official:
-        vec.exit_hint = f"exit_code={official.group(2)}"
+        vec.exit_hint = f"exit_code={official.group(1)}"
 
     if ok:
         return vec

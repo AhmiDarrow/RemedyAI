@@ -2,16 +2,73 @@ package com.remedy.groveconnect.api
 
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
+import java.io.Closeable
 import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStream
+import java.io.Reader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+
+/**
+ * Buffered line reader with a hard per-line allocation bound.
+ *
+ * java.io.BufferedReader.readLine() grows until a newline appears, so checking
+ * the returned String is too late for a malicious or damaged SSE peer.
+ */
+internal class BoundedLineReader(
+    private val source: Reader,
+    private val maxChars: Int,
+) : Closeable {
+    private val buffer = CharArray(8192)
+    private var start = 0
+    private var end = 0
+
+    init {
+        require(maxChars > 0) { "maxChars must be positive" }
+    }
+
+    fun readLine(): String? {
+        val line = StringBuilder(minOf(256, maxChars))
+        var sawAny = false
+        while (true) {
+            if (start >= end) {
+                end = source.read(buffer)
+                start = 0
+                if (end < 0) return if (sawAny) finish(line) else null
+                if (end == 0) continue
+            }
+            var newline = start
+            while (newline < end && buffer[newline] != '\n') newline++
+            val count = newline - start
+            if (line.length + count > maxChars) {
+                throw IOException("stream line exceeds $maxChars characters")
+            }
+            if (count > 0) {
+                line.append(buffer, start, count)
+                sawAny = true
+            }
+            start = newline
+            if (start < end && buffer[start] == '\n') {
+                start++
+                return finish(line)
+            }
+        }
+    }
+
+    private fun finish(line: StringBuilder): String {
+        if (line.isNotEmpty() && line[line.length - 1] == '\r') {
+            line.setLength(line.length - 1)
+        }
+        return line.toString()
+    }
+
+    override fun close() = source.close()
+}
 
 /**
  * Minimal HTTP client that talks to the PC's API through the loopback shim.
@@ -201,43 +258,44 @@ class RemedyApi(private val baseUrl: String) {
                     main.post { if (!cancelled.get()) onError("HTTP $code") }
                     return@submit
                 }
-                val reader = BufferedReader(
+                BoundedLineReader(
                     InputStreamReader(c.inputStream, Charsets.UTF_8),
-                )
-                var event = ""
-                val data = StringBuilder()
-                while (!cancelled.get()) {
-                    val line = reader.readLine() ?: break
-                    if (line.isEmpty()) {
-                        if (data.isNotEmpty()) {
-                            val payload = try {
-                                JSONObject(data.toString())
-                            } catch (_: Exception) {
-                                JSONObject().put("text", data.toString())
+                    MAX_SSE_LINE_CHARS,
+                ).use { reader ->
+                    var event = ""
+                    val data = StringBuilder()
+                    while (!cancelled.get()) {
+                        val line = reader.readLine() ?: break
+                        if (line.isEmpty()) {
+                            if (data.isNotEmpty()) {
+                                val payload = try {
+                                    JSONObject(data.toString())
+                                } catch (_: Exception) {
+                                    JSONObject().put("text", data.toString())
+                                }
+                                val ev = event.ifEmpty { "message" }
+                                event = ""
+                                data.setLength(0)
+                                main.post { if (!cancelled.get()) onEvent(ev, payload) }
+                            } else {
+                                event = ""
+                                data.setLength(0)
                             }
-                            val ev = event.ifEmpty { "message" }
-                            event = ""
-                            data.setLength(0)
-                            main.post { if (!cancelled.get()) onEvent(ev, payload) }
-                        } else {
-                            event = ""
-                            data.setLength(0)
+                            continue
                         }
-                        continue
-                    }
-                    when {
-                        line.startsWith("event:") -> event = line.substringAfter(':').trim()
-                        line.startsWith("data:") -> {
-                            if (data.isNotEmpty()) data.append('\n')
-                            data.append(line.substringAfter(':').trim())
-                            if (data.length > MAX_SSE_EVENT_CHARS) {
-                                throw IOException("stream event exceeds 1 MiB")
+                        when {
+                            line.startsWith("event:") -> event = line.substringAfter(':').trim()
+                            line.startsWith("data:") -> {
+                                if (data.isNotEmpty()) data.append('\n')
+                                data.append(line.substringAfter(':').trim())
+                                if (data.length > MAX_SSE_EVENT_CHARS) {
+                                    throw IOException("stream event exceeds 1 MiB")
+                                }
                             }
+                            line.startsWith(":") -> Unit // comment / keepalive
                         }
-                        line.startsWith(":") -> Unit // comment / keepalive
                     }
                 }
-                reader.close()
                 main.post { if (!cancelled.get()) onDone() }
             } catch (e: Exception) {
                 val msg = e.message ?: "stream error"
@@ -287,43 +345,44 @@ class RemedyApi(private val baseUrl: String) {
                     main.post { if (!cancelled.get()) onError("HTTP $code") }
                     return@submit
                 }
-                val reader = BufferedReader(
+                BoundedLineReader(
                     InputStreamReader(c.inputStream, Charsets.UTF_8),
-                )
-                var event = ""
-                val data = StringBuilder()
-                while (!cancelled.get()) {
-                    val line = reader.readLine() ?: break
-                    if (line.isEmpty()) {
-                        if (data.isNotEmpty()) {
-                            val payload = try {
-                                JSONObject(data.toString())
-                            } catch (_: Exception) {
-                                JSONObject().put("text", data.toString())
+                    MAX_SSE_LINE_CHARS,
+                ).use { reader ->
+                    var event = ""
+                    val data = StringBuilder()
+                    while (!cancelled.get()) {
+                        val line = reader.readLine() ?: break
+                        if (line.isEmpty()) {
+                            if (data.isNotEmpty()) {
+                                val payload = try {
+                                    JSONObject(data.toString())
+                                } catch (_: Exception) {
+                                    JSONObject().put("text", data.toString())
+                                }
+                                val ev = event.ifEmpty { "message" }
+                                event = ""
+                                data.setLength(0)
+                                main.post { if (!cancelled.get()) onEvent(ev, payload) }
+                            } else {
+                                event = ""
+                                data.setLength(0)
                             }
-                            val ev = event.ifEmpty { "message" }
-                            event = ""
-                            data.setLength(0)
-                            main.post { if (!cancelled.get()) onEvent(ev, payload) }
-                        } else {
-                            event = ""
-                            data.setLength(0)
+                            continue
                         }
-                        continue
-                    }
-                    when {
-                        line.startsWith("event:") -> event = line.substringAfter(':').trim()
-                        line.startsWith("data:") -> {
-                            if (data.isNotEmpty()) data.append('\n')
-                            data.append(line.substringAfter(':').trim())
-                            if (data.length > MAX_SSE_EVENT_CHARS) {
-                                throw IOException("stream event exceeds 1 MiB")
+                        when {
+                            line.startsWith("event:") -> event = line.substringAfter(':').trim()
+                            line.startsWith("data:") -> {
+                                if (data.isNotEmpty()) data.append('\n')
+                                data.append(line.substringAfter(':').trim())
+                                if (data.length > MAX_SSE_EVENT_CHARS) {
+                                    throw IOException("stream event exceeds 1 MiB")
+                                }
                             }
+                            line.startsWith(":") -> Unit // comment / keepalive
                         }
-                        line.startsWith(":") -> Unit // comment / keepalive
                     }
                 }
-                reader.close()
                 main.post { if (!cancelled.get()) onDone() }
             } catch (e: Exception) {
                 val msg = e.message ?: "stream error"
@@ -344,5 +403,6 @@ class RemedyApi(private val baseUrl: String) {
 
     private companion object {
         const val MAX_SSE_EVENT_CHARS = 1024 * 1024
+        const val MAX_SSE_LINE_CHARS = MAX_SSE_EVENT_CHARS + 16
     }
 }

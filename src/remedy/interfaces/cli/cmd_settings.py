@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 import time
 from typing import Any
 
@@ -318,6 +319,8 @@ def _parse_setting_value(raw: str) -> Any:
         return int(s)
     except ValueError:
         pass
+    if re.fullmatch(r"[+-]?0\d+", s):
+        return s
     try:
         return float(s)
     except ValueError:

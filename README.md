@@ -28,7 +28,7 @@ Remedy lives on **this computer** (Windows, Linux, WSLg). **Grove** is home. **S
 
 | | |
 |--|--|
-| **This tree** | **v0.41.7** |
+| **This tree** | **v0.48.0** |
 | **Last public release** | [v0.41.5](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.41.5) · [PyPI `remedy-ai==0.41.5`](https://pypi.org/project/remedy-ai/0.41.5/) |
 | **Owner’s manual** | [docs/manual/](https://github.com/AhmiDarrow/RemedyAI/tree/master/docs/manual/) · [index](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/README.md) |
 | **Install** | [Windows](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/01-install-windows.md) · [Linux](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/manual/01-install-linux.md) |
@@ -47,10 +47,20 @@ From the creator: *My name is Ahmi, I hope you enjoy my Remedy.*
 ```bash
 git clone https://github.com/AhmiDarrow/RemedyAI.git && cd RemedyAI
 uv sync --group dev
+uv run ruff check .
+uv run mypy
 uv run pytest -q
 cd desktop && npm test && npm run build
-python scripts/check_docs.py
+cd ../desktop/src-tauri && cargo test --locked && cargo check --locked
+cd ../../native/go && go test -race ./... && go vet ./...
+cd ../zig && zig build test -Doptimize=ReleaseSafe
+cd ../../android && ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
+cd .. && uv run python scripts/check_docs.py && uv build
 ```
+
+Windows uses `gradlew.bat`; Go race detection runs on Linux CI. CI exercises Python
+3.12/3.13, Windows-sensitive behavior, the React SPA, both Tauri targets,
+RemedyConnect Android, the Go/Zig native runtime, and Python packaging.
 
 Version / help / docs gates: `scripts/sync_version.py` · `scripts/sync_help_manual.py` · `scripts/check_docs.py`.  
 Contributing: [CONTRIBUTING.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/CONTRIBUTING.md) · signing: [WINDOWS_SIGNING.md](https://github.com/AhmiDarrow/RemedyAI/blob/master/docs/WINDOWS_SIGNING.md)

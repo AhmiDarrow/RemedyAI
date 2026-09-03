@@ -191,7 +191,7 @@ async def _run_one(runtime: Any, task: SpreadTask) -> WorkerResult:
             model = "none"
         else:
             summary, ok, details = await _job(
-                runtime, "explore", query=task.query, path=task.path
+                runtime, "explore", query=task.query or task.goal, path=task.path
             )
             model = "none"
     except Exception as e:

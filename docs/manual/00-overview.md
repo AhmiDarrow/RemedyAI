@@ -22,7 +22,7 @@ project access scope).
 | **Home surface** | **Grove** (partner). **Studio** is one tap away (workbench). |
 | **Data home** | `~/.remedy` (config, memory, voice, Vault, skills; DPAPI on Windows) |
 | **Models** | *Your* provider keys or Ollama / RMB — continuity stays on disk |
-| **Current** | **v0.41.7** — life-task owner card, recipes, verify after writes. Public: GitHub **v0.41.5** · PyPI **`remedy-ai==0.41.5`** |
+| **Current tree** | **v0.48.0** — compatibility-first Go/Zig native runtime and hardened RemedyConnect. Public: GitHub **v0.41.5** · PyPI **`remedy-ai==0.41.5`** |
 | **Install** | [Windows](01-install-windows.md) · [Linux](01-install-linux.md) · [GitHub Releases](https://github.com/AhmiDarrow/RemedyAI/releases/latest) · PyPI `remedy-ai` |
 
 In-app: title-bar / tray → **About Remedy** · **Settings → About**.  
@@ -31,6 +31,12 @@ Creator note: *My name is Ahmi, I hope you enjoy my Remedy.*
 ---
 
 ## What’s new (start here)
+
+**v0.48** adds a compatibility-first native runtime: Go owns supervised,
+versioned runtime services and Zig enforces machine-facing capabilities. Python
+remains the default compatibility/control plane; native activation never removes
+the fallback. RemedyConnect now has native phone surfaces, bounded transports,
+durable pairing, and restart recovery.
 
 **v0.41** is **multilingual**: Language pins chrome *and* replies (default Auto
 = this PC + what you type; many languages + RTL). Verified Plan steps and

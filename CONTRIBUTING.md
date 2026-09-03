@@ -10,7 +10,7 @@ reviewers — confidence, not an inbound feature factory.
 |------|---------|
 | Use / license | [LICENSE](LICENSE) · [COMMERCIAL.md](COMMERCIAL.md) · `ahmitdarrow@gmail.com` |
 | Report a security bug | Email the owner. Do not file a public issue with a working exploit. |
-| Verify behavior | `uv sync --group dev` then `uv run pytest -q` |
+| Verify behavior | Run the multi-stack development matrix in `README.md`; CI covers Python, React, Rust/Tauri, Go, Zig, Android, packaging, Windows, and Linux. |
 
 Inbound PRs (including from the self-improve bot) are **scanned, not merged**.
 The bot uses `pull_request` (not `pull_request_target`) and never has write

@@ -2,12 +2,47 @@ package memory
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 )
+
+var errInjectedWrite = errors.New("injected partial write")
+
+type partialAppendFile struct {
+	*os.File
+	remaining int
+}
+
+type firstSyncFailsFile struct {
+	*os.File
+	syncs int
+}
+
+func (f *firstSyncFailsFile) Sync() error {
+	f.syncs++
+	if f.syncs == 1 {
+		return errors.New("injected sync failure")
+	}
+	return f.File.Sync()
+}
+
+func (f *partialAppendFile) Write(payload []byte) (int, error) {
+	if f.remaining <= 0 {
+		return 0, errInjectedWrite
+	}
+	if len(payload) <= f.remaining {
+		n, err := f.File.Write(payload)
+		f.remaining -= n
+		return n, err
+	}
+	n, _ := f.File.Write(payload[:f.remaining])
+	f.remaining -= n
+	return n, errInjectedWrite
+}
 
 func TestStoreDurabilityTypesAndRetrieval(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "memory.log")
@@ -96,4 +131,60 @@ func TestStoreConcurrentReaders(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestAppendFrameRollsBackPartialWriteBeforeNextAppend(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "partial.log")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.Write([]byte("valid-prefix")); err != nil {
+		t.Fatal(err)
+	}
+	failing := &partialAppendFile{File: file, remaining: 10}
+	if err := appendFrame(failing, []byte("12345678"), []byte("payload")); !errors.Is(err, errInjectedWrite) {
+		t.Fatalf("appendFrame error = %v", err)
+	}
+	position, err := file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if position != int64(len("valid-prefix")) {
+		t.Fatalf("position after rollback = %d", position)
+	}
+	if err := appendFrame(file, []byte("next")); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "valid-prefixnext" {
+		t.Fatalf("contents after recovery = %q", data)
+	}
+}
+
+func TestAppendFramePersistsRollbackAfterSyncFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sync.log")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	failing := &firstSyncFailsFile{File: file}
+	if err := appendFrame(failing, []byte("not-durable")); err == nil {
+		t.Fatal("sync failure was accepted")
+	}
+	if failing.syncs != 2 {
+		t.Fatalf("sync calls = %d, want initial + rollback", failing.syncs)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() != 0 {
+		t.Fatalf("rollback size = %d", info.Size())
+	}
 }

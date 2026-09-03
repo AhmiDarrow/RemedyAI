@@ -245,11 +245,7 @@ def test_the_probe_hits_models_under_the_given_base(monkeypatch):
     assert seen == [("http://127.0.0.1:8740/v1/models", "RemedyAI-mdl/1.0", 0.25)]
 
 
-def test_the_fallback_probe_for_a_v1_base_repeats_the_same_url(monkeypatch):
-    """Documents current behaviour: for a ``/v1`` base — the only shape
-    ``get_tier_base_url`` ever produces — the retry URL is byte-identical to
-    the first, so the fallback can never find an endpoint the first attempt
-    missed. See BUGS in the handoff."""
+def test_the_fallback_probe_for_a_v1_base_tries_the_root_models_path(monkeypatch):
     seen = []
 
     def _capture(req, timeout=None):
@@ -258,7 +254,7 @@ def test_the_fallback_probe_for_a_v1_base_repeats_the_same_url(monkeypatch):
 
     _patch_urlopen(monkeypatch, _capture)
     assert mr._health("http://127.0.0.1:8740/v1") is False
-    assert seen == ["http://127.0.0.1:8740/v1/models", "http://127.0.0.1:8740/v1/models"]
+    assert seen == ["http://127.0.0.1:8740/v1/models", "http://127.0.0.1:8740/models"]
 
 
 def test_a_non_v1_base_falls_back_to_the_v1_path(monkeypatch):
@@ -421,23 +417,26 @@ def test_a_child_that_ignores_terminate_is_killed(monkeypatch):
     assert result["stopped"] is True
 
 
-def test_a_child_that_survives_kill_is_still_reported_stopped(monkeypatch):
-    """Documents current behaviour: after terminate+kill both time out the
-    result claims ``stopped`` anyway, so callers cannot detect a zombie."""
+def test_a_child_that_survives_kill_is_reported_and_retained_for_retry(monkeypatch):
     monkeypatch.setattr(mr.os, "name", "posix")
     proc = FakeProc(alive=True, wait_timeouts=2, kill_works=False)
     mr._tier_procs["light"] = proc
-    assert mr.stop_tier("light") == {"ok": True, "stopped": True, "tier": "light"}
+    result = mr.stop_tier("light")
+    assert result["ok"] is False
+    assert result["stopped"] is False
+    assert "still running" in result["error"]
     assert proc.poll() is None  # still alive
+    assert mr._tier_procs["light"] is proc
 
 
-def test_a_terminate_that_raises_is_swallowed_but_the_slot_is_still_cleared(monkeypatch):
+def test_a_terminate_that_raises_keeps_the_live_slot_and_reports_failure(monkeypatch):
     monkeypatch.setattr(mr.os, "name", "posix")
     proc = FakeProc(alive=True, terminate_error=PermissionError("access denied"))
     mr._tier_procs["medium"] = proc
     result = mr.stop_tier("medium")
-    assert mr._tier_procs["medium"] is None
-    assert result == {"ok": True, "stopped": False, "tier": "medium"}
+    assert mr._tier_procs["medium"] is proc
+    assert result["ok"] is False
+    assert result["stopped"] is False
 
 
 def test_an_already_exited_child_is_not_terminated_again(monkeypatch):
@@ -446,8 +445,7 @@ def test_an_already_exited_child_is_not_terminated_again(monkeypatch):
     mr._tier_procs["medium"] = proc
     result = mr.stop_tier("medium")
     assert proc.terminated is False
-    # the slot keeps the dead handle: only the live branch clears it
-    assert mr._tier_procs["medium"] is proc
+    assert mr._tier_procs["medium"] is None
     assert result == {"ok": True, "stopped": False, "tier": "medium"}
 
 
@@ -627,9 +625,7 @@ def test_an_existing_mmproj_is_passed_through(monkeypatch, tmp_path):
     assert cmd[cmd.index("--mmproj") + 1] == str(mmproj)
 
 
-def test_a_missing_mmproj_is_dropped_silently_rather_than_refused(monkeypatch, tmp_path):
-    """Documents current behaviour: a typo'd mmproj path yields a text-only
-    server with no warning, so vision decode fails much later and elsewhere."""
+def test_a_missing_mmproj_is_refused_before_start(monkeypatch, tmp_path):
     monkeypatch.setattr(mr, "is_tier_running", lambda n: False)
     monkeypatch.setattr(mr, "_port_open", lambda *a, **k: True)
     monkeypatch.setattr(mr, "_health", lambda *a, **k: True)
@@ -640,8 +636,9 @@ def test_a_missing_mmproj_is_dropped_silently_rather_than_refused(monkeypatch, t
         mmproj_path=str(tmp_path / "typo.gguf"),
         runtime_binary=str(_binary(tmp_path)),
     )
-    assert out["ok"] is True
-    assert "--mmproj" not in rec["cmd"]
+    assert out["ok"] is False
+    assert "Vision projection file not found" in out["error"]
+    assert "cmd" not in rec
 
 
 def test_a_child_that_exits_early_is_reported_with_its_code(monkeypatch, tmp_path):

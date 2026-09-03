@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const capability = @import("capability.zig");
 const policy = @import("policy.zig");
 const security = @import("security.zig");
@@ -34,6 +35,7 @@ pub fn authorizeProcess(
         encoded_token,
         subject,
         scope,
+        evidence.operation_hash,
         required,
         now_ms,
     );
@@ -44,22 +46,25 @@ test "executor requires policy and capability agreement" {
     const Hmac = std.crypto.auth.hmac.sha2.HmacSha256;
     const key = [_]u8{0x7c} ** Hmac.key_length;
     const nonce = [_]u8{0x33} ** 16;
+    const safe_tool = if (builtin.os.tag == .windows) "C:\\Remedy\\safe-tool.exe" else "/opt/remedy/safe-tool";
+    const other_tool = if (builtin.os.tag == .windows) "C:\\Remedy\\other-tool.exe" else "/opt/remedy/other-tool";
     const token = try security.issue(
         &key,
         "agent:executor",
         "workspace:test",
+        policy.hashArguments(&.{safe_tool}),
         capability.Set.one(.process_spawn),
         1000,
         2000,
         nonce,
     );
-    const rules = [_]policy.ProcessRule{.{ .executable = "safe-tool" }};
+    const rules = [_]policy.ProcessRule{.{ .executable = safe_tool }};
     var verifier = security.Verifier.init(std.testing.allocator, &key);
     defer verifier.deinit();
 
     try std.testing.expectError(
         error.PolicyDenied,
-        authorizeProcess(&verifier, &rules, &token, "agent:executor", "workspace:test", &.{"other-tool"}, true, 1500),
+        authorizeProcess(&verifier, &rules, &token, "agent:executor", "workspace:test", &.{other_tool}, true, 1500),
     );
     const authorization = try authorizeProcess(
         &verifier,
@@ -67,7 +72,7 @@ test "executor requires policy and capability agreement" {
         &token,
         "agent:executor",
         "workspace:test",
-        &.{"safe-tool"},
+        &.{safe_tool},
         true,
         1500,
     );
@@ -77,7 +82,12 @@ test "executor requires policy and capability agreement" {
 test "owner confirmation boolean cannot bypass token proof" {
     const Hmac = std.crypto.auth.hmac.sha2.HmacSha256;
     const key = [_]u8{0x4d} ** Hmac.key_length;
-    const rules = [_]policy.ProcessRule{.{ .executable = "send-tool", .owner_checkpoint = true }};
+    const send_tool = if (builtin.os.tag == .windows) "C:\\Remedy\\send-tool.exe" else "/opt/remedy/send-tool";
+    const delete_tool = if (builtin.os.tag == .windows) "C:\\Remedy\\delete-tool.exe" else "/opt/remedy/delete-tool";
+    const rules = [_]policy.ProcessRule{
+        .{ .executable = send_tool, .owner_checkpoint = true },
+        .{ .executable = delete_tool, .owner_checkpoint = true },
+    };
     var verifier = security.Verifier.init(std.testing.allocator, &key);
     defer verifier.deinit();
 
@@ -85,6 +95,7 @@ test "owner confirmation boolean cannot bypass token proof" {
         &key,
         "agent:sender",
         "workspace:test",
+        policy.hashArguments(&.{send_tool}),
         capability.Set.one(.process_spawn),
         1000,
         2000,
@@ -92,7 +103,7 @@ test "owner confirmation boolean cannot bypass token proof" {
     );
     try std.testing.expectError(
         error.AccessDenied,
-        authorizeProcess(&verifier, &rules, &weak_token, "agent:sender", "workspace:test", &.{"send-tool"}, true, 1500),
+        authorizeProcess(&verifier, &rules, &weak_token, "agent:sender", "workspace:test", &.{send_tool}, true, 1500),
     );
 
     const approved_rights = capability.Set.one(.process_spawn).merged(capability.Set.one(.owner_checkpoint));
@@ -100,10 +111,15 @@ test "owner confirmation boolean cannot bypass token proof" {
         &key,
         "agent:sender",
         "workspace:test",
+        policy.hashArguments(&.{send_tool}),
         approved_rights,
         1000,
         2000,
         [_]u8{0x55} ** 16,
     );
-    _ = try authorizeProcess(&verifier, &rules, &approved_token, "agent:sender", "workspace:test", &.{"send-tool"}, true, 1500);
+    try std.testing.expectError(
+        error.OperationMismatch,
+        authorizeProcess(&verifier, &rules, &approved_token, "agent:sender", "workspace:test", &.{delete_tool}, true, 1500),
+    );
+    _ = try authorizeProcess(&verifier, &rules, &approved_token, "agent:sender", "workspace:test", &.{send_tool}, true, 1500);
 }

@@ -1436,6 +1436,7 @@ def test_navigate_rail_fast_optimistic_when_host_alive(tmp_path: Path, monkeypat
     if d.get("via") == "optimistic":
         assert d.get("ready_for_input") is False or d.get("pending_load") is True
         assert d.get("observed") is False
+        assert float(d.get("settled_s") or 0.0) == 0.0
         assert "SUCCESS" not in str(d.get("message") or "")
         assert "have not seen" in str(d.get("message") or "").lower()
         assert ex.bridge.navigate_needs_settle() is True

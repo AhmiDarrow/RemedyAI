@@ -24,11 +24,13 @@ logger = logging.getLogger(__name__)
 
 _thread: threading.Thread | None = None
 _loop: asyncio.AbstractEventLoop | None = None
+_restart_waiter: threading.Thread | None = None
 _lock = threading.Lock()
 _saved: dict[str, Any] = {
     "app": None,
     "api_key": "",
     "sidecar_port": 7400,
+    "config": {},
 }
 
 # The one config dict the running gateway reads per request. Mutated in place
@@ -206,6 +208,50 @@ def stop_connect() -> None:
     drop_all_sessions()
 
 
+def _defer_restart_until_stopped(prior: threading.Thread) -> None:
+    """Start the latest requested configuration once *prior* actually exits.
+
+    A bounded join keeps Settings responsive, but losing the restart request
+    after that timeout leaves Connect offline. One shared waiter follows the
+    retiring owner and re-reads the latest saved config, so repeated changes
+    coalesce without ever starting two listeners.
+    """
+    global _restart_waiter, _thread
+
+    def _wait() -> None:
+        global _restart_waiter, _thread
+        prior.join()
+        with _lock:
+            if _thread is prior:
+                _thread = None
+            if _restart_waiter is threading.current_thread():
+                _restart_waiter = None
+            app = _saved.get("app")
+            api_key = str(_saved.get("api_key") or "")
+            sidecar_port = int(_saved.get("sidecar_port") or 7400)
+            config = dict(_saved.get("config") or {})
+        ok, _host, _port = _enabled_chosen(config)
+        if not ok:
+            return
+        maybe_start_connect(
+            app,
+            config,
+            api_key=api_key,
+            sidecar_port=sidecar_port,
+        )
+
+    with _lock:
+        if _restart_waiter is not None and _restart_waiter.is_alive():
+            return
+        waiter = threading.Thread(
+            target=_wait,
+            name="remedy-connect-restart",
+            daemon=True,
+        )
+        _restart_waiter = waiter
+        waiter.start()
+
+
 def maybe_start_connect(
     app: Any,
     config: dict[str, Any] | None,
@@ -221,6 +267,7 @@ def maybe_start_connect(
     _saved["app"] = app
     _saved["api_key"] = str(api_key or "")
     _saved["sidecar_port"] = int(sidecar_port or 7400)
+    _saved["config"] = dict(config or {})
     _publish_config(config)
     ok, host, port = _enabled_chosen(config)
     if not ok:
@@ -235,6 +282,7 @@ def maybe_start_connect(
         existing = _thread
     if existing is not None and existing.is_alive():
         logger.warning("connect gateway restart deferred until prior listener stops")
+        _defer_restart_until_stopped(existing)
         return
     ready = threading.Event()
     err: list[BaseException] = []
@@ -263,6 +311,9 @@ def on_connect_settings_changed(config: dict[str, Any] | None) -> None:
     from remedy.connect.store import set_paused
 
     cfg = config if isinstance(config, dict) else {}
+    previous = dict(_live_cfg)
+    _saved["config"] = dict(cfg)
+    _publish_config(cfg)
     paused = bool(cfg.get("connect_paused", False))
     set_paused(paused)
     if paused:
@@ -273,7 +324,7 @@ def on_connect_settings_changed(config: dict[str, Any] | None) -> None:
     # Listener-shaped keys (relay dial, rendezvous, IPv6 second socket) are
     # wired at start; panes apply live, these need a re-bind.
     for key in _RESTART_KEYS:
-        if listening_addr() is not None and _live_cfg.get(key) != cfg.get(key):
+        if listening_addr() is not None and previous.get(key) != cfg.get(key):
             stop_connect()
             break
     maybe_start_connect(

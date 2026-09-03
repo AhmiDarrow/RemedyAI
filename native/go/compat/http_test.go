@@ -1,6 +1,7 @@
 package compat
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -57,5 +58,59 @@ func TestHTTPCompatibilityHandlerRejectsExternalRedirect(t *testing.T) {
 	payload, _ := json.Marshal(HTTPRequest{Method: http.MethodGet, Path: "/redirect"})
 	if _, err := handler.Handle(context.Background(), protocol.Frame{Payload: payload}); !errors.Is(err, ErrUnsafeTarget) {
 		t.Fatalf("redirect = %v", err)
+	}
+}
+
+func TestHTTPCompatibilityHandlerPreservesQuery(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/sessions" || r.URL.Query().Get("limit") != "20" {
+			t.Errorf("request URI = %q", r.URL.RequestURI())
+		}
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+	handler, err := NewHTTPHandler(server.URL, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(HTTPRequest{Method: http.MethodGet, Path: "/sessions?limit=20"})
+	if _, err := handler.Handle(context.Background(), protocol.Frame{Payload: payload}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHTTPCompatibilityHandlerRejectsDifferentLoopbackOriginRedirect(t *testing.T) {
+	var redirected bool
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { redirected = true }))
+	defer target.Close()
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/capture", http.StatusTemporaryRedirect)
+	}))
+	defer origin.Close()
+	handler, err := NewHTTPHandler(origin.URL, origin.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(HTTPRequest{Method: http.MethodPost, Path: "/redirect", Header: map[string]string{"Authorization": "test-only"}, Body: []byte("private")})
+	if _, err := handler.Handle(context.Background(), protocol.Frame{Payload: payload}); !errors.Is(err, ErrUnsafeTarget) {
+		t.Fatalf("redirect = %v", err)
+	}
+	if redirected {
+		t.Fatal("request reached a different loopback origin")
+	}
+}
+
+func TestHTTPCompatibilityHandlerRejectsEncodedResponseOverFrameLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(bytes.Repeat([]byte{'x'}, 13<<20))
+	}))
+	defer server.Close()
+	handler, err := NewHTTPHandler(server.URL, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(HTTPRequest{Method: http.MethodGet, Path: "/large"})
+	if _, err := handler.Handle(context.Background(), protocol.Frame{Payload: payload}); !errors.Is(err, protocol.ErrPayloadTooLarge) {
+		t.Fatalf("large encoded response = %v", err)
 	}
 }

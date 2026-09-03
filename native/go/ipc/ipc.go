@@ -45,6 +45,8 @@ func Serve(ctx context.Context, listener net.Listener, handler Handler) error {
 
 func ServeConn(ctx context.Context, conn net.Conn, handler Handler) {
 	defer conn.Close()
+	stopClose := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stopClose()
 	var writeMu sync.Mutex
 	var callsMu sync.Mutex
 	calls := make(map[[16]byte]context.CancelFunc)
