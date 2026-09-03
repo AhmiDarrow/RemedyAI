@@ -6,6 +6,12 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [0.50.2] - 2026-09-03
 
+> **Experimental.** 0.50.0 through 0.50.2 are an experimental line: the native
+> Go/Zig runtime, the first-run Claimidx service and the RemedyConnect
+> hardening are still being proven in daily use. Expect rough edges. The last
+> stable public release is
+> [v0.41.5](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.41.5).
+
 - A cloud provider 5xx whose body says "unavailable" no longer wakes RMB. The
   ReAct loop only treats a 502/503 as "local host loading" when the binding is
   local, and implicit RMB starts (mid-turn recovery, provider wake) refuse to
