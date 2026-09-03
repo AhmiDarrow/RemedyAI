@@ -25,18 +25,22 @@ type Config struct {
 	HomeDir string
 	// Version overrides the reported product version (tests).
 	Version string
+	// DBPath is the SQLite memory.db path. Empty derives from HomeDir /
+	// REMEDY_HOME / ~/.remedy/memory.db (or :memory: when no home).
+	DBPath string
 }
 
 // Server is the Phase-4 first-slice HTTP API.
 type Server struct {
-	started time.Time
-	version string
-	token   string
-	mux     *http.ServeMux
+	started  time.Time
+	version  string
+	token    string
+	mux      *http.ServeMux
+	sessions *sessionStore
 }
 
-// New builds a server with ping/status/turn-active routes registered.
-func New(cfg Config) *Server {
+// New builds a server with ping/status/turn-active and sessions CRUD registered.
+func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
 		version = Version
@@ -45,16 +49,34 @@ func New(cfg Config) *Server {
 	if token == "" {
 		token = ResolveToken(cfg.HomeDir)
 	}
+	store, err := openSessionStore(resolveDBPath(cfg))
+	if err != nil {
+		return nil, fmt.Errorf("open session store: %w", err)
+	}
 	s := &Server{
-		started: time.Now(),
-		version: version,
-		token:   token,
-		mux:     http.NewServeMux(),
+		started:  time.Now(),
+		version:  version,
+		token:    token,
+		mux:      http.NewServeMux(),
+		sessions: store,
 	}
 	s.mux.HandleFunc("GET /api/ping", s.handlePing)
 	s.mux.HandleFunc("GET /api/status", s.handleStatus)
 	s.mux.HandleFunc("GET /api/turn-active", s.handleTurnActive)
-	return s
+	s.mux.HandleFunc("GET /api/sessions", s.handleListSessions)
+	s.mux.HandleFunc("POST /api/sessions", s.handleCreateSession)
+	s.mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
+	s.mux.HandleFunc("PATCH /api/sessions/{id}", s.handleUpdateSession)
+	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
+	return s, nil
+}
+
+// Close releases the session store.
+func (s *Server) Close() error {
+	if s == nil || s.sessions == nil {
+		return nil
+	}
+	return s.sessions.Close()
 }
 
 // Handler returns the CORS + auth wrapped mux.
@@ -70,6 +92,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	go func() {
 		errCh <- httpServer.Serve(ln)
 	}()
+	var serveErr error
 	select {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -77,15 +100,19 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		_ = httpServer.Shutdown(shutdownCtx)
 		err := <-errCh
 		if err == nil || errors.Is(err, http.ErrServerClosed) {
-			return ctx.Err()
+			serveErr = ctx.Err()
+		} else {
+			serveErr = err
 		}
-		return err
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
-			return nil
+			serveErr = nil
+		} else {
+			serveErr = err
 		}
-		return err
 	}
+	_ = s.Close()
+	return serveErr
 }
 
 // ListenAndServe binds addr (must be loopback) and serves until ctx cancels.
@@ -102,7 +129,10 @@ func ListenAndServe(ctx context.Context, addr string, cfg Config, onBound func(s
 	if onBound != nil {
 		onBound(ln.Addr().String())
 	}
-	s := New(cfg)
+	s, err := New(cfg)
+	if err != nil {
+		return err
+	}
 	err = s.Serve(ctx, ln)
 	if errors.Is(err, context.Canceled) || errors.Is(err, net.ErrClosed) {
 		return nil

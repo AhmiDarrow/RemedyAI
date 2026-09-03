@@ -13,7 +13,16 @@ import (
 )
 
 var alwaysForbidden = map[string]bool{"os/exec": true, "syscall": true, "unsafe": true, "plugin": true}
-var externalOwners = map[string]string{"github.com/Microsoft/go-winio": "ipc", "golang.org/x/sys": "ipc,state", "github.com/santhosh-tekuri/jsonschema/v6": "tools"}
+
+// Owned external deps: only the listed packages may import them (same pattern as
+// ipc→go-winio). modernc.org/sqlite is CGO-free; its transitive libc uses
+// unsafe internally, so the driver surface stays httpapi-only.
+var externalOwners = map[string]string{
+	"github.com/Microsoft/go-winio":           "ipc",
+	"golang.org/x/sys":                        "ipc,state",
+	"github.com/santhosh-tekuri/jsonschema/v6": "tools",
+	"modernc.org/sqlite":                      "httpapi",
+}
 
 func main() {
 	root := flag.String("root", "..", "native directory")
