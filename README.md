@@ -58,7 +58,9 @@ cd ../../android && ./gradlew testDebugUnitTest lintDebug assembleDebug assemble
 cd .. && uv run python scripts/check_docs.py && uv build
 ```
 
-Windows uses `gradlew.bat`; Go race detection runs on Linux CI. CI exercises Python
+Before a push, the same matrix runs locally as the pre-push gate: `uv run python scripts/prepush.py`
+(enable once per clone with `git config core.hooksPath .githooks`). Windows uses `gradlew.bat`;
+Go race detection also runs on Linux CI. CI exercises Python
 3.12/3.13, Windows-sensitive behavior, the React SPA, both Tauri targets,
 RemedyConnect Android, the Go/Zig native runtime, and Python packaging.
 
