@@ -172,8 +172,8 @@ def test_logical_cpu_count_uses_compatibility_by_default(monkeypatch: pytest.Mon
 # --- remedy_core loader (ABI 2) ------------------------------------------
 
 
-def test_the_python_side_requires_abi_two_from_the_zig_core():
-    assert native_runtime._ABI_VERSION == 2
+def test_the_python_side_requires_abi_three_from_the_zig_core():
+    assert native_runtime._ABI_VERSION == 3
     # The Go probe contract is a separate version and did not move.
     assert native_runtime._TOOL_ABI_VERSION == 1
     assert native_runtime._PROTOCOL_VERSION == 1
@@ -222,5 +222,5 @@ def test_core_library_loads_the_built_core_when_present():
     if native_runtime._core_library_path() is None:
         pytest.skip("remedy_core is not built in this checkout")
     library = native_runtime.core_library()
-    assert int(library.remedy_core_abi_version()) == 2
+    assert int(library.remedy_core_abi_version()) == 3
     assert native_runtime.core_library() is library

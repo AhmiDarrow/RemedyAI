@@ -228,8 +228,20 @@ def test_foreground_window_info_shape() -> None:
 
 
 def test_png_writer_swaps_bgr_to_rgb(tmp_path) -> None:
+    """Encoding lives in ``remedy_core`` (portable); skip when the lib is absent.
+
+    Linux CI without zig leaves no ``libremedy_core.so``. A stale ABI-1 .so
+    under ``zig-out/lib`` must not be papered over — rebuild or remove it.
+    """
     import struct
     import zlib
+
+    from remedy.runtime.native_runtime import NativeRuntimeUnavailableError, core_library
+
+    try:
+        core_library()
+    except NativeRuntimeUnavailableError as exc:
+        pytest.skip(f"remedy_core ABI 2 not available: {exc}")
 
     w, h = 2, 1
     stride = (w * 3 + 3) & ~3

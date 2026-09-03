@@ -45,6 +45,19 @@ def test_popen_hidden_merges_caller_creation_flags(monkeypatch: pytest.MonkeyPat
     assert seen["creationflags"] == expected
 
 
+def test_hidden_flags_survive_a_win32_mock_without_windows_attrs(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """POSIX interpreters lack CREATE_NO_WINDOW / STARTUPINFO; mocked win32 must not crash."""
+    monkeypatch.setattr(P.sys, "platform", "win32")
+    for name in ("CREATE_NO_WINDOW", "STARTUPINFO", "STARTF_USESHOWWINDOW", "SW_HIDE"):
+        if hasattr(subprocess, name):
+            monkeypatch.delattr(P.subprocess, name, raising=False)
+    assert P.hidden_creationflags() == 0
+    assert P.hidden_startupinfo() is None
+    assert P.hidden_subprocess_kwargs() == {"creationflags": 0}
+
+
 def test_kill_process_tree_kills_a_plain_child_everywhere():
     proc = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(60)"],

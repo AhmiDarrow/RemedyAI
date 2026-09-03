@@ -28,19 +28,26 @@ from typing import Any
 
 
 def hidden_creationflags() -> int:
-    """Windows creation flags that suppress a console window (0 elsewhere)."""
-    if sys.platform == "win32":
-        return int(subprocess.CREATE_NO_WINDOW)
-    return 0
+    """Windows creation flags that suppress a console window (0 elsewhere).
+
+    Uses ``getattr`` so a win32-platform mock on a POSIX interpreter (CI under
+    WSL, unit tests) cannot AttributeError on ``CREATE_NO_WINDOW``.
+    """
+    if sys.platform != "win32":
+        return 0
+    return int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
 def hidden_startupinfo() -> Any | None:
     """STARTUPINFO with SW_HIDE, belt and braces alongside CREATE_NO_WINDOW."""
     if sys.platform != "win32":
         return None
-    startup = subprocess.STARTUPINFO()
-    startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    startup.wShowWindow = subprocess.SW_HIDE
+    startupinfo_cls = getattr(subprocess, "STARTUPINFO", None)
+    if startupinfo_cls is None:
+        return None
+    startup = startupinfo_cls()
+    startup.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW", 1)
+    startup.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
     return startup
 
 
