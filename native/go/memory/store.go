@@ -105,16 +105,56 @@ func (s *Store) Append(record Record) error {
 	binary.LittleEndian.PutUint32(header[4:8], crc32.ChecksumIEEE(payload))
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err = s.file.Write(header[:]); err != nil {
-		return err
-	}
-	if _, err = s.file.Write(payload); err != nil {
-		return err
-	}
-	if err = s.file.Sync(); err != nil {
+	if err = appendFrame(s.file, header[:], payload); err != nil {
 		return err
 	}
 	s.index(record)
+	return nil
+}
+
+type appendFile interface {
+	io.Writer
+	Seek(offset int64, whence int) (int64, error)
+	Truncate(size int64) error
+	Sync() error
+}
+
+func appendFrame(file appendFile, parts ...[]byte) error {
+	start, err := file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return err
+	}
+	rollback := func(writeErr error) error {
+		truncateErr := file.Truncate(start)
+		_, seekErr := file.Seek(start, io.SeekStart)
+		// Persist the rollback too. A first Sync failure may be transient; if
+		// this second Sync also fails, surface both errors rather than claiming
+		// the pre-append boundary is durable.
+		rollbackSyncErr := file.Sync()
+		return errors.Join(writeErr, truncateErr, seekErr, rollbackSyncErr)
+	}
+	for _, part := range parts {
+		if err := writeAll(file, part); err != nil {
+			return rollback(err)
+		}
+	}
+	if err := file.Sync(); err != nil {
+		return rollback(err)
+	}
+	return nil
+}
+
+func writeAll(writer io.Writer, payload []byte) error {
+	for len(payload) > 0 {
+		written, err := writer.Write(payload)
+		if err != nil {
+			return err
+		}
+		if written == 0 {
+			return io.ErrShortWrite
+		}
+		payload = payload[written:]
+	}
 	return nil
 }
 

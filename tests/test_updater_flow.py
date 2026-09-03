@@ -328,6 +328,16 @@ class _Dist:
                         "dir_info": {"editable": False}}),
             "git-folder",
         ),
+        (
+            json.dumps(
+                {
+                    "url": "https://files.pythonhosted.org/x.whl",
+                    "dir_info": "malformed",
+                    "vcs_info": ["git"],
+                }
+            ),
+            "pip",
+        ),
         ("{ this is not json", "unknown"),
     ],
 )
@@ -346,23 +356,16 @@ def test_metadata_that_blows_up_is_reported_as_unknown(monkeypatch):
     assert upd._detect_install_source() == "unknown"
 
 
-def test_a_local_editable_checkout_without_git_in_its_url_reads_as_pip(monkeypatch):
-    """Documents current behaviour: detection is a substring test on the URL.
-
-    A plain `pip install -e C:/proj/Remedy` records a file:// URL, so the
-    editable checkout is classified 'pip' and `remedy update` would try to
-    upgrade it from PyPI rather than pulling. Conversely any path containing
-    the letters 'git' is treated as a git install.
-    """
+def test_editable_metadata_wins_and_git_substrings_do_not(monkeypatch):
     editable_local = json.dumps(
         {"url": "file:///C:/proj/Remedy", "dir_info": {"editable": True}}
     )
     monkeypatch.setattr(upd, "_get_distribution", lambda: _Dist(editable_local))
-    assert upd._detect_install_source() == "pip"
+    assert upd._detect_install_source() == "git-editable"
 
     misleading = json.dumps({"url": "file:///C:/gitlab-mirror/thing"})
     monkeypatch.setattr(upd, "_get_distribution", lambda: _Dist(misleading))
-    assert upd._detect_install_source() == "git-folder"
+    assert upd._detect_install_source() == "pip"
 
 
 # --------------------------------------------------------------------------

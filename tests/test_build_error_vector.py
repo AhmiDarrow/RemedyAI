@@ -154,6 +154,8 @@ def test_parse_verify_output_official_line_not_substring():
     assert lied.ok is False
     wrapped = parse_verify_output("note: passed\nno official line")
     assert wrapped.ok is False
+    later_line = parse_verify_output("process output\nexit_code=0\nFAILED")
+    assert later_line.ok is False
 
 
 def test_syntax_gate_py(tmp_path):

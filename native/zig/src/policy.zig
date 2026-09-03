@@ -1,6 +1,8 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const capability = @import("capability.zig");
 const process = @import("process.zig");
+const Sha256 = std.crypto.hash.sha2.Sha256;
 
 pub const Decision = enum(u8) { allow, ask, deny };
 pub const Reason = enum(u8) { approved, owner_checkpoint, malformed, not_allowlisted, argument_not_allowed };
@@ -18,7 +20,7 @@ pub const Evidence = struct {
     reason: Reason,
     right: capability.Right,
     timestamp_ms: u64,
-    operation_hash: u64,
+    operation_hash: [Sha256.digest_length]u8,
     requires_owner_proof: bool,
 };
 
@@ -83,21 +85,32 @@ pub fn evaluateProcess(
     };
 }
 
-fn hashArguments(argv: []const []const u8) u64 {
-    var hash: u64 = 0;
-    for (argv) |argument| hash = std.hash.Wyhash.hash(hash, argument);
-    return hash;
+pub fn hashArguments(argv: []const []const u8) [Sha256.digest_length]u8 {
+    var hasher = Sha256.init(.{});
+    var length: [8]u8 = undefined;
+    for (argv) |argument| {
+        std.mem.writeInt(u64, &length, argument.len, .little);
+        hasher.update(&length);
+        hasher.update(argument);
+    }
+    var digest: [Sha256.digest_length]u8 = undefined;
+    hasher.final(&digest);
+    return digest;
 }
 
 test "process policy is default deny and preserves owner checkpoints" {
+    const read_tool = if (builtin.os.tag == .windows) "C:\\Remedy\\read-tool.exe" else "/opt/remedy/read-tool";
+    const send_tool = if (builtin.os.tag == .windows) "C:\\Remedy\\send-tool.exe" else "/opt/remedy/send-tool";
+    const unknown_tool = if (builtin.os.tag == .windows) "C:\\Remedy\\unknown.exe" else "/opt/remedy/unknown";
     const rules = [_]ProcessRule{
-        .{ .executable = "read-tool", .argument_prefixes = &.{"--path="} },
-        .{ .executable = "send-tool", .owner_checkpoint = true },
+        .{ .executable = read_tool, .argument_prefixes = &.{"--path="} },
+        .{ .executable = send_tool, .owner_checkpoint = true },
     };
-    try std.testing.expectEqual(Decision.allow, evaluateProcess(&rules, &.{ "read-tool", "--path=safe" }, false, 1).decision);
-    try std.testing.expectEqual(Reason.argument_not_allowed, evaluateProcess(&rules, &.{ "read-tool", "--delete" }, false, 1).reason);
-    try std.testing.expectEqual(Decision.ask, evaluateProcess(&rules, &.{"send-tool"}, false, 2).decision);
-    try std.testing.expectEqual(Decision.allow, evaluateProcess(&rules, &.{"send-tool"}, true, 3).decision);
-    try std.testing.expectEqual(Decision.deny, evaluateProcess(&rules, &.{"unknown"}, true, 4).decision);
+    try std.testing.expectEqual(Decision.allow, evaluateProcess(&rules, &.{ read_tool, "--path=safe" }, false, 1).decision);
+    try std.testing.expectEqual(Reason.argument_not_allowed, evaluateProcess(&rules, &.{ read_tool, "--delete" }, false, 1).reason);
+    try std.testing.expectEqual(Decision.ask, evaluateProcess(&rules, &.{send_tool}, false, 2).decision);
+    try std.testing.expectEqual(Decision.allow, evaluateProcess(&rules, &.{send_tool}, true, 3).decision);
+    try std.testing.expectEqual(Decision.deny, evaluateProcess(&rules, &.{unknown_tool}, true, 4).decision);
+    try std.testing.expectEqual(Reason.malformed, evaluateProcess(&rules, &.{"read-tool"}, true, 4).reason);
     try std.testing.expectEqual(Reason.malformed, evaluateProcess(&rules, &.{}, true, 5).reason);
 }

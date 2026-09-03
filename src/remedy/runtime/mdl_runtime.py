@@ -57,19 +57,18 @@ def _health(base_url: str, timeout: float = 0.5) -> bool:
     base = (base_url or "").rstrip("/")
     if not base or not is_loopback_service_url(base):
         return False
-    url = base + "/models"
-    try:
-        req = Request(url, headers={"User-Agent": "RemedyAI-mdl/1.0"})
-        with urlopen_no_redirect(req, timeout=timeout) as resp:
-            return 200 <= getattr(resp, "status", 200) < 300
-    except Exception:
+    urls = [base + "/models"]
+    alternate = base.removesuffix("/v1") + "/models" if base.endswith("/v1") else base + "/v1/models"
+    if alternate not in urls:
+        urls.append(alternate)
+    for url in urls:
         try:
-            alt = base + "/v1/models" if not base.endswith("/v1") else base + "/models"
-            req = Request(alt, headers={"User-Agent": "RemedyAI-mdl/1.0"})
+            req = Request(url, headers={"User-Agent": "RemedyAI-mdl/1.0"})
             with urlopen_no_redirect(req, timeout=timeout) as resp:
                 return 200 <= getattr(resp, "status", 200) < 300
         except Exception:
-            return False
+            continue
+    return False
 
 
 def is_tier_running(tier_name: str) -> bool:
@@ -117,22 +116,19 @@ def stop_tier(tier_name: str) -> dict[str, Any]:
         return {"ok": False, "error": f"Unknown tier: {tier_name}"}
 
     proc = _tier_procs.get(tier_name)
-    killed = False
+    was_running = proc is not None and proc.poll() is None
 
-    if proc is not None and proc.poll() is None:
+    if was_running and proc is not None:
         with contextlib.suppress(Exception):
             proc.terminate()
             try:
                 proc.wait(timeout=5)
-                killed = True
             except subprocess.TimeoutExpired:
                 with contextlib.suppress(Exception):
                     proc.kill()
                     proc.wait(timeout=3)
-                killed = True
-        _tier_procs[tier_name] = None
 
-    if os.name == "nt" and proc is not None and proc.pid:
+    if os.name == "nt" and was_running and proc is not None and proc.pid:
         try:
             args = ["taskkill", "/F", "/PID", str(proc.pid), "/T"]
             from remedy.execution.process import hidden_subprocess_kwargs
@@ -145,11 +141,20 @@ def stop_tier(tier_name: str) -> dict[str, Any]:
                 check=False,
                 **hidden_subprocess_kwargs(),
             )
-            killed = True
         except (OSError, subprocess.TimeoutExpired):
             pass
 
-    return {"ok": True, "stopped": killed, "tier": tier_name}
+    still_running = proc is not None and proc.poll() is None
+    if not still_running:
+        _tier_procs[tier_name] = None
+    if was_running and still_running:
+        return {
+            "ok": False,
+            "stopped": False,
+            "tier": tier_name,
+            "error": "llama-server process is still running after terminate and kill",
+        }
+    return {"ok": True, "stopped": was_running, "tier": tier_name}
 
 
 def start_tier(
@@ -201,6 +206,8 @@ def start_tier(
     mpath = Path(model_path)
     if not mpath.is_file():
         return {"ok": False, "error": f"Model file not found: {model_path}"}
+    if mmproj_path and not Path(mmproj_path).is_file():
+        return {"ok": False, "error": f"Vision projection file not found: {mmproj_path}"}
 
     cmd: list[str] = [
         str(binary),
@@ -212,7 +219,7 @@ def start_tier(
 
     cmd.extend(["-ngl", str(n_gpu_layers) if n_gpu_layers is not None else str(tier.n_layers)])
 
-    if mmproj_path and Path(mmproj_path).is_file():
+    if mmproj_path:
         cmd.extend(["--mmproj", str(mmproj_path)])
 
     from remedy.execution.process import hidden_subprocess_kwargs

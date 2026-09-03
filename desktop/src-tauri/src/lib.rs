@@ -5439,6 +5439,7 @@ pub fn run() {
             match event {
                 tauri::RunEvent::ExitRequested { .. } => {
                     let state = app_handle.state::<ServerState>();
+                    state.app_exiting.store(true, Ordering::SeqCst);
                     if !state.attached_existing.load(Ordering::SeqCst) {
                         force_stop_remedy_processes();
                         force_stop_vision_processes();
@@ -5446,6 +5447,7 @@ pub fn run() {
                 }
                 tauri::RunEvent::Exit => {
                     let state = app_handle.state::<ServerState>();
+                    state.app_exiting.store(true, Ordering::SeqCst);
                     if !state.attached_existing.load(Ordering::SeqCst) {
                         force_stop_remedy_processes();
                         force_stop_vision_processes();

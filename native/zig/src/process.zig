@@ -10,6 +10,10 @@ pub fn validateArguments(argv: []const []const u8) error{InvalidArguments}!void 
     if (argv.len == 0 or argv.len > max_arguments or argv[0].len == 0) {
         return error.InvalidArguments;
     }
+    // Never let the process launcher perform a PATH/current-directory lookup
+    // after policy has approved a textual executable name. Callers retain the
+    // same tools by resolving them once into their trusted absolute identity.
+    if (!std.fs.path.isAbsolute(argv[0])) return error.InvalidArguments;
     var total: usize = 0;
     for (argv) |argument| {
         if (std.mem.indexOfScalar(u8, argument, 0) != null) return error.InvalidArguments;
@@ -46,16 +50,18 @@ test "process primitive rejects missing rights before spawning" {
 }
 
 test "process arguments reject malformed families" {
+    const trusted_tool = if (builtin.os.tag == .windows) "C:\\Remedy\\tool.exe" else "/opt/remedy/tool";
     try std.testing.expectError(error.InvalidArguments, validateArguments(&.{}));
     try std.testing.expectError(error.InvalidArguments, validateArguments(&.{""}));
-    try std.testing.expectError(error.InvalidArguments, validateArguments(&.{ "tool", "bad\x00arg" }));
-    try validateArguments(&.{ "tool", "--safe", "value" });
+    try std.testing.expectError(error.InvalidArguments, validateArguments(&.{ "tool", "--safe" }));
+    try std.testing.expectError(error.InvalidArguments, validateArguments(&.{ trusted_tool, "bad\x00arg" }));
+    try validateArguments(&.{ trusted_tool, "--safe", "value" });
 }
 
 test "process primitive captures bounded output" {
     const argv = switch (builtin.os.tag) {
-        .windows => &[_][]const u8{ "cmd.exe", "/d", "/c", "echo remedy" },
-        else => &[_][]const u8{ "sh", "-c", "printf remedy" },
+        .windows => &[_][]const u8{ "C:\\Windows\\System32\\cmd.exe", "/d", "/c", "echo remedy" },
+        else => &[_][]const u8{ "/bin/sh", "-c", "printf remedy" },
     };
     const result = try runCapture(
         std.testing.allocator,

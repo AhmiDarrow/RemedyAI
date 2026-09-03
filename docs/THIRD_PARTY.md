@@ -51,6 +51,18 @@ request** rather than bundled, so they are documented rather than attributed.
 - **Note:** Loopback only. If the binary is not ready yet, `web_search` uses
   DuckDuckGo's HTML results page instead.
 
+## Claimidx (local prior-art index)
+
+- **Project:** [claimidx/claimidx](https://github.com/claimidx/claimidx)
+- **Use:** Private local prior-art service started with Remedy
+  (`127.0.0.1:17340`)
+- **License:** **Apache License 2.0**
+- **Redistribution:** Downloaded from PyPI into `~/.remedy/claimidx`, never bundled
+- **Pin:** `CLAIMIDX_VERSION` and `CLAIMIDX_WHEEL_SHA256` in
+  `remedy.runtime.claimidx_host`
+- **Note:** The managed profile does not inherit global Claimidx credentials;
+  writes require its private token and public sharing is disabled by default.
+
 ## ripgrep
 
 - **Project:** [BurntSushi/ripgrep](https://github.com/BurntSushi/ripgrep)

@@ -139,7 +139,20 @@ def _ledger_path(home: str | Path | None = None) -> Path:
     return myelin_dir(home) / LEDGER_FILENAME
 
 
-_lock = threading.Lock()
+_lock = threading.RLock()
+
+
+def _invalidate_candidate_cache(home: str | Path | None) -> None:
+    """Forget derived candidates after a ledger or sheath write.
+
+    Explicit invalidation is required because shared/coarse filesystems can
+    preserve directory mtimes across an atomic update.
+    """
+    cache = globals().get("_cand_cache")
+    if not isinstance(cache, dict):
+        return
+    with _lock:
+        cache.pop(str(_home(home).resolve()), None)
 
 
 # --- pathway ledger --------------------------------------------------------
@@ -177,6 +190,7 @@ def save_ledger(ledger: dict[str, Any], home: str | Path | None = None) -> None:
         ledger["pathways"] = dict(keep)
     p = _ledger_path(home)
     write_json_atomic(p, ledger, ensure_ascii=False)
+    _invalidate_candidate_cache(home)
 
 
 def observe_pathway(user_text: str, home: str | Path | None = None) -> str:
@@ -258,6 +272,7 @@ def save_sheath(sheath: Sheath, home: str | Path | None = None) -> Path:
     d = sheath_path(sheath.slug, home)
     d.mkdir(parents=True, exist_ok=True)
     write_json_atomic(d / "sheath.json", sheath.to_dict(), ensure_ascii=False)
+    _invalidate_candidate_cache(home)
     return d
 
 

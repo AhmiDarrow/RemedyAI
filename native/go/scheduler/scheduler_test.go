@@ -142,3 +142,50 @@ func TestSnapshotRestoreRecoversRunningJobs(t *testing.T) {
 		t.Fatal("running job was not recovered")
 	}
 }
+
+func TestRuntimeBudgetCancelsExecutionAndExhaustsJob(t *testing.T) {
+	now := time.Now()
+	s := New(ExecutorFunc(func(ctx context.Context, _ Job) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}), time.Now)
+	if err := s.Add(Job{ID: "bounded", Trigger: Recurring, NextRun: now, Interval: time.Minute, Budget: Budget{MaxRuntime: 20 * time.Millisecond}}); err != nil {
+		t.Fatal(err)
+	}
+	done := s.Tick(context.Background(), now)
+	if len(done) != 1 || done[0].Status != Exhausted || done[0].LastError != "runtime budget exhausted" {
+		t.Fatalf("done = %#v", done)
+	}
+}
+
+func TestDeadlineCancelsExecution(t *testing.T) {
+	now := time.Now()
+	s := New(ExecutorFunc(func(ctx context.Context, _ Job) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}), time.Now)
+	if err := s.Add(Job{ID: "deadline", Trigger: OneShot, NextRun: now, Deadline: now.Add(20 * time.Millisecond)}); err != nil {
+		t.Fatal(err)
+	}
+	done := s.Tick(context.Background(), now)
+	if len(done) != 1 || done[0].Status != Failed || done[0].LastError != context.DeadlineExceeded.Error() {
+		t.Fatalf("done = %#v", done)
+	}
+}
+
+func TestParentDeadlineIsNotMisreportedAsRuntimeExhaustion(t *testing.T) {
+	now := time.Now()
+	parent, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	s := New(ExecutorFunc(func(ctx context.Context, _ Job) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}), time.Now)
+	if err := s.Add(Job{ID: "parent-deadline", Trigger: OneShot, NextRun: now, Budget: Budget{MaxRuntime: time.Second}}); err != nil {
+		t.Fatal(err)
+	}
+	done := s.Tick(parent, now)
+	if len(done) != 1 || done[0].Status != Failed || done[0].LastError != context.DeadlineExceeded.Error() {
+		t.Fatalf("done = %#v", done)
+	}
+}

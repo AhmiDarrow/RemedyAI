@@ -12,9 +12,10 @@ import (
 const ProtocolVersion = 1
 
 var (
-	ErrNoCapability     = errors.New("no worker supplies capability")
-	ErrProtocolMismatch = errors.New("worker protocol version mismatch")
-	ErrUncertainOutcome = errors.New("worker call outcome is uncertain; automatic replay blocked")
+	ErrNoCapability       = errors.New("no worker supplies capability")
+	ErrProtocolMismatch   = errors.New("worker protocol version mismatch")
+	ErrCapabilityMismatch = errors.New("worker capability negotiation mismatch")
+	ErrUncertainOutcome   = errors.New("worker call outcome is uncertain; automatic replay blocked")
 )
 
 type Capability string
@@ -240,10 +241,28 @@ func (w *managed) ready(ctx context.Context, factory Factory) (Worker, error) {
 		w.worker = nil
 		return nil, ErrProtocolMismatch
 	}
+	if !capabilitySetContains(health.Capabilities, w.spec.Capabilities) {
+		_ = w.worker.Close()
+		w.worker = nil
+		return nil, ErrCapabilityMismatch
+	}
 	if !health.Ready {
 		return nil, errors.New("worker is not ready")
 	}
 	return w.worker, nil
+}
+
+func capabilitySetContains(have, required []Capability) bool {
+	available := make(map[Capability]struct{}, len(have))
+	for _, capability := range have {
+		available[capability] = struct{}{}
+	}
+	for _, capability := range required {
+		if _, ok := available[capability]; !ok {
+			return false
+		}
+	}
+	return true
 }
 func bounded(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	if timeout <= 0 {

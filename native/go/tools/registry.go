@@ -14,11 +14,13 @@ import (
 )
 
 var (
-	ErrInvalidDescriptor = errors.New("invalid tool descriptor")
-	ErrAlreadyRegistered = errors.New("tool version is already registered")
-	ErrToolNotFound      = errors.New("tool version is not registered")
-	ErrInvalidInput      = errors.New("tool input failed schema validation")
-	ErrInvalidOutput     = errors.New("tool output failed schema validation")
+	ErrInvalidDescriptor     = errors.New("invalid tool descriptor")
+	ErrAlreadyRegistered     = errors.New("tool version is already registered")
+	ErrToolNotFound          = errors.New("tool version is not registered")
+	ErrInvalidInput          = errors.New("tool input failed schema validation")
+	ErrInvalidOutput         = errors.New("tool output failed schema validation")
+	ErrAuthorizationRequired = errors.New("tool authorization is required")
+	ErrUnauthorized          = errors.New("tool authorization failed")
 )
 
 type Risk uint8
@@ -69,6 +71,19 @@ func (f ExecutorFunc) Execute(ctx context.Context, request Request) (Result, err
 	return f(ctx, request)
 }
 
+// Authorizer verifies the immutable descriptor and request snapshot before an
+// executor receives control. Implementations validate capability tokens and
+// bind them to the descriptor's declared risk, capabilities, and permissions.
+type Authorizer interface {
+	Authorize(context.Context, Descriptor, Request) error
+}
+
+type AuthorizerFunc func(context.Context, Descriptor, Request) error
+
+func (f AuthorizerFunc) Authorize(ctx context.Context, descriptor Descriptor, request Request) error {
+	return f(ctx, descriptor, request)
+}
+
 type registered struct {
 	descriptor    Descriptor
 	input, output *jsonschema.Schema
@@ -79,17 +94,29 @@ type key struct {
 	version uint32
 }
 type Registry struct {
-	mu    sync.RWMutex
-	tools map[key]registered
+	mu         sync.RWMutex
+	tools      map[key]registered
+	authorizer Authorizer
 }
 
-func NewRegistry() *Registry { return &Registry{tools: make(map[key]registered)} }
+// NewRegistry accepts an optional process-wide authorizer. The variadic shape
+// keeps construction source-compatible while rejecting ambiguous policies.
+func NewRegistry(authorizers ...Authorizer) *Registry {
+	var authorizer Authorizer
+	if len(authorizers) == 1 {
+		authorizer = authorizers[0]
+	}
+	return &Registry{tools: make(map[key]registered), authorizer: authorizer}
+}
 
 func (r *Registry) Register(descriptor Descriptor, executor Executor) error {
 	if descriptor.ID == "" || descriptor.Version == 0 || descriptor.Description == "" || executor == nil {
 		return ErrInvalidDescriptor
 	}
 	if descriptor.Runtime != RuntimeGo && descriptor.Runtime != RuntimeZig && descriptor.Runtime != RuntimePython && descriptor.Runtime != RuntimeWASM {
+		return ErrInvalidDescriptor
+	}
+	if descriptor.Risk > RiskCheckpoint {
 		return ErrInvalidDescriptor
 	}
 	input, err := compileSchema(descriptor.ID+"-input", descriptor.InputSchema)
@@ -121,7 +148,7 @@ func (r *Registry) Resolve(id string, version uint32) (Descriptor, error) {
 	if !ok {
 		return Descriptor{}, ErrToolNotFound
 	}
-	return tool.descriptor, nil
+	return cloneDescriptor(tool.descriptor), nil
 }
 
 func (r *Registry) Latest(id string) (Descriptor, error) {
@@ -136,7 +163,7 @@ func (r *Registry) Latest(id string) (Descriptor, error) {
 	if latest.Version == 0 {
 		return Descriptor{}, ErrToolNotFound
 	}
-	return latest, nil
+	return cloneDescriptor(latest), nil
 }
 
 func (r *Registry) Execute(ctx context.Context, request Request) (Result, error) {
@@ -146,11 +173,23 @@ func (r *Registry) Execute(ctx context.Context, request Request) (Result, error)
 	if !ok {
 		return Result{}, ErrToolNotFound
 	}
-	input, err := decodeJSON(request.Input)
+	descriptor := cloneDescriptor(tool.descriptor)
+	execRequest := cloneRequest(request)
+	input, err := decodeJSON(execRequest.Input)
 	if err != nil || tool.input.Validate(input) != nil {
 		return Result{}, ErrInvalidInput
 	}
-	result, err := tool.executor.Execute(ctx, request)
+	protected := descriptor.Risk != RiskReadOnly || len(descriptor.Capabilities) != 0 || len(descriptor.Permissions) != 0
+	if protected {
+		if r.authorizer == nil || len(request.CapabilityToken) == 0 {
+			return Result{}, ErrAuthorizationRequired
+		}
+		authRequest := cloneRequest(request)
+		if err := r.authorizer.Authorize(ctx, descriptor, authRequest); err != nil {
+			return Result{}, fmt.Errorf("%w: %v", ErrUnauthorized, err)
+		}
+	}
+	result, err := tool.executor.Execute(ctx, execRequest)
 	if err != nil {
 		return result, err
 	}
@@ -159,6 +198,20 @@ func (r *Registry) Execute(ctx context.Context, request Request) (Result, error)
 		return Result{}, ErrInvalidOutput
 	}
 	return result, nil
+}
+
+func cloneDescriptor(descriptor Descriptor) Descriptor {
+	descriptor.Capabilities = append([]string(nil), descriptor.Capabilities...)
+	descriptor.Permissions = append([]string(nil), descriptor.Permissions...)
+	descriptor.InputSchema = append(json.RawMessage(nil), descriptor.InputSchema...)
+	descriptor.OutputSchema = append(json.RawMessage(nil), descriptor.OutputSchema...)
+	return descriptor
+}
+
+func cloneRequest(request Request) Request {
+	request.Input = append(json.RawMessage(nil), request.Input...)
+	request.CapabilityToken = append([]byte(nil), request.CapabilityToken...)
+	return request
 }
 
 func compileSchema(name string, raw json.RawMessage) (*jsonschema.Schema, error) {

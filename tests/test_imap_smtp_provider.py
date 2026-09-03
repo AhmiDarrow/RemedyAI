@@ -12,9 +12,7 @@ has no idea what that means.
 So these tests drive the real provider against the strict doubles in
 ``tests/harness/fake_mail.py`` and mostly assert the negative: what must be
 refused, who must *not* receive the message, what must not be flagged, what
-must always be closed, and which errors must not be swallowed. A handful of
-tests named ``test_BUG_...`` pin behaviour that is wrong but current, so that
-whoever fixes it finds out immediately.
+must always be closed, and which errors must not be swallowed.
 
 No socket is opened: ``imaplib``/``smtplib`` are replaced for the duration.
 """
@@ -602,12 +600,11 @@ def test_an_empty_subject_and_body_are_sent_as_empty_not_as_none(world):
     assert "(no subject)" in out["message"]
 
 
-def test_BUG_a_to_line_with_no_address_in_it_still_reports_success(world):
-    """Nothing was delivered: the envelope recipient list is empty. The caller
-    is told the mail was sent, and the owner believes it went out."""
-    out = provider().send_message(to="", subject="Hi", body="Hello")
-    assert out["ok"] is True
-    assert world.smtp.recipients == [()]
+def test_a_to_line_with_no_address_is_refused_before_smtp(world):
+    with pytest.raises(ValueError, match="recipient"):
+        provider().send_message(to="", subject="Hi", body="Hello")
+    assert world.smtp.connections == []
+    assert world.smtp.recipients == []
 
 
 def test_the_smtp_connection_is_closed_when_every_recipient_is_refused(monkeypatch):
@@ -666,14 +663,11 @@ def test_a_subject_that_is_already_a_reply_is_not_prefixed_again(
     assert world_.smtp.last_sent.subject == expected
 
 
-def test_BUG_replying_to_a_subjectless_message_sends_the_placeholder_label(monkeypatch):
-    """``get_message`` substitutes "(no subject)" for display, and the reply
-    path treats that as the real subject — so the recipient gets a mail titled
-    "Re: (no subject)" instead of an empty subject line."""
+def test_replying_to_a_subjectless_message_keeps_the_wire_subject_empty(monkeypatch):
     box = FakeMailbox({"INBOX": [FakeMessage(key="one", from_addr="a@x.test")]})
     world_ = install_fake_mail(monkeypatch, mailbox=box)
     provider().reply_to_message("1", body="ok")
-    assert world_.smtp.last_sent.subject == "Re: (no subject)"
+    assert world_.smtp.last_sent.subject == ""
 
 
 def test_the_references_chain_keeps_the_originals_and_adds_the_message_answered(world):

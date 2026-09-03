@@ -45,6 +45,10 @@ first use downloads pinned **SmolVLM2** weights plus **llama.cpp** `llama-server
 for this OS (`ubuntu-x64` CPU or `ubuntu-vulkan-x64` when a GPU is present) into
 `~/.remedy/vision/`.
 
+Claimidx is also downloaded and installed on first run rather than bundled. It
+runs as a private loopback helper from `~/.remedy/claimidx/`; a failed or
+offline download never prevents Remedy from starting.
+
 ## WSLg (Windows host, Linux UI)
 
 The Linux build talks to the **Windows work area** of the monitor the window is on (not a fake maximize that covers the taskbar). Close (✕) **minimizes to the Windows taskbar** — WSLg has no system tray. There is no “Start with Windows” toggle on Linux.
@@ -67,6 +71,7 @@ Data stays in `~/.remedy` on the Linux filesystem. If you share a home with Wind
 | Config | `~/.remedy/config.toml` |
 | Memory DB | `~/.remedy/memory.db` |
 | Auth / keys | `~/.remedy/auth/` |
+| Managed Claimidx | `~/.remedy/claimidx/` |
 
 ## See also
 

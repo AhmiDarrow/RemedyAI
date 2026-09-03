@@ -22,6 +22,7 @@ def test_tailscale_cli_finds_path(monkeypatch) -> None:
 
 
 def test_tailscale_cli_known_install_dir(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(tsb.sys, "platform", "win32")
     exe = tmp_path / "tailscale.exe"
     exe.write_bytes(b"x")
     monkeypatch.setattr(tsb.shutil, "which", lambda _exe: "")
@@ -172,6 +173,7 @@ def test_ensure_tailscale_downloads_and_launches(monkeypatch, tmp_path) -> None:
 
 
 def test_ensure_tailscale_download_error(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(tsb.sys, "platform", "win32")
     monkeypatch.setattr(tsb, "tailscale_installed", lambda: False)
     monkeypatch.setattr(
         tsb,

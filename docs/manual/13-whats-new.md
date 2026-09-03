@@ -2,14 +2,38 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current series: **v0.41.7** — life-task owner card, recipes, verify after writes.
+Current tree: **v0.48.0** — compatibility-first native runtime and hardened RemedyConnect.
 **Public** release is still **[v0.41.5](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.41.5)** · PyPI **`remedy-ai==0.41.5`**. Partner line still starts at 0.31.0.
 
 ## Contents
 
-- [Unreleased](#unreleased---grove-connect-phone-remote) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · [0.41.4](#0414---local-muscle-without-leftover-jobs) · [0.41.3](#0413---she-knows-the-house) · [0.41.2](#0412---closed-loop) · [0.41.1](#0411---checkpoints-on-the-wired-path) · [0.41.0](#0410---multilingual-plan-and-memory-authority) · [0.38.1](#0381---trust-gates) · [0.38.0](#0380---capability-architecture) · [0.31.2](#0312---this-round-this-folder) · [0.31.1](#0311---she-drives-her-own-ui) · [0.31.0](#0310---a-partner-for-any-ability-level) · [Hive](#hive) · [Research](#research) · [Game studio](#game-dev-studio) · [0.30.0](#0300---grove-voice-life-tasks-and-the-vault) · [0.26.2](#0262---host-in-remedys-hands) · [0.26.1](#0261---build-finishes) · [0.26.0](#0260---windows--linux-desktop) · [0.25.1](#0251---jail-stop-and-tab-isolation) · [0.25.0](#0250---stable-tabs--settings-chrome) · [0.24.0](#0240---host-bridge--first-home) · [0.23.2](#0232---defender-execution-false-positive) · [0.23.1](#0231---first-turn-agency) · [0.23.0](#0230---build-ability--companion) · [0.22.3](#0223---clear-mid-turn-stops) · [0.22.2](#0222---sleev-fail-open) · [0.22.1](#0221---sleev--gateway-lock) · [0.22.0](#0220---living-organism--builder-continuity) · [0.21.1](#0211---continuity--self-inject-safety) · [0.20.0](#0200---partner-metabolism--always-ready) · [0.19.0](#0190---parallel-multi-provider--background-turns) · older below
+- [Unreleased](#unreleased---claimidx-and-review-hardening) · [0.48.0](#0480---next-evolution-native-runtime) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
 
-## Unreleased - Grove Connect (phone remote)
+## Unreleased - Claimidx and review hardening
+
+First run installs a pinned, hash-verified Claimidx into an isolated private
+environment and starts its local prior-art service with Remedy. Setup is
+asynchronous and does not block an offline launch. Native runtime and
+RemedyConnect review fixes tighten authorization, bounded I/O, shutdown,
+reconnection, and rollback behavior without removing compatibility paths.
+
+## 0.48.0 - Next Evolution native runtime
+
+Remedy now includes a versioned Go nervous system and Zig capability core behind
+the compatibility-first runtime selector. The Python sidecar remains the default
+and fallback. Windows and Linux release builds carry the native components, while
+CI verifies Python, React, Rust, Go, Zig, Android, packaging, and both desktop OS
+targets. RemedyConnect gained native phone navigation, durable pairing, bounded
+networking, and server recovery when the phone closes or disconnects.
+
+## 0.47.0 - RemedyConnect cannot end Remedy
+
+The phone can stop only its own session, cannot shut down the desktop server,
+and reconnects after network loss. Native Grove, selectable sessions, terminal
+input, Tailscale setup, and a desktop server-restart control make Connect useful
+without giving it authority over Remedy's lifecycle.
+
+## 0.46.0 - RemedyConnect follows the PC
 
 **Settings → Connect** stays **off** until you turn it on. Pair a phone with a
 60-second QR on this PC. The phone drives **this computer**; it does not run

@@ -461,16 +461,14 @@ async def test_an_empty_kind_becomes_explore(
 
 
 @pytest.mark.asyncio
-async def test_an_unknown_kind_explores_but_loses_the_goal(
+async def test_an_unknown_kind_explores_with_the_goal(
     rt: FakeRuntime, job_calls: list[dict[str, Any]]
 ):
-    # Documents current behaviour: the fallback branch passes task.query only,
-    # so a goal-only task of an unrecognised kind explores with an empty query.
     out = await runner_mod._run_one(
         rt, SpreadTask(id="t1", kind="telepathy", goal="find the bug")
     )
     assert job_calls[0]["kind"] == "explore"
-    assert job_calls[0]["query"] == ""
+    assert job_calls[0]["query"] == "find the bug"
     assert out.kind == "telepathy", "the reported kind is not rewritten to explore"
 
 
@@ -752,7 +750,7 @@ async def test_a_search_uses_the_goal_when_no_query_is_given(
 async def test_a_search_with_zero_hits_still_reports_success(
     rt: FakeRuntime, monkeypatch
 ):
-    # Documents current behaviour: "searched and found nothing" is not a failure.
+    # A completed search with zero hits is still a successful observation.
     monkeypatch.setattr(
         "remedy.core.repo_search.search_repo", lambda root, q, **kw: ([], "ripgrep")
     )

@@ -167,7 +167,14 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) []Job {
 		}
 		s.mu.Unlock()
 		start := s.now()
-		err := s.executor.Execute(scheduledJob.ctx, clone(*job))
+		executionCtx, executionCancel, runtimeBound := boundedExecutionContext(scheduledJob.ctx, *job, start)
+		var err error
+		if executionCtx.Err() != nil {
+			err = executionCtx.Err()
+		} else {
+			err = s.executor.Execute(executionCtx, clone(*job))
+		}
+		executionCancel()
 		scheduledJob.cancel()
 		elapsed := s.now().Sub(start)
 		s.mu.Lock()
@@ -178,6 +185,9 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) []Job {
 		if job.Status == Canceled || errors.Is(err, context.Canceled) {
 			job.Status = Canceled
 			job.LastError = ""
+		} else if runtimeBound && errors.Is(err, context.DeadlineExceeded) {
+			job.Status = Exhausted
+			job.LastError = "runtime budget exhausted"
 		} else if err != nil {
 			job.Status = Failed
 			job.LastError = err.Error()
@@ -196,6 +206,31 @@ func (s *Scheduler) Tick(ctx context.Context, now time.Time) []Job {
 		s.mu.Unlock()
 	}
 	return completed
+}
+
+func boundedExecutionContext(parent context.Context, job Job, now time.Time) (context.Context, context.CancelFunc, bool) {
+	deadline, limited := parent.Deadline()
+	runtimeBound := false
+	if !job.Deadline.IsZero() && (!limited || job.Deadline.Before(deadline)) {
+		deadline = job.Deadline
+		limited = true
+		runtimeBound = false
+	}
+	if job.Budget.MaxRuntime > 0 {
+		remaining := job.Budget.MaxRuntime - job.Runtime
+		runtimeDeadline := now.Add(remaining)
+		if !limited || runtimeDeadline.Before(deadline) {
+			deadline = runtimeDeadline
+			limited = true
+			runtimeBound = true
+		}
+	}
+	if !limited {
+		ctx, cancel := context.WithCancel(parent)
+		return ctx, cancel, false
+	}
+	ctx, cancel := context.WithDeadline(parent, deadline)
+	return ctx, cancel, runtimeBound
 }
 func (s *Scheduler) Run(ctx context.Context, ticks <-chan time.Time) error {
 	for {

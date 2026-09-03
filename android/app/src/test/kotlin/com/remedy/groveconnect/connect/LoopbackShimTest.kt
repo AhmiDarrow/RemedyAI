@@ -124,6 +124,41 @@ class LoopbackShimTest {
         }
     }
 
+    @Test
+    fun trickledBodyCannotExtendTheAbsoluteDeadline() {
+        val shim = LoopbackShim(
+            bodyDeadlineMs = 150,
+            pipe = ShimPipe { _, _, _, _, output -> writeOk(output) },
+        )
+        val port = shim.start()
+        try {
+            Socket("127.0.0.1", port).use { sock ->
+                sock.soTimeout = 2_000
+                val output = sock.getOutputStream()
+                output.write(
+                    "POST /${shim.token}/ HTTP/1.1\r\nContent-Length: 64\r\n\r\n".toByteArray(),
+                )
+                output.flush()
+                val sender = thread(isDaemon = true) {
+                    try {
+                        repeat(64) {
+                            output.write('x'.code)
+                            output.flush()
+                            Thread.sleep(30)
+                        }
+                    } catch (_: Exception) {
+                        // Expected once the deadline closes the connection.
+                    }
+                }
+                val response = sock.getInputStream().readBytes().toString(Charsets.ISO_8859_1)
+                sender.join(1_000)
+                assertTrue(response.startsWith("HTTP/1.1 408"))
+            }
+        } finally {
+            shim.stop()
+        }
+    }
+
     private fun writeOk(output: java.io.OutputStream) {
         val body = "ok".toByteArray()
         output.write(

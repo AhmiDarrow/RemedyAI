@@ -13,9 +13,8 @@ to end. The second half doubles as the fidelity proof: if the provider works
 against these doubles the same way it works against Fastmail, the doubles are
 close enough.
 
-A handful of tests here document provider behaviour that is wrong but current
-(marked BUG). They pass on purpose — they are the regression net for whoever
-fixes it.
+Provider-level correctness tests live in ``tests/test_imap_smtp_provider.py``;
+this file keeps the doubles faithful to real protocol shapes.
 """
 
 from __future__ import annotations
@@ -551,6 +550,7 @@ def test_sending_records_exactly_what_would_have_left_the_machine(world):
     assert sent.subject == "Lunch"
     assert sent.body == "Tuesday works.\n"
     assert sent.header("Message-ID") == out["message_id"]
+    assert not any(ch.isspace() for ch in out["message_id"])
 
 
 def test_a_unicode_body_survives_the_round_trip(world):
@@ -726,7 +726,7 @@ def test_a_hand_built_mailbox_can_be_installed_instead_of_the_sample(monkeypatch
     assert world.mailbox is box
 
 
-# --- provider behaviour that is wrong but current ----------------------------
+# --- provider failure regressions --------------------------------------------
 
 
 def test_a_rejected_login_closes_the_connection_it_opened(world):

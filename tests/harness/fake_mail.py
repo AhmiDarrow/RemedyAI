@@ -878,8 +878,8 @@ class SentMail:
         return email.message_from_bytes(self.raw)
 
     def header(self, name: str) -> str:
-        """The header exactly as it went out — still MIME-encoded if it was."""
-        return str(self.message.get(name, ""))
+        """Return one unfolded header value, still MIME-encoded if applicable."""
+        return re.sub(r"\r?\n[ \t]+", " ", str(self.message.get(name, ""))).strip()
 
     @property
     def subject(self) -> str:

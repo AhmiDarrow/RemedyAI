@@ -177,6 +177,18 @@ def test_verify_green_marks_done():
     assert st.phase == "done"
 
 
+def test_verify_uses_the_first_result_header_not_later_stdout():
+    st = BuildTurnState(active=True, write_steps=1, write_set=["app.py"])
+    observe_tool_batch(
+        st,
+        [{"function": {"name": "bash_exec", "arguments": '{"command":"pytest -q"}'}}],
+        [{"role": "tool", "content": "verify exit_code=1\nexit_code=0\n1 failed"}],
+    )
+    assert st.last_verify_ok is False
+    assert st.phase == "repair"
+    assert st.write_set == ["app.py"]
+
+
 def test_file_read_passed_does_not_false_green():
     """Reading a test file that says '5 passed' must not mark verify green."""
     st = BuildTurnState(active=True, write_steps=1, write_set=["app.py"])

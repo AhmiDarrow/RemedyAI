@@ -41,6 +41,10 @@ jobs:
       - name: Test
         run: uv run pytest -q --tb=short
 
+      - name: Build Python distribution
+        if: matrix.python-version == '3.12'
+        run: uv build
+
   # Windows-first product: path/shell/secret-store regressions.
   test-windows:
     runs-on: windows-latest
@@ -57,35 +61,8 @@ jobs:
       - name: Import smoke
         run: uv run python -c "import remedy; from remedy.interfaces.api import create_app; create_app(); print('import OK')"
 
-      - name: Test (agency + security + windows-sensitive)
-        run: >
-          uv run pytest -q --tb=short
-          tests/test_agent_tool_batch.py
-          tests/test_agency_battery.py
-          tests/test_tool_call_pairing.py
-          tests/test_file_edit.py
-          tests/test_repo_search.py
-          tests/test_web_fetch_ssrf.py
-          tests/test_secret_store.py
-          tests/test_hidden_process.py
-          tests/test_react_stream.py
-          tests/test_react_policy.py
-          tests/test_project_write_jail.py
-          tests/test_shell_jail_fuzz.py
-          tests/test_win_paths.py
-          tests/test_uninstall_wipe_paths.py
-          tests/test_computer_use.py
-          tests/test_host_bridge.py
-          tests/test_api_auth.py
-          tests/test_access_scope.py
-          tests/test_zip_import_security.py
-          tests/test_secret_acl_no_everyone.py
-          tests/test_project_scan_jail.py
-          tests/test_instance_lock.py
-          tests/test_poll_lock.py
-          tests/test_stream_lock.py
-          tests/test_additive_followups.py
-          tests/test_quality_adversarial.py
+      - name: Full Windows test suite
+        run: uv run pytest -q --tb=short
 
   desktop:
     runs-on: ubuntu-latest
@@ -124,12 +101,12 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - name: Unit tests, lint, and APK build
+      - name: Unit tests, lint, and debug/release APK builds
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon test lintDebug assembleDebug
+          ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug assembleRelease
 
-  cargo-check:
+  rust-desktop:
     strategy:
       fail-fast: false
       matrix:
@@ -138,6 +115,10 @@ jobs:
     defaults:
       run:
         working-directory: desktop/src-tauri
+    # This job compiles/tests Rust only. Release jobs build and validate the
+    # actual sidecars, SPA, and bundle resources on both operating systems.
+    env:
+      TAURI_CONFIG: '{"bundle":{"active":false}}'
     steps:
       - uses: actions/checkout@v4
 
@@ -164,7 +145,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: cargo check
+      - name: Rust tests
+        run: cargo test --locked
+
+      - name: Rust compile check
         run: cargo check --locked
 
   native-core:
@@ -176,17 +160,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: native/go/go.mod
           cache-dependency-path: native/go/go.mod
 
-      - uses: mlugg/setup-zig@v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
 
       - name: Go tests
         run: go test ./...
+        working-directory: native/go
+
+      - name: Go race tests
+        if: runner.os == 'Linux'
+        run: go test -race ./...
         working-directory: native/go
 
       - name: Go vet
@@ -197,14 +186,29 @@ jobs:
         run: go run ./cmd/check-boundaries -root ..
         working-directory: native/go
 
-      - name: Native performance budgets
+      - name: Native performance budgets (Linux)
+        if: runner.os == 'Linux'
         run: go test -run=NONE -bench=. -benchtime=20x -benchmem ./benchmarks | go run ./cmd/benchcheck -budgets ../benchmarks/budgets.json -input -
+        working-directory: native/go
+
+      - name: Native performance budgets (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          go test ./benchmarks -run NONE -bench . -benchtime 20x -benchmem |
+            Out-File -FilePath ../benchmarks/latest-ci.txt -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go run ./cmd/benchcheck -budgets ../benchmarks/budgets.json -input ../benchmarks/latest-ci.txt
         working-directory: native/go
 
       - name: Zig tests
         run: zig build test
         working-directory: native/zig
 
-      - name: Zig build
-        run: zig build
+      - name: Zig release-safe tests
+        run: zig build test -Doptimize=ReleaseSafe
+        working-directory: native/zig
+
+      - name: Zig release-safe build
+        run: zig build -Doptimize=ReleaseSafe
         working-directory: native/zig

@@ -4283,7 +4283,7 @@ class ComputerExecutor:
 
         Strategy:
         1. Enqueue + ui_command (Desktop poller drives WebView).
-        2. Wait up to ~0.9s for host complete (normal path is 50–300ms).
+        2. Wait briefly for host complete (normal path is 50–300ms).
         3. If host is alive and still pending → return immediately with
            observed=false / pending_load (host will still open the page).
            Never burn 8–14s on open-url; never claim SUCCESS unseen.
@@ -4321,8 +4321,10 @@ class ComputerExecutor:
             out.setdefault("ok", True)
             out.setdefault("target", "browser")
             out.setdefault("action", "navigate")
-            # Brief settle so follow-up snapshot/click sees painted DOM
-            default_settle = 0.55 if optimistic else 0.35
+            # A confirmed navigation may briefly settle for its caller. An
+            # optimistic result is explicitly not ready for input, so sleeping
+            # here only delays the required follow-up observation.
+            default_settle = 0.0 if optimistic else 0.35
             raw_settle = payload.get("settle_s")
             settle = float(raw_settle) if raw_settle is not None else default_settle
             if settle > 0:
@@ -4354,7 +4356,7 @@ class ComputerExecutor:
             return _nav_ok(dict(finished.result), optimistic=False)
 
         # Brief re-read (host may complete mid-return) — abortable
-        for _ in range(8):
+        for _ in range(4):
             if self._abort_check():
                 return public_result(
                     ok=False,

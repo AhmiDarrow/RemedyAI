@@ -116,10 +116,21 @@ def _detect_install_source() -> str:
         if direct_url:
             import json
             info = json.loads(direct_url)
-            url = info.get("url", "")
-            if "git" in url or url.endswith(".git"):
-                if info.get("dir_info", {}).get("editable"):
-                    return "git-editable"
+            if not isinstance(info, dict):
+                return "unknown"
+            dir_info = info.get("dir_info")
+            if isinstance(dir_info, dict) and bool(dir_info.get("editable")):
+                return "git-editable"
+            url = str(info.get("url") or "").lower()
+            vcs_info = info.get("vcs_info")
+            vcs = (
+                str(vcs_info.get("vcs") or "").lower()
+                if isinstance(vcs_info, dict)
+                else ""
+            )
+            if vcs == "git" or url.endswith(".git") or url.startswith(
+                ("git+", "git://", "ssh://")
+            ):
                 return "git-folder"
         return "pip"
     except Exception:

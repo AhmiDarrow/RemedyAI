@@ -15,6 +15,7 @@ var (
 	ErrToolCallLimit           = errors.New("ReAct tool-call limit reached")
 	ErrNoProgress              = errors.New("ReAct made no progress")
 	ErrOwnerConfirmationNeeded = errors.New("owner confirmation required")
+	ErrIncompleteModelStream   = errors.New("model stream closed before completion")
 )
 
 type State string
@@ -143,13 +144,23 @@ func (e *Engine) Run(ctx context.Context, goal string) Outcome {
 			return out
 		}
 		var calls []ToolCall
+		completed := false
 		for event := range events {
 			out.Text += event.Text
+			completed = completed || event.Done
 			if event.ToolCall != nil {
 				calls = append(calls, *event.ToolCall)
 			}
 		}
 		if len(calls) == 0 {
+			if !completed {
+				out.Err = ErrIncompleteModelStream
+				if ctx.Err() != nil {
+					out.Err = ctx.Err()
+				}
+				trace(StateFailed, iteration, out.Err.Error())
+				return out
+			}
 			trace(StateComplete, iteration, "model completed without tools")
 			return out
 		}

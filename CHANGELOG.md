@@ -4,6 +4,16 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+### First-run Claimidx service
+
+- Remedy now downloads a pinned, sha256-verified Claimidx wheel on first run,
+  installs it in an isolated environment under `~/.remedy/claimidx`, seeds a
+  private local prior-art index, and starts it on loopback with Remedy.
+- Claimidx setup is asynchronous and failure-tolerant, so an offline or failed
+  download never blocks Remedy. The managed service does not inherit global
+  Claimidx credentials, uses a private write token, and keeps public sharing
+  disabled unless an owner separately opts in.
+
 ### RemedyConnect mobile hardening and recovery
 
 - Added a visible reconnect action, host-controlled native navigation, and
@@ -37,6 +47,49 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
   connection can no longer leave the desktop API offline without recovery.
 - Made the Go module's minimum patch version explicit so older Linux Go
   installations can bootstrap the declared 1.24 toolchain reliably.
+- Bound native tool authorization to immutable risk/capability metadata and
+  exact process operations, required absolute executable identities, and
+  pinned release workflow actions to reviewed commits.
+- Made native memory appends rollback-safe on partial writes, enforced job
+  runtime deadlines, closed idle IPC connections during shutdown, rejected
+  truncated model streams and incomplete worker capability negotiation, and
+  kept compatibility HTTP redirects on the exact loopback origin.
+- Strengthened hot JSON-state cache identity for atomic replacements on WSL and
+  coarse/shared filesystems so same-size writes cannot return stale memory.
+- Canonicalized outbound mail IDs independently of RFC header folding and
+  explicitly invalidated Myelin candidates after ledger or sheath writes, so
+  WSL filesystem timestamp granularity cannot surface already-covered work.
+- Removed a contradictory page-settle delay from unobserved optimistic Browser
+  navigation; the rail opens immediately and still requires a snapshot before
+  any follow-up input.
+
+### Complete verification matrix
+
+- Public CI now runs the full Python suite on Windows instead of a drifting
+  hand-picked file list, while Linux covers Python 3.12 and 3.13.
+- Release gates now include React tests/build, Rust tests/checks on Windows and
+  Linux, Android unit/lint/debug/release builds, Go race/vet/boundary/benchmark
+  checks, Zig debug and ReleaseSafe tests/builds, docs, and Python distributions.
+- Added a CI-matrix contract test so a shipped runtime or artifact cannot
+  silently lose its verification gate.
+- Rust CI now disables Tauri bundling only for compile/test jobs, avoiding
+  false missing-resource failures in clean checkouts while the separate
+  Windows and Linux release jobs continue to build and validate real bundle
+  resources.
+
+### Correctness and stale-contract sweep
+
+- Replaced tests that documented known-bad behavior with intended contracts:
+  mail rejects empty recipient lists and preserves subjectless replies, and
+  CLI settings retain leading-zero identifiers as strings.
+- Prevented build verification output from overriding a timed-out or failed
+  command with a later success-looking line, and made MDL health probing use
+  both supported model-list routes.
+- Made MDL startup reject missing projection files before spawn and made stop
+  report surviving model processes honestly instead of dropping their handle.
+- Preserved spread-task goals for unknown task kinds, rejected malformed
+  assistant budget structures, and made updater install-source detection honor
+  structured metadata without fragile URL-substring guesses.
 
 ## [0.48.0] — 2026-09-02
 

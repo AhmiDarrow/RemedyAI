@@ -6,10 +6,11 @@ on EVERY turn by the soul inject. Re-opening and re-parsing those files
 each turn is cheap on NVMe and painful on NTFS with antivirus hooks
 (each open can cost milliseconds).
 
-This cache keys parsed content by ``(mtime_ns, size)``: a read becomes
+This cache keys parsed content by ``(mtime_ns, ctime_ns, inode, size)``: a read becomes
 one ``stat`` (~microseconds) unless the file actually changed, in which
-case it is re-parsed once. Writers never need to invalidate — their
-atomic ``replace`` bumps the mtime and the next stat sees it. Callers
+case it is re-parsed once. The extra identity fields matter on shared and
+coarse-timestamp filesystems where two same-size atomic replacements can expose
+the same mtime. Writers never need to invalidate. Callers
 MUST treat returned objects as read-only (helpers that mutate should
 copy what they change; the organs' loaders build fresh dataclasses from
 the raw dicts, so sharing the parsed JSON is safe).
@@ -24,15 +25,15 @@ from pathlib import Path
 from typing import Any
 
 _lock = threading.Lock()
-_json_cache: dict[str, tuple[int, int, Any]] = {}
-_jsonl_cache: dict[str, tuple[int, int, list[dict[str, Any]]]] = {}
+_json_cache: dict[str, tuple[int, int, int, int, Any]] = {}
+_jsonl_cache: dict[str, tuple[int, int, int, int, list[dict[str, Any]]]] = {}
 _MAX_ENTRIES = 64
 
 
-def _stat_key(path: Path) -> tuple[int, int] | None:
+def _stat_key(path: Path) -> tuple[int, int, int, int] | None:
     try:
         st = path.stat()
-        return st.st_mtime_ns, st.st_size
+        return st.st_mtime_ns, st.st_ctime_ns, st.st_ino, st.st_size
     except OSError:
         return None
 
@@ -56,14 +57,14 @@ def read_json_cached(path: Path) -> Any | None:
         return None
     with _lock:
         hit = _json_cache.get(key)
-        if hit is not None and (hit[0], hit[1]) == stat:
-            return hit[2]
+        if hit is not None and hit[:4] == stat:
+            return hit[4]
     data: Any | None = None
     with suppress(OSError, json.JSONDecodeError, UnicodeError):
         data = json.loads(path.read_text(encoding="utf-8"))
     with _lock:
         if data is not None:
-            _json_cache[key] = (stat[0], stat[1], data)
+            _json_cache[key] = (*stat, data)
             _trim(_json_cache)
         else:
             _json_cache.pop(key, None)
@@ -83,8 +84,8 @@ def read_jsonl_cached(path: Path) -> list[dict[str, Any]]:
         return []
     with _lock:
         hit = _jsonl_cache.get(key)
-        if hit is not None and (hit[0], hit[1]) == stat:
-            return hit[2]
+        if hit is not None and hit[:4] == stat:
+            return hit[4]
     entries: list[dict[str, Any]] = []
     with suppress(OSError, UnicodeError):
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -93,7 +94,7 @@ def read_jsonl_cached(path: Path) -> list[dict[str, Any]]:
                 if isinstance(e, dict):
                     entries.append(e)
     with _lock:
-        _jsonl_cache[key] = (stat[0], stat[1], entries)
+        _jsonl_cache[key] = (*stat, entries)
         _trim(_jsonl_cache)
     return entries
 

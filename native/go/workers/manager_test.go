@@ -9,15 +9,16 @@ import (
 )
 
 type fakeWorker struct {
-	protocol int
-	ready    bool
-	call     func(context.Context, Request) (Response, error)
-	stream   func(context.Context, Request) (<-chan Response, error)
-	closed   atomic.Bool
+	protocol     int
+	ready        bool
+	capabilities []Capability
+	call         func(context.Context, Request) (Response, error)
+	stream       func(context.Context, Request) (<-chan Response, error)
+	closed       atomic.Bool
 }
 
 func (w *fakeWorker) Health(context.Context) (Health, error) {
-	return Health{Protocol: w.protocol, Ready: w.ready}, nil
+	return Health{Protocol: w.protocol, Ready: w.ready, Capabilities: w.capabilities}, nil
 }
 func (w *fakeWorker) Call(ctx context.Context, r Request) (Response, error) { return w.call(ctx, r) }
 func (w *fakeWorker) Stream(ctx context.Context, r Request) (<-chan Response, error) {
@@ -39,7 +40,7 @@ func TestCapabilityRoutingAndCrashRestart(t *testing.T) {
 	var connections atomic.Int32
 	manager := New(FactoryFunc(func(context.Context, Spec) (Worker, error) {
 		attempt := connections.Add(1)
-		return &fakeWorker{protocol: ProtocolVersion, ready: true, call: func(context.Context, Request) (Response, error) {
+		return &fakeWorker{protocol: ProtocolVersion, ready: true, capabilities: []Capability{Model, Vision}, call: func(context.Context, Request) (Response, error) {
 			if attempt == 1 {
 				return Response{}, errors.New("crash")
 			}
@@ -63,7 +64,7 @@ func TestNonIdempotentCallIsNeverReplayedAfterUncertainFailure(t *testing.T) {
 	var connections atomic.Int32
 	manager := New(FactoryFunc(func(context.Context, Spec) (Worker, error) {
 		connections.Add(1)
-		return &fakeWorker{protocol: ProtocolVersion, ready: true, call: func(context.Context, Request) (Response, error) {
+		return &fakeWorker{protocol: ProtocolVersion, ready: true, capabilities: []Capability{Research}, call: func(context.Context, Request) (Response, error) {
 			return Response{}, errors.New("response lost")
 		}}, nil
 	}))
@@ -81,14 +82,14 @@ func TestNonIdempotentCallIsNeverReplayedAfterUncertainFailure(t *testing.T) {
 
 func TestProtocolMismatchAndTimeout(t *testing.T) {
 	manager := New(FactoryFunc(func(context.Context, Spec) (Worker, error) {
-		return &fakeWorker{protocol: 99, ready: true, call: func(context.Context, Request) (Response, error) { return Response{}, nil }}, nil
+		return &fakeWorker{protocol: 99, ready: true, capabilities: []Capability{Research}, call: func(context.Context, Request) (Response, error) { return Response{}, nil }}, nil
 	}))
 	_ = manager.Register(Spec{ID: "old", Capabilities: []Capability{Research}})
 	if _, err := manager.Call(context.Background(), Request{Capability: Research}); !errors.Is(err, ErrProtocolMismatch) {
 		t.Fatalf("protocol=%v", err)
 	}
 	manager = New(FactoryFunc(func(context.Context, Spec) (Worker, error) {
-		return &fakeWorker{protocol: ProtocolVersion, ready: true, call: func(ctx context.Context, _ Request) (Response, error) { <-ctx.Done(); return Response{}, ctx.Err() }}, nil
+		return &fakeWorker{protocol: ProtocolVersion, ready: true, capabilities: []Capability{Speech}, call: func(ctx context.Context, _ Request) (Response, error) { <-ctx.Done(); return Response{}, ctx.Err() }}, nil
 	}))
 	_ = manager.Register(Spec{ID: "slow", Capabilities: []Capability{Speech}, CallTimeout: time.Millisecond})
 	if _, err := manager.Call(context.Background(), Request{Capability: Speech}); err == nil {
@@ -98,7 +99,7 @@ func TestProtocolMismatchAndTimeout(t *testing.T) {
 
 func TestStreamingSurface(t *testing.T) {
 	manager := New(FactoryFunc(func(context.Context, Spec) (Worker, error) {
-		return &fakeWorker{protocol: ProtocolVersion, ready: true, call: func(context.Context, Request) (Response, error) {
+		return &fakeWorker{protocol: ProtocolVersion, ready: true, capabilities: []Capability{Model}, call: func(context.Context, Request) (Response, error) {
 			return Response{Payload: []byte("chunk"), Final: true}, nil
 		}}, nil
 	}))
@@ -115,7 +116,7 @@ func TestStreamingSurface(t *testing.T) {
 func TestStreamingCancelsWorkerContextWhenConsumerCancels(t *testing.T) {
 	workerCanceled := make(chan struct{})
 	manager := New(FactoryFunc(func(context.Context, Spec) (Worker, error) {
-		return &fakeWorker{protocol: ProtocolVersion, ready: true, stream: func(ctx context.Context, _ Request) (<-chan Response, error) {
+		return &fakeWorker{protocol: ProtocolVersion, ready: true, capabilities: []Capability{Model}, stream: func(ctx context.Context, _ Request) (<-chan Response, error) {
 			stream := make(chan Response)
 			go func() {
 				<-ctx.Done()
@@ -150,8 +151,9 @@ func TestIncompleteStreamMarksWorkerForReconnect(t *testing.T) {
 	manager := New(FactoryFunc(func(context.Context, Spec) (Worker, error) {
 		attempt := connections.Add(1)
 		return &fakeWorker{
-			protocol: ProtocolVersion,
-			ready:    true,
+			protocol:     ProtocolVersion,
+			ready:        true,
+			capabilities: []Capability{Model},
 			call: func(context.Context, Request) (Response, error) {
 				return Response{Payload: []byte("reconnected"), Final: true}, nil
 			},
@@ -176,5 +178,28 @@ func TestIncompleteStreamMarksWorkerForReconnect(t *testing.T) {
 	response, err := manager.Call(context.Background(), Request{Capability: Model})
 	if err != nil || string(response.Payload) != "reconnected" || connections.Load() != 2 {
 		t.Fatalf("response=%#v err=%v connections=%d", response, err, connections.Load())
+	}
+}
+
+func TestCapabilityNegotiationRejectsWorkerMissingRegisteredCapability(t *testing.T) {
+	worker := &fakeWorker{
+		protocol:     ProtocolVersion,
+		ready:        true,
+		capabilities: []Capability{Model},
+		call: func(context.Context, Request) (Response, error) {
+			t.Fatal("mismatched worker received request")
+			return Response{}, nil
+		},
+	}
+	manager := New(FactoryFunc(func(context.Context, Spec) (Worker, error) { return worker, nil }))
+	defer manager.Close()
+	if err := manager.Register(Spec{ID: "incomplete", Capabilities: []Capability{Model, Vision}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Call(context.Background(), Request{Capability: Vision}); !errors.Is(err, ErrCapabilityMismatch) {
+		t.Fatalf("Call = %v", err)
+	}
+	if !worker.closed.Load() {
+		t.Fatal("mismatched worker was not closed")
 	}
 }

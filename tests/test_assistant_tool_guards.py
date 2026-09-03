@@ -1190,12 +1190,9 @@ async def test_a_malformed_category_list_is_reported_not_swallowed(tools, raw):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("raw", ['{"name": "food"}', "null", "42", '"food"'])
-async def test_valid_json_that_is_not_a_list_yields_no_categories(tools, raw):
-    """Documents current behaviour: only a JSON *list* is read; anything else
-    that parses is accepted quietly as 'no categories'."""
-    out = await _json(tools, "budget_set", label="2026-09", categories_json=raw)
-    assert out["ok"] is True
-    assert out["categories"] == []
+async def test_valid_json_that_is_not_a_list_is_refused(tools, raw):
+    out = await tools["budget_set"](label="2026-09", categories_json=raw)
+    assert out == "categories_json must be a JSON list of {name, planned}"
 
 
 @pytest.mark.asyncio

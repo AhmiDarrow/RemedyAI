@@ -1,7 +1,6 @@
 package com.remedy.groveconnect.connect
 
 import com.remedy.groveconnect.core.DenyPath
-import com.remedy.groveconnect.core.RecordCodec
 import com.remedy.groveconnect.core.ShimAuth
 import java.io.InputStream
 import java.io.OutputStream
@@ -28,6 +27,7 @@ fun interface ShimPipe {
 
 class LoopbackShim(
     private val headerDeadlineMs: Int = HEADER_TIMEOUT_MS,
+    private val bodyDeadlineMs: Int = BODY_TIMEOUT_MS,
     private val pipe: ShimPipe,
 ) {
     constructor(client: ConnectClient) : this(
@@ -133,6 +133,11 @@ class LoopbackShim(
                     writeResponse(s.getOutputStream(), 408, "text/plain; charset=utf-8", "Request headers timed out.".toByteArray())
                 } catch (_: Exception) {
                 }
+            } catch (_: BodyTimedOut) {
+                try {
+                    writeResponse(s.getOutputStream(), 408, "text/plain; charset=utf-8", "Request body timed out.".toByteArray())
+                } catch (_: Exception) {
+                }
             } catch (e: BadRequest) {
                 try {
                     writeResponse(s.getOutputStream(), 400, "text/plain; charset=utf-8", e.message.orEmpty().toByteArray())
@@ -156,6 +161,7 @@ class LoopbackShim(
     private class BodyTooLarge(val size: Int) : Exception("request body too large")
     private class HeaderTooLarge : Exception("request headers too large")
     private class HeaderTimedOut : Exception("request headers timed out")
+    private class BodyTimedOut : Exception("request body timed out")
     private class BadRequest(message: String) : Exception(message)
 
     private companion object {
@@ -164,13 +170,11 @@ class LoopbackShim(
         const val MAX_CLIENTS = 8
         const val MAX_PENDING = 16
         const val HEADER_TIMEOUT_MS = 10_000
+        const val BODY_TIMEOUT_MS = 30_000
     }
 
     private fun readRequest(sock: Socket, input: InputStream): ShimReq? {
         val headerBlock = readHeaders(sock, input) ?: return null
-        // Header reads tighten SO_TIMEOUT to the absolute time remaining.
-        // Restore the normal inactivity budget before reading a legitimate body.
-        sock.soTimeout = HEADER_TIMEOUT_MS
         val text = headerBlock.toString(Charsets.ISO_8859_1)
         val lines = text.split("\r\n")
         if (lines.isEmpty()) return null
@@ -188,13 +192,37 @@ class LoopbackShim(
         val cl = contentLengths.firstOrNull() ?: 0
         if (cl < 0) throw BadRequest("Invalid Content-Length.")
         if (cl > MAX_BODY) throw BodyTooLarge(cl)
-        val body = if (cl > 0) RecordCodec.readExact(input, cl) else ByteArray(0)
+        val body = if (cl > 0) readBody(sock, input, cl) else ByteArray(0)
         val forwarded = headers.filterNot {
             it.startsWith("Host:", ignoreCase = true) ||
                 it.startsWith("Content-Length:", ignoreCase = true) ||
                 it.startsWith("Connection:", ignoreCase = true)
         }.joinToString("\r\n")
         return ShimReq(method, target, forwarded, body)
+    }
+
+    /** Read an exact body under one wall-clock deadline, not a resettable idle timeout. */
+    private fun readBody(sock: Socket, input: InputStream, size: Int): ByteArray {
+        val body = ByteArray(size)
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(bodyDeadlineMs.toLong())
+        var offset = 0
+        while (offset < size) {
+            val remainingNanos = deadline - System.nanoTime()
+            if (remainingNanos <= 0) throw BodyTimedOut()
+            sock.soTimeout = TimeUnit.NANOSECONDS.toMillis(remainingNanos)
+                .coerceAtLeast(1)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
+            val read = try {
+                input.read(body, offset, size - offset)
+            } catch (_: SocketTimeoutException) {
+                throw BodyTimedOut()
+            }
+            if (read < 0) throw BadRequest("Incomplete request body.")
+            if (read == 0) continue
+            offset += read
+        }
+        return body
     }
 
     private fun readHeaders(sock: Socket, input: InputStream): ByteArray? {

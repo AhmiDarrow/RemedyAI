@@ -122,3 +122,29 @@ func TestServerRejectsDuplicateActiveCorrelationID(t *testing.T) {
 		t.Fatalf("original response = %#v", original)
 	}
 }
+
+func TestServeConnCancellationClosesIdleConnection(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	invoked := make(chan struct{}, 1)
+	go func() {
+		ServeConn(ctx, serverConn, HandlerFunc(func(context.Context, protocol.Frame) ([]protocol.Frame, error) {
+			invoked <- struct{}{}
+			return nil, nil
+		}))
+		close(done)
+	}()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("ServeConn remained blocked after context cancellation")
+	}
+	select {
+	case <-invoked:
+		t.Fatal("idle connection invoked handler")
+	default:
+	}
+}

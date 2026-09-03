@@ -38,6 +38,7 @@ Silent/passive/update installs may relaunch automatically.
 | Config | `%USERPROFILE%\.remedy\config.toml` |
 | Memory DB | `%USERPROFILE%\.remedy\memory.db` |
 | Auth / keys | `%USERPROFILE%\.remedy\auth\` |
+| Managed Claimidx | `%USERPROFILE%\.remedy\claimidx\` |
 | Desktop prefs | `%USERPROFILE%\.remedy\desktop.json` (and app data under `com.remedy.desktop` if present) |
 
 ## First launch
@@ -45,6 +46,10 @@ Silent/passive/update installs may relaunch automatically.
 1. Splash screen waits for the local API (`http://127.0.0.1:7400`).
 2. **Setup wizard** opens when setup is not completed (fresh install or wiped data).
 3. Complete [First run](02-first-run), then chat.
+
+Remedy also installs Claimidx after first launch. It is downloaded rather than
+bundled, verified before installation, and runs as a private loopback helper.
+An offline Claimidx download does not delay or disable Remedy.
 
 ## Always-ready (optional)
 

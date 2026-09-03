@@ -96,3 +96,35 @@ func TestEngineStopsRepeatedNoProgressAndToolCeilings(t *testing.T) {
 		t.Fatalf("ceiling = %v", out.Err)
 	}
 }
+
+func TestEngineRejectsStreamClosedWithoutDone(t *testing.T) {
+	engine := Engine{
+		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
+			return events(ModelEvent{Text: "partial"}), nil
+		}),
+		Tools:  toolFunc(func(context.Context, ToolCall) ToolResult { return ToolResult{} }),
+		Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
+	}
+	out := engine.Run(context.Background(), "goal")
+	if !errors.Is(out.Err, ErrIncompleteModelStream) || out.Text != "partial" {
+		t.Fatalf("outcome = %#v", out)
+	}
+}
+
+func TestEngineStillAcceptsToolCallStreamWithoutDone(t *testing.T) {
+	var calls atomic.Int32
+	engine := Engine{
+		Model: modelFunc(func(context.Context, Turn) (<-chan ModelEvent, error) {
+			if calls.Add(1) == 1 {
+				return events(ModelEvent{ToolCall: &ToolCall{ID: "1", Name: "read"}}), nil
+			}
+			return events(ModelEvent{Text: "complete", Done: true}), nil
+		}),
+		Tools:  toolFunc(func(context.Context, ToolCall) ToolResult { return ToolResult{ID: "1"} }),
+		Policy: policyFunc(func(context.Context, ToolCall) Decision { return Allow }),
+	}
+	out := engine.Run(context.Background(), "goal")
+	if out.Err != nil || out.Text != "complete" || len(out.Results) != 1 {
+		t.Fatalf("outcome = %#v", out)
+	}
+}

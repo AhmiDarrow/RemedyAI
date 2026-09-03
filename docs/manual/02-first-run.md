@@ -45,13 +45,17 @@ Optional default **project folder** — working directory for tools, shell, and 
 
 ### 5. On this PC
 
-Vision, voice, and local helpers **download automatically** the first time
+Vision, voice, Claimidx, and local helpers **download automatically** the first time
 Remedy starts. You can finish setup while they continue in the background.
 If the voice pack did not arrive, Settings → Voice has **Download Remedy's
 voice**. In Remedy Desktop the voice engines live in a small Python of their
 own under `~/.remedy/voice/runtime/` (downloaded and verified on first use,
 ~70 MB) together with her voice model. From a
 `pip` install, Advanced still shows the pip command.
+
+Claimidx is installed in its own environment under `~/.remedy/claimidx/`,
+seeded with prior art, and started with Remedy on `127.0.0.1:17340`. It uses a
+private database and write token. Public claim sharing remains off by default.
 
 ### 6. Ready
 

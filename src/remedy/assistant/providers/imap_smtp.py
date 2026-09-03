@@ -329,15 +329,17 @@ class ImapSmtpMailProvider:
                     raw = part[1]
                     break
             msg = email.message_from_bytes(raw)
+            subject_header = _decode(msg.get("Subject", ""))
             return MailMessage(
                 id=mid,
-                subject=_decode(msg.get("Subject", "")) or "(no subject)",
+                subject=subject_header or "(no subject)",
                 from_addr=_decode(msg.get("From", "")),
                 snippet=_body_text(msg)[:4000],
                 date=msg.get("Date", ""),
                 thread_id=msg.get("Message-ID", ""),
                 raw={
                     "message_id_header": msg.get("Message-ID", ""),
+                    "subject_header": subject_header,
                     "references": msg.get("References", ""),
                     "reply_to": _decode(msg.get("Reply-To", "")),
                     "cc": _decode(msg.get("Cc", "")),
@@ -358,16 +360,20 @@ class ImapSmtpMailProvider:
                 srv.quit()
 
     def send_message(self, *, to: str, subject: str, body: str) -> dict[str, Any]:
+        recipients = _addr_list(to)
+        if not recipients:
+            raise ValueError("At least one valid recipient address is required.")
         msg = MIMEText(body or "", "plain", "utf-8")
         msg["From"] = self.account.address
         msg["To"] = to
         msg["Subject"] = subject or ""
-        msg["Message-ID"] = email.utils.make_msgid()
+        message_id = email.utils.make_msgid()
+        msg["Message-ID"] = message_id
         msg["Date"] = email.utils.formatdate(localtime=True)
-        self._send(msg, _addr_list(to))
+        self._send(msg, recipients)
         return {
             "ok": True,
-            "message_id": msg["Message-ID"],
+            "message_id": message_id,
             "thread_id": "",
             "to": to,
             "subject": subject,
@@ -384,7 +390,8 @@ class ImapSmtpMailProvider:
         to_addr = str(raw.get("reply_to") or "") or original.from_addr
         if not to_addr:
             raise RuntimeError("Could not determine a reply address for that message.")
-        subject = original.subject or ""
+        raw_subject = raw.get("subject_header")
+        subject = str(raw_subject) if raw_subject is not None else (original.subject or "")
         if subject and not subject.lower().startswith("re:"):
             subject = f"Re: {subject}"
         references = " ".join(
@@ -394,7 +401,8 @@ class ImapSmtpMailProvider:
         msg["From"] = self.account.address
         msg["To"] = to_addr
         msg["Subject"] = subject
-        msg["Message-ID"] = email.utils.make_msgid()
+        message_id_out = email.utils.make_msgid()
+        msg["Message-ID"] = message_id_out
         msg["Date"] = email.utils.formatdate(localtime=True)
         if orig_id:
             msg["In-Reply-To"] = orig_id
@@ -407,7 +415,7 @@ class ImapSmtpMailProvider:
         self._send(msg, recipients)
         return {
             "ok": True,
-            "message_id": msg["Message-ID"],
+            "message_id": message_id_out,
             "thread_id": orig_id,
             "to": to_addr,
             "subject": subject,

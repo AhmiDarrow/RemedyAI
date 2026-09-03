@@ -524,8 +524,9 @@ async def run_auto_verify(
     # Count only real process results toward the auto-verify cap
     if hasattr(state, "auto_verify_cycles"):
         state.auto_verify_cycles = cycles + 1
-    # Official runner line only — stdout may mention other exit_code=0
-    m_exit = re.search(r"(?im)^(?:verify\s+)?exit_code=(\d+)", summary)
+    # Only the result header is authoritative. Process stdout follows it and
+    # may itself contain a line that says ``exit_code=0``.
+    m_exit = re.match(r"(?i)^\s*verify\s+exit_code=(-?\d+)\s*(?:\r?\n|$)", summary)
     if m_exit:
         ok = m_exit.group(1) == "0"
 
