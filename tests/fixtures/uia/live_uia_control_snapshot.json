@@ -1,15 +1,15 @@
 {
-  "source": "comtypes",
-  "captured_at": "2026-09-03T21:32:03+00:00",
+  "source": "host_binding",
+  "captured_at": "2026-09-03T22:01:37+00:00",
   "platform": "win32",
-  "notes": "Live capture from comtypes UI Automation before the Zig port. Do not inject input; do not write clipboard. Window acquisition: existing.",
+  "notes": "Live capture via desktop_uia → host_binding → Zig COM. Do not inject input; do not write clipboard. Window acquisition: existing.",
   "window": {
-    "hwnd": 1967332,
+    "hwnd": 4066618,
     "how": "existing"
   },
   "api": "uia_control_snapshot",
   "args": {
-    "hwnd": 1967332,
+    "hwnd": 4066618,
     "max_elements": 80,
     "preferred_only": true
   },
@@ -18,12 +18,12 @@
       "ref": "c1",
       "tag": "window",
       "role": "window",
-      "name": "New Text Document (6).txt - Notepad",
+      "name": "Untitled - Notepad",
       "x": 943,
       "y": 574,
       "w": 1090,
       "h": 748,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 398,
         "top": 200,
@@ -34,114 +34,330 @@
     },
     {
       "ref": "c2",
-      "tag": "button",
-      "role": "button",
-      "name": "OK",
-      "x": 1068,
-      "y": 634,
-      "w": 241,
-      "h": 32,
-      "hwnd": 1967332,
+      "tag": "pane",
+      "role": "pane",
+      "name": "PopupHost",
+      "x": 1391,
+      "y": 294,
+      "w": 37,
+      "h": 46,
+      "hwnd": 4066618,
       "bounds": {
-        "left": 948,
-        "top": 618,
-        "right": 1189,
-        "bottom": 650
+        "left": 1373,
+        "top": 271,
+        "right": 1410,
+        "bottom": 317
       },
       "uia": true
     },
     {
       "ref": "c3",
-      "tag": "tabitem",
-      "role": "tabitem",
-      "name": "google.txt. Unmodified.",
-      "x": 571,
-      "y": 226,
-      "w": 239,
-      "h": 32,
-      "hwnd": 1967332,
+      "tag": "pane",
+      "role": "pane",
+      "name": "PopupHost",
+      "x": 1091,
+      "y": 295,
+      "w": 38,
+      "h": 46,
+      "hwnd": 4066618,
       "bounds": {
-        "left": 452,
-        "top": 210,
-        "right": 691,
-        "bottom": 242
+        "left": 1072,
+        "top": 272,
+        "right": 1110,
+        "bottom": 318
       },
       "uia": true
     },
     {
       "ref": "c4",
-      "tag": "tabitem",
-      "role": "tabitem",
-      "name": "New Text Document (5).txt. Unmodified.",
-      "x": 810,
-      "y": 226,
-      "w": 239,
-      "h": 32,
-      "hwnd": 1967332,
+      "tag": "pane",
+      "role": "pane",
+      "name": "PopupHost",
+      "x": 1459,
+      "y": 295,
+      "w": 37,
+      "h": 46,
+      "hwnd": 4066618,
       "bounds": {
-        "left": 691,
-        "top": 210,
-        "right": 930,
-        "bottom": 242
+        "left": 1441,
+        "top": 272,
+        "right": 1478,
+        "bottom": 318
       },
       "uia": true
     },
     {
       "ref": "c5",
-      "tag": "tabitem",
-      "role": "tabitem",
-      "name": "New Text Document (6).txt. Unmodified.",
-      "x": 1049,
-      "y": 226,
-      "w": 247,
-      "h": 32,
-      "hwnd": 1967332,
+      "tag": "pane",
+      "role": "pane",
+      "name": "PopupHost",
+      "x": 1047,
+      "y": 295,
+      "w": 37,
+      "h": 46,
+      "hwnd": 4066618,
       "bounds": {
-        "left": 926,
-        "top": 210,
-        "right": 1173,
-        "bottom": 242
+        "left": 1029,
+        "top": 272,
+        "right": 1066,
+        "bottom": 318
       },
       "uia": true
     },
     {
       "ref": "c6",
-      "tag": "button",
-      "role": "button",
-      "name": "Close Tab",
-      "x": 1149,
-      "y": 226,
-      "w": 32,
-      "h": 24,
-      "hwnd": 1967332,
+      "tag": "pane",
+      "role": "pane",
+      "name": "PopupHost",
+      "x": 1003,
+      "y": 295,
+      "w": 38,
+      "h": 46,
+      "hwnd": 4066618,
       "bounds": {
-        "left": 1133,
-        "top": 214,
-        "right": 1165,
-        "bottom": 238
+        "left": 984,
+        "top": 272,
+        "right": 1022,
+        "bottom": 318
       },
       "uia": true
     },
     {
       "ref": "c7",
-      "tag": "button",
-      "role": "button",
-      "name": "Add New Tab",
-      "x": 1193,
-      "y": 228,
-      "w": 32,
-      "h": 24,
-      "hwnd": 1967332,
+      "tag": "pane",
+      "role": "pane",
+      "name": "PopupHost",
+      "x": 971,
+      "y": 295,
+      "w": 39,
+      "h": 46,
+      "hwnd": 4066618,
       "bounds": {
-        "left": 1177,
-        "top": 216,
-        "right": 1209,
-        "bottom": 240
+        "left": 952,
+        "top": 272,
+        "right": 991,
+        "bottom": 318
       },
       "uia": true
     },
     {
       "ref": "c8",
+      "tag": "pane",
+      "role": "pane",
+      "name": "PopupHost",
+      "x": 939,
+      "y": 295,
+      "w": 34,
+      "h": 46,
+      "hwnd": 4066618,
+      "bounds": {
+        "left": 922,
+        "top": 272,
+        "right": 956,
+        "bottom": 318
+      },
+      "uia": true
+    },
+    {
+      "ref": "c9",
+      "tag": "pane",
+      "role": "pane",
+      "name": "PopupHost",
+      "x": 907,
+      "y": 295,
+      "w": 37,
+      "h": 46,
+      "hwnd": 4066618,
+      "bounds": {
+        "left": 889,
+        "top": 272,
+        "right": 926,
+        "bottom": 318
+      },
+      "uia": true
+    },
+    {
+      "ref": "c10",
+      "tag": "pane",
+      "role": "pane",
+      "name": "PopupHost",
+      "x": 1344,
+      "y": 295,
+      "w": 38,
+      "h": 46,
+      "hwnd": 4066618,
+      "bounds": {
+        "left": 1325,
+        "top": 272,
+        "right": 1363,
+        "bottom": 318
+      },
+      "uia": true
+    },
+    {
+      "ref": "c11",
+      "tag": "pane",
+      "role": "pane",
+      "name": "PopupHost",
+      "x": 863,
+      "y": 295,
+      "w": 36,
+      "h": 46,
+      "hwnd": 4066618,
+      "bounds": {
+        "left": 845,
+        "top": 272,
+        "right": 881,
+        "bottom": 318
+      },
+      "uia": true
+    },
+    {
+      "ref": "c12",
+      "tag": "pane",
+      "role": "pane",
+      "name": "PopupHost",
+      "x": 807,
+      "y": 295,
+      "w": 39,
+      "h": 46,
+      "hwnd": 4066618,
+      "bounds": {
+        "left": 788,
+        "top": 272,
+        "right": 827,
+        "bottom": 318
+      },
+      "uia": true
+    },
+    {
+      "ref": "c13",
+      "tag": "pane",
+      "role": "pane",
+      "name": "PopupHost",
+      "x": 479,
+      "y": 295,
+      "w": 37,
+      "h": 46,
+      "hwnd": 4066618,
+      "bounds": {
+        "left": 461,
+        "top": 272,
+        "right": 498,
+        "bottom": 318
+      },
+      "uia": true
+    },
+    {
+      "ref": "c14",
+      "tag": "pane",
+      "role": "pane",
+      "name": "PopupHost",
+      "x": 1425,
+      "y": 295,
+      "w": 39,
+      "h": 46,
+      "hwnd": 4066618,
+      "bounds": {
+        "left": 1406,
+        "top": 272,
+        "right": 1445,
+        "bottom": 318
+      },
+      "uia": true
+    },
+    {
+      "ref": "c15",
+      "tag": "pane",
+      "role": "pane",
+      "name": "PopupHost",
+      "x": 429,
+      "y": 295,
+      "w": 36,
+      "h": 46,
+      "hwnd": 4066618,
+      "bounds": {
+        "left": 411,
+        "top": 272,
+        "right": 447,
+        "bottom": 318
+      },
+      "uia": true
+    },
+    {
+      "ref": "c16",
+      "tag": "pane",
+      "role": "pane",
+      "name": "PopupHost",
+      "x": 534,
+      "y": 295,
+      "w": 38,
+      "h": 46,
+      "hwnd": 4066618,
+      "bounds": {
+        "left": 515,
+        "top": 272,
+        "right": 553,
+        "bottom": 318
+      },
+      "uia": true
+    },
+    {
+      "ref": "c17",
+      "tag": "tabitem",
+      "role": "tabitem",
+      "name": "Untitled. Unmodified.",
+      "x": 571,
+      "y": 226,
+      "w": 246,
+      "h": 32,
+      "hwnd": 4066618,
+      "bounds": {
+        "left": 448,
+        "top": 210,
+        "right": 694,
+        "bottom": 242
+      },
+      "uia": true
+    },
+    {
+      "ref": "c18",
+      "tag": "button",
+      "role": "button",
+      "name": "Close Tab",
+      "x": 669,
+      "y": 226,
+      "w": 32,
+      "h": 24,
+      "hwnd": 4066618,
+      "bounds": {
+        "left": 653,
+        "top": 214,
+        "right": 685,
+        "bottom": 238
+      },
+      "uia": true
+    },
+    {
+      "ref": "c19",
+      "tag": "button",
+      "role": "button",
+      "name": "Add New Tab",
+      "x": 713,
+      "y": 228,
+      "w": 32,
+      "h": 24,
+      "hwnd": 4066618,
+      "bounds": {
+        "left": 697,
+        "top": 216,
+        "right": 729,
+        "bottom": 240
+      },
+      "uia": true
+    },
+    {
+      "ref": "c20",
       "tag": "menuitem",
       "role": "menuitem",
       "name": "File",
@@ -149,7 +365,7 @@
       "y": 258,
       "w": 41,
       "h": 32,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 408,
         "top": 242,
@@ -159,7 +375,7 @@
       "uia": true
     },
     {
-      "ref": "c9",
+      "ref": "c21",
       "tag": "menuitem",
       "role": "menuitem",
       "name": "Edit",
@@ -167,7 +383,7 @@
       "y": 258,
       "w": 44,
       "h": 32,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 457,
         "top": 242,
@@ -177,7 +393,7 @@
       "uia": true
     },
     {
-      "ref": "c10",
+      "ref": "c22",
       "tag": "menuitem",
       "role": "menuitem",
       "name": "View",
@@ -185,7 +401,7 @@
       "y": 258,
       "w": 50,
       "h": 32,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 509,
         "top": 242,
@@ -195,7 +411,7 @@
       "uia": true
     },
     {
-      "ref": "c11",
+      "ref": "c23",
       "tag": "button",
       "role": "button",
       "name": "Headings",
@@ -203,7 +419,7 @@
       "y": 258,
       "w": 56,
       "h": 32,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 779,
         "top": 242,
@@ -213,7 +429,7 @@
       "uia": true
     },
     {
-      "ref": "c12",
+      "ref": "c24",
       "tag": "button",
       "role": "button",
       "name": "Lists",
@@ -221,7 +437,7 @@
       "y": 258,
       "w": 56,
       "h": 32,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 835,
         "top": 242,
@@ -231,7 +447,7 @@
       "uia": true
     },
     {
-      "ref": "c13",
+      "ref": "c25",
       "tag": "button",
       "role": "button",
       "name": "Bold (Ctrl+B)",
@@ -239,7 +455,7 @@
       "y": 258,
       "w": 32,
       "h": 32,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 891,
         "top": 242,
@@ -249,7 +465,7 @@
       "uia": true
     },
     {
-      "ref": "c14",
+      "ref": "c26",
       "tag": "button",
       "role": "button",
       "name": "Italic (Ctrl+I)",
@@ -257,7 +473,7 @@
       "y": 258,
       "w": 32,
       "h": 32,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 923,
         "top": 242,
@@ -267,7 +483,7 @@
       "uia": true
     },
     {
-      "ref": "c15",
+      "ref": "c27",
       "tag": "button",
       "role": "button",
       "name": "Strikethrough (Ctrl+Shift+X)",
@@ -275,7 +491,7 @@
       "y": 258,
       "w": 32,
       "h": 32,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 955,
         "top": 242,
@@ -285,7 +501,7 @@
       "uia": true
     },
     {
-      "ref": "c16",
+      "ref": "c28",
       "tag": "button",
       "role": "button",
       "name": "Link (Ctrl+K)",
@@ -293,7 +509,7 @@
       "y": 258,
       "w": 32,
       "h": 32,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 987,
         "top": 242,
@@ -303,7 +519,7 @@
       "uia": true
     },
     {
-      "ref": "c17",
+      "ref": "c29",
       "tag": "button",
       "role": "button",
       "name": "Table",
@@ -311,7 +527,7 @@
       "y": 258,
       "w": 56,
       "h": 32,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 1019,
         "top": 242,
@@ -321,7 +537,7 @@
       "uia": true
     },
     {
-      "ref": "c18",
+      "ref": "c30",
       "tag": "button",
       "role": "button",
       "name": "Clear formatting (Ctrl+Space)",
@@ -329,7 +545,7 @@
       "y": 258,
       "w": 32,
       "h": 32,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 1075,
         "top": 242,
@@ -339,7 +555,7 @@
       "uia": true
     },
     {
-      "ref": "c19",
+      "ref": "c31",
       "tag": "button",
       "role": "button",
       "name": "Writing tools",
@@ -347,7 +563,7 @@
       "y": 258,
       "w": 56,
       "h": 32,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 1316,
         "top": 242,
@@ -357,7 +573,7 @@
       "uia": true
     },
     {
-      "ref": "c20",
+      "ref": "c32",
       "tag": "button",
       "role": "button",
       "name": "What's new",
@@ -365,7 +581,7 @@
       "y": 258,
       "w": 30,
       "h": 30,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 1376,
         "top": 243,
@@ -375,7 +591,7 @@
       "uia": true
     },
     {
-      "ref": "c21",
+      "ref": "c33",
       "tag": "button",
       "role": "button",
       "name": "User avatar",
@@ -383,7 +599,7 @@
       "y": 258,
       "w": 30,
       "h": 32,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 1410,
         "top": 242,
@@ -393,7 +609,7 @@
       "uia": true
     },
     {
-      "ref": "c22",
+      "ref": "c34",
       "tag": "button",
       "role": "button",
       "name": "Settings",
@@ -401,7 +617,7 @@
       "y": 258,
       "w": 30,
       "h": 32,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 1444,
         "top": 242,
@@ -411,7 +627,7 @@
       "uia": true
     },
     {
-      "ref": "c23",
+      "ref": "c35",
       "tag": "menuitem",
       "role": "menuitem",
       "name": "System",
@@ -419,7 +635,7 @@
       "y": 219,
       "w": 22,
       "h": 22,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 406,
         "top": 208,
@@ -429,7 +645,7 @@
       "uia": true
     },
     {
-      "ref": "c24",
+      "ref": "c36",
       "tag": "button",
       "role": "button",
       "name": "Minimize",
@@ -437,7 +653,7 @@
       "y": 216,
       "w": 47,
       "h": 30,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 1343,
         "top": 201,
@@ -447,7 +663,25 @@
       "uia": true
     },
     {
-      "ref": "c25",
+      "ref": "c37",
+      "tag": "button",
+      "role": "button",
+      "name": "Maximize",
+      "x": 1413,
+      "y": 216,
+      "w": 46,
+      "h": 30,
+      "hwnd": 4066618,
+      "bounds": {
+        "left": 1390,
+        "top": 201,
+        "right": 1436,
+        "bottom": 231
+      },
+      "uia": true
+    },
+    {
+      "ref": "c38",
       "tag": "button",
       "role": "button",
       "name": "Close",
@@ -455,7 +689,7 @@
       "y": 216,
       "w": 47,
       "h": 30,
-      "hwnd": 1967332,
+      "hwnd": 4066618,
       "bounds": {
         "left": 1436,
         "top": 201,

@@ -1,15 +1,15 @@
 # UIA fixtures (Phase 2 native cutover)
 
-Captured from the **comtypes** `desktop_uia` path before the Zig UI
-Automation port. Zig parity tests should match these shapes
-field-for-field.
+Contract shapes from ``fake_host_binding``; live shapes from
+``desktop_uia`` → ``host_binding`` → Zig COM. Parity tests should
+match these shapes field-for-field.
 
 ## Sources
 
 | Prefix | Meaning |
 |--------|---------|
-| `contract_*` | Deterministic shapes from `tests.harness.fake_win32` |
-| `live_*` | Real comtypes capture on Windows when UIA is available |
+| `contract_*` | Deterministic shapes from `tests.harness.fake_host_binding` |
+| `live_*` | Real Zig/host_binding capture on Windows when UIA is available |
 
 ## Regenerating
 

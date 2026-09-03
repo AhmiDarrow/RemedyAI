@@ -1,13 +1,15 @@
-"""ctypes prototypes for the ``remedy_core`` host surface (ABI 2).
+"""ctypes prototypes for the ``remedy_core`` host surface (ABI 3).
 
 This is the one place Python describes the C ABI declared in
 ``native/zig/include/remedy_core.h``. Every function here is a thin call into
 the library: it marshals arguments, checks the status, frees buffers the
 library allocated and returns plain Python values. Policy lives in the
-callers (``desktop_win``, ``execution.process``).
+callers (``desktop_win``, ``desktop_uia``, ``desktop_linux``,
+``execution.process``).
 
-Off Windows the library still loads and every host call reports
-:data:`STATUS_UNSUPPORTED`, which surfaces as :class:`HostError`.
+Windows: host + UIA. Linux: host (X11/XTest) + AT-SPI a11y snapshot.
+Other platforms: host/UIA/a11y calls report :data:`STATUS_UNSUPPORTED`
+(:class:`HostError`).
 """
 
 from __future__ import annotations
@@ -195,6 +197,36 @@ _PROTOTYPES: dict[str, tuple[list[Any], Any]] = {
     ),
     "remedy_core_process_kill_tree": ([c_uint32], c_int32),
     "remedy_core_process_close": ([c_uint64], c_int32),
+    "remedy_core_uia_available": ([POINTER(c_uint8)], c_int32),
+    "remedy_core_uia_control_snapshot": (
+        [c_uint64, c_uint32, c_uint8, POINTER(_BytePtr), POINTER(c_size_t)],
+        c_int32,
+    ),
+    "remedy_core_uia_read_window_text": (
+        [c_uint64, c_uint32, POINTER(_BytePtr), POINTER(c_size_t)],
+        c_int32,
+    ),
+    "remedy_core_uia_focused_element": ([POINTER(_BytePtr), POINTER(c_size_t)], c_int32),
+    "remedy_core_uia_element_action": (
+        [
+            c_uint64,
+            c_char_p,
+            c_size_t,
+            c_char_p,
+            c_size_t,
+            c_char_p,
+            c_size_t,
+            c_char_p,
+            c_size_t,
+            POINTER(_BytePtr),
+            POINTER(c_size_t),
+        ],
+        c_int32,
+    ),
+    "remedy_core_a11y_snapshot": (
+        [c_uint32, POINTER(_BytePtr), POINTER(c_size_t)],
+        c_int32,
+    ),
 }
 
 _bound: Any = None
@@ -619,3 +651,137 @@ def process_kill_tree(pid: int) -> None:
 def process_close(handle: int) -> None:
     library = _lib()
     _check(library, "process_close", library.remedy_core_process_close(handle))
+
+
+# --- UI Automation (ABI 3) ---------------------------------------------------
+
+
+def _take_json(library: Any, ptr: Any, length: Any) -> Any:
+    """Parse a library JSON buffer; ``null`` becomes ``None``."""
+    raw = _take(library, ptr, length)
+    if not raw or raw == b"null":
+        return None
+    return json.loads(raw)
+
+
+def uia_available() -> bool:
+    """True when ``CoCreateInstance(CUIAutomation)`` succeeds on this thread."""
+    if sys.platform != "win32":
+        return False
+    try:
+        library = _lib()
+    except NativeRuntimeUnavailableError:
+        return False
+    flag = c_uint8()
+    status = library.remedy_core_uia_available(ctypes.byref(flag))
+    if status == STATUS_UNSUPPORTED:
+        return False
+    _check(library, "uia_available", status)
+    return bool(flag.value)
+
+
+def uia_control_snapshot(
+    hwnd: int = 0,
+    max_elements: int = 80,
+    preferred_only: bool = True,
+) -> list[dict[str, Any]] | None:
+    """Control tree as a list of dicts, or ``None`` when UIA found nothing."""
+    library = _lib()
+    ptr, length = _BytePtr(), c_size_t()
+    _check(
+        library,
+        "uia_control_snapshot",
+        library.remedy_core_uia_control_snapshot(
+            hwnd,
+            max_elements,
+            1 if preferred_only else 0,
+            ctypes.byref(ptr),
+            ctypes.byref(length),
+        ),
+    )
+    result = _take_json(library, ptr, length)
+    if result is None:
+        return None
+    if not isinstance(result, list):
+        return None
+    return result or None
+
+
+def uia_read_window_text(hwnd: int, max_chars: int = 12000) -> dict[str, Any] | None:
+    library = _lib()
+    ptr, length = _BytePtr(), c_size_t()
+    _check(
+        library,
+        "uia_read_window_text",
+        library.remedy_core_uia_read_window_text(
+            hwnd, max_chars, ctypes.byref(ptr), ctypes.byref(length)
+        ),
+    )
+    result = _take_json(library, ptr, length)
+    return result if isinstance(result, dict) else None
+
+
+def uia_focused_element() -> dict[str, Any] | None:
+    library = _lib()
+    ptr, length = _BytePtr(), c_size_t()
+    _check(
+        library,
+        "uia_focused_element",
+        library.remedy_core_uia_focused_element(ctypes.byref(ptr), ctypes.byref(length)),
+    )
+    result = _take_json(library, ptr, length)
+    return result if isinstance(result, dict) else None
+
+
+def uia_element_action(
+    hwnd: int,
+    name: str,
+    *,
+    role: str = "",
+    action: str = "invoke",
+    text: str = "",
+) -> dict[str, Any]:
+    library = _lib()
+    name_raw, role_raw = _utf8(name), _utf8(role)
+    action_raw, text_raw = _utf8(action), _utf8(text)
+    ptr, length = _BytePtr(), c_size_t()
+    _check(
+        library,
+        "uia_element_action",
+        library.remedy_core_uia_element_action(
+            hwnd,
+            name_raw,
+            len(name_raw),
+            role_raw,
+            len(role_raw),
+            action_raw,
+            len(action_raw),
+            text_raw,
+            len(text_raw),
+            ctypes.byref(ptr),
+            ctypes.byref(length),
+        ),
+    )
+    result = _take_json(library, ptr, length)
+    if isinstance(result, dict):
+        return result
+    return {"ok": False, "message": f"UIA element {name!r} not found in hwnd={hwnd} (re-snapshot?)"}
+
+
+def a11y_snapshot(limit: int = 40) -> list[dict[str, Any]]:
+    """Linux AT-SPI clickables as dicts; empty list when unavailable / non-Linux."""
+    try:
+        library = _lib()
+    except NativeRuntimeUnavailableError:
+        return []
+    ptr, length = _BytePtr(), c_size_t()
+    status = library.remedy_core_a11y_snapshot(
+        max(1, int(limit)), ctypes.byref(ptr), ctypes.byref(length)
+    )
+    if status == STATUS_UNSUPPORTED:
+        return []
+    _check(library, "a11y_snapshot", status)
+    result = _take_json(library, ptr, length)
+    if not isinstance(result, list):
+        return []
+    return result

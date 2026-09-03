@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from remedy.core.computer import desktop_linux as lin
+from remedy.core.computer import host_binding as H
 
 
 def _synthetic_frame(width: int, height: int, boxes: list[tuple]) -> tuple:
@@ -121,20 +122,43 @@ def test_linux_detect_respects_max_marks(monkeypatch) -> None:
     assert len(lin.detect_ui_candidates(raw, stride, w, h, max_marks=5)) <= 5
 
 
-def test_linux_missing_binaries_fail_closed(monkeypatch) -> None:
-    monkeypatch.setattr(lin, "_which", lambda *n: None)
+def test_linux_host_fail_closed(monkeypatch) -> None:
+    """Without a Linux host/display, input fails closed (no silent no-op)."""
     monkeypatch.setattr(lin, "_require_linux", lambda: None)
-    with pytest.raises(RuntimeError, match="xdotool or ydotool"):
+
+    def boom(*_a, **_k):
+        raise H.HostError("mouse_drag", H.STATUS_UNSUPPORTED)
+
+    monkeypatch.setattr(H, "mouse_drag", boom)
+    monkeypatch.setattr(H, "mouse_scroll", boom)
+    monkeypatch.setattr(H, "mouse_move", boom)
+    monkeypatch.setattr(H, "mouse_button", boom)
+    monkeypatch.setattr(H, "focus_window", boom)
+    monkeypatch.setattr(H, "manage_window", boom)
+    with pytest.raises(RuntimeError, match="remedy_core"):
         lin.press_hold(1, 1, hold_ms=50)
-    with pytest.raises(RuntimeError, match="xdotool or ydotool"):
+    with pytest.raises(RuntimeError, match="remedy_core"):
         lin.scroll(1, 1)
-    with pytest.raises(RuntimeError, match="xdotool or ydotool"):
+    with pytest.raises(RuntimeError, match="remedy_core"):
         lin.drag(0, 0, 1, 1)
     assert hasattr(lin, "focus_window")
     assert callable(lin.focus_window)
     assert lin.focus_window(1) is False
     res = lin.manage_window(1, "restore")
     assert res.get("ok") is False
+
+
+def test_linux_module_has_no_pointer_tool_shellout() -> None:
+    """Phase 2 cutover: no external pointer/capture tool argv remains."""
+    src = Path(lin.__file__).read_text(encoding="utf-8")
+    # Strip the module docstring so the banlist is about call sites.
+    if src.startswith('"""'):
+        end = src.find('"""', 3)
+        body = src[end + 3 :] if end != -1 else src
+    else:
+        body = src
+    for banned in ("xdotool", "ydotool", "wmctrl", "grim", "scrot", "gnome-screenshot", "xsel"):
+        assert banned not in body, f"banned tool name still in desktop_linux.py: {banned}"
 
 
 def test_linux_detect_atspi_still_runs_on_tiny_capture(monkeypatch) -> None:
@@ -149,65 +173,6 @@ def test_linux_detect_atspi_still_runs_on_tiny_capture(monkeypatch) -> None:
     monkeypatch.setattr(lin, "_ocr_word_candidates", lambda *a, **k: [])
     cands = lin.detect_ui_candidates(b"\x00" * 40, 12, 10, 10)
     assert cands[0]["name"] == "Open"
-
-
-class _Rect:
-    def __init__(self, x: int, y: int, width: int, height: int) -> None:
-        self.x, self.y, self.width, self.height = x, y, width, height
-
-
-class _Comp:
-    def __init__(self, rect: _Rect) -> None:
-        self._rect = rect
-
-    def get_extents(self, _coord: int = 0) -> _Rect:
-        return self._rect
-
-
-class _Acc:
-    def __init__(
-        self,
-        name: str,
-        role: str,
-        *,
-        extents: tuple[int, int, int, int] | None = None,
-        children: list[_Acc] | None = None,
-    ) -> None:
-        self._name = name
-        self._role = role
-        self._extents = extents
-        self._children = children or []
-
-    def get_name(self) -> str:
-        return self._name
-
-    def get_role_name(self) -> str:
-        return self._role
-
-    def get_child_count(self) -> int:
-        return len(self._children)
-
-    def get_child_at_index(self, i: int) -> _Acc:
-        return self._children[i]
-
-    def get_component_iface(self) -> _Comp | None:
-        if self._extents is None:
-            return None
-        return _Comp(_Rect(*self._extents))
-
-
-def test_walk_atspi_tree_collects_clickable_fakes() -> None:
-    ok = _Acc("OK", "push button", extents=(10, 20, 80, 24))
-    cancel = _Acc("Cancel", "push button", extents=(100, 20, 80, 24))
-    filler = _Acc("", "filler", extents=(0, 0, 800, 600))
-    frame = _Acc("App", "frame", extents=(0, 0, 800, 600), children=[ok, cancel, filler])
-    desktop = _Acc("desktop", "desktop frame", children=[frame])
-    cands = lin._walk_atspi_tree(desktop, max_marks=10)
-    names = {c["name"] for c in cands}
-    assert "OK" in names
-    assert "Cancel" in names
-    assert "App" not in names
-    assert all(c["source"] == "atspi" for c in cands)
 
 
 def test_ocr_word_candidates_from_fake_tesseract(monkeypatch) -> None:
@@ -256,6 +221,13 @@ def test_desktop_snapshot_auto_empty_when_no_atspi(monkeypatch) -> None:
     assert wins[0]["ref"] == "w1"
     assert wins[0]["name"] == "Game"
 
+
+def test_atspi_binding_returns_list_on_non_linux() -> None:
+    """host_binding.a11y_snapshot is empty / unsupported off Linux, never raises."""
+    got = H.a11y_snapshot(10)
+    assert isinstance(got, list)
+
+
 def test_png_roundtrip_keeps_bright_box(tmp_path: Path) -> None:
     w, h = 64, 48
     raw, stride = _synthetic_frame(w, h, [(8, 8, 40, 28)])
@@ -265,6 +237,5 @@ def test_png_roundtrip_keeps_bright_box(tmp_path: Path) -> None:
     assert decoded is not None
     got, gs, gw, gh = decoded
     assert (gw, gh, gs) == (w, h, stride)
-    # center of the bright box stays bright after RGB roundtrip
     o = 18 * gs + 20 * 3
     assert got[o] > 200 and got[o + 1] > 200 and got[o + 2] > 200
