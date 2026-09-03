@@ -33,6 +33,13 @@ def _stem(token: str) -> str:
     return name.lower()
 
 
+def _expected_host(value: str) -> str:
+    """Resolve fixture host tokens. ``<DEFAULT>`` is cmd on Windows, posix elsewhere."""
+    if value == "<DEFAULT>":
+        return "cmd" if sys.platform == "win32" else "posix"
+    return value
+
+
 def _norm_argv_token(token: str, script_path: str | None) -> str:
     if script_path and os.path.normcase(token) == os.path.normcase(script_path):
         return "<SCRIPT_PATH>"
@@ -77,7 +84,7 @@ def test_host_op_prepare_matches_fixture(case: dict, tmp_path: Path) -> None:
     if "display" in expected:
         assert got.get("display") == expected["display"]
     if "host" in expected:
-        assert got.get("host") == expected["host"]
+        assert got.get("host") == _expected_host(str(expected["host"]))
     if "script_suffix" in expected:
         script_path = got["script_path"]
         assert isinstance(script_path, str)
@@ -135,3 +142,12 @@ def test_prepare_host_op_raw_still_uses_command_path() -> None:
     prepared = prepare_host_op(HostOp(kind="raw", text="chmod +x run.sh", host="cmd"))
     assert prepared.kind == "noop"
     assert prepared.argv == []
+
+
+@pytest.mark.usefixtures("_require_abi4_core")
+def test_prepare_host_op_default_host_follows_os(tmp_path: Path) -> None:
+    prepared = prepare_host_op(
+        HostOp(kind="run", argv=["git", "status"]),
+        scratch_dir=tmp_path,
+    )
+    assert prepared.host == ("cmd" if sys.platform == "win32" else "posix")
