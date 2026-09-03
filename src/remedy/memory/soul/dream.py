@@ -214,15 +214,15 @@ def dream_cycle(
         if len(t) >= 8 and not looks_like_secret_soul(t):
             thread_counts[t[:160]] += 1
     promoted_threads = 0
-    from remedy.core.metabolism.time_crystal import looks_like_job_resume_fact
+    from remedy.core.metabolism.time_crystal import looks_like_work_residue
 
     for thr, n in thread_counts.most_common(5):
         if n >= 2:
             # Title-case lightly for human inject
             pretty = thr[:1].upper() + thr[1:] if thr else thr
-            # Job-resume residue ("Continue: …", "Stay with: Continue…")
-            # is not a life pledge and must not become a mission.
-            if looks_like_job_resume_fact(pretty):
+            # Work residue ("Continue: …", a project path, a build arc) is
+            # session memory — never a relational thread, pledge or mission.
+            if looks_like_work_residue(pretty):
                 continue
             if pretty not in sf.relational.open_threads:
                 sf.relational.open_threads.append(pretty[:160])
@@ -231,7 +231,7 @@ def dream_cycle(
             # recurring thread is a recall of it — reconsolidate its trace.
             if n >= 3:
                 stay = f"Stay with: {pretty[:140]}"
-                if looks_like_job_resume_fact(stay):
+                if looks_like_work_residue(stay):
                     continue
                 if stay not in sf.pledges:
                     sf.pledges.append(stay)
@@ -243,6 +243,8 @@ def dream_cycle(
         arc = e.arc or ""
         if re.search(r"(?i)\b(always|never|prefer|from now on)\b", arc):
             line = re.sub(r"\s+", " ", arc)[:120]
+            if looks_like_work_residue(line):
+                continue  # an "intent=… | user: …" arc is a job, not a habit
             if line and line not in sf.self_habits and not looks_like_secret_soul(line):
                 sf.self_habits.append(line)
                 habit_n += 1
@@ -305,6 +307,8 @@ def dream_cycle(
         composed = compose_partner_dreams(sf, profile=profile_for_dream, limit=5)
         dreams_n = apply_partner_dreams(sf, composed)
         for d in sf.future_dreams[:3]:
+            if looks_like_work_residue(d) or looks_like_work_residue(d.split(":", 1)[0]):
+                continue
             if d not in sf.self_habits and d.startswith("Toward "):
                 # One self-habit from the hottest dream so "memory of myself" grows
                 move = d.split(":", 1)[-1].strip()
@@ -312,16 +316,29 @@ def dream_cycle(
                     sf.self_habits.append(move[:120])
                     break
 
-    # Optional: push strongest open thread into Partner Memory if store given
+    # Optional: push strongest *relational* open thread into Partner Memory.
+    # Work residue never becomes a partner fact — "Ongoing focus: continue:
+    # C:\\…\\Old-Remedy review" showed up in every tab's Memory panel.
     partner_added = 0
-    if memory is not None and sf.relational.open_threads:
+    _clean_threads = [
+        t for t in sf.relational.open_threads if t and not looks_like_work_residue(t)
+    ]
+    if memory is not None:
         with suppress(Exception):
-            from remedy.memory.partner_memory import upsert_profile_fact
+            from remedy.memory.partner_memory import (
+                purge_work_residue_facts,
+                upsert_profile_fact,
+            )
 
-            top = sf.relational.open_threads[-1]
+            top = _clean_threads[-1] if _clean_threads else ""
 
             async def _add() -> int:
                 profile = await memory.get_or_create_profile()
+                purged = purge_work_residue_facts(profile)
+                if not top:
+                    if purged:
+                        await memory.save_user_profile(profile)
+                    return 0
                 _f, action = upsert_profile_fact(
                     profile,
                     f"Ongoing focus: {top}",

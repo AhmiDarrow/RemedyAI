@@ -87,12 +87,16 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         if memory is None:
             raise HTTPException(503, "Memory store not available")
 
+        from remedy.memory.partner_memory import fact_is_work_residue
+
         profile = await memory.get_or_create_profile()
         facts = []
         for f in list(getattr(profile, "facts", None) or []):
             auth = str(getattr(f, "authority", "") or "")
             if auth == "hive":
                 continue
+            if fact_is_work_residue(f):
+                continue  # another tab's job is not a partner fact
             text = str(getattr(f, "fact", "") or "").strip()
             if not text:
                 continue

@@ -11,7 +11,7 @@ import re
 from contextlib import suppress
 from typing import Any
 
-from remedy.core.metabolism.time_crystal import looks_like_job_resume_fact
+from remedy.core.metabolism.time_crystal import looks_like_work_residue
 from remedy.memory.soul.field import load_soul_field
 
 
@@ -42,9 +42,10 @@ def collect_soul_mission_candidates(
         # Soft filter: skip pure emotional residue
         if re.search(r"(?i)^(lol|thanks|hi|hello)\b", g):
             return
-        # Leftover "Stay with: Continue…" / resume-the-last-job lines are
-        # session residue, not work she should arm as a mission.
-        if looks_like_job_resume_fact(g):
+        # Leftover "Stay with: Continue…" / resume-the-last-job lines and
+        # anything naming a project path are session residue, not work she
+        # should arm as a mission for whatever tab happens to dream next.
+        if looks_like_work_residue(g):
             return
         out.append(
             {

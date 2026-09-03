@@ -46,6 +46,7 @@ def recall_unified(
     limit: int = 12,
     profile: Any = None,
     budget_s: float = RECALL_BUDGET_S,
+    project_path: str | None = None,
 ) -> str:
     """Return a ranked markdown brief for agent/tool use.
 
@@ -62,17 +63,36 @@ def recall_unified(
     hits: list[tuple[float, str, str]] = []  # score, source, line
 
     sf = load_soul_field(home)
-    # Soul: episodes, pledges, tensions, habits
-    for ep in sf.episodes:
+    from remedy.core.metabolism.time_crystal import looks_like_work_residue
+    from remedy.memory.soul.inject import episode_in_scope
+
+    _proj = str(project_path or "")
+    _sid = str(session_id or "")
+
+    def _clean(text: str) -> bool:
+        return bool(text) and not looks_like_work_residue(text)
+
+    # Soul: episodes (scoped to this session / project), pledges, threads,
+    # habits, dreams. Work residue from another tab is never recalled — that
+    # is how "Old-Remedy review" reached a claimidx session as "Ongoing focus".
+    episodes = [
+        ep for ep in sf.episodes
+        if episode_in_scope(ep, project_path=_proj, session_id=_sid)
+    ]
+    for ep in episodes:
         line = ep.line()
         s = _score(qtok, line) + 0.05
         if s > 0.1 or not qtok:
             hits.append((s, "episode", line))
     for p in sf.pledges:
+        if not _clean(p):
+            continue
         s = _score(qtok, p) + 0.2
         if s > 0.15 or not qtok:
             hits.append((s, "pledge", p))
     for t in sf.relational.open_threads:
+        if not _clean(t):
+            continue
         s = _score(qtok, t) + 0.25
         if s > 0.15 or not qtok:
             hits.append((s, "open_thread", t))
@@ -81,10 +101,14 @@ def recall_unified(
         if s > 0.15 or not qtok:
             hits.append((s, "tension", t))
     for h in sf.self_habits:
+        if not _clean(h):
+            continue
         s = _score(qtok, h) + 0.1
         if s > 0.15 or not qtok:
             hits.append((s, "habit", h))
     for d in getattr(sf, "future_dreams", None) or []:
+        if not _clean(d) or not _clean(d.split(":", 1)[0]):
+            continue
         s = _score(qtok, d) + 0.22
         if s > 0.15 or not qtok:
             hits.append((s, "dream", d))
@@ -149,18 +173,22 @@ def recall_unified(
                 if line:
                     src_by_line.setdefault(line, src)
 
-            for ep in sf.episodes:
+            for ep in episodes:
                 _add_cand("episode", ep.line())
             for p in sf.pledges:
-                _add_cand("pledge", p)
+                if _clean(p):
+                    _add_cand("pledge", p)
             for t in sf.relational.open_threads:
-                _add_cand("open_thread", t)
+                if _clean(t):
+                    _add_cand("open_thread", t)
             for t in sf.relational.tensions:
                 _add_cand("tension", t)
             for h in sf.self_habits:
-                _add_cand("habit", h)
+                if _clean(h):
+                    _add_cand("habit", h)
             for d in getattr(sf, "future_dreams", None) or []:
-                _add_cand("dream", d)
+                if _clean(d) and _clean(d.split(":", 1)[0]):
+                    _add_cand("dream", d)
             for les in sf.organism_lessons[-8:]:
                 _add_cand("organism", les.line())
 
@@ -184,8 +212,14 @@ def recall_unified(
             break
 
     if not ranked:
-        # Fallback: inject slim soul block
-        block = build_soul_context_block(home=home, include_contract=False, max_chars=800)
+        # Fallback: inject slim soul block (same scope as the ranked path)
+        block = build_soul_context_block(
+            home=home,
+            include_contract=False,
+            max_chars=800,
+            project_path=_proj,
+            session_id=_sid,
+        )
         if block:
             return "Soul recall (no query hits — field snapshot):\n" + block
         return "Nothing recalled yet. Talk, build, and remember — the field densifies over turns."
@@ -204,6 +238,7 @@ async def recall_unified_async(
     session_id: str | None = None,
     limit: int = 12,
     budget_s: float = RECALL_BUDGET_S,
+    project_path: str | None = None,
 ) -> str:
     """Event-loop-safe recall: partner profile awaited here, the rest in a thread.
 
@@ -229,6 +264,7 @@ async def recall_unified_async(
                 limit=limit,
                 profile=profile,
                 budget_s=budget_s,
+                project_path=project_path,
             ),
             timeout=budget_s,
         )

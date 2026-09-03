@@ -581,6 +581,42 @@ def _project_key(path: str | None) -> str:
     return p
 
 
+#: Sources whose facts Remedy inferred on her own. An owner-stated fact that
+#: happens to contain a path ("my repo is at C:\\dev\\x") is theirs to keep.
+_INFERRED_SOURCES = frozenset(
+    ("inferred", "soul_dream", "brief", "agent", "tool", "consolidate", "session")
+)
+
+
+def fact_is_work_residue(fact: Any) -> bool:
+    """True for an inferred fact that names a job, not the person.
+
+    "Ongoing focus: continue: C:\\…\\Old-Remedy review" was written by the
+    soul dream from another tab's build and then shown in every project's
+    Memory panel and inject. Owner-authored facts are never treated as residue.
+    """
+    try:
+        from remedy.core.metabolism.time_crystal import looks_like_work_residue
+    except Exception:
+        return False
+    text = str(getattr(fact, "fact", "") or "")
+    if not looks_like_work_residue(text):
+        return False
+    if str(getattr(fact, "authority", "") or "") == "owner":
+        return False
+    src = str(getattr(fact, "source", "") or "").strip().lower()
+    if src in ("explicit", "user", "owner"):
+        return False
+    return src in _INFERRED_SOURCES or bool(getattr(fact, "inferred", False))
+
+
+def purge_work_residue_facts(profile: UserProfile) -> int:
+    """Remove inferred work-residue facts from *profile* in place."""
+    before = len(profile.facts)
+    profile.facts = [f for f in profile.facts if not fact_is_work_residue(f)]
+    return before - len(profile.facts)
+
+
 def rank_injectable_facts(
     profile: UserProfile,
     *,
@@ -598,6 +634,8 @@ def rank_injectable_facts(
         if not f.pinned and f.confidence < min_confidence:
             continue
         if looks_like_secret(f.fact):
+            continue
+        if fact_is_work_residue(f):
             continue
         # Project-scoped: include global + matching project; skip other projects
         fproj = _project_key(getattr(f, "project_path", None))

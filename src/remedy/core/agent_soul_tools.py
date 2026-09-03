@@ -74,12 +74,18 @@ def register_soul_tools(runtime: Any) -> None:
         from remedy.core.turn_context import turn_session_id
         from remedy.memory.soul.recall import recall_unified_async
 
+        _proj = ""
+        try:
+            _proj = str(runtime.effective_project_path() or "")
+        except Exception:
+            _proj = ""
         return await recall_unified_async(
             query or "",
             home=_home(),
             memory=getattr(runtime, "memory", None),
             session_id=turn_session_id(runtime),
             limit=int(limit or 12),
+            project_path=_proj,
         )
 
     async def soul_dream(force: bool = False, use_local: bool = True) -> str:

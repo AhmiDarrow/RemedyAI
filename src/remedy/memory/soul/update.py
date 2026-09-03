@@ -179,18 +179,35 @@ def _compress_arc(user_text: str, assistant_text: str, brief: Any = None) -> str
     return arc[:240]
 
 
+def _work_thread(brief: Any = None) -> str:
+    """The session's open *work* item (task / next step / intent).
+
+    Session-scoped by nature: it names a job in one project. It may live in
+    the episode residue (stamped with session_id + project_hint) and the
+    session Time Crystal, never in ``relational.open_threads`` — that list is
+    owner-global and lands in every tab's inject.
+    """
+    if brief is None:
+        return ""
+    with suppress(Exception):
+        tasks = list(getattr(brief, "open_tasks", None) or [])
+        if tasks:
+            return str(tasks[0])[:160]
+        nxt = list(getattr(brief, "next_steps", None) or [])
+        if nxt:
+            return str(nxt[0])[:160]
+        intent = str(getattr(brief, "intent", "") or "").strip()
+        if intent:
+            return f"continue: {intent[:140]}"
+    return ""
+
+
 def _open_thread(user_text: str, brief: Any = None) -> str:
-    if brief is not None:
-        with suppress(Exception):
-            tasks = list(getattr(brief, "open_tasks", None) or [])
-            if tasks:
-                return str(tasks[0])[:160]
-            nxt = list(getattr(brief, "next_steps", None) or [])
-            if nxt:
-                return str(nxt[0])[:160]
-            intent = str(getattr(brief, "intent", "") or "").strip()
-            if intent:
-                return f"continue: {intent[:140]}"
+    """A *relational* open thread — something to check in about later.
+
+    Only explicit forward-looking cues from the person qualify. Work items
+    from the Session Brief are session memory (see ``_work_thread``).
+    """
     u = (user_text or "").strip()
     if re.search(r"(?i)\b(later|tomorrow|remind|don'?t forget|next time)\b", u):
         return u[:160]
@@ -300,10 +317,21 @@ def update_soul_after_turn(
         if snippet and snippet not in rel.tensions:
             rel.tensions.append(f"revision: {snippet}")
 
+    from remedy.core.metabolism.time_crystal import looks_like_work_residue
+
     open_t = _open_thread(ut, brief)
-    if open_t and open_t not in rel.open_threads:
+    work_t = _work_thread(brief)
+    if (
+        open_t
+        and not looks_like_work_residue(open_t)
+        and open_t not in rel.open_threads
+    ):
         rel.open_threads.append(open_t)
         rel.open_threads = rel.open_threads[-10:]
+    # What the episode remembers as "open": the work item first (it is what
+    # "mid-flight" means), else the relational cue. Episodes carry session_id
+    # and project_hint, so readers can scope them; the relational list cannot.
+    episode_open = work_t or open_t
 
     # Soft self-habits from repeated successful doer patterns
     if at and rel.help_mode == "silent-doer" and len(at) < 800:
@@ -328,7 +356,7 @@ def update_soul_after_turn(
         ts=now_ts,
         arc=_compress_arc(ut, at, brief),
         user_stance=_stance(ut),
-        open_thread=open_t,
+        open_thread=episode_open,
         valence=val,
         muscle=muscle[:80],
         session_id=str(session_id or "")[:80],
@@ -350,9 +378,12 @@ def update_soul_after_turn(
         )
 
         tc = get_time_crystal(str(session_id or "") or "default")
-        if open_t and len(open_t) >= 12:
-            if not looks_like_job_resume_fact(open_t, source="soul_open_thread"):
-                tc.admit(open_t, horizon="session", source="soul_open_thread")
+        # The session crystal is the right home for this session's work item.
+        for _thread in (work_t, open_t):
+            if _thread and len(_thread) >= 12:
+                if not looks_like_job_resume_fact(_thread, source="soul_open_thread"):
+                    tc.admit(_thread, horizon="session", source="soul_open_thread")
+                break
 
         for p in sf.pledges[-2:]:
             # Identity pledges stay life. "Stay with: Continue…" is last-tab

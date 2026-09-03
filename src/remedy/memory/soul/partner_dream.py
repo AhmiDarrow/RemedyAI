@@ -57,9 +57,14 @@ def collect_user_goals(
             goals.extend(life_goal_lines(profile, limit=6))
         except Exception:
             pass
+    from remedy.core.metabolism.time_crystal import looks_like_work_residue
+
     for p in sf.pledges:
-        goals.append(p)
+        if not looks_like_work_residue(p):
+            goals.append(p)
     for t in sf.relational.open_threads[-6:]:
+        if looks_like_work_residue(t):
+            continue  # a job in one project is not a life goal
         if re.search(r"(?i)\b(goal|ship|finish|launch|family|life)\b", t) or len(t) >= 16:
             goals.append(t)
     cleaned: list[str] = []

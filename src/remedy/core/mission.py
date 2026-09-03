@@ -27,6 +27,8 @@ class Mission:
     id: str
     goal: str
     session_id: str | None = None
+    # Project the mission belongs to (empty for legacy / unbound missions).
+    project_path: str | None = None
     status: str = "active"  # active | completed | blocked | cancelled
     steps: list[MissionStep] = field(default_factory=list)
     verify_command: str | None = None
@@ -47,6 +49,7 @@ class Mission:
             id=str(data.get("id") or uuid.uuid4()),
             goal=str(data.get("goal") or ""),
             session_id=data.get("session_id"),
+            project_path=data.get("project_path") or None,
             status=str(data.get("status") or "active"),
             steps=steps,
             verify_command=data.get("verify_command"),
@@ -151,16 +154,31 @@ class MissionStore:
         return None
 
     def latest(self, session_id: str | None = None) -> Mission | None:
+        """The session's own latest mission.
+
+        With a *session_id* only that session's pointer counts — the global
+        ``latest.txt`` is another tab's job and used to be handed to a fresh
+        session as its active mission (the build engine then resumed a
+        different project's goal). The global pointer serves only anonymous
+        callers (CLI, no session).
+        """
         from remedy.core.security import sanitize_mission_session_id
 
         sid = sanitize_mission_session_id(session_id)
         if sid:
             ptr = self.root / f"latest-{sid}.txt"
-            if ptr.is_file():
-                mid = ptr.read_text(encoding="utf-8").strip()
-                m = self.get(mid)
-                if m:
-                    return m
+            if not ptr.is_file():
+                return None
+            mid = ptr.read_text(encoding="utf-8").strip()
+            m = self.get(mid)
+            if m is None:
+                return None
+            # A pointer that names a mission stamped for another session is
+            # stale bookkeeping, not this session's work.
+            if m.session_id and m.session_id != sid:
+                return None
+            return m
+        # No usable session id (CLI, tests, legacy callers): the global pointer.
         ptr = self.root / "latest.txt"
         if ptr.is_file():
             return self.get(ptr.read_text(encoding="utf-8").strip())
@@ -174,12 +192,14 @@ def create_mission(
     session_id: str | None = None,
     verify_command: str | None = None,
     home: str | Path | None = None,
+    project_path: str | None = None,
 ) -> Mission:
     store = MissionStore(home)
     m = Mission(
         id=str(uuid.uuid4()),
         goal=coerce_text_arg(goal),
         session_id=session_id,
+        project_path=(str(project_path).strip() or None) if project_path else None,
         verify_command=coerce_verify_command(verify_command) or None,
         steps=[
             MissionStep(id=str(uuid.uuid4())[:8], title=title)
