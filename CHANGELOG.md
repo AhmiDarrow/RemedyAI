@@ -4,6 +4,14 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+## [0.50.2] - 2026-09-03
+
+- A cloud provider 5xx whose body says "unavailable" no longer wakes RMB. The
+  ReAct loop only treats a 502/503 as "local host loading" when the binding is
+  local, and implicit RMB starts (mid-turn recovery, provider wake) refuse to
+  spawn a host on a machine where RMB was never set up: no enabled rmb.json
+  with a GGUF on disk means no watchdog, no vision unload, no GGUF load.
+
 ## [0.50.1] - 2026-09-03
 
 - Version bump for local testing of the Windows desktop installer and RemedyConnect APK.
