@@ -145,35 +145,21 @@ async def test_hive_note_not_in_parent_search(tmp_path: Path):
     assert "daughter should not leak" not in blob
 
 
-def test_vault_length_not_in_set_value_message(monkeypatch):
+def test_vault_length_not_in_set_value_message():
+    """Password set_value must not echo the secret or its length in the message."""
     from remedy.core.computer import desktop_uia as uia
+    from tests.harness.fake_host_binding import install_fake_host_uia
+    from tests.harness.fake_win32 import FakeUIAutomation, uia_element
 
-    class El:
-        def GetCurrentPattern(self, _pat):
-            return self
-
-        def QueryInterface(self, _iface):
-            return self
-
-        def SetValue(self, text):
-            self._v = text
-
-        @property
-        def CurrentValue(self):
-            return ""
-
-    monkeypatch.setattr(
-        uia,
-        "_find_live_element",
-        lambda *a, **k: (El(), SimpleNamespace(IUIAutomationValuePattern=object())),
-    )
-    monkeypatch.setattr(uia, "_el_role", lambda _e: "password")
-    monkeypatch.setattr(uia, "_el_name", lambda _e: "Password")
-    monkeypatch.setattr(uia, "_PAT_VALUE", 1)
-    res = uia.element_action(1, "Password", role="password", action="set_value", text="secret-token-xyz")
+    pwd = uia_element("Password", "edit", value="")
+    window = uia_element("Login", "window", hwnd=1, children=[pwd])
+    tree = FakeUIAutomation(uia_element("Desktop", "pane", children=[window]))
+    secret = "secret-token-xyz"
+    with install_fake_host_uia(tree):
+        res = uia.element_action(1, "Password", role="password", action="set_value", text=secret)
     msg = str(res.get("message") or "")
     assert "secret-token" not in msg
-    assert str(len("secret-token-xyz")) not in msg
+    assert str(len(secret)) not in msg
     assert res.get("verified") is False
 
 
@@ -258,20 +244,31 @@ def test_materialize_jails_absolute_and_dotdot(tmp_path: Path):
 
 
 def test_linux_hands_fail_closed_when_binaries_missing(monkeypatch):
+    """Without a working remedy_core host, Linux input/capture fail closed."""
     from remedy.core.computer import desktop_linux as lin
+    from remedy.core.computer import host_binding as H
 
-    monkeypatch.setattr(lin, "_which", lambda *n: None)
     monkeypatch.setattr(lin, "_require_linux", lambda: None)
-    with pytest.raises(RuntimeError, match="xdotool or ydotool"):
+
+    def boom(*_a, **_k):
+        raise H.HostError("linux_host", H.STATUS_UNSUPPORTED)
+
+    monkeypatch.setattr(H, "mouse_move", boom)
+    monkeypatch.setattr(H, "mouse_button", boom)
+    monkeypatch.setattr(H, "mouse_scroll", boom)
+    monkeypatch.setattr(H, "mouse_drag", boom)
+    monkeypatch.setattr(H, "focus_window", boom)
+    monkeypatch.setattr(H, "capture_region", boom)
+    with pytest.raises(RuntimeError, match="remedy_core"):
         lin.press_hold(10, 10, hold_ms=100)
-    with pytest.raises(RuntimeError, match="xdotool or ydotool"):
+    with pytest.raises(RuntimeError, match="remedy_core"):
         lin.scroll(10, 10, dy=-1)
-    with pytest.raises(RuntimeError, match="xdotool or ydotool"):
+    with pytest.raises(RuntimeError, match="remedy_core"):
         lin.drag(1, 1, 2, 2)
     assert hasattr(lin, "focus_window")
     assert lin.focus_window(0) is False
     assert lin.focus_window(1) is False
-    with pytest.raises(RuntimeError, match="grim|import|region"):
+    with pytest.raises(RuntimeError, match="remedy_core"):
         lin.screenshot_region_png(0, 0, 10, 10)
 
 
