@@ -1,0 +1,17 @@
+{
+  "source": "comtypes",
+  "captured_at": "2026-09-03T21:32:03+00:00",
+  "platform": "win32",
+  "notes": "Live capture from comtypes UI Automation before the Zig port. Do not inject input; do not write clipboard. Window acquisition: existing.",
+  "window": {
+    "hwnd": 1967332,
+    "how": "existing"
+  },
+  "api": "focused_element_info",
+  "args": {},
+  "result": {
+    "name": "YouTube Video Player",
+    "role": "group",
+    "value": ""
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "source": "fake_win32",
+  "captured_at": "2026-09-03T21:32:03+00:00",
+  "api": "read_window_text",
+  "platform": "harness",
+  "notes": "Contract fixture from tests.harness.fake_win32 before Zig UIA port. Shapes must match live comtypes output field-for-field.",
+  "args": {
+    "hwnd": 101,
+    "max_chars": 12000
+  },
+  "result": {
+    "title": "Untitled - Notepad",
+    "text": "File\n[Edit Document]: hello world\n[Query]: pinned\nSave\nWord wrap\nBelow\nStatus",
+    "fields": [
+      {
+        "name": "Edit Document",
+        "role": "document",
+        "value": "hello world"
+      },
+      {
+        "name": "Query",
+        "role": "edit",
+        "value": "pinned"
+      }
+    ]
+  },
+  "result_schema": {
+    "title": "str",
+    "text": "str (<=max_chars)",
+    "fields": [
+      {
+        "name": "str (<=80)",
+        "role": "str",
+        "value": "str (<=4000)"
+      }
+    ]
+  }
+}

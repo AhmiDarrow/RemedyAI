@@ -1,0 +1,160 @@
+{
+  "source": "fake_win32",
+  "captured_at": "2026-09-03T21:32:03+00:00",
+  "api": "uia_control_snapshot",
+  "platform": "harness",
+  "notes": "Contract fixture from tests.harness.fake_win32 before Zig UIA port. Shapes must match live comtypes output field-for-field.",
+  "args": {
+    "hwnd": 101,
+    "max_elements": 80,
+    "preferred_only": true
+  },
+  "result": [
+    {
+      "ref": "c1",
+      "tag": "window",
+      "role": "window",
+      "name": "Untitled - Notepad",
+      "x": 400,
+      "y": 300,
+      "w": 800,
+      "h": 600,
+      "hwnd": 101,
+      "bounds": {
+        "left": 0,
+        "top": 0,
+        "right": 800,
+        "bottom": 600
+      },
+      "uia": true
+    },
+    {
+      "ref": "c2",
+      "tag": "menuitem",
+      "role": "menuitem",
+      "name": "File",
+      "x": 30,
+      "y": 20,
+      "w": 40,
+      "h": 20,
+      "hwnd": 101,
+      "bounds": {
+        "left": 10,
+        "top": 10,
+        "right": 50,
+        "bottom": 30
+      },
+      "uia": true
+    },
+    {
+      "ref": "c3",
+      "tag": "edit",
+      "role": "edit",
+      "name": "Query",
+      "x": 110,
+      "y": 372,
+      "w": 200,
+      "h": 24,
+      "hwnd": 101,
+      "bounds": {
+        "left": 10,
+        "top": 360,
+        "right": 210,
+        "bottom": 384
+      },
+      "uia": true
+    },
+    {
+      "ref": "c4",
+      "tag": "button",
+      "role": "button",
+      "name": "Save",
+      "x": 50,
+      "y": 414,
+      "w": 80,
+      "h": 28,
+      "hwnd": 101,
+      "bounds": {
+        "left": 10,
+        "top": 400,
+        "right": 90,
+        "bottom": 428
+      },
+      "uia": true
+    },
+    {
+      "ref": "c5",
+      "tag": "checkbox",
+      "role": "checkbox",
+      "name": "Word wrap",
+      "x": 150,
+      "y": 412,
+      "w": 100,
+      "h": 24,
+      "hwnd": 101,
+      "bounds": {
+        "left": 100,
+        "top": 400,
+        "right": 200,
+        "bottom": 424
+      },
+      "uia": true
+    },
+    {
+      "ref": "c6",
+      "tag": "listitem",
+      "role": "listitem",
+      "name": "Below",
+      "x": 60,
+      "y": 5010,
+      "w": 120,
+      "h": 20,
+      "hwnd": 101,
+      "bounds": {
+        "left": 0,
+        "top": 5000,
+        "right": 120,
+        "bottom": 5020
+      },
+      "uia": true,
+      "offscreen": true
+    },
+    {
+      "ref": "c7",
+      "tag": "text",
+      "role": "text",
+      "name": "Status",
+      "x": 60,
+      "y": 448,
+      "w": 100,
+      "h": 16,
+      "hwnd": 101,
+      "bounds": {
+        "left": 10,
+        "top": 440,
+        "right": 110,
+        "bottom": 456
+      },
+      "uia": true
+    }
+  ],
+  "element_schema": {
+    "ref": "str (cN)",
+    "tag": "str (control role)",
+    "role": "str (same as tag)",
+    "name": "str (<=120)",
+    "x": "int (center)",
+    "y": "int (center)",
+    "w": "int",
+    "h": "int",
+    "hwnd": "int | null",
+    "bounds": {
+      "left": "int",
+      "top": "int",
+      "right": "int",
+      "bottom": "int"
+    },
+    "uia": "bool (always true)",
+    "offscreen": "bool (optional, only when true)"
+  }
+}

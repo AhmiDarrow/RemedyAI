@@ -1,0 +1,66 @@
+{
+  "source": "fake_win32",
+  "captured_at": "2026-09-03T21:32:03+00:00",
+  "api": "element_action",
+  "platform": "harness",
+  "notes": "Contract fixture from tests.harness.fake_win32 before Zig UIA port. Shapes must match live comtypes output field-for-field.",
+  "cases": [
+    {
+      "action": "invoke",
+      "result": {
+        "ok": true,
+        "message": "Invoked button 'Save'"
+      },
+      "result_schema": {
+        "ok": "bool",
+        "message": "str"
+      }
+    },
+    {
+      "action": "set_value",
+      "result": {
+        "ok": true,
+        "verified": true,
+        "message": "Set edit 'Amount' value, verified"
+      },
+      "result_schema": {
+        "ok": "bool",
+        "verified": "bool",
+        "message": "str"
+      }
+    },
+    {
+      "action": "toggle",
+      "result": {
+        "ok": true,
+        "message": "Toggled checkbox 'Word wrap' → on"
+      },
+      "result_schema": {
+        "ok": "bool",
+        "message": "str"
+      }
+    },
+    {
+      "action": "scroll_into_view",
+      "result": {
+        "ok": true,
+        "message": "Scrolled listitem 'Below' into view"
+      },
+      "result_schema": {
+        "ok": "bool",
+        "message": "str"
+      }
+    },
+    {
+      "action": "not_found",
+      "result": {
+        "ok": false,
+        "message": "UIA element 'Missing' not found in hwnd=101 (re-snapshot?)"
+      },
+      "result_schema": {
+        "ok": "bool",
+        "message": "str"
+      }
+    }
+  ]
+}
