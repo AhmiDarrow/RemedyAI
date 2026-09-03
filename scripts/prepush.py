@@ -221,6 +221,32 @@ def _pyproject_version() -> str:
     return m.group(1) if m else "0.0.0"
 
 
+def unreleased_section(changelog: str) -> str:
+    """The body under CHANGELOG.md's ``## [Unreleased]`` heading, stripped."""
+    m = re.search(
+        r"^## \[Unreleased\][^\n]*\n(.*?)(?=^## \[|\Z)",
+        changelog,
+        re.MULTILINE | re.DOTALL,
+    )
+    return m.group(1).strip() if m else ""
+
+
+def _require_no_unreleased_notes(commit: str) -> None:
+    """The public repo never mentions unreleased work.
+
+    Pending notes live in the clone-only ``docs/UNRELEASED.md`` and are folded
+    under the version heading in the release commit.
+    """
+    body = unreleased_section(_git("show", f"{commit}:CHANGELOG.md", check=False))
+    if body:
+        first = body.splitlines()[0]
+        _fail(
+            "CHANGELOG.md has text under [Unreleased]; the public repo never mentions "
+            "unreleased work. Move it to docs/UNRELEASED.md (clone-only) and fold it "
+            f"under the version heading in the release commit. First line: {first!r}"
+        )
+
+
 def _say(msg: str) -> None:
     print(msg, flush=True)
 
@@ -550,6 +576,7 @@ def hook(remote: str, refs: list[PushRef], *, serial: bool) -> None:
                 f"({head[:12]}); check it out so the matrix runs on the tree being pushed"
             )
         _require_clean_tree()
+        _require_no_unreleased_notes(ref.local_sha)
         if not verify_tree(ref.local_sha, serial=serial, force=False, only=None):
             raise SystemExit(1)
         _say(f"prepush: {remote}/{branch} <- {ref.local_sha[:12]} allowed")
@@ -611,6 +638,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _require_clean_tree()
     head = _git("rev-parse", "HEAD")
+    _require_no_unreleased_notes(head)
     ok = verify_tree(
         head, serial=args.serial, force=args.force, only=set(args.only) if args.only else None
     )

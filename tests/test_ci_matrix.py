@@ -211,3 +211,15 @@ def test_ci_reports_every_python_version() -> None:
     test = jobs["test"]
     assert isinstance(test, dict)
     assert test["strategy"]["fail-fast"] is False
+
+
+def test_public_changelog_never_carries_unreleased_notes() -> None:
+    """The public repo never mentions unreleased work: [Unreleased] stays empty."""
+    prepush = _prepush_module()
+    assert prepush.unreleased_section("## [Unreleased]\n\n## [0.1.0] - 2026-01-01\n- x\n") == ""
+    assert prepush.unreleased_section("## [Unreleased]\n\n### New thing\n- y\n\n## [0.1.0]\n") == "### New thing\n- y"
+    assert prepush.unreleased_section("# Changelog\n\n## [0.1.0]\n- x\n") == ""
+    assert prepush.unreleased_section("## [Unreleased]\n\n- only entry at the end\n") != ""
+
+    committed = (ROOT / "CHANGELOG.md").read_text("utf-8")
+    assert prepush.unreleased_section(committed) == "", "keep pending notes in docs/UNRELEASED.md"
