@@ -2,20 +2,36 @@
 
 High-level product notes for owners. Full detail: repo `CHANGELOG.md`.
 
-Current tree: **v0.48.0** — compatibility-first native runtime and hardened RemedyConnect.
+Current tree: **v0.50.2 — experimental**. The 0.50 line (native Go/Zig runtime,
+first-run Claimidx service, RemedyConnect hardening) is still being proven in
+daily use; expect rough edges, and keep the public installer if you want the
+stable experience.
 **Public** release is still **[v0.41.5](https://github.com/AhmiDarrow/RemedyAI/releases/tag/v0.41.5)** · PyPI **`remedy-ai==0.41.5`**. Partner line still starts at 0.31.0.
 
 ## Contents
 
-- [Unreleased](#unreleased---claimidx-and-review-hardening) · [0.48.0](#0480---next-evolution-native-runtime) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
+- [0.50.2](#0502---experimental-native-runtime-claimidx-and-connect-hardening) · [0.48.0](#0480---next-evolution-native-runtime) · [0.41.7](#0417---life-task-owner-card) · [0.41.6](#0416---hands-stay-on-first-run-talks) · [0.41.5](#0415---rmb-thinking-is-an-option) · older below
 
-## Unreleased - Claimidx and review hardening
+## 0.50.2 - Experimental: native runtime, Claimidx, and Connect hardening
 
-First run installs a pinned, hash-verified Claimidx into an isolated private
-environment and starts its local prior-art service with Remedy. Setup is
-asynchronous and does not block an offline launch. Native runtime and
-RemedyConnect review fixes tighten authorization, bounded I/O, shutdown,
-reconnection, and rollback behavior without removing compatibility paths.
+**Experimental line.** 0.50.0 through 0.50.2 are for owners who want to run
+ahead of the public release. Nothing here is required to keep using v0.41.5.
+
+- First run installs a pinned, hash-verified Claimidx into an isolated private
+  environment and starts its local prior-art service with Remedy. Setup is
+  asynchronous and never blocks an offline launch; public sharing stays off
+  unless you opt in.
+- RemedyConnect gained a visible reconnect action, host-controlled navigation,
+  per-session Stop, bounded network inputs, durable pairing storage, and
+  secrets excluded from Android backup and transfer.
+- The native runtime closed link and junction escapes, made event and memory
+  writes rollback-safe, bounded IPC, and the desktop now records why a server
+  exited and recovers it on its own. Closing or losing the phone can no longer
+  leave the desktop API offline.
+- A cloud provider outage no longer wakes RMB, and Remedy never starts a local
+  model host on a machine where RMB was never set up.
+- Public CI runs the full Python suite on Windows and Linux plus React, Rust,
+  Android, Go, Zig, docs, and packaging checks; Rust warnings fail the build.
 
 ## 0.48.0 - Next Evolution native runtime
 
