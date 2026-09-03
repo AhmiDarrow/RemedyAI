@@ -335,7 +335,13 @@ def collect_git_diff(
     else:
         files_args = ("diff", "--name-only", "HEAD")
         diff_args = ("diff", "HEAD")
-    _code, files_out, _err = run_unattended_git(root, *files_args, timeout=30)
-    _code, diff_out, _err = run_unattended_git(root, *diff_args, timeout=30)
+    files_code, files_out, files_err = run_unattended_git(
+        root, *files_args, timeout=30
+    )
+    if files_code != 0:
+        raise RuntimeError(f"git file-list failed ({files_code}): {files_err[:200]}")
+    diff_code, diff_out, diff_err = run_unattended_git(root, *diff_args, timeout=30)
+    if diff_code != 0:
+        raise RuntimeError(f"git diff failed ({diff_code}): {diff_err[:200]}")
     files = [ln.strip() for ln in files_out.splitlines() if ln.strip()]
     return files, diff_out
