@@ -206,6 +206,10 @@ class HandshakeState:
         else:
             self._mix_hash(s.public)
 
+    def set_ephemeral_for_test(self, private: bytes) -> None:
+        """Test hook: force the ephemeral private key (Noise test vectors)."""
+        self._e = KeyPair.from_private(private)
+
     def write_message(self, payload: bytes = b"") -> bytes:
         if self._done:
             raise NoiseError("handshake is complete")
@@ -286,7 +290,8 @@ class HandshakeState:
 
     def _write_token(self, token: str) -> bytes:
         if token == "e":
-            self._e = KeyPair.generate()
+            if self._e is None:
+                self._e = KeyPair.generate()
             self._mix_hash(self._e.public)
             return self._e.public
         if token == "s":
