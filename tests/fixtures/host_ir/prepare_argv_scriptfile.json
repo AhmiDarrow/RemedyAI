@@ -1,0 +1,261 @@
+{
+  "source": "remedy.execution.host.runner + scriptfile",
+  "captured_at": "2026-09-03",
+  "notes": "Normative for Zig prepare: argv_template (with <PWSH>/<CMD>/<SCRIPT_PATH>/<GIT>/<PYTHON> placeholders), script body text, BOM flag, kind, IR. Script path basename is UUID — only suffix and body are compared. pwsh launch argv MUST be -NoProfile -NonInteractive -ExecutionPolicy Bypass -File <path> — never -Command.",
+  "cases": [
+    {
+      "id": "script_pwsh_hi",
+      "kind": "prepare_op",
+      "input": {
+        "op": {
+          "kind": "script",
+          "lang": "pwsh",
+          "body": "Write-Output 'hi'"
+        }
+      },
+      "expected": {
+        "kind": "script",
+        "argv_template": [
+          "<PWSH>",
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "<SCRIPT_PATH>"
+        ],
+        "script_suffix": ".ps1",
+        "script_body_utf8_sig": "Write-Output 'hi'\n",
+        "script_has_bom": true,
+        "host": "pwsh",
+        "ir": {
+          "kind": "script",
+          "lang": "pwsh",
+          "body": "Write-Output 'hi'"
+        }
+      }
+    },
+    {
+      "id": "script_cmd_echo",
+      "kind": "prepare_op",
+      "input": {
+        "op": {
+          "kind": "script",
+          "lang": "cmd",
+          "body": "@echo hi"
+        }
+      },
+      "expected": {
+        "kind": "script",
+        "argv_template": [
+          "<CMD>",
+          "/c",
+          "<SCRIPT_PATH>"
+        ],
+        "script_suffix": ".cmd",
+        "script_body_utf8_sig": "@echo hi\n",
+        "script_has_bom": false,
+        "host": "cmd",
+        "ir": {
+          "kind": "script",
+          "lang": "cmd",
+          "body": "@echo hi"
+        }
+      }
+    },
+    {
+      "id": "cmd_get_childitem",
+      "kind": "prepare_command",
+      "input": {
+        "command": "Get-ChildItem -Name"
+      },
+      "expected": {
+        "kind": "script",
+        "argv_template": [
+          "<PWSH>",
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "<SCRIPT_PATH>"
+        ],
+        "script_suffix": ".ps1",
+        "script_body_utf8_sig": "Get-ChildItem -Name\n",
+        "script_has_bom": true,
+        "notes": [
+          "powershell → temp .ps1 + pwsh -File"
+        ],
+        "host": "pwsh",
+        "ir": {
+          "kind": "script",
+          "lang": "pwsh",
+          "body": "Get-ChildItem -Name"
+        }
+      }
+    },
+    {
+      "id": "cmd_ps_wrapper_unwrap",
+      "kind": "prepare_command",
+      "input": {
+        "command": "powershell.exe -NoProfile -Command Get-Date"
+      },
+      "expected": {
+        "kind": "script",
+        "argv_template": [
+          "<PWSH>",
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "<SCRIPT_PATH>"
+        ],
+        "script_suffix": ".ps1",
+        "script_body_utf8_sig": "Get-Date\n",
+        "script_has_bom": true,
+        "notes": [
+          "powershell → temp .ps1 + pwsh -File"
+        ],
+        "host": "pwsh",
+        "ir": {
+          "kind": "script",
+          "lang": "pwsh",
+          "body": "Get-Date"
+        }
+      }
+    },
+    {
+      "id": "translated_mkdir_src_x",
+      "kind": "prepare_command",
+      "input": {
+        "command": "mkdir -p src/x",
+        "host": "cmd"
+      },
+      "expected": {
+        "kind": "translated",
+        "argv_template": [
+          "<CMD>",
+          "/c",
+          "(if not exist \"src\\x\\.\" mkdir \"src\\x\")"
+        ],
+        "display": "(if not exist \"src\\x\\.\" mkdir \"src\\x\")",
+        "translated": "(if not exist \"src\\x\\.\" mkdir \"src\\x\")",
+        "notes": [
+          "mkdir -p → if not exist mkdir"
+        ],
+        "ir": {
+          "kind": "raw",
+          "host": "cmd",
+          "text": "(if not exist \"src\\x\\.\" mkdir \"src\\x\")"
+        },
+        "host": "cmd"
+      }
+    },
+    {
+      "id": "noop_chmod",
+      "kind": "prepare_command",
+      "input": {
+        "command": "chmod +x run.sh",
+        "host": "cmd"
+      },
+      "expected": {
+        "kind": "noop",
+        "argv": [],
+        "display": "chmod +x run.sh",
+        "notes": [
+          "chmod ignored on Windows host"
+        ],
+        "ir": {
+          "kind": "raw",
+          "host": "cmd",
+          "text": "chmod +x run.sh"
+        },
+        "host": "cmd"
+      }
+    },
+    {
+      "id": "op_run_git_status",
+      "kind": "prepare_op",
+      "input": {
+        "op": {
+          "kind": "run",
+          "argv": [
+            "git",
+            "status"
+          ]
+        }
+      },
+      "expected": {
+        "kind": "argv",
+        "argv_template": [
+          "<GIT>",
+          "status"
+        ],
+        "ir": {
+          "kind": "run",
+          "argv": [
+            "git",
+            "status"
+          ]
+        },
+        "host": "cmd"
+      }
+    },
+    {
+      "id": "op_mkdir",
+      "kind": "prepare_op",
+      "input": {
+        "op": {
+          "kind": "mkdir",
+          "paths": [
+            "src",
+            "tests"
+          ]
+        }
+      },
+      "expected": {
+        "kind": "mkdir",
+        "argv": [],
+        "display": "mkdir",
+        "ir": {
+          "kind": "mkdir",
+          "paths": [
+            "src",
+            "tests"
+          ]
+        }
+      }
+    },
+    {
+      "id": "plain_argv_py_compile",
+      "kind": "prepare_command",
+      "input": {
+        "command": "python -m py_compile app.py",
+        "host": "cmd"
+      },
+      "expected": {
+        "kind": "argv",
+        "argv_template": [
+          "<PYTHON>",
+          "-m",
+          "py_compile",
+          "app.py"
+        ],
+        "notes": [
+          "plain argv — no shell"
+        ],
+        "ir": {
+          "kind": "run",
+          "argv_template": [
+            "<PYTHON>",
+            "-m",
+            "py_compile",
+            "app.py"
+          ]
+        },
+        "host": "cmd"
+      }
+    }
+  ]
+}
