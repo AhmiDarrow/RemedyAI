@@ -23,6 +23,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+
       - name: Install dependencies
         run: uv sync --dev
 
@@ -41,6 +45,16 @@ jobs:
       - name: Docs sync (versions, help, slash cmds, hotkeys, test count)
         run: uv run python scripts/check_docs.py
 
+      # Library-backed tests must execute, not skip: build the Zig core and
+      # point the loader at it. Linux host functions return unsupported, but
+      # loading and the ABI check run for real.
+      - name: Build native core (Zig)
+        working-directory: native/zig
+        run: |
+          zig build -Doptimize=ReleaseSafe
+          test -f zig-out/lib/libremedy_core.so
+          echo "REMEDY_NATIVE_CORE_LIB=${PWD}/zig-out/lib/libremedy_core.so" >> "$GITHUB_ENV"
+
       - name: Test
         run: uv run pytest -q --tb=short
 
@@ -58,11 +72,26 @@ jobs:
         with:
           python-version: "3.12"
 
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+
       - name: Install dependencies
         run: uv sync --dev
 
       - name: Import smoke
         run: uv run python -c "import remedy; from remedy.interfaces.api import create_app; create_app(); print('import OK')"
+
+      # DLL-backed tests must execute, not skip: build the Zig core and point
+      # the loader at it before the suite runs.
+      - name: Build native core (Zig)
+        shell: pwsh
+        working-directory: native/zig
+        run: |
+          zig build -Doptimize=ReleaseSafe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $lib = (Resolve-Path zig-out/bin/remedy_core.dll).Path
+          "REMEDY_NATIVE_CORE_LIB=$lib" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Full Windows test suite
         run: uv run pytest -q --tb=short

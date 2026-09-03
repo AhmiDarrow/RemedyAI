@@ -144,19 +144,24 @@ jobs:
         shell: bash
         run: python scripts/sync_version.py "${REMEDY_RELEASE_VERSION}"
 
-      - name: Build sidecar
-        run: python scripts/build_desktop.py --clean --ci
-
+      # The sidecar bundles remedy_core.dll (build_desktop.py --add-binary),
+      # so the native runtime is built first.
       - name: Build native runtime
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force desktop/bin | Out-Null
           Push-Location native/go
           go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime.exe ./cmd/remedy-runtime
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Pop-Location
           Push-Location native/zig
           zig build -Doptimize=ReleaseSafe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Pop-Location
           Copy-Item native/zig/zig-out/bin/remedy_core.dll desktop/bin/remedy_core.dll
+
+      - name: Build sidecar
+        run: python scripts/build_desktop.py --clean --ci
 
       - name: Upload sidecar artifact
         uses: actions/upload-artifact@v4
@@ -297,19 +302,22 @@ jobs:
         shell: bash
         run: python scripts/sync_version.py "${REMEDY_RELEASE_VERSION}"
 
-      - name: Build Linux sidecar
-        run: python scripts/build_desktop.py --clean --ci
-        env:
-          TAURI_ENV_TARGET_TRIPLE: x86_64-unknown-linux-gnu
-
+      # The sidecar bundles libremedy_core.so (build_desktop.py --add-binary),
+      # so the native runtime is built first.
       - name: Build Linux native runtime
         run: |
+          mkdir -p desktop/bin
           cd native/go
           go build -trimpath -ldflags '-s -w' -o ../../desktop/bin/remedy-runtime ./cmd/remedy-runtime
           cd ../zig
           zig build -Doptimize=ReleaseSafe
           cp zig-out/lib/libremedy_core.so ../../desktop/bin/libremedy_core.so
           chmod +x ../../desktop/bin/remedy-runtime
+
+      - name: Build Linux sidecar
+        run: python scripts/build_desktop.py --clean --ci
+        env:
+          TAURI_ENV_TARGET_TRIPLE: x86_64-unknown-linux-gnu
 
       - name: Upload Linux sidecar artifact
         uses: actions/upload-artifact@v4
