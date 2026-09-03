@@ -118,7 +118,11 @@ jobs:
     # This job compiles/tests Rust only. Release jobs build and validate the
     # actual sidecars, SPA, and bundle resources on both operating systems.
     env:
-      TAURI_CONFIG: '{"bundle":{"active":false}}'
+      # Rust compilation is intentionally independent of sidecars/resources
+      # produced by the release jobs. JSON Merge Patch needs null to clear the
+      # platform resource map; active=false alone still validates its paths.
+      TAURI_CONFIG: '{"bundle":{"active":false,"externalBin":[],"resources":null}}'
+      RUSTFLAGS: "-D warnings"
     steps:
       - uses: actions/checkout@v4
 

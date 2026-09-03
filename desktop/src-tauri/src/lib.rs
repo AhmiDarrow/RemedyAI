@@ -154,8 +154,14 @@ fn load_desktop_prefs() -> DesktopPrefs {
                 prefs.skip_quit_server_warning = v;
             }
             if healed_close {
-                let _ = save_desktop_prefs(&prefs);
-                log::info!("desktop.json: close_to_tray forced true (title-bar X → tray)");
+                match save_desktop_prefs(&prefs) {
+                    Ok(()) => log::info!(
+                        "desktop.json: close_to_tray forced true (title-bar X → tray)"
+                    ),
+                    Err(e) => log::warn!(
+                        "desktop.json: could not persist close_to_tray repair: {e}"
+                    ),
+                }
             }
             return prefs;
         }
@@ -181,14 +187,16 @@ fn load_desktop_prefs() -> DesktopPrefs {
             prefs.skip_quit_server_warning = v;
         }
         // Seed desktop.json so CloseRequested and future launches stay in sync
-        let _ = save_desktop_prefs(&prefs);
-        log::info!(
-            "desktop prefs seeded from config.toml (close_to_tray={}, start_in_tray={}, skip_quit_warn={}, healed_close={})",
-            prefs.close_to_tray,
-            prefs.start_in_tray,
-            prefs.skip_quit_server_warning,
-            healed_close
-        );
+        match save_desktop_prefs(&prefs) {
+            Ok(()) => log::info!(
+                "desktop prefs seeded from config.toml (close_to_tray={}, start_in_tray={}, skip_quit_warn={}, healed_close={})",
+                prefs.close_to_tray,
+                prefs.start_in_tray,
+                prefs.skip_quit_server_warning,
+                healed_close
+            ),
+            Err(e) => log::warn!("desktop prefs could not be seeded from config.toml: {e}"),
+        }
     }
     prefs
 }
@@ -969,12 +977,12 @@ fn wait_for_health(max_wait: Duration) -> bool {
 
 fn kill_child(guard: &mut Option<Child>) {
     if let Some(mut child) = guard.take() {
-        let pid = child.id();
         // On Windows, Child::kill / Drop do NOT kill the process tree. PyInstaller
         // sidecars (and anything still holding :7400) must be tree-killed or they
         // linger in Task Manager after the UI closes.
         #[cfg(target_os = "windows")]
         {
+            let pid = child.id();
             let _ = Command::new("taskkill")
                 .args(["/F", "/T", "/PID", &pid.to_string()])
                 .creation_flags(CREATE_NO_WINDOW)
@@ -1097,10 +1105,6 @@ fn kill_api_port_windows() {
         .status();
 }
 
-#[cfg(target_os = "windows")]
-fn kill_port_7400_windows() {
-    kill_api_port_windows();
-}
 /// Kill ``remedy.exe serve`` and ``python … remedy … serve`` process trees.
 #[cfg(target_os = "windows")]
 fn kill_cli_serve_windows() {
@@ -1347,11 +1351,6 @@ fn open_text_file() -> Result<Option<serde_json::Value>, String> {
         "text": text,
         "name": path.file_name().and_then(|s| s.to_str()).unwrap_or("import.txt"),
     })))
-}
-
-#[cfg(not(target_os = "windows"))]
-fn dirs_next_home() -> Option<std::path::PathBuf> {
-    std::env::var_os("HOME").map(std::path::PathBuf::from)
 }
 
 /// Resolve the primary desktop window (label "main", else first webview).
@@ -2005,12 +2004,12 @@ fn get_desktop_prefs(state: State<'_, ServerState>) -> Result<serde_json::Value,
 
 /// Hard-exit failsafe: if Tauri's event loop does not tear down, kill ourselves.
 fn schedule_force_exit(after: Duration) {
-    let pid = std::process::id();
     thread::spawn(move || {
         thread::sleep(after);
         log::warn!("quit failsafe: process still alive after {after:?} — forcing exit");
         #[cfg(target_os = "windows")]
         {
+            let pid = std::process::id();
             let _ = Command::new("taskkill")
                 .args(["/F", "/T", "/PID", &pid.to_string()])
                 .creation_flags(CREATE_NO_WINDOW)
@@ -2355,6 +2354,13 @@ fn linux_env_is_wslg() -> bool {
         || Path::new("/mnt/wslg").exists()
 }
 
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
 fn wslg_powershell_exe() -> Option<PathBuf> {
     let mut cands: Vec<PathBuf> = Vec::new();
     if let Ok(root) = env::var("SYSTEMROOT") {
@@ -2369,6 +2375,13 @@ fn wslg_powershell_exe() -> Option<PathBuf> {
     cands.into_iter().find(|p| p.is_file())
 }
 
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
 fn wslg_windows_path(p: &Path) -> PathBuf {
     if let Ok(out) = Command::new("wslpath").args(["-w"]).arg(p).output() {
         if out.status.success() {
@@ -2381,6 +2394,13 @@ fn wslg_windows_path(p: &Path) -> PathBuf {
     p.to_path_buf()
 }
 
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
 fn wslg_workarea_script() -> Option<PathBuf> {
     let mut cands: Vec<PathBuf> = Vec::new();
     cands.push(
@@ -2530,7 +2550,7 @@ fn linux_toggle_workarea(w: &tauri::WebviewWindow) -> Result<bool, String> {
             .map_err(|e| format!("current_monitor: {e}"))?
             .ok_or_else(|| "no current monitor".to_string())?;
         let wa = mon.work_area();
-        let mut width = wa.size.width.max(800);
+        let width = wa.size.width.max(800);
         let mut height = wa.size.height.max(500);
         let full = mon.size();
         // GDK on WSLg often reports workarea == full output and ignores the
@@ -2643,15 +2663,17 @@ fn linux_on_host_resized(window: &tauri::Window, size: tauri::PhysicalSize<u32>)
 
 /// Close chrome: stay running. Windows tray hide; Linux always minimize
 /// (AppIndicator is often invisible — hide() would drop the only restore surface).
+#[cfg(target_os = "linux")]
 fn stay_ready_after_close(w: &tauri::WebviewWindow) -> Result<(), String> {
-    #[cfg(target_os = "linux")]
-    {
-        let _ = w.unmaximize();
-        w.minimize()
-            .map_err(|e| format!("minimize failed: {e}"))?;
-        log::info!("request_close: Linux minimize to taskbar");
-        return Ok(());
-    }
+    let _ = w.unmaximize();
+    w.minimize()
+        .map_err(|e| format!("minimize failed: {e}"))?;
+    log::info!("request_close: Linux minimize to taskbar");
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn stay_ready_after_close(w: &tauri::WebviewWindow) -> Result<(), String> {
     let has_tray = w.app_handle().tray_by_id("main").is_some();
     if !has_tray {
         let _ = w.unmaximize();
@@ -2666,13 +2688,14 @@ fn stay_ready_after_close(w: &tauri::WebviewWindow) -> Result<(), String> {
 }
 
 /// Last-resort stay-ready. Never hide() on WSLg (RAIL HWND teardown).
+#[cfg(target_os = "linux")]
 fn stay_ready_fallback(w: &tauri::WebviewWindow) {
-    #[cfg(target_os = "linux")]
-    {
-        let _ = w.unmaximize();
-        let _ = w.minimize();
-        return;
-    }
+    let _ = w.unmaximize();
+    let _ = w.minimize();
+}
+
+#[cfg(not(target_os = "linux"))]
+fn stay_ready_fallback(w: &tauri::WebviewWindow) {
     if w.app_handle().tray_by_id("main").is_none() {
         let _ = w.unmaximize();
         let _ = w.minimize();
@@ -2695,13 +2718,6 @@ fn request_close_main_window(
             start_in_tray: fresh.start_in_tray,
             skip_quit_server_warning: fresh.skip_quit_server_warning,
         };
-    }
-    if !fresh.close_to_tray {
-        save_desktop_prefs(&DesktopPrefs {
-            close_to_tray: true,
-            start_in_tray: fresh.start_in_tray,
-            skip_quit_server_warning: fresh.skip_quit_server_warning,
-        });
     }
     let w = primary_window(&app).ok_or_else(|| "no main window".to_string())?;
     stay_ready_after_close(&w)
@@ -2768,6 +2784,7 @@ struct DesktopUpdateInfo {
     error: Option<String>,
 }
 
+#[cfg(target_os = "windows")]
 #[derive(serde::Serialize, Clone)]
 struct UpdateProgress {
     phase: String,
@@ -2779,6 +2796,7 @@ fn app_version(app: &AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
+#[cfg(target_os = "windows")]
 fn parse_semver(raw: &str) -> (u64, u64, u64) {
     let s = raw.trim().trim_start_matches('v').trim_start_matches('V');
     let mut parts = s.split(|c| c == '.' || c == '-' || c == '+');
@@ -2788,12 +2806,14 @@ fn parse_semver(raw: &str) -> (u64, u64, u64) {
     (major, minor, patch)
 }
 
+#[cfg(target_os = "windows")]
 fn is_newer(latest: &str, current: &str) -> bool {
     parse_semver(latest) > parse_semver(current)
 }
 
 /// Fetch latest desktop release metadata. Tries multiple sources; never fails
 /// the whole check because the first URL errored (common with redirects / rate limits).
+#[cfg(target_os = "windows")]
 fn fetch_latest_desktop() -> Result<(String, Option<String>, Option<String>), String> {
     // Prefer Tauri latest.json (has platform installer URL + signature).
     let urls = [
@@ -2883,19 +2903,20 @@ fn fetch_latest_desktop() -> Result<(String, Option<String>, Option<String>), St
     })
 }
 
+#[cfg(not(target_os = "windows"))]
 fn desktop_update_result(current: String) -> DesktopUpdateInfo {
-    #[cfg(not(target_os = "windows"))]
-    {
-        return DesktopUpdateInfo {
-            current_version: current.clone(),
-            latest_version: current,
-            update_available: false,
-            download_url: None,
-            release_notes: None,
-            error: None,
-        };
+    DesktopUpdateInfo {
+        current_version: current.clone(),
+        latest_version: current,
+        update_available: false,
+        download_url: None,
+        release_notes: None,
+        error: None,
     }
-    #[cfg(target_os = "windows")]
+}
+
+#[cfg(target_os = "windows")]
+fn desktop_update_result(current: String) -> DesktopUpdateInfo {
     match fetch_latest_desktop() {
         Ok((latest, download_url, notes)) => {
             let latest_norm = latest
@@ -3007,7 +3028,7 @@ fn dpapi_unprotect_user(cipher: &[u8]) -> Result<Vec<u8>, String> {
     if cipher.is_empty() {
         return Err("empty DPAPI ciphertext".into());
     }
-    let mut in_blob = DataBlob {
+    let in_blob = DataBlob {
         cb_data: cipher.len() as u32,
         // CryptUnprotectData does not mutate input; cast is for C ABI only.
         pb_data: cipher.as_ptr() as *mut u8,
@@ -3085,11 +3106,13 @@ async fn check_desktop_update(app: AppHandle) -> Result<DesktopUpdateInfo, Strin
         .map_err(|e| format!("Update check task failed: {e}"))
 }
 
+#[cfg(target_os = "windows")]
 fn update_status_path() -> PathBuf {
     env::temp_dir().join("RemedyDesktop-Update-status.json")
 }
 
 /// Persist update phase for the out-of-process progress host (survives app.exit).
+#[cfg(target_os = "windows")]
 fn write_update_status(phase: &str, percent: u8, message: &str, from: &str, to: &str) {
     let path = update_status_path();
     let body = format!(
@@ -3110,6 +3133,7 @@ fn write_update_status(phase: &str, percent: u8, message: &str, from: &str, to: 
     let _ = std::fs::write(&path, body);
 }
 
+#[cfg(target_os = "windows")]
 fn emit_progress(app: &AppHandle, phase: &str, percent: u8, message: &str) {
     write_update_status(phase, percent, message, "", "");
     let _ = app.emit(
@@ -3122,6 +3146,7 @@ fn emit_progress(app: &AppHandle, phase: &str, percent: u8, message: &str) {
     );
 }
 
+#[cfg(target_os = "windows")]
 fn emit_progress_ver(
     app: &AppHandle,
     phase: &str,
@@ -3143,6 +3168,7 @@ fn emit_progress_ver(
 
 /// Path of the flag that tells NSIS POSTINSTALL *not* to auto-start the app.
 /// The in-app update script is the sole relaunch owner while this exists.
+#[cfg(target_os = "windows")]
 fn updater_owns_relaunch_flag_path() -> PathBuf {
     env::temp_dir().join("RemedyDesktop-UpdaterOwnsRelaunch.flag")
 }
@@ -3324,11 +3350,7 @@ fn schedule_update_install_script(ps1_path: &str) -> Result<(), String> {
     Err(errors.join(" | "))
 }
 
-#[cfg(not(target_os = "windows"))]
-fn schedule_update_install_script(_ps1_path: &str) -> Result<(), String> {
-    Err("updates are Windows-only".into())
-}
-
+#[cfg(target_os = "windows")]
 fn write_updater_owns_relaunch_flag() {
     let path = updater_owns_relaunch_flag_path();
     let _ = std::fs::write(
@@ -3342,6 +3364,7 @@ fn write_updater_owns_relaunch_flag() {
 }
 
 /// Ensure the install-progress host script is in TEMP (never depend on install-dir during NSIS).
+#[cfg(target_os = "windows")]
 fn ensure_update_ui_ps1_in_temp() -> PathBuf {
     let temp_ps1 = env::temp_dir().join("remedy-update-ui.ps1");
     // Always write embedded source so fixes ship with the running binary.
@@ -3452,23 +3475,12 @@ fn launch_install_progress_ui(from: &str, to: &str) {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-fn launch_install_progress_ui(_from: &str, _to: &str) {}
-
-/// Canonical Windows NSIS asset name on GitHub Releases.
-/// NSIS emits "Remedy Desktop_{ver}_x64-setup.exe"; CI renames spaces → dots so the
-/// published asset is always `Remedy.Desktop_{ver}_x64-setup.exe` (no spaces, no
-/// `Remedy_Desktop_`). `latest.json` URL must match that asset name exactly.
-#[allow(dead_code)]
-fn canonical_installer_name(version: &str) -> String {
-    let ver = version.trim().trim_start_matches('v').trim_start_matches('V');
-    format!("Remedy.Desktop_{ver}_x64-setup.exe")
-}
-
 /// Tauri updater pubkey (same blob as tauri.conf.json plugins.updater.pubkey).
+#[cfg(target_os = "windows")]
 const UPDATER_MINISIGN_PUBKEY_B64: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ2MDEwQzVERTNBQ0JDRTAKUldUZ3ZLempYUXdCMWdRNWl0UzlpSDVUamJQZXRvREFpNE9Mb2xJeGpQck5ubVJ5ZDNxSko0dTYK";
 
 /// Accept raw minisign **or** Tauri's base64-wrapped `.sig` (both appear in latest.json).
+#[cfg(target_os = "windows")]
 fn decode_updater_signature(sig: &str) -> Result<minisign_verify::Signature, String> {
     use base64::Engine;
     use minisign_verify::Signature;
@@ -3486,6 +3498,7 @@ fn decode_updater_signature(sig: &str) -> Result<minisign_verify::Signature, Str
         .map_err(|e| format!("updater signature parse: {e}"))
 }
 
+#[cfg(target_os = "windows")]
 fn verify_installer_minisign(exe: &Path, sig: &str) -> Result<(), String> {
     use base64::Engine;
     use minisign_verify::PublicKey;
@@ -3513,6 +3526,7 @@ fn verify_installer_minisign(exe: &Path, sig: &str) -> Result<(), String> {
 /// Callers should **download the returned URL** (not a stale UI-held URL) so a
 /// check→install race cannot pair an old installer path with a new signature blob.
 /// Refuses install when the release is unsigned (owner can still install manually from GitHub).
+#[cfg(target_os = "windows")]
 fn fetch_signed_release_asset() -> Result<(String /*url*/, String /*sig*/), String> {
     let meta_url =
         "https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json";
@@ -3568,25 +3582,7 @@ fn fetch_signed_release_asset() -> Result<(String /*url*/, String /*sig*/), Stri
     Ok((url, sig))
 }
 
-/// Back-compat helper: require the client URL to match signed latest.json.
-/// Prefer [`fetch_signed_release_asset`] + download that URL (used by install path).
-#[allow(dead_code)]
-fn fetch_release_signature_for_url(download_url: &str) -> Result<String, String> {
-    let (url, sig) = fetch_signed_release_asset()?;
-    let got = download_url
-        .trim()
-        .replace("Remedy_Desktop_", "Remedy.Desktop_");
-    if !got.is_empty() && got != url {
-        return Err(format!(
-            "Download URL does not match signed latest.json asset.\n  got: {got}\n  expected: {url}\n\
-             Tip: installer assets must be named Remedy.Desktop_{{ver}}_x64-setup.exe \
-             (dots for spaces). Re-check/rename the GitHub Release asset or retry so the \
-             app re-reads latest.json."
-        ));
-    }
-    Ok(sig)
-}
-
+#[cfg(target_os = "windows")]
 fn is_trusted_download_url(url: &str) -> bool {
     // Official release pages / assets for RemedyAI only.
     if url.starts_with("https://github.com/AhmiDarrow/RemedyAI/releases/") {
@@ -3606,6 +3602,7 @@ fn is_trusted_download_url(url: &str) -> bool {
 }
 
 /// Validate that the file looks like a Windows PE installer (not an HTML error page).
+#[cfg(target_os = "windows")]
 fn validate_installer_exe(path: &Path, min_bytes: u64) -> Result<(), String> {
     let meta = std::fs::metadata(path).map_err(|e| format!("Cannot stat installer: {e}"))?;
     if meta.len() < min_bytes {
@@ -3629,6 +3626,7 @@ fn validate_installer_exe(path: &Path, min_bytes: u64) -> Result<(), String> {
 }
 
 // Guard against double-click / concurrent update starts.
+#[cfg(target_os = "windows")]
 static UPDATE_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Download the NSIS installer, run it silently (/S /UPDATE), exit so files can be replaced.
@@ -3639,15 +3637,17 @@ static UPDATE_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 ///
 /// Sole relaunch owner: update script (+ NSIS marker /NOAUTOLAUNCH). No double window.
 #[tauri::command]
+#[cfg(not(target_os = "windows"))]
+fn start_desktop_update(_app: AppHandle, _download_url: String) -> Result<(), String> {
+    Err(
+        "In-app updates are Windows-only. Install the Linux .deb or AppImage from GitHub Releases."
+            .into(),
+    )
+}
+
+#[tauri::command]
+#[cfg(target_os = "windows")]
 fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), String> {
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = (app, download_url);
-        return Err(
-            "In-app updates are Windows-only. Install the Linux .deb or AppImage from GitHub Releases."
-                .into(),
-        );
-    }
     // Client may pass a URL from an earlier check; we always re-resolve the
     // signed asset from latest.json before download so naming/version races
     // (e.g. got v0.14.3 URL, expected v0.14.4) cannot fail after a multi-MB pull.
@@ -3825,9 +3825,6 @@ fn start_desktop_update(app: AppHandle, download_url: String) -> Result<(), Stri
                 //
                 // Spawn powershell.exe directly with CREATE_NO_WINDOW - never
                 // `cmd /c start` (that flashed two black console windows).
-                const DETACHED_PROCESS: u32 = 0x00000008;
-                const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-                const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x01000000;
                 let install_path = temp.to_string_lossy().replace('\'', "''");
                 // Current install dir (best-effort) for /D= upgrade-in-place.
                 let current_exe = std::env::current_exe().ok();
@@ -5332,19 +5329,6 @@ pub fn run() {
                             start_in_tray: fresh.start_in_tray,
                             skip_quit_server_warning: fresh.skip_quit_server_warning,
                         };
-                    }
-                    // Heal stale desktop.json / config that had close_to_tray=false
-                    // (common after older Setup) so next launch matches behavior.
-                    if !fresh.close_to_tray {
-                        let healed = DesktopPrefs {
-                            close_to_tray: true,
-                            start_in_tray: fresh.start_in_tray,
-                            skip_quit_server_warning: fresh.skip_quit_server_warning,
-                        };
-                        save_desktop_prefs(&healed);
-                        log::info!(
-                            "close_to_tray healed to true (title-bar X always hides; quit via tray)"
-                        );
                     }
                     api.prevent_close();
                     if let Some(w) = window.app_handle().get_webview_window(window.label()) {
