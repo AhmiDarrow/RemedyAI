@@ -397,7 +397,7 @@ async def test_a_local_host_still_loading_its_weights_is_waited_for_not_abandone
 ):
     """RMB answers 503 *Loading model* for a minute after a restart. Treating
     that as a dead provider throws away a turn that was about to work."""
-    runtime = make_runtime(tmp_path)
+    runtime = make_local_runtime(tmp_path)
     FakeToolRegistry().install(runtime)
     fake = FakeLLM(
         [error_turn(503, "Loading model, please wait"), text_turn("ready now")]
@@ -416,12 +416,47 @@ async def test_a_local_host_still_loading_its_weights_is_waited_for_not_abandone
 
 
 @pytest.mark.asyncio
+async def test_a_cloud_503_saying_unavailable_never_waits_on_rmb(tmp_path):
+    """xAI's outage body reads "Service temporarily unavailable". That is not
+    our local host loading weights; waking RMB on it unloaded the vision model
+    and started a GGUF the owner had not asked for (2026-09-03)."""
+    runtime = make_runtime(
+        tmp_path,
+        llm_provider="xai",
+        llm_model="grok-4.5",
+        llm_base_url="http://xai.invalid/v1",
+    )
+    FakeToolRegistry().install(runtime)
+    fake = FakeLLM(
+        [
+            error_turn(
+                503,
+                '{"code":"unavailable","error":"Service temporarily unavailable. '
+                'The model did not respond to this request."}',
+            ),
+            text_turn("back again"),
+        ]
+    )
+
+    def _must_not_wait(*a, **k):
+        raise AssertionError("cloud 503 must not wait on / wake RMB")
+
+    with fake.patch(), patch(NO_TOOLS, return_value=False), patch(
+        RMB_WAIT, side_effect=_must_not_wait
+    ):
+        chunks = await drain(runtime, "say hello")
+
+    assert "Local model is loading" not in statuses(chunks)
+    assert "back again" in answer(chunks)
+
+
+@pytest.mark.asyncio
 async def test_a_host_that_never_becomes_ready_falls_through_to_normal_recovery(
     tmp_path,
 ):
     """The readiness wait is a shortcut, not a trap: if it times out the turn
     still takes the ordinary soft-recovery path."""
-    runtime = make_runtime(tmp_path)
+    runtime = make_local_runtime(tmp_path)
     FakeToolRegistry().install(runtime)
     fake = FakeLLM(
         [error_turn(503, "Loading model, please wait"), text_turn("answered anyway")]
