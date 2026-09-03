@@ -1,0 +1,12 @@
+{
+  "name": "android_debug_hash",
+  "notes": "Intermediate hash/AEAD steps from Android NoiseIkTest.debugHash (snow literary prologue). Confirms Python BLAKE2s/HKDF/AEAD match.",
+  "protocol_name_hex": "4e6f6973655f494b5f32353531395f436861436861506f6c795f424c414b453273",
+  "h0_hex": "bbea022b948cf3bc5857d70804229179e1116bc40cb8cc074835349c464bca36",
+  "h_prologue_hex": "5bb156750593ca8a20dec81f2208ac09fe9639e6989e5f56bcff5e5a198361f3",
+  "h_rs_hex": "b2e7409ee8575150d9b8d176cc326a68c7581746a52147a172b8a73882aa60a2",
+  "h_e_hex": "62282308202dee87b14acbf965f46af4718f7e119bf791651f4300c5de8ecc7b",
+  "k_after_es_hex": "a7b2e46735a1aac6374af349a6108212f1de879c35ccd1ae445a8c3e20462015",
+  "enc_s_hex": "e818de301c97393bfa71ac250becfc8acef64a969e039f407fe44c5ffc3d66d94ff57627ad4cc53882a1b2993babac39",
+  "android_hex_matched_python": true
+}
