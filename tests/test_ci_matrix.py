@@ -303,6 +303,7 @@ def test_prepush_python_lane_consumes_the_native_lane_core() -> None:
         assert build and "zig build -Doptimize=ReleaseSafe" in build
         assert f"--prefix {prepush.WSL_ZIG_PREFIX}" in build
         assert "--cache-dir" in build
+        assert "rm -f" in build and "libremedy_core.so" in build
         pytest_cmd = prepush._wsl_pytest_command()
         assert pytest_cmd
         assert (f"REMEDY_NATIVE_CORE_LIB={prepush.WSL_NATIVE_CORE_LIB}" in pytest_cmd) == prepush._wsl_has_zig()
