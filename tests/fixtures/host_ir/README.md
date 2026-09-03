@@ -21,6 +21,7 @@ Machine-local executable paths are scrubbed:
 | `<PYTHON>` | host CPython resolved path |
 | `<SCRIPT_PATH>` | UUID scratch script path |
 | `<RG>` | ripgrep path inside translated text (`rg_placeholder: true`) |
+| `<DEFAULT>` | OS default shell host (`cmd` on Windows, `posix` elsewhere) |
 
 ## Regenerating
 
