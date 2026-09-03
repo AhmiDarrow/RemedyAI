@@ -223,3 +223,18 @@ def test_public_changelog_never_carries_unreleased_notes() -> None:
 
     committed = (ROOT / "CHANGELOG.md").read_text("utf-8")
     assert prepush.unreleased_section(committed) == "", "keep pending notes in docs/UNRELEASED.md"
+
+
+def test_experimental_versions_publish_as_prereleases() -> None:
+    """A version whose CHANGELOG section says Experimental never becomes GitHub's
+    "latest" release, so installed apps do not auto-update to it."""
+    jobs = _workflow_jobs("desktop-release.yml")
+    verify = jobs["verify"]
+    assert isinstance(verify, dict)
+    assert "prerelease" in verify["outputs"]
+    assert "experimental" in _run_commands(verify).lower()
+    release = jobs["release"]
+    assert isinstance(release, dict)
+    publish = [s for s in release["steps"] if isinstance(s, dict) and "action-gh-release" in str(s.get("uses", ""))]
+    assert publish, "release job must publish with action-gh-release"
+    assert "needs.verify.outputs.prerelease" in str(publish[0]["with"]["prerelease"])
