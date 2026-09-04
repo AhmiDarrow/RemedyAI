@@ -285,11 +285,20 @@ func TestResolveTokenPosixFallback(t *testing.T) {
 
 func TestStatusAuthenticatedChatSessionsCount(t *testing.T) {
 	const token = "test-token-not-a-secret-16"
-	dbPath := filepath.Join(t.TempDir(), "memory.db")
+	home := t.TempDir()
+	skillDir := filepath.Join(home, "skills", "demo-skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: demo-skill\ndescription: test\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(home, "memory.db")
 	base, shutdown := startTestServer(t, Config{
 		Token:   token,
 		Version: "0.50.2",
 		DBPath:  dbPath,
+		HomeDir: home,
 	})
 	defer shutdown()
 	client := &http.Client{Timeout: 3 * time.Second}
@@ -320,6 +329,13 @@ func TestStatusAuthenticatedChatSessionsCount(t *testing.T) {
 	if n, _ := unauth["chat_sessions_count"].(float64); n != 0 {
 		t.Fatalf("unauth count = %v", unauth["chat_sessions_count"])
 	}
+	if n, _ := unauth["skills_count"].(float64); n != 0 {
+		t.Fatalf("unauth skills_count = %v", unauth["skills_count"])
+	}
+	gw, _ := unauth["gateway"].(map[string]any)
+	if _, ok := gw["uptime"]; !ok {
+		t.Fatalf("gateway missing uptime: %#v", gw)
+	}
 
 	req, err = http.NewRequest(http.MethodGet, base+"/api/status", nil)
 	if err != nil {
@@ -336,6 +352,15 @@ func TestStatusAuthenticatedChatSessionsCount(t *testing.T) {
 	_ = json.Unmarshal(raw, &authed)
 	if n, _ := authed["chat_sessions_count"].(float64); n != 1 {
 		t.Fatalf("authed count = %v body=%s", authed["chat_sessions_count"], raw)
+	}
+	if n, _ := authed["skills_count"].(float64); n < 1 {
+		t.Fatalf("authed skills_count = %v body=%s", authed["skills_count"], raw)
+	}
+	if _, ok := authed["version"].(string); !ok || authed["version"] == "" {
+		t.Fatalf("version missing: %#v", authed["version"])
+	}
+	if _, ok := authed["uptime"].(string); !ok || authed["uptime"] == "" {
+		t.Fatalf("uptime missing: %#v", authed["uptime"])
 	}
 }
 

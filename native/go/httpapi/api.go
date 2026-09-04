@@ -37,6 +37,8 @@ type Config struct {
 	// DBPath is the SQLite memory.db path. Empty derives from HomeDir /
 	// REMEDY_HOME / ~/.remedy/memory.db (or :memory: when no home).
 	DBPath string
+	// WebUIDir overrides FindWebUIDir (tests / REMEDY_WEBUI_DIR equivalent).
+	WebUIDir string
 	// TurnRunner powers POST /api/sessions/{id}/messages and .../messages/stream.
 	// Nil → 503 (matches Python when runtime is unavailable).
 	TurnRunner TurnRunner
@@ -48,6 +50,7 @@ type Server struct {
 	version  string
 	token    string
 	homeDir  string
+	webUIDir string
 	mux      *http.ServeMux
 	sessions *sessionStore
 	events   *sessionEventHub
@@ -70,7 +73,8 @@ type Server struct {
 // sessions CRUD, session LLM bind, attachments upload/get, messages
 // list/create/stream, abort, session-events SSE, Connect management,
 // Connect me/stop, providers/models catalog, skills/library routes,
-// workspace/files/media routes, and partner/approvals/plans/life-tasks/goals.
+// workspace/files/media routes, partner/approvals/plans/life-tasks/goals,
+// and optional WebUI static serving.
 func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
@@ -97,6 +101,7 @@ func New(cfg Config) (*Server, error) {
 		version:   version,
 		token:     token,
 		homeDir:   homeDir,
+		webUIDir:  strings.TrimSpace(cfg.WebUIDir),
 		mux:       http.NewServeMux(),
 		sessions:  store,
 		events:    newSessionEventHub(),
@@ -174,6 +179,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/goals/activity/clear", s.handleClearGoalActivity)
 	s.mux.HandleFunc("PATCH /api/goals/{goal_id}", s.handlePatchGoal)
 	s.mux.HandleFunc("DELETE /api/goals/{goal_id}", s.handleDeleteGoal)
+	s.mountWebUI()
 	return s, nil
 }
 
@@ -297,7 +303,15 @@ func (s *Server) handlePing(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	uptime := formatUptime(time.Since(s.started))
-	gwStats := map[string]any{"running": false}
+	gwStats := map[string]any{
+		"running":            false,
+		"uptime":             uptime,
+		"channels_active":    0,
+		"events_processed":   0,
+		"channels":           []string{},
+		"started_at":         nil,
+		"rate_limit_per_min": 0,
+	}
 	if s.messengerGW != nil {
 		gwStats = s.messengerGW.StatsMap()
 		// Prefer process uptime for the top-level status field; gateway
@@ -312,7 +326,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"uptime":              uptime,
 		"gateway":             gwStats,
 		"memory_entries":      0,
-		"skills_count":        s.skillsCount(),
+		"skills_count":        0,
 		"sessions_count":      0,
 		"chat_sessions_count": 0,
 	}
@@ -327,10 +341,18 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"crashes":   h.Crashes,
 		}
 	}
-	// Authenticated tier may touch SQLite for chat session counts.
-	if s.token != "" && requestAuthorized(r, s.token) && s.sessions != nil {
-		if n, err := s.sessions.Count(); err == nil {
-			body["chat_sessions_count"] = n
+	// Unauthenticated liveness must not open SQLite or report skill/session counts.
+	authed := s.token == "" || requestAuthorized(r, s.token)
+	if !authed {
+		writeJSON(w, http.StatusOK, body)
+		return
+	}
+	body["skills_count"] = countSkills(s.homeDir)
+	if s.sessions != nil {
+		if mem, summaries, chats, err := s.sessions.StatusCounts(); err == nil {
+			body["memory_entries"] = mem
+			body["sessions_count"] = summaries
+			body["chat_sessions_count"] = chats
 		}
 	}
 	writeJSON(w, http.StatusOK, body)
