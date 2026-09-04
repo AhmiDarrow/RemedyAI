@@ -9,12 +9,13 @@ import (
 	"strings"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/core"
+	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
 // RegisterZigHostTools installs RuntimeZig Tool ABI executors that call
 // remedy_core through native/go/core. Registration always succeeds; execute
 // fails closed when the library is missing or the host export is unsupported.
-// No Python / os soft fallback.
+// No Python / os/exec soft fallback.
 func RegisterZigHostTools(registry *Registry) error {
 	if registry == nil {
 		return fmt.Errorf("%w: nil registry", ErrInvalidDescriptor)
@@ -124,6 +125,48 @@ func RegisterZigHostTools(registry *Registry) error {
 		return err
 	}
 
+	if err := registry.Register(Descriptor{
+		ID:           "shell.exec",
+		Version:      1,
+		Description:  "Authorized one-shot argv capture via Zig (absolute argv[0]; no os/exec)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskMutation,
+		Capabilities: []string{"process.spawn"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["argv"],
+			"properties":{
+				"argv":{
+					"type":"array",
+					"minItems":1,
+					"maxItems":256,
+					"items":{"type":"string","minLength":1}
+				},
+				"cwd":{"type":"string"},
+				"env":{
+					"type":"object",
+					"additionalProperties":{"type":"string"}
+				},
+				"timeout_ms":{"type":"integer","minimum":1,"maximum":600000},
+				"owner_confirmed":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["exit_code","timed_out","stdout","stderr"],
+			"properties":{
+				"exit_code":{"type":"integer","minimum":0},
+				"timed_out":{"type":"boolean"},
+				"stdout":{"type":"string"},
+				"stderr":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeShellExec)); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -215,6 +258,69 @@ func executeComputerMonitors(context.Context, Request) (Result, error) {
 	out, err := json.Marshal(map[string]any{
 		"monitors": monitors,
 		"total":    len(monitors),
+	})
+	return Result{Output: out}, err
+}
+
+func executeShellExec(_ context.Context, request Request) (Result, error) {
+	var body struct {
+		Argv           []string          `json:"argv"`
+		Cwd            string            `json:"cwd"`
+		Env            map[string]string `json:"env"`
+		TimeoutMS      uint32            `json:"timeout_ms"`
+		OwnerConfirmed bool              `json:"owner_confirmed"`
+	}
+	if err := json.Unmarshal(request.Input, &body); err != nil {
+		return Result{}, ErrInvalidInput
+	}
+	if len(body.Argv) == 0 {
+		return Result{}, ErrInvalidInput
+	}
+	for _, arg := range body.Argv {
+		if arg == "" {
+			return Result{}, ErrInvalidInput
+		}
+	}
+	if !filepath.IsAbs(body.Argv[0]) {
+		return Result{}, fmt.Errorf("%w: argv[0] must be absolute", ErrInvalidInput)
+	}
+	if body.Cwd != "" && !filepath.IsAbs(body.Cwd) {
+		return Result{}, fmt.Errorf("%w: cwd must be absolute when set", ErrInvalidInput)
+	}
+
+	home := resolveToolHome()
+	key, err := secret.EnsureHostSigningKey(home)
+	if err != nil {
+		return Result{}, fmt.Errorf("shell.exec signing key: %w", err)
+	}
+	if err := core.EnsureSigningKey(key); err != nil {
+		return Result{}, err
+	}
+	_ = core.WriteJailSetRoots(nil)
+
+	token, nowMS, err := core.IssueProcessSpawnToken(body.Argv, body.OwnerConfirmed)
+	if err != nil {
+		return Result{}, err
+	}
+	res, err := core.ExecCaptureAuthorized(
+		body.Argv,
+		body.Cwd,
+		body.Env,
+		token,
+		"",
+		"",
+		body.OwnerConfirmed,
+		nowMS,
+		body.TimeoutMS,
+	)
+	if err != nil {
+		return Result{}, err
+	}
+	out, err := json.Marshal(map[string]any{
+		"exit_code": res.ExitCode,
+		"timed_out": res.TimedOut,
+		"stdout":    string(res.Stdout),
+		"stderr":    string(res.Stderr),
 	})
 	return Result{Output: out}, err
 }
