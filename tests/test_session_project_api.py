@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 from remedy.core.agent import BasicRuntime
-from remedy.core.build_todos import upsert_todos
 from remedy.interfaces.api import create_app
 from remedy.memory.store import MemoryStore
 from remedy.models import AgentConfig, ChatSession
@@ -339,70 +337,9 @@ def test_bulk_set_session_project(client):
         assert "Bulk" in str(by_id[sid]["project_path"])
 
 
-def test_session_todos_endpoint(client):
-    c, tmp = client
-    proj = tmp / "TodoProj"
-    proj.mkdir()
-    r = c.post("/api/sessions", json={"title": "todos", "project_path": str(proj)})
-    assert r.status_code == 200
-    sid = r.json()["id"]
-    empty = c.get(f"/api/sessions/{sid}/todos")
-    assert empty.status_code == 200
-    assert empty.json()["todos"] == []
-    rt = SimpleNamespace(
-        effective_project_path=lambda: proj,
-        config=SimpleNamespace(home_dir=tmp),
-    )
-    upsert_todos(
-        rt,
-        [{"id": "1", "content": "list files", "status": "in_progress"}],
-        merge=False,
-        root=proj,
-    )
-    got = c.get(f"/api/sessions/{sid}/todos")
-    assert got.status_code == 200
-    rows = got.json()["todos"]
-    assert len(rows) == 1
-    assert rows[0]["content"] == "list files"
-    assert rows[0]["status"] == "in_progress"
-    upsert_todos(
-        rt,
-        [{"id": "1", "content": "list files", "status": "completed"}],
-        merge=False,
-        root=proj,
-    )
-    done = c.get(f"/api/sessions/{sid}/todos")
-    assert done.status_code == 200
-    assert done.json()["todos"] == []
+# test_session_todos_endpoint: session todos HTTP is Go-owned (session_extras).
 
-
-def test_session_todos_do_not_leak_from_runtime_cache(client):
-    """Another tab with no project must not inherit the last turn's checklist."""
-    c, tmp = client
-    proj = tmp / "OwnerProj"
-    proj.mkdir()
-    owner = c.post("/api/sessions", json={"title": "owner", "project_path": str(proj)})
-    other = c.post("/api/sessions", json={"title": "other", "project_path": "C:\\"})
-    assert owner.status_code == 200 and other.status_code == 200
-    rt = SimpleNamespace(
-        effective_project_path=lambda: proj,
-        config=SimpleNamespace(home_dir=tmp),
-        _build_todos=[
-            type("T", (), {"id": "x", "content": "secret checklist", "status": "in_progress"})()
-        ],
-    )
-    upsert_todos(
-        rt,
-        [{"id": "x", "content": "secret checklist", "status": "in_progress"}],
-        merge=False,
-        root=proj,
-    )
-    leaked = c.get(f"/api/sessions/{other.json()['id']}/todos")
-    assert leaked.status_code == 200
-    assert leaked.json()["todos"] == []
-    mine = c.get(f"/api/sessions/{owner.json()['id']}/todos")
-    assert any(t.get("content") == "secret checklist" for t in mine.json()["todos"])
-
+# test_session_todos_do_not_leak_from_runtime_cache: session todos HTTP is Go-owned (session_extras).
 
 def test_grove_session_tagged_origin_and_no_project(client):
     """Grove home/goal chats: origin_channel='grove', no project folder —

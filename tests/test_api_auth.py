@@ -203,7 +203,7 @@ def test_cors_preflight_options_not_blocked_by_auth(auth_on, tmp_path):
     app = create_app(api_key=tok)
     client = TestClient(app)
     r = client.options(
-        "/api/auth/xai/login",
+        "/api/providers/probe",
         headers={
             "Origin": "http://tauri.localhost",
             "Access-Control-Request-Method": "POST",

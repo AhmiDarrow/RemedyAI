@@ -258,6 +258,63 @@ def test_python_routes_omit_go_owned_connect_and_webhooks() -> None:
     assert importlib.util.find_spec("remedy.connect") is None
 
 
+def test_python_routes_omit_phase4_go_owned_modules() -> None:
+    """Deleted FastAPI twins must stay gone; create_app must not serve them."""
+    import importlib.util
+    import re
+
+    from fastapi.testclient import TestClient
+
+    from remedy.interfaces.api import create_app
+
+    routes_init = Path("src/remedy/interfaces/routes/__init__.py").read_text(
+        encoding="utf-8"
+    )
+    for mod in ("i18n", "usage", "vision", "telephony"):
+        assert not re.search(rf"\bregister_{mod}_routes\s*\(", routes_init)
+        assert importlib.util.find_spec(f"remedy.interfaces.routes.{mod}") is None
+
+    client = TestClient(create_app(api_key=""))
+    absent = [
+        "/api/i18n",
+        "/api/usage/summary",
+        "/api/usage/series",
+        "/api/usage/export",
+        "/api/updates/check",
+        "/api/vision/status",
+        "/api/vision/catalog",
+        "/api/telephony/status",
+        "/api/auth/xai",
+        "/api/auth/xai/login",
+        "/api/assistant/google",
+        "/api/memory/search",
+        "/api/memory/facts",
+        "/api/memory/persona-wipe",
+        "/api/skills/packs",
+        "/api/skills/metrics/reuse",
+        "/api/skills/learning/summary",
+        "/api/skills/export",
+        "/api/continuity/dashboard",
+        "/api/nanoswarm/token/status",
+        "/api/sessions/s1/todos",
+        "/api/sessions/s1/timeline",
+        "/api/sessions/s1/export",
+    ]
+    for path in absent:
+        r = client.get(path)
+        assert r.status_code == 404, f"{path} still registered ({r.status_code})"
+
+    for path in (
+        "/api/telephony/terms",
+        "/api/telephony/choose",
+        "/api/sessions/s1/steer",
+        "/api/sessions/s1/time-travel",
+        "/api/memory/persona-wipe",
+    ):
+        r = client.post(path, json={})
+        assert r.status_code == 404, f"{path} still registered ({r.status_code})"
+
+
 def test_rmdy_tool_worker_entry_still_present() -> None:
     spec = importlib.util.find_spec("remedy.runtime.rmdy_tool_worker")
     assert spec is not None

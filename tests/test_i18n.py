@@ -121,21 +121,20 @@ def test_auto_prompt_does_not_force_english():
     assert "English" not in line or "unless they do" in line
 
 
-def test_i18n_endpoint_and_settings_round_trip(tmp_path, monkeypatch):
-    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
-    client = TestClient(create_app())
-    hinted = client.get("/api/i18n", params={"lang": "auto", "hint": "pt-BR"})
-    assert hinted.status_code == 200
-    assert hinted.json()["resolved"] == "pt"
+def test_i18n_catalog_payload_and_settings_round_trip(tmp_path, monkeypatch):
+    """Catalog payload stays unit-tested; GET /api/i18n is Go httpapi owned."""
+    from remedy.i18n.catalog import catalog_payload
 
-    r = client.get("/api/i18n", params={"lang": "es"})
-    assert r.status_code == 200, r.text
-    body = r.json()
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    hinted = catalog_payload("auto", hint="pt-BR")
+    assert hinted["resolved"] == "pt"
+    body = catalog_payload("es")
     assert body["resolved"] == "es"
     assert body["catalog"]["bar.help"] == "Ayuda"
     assert any(x["id"] == "auto" for x in body["languages"])
     assert any(x["id"] == "yo" for x in body["languages"])
 
+    client = TestClient(create_app())
     s = client.get("/api/settings")
     assert s.status_code == 200
     data = s.json()
@@ -147,6 +146,6 @@ def test_i18n_endpoint_and_settings_round_trip(tmp_path, monkeypatch):
     assert put.status_code == 200, put.text
     again = client.get("/api/settings")
     assert again.json()["ui_language"] == "ja"
-    i18n = client.get("/api/i18n")
-    assert i18n.json()["resolved"] == "ja"
-    assert i18n.json()["catalog"]["settings.save"] == "保存"
+    ja = catalog_payload("ja")
+    assert ja["resolved"] == "ja"
+    assert ja["catalog"]["settings.save"] == "保存"

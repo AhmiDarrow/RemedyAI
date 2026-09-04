@@ -1,6 +1,7 @@
-"""TestClient-only: memory / skills HTTP routes.
+"""TestClient-only: core skills HTTP routes (+ legacy summaries/handoffs).
 
 Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+Memory search/facts/wipe and skills extras (packs/metrics/export/…) are Go-owned.
 """
 from __future__ import annotations
 
@@ -9,141 +10,16 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-# suppress used by archive-unused / packs
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse
 
-from remedy.interfaces.api_models import (
-    MemoryAddRequest,
-    PersonaWipeRequest,
-    SkillInfo,
-)
-from remedy.models import (
-    MemoryEntryType,
-)
+from remedy.interfaces.api_models import SkillInfo
 
 logger = logging.getLogger(__name__)
 
 
 def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=None) -> None:
     """Register routes (closes over runtime/gateway/memory)."""
-    # -- memory search -------------------------------------------------------
-    @app.get("/api/memory/search")
-    async def search_memory(
-        query: str = Query(default=""),
-        limit: int = Query(default=10, le=50),
-    ):
-        if memory is None:
-            raise HTTPException(503, "Memory store not available")
-
-        # Empty query: recent human notes (panel open) — not FTS heartbeats.
-        q = (query or "").strip()
-        from remedy.memory.authority import is_hive_memory_hit, is_hive_writer
-
-        def _keep(e: Any) -> bool:
-            meta = getattr(e, "metadata", None) or {}
-            if not isinstance(meta, dict):
-                meta = {}
-            if is_hive_writer(getattr(e, "session_id", None)):
-                return False
-            return not is_hive_memory_hit(
-                {
-                    "authority": meta.get("authority"),
-                    "session_id": getattr(e, "session_id", None),
-                }
-            )
-
-        if not q:
-            raw = await memory.list_recent(limit=max(limit * 3, 30))
-            entries = [
-                e
-                for e in raw
-                if str(getattr(e.entry_type, "value", e.entry_type) or "") != "system"
-                and _keep(e)
-            ][:limit]
-        else:
-            entries = [e for e in await memory.search(query, limit=limit * 2) if _keep(e)][
-                :limit
-            ]
-        return {
-            "query": query,
-            "results": [
-                {
-                    "id": str(e.id),
-                    "title": e.title,
-                    "content": e.content[:300],
-                    "type": e.entry_type.value,
-                    "importance": e.importance,
-                    "created_at": e.created_at.isoformat() if e.created_at else None,
-                }
-                for e in entries
-            ],
-        }
-
-    @app.get("/api/memory/facts")
-    async def memory_partner_facts(limit: int = Query(default=20, le=50)):
-        """Owner Partner Memory facts for the Memory panel — never hive."""
-        if memory is None:
-            raise HTTPException(503, "Memory store not available")
-
-        from remedy.memory.partner_memory import fact_is_work_residue
-
-        profile = await memory.get_or_create_profile()
-        facts = []
-        for f in list(getattr(profile, "facts", None) or []):
-            auth = str(getattr(f, "authority", "") or "")
-            if auth == "hive":
-                continue
-            if fact_is_work_residue(f):
-                continue  # another tab's job is not a partner fact
-            text = str(getattr(f, "fact", "") or "").strip()
-            if not text:
-                continue
-            facts.append(
-                {
-                    "text": text[:300],
-                    "category": str(getattr(f, "category", "") or "general"),
-                    "authority": auth or "agent",
-                }
-            )
-            if len(facts) >= limit:
-                break
-        return {"facts": facts}
-
-    # -- memory add ----------------------------------------------------------
-    @app.post("/api/memory/add")
-    async def add_memory(req: MemoryAddRequest):
-        if memory is None:
-            raise HTTPException(503, "Memory store not available")
-
-        from remedy.models import MemoryEntry
-        entry = MemoryEntry(
-            title=req.title,
-            content=req.content,
-            entry_type=MemoryEntryType.NOTE,
-            tags=req.tags,
-            importance=req.importance,
-        )
-        saved = await memory.upsert(entry)
-        return {"id": str(saved.id), "title": saved.title, "status": "saved"}
-
-    @app.post("/api/memory/persona-wipe")
-    async def persona_wipe(req: PersonaWipeRequest):
-        """Forget Partner Memory / soul residue. Chats, keys, and skills stay."""
-        from remedy.memory.persona_wipe import wipe_persona
-
-        home = None
-        with suppress(Exception):
-            from remedy.interfaces.config import load_config
-
-            home = (load_config() or {}).get("home_dir")
-        try:
-            stats = await wipe_persona(
-                memory, home=home, runtime=runtime, confirm=req.confirm
-            )
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
-        return {"status": "wiped", **stats}
+    # /api/memory/search|facts|add|persona-wipe live on Go httpapi only.
 
     # -- skills --------------------------------------------------------------
     def _skill_info(s) -> SkillInfo:
@@ -189,160 +65,32 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             skills = list(reg.skills)[:limit]
         return [_skill_info(s) for s in skills]
 
-    @app.get("/api/skills/metrics/reuse")
-    async def skills_reuse_metrics():
-        """Closed-loop skill re-use: activations vs executions (Phase B3)."""
-        from pathlib import Path
-
-        from remedy.core.learning_loop import LearningLoop
-
-        home = Path(
-            getattr(getattr(runtime, "config", None), "home_dir", None)
-            or "~/.remedy"
-        ).expanduser()
-        loop = LearningLoop(
-            skills_dir=home / "skills",
-            memory=None,
-            stats_path=home / "skill_stats.json",
-            registry=getattr(runtime, "skills", None) if runtime else None,
-        )
-        return loop.get_reuse_metrics()
-
-    @app.get("/api/skills/learning/summary")
-    async def skills_learning_summary(limit: int = Query(default=12, le=50)):
-        """What did I learn? — probation/auto-generated skills + last lifecycle note.
-
-        Personal-partner observability: surface the learning loop without making
-        users dig through ~/.remedy.
-        """
-        if runtime is None or not hasattr(runtime, "skills"):
-            return {
-                "recent": [],
-                "probation_count": 0,
-                "learned_count": 0,
-                "active_learned_count": 0,
-                "note": "Skills not available",
-            }
-        reg = runtime.skills
-        all_skills = list(getattr(reg, "skills", []) or [])
-        learned: list[dict] = []
-        probation = 0
-        active_learned = 0
-        for s in all_skills:
-            meta = s.manifest.metadata or {}
-            auto = bool(meta.get("auto_generated"))
-            status_val = (
-                s.manifest.status.value
-                if hasattr(s.manifest.status, "value")
-                else str(s.manifest.status)
-            )
-            if status_val in ("discovered", "validated"):
-                probation += 1
-            if not auto:
-                continue
-            if status_val == "active":
-                active_learned += 1
-            mtime = 0.0
-            path = s.manifest.path or meta.get("skill_path") or ""
-            if path:
-                with suppress(OSError):
-                    p = Path(path)
-                    target = p if p.is_file() else (p / "SKILL.md" if p.is_dir() else p)
-                    if target.exists():
-                        mtime = target.stat().st_mtime
-            info = _skill_info(s)
-            learned.append(
-                {
-                    **info.model_dump(),
-                    "lifecycle_last": meta.get("lifecycle_last")
-                    or meta.get("creation_gate")
-                    or meta.get("lifecycle"),
-                    "mtime": mtime,
-                }
-            )
-        learned.sort(key=lambda r: float(r.get("mtime") or 0), reverse=True)
-        recent = learned[:limit]
-        for row in recent:
-            row.pop("mtime", None)
-        return {
-            "recent": recent,
-            "probation_count": probation,
-            "learned_count": len(learned),
-            "active_learned_count": active_learned,
-            "note": (
-                "Learned skills start on probation and promote only after multi-session success."
-                if learned
-                else "No auto-learned skills yet — multi-step successful work can create them."
-            ),
+    # skills metrics/learning/packs/export/import/archive live on Go httpapi only.
+    # Keep these path segments from being swallowed by /api/skills/{name}.
+    _GO_SKILL_SEGMENTS = frozenset(
+        {
+            "packs",
+            "metrics",
+            "learning",
+            "export",
+            "import",
+            "archive-unused",
+            "library",
         }
-
-    # Static skill routes MUST be registered before /api/skills/{name}
-    # or Starlette treats "packs" as a skill name.
-    @app.get("/api/skills/packs")
-    async def get_skill_packs():
-        """List skill packs (power-user grouping)."""
-        from pathlib import Path
-
-        from remedy.skills.shared import load_skill_packs
-
-        home = Path(
-            getattr(getattr(runtime, "config", None), "home_dir", None) or "~/.remedy"
-        ).expanduser()
-        data = load_skill_packs(home)
-        budget = 80
-        try:
-            from remedy.interfaces.api_support import load_config
-
-            budget = int((load_config() or {}).get("skills_active_budget") or 80)
-        except Exception:
-            pass
-        active_count = 0
-        if runtime is not None and hasattr(runtime, "skills"):
-            for s in runtime.skills.skills:
-                st = s.manifest.status
-                stv = st.value if hasattr(st, "value") else str(st)
-                if stv not in ("archived", "disabled", "deprecated"):
-                    if not (s.manifest.metadata or {}).get("quarantine"):
-                        active_count += 1
-        return {
-            **data,
-            "active_count": active_count,
-            "active_budget": budget,
-            "budget_banner": (
-                f"{active_count} / {budget} in active set — archive or pack to stay sharp"
-                if active_count >= int(budget * 0.85)
-                else None
-            ),
-        }
-
-    @app.put("/api/skills/packs")
-    async def put_skill_packs(request: Request):
-        """Save skill packs definition + enabled pack list."""
-        from pathlib import Path
-
-        from remedy.skills.shared import save_skill_packs
-
-        try:
-            payload = await request.json()
-        except Exception:
-            raise HTTPException(400, "JSON body required") from None
-        home = Path(
-            getattr(getattr(runtime, "config", None), "home_dir", None) or "~/.remedy"
-        ).expanduser()
-        data = {
-            "packs": payload.get("packs") if isinstance(payload.get("packs"), dict) else {},
-            "enabled": list(payload.get("enabled") or []),
-        }
-        path = save_skill_packs(data, home)
-        return {"status": "ok", "path": str(path), **data}
+    )
 
     def _skill_home() -> Path:
         return Path(
             getattr(getattr(runtime, "config", None), "home_dir", None) or "~/.remedy"
         ).expanduser()
 
+    def _reject_go_skill_segment(name: str) -> None:
+        if name in _GO_SKILL_SEGMENTS:
+            raise HTTPException(404, "Not Found")
+
     @app.get("/api/skills/{name}")
     async def get_skill_detail(name: str):
+        _reject_go_skill_segment(name)
         if runtime is None or not hasattr(runtime, "skills"):
             raise HTTPException(503, "Skills not available")
         skill = runtime.skills.get(name)
@@ -370,6 +118,7 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
         Safety: only deletes directories under ``~/.remedy/skills/``. Bundled package
         skills (shipped under the Remedy install) cannot be deleted this way.
         """
+        _reject_go_skill_segment(name)
         if runtime is None or not hasattr(runtime, "skills"):
             raise HTTPException(503, "Skills not available")
         reg = runtime.skills
@@ -477,6 +226,7 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
 
     @app.post("/api/skills/{name}/status")
     async def set_skill_status(name: str, request: Request):
+        _reject_go_skill_segment(name)
         if runtime is None or not hasattr(runtime, "skills"):
             raise HTTPException(503, "Skills not available")
         reg = runtime.skills
@@ -535,6 +285,7 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
     @app.post("/api/skills/{name}/quarantine")
     async def set_skill_quarantine(name: str, request: Request):
         """Toggle manual quarantine (blocks script activation until cleared)."""
+        _reject_go_skill_segment(name)
         if runtime is None or not hasattr(runtime, "skills"):
             raise HTTPException(503, "Skills not available")
         skill = runtime.skills.get(name)
@@ -570,6 +321,7 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
     @app.put("/api/skills/{name}/body")
     async def update_skill_body(name: str, request: Request):
         """Replace skill instructions / full SKILL.md body (human editor)."""
+        _reject_go_skill_segment(name)
         if runtime is None or not hasattr(runtime, "skills"):
             raise HTTPException(503, "Skills not available")
         skill = runtime.skills.get(name)
@@ -603,6 +355,7 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
 
     @app.post("/api/skills/{name}/feedback")
     async def skill_feedback(name: str, request: Request):
+        _reject_go_skill_segment(name)
         if runtime is None or not hasattr(runtime, "skills"):
             raise HTTPException(503, "Skills not available")
         skill = runtime.skills.get(name)
@@ -638,202 +391,7 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             ),
         }
 
-    @app.post("/api/skills/export")
-    async def export_skills_pack(request: Request):
-        """Export selected (or all) skills as a ZIP pack."""
-        if runtime is None or not hasattr(runtime, "skills"):
-            raise HTTPException(503, "Skills not available")
-        try:
-            payload = await request.json()
-        except Exception:
-            payload = {}
-        names = list((payload or {}).get("names") or [])
-        import tempfile
-
-        from remedy.skills.exporter import SkillExporter
-
-        tmp = Path(tempfile.mkdtemp(prefix="remedy-skill-pack-"))
-        exp = SkillExporter(tmp)
-        skills = []
-        if names:
-            for n in names:
-                s = runtime.skills.get(n)
-                if s:
-                    skills.append(s)
-        else:
-            skills = list(runtime.skills.skills)
-        if not skills:
-            raise HTTPException(400, "No skills to export")
-        zip_path = exp.export_pack(skills)
-        return FileResponse(
-            str(zip_path),
-            filename=zip_path.name,
-            media_type="application/zip",
-        )
-
-    @app.post("/api/skills/import")
-    async def import_skills_pack(request: Request):
-        """Import a skill pack ZIP into quarantine until user promotes."""
-        if runtime is None or not hasattr(runtime, "skills"):
-            raise HTTPException(503, "Skills not available")
-        form = await request.form()
-        upload = form.get("file")
-        if upload is None:
-            raise HTTPException(400, "file required")
-        import tempfile
-
-        from remedy.skills.exporter import SkillExporter
-
-        home = Path(
-            getattr(getattr(runtime, "config", None), "home_dir", None) or "~/.remedy"
-        ).expanduser()
-        dest_root = home / "skills"
-        tmp = Path(tempfile.mkdtemp(prefix="remedy-skill-import-"))
-        from remedy.skills.library.install import MAX_SKILL_ZIP_BYTES
-
-        chunks: list[bytes] = []
-        total = 0
-        while True:
-            block = await upload.read(65536)  # type: ignore[union-attr]
-            if not block:
-                break
-            total += len(block)
-            if total > MAX_SKILL_ZIP_BYTES:
-                raise HTTPException(413, f"Skill pack exceeds {MAX_SKILL_ZIP_BYTES} bytes")
-            chunks.append(block)
-        zip_path = tmp / "pack.zip"
-        zip_path.write_bytes(b"".join(chunks))
-        exp = SkillExporter(tmp)
-        imported = exp.import_pack_quarantine(zip_path, dest_root)
-        n = 0
-        for skill in imported:
-            runtime.skills.register(skill)
-            n += 1
-        return {
-            "imported": n,
-            "names": [s.manifest.name for s in imported],
-            "quarantine": True,
-        }
-
-    @app.post("/api/skills/archive-unused")
-    async def archive_unused_skills(request: Request):
-        """Archive skills unused for N days (power-user 100+ library hygiene).
-
-        Does not delete packs. Skips bundled/quarantine unless include_quarantine.
-        Body: { days?: 90, dry_run?: false, include_quarantine?: false }
-        """
-        if runtime is None or not hasattr(runtime, "skills"):
-            raise HTTPException(503, "Skills not available")
-        try:
-            payload = await request.json()
-        except Exception:
-            payload = {}
-        days = int((payload or {}).get("days") or 90)
-        dry_run = bool((payload or {}).get("dry_run", False))
-        include_q = bool((payload or {}).get("include_quarantine", False))
-        days = max(7, min(3650, days))
-
-        from datetime import UTC, datetime, timedelta
-        from pathlib import Path
-
-        from remedy.core.learning.refiner import SkillRefiner
-        from remedy.models import SkillStatus as _SS
-
-        home = Path(
-            getattr(getattr(runtime, "config", None), "home_dir", None) or "~/.remedy"
-        ).expanduser()
-        refiner = SkillRefiner(stats_path=home / "skill_stats.json")
-        cutoff = datetime.now(UTC) - timedelta(days=days)
-        candidates: list[dict] = []
-        archived: list[str] = []
-
-        for skill in list(runtime.skills.skills):
-            m = skill.manifest
-            st = m.status
-            stv = st.value if hasattr(st, "value") else str(st)
-            if stv in ("archived", "deprecated"):
-                continue
-            meta = m.metadata or {}
-            if meta.get("quarantine") and not include_q:
-                continue
-            # Prefer never archiving non-auto bundled packs that are active defaults
-            if not meta.get("auto_generated") and stv == "active" and not meta.get(
-                "user_installed"
-            ):
-                # still allow if truly unused for long — only auto/user-touched
-                if not meta.get("manual_override") and not meta.get("source"):
-                    # skip pure bundled unless executions exist and went cold
-                    pass
-
-            stats = refiner.get_stats(m.name) if hasattr(refiner, "get_stats") else None
-            last_dt = None
-            if stats is not None:
-                last_dt = getattr(stats, "last_activated", None) or getattr(
-                    stats, "last_executed", None
-                )
-            if last_dt is None and hasattr(refiner, "last_success_at"):
-                last_dt = refiner.last_success_at(m.name)
-
-            # Never used at all + not recently created: use zero activity
-            never = last_dt is None and (
-                not stats
-                or (
-                    int(getattr(stats, "total_executions", 0) or 0) == 0
-                    and int(getattr(stats, "activations", 0) or 0) == 0
-                )
-            )
-            cold = False
-            if last_dt is not None:
-                try:
-                    if last_dt.tzinfo is None:
-                        last_dt = last_dt.replace(tzinfo=UTC)
-                    cold = last_dt < cutoff
-                except Exception:
-                    cold = False
-
-            # Only archive auto-generated / learned or explicitly user-overridden when never used
-            is_learned = bool(meta.get("auto_generated"))
-            if not (cold or (never and is_learned)):
-                continue
-            if never and not is_learned:
-                # Bundled unused — leave alone
-                continue
-
-            row = {
-                "name": m.name,
-                "status": stv,
-                "last_activity": last_dt.isoformat() if last_dt else None,
-                "auto_generated": is_learned,
-            }
-            candidates.append(row)
-            if dry_run:
-                continue
-            try:
-                if hasattr(runtime.skills, "set_status"):
-                    runtime.skills.set_status(m.name, _SS.ARCHIVED)
-                else:
-                    skill.manifest.status = _SS.ARCHIVED
-                meta = dict(skill.manifest.metadata or {})
-                meta["lifecycle"] = "bulk-archive"
-                meta["lifecycle_last"] = f"Archived: unused >{days}d"
-                skill.manifest.metadata = meta
-                _persist_skill(skill)
-                archived.append(m.name)
-            except Exception:
-                continue
-
-        if archived and not dry_run:
-            with suppress(Exception):
-                from remedy.skills.shared import invalidate_shared_registry
-
-                invalidate_shared_registry()
-        return {
-            "days": days,
-            "dry_run": dry_run,
-            "candidates": candidates,
-            "archived": archived,
-            "count": len(archived) if not dry_run else len(candidates),
-        }
+    # skills export/import/archive-unused live on Go httpapi only.
 
     # Generic CI webhook POST /api/webhook/{source} lives on Go httpapi only.
 

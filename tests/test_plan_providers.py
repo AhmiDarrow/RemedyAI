@@ -236,5 +236,6 @@ class TestAuthRoutes:
         paths = {getattr(r, "path", None) for r in app.routes}
         assert "/api/providers" in paths
         assert "/api/providers/ollama/detect" in paths
-        assert "/api/auth/xai/login" in paths
-        assert "/api/auth/xai" in paths
+        # /api/auth/xai* is Go-owned — not on the TestClient registrar.
+        assert "/api/auth/xai/login" not in paths
+        assert "/api/auth/xai" not in paths

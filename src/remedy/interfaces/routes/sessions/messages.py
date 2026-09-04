@@ -17,7 +17,6 @@ from remedy.interfaces.api_support import (
 )
 from remedy.interfaces.attachments import filter_jailed_attachments
 from remedy.models import (
-    ChatMessage,
     ChatMessageRole,
 )
 
@@ -83,66 +82,9 @@ def register_messages_routes(app: FastAPI, *, runtime=None, gateway=None, memory
             ]
         }
 
-    @app.get("/api/sessions/{session_id}/todos")
-    async def list_session_todos(session_id: str):
-        """Live build checklist for the session project (user-visible)."""
-        from pathlib import Path
+    # /api/sessions/{id}/todos lives on Go httpapi only.
 
-        from remedy.core.build_todos import load_todos, open_todo_count, todos_public
-
-        root = None
-        if memory is not None:
-            sess = await memory.get_chat_session(session_id)
-            if sess is None:
-                raise HTTPException(404, "Session not found")
-            raw = getattr(sess, "project_path", None)
-            from remedy.core.workspace import is_unset_project_path, is_volume_root_path
-
-            if not raw or is_unset_project_path(raw) or is_volume_root_path(raw):
-                items = load_todos(runtime, session_id=session_id)
-                if open_todo_count(items) == 0:
-                    return {"todos": []}
-                return {"todos": todos_public(items)}
-            p = Path(str(raw))
-            root = p.parent if p.is_file() else p
-            if is_volume_root_path(root):
-                items = load_todos(runtime, session_id=session_id)
-                if open_todo_count(items) == 0:
-                    return {"todos": []}
-                return {"todos": todos_public(items)}
-        items = load_todos(runtime if root is None else None, root=root, session_id=session_id)
-        if open_todo_count(items) == 0:
-            return {"todos": []}
-        return {"todos": todos_public(items)}
-
-    @app.post("/api/sessions/{session_id}/steer")
-    async def steer_message(session_id: str, req: SendMessageRequest):
-        """Say something to a turn that is already running.
-
-        The text joins the live ReAct loop at its next step (no stop, no
-        restart) and is persisted as the owner's message so the transcript
-        reads in order. ``{"steered": false}`` means no turn was running —
-        send it as a normal message instead.
-        """
-        text = coerce_text_arg(req.message)
-        if not text:
-            raise HTTPException(400, "Message is empty")
-        from remedy.core.turn_context import try_push_nudge
-
-        ok, reason = try_push_nudge(session_id, text)
-        if not ok:
-            return {"steered": False, "reason": reason}
-        if memory is not None:
-            with contextlib.suppress(Exception):
-                if await memory.get_chat_session(session_id) is not None:
-                    await memory.add_chat_message(
-                        ChatMessage(
-                            session_id=session_id,
-                            role=ChatMessageRole.USER,
-                            content=text,
-                        )
-                    )
-        return {"steered": True, "reason": "ok"}
+    # /api/sessions/{id}/steer lives on Go httpapi only.
 
     @app.post("/api/sessions/{session_id}/messages")
     async def send_message(session_id: str, req: SendMessageRequest):

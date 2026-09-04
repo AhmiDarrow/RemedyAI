@@ -29,7 +29,8 @@ import remedy.interfaces.routes as routes_pkg
 STREAMING = {"/api/events/sessions"}
 
 #: Reaching the network would make this a flaky test, not a better one.
-OUTBOUND = {"/api/updates/check"}
+# /api/updates/check removed from TestClient surface (Go-owned).
+OUTBOUND: set[str] = set()
 
 
 class _StubConfig:
