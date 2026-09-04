@@ -4,7 +4,7 @@
 
 **Remedy Desktop** is the recommended way to use Remedy — your personal AI
 partner for knowledge, design, code, computer use, and get-it-done work (not a
-medical or clinical product). Current package series: **0.48.x** (see root
+medical or clinical product). Current package series: **0.50.x** (see root
 `CHANGELOG.md`).
 
 ### Dev workflow (single build)
@@ -96,7 +96,7 @@ launcher** for `remedy serve` → `remedy-runtime`; set
 
 | Gap | Why it still matters |
 |-----|----------------------|
-| Full `/api/*` route parity | Go covers the production Desktop surface; FastAPI `create_app` remains for pytest / TestClient only |
+| Full `/api/*` route parity | Go covers the production Desktop surface; Desktop-called paths still missing on Go are listed in `tests/test_desktop_api_contract.py` `KNOWN_GO_GAPS` (shrink only). FastAPI `create_app` remains for pytest / TestClient only |
 | Python worker over RMDY | Prompt assembly, soul/skills text, voice/vision/telephony still need a supervised worker |
 | Zig in-process from Go | Some host primitives still load via Python `host_binding` |
 | Release smoke | NSIS/deb/AppImage must prove :7400 health + session stream on both OS with the new `externalBin` triple names |
@@ -205,17 +205,15 @@ Start-Process explorer
 ```
 
 3. Unpin Remedy from the taskbar and pin again (or reboot).
-4. Confirm you launched the newly built `app.exe` under
+4. Confirm you launched the newly built `Remedy Desktop.exe` under
    `%LOCALAPPDATA%\Remedy Desktop\`.
 
-It bundles the full Remedy server as a sidecar inside a native Tauri application,
-so users only need to download and run one installer — no Python, Node, or Rust
-toolchain required.
-
-The desktop app provides a chat interface with streaming tokens,
-session management, file/image attachments (drag-and-drop), slash commands,
-themes, first-run setup, bundled skills, and persistent memory. Releases are
-minisign-signed for in-app auto-update.
+Packaged Desktop is one installer: Tauri UI plus Go **`remedy-runtime`**
+(`externalBin`, owns `:7400`) and Zig **`remedy_core`** — no PyInstaller
+`remedy-desktop` sidecar, and no Python/Node/Rust toolchain required for
+owners. Chat streams tokens over HTTP/SSE with sessions, attachments, slash
+commands, themes, first-run setup, bundled skills, and persistent memory.
+Releases are minisign-signed for in-app auto-update.
 
 ## Goal
 
@@ -277,7 +275,7 @@ Grove sends with `mode: 'steer'`; Studio keeps its queue/interrupt modes.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `POST` | `/api/sessions/{id}/attachments` | Upload file (JSON + base64 preferred in frozen sidecar) |
+| `POST` | `/api/sessions/{id}/attachments` | Upload file (JSON + base64 preferred in packaged Desktop) |
 | `GET` | `/api/sessions/{id}/attachments/{filename}` | Download stored attachment |
 
 Same-name re-upload overwrites the prior file (no `_N` suffixes).
@@ -357,11 +355,11 @@ event: error         → { message: "..." }
 
 ## Implementation Order
 
-### Phase 0 — API Foundation (Python, in-repo)
-1. Session/message models in `models.py`
+### Phase 0 — API Foundation (historical Python; production is Go)
+1. Session/message models in `models.py` (pytest / TestClient FastAPI surface)
 2. Session/message tables in `memory/store.py`
-3. Structured SSE streaming in `api.py`
-4. Full session/message/command/model REST endpoints
+3. Structured SSE streaming (now Go `httpapi` on packaged `:7400`)
+4. Full session/message/command/model REST endpoints (Go authority; see `KNOWN_GO_GAPS`)
 
 ### Phase 1 — Web UI (React + Vite + Tailwind)
 5. Scaffold `desktop/` with Vite + React + Tailwind
@@ -372,8 +370,8 @@ event: error         → { message: "..." }
 10. Status bar
 
 ### Phase 2 — Tauri Shell (Windows first)
-11. Set up `src-tauri/` with sidecar config
-12. Bundle/spawn `remedy` process
+11. Set up `src-tauri/` with `externalBin` for `remedy-runtime`
+12. Bundle/spawn Go `remedy-runtime` (not PyInstaller `remedy-desktop`)
 13. Window management, tray icon (optional)
 14. NSIS installer build
 
@@ -388,12 +386,12 @@ event: error         → { message: "..." }
 - **Markdown**: `react-markdown` + `rehype-highlight` for code blocks
 - **Streaming**: Native `fetch` with `ReadableStream` for SSE; no WebSocket needed
 - **State**: TanStack Query (React Query) for REST caching; lightweight
-- **Sidecar**: Go `remedy-runtime` (Tauri `externalBin`); `remedy serve` is a thin launcher
+- **Local API**: Go `remedy-runtime` (Tauri `externalBin`) + Zig `remedy_core`; `remedy serve` is a thin launcher
 
 ## Windows Distribution
 
 - **Dev**: `remedy serve` (→ `remedy-runtime`) + `pnpm tauri:dev` / Vite
-- **Packaged**: Tauri bundles `remedy-runtime` via `externalBin`; NSIS `.exe` installer
+- **Packaged**: Tauri bundles `remedy-runtime` via `externalBin` + Zig `remedy_core`; NSIS `.exe` installer
 - **Config**: Shares `~/.remedy/config.toml` with CLI `remedy`
 
 ## Success Criteria (v1)
@@ -408,10 +406,10 @@ event: error         → { message: "..." }
 - [x] Multi-tool ReAct turns keep complete `tool_calls` / tool-result pairing
   (avoids provider HTTP 400 on large reviews)
 
-## Sidecar agent notes
+## Runtime agent notes
 
-The desktop chat path is `React UI → remedy-runtime (:7400) → workers /
-BasicRuntime` ReAct loop. FastAPI `create_app` is not on this path (tests only).
+The desktop chat path is `React UI → remedy-runtime (:7400) → Go cognition /
+supervised workers`. FastAPI `create_app` is not on this path (tests only).
 Tool batches are executed in parallel waves (`MAX_PARALLEL_TOOLS`) but **every**
 assistant tool-call id still receives a tool result message before the next LLM
 request. Incomplete pairing is also sanitized by `ensure_tool_call_pairings`
@@ -503,7 +501,7 @@ Version is sourced from `pyproject.toml` — `scripts/sync_version.py` keeps
 CI workflow: [`.github/workflows/desktop-release.yml`](../.github/workflows/desktop-release.yml)
 
 1. Push a tag `vX.Y.Z` on the release branch (or use `workflow_dispatch` with a version).
-2. Jobs: build sidecar → build Tauri NSIS with `TAURI_SIGNING_*` secrets → publish GitHub Release + `latest.json`.
+2. Jobs: stage `remedy-runtime` + `remedy_core` → build Tauri NSIS with `TAURI_SIGNING_*` secrets → publish GitHub Release + `latest.json`.
 3. Desktop checks `https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json`.
 
 ### Signing checklist

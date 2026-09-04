@@ -33,9 +33,9 @@ checks capabilities before machine-facing execution.
 `src/remedy/runtime/native_runtime.py` is the Zig/Go probe seam for capability
 routing. The selector accepts `compatibility` (the default), `auto`, or `native`
 through `REMEDY_NATIVE_RUNTIME` or `native_runtime` in config. Go protocol/tool
-ABI 1 and Zig ABI 1 must both probe healthy before the native route becomes
-effective. Fallback after a native attempt is allowed only for operations
-declared idempotent.
+ABI 1 and Zig C ABI **5** (`REMEDY_CORE_ABI_VERSION`) must both probe healthy
+before the native route becomes effective. Fallback after a native attempt is
+allowed only for operations declared idempotent.
 
 **HTTP authority:** `remedy-runtime` owns production `:7400`. `remedy serve` and
 packaged Desktop launch that binary (fail closed if missing). Python does not
@@ -64,7 +64,8 @@ Grove unmounts off-surface. Studio must own its own voice instance (`useVoice` i
 
 ## Core control plane
 
-- **ReAct** — `core/react_loop/`, `react_turn.py`, `react_policy.py`, `react_stream.py`, `turn_context.py`. Work signal gates tools; chat-only messages do not start a tool storm.
+- **ReAct (production)** — Go `native/go/cognition/` driven by `remedy-runtime` / `native/go/httpapi` (`CognitionTurnRunner`). Desktop and `remedy serve` chat turns use this path on `:7400`.
+- **ReAct (Python helpers)** — `src/remedy/core/react_loop/`, `react_turn.py`, `react_policy.py`, `react_stream.py`, `turn_context.py` remain for workers, tests, and compatibility — **not** the production API authority.
 - **PolicyEngine** — `policy/engine.py`. Deterministic allow / ask / deny. Dangerous host commands denied; mail/pay checkpoints never waived. Trust profiles live in `APPROVALS.needs_ask`.
 - **Write jail** — `core/security` + computer executor. Runtime-bin skip requires a real executable extension; cross-session computer state is thread-local per session.
 - **Hive** — daughters are capped; no parent Partner Memory writes; no nested spawn. PROCESS_EXEC + FS_WRITE + NETWORK_READ by design for foragers (not a full sandbox).
