@@ -253,22 +253,31 @@ def test_the_parent_closes_the_pty_side_ends_and_keeps_its_own(wired: Any) -> No
 
 @windows_only
 @pytest.mark.parametrize(
-    ("argv", "cmdline"),
+    "argv",
     [
-        (["cmd.exe"], "cmd.exe"),
-        (["cmd.exe", "/c", "echo hi"], 'cmd.exe /c "echo hi"'),
-        (["C:\\Program Files\\x.exe", "-v"], '"C:\\Program Files\\x.exe" -v'),
-        (["cmd.exe", "/c", "echo a & del b"], 'cmd.exe /c "echo a & del b"'),
-        (["cmd.exe", "/c", 'say "hi"'], 'cmd.exe /c "say \\"hi\\""'),
+        ["cmd.exe"],
+        ["cmd.exe", "/c", "echo hi"],
+        ["C:\\Program Files\\x.exe", "-v"],
+        ["cmd.exe", "/c", "echo a & del b"],
+        ["cmd.exe", "/c", 'say "hi"'],
     ],
 )
 def test_the_command_line_is_quoted_argument_by_argument(
-    wired: Any, argv: list[str], cmdline: str
+    wired: Any, argv: list[str]
 ) -> None:
+    """Authorized ConPTY resolves argv[0] via PATH, then quotes argument-by-argument."""
+    import shutil
+    from pathlib import Path
+
     host, fake = wired
     conpty._spawn_conpty_sync(argv, None, None)
+    expected_argv = [str(a) for a in argv]
+    if not Path(expected_argv[0]).is_absolute():
+        found = shutil.which(expected_argv[0])
+        assert found is not None, expected_argv[0]
+        expected_argv[0] = str(Path(found).resolve())
+    cmdline = subprocess.list2cmdline(expected_argv)
     assert fake.spawns[0]["cmdline"] == cmdline
-    assert fake.spawns[0]["cmdline"] == subprocess.list2cmdline(argv)
     assert host.spawns[0]["cmdline"] == cmdline
 
 

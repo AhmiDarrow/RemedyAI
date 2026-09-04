@@ -3,9 +3,9 @@
 This is the one place Python describes the C ABI declared in
 ``native/zig/include/remedy_core.h``. Every function here is a thin call into
 the library: it marshals arguments, checks the status, frees buffers the
-library allocated and returns plain Python values. Policy lives in the
-callers (``desktop_win``, ``desktop_uia``, ``desktop_linux``,
-``execution.process``, ``execution.host.conpty``).
+library allocated and returns plain Python values. Production process and
+ConPTY spawns use the authorized ABI (policy + capability tokens); the
+unsigned spawn exports remain for low-level tests only.
 
 Windows: host + UIA + ConPTY. Linux: host (X11/XTest) + AT-SPI a11y snapshot.
 ``host_op_prepare`` (structured ops + command-string prepare) and
@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import ctypes
 import json
+import os
 import sys
+import time
 from collections.abc import Mapping, Sequence
 from ctypes import (
     POINTER,
@@ -267,7 +269,76 @@ _PROTOTYPES: dict[str, tuple[list[Any], Any]] = {
     "remedy_core_conpty_kill": ([c_uint64], c_int32),
     "remedy_core_conpty_close_pipe": ([c_uint64, c_uint32], c_int32),
     "remedy_core_conpty_close": ([c_uint64], c_int32),
+    "remedy_core_security_set_signing_key": ([c_void_p, c_size_t], c_int32),
+    "remedy_core_security_clear_signing_key": ([], c_int32),
+    "remedy_core_policy_hash_argv": (
+        [c_char_p, c_size_t, c_void_p, c_size_t],
+        c_int32,
+    ),
+    "remedy_core_capability_issue": (
+        [
+            c_char_p,
+            c_size_t,
+            c_char_p,
+            c_size_t,
+            c_void_p,
+            c_size_t,
+            c_uint64,
+            c_uint64,
+            c_uint64,
+            c_void_p,
+            c_size_t,
+            c_void_p,
+            c_size_t,
+        ],
+        c_int32,
+    ),
+    "remedy_core_process_spawn_authorized": (
+        [
+            c_char_p,
+            c_size_t,
+            c_char_p,
+            c_size_t,
+            c_char_p,
+            c_size_t,
+            c_void_p,
+            c_size_t,
+            c_char_p,
+            c_size_t,
+            c_char_p,
+            c_size_t,
+            c_uint8,
+            c_uint64,
+            POINTER(c_uint32),
+            POINTER(c_uint64),
+        ],
+        c_int32,
+    ),
+    "remedy_core_conpty_spawn_authorized": (
+        [
+            c_char_p,
+            c_size_t,
+            c_char_p,
+            c_size_t,
+            c_char_p,
+            c_size_t,
+            c_uint16,
+            c_uint16,
+            c_void_p,
+            c_size_t,
+            c_char_p,
+            c_size_t,
+            c_char_p,
+            c_size_t,
+            c_uint8,
+            c_uint64,
+            POINTER(c_uint32),
+            POINTER(c_uint64),
+        ],
+        c_int32,
+    ),
 }
+
 
 _bound: Any = None
 
@@ -1028,3 +1099,235 @@ def conpty_close(handle: int) -> None:
     """Release pipes, pseudoconsole and process handle; invalidates *handle*."""
     library = _lib()
     _check(library, "conpty_close", library.remedy_core_conpty_close(handle))
+
+
+# --- ABI 5 additive: policy + capability tokens ------------------------------
+
+CAPABILITY_TOKEN_SIZE = 169
+PROCESS_SPAWN_RIGHT = 1 << 2
+OWNER_CHECKPOINT_RIGHT = 1 << 5
+DEFAULT_SPAWN_SUBJECT = "agent:remedy"
+DEFAULT_SPAWN_SCOPE = "workspace:local"
+_TOKEN_LIFETIME_MS = 60_000
+
+_signing_key_ready = False
+
+
+def security_set_signing_key(key: bytes | bytearray | memoryview) -> None:
+    """Install the HMAC signing key (first 32 bytes). Test or secret-store material only."""
+    global _signing_key_ready
+    raw = bytes(key)
+    if len(raw) < 32:
+        raise ValueError("signing key must be at least 32 bytes")
+    library = _lib()
+    buf = (c_uint8 * 32).from_buffer_copy(raw[:32])
+    _check(
+        library,
+        "security_set_signing_key",
+        library.remedy_core_security_set_signing_key(buf, 32),
+    )
+    _signing_key_ready = True
+
+
+def security_clear_signing_key() -> None:
+    global _signing_key_ready
+    library = _lib()
+    _check(library, "security_clear_signing_key", library.remedy_core_security_clear_signing_key())
+    _signing_key_ready = False
+
+
+def ensure_spawn_signing_key() -> None:
+    """Ensure a runtime signing key is installed (ephemeral if unset)."""
+    global _signing_key_ready
+    if _signing_key_ready:
+        return
+    # Prefer an explicit test/operator key; otherwise mint a process-local one.
+    env_key = os.environ.get("REMEDY_SPAWN_SIGNING_KEY", "")
+    if env_key:
+        raw = bytes.fromhex(env_key) if all(c in "0123456789abcdefABCDEF" for c in env_key) and len(env_key) >= 64 else env_key.encode("utf-8")
+    else:
+        raw = os.urandom(32)
+    security_set_signing_key(raw)
+
+
+def policy_hash_argv(argv: Sequence[str]) -> bytes:
+    library = _lib()
+    argv_raw = _utf8(json.dumps([str(a) for a in argv]))
+    out = (c_uint8 * 32)()
+    _check(
+        library,
+        "policy_hash_argv",
+        library.remedy_core_policy_hash_argv(argv_raw, len(argv_raw), out, 32),
+    )
+    return bytes(out)
+
+
+def capability_issue(
+    *,
+    operation_hash: bytes,
+    rights_bits: int = PROCESS_SPAWN_RIGHT,
+    subject: str = DEFAULT_SPAWN_SUBJECT,
+    scope: str = DEFAULT_SPAWN_SCOPE,
+    issued_at_ms: int | None = None,
+    expires_at_ms: int | None = None,
+    nonce: bytes | None = None,
+) -> bytes:
+    """Issue a v2 capability token bound to *operation_hash* (32 bytes)."""
+    ensure_spawn_signing_key()
+    if len(operation_hash) != 32:
+        raise ValueError("operation_hash must be 32 bytes")
+    now = int(time.time() * 1000) if issued_at_ms is None else int(issued_at_ms)
+    exp = now + _TOKEN_LIFETIME_MS if expires_at_ms is None else int(expires_at_ms)
+    nonce_raw = os.urandom(16) if nonce is None else bytes(nonce)
+    if len(nonce_raw) != 16:
+        raise ValueError("nonce must be 16 bytes")
+    library = _lib()
+    op_buf = (c_uint8 * 32).from_buffer_copy(operation_hash)
+    nonce_buf = (c_uint8 * 16).from_buffer_copy(nonce_raw)
+    out = (c_uint8 * CAPABILITY_TOKEN_SIZE)()
+    subject_raw = _utf8(subject)
+    scope_raw = _utf8(scope)
+    _check(
+        library,
+        "capability_issue",
+        library.remedy_core_capability_issue(
+            subject_raw,
+            len(subject_raw),
+            scope_raw,
+            len(scope_raw),
+            op_buf,
+            32,
+            int(rights_bits),
+            now,
+            exp,
+            nonce_buf,
+            16,
+            out,
+            CAPABILITY_TOKEN_SIZE,
+        ),
+    )
+    return bytes(out)
+
+
+def issue_process_spawn_token(
+    argv: Sequence[str],
+    *,
+    owner_checkpoint: bool = False,
+    subject: str = DEFAULT_SPAWN_SUBJECT,
+    scope: str = DEFAULT_SPAWN_SCOPE,
+) -> tuple[bytes, int]:
+    """Return ``(token, now_ms)`` for an authorized spawn of *argv*."""
+    digest = policy_hash_argv(argv)
+    now = int(time.time() * 1000)
+    rights = PROCESS_SPAWN_RIGHT
+    if owner_checkpoint:
+        rights |= OWNER_CHECKPOINT_RIGHT
+    token = capability_issue(
+        operation_hash=digest,
+        rights_bits=rights,
+        subject=subject,
+        scope=scope,
+        issued_at_ms=now,
+        expires_at_ms=now + _TOKEN_LIFETIME_MS,
+    )
+    return token, now
+
+
+def process_spawn_authorized(
+    argv: Sequence[str],
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+    *,
+    token: bytes,
+    subject: str = DEFAULT_SPAWN_SUBJECT,
+    scope: str = DEFAULT_SPAWN_SCOPE,
+    owner_confirmed: bool = False,
+    now_ms: int | None = None,
+) -> tuple[int, int]:
+    """Authorized hidden spawn. *argv[0]* must be absolute. No unsigned fallback."""
+    library = _lib()
+    argv_raw = _utf8(json.dumps([str(a) for a in argv]))
+    cwd_raw = _utf8(str(cwd)) if cwd else b""
+    env_raw = _utf8(json.dumps({str(k): str(v) for k, v in env.items()})) if env is not None else b""
+    subject_raw = _utf8(subject)
+    scope_raw = _utf8(scope)
+    token_raw = bytes(token)
+    pid, handle = c_uint32(), c_uint64()
+    when = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    _check(
+        library,
+        "process_spawn_authorized",
+        library.remedy_core_process_spawn_authorized(
+            argv_raw,
+            len(argv_raw),
+            cwd_raw,
+            len(cwd_raw),
+            env_raw,
+            len(env_raw),
+            (c_uint8 * len(token_raw)).from_buffer_copy(token_raw),
+            len(token_raw),
+            subject_raw,
+            len(subject_raw),
+            scope_raw,
+            len(scope_raw),
+            1 if owner_confirmed else 0,
+            when,
+            ctypes.byref(pid),
+            ctypes.byref(handle),
+        ),
+    )
+    return pid.value, handle.value
+
+
+def conpty_spawn_authorized(
+    argv: Sequence[str],
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+    *,
+    cols: int = 120,
+    rows: int = 40,
+    token: bytes,
+    subject: str = DEFAULT_SPAWN_SUBJECT,
+    scope: str = DEFAULT_SPAWN_SCOPE,
+    owner_confirmed: bool = False,
+    now_ms: int | None = None,
+) -> tuple[int, int]:
+    """Authorized ConPTY spawn. *argv[0]* must be absolute. No unsigned fallback."""
+    library = _lib()
+    argv_raw = _utf8(json.dumps([str(a) for a in argv]))
+    cwd_raw = _utf8(str(cwd)) if cwd else b""
+    env_raw = (
+        _utf8(json.dumps({str(k): str(v) for k, v in env.items()}))
+        if env is not None
+        else b""
+    )
+    subject_raw = _utf8(subject)
+    scope_raw = _utf8(scope)
+    token_raw = bytes(token)
+    pid, handle = c_uint32(), c_uint64()
+    when = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    _check(
+        library,
+        "conpty_spawn_authorized",
+        library.remedy_core_conpty_spawn_authorized(
+            argv_raw,
+            len(argv_raw),
+            cwd_raw,
+            len(cwd_raw),
+            env_raw,
+            len(env_raw),
+            int(cols) & 0xFFFF,
+            int(rows) & 0xFFFF,
+            (c_uint8 * len(token_raw)).from_buffer_copy(token_raw),
+            len(token_raw),
+            subject_raw,
+            len(subject_raw),
+            scope_raw,
+            len(scope_raw),
+            1 if owner_confirmed else 0,
+            when,
+            ctypes.byref(pid),
+            ctypes.byref(handle),
+        ),
+    )
+    return int(pid.value), int(handle.value)

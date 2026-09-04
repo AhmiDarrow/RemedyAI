@@ -13,10 +13,14 @@ extern "C" {
  * on top of ABI 4 host_op_prepare / translate_posix_to_host, ABI 3 UI
  * Automation / Linux AT-SPI, and the ABI 2 host surface (DPI, monitors,
  * capture, PNG, input, windows, clipboard and hidden process control).
- * Every host/UIA/ConPTY function returns a remedy_core_status. On a
- * non-Windows build each host/UIA/ConPTY function returns
- * REMEDY_CORE_UNSUPPORTED and writes nothing; host_op_prepare and
- * translate_posix_to_host are portable and remain available.
+ * Additive on the same ABI 5: authorized spawn (policy + HMAC capability
+ * tokens), signing-key set/clear, argv hash, and token issue. Production
+ * Python spawn paths use the authorized exports; the unsigned
+ * process_spawn_hidden / conpty_spawn symbols remain for low-level tests.
+ * Every host/UIA/ConPTY/policy function returns a remedy_core_status. On a
+ * non-Windows build each host/UIA/ConPTY spawn function returns
+ * REMEDY_CORE_UNSUPPORTED and writes nothing; host_op_prepare,
+ * translate_posix_to_host, and the portable security helpers remain available.
  *
  * Memory: any buffer returned through an `out_*` pointer is owned by the
  * caller and must be released with remedy_core_free(ptr, len). Strings that
@@ -25,6 +29,7 @@ extern "C" {
  *
  * Errors: when a call fails with REMEDY_CORE_OPERATION_FAILED the Win32 error
  * code is available from remedy_core_last_os_error() on the same thread.
+ * Policy / token failures return REMEDY_CORE_ACCESS_DENIED.
  */
 #define REMEDY_CORE_ABI_VERSION 5u
 
@@ -376,6 +381,67 @@ int32_t remedy_core_conpty_close_pipe(uint64_t handle, uint32_t which);
 /* Close remaining pipes, ClosePseudoConsole, CloseHandle(process), free
  * the session. The handle must not be reused. */
 int32_t remedy_core_conpty_close(uint64_t handle);
+
+
+/* ---- ABI 5 additive: policy + capability tokens --------------------------- */
+
+/* HMAC-SHA-256 signing key for capability tokens. len must be >= 32; only the
+ * first 32 bytes are used. Replaces any previous key and clears replay state.
+ * No key is compiled into the library — callers supply test or secret-store
+ * material at runtime. */
+int32_t remedy_core_security_set_signing_key(const uint8_t *key, size_t len);
+
+/* Forget the signing key and verifier replay set. */
+int32_t remedy_core_security_clear_signing_key(void);
+
+/* SHA-256 over a JSON argv string array (same framing as spawn). Writes 32
+ * bytes into out_hash when out_hash_len >= 32. */
+int32_t remedy_core_policy_hash_argv(
+    const uint8_t *argv_json, size_t argv_len,
+    uint8_t *out_hash, size_t out_hash_len
+);
+
+/* Issue a v2 capability token (169 bytes). operation_hash is 32 bytes; nonce
+ * is 16 bytes; out_token_len must be >= 169. Requires a signing key. */
+int32_t remedy_core_capability_issue(
+    const uint8_t *subject, size_t subject_len,
+    const uint8_t *scope, size_t scope_len,
+    const uint8_t *operation_hash, size_t operation_hash_len,
+    uint64_t rights_bits,
+    uint64_t issued_at_ms,
+    uint64_t expires_at_ms,
+    const uint8_t *nonce, size_t nonce_len,
+    uint8_t *out_token, size_t out_token_len
+);
+
+/* Policy + token authorize, then hidden job-object spawn. argv[0] must be an
+ * absolute path. Empty subject/scope default to agent:remedy / workspace:local.
+ * owner_confirmed is 0/1. Token failures and policy denials → ACCESS_DENIED. */
+int32_t remedy_core_process_spawn_authorized(
+    const uint8_t *argv_json, size_t argv_len,
+    const uint8_t *cwd, size_t cwd_len,
+    const uint8_t *env_json, size_t env_len,
+    const uint8_t *token, size_t token_len,
+    const uint8_t *subject, size_t subject_len,
+    const uint8_t *scope, size_t scope_len,
+    uint8_t owner_confirmed,
+    uint64_t now_ms,
+    uint32_t *out_pid, uint64_t *out_handle
+);
+
+/* Policy + token authorize, then ConPTY spawn (same auth contract). */
+int32_t remedy_core_conpty_spawn_authorized(
+    const uint8_t *argv_json, size_t argv_len,
+    const uint8_t *cwd, size_t cwd_len,
+    const uint8_t *env_json, size_t env_len,
+    uint16_t cols, uint16_t rows,
+    const uint8_t *token, size_t token_len,
+    const uint8_t *subject, size_t subject_len,
+    const uint8_t *scope, size_t scope_len,
+    uint8_t owner_confirmed,
+    uint64_t now_ms,
+    uint32_t *out_pid, uint64_t *out_handle
+);
 
 #ifdef __cplusplus
 }

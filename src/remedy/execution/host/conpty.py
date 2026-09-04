@@ -2,7 +2,8 @@
 
 Used by the persistent host session when ``use_conpty=True``. Implementation
 lives in ``remedy_core`` (ABI 5); this module is a thin async duck-type over
-``host_binding``. Spawn/IO failures raise (no soft Python ConPTY twin).
+``host_binding`` authorized ConPTY spawn. Spawn/IO failures raise (no soft
+Python ConPTY twin and no unsigned-spawn fallback).
 When ConPTY is unsupported, ``HostSession`` keeps the ordinary pipe path.
 """
 
@@ -42,13 +43,39 @@ async def spawn_conpty(
     return await asyncio.to_thread(_spawn_conpty_sync, argv, cwd, env)
 
 
+def _resolve_argv0(argv: list[str]) -> list[str]:
+    import shutil
+    from pathlib import Path
+
+    args = [str(a) for a in argv]
+    if not args:
+        raise ValueError("argv must not be empty")
+    exe = args[0]
+    path = Path(exe)
+    if path.is_absolute():
+        return args
+    found = shutil.which(exe)
+    if found is None:
+        raise FileNotFoundError(exe)
+    args[0] = str(Path(found).resolve())
+    return args
+
+
 def _spawn_conpty_sync(
     argv: list[str],
     cwd: str | None,
     env: dict[str, str] | None,
 ) -> _ConPTYProcess:
     try:
-        pid, handle = host_binding.conpty_spawn(argv, cwd=cwd, env=env)
+        resolved = _resolve_argv0(argv)
+        token, now_ms = host_binding.issue_process_spawn_token(resolved)
+        pid, handle = host_binding.conpty_spawn_authorized(
+            resolved,
+            cwd=cwd,
+            env=env,
+            token=token,
+            now_ms=now_ms,
+        )
     except HostError as exc:
         detail = str(exc)
         if exc.os_error:
