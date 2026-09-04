@@ -270,6 +270,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/webhooks/whatsapp", s.handleWhatsAppEvents)
 	s.mux.HandleFunc("POST /api/webhooks/teams", s.handleTeamsActivity)
 	s.mux.HandleFunc("POST /api/webhooks/google_chat", s.handleGoogleChatEvent)
+	s.mux.HandleFunc("POST /api/webhook/{source}", s.handleGenericWebhook)
 	s.mountWebUI()
 	return s, nil
 }

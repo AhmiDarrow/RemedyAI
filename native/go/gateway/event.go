@@ -32,6 +32,7 @@ const (
 	EventHeartbeat EventKind = "heartbeat"
 	EventHealth    EventKind = "health"
 	EventPing      EventKind = "ping"
+	EventWebhook   EventKind = "webhook"
 )
 
 // Event is a normalized inbound (or system) gateway event.
