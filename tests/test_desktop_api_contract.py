@@ -23,24 +23,7 @@ _GO_HANDLE = re.compile(
 
 # Desktop-called paths not yet on Go. Remove an entry in the same change that
 # registers the HandleFunc (and preferably Go tests). Do not add soft stubs.
-KNOWN_GO_GAPS: frozenset[str] = frozenset(
-    {
-        "/api/agents",
-        "/api/app/command",
-        "/api/commands",
-        "/api/continuity/dashboard",
-        "/api/coordination/presence",
-        "/api/diagnostics",
-        "/api/nanoswarm/status",
-        "/api/nanoswarm/token/status",
-        "/api/projects/scan",
-        "/api/scratch",
-        "/api/self-inject/rounds",
-        "/api/sessions/bulk-project",
-        "/api/sessions/import",
-        "/api/sessions/{}/messages/{}/edit",
-    }
-)
+KNOWN_GO_GAPS: frozenset[str] = frozenset()
 
 pytestmark = pytest.mark.skipif(
     not DESKTOP.is_dir(), reason="desktop sources not in this tree"
