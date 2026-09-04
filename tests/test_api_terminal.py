@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import socket
 import threading
 import time
@@ -352,3 +353,57 @@ def test_write_does_not_await_a_synchronous_stdin() -> None:
     sess = _TerminalSession(proc, cwd=None)
     asyncio.run(sess.write("echo hi\n"))
     assert bytes(proc.stdin.received) == b"echo hi\n"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="ConPTY fail-closed path is Windows-only")
+def test_terminal_open_fails_closed_when_conpty_spawn_raises(monkeypatch) -> None:
+    """When Zig reports ConPTY available, spawn failure must not soft-fall to pipes."""
+    import remedy.execution.host.conpty as conpty_mod
+
+    monkeypatch.setattr(terminal_mod, "_SPAWN_OVERRIDE", None)
+    monkeypatch.setattr(conpty_mod, "spawn_conpty_supported", lambda: True)
+
+    async def boom(*_a, **_k):
+        raise OSError("injected ConPTY spawn failure")
+
+    monkeypatch.setattr(conpty_mod, "spawn_conpty", boom)
+
+    pipes_called = {"n": 0}
+
+    async def fake_pipes(*_a, **_k):
+        pipes_called["n"] += 1
+        raise AssertionError("pipe fallback must not run when ConPTY is available")
+
+    monkeypatch.setattr(
+        "remedy.execution.process.create_hidden_subprocess_exec",
+        fake_pipes,
+    )
+
+    client = _app()
+    r = client.post("/api/terminal", json={"cwd": None, "cols": 80, "rows": 24})
+    assert r.status_code == 500, r.text
+    assert "Could not start terminal" in r.text
+    assert pipes_called["n"] == 0
+    assert "injected ConPTY spawn failure" in r.text
+
+
+@pytest.mark.skipif(os.name != "nt", reason="ConPTY unsupported path is Windows-gated")
+def test_terminal_open_uses_pipes_when_conpty_unsupported(monkeypatch) -> None:
+    """Pipes remain the legitimate path when Zig reports ConPTY unsupported."""
+    import remedy.execution.host.conpty as conpty_mod
+
+    monkeypatch.setattr(terminal_mod, "_SPAWN_OVERRIDE", None)
+    monkeypatch.setattr(conpty_mod, "spawn_conpty_supported", lambda: False)
+
+    async def fake_pipes(*_a, **_k):
+        return _FakeProc()
+
+    monkeypatch.setattr(
+        "remedy.execution.process.create_hidden_subprocess_exec",
+        fake_pipes,
+    )
+
+    client = _app()
+    r = client.post("/api/terminal", json={"cwd": None, "cols": 80, "rows": 24})
+    assert r.status_code == 200, r.text
+    assert r.json().get("terminal_id")
