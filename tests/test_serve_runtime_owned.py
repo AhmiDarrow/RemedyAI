@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -187,6 +188,21 @@ def test_cmd_serve_does_not_import_create_app(monkeypatch, tmp_path) -> None:
 def test_create_app_still_importable_for_tests() -> None:
     mod = importlib.import_module("remedy.interfaces.api")
     assert callable(mod.create_app)
+    doc = (mod.__doc__ or "") + (mod.create_app.__doc__ or "")
+    assert "test" in doc.lower() or "TestClient" in doc
+    assert "remedy-runtime" in doc or ":7400" in doc
+
+
+def test_fastapi_module_is_not_production_serve_entry() -> None:
+    """create_app must not be reachable from the production serve path."""
+    import remedy.interfaces.cli.cmd_runtime as CR
+    import remedy.interfaces.serve_forensics as SF
+
+    src = Path(CR.__file__).read_text(encoding="utf-8")
+    assert "create_app" not in src
+    assert "run_uvicorn" not in src
+    assert "from remedy.interfaces.api" not in src
+    assert not hasattr(SF, "run_uvicorn_logged")
 
 
 def test_rmdy_tool_worker_entry_still_present() -> None:

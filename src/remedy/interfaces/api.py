@@ -1,9 +1,10 @@
-"""FastAPI route surface for unit tests and legacy TestClient harnesses.
+"""FastAPI route surface for pytest / TestClient only (optional tauri:dev harness).
 
-Production ``:7400`` is owned by Go ``remedy-runtime`` (``remedy serve``
-execs that binary). This module is **not** the production HTTP server —
-``create_app`` remains for pytest / in-process clients only. Python workers
-use ``python -m remedy.runtime.rmdy_tool_worker``.
+Production ``:7400`` is owned by Go ``remedy-runtime``. ``remedy serve`` and
+packaged Desktop exec that binary — they do **not** import this module or bind
+uvicorn. ``create_app`` stays for in-process tests; ``tauri:dev`` may launch
+``remedy`` as a launcher only (which then hands off to ``remedy-runtime``).
+Python workers use ``python -m remedy.runtime.rmdy_tool_worker``.
 
 Models: api_models.py  |  Helpers: api_support.py  |  Routes: create_app() below.
 """
@@ -179,6 +180,10 @@ def create_app(
     *,
     api_key: str = "",
 ) -> FastAPI:
+    """Build the in-process FastAPI app for pytest / TestClient.
+
+    Not a production HTTP server. Go ``remedy-runtime`` owns ``:7400``.
+    """
     # Let slash commands list skills without threading runtime everywhere.
     handle_slash_command._skills_registry = (  # type: ignore[attr-defined]
         getattr(runtime, "skills", None) if runtime is not None else None
@@ -186,7 +191,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        # Register once: covers hard kill of uvicorn after lifespan teardown too.
+        # Register once: covers hard kill of the TestClient process too.
         global _vision_atexit_registered
         if not _vision_atexit_registered:
             atexit.register(_shutdown_vision_decoder)
@@ -213,8 +218,7 @@ def create_app(
         except Exception:
             logger.debug("Native runtime startup probe skipped", exc_info=True)
 
-        # Start gateway messengers on uvicorn's event loop (not the pre-uvicorn
-        # asyncio.run used during serve bootstrap — that loop is already closed).
+        # Start gateway messengers on the app event loop (TestClient / ASGI).
         if gateway is not None and not getattr(gateway, "running", False):
             try:
                 await gateway.start()
@@ -567,9 +571,9 @@ def create_app(
             except Exception:
                 logger.debug("shared LLM session close on shutdown failed", exc_info=True)
 
-    # Packaged desktop sidecar / opt-in: hide Swagger/ReDoc + default OpenAPI
-    # JSON (S-AUTH-05). Dev/serve keep docs; set REMEDY_DISABLE_API_DOCS=0 to
-    # force-enable even when frozen.
+    # Frozen / opt-in: hide Swagger/ReDoc + default OpenAPI JSON (S-AUTH-05).
+    # TestClient keeps docs unless REMEDY_DISABLE_API_DOCS=1; set
+    # REMEDY_DISABLE_API_DOCS=0 to force-enable even when frozen.
     _docs_env = str(os.environ.get("REMEDY_DISABLE_API_DOCS", "")).strip().lower()
     if _docs_env in ("0", "false", "no", "off"):
         _disable_api_docs = False
@@ -890,8 +894,8 @@ def create_app(
 
     register_all_routes(app, runtime=runtime, gateway=gateway, memory=memory)
 
-    # Optional browser Web UI: same React app as Desktop, served by the local API.
-    # Prefer REMEDY_WEBUI_DIR, then repo desktop/dist (dev), then sidecar-adjacent ui/.
+    # Optional SPA mount for TestClient / harness parity with Go WebUI serving.
+    # Prefer REMEDY_WEBUI_DIR, then repo desktop/dist (dev), then staged ui/.
     _mount_web_ui(app)
 
     return app
@@ -1053,9 +1057,9 @@ def _mount_web_ui(app: FastAPI) -> None:
     async def webui_spa(full_path: str):
         return _spa_file(full_path)
 
-    # Stash for CLI banner
+    # Stash for harnesses that inspect mount state.
     app.state.webui_dir = str(web_dir)
-    logger.info("WebUI mounted from %s (open http://127.0.0.1:7400/)", web_dir)
+    logger.info("WebUI mounted from %s (TestClient harness; production :7400 is Go)", web_dir)
 
 
 def yaml_schema(app: FastAPI) -> str:
