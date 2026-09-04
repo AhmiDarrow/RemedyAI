@@ -32,6 +32,7 @@ from ctypes import (
     c_uint64,
     c_void_p,
 )
+from pathlib import Path
 from typing import Any, NamedTuple
 
 from remedy.runtime.native_runtime import NativeRuntimeUnavailableError, core_library
@@ -1148,7 +1149,7 @@ def security_clear_signing_key() -> None:
     _signing_key_ready = False
 
 
-def _remedy_auth_dir(home: str | os.PathLike[str] | None = None) -> "Path":
+def _remedy_auth_dir(home: str | os.PathLike[str] | None = None) -> Path:
     from pathlib import Path
 
     if home is not None and str(home).strip():
