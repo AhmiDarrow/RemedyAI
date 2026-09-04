@@ -181,6 +181,25 @@ func TestIncompleteStreamMarksWorkerForReconnect(t *testing.T) {
 	}
 }
 
+func TestToolsCapabilityRoutesLikeOtherWorkers(t *testing.T) {
+	manager := New(FactoryFunc(func(context.Context, Spec) (Worker, error) {
+		return &fakeWorker{protocol: ProtocolVersion, ready: true, capabilities: []Capability{Tools}, call: func(_ context.Context, r Request) (Response, error) {
+			if r.Operation != "execute" {
+				return Response{}, errors.New("unexpected operation")
+			}
+			return Response{Payload: []byte(`{"ok":true}`), Final: true}, nil
+		}}, nil
+	}))
+	defer manager.Close()
+	if err := manager.Register(Spec{ID: "python-tools", Capabilities: []Capability{Tools}}); err != nil {
+		t.Fatal(err)
+	}
+	response, err := manager.Call(context.Background(), Request{Capability: Tools, Operation: "execute", Idempotent: true})
+	if err != nil || string(response.Payload) != `{"ok":true}` {
+		t.Fatalf("response=%#v err=%v", response, err)
+	}
+}
+
 func TestCapabilityNegotiationRejectsWorkerMissingRegisteredCapability(t *testing.T) {
 	worker := &fakeWorker{
 		protocol:     ProtocolVersion,

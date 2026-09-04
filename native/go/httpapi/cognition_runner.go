@@ -7,39 +7,60 @@ import (
 	"strings"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
+	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
 
 // CognitionTurnRunner drives cognition.Engine and emits the @@ control tokens
 // that stream.go already understands. No Python ReAct wrap — Go owns the loop.
 type CognitionTurnRunner struct {
-	Model  cognition.Model
-	Tools  cognition.ToolExecutor
-	Policy cognition.Policy
-	Config cognition.Config
+	Model    cognition.Model
+	Tools    cognition.ToolExecutor
+	Policy   cognition.Policy
+	Config   cognition.Config
+	Registry *tools.Registry
 }
 
-// NewCognitionTurnRunner builds a runner with Deny-default policy and echo tools
-// when Tools/Policy are nil (safe until Tool ABI + real policy land).
+// NewCognitionTurnRunner builds a runner on the real Tool ABI registry (Go
+// builtins in-process). Pass AttachPythonWorker to add RuntimePython tools over
+// RMDY frames. Missing Tools/Policy is an error — no Echo/DenyAll fallback.
 func NewCognitionTurnRunner(model cognition.Model) *CognitionTurnRunner {
-	return &CognitionTurnRunner{
-		Model:  model,
-		Tools:  cognition.EchoTools{},
-		Policy: cognition.DenyAll{},
+	registry, err := NewDefaultToolRegistry(nil)
+	if err != nil {
+		panic("tool ABI builtins failed to register: " + err.Error())
 	}
+	return &CognitionTurnRunner{
+		Model:    model,
+		Registry: registry,
+		Tools:    &RegistryToolExecutor{Registry: registry},
+		Policy:   &RegistryPolicy{Registry: registry},
+	}
+}
+
+// AttachPythonWorker registers RuntimePython tools that execute over RMDY frames.
+func (r *CognitionTurnRunner) AttachPythonWorker(caller tools.FrameCaller) error {
+	if r == nil || r.Registry == nil {
+		return errors.New("cognition turn runner has no tool registry")
+	}
+	if err := tools.RegisterPythonWorkerTools(r.Registry, caller); err != nil {
+		return err
+	}
+	r.Tools = &RegistryToolExecutor{Registry: r.Registry}
+	r.Policy = &RegistryPolicy{Registry: r.Registry}
+	return nil
 }
 
 func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit func(string) error) error {
 	if r == nil || r.Model == nil {
 		return errors.New("cognition turn runner requires a model")
 	}
-	tools := r.Tools
-	if tools == nil {
-		tools = cognition.EchoTools{}
+	if r.Tools == nil {
+		return errors.New("cognition turn runner requires a tool executor")
 	}
+	if r.Policy == nil {
+		return errors.New("cognition turn runner requires a policy")
+	}
+	execTools := r.Tools
 	policy := r.Policy
-	if policy == nil {
-		policy = cognition.DenyAll{}
-	}
 
 	var emitErr error
 	safeEmit := func(tok string) {
@@ -53,7 +74,7 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 
 	engine := cognition.Engine{
 		Model:  &emittingModel{inner: r.Model, emit: safeEmit},
-		Tools:  &emittingTools{inner: tools, emit: safeEmit},
+		Tools:  &emittingTools{inner: execTools, emit: safeEmit},
 		Policy: policy,
 		Config: r.Config,
 	}

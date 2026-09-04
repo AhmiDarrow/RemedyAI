@@ -25,6 +25,7 @@ const (
 	Vision   Capability = "vision"
 	Speech   Capability = "speech"
 	Research Capability = "research"
+	Tools    Capability = "tools"
 )
 
 type Spec struct {
