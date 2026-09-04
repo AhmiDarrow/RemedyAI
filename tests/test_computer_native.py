@@ -110,7 +110,7 @@ def test_press_hold_needs_coordinates(tmp_path, monkeypatch) -> None:
 
 def test_page_text_desktop_reads_via_uia(tmp_path, monkeypatch) -> None:
     _patch_win(monkeypatch)
-    import remedy.core.computer.desktop_uia as U
+    import remedy.core.computer.guidance as U
 
     monkeypatch.setattr(
         U,
@@ -129,7 +129,7 @@ def test_page_text_desktop_reads_via_uia(tmp_path, monkeypatch) -> None:
 
 def test_page_text_desktop_honest_when_unreadable(tmp_path, monkeypatch) -> None:
     _patch_win(monkeypatch)
-    import remedy.core.computer.desktop_uia as U
+    import remedy.core.computer.guidance as U
 
     monkeypatch.setattr(U, "read_window_text", lambda hwnd, **k: None)
     ex = ComputerExecutor(home_dir=tmp_path)
@@ -150,7 +150,7 @@ def test_scroll_defaults_to_foreground_center(tmp_path, monkeypatch) -> None:
 
 def test_key_result_carries_evidence(tmp_path, monkeypatch) -> None:
     _patch_win(monkeypatch)
-    import remedy.core.computer.desktop_uia as U
+    import remedy.core.computer.guidance as U
 
     monkeypatch.setattr(
         U,
@@ -257,6 +257,12 @@ def test_type_fast_falls_back_when_clipboard_host_errors(monkeypatch) -> None:
 
 @pytest.mark.skipif(not IS_WIN, reason="Windows only")
 def test_clipboard_roundtrip_preserves_user_data() -> None:
+    from remedy.runtime.native_runtime import NativeRuntimeUnavailableError, core_library
+
+    try:
+        core_library()
+    except NativeRuntimeUnavailableError as exc:
+        pytest.skip(f"remedy_core not available: {exc}")
     old = W.get_clipboard_text()
     try:
         assert W.set_clipboard_text("remedy-native-test") is True

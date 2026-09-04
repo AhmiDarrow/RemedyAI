@@ -243,12 +243,107 @@ def test_atspi_binding_returns_list_on_non_linux() -> None:
     assert isinstance(got, list)
 
 
+
+
+def _paeth(a: int, b: int, c: int) -> int:
+    p = a + b - c
+    pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+    if pa <= pb and pa <= pc:
+        return a
+    if pb <= pc:
+        return b
+    return c
+
+
+def _read_png_bgr(path: Path) -> tuple[bytes, int, int, int] | None:
+    """Decode 8-bit gray/RGB/RGBA PNG to BGR + stride (test helper)."""
+    import struct
+    import zlib
+
+    data = path.read_bytes()
+    if len(data) < 33 or data[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    pos = 8
+    width = height = 0
+    bit_depth = 8
+    color_type = 2
+    idat = bytearray()
+    while pos + 12 <= len(data):
+        (length,) = struct.unpack(">I", data[pos : pos + 4])
+        tag = data[pos + 4 : pos + 8]
+        chunk = data[pos + 8 : pos + 8 + length]
+        pos += 12 + length
+        if tag == b"IHDR" and len(chunk) >= 13:
+            width, height, bit_depth, color_type = struct.unpack(">IIBB", chunk[:10])
+        elif tag == b"IDAT":
+            idat.extend(chunk)
+        elif tag == b"IEND":
+            break
+    if width < 1 or height < 1 or bit_depth != 8 or color_type not in (0, 2, 6):
+        return None
+    raw = zlib.decompress(bytes(idat))
+    bpp = {0: 1, 2: 3, 6: 4}[color_type]
+    row_in = 1 + width * bpp
+    if len(raw) < row_in * height:
+        return None
+    prev = bytearray(width * bpp)
+    rows: list[bytearray] = []
+    for y in range(height):
+        filt = raw[y * row_in]
+        cur = bytearray(raw[y * row_in + 1 : y * row_in + row_in])
+        for i, val in enumerate(cur):
+            left = cur[i - bpp] if i >= bpp else 0
+            up = prev[i]
+            ul = prev[i - bpp] if i >= bpp else 0
+            if filt == 1:
+                cur[i] = (val + left) & 255
+            elif filt == 2:
+                cur[i] = (val + up) & 255
+            elif filt == 3:
+                cur[i] = (val + ((left + up) // 2)) & 255
+            elif filt == 4:
+                cur[i] = (val + _paeth(left, up, ul)) & 255
+            elif filt != 0:
+                return None
+        prev = cur
+        rows.append(cur)
+    out_stride = (width * 3 + 3) & ~3
+    buf = bytearray(out_stride * height)
+    for y, cur in enumerate(rows):
+        dst = y * out_stride
+        if color_type == 2:
+            for x in range(width):
+                s = x * 3
+                buf[dst + s] = cur[s + 2]
+                buf[dst + s + 1] = cur[s + 1]
+                buf[dst + s + 2] = cur[s]
+        elif color_type == 6:
+            for x in range(width):
+                s = x * 4
+                o = dst + x * 3
+                buf[o] = cur[s + 2]
+                buf[o + 1] = cur[s + 1]
+                buf[o + 2] = cur[s]
+        else:
+            for x in range(width):
+                g = cur[x]
+                o = dst + x * 3
+                buf[o] = buf[o + 1] = buf[o + 2] = g
+    return bytes(buf), out_stride, width, height
+
+
 def test_png_roundtrip_keeps_bright_box(tmp_path: Path) -> None:
+    from remedy.runtime.native_runtime import NativeRuntimeUnavailableError, core_library
+
+    try:
+        core_library()
+    except NativeRuntimeUnavailableError as exc:
+        pytest.skip(f"remedy_core not available: {exc}")
     w, h = 64, 48
     raw, stride = _synthetic_frame(w, h, [(8, 8, 40, 28)])
     path = tmp_path / "box.png"
     lin._write_png_bgr(path, w, h, raw, stride)
-    decoded = lin._read_png_bgr(path)
+    decoded = _read_png_bgr(path)
     assert decoded is not None
     got, gs, gw, gh = decoded
     assert (gw, gh, gs) == (w, h, stride)

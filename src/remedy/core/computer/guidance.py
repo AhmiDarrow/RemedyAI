@@ -8,8 +8,16 @@ compound actions, re-observe after failure — not vision thrash.
 from __future__ import annotations
 
 import re
+import sys
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from remedy.core.build_oracle import coerce_text_arg
+from remedy.core.computer import host_binding as H
+from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
+
+_TOGGLE_ROLES = frozenset({"checkbox", "togglebutton", "switch", "radiobutton"})
+_T = TypeVar("_T")
 
 # When this matches, the full playbook is worth the tokens. Coding "implement X"
 # must not pay for grocery/CUA liturgy on every turn.
@@ -380,3 +388,102 @@ web task left the rail sticky.
 - Clicking a desktop game/app with implicit browser routing
 - Replaying unrelated earlier tasks
 """.strip()
+
+
+# --- UIA observe helpers + soft host_binding wrappers (HostError fails closed) ---
+
+
+def structured_observe_hint(*, n_windows: int, n_controls: int) -> str:
+    """What to do next: UIA/DOM first, screenshot/OCR last."""
+    if int(n_controls or 0) > 0:
+        return (
+            "Use control refs (cN) or names. Do not guess pixels. "
+            "Screenshot/OCR only if a custom-drawn control is missing."
+        )
+    if int(n_windows or 0) > 0:
+        return (
+            "Window list only — UI Automation found no controls. "
+            "Focus the app and snapshot again, or computer_screenshot for OCR "
+            "(ref=oN). Do not click guessed x/y."
+        )
+    return (
+        "No structured controls. computer_screenshot then click OCR ref=oN "
+        "or marked boxes — never guessed coordinates."
+    )
+
+
+def preferred_click_action(role: str = "") -> str:
+    """Which UIA pattern to try before a pixel click-at-center."""
+    r = (role or "").strip().lower()
+    if r in _TOGGLE_ROLES:
+        return "toggle"
+    return "invoke"
+
+
+def _uia_call(fn: Callable[[], _T], *, default: _T) -> _T:
+    """Soft-miss only when native core is absent / off-platform."""
+    if sys.platform != "win32":
+        return default
+    try:
+        return fn()
+    except NativeRuntimeUnavailableError:
+        return default
+
+
+def uia_available() -> bool:
+    return _uia_call(H.uia_available, default=False)
+
+
+def read_window_text(hwnd: int, *, max_chars: int = 12000) -> dict[str, Any] | None:
+    if not hwnd:
+        return None
+    return _uia_call(
+        lambda: H.uia_read_window_text(int(hwnd), int(max_chars)),
+        default=None,
+    )
+
+
+def focused_element_info() -> dict[str, Any] | None:
+    return _uia_call(H.uia_focused_element, default=None)
+
+
+def element_action(
+    hwnd: int,
+    name: str,
+    *,
+    role: str = "",
+    action: str = "invoke",
+    text: str = "",
+) -> dict[str, Any]:
+    soft = {
+        "ok": False,
+        "message": f"UIA element {name!r} not found in hwnd={hwnd} (re-snapshot?)",
+    }
+    if sys.platform != "win32":
+        return soft
+    try:
+        return H.uia_element_action(
+            int(hwnd),
+            str(name),
+            role=str(role or ""),
+            action=str(action or "invoke"),
+            text=str(text),
+        )
+    except NativeRuntimeUnavailableError as exc:
+        return {"ok": False, "message": f"UIA {action} failed on control {name!r}: {exc}"}
+
+
+def uia_control_snapshot(
+    *,
+    hwnd: int | None = None,
+    max_elements: int = 80,
+    preferred_only: bool = True,
+) -> list[dict[str, Any]] | None:
+    return _uia_call(
+        lambda: H.uia_control_snapshot(
+            0 if hwnd is None else int(hwnd),
+            int(max_elements) if max_elements is not None else 80,
+            bool(preferred_only),
+        ),
+        default=None,
+    )
