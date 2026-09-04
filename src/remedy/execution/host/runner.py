@@ -528,7 +528,8 @@ def prepare_host_op(
 
     ``run`` / ``script`` / ``mkdir`` / ``which`` / ``env`` / ``chain`` go through
     ``remedy_core_host_op_prepare`` (Zig ABI 4). ``raw`` still uses
-    :func:`prepare_host_command` until translate lands in Zig.
+    :func:`prepare_host_command` (translate itself is Zig; orchestration,
+    ConPTY, and policy remain Python).
     """
     if op.kind == "raw":
         return prepare_host_command(

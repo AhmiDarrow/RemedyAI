@@ -12,6 +12,7 @@ pub const system = @import("system.zig");
 pub const host = @import("host.zig");
 pub const uia = @import("uia.zig");
 pub const shell_ir = @import("shell_ir.zig");
+pub const shell_translate = @import("shell_translate.zig");
 
 /// C ABI version of the exported surface (`remedy_core_abi_version`).
 pub const abi_version: u32 = 4;
@@ -28,12 +29,13 @@ pub const Status = enum(i32) {
     unsupported = 4,
 };
 
-// Host, UIA, and shell_ir exports live in their modules; referencing them
-// here makes the linker emit them from the library build as well as tests.
+// Host, UIA, shell_ir, and shell_translate exports live in their modules;
+// referencing them here makes the linker emit them from the library build.
 comptime {
     _ = host;
     _ = uia;
     _ = shell_ir;
+    _ = shell_translate;
 }
 
 export fn remedy_core_abi_version() callconv(.c) u32 {
@@ -138,4 +140,5 @@ test {
     _ = host;
     _ = uia;
     _ = shell_ir;
+    _ = shell_translate;
 }
