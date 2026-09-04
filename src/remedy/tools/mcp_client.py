@@ -53,8 +53,8 @@ class MCPClient:
             await self.disconnect(server_name)
 
         try:
-            from remedy.execution.process import create_hidden_subprocess_exec
             from remedy.execution.env import scrub_subprocess_env
+            from remedy.execution.process import create_hidden_subprocess_exec
 
             # Never forward provider/API secrets into MCP server children.
             safe_env = scrub_subprocess_env(env, argv=[command, *(args or [])])

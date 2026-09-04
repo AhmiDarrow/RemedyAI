@@ -146,8 +146,8 @@ async def _git_out(
     said why — it simply stopped. A timeout is reported as a failed git call,
     which the callers already know how to handle.
     """
-    from remedy.execution.process import create_hidden_subprocess_exec
     from remedy.execution.env import unattended_vcs_env
+    from remedy.execution.process import create_hidden_subprocess_exec
 
     env = unattended_vcs_env(["git"])
     proc = await create_hidden_subprocess_exec(
