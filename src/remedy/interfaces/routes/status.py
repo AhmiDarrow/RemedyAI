@@ -1,4 +1,7 @@
-"""API route registration for Remedy FastAPI app."""
+"""TestClient-only: status / ping / health routes.
+
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+"""
 from __future__ import annotations
 
 import asyncio

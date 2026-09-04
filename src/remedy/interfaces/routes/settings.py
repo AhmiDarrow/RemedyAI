@@ -1,4 +1,7 @@
-"""API route registration for Remedy FastAPI app."""
+"""TestClient-only: settings GET/PATCH (SPA settings schema still reads this tree).
+
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+"""
 from __future__ import annotations
 
 import contextlib

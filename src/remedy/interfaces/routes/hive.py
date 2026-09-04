@@ -1,4 +1,7 @@
-"""Advanced hive inspector — roster, spawn, retire, assign."""
+"""TestClient-only: hive inspector (roster, spawn, retire, assign).
+
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+"""
 
 from __future__ import annotations
 

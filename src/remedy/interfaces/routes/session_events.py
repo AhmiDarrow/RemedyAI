@@ -1,4 +1,7 @@
-"""Realtime SSE: GET /api/events/sessions."""
+"""TestClient-only: realtime SSE GET /api/events/sessions.
+
+Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+"""
 
 from __future__ import annotations
 
