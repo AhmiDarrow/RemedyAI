@@ -37,7 +37,7 @@ from remedy.core.project_fingerprint import (
     path_env_with_local_bins,
 )
 from remedy.core.relpath import norm_rel
-from remedy.execution.sandbox import SubprocessSandbox
+from remedy.execution.result import SubprocessSandbox
 
 logger = logging.getLogger(__name__)
 

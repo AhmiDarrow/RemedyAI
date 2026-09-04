@@ -118,7 +118,7 @@ async def _sandbox_run(runtime: Any, argv: list[str], *, cwd: Path, timeout: flo
     """Run argv through SubprocessSandbox exactly like bash_exec does."""
     from remedy.core.project_fingerprint import path_env_with_local_bins
     from remedy.execution.env import allowed_paths_for_shell
-    from remedy.execution.sandbox import SubprocessSandbox
+    from remedy.execution.result import SubprocessSandbox
 
     roots = _write_roots(runtime) or [cwd]
     sandbox = SubprocessSandbox(allowed_paths=allowed_paths_for_shell(roots, cwd))

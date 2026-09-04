@@ -9,7 +9,7 @@ import pytest
 from remedy.execution.docker import DockerSandbox
 from remedy.execution.result import ExecutionResult
 from remedy.execution.runtime import ToolContext, ToolRuntime
-from remedy.execution.sandbox import SubprocessSandbox
+from remedy.execution.result import SubprocessSandbox
 from remedy.models import ToolCall, ToolSource
 from remedy.policy.decisions import ToolRequest
 from remedy.policy.engine import PolicyEngine

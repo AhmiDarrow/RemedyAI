@@ -406,7 +406,7 @@ def register_shell_tools(runtime: Any) -> None:
         _ = description
         from remedy.core.approvals import APPROVALS
         from remedy.core.project_fingerprint import path_env_with_local_bins
-        from remedy.execution.sandbox import SubprocessSandbox
+        from remedy.execution.result import SubprocessSandbox
 
         if not command or not str(command).strip():
             return format_tool_error(
@@ -876,7 +876,7 @@ def register_shell_tools(runtime: Any) -> None:
         from pathlib import Path as _P
 
         from remedy.core.project_fingerprint import path_env_with_local_bins
-        from remedy.execution.sandbox import SubprocessSandbox
+        from remedy.execution.result import SubprocessSandbox
 
         rel = (path or "").strip()
         if not rel:

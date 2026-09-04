@@ -10,7 +10,7 @@ from rich.table import Table
 
 from remedy.core.learning.reflection import ExecutionTrace, TraceStep
 from remedy.core.learning_loop import LearningLoop
-from remedy.execution.sandbox import SubprocessSandbox
+from remedy.execution.result import SubprocessSandbox
 from remedy.interfaces.cli.util import _print_exec_result, _print_skills, console
 from remedy.interfaces.config import config_to_agent_config, resolve_config
 from remedy.memory.store import MemoryStore
