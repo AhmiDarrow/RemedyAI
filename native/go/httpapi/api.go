@@ -62,7 +62,8 @@ type Server struct {
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
 // sessions CRUD, session LLM bind, attachments upload/get, messages
 // list/create/stream, abort, session-events SSE, Connect management,
-// Connect me/stop, providers/models catalog, and skills/library routes.
+// Connect me/stop, providers/models catalog, skills/library routes, and
+// workspace/files/media routes.
 func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
@@ -138,6 +139,10 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/skills/library/install", s.handleLibraryInstall)
 	s.mux.HandleFunc("GET /api/skills/library/updates", s.handleLibraryUpdates)
 	s.mux.HandleFunc("GET /api/skills/{name}", s.handleGetSkill)
+	s.mux.HandleFunc("GET /api/workspace", s.handleGetWorkspace)
+	s.mux.HandleFunc("GET /api/files", s.handleListFiles)
+	s.mux.HandleFunc("GET /api/files/search", s.handleSearchFiles)
+	s.mux.HandleFunc("GET /api/media", s.handleServeMedia)
 	return s, nil
 }
 
