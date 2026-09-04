@@ -38,6 +38,7 @@ def test_popen_hidden_merges_caller_creation_flags(monkeypatch: pytest.MonkeyPat
         seen.update(kwargs)
         return object()
 
+    monkeypatch.setattr(P, "require_process_host", lambda: None)
     monkeypatch.setattr(P.subprocess, "Popen", fake_popen)
     P.popen_hidden(["x"], creationflags=0x200, close_fds=True)
     assert seen["close_fds"] is True

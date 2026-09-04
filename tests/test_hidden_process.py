@@ -1,4 +1,4 @@
-"""Tests for Windows console-hide subprocess helpers."""
+"""Tests for Windows console-hide subprocess helpers and fail-closed host gate."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import sys
 
 import pytest
 
+from remedy.execution import process as P
 from remedy.execution.process import (
     create_hidden_subprocess_exec,
     hidden_creationflags,
@@ -15,6 +16,7 @@ from remedy.execution.process import (
     run_hidden,
     win_shell_prefix,
 )
+from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
 
 def test_hidden_creationflags_windows_only() -> None:
@@ -81,3 +83,25 @@ def test_run_hidden_accepts_creationflags_merge() -> None:
             **kw,
         )
         assert p.wait(timeout=15) == 0
+
+
+def test_soft_helpers_fail_closed_without_process_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Piped soft helpers must not soft-fallback when remedy_core is missing."""
+    if sys.platform not in ("win32", "linux"):
+        pytest.skip("process host gate is win32/linux")
+
+    def _boom() -> None:
+        raise NativeRuntimeUnavailableError("remedy_core library not found: test double")
+
+    monkeypatch.setattr(P, "require_process_host", _boom)
+    with pytest.raises(NativeRuntimeUnavailableError):
+        P.run_hidden(
+            [sys.executable, "-c", "pass"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    with pytest.raises(NativeRuntimeUnavailableError):
+        P.popen_hidden([sys.executable, "-c", "pass"])
