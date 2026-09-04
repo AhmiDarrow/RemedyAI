@@ -36,6 +36,7 @@ var settableKeys = map[string]struct{}{
 	"messengers": {}, "assistant": {},
 	"connect_enabled": {}, "connect_bind_host": {}, "connect_bind_port": {},
 	"connect_paused": {}, "connect_panes": {}, "connect_relay_url": {},
+	"connect_rdv_enabled": {},
 }
 
 var knownMessengers = map[string]struct{}{
@@ -246,6 +247,7 @@ func (s *Server) applySettingsUpdate(updates map[string]any) (map[string]any, er
 	if err := WriteConfig(path, cfg); err != nil {
 		return nil, err
 	}
+	s.refreshConnectAfterSettings()
 
 	changes := make([]string, 0, len(patch)+3)
 	for k := range patch {
