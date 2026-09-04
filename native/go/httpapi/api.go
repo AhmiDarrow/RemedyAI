@@ -17,7 +17,6 @@ import (
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
-
 // Version matches pyproject.toml until a shared ldflag/sync lands.
 // TODO: wire via -ldflags or scripts/sync_version.py.
 const Version = "0.50.2"
@@ -57,7 +56,8 @@ type Server struct {
 
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
 // sessions CRUD, session LLM bind, attachments upload/get, messages
-// list/create/stream, abort, session-events SSE, and Connect management.
+// list/create/stream, abort, session-events SSE, Connect management, and
+// providers/models catalog routes.
 func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
@@ -117,6 +117,11 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/connect/pause", s.handleConnectPause)
 	s.mux.HandleFunc("POST /api/connect/resume", s.handleConnectResume)
 	s.mux.HandleFunc("POST /api/connect/devices/{id}/revoke", s.handleConnectRevoke)
+	s.mux.HandleFunc("GET /api/providers", s.handleListProviders)
+	s.mux.HandleFunc("GET /api/providers/connected", s.handleListConnectedProviders)
+	s.mux.HandleFunc("GET /api/providers/free", s.handleListFreeProviders)
+	s.mux.HandleFunc("GET /api/providers/ollama/detect", s.handleOllamaDetect)
+	s.mux.HandleFunc("GET /api/models", s.handleListModels)
 	return s, nil
 }
 
