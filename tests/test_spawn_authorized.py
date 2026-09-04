@@ -119,3 +119,98 @@ def test_clear_signing_key_denies_until_reinstalled(tmp_path: Path):
             now_ms=now,
         )
     assert raised.value.status == H.STATUS_ACCESS_DENIED
+
+
+@pytest.fixture
+def clear_write_jail():
+    with contextlib.suppress(H.HostError, NativeRuntimeUnavailableError, OSError):
+        H.write_jail_clear()
+    yield
+    with contextlib.suppress(H.HostError, NativeRuntimeUnavailableError, OSError):
+        H.write_jail_clear()
+
+
+@windows_with_core
+def test_write_jail_denies_cwd_outside_roots(test_signing_key, tmp_path: Path, clear_write_jail):
+    _ = (test_signing_key, clear_write_jail)
+    project = tmp_path / "proj"
+    project.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    argv = P._resolve_argv0(["cmd", "/c", "exit 0"])
+    token, now = H.issue_process_spawn_token(argv)
+    with pytest.raises(H.HostError) as raised:
+        H.process_spawn_authorized(
+            argv,
+            cwd=str(outside),
+            token=token,
+            now_ms=now,
+            write_roots=[str(project)],
+        )
+    assert raised.value.status == H.STATUS_ACCESS_DENIED
+
+
+@windows_with_core
+def test_write_jail_allows_project_cwd(test_signing_key, tmp_path: Path, clear_write_jail):
+    _ = clear_write_jail
+    _ = test_signing_key
+    project = tmp_path / "proj"
+    project.mkdir()
+    argv = P._resolve_argv0(["cmd", "/c", "exit %REMEDY_AUTH_CODE%"])
+    with P.spawn_hidden(
+        argv,
+        cwd=project,
+        env={"REMEDY_AUTH_CODE": "7", "SystemRoot": r"C:\Windows"},
+        write_roots=[str(project)],
+    ) as child:
+        assert child.wait(10.0) == 7
+
+
+@windows_with_core
+def test_write_jail_auth_path_always_denied(test_signing_key, tmp_path: Path, clear_write_jail):
+    _ = (test_signing_key, clear_write_jail)
+    H.write_jail_clear()  # Full — workdir unbound, auth still closed
+    auth = tmp_path / ".remedy" / "auth" / "local_api_token"
+    auth.parent.mkdir(parents=True)
+    auth.write_text("x", encoding="utf-8")
+    argv = P._resolve_argv0(["cmd", "/c", "type", str(auth)])
+    with pytest.raises(H.HostError) as raised:
+        H.write_jail_check_spawn(argv, cwd=str(tmp_path))
+    assert raised.value.status == H.STATUS_ACCESS_DENIED
+
+
+@windows_with_core
+def test_write_jail_blocks_absolute_mutation_dest(test_signing_key, tmp_path: Path, clear_write_jail):
+    _ = (test_signing_key, clear_write_jail)
+    project = tmp_path / "proj"
+    project.mkdir()
+    dest = tmp_path / "outside" / "pwn.txt"
+    dest.parent.mkdir()
+    argv = P._resolve_argv0(["cmd", "/c", "copy", "a.txt", str(dest)])
+    H.write_jail_set_roots([str(project)])
+    with pytest.raises(H.HostError) as raised:
+        H.write_jail_check_spawn(argv, cwd=str(project))
+    assert raised.value.status == H.STATUS_ACCESS_DENIED
+    # Relative dest under jailed cwd is fine
+    ok = P._resolve_argv0(["cmd", "/c", "copy", "a.txt", "out.txt"])
+    H.write_jail_check_spawn(ok, cwd=str(project))
+
+
+@windows_with_core
+def test_write_jail_empty_roots_is_full(test_signing_key, tmp_path: Path, clear_write_jail):
+    _ = (test_signing_key, clear_write_jail)
+    anywhere = tmp_path / "anywhere"
+    anywhere.mkdir()
+    argv = P._resolve_argv0(["cmd", "/c", "exit 0"])
+    token, now = H.issue_process_spawn_token(argv)
+    pid, handle = H.process_spawn_authorized(
+        argv,
+        cwd=str(anywhere),
+        token=token,
+        now_ms=now,
+        write_roots=[],
+    )
+    try:
+        assert H.process_wait(handle, 10_000) == 0
+    finally:
+        H.process_close(handle)

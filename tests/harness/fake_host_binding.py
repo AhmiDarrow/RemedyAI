@@ -825,13 +825,14 @@ class FakeHostConpty:
         scope: str = 'workspace:local',
         owner_confirmed: bool = False,
         now_ms: int | None = None,
+        write_roots: Sequence[str] | None = None,
     ) -> tuple[int, int]:
         """Record an authorized process spawn; tests that need a live child patch this."""
-        _ = (cwd, env, subject, scope, owner_confirmed, now_ms)
+        _ = (cwd, env, subject, scope, owner_confirmed, now_ms, write_roots)
         self.calls.append(
             (
                 'process_spawn_authorized',
-                (list(argv), cwd, env, bytes(token), subject, scope, owner_confirmed, now_ms),
+                (list(argv), cwd, env, bytes(token), subject, scope, owner_confirmed, now_ms, write_roots),
                 {},
             )
         )
@@ -852,15 +853,22 @@ class FakeHostConpty:
         scope: str = 'workspace:local',
         owner_confirmed: bool = False,
         now_ms: int | None = None,
+        write_roots: Sequence[str] | None = None,
     ) -> tuple[int, int]:
         self.calls.append(
             (
                 'conpty_spawn_authorized',
-                (list(argv), cwd, env, cols, rows, bytes(token), subject, scope, owner_confirmed, now_ms),
+                (list(argv), cwd, env, cols, rows, bytes(token), subject, scope, owner_confirmed, now_ms, write_roots),
                 {},
             )
         )
         return self.conpty_spawn(argv, cwd=cwd, env=env, cols=cols, rows=rows)
+
+    def write_jail_set_roots(self, roots: Sequence[str] | None) -> None:
+        self.calls.append(('write_jail_set_roots', (list(roots or []),), {}))
+
+    def write_jail_clear(self) -> None:
+        self.calls.append(('write_jail_clear', (), {}))
 
 
 @contextlib.contextmanager

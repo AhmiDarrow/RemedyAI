@@ -12,6 +12,7 @@ const capability = @import("capability.zig");
 const executor = @import("executor.zig");
 const policy = @import("policy.zig");
 const security = @import("security.zig");
+const write_jail = @import("write_jail.zig");
 
 const is_windows = builtin.os.tag == .windows;
 const windows_host = if (is_windows) @import("host_windows.zig") else struct {};
@@ -66,6 +67,7 @@ fn authStatus(err: anyerror) i32 {
         error.InvalidPath,
         => invalid_status,
         error.Unsupported => unsupported_status,
+        error.OutOfMemory => failed_status,
         else => failed_status,
     };
 }
@@ -162,6 +164,7 @@ export fn remedy_core_capability_issue(
 
 fn authorizeLocked(
     argv: []const []const u8,
+    cwd: []const u8,
     token: []const u8,
     subject: []const u8,
     scope: []const u8,
@@ -169,6 +172,10 @@ fn authorizeLocked(
     now_ms: u64,
 ) !void {
     try requireKeyLocked();
+    // Workdir / write-root jail + auth refuse (equal-or-better than Python
+    // sandbox workdir gate). Runs before token consume so a denied spawn
+    // does not burn the nonce.
+    try write_jail.checkSpawn(host.allocator, argv, cwd);
     const verifier = &(g_verifier orelse return error.AccessDenied);
     _ = try executor.authorizeProcess(
         verifier,
@@ -224,6 +231,7 @@ export fn remedy_core_process_spawn_authorized(
     lock();
     const auth_result = authorizeLocked(
         argv,
+        slice(cwd, cwd_len),
         slice(token, token_len),
         subjectOrDefault(subject, subject_len),
         scopeOrDefault(scope, scope_len),
@@ -277,6 +285,7 @@ export fn remedy_core_conpty_spawn_authorized(
     lock();
     const auth_result = authorizeLocked(
         argv,
+        slice(cwd, cwd_len),
         slice(token, token_len),
         subjectOrDefault(subject, subject_len),
         scopeOrDefault(scope, scope_len),
