@@ -129,6 +129,29 @@ func TestRMDYPythonToolsRoundTrip(t *testing.T) {
 	if writeOut.Path != "out/note.txt" || writeOut.BytesWritten != len("hello abi") || !writeOut.Created {
 		t.Fatalf("workspace.write=%+v", writeOut)
 	}
+
+	fetched, err := clientReg.Execute(context.Background(), Request{
+		ToolID: "web.fetch", Version: 1,
+		Input: json.RawMessage(`{"url":"https://example.invalid/page","max_chars":5000}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fetchOut struct {
+		URL      string `json:"url"`
+		FinalURL string `json:"final_url"`
+		Content  string `json:"content"`
+		Format   string `json:"format"`
+	}
+	if err := json.Unmarshal(fetched.Output, &fetchOut); err != nil {
+		t.Fatal(err)
+	}
+	if fetchOut.URL != "https://example.invalid/page" || fetchOut.Format != "text" {
+		t.Fatalf("web.fetch=%+v", fetchOut)
+	}
+	if !strings.Contains(fetchOut.Content, "example.invalid/page") {
+		t.Fatalf("web.fetch content=%q", fetchOut.Content)
+	}
 }
 
 func TestWirePayloadRoundTrip(t *testing.T) {

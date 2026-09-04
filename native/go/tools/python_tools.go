@@ -203,5 +203,37 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 		return err
 	}
 
+	if err := registry.Register(Descriptor{
+		ID:          "web.fetch",
+		Version:     1,
+		Description: "Fetch a public HTTP(S) URL as readable text via the Python agent web_fetch backend (SSRF-guarded)",
+		Runtime:     RuntimePython,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["url"],
+			"properties":{
+				"url":{"type":"string","minLength":1},
+				"max_chars":{"type":"integer","minimum":1000,"maximum":200000}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["url","final_url","content","format"],
+			"properties":{
+				"url":{"type":"string"},
+				"final_url":{"type":"string"},
+				"content":{"type":"string"},
+				"format":{"type":"string","enum":["markdown","text"]},
+				"title":{"type":"string"},
+				"truncated":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
 	return nil
 }
