@@ -4,6 +4,10 @@ All notable changes to Remedy (`remedy-ai`) are documented here.
 
 ## [Unreleased]
 
+- FastAPI `create_app` is marked test-only after the runtime cutover: production
+  `:7400` stays Go `remedy-runtime`; dead Python uvicorn forensics helper removed;
+  docs/`tauri:dev` wording no longer imply Python serves the local API.
+
 ## [0.50.2] - 2026-09-03
 
 > **Experimental.** 0.50.0 through 0.50.2 are an experimental line: the native

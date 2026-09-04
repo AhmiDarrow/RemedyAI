@@ -38,7 +38,8 @@ dependencies = [
 
 # Optional install groups.
 # `server` is a documented alias — fastapi / uvicorn / python-multipart are
-# already core (needed for `remedy serve`). Kept so older pins keep working.
+# already core (pytest TestClient / create_app harness only; production :7400
+# is Go remedy-runtime). Kept so older pins keep working.
 [project.optional-dependencies]
 server = [
     "fastapi>=0.139.2,<1",

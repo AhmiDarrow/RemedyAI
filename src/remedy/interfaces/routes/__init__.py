@@ -1,4 +1,9 @@
-"""Route modules for the Remedy FastAPI app."""
+"""Route modules for the pytest / TestClient FastAPI surface.
+
+Production ``:7400`` is owned by Go ``remedy-runtime``. These ``register_*``
+helpers exist so ``create_app`` can exercise the Python route tree in-process.
+Connect management (``/api/connect*``) is not registered here — Go owns it.
+"""
 from __future__ import annotations
 
 from fastapi import FastAPI
@@ -35,7 +40,7 @@ def register_all_routes(
     gateway=None,
     memory=None,
 ) -> None:
-    """Attach all HTTP routes to *app*."""
+    """Attach TestClient HTTP routes to *app* (not production :7400)."""
     kw = {"runtime": runtime, "gateway": gateway, "memory": memory}
     register_status_routes(app, **kw)
     register_chat_routes(app, **kw)
@@ -51,7 +56,7 @@ def register_all_routes(
     register_assistant_routes(app, **kw)
     register_partner_routes(app, **kw)
     register_computer_routes(app, **kw)
-    # Connect management (/api/connect*) is owned by remedy-runtime (Go).
+    # No register_connect_* — /api/connect* is owned by remedy-runtime (Go).
     register_misc_routes(app, **kw)
     register_vision_routes(app, **kw)
     register_voice_routes(app, **kw)

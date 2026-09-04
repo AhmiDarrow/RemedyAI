@@ -804,7 +804,7 @@ fn ask_foreign_serve_dialog() -> ForeignServeChoice {
     }
 }
 
-/// Locate built SPA assets so the Python sidecar can mount browser WebUI at /.
+/// Locate built SPA assets so remedy-runtime (or a TestClient harness) can serve WebUI at /.
 fn find_webui_dir() -> Option<PathBuf> {
     if let Ok(env_dir) = env::var("REMEDY_WEBUI_DIR") {
         let p = PathBuf::from(env_dir.trim());
@@ -863,7 +863,7 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
     let port_str = port.to_string();
     let use_runtime = is_runtime_binary(cmd);
     // Go: --serve owns 127.0.0.1:7400; --listen only for a desktop-chosen port.
-    // Python: --home … serve --host/--port --skip-setup (Desktop SetupWizard owns UX).
+    // Optional tauri:dev Python launcher: `remedy serve` → remedy-runtime (no uvicorn).
     let listen = format!("127.0.0.1:{port_str}");
     let python_args = [
         "--home",
@@ -3371,7 +3371,7 @@ fn dpapi_unprotect_user(_cipher: &[u8]) -> Result<Vec<u8>, String> {
     Err("DPAPI envelopes are only supported on Windows".into())
 }
 
-/// Read the local API bearer token written by the Python sidecar
+/// Read the local API bearer token written by the local API
 /// (`$REMEDY_HOME/auth/local_api_token`, default `~/.remedy/auth/...`).
 #[tauri::command]
 fn get_local_api_token() -> Result<String, String> {

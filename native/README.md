@@ -31,10 +31,10 @@ work cannot overwrite one another through process-global model state.
 
 Local IPC uses the shared bounded frame format over current-user Windows named pipes or
 mode-0600 Unix sockets. Calls retain correlation IDs across concurrent work, propagate
-cancellation, and unblock on disconnect. A loopback-only HTTP compatibility handler keeps
-the existing FastAPI product reachable during reversible migration and blocks off-machine
-targets and redirects. Duplicate active correlation IDs are rejected and each connection
-has a fixed in-flight ceiling.
+cancellation, and unblock on disconnect. Go ``remedy-runtime`` owns production loopback
+HTTP on ``:7400`` (FastAPI ``create_app`` remains pytest / TestClient only) and blocks
+off-machine targets and redirects. Duplicate active correlation IDs are rejected and each
+connection has a fixed in-flight ceiling.
 
 The Go cognition engine represents observation, model streaming, policy, action, state
 update, pause, completion, and failure as traceable transitions. It supports bounded model

@@ -1,8 +1,9 @@
-"""Dev sidecar for Tauri — always runs live source via uv/python.
+"""Dev launcher for tauri:dev — live checkout via uv/python (optional).
 
-Tauri spawns: remedy-desktop.exe --home <path> serve --host 127.0.0.1 --port 7400
-We re-exec into the repo checkout so secret-store / OAuth / version fixes apply
-without a full PyInstaller rebuild of the whole agent.
+Tauri may spawn: ``remedy --home <path> serve --host 127.0.0.1 --port 7400``.
+That CLI path hands off to Go ``remedy-runtime`` (no Python uvicorn on :7400).
+This script re-execs into the repo checkout so launcher / worker fixes apply
+without rebuilding. Prefer ``REMEDY_RUNTIME_SIDECAR=1`` to skip Python entirely.
 """
 
 from __future__ import annotations

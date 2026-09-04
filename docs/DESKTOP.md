@@ -12,10 +12,11 @@ medical or clinical product). Current package series: **0.48.x** (see root
 **One dev build** on the default ports (`127.0.0.1:7400`, `~/.remedy`, Vite
 `localhost:5173`). Run `cd desktop && npm run tauri:dev`.
 
-The dev build runs the **live Python sidecar** (repo `.venv/Scripts/remedy.exe`,
-current `src/remedy`), never a stale packaged `remedy-desktop.exe`. If you also
-have the installed release running, quit it first (they share port `7400` and
-`~/.remedy`).
+By default `tauri:dev` may launch the **live Python `remedy` CLI** (repo
+`.venv`) as a thin launcher that execs Go `remedy-runtime` on `:7400` — it does
+**not** bind FastAPI/uvicorn. Set `REMEDY_RUNTIME_SIDECAR=1` to skip Python and
+spawn `remedy-runtime` directly. Quit any installed release first (shared port
+`7400` and `~/.remedy`).
 
 ### Always-ready window (close → tray) — **0.20.0+**
 
@@ -85,9 +86,11 @@ non-default port) and ships the Zig `remedy_core` shared library as a resource.
 **`remedy serve` also execs `remedy-runtime`** — Python no longer starts
 uvicorn on `:7400` (fail closed if the binary is missing). **`remedy-desktop`
 is not built or shipped** — there is no Python fallback launch path in
-installers. `tauri:dev` still prefers the live Python venv; set
-`REMEDY_RUNTIME_SIDECAR=1` to exercise the Go binary from a checkout.
-Python worker entry: `python -m remedy.runtime.rmdy_tool_worker`.
+installers. `tauri:dev` optionally uses the live Python venv **only as a
+launcher** for `remedy serve` → `remedy-runtime`; set
+`REMEDY_RUNTIME_SIDECAR=1` to spawn the Go binary directly. FastAPI
+`create_app` is **test-only** (pytest / TestClient). Python worker entry:
+`python -m remedy.runtime.rmdy_tool_worker`.
 
 **Remaining gaps (worker / parity — not dual-serve):**
 
@@ -215,23 +218,24 @@ minisign-signed for in-app auto-update.
 
 ## Goal
 
-A **Tauri desktop app** (Windows-first) with an interactive chat UX, backed by an
-**extended Remedy FastAPI** server. The desktop is the primary installation target;
-CLI and web UI remain available as power-user features.
+A **Tauri desktop app** (Windows-first) with an interactive chat UX, backed by
+Go **`remedy-runtime`** on `127.0.0.1:7400`. The desktop is the primary
+installation target; CLI and web UI remain available as power-user features.
+FastAPI `create_app` is pytest / TestClient only.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────┐
-│  remedy-desktop (Tauri 2)                   │
+│  Remedy Desktop (Tauri 2)                   │
 │  ┌───────────────────────────────────────┐  │
 │  │  Web UI (React 19 + Vite + Tailwind)  │  │
 │  │  chat · sessions · slash · markdown   │  │
 │  └─────────────────┬─────────────────────┘  │
 │                    │ HTTP + SSE             │
 │  ┌─────────────────▼─────────────────────┐  │
-│  │  Sidecar: `remedy serve` (Python)     │  │
-│  │  extended session/message/event API   │  │
+│  │  Sidecar: remedy-runtime (Go :7400)   │  │
+│  │  session/message/event API authority  │  │
 │  └───────────────────────────────────────┘  │
 └─────────────────────────────────────────────┘
 ```
@@ -383,12 +387,12 @@ event: error         → { message: "..." }
 - **Markdown**: `react-markdown` + `rehype-highlight` for code blocks
 - **Streaming**: Native `fetch` with `ReadableStream` for SSE; no WebSocket needed
 - **State**: TanStack Query (React Query) for REST caching; lightweight
-- **Sidecar**: `remedy serve` spawned as subprocess; PyInstaller `.exe` as fallback for standalone Windows builds
+- **Sidecar**: Go `remedy-runtime` (Tauri `externalBin`); `remedy serve` is a thin launcher
 
 ## Windows Distribution
 
-- **Dev**: `remedy serve` + `pnpm dev` in separate terminals
-- **Packaged**: Tauri bundles `remedy` binary via sidecar; NSIS `.exe` installer
+- **Dev**: `remedy serve` (→ `remedy-runtime`) + `pnpm tauri:dev` / Vite
+- **Packaged**: Tauri bundles `remedy-runtime` via `externalBin`; NSIS `.exe` installer
 - **Config**: Shares `~/.remedy/config.toml` with CLI `remedy`
 
 ## Success Criteria (v1)
@@ -405,8 +409,9 @@ event: error         → { message: "..." }
 
 ## Sidecar agent notes
 
-The desktop chat path is `React UI → FastAPI → BasicRuntime` ReAct loop. Tool
-batches are executed in parallel waves (`MAX_PARALLEL_TOOLS`) but **every**
+The desktop chat path is `React UI → remedy-runtime (:7400) → workers /
+BasicRuntime` ReAct loop. FastAPI `create_app` is not on this path (tests only).
+Tool batches are executed in parallel waves (`MAX_PARALLEL_TOOLS`) but **every**
 assistant tool-call id still receives a tool result message before the next LLM
 request. Incomplete pairing is also sanitized by `ensure_tool_call_pairings`
 immediately before each provider call.

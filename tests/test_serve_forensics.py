@@ -1,10 +1,9 @@
-"""Every way out of ``remedy serve`` leaves a breadcrumb in the logs."""
+"""Crash forensics helpers (workers only — not a Python :7400 server)."""
 
 from __future__ import annotations
 
 import faulthandler
 import logging
-import signal
 import threading
 
 import pytest
@@ -42,32 +41,6 @@ def test_uncaught_thread_exception_is_logged(tmp_path, monkeypatch, caplog):
         threading.excepthook = prior
 
 
-def test_logged_server_records_exit_signal(caplog):
-    uvicorn = pytest.importorskip("uvicorn")
-
-    async def app(scope, receive, send):  # pragma: no cover - never served
-        pass
-
-    # Build the same subclass run_uvicorn_logged uses, without binding a port.
-    config = uvicorn.Config(app, host="127.0.0.1", port=0)
-    captured: dict[str, object] = {}
-
-    def _fake_run(self):
-        self.started = True
-        with caplog.at_level(logging.CRITICAL, logger="remedy.serve"):
-            self.handle_exit(signal.SIGTERM, None)
-        captured["should_exit"] = self.should_exit
-
-    monkeypatch_target = uvicorn.Server
-    original_run = monkeypatch_target.run
-    try:
-        monkeypatch_target.run = _fake_run
-        with caplog.at_level(logging.WARNING, logger="remedy.serve"):
-            serve_forensics.run_uvicorn_logged(app, host="127.0.0.1", port=0)
-    finally:
-        monkeypatch_target.run = original_run
-    assert captured["should_exit"] is True
-    messages = [r.getMessage() for r in caplog.records]
-    assert any("SIGTERM" in m for m in messages)
-    assert any("API server loop ended" in m for m in messages)
-    _ = config
+def test_run_uvicorn_logged_removed() -> None:
+    """Regression: no Python uvicorn serve helper after runtime cutover."""
+    assert not hasattr(serve_forensics, "run_uvicorn_logged")
