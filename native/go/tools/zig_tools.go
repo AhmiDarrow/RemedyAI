@@ -159,6 +159,69 @@ func RegisterZigHostTools(registry *Registry) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:           "computer.click",
+		Version:      1,
+		Description:  "Click at virtual-screen physical pixels via Zig SendInput/X11 (fail closed)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskMutation,
+		Capabilities: []string{"computer.input"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["x","y"],
+			"properties":{
+				"x":{"type":"integer"},
+				"y":{"type":"integer"},
+				"button":{"type":"string","enum":["left","right","middle"]},
+				"clicks":{"type":"integer","minimum":1,"maximum":3}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["ok","x","y","button","clicks"],
+			"properties":{
+				"ok":{"type":"boolean","const":true},
+				"x":{"type":"integer"},
+				"y":{"type":"integer"},
+				"button":{"type":"string","enum":["left","right","middle"]},
+				"clicks":{"type":"integer","minimum":1}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeComputerClick)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:           "computer.type",
+		Version:      1,
+		Description:  "Type UTF-8 text via Zig Unicode key events (fail closed)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskMutation,
+		Capabilities: []string{"computer.input"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["text"],
+			"properties":{
+				"text":{"type":"string","minLength":1,"maxLength":8000},
+				"per_char_delay_ms":{"type":"integer","minimum":0,"maximum":200}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["ok","chars"],
+			"properties":{
+				"ok":{"type":"boolean","const":true},
+				"chars":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeComputerType)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:           "shell.exec",
 		Version:      1,
 		Description:  "Authorized one-shot argv capture via Zig (absolute argv[0]; no os/exec)",
@@ -367,6 +430,80 @@ func executeComputerSnapshot(_ context.Context, request Request) (Result, error)
 	default:
 		return Result{}, fmt.Errorf("%w: computer.snapshot", core.ErrUnsupported)
 	}
+}
+
+func executeComputerClick(_ context.Context, request Request) (Result, error) {
+	var body struct {
+		X      *int   `json:"x"`
+		Y      *int   `json:"y"`
+		Button string `json:"button"`
+		Clicks int    `json:"clicks"`
+	}
+	if err := json.Unmarshal(request.Input, &body); err != nil {
+		return Result{}, ErrInvalidInput
+	}
+	if body.X == nil || body.Y == nil {
+		return Result{}, ErrInvalidInput
+	}
+	buttonName := strings.ToLower(strings.TrimSpace(body.Button))
+	if buttonName == "" {
+		buttonName = "left"
+	}
+	var button uint32
+	switch buttonName {
+	case "left":
+		button = core.MouseLeft
+	case "right":
+		button = core.MouseRight
+	case "middle":
+		button = core.MouseMiddle
+	default:
+		return Result{}, ErrInvalidInput
+	}
+	clicks := body.Clicks
+	if clicks <= 0 {
+		clicks = 1
+	}
+	if clicks > 3 {
+		return Result{}, ErrInvalidInput
+	}
+	if err := core.MouseClick(int32(*body.X), int32(*body.Y), button, uint32(clicks)); err != nil {
+		return Result{}, err
+	}
+	out, err := json.Marshal(map[string]any{
+		"ok": true, "x": *body.X, "y": *body.Y, "button": buttonName, "clicks": clicks,
+	})
+	return Result{Output: out}, err
+}
+
+func executeComputerType(_ context.Context, request Request) (Result, error) {
+	var body struct {
+		Text            string `json:"text"`
+		PerCharDelayMS  *int   `json:"per_char_delay_ms"`
+	}
+	if err := json.Unmarshal(request.Input, &body); err != nil {
+		return Result{}, ErrInvalidInput
+	}
+	if body.Text == "" {
+		return Result{}, ErrInvalidInput
+	}
+	if len(body.Text) > 8000 {
+		return Result{}, ErrInvalidInput
+	}
+	delay := uint32(5)
+	if body.PerCharDelayMS != nil {
+		if *body.PerCharDelayMS < 0 || *body.PerCharDelayMS > 200 {
+			return Result{}, ErrInvalidInput
+		}
+		delay = uint32(*body.PerCharDelayMS)
+	}
+	if err := core.TypeText(body.Text, delay); err != nil {
+		return Result{}, err
+	}
+	out, err := json.Marshal(map[string]any{
+		"ok": true, "chars": len([]rune(body.Text)),
+	})
+	return Result{Output: out}, err
 }
 
 func executeShellExec(_ context.Context, request Request) (Result, error) {

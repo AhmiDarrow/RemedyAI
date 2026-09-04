@@ -35,6 +35,18 @@ func TestRegisterZigHostToolsDescriptors(t *testing.T) {
 			t.Fatalf("%s capabilities=%v", id, desc.Capabilities)
 		}
 	}
+	for _, id := range []string{"computer.click", "computer.type"} {
+		desc, err := registry.Latest(id)
+		if err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		if desc.Runtime != RuntimeZig || desc.Risk != RiskMutation {
+			t.Fatalf("%s runtime/risk=%s/%v", id, desc.Runtime, desc.Risk)
+		}
+		if len(desc.Capabilities) == 0 || desc.Capabilities[0] != "computer.input" {
+			t.Fatalf("%s capabilities=%v", id, desc.Capabilities)
+		}
+	}
 	shell, err := registry.Latest("shell.exec")
 	if err != nil {
 		t.Fatal(err)
@@ -79,6 +91,64 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 	}
 	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
 		t.Fatalf("computer.snapshot err=%v", err)
+	}
+
+	_, err = registry.Execute(context.Background(), Request{
+		ToolID: "computer.click", Version: 1, Input: json.RawMessage(`{"x":10,"y":20}`),
+		CapabilityToken: token,
+	})
+	if err == nil {
+		t.Fatal("computer.click expected fail-closed error")
+	}
+	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("computer.click err=%v", err)
+	}
+
+	_, err = registry.Execute(context.Background(), Request{
+		ToolID: "computer.type", Version: 1, Input: json.RawMessage(`{"text":"hi"}`),
+		CapabilityToken: token,
+	})
+	if err == nil {
+		t.Fatal("computer.type expected fail-closed error")
+	}
+	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("computer.type err=%v", err)
+	}
+}
+
+func TestComputerClickRejectsBadButton(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "computer.click",
+		Version:         1,
+		Input:           json.RawMessage(`{"x":1,"y":2,"button":"side"}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("bad button: %v", err)
+	}
+}
+
+func TestComputerTypeRejectsEmptyText(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "computer.type",
+		Version:         1,
+		Input:           json.RawMessage(`{"text":""}`),
+		CapabilityToken: []byte("tok"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("empty text: %v", err)
 	}
 }
 
