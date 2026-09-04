@@ -9,13 +9,13 @@ extern "C" {
 #endif
 
 /*
- * ABI 4 adds host_op_prepare (Host Command IR → PreparedCommand JSON) on top
- * of ABI 3 UI Automation / Linux AT-SPI and the ABI 2 host surface (DPI,
- * monitors, capture, PNG, input, windows, clipboard and hidden process
- * control). Every host/UIA function returns a remedy_core_status. On a
- * non-Windows build each host/UIA function returns REMEDY_CORE_UNSUPPORTED
- * and writes nothing; host_op_prepare is portable argv shaping and remains
- * available.
+ * ABI 4 adds host_op_prepare (Host Command IR → PreparedCommand JSON) and
+ * translate_posix_to_host on top of ABI 3 UI Automation / Linux AT-SPI and
+ * the ABI 2 host surface (DPI, monitors, capture, PNG, input, windows,
+ * clipboard and hidden process control). Every host/UIA function returns a
+ * remedy_core_status. On a non-Windows build each host/UIA function returns
+ * REMEDY_CORE_UNSUPPORTED and writes nothing; host_op_prepare and
+ * translate_posix_to_host are portable and remain available.
  *
  * Memory: any buffer returned through an `out_*` pointer is owned by the
  * caller and must be released with remedy_core_free(ptr, len). Strings that
@@ -312,9 +312,20 @@ int32_t remedy_core_a11y_snapshot(
  * bare HostOp object ({kind,...}) or {op:<HostOp>, scratch_dir?, project_path?}.
  * On success *out_json / *out_len hold UTF-8 PreparedCommand JSON
  * {argv,display,kind,ir,host,script_path?,notes?,translated?} — caller frees
- * with remedy_core_free. Supports run|script|mkdir|which|env|chain. raw
- * (prepare_host_command / translate) returns UNSUPPORTED until that slice. */
+ * with remedy_core_free. Supports run|script|mkdir|which|env|chain. */
 int32_t remedy_core_host_op_prepare(
+    const uint8_t *json_in,
+    size_t json_in_len,
+    uint8_t **out_json,
+    size_t *out_len
+);
+
+/* POSIX→host command-string rewrite (translate_posix_to_host). json_in is
+ * {"command":"...","host":"cmd"|"posix"|omit,"rg_path"?: "...",
+ *  "python_exe"?: "...","pwsh_exe"?: "..."}. On success *out_json holds
+ * {"text","changed","notes","untranslatable","noop"} — caller frees with
+ * remedy_core_free. */
+int32_t remedy_core_translate_posix_to_host(
     const uint8_t *json_in,
     size_t json_in_len,
     uint8_t **out_json,

@@ -8,8 +8,9 @@ callers (``desktop_win``, ``desktop_uia``, ``desktop_linux``,
 ``execution.process``).
 
 Windows: host + UIA. Linux: host (X11/XTest) + AT-SPI a11y snapshot.
-``host_op_prepare`` is portable. Other platforms: host/UIA/a11y calls report
-:data:`STATUS_UNSUPPORTED` (:class:`HostError`).
+``host_op_prepare`` and ``translate_posix_to_host`` are portable. Other
+platforms: host/UIA/a11y calls report :data:`STATUS_UNSUPPORTED`
+(:class:`HostError`).
 """
 
 from __future__ import annotations
@@ -228,6 +229,10 @@ _PROTOTYPES: dict[str, tuple[list[Any], Any]] = {
         c_int32,
     ),
     "remedy_core_host_op_prepare": (
+        [c_char_p, c_size_t, POINTER(_BytePtr), POINTER(c_size_t)],
+        c_int32,
+    ),
+    "remedy_core_translate_posix_to_host": (
         [c_char_p, c_size_t, POINTER(_BytePtr), POINTER(c_size_t)],
         c_int32,
     ),
@@ -831,4 +836,38 @@ def host_op_prepare(
     result = _take_json(library, ptr, length)
     if not isinstance(result, dict):
         raise HostError("host_op_prepare", STATUS_OPERATION_FAILED)
+    return result
+
+
+def translate_posix_to_host(
+    command: str,
+    *,
+    host: str | None = None,
+    rg_path: str | None = None,
+    python_exe: str | None = None,
+    pwsh_exe: str | None = None,
+) -> dict[str, Any]:
+    """Call ``remedy_core_translate_posix_to_host``; return a TranslateResult dict."""
+    payload: dict[str, Any] = {"command": command or ""}
+    if host is not None:
+        payload["host"] = host
+    if rg_path:
+        payload["rg_path"] = rg_path
+    if python_exe:
+        payload["python_exe"] = python_exe
+    if pwsh_exe:
+        payload["pwsh_exe"] = pwsh_exe
+    encoded = _utf8(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    library = _lib()
+    ptr, length = _BytePtr(), c_size_t()
+    _check(
+        library,
+        "translate_posix_to_host",
+        library.remedy_core_translate_posix_to_host(
+            encoded, len(encoded), ctypes.byref(ptr), ctypes.byref(length)
+        ),
+    )
+    result = _take_json(library, ptr, length)
+    if not isinstance(result, dict):
+        raise HostError("translate_posix_to_host", STATUS_OPERATION_FAILED)
     return result
