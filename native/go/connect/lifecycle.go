@@ -48,7 +48,8 @@ type GatewaySettings struct {
 // Gateway owns the Connect listener lifecycle: start/stop, pause, health, self-heal.
 // A nil ConnHandler uses NoiseConnHandler (Noise IK → allowlist → inner mux).
 // Relay and public-broker rdv supervisors run beside the listener when configured;
-// dialed pipes use the same Noise session path as accepted TCP.
+// dialed pipes use the same Noise session path as accepted TCP. mDNS advertises
+// the bound chosen IPv4 (host-pub hash only) for same-L2 discovery.
 type Gateway struct {
 	mu sync.Mutex
 
@@ -69,6 +70,8 @@ type Gateway struct {
 	supMu     sync.Mutex // serializes refreshSupervisors / stopSupervisors
 	supCancel context.CancelFunc
 	supWG     sync.WaitGroup
+
+	mdnsStop func()
 }
 
 // NewGateway builds an idle gateway. A nil handler selects NoiseConnHandler at start.
@@ -259,12 +262,47 @@ func (g *Gateway) MaybeStart(cfg GatewaySettings) error {
 	g.mu.Lock()
 	g.serving = true
 	g.mu.Unlock()
+	g.startMDNS()
 	g.refreshSupervisors()
 	return nil
 }
 
-// Stop closes supervisors, the listener, and drops sessions. Idempotent.
+// stopMDNS stops the mDNS advertiser if running.
+func (g *Gateway) stopMDNS() {
+	g.mu.Lock()
+	stop := g.mdnsStop
+	g.mdnsStop = nil
+	g.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
+}
+
+// startMDNS advertises the live bind with the host static public key hash.
+// Best-effort: bind/NIC failures leave Connect serving without multicast.
+func (g *Gateway) startMDNS() {
+	g.stopMDNS()
+	host, port, ok := g.listener.ListeningAddr()
+	if !ok {
+		return
+	}
+	home := g.LiveConfig().Home
+	kp, err := LoadOrCreateHostKeyPair(home)
+	if err != nil {
+		return
+	}
+	stop, err := StartAdvertiser(host, port, kp.Public)
+	if err != nil {
+		return
+	}
+	g.mu.Lock()
+	g.mdnsStop = stop
+	g.mu.Unlock()
+}
+
+// Stop closes mDNS, supervisors, the listener, and drops sessions. Idempotent.
 func (g *Gateway) Stop() error {
+	g.stopMDNS()
 	g.stopSupervisors()
 	g.mu.Lock()
 	select {

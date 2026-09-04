@@ -273,6 +273,34 @@ func TestGatewayNilHandlerServesNoiseConnectMe(t *testing.T) {
 	}
 }
 
+func TestGatewayStartsAndStopsMDNS(t *testing.T) {
+	home := pipeHome(t)
+	_ = mustHostKP(t, home)
+	g := connect.NewGateway(nil)
+	if err := g.MaybeStart(connect.GatewaySettings{
+		Enabled: true,
+		Host:    "127.0.0.1",
+		Port:    0,
+		Home:    home,
+		RDV:     false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := g.ListeningAddr(); !ok {
+		t.Fatal("not listening")
+	}
+	// Advertiser is best-effort; Stop must tear it down without hanging.
+	if err := g.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := g.ListeningAddr(); ok {
+		t.Fatal("still listening after stop")
+	}
+}
+
 func TestGatewayRelaySupervisorDialsActiveSID(t *testing.T) {
 	// MaybeStart with a relay URL dials wanted SIDs beside the TCP listener.
 	// Peer DialRelay only returns once the gateway supervisor also dials (splice).
