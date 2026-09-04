@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/core"
@@ -122,6 +123,38 @@ func RegisterZigHostTools(registry *Registry) error {
 			"additionalProperties":false
 		}`),
 	}, ExecutorFunc(executeComputerMonitors)); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:           "computer.snapshot",
+		Version:      1,
+		Description:  "Accessibility control snapshot via Zig UIA (Windows) or AT-SPI (Linux)",
+		Runtime:      RuntimeZig,
+		Risk:         RiskReadOnly,
+		Capabilities: []string{"computer.read"},
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"hwnd":{"type":"integer","minimum":0},
+				"max_elements":{"type":"integer","minimum":1,"maximum":120},
+				"preferred_only":{"type":"boolean"},
+				"limit":{"type":"integer","minimum":1,"maximum":200}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["source","available","controls","total"],
+			"properties":{
+				"source":{"type":"string","enum":["uia","atspi","none"]},
+				"available":{"type":"boolean"},
+				"controls":{"type":"array"},
+				"total":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(executeComputerSnapshot)); err != nil {
 		return err
 	}
 
@@ -262,6 +295,80 @@ func executeComputerMonitors(context.Context, Request) (Result, error) {
 	return Result{Output: out}, err
 }
 
+func executeComputerSnapshot(_ context.Context, request Request) (Result, error) {
+	var body struct {
+		HWND          *uint64 `json:"hwnd"`
+		MaxElements   int     `json:"max_elements"`
+		PreferredOnly *bool   `json:"preferred_only"`
+		Limit         int     `json:"limit"`
+	}
+	if len(request.Input) > 0 {
+		if err := json.Unmarshal(request.Input, &body); err != nil {
+			return Result{}, ErrInvalidInput
+		}
+	}
+
+	switch runtime.GOOS {
+	case "windows":
+		hwnd := uint64(0)
+		if body.HWND != nil {
+			hwnd = *body.HWND
+		}
+		maxElements := uint32(0)
+		if body.MaxElements > 0 {
+			maxElements = uint32(body.MaxElements)
+		}
+		preferred := true
+		if body.PreferredOnly != nil {
+			preferred = *body.PreferredOnly
+		}
+		available, err := core.UIAAvailable()
+		if err != nil {
+			return Result{}, err
+		}
+		if !available {
+			out, err := json.Marshal(map[string]any{
+				"source": "uia", "available": false, "controls": []any{}, "total": 0,
+			})
+			return Result{Output: out}, err
+		}
+		raw, err := core.UIAControlSnapshotJSON(hwnd, maxElements, preferred)
+		if err != nil {
+			return Result{}, err
+		}
+		controls, err := decodeJSONArrayOrNull(raw)
+		if err != nil {
+			return Result{}, fmt.Errorf("uia_control_snapshot: invalid JSON: %w", err)
+		}
+		out, err := json.Marshal(map[string]any{
+			"source": "uia", "available": true, "controls": controls, "total": len(controls),
+		})
+		return Result{Output: out}, err
+	case "linux":
+		limit := body.Limit
+		if limit <= 0 {
+			limit = 40
+		}
+		if limit > 200 {
+			limit = 200
+		}
+		raw, err := core.A11ySnapshotJSON(uint32(limit))
+		if err != nil {
+			return Result{}, err
+		}
+		controls, err := decodeJSONArrayOrNull(raw)
+		if err != nil {
+			return Result{}, fmt.Errorf("a11y_snapshot: invalid JSON: %w", err)
+		}
+		out, err := json.Marshal(map[string]any{
+			"source": "atspi", "available": true, "controls": controls, "total": len(controls),
+		})
+		return Result{Output: out}, err
+	default:
+		return Result{}, fmt.Errorf("%w: computer.snapshot", core.ErrUnsupported)
+	}
+}
+
 func executeShellExec(_ context.Context, request Request) (Result, error) {
 	var body struct {
 		Argv           []string          `json:"argv"`
@@ -323,6 +430,21 @@ func executeShellExec(_ context.Context, request Request) (Result, error) {
 		"stderr":    string(res.Stderr),
 	})
 	return Result{Output: out}, err
+}
+
+func decodeJSONArrayOrNull(raw []byte) ([]any, error) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return []any{}, nil
+	}
+	var controls []any
+	if err := json.Unmarshal(raw, &controls); err != nil {
+		return nil, err
+	}
+	if controls == nil {
+		controls = []any{}
+	}
+	return controls, nil
 }
 
 func resolveToolHome() string {

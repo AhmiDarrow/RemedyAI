@@ -20,7 +20,7 @@ func TestRegisterZigHostToolsDescriptors(t *testing.T) {
 	if err := RegisterZigHostTools(registry); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"computer.screenshot", "computer.windows", "computer.monitors"} {
+	for _, id := range []string{"computer.screenshot", "computer.windows", "computer.monitors", "computer.snapshot"} {
 		desc, err := registry.Latest(id)
 		if err != nil {
 			t.Fatalf("%s: %v", id, err)
@@ -68,6 +68,17 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 	}
 	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
 		t.Fatalf("err=%v", err)
+	}
+
+	_, err = registry.Execute(context.Background(), Request{
+		ToolID: "computer.snapshot", Version: 1, Input: json.RawMessage(`{}`),
+		CapabilityToken: token,
+	})
+	if err == nil {
+		t.Fatal("computer.snapshot expected fail-closed error")
+	}
+	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("computer.snapshot err=%v", err)
 	}
 }
 
@@ -218,6 +229,30 @@ func TestZigHostToolsLiveWhenLibraryPresent(t *testing.T) {
 	}
 	if !strings.Contains(filepath.ToSlash(shotOut.Path), "/computer/shots/") {
 		t.Fatalf("unexpected shot path %q", shotOut.Path)
+	}
+
+	snap, err := registry.Execute(context.Background(), Request{
+		ToolID: "computer.snapshot", Version: 1,
+		Input:           json.RawMessage(`{"max_elements":20}`),
+		CapabilityToken: token,
+	})
+	if err != nil {
+		t.Fatalf("computer.snapshot: %v", err)
+	}
+	var snapOut struct {
+		Source    string `json:"source"`
+		Available bool   `json:"available"`
+		Controls  []any  `json:"controls"`
+		Total     int    `json:"total"`
+	}
+	if err := json.Unmarshal(snap.Output, &snapOut); err != nil {
+		t.Fatal(err)
+	}
+	if snapOut.Source != "uia" {
+		t.Fatalf("source=%q", snapOut.Source)
+	}
+	if snapOut.Total != len(snapOut.Controls) {
+		t.Fatalf("total mismatch: %#v", snapOut)
 	}
 
 	cmd := filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
