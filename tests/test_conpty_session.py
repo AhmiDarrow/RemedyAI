@@ -13,7 +13,6 @@ Win32 stays inside Zig. Tests mock ``host_binding`` through
 
 from __future__ import annotations
 
-import asyncio
 import subprocess
 import sys
 import threading
