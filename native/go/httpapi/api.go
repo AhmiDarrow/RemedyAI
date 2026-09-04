@@ -9,7 +9,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"strings"
 	"time"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
 // Version matches pyproject.toml until a shared ldflag/sync lands.
@@ -46,16 +50,24 @@ type Server struct {
 	runner   TurnRunner
 }
 
-// New builds a server with ping/status/turn-active, sessions CRUD,
-// messages list/create/stream, abort, and session-events SSE registered.
+// New builds a server with ping/status/turn-active, auth bootstrap, settings,
+// sessions CRUD, messages list/create/stream, abort, and session-events SSE.
 func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
 		version = Version
 	}
+	homeDir := strings.TrimSpace(cfg.HomeDir)
 	token := cfg.Token
 	if token == "" {
-		token = ResolveToken(cfg.HomeDir)
+		token = ResolveToken(homeDir)
+	}
+	// First-run: generate + persist only when a home is explicit (HomeDir /
+	// REMEDY_HOME). Avoid writing into the real ~/.remedy from bare tests.
+	if token == "" && AuthEnabled() {
+		if homeDir != "" || strings.TrimSpace(os.Getenv("REMEDY_HOME")) != "" {
+			token = secret.EnsureLocalAPIToken(ResolveHomeDir(homeDir), "")
+		}
 	}
 	store, err := openSessionStore(resolveDBPath(cfg))
 	if err != nil {
@@ -65,7 +77,7 @@ func New(cfg Config) (*Server, error) {
 		started:  time.Now(),
 		version:  version,
 		token:    token,
-		homeDir:  cfg.HomeDir,
+		homeDir:  homeDir,
 		mux:      http.NewServeMux(),
 		sessions: store,
 		events:   newSessionEventHub(),
@@ -75,6 +87,9 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/ping", s.handlePing)
 	s.mux.HandleFunc("GET /api/status", s.handleStatus)
 	s.mux.HandleFunc("GET /api/turn-active", s.handleTurnActive)
+	s.mux.HandleFunc("GET /api/auth/local-bootstrap", s.handleLocalBootstrap)
+	s.mux.HandleFunc("GET /api/settings", s.handleGetSettings)
+	s.mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
 	s.mux.HandleFunc("GET /api/sessions", s.handleListSessions)
 	s.mux.HandleFunc("POST /api/sessions", s.handleCreateSession)
 	s.mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)

@@ -11,11 +11,12 @@ import (
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
-// PublicPaths need no Bearer token (health / readiness).
+// PublicPaths need no Bearer token (health / readiness / loopback bootstrap).
 var PublicPaths = map[string]struct{}{
-	"/api/ping":        {},
-	"/api/status":      {},
-	"/api/turn-active": {},
+	"/api/ping":                 {},
+	"/api/status":               {},
+	"/api/turn-active":          {},
+	"/api/auth/local-bootstrap": {},
 }
 
 const unauthorizedDetail = "Missing or invalid Bearer token. " +
