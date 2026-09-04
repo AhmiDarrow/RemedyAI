@@ -12,15 +12,20 @@ import (
 	"strings"
 )
 
-var alwaysForbidden = map[string]bool{"os/exec": true, "syscall": true, "unsafe": true, "plugin": true}
+var alwaysForbidden = map[string]bool{"os/exec": true, "syscall": true, "plugin": true}
+
+// unsafeOwners may import "unsafe" (DPAPI DataBlob copies). Everyone else is denied.
+var unsafeOwners = map[string]bool{"secret": true}
 
 // Owned external deps: only the listed packages may import them (same pattern as
 // ipc→go-winio). modernc.org/sqlite is CGO-free; its transitive libc uses
 // unsafe internally, so the driver surface stays httpapi-only.
+// secret owns golang.org/x/sys for CryptProtectData / CryptUnprotectData.
 var externalOwners = map[string]string{
 	"github.com/Microsoft/go-winio":           "ipc",
-	"golang.org/x/sys":                        "ipc,state",
+	"golang.org/x/sys":                        "ipc,state,secret",
 	"github.com/santhosh-tekuri/jsonschema/v6": "tools",
+	"golang.org/x/crypto":                     "connect",
 	"modernc.org/sqlite":                      "httpapi",
 }
 
@@ -68,6 +73,9 @@ func check(goRoot string) ([]string, error) {
 			}
 			if alwaysForbidden[value] {
 				violations = append(violations, fmt.Sprintf("%s imports forbidden %s", filepath.ToSlash(relative), value))
+			}
+			if value == "unsafe" && !unsafeOwners[pkg] {
+				violations = append(violations, fmt.Sprintf("%s imports forbidden unsafe", filepath.ToSlash(relative)))
 			}
 			for dependency, owners := range externalOwners {
 				if value == dependency || strings.HasPrefix(value, dependency+"/") {
