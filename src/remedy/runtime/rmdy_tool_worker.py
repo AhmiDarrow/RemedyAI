@@ -389,6 +389,12 @@ def _web_fetch(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return out
 
 
+def _prompt_assemble(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.prompt_assemble import assemble_prompt
+
+    return assemble_prompt(inp)
+
+
 _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("text.slugify", 1): lambda inp: {"slug": _slugify(str(inp.get("text", "")))},
     ("text.word_count", 1): lambda inp: {"words": _word_count(str(inp.get("text", "")))},
@@ -398,6 +404,7 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("workspace.search", 1): _workspace_search,
     ("web.search", 1): _web_search,
     ("web.fetch", 1): _web_fetch,
+    ("prompt.assemble", 1): _prompt_assemble,
 }
 
 
