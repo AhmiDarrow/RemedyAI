@@ -19,7 +19,7 @@ import logging
 import struct
 import sys
 from collections.abc import Callable, Mapping
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 logger = logging.getLogger("remedy.runtime.rmdy_tool_worker")
 
@@ -139,7 +139,7 @@ def serve(reader: BinaryIO, writer: BinaryIO) -> None:
         if kind == _KIND_TOOL_REQUEST:
             write_frame(writer, _KIND_TOOL_RESULT, correlation, _handle_tool(payload))
             continue
-        err = f"unsupported RMDY frame kind {kind}".encode("utf-8")
+        err = f"unsupported RMDY frame kind {kind}".encode()
         write_frame(writer, _KIND_TOOL_RESULT, correlation, err, flags=1)
 
 
