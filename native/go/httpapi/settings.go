@@ -631,7 +631,7 @@ func (s *Server) settingsPayload() map[string]any {
 		"user_name":                 strings.TrimSpace(cfgString(cfg, "user_name", "")),
 		"agent_gender":              gender,
 		"ui_language":               cfgString(cfg, "ui_language", "auto"),
-		"ui_languages":              []map[string]any{},
+		"ui_languages":              publicLanguageList(),
 		"persona":                   cfgString(cfg, "persona", "default"),
 		"project_path":              projectPath,
 		"access_scope":              cfgString(cfg, "access_scope", "project"),
