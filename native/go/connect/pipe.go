@@ -97,6 +97,16 @@ func (c *SessionCrypto) RekeySend() error {
 	return c.Send.Rekey()
 }
 
+// RekeyRecv runs CipherState.Rekey on the recv side (peer sent TYPE_REKEY).
+func (c *SessionCrypto) RekeyRecv() error {
+	if c == nil || c.Recv == nil {
+		return fmt.Errorf("%w: nil recv cipher", ErrSession)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Recv.Rekey()
+}
+
 // ReadLenPrefixed reads u32be length + body (Noise handshake messages).
 func ReadLenPrefixed(r io.Reader) ([]byte, error) {
 	var header [4]byte
@@ -247,15 +257,28 @@ type Session struct {
 	Home   string
 
 	mu             sync.Mutex
+	writeMu        sync.Mutex
 	lenientDecrypt bool
 	badRecords     int
 }
 
 // SendPlain encrypts plaintext and writes one transport record.
 func (s *Session) SendPlain(plaintext []byte) error {
+	return s.sendPlain(plaintext, false)
+}
+
+// SendPlainInner is SendPlain with post-send TYPE_REKEY when NoteSend is due
+// (matches Python inner_rekey=True used for PING/PONG and inner HTTP).
+func (s *Session) SendPlainInner(plaintext []byte) error {
+	return s.sendPlain(plaintext, true)
+}
+
+func (s *Session) sendPlain(plaintext []byte, innerRekey bool) error {
 	if s == nil || s.Crypto == nil || s.Conn == nil {
 		return fmt.Errorf("%w: nil session", ErrSession)
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	blob, err := s.Crypto.Encrypt(plaintext)
 	if err != nil {
 		return err
@@ -263,8 +286,51 @@ func (s *Session) SendPlain(plaintext []byte) error {
 	if err := WriteRecord(s.Conn, blob); err != nil {
 		return err
 	}
-	_ = s.Crypto.NoteSend()
-	return nil
+	if !s.Crypto.NoteSend() || !innerRekey {
+		return nil
+	}
+	frame, err := EncodeInner(TypeRekey, 0, nil, true)
+	if err != nil {
+		return err
+	}
+	blob, err = s.Crypto.Encrypt(frame)
+	if err != nil {
+		return err
+	}
+	if err := WriteRecord(s.Conn, blob); err != nil {
+		return err
+	}
+	return s.Crypto.RekeySend()
+}
+
+// HandleInnerControl demuxes PING / PONG / REKEY on one decrypted record.
+// HTTP request dispatch lands in a later slice; those frames are ignored here.
+func HandleInnerControl(sess *Session, plain []byte) error {
+	if sess == nil || sess.Crypto == nil {
+		return fmt.Errorf("%w: nil session", ErrSession)
+	}
+	if len(plain) == 0 || plain[0] != InnerVersion {
+		return nil
+	}
+	sess.Crypto.Inner = true
+	frame, err := DecodeInner(plain)
+	if err != nil {
+		return err
+	}
+	switch frame.Type {
+	case TypeRekey:
+		return sess.Crypto.RekeyRecv()
+	case TypePing:
+		pong, err := EncodeInner(TypePong, frame.ID, nil, true)
+		if err != nil {
+			return err
+		}
+		return sess.SendPlainInner(pong)
+	case TypePong:
+		return nil
+	default:
+		return nil
+	}
 }
 
 // ReadTransport reads one packed transport record from the socket.
@@ -416,7 +482,7 @@ func runIdleLoop(ctx context.Context, sess *Session, cfg SessionConfig) error {
 		default:
 		}
 		_ = sess.Conn.SetReadDeadline(time.Now().Add(idle))
-		_, err := sess.RecvPlain()
+		plain, err := sess.RecvPlain()
 		_ = sess.Conn.SetReadDeadline(time.Time{})
 		if err != nil {
 			var ne net.Error
@@ -426,6 +492,9 @@ func runIdleLoop(ctx context.Context, sess *Session, cfg SessionConfig) error {
 			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 				return nil
 			}
+			return err
+		}
+		if err := HandleInnerControl(sess, plain); err != nil {
 			return err
 		}
 	}
