@@ -93,7 +93,7 @@ def test_zig_host_session_echo_round_trip() -> None:
 @windows_only
 @pytest.mark.asyncio
 async def test_python_host_session_is_thin_zig_binding() -> None:
-    """HostSession on Windows must open/run/close only through Zig."""
+    """HostSession on Windows must open/run/close only through Zig authorized open."""
     from remedy.execution.host.session import HostSession
 
     sess = HostSession(host="cmd", use_conpty=False)
@@ -107,6 +107,23 @@ async def test_python_host_session_is_thin_zig_binding() -> None:
     finally:
         await sess.close()
     assert sess._zig_handle == 0
+
+
+@requires_core
+@windows_only
+def test_zig_host_session_open_authorized_round_trip() -> None:
+    token, now = host_binding.issue_host_session_token("cmd")
+    handle = host_binding.host_session_open_authorized(
+        host="cmd", use_conpty=False, token=token, now_ms=now
+    )
+    try:
+        result = host_binding.host_session_run(
+            handle, "echo host-session-auth-ok", timeout_ms=20_000
+        )
+        assert result.get("timed_out") is False
+        assert "host-session-auth-ok" in (result.get("stdout") or "")
+    finally:
+        host_binding.host_session_close(handle)
 
 
 @requires_core
