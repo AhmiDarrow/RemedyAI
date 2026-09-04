@@ -28,7 +28,7 @@ import struct
 import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, cast
 
 logger = logging.getLogger("remedy.runtime.rmdy_tool_worker")
 
@@ -303,7 +303,7 @@ class _PipeFile:
         import ctypes
         from ctypes import wintypes
 
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        kernel32 = ctypes.windll.kernel32
         remaining = 65536 if size < 0 else size
         chunks: list[bytes] = []
         while remaining > 0:
@@ -327,7 +327,7 @@ class _PipeFile:
         import ctypes
         from ctypes import wintypes
 
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        kernel32 = ctypes.windll.kernel32
         written_total = 0
         while written_total < len(data):
             chunk = data[written_total:]
@@ -352,7 +352,7 @@ class _PipeFile:
             return
         import ctypes
 
-        ctypes.windll.kernel32.FlushFileBuffers(self._handle)  # type: ignore[attr-defined]
+        ctypes.windll.kernel32.FlushFileBuffers(self._handle)
 
     def close(self) -> None:
         if self._closed:
@@ -360,13 +360,13 @@ class _PipeFile:
         self._closed = True
         import ctypes
 
-        ctypes.windll.kernel32.CloseHandle(self._handle)  # type: ignore[attr-defined]
+        ctypes.windll.kernel32.CloseHandle(self._handle)
 
 
 def _dial_windows_pipe(endpoint: str) -> tuple[BinaryIO, BinaryIO, Callable[[], None]]:
     import ctypes
 
-    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    kernel32 = ctypes.windll.kernel32
     generic_read = 0x80000000
     generic_write = 0x40000000
     open_existing = 3
@@ -384,14 +384,18 @@ def _dial_windows_pipe(endpoint: str) -> tuple[BinaryIO, BinaryIO, Callable[[], 
         err = ctypes.GetLastError()
         raise OSError(f"CreateFileW({endpoint!r}) failed: Win32 {err}")
     pipe = _PipeFile(int(handle))
-    return pipe, pipe, pipe.close
+    stream = cast(BinaryIO, pipe)
+    return stream, stream, pipe.close
 
 
 def _dial_unix(endpoint: str) -> tuple[BinaryIO, BinaryIO, Callable[[], None]]:
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    af_unix = getattr(socket, "AF_UNIX", None)
+    if af_unix is None:
+        raise OSError("AF_UNIX sockets are not available on this platform")
+    sock = socket.socket(af_unix, socket.SOCK_STREAM)
     sock.connect(endpoint)
-    reader = sock.makefile("rb", buffering=0)
-    writer = sock.makefile("wb", buffering=0)
+    reader = cast(BinaryIO, sock.makefile("rb", buffering=0))
+    writer = cast(BinaryIO, sock.makefile("wb", buffering=0))
 
     def _close() -> None:
         try:
