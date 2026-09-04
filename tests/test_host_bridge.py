@@ -71,10 +71,7 @@ def test_translate_rm_chain_and_plain_del() -> None:
 
 
 def test_translate_q_escapes_quote_amp() -> None:
-    from remedy.execution.host.translate import _q, translate_posix_to_host
-
-    assert '&' not in _q('foo"&calc') or '""' in _q('foo"&calc')
-    assert _q('foo"&calc') == '"foo""&calc"'
+    """Zig cmd quoting doubles embedded quotes (``"foo""&calc"``)."""
     text = translate_posix_to_host('cat foo"&calc', host="cmd").text
     assert "type" in text
     assert '"foo""&calc"' in text

@@ -1,56 +1,21 @@
 """Deterministic POSIX → Windows-cmd rewrite for model-emitted shell strings.
 
-Implemented in Zig (`remedy_core_translate_posix_to_host`, ABI 4). This module
-is the thin binding plus argv-head helpers that never went through the
-command-string path. PowerShell payloads are *not* rewritten — the runner
-sends them through a temp ``.ps1`` and ``pwsh -File``.
+Implemented in Zig (`remedy_core_translate_posix_to_host`,
+`remedy_core_looks_like_powershell`, `remedy_core_rewrite_posix_argv`). This
+module is the thin binding plus path helpers that supply rg/python/pwsh into
+the ABI. No Python rewrite twin — fail closed when Zig is unavailable.
 """
 
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import sys
 from dataclasses import dataclass, field
 
-# Strong PowerShell-only signals. Do not use POSIX `test -eq` or `start-server`.
-# powershell/pwsh are *not* listed here — a later-segment mention ("use powershell")
-# must not skip POSIX rewrite. Head match is _PS_HEAD.
-_PS_STRONG = re.compile(
-    r"(?is)("
-    r"\$_\b"
-    r"|\$PSVersionTable"
-    r"|\$env:[A-Za-z]"
-    r"|\bparam\s*\("
-    r"|@['\"]"
-    r")"
-)
-# Optional path prefix before powershell/pwsh (command head only).
-_PS_HEAD = re.compile(
-    r"(?is)^\s*(?:(?:[A-Za-z]:\\)?(?:[^\s\"']*[\\/])?)?(?:powershell|pwsh)(?:\.exe)?\b"
-)
-_PS_CMDLET = re.compile(
-    r"(?i)\b(?:Get|Set|New|Remove|Invoke|Write|Select|Where|ForEach|Out|"
-    r"Add|Clear|ConvertTo|ConvertFrom|Import|Export|Start|Stop|Test|Measure)"
-    r"-([A-Za-z][A-Za-z0-9]+)\b"
-)
-# Nouns that collide with POSIX / script names (start-server, start-dev).
-# "service" is a real PS noun (Get-Service / Start-Service) — do not denylist it.
-_PS_FILENAME_NOUNS = frozenset(
-    {
-        "server",
-        "dev",
-        "app",
-        "all",
-        "here",
-        "now",
-        "script",
-        "build",
-        "web",
-        "api",
-    }
-)
+from remedy.core.computer import host_binding as hb
+from remedy.core.computer.host_binding import HostError
+from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
 
 @dataclass
@@ -64,33 +29,7 @@ class TranslateResult:
 
 def looks_like_powershell(command: str) -> bool:
     """True when the string is PowerShell, not POSIX/cmd or a script name."""
-    cmd = (command or "").strip()
-    if not cmd:
-        return False
-    if _PS_HEAD.match(cmd):
-        return True
-    if _PS_STRONG.search(cmd):
-        return True
-    for m in _PS_CMDLET.finditer(cmd):
-        if m.group(1).lower() in _PS_FILENAME_NOUNS:
-            continue
-        end = m.end()
-        trail = cmd[end : end + 8]
-        if re.match(r"\.(sh|bash|zsh|py|js|ts|exe|bat|cmd)\b", trail, re.I):
-            continue
-        return True
-    return False
-
-
-def _q(path: str) -> str:
-    """Quote a path for cmd.exe (tests + rewrite_posix_argv helpers)."""
-    p = path.replace("/", "\\") if ("/" in path or os.name == "nt") else path
-    if not p:
-        return '""'
-    if len(p) >= 2 and p[0] == p[-1] == '"':
-        p = p[1:-1]
-    p = p.replace('"', '""')
-    return f'"{p}"'
+    return bool(hb.looks_like_powershell(command or ""))
 
 
 def _find_rg() -> str:
@@ -144,8 +83,6 @@ def translate_posix_to_host(
     *host* defaults to ``cmd`` on Windows and ``posix`` elsewhere. Tests pass
     ``host="cmd"`` to exercise the rewrite table on any OS.
     """
-    from remedy.core.computer import host_binding as hb
-
     resolved = host
     if resolved is None:
         resolved = "cmd" if os.name == "nt" else "posix"
@@ -177,35 +114,16 @@ def rewrite_posix_argv(argv: list[str]) -> tuple[list[str], list[str]]:
     """
     if not argv:
         return argv, []
-    notes: list[str] = []
-    head = str(argv[0] or "").replace("\\", "/").rsplit("/", 1)[-1].lower()
-    if head.endswith(".exe"):
-        head = head[:-4]
-    rest = [str(a) for a in argv[1:]]
-    if head == "wc" and any(t in ("-l", "--lines") for t in rest):
-        files = [t for t in rest if not t.startswith("-")]
-        if files:
-            exe = _python_exe()
-            win_p = files[0].replace("/", "\\") if ("/" in files[0] or os.name == "nt") else files[0]
-            if exe:
-                notes.append("wc -l → python line count")
-                code = (
-                    "p=open(r'''"
-                    + win_p.replace("'''", "")
-                    + "''',encoding='utf-8',errors='replace').read().splitlines();"
-                    + "print(len(p))"
-                )
-                return [exe, "-c", code], notes
-            pw = _pwsh_exe()
-            if pw:
-                notes.append("wc -l → pwsh Measure-Object")
-                ps = (
-                    f"(Get-Content -LiteralPath '{files[0].replace(chr(39), chr(39)+chr(39))}' "
-                    f"| Measure-Object -Line).Lines"
-                )
-                return [pw, "-NoProfile", "-Command", ps], notes
-            notes.append(
-                "wc -l needs Python — install Python 3 or set REMEDY_PYTHON to python.exe"
-            )
-            return argv, notes
-    return argv, notes
+    try:
+        data = hb.rewrite_posix_argv(
+            [str(a) for a in argv],
+            python_exe=_python_exe() or None,
+            pwsh_exe=_pwsh_exe() or None,
+        )
+    except (HostError, NativeRuntimeUnavailableError):
+        raise
+    out_raw = data.get("argv") or []
+    notes_raw = data.get("notes") or []
+    out = [str(a) for a in out_raw] if isinstance(out_raw, list) else list(argv)
+    notes = [str(n) for n in notes_raw] if isinstance(notes_raw, list) else []
+    return out, notes
