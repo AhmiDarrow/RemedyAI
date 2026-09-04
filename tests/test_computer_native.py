@@ -204,6 +204,54 @@ def test_type_fast_newlines_stay_keystrokes(monkeypatch) -> None:
     assert r["method"] == "keystrokes"
 
 
+def test_clipboard_host_error_propagates(monkeypatch) -> None:
+    from remedy.core.computer import host_binding as H
+
+    monkeypatch.setattr(W, "_require_windows", lambda: None)
+    monkeypatch.setattr(
+        H,
+        "clipboard_get_text",
+        lambda: (_ for _ in ()).throw(
+            H.HostError("clipboard_get_text", H.STATUS_OPERATION_FAILED)
+        ),
+    )
+    monkeypatch.setattr(
+        H,
+        "clipboard_set_text",
+        lambda _t: (_ for _ in ()).throw(
+            H.HostError("clipboard_set_text", H.STATUS_OPERATION_FAILED)
+        ),
+    )
+    with pytest.raises(H.HostError) as get_exc:
+        W.get_clipboard_text()
+    assert get_exc.value.function == "clipboard_get_text"
+    assert get_exc.value.status == H.STATUS_OPERATION_FAILED
+    with pytest.raises(H.HostError) as set_exc:
+        W.set_clipboard_text("x")
+    assert set_exc.value.function == "clipboard_set_text"
+    assert set_exc.value.status == H.STATUS_OPERATION_FAILED
+
+
+def test_type_fast_falls_back_when_clipboard_host_errors(monkeypatch) -> None:
+    from remedy.core.computer import host_binding as H
+
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(
+        W, "type_text", lambda t, **k: seen.setdefault("typed", t) or len(t)
+    )
+    monkeypatch.setattr(
+        W,
+        "get_clipboard_text",
+        lambda: (_ for _ in ()).throw(
+            H.HostError("clipboard_get_text", H.STATUS_OPERATION_FAILED)
+        ),
+    )
+    long = "x" * 500
+    r = W.type_text_fast(long)
+    assert r["method"] == "keystrokes"
+    assert seen.get("typed") == long
+
+
 # --- live (Windows only, real desktop) --------------------------------------
 
 
