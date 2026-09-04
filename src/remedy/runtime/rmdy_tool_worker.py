@@ -209,8 +209,9 @@ def _web_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
         raise ValueError("query is required")
     if len(query) > 400:
         query = query[:400]
+    raw_max = inp.get("max_results", 5)
     try:
-        max_results = int(inp.get("max_results") if inp.get("max_results") is not None else 5)
+        max_results = int(raw_max) if raw_max is not None else 5
     except (TypeError, ValueError):
         max_results = 5
     max_results = max(1, min(10, max_results))
