@@ -1,0 +1,320 @@
+package connect
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
+)
+
+const (
+	// MaxDevices is the active paired-device cap (Python store.MAX_DEVICES).
+	MaxDevices = 3
+)
+
+var (
+	deviceIDRe  = regexp.MustCompile(`^[a-f0-9]{16,64}$`)
+	storeMu     sync.Mutex
+	revokedLive = map[string]struct{}{}
+)
+
+// Device is a paired-phone record under auth/connect/devices/.
+type Device struct {
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	PublicHex string  `json:"public_hex"`
+	PairedAt  float64 `json:"paired_at"`
+	Revoked   bool    `json:"revoked"`
+}
+
+// DevicesDir is ~/.remedy/auth/connect/devices.
+func DevicesDir(home string) (string, error) {
+	root, err := ConnectRoot(home)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(root, "devices")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	_ = os.Chmod(dir, 0o700)
+	return dir, nil
+}
+
+func devicePath(deviceID, home string) (string, error) {
+	id := strings.ToLower(strings.TrimSpace(deviceID))
+	if !deviceIDRe.MatchString(id) {
+		return "", fmt.Errorf("invalid device id")
+	}
+	dir, err := DevicesDir(home)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, id+".json"), nil
+}
+
+// SaveDevice persists a sealed device record.
+func SaveDevice(rec Device, home string) (Device, error) {
+	id := strings.ToLower(strings.TrimSpace(rec.ID))
+	if !deviceIDRe.MatchString(id) {
+		return Device{}, fmt.Errorf("invalid device id")
+	}
+	name := strings.TrimSpace(rec.Name)
+	if name == "" {
+		name = "phone"
+	}
+	if len(name) > 80 {
+		name = name[:80]
+	}
+	pairedAt := rec.PairedAt
+	if pairedAt == 0 {
+		pairedAt = float64(time.Now().UnixNano()) / 1e9
+	}
+	clean := Device{
+		ID:        id,
+		Name:      name,
+		PublicHex: strings.ToLower(strings.TrimSpace(rec.PublicHex)),
+		PairedAt:  pairedAt,
+		Revoked:   rec.Revoked,
+	}
+	path, err := devicePath(id, home)
+	if err != nil {
+		return Device{}, err
+	}
+	storeMu.Lock()
+	defer storeMu.Unlock()
+	if err := writeSealedJSON(path, clean); err != nil {
+		return Device{}, err
+	}
+	if clean.Revoked {
+		revokedLive[id] = struct{}{}
+	} else {
+		delete(revokedLive, id)
+	}
+	return clean, nil
+}
+
+// GetDevice loads one device record, or nil when missing/unreadable.
+func GetDevice(deviceID, home string) (*Device, error) {
+	path, err := devicePath(deviceID, home)
+	if err != nil {
+		return nil, nil
+	}
+	storeMu.Lock()
+	defer storeMu.Unlock()
+	rec, err := readSealedDevice(path)
+	if err != nil || rec == nil {
+		return nil, nil
+	}
+	return rec, nil
+}
+
+// ListDevices returns sealed device records, optionally including revoked.
+func ListDevices(home string, includeRevoked bool) ([]Device, error) {
+	dir, err := DevicesDir(home)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+
+	storeMu.Lock()
+	defer storeMu.Unlock()
+	out := make([]Device, 0, len(names))
+	for _, name := range names {
+		rec, err := readSealedDevice(filepath.Join(dir, name))
+		if err != nil || rec == nil {
+			continue
+		}
+		if !includeRevoked && rec.Revoked {
+			continue
+		}
+		out = append(out, *rec)
+	}
+	return out, nil
+}
+
+// ActiveDeviceCount is the number of non-revoked paired devices.
+func ActiveDeviceCount(home string) (int, error) {
+	list, err := ListDevices(home, false)
+	if err != nil {
+		return 0, err
+	}
+	return len(list), nil
+}
+
+// FindDeviceByPublic locates a device by its X25519 public key hex.
+func FindDeviceByPublic(publicHex, home string) (*Device, error) {
+	want := strings.ToLower(strings.TrimSpace(publicHex))
+	if want == "" {
+		return nil, nil
+	}
+	list, err := ListDevices(home, true)
+	if err != nil {
+		return nil, err
+	}
+	for i := range list {
+		if strings.ToLower(strings.TrimSpace(list[i].PublicHex)) == want {
+			rec := list[i]
+			return &rec, nil
+		}
+	}
+	return nil, nil
+}
+
+// RevokeDevice marks a device revoked and tracks it live.
+func RevokeDevice(deviceID, home string) (*Device, error) {
+	rec, err := GetDevice(deviceID, home)
+	if err != nil || rec == nil {
+		return nil, err
+	}
+	rec.Revoked = true
+	saved, err := SaveDevice(*rec, home)
+	if err != nil {
+		return nil, err
+	}
+	_ = AppendAudit("revoke", home, map[string]string{"device_id": saved.ID})
+	return &saved, nil
+}
+
+// IsRevokedLive reports whether deviceID was revoked in this process.
+func IsRevokedLive(deviceID string) bool {
+	id := strings.ToLower(strings.TrimSpace(deviceID))
+	storeMu.Lock()
+	defer storeMu.Unlock()
+	_, ok := revokedLive[id]
+	return ok
+}
+
+func writeSealedJSON(path string, payload Device) error {
+	plain, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	var asMap map[string]any
+	if err := json.Unmarshal(plain, &asMap); err != nil {
+		return err
+	}
+	plain, err = json.MarshalIndent(asMap, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	envelope := map[string]any{
+		"v":        2,
+		"encoding": "plain",
+		"payload":  asMap,
+	}
+	if runtime.GOOS == "windows" {
+		if sealed, err := secret.Protect(plain); err == nil {
+			envelope = map[string]any{
+				"v":        2,
+				"encoding": "dpapi",
+				"dpapi":    base64.StdEncoding.EncodeToString(sealed),
+			}
+		}
+	}
+	raw, err := json.MarshalIndent(envelope, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	return writeBytesAtomic(path, raw)
+}
+
+func readSealedDevice(path string) (*Device, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var outer map[string]any
+	if err := json.Unmarshal(raw, &outer); err != nil {
+		return nil, nil
+	}
+	encoding, _ := outer["encoding"].(string)
+	encoding = strings.ToLower(strings.TrimSpace(encoding))
+	var inner map[string]any
+	switch {
+	case encoding == "dpapi":
+		blob, _ := outer["dpapi"].(string)
+		if blob == "" {
+			blob, _ = outer["payload"].(string)
+		}
+		cipher, err := base64.StdEncoding.DecodeString(blob)
+		if err != nil {
+			return nil, nil
+		}
+		plain, err := secret.Unprotect(cipher)
+		if err != nil {
+			return nil, nil
+		}
+		if err := json.Unmarshal(plain, &inner); err != nil {
+			return nil, nil
+		}
+	default:
+		if payload, ok := outer["payload"].(map[string]any); ok {
+			inner = payload
+		} else if _, hasID := outer["id"]; hasID {
+			inner = outer
+		} else if _, hasPub := outer["public_hex"]; hasPub {
+			inner = outer
+		} else {
+			return nil, nil
+		}
+	}
+	rec, err := deviceFromMap(inner)
+	if err != nil {
+		return nil, nil
+	}
+	return &rec, nil
+}
+
+func deviceFromMap(m map[string]any) (Device, error) {
+	id, _ := m["id"].(string)
+	name, _ := m["name"].(string)
+	pub, _ := m["public_hex"].(string)
+	var pairedAt float64
+	switch v := m["paired_at"].(type) {
+	case float64:
+		pairedAt = v
+	case json.Number:
+		f, _ := v.Float64()
+		pairedAt = f
+	}
+	revoked, _ := m["revoked"].(bool)
+	if strings.TrimSpace(id) == "" {
+		return Device{}, fmt.Errorf("missing id")
+	}
+	return Device{
+		ID:        strings.ToLower(strings.TrimSpace(id)),
+		Name:      name,
+		PublicHex: strings.ToLower(strings.TrimSpace(pub)),
+		PairedAt:  pairedAt,
+		Revoked:   revoked,
+	}, nil
+}
