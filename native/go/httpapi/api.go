@@ -57,13 +57,16 @@ type Server struct {
 	// focusedSessionID mirrors host_bridge focused desktop tab (Connect Stop).
 	focusedMu        sync.Mutex
 	focusedSessionID string
+
+	approvals *approvalQueue
+	lifeHub   *lifeTaskHub
 }
 
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
 // sessions CRUD, session LLM bind, attachments upload/get, messages
 // list/create/stream, abort, session-events SSE, Connect management,
-// Connect me/stop, providers/models catalog, skills/library routes, and
-// workspace/files/media routes.
+// Connect me/stop, providers/models catalog, skills/library routes,
+// workspace/files/media routes, and partner/approvals/plans/life-tasks/goals.
 func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
@@ -86,16 +89,19 @@ func New(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("open session store: %w", err)
 	}
 	s := &Server{
-		started:  time.Now(),
-		version:  version,
-		token:    token,
-		homeDir:  homeDir,
-		mux:      http.NewServeMux(),
-		sessions: store,
-		events:   newSessionEventHub(),
-		claims:   newStreamClaims(),
-		runner:   cfg.TurnRunner,
+		started:   time.Now(),
+		version:   version,
+		token:     token,
+		homeDir:   homeDir,
+		mux:       http.NewServeMux(),
+		sessions:  store,
+		events:    newSessionEventHub(),
+		claims:    newStreamClaims(),
+		runner:    cfg.TurnRunner,
+		approvals: newApprovalQueue(),
+		lifeHub:   newLifeTaskHub(),
 	}
+	_ = s.approvals.SyncFromConfig(LoadConfig(homeDir))
 	s.mux.HandleFunc("GET /api/ping", s.handlePing)
 	s.mux.HandleFunc("GET /api/status", s.handleStatus)
 	s.mux.HandleFunc("GET /api/turn-active", s.handleTurnActive)
@@ -143,6 +149,27 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/files", s.handleListFiles)
 	s.mux.HandleFunc("GET /api/files/search", s.handleSearchFiles)
 	s.mux.HandleFunc("GET /api/media", s.handleServeMedia)
+	s.mux.HandleFunc("GET /api/partner/status", s.handlePartnerStatus)
+	s.mux.HandleFunc("GET /api/approvals", s.handleListApprovals)
+	s.mux.HandleFunc("POST /api/approvals/{approval_id}/resolve", s.handleResolveApproval)
+	s.mux.HandleFunc("GET /api/life-tasks/current", s.handleCurrentLifeTask)
+	s.mux.HandleFunc("POST /api/life-tasks/act", s.handleActLifeTask)
+	s.mux.HandleFunc("POST /api/life-tasks/probe", s.handleProbeLifeTask)
+	s.mux.HandleFunc("GET /api/life-tasks", s.handleListLifeTasks)
+	s.mux.HandleFunc("GET /api/life-tasks/{task_id}", s.handleGetLifeTask)
+	s.mux.HandleFunc("GET /api/plans/latest", s.handleLatestPlan)
+	s.mux.HandleFunc("GET /api/plans", s.handleListPlans)
+	s.mux.HandleFunc("POST /api/plans", s.handleCreatePlan)
+	s.mux.HandleFunc("GET /api/plans/{plan_id}", s.handleGetPlan)
+	s.mux.HandleFunc("POST /api/plans/{plan_id}/status", s.handleSetPlanStatus)
+	s.mux.HandleFunc("POST /api/plans/{plan_id}/steps/status", s.handleSetPlanStepStatus)
+	s.mux.HandleFunc("GET /api/checkpoints/latest", s.handleLatestCheckpoint)
+	s.mux.HandleFunc("GET /api/checkpoints", s.handleListCheckpoints)
+	s.mux.HandleFunc("GET /api/goals", s.handleListGoals)
+	s.mux.HandleFunc("POST /api/goals", s.handleCreateGoal)
+	s.mux.HandleFunc("POST /api/goals/activity/clear", s.handleClearGoalActivity)
+	s.mux.HandleFunc("PATCH /api/goals/{goal_id}", s.handlePatchGoal)
+	s.mux.HandleFunc("DELETE /api/goals/{goal_id}", s.handleDeleteGoal)
 	return s, nil
 }
 
