@@ -62,5 +62,76 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 		return err
 	}
 
+	if err := registry.Register(Descriptor{
+		ID:          "workspace.read",
+		Version:     1,
+		Description: "Read a UTF-8 text file under the workspace (Python worker)",
+		Runtime:     RuntimePython,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["path"],
+			"properties":{
+				"path":{"type":"string","minLength":1},
+				"offset":{"type":"integer","minimum":0},
+				"limit":{"type":"integer","minimum":1}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["path","content"],
+			"properties":{
+				"path":{"type":"string"},
+				"content":{"type":"string"},
+				"truncated":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
+		ID:          "workspace.list",
+		Version:     1,
+		Description: "List files and directories under a workspace path (Python worker)",
+		Runtime:     RuntimePython,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"path":{"type":"string"},
+				"limit":{"type":"integer","minimum":1,"maximum":2000},
+				"offset":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["path","entries","total"],
+			"properties":{
+				"path":{"type":"string"},
+				"entries":{
+					"type":"array",
+					"items":{
+						"type":"object",
+						"required":["name","kind"],
+						"properties":{
+							"name":{"type":"string"},
+							"kind":{"type":"string","enum":["file","dir"]}
+						},
+						"additionalProperties":false
+					}
+				},
+				"total":{"type":"integer","minimum":0},
+				"truncated":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
 	return nil
 }

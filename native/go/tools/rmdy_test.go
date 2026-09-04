@@ -65,6 +65,23 @@ func TestRMDYPythonToolsRoundTrip(t *testing.T) {
 	if wordOut.Words != 3 {
 		t.Fatalf("words=%d", wordOut.Words)
 	}
+
+	listed, err := clientReg.Execute(context.Background(), Request{
+		ToolID: "workspace.list", Version: 1,
+		Input: json.RawMessage(`{"path":"."}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listOut struct {
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal(listed.Output, &listOut); err != nil {
+		t.Fatal(err)
+	}
+	if listOut.Total < 1 {
+		t.Fatalf("workspace.list total=%d", listOut.Total)
+	}
 }
 
 func TestWirePayloadRoundTrip(t *testing.T) {

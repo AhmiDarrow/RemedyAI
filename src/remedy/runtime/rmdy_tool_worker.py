@@ -9,16 +9,25 @@ Stdio mode (default)::
 
     python -m remedy.runtime.rmdy_tool_worker
 
+IPC mode (supervised by ``remedy-runtime --serve``)::
+
+    REMEDY_RMDY_ENDPOINT=\\\\.\\pipe\\remedy-tools-… python -m remedy.runtime.rmdy_tool_worker
+    REMEDY_RMDY_ENDPOINT=/tmp/remedy-tools-….sock python -m remedy.runtime.rmdy_tool_worker
+
 The worker never logs to stdout (that is the wire).
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
+import os
+import socket
 import struct
 import sys
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any, BinaryIO
 
 logger = logging.getLogger("remedy.runtime.rmdy_tool_worker")
@@ -27,6 +36,20 @@ _PROTOCOL_VERSION = 1
 _HEADER_SIZE = 32
 _MAX_PAYLOAD = 16 << 20
 _MAGIC = b"RMDY"
+_READ_CHAR_CAP = 512_000
+_SKIP_DIR_NAMES = {
+    ".git",
+    "__pycache__",
+    "node_modules",
+    ".venv",
+    "venv",
+    ".tox",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "zig-cache",
+    "zig-out",
+}
 
 _KIND_TOOL_REQUEST = 1
 _KIND_TOOL_RESULT = 2
@@ -53,9 +76,133 @@ def _word_count(text: str) -> int:
     return len(text.split())
 
 
+def _workspace_root() -> Path:
+    raw = (os.environ.get("REMEDY_WORKSPACE") or os.environ.get("REMEDY_PROJECT") or "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return Path.cwd().resolve()
+
+
+def _resolve_workspace_path(path: str) -> Path:
+    root = _workspace_root()
+    raw = (path or ".").strip() or "."
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise PermissionError(f"path escapes workspace root: {path}") from exc
+    return resolved
+
+
+def _is_credential_name(name: str) -> bool:
+    try:
+        from remedy.core.security import is_credential_filename
+
+        return bool(is_credential_filename(name))
+    except Exception:  # noqa: BLE001 — worker must stay up without full package
+        lowered = name.lower()
+        return lowered in {".env", ".npmrc", ".pypirc"} or lowered.endswith(
+            (".pem", ".key", ".p12", ".pfx")
+        )
+
+
+def _workspace_read(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    path = str(inp.get("path") or "").strip()
+    if not path:
+        raise ValueError("path is required")
+    target = _resolve_workspace_path(path)
+    if _is_credential_name(target.name) or any(_is_credential_name(p) for p in target.parts):
+        raise PermissionError("credential-looking files are not readable")
+    if not target.exists():
+        raise FileNotFoundError(f"file not found: {path}")
+    if target.is_dir():
+        raise IsADirectoryError(f"path is a directory: {path}")
+    try:
+        from remedy.core.text_files import is_probably_text
+
+        if not is_probably_text(target):
+            raise ValueError(f"binary or non-text file: {path}")
+    except ImportError:
+        pass
+    text = target.read_text(encoding="utf-8", errors="replace")
+    try:
+        offset = max(0, int(inp.get("offset") or 0))
+    except (TypeError, ValueError):
+        offset = 0
+    limit_raw = inp.get("limit")
+    limit: int | None
+    try:
+        limit = None if limit_raw is None else max(1, int(limit_raw))
+    except (TypeError, ValueError):
+        limit = None
+    truncated = False
+    if offset or limit is not None:
+        lines = text.splitlines(keepends=True)
+        end = len(lines) if limit is None else min(len(lines), offset + limit)
+        start = min(offset, len(lines))
+        text = "".join(lines[start:end])
+        truncated = end < len(lines)
+    if len(text) > _READ_CHAR_CAP:
+        text = text[:_READ_CHAR_CAP]
+        truncated = True
+    try:
+        rel = str(target.relative_to(_workspace_root()).as_posix())
+    except ValueError:
+        rel = str(target)
+    out: dict[str, Any] = {"path": rel, "content": text}
+    if truncated:
+        out["truncated"] = True
+    return out
+
+
+def _workspace_list(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    path = str(inp.get("path") or ".").strip() or "."
+    target = _resolve_workspace_path(path)
+    if not target.exists():
+        raise FileNotFoundError(f"path not found: {path}")
+    if not target.is_dir():
+        raise NotADirectoryError(f"not a directory: {path}")
+    try:
+        limit = max(1, min(2000, int(inp.get("limit") or 200)))
+    except (TypeError, ValueError):
+        limit = 200
+    try:
+        offset = max(0, int(inp.get("offset") or 0))
+    except (TypeError, ValueError):
+        offset = 0
+    root = _workspace_root()
+    entries = sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+    visible = [
+        p
+        for p in entries
+        if p.name not in _SKIP_DIR_NAMES and not _is_credential_name(p.name)
+    ]
+    page = visible[offset : offset + limit]
+    items: list[dict[str, str]] = []
+    for p in page:
+        try:
+            name = p.relative_to(root).as_posix()
+        except ValueError:
+            name = p.name
+        items.append({"name": name, "kind": "dir" if p.is_dir() else "file"})
+    out: dict[str, Any] = {
+        "path": path,
+        "entries": items,
+        "total": len(visible),
+    }
+    if offset + len(items) < len(visible):
+        out["truncated"] = True
+    return out
+
+
 _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("text.slugify", 1): lambda inp: {"slug": _slugify(str(inp.get("text", "")))},
     ("text.word_count", 1): lambda inp: {"words": _word_count(str(inp.get("text", "")))},
+    ("workspace.read", 1): _workspace_read,
+    ("workspace.list", 1): _workspace_list,
 }
 
 
@@ -143,9 +290,163 @@ def serve(reader: BinaryIO, writer: BinaryIO) -> None:
         write_frame(writer, _KIND_TOOL_RESULT, correlation, err, flags=1)
 
 
+class _PipeFile:
+    """Binary file-like over a Windows named-pipe HANDLE (CreateFileW)."""
+
+    def __init__(self, handle: int) -> None:
+        self._handle = handle
+        self._closed = False
+
+    def read(self, size: int = -1) -> bytes:
+        if self._closed or size == 0:
+            return b""
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        remaining = 65536 if size < 0 else size
+        chunks: list[bytes] = []
+        while remaining > 0:
+            to_read = min(65536, remaining)
+            buf = (ctypes.c_char * to_read)()
+            read = wintypes.DWORD(0)
+            ok = kernel32.ReadFile(self._handle, buf, to_read, ctypes.byref(read), None)
+            if not ok or read.value == 0:
+                break
+            chunks.append(buf.raw[: read.value])
+            if size < 0:
+                break
+            remaining -= read.value
+            if read.value < to_read:
+                break
+        return b"".join(chunks)
+
+    def write(self, data: bytes) -> int:
+        if self._closed:
+            return 0
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        written_total = 0
+        while written_total < len(data):
+            chunk = data[written_total:]
+            buf = (ctypes.c_char * len(chunk)).from_buffer_copy(chunk)
+            written = wintypes.DWORD(0)
+            ok = kernel32.WriteFile(
+                self._handle,
+                buf,
+                len(chunk),
+                ctypes.byref(written),
+                None,
+            )
+            if not ok:
+                raise OSError("WriteFile failed on named pipe")
+            written_total += int(written.value)
+            if written.value == 0:
+                break
+        return written_total
+
+    def flush(self) -> None:
+        if self._closed:
+            return
+        import ctypes
+
+        ctypes.windll.kernel32.FlushFileBuffers(self._handle)  # type: ignore[attr-defined]
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        import ctypes
+
+        ctypes.windll.kernel32.CloseHandle(self._handle)  # type: ignore[attr-defined]
+
+
+def _dial_windows_pipe(endpoint: str) -> tuple[BinaryIO, BinaryIO, Callable[[], None]]:
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    generic_read = 0x80000000
+    generic_write = 0x40000000
+    open_existing = 3
+    invalid_handle = ctypes.c_void_p(-1).value
+    handle = kernel32.CreateFileW(
+        endpoint,
+        generic_read | generic_write,
+        0,
+        None,
+        open_existing,
+        0,
+        None,
+    )
+    if handle in (None, 0, invalid_handle, -1):
+        err = ctypes.GetLastError()
+        raise OSError(f"CreateFileW({endpoint!r}) failed: Win32 {err}")
+    pipe = _PipeFile(int(handle))
+    return pipe, pipe, pipe.close
+
+
+def _dial_unix(endpoint: str) -> tuple[BinaryIO, BinaryIO, Callable[[], None]]:
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.connect(endpoint)
+    reader = sock.makefile("rb", buffering=0)
+    writer = sock.makefile("wb", buffering=0)
+
+    def _close() -> None:
+        try:
+            reader.close()
+        finally:
+            try:
+                writer.close()
+            finally:
+                sock.close()
+
+    return reader, writer, _close
+
+
+def dial_endpoint(endpoint: str) -> tuple[BinaryIO, BinaryIO, Callable[[], None]]:
+    endpoint = endpoint.strip()
+    if not endpoint:
+        raise ValueError("empty RMDY endpoint")
+    if endpoint.startswith("\\\\.\\pipe\\") or endpoint.startswith("//./pipe/"):
+        # Normalize forward-slash form if a shell mangled it.
+        normalized = endpoint.replace("/", "\\")
+        return _dial_windows_pipe(normalized)
+    return _dial_unix(endpoint)
+
+
+def serve_endpoint(endpoint: str) -> None:
+    import time
+
+    last_err: Exception | None = None
+    for _ in range(50):
+        try:
+            reader, writer, closer = dial_endpoint(endpoint)
+            try:
+                serve(reader, writer)
+            finally:
+                closer()
+            return
+        except OSError as exc:
+            last_err = exc
+            time.sleep(0.1)
+    raise SystemExit(f"failed to dial RMDY endpoint {endpoint!r}: {last_err}")
+
+
 def main(argv: list[str] | None = None) -> int:
-    _ = argv
+    parser = argparse.ArgumentParser(prog="remedy.runtime.rmdy_tool_worker")
+    parser.add_argument(
+        "--endpoint",
+        default="",
+        help="IPC endpoint (named pipe / unix socket); default REMEDY_RMDY_ENDPOINT or stdio",
+    )
+    args = parser.parse_args(argv)
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
+    endpoint = (args.endpoint or os.environ.get("REMEDY_RMDY_ENDPOINT") or "").strip()
+    if endpoint:
+        serve_endpoint(endpoint)
+        return 0
     # Windows stdio is text by default; reopen as binary for RMDY frames.
     serve(sys.stdin.buffer, sys.stdout.buffer)
     return 0
