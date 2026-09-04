@@ -28,6 +28,9 @@ type Config struct {
 	// DBPath is the SQLite memory.db path. Empty derives from HomeDir /
 	// REMEDY_HOME / ~/.remedy/memory.db (or :memory: when no home).
 	DBPath string
+	// TurnRunner powers POST /api/sessions/{id}/messages. Nil → 503
+	// (matches Python when runtime is unavailable).
+	TurnRunner TurnRunner
 }
 
 // Server is the Phase-4 first-slice HTTP API.
@@ -35,13 +38,16 @@ type Server struct {
 	started  time.Time
 	version  string
 	token    string
+	homeDir  string
 	mux      *http.ServeMux
 	sessions *sessionStore
 	events   *sessionEventHub
+	claims   *streamClaims
+	runner   TurnRunner
 }
 
-// New builds a server with ping/status/turn-active, sessions CRUD, and
-// session-events SSE registered.
+// New builds a server with ping/status/turn-active, sessions CRUD,
+// messages list/create, abort, and session-events SSE registered.
 func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
@@ -59,9 +65,12 @@ func New(cfg Config) (*Server, error) {
 		started:  time.Now(),
 		version:  version,
 		token:    token,
+		homeDir:  cfg.HomeDir,
 		mux:      http.NewServeMux(),
 		sessions: store,
 		events:   newSessionEventHub(),
+		claims:   newStreamClaims(),
+		runner:   cfg.TurnRunner,
 	}
 	s.mux.HandleFunc("GET /api/ping", s.handlePing)
 	s.mux.HandleFunc("GET /api/status", s.handleStatus)
@@ -71,6 +80,9 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
 	s.mux.HandleFunc("PATCH /api/sessions/{id}", s.handleUpdateSession)
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
+	s.mux.HandleFunc("GET /api/sessions/{id}/messages", s.handleListMessages)
+	s.mux.HandleFunc("POST /api/sessions/{id}/messages", s.handleSendMessage)
+	s.mux.HandleFunc("POST /api/sessions/{id}/abort", s.handleAbortSession)
 	s.mux.HandleFunc("GET /api/events/sessions", s.handleSessionEvents)
 	return s, nil
 }
@@ -199,9 +211,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTurnActive(w http.ResponseWriter, _ *http.Request) {
+	active := s.claims != nil && s.claims.AnyActive()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok",
-		"active": false,
+		"active": active,
 	})
 }
 
