@@ -92,6 +92,8 @@ func main() {
 	}
 
 	var runner httpapi.TurnRunner
+	var voiceWorker httpapi.VoiceWorker
+	var visionWorker httpapi.VisionWorker
 	if *smokeFixture {
 		runner = httpapi.NewFixtureTurnRunner()
 	} else {
@@ -100,6 +102,7 @@ func main() {
 		// Equal-or-better vs pre-cutover Python ReAct: supervise the RMDY tool
 		// worker, dial FrameCaller, AttachPythonWorker. Fail closed — never
 		// serve forever with only Go demo builtins pretending product tools.
+		// Same session hosts voice/vision handlers (forever-Python ML lanes).
 		cwd, _ := os.Getwd()
 		session, err := workers.StartRMDYToolWorker(ctx, workers.RMDYToolOptions{
 			Cwd: cwd,
@@ -114,12 +117,20 @@ func main() {
 			fmt.Fprintf(os.Stderr, "remedy-runtime: AttachPythonWorker failed: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Fprintf(os.Stderr, "remedy-runtime: RMDY tool worker attached (pid=%d endpoint=%s)\n", session.PID, session.Endpoint)
+		voiceWorker, visionWorker, err = httpapi.AttachMLWorkers(session.Client)
+		if err != nil {
+			_ = session.Close()
+			fmt.Fprintf(os.Stderr, "remedy-runtime: voice/vision workers required: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "remedy-runtime: RMDY tool worker attached (pid=%d endpoint=%s; voice+vision)\n", session.PID, session.Endpoint)
 		runner = cognition
 	}
 
 	err := httpapi.ListenAndServe(ctx, addr, httpapi.Config{
-		TurnRunner: runner,
+		TurnRunner:   runner,
+		VoiceWorker:  voiceWorker,
+		VisionWorker: visionWorker,
 	}, func(bound string) {
 		fmt.Fprintf(os.Stderr, "remedy-runtime listening on http://%s\n", bound)
 	})
