@@ -79,11 +79,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	// Durable Zig HMAC key in the secret store (never logged). Go does not
-	// yet load remedy_core in-process (Zig host tools stay unwired here);
-	// Python host_binding installs the same on-disk key into the DLL when it
-	// spawns. Turn tools use the Go Tool ABI registry; AttachPythonWorker adds
-	// RuntimePython tools over RMDY frames when a worker is connected.
+	// Durable Zig HMAC key in the secret store (never logged). httpapi terminal
+	// / computer routes install the same on-disk key into remedy_core when they
+	// spawn ConPTY; Python host_binding shares the file. Turn tools use the Go
+	// Tool ABI registry; AttachPythonWorker adds RuntimePython tools over RMDY
+	// frames when a worker is connected.
 	if _, err := secret.EnsureHostSigningKey(""); err != nil {
 		fmt.Fprintf(os.Stderr, "remedy-runtime host signing key: %v\n", err)
 		os.Exit(1)

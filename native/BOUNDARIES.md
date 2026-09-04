@@ -15,4 +15,6 @@ until Phase 17 gates a native slice on and proves rollback.
 
 `go run ./cmd/check-boundaries -root ..` enforces the mechanical portion of this contract.
 It rejects direct process execution from Go, unsafe/syscall use, misplaced third-party
-dependencies, and Python coupling from the native Go runtime.
+dependencies, and Python coupling from the native Go runtime. Package `core` may import
+`unsafe` and `golang.org/x/sys` solely to load the Zig `remedy_core` C ABI (ConPTY, capture,
+policy tokens); every other package stays deny-by-default.

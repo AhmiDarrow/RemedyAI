@@ -20,6 +20,8 @@ func TestBoundaryCheckerFindsForbiddenAndMisownedImports(t *testing.T) {
 	write("runtime/bad.go", "package runtime\nimport (\"os/exec\"; _ \"github.com/Microsoft/go-winio\")\n")
 	write("cmd/bad/main.go", "package main\nimport \"unsafe\"\n")
 	write("secret/ok_unsafe.go", "package secret\nimport \"unsafe\"\nvar _ = unsafe.Sizeof(0)\n")
+	write("core/ok_unsafe.go", "package core\nimport \"unsafe\"\nvar _ = unsafe.Sizeof(0)\n")
+	write("core/ok_sys.go", "package core\nimport _ \"golang.org/x/sys/windows\"\n")
 	write("memory/bad_sqlite.go", "package memory\nimport _ \"modernc.org/sqlite\"\n")
 	write("httpapi/ok_sqlite.go", "package httpapi\nimport _ \"modernc.org/sqlite\"\n")
 	write("connect/ok_crypto.go", "package connect\nimport _ \"golang.org/x/crypto/blake2s\"\n")
@@ -46,5 +48,8 @@ func TestBoundaryCheckerFindsForbiddenAndMisownedImports(t *testing.T) {
 	}
 	if strings.Contains(joined, "secret/ok_unsafe.go") {
 		t.Fatalf("secret must be allowed to import unsafe: %v", violations)
+	}
+	if strings.Contains(joined, "core/ok_unsafe.go") || strings.Contains(joined, "core/ok_sys.go") {
+		t.Fatalf("core must be allowed unsafe and golang.org/x/sys: %v", violations)
 	}
 }
