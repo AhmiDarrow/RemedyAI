@@ -1,6 +1,7 @@
 package connect_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -163,11 +164,111 @@ func TestSettingsFromMap(t *testing.T) {
 		"connect_relay_url":   "10.0.0.8:7402",
 		"connect_rdv_enabled": false,
 		"connect_paused":      "yes",
+		"connect_home":        "/tmp/remedy-home",
+		"api_key":             "tok-from-map",
+		"sidecar_port":        7411.0,
 	})
 	if !cfg.Enabled || !cfg.Paused || cfg.Host != "10.0.0.8" || cfg.Port != 7401 {
 		t.Fatalf("%+v", cfg)
 	}
 	if cfg.RDV || cfg.RelayURL != "10.0.0.8:7402" {
 		t.Fatalf("%+v", cfg)
+	}
+	if cfg.Home != "/tmp/remedy-home" || cfg.APIKey != "tok-from-map" || cfg.Sidecar != 7411 {
+		t.Fatalf("%+v", cfg)
+	}
+}
+
+func TestGatewayNilHandlerServesNoiseConnectMe(t *testing.T) {
+	// Production path: NewGateway(nil) → Noise IK → allowlist → /connect/me.
+	home := pipeHome(t)
+	hostKP := mustHostKP(t, home)
+
+	g := connect.NewGateway(nil)
+	defer func() { _ = g.Stop() }()
+
+	if err := g.MaybeStart(connect.GatewaySettings{
+		Enabled: true,
+		Host:    "127.0.0.1",
+		Port:    0,
+		Home:    home,
+		APIKey:  "tok-gateway-noise-test",
+		Sidecar: 7400,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	host, port, ok := g.ListeningAddr()
+	if !ok {
+		t.Fatal("not listening")
+	}
+	_, secret := mustStartPair(t, home, port)
+
+	deviceKP, err := connect.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(8 * time.Second))
+
+	client, err := connect.HandshakeInitiator(c, deviceKP, hostKP.Public, connect.PairPayload(secret, "phone"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := connect.EncodeHTTPRequest(connect.HTTPRequest{
+		Method: "GET",
+		Target: "/connect/me",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := connect.EncodeInner(connect.TypeHTTPReq, 7, payload, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := client.Encrypt(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := connect.WriteRecord(c, blob); err != nil {
+		t.Fatal(err)
+	}
+
+	var joined []byte
+	for {
+		nonce, ct, err := connect.ReadRecord(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		packed, _ := connect.PackRecord(nonce, ct)
+		out, err := client.Decrypt(packed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		inner, err := connect.DecodeInner(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if inner.Type != connect.TypeHTTPRes || inner.ID != 7 {
+			t.Fatalf("unexpected %+v", inner)
+		}
+		joined = append(joined, inner.Payload...)
+		if inner.Fin() {
+			break
+		}
+	}
+	if !bytes.Contains(joined, []byte("HTTP/1.1 200")) {
+		t.Fatalf("joined=%q", joined)
+	}
+	for _, want := range []string{`"device_id"`, `"panes"`, `"reachable"`} {
+		if !bytes.Contains(joined, []byte(want)) {
+			t.Fatalf("missing %s in %q", want, joined)
+		}
+	}
+	if bytes.Contains(joined, []byte("tok-gateway-noise-test")) || bytes.Contains(joined, []byte("Bearer")) {
+		t.Fatalf("api key leaked in /connect/me: %q", joined)
 	}
 }
