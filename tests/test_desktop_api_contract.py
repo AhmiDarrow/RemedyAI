@@ -38,23 +38,7 @@ KNOWN_GO_GAPS: frozenset[str] = frozenset(
         "/api/self-inject/rounds",
         "/api/sessions/bulk-project",
         "/api/sessions/import",
-        "/api/sessions/{}/command",
-        "/api/sessions/{}/export",
         "/api/sessions/{}/messages/{}/edit",
-        "/api/sessions/{}/steer",
-        "/api/sessions/{}/time-travel",
-        "/api/sessions/{}/timeline",
-        "/api/sessions/{}/todos",
-        "/api/skills/archive-unused",
-        "/api/skills/export",
-        "/api/skills/import",
-        "/api/skills/learning/summary",
-        "/api/skills/metrics/reuse",
-        "/api/skills/packs",
-        "/api/skills/{}/body",
-        "/api/skills/{}/feedback",
-        "/api/skills/{}/quarantine",
-        "/api/skills/{}/status",
     }
 )
 
