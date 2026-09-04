@@ -280,5 +280,42 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 		return err
 	}
 
+	if err := registry.Register(Descriptor{
+		ID:          "prompt.assemble",
+		Version:     1,
+		Description: "Assemble system/soul/skills/memory context for a cognition turn (internal; not model-callable)",
+		Runtime:     RuntimePython,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"message":{"type":"string"},
+				"prompt":{"type":"string"},
+				"session_id":{"type":"string"},
+				"plan_mode":{"type":"boolean"},
+				"chat_mode":{"type":"boolean"},
+				"home_dir":{"type":"string"},
+				"project_path":{"type":"string"},
+				"provider":{"type":"string"},
+				"model":{"type":"string"},
+				"base_url":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["system","goal"],
+			"properties":{
+				"system":{"type":"string","minLength":1},
+				"goal":{"type":"string"},
+				"context_chars":{"type":"integer","minimum":0},
+				"system_chars":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
 	return nil
 }

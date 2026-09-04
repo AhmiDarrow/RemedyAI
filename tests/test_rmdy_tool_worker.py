@@ -417,3 +417,73 @@ def test_stdio_tool_round_trip_web_fetch(monkeypatch: pytest.MonkeyPatch) -> Non
     assert body["output"]["format"] == "text"
     assert body["output"]["content"] == "plain text body"
     assert body["output"]["url"] == "https://example.com/plain"
+
+
+def test_prompt_assemble_handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    monkeypatch.setenv("REMEDY_WORKSPACE", str(tmp_path))
+    (tmp_path / "config.toml").write_text(
+        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
+        encoding="utf-8",
+    )
+    out = worker._prompt_assemble(
+        {"message": "hello partner", "session_id": "sess-1", "chat_mode": True}
+    )
+    assert isinstance(out["system"], str) and out["system"].strip()
+    assert out["goal"] == "hello partner"
+    assert int(out["system_chars"]) == len(out["system"])
+    # Identity / operational body must beat raw prompt-only.
+    assert "Remedy" in out["system"] or "partner" in out["system"].lower()
+
+
+def test_stdio_tool_round_trip_prompt_assemble(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("REMEDY_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text(
+        'name = "Remedy"\nllm_provider = "openai"\nllm_model = "gpt-4o-mini"\n',
+        encoding="utf-8",
+    )
+    req = json.dumps(
+        {
+            "tool_id": "prompt.assemble",
+            "version": 1,
+            "input": {"message": "wire assemble", "session_id": "s"},
+        }
+    ).encode("utf-8")
+    corr = b"\x07" + b"\x00" * 15
+    inbound = _frame(worker._KIND_TOOL_REQUEST, req, corr)
+
+    class _Buf:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+            self._pos = 0
+            self.out = bytearray()
+
+        def read(self, n: int) -> bytes:
+            if self._pos >= len(self._data):
+                return b""
+            chunk = self._data[self._pos : self._pos + n]
+            self._pos += len(chunk)
+            return chunk
+
+        def write(self, data: bytes) -> int:
+            self.out.extend(data)
+            return len(data)
+
+        def flush(self) -> None:
+            return None
+
+    buf = _Buf(inbound)
+    worker.serve(buf, buf)  # type: ignore[arg-type]
+
+    raw = bytes(buf.out)
+    payload_len = struct.unpack_from("<I", raw, 12)[0]
+    body = json.loads(raw[32 : 32 + payload_len].decode("utf-8"))
+    assert body["ok"] is True
+    assert body["output"]["goal"] == "wire assemble"
+    assert isinstance(body["output"]["system"], str) and body["output"]["system"].strip()
+
+
+def test_prompt_assemble_registered() -> None:
+    assert ("prompt.assemble", 1) in worker._HANDLERS

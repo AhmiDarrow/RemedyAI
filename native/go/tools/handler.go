@@ -431,6 +431,61 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	})); err != nil {
 		return err
 	}
+
+	if err := registry.Register(Descriptor{
+		ID:          "prompt.assemble",
+		Version:     1,
+		Description: "Assemble system/soul/skills/memory context (local mirror of Python worker)",
+		Runtime:     RuntimeGo,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"properties":{
+				"message":{"type":"string"},
+				"prompt":{"type":"string"},
+				"session_id":{"type":"string"},
+				"plan_mode":{"type":"boolean"},
+				"chat_mode":{"type":"boolean"},
+				"home_dir":{"type":"string"},
+				"project_path":{"type":"string"},
+				"provider":{"type":"string"},
+				"model":{"type":"string"},
+				"base_url":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["system","goal"],
+			"properties":{
+				"system":{"type":"string","minLength":1},
+				"goal":{"type":"string"},
+				"context_chars":{"type":"integer","minimum":0},
+				"system_chars":{"type":"integer","minimum":0}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(func(_ context.Context, request Request) (Result, error) {
+		var body struct {
+			Message string `json:"message"`
+			Prompt  string `json:"prompt"`
+		}
+		_ = json.Unmarshal(request.Input, &body)
+		goal := strings.TrimSpace(body.Message)
+		if goal == "" {
+			goal = strings.TrimSpace(body.Prompt)
+		}
+		system := "mirror-system\n\nYou are Remedy. Assembled context for: " + goal
+		out, err := json.Marshal(map[string]any{
+			"system":        system,
+			"goal":          goal,
+			"context_chars": len(goal),
+			"system_chars":  len(system),
+		})
+		return Result{Output: out}, err
+	})); err != nil {
+		return err
+	}
 	return nil
 }
 
