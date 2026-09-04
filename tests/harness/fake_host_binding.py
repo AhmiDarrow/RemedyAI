@@ -840,6 +840,48 @@ class FakeHostConpty:
 
         raise HostError('process_spawn_authorized', STATUS_OPERATION_FAILED, os_error=1)
 
+    def process_exec_capture_authorized(
+        self,
+        argv: Sequence[str],
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        *,
+        token: bytes,
+        subject: str = 'agent:remedy',
+        scope: str = 'workspace:local',
+        owner_confirmed: bool = False,
+        now_ms: int | None = None,
+        timeout_ms: int = 60_000,
+        write_roots: Sequence[str] | None = None,
+    ) -> Any:
+        """Record authorized exec-capture; tests that need output patch this."""
+        from remedy.core.computer.host_binding import (
+            STATUS_OPERATION_FAILED,
+            ExecCaptureResult,
+            HostError,
+        )
+
+        self.calls.append(
+            (
+                'process_exec_capture_authorized',
+                (
+                    list(argv),
+                    cwd,
+                    env,
+                    bytes(token),
+                    subject,
+                    scope,
+                    owner_confirmed,
+                    now_ms,
+                    timeout_ms,
+                    write_roots,
+                ),
+                {},
+            )
+        )
+        _ = ExecCaptureResult
+        raise HostError('process_exec_capture_authorized', STATUS_OPERATION_FAILED, os_error=1)
+
     def conpty_spawn_authorized(
         self,
         argv: Sequence[str],
