@@ -1,30 +1,27 @@
-"""The three session message routes: history, the build checklist, and send.
+"""Session message routes: history and send.
 
 If this code is wrong the chat window breaks in ways that are hard to see. A
 history page that does not cap message bodies ships a multi-megabyte JSON blob
-to the UI on every scroll. A todos route that falls back to the shared runtime
-cache shows one project's checklist inside another project's tab. And the send
-route is the one place where a second POST can start a second generation on the
-same session, where an empty composer submit can create a junk turn, and where a
-forged attachment path can drag an arbitrary file into the model's context.
+to the UI on every scroll. The send route is the one place where a second POST
+can start a second generation on the same session, where an empty composer
+submit can create a junk turn, and where a forged attachment path can drag an
+arbitrary file into the model's context.
 
-These tests pin the refusals: what must be rejected (503 without a runtime, 400
-on an empty message, 409 while a turn is running), what must be left alone (a
-sticky per-session provider that a stale model id must not steal), and what must
-not silently leak (attachments outside the session's own folder).
+Todos / steer HTTP live on Go httpapi (session_extras). These tests pin the
+refusals still owned by the TestClient twin: 503 without a runtime, 400 on an
+empty message, 409 while a turn is running, sticky per-session provider, and
+attachments outside the session folder.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from remedy.core.build_todos import upsert_todos
 from remedy.interfaces.attachments import session_attachments_dir
 from remedy.interfaces.routes.sessions.messages import register_messages_routes
 from remedy.models import ChatMessage, ChatMessageRole, ChatSession
@@ -295,77 +292,7 @@ def test_the_default_page_is_a_hundred_newest():
     assert mem.list_calls == [("s1", 100, 0)]
 
 
-# --- GET /todos ---------------------------------------------------------------
-
-
-def test_todos_without_a_store_are_empty_rather_than_a_404():
-    r = make_client(memory=None).get("/api/sessions/s1/todos")
-    assert r.status_code == 200
-    assert r.json() == {"todos": []}
-
-
-def test_todos_for_an_unknown_session_are_a_404():
-    r = make_client(memory=Memory()).get("/api/sessions/nope/todos")
-    assert r.status_code == 404
-
-
-@pytest.mark.parametrize("raw", [None, "", "   ", ".", "./", "C:\\", "/"])
-def test_a_session_with_no_real_project_has_no_checklist(raw):
-    """Otherwise the volume root grows a .remedy-build folder shared by every tab."""
-    mem = Memory([session(project_path=raw)])
-    r = make_client(memory=mem).get("/api/sessions/s1/todos")
-    assert r.json() == {"todos": []}
-
-
-def test_a_projects_checklist_is_read_from_its_own_folder(tmp_path):
-    proj = tmp_path / "proj"
-    proj.mkdir()
-    upsert_todos(None, [{"id": "t1", "content": "ship it", "status": "pending"}], root=proj)
-    mem = Memory([session(project_path=str(proj))])
-    r = make_client(memory=mem).get("/api/sessions/s1/todos")
-    assert r.json() == {"todos": [{"id": "t1", "content": "ship it", "status": "pending"}]}
-
-
-def test_a_project_path_that_is_a_file_resolves_to_its_folder(tmp_path):
-    proj = tmp_path / "proj2"
-    proj.mkdir()
-    upsert_todos(None, [{"id": "t1", "content": "fix", "status": "in_progress"}], root=proj)
-    f = proj / "main.py"
-    f.write_text("x", encoding="utf-8")
-    mem = Memory([session(project_path=str(f))])
-    assert make_client(memory=mem).get("/api/sessions/s1/todos").json()["todos"]
-
-
-@pytest.mark.parametrize("status", ["completed", "cancelled"])
-def test_a_finished_checklist_is_reported_as_nothing_to_do(tmp_path, status):
-    proj = tmp_path / f"proj_{status}"
-    proj.mkdir()
-    upsert_todos(None, [{"id": "t1", "content": "done", "status": status}], root=proj)
-    mem = Memory([session(project_path=str(proj))])
-    assert make_client(memory=mem).get("/api/sessions/s1/todos").json() == {"todos": []}
-
-
-def test_a_project_without_a_checklist_file_is_empty(tmp_path):
-    proj = tmp_path / "bare"
-    proj.mkdir()
-    mem = Memory([session(project_path=str(proj))])
-    assert make_client(memory=mem).get("/api/sessions/s1/todos").json() == {"todos": []}
-
-
-def test_another_tabs_cached_checklist_is_never_served(tmp_path):
-    """The route passes runtime=None on purpose: the in-memory cache belongs to
-    whichever turn last ran, not to this session."""
-    other = tmp_path / "other"
-    other.mkdir()
-    upsert_todos(None, [{"id": "x", "content": "someone else's work"}], root=other)
-    runtime = SimpleNamespace(
-        _build_todos=["leaked"],
-        effective_project_path=lambda: str(other),
-    )
-    mem = Memory([session(project_path="")])
-    client = make_client(runtime=runtime, memory=mem)
-    assert client.get("/api/sessions/s1/todos").json() == {"todos": []}
-
+# GET /api/sessions/{id}/todos is owned by Go httpapi (session_extras).
 
 # --- POST /messages: guards ---------------------------------------------------
 

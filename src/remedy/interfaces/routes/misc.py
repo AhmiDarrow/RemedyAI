@@ -1,6 +1,7 @@
-"""TestClient-only: misc app-control, updates, and schema routes.
+"""TestClient-only: misc app-control, project scan, and schema routes.
 
 Go ``remedy-runtime`` owns production ``:7400``; this registrar is for pytest.
+``/api/updates/check`` is Go-owned (not registered here).
 """
 from __future__ import annotations
 
@@ -8,7 +9,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import time
 
 import yaml
 from fastapi import FastAPI, HTTPException, Query, Response
@@ -33,144 +33,7 @@ def register_misc_routes(app: FastAPI, *, runtime=None, gateway=None, memory=Non
         cmd = bus.take() if take else bus.peek()
         return {"command": cmd}
 
-    # -- updates ------------------------------------------------------------
-    @app.get("/api/updates/check")
-    async def check_updates(current: str | None = Query(default=None)):
-        """Report package + desktop release versions.
-
-        Desktop UI prefers the Tauri ``check_desktop_update`` command; this
-        endpoint is the browser/dev fallback and a secondary path when Rust
-        GitHub fetch fails.
-
-        Optional ``current``: shell/app version to compare against (desktop
-        package version). When omitted, uses the Python package version — which
-        can lag or lead the installed EXE if the sidecar was rebuilt separately.
-        """
-        from remedy.interfaces.updater import _parse_version
-
-        python_version = _remedy_version
-        # Prefer explicit shell version so a newer sidecar cannot mask an
-        # outdated desktop EXE (or vice versa).
-        current_raw = (current or "").strip() or python_version
-        current_norm = str(current_raw).lstrip("vV").strip() or python_version
-        # Chrome polls this; PyPI + GitHub are ~500ms. Cache per current
-        # version on this app so a restart still fetches once.
-        now = time.monotonic()
-        cache = getattr(app.state, "_updates_check_cache", None)
-        if not isinstance(cache, dict):
-            cache = {}
-            app.state._updates_check_cache = cache
-        hit = cache.get(current_norm)
-        if (
-            isinstance(hit, tuple)
-            and len(hit) == 2
-            and (now - float(hit[0])) < 300.0
-            and isinstance(hit[1], dict)
-        ):
-            return dict(hit[1])
-        latest_python = None
-        latest_desktop = None
-        release_url = None
-        installer_url = None
-        errors: list[str] = []
-
-        # Every fetch below runs in a worker thread. urlopen is blocking, and
-        # this is an async route: done inline, one unreachable host froze the
-        # whole local API — chat, streaming, everything — for up to 40 seconds
-        # across the three calls.
-        def _fetch(url: str, timeout: float) -> dict:
-            import json as _json
-            import urllib.request as _urllib
-
-            req = _urllib.Request(
-                url,
-                headers={"Accept": "application/json", "User-Agent": "Remedy-Updater"},
-            )
-            # `_urllib` is already urllib.request (not the top-level package).
-            with _urllib.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-                return _json.loads(resp.read().decode())
-
-        try:
-            data = await asyncio.to_thread(
-                _fetch, "https://pypi.org/pypi/remedy-ai/json", 10
-            )
-            latest_python = data["info"]["version"]
-        except Exception as e:
-            errors.append(f"PyPI: {e}")
-
-        # Prefer latest.json, then GitHub Releases API.
-        for url in (
-            "https://github.com/AhmiDarrow/RemedyAI/releases/latest/download/latest.json",
-            "https://api.github.com/repos/AhmiDarrow/RemedyAI/releases/latest",
-        ):
-            try:
-                data = await asyncio.to_thread(_fetch, url, 15)
-                if "version" in data:
-                    latest_desktop = str(data.get("version") or "").lstrip("vV")
-                    release_url = (
-                        "https://github.com/AhmiDarrow/RemedyAI/releases/latest"
-                    )
-                    installer_url = (
-                        (data.get("platforms") or {})
-                        .get("windows-x86_64", {})
-                        .get("url")
-                    ) or data.get("url")
-                    break
-                if "tag_name" in data:
-                    latest_desktop = str(data.get("tag_name") or "").lstrip("vV")
-                    release_url = data.get("html_url") or (
-                        "https://github.com/AhmiDarrow/RemedyAI/releases/latest"
-                    )
-                    for asset in data.get("assets") or []:
-                        name = str(asset.get("name") or "")
-                        lower = name.lower()
-                        if name.endswith(("-setup.exe", "_x64-setup.exe")) or (
-                            name.endswith(".exe")
-                            and ("setup" in lower or "remedy" in lower)
-                        ):
-                            installer_url = asset.get("browser_download_url")
-                            break
-                    break
-            except Exception as e:
-                errors.append(f"GitHub ({url.split('/')[-1]}): {e}")
-
-        update_available = False
-        # Desktop installer is the product of record for the app.
-        if latest_desktop and _parse_version(latest_desktop) > _parse_version(
-            current_norm
-        ):
-            update_available = True
-        elif (
-            latest_python
-            and not latest_desktop
-            and _parse_version(latest_python) > _parse_version(current_norm)
-        ):
-            update_available = True
-
-        # Require an installer URL before claiming a desktop update is installable.
-        if (
-            update_available
-            and latest_desktop
-            and not (installer_url and str(installer_url).strip())
-        ):
-            errors.append(
-                "Newer desktop release found but no Windows installer URL on the release."
-            )
-            # Still flag available so the UI can open the releases page.
-            # Install button needs installer_url; UpdateScreen checks it.
-
-        result = {
-            "current_version": current_norm,
-            "python_version": python_version,
-            "latest_python": latest_python,
-            "latest_desktop": latest_desktop,
-            "release_url": release_url,
-            "installer_url": installer_url,
-            "update_available": update_available,
-            "error": " · ".join(errors) if errors else None,
-        }
-        cache[current_norm] = (now, dict(result))
-        return result
+    # /api/updates/check lives on Go httpapi only.
 
     def _yaml_schema() -> str:
         import io

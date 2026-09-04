@@ -4,14 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
 from remedy.core.checkpoint import (
     CheckpointStore,
     build_checkpoint_from_tool_steps,
 )
 from remedy.core.learning.refiner import SkillRefiner
-from remedy.interfaces.api import create_app
 from remedy.tools.mcp_server import RemedyMCPServer
 
 
@@ -66,24 +63,20 @@ def test_skill_activation_reuse_metrics(tmp_path: Path):
     assert ref2.get_stats("my-skill").activations == 2
 
 
-def test_reuse_metrics_api(tmp_path: Path):
-    class Cfg:
-        home_dir = str(tmp_path)
+def test_reuse_metrics_via_learning_loop(tmp_path: Path):
+    """HTTP /api/skills/metrics/reuse is Go-owned; pin LearningLoop metrics here."""
+    from remedy.core.learning_loop import LearningLoop
 
-    class RT:
-        config = Cfg()
-        skills = None
-
-    # seed stats
     (tmp_path / "skills").mkdir()
     ref = SkillRefiner(stats_path=tmp_path / "skill_stats.json")
     ref.record_activation("demo", session_id="a")
-
-    app = create_app(runtime=RT(), api_key="")
-    client = TestClient(app)
-    r = client.get("/api/skills/metrics/reuse")
-    assert r.status_code == 200
-    data = r.json()
+    loop = LearningLoop(
+        skills_dir=tmp_path / "skills",
+        memory=None,
+        stats_path=tmp_path / "skill_stats.json",
+        registry=None,
+    )
+    data = loop.get_reuse_metrics()
     assert data["total_activations"] >= 1
 
 

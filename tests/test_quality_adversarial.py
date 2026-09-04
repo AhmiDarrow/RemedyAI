@@ -774,89 +774,9 @@ def test_budget_hits_drops_hive_session_id():
     assert "keep-me" in blob
 
 
-def test_memory_search_api_drops_hive(tmp_path):
-    import asyncio
+# test_memory_search_api_drops_hive: /api/memory/* HTTP is Go-owned (memory_test.go).
 
-    from fastapi.testclient import TestClient
-
-    from remedy.interfaces.api import create_app
-    from remedy.memory.authority import stamp_entry_metadata
-    from remedy.memory.store import MemoryStore
-    from remedy.models import MemoryEntry, MemoryEntryType
-
-    mem = MemoryStore(tmp_path / "memory.db")
-    asyncio.run(mem.initialize())
-    hive_meta = stamp_entry_metadata(
-        {}, source="hive", session_id="hive_zz", inferred=False
-    )
-    owner_meta = stamp_entry_metadata(
-        {}, source="owner", session_id="owner-sess", inferred=False
-    )
-    asyncio.run(
-        mem.upsert(
-            MemoryEntry(
-                title="hive api leak",
-                content="daughter api leak",
-                entry_type=MemoryEntryType.NOTE,
-                session_id="hive_zz",
-                metadata=hive_meta,
-            )
-        )
-    )
-    asyncio.run(
-        mem.upsert(
-            MemoryEntry(
-                title="owner leak note",
-                content="owner oat-milk leak",
-                entry_type=MemoryEntryType.NOTE,
-                session_id="owner-sess",
-                metadata=owner_meta,
-            )
-        )
-    )
-
-    class RT:
-        config = SimpleNamespace(home_dir=str(tmp_path))
-
-        def list_tasks(self):
-            return []
-
-    client = TestClient(create_app(runtime=RT(), memory=mem, api_key=""))
-    body = client.get("/api/memory/search", params={"query": "leak"}).json()
-    blob = json.dumps(body).lower()
-    assert "owner oat-milk leak" in blob
-    assert "daughter api leak" not in blob
-    assert "hive_zz" not in blob
-
-
-def test_memory_facts_route_skips_hive(tmp_path):
-    import asyncio
-
-    from fastapi.testclient import TestClient
-
-    from remedy.interfaces.api import create_app
-    from remedy.memory.profile import UserFact, UserProfile
-    from remedy.memory.store import MemoryStore
-
-    mem = MemoryStore(tmp_path / "memory.db")
-    asyncio.run(mem.initialize())
-    profile = UserProfile(user_id="default")
-    profile.facts.append(UserFact(fact="likes oat milk", authority="owner"))
-    profile.facts.append(UserFact(fact="hive should hide", authority="hive"))
-    asyncio.run(mem.save_user_profile(profile))
-
-    class RT:
-        config = SimpleNamespace(home_dir=str(tmp_path))
-
-        def list_tasks(self):
-            return []
-
-    client = TestClient(create_app(runtime=RT(), memory=mem, api_key=""))
-    body = client.get("/api/memory/facts").json()
-    texts = [str(f.get("text") or "") for f in body.get("facts") or []]
-    assert any("oat milk" in t for t in texts)
-    assert not any("hive should hide" in t for t in texts)
-
+# test_memory_facts_route_skips_hive: /api/memory/* HTTP is Go-owned (memory_test.go).
 
 def test_authorize_unknown_denied_memory_save_not_unknown():
     from remedy.core.hive.policy import reset_hive_depth, set_hive_depth

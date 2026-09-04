@@ -6,12 +6,10 @@ import json
 from unittest.mock import patch
 
 import pytest
-from fastapi.testclient import TestClient
 
 from remedy.assistant import google_oauth as go
 from remedy.assistant.providers.google_calendar import GoogleCalendarProvider, _event_time
 from remedy.assistant.store import reset_assistant_store
-from remedy.interfaces.api import create_app
 
 
 @pytest.fixture(autouse=True)
@@ -231,52 +229,5 @@ def test_calendar_list_uses_bearer(tmp_path):
     assert events[0].title == "Standup"
 
 
-def test_api_google_routes(tmp_path, monkeypatch):
-    home = tmp_path / "home"
-    home.mkdir()
-    (home / "config.toml").write_text(
-        f'name = "Remedy"\nsetup_completed = true\nhome_dir = "{home.as_posix()}"\n',
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("REMEDY_HOME", str(home))
-    from remedy.interfaces import api_support
+# /api/assistant/google* is owned by Go httpapi — see google_oauth_test.go.
 
-    monkeypatch.setattr(api_support, "_default_config_path", lambda: home / "config.toml")
-    monkeypatch.setattr(api_support, "_find_config_path", lambda: home / "config.toml")
-    reset_assistant_store()
-
-    client = TestClient(create_app())
-    r = client.get("/api/assistant/google")
-    assert r.status_code == 200
-    assert r.json()["connected"] is False
-
-    r2 = client.put(
-        "/api/assistant/google/app",
-        json={"client_id": "cid-from-api", "client_secret": "sec"},
-    )
-    assert r2.status_code == 200
-    assert r2.json()["app"]["client_id_set"] is True
-
-    # Consent required before OAuth start
-    r3_block = client.post("/api/assistant/google/oauth/start", json={})
-    assert r3_block.status_code == 403
-
-    client.put(
-        "/api/settings",
-        json={
-            "assistant": {
-                "privacy_ai_accepted": True,
-                "account_access_accepted": True,
-            }
-        },
-    )
-    r3 = client.post("/api/assistant/google/oauth/start", json={})
-    assert r3.status_code == 200, r3.text
-    body = r3.json()
-    assert body["auth_url"]
-    assert body["state"]
-
-    # Callback without pending state fails gracefully
-    r4 = client.get("/api/assistant/google/callback?code=x&state=bogus")
-    assert r4.status_code == 400
-    assert "text/html" in r4.headers.get("content-type", "")

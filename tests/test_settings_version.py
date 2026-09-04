@@ -22,24 +22,6 @@ def test_settings_returns_package_version():
     assert data["agent_gender"] in ("female", "male", "neutral")
 
 
-def test_updates_check_returns_current_version():
-    client = TestClient(create_app())
-    r = client.get("/api/updates/check")
-    assert r.status_code == 200, r.text
-    data = r.json()
-    assert data.get("current_version") == __version__
+# GET /api/updates/check is owned by Go httpapi — see updates_test.go.
 
 
-def test_updates_check_honors_shell_current_query():
-    """Desktop shell version must drive availability — not only the sidecar."""
-    client = TestClient(create_app())
-    # Pretend the EXE is older than whatever is installed in Python.
-    r = client.get("/api/updates/check", params={"current": "0.0.1"})
-    assert r.status_code == 200, r.text
-    data = r.json()
-    assert data["current_version"] == "0.0.1"
-    assert data.get("python_version") == __version__
-    # If GitHub/PyPI is reachable and has any newer release, flag it.
-    # Offline CI still returns a structured body without crashing.
-    assert "update_available" in data
-    assert "latest_desktop" in data or data.get("error")
