@@ -395,6 +395,72 @@ def _prompt_assemble(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return assemble_prompt(inp)
 
 
+def _voice_speak(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.voice_vision_rmdy import voice_speak
+
+    return voice_speak(inp)
+
+
+def _voice_transcribe(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.voice_vision_rmdy import voice_transcribe
+
+    return voice_transcribe(inp)
+
+
+def _voice_install(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.voice_vision_rmdy import voice_install
+
+    return voice_install(inp)
+
+
+def _vision_activate(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.voice_vision_rmdy import vision_activate
+
+    return vision_activate(inp)
+
+
+def _vision_install(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.voice_vision_rmdy import vision_install
+
+    return vision_install(inp)
+
+
+def _vision_cancel_install(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.voice_vision_rmdy import vision_cancel_install
+
+    return vision_cancel_install(inp)
+
+
+def _vision_reinstall_runtime(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.voice_vision_rmdy import vision_reinstall_runtime
+
+    return vision_reinstall_runtime(inp)
+
+
+def _vision_uninstall(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.voice_vision_rmdy import vision_uninstall
+
+    return vision_uninstall(inp)
+
+
+def _vision_start(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.voice_vision_rmdy import vision_start
+
+    return vision_start(inp)
+
+
+def _vision_stop(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.voice_vision_rmdy import vision_stop
+
+    return vision_stop(inp)
+
+
+def _vision_progress(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    from remedy.runtime.voice_vision_rmdy import vision_progress
+
+    return vision_progress(inp)
+
+
 _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("text.slugify", 1): lambda inp: {"slug": _slugify(str(inp.get("text", "")))},
     ("text.word_count", 1): lambda inp: {"words": _word_count(str(inp.get("text", "")))},
@@ -405,6 +471,17 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("web.search", 1): _web_search,
     ("web.fetch", 1): _web_fetch,
     ("prompt.assemble", 1): _prompt_assemble,
+    ("voice.speak", 1): _voice_speak,
+    ("voice.transcribe", 1): _voice_transcribe,
+    ("voice.install", 1): _voice_install,
+    ("vision.activate", 1): _vision_activate,
+    ("vision.install", 1): _vision_install,
+    ("vision.cancel_install", 1): _vision_cancel_install,
+    ("vision.reinstall_runtime", 1): _vision_reinstall_runtime,
+    ("vision.uninstall", 1): _vision_uninstall,
+    ("vision.start", 1): _vision_start,
+    ("vision.stop", 1): _vision_stop,
+    ("vision.progress", 1): _vision_progress,
 }
 
 
@@ -486,7 +563,11 @@ def serve(reader: BinaryIO, writer: BinaryIO) -> None:
             return
         if kind == _KIND_HEALTH:
             body = json.dumps(
-                {"protocol": _PROTOCOL_VERSION, "ready": True, "capabilities": ["tools"]},
+                {
+                    "protocol": _PROTOCOL_VERSION,
+                    "ready": True,
+                    "capabilities": ["tools", "speech", "vision"],
+                },
                 separators=(",", ":"),
             ).encode("utf-8")
             write_frame(writer, _KIND_HEALTH, correlation, body)
