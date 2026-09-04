@@ -11,8 +11,9 @@ a leftover file whose flock/msvcrt lock is free is reclaimed; a true live
 holder still wins.
 
 **Ownership:** Go ``remedy-runtime`` owns messenger inbound (``native/go/gateway``).
-Python must not acquire these locks unless ``REMEDY_PYTHON_MESSENGER_POLL=1``
-(emergency / unit tests only) — otherwise dual pollers fight over the bot.
+Python must not acquire these locks unless both ``REMEDY_PYTHON_MESSENGER_POLL=1``
+and a pytest marker (``PYTEST_CURRENT_TEST`` / ``REMEDY_TESTING``) are set —
+otherwise dual pollers fight over the bot. Production cannot opt in by flag alone.
 """
 
 from __future__ import annotations
@@ -32,16 +33,36 @@ logger = logging.getLogger(__name__)
 # If the lock owner stops heartbeating, another process may take over.
 STALE_LOCK_SECONDS = 90.0
 
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def _env_truthy(name: str) -> bool:
+    return (os.environ.get(name) or "").strip().lower() in _TRUTHY
+
+
+def _under_pytest() -> bool:
+    """True during pytest (auto env) or when the suite set ``REMEDY_TESTING``."""
+    return bool(os.environ.get("PYTEST_CURRENT_TEST")) or _env_truthy("REMEDY_TESTING")
+
 
 def python_may_poll_messengers() -> bool:
-    """True only when Python is explicitly allowed to own inbound pollers.
+    """True only when Python may own inbound pollers (pytest suite only).
 
     Default is False: Go ``remedy-runtime`` holds ``*_getupdates.lock`` and runs
-    Telegram/Discord/Slack/Matrix/Mattermost inbound. Opt in with
-    REMEDY_PYTHON_MESSENGER_POLL=1.
+    Telegram/Discord/Slack/Matrix/Mattermost inbound. Requires both
+    ``REMEDY_PYTHON_MESSENGER_POLL=1`` and a test marker
+    (``PYTEST_CURRENT_TEST`` or ``REMEDY_TESTING=1``). Setting the poll flag in
+    production alone is refused — no accidental dual poll.
     """
-    raw = (os.environ.get("REMEDY_PYTHON_MESSENGER_POLL") or "").strip().lower()
-    return raw in ("1", "true", "yes", "on")
+    if not _env_truthy("REMEDY_PYTHON_MESSENGER_POLL"):
+        return False
+    if not _under_pytest():
+        logger.warning(
+            "REMEDY_PYTHON_MESSENGER_POLL is set outside pytest — "
+            "refusing Python messenger inbound (Go owns production poll)"
+        )
+        return False
+    return True
 
 
 def _pid_alive(pid: int) -> bool:
@@ -148,10 +169,12 @@ class MessengerPollLock:
         if not python_may_poll_messengers():
             logger.info(
                 "%s poll lock skipped — Go remedy-runtime owns messenger inbound "
-                "(set REMEDY_PYTHON_MESSENGER_POLL=1 only for emergency Python poll)",
+                "(Python poll is pytest-only: REMEDY_PYTHON_MESSENGER_POLL=1 + "
+                "REMEDY_TESTING / PYTEST_CURRENT_TEST)",
                 self.channel,
             )
             return False
+
         if self.held:
             return True
         key = self._key()

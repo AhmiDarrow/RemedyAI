@@ -4,7 +4,9 @@ Keeps interfaces/cli.py thin: serve only calls ``attach_messengers_to_gateway``.
 
 Inbound long-poll / WS is owned by Go ``remedy-runtime`` (``native/go/gateway``).
 Python registers adapters for outbound mirror + catalog compatibility and does
-not acquire messenger poll locks unless ``REMEDY_PYTHON_MESSENGER_POLL=1``.
+not acquire messenger poll locks unless pytest explicitly opts in
+(``REMEDY_PYTHON_MESSENGER_POLL=1`` and ``REMEDY_TESTING`` /
+``PYTEST_CURRENT_TEST``).
 """
 
 from __future__ import annotations

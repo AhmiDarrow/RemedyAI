@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 async def reload_messenger_channels(gateway: Any, cfg: dict | None = None) -> list[str]:
     """Stop messenger adapters, re-register from config, start them again.
 
-    When Go owns inbound (default), restarted adapters stay outbound-only.
+    When Go owns inbound (default / non-pytest), restarted adapters stay outbound-only.
     """
     if gateway is None:
         return []
