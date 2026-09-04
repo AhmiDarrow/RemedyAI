@@ -164,18 +164,21 @@ def ensure_home_stretch(
     force: bool = False,
     background: bool = True,
 ) -> HomeCensus | None:
-    """Stretch if needed. Default: daemon thread so first serve stays snappy."""
+    """Stretch if needed. Default: daemon thread so first serve stays snappy.
+
+    Sync path (``background=False``) fails closed — no soft swallow.
+    """
     if not force and not needs_stretch(home):
         return load_census(home)
     if background:
         threading.Thread(
-            target=_stretch_safe,
+            target=_stretch_background,
             args=(home, force),
             name="remedy-home-stretch",
             daemon=True,
         ).start()
         return load_census(home)
-    return _stretch_safe(home, force)
+    return stretch_home(home, force=force)
 
 
 def format_home_line(
@@ -204,9 +207,9 @@ def format_home_whoami(
     )
 
 
-def _stretch_safe(home: str | Path | None, force: bool) -> HomeCensus | None:
+def _stretch_background(home: str | Path | None, force: bool) -> None:
+    """Daemon stretch: log and drop — caller already returned a stale/None census."""
     try:
-        return stretch_home(home, force=force)
+        stretch_home(home, force=force)
     except Exception:
         logger.exception("home stretch failed")
-        return None
