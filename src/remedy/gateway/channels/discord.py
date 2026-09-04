@@ -1,29 +1,17 @@
-"""Discord: Gateway WS inbound + REST outbound (desktop-friendly single shard)."""
+"""Discord REST outbound — Gateway WS inbound owned by Go."""
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import json
 import logging
-import zlib
-from typing import TYPE_CHECKING
 
-from remedy.gateway.channels.allowlist import is_allowed, parse_ids
+from remedy.gateway.channels.allowlist import parse_ids
 from remedy.gateway.channels.base_http import HttpSessionMixin
-from remedy.gateway.channels.emit_util import emit_message
 from remedy.gateway.router import ChannelAdapter
 from remedy.models import ChannelKind
-
-if TYPE_CHECKING:
-    from remedy.gateway.poll_lock import MessengerPollLock
 
 logger = logging.getLogger(__name__)
 
 API = "https://discord.com/api/v10"
-GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json"
-# GUILDS | GUILD_MESSAGES | DIRECT_MESSAGES | MESSAGE_CONTENT
-INTENTS = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15)
 
 
 class DiscordChannel(HttpSessionMixin, ChannelAdapter):
@@ -47,93 +35,19 @@ class DiscordChannel(HttpSessionMixin, ChannelAdapter):
             self._allowed = self._allowed | frozenset({self.channel_id})
         self.allow_all = bool(allow_all)
         self._home_dir = home_dir
-        self._ws_task: asyncio.Task | None = None
-        self._lock_retry_task: asyncio.Task | None = None
-        self._poll_lock: MessengerPollLock | None = None
-        self._seq: int | None = None
-        self._heartbeat_ms = 41250
-        self._heartbeat_task: asyncio.Task | None = None
-        self._session_id: str | None = None
-        self._typing_tasks: set[asyncio.Task] = set()
 
     async def start(self) -> None:
         await super().start()
         if not self.bot_token:
             logger.info("Discord channel: stub mode (no token)")
             return
-        logger.info("Discord channel active (default_channel=%s)", self.channel_id)
-        from remedy.gateway.poll_lock import python_may_poll_messengers
-
-        if not python_may_poll_messengers():
-            logger.info(
-                "Discord: outbound-ready (Go remedy-runtime owns inbound gateway)"
-            )
-            return
-        started = await self._try_start_gateway()
-        if not started:
-            logger.error(
-                "Discord gateway deferred — another process holds the bot lock "
-                "(or a stale lock). Will retry every 20s until acquired."
-            )
-            self._lock_retry_task = asyncio.create_task(self._lock_retry_loop())
-
-    async def _try_start_gateway(self) -> bool:
-        """Acquire exclusive lock and start the gateway WS. False if locked out."""
-        if self._ws_task is not None and not self._ws_task.done():
-            return True
-        from remedy.gateway.poll_lock import MessengerPollLock
-
-        if self._poll_lock is not None and getattr(self._poll_lock, "held", False):
-            pass
-        else:
-            if self._poll_lock is not None:
-                with contextlib.suppress(Exception):
-                    self._poll_lock.release()
-            self._poll_lock = MessengerPollLock(self._home_dir, "discord")
-            if not self._poll_lock.try_acquire():
-                self._poll_lock = None
-                return False
-        self._ws_task = asyncio.create_task(self._gateway_loop())
-        logger.info("Discord gateway task scheduled")
-        return True
-
-    async def _lock_retry_loop(self) -> None:
-        while self._running:
-            await asyncio.sleep(20.0)
-            if not self._running:
-                return
-            try:
-                if await self._try_start_gateway():
-                    logger.info("Discord gateway acquired after retry")
-                    return
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("Discord poll lock retry failed")
+        logger.info(
+            "Discord outbound-ready (default_channel=%s; "
+            "Go remedy-runtime owns inbound gateway)",
+            self.channel_id,
+        )
 
     async def stop(self) -> None:
-        for t in self._typing_tasks:
-            t.cancel()
-        self._typing_tasks.clear()
-        if self._lock_retry_task:
-            self._lock_retry_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._lock_retry_task
-            self._lock_retry_task = None
-        if self._heartbeat_task:
-            self._heartbeat_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._heartbeat_task
-            self._heartbeat_task = None
-        if self._ws_task:
-            self._ws_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._ws_task
-            self._ws_task = None
-        if self._poll_lock is not None:
-            with contextlib.suppress(Exception):
-                self._poll_lock.release()
-            self._poll_lock = None
         await self.close_http()
         await super().stop()
 
@@ -168,106 +82,3 @@ class DiscordChannel(HttpSessionMixin, ChannelAdapter):
                 _ = resp.status
         except Exception:
             pass
-
-    async def _gateway_loop(self) -> None:
-        import aiohttp
-
-        while self._running:
-            try:
-                if self._poll_lock is not None:
-                    with contextlib.suppress(Exception):
-                        self._poll_lock.heartbeat()
-                session = await self.ensure_http()
-                async with session.ws_connect(GATEWAY_URL, heartbeat=None) as ws:
-                    async for msg in ws:
-                        if msg.type == aiohttp.WSMsgType.TEXT:
-                            await self._on_payload(ws, json.loads(msg.data))
-                        elif msg.type == aiohttp.WSMsgType.BINARY:
-                            raw = zlib.decompress(msg.data)
-                            await self._on_payload(ws, json.loads(raw))
-                        elif msg.type in (
-                            aiohttp.WSMsgType.CLOSED,
-                            aiohttp.WSMsgType.ERROR,
-                        ):
-                            break
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("Discord gateway error")
-                await asyncio.sleep(3.0)
-
-    async def _on_payload(self, ws, data: dict) -> None:
-        op = data.get("op")
-        t = data.get("t")
-        s = data.get("s")
-        if s is not None:
-            self._seq = s
-        d = data.get("d") or {}
-
-        if op == 10:  # Hello
-            self._heartbeat_ms = int(d.get("heartbeat_interval") or 41250)
-            await ws.send_json(
-                {
-                    "op": 2,
-                    "d": {
-                        "token": self.bot_token,
-                        "intents": INTENTS,
-                        "properties": {
-                            "os": "windows",
-                            "browser": "remedy",
-                            "device": "remedy",
-                        },
-                    },
-                }
-            )
-            if self._heartbeat_task:
-                self._heartbeat_task.cancel()
-            self._heartbeat_task = asyncio.create_task(self._heartbeat(ws))
-        elif op == 0 and t == "MESSAGE_CREATE":
-            await self._on_message(d)
-        elif op == 0 and t == "READY":
-            self._session_id = d.get("session_id")
-            logger.info("Discord gateway READY")
-
-    async def _heartbeat(self, ws) -> None:
-        try:
-            while self._running:
-                await asyncio.sleep(self._heartbeat_ms / 1000.0)
-                if self._poll_lock is not None:
-                    with contextlib.suppress(Exception):
-                        self._poll_lock.heartbeat()
-                await ws.send_json({"op": 1, "d": self._seq})
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            pass
-
-    async def _on_message(self, d: dict) -> None:
-        if d.get("author", {}).get("bot"):
-            return
-        content = (d.get("content") or "").strip()
-        if not content:
-            return
-        ch_id = str(d.get("channel_id") or "")
-        author = d.get("author") or {}
-        user_id = str(author.get("id") or "")
-        guild_id = str(d.get("guild_id") or "")
-        if not is_allowed(
-            allowlist=self._allowed,
-            allow_all=self.allow_all,
-            candidates=[ch_id, user_id, guild_id],
-            channel="discord",
-        ):
-            return
-        task = asyncio.create_task(self.send_typing(ch_id))
-        self._typing_tasks.add(task)
-        task.add_done_callback(self._typing_tasks.discard)
-        await emit_message(
-            self.gateway,
-            ChannelKind.DISCORD,
-            message=content,
-            chat_id=ch_id,
-            source_id=user_id or ch_id,
-            username=author.get("username"),
-            extra={"user_id": user_id, "guild_id": guild_id},
-        )

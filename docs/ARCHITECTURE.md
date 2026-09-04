@@ -15,7 +15,7 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 | Shell tests | `desktop/src-tauri/src/` | Rust/Tauri browser host, privacy shield, lifecycle, Windows + Linux compile |
 | Connect tests | `android/**/src/test/` | Kotlin protocol, storage, networking, and mobile behavior; lint + both APK variants |
 | Native tests | `native/go/**/*_test.go`, `native/zig/src/` | Go race/unit/benchmark/boundary gates and Zig debug/ReleaseSafe capability tests |
-| Gateway | `native/go/gateway/` (+ thin `src/remedy/gateway/`) | Go owns messenger inbound (Telegram/Discord/Slack/Matrix/Mattermost + WhatsApp/Teams/Google Chat webhooks + Signal via Zig exec-capture) + poll locks; Python keeps catalog/settings helpers and TestClient FastAPI only (no `/api/webhooks*` registrar) |
+| Gateway | `native/go/gateway/` (+ thin `src/remedy/gateway/`) | Go owns messenger inbound (Telegram/Discord/Slack/Matrix/Mattermost + WhatsApp/Teams/Google Chat webhooks + Signal via Zig exec-capture) + poll locks; Python keeps catalog/settings + outbound-only adapter stubs for TestClient (no inbound poll/WS/webhook code; no `/api/webhooks*` registrar) |
 | Native runtime | `native/` | Versioned Go nervous system + Zig capability core; layered cutover with Python compatibility/ML workers |
 | Claimidx host | `src/remedy/runtime/claimidx_host.py` | Pinned first-run install, private index, loopback lifecycle on `:17340` |
 

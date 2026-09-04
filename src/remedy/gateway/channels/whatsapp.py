@@ -1,15 +1,11 @@
-"""WhatsApp Cloud API: Graph outbound + webhook inbound (needs public URL)."""
+"""WhatsApp Cloud API Graph outbound — webhook inbound owned by Go httpapi."""
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import logging
-from typing import Any
 
-from remedy.gateway.channels.allowlist import is_allowed, parse_ids
+from remedy.gateway.channels.allowlist import parse_ids
 from remedy.gateway.channels.base_http import HttpSessionMixin
-from remedy.gateway.channels.emit_util import emit_message
 from remedy.gateway.router import ChannelAdapter
 from remedy.models import ChannelKind
 
@@ -42,7 +38,8 @@ class WhatsAppChannel(HttpSessionMixin, ChannelAdapter):
         await super().start()
         if self.access_token and self.phone_number_id:
             logger.info(
-                "WhatsApp channel active (phone_number_id=%s, inbound=webhook)",
+                "WhatsApp outbound-ready (phone_number_id=%s; "
+                "Go remedy-runtime owns webhook inbound)",
                 self.phone_number_id,
             )
         else:
@@ -78,65 +75,3 @@ class WhatsAppChannel(HttpSessionMixin, ChannelAdapter):
 
     async def send_typing(self, target: str | None = None) -> None:
         return
-
-    def verify_webhook_challenge(
-        self, mode: str, token: str, challenge: str
-    ) -> str | None:
-        if mode != "subscribe":
-            return None
-        presented = (token or "").strip()
-        expected = (self.verify_token or "").strip()
-        if not presented or not expected:
-            return None
-        # Constant-time; unequal lengths → False (do not raise → no 500).
-        if len(presented) != len(expected):
-            return None
-        if not hmac.compare_digest(presented, expected):
-            return None
-        return challenge
-
-    def verify_signature(self, body: bytes, signature_header: str) -> bool:
-        # Fail closed: inbound POST requires app_secret + valid HMAC.
-        # (GET verify still uses verify_token alone.)
-        if not self.app_secret:
-            logger.warning("WhatsApp webhook POST rejected: app_secret not configured")
-            return False
-        if not signature_header.startswith("sha256="):
-            return False
-        expected = signature_header.split("=", 1)[1]
-        digest = hmac.new(
-            self.app_secret.encode("utf-8"), body, hashlib.sha256
-        ).hexdigest()
-        return hmac.compare_digest(digest, expected)
-
-    async def handle_webhook_payload(self, data: dict[str, Any]) -> int:
-        """Parse Cloud API webhook; emit messages. Returns count handled."""
-        n = 0
-        for entry in data.get("entry") or []:
-            for change in entry.get("changes") or []:
-                value = change.get("value") or {}
-                for msg in value.get("messages") or []:
-                    if msg.get("type") != "text":
-                        continue
-                    text = ((msg.get("text") or {}).get("body") or "").strip()
-                    if not text:
-                        continue
-                    sender = str(msg.get("from") or "")
-                    if not is_allowed(
-                        allowlist=self._allowed,
-                        allow_all=self.allow_all,
-                        candidates=[sender],
-                        channel="whatsapp",
-                    ):
-                        continue
-                    await emit_message(
-                        self.gateway,
-                        ChannelKind.WHATSAPP,
-                        message=text,
-                        chat_id=sender,
-                        source_id=sender,
-                        username=sender,
-                        extra={"user_id": sender},
-                    )
-                    n += 1
-        return n

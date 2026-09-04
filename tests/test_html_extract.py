@@ -179,29 +179,13 @@ async def test_web_fetch_drops_rail_from_the_wrong_tab(monkeypatch):
     assert "URL: https://pypi.org/project/PyChromecast/" in out
 
 
-def test_jwks_host_allowlist():
-    from remedy.gateway.channels.jwt_rs256 import _jwks_url_allowed
+def test_python_teams_jwt_helpers_removed():
+    """Teams JWT / JWKS inbound moved to Go native/go/gateway."""
+    from pathlib import Path
 
-    assert _jwks_url_allowed(
-        "https://login.microsoftonline.com/common/discovery/v2.0/keys"
-    )
-    assert _jwks_url_allowed("https://login.botframework.com/v1/.well-known/keys")
-    assert not _jwks_url_allowed("https://evil.example/keys")
-    assert not _jwks_url_allowed("http://login.microsoftonline.com/keys")
+    import remedy.gateway.channels as channels_pkg
+    import remedy.gateway.channels.teams as teams_mod
 
-
-def test_iss_rejects_substring_spoof():
-    from remedy.gateway.channels.teams import _jwt_claims_structurally_valid
-
-    now = 1_700_000_000
-    base = {"aud": "app", "exp": now + 3600}
-    assert _jwt_claims_structurally_valid(
-        {**base, "iss": "https://sts.windows.net/tid/"},
-        app_id="app",
-        now=now,
-    )
-    assert not _jwt_claims_structurally_valid(
-        {**base, "iss": "https://evil.com/sts.windows.net"},
-        app_id="app",
-        now=now,
-    )
+    root = Path(channels_pkg.__file__).resolve().parent
+    assert not (root / "jwt_rs256.py").exists()
+    assert not hasattr(teams_mod, "_jwt_claims_structurally_valid")
