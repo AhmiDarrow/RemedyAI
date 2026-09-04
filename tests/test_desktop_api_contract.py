@@ -63,18 +63,6 @@ KNOWN_GO_GAPS: frozenset[str] = frozenset(
         "/api/skills/{}/feedback",
         "/api/skills/{}/quarantine",
         "/api/skills/{}/status",
-        "/api/telephony/choose",
-        "/api/telephony/status",
-        "/api/telephony/terms",
-        "/api/vision/activate",
-        "/api/vision/catalog",
-        "/api/vision/install",
-        "/api/vision/install/cancel",
-        "/api/vision/reinstall-runtime",
-        "/api/vision/start",
-        "/api/vision/status",
-        "/api/vision/stop",
-        "/api/vision/uninstall",
     }
 )
 
