@@ -1,7 +1,7 @@
 ; Auto-update pipeline + uninstall data options.
 ; productName + mainBinaryName "Remedy Desktop" -> Remedy Desktop.exe
 ; (0.23.1 and earlier shipped generic app.exe — Defender Execution.A!ml bait).
-; Sidecar is remedy-desktop.exe.
+; Packaged sidecar is remedy-runtime (externalBin); also kill legacy remedy-desktop.
 ;
 ; Uninstall UI: config / skills / full wipe checkboxes via PowerShell dialog
 ; (scripts bundled as resources under $INSTDIR\windows\ and run from %TEMP%).
@@ -14,21 +14,26 @@
 
 !macro _REMEDY_KILL_ALL
   DetailPrint "Closing running Remedy processes so files can be replaced..."
-  ; Tree-kill every known image name (main app + sidecar variants).
+  ; Tree-kill every known image name (main app + runtime + legacy Python sidecar).
   nsExec::ExecToLog 'taskkill /F /T /IM "Remedy Desktop.exe"'
+  nsExec::ExecToLog 'taskkill /F /T /IM "remedy-runtime.exe"'
+  nsExec::ExecToLog 'taskkill /F /T /IM "remedy-runtime-x86_64-pc-windows-msvc.exe"'
   nsExec::ExecToLog 'taskkill /F /T /IM "remedy-desktop.exe"'
   nsExec::ExecToLog 'taskkill /F /T /IM "remedy-desktop-x86_64-pc-windows-msvc.exe"'
   nsExec::ExecToLog 'taskkill /F /T /IM "remedy-desktop-amd64-pc-windows-msvc.exe"'
-  ; Anything still listening on the sidecar port (stale Python/uvicorn).
+  ; Anything still listening on the local API port (stale runtime / old uvicorn).
   nsExec::ExecToLog 'cmd /c for /f "tokens=5" %a in (''netstat -ano ^| findstr :7400 ^| findstr LISTENING'') do taskkill /F /PID %a'
-  ; PowerShell belt-and-suspenders — Remedy Desktop / remedy-desktop* only (never generic app.exe).
-  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match ''^(remedy-desktop|Remedy Desktop)$'' -or ($_.Path -and $_.Path -like ''*Remedy Desktop*'') } | Stop-Process -Force -ErrorAction SilentlyContinue"'
+  ; PowerShell belt-and-suspenders — app + runtime / legacy desktop only (never generic app.exe alone by name elsewhere).
+  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match ''^(remedy-runtime|remedy-desktop|Remedy Desktop)$'' -or ($_.Path -and ($_.Path -like ''*Remedy Desktop*'' -or $_.Path -like ''*remedy-runtime*'')) } | Stop-Process -Force -ErrorAction SilentlyContinue"'
   Sleep 2000
   ; Second pass - Windows can take a moment to release file handles.
+  nsExec::ExecToLog 'taskkill /F /T /IM "remedy-runtime.exe"'
   nsExec::ExecToLog 'taskkill /F /T /IM "remedy-desktop.exe"'
   nsExec::ExecToLog 'taskkill /F /T /IM "Remedy Desktop.exe"'
   Sleep 1500
-  ; Best-effort delete of locked sidecar so NSIS can recreate it.
+  ; Best-effort delete of locked sidecars so NSIS can recreate them.
+  Delete /REBOOTOK "$INSTDIR\remedy-runtime.exe"
+  Delete /REBOOTOK "$INSTDIR\remedy-runtime-x86_64-pc-windows-msvc.exe"
   Delete /REBOOTOK "$INSTDIR\remedy-desktop.exe"
   Delete /REBOOTOK "$INSTDIR\remedy-desktop-x86_64-pc-windows-msvc.exe"
   Delete /REBOOTOK "$INSTDIR\app.exe"
