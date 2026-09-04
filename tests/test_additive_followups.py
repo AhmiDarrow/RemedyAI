@@ -335,7 +335,7 @@ def test_foreign_live_pid_lock_is_not_stolen(tmp_path: Path, monkeypatch) -> Non
 
 def test_linux_desktop_module_exports_capture_and_input() -> None:
     from remedy.core.computer import desktop_linux as lin
-    from remedy.core.computer.desktop_os import native
+    from remedy.core.computer.host_binding import native
 
     assert callable(lin.screenshot_png)
     assert callable(lin.click)
