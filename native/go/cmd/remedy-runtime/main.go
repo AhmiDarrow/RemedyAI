@@ -12,7 +12,6 @@ import (
 	"os/signal"
 	"runtime"
 
-	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
 	"github.com/AhmiDarrow/RemedyAI/native/go/httpapi"
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
@@ -79,10 +78,8 @@ func main() {
 	if *smokeFixture {
 		runner = httpapi.NewFixtureTurnRunner()
 	} else {
-		// Scripted model until live providers stream through cognition.Model.
-		runner = httpapi.NewCognitionTurnRunner(&cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
-			{{Text: "Hello ", Done: false}, {Text: "world", Done: true}},
-		}})
+		// Live OpenAI-compatible SSE when settings+secret are ready; else Scripted.
+		runner = httpapi.NewCognitionTurnRunner(httpapi.ResolveListenModel(""))
 	}
 
 	err := httpapi.ListenAndServe(ctx, addr, httpapi.Config{
