@@ -360,7 +360,7 @@ fn pathExists(io: std.Io, path: []const u8) bool {
     return true;
 }
 
-fn getEnvAlloc(gpa: std.mem.Allocator, key: []const u8) ?[]u8 {
+pub fn getEnvAlloc(gpa: std.mem.Allocator, key: []const u8) ?[]u8 {
     // Windows Environ.Block is GlobalBlock (`.global`). POSIX Block is a
     // PosixBlock slice — use libc getenv instead of inventing a fake `.global`.
     if (builtin.os.tag == .windows) {

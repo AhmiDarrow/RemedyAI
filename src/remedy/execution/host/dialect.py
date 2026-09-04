@@ -1,19 +1,14 @@
-"""Last-good host dialect for this machine — sibling to RMB last_good_fit."""
+"""Last-good host dialect — thin binding over Zig ``remedy_core``.
+
+Authority lives in ``native/zig/src/host_dialect.zig``. No Python twin.
+Persists under ``~/.remedy/host/dialect.json``.
+"""
 
 from __future__ import annotations
 
-import json
-import os
-import shutil
-import time
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
-from remedy.core.atomic_json import write_json_atomic
-
-_DIALECT_REL = Path("host") / "dialect.json"
 
 
 @dataclass
@@ -53,78 +48,44 @@ class HostDialect:
         )
 
 
+def _home_str(home: str | Path | None) -> str:
+    if home:
+        return str(Path(home).expanduser())
+    return ""
+
+
 def dialect_path(home: str | Path | None = None) -> Path:
-    base = _home(home)
-    return base / _DIALECT_REL
+    base = Path(_home_str(home)) if home else None
+    if base is None:
+        try:
+            from remedy.core.security import get_home_dir
+
+            base = get_home_dir()
+        except Exception:
+            import os
+
+            env = (os.environ.get("REMEDY_HOME") or "").strip()
+            base = Path(env or "~/.remedy").expanduser()
+    return base / "host" / "dialect.json"
 
 
 def load_dialect(home: str | Path | None = None) -> HostDialect:
-    path = dialect_path(home)
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeError):
-        return _probe_cached(home)
-    d = HostDialect.from_dict(raw if isinstance(raw, dict) else None)
-    # Fill any empty probe fields without clobbering last-good. Probe lazily:
-    # load_dialect sits on hot paths (resolve_which per host command,
-    # record_success, the per-turn system-prompt inject) and a healthy
-    # dialect.json needs no which/glob sweeps at all.
-    if (
-        not d.python_cmd
-        or not _python_cmd_usable(d.python_cmd)
-        or not d.git_cmd
-        or not d.rg_cmd
-        or d.rg_cmd.startswith("(")
-        or not d.curl_kind
-        or not d.pwsh_cmd
-        or not d.host
-    ):
-        probed = _probe_cached(home)
-        if not d.python_cmd or not _python_cmd_usable(d.python_cmd):
-            # Sidecar / Store stub stamped by an older probe — heal in memory.
-            d.python_cmd = probed.python_cmd
-        if not d.git_cmd:
-            d.git_cmd = probed.git_cmd
-        if not d.rg_cmd or d.rg_cmd.startswith("("):
-            # Heal a leftover `str((Path, source))` tuple from older probes.
-            d.rg_cmd = probed.rg_cmd
-        if not d.curl_kind:
-            d.curl_kind = probed.curl_kind
-        if not d.pwsh_cmd:
-            d.pwsh_cmd = probed.pwsh_cmd
-        if not d.host:
-            d.host = probed.host
-    return d
+    from remedy.core.computer import host_binding
 
-
-# A host permanently missing a tool (no pwsh installed → pwsh_cmd stays "")
-# would otherwise re-probe on every load; cache probe results briefly so the
-# hot paths stay cheap while a newly installed tool is still picked up.
-_PROBE_TTL_S = 300.0
-_probe_cache: dict[str, tuple[float, HostDialect]] = {}
-
-
-def _probe_cached(home: str | Path | None) -> HostDialect:
-    key = str(_home(home))
-    now = time.monotonic()
-    hit = _probe_cache.get(key)
-    if hit is not None and now - hit[0] < _PROBE_TTL_S:
-        return hit[1]
-    probed = probe_host_dialect(home=home, persist=False)
-    _probe_cache[key] = (now, probed)
-    return probed
+    return HostDialect.from_dict(host_binding.dialect_load(_home_str(home)))
 
 
 def save_dialect(dialect: HostDialect, home: str | Path | None = None) -> Path:
+    """Persist via Zig probe+record path: write through dialect_probe(persist).
+
+    Prefer ``probe_host_dialect(persist=True)`` / ``record_success``. This keeps
+    a Path-returning helper for tests that assert the file exists.
+    """
+    from remedy.core.atomic_json import write_json_atomic
+
     path = dialect_path(home)
     write_json_atomic(path, dialect.to_dict())
     return path
-
-
-def _python_cmd_usable(path: str) -> bool:
-    from remedy.core.build_python import is_usable_host_python
-
-    return is_usable_host_python(path)
 
 
 def probe_host_dialect(
@@ -132,48 +93,12 @@ def probe_host_dialect(
     home: str | Path | None = None,
     persist: bool = False,
 ) -> HostDialect:
-    """Cheap PATH probe — no network, no long commands."""
-    python = ""
-    try:
-        from remedy.core.build_python import host_python_executable
+    """Cheap PATH probe — Zig owns which + sidecar rejection."""
+    from remedy.core.computer import host_binding
 
-        python = host_python_executable()
-    except Exception:
-        python = ""
-    if not python:
-        for name in ("python", "python3", "py"):
-            found = shutil.which(name) or ""
-            if found and _python_cmd_usable(found):
-                python = found
-                break
-    git = shutil.which("git") or ""
-    pwsh = shutil.which("pwsh") or ""
-    curl = shutil.which("curl") or ""
-    rg = ""
-    try:
-        from remedy.core.rg_binary import find_rg
-
-        path, _src = find_rg(home_dir=home)
-        if path:
-            raw = str(path)
-            posix = Path(path).as_posix()
-            # Keep Unix probe paths as POSIX (`/usr/bin/rg`), not `\usr\bin\rg` on NT.
-            rg = posix if posix.startswith("/") else raw
-        else:
-            rg = shutil.which("rg") or ""
-    except Exception:
-        rg = shutil.which("rg") or ""
-    d = HostDialect(
-        host="cmd" if os.name == "nt" else "posix",
-        python_cmd=python or "",
-        git_cmd=git,
-        rg_cmd=rg or "",
-        curl_kind="real" if curl else "missing",
-        pwsh_cmd=pwsh,
+    return HostDialect.from_dict(
+        host_binding.dialect_probe(_home_str(home), persist=persist)
     )
-    if persist:
-        save_dialect(d, home)
-    return d
 
 
 def record_success(
@@ -182,42 +107,22 @@ def record_success(
     home: str | Path | None = None,
     note: str = "",
 ) -> HostDialect:
-    d = load_dialect(home)
-    d.successes = int(d.successes or 0) + 1
-    d.last_success_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    low = (command or "").lower()
-    if any(k in low for k in ("pytest", "py_compile", "cargo test", "npm test", "go test")):
-        d.last_good_verify = (command or "").strip()[:240]
-    if note:
-        notes = [note, *[n for n in d.notes if n != note]]
-        d.notes = notes[:12]
-    save_dialect(d, home)
-    return d
+    from remedy.core.computer import host_binding
+
+    return HostDialect.from_dict(
+        host_binding.dialect_record_success(
+            command, home=_home_str(home), note=note
+        )
+    )
 
 
-def format_dialect_line(dialect: HostDialect | None = None, home: str | Path | None = None) -> str:
+def format_dialect_line(
+    dialect: HostDialect | None = None, home: str | Path | None = None
+) -> str:
     """One-line inject: this PC's host, not a tutorial."""
-    d = dialect or load_dialect(home)
-    bits = [f"Host bridge: {d.host or 'cmd'}"]
-    if d.python_cmd:
-        bits.append(f"python={d.python_cmd}")
-    if d.rg_cmd:
-        bits.append("rg=yes")
-    if d.curl_kind:
-        bits.append(f"curl={d.curl_kind}")
-    if d.last_good_verify:
-        bits.append(f"last_verify={d.last_good_verify[:80]}")
-    bits.append("prefer host_run(argv) / host_mkdir / host_script over quoted bash")
-    return " · ".join(bits)
+    from remedy.core.computer import host_binding
 
-
-def _home(home: str | Path | None) -> Path:
-    if home:
-        return Path(home).expanduser()
-    try:
-        from remedy.core.security import get_home_dir
-
-        return get_home_dir()
-    except Exception:
-        env = (os.environ.get("REMEDY_HOME") or "").strip()
-        return Path(env or "~/.remedy").expanduser()
+    return host_binding.dialect_format_line(
+        _home_str(home),
+        dialect.to_dict() if dialect is not None else None,
+    )
