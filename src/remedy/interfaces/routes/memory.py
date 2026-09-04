@@ -14,12 +14,8 @@ from remedy.interfaces.api_models import (
     MemoryAddRequest,
     PersonaWipeRequest,
     SkillInfo,
-    WebhookPayload,
 )
 from remedy.models import (
-    ChannelKind,
-    EventKind,
-    GatewayEvent,
     MemoryEntryType,
 )
 
@@ -836,71 +832,7 @@ def register_memory_routes(app: FastAPI, *, runtime=None, gateway=None, memory=N
             "count": len(archived) if not dry_run else len(candidates),
         }
 
-    # -- webhook -------------------------------------------------------------
-    @app.post("/api/webhook/{source}")
-    async def receive_webhook(source: str, request: Request):
-        # The body is read by hand, *not* declared as a typed parameter:
-        # FastAPI would otherwise buffer and parse the whole thing before the
-        # handler ran, and the size cap below would be a no-op.
-        if gateway is None:
-            raise HTTPException(503, "Gateway not available")
-        # Fail closed when local API auth is on: require Bearer or webhook secret.
-        # Empty expected must not accept unauthenticated injects (S-MSG-03).
-        import os as _os
-
-        from remedy.interfaces.local_auth import auth_enabled as _auth_enabled
-
-        expected = (
-            getattr(getattr(request.app, "state", None), "api_key", None)
-            or _os.environ.get("REMEDY_API_KEY")
-            or _os.environ.get("REMEDY_WEBHOOK_SECRET")
-            or ""
-        )
-        expected = str(expected or "").strip()
-        webhook_secret = (_os.environ.get("REMEDY_WEBHOOK_SECRET") or "").strip()
-
-        from remedy.core.security import secret_equals as _ct_eq
-
-        if _auth_enabled():
-            if not expected and not webhook_secret:
-                raise HTTPException(
-                    503,
-                    "Webhook auth not configured (set REMEDY_WEBHOOK_SECRET "
-                    "or enable local API token)",
-                )
-            auth = request.headers.get("Authorization", "")
-            secret = request.headers.get("X-Remedy-Webhook-Secret", "")
-            bearer_ok = bool(expected) and _ct_eq(auth, f"Bearer {expected}")
-            secret_ok = bool(secret) and (
-                (bool(expected) and _ct_eq(secret, expected))
-                or (bool(webhook_secret) and _ct_eq(secret, webhook_secret))
-            )
-            if not (bearer_ok or secret_ok):
-                raise HTTPException(401, "Webhook auth required")
-
-        # Bounded, like every other webhook here. Only 1000 characters of this
-        # are ever kept, but ``request.body()`` buffers the whole thing first.
-        from remedy.interfaces.routes.webhooks import read_body_capped
-
-        body = await read_body_capped(request)
-        try:
-            payload = WebhookPayload.model_validate_json(body)
-        except Exception as exc:
-            raise HTTPException(422, f"invalid webhook payload: {exc}") from None
-        event = GatewayEvent(
-            kind=EventKind.WEBHOOK,
-            channel=ChannelKind.API,
-            source_id=source,
-            payload={
-                "source": source,
-                "event": payload.event,
-                "data": payload.data,
-                "raw": body.decode("utf-8", errors="replace")[:1000],
-            },
-        )
-
-        await gateway.enqueue(event)
-        return {"status": "accepted", "source": source}
+    # Generic CI webhook POST /api/webhook/{source} lives on Go httpapi only.
 
     # -- legacy session summaries  -------------------------------------------
     @app.get("/api/session-summaries")
