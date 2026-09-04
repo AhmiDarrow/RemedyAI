@@ -8,9 +8,10 @@ it. Every Remedy-spawned child goes through this module:
   :func:`create_hidden_subprocess_exec` wrap :mod:`subprocess` and
   :mod:`asyncio` for callers that need pipes, and add the hidden creation
   flags on Windows.
-* :func:`spawn_hidden` starts a process through ``remedy_core`` inside a
-  Windows job object, so the whole tree (``uv.exe`` and the python it
-  launches, ``cmd`` and its children) dies when the handle closes.
+* :func:`spawn_hidden` starts a process through ``remedy_core`` authorized
+  spawn (policy + capability token) inside a Windows job object, so the
+  whole tree (``uv.exe`` and the python it launches, ``cmd`` and its
+  children) dies when the handle closes.
 * :func:`kill_tree` / :func:`kill_process_tree` terminate a process and every
   descendant through ``remedy_core`` (toolhelp walk, deepest first) instead
   of a shell helper.
@@ -216,6 +217,24 @@ class HiddenProcess:
         return self._handle
 
 
+def _resolve_argv0(argv: Sequence[str]) -> list[str]:
+    """Resolve argv[0] to an absolute path (required by authorized spawn)."""
+    import shutil
+
+    args = [str(a) for a in argv]
+    if not args:
+        raise ValueError("argv must not be empty")
+    exe = args[0]
+    path = Path(exe)
+    if path.is_absolute():
+        return args
+    found = shutil.which(exe)
+    if found is None:
+        raise FileNotFoundError(exe)
+    args[0] = str(Path(found).resolve())
+    return args
+
+
 def spawn_hidden(
     argv: Sequence[str],
     *,
@@ -225,14 +244,21 @@ def spawn_hidden(
     """Start *argv* hidden, inside a job that dies with its handle.
 
     No pipes are attached; use :func:`popen_hidden` when output is needed.
-    ``argv[0]`` is resolved by ``CreateProcessW`` like ``subprocess.Popen``.
+    Goes through ``remedy_core`` authorized spawn (policy + capability token).
+    There is no soft fallback to the unsigned spawn export.
     Raises :class:`remedy.core.computer.host_binding.HostError` (unsupported)
     on platforms where ``remedy_core`` has no process host yet.
     """
     from remedy.core.computer import host_binding
 
-    pid, handle = host_binding.process_spawn_hidden(
-        [str(a) for a in argv], str(cwd) if cwd else None, env
+    resolved = _resolve_argv0(argv)
+    token, now_ms = host_binding.issue_process_spawn_token(resolved)
+    pid, handle = host_binding.process_spawn_authorized(
+        resolved,
+        str(cwd) if cwd else None,
+        env,
+        token=token,
+        now_ms=now_ms,
     )
     return HiddenProcess(pid, handle)
 

@@ -801,6 +801,68 @@ class FakeHostConpty:
         session.closed = True
 
 
+
+    def issue_process_spawn_token(
+        self,
+        argv: Sequence[str],
+        *,
+        owner_checkpoint: bool = False,
+        subject: str = 'agent:remedy',
+        scope: str = 'workspace:local',
+    ) -> tuple[bytes, int]:
+        _ = (argv, owner_checkpoint, subject, scope)
+        self.calls.append(('issue_process_spawn_token', (list(argv),), {}))
+        return b'\x11' * 169, 1_700_000_000_000
+
+    def process_spawn_authorized(
+        self,
+        argv: Sequence[str],
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        *,
+        token: bytes,
+        subject: str = 'agent:remedy',
+        scope: str = 'workspace:local',
+        owner_confirmed: bool = False,
+        now_ms: int | None = None,
+    ) -> tuple[int, int]:
+        """Record an authorized process spawn; tests that need a live child patch this."""
+        _ = (cwd, env, subject, scope, owner_confirmed, now_ms)
+        self.calls.append(
+            (
+                'process_spawn_authorized',
+                (list(argv), cwd, env, bytes(token), subject, scope, owner_confirmed, now_ms),
+                {},
+            )
+        )
+        from remedy.core.computer.host_binding import STATUS_OPERATION_FAILED, HostError
+
+        raise HostError('process_spawn_authorized', STATUS_OPERATION_FAILED, os_error=1)
+
+    def conpty_spawn_authorized(
+        self,
+        argv: Sequence[str],
+        cwd: str | None = None,
+        env: Mapping[str, str] | None = None,
+        *,
+        cols: int = 120,
+        rows: int = 40,
+        token: bytes,
+        subject: str = 'agent:remedy',
+        scope: str = 'workspace:local',
+        owner_confirmed: bool = False,
+        now_ms: int | None = None,
+    ) -> tuple[int, int]:
+        self.calls.append(
+            (
+                'conpty_spawn_authorized',
+                (list(argv), cwd, env, cols, rows, bytes(token), subject, scope, owner_confirmed, now_ms),
+                {},
+            )
+        )
+        return self.conpty_spawn(argv, cwd=cwd, env=env, cols=cols, rows=rows)
+
+
 @contextlib.contextmanager
 def install_fake_conpty(
     console: FakeConsoleHost | None = None,
@@ -823,6 +885,8 @@ def install_fake_conpty(
     names = (
         "conpty_available",
         "conpty_spawn",
+        "conpty_spawn_authorized",
+        "issue_process_spawn_token",
         "conpty_write",
         "conpty_read",
         "conpty_poll",
