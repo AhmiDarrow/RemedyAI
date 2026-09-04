@@ -747,6 +747,13 @@ def _echoing_host(cwd: str = "C:\\work") -> FakeConsoleHost:
 
 
 async def _conpty_session(host: FakeConsoleHost) -> tuple[HostSession, Any]:
+    """Wire a fake ConPTY process into HostSession without Zig open.
+
+    Production Windows sessions use Zig HostSession; these unit tests still
+    exercise the Python ConPTY duck-type path against FakeConsoleHost.
+    """
+    import asyncio
+
     proc = conpty._spawn_conpty_sync(["cmd.exe", "/Q", "/K"], None, None)
 
     async def override(_argv: list[str], *, cwd: Any = None, env: Any = None) -> Any:
@@ -754,13 +761,24 @@ async def _conpty_session(host: FakeConsoleHost) -> tuple[HostSession, Any]:
 
     spawn_conpty._override = override  # type: ignore[attr-defined]
     sess = HostSession(host="cmd", use_conpty=True)
-    await sess.start()
-    assert sess._used_conpty is True
+    sess._lock = asyncio.Lock()
+    sess._proc = proc
+    sess._zig_handle = 0
+    sess.started = True
+    sess._used_conpty = True
+    # Quiet boot the same way start() would for a real ConPTY session.
+    from remedy.execution.host.session import _boot_commands
+
+    boot = _boot_commands("cmd")
+    if boot:
+        await sess._send_raw(boot + "\n")
+        await asyncio.sleep(0.05)
     return sess, proc
 
 
 def _drop(sess: HostSession, proc: Any) -> None:
     sess._proc = None
+    sess._zig_handle = 0
     sess.started = False
     proc.kill()
 

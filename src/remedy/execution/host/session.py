@@ -71,13 +71,20 @@ class SessionResult:
 
 @dataclass
 class HostSession:
-    """One long-lived cmd/pwsh process. Not the default for bash_exec."""
+    """One long-lived cmd/pwsh process. Not the default for bash_exec.
+
+    On Windows the live session is owned by Zig ``remedy_core`` HostSession
+    (ABI 5). Protocol helpers stay available in Python for fixture parity;
+    production open/run/cwd/close go through ``host_binding`` with no soft
+    Python fallback around a failed Zig call.
+    """
 
     host: str = "cmd"
     cwd: str | None = None
     env: dict[str, str] | None = None
     use_conpty: bool = False
     _proc: Any = field(default=None, init=False, repr=False)
+    _zig_handle: int = field(default=0, init=False, repr=False)
     _buf: bytearray = field(default_factory=bytearray, init=False, repr=False)
     _lock: asyncio.Lock | None = field(default=None, init=False, repr=False)
     _stdout_pending: asyncio.Task[bytes] | None = field(
@@ -89,6 +96,35 @@ class HostSession:
         if self.started and self._alive():
             return
         self._lock = asyncio.Lock()
+        if os.name == "nt":
+            await self._start_zig()
+            return
+        await self._start_posix_pipes()
+
+    async def _start_zig(self) -> None:
+        """Windows: Zig HostSession owns spawn + sentinel I/O."""
+        from remedy.core.computer import host_binding
+
+        if self.env is not None:
+            env = dict(self.env)
+        else:
+            from remedy.execution.sandbox import scrub_subprocess_env
+
+            env = scrub_subprocess_env()
+        # Zig scrubSessionEnv also injects non-interactive defaults.
+        handle = await asyncio.to_thread(
+            host_binding.host_session_open,
+            host=self.host,
+            cwd=self.cwd,
+            env=env,
+            use_conpty=bool(self.use_conpty),
+        )
+        self._zig_handle = int(handle)
+        self._proc = None
+        self.started = True
+        self._used_conpty = bool(self.use_conpty)
+
+    async def _start_posix_pipes(self) -> None:
         argv = _session_argv(self.host)
         if self.env is not None:
             env = dict(self.env)
@@ -104,30 +140,21 @@ class HostSession:
         for key in list(env):
             if key.upper() == "GIT_ASKPASS":
                 env.pop(key, None)
-        if os.name == "nt":
-            env.setdefault("CHCP", "65001")
         from remedy.execution.process import create_hidden_subprocess_exec
 
-        used_conpty = False
-        if self.use_conpty and os.name == "nt":
-            proc = await _try_conpty_exec(argv, cwd=self.cwd, env=env)
-            used_conpty = proc is not None
-        else:
-            proc = None
-        if proc is None:
-            proc = await create_hidden_subprocess_exec(
-                argv[0],
-                *argv[1:],
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                cwd=self.cwd,
-                env=env,
-            )
+        proc = await create_hidden_subprocess_exec(
+            argv[0],
+            *argv[1:],
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            cwd=self.cwd,
+            env=env,
+        )
         self._proc = proc
+        self._zig_handle = 0
         self.started = True
-        self._used_conpty = used_conpty
-        # Quiet the banner / set UTF-8
+        self._used_conpty = False
         boot = _boot_commands(self.host)
         if boot:
             await self._send_raw(boot + "\n")
@@ -138,6 +165,8 @@ class HostSession:
             return SessionResult(exit_code=-1, stdout="", stderr="empty command", host=self.host)
         await self.start()
         assert self._lock is not None
+        if self._zig_handle:
+            return await self._run_zig(command.strip(), timeout=timeout)
         with suppress(Exception):
             from remedy.core.turn_context import register_turn_process
 
@@ -202,9 +231,46 @@ class HostSession:
             used_conpty=bool(getattr(self, "_used_conpty", False)),
         )
 
+    async def _run_zig(self, command: str, *, timeout: float) -> SessionResult:
+        from remedy.core.computer import host_binding
+
+        assert self._lock is not None
+        async with self._lock:
+            data = await asyncio.to_thread(
+                host_binding.host_session_run,
+                self._zig_handle,
+                command,
+                timeout_ms=int(max(1.0, float(timeout)) * 1000),
+            )
+        timed_out = bool(data.get("timed_out"))
+        interactive = bool(data.get("interactive"))
+        if timed_out or interactive:
+            self._abandon_proc()
+        return SessionResult(
+            exit_code=int(data.get("exit_code", -1)),
+            stdout=str(data.get("stdout") or ""),
+            stderr=str(data.get("stderr") or ""),
+            cwd=str(data.get("cwd") or ""),
+            timed_out=timed_out,
+            interactive=interactive,
+            host=str(data.get("host") or self.host),
+            used_conpty=bool(data.get("used_conpty", self._used_conpty)),
+        )
+
     async def current_cwd(self) -> str:
         if not self._alive():
             return ""
+        if self._zig_handle:
+            from remedy.core.computer import host_binding
+
+            assert self._lock is not None
+            async with self._lock:
+                here = await asyncio.to_thread(
+                    host_binding.host_session_cwd, self._zig_handle
+                )
+            if not here:
+                self._abandon_proc()
+            return here or ""
         token = uuid.uuid4().hex[:8]
         sentinel = f"{_SENTINEL_PREFIX}cwd_{token}"
         cmd = _cwd_command(self.host)
@@ -236,9 +302,16 @@ class HostSession:
         return lines[-1] if lines else ""
 
     async def close(self) -> None:
+        handle = self._zig_handle
+        self._zig_handle = 0
         proc = self._proc
         self._proc = None
         self.started = False
+        if handle:
+            from remedy.core.computer import host_binding
+
+            await asyncio.to_thread(host_binding.host_session_close, handle)
+            return
         if proc is None:
             return
         try:
@@ -252,11 +325,20 @@ class HostSession:
         kill_process_tree(proc)
 
     def _abandon_proc(self) -> None:
+        handle = self._zig_handle
+        self._zig_handle = 0
         self._proc = None
         self.started = False
         self._stdout_pending = None
+        if handle:
+            with suppress(Exception):
+                from remedy.core.computer import host_binding
+
+                host_binding.host_session_close(handle)
 
     def _alive(self) -> bool:
+        if self._zig_handle:
+            return self.started
         proc = self._proc
         if proc is None:
             return False

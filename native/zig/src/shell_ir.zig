@@ -1,7 +1,7 @@
 //! Host Command IR — Zig mirror of `remedy.execution.host.ir` + prepare.
 //! ABI 4: `remedy_core_host_op_prepare` (run|script|mkdir|which|env|chain|raw
-//! / command-string). Translate is in `shell_translate.zig`. ConPTY is ABI 5;
-//! policy remains Python.
+//! / command-string). Translate is in `shell_translate.zig`. ConPTY, policy,
+//! write-jail, and HostSession orchestration are ABI 5.
 
 const std = @import("std");
 const builtin = @import("builtin");

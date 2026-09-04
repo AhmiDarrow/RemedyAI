@@ -235,6 +235,35 @@ extern "kernel32" fn CreateProcessW(
     startup_info: *STARTUPINFOW,
     process_information: *PROCESS_INFORMATION,
 ) callconv(.winapi) BOOL;
+extern "kernel32" fn CreatePipe(
+    read_pipe: *?HANDLE,
+    write_pipe: *?HANDLE,
+    attributes: ?*SECURITY_ATTRIBUTES,
+    size: DWORD,
+) callconv(.winapi) BOOL;
+extern "kernel32" fn SetHandleInformation(handle: HANDLE, mask: DWORD, flags: DWORD) callconv(.winapi) BOOL;
+extern "kernel32" fn ReadFile(
+    handle: HANDLE,
+    buffer: [*]u8,
+    to_read: DWORD,
+    read: *DWORD,
+    overlapped: ?*anyopaque,
+) callconv(.winapi) BOOL;
+extern "kernel32" fn WriteFile(
+    handle: HANDLE,
+    buffer: [*]const u8,
+    to_write: DWORD,
+    written: *DWORD,
+    overlapped: ?*anyopaque,
+) callconv(.winapi) BOOL;
+extern "kernel32" fn PeekNamedPipe(
+    pipe: HANDLE,
+    buffer: ?[*]u8,
+    buffer_size: DWORD,
+    bytes_read: ?*DWORD,
+    total_bytes_avail: ?*DWORD,
+    bytes_left_this_message: ?*DWORD,
+) callconv(.winapi) BOOL;
 extern "kernel32" fn CreateJobObjectW(attributes: ?*anyopaque, name: ?[*:0]const u16) callconv(.winapi) ?HANDLE;
 extern "kernel32" fn SetInformationJobObject(job: HANDLE, class: c_int, info: *anyopaque, len: DWORD) callconv(.winapi) BOOL;
 extern "kernel32" fn AssignProcessToJobObject(job: HANDLE, process: HANDLE) callconv(.winapi) BOOL;
@@ -296,6 +325,15 @@ const GMEM_MOVEABLE: UINT = 0x0002;
 
 const CREATE_SUSPENDED: DWORD = 0x00000004;
 const CREATE_UNICODE_ENVIRONMENT: DWORD = 0x00000400;
+const STARTF_USESTDHANDLES: DWORD = 0x00000100;
+const HANDLE_FLAG_INHERIT: DWORD = 0x00000001;
+const STILL_ACTIVE: DWORD = 259;
+
+const SECURITY_ATTRIBUTES = extern struct {
+    nLength: DWORD,
+    lpSecurityDescriptor: ?*anyopaque,
+    bInheritHandle: BOOL,
+};
 const CREATE_NO_WINDOW: DWORD = 0x08000000;
 const STARTF_USESHOWWINDOW: DWORD = 0x00000001;
 const JobObjectExtendedLimitInformation: c_int = 9;
@@ -1017,6 +1055,186 @@ pub fn processClose(handle: u64) Error!void {
     // Closing the last job handle terminates whatever is still running in it.
     _ = CloseHandle(process.job);
     allocator.destroy(process);
+}
+
+// ---------------------------------------------------------------------------
+// Interactive piped spawn (stdin/stdout for HostSession; stderr→stdout)
+// ---------------------------------------------------------------------------
+
+const Piped = struct {
+    process: HANDLE,
+    job: HANDLE,
+    stdin_write: ?HANDLE = null,
+    stdout_read: ?HANDLE = null,
+    pid: u32,
+    exit_code: ?u32 = null,
+};
+
+fn pipedFrom(handle: u64) Error!*Piped {
+    if (handle == 0) return error.InvalidArgument;
+    return @ptrFromInt(@as(usize, @intCast(handle)));
+}
+
+fn closeOptHandle(handle: ?HANDLE) void {
+    if (handle) |h| _ = CloseHandle(h);
+}
+
+/// Hidden CreateProcess with redirected stdin/stdout (stderr merged), job-kill
+/// on close. Parent ends are non-inheritable. Handle is a Piped* freed by
+/// `pipedClose`.
+pub fn spawnPiped(argv_json: []const u8, cwd: []const u8, env_json: []const u8) Error!Spawned {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const argv = try host.parseArgv(gpa, argv_json);
+    const command_line = try host.commandLine(gpa, argv);
+    const directory: ?[*:0]const u16 = if (cwd.len == 0) null else (try host.utf8ToUtf16Z(gpa, cwd)).ptr;
+    const environment: ?*anyopaque = if (try host.parseEnv(gpa, env_json)) |pairs|
+        @ptrCast((try host.envBlock(gpa, pairs)).ptr)
+    else
+        null;
+
+    var sa = SECURITY_ATTRIBUTES{
+        .nLength = @sizeOf(SECURITY_ATTRIBUTES),
+        .lpSecurityDescriptor = null,
+        .bInheritHandle = 1,
+    };
+
+    var child_stdin: ?HANDLE = null;
+    var parent_stdin: ?HANDLE = null;
+    if (CreatePipe(&child_stdin, &parent_stdin, &sa, 0) == 0) return fail();
+    if (SetHandleInformation(parent_stdin.?, HANDLE_FLAG_INHERIT, 0) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        return fail();
+    }
+
+    var parent_stdout: ?HANDLE = null;
+    var child_stdout: ?HANDLE = null;
+    if (CreatePipe(&parent_stdout, &child_stdout, &sa, 0) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        return fail();
+    }
+    if (SetHandleInformation(parent_stdout.?, HANDLE_FLAG_INHERIT, 0) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(child_stdout);
+        return fail();
+    }
+
+    const job = CreateJobObjectW(null, null) orelse {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(child_stdout);
+        return fail();
+    };
+    var limits = std.mem.zeroes(JOBOBJECT_EXTENDED_LIMIT_INFORMATION);
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, @sizeOf(JOBOBJECT_EXTENDED_LIMIT_INFORMATION)) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(child_stdout);
+        _ = CloseHandle(job);
+        return fail();
+    }
+
+    var startup = std.mem.zeroes(STARTUPINFOW);
+    startup.cb = @sizeOf(STARTUPINFOW);
+    startup.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+    startup.wShowWindow = SW_HIDE;
+    startup.hStdInput = child_stdin;
+    startup.hStdOutput = child_stdout;
+    startup.hStdError = child_stdout;
+    var info: PROCESS_INFORMATION = undefined;
+    const flags = CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED;
+    if (CreateProcessW(null, command_line.ptr, null, null, 1, flags, environment, directory, &startup, &info) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(child_stdout);
+        _ = CloseHandle(job);
+        return fail();
+    }
+    // Child inherited its ends; parent must not keep them.
+    closeOptHandle(child_stdin);
+    closeOptHandle(child_stdout);
+    errdefer {
+        _ = TerminateProcess(info.hProcess, 1);
+        _ = CloseHandle(info.hThread);
+        _ = CloseHandle(info.hProcess);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        _ = CloseHandle(job);
+    }
+    if (AssignProcessToJobObject(job, info.hProcess) == 0) return fail();
+    if (ResumeThread(info.hThread) == std.math.maxInt(DWORD)) return fail();
+    _ = CloseHandle(info.hThread);
+
+    const piped = allocator.create(Piped) catch return error.OutOfMemory;
+    piped.* = .{
+        .process = info.hProcess,
+        .job = job,
+        .stdin_write = parent_stdin,
+        .stdout_read = parent_stdout,
+        .pid = info.dwProcessId,
+        .exit_code = null,
+    };
+    return .{ .pid = info.dwProcessId, .handle = @intFromPtr(piped) };
+}
+
+pub fn pipedWrite(handle: u64, data: []const u8) Error!usize {
+    const piped = try pipedFrom(handle);
+    const pipe = piped.stdin_write orelse return error.InvalidArgument;
+    if (data.len == 0) return 0;
+    var written: DWORD = 0;
+    if (WriteFile(pipe, data.ptr, @intCast(data.len), &written, null) == 0) return fail();
+    return written;
+}
+
+pub fn pipedReadAvailable(handle: u64, buf: []u8) Error!usize {
+    const piped = try pipedFrom(handle);
+    const pipe = piped.stdout_read orelse return 0;
+    if (buf.len == 0) return 0;
+    var avail: DWORD = 0;
+    if (PeekNamedPipe(pipe, null, 0, null, &avail, null) == 0) return 0;
+    if (avail == 0) return 0;
+    const want: DWORD = @intCast(@min(buf.len, @as(usize, @intCast(avail))));
+    var got: DWORD = 0;
+    if (ReadFile(pipe, buf.ptr, want, &got, null) == 0) return 0;
+    return got;
+}
+
+pub fn pipedPoll(handle: u64) Error!WaitOutcome {
+    const piped = try pipedFrom(handle);
+    if (piped.exit_code) |code| return .{ .exited = true, .exit_code = code };
+    var code: DWORD = 0;
+    if (GetExitCodeProcess(piped.process, &code) == 0) return fail();
+    if (code == STILL_ACTIVE) return .{ .exited = false, .exit_code = 0 };
+    piped.exit_code = code;
+    return .{ .exited = true, .exit_code = code };
+}
+
+pub fn pipedKill(handle: u64) Error!void {
+    const piped = try pipedFrom(handle);
+    _ = TerminateProcess(piped.process, 1);
+    if (piped.exit_code == null) piped.exit_code = 1;
+    try killTree(piped.pid);
+}
+
+pub fn pipedClose(handle: u64) Error!void {
+    const piped = try pipedFrom(handle);
+    closeOptHandle(piped.stdin_write);
+    piped.stdin_write = null;
+    closeOptHandle(piped.stdout_read);
+    piped.stdout_read = null;
+    _ = CloseHandle(piped.process);
+    _ = CloseHandle(piped.job);
+    allocator.destroy(piped);
 }
 
 const ProcessRecord = struct { pid: u32, parent: u32 };
