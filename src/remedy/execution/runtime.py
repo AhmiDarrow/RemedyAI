@@ -15,8 +15,9 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from remedy.execution.policy import ExecutionPolicy, PolicyDecision
 from remedy.models import ToolCall, ToolResult
+from remedy.policy.decisions import PolicyDecision, ToolRequest
+from remedy.policy.engine import PolicyEngine
 
 _SANDBOX_TOOL_ALLOWLIST = frozenset({
     "bash_exec",
@@ -69,14 +70,14 @@ class ToolRuntime:
     def __init__(
         self,
         sandbox=None,  # Sandbox
-        policy: ExecutionPolicy | None = None,
+        policy: PolicyEngine | None = None,
         tool_registry=None,  # ToolRegistry
         max_retries: int = 3,
         retry_backoff: float = 1.0,
         default_timeout: float = 30.0,
     ) -> None:
         self.sandbox = sandbox
-        self.policy = policy or ExecutionPolicy()
+        self.policy = policy or PolicyEngine()
         self.tool_registry = tool_registry
         self.max_retries = max_retries
         self.retry_backoff = retry_backoff
@@ -118,8 +119,15 @@ class ToolRuntime:
             context=ctx,
         )
 
-        # 1. Permission check
-        decision = self.policy.evaluate(tool_call.tool_name)
+        # 1. Permission check (PolicyEngine — not execution.policy twin)
+        decision = self.policy.evaluate(
+            ctx,
+            tool_call.tool_name,
+            ToolRequest(
+                name=tool_call.tool_name,
+                arguments=dict(tool_call.arguments or {}),
+            ),
+        )
         record.policy_decision = decision
 
         if not decision.allowed:

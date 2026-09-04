@@ -1,4 +1,4 @@
-"""Phase 5 tests: Execution sandbox, tool runtime, and policy engine."""
+"""Phase 5 tests: Execution sandbox, tool runtime, and PolicyEngine gate."""
 
 from __future__ import annotations
 
@@ -7,116 +7,35 @@ import json
 import pytest
 
 from remedy.execution.docker import DockerSandbox
-from remedy.execution.policy import (
-    ExecutionPolicy,
-    PolicyAction,
-    PolicyRule,
-    default_policy,
-)
 from remedy.execution.result import ExecutionResult
 from remedy.execution.runtime import ToolContext, ToolRuntime
 from remedy.execution.sandbox import SubprocessSandbox
 from remedy.models import ToolCall, ToolSource
+from remedy.policy.decisions import ToolRequest
+from remedy.policy.engine import PolicyEngine
 
 
-class TestExecutionPolicy:
-    """Policy engine tests."""
+class TestPolicyEngineGate:
+    """Tool allow/deny/ask via PolicyEngine (execution.policy retired)."""
 
-    def test_default_allow(self):
-        policy = ExecutionPolicy(default_action=PolicyAction.ALLOW)
-        decision = policy.evaluate("any_tool")
+    def test_safe_tool_allowed(self):
+        decision = PolicyEngine().evaluate(None, "memory_search", ToolRequest(name="memory_search"))
         assert decision.allowed
-        assert "Allowed by default" in decision.reason
+        assert not decision.requires_approval
 
-    def test_default_deny(self):
-        policy = ExecutionPolicy(default_action=PolicyAction.DENY)
-        decision = policy.evaluate("any_tool")
+    def test_dangerous_bash_denied(self):
+        decision = PolicyEngine().evaluate(
+            None,
+            "bash_exec",
+            ToolRequest(name="bash_exec", arguments={"command": "sudo id"}),
+        )
         assert not decision.allowed
+        assert decision.reason
 
-    def test_explicit_allow(self):
-        policy = ExecutionPolicy(default_action=PolicyAction.DENY)
-        policy.allow("bash_exec", "Safe command")
-        assert policy.evaluate("bash_exec").allowed
-        assert not policy.evaluate("other_tool").allowed
-
-    def test_deny_takes_precedence(self):
-        policy = ExecutionPolicy()
-        policy.allow("bash_exec")
-        policy.deny("bash_exec", "Blocked for safety")
-        decision = policy.evaluate("bash_exec")
-        assert not decision.allowed
-        assert "Blocked for safety" in decision.reason
-
-    def test_wildcard_patterns(self):
-        policy = ExecutionPolicy(default_action=PolicyAction.DENY)
-        policy.allow("memory_*")
-        policy.allow("skill_*")
-
-        assert policy.evaluate("memory_search").allowed
-        assert policy.evaluate("memory_add").allowed
-        assert policy.evaluate("skill_load").allowed
-        assert not policy.evaluate("bash_exec").allowed
-
-    def test_exact_match_vs_wildcard(self):
-        policy = ExecutionPolicy()
-        policy.allow("memory_*")
-        policy.deny("memory_delete")
-
-        assert policy.evaluate("memory_search").allowed
-        assert not policy.evaluate("memory_delete").allowed
-
-    def test_star_wildcard(self):
-        policy = ExecutionPolicy(default_action=PolicyAction.DENY)
-        policy.allow("*")
-        assert policy.evaluate("any_tool").allowed
-        assert policy.evaluate("another_tool").allowed
-
-    def test_require_approval(self):
-        policy = ExecutionPolicy(default_action=PolicyAction.ALLOW)
-        policy.require_approval("bash_exec")
-
-        decision = policy.evaluate("bash_exec")
+    def test_mail_send_always_asks(self):
+        decision = PolicyEngine().evaluate(None, "mail_send", ToolRequest(name="mail_send"))
         assert decision.allowed
         assert decision.requires_approval
-
-    def test_check_shortcut(self):
-        policy = ExecutionPolicy()
-        policy.deny("dangerous_tool")
-        assert policy.check("safe_tool")
-        assert not policy.check("dangerous_tool")
-
-    def test_default_policy_safety(self):
-        policy = default_policy()
-        assert policy.check("memory_search")
-        assert not policy.check("sudo_kill")
-        assert not policy.check("raw_sql_exec")
-
-    def test_rules_for_tool(self):
-        policy = ExecutionPolicy()
-        policy.allow("test_tool")
-        policy.deny("test_tool", "override")
-        rules = policy.rules_for("test_tool")
-        assert len(rules) == 2
-
-    def test_clear_rules_by_scope(self):
-        policy = ExecutionPolicy()
-        policy.allow("tool_a", scope="session")
-        policy.deny("tool_b", scope="global")
-        policy.clear_rules(scope="session")
-        assert policy.rule_count == 1
-
-    def test_denied_allowed_sets(self):
-        policy = ExecutionPolicy()
-        policy.allow("safe1")
-        policy.allow("safe2")
-        policy.deny("danger1")
-        assert "safe1" in policy.allowed_tools()
-        assert "danger1" in policy.denied_tools()
-
-    def test_add_rule_from_dataclass(self):
-        policy = ExecutionPolicy()
-        policy.add_rule(PolicyRule(tool_name="blocked", action=PolicyAction.DENY, reason="test"))
-        assert not policy.check("blocked")
 
 
 class TestToolRuntime:
@@ -139,32 +58,29 @@ class TestToolRuntime:
 
     @pytest.mark.asyncio
     async def test_policy_denies(self):
-        policy = ExecutionPolicy()
-        policy.deny("blocked_tool")
-
-        runtime = ToolRuntime(policy=policy)
-        call = ToolCall(tool_name="blocked_tool", arguments={})
+        runtime = ToolRuntime()
+        call = ToolCall(
+            tool_name="bash_exec",
+            arguments={"command": "sudo id"},
+        )
         result = await runtime.execute(call)
 
         assert not result.success
-        assert "Policy denied" in result.error
+        assert "Policy denied" in (result.error or "")
 
     @pytest.mark.asyncio
     async def test_requires_approval(self):
-        policy = ExecutionPolicy()
-        policy.require_approval("needs_ok")
-
         async def handler(args):
             return "done"
 
-        runtime = ToolRuntime(policy=policy)
-        runtime.register_handler("needs_ok", handler)
+        runtime = ToolRuntime()
+        runtime.register_handler("mail_send", handler)
 
-        call = ToolCall(tool_name="needs_ok", arguments={})
+        call = ToolCall(tool_name="mail_send", arguments={})
         result = await runtime.execute(call)
 
         assert not result.success
-        assert "approval" in result.error.lower()
+        assert "approval" in (result.error or "").lower()
         assert result.data["requires_approval"] is True
 
     @pytest.mark.asyncio
@@ -349,8 +265,7 @@ class TestIntegration:
     @pytest.mark.asyncio
     async def test_end_to_end_approved(self):
         sandbox = SubprocessSandbox()
-        policy = ExecutionPolicy()
-        runtime = ToolRuntime(sandbox=sandbox, policy=policy)
+        runtime = ToolRuntime(sandbox=sandbox)
 
         # Register bash_exec as a handler pointing to sandbox
         call = ToolCall(
