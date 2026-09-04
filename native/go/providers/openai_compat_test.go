@@ -12,6 +12,22 @@ import (
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
 )
 
+func TestBuildMessagesPrependsSystem(t *testing.T) {
+	msgs := buildMessages(cognition.Turn{
+		System: "You are Remedy.",
+		Goal:   "hi",
+	})
+	if len(msgs) < 2 {
+		t.Fatalf("msgs=%v", msgs)
+	}
+	if msgs[0]["role"] != "system" || msgs[0]["content"] != "You are Remedy." {
+		t.Fatalf("system msg=%v", msgs[0])
+	}
+	if msgs[1]["role"] != "user" || msgs[1]["content"] != "hi" {
+		t.Fatalf("user msg=%v", msgs[1])
+	}
+}
+
 func TestOpenAICompatStreamsTextAndDone(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {

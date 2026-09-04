@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -15,11 +16,12 @@ import (
 // CognitionTurnRunner drives cognition.Engine and emits the @@ control tokens
 // that stream.go already understands. No Python ReAct wrap — Go owns the loop.
 type CognitionTurnRunner struct {
-	Model    cognition.Model
-	Tools    cognition.ToolExecutor
-	Policy   cognition.Policy
-	Config   cognition.Config
-	Registry *tools.Registry
+	Model          cognition.Model
+	Tools          cognition.ToolExecutor
+	Policy         cognition.Policy
+	Config         cognition.Config
+	Registry       *tools.Registry
+	promptAssemble *tools.RMDYExecutor
 }
 
 // NewCognitionTurnRunner builds a runner on the real Tool ABI registry (Go
@@ -43,17 +45,28 @@ func NewCognitionTurnRunner(model cognition.Model) *CognitionTurnRunner {
 }
 
 // AttachPythonWorker registers RuntimePython tools that execute over RMDY frames.
+// Also enables prompt.assemble before each model turn (fail closed on error).
 func (r *CognitionTurnRunner) AttachPythonWorker(caller tools.FrameCaller) error {
 	if r == nil || r.Registry == nil {
 		return errors.New("cognition turn runner has no tool registry")
 	}
+	if caller == nil {
+		return errors.New("python worker frame caller is required")
+	}
 	if err := tools.RegisterPythonWorkerTools(r.Registry, caller); err != nil {
 		return err
 	}
+	r.promptAssemble = tools.NewRMDYExecutor(caller)
 	r.Tools = &RegistryToolExecutor{Registry: r.Registry, TokenFor: RuntimeCapabilityToken}
 	r.Policy = &RegistryPolicy{Registry: r.Registry}
 	r.syncModelToolSchemas()
 	return nil
+}
+
+// modelVisibleTool reports whether a Tool ABI id should be advertised to the LLM.
+// Internal services (prompt.*) stay off the model surface.
+func modelVisibleTool(id string) bool {
+	return !strings.HasPrefix(id, "prompt.")
 }
 
 // syncModelToolSchemas advertises the Tool ABI surface on OpenAI-compatible requests.
@@ -68,6 +81,9 @@ func (r *CognitionTurnRunner) syncModelToolSchemas() {
 	list := r.Registry.List()
 	meta := make([]providers.RegistryTool, 0, len(list))
 	for _, d := range list {
+		if !modelVisibleTool(d.ID) {
+			continue
+		}
 		meta = append(meta, providers.RegistryTool{
 			ID:          d.ID,
 			Description: d.Description,
@@ -75,6 +91,56 @@ func (r *CognitionTurnRunner) syncModelToolSchemas() {
 		})
 	}
 	oc.Tools = providers.ToolSchemasFromRegistry(meta)
+}
+
+type assembledPrompt struct {
+	System string
+	Goal   string
+}
+
+func (r *CognitionTurnRunner) assemblePrompt(ctx context.Context, req TurnRequest) (assembledPrompt, error) {
+	if r == nil || r.promptAssemble == nil {
+		return assembledPrompt{}, errors.New("prompt.assemble requires an attached Python worker")
+	}
+	input := map[string]any{
+		"message":    req.Prompt,
+		"session_id": req.SessionID,
+		"plan_mode":  req.PlanMode,
+		"chat_mode":  req.ChatMode,
+	}
+	if req.Model != nil && strings.TrimSpace(*req.Model) != "" {
+		input["model"] = strings.TrimSpace(*req.Model)
+	}
+	if req.Provider != nil && strings.TrimSpace(*req.Provider) != "" {
+		input["provider"] = strings.TrimSpace(*req.Provider)
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return assembledPrompt{}, err
+	}
+	res, err := r.promptAssemble.Execute(ctx, tools.Request{
+		ToolID:  "prompt.assemble",
+		Version: 1,
+		Input:   raw,
+	})
+	if err != nil {
+		return assembledPrompt{}, err
+	}
+	var out struct {
+		System string `json:"system"`
+		Goal   string `json:"goal"`
+	}
+	if err := json.Unmarshal(res.Output, &out); err != nil {
+		return assembledPrompt{}, fmt.Errorf("prompt.assemble decode: %w", err)
+	}
+	if strings.TrimSpace(out.System) == "" {
+		return assembledPrompt{}, errors.New("prompt.assemble returned empty system")
+	}
+	goal := out.Goal
+	if strings.TrimSpace(goal) == "" {
+		goal = req.Prompt
+	}
+	return assembledPrompt{System: out.System, Goal: goal}, nil
 }
 
 func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit func(string) error) error {
@@ -89,6 +155,18 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 	}
 	execTools := r.Tools
 	policy := r.Policy
+
+	seed := cognition.Turn{Goal: req.Prompt}
+	// Production serve always AttachPythonWorker. When attached, assemble is
+	// mandatory — never fall back to raw prompt-only.
+	if r.promptAssemble != nil {
+		assembled, err := r.assemblePrompt(ctx, req)
+		if err != nil {
+			return fmt.Errorf("prompt.assemble required: %w", err)
+		}
+		seed.System = assembled.System
+		seed.Goal = assembled.Goal
+	}
 
 	var (
 		emitMu  sync.Mutex
@@ -116,7 +194,7 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 		Policy: policy,
 		Config: r.Config,
 	}
-	out := engine.Run(ctx, req.Prompt)
+	out := engine.RunTurn(ctx, seed)
 
 	if emitErr != nil {
 		return emitErr

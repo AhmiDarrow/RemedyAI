@@ -47,6 +47,7 @@ type ModelEvent struct {
 }
 type Turn struct {
 	Goal      string
+	System    string // assembled system/soul/skills/memory; empty = prompt-only
 	Text      string
 	Results   []ToolResult
 	Iteration int
@@ -121,6 +122,11 @@ type Engine struct {
 }
 
 func (e *Engine) Run(ctx context.Context, goal string) Outcome {
+	return e.RunTurn(ctx, Turn{Goal: goal})
+}
+
+// RunTurn drives ReAct from a fully specified initial turn (goal + optional system).
+func (e *Engine) RunTurn(ctx context.Context, seed Turn) Outcome {
 	config := e.Config.normalized()
 	now := e.Now
 	if now == nil {
@@ -133,9 +139,11 @@ func (e *Engine) Run(ctx context.Context, goal string) Outcome {
 	var lastBatch string
 	repeated := 0
 	toolCount := 0
+	goal := seed.Goal
+	system := seed.System
 	for iteration := 1; iteration <= config.MaxIterations; iteration++ {
 		trace(StateObserve, iteration, "assemble turn")
-		turn := Turn{Goal: goal, Text: out.Text, Results: append([]ToolResult(nil), out.Results...), Iteration: iteration}
+		turn := Turn{Goal: goal, System: system, Text: out.Text, Results: append([]ToolResult(nil), out.Results...), Iteration: iteration}
 		trace(StateModel, iteration, "stream model")
 		events, err := e.streamWithRetry(ctx, turn, config)
 		if err != nil {

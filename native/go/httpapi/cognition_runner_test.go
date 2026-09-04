@@ -24,6 +24,79 @@ func TestCognitionTurnRunnerEmitsTextAndCompletes(t *testing.T) {
 	if out != "Hello world" {
 		t.Fatalf("got %q", out)
 	}
+	if model.LastTurn.System != "" {
+		t.Fatalf("raw path must not inject system without worker, got %q", model.LastTurn.System)
+	}
+}
+
+func TestCognitionTurnRunnerAssemblesPromptOverRMDY(t *testing.T) {
+	serverReg := tools.NewRegistry()
+	if err := tools.RegisterPythonWorkerLocalMirrors(serverReg); err != nil {
+		t.Fatal(err)
+	}
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go ipc.ServeConn(ctx, serverConn, tools.WorkerHandler{Registry: serverReg})
+	client := ipc.NewClient(clientConn)
+	defer client.Close()
+
+	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
+		{{Text: "assembled-ok", Done: true}},
+	}}
+	r := NewCognitionTurnRunner(model)
+	if err := r.AttachPythonWorker(client); err != nil {
+		t.Fatal(err)
+	}
+	out, err := CollectTokens(context.Background(), r, TurnRequest{Prompt: "hello partner", SessionID: "s1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "assembled-ok") {
+		t.Fatalf("missing final text: %q", out)
+	}
+	if !strings.Contains(model.LastTurn.System, "mirror-system") {
+		t.Fatalf("expected assembled system on model turn, got %q", model.LastTurn.System)
+	}
+	if model.LastTurn.Goal != "hello partner" {
+		t.Fatalf("goal=%q", model.LastTurn.Goal)
+	}
+	if _, err := r.Registry.Latest("prompt.assemble"); err != nil {
+		t.Fatalf("prompt.assemble missing after attach: %v", err)
+	}
+}
+
+func TestCognitionTurnRunnerFailsClosedWhenAssembleUnavailable(t *testing.T) {
+	// Empty server registry — worker has no prompt.assemble handler.
+	serverReg := tools.NewRegistry()
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go ipc.ServeConn(ctx, serverConn, tools.WorkerHandler{Registry: serverReg})
+	client := ipc.NewClient(clientConn)
+	defer client.Close()
+
+	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
+		{{Text: "should-not-run", Done: true}},
+	}}
+	r := NewCognitionTurnRunner(model)
+	if err := r.AttachPythonWorker(client); err != nil {
+		t.Fatal(err)
+	}
+	_, err := CollectTokens(context.Background(), r, TurnRequest{Prompt: "hi"})
+	if err == nil {
+		t.Fatal("expected fail-closed when prompt.assemble unavailable")
+	}
+	if !strings.Contains(err.Error(), "prompt.assemble") {
+		t.Fatalf("error should mention prompt.assemble, got %v", err)
+	}
+	if model.LastTurn.System != "" || model.LastTurn.Goal != "" {
+		t.Fatalf("model must not see the turn when assemble fails: %+v", model.LastTurn)
+	}
 }
 
 func TestCognitionTurnRunnerRegistersZigHostTools(t *testing.T) {

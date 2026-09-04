@@ -115,7 +115,10 @@ func ToolSchemasFromRegistry(list []RegistryTool) []map[string]any {
 }
 
 func buildMessages(turn cognition.Turn) []map[string]string {
-	msgs := make([]map[string]string, 0, 2+len(turn.Results))
+	msgs := make([]map[string]string, 0, 3+len(turn.Results))
+	if sys := strings.TrimSpace(turn.System); sys != "" {
+		msgs = append(msgs, map[string]string{"role": "system", "content": sys})
+	}
 	goal := strings.TrimSpace(turn.Goal)
 	if goal == "" {
 		goal = "continue"
