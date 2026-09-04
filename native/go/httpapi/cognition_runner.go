@@ -64,9 +64,11 @@ func (r *CognitionTurnRunner) AttachPythonWorker(caller tools.FrameCaller) error
 }
 
 // modelVisibleTool reports whether a Tool ABI id should be advertised to the LLM.
-// Internal services (prompt.*) stay off the model surface.
+// Internal services (prompt.*/voice.*/vision.*) stay off the model surface.
 func modelVisibleTool(id string) bool {
-	return !strings.HasPrefix(id, "prompt.")
+	return !strings.HasPrefix(id, "prompt.") &&
+		!strings.HasPrefix(id, "voice.") &&
+		!strings.HasPrefix(id, "vision.")
 }
 
 // syncModelToolSchemas advertises the Tool ABI surface on OpenAI-compatible requests.
