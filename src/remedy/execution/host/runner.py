@@ -12,54 +12,6 @@ from pathlib import Path
 from typing import Any, Literal
 
 from remedy.execution.host.ir import HostOp, script_op
-from remedy.execution.host.translate import looks_like_powershell
-
-# Cmd builtins that still need a shell after translation.
-_CMD_BUILTINS = frozenset(
-    {
-        "echo",
-        "cd",
-        "dir",
-        "type",
-        "copy",
-        "move",
-        "del",
-        "erase",
-        "md",
-        "mkdir",
-        "rd",
-        "rmdir",
-        "set",
-        "setlocal",
-        "endlocal",
-        "if",
-        "for",
-        "call",
-        "exit",
-        "rem",
-        "ver",
-        "cls",
-        "color",
-        "title",
-        "pushd",
-        "popd",
-        "shift",
-        "pause",
-        "assoc",
-        "ftype",
-        "start",
-        "vol",
-        "date",
-        "time",
-        "path",
-        "prompt",
-        "where",
-        "mklink",
-        "xcopy",
-    }
-)
-
-_SHELL_META_CHARS = set("|<>&^%()")
 
 
 @dataclass
@@ -99,68 +51,6 @@ def coerce_argv(argv: Any) -> list[str]:
         return text.split()
 
 
-# Modules `uv run <name>` should exec as `python -m <name>` so the Windows
-# desktop (a GUI process) does not flash a CMD for uv's python child.
-_UV_RUN_MODULES = frozenset(
-    {
-        "pytest",
-        "ruff",
-        "mypy",
-        "pip",
-        "httpx",
-        "uvicorn",
-        "http.server",
-    }
-)
-
-
-def deflate_uv_run(
-    argv: list[str], *, project_path: Path | str | None = None
-) -> list[str]:
-    """Turn ``uv run pytest`` into ``python -m pytest``.
-
-    CREATE_NO_WINDOW hides *uv.exe*, but uv then CreateProcess's python.exe
-    without that flag. The desktop sidecar has no console, so that python
-    child opens a visible CMD for every test/lint. Exec the project
-    interpreter ourselves and the flag sticks.
-    """
-    if len(argv) < 3:
-        return argv
-    head = argv[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
-    if head.endswith(".exe"):
-        head = head[:-4]
-    if head != "uv" or str(argv[1]).lower() != "run":
-        return argv
-    rest = list(argv[2:])
-    while rest and str(rest[0]).startswith("-"):
-        flag = str(rest[0]).lower()
-        if flag in {"--directory", "--project", "-p", "--package"} and len(rest) > 1:
-            rest = rest[2:]
-            continue
-        rest = rest[1:]
-    if not rest:
-        return argv
-    py = resolve_which("python", cwd=project_path)
-    if not py:
-        return argv
-    tool = str(rest[0]).replace("\\", "/").rsplit("/", 1)[-1].lower()
-    if tool.endswith(".exe"):
-        tool = tool[:-4]
-    if tool in {"python", "python3", "py"}:
-        return [py, *rest[1:]]
-    if tool in _UV_RUN_MODULES:
-        return [py, "-m", tool, *rest[1:]]
-    if tool.endswith(".py"):
-        return [py, *rest]
-    return argv
-
-
-def _exe_stem(name: str) -> str:
-    """``C:\\bin\\git.exe`` / ``git`` → ``git``."""
-    head = str(name or "").replace("\\", "/").rsplit("/", 1)[-1].lower()
-    return head[:-4] if head.endswith(".exe") else head
-
-
 @dataclass(frozen=True)
 class ChainHop:
     """One hop of an ``A && B`` chain the sandbox can run without cmd.exe."""
@@ -192,54 +82,6 @@ class ChainHop:
         if kind == "mkdir":
             return ChainHop.mkdir([str(p) for p in (raw.get("paths") or [])])
         raise ValueError(f"unknown chain hop kind: {kind!r}")
-
-
-def split_and_segments(text: str) -> list[str] | None:
-    """Quote-aware ``&&`` split. None if fewer than two hops or quotes never close."""
-    raw = (text or "").strip()
-    if not raw or "||" in raw:
-        return None
-    parts: list[str] = []
-    buf: list[str] = []
-    quote = ""
-    i = 0
-    while i < len(raw):
-        ch = raw[i]
-        if quote:
-            buf.append(ch)
-            if ch == quote:
-                quote = ""
-            i += 1
-            continue
-        if ch in "\"'":
-            quote = ch
-            buf.append(ch)
-            i += 1
-            continue
-        if raw.startswith("&&", i):
-            parts.append("".join(buf).strip())
-            buf = []
-            i += 2
-            continue
-        buf.append(ch)
-        i += 1
-    if quote:
-        return None
-    parts.append("".join(buf).strip())
-    parts = [p for p in parts if p]
-    return parts if len(parts) >= 2 else None
-
-
-def split_plain_and_chain(text: str) -> list[str] | None:
-    """Split ``A && B && C`` into segments when every hop is a plain argv.
-
-    Quote-aware so ``git commit -m "a && b"`` stays one hop. Pipes, ``||``,
-    redirects, parens, and cmd builtins still need a real shell.
-    """
-    parts = split_and_segments(text)
-    if not parts or any(not looks_like_plain_argv(p) for p in parts):
-        return None
-    return parts
 
 
 def expand_shell_chain(
@@ -281,46 +123,6 @@ def expand_and_chain_argv(
     if not hops or any(h.kind != "run" for h in hops):
         return None
     return [list(h.argv) for h in hops]
-
-
-def _unquoted_has_shell_meta(cmd: str) -> bool:
-    """True if shell metacharacters appear outside quotes (or quotes never close)."""
-    quote = ""
-    i = 0
-    n = len(cmd)
-    while i < n:
-        ch = cmd[i]
-        if quote:
-            if ch == quote:
-                quote = ""
-            i += 1
-            continue
-        if ch in "\"'":
-            quote = ch
-            i += 1
-            continue
-        if ch in _SHELL_META_CHARS:
-            return True
-        if cmd.startswith("&&", i) or cmd.startswith("||", i):
-            return True
-        i += 1
-    return bool(quote)
-
-
-def looks_like_plain_argv(command: str) -> bool:
-    """True when *command* is a single native process + args (no shell)."""
-    cmd = (command or "").strip()
-    if not cmd or _unquoted_has_shell_meta(cmd):
-        return False
-    if looks_like_powershell(cmd):
-        return False
-    try:
-        toks = shlex.split(cmd, posix=os.name != "nt")
-    except ValueError:
-        return False
-    if not toks:
-        return False
-    return _exe_stem(toks[0]) not in _CMD_BUILTINS
 
 
 def prepare_host_command(
@@ -420,6 +222,9 @@ def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
     key = n.lower().rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
     if key.endswith(".exe"):
         key = key[:-4]
+    from remedy.core.computer.host_binding import HostError
+    from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
+
     try:
         from remedy.execution.host.dialect import load_dialect
 
@@ -441,7 +246,9 @@ def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
                     hit = ""
             if hit:
                 return hit
-    except Exception:
+    except HostError:
+        raise
+    except (NativeRuntimeUnavailableError, OSError):
         pass
     if cwd is not None:
         try:
@@ -456,7 +263,7 @@ def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
                     alt = bin_dir / f"{key}{suffix}"
                     if alt.is_file():
                         return str(alt)
-        except Exception:
+        except OSError:
             pass
     def _ok_python(path: str | None) -> bool:
         if not path:
@@ -481,7 +288,7 @@ def resolve_which(name: str, *, cwd: Path | str | None = None) -> str | None:
             from remedy.core.build_python import host_python_executable
 
             hit = host_python_executable()
-        except Exception:
+        except OSError:
             hit = ""
         if hit and _ok_python(hit):
             return hit
@@ -498,13 +305,18 @@ def default_script_lang(home: str | Path | None = None) -> str:
     """pwsh when this PC has it; otherwise python (POSIX) or cmd."""
     if os.name != "nt":
         return "python"
+    from remedy.core.computer.host_binding import HostError
+    from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
+
     try:
         from remedy.execution.host.dialect import load_dialect
 
         d = load_dialect(home)
         if (d.pwsh_cmd or "").strip() and Path(d.pwsh_cmd).is_file():
             return "pwsh"
-    except Exception:
+    except HostError:
+        raise
+    except (NativeRuntimeUnavailableError, OSError):
         pass
     if shutil.which("pwsh") or shutil.which("powershell"):
         return "pwsh"

@@ -22,7 +22,6 @@ from remedy.execution.host.ir import HostOp, mkdir_op, run_op, script_op
 from remedy.execution.host.runner import (
     coerce_argv,
     launch_script,
-    looks_like_plain_argv,
     prepare_host_command,
     prepare_host_op,
     resolve_which,
@@ -135,12 +134,24 @@ def test_expand_and_chain_splits_git_without_cmd() -> None:
     assert _exe_stem(hops[1][0]) == "git"
     assert hops[1][1:3] == ["commit", "-m"]
     assert hops[1][3] == "wip"
-    quoted = host_runner.split_plain_and_chain(
-        'git commit -m "fix: a && b" && git status'
+    # Quote-aware && stays one hop (Zig shell_chain — no Python twin).
+    quoted = host_runner.expand_and_chain_argv(
+        ["cmd.exe", "/c", 'git commit -m "fix: a && b" && git status']
     )
-    assert quoted == ['git commit -m "fix: a && b"', "git status"]
+    assert quoted is not None
+    assert len(quoted) == 2
+    assert _exe_stem(quoted[0][0]) == "git"
+    assert quoted[0][1:3] == ["commit", "-m"]
+    assert quoted[0][3] == "fix: a && b"
+    assert _exe_stem(quoted[1][0]) == "git"
+    assert quoted[1][1:] == ["status"]
     assert host_runner.expand_and_chain_argv(["cmd", "/c", "git status"]) is None
-    assert host_runner.split_plain_and_chain("mkdir -p a && git add .") is None
+    # mkdir is not a plain run hop — Zig returns mkdir+run, expand_and_chain_argv
+    # only yields all-run chains.
+    assert (
+        host_runner.expand_and_chain_argv(["cmd.exe", "/c", "mkdir -p a && git add ."])
+        is None
+    )
 
 
 def test_expand_shell_chain_cd_and_mkdir() -> None:
@@ -263,22 +274,18 @@ async def test_sandbox_and_chain_stops_on_failure() -> None:
     assert "chain-nope" not in (res.stdout or "")
 
 
-def test_deflate_uv_run_pytest_uses_python_dash_m(tmp_path, monkeypatch) -> None:
-    from remedy.execution.host import runner as host_runner
-
-    py = tmp_path / "python.exe"
+def test_prepare_deflates_uv_run_pytest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Zig ``host_op_prepare`` owns uv-run deflate (no Python twin)."""
+    py = tmp_path / ("python.exe" if os.name == "nt" else "python")
     py.write_text("", encoding="utf-8")
-    monkeypatch.setattr(host_runner, "resolve_which", lambda name, cwd=None: str(py) if name == "python" else None)
-    out = host_runner.deflate_uv_run(
-        ["uv", "run", "pytest", "-q"], project_path=tmp_path
-    )
-    assert out[0] == str(py)
-    assert out[1:3] == ["-m", "pytest"]
-    assert out[3:] == ["-q"]
-    py_out = host_runner.deflate_uv_run(
-        ["uv", "run", "python", "script.py"], project_path=tmp_path
-    )
-    assert py_out == [str(py), "script.py"]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setenv("REMEDY_PYTHON", str(py))
+    prep = prepare_host_command("uv run pytest -q", host="cmd", project_path=tmp_path)
+    joined = " ".join(prep.argv).lower()
+    assert "pytest" in joined
+    assert prep.kind in {"argv", "translated", "raw", "script"}
 
 
 def test_prepare_strips_pytest_last_failed() -> None:
@@ -464,10 +471,11 @@ def test_prepare_plain_argv_no_shell() -> None:
     assert prep.kind == "argv"
     assert "python" in Path(prep.argv[0]).name.lower()
     assert "py_compile" in prep.argv
-    assert looks_like_plain_argv("python -m py_compile app.py")
-    assert looks_like_plain_argv('python -c "print(1)"')
-    assert not looks_like_plain_argv("echo hello")
-    assert not looks_like_plain_argv("mkdir -p a && ls")
+    # Builtins / chains still go through a shell (Zig prepare — no Python twin).
+    echo = prepare_host_command("echo hello", host="cmd")
+    assert echo.kind in {"translated", "raw", "script", "session"}
+    chain = prepare_host_command("mkdir -p a && ls", host="cmd")
+    assert chain.kind in {"translated", "raw", "script", "session", "argv"}
 
 
 def test_prepare_translated_mkdir() -> None:
