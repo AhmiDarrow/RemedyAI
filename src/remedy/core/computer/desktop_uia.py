@@ -40,7 +40,7 @@ def structured_observe_hint(*, n_windows: int, n_controls: int) -> str:
 def uia_available() -> bool:
     if sys.platform != "win32":
         return False
-    with contextlib.suppress(NativeRuntimeUnavailableError, H.HostError):
+    with contextlib.suppress(NativeRuntimeUnavailableError):
         return H.uia_available()
     return False
 
@@ -56,23 +56,27 @@ def preferred_click_action(role: str = "") -> str:
 def read_window_text(hwnd: int, *, max_chars: int = 12000) -> dict[str, Any] | None:
     """Read the visible TEXT CONTENT of a native window via UIA.
 
-    Returns ``{"title", "text", "fields"}`` or ``None`` when UIA is unavailable.
+    Returns ``{"title", "text", "fields"}`` or ``None`` when UIA is unavailable
+    / hwnd missing. :class:`host_binding.HostError` propagates (fail closed).
     """
     if sys.platform != "win32" or not hwnd:
         return None
     try:
         return H.uia_read_window_text(int(hwnd), int(max_chars))
-    except (NativeRuntimeUnavailableError, H.HostError):
+    except NativeRuntimeUnavailableError:
         return None
 
 
 def focused_element_info() -> dict[str, Any] | None:
-    """Name/role/value of the currently focused UIA element (act→verify evidence)."""
+    """Name/role/value of the currently focused UIA element (act→verify evidence).
+
+    :class:`host_binding.HostError` propagates (fail closed).
+    """
     if sys.platform != "win32":
         return None
     try:
         return H.uia_focused_element()
-    except (NativeRuntimeUnavailableError, H.HostError):
+    except NativeRuntimeUnavailableError:
         return None
 
 
@@ -87,7 +91,8 @@ def element_action(
     """Drive a native control through its UIA pattern — the reliable path.
 
     action: ``invoke``, ``set_value``, ``toggle``, ``scroll_into_view``.
-    Always returns ``{"ok": bool, "message": str, ...}``.
+    Returns ``{"ok": bool, "message": str, ...}`` on success or soft miss.
+    :class:`host_binding.HostError` propagates (fail closed).
     """
     if sys.platform != "win32":
         return {
@@ -102,7 +107,7 @@ def element_action(
             action=str(action or "invoke"),
             text=str(text),
         )
-    except (NativeRuntimeUnavailableError, H.HostError) as exc:
+    except NativeRuntimeUnavailableError as exc:
         return {"ok": False, "message": f"UIA {action} failed on control {name!r}: {exc}"}
 
 
@@ -112,7 +117,10 @@ def uia_control_snapshot(
     max_elements: int = 80,
     preferred_only: bool = True,
 ) -> list[dict[str, Any]] | None:
-    """Walk UIA control tree; return elements with refs c1, c2, … or None."""
+    """Walk UIA control tree; return elements with refs c1, c2, … or None.
+
+    :class:`host_binding.HostError` propagates (fail closed).
+    """
     if sys.platform != "win32":
         return None
     try:
@@ -121,5 +129,5 @@ def uia_control_snapshot(
             int(max_elements) if max_elements is not None else 80,
             bool(preferred_only),
         )
-    except (NativeRuntimeUnavailableError, H.HostError):
+    except NativeRuntimeUnavailableError:
         return None

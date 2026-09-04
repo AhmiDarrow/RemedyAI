@@ -205,16 +205,15 @@ def _draw_marks_on_bgr(
 
 
 def _capture_virtual_screen() -> tuple[bytes, int, int, int, int, int]:
-    """Return (bgr_bytes, stride, width, height, origin_x, origin_y)."""
+    """Return (bgr_bytes, stride, width, height, origin_x, origin_y).
+
+    Host failures raise — no blank 10x10 soft fallback.
+    """
     _require_linux()
     try:
         shot = H.capture_virtual_screen(3)
     except (NativeRuntimeUnavailableError, H.HostError) as exc:
-        # Headless / no DISPLAY: tiny blank so Set-of-Mark callers stay stable.
-        w = h = 10
-        stride = (w * 3 + 3) & ~3
-        _ = exc
-        return b"\x00" * (stride * h), stride, w, h, 0, 0
+        raise _host_fail("capture", exc) from exc
     return shot.pixels, shot.stride, shot.width, shot.height, shot.left, shot.top
 
 
