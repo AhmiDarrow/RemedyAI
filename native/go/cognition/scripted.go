@@ -41,7 +41,8 @@ type AllowAll struct{}
 
 func (AllowAll) Decide(context.Context, ToolCall) Decision { return Allow }
 
-// EchoTools returns each call's input as output (for smoke until Tool ABI lands).
+// EchoTools returns each call's input as output. Test double only — production
+// turns use the Tool ABI registry (see httpapi.RegistryToolExecutor).
 type EchoTools struct{}
 
 func (EchoTools) Execute(_ context.Context, call ToolCall) ToolResult {

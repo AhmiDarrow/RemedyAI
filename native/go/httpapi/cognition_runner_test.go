@@ -2,11 +2,14 @@ package httpapi
 
 import (
 	"context"
+	"net"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
+	"github.com/AhmiDarrow/RemedyAI/native/go/ipc"
+	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
 )
 
 func TestCognitionTurnRunnerEmitsTextAndCompletes(t *testing.T) {
@@ -20,6 +23,97 @@ func TestCognitionTurnRunnerEmitsTextAndCompletes(t *testing.T) {
 	}
 	if out != "Hello world" {
 		t.Fatalf("got %q", out)
+	}
+}
+
+func TestCognitionTurnRunnerExecutesRealGoBuiltinTools(t *testing.T) {
+	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
+		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "runtime.probe", Input: []byte(`{}`)}},
+			{ToolCall: &cognition.ToolCall{ID: "2", Name: "text.sha256", Input: []byte(`{"text":"hi"}`)}},
+			{ToolCall: &cognition.ToolCall{ID: "3", Name: "json.canonical", Input: []byte(`{"value":{"z":1,"a":2}}`)}}},
+		{{Text: "done", Done: true}},
+	}}
+	r := NewCognitionTurnRunner(model)
+	out, err := CollectTokens(context.Background(), r, TurnRequest{Prompt: "probe"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `@@tool_call:`) || !strings.Contains(out, `"runtime.probe"`) {
+		t.Fatalf("missing tool_call: %q", out)
+	}
+	if !strings.Contains(out, `@@tool_result:`) || !strings.Contains(out, `"ok":true`) {
+		t.Fatalf("missing tool_result: %q", out)
+	}
+	if !strings.Contains(out, `"status":"ready"`) && !strings.Contains(out, `"status\": \"ready\"`) {
+		// preview is raw JSON output of the tool
+		if !strings.Contains(out, "ready") || !strings.Contains(out, "tool_abi") {
+			t.Fatalf("missing probe payload in tool_result: %q", out)
+		}
+	}
+	if !strings.Contains(out, "sha256") {
+		t.Fatalf("missing sha256 tool_result: %q", out)
+	}
+	if !strings.Contains(out, "done") {
+		t.Fatalf("missing final text: %q", out)
+	}
+}
+
+func TestCognitionTurnRunnerExecutesPythonToolsOverRMDY(t *testing.T) {
+	serverReg := tools.NewRegistry()
+	if err := tools.RegisterPythonWorkerLocalMirrors(serverReg); err != nil {
+		t.Fatal(err)
+	}
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go ipc.ServeConn(ctx, serverConn, tools.WorkerHandler{Registry: serverReg})
+	client := ipc.NewClient(clientConn)
+	defer client.Close()
+
+	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
+		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "text.slugify", Input: []byte(`{"text":"Hello Worker"}`)}}},
+		{{Text: "slug-ok", Done: true}},
+	}}
+	r := NewCognitionTurnRunner(model)
+	if err := r.AttachPythonWorker(client); err != nil {
+		t.Fatal(err)
+	}
+	out, err := CollectTokens(context.Background(), r, TurnRequest{Prompt: "slug"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "text.slugify") || !strings.Contains(out, `"ok":true`) {
+		t.Fatalf("missing python tool result: %q", out)
+	}
+	if !strings.Contains(out, "hello-worker") {
+		t.Fatalf("missing slug preview: %q", out)
+	}
+	if !strings.Contains(out, "slug-ok") {
+		t.Fatalf("missing final text: %q", out)
+	}
+}
+
+func TestCognitionTurnRunnerDeniesUnregisteredTools(t *testing.T) {
+	model := &cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
+		{{ToolCall: &cognition.ToolCall{ID: "1", Name: "file_read", Input: []byte(`{"path":"a.py"}`)}}},
+		{{Text: "after-deny", Done: true}},
+	}}
+	r := NewCognitionTurnRunner(model)
+	out, err := CollectTokens(context.Background(), r, TurnRequest{Prompt: "read"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `@@tool_call:`) || !strings.Contains(out, "file_read") {
+		t.Fatalf("expected tool_call for unregistered tool, got %q", out)
+	}
+	// Deny skips Execute, so no successful tool_result token is emitted.
+	if strings.Contains(out, `"ok":true`) {
+		t.Fatalf("unregistered tool must not execute, got %q", out)
+	}
+	if !strings.Contains(out, "after-deny") {
+		t.Fatalf("missing final text: %q", out)
 	}
 }
 
