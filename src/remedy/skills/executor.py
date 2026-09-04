@@ -6,7 +6,6 @@ and provides structured result reporting.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import re
 import tempfile
@@ -88,30 +87,28 @@ class SkillExecutor:
             return result
 
         try:
+            import subprocess
+
             from remedy.execution.env import scrub_subprocess_env
-            from remedy.execution.process import create_hidden_subprocess_exec
+            from remedy.execution.process import run_hidden_async
 
             # Never pass provider keys / REMEDY_* into skill scripts (same as bash sandbox).
             child_env = scrub_subprocess_env(env)
-            proc = await create_hidden_subprocess_exec(
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=child_env,
-                cwd=str(script_path.parent),
-            )
             result.started_at = datetime.now(UTC)
-
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout
+                completed = await run_hidden_async(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    env=child_env,
+                    cwd=str(script_path.parent),
                 )
-                result.stdout = stdout.decode("utf-8", errors="replace")
-                result.stderr = stderr.decode("utf-8", errors="replace")
-                result.exit_code = proc.returncode or 0
+                result.stdout = str(completed.stdout or "")
+                result.stderr = str(completed.stderr or "")
+                result.exit_code = int(completed.returncode or 0)
                 result.success = result.exit_code == 0
-            except TimeoutError:
-                proc.kill()
+            except subprocess.TimeoutExpired:
                 result.error = f"Script timed out after {timeout}s"
                 result.success = False
 
@@ -192,28 +189,27 @@ class SkillExecutor:
         cwd = str(skill_dir or self.sandbox_dir)
 
         try:
+            import subprocess
+
             from remedy.execution.env import scrub_subprocess_env
-            from remedy.execution.process import create_hidden_subprocess_exec
+            from remedy.execution.process import run_hidden_async
 
             # Never pass provider keys / REMEDY_* into skill shell (same as run_script).
             child_env = scrub_subprocess_env(env)
-            proc = await create_hidden_subprocess_exec(
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=child_env,
-            )
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=120.0
+                completed = await run_hidden_async(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=120.0,
+                    cwd=cwd,
+                    env=child_env,
                 )
-                result.stdout = stdout.decode("utf-8", errors="replace")
-                result.stderr = stderr.decode("utf-8", errors="replace")
-                result.exit_code = proc.returncode or 0
+                result.stdout = str(completed.stdout or "")
+                result.stderr = str(completed.stderr or "")
+                result.exit_code = int(completed.returncode or 0)
                 result.success = result.exit_code == 0
-            except TimeoutError:
-                proc.kill()
+            except subprocess.TimeoutExpired:
                 result.error = "Shell block timed out after 120s"
                 result.success = False
         except Exception as e:

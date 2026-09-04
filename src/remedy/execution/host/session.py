@@ -1,8 +1,9 @@
 """Persistent host session — thin binding over Zig HostSession.
 
 Windows open/run/cwd/close and the sentinel protocol (wrap/split/VT/echo)
-live in ``remedy_core`` (ABI 5). POSIX keeps a piped live shell because Zig
-live open is Windows-only; protocol helpers still go through the Zig ABI.
+live in ``remedy_core`` (ABI 5). Zig live open is Windows-only; Linux fails
+closed (no soft pipe spawn). Darwin may still use hidden pipes. Protocol
+helpers still go through the Zig ABI.
 """
 
 from __future__ import annotations
@@ -66,7 +67,8 @@ class HostSession:
     """One long-lived cmd/pwsh/posix process. Not the default for bash_exec.
 
     Windows: Zig ``remedy_core`` HostSession owns spawn + sentinel I/O (no
-    Python ConPTY/pipe twin). POSIX: hidden pipes; wrap/split still Zig.
+    Python ConPTY/pipe twin). Linux: fail closed (no Zig live open / no soft
+    pipes). Darwin: hidden pipes; wrap/split still Zig.
     """
 
     host: str = "cmd"
@@ -118,6 +120,11 @@ class HostSession:
         self._used_conpty = bool(self.use_conpty)
 
     async def _start_posix_pipes(self) -> None:
+        # Zig HostSession live open is Windows-only. Linux must not soft-pipe.
+        if sys.platform in ("win32", "linux"):
+            from remedy.core.computer.host_binding import STATUS_UNSUPPORTED, HostError
+
+            raise HostError("host_session_posix_pipes", STATUS_UNSUPPORTED)
         argv = _session_argv(self.host)
         if self.env is not None:
             env = dict(self.env)

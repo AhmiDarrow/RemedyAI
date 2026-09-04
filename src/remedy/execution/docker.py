@@ -7,7 +7,6 @@ and image caching.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import logging
 import shutil
@@ -19,17 +18,33 @@ from remedy.execution.result import ExecutionResult, Sandbox
 logger = logging.getLogger(__name__)
 
 
-async def _wait_docker(proc: asyncio.subprocess.Process, timeout_s: float, what: str) -> int:
+async def _run_docker(
+    argv: list[str],
+    *,
+    timeout_s: float,
+    what: str,
+    text: bool = False,
+) -> tuple[int, str | bytes, str | bytes]:
+    """One-shot docker argv via Zig authorized exec-capture."""
+    import subprocess
+
+    from remedy.execution.process import run_hidden_async
+
     try:
-        await asyncio.wait_for(proc.wait(), timeout=timeout_s)
-        return int(proc.returncode or 0)
-    except TimeoutError:
-        with contextlib.suppress(ProcessLookupError, OSError):
-            proc.kill()
-        with contextlib.suppress(Exception):
-            await proc.wait()
+        completed = await run_hidden_async(
+            argv,
+            capture_output=True,
+            text=text,
+            timeout=timeout_s,
+        )
+        return (
+            int(completed.returncode or 0),
+            completed.stdout or ("" if text else b""),
+            completed.stderr or ("" if text else b""),
+        )
+    except subprocess.TimeoutExpired:
         logger.warning("%s timed out after %.0fs", what, timeout_s)
-        return 124
+        return 124, ("" if text else b""), ("" if text else b"")
 
 
 class DockerSandbox(Sandbox):
@@ -76,22 +91,19 @@ class DockerSandbox(Sandbox):
             return False
 
         try:
-            from remedy.execution.process import create_hidden_subprocess_exec
-
-            proc = await create_hidden_subprocess_exec(
-                "docker", "image", "inspect", self.image,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            code, _out, _err = await _run_docker(
+                ["docker", "image", "inspect", self.image],
+                timeout_s=8.0,
+                what="docker image inspect",
             )
-            if await _wait_docker(proc, 8.0, "docker image inspect") == 0:
+            if code == 0:
                 return True
-
-            proc = await create_hidden_subprocess_exec(
-                "docker", "pull", self.image,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            code, _out, _err = await _run_docker(
+                ["docker", "pull", self.image],
+                timeout_s=120.0,
+                what="docker pull",
             )
-            return await _wait_docker(proc, 120.0, "docker pull") == 0
+            return code == 0
         except Exception:
             return False
 
@@ -141,29 +153,21 @@ class DockerSandbox(Sandbox):
         docker_cmd.append(self.image)
         docker_cmd += command
 
+        import subprocess
+
         try:
-            from remedy.execution.process import create_hidden_subprocess_exec
-
-            proc = await create_hidden_subprocess_exec(
-                *docker_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            code, stdout, stderr = await _run_docker(
+                docker_cmd,
+                timeout_s=timeout_seconds,
+                what="docker run",
             )
-
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(),
-                    timeout=timeout_seconds,
-                )
-            except TimeoutError:
-                proc.kill()
+            if code == 124:
                 elapsed = (time.monotonic() - start) * 1000
                 return ExecutionResult(
                     exit_code=-1,
                     stderr=f"Container timed out after {timeout_seconds}s",
                     duration_ms=elapsed,
                 )
-
         except FileNotFoundError:
             elapsed = (time.monotonic() - start) * 1000
             return ExecutionResult(
@@ -171,18 +175,27 @@ class DockerSandbox(Sandbox):
                 stderr="Docker executable not found",
                 duration_ms=elapsed,
             )
+        except subprocess.TimeoutExpired:
+            elapsed = (time.monotonic() - start) * 1000
+            return ExecutionResult(
+                exit_code=-1,
+                stderr=f"Container timed out after {timeout_seconds}s",
+                duration_ms=elapsed,
+            )
         finally:
             # Cleanup temp dir
             import shutil
+
             with contextlib.suppress(Exception):
                 shutil.rmtree(tmpdir, ignore_errors=True)
 
         elapsed = (time.monotonic() - start) * 1000
-
+        out_s = stdout.decode("utf-8", errors="replace") if isinstance(stdout, bytes) else str(stdout)
+        err_s = stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else str(stderr)
         return ExecutionResult(
-            exit_code=proc.returncode or 0,
-            stdout=stdout.decode("utf-8", errors="replace") if stdout else "",
-            stderr=stderr.decode("utf-8", errors="replace") if stderr else "",
+            exit_code=code,
+            stdout=out_s,
+            stderr=err_s,
             duration_ms=elapsed,
         )
 
@@ -194,45 +207,40 @@ class DockerSandbox(Sandbox):
         could stall the caller for ever. An unanswerable question is answered
         "no such sandbox", which is the safe reading: the caller creates one.
         """
-        from remedy.execution.process import create_hidden_subprocess_exec
-
-        proc = await create_hidden_subprocess_exec(
-            "docker", "ps", "-a", "--filter", f"label=remedy.sandbox={name}",
-            "--format", "{{.ID}}",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        code, stdout, _err = await _run_docker(
+            [
+                "docker",
+                "ps",
+                "-a",
+                "--filter",
+                f"label=remedy.sandbox={name}",
+                "--format",
+                "{{.ID}}",
+            ],
+            timeout_s=timeout_s,
+            what="docker ps",
         )
-        try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
-        except TimeoutError:
-            with contextlib.suppress(ProcessLookupError, OSError):
-                proc.kill()
-            with contextlib.suppress(Exception):
-                await proc.wait()
+        if code == 124:
             logger.warning("docker ps timed out after %.0fs; assuming no sandbox", timeout_s)
             return False
-        return bool(stdout.strip())
+        raw = stdout if isinstance(stdout, bytes) else str(stdout).encode()
+        return bool(raw.strip())
 
     async def cleanup(self) -> None:
         """Remove all stopped Remedy sandbox containers."""
         try:
-            from remedy.execution.process import create_hidden_subprocess_exec
-
-            proc = await create_hidden_subprocess_exec(
-                "docker", "container", "prune", "-f",
-                "--filter", "label=remedy.sandbox",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            # Prune is best-effort housekeeping; never let it stall shutdown.
+            await _run_docker(
+                [
+                    "docker",
+                    "container",
+                    "prune",
+                    "-f",
+                    "--filter",
+                    "label=remedy.sandbox",
+                ],
+                timeout_s=30.0,
+                what="docker container prune",
             )
-            # Prune is best-effort housekeeping; never let it stall shutdown —
-            # and a prune that hangs must not be left running either.
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=30.0)
-            except TimeoutError:
-                with contextlib.suppress(ProcessLookupError, OSError):
-                    proc.kill()
-                with contextlib.suppress(Exception):
-                    await proc.wait()
-                logger.warning("docker container prune timed out after 30s; killed it")
         except Exception:
             pass

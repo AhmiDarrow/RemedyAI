@@ -137,27 +137,24 @@ class SignalChannel(ChannelAdapter):
         bin_path = self._bin()
         if not bin_path:
             return 1, "", "signal-cli not found"
-        cmd = [bin_path, "-a", self.account, *args]
-        from remedy.execution.process import create_hidden_subprocess_exec
+        import subprocess
 
-        proc = await create_hidden_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        from remedy.execution.process import run_hidden_async
+
+        cmd = [bin_path, "-a", self.account, *args]
         try:
-            out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except TimeoutError:
-            proc.kill()
-            # Reap it. kill() only signals; without the wait the child stays a
-            # zombie, and _receive_loop polls every 10s, so they accumulate.
-            with contextlib.suppress(Exception):
-                await asyncio.wait_for(proc.wait(), timeout=5)
+            completed = await run_hidden_async(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
             return 1, "", "timeout"
         return (
-            int(proc.returncode or 0),
-            out_b.decode("utf-8", errors="replace"),
-            err_b.decode("utf-8", errors="replace"),
+            int(completed.returncode or 0),
+            str(completed.stdout or ""),
+            str(completed.stderr or ""),
         )
 
     async def send(self, message: str, target: str | None = None) -> bool:

@@ -308,6 +308,8 @@ async def _spawn_terminal(
             await sess.start()
             return sess
 
+    # Soft pipe spawn only off win32/linux. Zig has no interactive pipe-spawn;
+    # create_hidden_subprocess_exec fails closed on those hosts (tests inject).
     from remedy.execution.process import create_hidden_subprocess_exec
 
     proc = await create_hidden_subprocess_exec(

@@ -1028,7 +1028,7 @@ def open_app(
     import re
     import shutil
 
-    from remedy.execution.process import popen_hidden
+    from remedy.execution.process import retain_detached, spawn_hidden
 
     raw = (app or "").strip()
     if not raw:
@@ -1098,7 +1098,7 @@ def open_app(
                 if resolved.is_file():
                     if is_text_document_path(resolved):
                         return refuse_os_open_text_document(resolved)
-                    popen_hidden([str(resolved)], close_fds=True)
+                    retain_detached(spawn_hidden([str(resolved)]))
                     return {
                         "app": raw,
                         "method": "project_path",
@@ -1107,7 +1107,7 @@ def open_app(
     if path_candidate.is_file() and path_candidate.is_absolute():
         if is_text_document_path(path_candidate):
             return refuse_os_open_text_document(path_candidate)
-        popen_hidden([str(path_candidate)], close_fds=True)
+        retain_detached(spawn_hidden([str(path_candidate)]))
         return {"app": raw, "method": "path", "target": str(path_candidate)}
     if path_candidate.is_dir() and (
         path_candidate.is_absolute() or (search_dirs and path_candidate.exists())
@@ -1125,7 +1125,7 @@ def open_app(
         raise ValueError(f"open_app path not found: {target[:80]}")
     which = shutil.which(target) or shutil.which(raw)
     if which:
-        popen_hidden([which], close_fds=True)
+        retain_detached(spawn_hidden([which]))
         return {"app": raw, "method": "which", "target": which}
     # Appliances: anything in her house (Start Menu inventory), natural name.
     # "spotify", "word", "steam" resolve here without hardcoded aliases.
@@ -1164,7 +1164,7 @@ def open_app(
             f"open_app refuses unsafe app name for shell start: {raw[:48]!r}"
             + (f" · {hint}" if hint else "")
         )
-    popen_hidden(["cmd", "/c", "start", "", raw], close_fds=True)
+    retain_detached(spawn_hidden(["cmd", "/c", "start", "", raw]))
     return {"app": raw, "method": "cmd start", "target": raw}
 
 
@@ -1208,10 +1208,10 @@ def open_url(url: str) -> dict[str, Any]:
             os.startfile(u)
             return {"url": u, "method": "os.startfile"}
         except OSError:
-            from remedy.execution.process import popen_hidden
+            from remedy.execution.process import retain_detached, spawn_hidden
 
             # Empty title arg after start is required for URLs with &
-            popen_hidden(["cmd", "/c", "start", "", u], close_fds=True)
+            retain_detached(spawn_hidden(["cmd", "/c", "start", "", u]))
             return {"url": u, "method": "cmd start"}
     import webbrowser
 
