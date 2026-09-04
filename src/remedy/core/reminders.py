@@ -393,10 +393,12 @@ def mark_fired(
         r.fire_count = int(r.fire_count or 0) + 1
         nxt = next_occurrence(r.due_ts, r.recurrence)
         if nxt:
-            # Skip any occurrences already in the past (machine was asleep).
-            while nxt and nxt <= n:
+            # Skip missed occurrences, and keep a 1s future horizon so a due
+            # that lands on "now" (5× daily from five days ago) cannot lose a
+            # clock race before the caller reads it back.
+            while nxt and nxt <= time.time() + 1.0:
                 nxt = next_occurrence(nxt, r.recurrence)
-            r.due_ts = float(nxt or (n + 86400))
+            r.due_ts = float(nxt or (time.time() + 86400))
             r.status = STATUS_PENDING
         else:
             r.status = STATUS_FIRED
@@ -425,9 +427,10 @@ def take_due_deliveries(
             r.fire_count = int(r.fire_count or 0) + 1
             nxt = next_occurrence(r.due_ts, r.recurrence)
             if nxt:
-                while nxt and nxt <= n:
+                # Same 1s horizon as mark_fired — see comment there.
+                while nxt and nxt <= time.time() + 1.0:
                     nxt = next_occurrence(nxt, r.recurrence)
-                r.due_ts = float(nxt or (n + 86400))
+                r.due_ts = float(nxt or (time.time() + 86400))
                 r.status = STATUS_PENDING
             else:
                 r.status = STATUS_FIRED
