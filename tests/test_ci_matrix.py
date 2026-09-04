@@ -206,7 +206,7 @@ def test_build_desktop_bundles_the_core_library_at_the_archive_root(tmp_path: Pa
     with pytest.raises(SystemExit):
         build_desktop.resolve_core_library(wrong_name)
 
-    assert "required_abi = 4" in source
+    assert "required_abi = 5" in source
     assert "remedy_core_abi_version()" in source
 
     parser_help = source[source.index("__main__") :]
@@ -298,7 +298,7 @@ def test_prepush_python_lane_consumes_the_native_lane_core() -> None:
     linux = [s.command for s in prepush.LINUX.steps]
     assert linux.index(prepush.WSL_ZIG_BUILD) < linux.index(prepush.WSL_PYTEST)
     assert prepush.WSL_NATIVE_CORE_LIB.startswith("/tmp/")
-    assert prepush.REQUIRED_NATIVE_ABI == 4
+    assert prepush.REQUIRED_NATIVE_ABI == 5
     if prepush.IS_WINDOWS and prepush.shutil.which("wsl"):
         build = prepush._wsl_zig_build_command()
         assert build and "zig build -Doptimize=ReleaseSafe" in build

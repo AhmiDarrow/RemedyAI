@@ -1,31 +1,29 @@
 """Windows ConPTY spawn — child sees a real console; parent still uses pipes.
 
-Used by the persistent host session when ``use_conpty=True``. Any API failure
-raises; the session falls back to hidden pipes.
+Used by the persistent host session when ``use_conpty=True``. Implementation
+lives in ``remedy_core`` (ABI 5); this module is a thin async duck-type over
+``host_binding``. Spawn/IO failures raise (no soft Python ConPTY twin).
+When ConPTY is unsupported, ``HostSession`` keeps the ordinary pipe path.
 """
 
 from __future__ import annotations
 
 import asyncio
-import subprocess
 import sys
+from contextlib import suppress
 from typing import Any
 
-_PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016
-_EXTENDED_STARTUPINFO_PRESENT = 0x00080000
-_CREATE_UNICODE_ENVIRONMENT = 0x00000400
-_STARTF_USESTDHANDLES = 0x00000100
+from remedy.core.computer import host_binding
+from remedy.core.computer.host_binding import HostError
+from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
 
 def spawn_conpty_supported() -> bool:
     if sys.platform != "win32":
         return False
     try:
-        import ctypes
-
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        return hasattr(k32, "CreatePseudoConsole")
-    except Exception:
+        return bool(host_binding.conpty_available())
+    except (HostError, NativeRuntimeUnavailableError, OSError):
         return False
 
 
@@ -49,318 +47,85 @@ def _spawn_conpty_sync(
     cwd: str | None,
     env: dict[str, str] | None,
 ) -> _ConPTYProcess:
-    import ctypes
-    from ctypes import wintypes
-
-    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-
-    class COORD(ctypes.Structure):
-        _fields_ = [("X", wintypes.SHORT), ("Y", wintypes.SHORT)]
-
-    class SecurityAttributes(ctypes.Structure):
-        _fields_ = [
-            ("nLength", wintypes.DWORD),
-            ("lpSecurityDescriptor", wintypes.LPVOID),
-            ("bInheritHandle", wintypes.BOOL),
-        ]
-
-    class StartupInfoW(ctypes.Structure):
-        _fields_ = [
-            ("cb", wintypes.DWORD),
-            ("lpReserved", wintypes.LPWSTR),
-            ("lpDesktop", wintypes.LPWSTR),
-            ("lpTitle", wintypes.LPWSTR),
-            ("dwX", wintypes.DWORD),
-            ("dwY", wintypes.DWORD),
-            ("dwXSize", wintypes.DWORD),
-            ("dwYSize", wintypes.DWORD),
-            ("dwXCountChars", wintypes.DWORD),
-            ("dwYCountChars", wintypes.DWORD),
-            ("dwFillAttribute", wintypes.DWORD),
-            ("dwFlags", wintypes.DWORD),
-            ("wShowWindow", wintypes.WORD),
-            ("cbReserved2", wintypes.WORD),
-            ("lpReserved2", ctypes.POINTER(wintypes.BYTE)),
-            ("hStdInput", wintypes.HANDLE),
-            ("hStdOutput", wintypes.HANDLE),
-            ("hStdError", wintypes.HANDLE),
-        ]
-
-    class StartupInfoExW(ctypes.Structure):
-        _fields_ = [
-            ("StartupInfo", StartupInfoW),
-            ("lpAttributeList", ctypes.c_void_p),
-        ]
-
-    class ProcessInformation(ctypes.Structure):
-        _fields_ = [
-            ("hProcess", wintypes.HANDLE),
-            ("hThread", wintypes.HANDLE),
-            ("dwProcessId", wintypes.DWORD),
-            ("dwThreadId", wintypes.DWORD),
-        ]
-
-    k32.CreatePipe.argtypes = [
-        ctypes.POINTER(wintypes.HANDLE),
-        ctypes.POINTER(wintypes.HANDLE),
-        ctypes.POINTER(SecurityAttributes),
-        wintypes.DWORD,
-    ]
-    k32.CreatePipe.restype = wintypes.BOOL
-    k32.CreatePseudoConsole.argtypes = [
-        COORD,
-        wintypes.HANDLE,
-        wintypes.HANDLE,
-        wintypes.DWORD,
-        ctypes.POINTER(ctypes.c_void_p),
-    ]
-    k32.CreatePseudoConsole.restype = ctypes.HRESULT
-    k32.CloseHandle.argtypes = [wintypes.HANDLE]
-    k32.CloseHandle.restype = wintypes.BOOL
-    k32.InitializeProcThreadAttributeList.argtypes = [
-        ctypes.c_void_p,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        ctypes.POINTER(ctypes.c_size_t),
-    ]
-    k32.InitializeProcThreadAttributeList.restype = wintypes.BOOL
-    k32.UpdateProcThreadAttribute.argtypes = [
-        ctypes.c_void_p,
-        wintypes.DWORD,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_size_t,
-        ctypes.c_void_p,
-        ctypes.POINTER(ctypes.c_size_t),
-    ]
-    k32.UpdateProcThreadAttribute.restype = wintypes.BOOL
-    k32.DeleteProcThreadAttributeList.argtypes = [ctypes.c_void_p]
-    k32.CreateProcessW.argtypes = [
-        wintypes.LPCWSTR,
-        wintypes.LPWSTR,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        wintypes.BOOL,
-        wintypes.DWORD,
-        ctypes.c_void_p,
-        wintypes.LPCWSTR,
-        ctypes.c_void_p,
-        ctypes.POINTER(ProcessInformation),
-    ]
-    k32.CreateProcessW.restype = wintypes.BOOL
-
-    sa = SecurityAttributes()
-    sa.nLength = ctypes.sizeof(SecurityAttributes)
-    sa.lpSecurityDescriptor = None
-    sa.bInheritHandle = False
-
-    h_pty_in = wintypes.HANDLE()
-    h_con_in = wintypes.HANDLE()  # parent writes
-    if not k32.CreatePipe(ctypes.byref(h_pty_in), ctypes.byref(h_con_in), ctypes.byref(sa), 0):
-        raise OSError("CreatePipe input failed")
-
-    h_con_out = wintypes.HANDLE()  # parent reads
-    h_pty_out = wintypes.HANDLE()
-    if not k32.CreatePipe(ctypes.byref(h_con_out), ctypes.byref(h_pty_out), ctypes.byref(sa), 0):
-        k32.CloseHandle(h_pty_in)
-        k32.CloseHandle(h_con_in)
-        raise OSError("CreatePipe output failed")
-
-    h_pc = ctypes.c_void_p()
-    # restype=HRESULT makes ctypes RAISE on a failing HRESULT rather than
-    # return it, so a plain ``if hr != 0`` branch never ran and all four pipe
-    # ends leaked on every failed attempt. Catch, close, re-raise as ours.
     try:
-        hr = k32.CreatePseudoConsole(
-            COORD(120, 40), h_pty_in, h_pty_out, 0, ctypes.byref(h_pc)
-        )
-    except OSError as exc:
-        hr = getattr(exc, "winerror", None) or -1
-    if hr != 0:
-        for h in (h_pty_in, h_con_in, h_con_out, h_pty_out):
-            k32.CloseHandle(h)
-        raise OSError(f"CreatePseudoConsole failed hr={hr}")
-
-    # Parent does not need the pty-side pipe ends.
-    k32.CloseHandle(h_pty_in)
-    k32.CloseHandle(h_pty_out)
-
-    size = ctypes.c_size_t(0)
-    k32.InitializeProcThreadAttributeList(None, 1, 0, ctypes.byref(size))
-    attr_buf = (ctypes.c_char * size.value)()
-    if not k32.InitializeProcThreadAttributeList(attr_buf, 1, 0, ctypes.byref(size)):
-        k32.CloseHandle(h_con_in)
-        k32.CloseHandle(h_con_out)
-        k32.ClosePseudoConsole(h_pc)
-        raise OSError("InitializeProcThreadAttributeList failed")
-
-    if not k32.UpdateProcThreadAttribute(
-        attr_buf,
-        0,
-        _PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-        h_pc,
-        ctypes.sizeof(ctypes.c_void_p),
-        None,
-        None,
-    ):
-        k32.DeleteProcThreadAttributeList(attr_buf)
-        k32.CloseHandle(h_con_in)
-        k32.CloseHandle(h_con_out)
-        k32.ClosePseudoConsole(h_pc)
-        raise OSError("UpdateProcThreadAttribute failed")
-
-    siex = StartupInfoExW()
-    siex.StartupInfo.cb = ctypes.sizeof(StartupInfoExW)
-    # bInheritHandles=False does NOT stop the child inheriting the parent's
-    # standard handles when those are redirected (service / launcher): the
-    # child's output then lands on Remedy's own stdout and every run() times
-    # out. STARTF_USESTDHANDLES with NULL handles makes the pseudoconsole the
-    # child's only stdio.
-    siex.StartupInfo.dwFlags = _STARTF_USESTDHANDLES
-    siex.StartupInfo.hStdInput = None
-    siex.StartupInfo.hStdOutput = None
-    siex.StartupInfo.hStdError = None
-    siex.lpAttributeList = ctypes.cast(attr_buf, ctypes.c_void_p)
-
-    cmdline = subprocess.list2cmdline(argv)
-    env_block = _env_block(env)
-    pi = ProcessInformation()
-    created = k32.CreateProcessW(
-        None,
-        ctypes.c_wchar_p(cmdline),
-        None,
-        None,
-        False,
-        _EXTENDED_STARTUPINFO_PRESENT | _CREATE_UNICODE_ENVIRONMENT,
-        env_block,
-        cwd,
-        ctypes.byref(siex),
-        ctypes.byref(pi),
-    )
-    k32.DeleteProcThreadAttributeList(attr_buf)
-    if not created:
-        err = ctypes.get_last_error()
-        k32.CloseHandle(h_con_in)
-        k32.CloseHandle(h_con_out)
-        k32.ClosePseudoConsole(h_pc)
-        raise OSError(f"CreateProcessW failed winerr={err}")
-
-    k32.CloseHandle(pi.hThread)
-    return _ConPTYProcess(
-        pid=int(pi.dwProcessId),
-        process_handle=int(pi.hProcess),
-        # .value, not int(): these are ctypes HANDLE/c_void_p, and int() on one
-        # raises ValueError. That was the LAST statement of the spawn, after
-        # CreateProcessW had already succeeded — so every ConPTY attempt raised,
-        # leaving the child, its process handle, the pseudoconsole and both
-        # parent pipe ends behind. _try_conpty_exec swallowed it and fell back
-        # to plain pipes, so ConPTY had never once worked.
-        stdin_handle=int(h_con_in.value or 0),
-        stdout_handle=int(h_con_out.value or 0),
-        pc_handle=int(h_pc.value or 0),
-    )
-
-
-def _env_block(env: dict[str, str] | None) -> Any:
-    import ctypes
-
-    if env is None:
-        return None
-    parts = [f"{k}={v}" for k, v in env.items()]
-    blob = "\0".join(parts) + "\0\0"
-    return ctypes.create_unicode_buffer(blob)
+        pid, handle = host_binding.conpty_spawn(argv, cwd=cwd, env=env)
+    except HostError as exc:
+        detail = str(exc)
+        if exc.os_error:
+            detail = f"{detail} winerr={exc.os_error}"
+        raise OSError(detail) from exc
+    except NativeRuntimeUnavailableError as exc:
+        raise OSError(f"ConPTY unavailable: {exc}") from exc
+    return _ConPTYProcess(pid=pid, handle=handle)
 
 
 class _HandleStream:
-    def __init__(self, handle: int, *, write: bool) -> None:
-        self._handle = handle
+    def __init__(self, session: int, *, write: bool) -> None:
+        self._session = session
         self._write = write
         self._closed = False
 
     def write(self, data: bytes) -> None:
-        if self._closed or not self._write:
+        if self._closed or not self._write or not self._session:
             return
-        import ctypes
-        from ctypes import wintypes
-
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        written = wintypes.DWORD(0)
-        buf = ctypes.create_string_buffer(data)
-        k32.WriteFile(self._handle, buf, len(data), ctypes.byref(written), None)
+        with suppress(HostError, NativeRuntimeUnavailableError, OSError):
+            host_binding.conpty_write(self._session, data)
 
     async def drain(self) -> None:
         return None
 
     async def read(self, n: int = 4096) -> bytes:
-        if self._closed or self._write:
+        if self._closed or self._write or not self._session:
             return b""
-        return await asyncio.to_thread(self._read_sync, n)
+        # Match prior behaviour: n is clamped up to 1, not down to 0.
+        return await asyncio.to_thread(self._read_sync, max(1, int(n)))
 
     def _read_sync(self, n: int) -> bytes:
-        import ctypes
-        from ctypes import wintypes
-
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        buf = ctypes.create_string_buffer(max(1, n))
-        got = wintypes.DWORD(0)
-        ok = k32.ReadFile(self._handle, buf, max(1, n), ctypes.byref(got), None)
-        if not ok or got.value == 0:
+        try:
+            return host_binding.conpty_read(self._session, n)
+        except (HostError, NativeRuntimeUnavailableError, OSError):
             return b""
-        return buf.raw[: got.value]
 
     def close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        try:
-            import ctypes
-
-            ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle(self._handle)
-        except Exception:
-            pass
+        if not self._session:
+            return
+        which = (
+            host_binding.CONPTY_PIPE_STDIN
+            if self._write
+            else host_binding.CONPTY_PIPE_STDOUT
+        )
+        with suppress(HostError, NativeRuntimeUnavailableError, OSError):
+            host_binding.conpty_close_pipe(self._session, which)
 
 
 class _ConPTYProcess:
     """Duck-type asyncio.subprocess.Process for HostSession."""
 
-    def __init__(
-        self,
-        *,
-        pid: int,
-        process_handle: int,
-        stdin_handle: int,
-        stdout_handle: int,
-        pc_handle: int,
-    ) -> None:
+    def __init__(self, *, pid: int, handle: int) -> None:
         self.pid = pid
         self.returncode: int | None = None
-        self.stdin = _HandleStream(stdin_handle, write=True)
-        self.stdout = _HandleStream(stdout_handle, write=False)
+        self._handle = int(handle)
+        self.stdin = _HandleStream(self._handle, write=True)
+        self.stdout = _HandleStream(self._handle, write=False)
         self.stderr = None
-        self._ph = process_handle
-        self._pc = pc_handle
 
     def poll(self) -> int | None:
-        """STILL_ACTIVE (259) means the child is running; anything else is done."""
+        """``None`` while the child is running; otherwise the exit code."""
         if self.returncode is not None:
             return self.returncode
-        if not self._ph:
+        if not self._handle:
             return self.returncode
         try:
-            import ctypes
-            from ctypes import wintypes
-
-            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            code = wintypes.DWORD(0)
-            ok = k32.GetExitCodeProcess(self._ph, ctypes.byref(code))
-            if not ok:
-                return None
-            if int(code.value) == 259:  # STILL_ACTIVE
-                return None
-            self.returncode = int(code.value)
-            return self.returncode
-        except Exception:
+            code = host_binding.conpty_poll(self._handle)
+        except (HostError, NativeRuntimeUnavailableError, OSError):
             return None
+        if code is None:
+            return None
+        self.returncode = int(code)
+        return self.returncode
 
     def kill(self) -> None:
         self._terminate()
@@ -369,37 +134,21 @@ class _ConPTYProcess:
         self._terminate()
 
     def _terminate(self) -> None:
-        try:
-            import ctypes
-
-            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            k32.TerminateProcess(self._ph, 1)
-        except Exception:
-            pass
+        if self._handle:
+            with suppress(HostError, NativeRuntimeUnavailableError, OSError):
+                host_binding.conpty_kill(self._handle)
         self._close()
         self.returncode = 1
 
     def _close(self) -> None:
-        from contextlib import suppress
-
         with suppress(Exception):
             self.stdin.close()
         with suppress(Exception):
             self.stdout.close()
-        # Two closes, two suppressions. They shared one before, so a throwing
-        # ClosePseudoConsole skipped CloseHandle — and the process handle was
-        # zeroed below regardless, leaving nothing able to close it, ever.
-        with suppress(Exception):
-            import ctypes
-
-            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            if self._pc:
-                k32.ClosePseudoConsole(self._pc)
-        with suppress(Exception):
-            import ctypes
-
-            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            if self._ph:
-                k32.CloseHandle(self._ph)
-        self._pc = 0
-        self._ph = 0
+        handle = self._handle
+        self._handle = 0
+        self.stdin._session = 0
+        self.stdout._session = 0
+        if handle:
+            with suppress(HostError, NativeRuntimeUnavailableError, OSError):
+                host_binding.conpty_close(handle)

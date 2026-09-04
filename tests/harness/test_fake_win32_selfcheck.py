@@ -573,30 +573,24 @@ def test_the_attribute_list_size_probe_reports_failure_like_the_real_api():
 
 
 @windows_only
-def test_spawn_conpty_is_reported_unsupported_when_the_export_is_missing():
+def test_spawn_conpty_is_reported_unsupported_when_the_binding_says_so():
     from remedy.execution.host import conpty
+    from tests.harness.fake_host_binding import install_fake_conpty
 
-    windll = FakeWinDLL()
-    with install_fake_win32(windll=windll):
+    with install_fake_conpty(available=True):
         assert conpty.spawn_conpty_supported() is True
-        windll.kernel32.set_missing("CreatePseudoConsole")
+    with install_fake_conpty(available=False):
         assert conpty.spawn_conpty_supported() is False
 
 
 @windows_only
 def test_conpty_spawn_builds_the_console_and_the_command_line_it_was_asked_for():
-    """The fake proves the pipes, the pseudoconsole and the CreateProcessW
-    arguments are all what the real API would have been handed.
-
-    This used to end in ``pytest.raises(ValueError)``: the last statement of
-    ``_spawn_conpty_sync`` called ``int()`` on a ``wintypes.HANDLE``, which
-    raises — so the spawn always threw after the child had already been
-    created, and ConPTY silently never worked.
-    """
+    """The binding fake proves pipes, pseudoconsole and CreateProcessW args."""
     from remedy.execution.host import conpty
+    from tests.harness.fake_host_binding import install_fake_conpty
 
     host = FakeConsoleHost()
-    with install_fake_win32(console=host):
+    with install_fake_conpty(console=host):
         proc = conpty._spawn_conpty_sync(
             ["cmd.exe", "/c", "echo hi"], "C:\\work", {"A": "b"}
         )
@@ -614,17 +608,17 @@ def test_conpty_spawn_builds_the_console_and_the_command_line_it_was_asked_for()
     assert host.spawns[0]["cmdline"] == 'cmd.exe /c "echo hi"'
     assert host.spawns[0]["cwd"] == "C:\\work"
     assert host.spawns[0]["flags"] == 0x00080000 | 0x00000400
-    # The pty-side ends are handed to the console and closed by the parent.
     assert host.pipes[0].write_handle not in host.closed
 
 
 @windows_only
 def test_a_failed_createprocess_closes_every_handle_it_opened():
     from remedy.execution.host import conpty
+    from tests.harness.fake_host_binding import install_fake_conpty
 
     host = FakeConsoleHost(fail_create_process=True)
-    with install_fake_win32(console=host):
-        with pytest.raises(OSError, match="CreateProcessW failed"):
+    with install_fake_conpty(console=host):
+        with pytest.raises(OSError, match="operation failed"):
             conpty._spawn_conpty_sync(["cmd.exe"], None, None)
     assert host.open_handles == [], f"leaked {host.open_handles}"
     assert host.closed_pseudoconsoles
@@ -633,10 +627,11 @@ def test_a_failed_createprocess_closes_every_handle_it_opened():
 @windows_only
 def test_a_failed_pseudoconsole_is_raised_and_leaves_no_handle_behind():
     from remedy.execution.host import conpty
+    from tests.harness.fake_host_binding import install_fake_conpty
 
     host = FakeConsoleHost(create_pseudoconsole_hr=-2147024809)
-    with install_fake_win32(console=host):
-        with pytest.raises(OSError, match="CreatePseudoConsole failed"):
+    with install_fake_conpty(console=host):
+        with pytest.raises(OSError, match=r"winerr=-2147024809"):
             conpty._spawn_conpty_sync(["cmd.exe"], None, None)
     assert host.open_handles == []
     assert host.spawns == [], "no process may be created once the console failed"
@@ -645,10 +640,11 @@ def test_a_failed_pseudoconsole_is_raised_and_leaves_no_handle_behind():
 @windows_only
 def test_a_failed_pipe_is_raised_before_anything_else_happens():
     from remedy.execution.host import conpty
+    from tests.harness.fake_host_binding import install_fake_conpty
 
     host = FakeConsoleHost(fail_create_pipe=True)
-    with install_fake_win32(console=host):
-        with pytest.raises(OSError, match="CreatePipe input failed"):
+    with install_fake_conpty(console=host):
+        with pytest.raises(OSError, match="operation failed"):
             conpty._spawn_conpty_sync(["cmd.exe"], None, None)
     assert host.pseudoconsoles == []
     assert host.spawns == []
@@ -658,59 +654,51 @@ def test_a_failed_pipe_is_raised_before_anything_else_happens():
 @pytest.mark.asyncio
 async def test_the_conpty_handle_stream_reads_and_writes_through_the_fake():
     from remedy.execution.host import conpty
+    from tests.harness.fake_host_binding import install_fake_conpty
 
     host = FakeConsoleHost()
-    windll = FakeWinDLL()
-    host.install_into(windll)
-    read_h, write_h = ctypes.c_void_p(), ctypes.c_void_p()
-    windll.kernel32.CreatePipe(ctypes.byref(read_h), ctypes.byref(write_h), None, 0)
-
-    with install_fake_win32(windll=windll, console=host):
-        stdin = conpty._HandleStream(write_h.value, write=True)
-        stdout = conpty._HandleStream(read_h.value, write=False)
-        stdin.write(b"echo hi\r\n")
-        await stdin.drain()
-        host.feed(read_h.value, b"hi\r\n")
-        assert await stdout.read(64) == b"hi\r\n"
-        # A write-only stream never yields bytes, and a closed one goes quiet.
-        assert await stdin.read(16) == b""
-        stdout.close()
-        assert await stdout.read(16) == b""
-    assert host.written(write_h.value) == b"echo hi\r\n"
-    assert host.is_closed(read_h.value)
+    with install_fake_conpty(console=host) as fake:
+        proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+        session = fake.sessions[proc._handle]
+        stdin_h = session.stdin_handle
+        stdout_h = session.stdout_handle
+        proc.stdin.write(b"echo hi\r\n")
+        await proc.stdin.drain()
+        host.feed(stdout_h, b"hi\r\n")
+        assert await proc.stdout.read(64) == b"hi\r\n"
+        assert await proc.stdin.read(16) == b""
+        proc.stdout.close()
+        assert await proc.stdout.read(16) == b""
+    assert host.written(stdin_h) == b"echo hi\r\n"
+    assert host.is_closed(stdout_h)
 
 
 @windows_only
 @pytest.mark.asyncio
 async def test_spawn_conpty_surfaces_the_failure_rather_than_returning_a_dead_process():
     from remedy.execution.host import conpty
+    from tests.harness.fake_host_binding import install_fake_conpty
 
     host = FakeConsoleHost(fail_create_process=True)
-    with install_fake_win32(console=host):
-        with pytest.raises(OSError, match="CreateProcessW failed"):
+    with install_fake_conpty(console=host):
+        with pytest.raises(OSError, match="operation failed"):
             await conpty.spawn_conpty(["cmd.exe"], cwd=None, env=None)
 
 
 @windows_only
 def test_terminating_the_fake_process_closes_its_console_and_handles():
     from remedy.execution.host import conpty
+    from tests.harness.fake_host_binding import install_fake_conpty
 
     host = FakeConsoleHost()
-    windll = FakeWinDLL()
-    host.install_into(windll)
-    read_h, write_h = ctypes.c_void_p(), ctypes.c_void_p()
-    windll.kernel32.CreatePipe(ctypes.byref(read_h), ctypes.byref(write_h), None, 0)
-    with install_fake_win32(windll=windll, console=host):
-        proc = conpty._ConPTYProcess(
-            pid=4321,
-            process_handle=0x900,
-            stdin_handle=write_h.value,
-            stdout_handle=read_h.value,
-            pc_handle=0x910,
-        )
+    with install_fake_conpty(console=host) as fake:
+        proc = conpty._spawn_conpty_sync(["cmd.exe"], None, None)
+        session = fake.sessions[proc._handle]
+        process_h = session.process_handle
+        pc_h = session.pc_handle
         proc.terminate()
-    assert host.terminated == [(0x900, 1)]
-    assert host.closed_pseudoconsoles == [0x910]
+    assert host.terminated == [(process_h, 1)]
+    assert host.closed_pseudoconsoles == [pc_h]
     assert proc.returncode == 1
 
 
@@ -723,8 +711,8 @@ def test_the_installer_restores_every_attribute_it_touched():
     platform_before = sys.platform
     comtypes_before = sys.modules.get("comtypes")
 
-    # install_fake_win32 still owns the windll/comtypes surface used by
-    # ConPTY doubles; UIA production tests use install_fake_host_uia instead.
+    # install_fake_win32 still owns windll/comtypes; ConPTY production tests
+    # use install_fake_conpty, UIA uses install_fake_host_uia.
     with install_fake_win32(uia=FakeUIAutomation()) as fake:
         assert ctypes.windll is fake.windll
         assert sys.platform == "win32"

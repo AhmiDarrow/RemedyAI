@@ -101,7 +101,7 @@ def _require_abi4_core():
     if native_runtime._core_library_path() is None:
         pytest.skip("remedy_core is not built in this checkout")
     library = native_runtime.core_library()
-    assert int(library.remedy_core_abi_version()) == 4
+    assert int(library.remedy_core_abi_version()) == 5
 
 
 @pytest.mark.usefixtures("_require_abi4_core")

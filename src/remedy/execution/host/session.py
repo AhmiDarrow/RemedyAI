@@ -487,17 +487,17 @@ def _split_sentinel(
     return code, body.strip()
 
 
-# -- ConPTY (best-effort; pipe session is the supported default) ---------------
+# -- ConPTY (opt-in via use_conpty; pipes remain the default) ---------------
 
 
 def conpty_available() -> bool:
+    """True when ``remedy_core`` reports ConPTY (ABI 5) on this host."""
     if sys.platform != "win32":
         return False
     try:
-        import ctypes
+        from remedy.execution.host.conpty import spawn_conpty_supported
 
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        return hasattr(k32, "CreatePseudoConsole")
+        return bool(spawn_conpty_supported())
     except Exception:
         return False
 
@@ -508,15 +508,17 @@ async def _try_conpty_exec(
     cwd: str | None,
     env: dict[str, str],
 ) -> Any | None:
-    """Attempt a ConPTY-backed process. None → caller uses pipes."""
+    """Spawn via Zig ConPTY when available.
+
+    Returns ``None`` only when ConPTY is unsupported so the caller can use
+    pipes. A failed spawn after the probe said available raises — no soft
+    Python fallback around ``remedy_core``.
+    """
     if not conpty_available():
         return None
-    try:
-        from remedy.execution.host.conpty import spawn_conpty
+    from remedy.execution.host.conpty import spawn_conpty
 
-        return await spawn_conpty(argv, cwd=cwd, env=env)
-    except Exception:
-        return None
+    return await spawn_conpty(argv, cwd=cwd, env=env)
 
 
 # Per-chat-session host shells. Do not reuse across session_id or start cwd.
