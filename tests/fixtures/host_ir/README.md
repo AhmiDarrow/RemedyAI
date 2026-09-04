@@ -30,7 +30,7 @@ uv run python tests/fixtures/host_ir/_capture_host_ir.py
 ```
 
 Sources: `tests/test_host_bridge.py` cases plus the IR helpers in
-`src/remedy/execution/host/{ir,translate,runner,scriptfile}.py`.
+`src/remedy/execution/host/{ir,translate,runner}.py` (scriptfile lives in Zig).
 
 ## Proof target (from NATIVE_CUTOVER_PLAN Phase 3)
 

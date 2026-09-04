@@ -1,7 +1,8 @@
-"""Host Command IR — the contract models should speak instead of raw shell.
+"""Host Command IR — Python dataclass contract for Zig ``host_op_prepare``.
 
-A command string is a compatibility wrapper. Structured ops (run / mkdir /
-which / script) never need quoting. ``raw`` is last resort.
+Structured ops (run / mkdir / which / script) never need quoting. ``raw`` is
+last resort. Prepare/argv/scriptfile live in ``remedy_core``; this module is
+serialization only.
 """
 
 from __future__ import annotations

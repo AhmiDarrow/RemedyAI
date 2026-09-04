@@ -769,7 +769,7 @@ def register_shell_tools(runtime: Any) -> None:
             )
         finally:
             with suppress(Exception):
-                from remedy.execution.host.scriptfile import cleanup_host_script
+                from remedy.execution.host.runner import cleanup_host_script
 
                 cleanup_host_script(getattr(prepared, "script_path", None))
         parts = [
@@ -1240,8 +1240,7 @@ def register_shell_tools(runtime: Any) -> None:
         workdir: str = "",
     ) -> str:
         """Write a scratch script and run it with -File (never -Command)."""
-        from remedy.execution.host.runner import default_script_lang
-        from remedy.execution.host.scriptfile import launch_script
+        from remedy.execution.host.runner import default_script_lang, launch_script
 
         text = (body or "").strip()
         if not text:

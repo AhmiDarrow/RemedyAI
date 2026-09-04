@@ -359,7 +359,7 @@ def main() -> None:
     _write(
         "prepare_argv_scriptfile.json",
         {
-            "source": "remedy.execution.host.runner + scriptfile",
+            "source": "remedy.execution.host.runner + zig shell_ir",
             "captured_at": "2026-09-03",
             "notes": (
                 "Normative for Zig prepare: argv_template (with <PWSH>/<CMD>/<SCRIPT_PATH>/"
