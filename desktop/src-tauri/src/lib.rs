@@ -937,12 +937,12 @@ fn find_webui_dir() -> Option<PathBuf> {
 fn spawn_remedy(cmd: &str) -> Option<Child> {
     let home_dir = remedy_home();
     let home_str = home_dir.to_string_lossy();
-    let port_str = api_port().to_string();
+    let port = api_port();
+    let port_str = port.to_string();
     let use_runtime = is_runtime_binary(cmd);
-    // Go: --serve --listen 127.0.0.1:PORT (REMEDY_HOME via env).
+    // Go: --serve owns 127.0.0.1:7400; --listen only for a desktop-chosen port.
     // Python: --home … serve --host/--port --skip-setup (Desktop SetupWizard owns UX).
     let listen = format!("127.0.0.1:{port_str}");
-    let runtime_args = ["--serve", "--listen", listen.as_str()];
     let python_args = [
         "--home",
         home_str.as_ref(),
@@ -970,6 +970,14 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
             })
         });
 
+    let apply_runtime_args = |c: &mut Command| {
+        if port == 7400 {
+            c.args(["--serve"]);
+        } else {
+            c.args(["--serve", "--listen", listen.as_str()]);
+        }
+    };
+
     #[cfg(target_os = "windows")]
     {
         // IMPORTANT: do NOT combine CREATE_NO_WINDOW with DETACHED_PROCESS —
@@ -977,7 +985,7 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
         // visible console for console-subsystem sidecar builds (what the user saw).
         let mut c = Command::new(cmd);
         if use_runtime {
-            c.args(runtime_args);
+            apply_runtime_args(&mut c);
         } else {
             c.args(python_args);
         }
@@ -1000,7 +1008,7 @@ fn spawn_remedy(cmd: &str) -> Option<Child> {
     {
         let mut c = Command::new(cmd);
         if use_runtime {
-            c.args(runtime_args);
+            apply_runtime_args(&mut c);
         } else {
             c.args(python_args);
         }
@@ -1486,18 +1494,29 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='remedy.exe' OR
 #[cfg(not(target_os = "windows"))]
 fn force_stop_remedy_processes() {
     // Python argv: `remedy --home <dir> serve --host 127.0.0.1 --port N`.
-    // Go argv: `remedy-runtime --serve --listen 127.0.0.1:N`.
+    // Go argv: bare `--serve` on :7400, or `--serve --listen 127.0.0.1:N`.
     let port = api_port();
     let _ = Command::new("pkill")
         .args(["-f", &format!("serve --host 127.0.0.1 --port {port}")])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
-    let _ = Command::new("pkill")
-        .args(["-f", &format!("remedy-runtime.*--listen 127\\.0\\.0\\.1:{port}")])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    if port == 7400 {
+        let _ = Command::new("pkill")
+            .args(["-f", "remedy-runtime.*--serve"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    } else {
+        let _ = Command::new("pkill")
+            .args([
+                "-f",
+                &format!("remedy-runtime.*--listen 127\\.0\\.0\\.1:{port}"),
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
 }
 
 /// How to treat an existing listener on :7400 before starting the sidecar.

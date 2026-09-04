@@ -14,3 +14,18 @@ func TestCurrentProbeDeclaresVersionedReadiness(t *testing.T) {
 		t.Fatalf("probe platform mismatch: %+v", got)
 	}
 }
+
+func TestResolveServeAddrDefaultsToProduction7400(t *testing.T) {
+	if got := resolveServeAddr("", true); got != defaultServeAddr {
+		t.Fatalf("bare --serve = %q, want %q", got, defaultServeAddr)
+	}
+	if got := resolveServeAddr("127.0.0.1:7410", true); got != "127.0.0.1:7410" {
+		t.Fatalf("--listen override = %q", got)
+	}
+	if got := resolveServeAddr("127.0.0.1:0", false); got != "127.0.0.1:0" {
+		t.Fatalf("explicit --listen without --serve = %q", got)
+	}
+	if got := resolveServeAddr("", false); got != "" {
+		t.Fatalf("neither flag = %q, want empty", got)
+	}
+}
