@@ -9,6 +9,10 @@ On serve restart the new process must be able to take over a leftover file from 
 and lock the new poller out). The OS exclusive lock is the source of truth:
 a leftover file whose flock/msvcrt lock is free is reclaimed; a true live
 holder still wins.
+
+**Ownership:** Go ``remedy-runtime`` owns messenger inbound (``native/go/gateway``).
+Python must not acquire these locks unless ``REMEDY_PYTHON_MESSENGER_POLL=1``
+(emergency / unit tests only) — otherwise dual pollers fight over the bot.
 """
 
 from __future__ import annotations
@@ -27,6 +31,16 @@ logger = logging.getLogger(__name__)
 
 # If the lock owner stops heartbeating, another process may take over.
 STALE_LOCK_SECONDS = 90.0
+
+
+def python_may_poll_messengers() -> bool:
+    """True only when Python is explicitly allowed to own inbound pollers.
+
+    Default is False: Go ``remedy-runtime`` holds ``*_getupdates.lock`` and runs
+    Telegram/Discord (and outbound stubs). Opt in with REMEDY_PYTHON_MESSENGER_POLL=1.
+    """
+    raw = (os.environ.get("REMEDY_PYTHON_MESSENGER_POLL") or "").strip().lower()
+    return raw in ("1", "true", "yes", "on")
 
 
 def _pid_alive(pid: int) -> bool:
@@ -127,7 +141,16 @@ class MessengerPollLock:
         report STILL_ACTIVE for an exited process, and PIDs recycle. Try the OS
         exclusive lock. If it is free, this serve takes over (restart reclaim).
         If it is busy, a true live poller still holds it — we stay out.
+
+        When Go owns messengers (default), always refuse so Python cannot dual-poll.
         """
+        if not python_may_poll_messengers():
+            logger.info(
+                "%s poll lock skipped — Go remedy-runtime owns messenger inbound "
+                "(set REMEDY_PYTHON_MESSENGER_POLL=1 only for emergency Python poll)",
+                self.channel,
+            )
+            return False
         if self.held:
             return True
         key = self._key()

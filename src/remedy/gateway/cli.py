@@ -123,6 +123,8 @@ async def run_gateway(
     cli = CLIChannel(gw)
     gw.register_channel(cli)
 
+    from remedy.gateway.poll_lock import python_may_poll_messengers
+
     registered = register_messenger_channels(
         gw,
         cfg,
@@ -133,13 +135,20 @@ async def run_gateway(
     gw.register_channel(WebChannel(gw))
     await gw.start()
 
+    go_owns = not python_may_poll_messengers()
+    inbound_note = (
+        "Inbound poll owned by Go remedy-runtime (Python outbound-only).\n"
+        if go_owns
+        else "Python messenger poll enabled via REMEDY_PYTHON_MESSENGER_POLL.\n"
+    )
     console.print(Panel(
         f"[bold green]Remedy Gateway Running[/bold green]\n"
         f"Channels: {', '.join(c.value for c in gw.channels)}\n"
         f"Messengers: {', '.join(registered) or '(none)'}\n"
         f"Heartbeat: {hb}s · Rate: {rate}/min\n"
         f"Database: {db_path}\n"
-        f"\n[dim]Messenger chats appear in desktop Sessions (realtime SSE).\n"
+        f"\n[dim]{inbound_note}"
+        f"Messenger chats appear in desktop Sessions (realtime SSE).\n"
         f"Press Ctrl+C to stop[/dim]",
         title="Gateway Status",
     ))

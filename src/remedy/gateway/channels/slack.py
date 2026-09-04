@@ -57,6 +57,14 @@ class SlackChannel(HttpSessionMixin, ChannelAdapter):
         if not self.app_token:
             logger.info("Slack: outbound only (set app_token for Socket Mode inbound)")
             return
+        from remedy.gateway.poll_lock import python_may_poll_messengers
+
+        if not python_may_poll_messengers():
+            logger.info(
+                "Slack: outbound-ready (Go remedy-runtime owns inbound; "
+                "Socket Mode not started from Python)"
+            )
+            return
         started = await self._try_start_socket()
         if not started:
             logger.error(

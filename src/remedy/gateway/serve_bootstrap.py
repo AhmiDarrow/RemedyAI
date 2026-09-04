@@ -1,6 +1,10 @@
 """Wire messenger channels + session bridge onto the API/desktop Gateway.
 
 Keeps interfaces/cli.py thin: serve only calls ``attach_messengers_to_gateway``.
+
+Inbound long-poll / WS is owned by Go ``remedy-runtime`` (``native/go/gateway``).
+Python registers adapters for outbound mirror + catalog compatibility and does
+not acquire messenger poll locks unless ``REMEDY_PYTHON_MESSENGER_POLL=1``.
 """
 
 from __future__ import annotations
@@ -19,8 +23,15 @@ def attach_messengers_to_gateway(runtime: Any, gateway: Any) -> list[str]:
     """
     from remedy.gateway.channel_registry import register_messenger_channels
     from remedy.gateway.messengers import is_messenger_channel
+    from remedy.gateway.poll_lock import python_may_poll_messengers
     from remedy.gateway.session_bridge import handle_messenger_event, outbound_chunks
     from remedy.interfaces.api_support import load_config
+
+    if not python_may_poll_messengers():
+        logger.info(
+            "Messenger inbound owned by Go remedy-runtime; "
+            "Python adapters are outbound-only (no dual poll)"
+        )
 
     async def _gateway_handler(event):
         ch = event.channel.value if hasattr(event.channel, "value") else str(event.channel)

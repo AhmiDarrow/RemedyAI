@@ -14,7 +14,7 @@ Pointers, not a second product bible. Public: `docs/DESKTOP.md`,
 | Shell tests | `desktop/src-tauri/src/` | Rust/Tauri browser host, privacy shield, lifecycle, Windows + Linux compile |
 | Connect tests | `android/**/src/test/` | Kotlin protocol, storage, networking, and mobile behavior; lint + both APK variants |
 | Native tests | `native/go/**/*_test.go`, `native/zig/src/` | Go race/unit/benchmark/boundary gates and Zig debug/ReleaseSafe capability tests |
-| Gateway | `src/remedy/gateway/` | Serve bootstrap, session bridge, messenger flush |
+| Gateway | `native/go/gateway/` (+ thin `src/remedy/gateway/`) | Go owns messenger inbound + poll locks; Python keeps catalog, settings, outbound mirror |
 | Native runtime | `native/` | Versioned Go nervous system + Zig capability core; layered cutover with Python compatibility/ML workers |
 | Claimidx host | `src/remedy/runtime/claimidx_host.py` | Pinned first-run install, private index, loopback lifecycle on `:17340` |
 

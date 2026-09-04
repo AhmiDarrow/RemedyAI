@@ -67,6 +67,13 @@ class SignalChannel(ChannelAdapter):
             )
             return
         logger.info("Signal channel active (cli=%s)", bin_path)
+        from remedy.gateway.poll_lock import python_may_poll_messengers
+
+        if not python_may_poll_messengers():
+            logger.info(
+                "Signal: outbound-ready (Go remedy-runtime owns inbound receive)"
+            )
+            return
         started = await self._try_start_receive()
         if not started:
             logger.error(
