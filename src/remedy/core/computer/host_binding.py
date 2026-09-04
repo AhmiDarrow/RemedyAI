@@ -341,6 +341,32 @@ _PROTOTYPES: dict[str, tuple[list[Any], Any]] = {
         ],
         c_int32,
     ),
+    "remedy_core_process_exec_capture_authorized": (
+        [
+            c_char_p,
+            c_size_t,
+            c_char_p,
+            c_size_t,
+            c_char_p,
+            c_size_t,
+            c_void_p,
+            c_size_t,
+            c_char_p,
+            c_size_t,
+            c_char_p,
+            c_size_t,
+            c_uint8,
+            c_uint64,
+            c_uint32,
+            POINTER(c_uint32),
+            POINTER(c_uint8),
+            POINTER(_BytePtr),
+            POINTER(c_size_t),
+            POINTER(_BytePtr),
+            POINTER(c_size_t),
+        ],
+        c_int32,
+    ),
     "remedy_core_write_jail_set_roots": ([c_char_p, c_size_t], c_int32),
     "remedy_core_write_jail_clear": ([], c_int32),
     "remedy_core_write_jail_check_path": (
@@ -1639,6 +1665,86 @@ def process_spawn_authorized(
         ),
     )
     return pid.value, handle.value
+
+
+class ExecCaptureResult(NamedTuple):
+    """Outcome of :func:`process_exec_capture_authorized`."""
+
+    exit_code: int
+    timed_out: bool
+    stdout: bytes
+    stderr: bytes
+
+
+def process_exec_capture_authorized(
+    argv: Sequence[str],
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+    *,
+    token: bytes,
+    subject: str = DEFAULT_SPAWN_SUBJECT,
+    scope: str = DEFAULT_SPAWN_SCOPE,
+    owner_confirmed: bool = False,
+    now_ms: int | None = None,
+    timeout_ms: int = 60_000,
+    write_roots: Sequence[str] | None = None,
+) -> ExecCaptureResult:
+    """Authorized one-shot hidden spawn with stdout/stderr capture.
+
+    *argv[0]* must be absolute. ``timeout_ms`` 0 defaults to 60000 inside Zig.
+    On timeout: ``timed_out`` is True and ``exit_code`` is 1. No unsigned soft
+    fallback. *write_roots* semantics match :func:`process_spawn_authorized`.
+    """
+    if write_roots is not None:
+        write_jail_set_roots(write_roots)
+    library = _lib()
+    argv_raw = _utf8(json.dumps([str(a) for a in argv]))
+    cwd_raw = _utf8(str(cwd)) if cwd else b""
+    env_raw = (
+        _utf8(json.dumps({str(k): str(v) for k, v in env.items()}))
+        if env is not None
+        else b""
+    )
+    subject_raw = _utf8(subject)
+    scope_raw = _utf8(scope)
+    token_raw = bytes(token)
+    when = int(time.time() * 1000) if now_ms is None else int(now_ms)
+    exit_code, timed_out = c_uint32(), c_uint8()
+    out_so, out_so_len = _BytePtr(), c_size_t()
+    out_se, out_se_len = _BytePtr(), c_size_t()
+    _check(
+        library,
+        "process_exec_capture_authorized",
+        library.remedy_core_process_exec_capture_authorized(
+            argv_raw,
+            len(argv_raw),
+            cwd_raw,
+            len(cwd_raw),
+            env_raw,
+            len(env_raw),
+            (c_uint8 * len(token_raw)).from_buffer_copy(token_raw),
+            len(token_raw),
+            subject_raw,
+            len(subject_raw),
+            scope_raw,
+            len(scope_raw),
+            1 if owner_confirmed else 0,
+            when,
+            int(timeout_ms) & 0xFFFFFFFF,
+            ctypes.byref(exit_code),
+            ctypes.byref(timed_out),
+            ctypes.byref(out_so),
+            ctypes.byref(out_so_len),
+            ctypes.byref(out_se),
+            ctypes.byref(out_se_len),
+        ),
+    )
+    return ExecCaptureResult(
+        exit_code=int(exit_code.value),
+        timed_out=bool(timed_out.value),
+        stdout=_take(library, out_so, out_so_len),
+        stderr=_take(library, out_se, out_se_len),
+    )
 
 
 def conpty_spawn_authorized(
