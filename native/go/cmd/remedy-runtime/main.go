@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"runtime"
 
+	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
 	"github.com/AhmiDarrow/RemedyAI/native/go/httpapi"
 )
 
@@ -42,6 +43,7 @@ func main() {
 	probe := flag.Bool("probe", false, "emit one JSON readiness record and exit")
 	listen := flag.String("listen", "", "loopback HTTP listen address (e.g. 127.0.0.1:0); opt-in, not :7400")
 	serve := flag.Bool("serve", false, "serve the Phase-4 local HTTP API (defaults --listen to 127.0.0.1:0)")
+	smokeFixture := flag.Bool("smoke-fixture", false, "use FixtureTurnRunner instead of cognition (explicit smoke only)")
 	flag.Parse()
 
 	if *probe {
@@ -64,9 +66,18 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	// Fixture runner keeps stream/sync chat callable until cognition is wired.
+	var runner httpapi.TurnRunner
+	if *smokeFixture {
+		runner = httpapi.NewFixtureTurnRunner()
+	} else {
+		// Scripted model until live providers stream through cognition.Model.
+		runner = httpapi.NewCognitionTurnRunner(&cognition.ScriptedModel{Rounds: [][]cognition.ModelEvent{
+			{{Text: "Hello ", Done: false}, {Text: "world", Done: true}},
+		}})
+	}
+
 	err := httpapi.ListenAndServe(ctx, addr, httpapi.Config{
-		TurnRunner: httpapi.NewFixtureTurnRunner(),
+		TurnRunner: runner,
 	}, func(bound string) {
 		fmt.Fprintf(os.Stderr, "remedy-runtime listening on http://%s\n", bound)
 	})
