@@ -263,3 +263,175 @@ func TestWebhookPathsSkipAPIBearer(t *testing.T) {
 		t.Fatalf("status=%d want 503", rec.Code)
 	}
 }
+
+func TestGenericWebhookHappyPath(t *testing.T) {
+	s := newWebhookTestServer(t)
+	var n atomic.Int32
+	var got gateway.Event
+	s.messengerGW.RegisterHandler(func(ctx context.Context, ev gateway.Event) error {
+		if ev.Kind == gateway.EventWebhook {
+			n.Add(1)
+			got = ev
+		}
+		return nil
+	})
+	h := s.Handler()
+	raw := []byte(`{"source":"ci","event":"push","data":{"x":1}}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/webhook/ci", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-token-not-a-secret-16")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["status"] != "accepted" || body["source"] != "ci" {
+		t.Fatalf("body=%#v", body)
+	}
+	waitAtomic(t, &n, 1)
+	if got.Channel != gateway.ChannelAPI || got.SourceID != "ci" {
+		t.Fatalf("event meta channel=%s source=%s", got.Channel, got.SourceID)
+	}
+	if got.Payload["event"] != "push" {
+		t.Fatalf("payload event=%v", got.Payload["event"])
+	}
+	data, _ := got.Payload["data"].(map[string]any)
+	switch x := data["x"].(type) {
+	case float64:
+		if x != 1 {
+			t.Fatalf("payload data=%#v", got.Payload["data"])
+		}
+	case json.Number:
+		if x.String() != "1" {
+			t.Fatalf("payload data=%#v", got.Payload["data"])
+		}
+	default:
+		t.Fatalf("payload data=%#v", got.Payload["data"])
+	}
+	rawKeep, _ := got.Payload["raw"].(string)
+	if !strings.Contains(rawKeep, `"event":"push"`) {
+		t.Fatalf("raw snippet=%q", rawKeep)
+	}
+}
+
+func TestGenericWebhookPublicExemptionAndHandlerAuth(t *testing.T) {
+	s := newWebhookTestServer(t)
+	t.Setenv("REMEDY_WEBHOOK_SECRET", "whsec-test-secret")
+	h := s.Handler()
+	raw := []byte(`{"source":"ci","event":"push","data":{"x":1}}`)
+
+	// Middleware must not 401: path is public. Handler still requires auth.
+	req := httptest.NewRequest(http.MethodPost, "/api/webhook/ci", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no-auth status=%d want 401", rec.Code)
+	}
+	var errBody map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &errBody)
+	if detail, _ := errBody["detail"].(string); detail != "Webhook auth required" {
+		t.Fatalf("want handler detail, got %#v (middleware would differ)", errBody)
+	}
+
+	var n atomic.Int32
+	s.messengerGW.RegisterHandler(func(ctx context.Context, ev gateway.Event) error {
+		if ev.Kind == gateway.EventWebhook {
+			n.Add(1)
+		}
+		return nil
+	})
+
+	req = httptest.NewRequest(http.MethodPost, "/api/webhook/ci", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Remedy-Webhook-Secret", "whsec-test-secret")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("secret-auth status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	waitAtomic(t, &n, 1)
+
+	req = httptest.NewRequest(http.MethodPost, "/api/webhook/ci", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Remedy-Webhook-Secret", "wrong")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong-secret status=%d", rec.Code)
+	}
+}
+
+func TestGenericWebhookFailClosedWithoutSecret(t *testing.T) {
+	t.Setenv("REMEDY_API_AUTH", "1")
+	t.Setenv("REMEDY_API_KEY", "")
+	t.Setenv("REMEDY_WEBHOOK_SECRET", "")
+	home := t.TempDir()
+	s, err := New(Config{
+		Token:   "temp-token-will-clear-16",
+		HomeDir: home,
+		DBPath:  filepath.Join(home, "memory.db"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	s.token = "" // no API token and no webhook secret → 503
+	s.startMessengerGateway()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/webhook/ci",
+		bytes.NewReader([]byte(`{"source":"ci","event":"push","data":{"x":1}}`)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable && rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d want 503 or 401", rec.Code)
+	}
+}
+
+func TestGenericWebhookBadBodyFamily(t *testing.T) {
+	s := newWebhookTestServer(t)
+	h := s.Handler()
+	auth := func(req *http.Request) {
+		req.Header.Set("Authorization", "Bearer test-token-not-a-secret-16")
+		req.Header.Set("Content-Type", "application/json")
+	}
+	s.messengerGW.RegisterHandler(func(ctx context.Context, ev gateway.Event) error {
+		if ev.Kind == gateway.EventWebhook {
+			t.Errorf("must not enqueue bad body (kind=%s)", ev.Kind)
+		}
+		return nil
+	})
+
+	cases := []struct {
+		name string
+		body []byte
+		cl   int64
+		want int
+	}{
+		{"truncated_json", []byte(`{"event": 5`), 0, http.StatusUnprocessableEntity},
+		{"missing_source", []byte(`{"event":"push","data":{}}`), 0, http.StatusUnprocessableEntity},
+		{"event_wrong_type", []byte(`{"source":"ci","event":5}`), 0, http.StatusUnprocessableEntity},
+		{"not_object", []byte(`["ci"]`), 0, http.StatusUnprocessableEntity},
+		{"empty_body", []byte(``), 0, http.StatusUnprocessableEntity},
+		{"oversized", bytes.Repeat([]byte("x"), webhookMaxBytes+8), int64(webhookMaxBytes + 8), http.StatusRequestEntityTooLarge},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/webhook/ci", bytes.NewReader(tc.body))
+			auth(req)
+			if tc.cl > 0 {
+				req.ContentLength = tc.cl
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status=%d want %d body=%s", rec.Code, tc.want, rec.Body.String())
+			}
+		})
+	}
+}

@@ -1,11 +1,14 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/gateway"
 )
@@ -212,4 +215,125 @@ func jsonTruthy(v any) bool {
 	default:
 		return true
 	}
+}
+
+// genericWebhookPayload mirrors Python WebhookPayload (api_models.py).
+type genericWebhookPayload struct {
+	Source    string         `json:"source"`
+	Event     string         `json:"event"`
+	Data      map[string]any `json:"data"`
+	Signature *string        `json:"signature"`
+}
+
+// handleGenericWebhook serves POST /api/webhook/{source} (CI / generic inject).
+// Middleware skips Bearer so X-Remedy-Webhook-Secret can reach us; when
+// AuthEnabled we fail closed (Bearer or webhook secret), matching Python.
+func (s *Server) handleGenericWebhook(w http.ResponseWriter, r *http.Request) {
+	gw := s.ensureMessengerGateway()
+	if gw == nil {
+		writeWebhookError(w, http.StatusServiceUnavailable, "Gateway not available")
+		return
+	}
+	if status, detail := s.authorizeGenericWebhook(r); status != 0 {
+		writeWebhookError(w, status, detail)
+		return
+	}
+
+	source := strings.TrimSpace(r.PathValue("source"))
+	if source == "" {
+		writeWebhookError(w, http.StatusUnprocessableEntity, "invalid webhook payload: source required")
+		return
+	}
+
+	body, err := readBodyCapped(r, webhookMaxBytes)
+	if errors.Is(err, errPayloadTooLarge) {
+		writeWebhookError(w, http.StatusRequestEntityTooLarge, "payload too large")
+		return
+	}
+	if err != nil {
+		writeWebhookError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+
+	payload, err := parseGenericWebhookPayload(body)
+	if err != nil {
+		writeWebhookError(w, http.StatusUnprocessableEntity, "invalid webhook payload: "+err.Error())
+		return
+	}
+
+	raw := truncateRunes(strings.ToValidUTF8(string(body), "\uFFFD"), 1000)
+	ev := gateway.Event{
+		ID:       gateway.NewEventID(),
+		Kind:     gateway.EventWebhook,
+		Channel:  gateway.ChannelAPI,
+		SourceID: source,
+		Payload: map[string]any{
+			"source": source,
+			"event":  payload.Event,
+			"data":   payload.Data,
+			"raw":    raw,
+		},
+		At: time.Now().UTC(),
+	}
+	gw.Enqueue(ev)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "accepted", "source": source})
+}
+
+// authorizeGenericWebhook mirrors memory.py receive_webhook auth (S-MSG-03).
+// Returns (0, "") when allowed.
+func (s *Server) authorizeGenericWebhook(r *http.Request) (int, string) {
+	if !AuthEnabled() {
+		return 0, ""
+	}
+	expected := ""
+	if s != nil {
+		expected = strings.TrimSpace(s.token)
+	}
+	if expected == "" {
+		expected = strings.TrimSpace(os.Getenv("REMEDY_API_KEY"))
+	}
+	if expected == "" {
+		expected = strings.TrimSpace(os.Getenv("REMEDY_WEBHOOK_SECRET"))
+	}
+	webhookSecret := strings.TrimSpace(os.Getenv("REMEDY_WEBHOOK_SECRET"))
+	if expected == "" && webhookSecret == "" {
+		return http.StatusServiceUnavailable,
+			"Webhook auth not configured (set REMEDY_WEBHOOK_SECRET or enable local API token)"
+	}
+	auth := r.Header.Get("Authorization")
+	secretHdr := r.Header.Get("X-Remedy-Webhook-Secret")
+	bearerOK := expected != "" && secretEquals(auth, "Bearer "+expected)
+	secretOK := secretHdr != "" && (
+		(expected != "" && secretEquals(secretHdr, expected)) ||
+			(webhookSecret != "" && secretEquals(secretHdr, webhookSecret)))
+	if !(bearerOK || secretOK) {
+		return http.StatusUnauthorized, "Webhook auth required"
+	}
+	return 0, ""
+}
+
+func parseGenericWebhookPayload(body []byte) (genericWebhookPayload, error) {
+	var payload genericWebhookPayload
+	dec := json.NewDecoder(strings.NewReader(string(body)))
+	dec.UseNumber()
+	if err := dec.Decode(&payload); err != nil {
+		return genericWebhookPayload{}, err
+	}
+	// Reject trailing junk (Python model_validate_json is strict on the document).
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return genericWebhookPayload{}, errors.New("trailing data")
+		}
+		return genericWebhookPayload{}, err
+	}
+	if strings.TrimSpace(payload.Source) == "" {
+		return genericWebhookPayload{}, errors.New("source required")
+	}
+	if payload.Event == "" {
+		payload.Event = "default"
+	}
+	if payload.Data == nil {
+		payload.Data = map[string]any{}
+	}
+	return payload, nil
 }
