@@ -93,10 +93,14 @@ func TestPublicAndAuthRoutes(t *testing.T) {
 				if gw["running"] != false {
 					t.Fatalf("gateway = %#v", gw)
 				}
-				for _, key := range []string{"memory_entries", "skills_count", "sessions_count", "chat_sessions_count"} {
+				for _, key := range []string{"memory_entries", "sessions_count", "chat_sessions_count"} {
 					if n, _ := body[key].(float64); n != 0 {
 						t.Fatalf("%s = %v, want 0", key, body[key])
 					}
+				}
+				// skills_count is discovered from bundled/dev roots when present.
+				if _, ok := body["skills_count"].(float64); !ok {
+					t.Fatalf("skills_count missing: %#v", body["skills_count"])
 				}
 			},
 		},
@@ -129,7 +133,13 @@ func TestPublicAndAuthRoutes(t *testing.T) {
 			headers: map[string]string{
 				"Authorization": "Bearer " + token,
 			},
-			wantStatus: http.StatusNotFound, // route not in this slice
+			wantStatus: http.StatusOK,
+			check: func(t *testing.T, body map[string]any, _ http.Header) {
+				// list endpoint returns a JSON array (decoded into nil map here).
+				if body != nil && body["error"] != nil {
+					t.Fatalf("skills list error body = %#v", body)
+				}
+			},
 		},
 		{
 			name:   "protected ok with X-Remedy-Token",
@@ -138,7 +148,7 @@ func TestPublicAndAuthRoutes(t *testing.T) {
 			headers: map[string]string{
 				"X-Remedy-Token": token,
 			},
-			wantStatus: http.StatusNotFound,
+			wantStatus: http.StatusOK,
 		},
 		{
 			name:   "protected 401 wrong token",

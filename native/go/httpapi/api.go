@@ -62,7 +62,7 @@ type Server struct {
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
 // sessions CRUD, session LLM bind, attachments upload/get, messages
 // list/create/stream, abort, session-events SSE, Connect management,
-// Connect me/stop, and providers/models catalog routes.
+// Connect me/stop, providers/models catalog, and skills/library routes.
 func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
@@ -130,6 +130,14 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/providers/free", s.handleListFreeProviders)
 	s.mux.HandleFunc("GET /api/providers/ollama/detect", s.handleOllamaDetect)
 	s.mux.HandleFunc("GET /api/models", s.handleListModels)
+	s.mux.HandleFunc("GET /api/skills", s.handleListSkills)
+	s.mux.HandleFunc("GET /api/skills/library/catalog", s.handleLibraryCatalog)
+	s.mux.HandleFunc("GET /api/skills/library/search", s.handleLibrarySearch)
+	s.mux.HandleFunc("GET /api/skills/library/suggest", s.handleLibrarySuggest)
+	s.mux.HandleFunc("POST /api/skills/library/suggest/dismiss", s.handleLibrarySuggestDismiss)
+	s.mux.HandleFunc("POST /api/skills/library/install", s.handleLibraryInstall)
+	s.mux.HandleFunc("GET /api/skills/library/updates", s.handleLibraryUpdates)
+	s.mux.HandleFunc("GET /api/skills/{name}", s.handleGetSkill)
 	return s, nil
 }
 
@@ -257,7 +265,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"uptime":              uptime,
 		"gateway":             map[string]any{"running": false},
 		"memory_entries":      0,
-		"skills_count":        0,
+		"skills_count":        s.skillsCount(),
 		"sessions_count":      0,
 		"chat_sessions_count": 0,
 	}
