@@ -28,10 +28,22 @@ def test_go_owns_messenger_poll_by_default(monkeypatch, tmp_path):
 
 def test_python_poll_opt_in_allows_lock(monkeypatch, tmp_path):
     monkeypatch.setenv("REMEDY_PYTHON_MESSENGER_POLL", "1")
+    monkeypatch.setenv("REMEDY_TESTING", "1")
     assert python_may_poll_messengers() is True
     lock = MessengerPollLock(tmp_path, "telegram")
     assert lock.try_acquire() is True
     lock.release()
+
+
+def test_python_poll_flag_alone_refused_outside_tests(monkeypatch, tmp_path):
+    """REMEDY_PYTHON_MESSENGER_POLL=1 without a test marker must not dual-poll."""
+    monkeypatch.setenv("REMEDY_PYTHON_MESSENGER_POLL", "1")
+    monkeypatch.delenv("REMEDY_TESTING", raising=False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    assert python_may_poll_messengers() is False
+    lock = MessengerPollLock(tmp_path, "telegram")
+    assert lock.try_acquire() is False
+    assert lock.held is False
 
 
 def test_pid_alive_self():

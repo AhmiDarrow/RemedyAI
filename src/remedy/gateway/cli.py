@@ -139,7 +139,7 @@ async def run_gateway(
     inbound_note = (
         "Inbound poll owned by Go remedy-runtime (Python outbound-only).\n"
         if go_owns
-        else "Python messenger poll enabled via REMEDY_PYTHON_MESSENGER_POLL.\n"
+        else "Python messenger poll enabled (pytest / REMEDY_TESTING only).\n"
     )
     console.print(Panel(
         f"[bold green]Remedy Gateway Running[/bold green]\n"

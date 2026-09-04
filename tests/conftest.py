@@ -11,8 +11,10 @@ import pytest
 os.environ.setdefault("REMEDY_API_AUTH", "0")
 
 # Production: Go remedy-runtime owns messenger inbound poll locks. The suite
-# still exercises Python adapter poll paths; opt them in for tests only.
+# still exercises Python adapter poll paths; both flags are required — the poll
+# flag alone is refused outside pytest / REMEDY_TESTING.
 os.environ.setdefault("REMEDY_PYTHON_MESSENGER_POLL", "1")
+os.environ.setdefault("REMEDY_TESTING", "1")
 
 # The suite must never write to — or drive — the owner's real installation.
 # Several subsystems (the computer host bridge above all) resolve their home
