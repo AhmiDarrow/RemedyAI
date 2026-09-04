@@ -28,7 +28,7 @@ func TestCognitionTurnRunnerEmitsTextAndCompletes(t *testing.T) {
 
 func TestCognitionTurnRunnerRegistersZigHostTools(t *testing.T) {
 	r := NewCognitionTurnRunner(&cognition.ScriptedModel{})
-	for _, id := range []string{"computer.screenshot", "computer.windows", "computer.monitors"} {
+	for _, id := range []string{"computer.screenshot", "computer.windows", "computer.monitors", "shell.exec"} {
 		desc, err := r.Registry.Latest(id)
 		if err != nil {
 			t.Fatalf("%s missing: %v", id, err)

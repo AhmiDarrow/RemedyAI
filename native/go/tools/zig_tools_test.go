@@ -35,6 +35,16 @@ func TestRegisterZigHostToolsDescriptors(t *testing.T) {
 			t.Fatalf("%s capabilities=%v", id, desc.Capabilities)
 		}
 	}
+	shell, err := registry.Latest("shell.exec")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shell.Runtime != RuntimeZig || shell.Risk != RiskMutation {
+		t.Fatalf("shell.exec runtime/risk=%s/%v", shell.Runtime, shell.Risk)
+	}
+	if len(shell.Capabilities) == 0 || shell.Capabilities[0] != "process.spawn" {
+		t.Fatalf("shell.exec capabilities=%v", shell.Capabilities)
+	}
 }
 
 func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
@@ -52,6 +62,73 @@ func TestZigHostToolsFailClosedWithoutLibrary(t *testing.T) {
 	_, err := registry.Execute(context.Background(), Request{
 		ToolID: "computer.windows", Version: 1, Input: json.RawMessage(`{}`),
 		CapabilityToken: token,
+	})
+	if err == nil {
+		t.Fatal("expected fail-closed error")
+	}
+	if !errors.Is(err, core.ErrUnavailable) && !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestShellExecRejectsRelativeArgv(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:          "shell.exec",
+		Version:         1,
+		Input:           json.RawMessage(`{"argv":["echo","hi"]}`),
+		CapabilityToken: []byte("test-token"),
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("relative argv[0]: %v", err)
+	}
+	if !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("expected absolute path message: %v", err)
+	}
+}
+
+func TestShellExecRequiresCapabilityToken(t *testing.T) {
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Execute(context.Background(), Request{
+		ToolID:  "shell.exec",
+		Version: 1,
+		Input:   json.RawMessage(`{"argv":["C:\\\\Windows\\\\System32\\\\cmd.exe","/c","echo","hi"]}`),
+	})
+	if !errors.Is(err, ErrAuthorizationRequired) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestShellExecFailClosedWithoutLibrary(t *testing.T) {
+	core.ResetForTest()
+	t.Cleanup(core.ResetForTest)
+	home := t.TempDir()
+	t.Setenv("REMEDY_HOME", home)
+	t.Setenv("REMEDY_NATIVE_CORE_LIB", filepath.Join(t.TempDir(), "missing.dll"))
+
+	registry := NewRegistry(AuthorizerFunc(func(context.Context, Descriptor, Request) error {
+		return nil
+	}))
+	if err := RegisterZigHostTools(registry); err != nil {
+		t.Fatal(err)
+	}
+	argv0 := filepath.Join(home, "bin", "tool.exe")
+	input, err := json.Marshal(map[string]any{"argv": []string{argv0, "--version"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = registry.Execute(context.Background(), Request{
+		ToolID: "shell.exec", Version: 1, Input: input, CapabilityToken: []byte("tok"),
 	})
 	if err == nil {
 		t.Fatal("expected fail-closed error")
@@ -141,5 +218,38 @@ func TestZigHostToolsLiveWhenLibraryPresent(t *testing.T) {
 	}
 	if !strings.Contains(filepath.ToSlash(shotOut.Path), "/computer/shots/") {
 		t.Fatalf("unexpected shot path %q", shotOut.Path)
+	}
+
+	cmd := filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
+	if _, err := os.Stat(cmd); err != nil {
+		t.Skip("cmd.exe missing")
+	}
+	shellInput, err := json.Marshal(map[string]any{
+		"argv":       []string{cmd, "/d", "/s", "/c", "echo shell-exec-ok"},
+		"timeout_ms": 15000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shell, err := registry.Execute(context.Background(), Request{
+		ToolID: "shell.exec", Version: 1, Input: shellInput, CapabilityToken: token,
+	})
+	if err != nil {
+		t.Fatalf("shell.exec: %v", err)
+	}
+	var shellOut struct {
+		ExitCode uint32 `json:"exit_code"`
+		TimedOut bool   `json:"timed_out"`
+		Stdout   string `json:"stdout"`
+		Stderr   string `json:"stderr"`
+	}
+	if err := json.Unmarshal(shell.Output, &shellOut); err != nil {
+		t.Fatal(err)
+	}
+	if shellOut.TimedOut || shellOut.ExitCode != 0 {
+		t.Fatalf("shell.exec failed: %#v", shellOut)
+	}
+	if !strings.Contains(shellOut.Stdout, "shell-exec-ok") {
+		t.Fatalf("stdout=%q stderr=%q", shellOut.Stdout, shellOut.Stderr)
 	}
 }
