@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
+import subprocess
+from pathlib import Path
 
 from remedy.gateway.cli import main_gateway
 from remedy.interfaces.cli.cmd_runtime import _cmd_chat, _cmd_desktop, _cmd_serve
@@ -25,6 +29,57 @@ from remedy.interfaces.cli.util import UnsafeHomeError, _get_db_path, console
 from remedy.interfaces.uninstaller import run_uninstall
 from remedy.interfaces.updater import run_update
 from remedy.interfaces.wizard import run_wizard
+
+
+def _repo_root() -> Path | None:
+    here = Path(__file__).resolve()
+    for candidate in (here.parents[3], here.parents[4] if len(here.parents) > 4 else None):
+        if candidate is None:
+            continue
+        if (candidate / "native" / "go" / "go.mod").is_file():
+            return candidate
+    env = os.environ.get("REMEDY_DEV_ROOT", "").strip()
+    if env:
+        root = Path(env).expanduser().resolve()
+        if (root / "native" / "go" / "go.mod").is_file():
+            return root
+    return None
+
+
+def _run_connect_relay(*, host: str, port: int) -> int:
+    """Dispatch owner-run relay to the Go binary. No Python Connect fallback."""
+    override = os.environ.get("REMEDY_CONNECT_RELAY", "").strip()
+    if override:
+        cmd = [override, "--host", host, "--port", str(port)]
+        return subprocess.call(cmd)
+
+    exe = "connect-relay.exe" if os.name == "nt" else "connect-relay"
+    found = shutil.which("connect-relay") or shutil.which(exe)
+    if found:
+        return subprocess.call([found, "--host", host, "--port", str(port)])
+
+    root = _repo_root()
+    if root is not None:
+        go = shutil.which("go")
+        if go:
+            return subprocess.call(
+                [
+                    go,
+                    "run",
+                    "./cmd/connect-relay",
+                    "--host",
+                    host,
+                    "--port",
+                    str(port),
+                ],
+                cwd=str(root / "native" / "go"),
+            )
+
+    console.print(
+        "[red]connect-relay:[/red] Go owns Connect. Build "
+        "`native/go/cmd/connect-relay` or set REMEDY_CONNECT_RELAY to the binary."
+    )
+    return 2
 
 
 def main(args: list[str] | None = None) -> None:
@@ -83,9 +138,7 @@ def main(args: list[str] | None = None) -> None:
     elif parsed.command == "desktop":
         _cmd_desktop(parsed)
     elif parsed.command == "connect-relay":
-        from remedy.connect.relay import main as connect_relay_main
-
-        raise SystemExit(connect_relay_main(host=parsed.host, port=parsed.port))
+        raise SystemExit(_run_connect_relay(host=parsed.host, port=parsed.port))
     elif parsed.command == "setup":
         run_wizard(
             quick=parsed.quick,

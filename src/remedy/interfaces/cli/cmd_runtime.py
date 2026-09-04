@@ -293,17 +293,8 @@ def _cmd_serve(args) -> None:
         except Exception as exc:
             console.print(f"[yellow]Computer host failed:[/yellow] {exc}")
 
-    try:
-        from remedy.connect.lifecycle import maybe_start_connect
-
-        maybe_start_connect(
-            app,
-            config if isinstance(config, dict) else {},
-            api_key=str(api_key or ""),
-            sidecar_port=int(getattr(args, "port", 7400) or 7400),
-        )
-    except Exception as exc:
-        console.print(f"[yellow]Connect gateway skipped:[/yellow] {exc}")
+    # Connect Gateway is owned by remedy-runtime (Go). Python serve does not
+    # start or fall back to a Python Connect listener.
 
     log_level = config.get("log_level", "INFO").upper()
     # Access logs spam the desktop console (status polls every few seconds).
