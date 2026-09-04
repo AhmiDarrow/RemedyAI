@@ -176,9 +176,7 @@ def _workspace_list(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     root = _workspace_root()
     entries = sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
     visible = [
-        p
-        for p in entries
-        if p.name not in _SKIP_DIR_NAMES and not _is_credential_name(p.name)
+        p for p in entries if p.name not in _SKIP_DIR_NAMES and not _is_credential_name(p.name)
     ]
     page = visible[offset : offset + limit]
     items: list[dict[str, str]] = []
@@ -196,6 +194,59 @@ def _workspace_list(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     if offset + len(items) < len(visible):
         out["truncated"] = True
     return out
+
+
+def _workspace_write(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Bridge Tool ABI workspace.write to atomic workspace file write + agent guards."""
+    path = str(inp.get("path") or "").strip()
+    if not path:
+        raise ValueError("path is required")
+    if "content" not in inp:
+        raise ValueError("content is required")
+    raw_content = inp.get("content")
+    if raw_content is None:
+        raise ValueError("content is required")
+    if isinstance(raw_content, (dict, list)):
+        body = json.dumps(raw_content, ensure_ascii=False)
+    elif isinstance(raw_content, str):
+        body = raw_content
+    else:
+        body = str(raw_content)
+
+    from remedy.core.workspace_tools.guards import (
+        junk_write_guard,
+        looks_like_history_stub_text,
+        reserved_guard,
+    )
+
+    bad = reserved_guard(path)
+    if bad:
+        raise PermissionError(bad)
+    junk = junk_write_guard(path)
+    if junk:
+        raise PermissionError(junk)
+    if looks_like_history_stub_text(body):
+        raise ValueError("refusing to write provider-history summary stub as file content")
+
+    target = _resolve_workspace_path(path)
+    if _is_credential_name(target.name) or any(_is_credential_name(p) for p in target.parts):
+        raise PermissionError("credential-looking files are not writable")
+    if target.exists() and target.is_dir():
+        raise IsADirectoryError(f"path is a directory: {path}")
+
+    created = not target.is_file()
+    from remedy.core.atomic_json import write_text_atomic
+
+    write_text_atomic(target, body)
+    try:
+        rel = str(target.relative_to(_workspace_root()).as_posix())
+    except ValueError:
+        rel = str(target)
+    return {
+        "path": rel,
+        "bytes_written": len(body.encode("utf-8")),
+        "created": created,
+    }
 
 
 def _web_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -234,6 +285,7 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("text.word_count", 1): lambda inp: {"words": _word_count(str(inp.get("text", "")))},
     ("workspace.read", 1): _workspace_read,
     ("workspace.list", 1): _workspace_list,
+    ("workspace.write", 1): _workspace_write,
     ("web.search", 1): _web_search,
 }
 
@@ -266,12 +318,16 @@ def read_frame(stream: BinaryIO) -> tuple[int, int, bytes, bytes]:
     return kind, flags, correlation, payload
 
 
-def write_frame(stream: BinaryIO, kind: int, correlation: bytes, payload: bytes, *, flags: int = 0) -> None:
+def write_frame(
+    stream: BinaryIO, kind: int, correlation: bytes, payload: bytes, *, flags: int = 0
+) -> None:
     if len(correlation) != 16:
         raise ValueError("correlation id must be 16 bytes")
     if len(payload) > _MAX_PAYLOAD:
         raise ValueError("RMDY payload too large")
-    header = _MAGIC + struct.pack("<HHII", _PROTOCOL_VERSION, kind, flags, len(payload)) + correlation
+    header = (
+        _MAGIC + struct.pack("<HHII", _PROTOCOL_VERSION, kind, flags, len(payload)) + correlation
+    )
     stream.write(header + payload)
     stream.flush()
 
@@ -293,7 +349,9 @@ def _handle_tool(payload: bytes) -> bytes:
         return json.dumps({"ok": False, "error": "input must be a JSON object"}).encode("utf-8")
     handler = _HANDLERS.get((tool_id, version))
     if handler is None:
-        return json.dumps({"ok": False, "error": f"unknown tool {tool_id}@{version}"}).encode("utf-8")
+        return json.dumps({"ok": False, "error": f"unknown tool {tool_id}@{version}"}).encode(
+            "utf-8"
+        )
     try:
         output = handler(raw_input)
     except Exception as exc:  # noqa: BLE001 — wire must carry the failure

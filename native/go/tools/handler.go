@@ -217,6 +217,49 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	}
 
 	if err := registry.Register(Descriptor{
+		ID:          "workspace.write",
+		Version:     1,
+		Description: "Write a UTF-8 text file (local mirror of Python worker)",
+		Runtime:     RuntimeGo,
+		Risk:        RiskMutation,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["path","content"],
+			"properties":{
+				"path":{"type":"string","minLength":1},
+				"content":{"type":"string"}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["path","bytes_written"],
+			"properties":{
+				"path":{"type":"string"},
+				"bytes_written":{"type":"integer","minimum":0},
+				"created":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(func(_ context.Context, request Request) (Result, error) {
+		var body struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(request.Input, &body); err != nil || strings.TrimSpace(body.Path) == "" {
+			return Result{}, ErrInvalidInput
+		}
+		out, err := json.Marshal(map[string]any{
+			"path":          body.Path,
+			"bytes_written": len([]byte(body.Content)),
+			"created":       true,
+		})
+		return Result{Output: out}, err
+	})); err != nil {
+		return err
+	}
+
+	if err := registry.Register(Descriptor{
 		ID:          "web.search",
 		Version:     1,
 		Description: "Search the public web (local mirror of Python worker)",
