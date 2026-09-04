@@ -345,25 +345,18 @@ async def test_run_exec_scrubs_llm_keys_and_askpass(monkeypatch, tmp_path):
 
     captured: dict = {}
 
-    class FakeProc:
-        returncode = 0
+    async def fake_hidden(argv, **kwargs):
+        import subprocess
 
-        async def communicate(self):
-            return b"ok", b""
-
-        def kill(self):
-            return None
-
-    async def fake_hidden(*argv, **kwargs):
         captured["env"] = dict(kwargs.get("env") or {})
-        return FakeProc()
+        return subprocess.CompletedProcess(list(argv), 0, "ok", "")
 
     monkeypatch.setenv("XAI_API_KEY", "xai_must_drop")
     monkeypatch.setenv("OPENAI_API_KEY", "sk_must_drop")
     monkeypatch.setenv("GIT_ASKPASS", "gui-helper")
     monkeypatch.setenv("GH_TOKEN", "ghp_test_keep")
     monkeypatch.setattr(
-        "remedy.execution.process.create_hidden_subprocess_exec",
+        "remedy.execution.process.run_hidden_async",
         fake_hidden,
     )
     code, out, _err = await mod._run_exec(

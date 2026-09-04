@@ -134,6 +134,94 @@ def test_run_hidden_fail_closed_family(monkeypatch: pytest.MonkeyPatch) -> None:
         P.run_hidden([sys.executable, "-c", "pass"], timeout=1)
 
 
+def test_run_hidden_capture_uses_exec_capture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[list[str]] = []
+
+    class _Captured:
+        exit_code = 0
+        timed_out = False
+        stdout = b"cap-ok\n"
+        stderr = b""
+
+    def fake_require() -> None:
+        return None
+
+    def fake_resolve(argv):
+        return [str(a) for a in argv]
+
+    def fake_issue(argv, **_k):
+        return b"\x11" * H.CAPABILITY_TOKEN_SIZE, 1
+
+    def fake_capture(argv, cwd=None, env=None, **kwargs):
+        _ = (cwd, env, kwargs)
+        seen.append(list(argv))
+        return _Captured()
+
+    monkeypatch.setattr(P, "require_process_host", fake_require)
+    monkeypatch.setattr(P, "_resolve_argv0", fake_resolve)
+    monkeypatch.setattr(H, "issue_process_spawn_token", fake_issue)
+    monkeypatch.setattr(H, "process_exec_capture_authorized", fake_capture)
+
+    result = P.run_hidden(
+        [sys.executable, "-c", "print('cap-ok')"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 0
+    assert "cap-ok" in (result.stdout or "")
+    assert seen and seen[0][0] == sys.executable
+
+
+def test_piped_soft_helpers_fail_closed_family(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if sys.platform not in ("win32", "linux"):
+        pytest.skip("process host gate is win32/linux")
+    from remedy.core.computer.host_binding import STATUS_UNSUPPORTED
+
+    monkeypatch.setattr(P, "require_process_host", lambda: None)
+    with pytest.raises(HostError) as raised:
+        P.popen_hidden([sys.executable, "-c", "pass"])
+    assert raised.value.status == STATUS_UNSUPPORTED
+
+
+@pytest.mark.asyncio
+async def test_create_hidden_fail_closed_family(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if sys.platform not in ("win32", "linux"):
+        pytest.skip("process host gate is win32/linux")
+    import asyncio
+
+    from remedy.core.computer.host_binding import STATUS_UNSUPPORTED
+
+    monkeypatch.setattr(P, "require_process_host", lambda: None)
+    with pytest.raises(HostError) as raised:
+        await P.create_hidden_subprocess_exec(
+            sys.executable,
+            "-c",
+            "pass",
+            stdout=asyncio.subprocess.PIPE,
+        )
+    assert raised.value.status == STATUS_UNSUPPORTED
+
+
+@pytest.mark.asyncio
+async def test_host_session_posix_pipes_fail_closed_on_linux() -> None:
+    if sys.platform != "linux":
+        pytest.skip("POSIX pipe refuse is linux-specific")
+    from remedy.core.computer.host_binding import STATUS_UNSUPPORTED
+    from remedy.execution.host import session as sess_mod
+
+    session = sess_mod.HostSession(host="posix")
+    with pytest.raises(HostError) as raised:
+        await session.start()
+    assert raised.value.status == STATUS_UNSUPPORTED
+
+
 @requires_core
 @windows_with_core
 @pytest.mark.asyncio

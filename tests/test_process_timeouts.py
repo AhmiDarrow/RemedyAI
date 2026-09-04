@@ -18,7 +18,15 @@ from remedy.core.self_inject import _git_out
 
 
 @pytest.mark.asyncio
-async def test_git_returns_normally(tmp_path):
+async def test_git_returns_normally(tmp_path, monkeypatch):
+    import subprocess
+
+    async def fake_run(argv, **kwargs):
+        _ = kwargs
+        assert argv[:2] == ["git", "-C"]
+        return subprocess.CompletedProcess(list(argv), 0, "master\n", "")
+
+    monkeypatch.setattr("remedy.execution.process.run_hidden_async", fake_run)
     code, out, err = await _git_out(Path("."), "rev-parse", "--abbrev-ref", "HEAD")
     assert code == 0, err
     assert out.strip()
@@ -27,23 +35,12 @@ async def test_git_returns_normally(tmp_path):
 @pytest.mark.asyncio
 async def test_a_hung_git_becomes_a_failed_call_not_a_hang(monkeypatch):
     """Must not race a real git that can finish in under 1ms on a warm CI box."""
+    import subprocess
 
-    class _Never:
-        returncode = None
+    async def _run(argv, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=list(argv), timeout=kwargs.get("timeout") or 0.05)
 
-        async def communicate(self):
-            await asyncio.sleep(3600)
-
-        def kill(self):
-            return None
-
-        async def wait(self):
-            return 0
-
-    async def _spawn(*_a, **_kw):
-        return _Never()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", _spawn)
+    monkeypatch.setattr("remedy.execution.process.run_hidden_async", _run)
     code, out, err = await _git_out(Path("."), "rev-list", "--all", timeout_s=0.05)
     assert code != 0
     assert out == ""
@@ -52,11 +49,12 @@ async def test_a_hung_git_becomes_a_failed_call_not_a_hang(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stdin_is_closed_so_a_prompt_cannot_block():
-    """A credential or hook prompt must fail immediately rather than wait."""
+    """One-shot Zig exec-capture has no interactive stdin feed."""
     import inspect
 
     src = inspect.getsource(_git_out)
-    assert "stdin=asyncio.subprocess.DEVNULL" in src
+    assert "run_hidden_async" in src
+    assert "capture_output=True" in src
 
 
 def test_no_process_wait_in_the_tree_is_unbounded():
@@ -133,11 +131,11 @@ async def test_docker_answers_no_when_it_cannot_answer(monkeypatch):
         async def wait(self):
             return 0
 
-    async def _spawn(*_a, **_kw):
-        return _Never()
+    async def _run(argv, **_kw):
+        import subprocess
 
-    monkeypatch.setattr(
-        "remedy.execution.process.create_hidden_subprocess_exec", _spawn
-    )
+        raise subprocess.TimeoutExpired(cmd=list(argv), timeout=0.05)
+
+    monkeypatch.setattr("remedy.execution.process.run_hidden_async", _run)
     sandbox = docker_mod.DockerSandbox.__new__(docker_mod.DockerSandbox)
     assert await sandbox.sandbox_exists("x", timeout_s=0.05) is False
