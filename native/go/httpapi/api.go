@@ -56,7 +56,8 @@ type Server struct {
 }
 
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
-// sessions CRUD, messages list/create/stream, abort, and session-events SSE.
+// sessions CRUD, session LLM bind, messages list/create/stream, abort,
+// session-events SSE, and Connect management.
 func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
@@ -100,6 +101,8 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
 	s.mux.HandleFunc("PATCH /api/sessions/{id}", s.handleUpdateSession)
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
+	s.mux.HandleFunc("PUT /api/sessions/{id}/llm", s.handleSetSessionLLM)
+	s.mux.HandleFunc("POST /api/sessions/{id}/llm", s.handleSetSessionLLM)
 	s.mux.HandleFunc("GET /api/sessions/{id}/messages", s.handleListMessages)
 	s.mux.HandleFunc("POST /api/sessions/{id}/messages", s.handleSendMessage)
 	s.mux.HandleFunc("POST /api/sessions/{id}/messages/stream", s.handleStreamMessage)
