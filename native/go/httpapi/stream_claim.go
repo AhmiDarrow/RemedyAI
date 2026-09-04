@@ -23,6 +23,8 @@ type claimEntry struct {
 	ctx    context.Context
 }
 
+const nudgeMax = 24
+
 // streamClaims mirrors remedy.core.turn_context stream claim + abort epoch.
 type streamClaims struct {
 	mu       sync.Mutex
@@ -30,6 +32,7 @@ type streamClaims struct {
 	epochs   map[string]int
 	turns    sync.WaitGroup
 	sidTurns map[string]*sync.WaitGroup
+	nudges   map[string][]string
 }
 
 func newStreamClaims() *streamClaims {
@@ -37,6 +40,7 @@ func newStreamClaims() *streamClaims {
 		bySID:    make(map[string]*claimEntry),
 		epochs:   make(map[string]int),
 		sidTurns: make(map[string]*sync.WaitGroup),
+		nudges:   make(map[string][]string),
 	}
 }
 
@@ -190,6 +194,8 @@ func (c *streamClaims) Release(sessionID string, epoch *int) {
 		ent.cancel()
 	}
 	delete(c.bySID, sid)
+	// A nudge nobody drained belongs to a turn that is over.
+	delete(c.nudges, sid)
 }
 
 // Abort signals the live claim. Returns notified count (1 when a claim was
@@ -277,4 +283,51 @@ func (c *streamClaims) IsClaimed(sessionID string) bool {
 	defer c.mu.Unlock()
 	_, ok := c.bySID[sid]
 	return ok
+}
+
+// TryPushNudge queues owner mid-turn text. reason is ok | empty | no_turn | nudge_full.
+func (c *streamClaims) TryPushNudge(sessionID, text string) (ok bool, reason string) {
+	sid := strings.TrimSpace(sessionID)
+	body := strings.TrimSpace(text)
+	if sid == "" || body == "" || c == nil {
+		return false, "empty"
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, busy := c.bySID[sid]; !busy {
+		return false, "no_turn"
+	}
+	lst := c.nudges[sid]
+	if len(lst) >= nudgeMax {
+		return false, "nudge_full"
+	}
+	c.nudges[sid] = append(lst, body)
+	return true, "ok"
+}
+
+// DrainNudges takes every queued nudge for sessionID (empty when none).
+func (c *streamClaims) DrainNudges(sessionID string) []string {
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" || c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := c.nudges[sid]
+	delete(c.nudges, sid)
+	if len(out) == 0 {
+		return nil
+	}
+	return append([]string(nil), out...)
+}
+
+// ClearNudges drops queued mid-turn text for sessionID.
+func (c *streamClaims) ClearNudges(sessionID string) {
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" || c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.nudges, sid)
 }

@@ -106,8 +106,12 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 		}
 	}
 
+	model := cognition.Model(&emittingModel{inner: r.Model, emit: safeEmit})
+	if req.DrainNudges != nil {
+		model = &nudgeAwareModel{inner: model, drain: req.DrainNudges, emit: safeEmit}
+	}
 	engine := cognition.Engine{
-		Model:  &emittingModel{inner: r.Model, emit: safeEmit},
+		Model:  model,
 		Tools:  &emittingTools{inner: execTools, emit: safeEmit},
 		Policy: policy,
 		Config: r.Config,
@@ -132,6 +136,25 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 		return out.Err
 	}
 	return nil
+}
+
+type nudgeAwareModel struct {
+	inner cognition.Model
+	drain func() []string
+	emit  func(string)
+}
+
+func (m *nudgeAwareModel) Stream(ctx context.Context, turn cognition.Turn) (<-chan cognition.ModelEvent, error) {
+	if m.drain != nil {
+		if nudges := m.drain(); len(nudges) > 0 {
+			if m.emit != nil {
+				m.emit("@@steered\n")
+			}
+			turn.Goal = strings.TrimSpace(turn.Goal) +
+				"\n\n[Owner mid-turn guidance]\n" + strings.Join(nudges, "\n")
+		}
+	}
+	return m.inner.Stream(ctx, turn)
 }
 
 type emittingModel struct {

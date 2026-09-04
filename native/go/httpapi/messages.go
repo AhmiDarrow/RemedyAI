@@ -52,6 +52,8 @@ type TurnRequest struct {
 	PlanMode    bool
 	ChatMode    bool
 	Attachments []map[string]any
+	// DrainNudges returns queued owner mid-turn guidance (steer). Optional.
+	DrainNudges func() []string
 }
 
 // TurnRunner generates assistant tokens for the sync send path.
@@ -137,6 +139,175 @@ func (s *sessionStore) ListMessages(sessionID string, limit, offset int) ([]Chat
 		out = append(out, msg)
 	}
 	return out, rows.Err()
+}
+
+// ListMessagesExport returns up to limit non-reverted messages in chrono order
+// (export / timeline; higher cap than the list UI).
+func (s *sessionStore) ListMessagesExport(sessionID string, limit int) ([]ChatMessage, error) {
+	if limit <= 0 {
+		limit = 2000
+	}
+	if limit > 2000 {
+		limit = 2000
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.Query(
+		`SELECT id, role, content, thinking, tool_calls, tool_results,
+		        model, agent, tokens, created_at, reverted
+		 FROM (
+		   SELECT id, role, content, thinking, tool_calls, tool_results,
+		          model, agent, tokens, created_at, reverted, rowid AS _rid
+		   FROM chat_messages
+		   WHERE session_id = ? AND reverted = 0
+		   ORDER BY created_at DESC, rowid DESC
+		   LIMIT ?
+		 ) AS recent
+		 ORDER BY created_at ASC, _rid ASC`,
+		sessionID, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ChatMessage, 0)
+	for rows.Next() {
+		msg, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, msg)
+	}
+	return out, rows.Err()
+}
+
+// GetMessage returns a chat row and its session_id.
+func (s *sessionStore) GetMessage(msgID string) (msg ChatMessage, sessionID string, ok bool, err error) {
+	msgID = strings.TrimSpace(msgID)
+	if msgID == "" {
+		return ChatMessage{}, "", false, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	row := s.db.QueryRow(
+		`SELECT id, session_id, role, content, thinking, tool_calls, tool_results,
+		        model, agent, tokens, created_at, reverted
+		 FROM chat_messages WHERE id = ?`,
+		msgID,
+	)
+	var (
+		id, sid, role, content, created string
+		thinking, model, agent          sql.NullString
+		toolCallsJSON, toolResultsJSON  string
+		tokens                          sql.NullInt64
+		reverted                        int
+	)
+	err = row.Scan(
+		&id, &sid, &role, &content, &thinking, &toolCallsJSON, &toolResultsJSON,
+		&model, &agent, &tokens, &created, &reverted,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ChatMessage{}, "", false, nil
+	}
+	if err != nil {
+		return ChatMessage{}, "", false, err
+	}
+	var toolCalls any = []any{}
+	var toolResults any = []any{}
+	if toolCallsJSON != "" {
+		_ = json.Unmarshal([]byte(toolCallsJSON), &toolCalls)
+	}
+	if toolResultsJSON != "" {
+		_ = json.Unmarshal([]byte(toolResultsJSON), &toolResults)
+	}
+	msg = ChatMessage{
+		ID:          id,
+		Role:        role,
+		Content:     content,
+		ToolCalls:   toolCalls,
+		ToolResults: toolResults,
+		CreatedAt:   created,
+		Reverted:    reverted != 0,
+	}
+	if thinking.Valid {
+		msg.Thinking = thinking.String
+	}
+	if model.Valid {
+		msg.Model = model.String
+	}
+	if agent.Valid {
+		msg.Agent = agent.String
+	}
+	if tokens.Valid {
+		msg.Tokens = tokens.Int64
+	}
+	return msg, sid, true, nil
+}
+
+// RevertFrom soft-deletes msgID and all later messages; resyncs message_count.
+func (s *sessionStore) RevertFrom(sessionID, msgID string) (int, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	msgID = strings.TrimSpace(msgID)
+	if sessionID == "" || msgID == "" {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var cutAt string
+	var cutRid int64
+	err := s.db.QueryRow(
+		`SELECT created_at, rowid FROM chat_messages WHERE id = ? AND session_id = ?`,
+		msgID, sessionID,
+	).Scan(&cutAt, &cutRid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	res, err := s.db.Exec(
+		`UPDATE chat_messages SET reverted = 1
+		 WHERE session_id = ? AND reverted = 0 AND (
+		   created_at > ? OR (created_at = ? AND rowid >= ?)
+		 )`,
+		sessionID, cutAt, cutAt, cutRid,
+	)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		var live int
+		_ = s.db.QueryRow(
+			`SELECT COUNT(*) FROM chat_messages WHERE session_id = ? AND reverted = 0`,
+			sessionID,
+		).Scan(&live)
+		_, _ = s.db.Exec(
+			`UPDATE chat_sessions SET message_count = ?, updated_at = ? WHERE id = ?`,
+			live, nowISO(), sessionID,
+		)
+	}
+	return int(n), nil
+}
+
+// ClearMessages hard-deletes all messages for a session (slash /reset).
+func (s *sessionStore) ClearMessages(sessionID string) (int, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res, err := s.db.Exec(`DELETE FROM chat_messages WHERE session_id = ?`, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	_, err = s.db.Exec(
+		`UPDATE chat_sessions SET message_count = 0, updated_at = ? WHERE id = ?`,
+		nowISO(), sessionID,
+	)
+	return int(n), err
 }
 
 func scanMessage(row scannable) (ChatMessage, error) {
@@ -464,6 +635,12 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 		PlanMode:    req.PlanMode,
 		ChatMode:    req.ChatMode,
 		Attachments: attDicts,
+		DrainNudges: func() []string {
+			if s.claims == nil {
+				return nil
+			}
+			return s.claims.DrainNudges(sid)
+		},
 	}, func(token string) error {
 		if strings.HasPrefix(token, "@@") {
 			return nil
