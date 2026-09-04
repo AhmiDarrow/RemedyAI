@@ -393,12 +393,13 @@ export fn remedy_core_process_exec_capture_authorized(
             host.allocator,
             io,
             capability.Set.one(.process_spawn),
-            argv,
-            timeoutMs(budget),
+            .{
+                .argv = argv,
+                .timeout = timeoutMs(budget),
+            },
         ) catch |err| return switch (err) {
             error.InvalidArguments => invalid_status,
             error.AccessDenied => denied_status,
-            error.Unsupported => unsupported_status,
             else => failed_status,
         };
         if (soft.timed_out) {
