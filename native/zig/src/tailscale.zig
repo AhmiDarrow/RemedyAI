@@ -180,8 +180,10 @@ fn runCli(
         gpa,
         io,
         capability.Set.one(.process_spawn),
-        argv_buf[0 .. args.len + 1],
-        timeoutMs(timeout_ms),
+        .{
+            .argv = argv_buf[0 .. args.len + 1],
+            .timeout = timeoutMs(timeout_ms),
+        },
     );
 }
 

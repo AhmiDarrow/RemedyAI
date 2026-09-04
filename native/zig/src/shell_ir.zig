@@ -336,7 +336,7 @@ fn defaultHostName() []const u8 {
     return if (builtin.os.tag == .windows) "cmd" else "posix";
 }
 
-fn exeStem(name: []const u8) []const u8 {
+pub fn exeStem(name: []const u8) []const u8 {
     var head = name;
     if (std.mem.lastIndexOfScalar(u8, head, '/')) |i| head = head[i + 1 ..];
     if (std.mem.lastIndexOfScalar(u8, head, '\\')) |i| head = head[i + 1 ..];
@@ -350,7 +350,7 @@ fn testingIo() std.Io {
     return std.testing.io;
 }
 
-fn pathExists(io: std.Io, path: []const u8) bool {
+pub fn pathExists(io: std.Io, path: []const u8) bool {
     if (path.len == 0) return false;
     if (std.fs.path.isAbsolute(path)) {
         std.Io.Dir.accessAbsolute(io, path, .{}) catch return false;
@@ -887,7 +887,7 @@ fn splitArgv(arena: std.mem.Allocator, text: []const u8) error{OutOfMemory}![]co
     return try out.toOwnedSlice(arena);
 }
 
-fn coerceArgv(arena: std.mem.Allocator, text: []const u8) error{OutOfMemory}![]const []const u8 {
+pub fn coerceArgv(arena: std.mem.Allocator, text: []const u8) error{OutOfMemory}![]const []const u8 {
     const s = trimSpace(text);
     if (s.len == 0) return &.{};
     if (s[0] == '[' and s[s.len - 1] == ']') {
@@ -911,7 +911,7 @@ fn coerceArgv(arena: std.mem.Allocator, text: []const u8) error{OutOfMemory}![]c
     return splitArgv(arena, s);
 }
 
-fn looksLikePlainArgv(arena: std.mem.Allocator, command: []const u8) error{OutOfMemory}!bool {
+pub fn looksLikePlainArgv(arena: std.mem.Allocator, command: []const u8) error{OutOfMemory}!bool {
     const cmd = trimSpace(command);
     if (cmd.len == 0 or unquotedHasShellMeta(cmd)) return false;
     if (shell_translate.looksLikePowershell(cmd)) return false;

@@ -1,8 +1,8 @@
-"""Thin hop/abort orchestrator — Zig write-jail owns spawn scrub.
+"""Thin hop/abort orchestrator — Zig write-jail + shell-chain execute.
 
-``SubprocessSandbox`` expands shell chains and runs hidden children with
-abort/timeout. Workdir / write-root / auth-path gates go through
-``host_binding.write_jail_*`` (no Python path-jail twin, no soft fallback).
+``SubprocessSandbox`` routes ``A && B`` chains through Zig expand/execute with
+an abort-flag bridge. Non-chains still use ``_execute_one``. Workdir /
+write-root / auth-path gates go through ``host_binding.write_jail_*``.
 Env scrub lives in ``remedy.execution.env``; Docker in ``remedy.execution.docker``.
 """
 
@@ -10,12 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ctypes
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from remedy.execution.host.runner import ChainHop
+from typing import Any
 
 from remedy.core.security import check_dangerous_command
 from remedy.execution.env import (
@@ -151,20 +149,15 @@ class SubprocessSandbox(Sandbox):
             if denied is not None:
                 return denied
 
-        from remedy.execution.host.runner import expand_shell_chain
-
-        hops = expand_shell_chain(
+        chain = await self._execute_shell_chain(
             list(command),
-            project_path=workdir,
+            workdir=workdir,
+            timeout_seconds=timeout_seconds,
+            env=env,
+            start=start,
         )
-        if hops and len(hops) >= 2:
-            return await self._execute_shell_chain(
-                hops,
-                workdir=workdir,
-                timeout_seconds=timeout_seconds,
-                env=env,
-                start=start,
-            )
+        if chain is not None:
+            return chain
         return await self._execute_one(
             list(command),
             workdir=workdir,
@@ -173,117 +166,75 @@ class SubprocessSandbox(Sandbox):
             start=start,
         )
 
-    def _resolve_path(self, cwd: Path | None, raw: str) -> Path:
-        from remedy.core.workspace import resolve_existing_path
-
-        return resolve_existing_path(raw, cwd=cwd)
-
     async def _execute_shell_chain(
         self,
-        hops: list[ChainHop],
+        command: list[str],
         *,
         workdir: Path | None,
         timeout_seconds: float,
         env: dict[str, str] | None,
         start: float,
-    ) -> ExecutionResult:
-        """Run ``cd``/``mkdir``/process hops without cmd.exe (no inherited console)."""
-        from remedy.core.turn_context import is_turn_aborted
-        from remedy.execution.host.runner import ChainHop
+    ) -> ExecutionResult | None:
+        """Zig shell-chain execute. Returns ``None`` when not a chain."""
+        from remedy.core.computer.host_binding import HostError, shell_chain_execute
+        from remedy.core.turn_context import current_abort_event, is_turn_aborted
 
-        stdout_parts: list[str] = []
-        stderr_parts: list[str] = []
-        last = ExecutionResult(exit_code=0)
-        remaining = float(timeout_seconds)
-        cwd: Path | None = Path(workdir) if workdir is not None else None
-        for hop in hops:
-            if not isinstance(hop, ChainHop):
-                return ExecutionResult(
-                    exit_code=-1,
-                    stderr="internal: malformed shell chain",
-                    duration_ms=(time.monotonic() - start) * 1000,
-                )
-            if is_turn_aborted():
-                return ExecutionResult(
-                    exit_code=-1,
-                    stderr="Aborted before start (session stop)",
-                    duration_ms=(time.monotonic() - start) * 1000,
-                )
-            if remaining <= 0.05:
-                return ExecutionResult(
-                    exit_code=-1,
-                    stdout=_clip_output("\n".join(stdout_parts), "stdout"),
-                    stderr=_clip_output(
-                        "\n".join(
-                            [*stderr_parts, f"Command timed out after {timeout_seconds}s"]
-                        ),
-                        "stderr",
-                    ),
-                    duration_ms=(time.monotonic() - start) * 1000,
-                )
-            hop_start = time.monotonic()
-            if hop.kind == "cd":
-                raw = hop.paths[0] if hop.paths else ""
-                target = self._resolve_path(cwd, raw)
-                denied = _check_path_jail(target, cwd, start=start, what=f"cd {raw}")
-                if denied is not None:
-                    return denied
-                if not target.is_dir():
-                    return ExecutionResult(
-                        exit_code=1,
-                        stderr=f"cd: {target} is not a directory",
-                        duration_ms=(time.monotonic() - start) * 1000,
-                    )
-                cwd = target
-                remaining -= max(0.0, (time.monotonic() - hop_start))
-                last = ExecutionResult(exit_code=0)
-                continue
-            if hop.kind == "mkdir":
-                try:
-                    for p in hop.paths:
-                        dest = self._resolve_path(cwd, p)
-                        denied = _check_path_jail(
-                            dest, cwd, start=start, what=f"mkdir {p}"
-                        )
-                        if denied is not None:
-                            return denied
-                        dest.mkdir(parents=True, exist_ok=True)
-                except OSError as exc:
-                    return ExecutionResult(
-                        exit_code=1,
-                        stderr=f"mkdir failed: {exc}",
-                        duration_ms=(time.monotonic() - start) * 1000,
-                    )
-                remaining -= max(0.0, (time.monotonic() - hop_start))
-                last = ExecutionResult(exit_code=0)
-                continue
-            argv = list(hop.argv)
-            hop_danger = check_dangerous_command(argv)
-            if hop_danger:
-                return ExecutionResult(
-                    exit_code=-1,
-                    stderr=f"Blocked by security policy: {hop_danger}",
-                    duration_ms=(time.monotonic() - start) * 1000,
-                )
-            last = await self._execute_one(
-                argv,
-                workdir=cwd,
-                timeout_seconds=remaining,
-                env=env,
-                start=time.monotonic(),
+        if is_turn_aborted():
+            return ExecutionResult(
+                exit_code=-1,
+                stderr="Aborted before start (session stop)",
+                duration_ms=(time.monotonic() - start) * 1000,
             )
-            if last.stdout:
-                stdout_parts.append(last.stdout)
-            if last.stderr:
-                stderr_parts.append(last.stderr)
-            remaining -= max(0.0, last.duration_ms / 1000.0)
-            if last.exit_code != 0:
-                break
+
+        # Outer argv is cmd/sh; scrub once for the chain (Zig inherits this map).
+        safe_env = scrub_subprocess_env(env, argv=command)
+        safe_env.setdefault("PYTHONIOENCODING", "utf-8")
+        safe_env.setdefault("PYTHONUTF8", "1")
+
+        payload: dict[str, Any] = {
+            "argv": [str(a) for a in command],
+            "timeout_ms": max(1, int(float(timeout_seconds) * 1000)),
+            "env": {str(k): str(v) for k, v in safe_env.items()},
+        }
+        if workdir is not None:
+            payload["cwd"] = str(workdir)
+            payload["project_path"] = str(workdir)
+
+        abort_flag = ctypes.c_uint8(0)
+        abort_ev = current_abort_event()
+        watch: asyncio.Task[Any] | None = None
+        if abort_ev is not None:
+
+            async def _watch_abort() -> None:
+                await abort_ev.wait()
+                abort_flag.value = 1
+
+            watch = asyncio.create_task(_watch_abort())
+
+        try:
+            try:
+                result = await asyncio.to_thread(
+                    shell_chain_execute,
+                    payload,
+                    abort_flag=abort_flag,
+                )
+            except HostError:
+                raise
+        finally:
+            if watch is not None and not watch.done():
+                watch.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await watch
+
+        if result.get("not_a_chain"):
+            return None
+
+        elapsed = (time.monotonic() - start) * 1000
         return ExecutionResult(
-            exit_code=last.exit_code,
-            stdout=_clip_output("\n".join(stdout_parts), "stdout"),
-            stderr=_clip_output("\n".join(stderr_parts), "stderr"),
-            duration_ms=(time.monotonic() - start) * 1000,
+            exit_code=int(result.get("exit_code") or 0),
+            stdout=_clip_output(str(result.get("stdout") or ""), "stdout"),
+            stderr=_clip_output(str(result.get("stderr") or ""), "stderr"),
+            duration_ms=float(result.get("duration_ms") or elapsed),
         )
 
     async def _execute_one(
