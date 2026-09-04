@@ -487,3 +487,85 @@ def uia_control_snapshot(
         ),
         default=None,
     )
+
+
+# --- Windows soft desktop policy (UAC / dialog / webview) -------------------
+
+_SECURE_TITLES = ("user account control", "windows security")
+_DIALOG_CLASS = "#32770"
+_WEBVIEW_CHILD_CLASSES = (
+    "Chrome_WidgetWin_1",
+    "Chrome_RenderWidgetHostHWND",
+    "WebView2",
+    "Intermediate D3D Window",
+)
+
+
+def detect_system_prompt(
+    *,
+    foreground_info: Callable[[], dict[str, Any]],
+    window_class: Callable[[int], str],
+) -> dict[str, Any]:
+    """UAC / secure-desktop block signal for computer-use (Windows)."""
+    import contextlib
+
+    with contextlib.suppress(Exception):
+        fg = foreground_info()
+        title = str(fg.get("title") or "").lower()
+        cls = window_class(int(fg.get("hwnd") or 0)).lower()
+        if any(t in title for t in _SECURE_TITLES) or cls in (
+            "credential dialog xaml host",
+            "#32770",
+        ):
+            if any(t in title for t in _SECURE_TITLES):
+                return {
+                    "blocked": True,
+                    "kind": "uac",
+                    "message": (
+                        "A Windows security / UAC prompt is on the secure desktop. "
+                        "I can't click it — Windows blocks all automated input there "
+                        "by design. Please approve or dismiss it yourself, then say "
+                        "continue."
+                    ),
+                }
+    return {"blocked": False, "kind": "", "message": ""}
+
+
+def find_dialog_window(
+    *,
+    foreground_info: Callable[[], dict[str, Any]],
+    window_class: Callable[[int], str],
+    list_windows: Callable[..., list[dict[str, Any]]],
+) -> dict[str, Any] | None:
+    """Foreground or listed #32770 dialog hwnd."""
+    import contextlib
+
+    with contextlib.suppress(Exception):
+        fg = foreground_info()
+        hwnd = int(fg.get("hwnd") or 0)
+        if hwnd and window_class(hwnd).lower() == _DIALOG_CLASS.lower():
+            return {"hwnd": hwnd, "title": str(fg.get("title") or "")}
+        for w in list_windows(limit=30):
+            wh = int(w.get("hwnd") or 0)
+            if wh and str(w.get("class") or "").lower() == _DIALOG_CLASS.lower():
+                return {"hwnd": wh, "title": str(w.get("title") or "")}
+    return None
+
+
+def find_webview_host_hwnd(
+    *,
+    list_windows: Callable[..., list[dict[str, Any]]],
+    find_child: Callable[..., int | None],
+) -> int | None:
+    """Remedy/Tauri webview child hwnd when present."""
+    for w in list_windows(limit=200):
+        title = str(w.get("title") or "").lower()
+        if "remedy" not in title and "tauri" not in title:
+            continue
+        hwnd = int(w["hwnd"])
+        for cls in _WEBVIEW_CHILD_CLASSES:
+            child = find_child(hwnd, class_name=cls)
+            if child:
+                return child
+        return hwnd
+    return None

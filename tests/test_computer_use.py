@@ -2030,20 +2030,17 @@ def test_type_text_abort_mid_string(monkeypatch):
         pytest.skip("Windows only")
 
     from remedy.core.computer import desktop_win as win
+    from remedy.core.computer import host_binding as H
 
-    # Avoid real keystrokes: stub _send_input
+    # Avoid real keystrokes: stub host type_text (Zig path; no _send_input).
     sent: list[int] = []
-
-    def fake_send(*_a, **_k):
-        sent.append(1)
-
-    monkeypatch.setattr(win, "_send_input", fake_send)
+    monkeypatch.setattr(H, "type_text", lambda *_a, **_k: sent.append(1))
     monkeypatch.setattr(win, "_require_windows", lambda: None)
 
     calls = {"n": 0}
 
     def abort_after_partial():
-        # type_text checks every 8 chars; fire after first check
+        # type_text_chars checks every 2 chars; fire after first check
         calls["n"] += 1
         return calls["n"] >= 1
 
