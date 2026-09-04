@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -121,6 +122,51 @@ func TestOpenAICompatToolCalls(t *testing.T) {
 	}
 	if call == nil || call.Name != "file_read" || !strings.Contains(string(call.Input), "a.py") {
 		t.Fatalf("call=%#v", call)
+	}
+}
+
+func TestOpenAICompatAdvertisesToolsArray(t *testing.T) {
+	var sawTools bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		tools, ok := body["tools"].([]any)
+		if !ok || len(tools) == 0 {
+			t.Fatalf("tools missing: %#v", body["tools"])
+		}
+		first, _ := tools[0].(map[string]any)
+		fn, _ := first["function"].(map[string]any)
+		if fn["name"] != "workspace.read" {
+			t.Fatalf("tool name=%v", fn["name"])
+		}
+		sawTools = true
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n"))
+	}))
+	defer srv.Close()
+
+	m := &OpenAICompat{
+		BaseURL:    srv.URL + "/v1",
+		APIKey:     "unused",
+		Model:      "x",
+		HTTPClient: srv.Client(),
+		Tools: ToolSchemasFromRegistry([]RegistryTool{{
+			ID:          "workspace.read",
+			Description: "Read a file",
+			InputSchema: json.RawMessage(`{"type":"object","required":["path"],"properties":{"path":{"type":"string"}}}`),
+		}}),
+	}
+	ch, err := m.Stream(context.Background(), cognition.Turn{Goal: "read"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range ch {
+	}
+	if !sawTools {
+		t.Fatal("handler did not observe tools array")
 	}
 }
 
