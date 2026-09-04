@@ -62,7 +62,14 @@ func RegisterFromConfig(gw *Gateway, cfg map[string]any, home string, secrets Se
 		tok := secrets("slack", "bot_token")
 		sec := section(cfg, "slack")
 		if tok != "" {
-			gw.RegisterChannel(NewSlackOut(tok, cfgString(sec, "channel_id")))
+			gw.RegisterChannel(NewSlack(gw, SlackConfig{
+				BotToken:  tok,
+				AppToken:  secrets("slack", "app_token"),
+				ChannelID: cfgString(sec, "channel_id"),
+				AllowIDs:  firstAny(sec["allow_ids"], sec["allow_chat_ids"]),
+				AllowAll:  asBool(sec["allow_all"]),
+				HomeDir:   home,
+			}))
 			registered = append(registered, "slack")
 		} else {
 			log.Printf("slack enabled but no bot_token")
@@ -74,7 +81,15 @@ func RegisterFromConfig(gw *Gateway, cfg map[string]any, home string, secrets Se
 		tok := secrets("mattermost", "bot_token")
 		base := cfgString(sec, "base_url")
 		if tok != "" && base != "" {
-			gw.RegisterChannel(NewMattermostOut(base, tok, cfgString(sec, "channel_id")))
+			gw.RegisterChannel(NewMattermost(gw, MattermostConfig{
+				BotToken:  tok,
+				BaseURL:   base,
+				ChannelID: cfgString(sec, "channel_id"),
+				TeamID:    cfgString(sec, "team_id"),
+				AllowIDs:  firstAny(sec["allow_ids"], sec["allow_chat_ids"]),
+				AllowAll:  asBool(sec["allow_all"]),
+				HomeDir:   home,
+			}))
 			registered = append(registered, "mattermost")
 		} else {
 			log.Printf("mattermost enabled but missing bot_token or base_url")
@@ -86,7 +101,15 @@ func RegisterFromConfig(gw *Gateway, cfg map[string]any, home string, secrets Se
 		tok := secrets("matrix", "access_token")
 		hs := cfgString(sec, "homeserver")
 		if tok != "" && hs != "" {
-			gw.RegisterChannel(NewMatrixOut(hs, tok, cfgString(sec, "room_id")))
+			gw.RegisterChannel(NewMatrix(gw, MatrixConfig{
+				AccessToken: tok,
+				Homeserver:  hs,
+				UserID:      cfgString(sec, "user_id"),
+				RoomID:      cfgString(sec, "room_id"),
+				AllowIDs:    firstAny(sec["allow_ids"], sec["allow_chat_ids"], sec["allow_room_ids"]),
+				AllowAll:    asBool(sec["allow_all"]),
+				HomeDir:     home,
+			}))
 			registered = append(registered, "matrix")
 		} else {
 			log.Printf("matrix enabled but missing access_token or homeserver")

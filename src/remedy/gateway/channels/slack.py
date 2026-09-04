@@ -61,8 +61,7 @@ class SlackChannel(HttpSessionMixin, ChannelAdapter):
 
         if not python_may_poll_messengers():
             logger.info(
-                "Slack: outbound-ready (Go remedy-runtime owns inbound; "
-                "Socket Mode not started from Python)"
+                "Slack: outbound-ready (Go remedy-runtime owns Socket Mode inbound)"
             )
             return
         started = await self._try_start_socket()

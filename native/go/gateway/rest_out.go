@@ -13,8 +13,8 @@ import (
 )
 
 // RESTOutChannel is an outbound-capable messenger without a live inbound loop.
-// Used for Slack/Mattermost/Matrix/WhatsApp/Teams/Google Chat/Signal until
-// their inbound transports are ported; desktop→messenger mirror still works.
+// Used for WhatsApp/Teams/Google Chat/Signal (webhook or external exec inbound).
+// Slack/Mattermost/Matrix own dedicated inbound adapters.
 type RESTOutChannel struct {
 	kind     ChannelKind
 	sendFn   func(ctx context.Context, client *http.Client, message, target string) (bool, error)
@@ -46,7 +46,7 @@ func (c *RESTOutChannel) Start(ctx context.Context) error {
 	c.mu.Lock()
 	c.running = true
 	c.mu.Unlock()
-	log.Printf("%s: outbound-ready (inbound not yet ported to Go)", c.kind)
+	log.Printf("%s: outbound-ready (webhook/exec inbound outside this adapter)", c.kind)
 	return nil
 }
 
@@ -92,55 +92,6 @@ func jsonPOST(ctx context.Context, client *http.Client, url string, headers map[
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	return resp.StatusCode, nil
-}
-
-// NewSlackOut builds Slack chat.postMessage outbound.
-func NewSlackOut(botToken, channelID string) Channel {
-	tok := strings.TrimSpace(botToken)
-	return newRESTOut(ChannelSlack, channelID, func(ctx context.Context, client *http.Client, message, target string) (bool, error) {
-		if tok == "" {
-			return true, nil
-		}
-		status, err := jsonPOST(ctx, client, "https://slack.com/api/chat.postMessage",
-			map[string]string{"Authorization": "Bearer " + tok},
-			map[string]any{"channel": target, "text": trimRunes(message, 3000)},
-		)
-		return status == 200, err
-	})
-}
-
-// NewMattermostOut builds Mattermost REST posts.
-func NewMattermostOut(baseURL, botToken, channelID string) Channel {
-	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	tok := strings.TrimSpace(botToken)
-	return newRESTOut(ChannelMattermost, channelID, func(ctx context.Context, client *http.Client, message, target string) (bool, error) {
-		if tok == "" || base == "" {
-			return true, nil
-		}
-		status, err := jsonPOST(ctx, client, base+"/api/v4/posts",
-			map[string]string{"Authorization": "Bearer " + tok},
-			map[string]any{"channel_id": target, "message": trimRunes(message, 4000)},
-		)
-		return status == 201 || status == 200, err
-	})
-}
-
-// NewMatrixOut builds Matrix room send outbound.
-func NewMatrixOut(homeserver, accessToken, roomID string) Channel {
-	hs := strings.TrimRight(strings.TrimSpace(homeserver), "/")
-	tok := strings.TrimSpace(accessToken)
-	return newRESTOut(ChannelMatrix, roomID, func(ctx context.Context, client *http.Client, message, target string) (bool, error) {
-		if tok == "" || hs == "" {
-			return true, nil
-		}
-		txn := NewEventID()
-		url := hs + "/_matrix/client/v3/rooms/" + target + "/send/m.room.message/" + txn
-		status, err := jsonPOST(ctx, client, url,
-			map[string]string{"Authorization": "Bearer " + tok},
-			map[string]any{"msgtype": "m.text", "body": trimRunes(message, 4000)},
-		)
-		return status == 200, err
-	})
 }
 
 // NewWhatsAppOut builds WhatsApp Cloud API outbound.
