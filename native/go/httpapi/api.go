@@ -1,7 +1,9 @@
 // Package httpapi serves the production local HTTP API for remedy-runtime.
-// Packaged Desktop binds this server on 127.0.0.1:7400 (or a desktop-chosen
-// loopback port). Python remains the compatibility/worker path and the default
-// for tauri:dev.
+// Packaged Desktop and `remedy serve` bind this server on 127.0.0.1:7400 (or a
+// desktop-chosen loopback port). Python no longer starts uvicorn on :7400 —
+// it remains the RMDY/ML worker path. tauri:dev still prefers a live Python
+// sidecar unless REMEDY_RUNTIME_SIDECAR=1; packaged builds fail closed when
+// remedy-runtime is missing (no soft Python dual-serve).
 package httpapi
 
 import (

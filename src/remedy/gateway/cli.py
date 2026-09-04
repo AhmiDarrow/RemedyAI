@@ -265,7 +265,7 @@ def main_gateway(args) -> None:
 
 
 def _serve_api(db_path: Path, args: Any | None = None) -> None:
-    """Same serve path as ``remedy serve`` (lock, bind, config, messengers)."""
+    """Same serve path as ``remedy serve`` — hands off to ``remedy-runtime``."""
     from types import SimpleNamespace
 
     from remedy.interfaces.cli.cmd_runtime import _cmd_serve

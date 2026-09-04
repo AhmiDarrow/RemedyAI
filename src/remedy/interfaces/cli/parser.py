@@ -190,7 +190,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gw_start.add_argument("--heartbeat", type=float, default=60.0)
     gw_sub.add_parser("status", help="Show gateway status")
-    gw_sub.add_parser("serve", help="Start the REST API server")
+    gw_sub.add_parser(
+        "serve",
+        help="Start remedy-runtime (Go local API; no Python uvicorn)",
+    )
     gw_sub.add_parser("channels", help="List available channels")
 
     # remedy config init|show|path
@@ -314,8 +317,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     # remedy serve
-    serve_cmd = sub.add_parser("serve", help="Start the full API server (with config)")
-    serve_cmd.add_argument("--host", default="127.0.0.1")
+    serve_cmd = sub.add_parser(
+        "serve",
+        help="Start remedy-runtime on the local API (default 127.0.0.1:7400)",
+    )
+    serve_cmd.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Loopback bind host only (remedy-runtime refuses non-loopback)",
+    )
     serve_cmd.add_argument("--port", type=int, default=7400)
     serve_cmd.add_argument("--config", dest="config_file", default=None)
     serve_cmd.add_argument(
