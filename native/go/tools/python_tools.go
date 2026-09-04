@@ -133,5 +133,46 @@ func RegisterPythonWorkerTools(registry *Registry, caller FrameCaller) error {
 		return err
 	}
 
+	if err := registry.Register(Descriptor{
+		ID:          "web.search",
+		Version:     1,
+		Description: "Search the public web via the Python agent web_search backend (OpenSERP/DDG)",
+		Runtime:     RuntimePython,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["query"],
+			"properties":{
+				"query":{"type":"string","minLength":1},
+				"max_results":{"type":"integer","minimum":1,"maximum":10}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["query","backend","results"],
+			"properties":{
+				"query":{"type":"string"},
+				"backend":{"type":"string"},
+				"results":{
+					"type":"array",
+					"items":{
+						"type":"object",
+						"required":["title","url"],
+						"properties":{
+							"title":{"type":"string"},
+							"url":{"type":"string"},
+							"snippet":{"type":"string"}
+						},
+						"additionalProperties":false
+					}
+				}
+			},
+			"additionalProperties":false
+		}`),
+	}, exec); err != nil {
+		return err
+	}
+
 	return nil
 }
