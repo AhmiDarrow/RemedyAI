@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/cognition"
 	"github.com/AhmiDarrow/RemedyAI/native/go/tools"
@@ -62,8 +63,14 @@ func (r *CognitionTurnRunner) RunTurn(ctx context.Context, req TurnRequest, emit
 	execTools := r.Tools
 	policy := r.Policy
 
-	var emitErr error
+	var (
+		emitMu  sync.Mutex
+		emitErr error
+	)
+	// Tool batches run concurrently; serialize emit + emitErr.
 	safeEmit := func(tok string) {
+		emitMu.Lock()
+		defer emitMu.Unlock()
 		if emitErr != nil || emit == nil {
 			return
 		}
@@ -193,10 +200,18 @@ func formatToolResultToken(res cognition.ToolResult) string {
 
 // CollectTokens runs a turn and returns concatenated emitted tokens (tests).
 func CollectTokens(ctx context.Context, r TurnRunner, req TurnRequest) (string, error) {
-	var b strings.Builder
+	var (
+		mu sync.Mutex
+		b  strings.Builder
+	)
 	err := r.RunTurn(ctx, req, func(tok string) error {
+		mu.Lock()
+		defer mu.Unlock()
 		b.WriteString(tok)
 		return nil
 	})
-	return b.String(), err
+	mu.Lock()
+	out := b.String()
+	mu.Unlock()
+	return out, err
 }

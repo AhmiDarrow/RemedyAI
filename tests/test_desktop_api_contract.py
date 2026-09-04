@@ -19,9 +19,15 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 DESKTOP = ROOT / "desktop" / "src"
 SERVER = ROOT / "src" / "remedy" / "interfaces"
+# Production :7400 is remedy-runtime (Go). Python routes remain for tests /
+# tauri:dev until Phase 4 fully retires FastAPI — contract must see both.
+GO_HTTPAPI = ROOT / "native" / "go" / "httpapi"
 
 #: apiFetch prepends this; the call sites pass the rest.
 API_PREFIX = "/api"
+_GO_HANDLE = re.compile(
+    r'HandleFunc\(\s*"([A-Z]+)\s+([^"]+)"',
+)
 
 pytestmark = pytest.mark.skipif(
     not DESKTOP.is_dir(), reason="desktop sources not in this tree"
@@ -76,6 +82,13 @@ def _served_routes() -> set[str]:
                 value = node.args[0].value
                 if isinstance(value, str):
                     served.add(value)
+    if GO_HTTPAPI.is_dir():
+        for path in sorted(GO_HTTPAPI.rglob("*.go")):
+            if path.name.endswith("_test.go"):
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for m in _GO_HANDLE.finditer(text):
+                served.add(m.group(2))
     return served
 
 
