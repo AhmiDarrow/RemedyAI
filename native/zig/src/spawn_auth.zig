@@ -16,7 +16,9 @@ const security = @import("security.zig");
 const write_jail = @import("write_jail.zig");
 
 const is_windows = builtin.os.tag == .windows;
+const is_linux = builtin.os.tag == .linux;
 const windows_host = if (is_windows) @import("host_windows.zig") else struct {};
+const linux_host = if (is_linux) @import("host_linux.zig") else struct {};
 const windows_conpty = if (is_windows) @import("conpty_windows.zig") else struct {};
 
 const Status = root.Status;
@@ -234,7 +236,7 @@ export fn remedy_core_process_spawn_authorized(
     out_pid: ?*u32,
     out_handle: ?*u64,
 ) callconv(.c) i32 {
-    if (!is_windows) return unsupported_status;
+    if (!is_windows and !is_linux) return unsupported_status;
     const pid_slot = out_pid orelse return invalid_status;
     const handle_slot = out_handle orelse return invalid_status;
     pid_slot.* = 0;
@@ -257,13 +259,21 @@ export fn remedy_core_process_spawn_authorized(
     unlock();
     auth_result catch |err| return authStatus(err);
 
-    const spawned = windows_host.spawnHidden(
-        slice(argv_json, argv_len),
-        slice(cwd, cwd_len),
-        slice(env_json, env_len),
-    ) catch |err| return host.statusOf(err);
-    pid_slot.* = spawned.pid;
-    handle_slot.* = spawned.handle;
+    const spawned = if (is_windows)
+        windows_host.spawnHidden(
+            slice(argv_json, argv_len),
+            slice(cwd, cwd_len),
+            slice(env_json, env_len),
+        )
+    else
+        linux_host.spawnHidden(
+            slice(argv_json, argv_len),
+            slice(cwd, cwd_len),
+            slice(env_json, env_len),
+        );
+    const result = spawned catch |err| return host.statusOf(err);
+    pid_slot.* = result.pid;
+    handle_slot.* = result.handle;
     return ok_status;
 }
 
@@ -385,9 +395,15 @@ export fn remedy_core_process_exec_capture_authorized(
             out_stderr_len,
         );
     } else {
-        // Portable path: soft capture (env inherit; Signal does not need custom env).
+        // Portable path: soft capture. init_single_threaded uses a failing
+        // allocator and OOMs on spawn — use a real GPA like shell_chain.
         _ = .{ env_json, env_len };
-        var threaded: std.Io.Threaded = .init_single_threaded;
+        const parent_env: std.process.Environ = if (is_windows)
+            .{ .block = .global }
+        else
+            .{ .block = .empty };
+        var threaded = std.Io.Threaded.init(host.allocator, .{ .environ = parent_env });
+        defer threaded.deinit();
         const io = threaded.io();
         const soft = process.runCaptureSoft(
             host.allocator,

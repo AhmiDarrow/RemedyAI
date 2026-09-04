@@ -234,13 +234,13 @@ int32_t remedy_core_clipboard_set_text(const uint8_t *utf8, size_t len);
 
 /* ---- ABI 2: processes -------------------------------------------------- */
 
-/* Start argv_json (a JSON array of strings; argv[0] is resolved by
- * CreateProcessW like subprocess.Popen) with CREATE_NO_WINDOW and
- * STARTF_USESHOWWINDOW / SW_HIDE inside a job object whose
- * JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE limit ends every descendant (uv.exe's
- * python, cmd's children) when the handle is closed. cwd may be empty
- * (inherit). env_json is a JSON object of strings replacing the whole
- * environment, or empty to inherit. No standard handles are shared. */
+/* Start argv_json (a JSON array of strings; argv[0] must be absolute on
+ * Linux; on Windows CreateProcessW resolves like subprocess.Popen) hidden
+ * with no shared stdio. Windows: CREATE_NO_WINDOW + job object with
+ * JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. Linux: own process group (pgid=0);
+ * process_close / kill_tree ends the group. cwd may be empty (inherit).
+ * env_json is a JSON object of strings replacing the whole environment, or
+ * empty to inherit. */
 int32_t remedy_core_process_spawn_hidden(
     const uint8_t *argv_json, size_t argv_len,
     const uint8_t *cwd, size_t cwd_len,
@@ -254,12 +254,13 @@ int32_t remedy_core_process_wait(
     uint64_t handle, uint32_t timeout_ms, uint8_t *out_exited, uint32_t *out_exit_code
 );
 
-/* Terminate pid and every descendant found by a toolhelp snapshot (deepest
- * first, guarded against PID reuse). A pid that is already gone is OK. */
+/* Terminate pid and every descendant. Windows: toolhelp snapshot (deepest
+ * first). Linux: process-group SIGKILL + /proc ppid walk. pid 0/1 invalid.
+ * A pid that is already gone is OK. */
 int32_t remedy_core_process_kill_tree(uint32_t pid);
 
-/* Close the process and job handles. A tree still running inside the job
- * is terminated by the job close. Frees the handle; do not reuse it. */
+/* Close the spawn handle. Windows: closing the job kills remaining children.
+ * Linux: SIGKILL the process group then reap. Frees the handle; do not reuse. */
 int32_t remedy_core_process_close(uint64_t handle);
 
 /* ---- ABI 3: UI Automation --------------------------------------------- */
