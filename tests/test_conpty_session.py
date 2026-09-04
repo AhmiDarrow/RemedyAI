@@ -27,12 +27,6 @@ from remedy.execution.host.conpty import (
     spawn_conpty,
     spawn_conpty_supported,
 )
-from remedy.execution.host.session import (
-    HostSession,
-    _sentinel_done,
-    _split_sentinel,
-    _wrap_with_sentinel,
-)
 from tests.harness.fake_host_binding import FakeHostConpty, install_fake_conpty
 from tests.harness.fake_win32 import (
     CONPTY_PRELUDE,
@@ -736,191 +730,24 @@ async def test_a_spawned_session_round_trips_a_command_through_the_double() -> N
 
 
 # ---------------------------------------------------------------------------
-# The session on top of a pseudoconsole
+# Sentinel protocol — Zig HostSession owns wrap/split (no Python twin)
 # ---------------------------------------------------------------------------
 
 
-def _echoing_host(cwd: str = "C:\\work") -> FakeConsoleHost:
-    return FakeConsoleHost(
-        pid=0, echo=True, shell=fake_cmd_shell(cwd), vt_prelude=CONPTY_PRELUDE
-    )
+def _core_available() -> bool:
+    try:
+        from remedy.core.computer import host_binding
+
+        host_binding._lib()
+        return True
+    except Exception:
+        return False
 
 
-async def _conpty_session(host: FakeConsoleHost) -> tuple[HostSession, Any]:
-    """Wire a fake ConPTY process into HostSession without Zig open.
-
-    Production Windows sessions use Zig HostSession; these unit tests still
-    exercise the Python ConPTY duck-type path against FakeConsoleHost.
-    """
-    import asyncio
-
-    proc = conpty._spawn_conpty_sync(["cmd.exe", "/Q", "/K"], None, None)
-
-    async def override(_argv: list[str], *, cwd: Any = None, env: Any = None) -> Any:
-        return proc
-
-    spawn_conpty._override = override  # type: ignore[attr-defined]
-    sess = HostSession(host="cmd", use_conpty=True)
-    sess._lock = asyncio.Lock()
-    sess._proc = proc
-    sess._zig_handle = 0
-    sess.started = True
-    sess._used_conpty = True
-    # Quiet boot the same way start() would for a real ConPTY session.
-    from remedy.execution.host.session import _boot_commands
-
-    boot = _boot_commands("cmd")
-    if boot:
-        await sess._send_raw(boot + "\n")
-        await asyncio.sleep(0.05)
-    return sess, proc
+requires_core = pytest.mark.skipif(not _core_available(), reason="remedy_core not built")
 
 
-def _drop(sess: HostSession, proc: Any) -> None:
-    sess._proc = None
-    sess._zig_handle = 0
-    sess.started = False
-    proc.kill()
-
-
-@windows_only
-@pytest.mark.asyncio
-async def test_a_conpty_session_returns_only_what_the_command_printed() -> None:
-    host = _echoing_host()
-    with install_fake_conpty(console=host):
-        sess, proc = await _conpty_session(host)
-        res = await sess.run("echo hello", timeout=5)
-        _drop(sess, proc)
-
-    assert res.timed_out is False
-    assert res.used_conpty is True
-    assert res.exit_code == 0
-    assert res.stdout == "hello"
-    assert res.cwd == "C:\\work"
-
-
-@windows_only
-@pytest.mark.asyncio
-async def test_a_conpty_session_presses_enter_not_linefeed() -> None:
-    host = _echoing_host()
-    with install_fake_conpty(console=host):
-        sess, proc = await _conpty_session(host)
-        res = await sess.run("echo typed", timeout=2)
-        typed = host.written(host.pipes[0].write_handle)
-        _drop(sess, proc)
-
-    assert res.timed_out is False
-    assert res.stdout == "typed"
-    assert b"\n" not in typed
-    assert typed.endswith(b"\r")
-
-
-@windows_only
-@pytest.mark.asyncio
-async def test_a_conpty_session_reports_the_real_exit_code_not_the_echo() -> None:
-    host = _echoing_host()
-    with install_fake_conpty(console=host):
-        sess, proc = await _conpty_session(host)
-        res = await sess.run("no_such_cmd", timeout=5)
-        _drop(sess, proc)
-
-    assert res.timed_out is False
-    assert res.exit_code == 9009
-    assert "not recognized" in res.stdout
-
-
-@windows_only
-@pytest.mark.asyncio
-async def test_exit_slash_b_returns_the_shell_code_instead_of_timing_out() -> None:
-    host = _echoing_host()
-    with install_fake_conpty(console=host):
-        sess, proc = await _conpty_session(host)
-        res = await sess.run("exit /b 7", timeout=5)
-        alive_after = sess.started
-        polled = proc.poll()
-        _drop(sess, proc)
-
-    assert res.timed_out is False
-    assert res.exit_code == 7
-    assert "the shell exited (code 7) while running the command" in res.stdout
-    assert alive_after is False
-    assert polled == 7
-
-
-@windows_only
-@pytest.mark.asyncio
-async def test_the_next_run_respawns_after_the_shell_exits() -> None:
-    host = _echoing_host()
-    with install_fake_conpty(console=host):
-
-        async def override(_argv: list[str], *, cwd: Any = None, env: Any = None) -> Any:
-            return conpty._spawn_conpty_sync(["cmd.exe", "/Q", "/K"], None, None)
-
-        spawn_conpty._override = override  # type: ignore[attr-defined]
-        sess = HostSession(host="cmd", use_conpty=True)
-        first = await sess.run("exit /b 7", timeout=5)
-        second = await sess.run("echo still here", timeout=5)
-        proc = sess._proc
-        _drop(sess, proc)
-
-    assert first.exit_code == 7
-    assert first.timed_out is False
-    assert second.timed_out is False
-    assert second.exit_code == 0
-    assert second.stdout == "still here"
-
-
-@windows_only
-@pytest.mark.asyncio
-async def test_a_pipe_session_also_notices_when_the_shell_exits() -> None:
-    host = FakeConsoleHost(
-        pid=0, echo=False, shell=fake_cmd_shell("C:\\plain"), newline_submits=True
-    )
-    with install_fake_conpty(console=host):
-        sess, proc = await _conpty_session(host)
-        sess._used_conpty = False
-        res = await sess.run("exit 3", timeout=5)
-        _drop(sess, proc)
-
-    assert res.timed_out is False
-    assert res.exit_code == 3
-    assert "the shell exited (code 3) while running the command" in res.stdout
-
-
-@windows_only
-@pytest.mark.asyncio
-async def test_a_conpty_session_keeps_multi_line_output_and_drops_the_boot_echo() -> None:
-    host = _echoing_host(cwd="D:\\proj")
-    with install_fake_conpty(console=host):
-        sess, proc = await _conpty_session(host)
-        first = await sess.run("echo one & echo two", timeout=5)
-        second = await sess.run("echo three", timeout=5)
-        _drop(sess, proc)
-
-    assert first.stdout.splitlines() == ["one", "two"]
-    assert first.cwd == "D:\\proj"
-    assert second.stdout == "three"
-    assert "\x1b" not in first.stdout + second.stdout
-    assert "chcp" not in first.stdout
-
-
-@windows_only
-@pytest.mark.asyncio
-async def test_a_pipe_session_is_unaffected_by_the_stricter_sentinel() -> None:
-    host = FakeConsoleHost(
-        pid=0, echo=False, shell=fake_cmd_shell("C:\\plain"), newline_submits=True
-    )
-    with install_fake_conpty(console=host):
-        sess, proc = await _conpty_session(host)
-        sess._used_conpty = False
-        res = await sess.run("echo plain", timeout=5)
-        _drop(sess, proc)
-
-    assert res.exit_code == 0
-    assert res.stdout == "plain"
-    assert res.cwd == "C:\\plain"
-
-
+@requires_core
 @pytest.mark.parametrize(
     ("text", "code", "body"),
     [
@@ -932,9 +759,15 @@ async def test_a_pipe_session_is_unaffected_by_the_stricter_sentinel() -> None:
     ],
 )
 def test_the_sentinel_is_read_in_its_expanded_form(text: str, code: int, body: str) -> None:
-    assert _split_sentinel(text, "REMEDY_HOST_DONE_abc") == (code, body)
+    from remedy.core.computer import host_binding
+
+    assert host_binding.host_session_split(text=text, sentinel="REMEDY_HOST_DONE_abc") == (
+        code,
+        body,
+    )
 
 
+@requires_core
 @pytest.mark.parametrize(
     "echoed",
     [
@@ -944,16 +777,24 @@ def test_the_sentinel_is_read_in_its_expanded_form(text: str, code: int, body: s
     ],
 )
 def test_an_echoed_unexpanded_sentinel_is_not_a_completion(echoed: str) -> None:
+    from remedy.core.computer import host_binding
+    from remedy.execution.host.session import _sentinel_done
+
     assert _sentinel_done(echoed.encode(), b"REMEDY_HOST_DONE_abc") is False
-    assert _split_sentinel(echoed, "REMEDY_HOST_DONE_abc")[0] == -1
+    assert host_binding.host_session_split(text=echoed, sentinel="REMEDY_HOST_DONE_abc")[0] == -1
     assert _sentinel_done(
         (echoed + "REMEDY_HOST_DONE_abc:0\r\n").encode(), b"REMEDY_HOST_DONE_abc"
     )
 
 
+@requires_core
 def test_the_split_for_a_pseudoconsole_strips_vt_and_the_echoed_command() -> None:
+    from remedy.core.computer import host_binding
+
     sentinel = "REMEDY_HOST_DONE_abc"
-    wrapped = _wrap_with_sentinel("cmd", "echo hello", sentinel)
+    wrapped = host_binding.host_session_wrap(
+        host="cmd", command="echo hello", sentinel=sentinel
+    )
     stream = (
         CONPTY_PRELUDE.decode()
         + "chcp 65001 >NUL & @echo off\x1b[2;1H"
@@ -961,10 +802,9 @@ def test_the_split_for_a_pseudoconsole_strips_vt_and_the_echoed_command() -> Non
         + f"echo {sentinel}:%ERRORLEVEL%\x1b[5;1H"
         + f"\x1b[?25h{sentinel}:0\r\n"
     )
-    assert _split_sentinel(stream, sentinel, host="cmd", command=wrapped, conpty=True) == (
-        0,
-        "hello",
-    )
+    assert host_binding.host_session_split(
+        text=stream, sentinel=sentinel, command=wrapped, conpty=True
+    ) == (0, "hello")
 
 
 def test_fake_cmd_shell_exit_ends_the_process() -> None:
