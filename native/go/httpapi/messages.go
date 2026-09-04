@@ -523,6 +523,7 @@ func (s *Server) handleSendMessage(w http.ResponseWriter, r *http.Request) {
 				MessageCount:  &count,
 				Role:          &role,
 			})
+			s.mirrorDesktopReply(sess, reply)
 		}
 	}
 

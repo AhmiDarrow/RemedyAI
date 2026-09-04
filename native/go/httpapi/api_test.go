@@ -90,8 +90,8 @@ func TestPublicAndAuthRoutes(t *testing.T) {
 					t.Fatalf("status body = %#v", body)
 				}
 				gw, _ := body["gateway"].(map[string]any)
-				if gw["running"] != false {
-					t.Fatalf("gateway = %#v", gw)
+				if gw["running"] != true {
+					t.Fatalf("gateway = %#v (want running while serve is up)", gw)
 				}
 				for _, key := range []string{"memory_entries", "sessions_count", "chat_sessions_count"} {
 					if n, _ := body[key].(float64); n != 0 {

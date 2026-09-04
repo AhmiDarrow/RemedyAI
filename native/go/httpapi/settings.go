@@ -248,6 +248,9 @@ func (s *Server) applySettingsUpdate(updates map[string]any) (map[string]any, er
 		return nil, err
 	}
 	s.refreshConnectAfterSettings()
+	if messengersUpdate != nil {
+		s.refreshMessengerAfterSettings()
+	}
 
 	changes := make([]string, 0, len(patch)+3)
 	for k := range patch {

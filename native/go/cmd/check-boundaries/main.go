@@ -23,7 +23,7 @@ var unsafeOwners = map[string]bool{"secret": true}
 // secret owns golang.org/x/sys for CryptProtectData / CryptUnprotectData.
 var externalOwners = map[string]string{
 	"github.com/Microsoft/go-winio":           "ipc",
-	"golang.org/x/sys":                        "ipc,state,secret",
+	"golang.org/x/sys":                        "ipc,state,secret,gateway",
 	"github.com/santhosh-tekuri/jsonschema/v6": "tools",
 	"golang.org/x/crypto":                     "connect",
 	"modernc.org/sqlite":                      "httpapi",
