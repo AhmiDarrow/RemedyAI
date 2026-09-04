@@ -11,6 +11,7 @@ const host = @import("host.zig");
 const capability = @import("capability.zig");
 const executor = @import("executor.zig");
 const policy = @import("policy.zig");
+const process = @import("process.zig");
 const security = @import("security.zig");
 const write_jail = @import("write_jail.zig");
 
@@ -266,6 +267,158 @@ export fn remedy_core_process_spawn_authorized(
     return ok_status;
 }
 
+fn deliverCaptureOwned(
+    stdout: []u8,
+    stderr: []u8,
+    out_stdout: ?*?[*]u8,
+    out_stdout_len: ?*usize,
+    out_stderr: ?*?[*]u8,
+    out_stderr_len: ?*usize,
+) i32 {
+    const so_ptr = out_stdout orelse {
+        host.allocator.free(stdout);
+        host.allocator.free(stderr);
+        return invalid_status;
+    };
+    const so_len = out_stdout_len orelse {
+        host.allocator.free(stdout);
+        host.allocator.free(stderr);
+        return invalid_status;
+    };
+    const se_ptr = out_stderr orelse {
+        host.allocator.free(stdout);
+        host.allocator.free(stderr);
+        return invalid_status;
+    };
+    const se_len = out_stderr_len orelse {
+        host.allocator.free(stdout);
+        host.allocator.free(stderr);
+        return invalid_status;
+    };
+    so_ptr.* = if (stdout.len == 0) null else stdout.ptr;
+    so_len.* = stdout.len;
+    se_ptr.* = if (stderr.len == 0) null else stderr.ptr;
+    se_len.* = stderr.len;
+    if (stdout.len == 0) host.allocator.free(stdout);
+    if (stderr.len == 0) host.allocator.free(stderr);
+    return ok_status;
+}
+
+fn timeoutMs(ms: u64) std.Io.Timeout {
+    return .{ .duration = .{
+        .raw = std.Io.Duration.fromMilliseconds(@intCast(ms)),
+        .clock = .awake,
+    } };
+}
+
+/// Authorize then one-shot hidden spawn with stdout/stderr capture.
+/// Windows: job-object spawn + kill-tree on timeout. Elsewhere: process.runCaptureSoft.
+/// timeout_ms 0 defaults to 60000. On timeout: exit_code=1, timed_out=1 (Python signal-cli parity).
+/// Caller frees stdout/stderr with remedy_core_free (NULL/0 when empty).
+export fn remedy_core_process_exec_capture_authorized(
+    argv_json: ?[*]const u8,
+    argv_len: usize,
+    cwd: ?[*]const u8,
+    cwd_len: usize,
+    env_json: ?[*]const u8,
+    env_len: usize,
+    token: ?[*]const u8,
+    token_len: usize,
+    subject: ?[*]const u8,
+    subject_len: usize,
+    scope: ?[*]const u8,
+    scope_len: usize,
+    owner_confirmed: u8,
+    now_ms: u64,
+    timeout_ms: u32,
+    out_exit_code: ?*u32,
+    out_timed_out: ?*u8,
+    out_stdout: ?*?[*]u8,
+    out_stdout_len: ?*usize,
+    out_stderr: ?*?[*]u8,
+    out_stderr_len: ?*usize,
+) callconv(.c) i32 {
+    const exit_slot = out_exit_code orelse return invalid_status;
+    const timed_slot = out_timed_out orelse return invalid_status;
+    exit_slot.* = 1;
+    timed_slot.* = 0;
+    if (out_stdout) |p| p.* = null;
+    if (out_stdout_len) |p| p.* = 0;
+    if (out_stderr) |p| p.* = null;
+    if (out_stderr_len) |p| p.* = 0;
+
+    var arena = std.heap.ArenaAllocator.init(host.allocator);
+    defer arena.deinit();
+    const argv = host.parseArgv(arena.allocator(), slice(argv_json, argv_len)) catch return invalid_status;
+
+    lock();
+    const auth_result = authorizeLocked(
+        argv,
+        slice(cwd, cwd_len),
+        slice(token, token_len),
+        subjectOrDefault(subject, subject_len),
+        scopeOrDefault(scope, scope_len),
+        owner_confirmed != 0,
+        now_ms,
+    );
+    unlock();
+    auth_result catch |err| return authStatus(err);
+
+    const budget: u32 = if (timeout_ms == 0) 60_000 else timeout_ms;
+
+    if (is_windows) {
+        const captured = windows_host.execCapture(
+            slice(argv_json, argv_len),
+            slice(cwd, cwd_len),
+            slice(env_json, env_len),
+            budget,
+            process.max_output_bytes,
+        ) catch |err| return host.statusOf(err);
+        exit_slot.* = captured.exit_code;
+        timed_slot.* = @intFromBool(captured.timed_out);
+        return deliverCaptureOwned(
+            captured.stdout,
+            captured.stderr,
+            out_stdout,
+            out_stdout_len,
+            out_stderr,
+            out_stderr_len,
+        );
+    } else {
+        // Portable path: soft capture (env inherit; Signal does not need custom env).
+        _ = .{ env_json, env_len };
+        var threaded: std.Io.Threaded = .init_single_threaded;
+        const io = threaded.io();
+        const soft = process.runCaptureSoft(
+            host.allocator,
+            io,
+            capability.Set.one(.process_spawn),
+            argv,
+            timeoutMs(budget),
+        ) catch |err| return switch (err) {
+            error.InvalidArguments => invalid_status,
+            error.AccessDenied => denied_status,
+            error.Unsupported => unsupported_status,
+            else => failed_status,
+        };
+        if (soft.timed_out) {
+            exit_slot.* = 1;
+            timed_slot.* = 1;
+        } else {
+            exit_slot.* = soft.exit_code;
+            timed_slot.* = 0;
+        }
+        return deliverCaptureOwned(
+            soft.stdout,
+            soft.stderr,
+            out_stdout,
+            out_stdout_len,
+            out_stderr,
+            out_stderr_len,
+        );
+    }
+}
+
 /// Authorize then ConPTY-spawn. argv[0] must already be an absolute path.
 export fn remedy_core_conpty_spawn_authorized(
     argv_json: ?[*]const u8,
@@ -362,4 +515,74 @@ test "product rules allow git and deny sudo through authorizeProcess" {
             1500,
         ),
     );
+}
+
+test "exec capture authorized echoes through job/soft path" {
+    if (builtin.os.tag != .windows and builtin.os.tag != .linux) return error.SkipZigTest;
+
+    const key = [_]u8{0xA5} ** Hmac.key_length;
+    try std.testing.expectEqual(ok_status, remedy_core_security_set_signing_key(&key, key.len));
+    defer _ = remedy_core_security_clear_signing_key();
+
+    const argv: []const u8 = if (builtin.os.tag == .windows)
+        "[\"C:\\\\Windows\\\\System32\\\\cmd.exe\",\"/d\",\"/c\",\"echo remedy-capture\"]"
+    else
+        "[\"/bin/sh\",\"-c\",\"printf remedy-capture\"]";
+    const op = policy.hashArguments(if (builtin.os.tag == .windows)
+        &.{ "C:\\Windows\\System32\\cmd.exe", "/d", "/c", "echo remedy-capture" }
+    else
+        &.{ "/bin/sh", "-c", "printf remedy-capture" });
+    var token_buf: [security.token_size]u8 = undefined;
+    try std.testing.expectEqual(ok_status, remedy_core_capability_issue(
+        default_subject.ptr,
+        default_subject.len,
+        default_scope.ptr,
+        default_scope.len,
+        &op,
+        op.len,
+        capability.Set.one(.process_spawn).bits,
+        1000,
+        60_000,
+        &([_]u8{0x22} ** 16),
+        16,
+        &token_buf,
+        token_buf.len,
+    ));
+
+    var exit_code: u32 = 99;
+    var timed_out: u8 = 1;
+    var out_stdout: ?[*]u8 = null;
+    var out_stdout_len: usize = 0;
+    var out_stderr: ?[*]u8 = null;
+    var out_stderr_len: usize = 0;
+    const st = remedy_core_process_exec_capture_authorized(
+        argv.ptr,
+        argv.len,
+        null,
+        0,
+        null,
+        0,
+        &token_buf,
+        token_buf.len,
+        null,
+        0,
+        null,
+        0,
+        0,
+        1500,
+        15_000,
+        &exit_code,
+        &timed_out,
+        &out_stdout,
+        &out_stdout_len,
+        &out_stderr,
+        &out_stderr_len,
+    );
+    defer if (out_stdout) |p| host.allocator.free(p[0..out_stdout_len]);
+    defer if (out_stderr) |p| host.allocator.free(p[0..out_stderr_len]);
+    try std.testing.expectEqual(ok_status, st);
+    try std.testing.expectEqual(@as(u32, 0), exit_code);
+    try std.testing.expectEqual(@as(u8, 0), timed_out);
+    try std.testing.expect(out_stdout_len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, out_stdout.?[0..out_stdout_len], "remedy-capture") != null);
 }

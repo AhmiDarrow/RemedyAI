@@ -1266,6 +1266,224 @@ pub fn pipedClose(handle: u64) Error!void {
     allocator.destroy(piped);
 }
 
+// ---------------------------------------------------------------------------
+// One-shot capture (stdout + stderr pipes, job kill-tree on close / timeout)
+// ---------------------------------------------------------------------------
+
+pub const CaptureResult = struct {
+    exit_code: u32,
+    timed_out: bool,
+    stdout: []u8,
+    stderr: []u8,
+};
+
+fn drainPipe(pipe: HANDLE, buf: *std.ArrayList(u8), max_bytes: usize) Error!void {
+    var scratch: [8192]u8 = undefined;
+    while (true) {
+        var avail: DWORD = 0;
+        if (PeekNamedPipe(pipe, null, 0, null, &avail, null) == 0) return;
+        if (avail == 0) return;
+        if (buf.items.len >= max_bytes) {
+            // Discard remaining so the child does not block on a full pipe.
+            var dump: DWORD = 0;
+            _ = ReadFile(pipe, &scratch, @intCast(@min(scratch.len, @as(usize, avail))), &dump, null);
+            continue;
+        }
+        const room = max_bytes - buf.items.len;
+        const want: DWORD = @intCast(@min(scratch.len, @min(room, @as(usize, avail))));
+        var got: DWORD = 0;
+        if (ReadFile(pipe, &scratch, want, &got, null) == 0 or got == 0) return;
+        buf.appendSlice(allocator, scratch[0..got]) catch return error.OutOfMemory;
+    }
+}
+
+/// Hidden CreateProcess with separate stdout/stderr pipes inside a kill-on-close
+/// job. Waits up to `timeout_ms` (0 → 60s). On timeout: TerminateProcess +
+/// killTree, exit_code=1, timed_out=true. Caller owns stdout/stderr via
+/// `allocator` (same as other host buffers).
+pub fn execCapture(
+    argv_json: []const u8,
+    cwd: []const u8,
+    env_json: []const u8,
+    timeout_ms: u32,
+    max_bytes: usize,
+) Error!CaptureResult {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const argv = try host.parseArgv(gpa, argv_json);
+    const command_line = try host.commandLine(gpa, argv);
+    const directory: ?[*:0]const u16 = if (cwd.len == 0) null else (try host.utf8ToUtf16Z(gpa, cwd)).ptr;
+    const environment: ?*anyopaque = if (try host.parseEnv(gpa, env_json)) |pairs|
+        @ptrCast((try host.envBlock(gpa, pairs)).ptr)
+    else
+        null;
+
+    var sa = SECURITY_ATTRIBUTES{
+        .nLength = @sizeOf(SECURITY_ATTRIBUTES),
+        .lpSecurityDescriptor = null,
+        .bInheritHandle = 1,
+    };
+
+    var child_stdin: ?HANDLE = null;
+    var parent_stdin: ?HANDLE = null;
+    if (CreatePipe(&child_stdin, &parent_stdin, &sa, 0) == 0) return fail();
+    if (SetHandleInformation(parent_stdin.?, HANDLE_FLAG_INHERIT, 0) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        return fail();
+    }
+
+    var parent_stdout: ?HANDLE = null;
+    var child_stdout: ?HANDLE = null;
+    if (CreatePipe(&parent_stdout, &child_stdout, &sa, 0) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        return fail();
+    }
+    if (SetHandleInformation(parent_stdout.?, HANDLE_FLAG_INHERIT, 0) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(child_stdout);
+        return fail();
+    }
+
+    var parent_stderr: ?HANDLE = null;
+    var child_stderr: ?HANDLE = null;
+    if (CreatePipe(&parent_stderr, &child_stderr, &sa, 0) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(child_stdout);
+        return fail();
+    }
+    if (SetHandleInformation(parent_stderr.?, HANDLE_FLAG_INHERIT, 0) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(child_stdout);
+        closeOptHandle(parent_stderr);
+        closeOptHandle(child_stderr);
+        return fail();
+    }
+
+    const job = CreateJobObjectW(null, null) orelse {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(child_stdout);
+        closeOptHandle(parent_stderr);
+        closeOptHandle(child_stderr);
+        return fail();
+    };
+    var limits = std.mem.zeroes(JOBOBJECT_EXTENDED_LIMIT_INFORMATION);
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, @sizeOf(JOBOBJECT_EXTENDED_LIMIT_INFORMATION)) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(child_stdout);
+        closeOptHandle(parent_stderr);
+        closeOptHandle(child_stderr);
+        _ = CloseHandle(job);
+        return fail();
+    }
+
+    var startup = std.mem.zeroes(STARTUPINFOW);
+    startup.cb = @sizeOf(STARTUPINFOW);
+    startup.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+    startup.wShowWindow = SW_HIDE;
+    startup.hStdInput = child_stdin;
+    startup.hStdOutput = child_stdout;
+    startup.hStdError = child_stderr;
+    var info: PROCESS_INFORMATION = undefined;
+    const flags = CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED;
+    if (CreateProcessW(null, command_line.ptr, null, null, 1, flags, environment, directory, &startup, &info) == 0) {
+        closeOptHandle(child_stdin);
+        closeOptHandle(parent_stdin);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(child_stdout);
+        closeOptHandle(parent_stderr);
+        closeOptHandle(child_stderr);
+        _ = CloseHandle(job);
+        return fail();
+    }
+    closeOptHandle(child_stdin);
+    closeOptHandle(child_stdout);
+    closeOptHandle(child_stderr);
+    // Child stdin gets EOF immediately (one-shot; no interactive input).
+    closeOptHandle(parent_stdin);
+    parent_stdin = null;
+
+    errdefer {
+        _ = TerminateProcess(info.hProcess, 1);
+        _ = CloseHandle(info.hThread);
+        _ = CloseHandle(info.hProcess);
+        closeOptHandle(parent_stdout);
+        closeOptHandle(parent_stderr);
+        _ = CloseHandle(job);
+    }
+    if (AssignProcessToJobObject(job, info.hProcess) == 0) return fail();
+    if (ResumeThread(info.hThread) == std.math.maxInt(DWORD)) return fail();
+    _ = CloseHandle(info.hThread);
+
+    const budget: u32 = if (timeout_ms == 0) 60_000 else timeout_ms;
+    const limit = if (max_bytes == 0) process_max_output else max_bytes;
+    var stdout_buf: std.ArrayList(u8) = .empty;
+    errdefer stdout_buf.deinit(allocator);
+    var stderr_buf: std.ArrayList(u8) = .empty;
+    errdefer stderr_buf.deinit(allocator);
+
+    var timed_out = false;
+    var exited = false;
+    var exit_code: u32 = 1;
+    var waited: u32 = 0;
+    const slice_ms: u32 = 50;
+    while (!exited) {
+        const remaining = if (waited >= budget) 0 else budget - waited;
+        const slice = if (remaining == 0) @as(u32, 0) else @min(slice_ms, remaining);
+        const wait = WaitForSingleObject(info.hProcess, slice);
+        try drainPipe(parent_stdout.?, &stdout_buf, limit);
+        try drainPipe(parent_stderr.?, &stderr_buf, limit);
+        if (wait == WAIT_OBJECT_0) {
+            var code: DWORD = 0;
+            if (GetExitCodeProcess(info.hProcess, &code) == 0) return fail();
+            exit_code = code;
+            exited = true;
+            break;
+        }
+        if (wait != WAIT_TIMEOUT) return fail();
+        waited += slice;
+        if (waited >= budget) {
+            timed_out = true;
+            _ = TerminateProcess(info.hProcess, 1);
+            killTree(info.dwProcessId) catch {};
+            _ = WaitForSingleObject(info.hProcess, 5000);
+            try drainPipe(parent_stdout.?, &stdout_buf, limit);
+            try drainPipe(parent_stderr.?, &stderr_buf, limit);
+            exit_code = 1;
+            exited = true;
+            break;
+        }
+    }
+
+    closeOptHandle(parent_stdout);
+    closeOptHandle(parent_stderr);
+    _ = CloseHandle(info.hProcess);
+    _ = CloseHandle(job);
+
+    return .{
+        .exit_code = exit_code,
+        .timed_out = timed_out,
+        .stdout = try stdout_buf.toOwnedSlice(allocator),
+        .stderr = try stderr_buf.toOwnedSlice(allocator),
+    };
+}
+
+const process_max_output: usize = 1024 * 1024;
+
 const ProcessRecord = struct { pid: u32, parent: u32 };
 
 fn creationTime(pid: u32) ?u64 {

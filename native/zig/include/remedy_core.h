@@ -14,7 +14,8 @@ extern "C" {
  * Automation / Linux AT-SPI, and the ABI 2 host surface (DPI, monitors,
  * capture, PNG, input, windows, clipboard and hidden process control).
  * Additive on the same ABI 5: authorized spawn (policy + HMAC capability
- * tokens), signing-key set/clear, argv hash, token issue, write-jail /
+ * tokens), signing-key set/clear, argv hash, token issue, authorized
+ * one-shot exec capture (stdout/stderr + timeout/kill-tree), write-jail /
  * workdir roots (set/clear/check), HostSession orchestration (open/run/
  * cwd/close + wrap/split protocol), and host diagnose/dialect/stretch.
  * Production Python spawn/session paths use the authorized exports; the
@@ -444,6 +445,28 @@ int32_t remedy_core_conpty_spawn_authorized(
     uint8_t owner_confirmed,
     uint64_t now_ms,
     uint32_t *out_pid, uint64_t *out_handle
+);
+
+/* Policy + token authorize, then one-shot hidden spawn with stdout/stderr
+ * capture. Windows uses a kill-on-close job and kill-tree on timeout; other
+ * platforms use the portable soft-capture primitive. timeout_ms 0 → 60000.
+ * On timeout: *out_timed_out=1, *out_exit_code=1. Caller frees stdout/stderr
+ * with remedy_core_free (NULL/0 when empty). Suitable for signal-cli receive
+ * --json / send -m. */
+int32_t remedy_core_process_exec_capture_authorized(
+    const uint8_t *argv_json, size_t argv_len,
+    const uint8_t *cwd, size_t cwd_len,
+    const uint8_t *env_json, size_t env_len,
+    const uint8_t *token, size_t token_len,
+    const uint8_t *subject, size_t subject_len,
+    const uint8_t *scope, size_t scope_len,
+    uint8_t owner_confirmed,
+    uint64_t now_ms,
+    uint32_t timeout_ms,
+    uint32_t *out_exit_code,
+    uint8_t *out_timed_out,
+    uint8_t **out_stdout, size_t *out_stdout_len,
+    uint8_t **out_stderr, size_t *out_stderr_len
 );
 
 /* ---- ABI 5 additive: write jail / workdir roots --------------------------- */

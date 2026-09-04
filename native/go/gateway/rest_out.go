@@ -13,8 +13,8 @@ import (
 )
 
 // RESTOutChannel is an outbound-capable messenger without a live inbound loop.
-// Used for Signal (external exec inbound). WhatsApp/Teams/Google Chat own
-// dedicated webhook adapters; Slack/Mattermost/Matrix own poll/WS adapters.
+// WhatsApp/Teams/Google Chat own dedicated webhook adapters;
+// Slack/Mattermost/Matrix own poll/WS adapters. Signal owns signal.go.
 type RESTOutChannel struct {
 	kind     ChannelKind
 	sendFn   func(ctx context.Context, client *http.Client, message, target string) (bool, error)
@@ -92,16 +92,4 @@ func jsonPOST(ctx context.Context, client *http.Client, url string, headers map[
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	return resp.StatusCode, nil
-}
-
-// NewSignalOut is a stub (signal-cli requires process exec; Zig/Python path).
-func NewSignalOut(account string) Channel {
-	return newRESTOut(ChannelSignal, account, func(ctx context.Context, client *http.Client, message, target string) (bool, error) {
-		_ = ctx
-		_ = client
-		_ = message
-		_ = target
-		log.Printf("signal: outbound stub (signal-cli exec stays outside Go boundaries)")
-		return false, nil
-	})
 }

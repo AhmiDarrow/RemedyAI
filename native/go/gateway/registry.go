@@ -175,7 +175,18 @@ func RegisterFromConfig(gw *Gateway, cfg map[string]any, home string, secrets Se
 
 	if _, on := enabled["signal"]; on {
 		sec := section(cfg, "signal")
-		gw.RegisterChannel(NewSignalOut(cfgString(sec, "account")))
+		cli := cfgString(sec, "cli_path")
+		if cli == "" {
+			cli = "signal-cli"
+		}
+		acct := cfgString(sec, "account")
+		gw.RegisterChannel(NewSignal(gw, SignalConfig{
+			CLIPath:   cli,
+			Account:   acct,
+			AllowFrom: firstAny(sec["allow_from"], sec["allow_ids"]),
+			AllowAll:  asBool(sec["allow_all"]),
+			HomeDir:   home,
+		}))
 		registered = append(registered, "signal")
 	}
 
