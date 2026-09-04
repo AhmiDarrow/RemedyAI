@@ -54,10 +54,13 @@ def test_path_normalization_conflict(home) -> None:
 
 
 def test_stale_beacon_releases_claim(home, monkeypatch) -> None:
-    monkeypatch.setattr(C, "BEACON_TTL", 0.05)
-    monkeypatch.setattr(C, "CLAIM_TTL", 0.05)
+    # Margins stay well above lock-wait + atomic-write latency under a loaded
+    # matrix (WSL fsync / shared ``_thread_lock``). A 50 ms TTL was enough in
+    # isolation and flaked when the suite contended the process lock.
+    monkeypatch.setattr(C, "BEACON_TTL", 0.25)
+    monkeypatch.setattr(C, "CLAIM_TTL", 0.25)
     assert C.claim_path("dead", "/p/x.py", home=home) is None
-    time.sleep(0.08)  # beacon + claim go stale
+    time.sleep(0.5)  # beacon + claim go stale
     # A crashed/idle session must not deadlock the file.
     assert C.claim_path("alive", "/p/x.py", home=home) is None
     assert [b.session_id for b in C.active_beacons(home=home)] == ["alive"]

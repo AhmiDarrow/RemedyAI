@@ -231,8 +231,10 @@ def register(
     sid = (session_id or "").strip()
     if not sid:
         return
-    now = time.time()
     with _txn(home) as beacons:
+        # Stamp after the lock: waiting on ``_thread_lock`` under suite load
+        # can exceed a short test TTL and publish an already-stale heartbeat.
+        now = time.time()
         b = beacons.get(sid)
         if b is None:
             b = SessionBeacon(session_id=sid, pid=os.getpid(), started_ts=now)
@@ -266,8 +268,8 @@ def heartbeat(
     sid = (session_id or "").strip()
     if not sid:
         return
-    now = time.time()
     with _txn(home) as beacons:
+        now = time.time()
         b = beacons.get(sid)
         if b is None:
             b = SessionBeacon(session_id=sid, pid=os.getpid(), started_ts=now)
@@ -311,8 +313,9 @@ def claim_path(
     key = norm_path(path)
     if not sid or not key:
         return None
-    now = time.time()
     with _txn(home) as beacons:
+        # Stamp after the lock so lock-wait does not age the published heartbeat.
+        now = time.time()
         for other_sid, b in beacons.items():
             if other_sid == sid:
                 continue
@@ -388,8 +391,8 @@ def path_holder(
 ) -> SessionBeacon | None:
     """The live session (if any, other than ``exclude``) holding ``path``."""
     key = norm_path(path)
-    now = time.time()
     with _txn(home) as beacons:
+        now = time.time()
         for sid, b in beacons.items():
             if exclude and sid == exclude:
                 continue
