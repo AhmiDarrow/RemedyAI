@@ -847,6 +847,28 @@ fn parseOpenJson(arena: std.mem.Allocator, json_in: []const u8) Error!struct {
     return .{ .host = host_name, .cwd = cwd, .env_json = env_json, .use_conpty = use_conpty };
 }
 
+/// Return the argv JSON array Zig will authorize for a HostSession open of *host*.
+/// Portable resolver; production token issue must hash this exact argv.
+export fn remedy_core_host_session_argv(
+    host_ptr: ?[*]const u8,
+    host_len: usize,
+    out_json: ?*?[*]u8,
+    out_len: ?*usize,
+) callconv(.c) i32 {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    const io = threaded.io();
+    const host_name = if (host_len == 0) defaultHost() else slice(host_ptr, host_len);
+    const argv = sessionArgv(a, io, host_name) catch |err| {
+        return deliverBytes(@as(Error![]u8, err), out_json, out_len);
+    };
+    const encoded = std.json.Stringify.valueAlloc(a, argv, .{}) catch return failed_status;
+    const owned = allocator.dupe(u8, encoded) catch return failed_status;
+    return deliverBytes(@as(Error![]u8, owned), out_json, out_len);
+}
+
 export fn remedy_core_host_session_open(
     json_in: ?[*]const u8,
     json_len: usize,
@@ -1125,4 +1147,27 @@ test "host_session live echo round-trip" {
     try std.testing.expectEqual(ok_status, rst);
     defer host.allocator.free(out_ptr.?[0..out_len]);
     try std.testing.expect(std.mem.indexOf(u8, out_ptr.?[0..out_len], "host-session-ok") != null);
+}
+
+
+test "host_session_argv C ABI matches sessionArgv" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    const io = threaded.io();
+    const argv = try sessionArgv(arena.allocator(), io, "cmd");
+    var out_ptr: ?[*]u8 = null;
+    var out_len: usize = 0;
+    const host_name = "cmd";
+    try std.testing.expectEqual(
+        ok_status,
+        remedy_core_host_session_argv(host_name.ptr, host_name.len, &out_ptr, &out_len),
+    );
+    defer host.allocator.free(out_ptr.?[0..out_len]);
+    const raw = out_ptr.?[0..out_len];
+    const parsed = try std.json.parseFromSlice([]const []const u8, arena.allocator(), raw, .{});
+    try std.testing.expectEqual(argv.len, parsed.value.len);
+    for (argv, parsed.value) |want, got| {
+        try std.testing.expectEqualStrings(want, got);
+    }
 }

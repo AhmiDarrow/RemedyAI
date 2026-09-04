@@ -363,6 +363,10 @@ _PROTOTYPES: dict[str, tuple[list[Any], Any]] = {
         ],
         c_int32,
     ),
+    "remedy_core_host_session_argv": (
+        [c_char_p, c_size_t, POINTER(_BytePtr), POINTER(c_size_t)],
+        c_int32,
+    ),
     "remedy_core_host_session_open": (
         [c_char_p, c_size_t, POINTER(c_uint64)],
         c_int32,
@@ -1753,6 +1757,41 @@ def host_session_split(
     raw = _take(library, ptr, length)
     data = json.loads(raw.decode("utf-8"))
     return int(data.get("exit_code", -1)), str(data.get("body") or "")
+
+
+def host_session_argv(host: str | None = None) -> list[str]:
+    """Argv Zig will authorize for :func:`host_session_open_authorized`."""
+    host_name = str(host or ("cmd" if sys.platform == "win32" else "posix"))
+    host_raw = _utf8(host_name)
+    library = _lib()
+    ptr, length = _BytePtr(), c_size_t()
+    _check(
+        library,
+        "host_session_argv",
+        library.remedy_core_host_session_argv(
+            host_raw, len(host_raw), ctypes.byref(ptr), ctypes.byref(length)
+        ),
+    )
+    data = _take_json(library, ptr, length)
+    if not isinstance(data, list) or not all(isinstance(x, str) for x in data):
+        raise HostError("host_session_argv", STATUS_OPERATION_FAILED)
+    return [str(x) for x in data]
+
+
+def issue_host_session_token(
+    host: str | None = None,
+    *,
+    owner_checkpoint: bool = False,
+    subject: str = DEFAULT_SPAWN_SUBJECT,
+    scope: str = DEFAULT_SPAWN_SCOPE,
+) -> tuple[bytes, int]:
+    """Return ``(token, now_ms)`` for an authorized HostSession open of *host*."""
+    return issue_process_spawn_token(
+        host_session_argv(host),
+        owner_checkpoint=owner_checkpoint,
+        subject=subject,
+        scope=scope,
+    )
 
 
 def host_session_open(
