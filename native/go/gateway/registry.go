@@ -121,7 +121,18 @@ func RegisterFromConfig(gw *Gateway, cfg map[string]any, home string, secrets Se
 		tok := secrets("whatsapp", "access_token")
 		phone := cfgString(sec, "phone_number_id")
 		if tok != "" && phone != "" {
-			gw.RegisterChannel(NewWhatsAppOut(tok, phone))
+			verify := secrets("whatsapp", "verify_token")
+			if verify == "" {
+				verify = cfgString(sec, "verify_token")
+			}
+			gw.RegisterChannel(NewWhatsApp(gw, WhatsAppConfig{
+				AccessToken:   tok,
+				PhoneNumberID: phone,
+				VerifyToken:   verify,
+				AppSecret:     secrets("whatsapp", "app_secret"),
+				AllowFrom:     sec["allow_from"],
+				AllowAll:      asBool(sec["allow_all"]),
+			}))
 			registered = append(registered, "whatsapp")
 		} else {
 			log.Printf("whatsapp enabled but missing access_token or phone_number_id")
@@ -133,7 +144,13 @@ func RegisterFromConfig(gw *Gateway, cfg map[string]any, home string, secrets Se
 		appID := cfgString(sec, "app_id")
 		pwd := secrets("teams", "app_password")
 		if appID != "" && pwd != "" {
-			gw.RegisterChannel(NewTeamsOut(appID, pwd, ""))
+			gw.RegisterChannel(NewTeams(gw, TeamsConfig{
+				AppID:       appID,
+				AppPassword: pwd,
+				TenantID:    cfgString(sec, "tenant_id"),
+				AllowIDs:    firstAny(sec["allow_ids"], sec["allow_chat_ids"]),
+				AllowAll:    asBool(sec["allow_all"]),
+			}))
 			registered = append(registered, "teams")
 		} else {
 			log.Printf("teams enabled but missing app_id or app_password")
@@ -144,7 +161,12 @@ func RegisterFromConfig(gw *Gateway, cfg map[string]any, home string, secrets Se
 		sec := section(cfg, "google_chat")
 		tok := secrets("google_chat", "access_token")
 		if tok != "" {
-			gw.RegisterChannel(NewGoogleChatOut(tok, cfgString(sec, "space_id")))
+			gw.RegisterChannel(NewGoogleChat(gw, GoogleChatConfig{
+				AccessToken: tok,
+				SpaceID:     cfgString(sec, "space_id"),
+				AllowIDs:    firstAny(sec["allow_ids"], sec["allow_chat_ids"]),
+				AllowAll:    asBool(sec["allow_all"]),
+			}))
 			registered = append(registered, "google_chat")
 		} else {
 			log.Printf("google_chat enabled but no access_token")

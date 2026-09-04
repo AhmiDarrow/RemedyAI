@@ -13,8 +13,8 @@ import (
 )
 
 // RESTOutChannel is an outbound-capable messenger without a live inbound loop.
-// Used for WhatsApp/Teams/Google Chat/Signal (webhook or external exec inbound).
-// Slack/Mattermost/Matrix own dedicated inbound adapters.
+// Used for Signal (external exec inbound). WhatsApp/Teams/Google Chat own
+// dedicated webhook adapters; Slack/Mattermost/Matrix own poll/WS adapters.
 type RESTOutChannel struct {
 	kind     ChannelKind
 	sendFn   func(ctx context.Context, client *http.Client, message, target string) (bool, error)
@@ -92,64 +92,6 @@ func jsonPOST(ctx context.Context, client *http.Client, url string, headers map[
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	return resp.StatusCode, nil
-}
-
-// NewWhatsAppOut builds WhatsApp Cloud API outbound.
-func NewWhatsAppOut(accessToken, phoneNumberID string) Channel {
-	tok := strings.TrimSpace(accessToken)
-	phone := strings.TrimSpace(phoneNumberID)
-	return newRESTOut(ChannelWhatsApp, "", func(ctx context.Context, client *http.Client, message, target string) (bool, error) {
-		if tok == "" || phone == "" {
-			return true, nil
-		}
-		status, err := jsonPOST(ctx, client,
-			"https://graph.facebook.com/v18.0/"+phone+"/messages",
-			map[string]string{"Authorization": "Bearer " + tok},
-			map[string]any{
-				"messaging_product": "whatsapp",
-				"to":                target,
-				"type":              "text",
-				"text":              map[string]any{"body": trimRunes(message, 4096)},
-			},
-		)
-		return status == 200, err
-	})
-}
-
-// NewGoogleChatOut builds Google Chat spaces messages outbound.
-func NewGoogleChatOut(accessToken, spaceID string) Channel {
-	tok := strings.TrimSpace(accessToken)
-	return newRESTOut(ChannelGoogleChat, spaceID, func(ctx context.Context, client *http.Client, message, target string) (bool, error) {
-		if tok == "" {
-			return true, nil
-		}
-		space := target
-		if !strings.HasPrefix(space, "spaces/") {
-			space = "spaces/" + space
-		}
-		status, err := jsonPOST(ctx, client,
-			"https://chat.googleapis.com/v1/"+space+"/messages",
-			map[string]string{"Authorization": "Bearer " + tok},
-			map[string]any{"text": trimRunes(message, 4096)},
-		)
-		return status == 200, err
-	})
-}
-
-// NewTeamsOut is a stub outbound (Bot Framework token exchange not ported yet).
-func NewTeamsOut(appID, appPassword, defaultConv string) Channel {
-	_ = appPassword
-	return newRESTOut(ChannelTeams, defaultConv, func(ctx context.Context, client *http.Client, message, target string) (bool, error) {
-		_ = ctx
-		_ = client
-		_ = message
-		_ = target
-		if strings.TrimSpace(appID) == "" {
-			return true, nil
-		}
-		log.Printf("teams: outbound stub (Bot Framework token exchange not yet ported)")
-		return false, nil
-	})
 }
 
 // NewSignalOut is a stub (signal-cli requires process exec; Zig/Python path).

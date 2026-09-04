@@ -266,6 +266,10 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/rmb/hf/pull", s.handleRmbHfPull)
 	s.mux.HandleFunc("GET /api/rmb/hf/progress", s.handleRmbHfProgress)
 	s.mux.HandleFunc("POST /api/rmb/hf/cancel", s.handleRmbHfCancel)
+	s.mux.HandleFunc("GET /api/webhooks/whatsapp", s.handleWhatsAppVerify)
+	s.mux.HandleFunc("POST /api/webhooks/whatsapp", s.handleWhatsAppEvents)
+	s.mux.HandleFunc("POST /api/webhooks/teams", s.handleTeamsActivity)
+	s.mux.HandleFunc("POST /api/webhooks/google_chat", s.handleGoogleChatEvent)
 	s.mountWebUI()
 	return s, nil
 }
