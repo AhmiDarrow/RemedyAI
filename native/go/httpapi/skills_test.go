@@ -151,6 +151,7 @@ func TestListAndGetSkills(t *testing.T) {
 func TestStatusSkillsCount(t *testing.T) {
 	s, _ := newSkillsTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	req.Header.Set("Authorization", "Bearer "+skillsTestToken)
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {

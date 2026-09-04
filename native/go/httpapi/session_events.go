@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/AhmiDarrow/RemedyAI/native/go/events"
 )
 
 // SessionEvent matches Python interfaces.session_events.SessionEvent.to_dict.
@@ -94,6 +96,18 @@ func (s *Server) publishSessionEvent(ev SessionEvent) {
 		return
 	}
 	s.events.publish(ev)
+	if s.bus == nil {
+		return
+	}
+	payload, err := json.Marshal(ev)
+	if err != nil {
+		return
+	}
+	s.publishBusEvent(events.Event{
+		Type:   ev.Type,
+		Source: "session",
+		Data:   payload,
+	})
 }
 
 func (s *Server) handleSessionEvents(w http.ResponseWriter, r *http.Request) {

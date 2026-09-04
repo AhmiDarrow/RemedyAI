@@ -17,7 +17,10 @@ import (
 	"time"
 
 	"github.com/AhmiDarrow/RemedyAI/native/go/connect"
+	"github.com/AhmiDarrow/RemedyAI/native/go/events"
 	"github.com/AhmiDarrow/RemedyAI/native/go/gateway"
+	"github.com/AhmiDarrow/RemedyAI/native/go/hive"
+	"github.com/AhmiDarrow/RemedyAI/native/go/scheduler"
 	"github.com/AhmiDarrow/RemedyAI/native/go/secret"
 )
 
@@ -67,11 +70,21 @@ type Server struct {
 
 	approvals *approvalQueue
 	lifeHub   *lifeTaskHub
+
+	bus               *events.Bus
+	eventLogPath      string
+	ephemeralEventDir string
+	sched             *scheduler.Scheduler
+	schedPath         string
+	schedCancel       context.CancelFunc
+	hiveMgr           *hive.Manager
+	hiveFS            *hiveStore
 }
 
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
 // sessions CRUD, session LLM bind, attachments upload/get, messages
-// list/create/stream, abort, session-events SSE, Connect management,
+// list/create/stream, abort, session-events SSE, durable events bus,
+// scheduler jobs, hive roster/spawn/assign/retire, Connect management,
 // Connect me/stop, providers/models catalog, skills/library routes,
 // workspace/files/media routes, partner/approvals/plans/life-tasks/goals,
 // and optional WebUI static serving.
@@ -96,6 +109,7 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open session store: %w", err)
 	}
+	home := ResolveHomeDir(homeDir)
 	s := &Server{
 		started:   time.Now(),
 		version:   version,
@@ -109,8 +123,16 @@ func New(cfg Config) (*Server, error) {
 		runner:    cfg.TurnRunner,
 		approvals: newApprovalQueue(),
 		lifeHub:   newLifeTaskHub(),
+		hiveMgr:   hive.New(context.Background(), 64),
+		hiveFS:    openHiveStore(home),
 	}
 	_ = s.approvals.SyncFromConfig(LoadConfig(homeDir))
+	if err := s.openEventBus(home); err != nil {
+		_ = store.Close()
+		s.hiveMgr.Shutdown()
+		return nil, fmt.Errorf("open event bus: %w", err)
+	}
+	s.initScheduler(home)
 	s.mux.HandleFunc("GET /api/ping", s.handlePing)
 	s.mux.HandleFunc("GET /api/status", s.handleStatus)
 	s.mux.HandleFunc("GET /api/turn-active", s.handleTurnActive)
@@ -131,6 +153,16 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/sessions/{id}/messages/stream", s.handleStreamMessage)
 	s.mux.HandleFunc("POST /api/sessions/{id}/abort", s.handleAbortSession)
 	s.mux.HandleFunc("GET /api/events/sessions", s.handleSessionEvents)
+	s.mux.HandleFunc("GET /api/events", s.handleEventsReplay)
+	s.mux.HandleFunc("GET /api/events/stream", s.handleEventsStream)
+	s.mux.HandleFunc("GET /api/scheduler/jobs", s.handleSchedulerList)
+	s.mux.HandleFunc("POST /api/scheduler/jobs", s.handleSchedulerAdd)
+	s.mux.HandleFunc("POST /api/scheduler/jobs/{id}/cancel", s.handleSchedulerCancel)
+	s.mux.HandleFunc("POST /api/scheduler/goals/ready", s.handleSchedulerGoalReady)
+	s.mux.HandleFunc("GET /api/hive/roster", s.handleHiveRoster)
+	s.mux.HandleFunc("POST /api/hive/spawn", s.handleHiveSpawn)
+	s.mux.HandleFunc("POST /api/hive/assign", s.handleHiveAssign)
+	s.mux.HandleFunc("POST /api/hive/retire", s.handleHiveRetire)
 	s.mux.HandleFunc("GET /api/connect", s.handleGetConnect)
 	s.mux.HandleFunc("PUT /api/connect", s.handlePutConnect)
 	s.mux.HandleFunc("GET /api/connect/addresses", s.handleConnectAddresses)
@@ -183,13 +215,19 @@ func New(cfg Config) (*Server, error) {
 	return s, nil
 }
 
-// Close stops messenger + Connect, aborts in-flight turns, then releases the session store.
+// Close stops messenger, Connect, scheduler, hive, event bus, aborts turns, then releases sessions.
 func (s *Server) Close() error {
 	if s == nil {
 		return nil
 	}
+	s.stopSchedulerLoop()
 	s.stopMessengerGateway()
 	s.stopConnectGateway()
+	if s.hiveMgr != nil {
+		s.hiveMgr.Shutdown()
+		s.hiveMgr = nil
+	}
+	s.closeEventBus()
 	if s.claims != nil {
 		s.claims.AbortAll()
 		s.claims.WaitTurns()
@@ -211,6 +249,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.apiListenPort = listenPort(ln)
 	s.startMessengerGateway()
 	s.startConnectGateway(s.apiListenPort)
+	s.startSchedulerLoop(ctx)
 	httpServer := &http.Server{Handler: s.Handler()}
 	errCh := make(chan error, 1)
 	go func() {
@@ -329,6 +368,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"skills_count":        0,
 		"sessions_count":      0,
 		"chat_sessions_count": 0,
+		"event_bus":           s.bus != nil,
+		"scheduler_jobs":      0,
+		"hive_agents":         0,
 	}
 	if s.connectGW != nil {
 		h := s.connectGW.Health()
@@ -341,13 +383,19 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"crashes":   h.Crashes,
 		}
 	}
+	if s.sched != nil {
+		body["scheduler_jobs"] = len(s.sched.Jobs())
+	}
+	if s.hiveMgr != nil {
+		body["hive_agents"] = len(s.hiveMgr.List())
+	}
 	// Unauthenticated liveness must not open SQLite or report skill/session counts.
 	authed := s.token == "" || requestAuthorized(r, s.token)
 	if !authed {
 		writeJSON(w, http.StatusOK, body)
 		return
 	}
-	body["skills_count"] = countSkills(s.homeDir)
+	body["skills_count"] = s.skillsCount()
 	if s.sessions != nil {
 		if mem, summaries, chats, err := s.sessions.StatusCounts(); err == nil {
 			body["memory_entries"] = mem

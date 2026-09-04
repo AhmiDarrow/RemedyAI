@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -223,8 +224,33 @@ func (m *Manager) Snapshot(id string) (Snapshot, error) {
 	if agent == nil {
 		return Snapshot{}, ErrAgentNotFound
 	}
-	return Snapshot{ID: agent.spec.ID, Parent: agent.spec.Parent, Goals: append([]string(nil), agent.spec.Goals...), MemoryScope: agent.spec.MemoryScope, Capabilities: append([]string(nil), agent.spec.Capabilities...), Status: agent.status, Error: agent.lastError}, nil
+	return snapshotOf(agent), nil
 }
+
+// List returns inspectable snapshots for every supervised agent (including terminal).
+func (m *Manager) List() []Snapshot {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Snapshot, 0, len(m.agents))
+	for _, agent := range m.agents {
+		out = append(out, snapshotOf(agent))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func snapshotOf(agent *managed) Snapshot {
+	return Snapshot{
+		ID:           agent.spec.ID,
+		Parent:       agent.spec.Parent,
+		Goals:        append([]string(nil), agent.spec.Goals...),
+		MemoryScope:  agent.spec.MemoryScope,
+		Capabilities: append([]string(nil), agent.spec.Capabilities...),
+		Status:       agent.status,
+		Error:        agent.lastError,
+	}
+}
+
 func (m *Manager) Shutdown() { m.cancel(); m.wg.Wait() }
 func subset(child, parent []string) bool {
 	allowed := make(map[string]bool, len(parent))
