@@ -4,7 +4,7 @@ Package layout: ``remedy.core.react_loop`` — ``call_llm_stream`` lives here.
 ``loop_steps.run_react_steps`` drives the turn via ``loop_prelude`` /
 ``loop_http`` / ``loop_round``; small helpers are ``loop_util``. Fatal-error
 helpers live in ``react_loop.errors``. Prefer importing from
-``remedy.core.react_loop`` or the shim ``agent_react_loop``.
+``remedy.core.react_loop``.
 """
 
 from __future__ import annotations

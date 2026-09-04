@@ -217,7 +217,7 @@ def test_completion_message_content_and_reasoning() -> None:
 
 
 def test_extract_response_also_reads_message_tool_calls() -> None:
-    """Adapter path used by agent_react_loop non-SSE branch."""
+    """Adapter path used by react_loop non-SSE branch."""
     p = OpenAIProvider()
     parsed = p.extract_response(
         {

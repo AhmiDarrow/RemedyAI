@@ -43,7 +43,7 @@ def test_run_until_done_never_used_tools_nudge_branch():
     Regression: coding_in_flight was always true when tools were armed, so the
     ``elif run_until_done and all_tools`` nudge was dead code.
     """
-    # Mirror the branch predicates used in agent_react_loop epoch wall.
+    # Mirror the branch predicates used in react_loop epoch wall.
     run_until_done = True
     unfinished = False
     tool_batches_this_turn = 0

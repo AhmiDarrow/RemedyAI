@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from remedy.core.agent_react_loop import _is_fatal_llm_api_error
+from remedy.core.react_loop import _is_fatal_llm_api_error
 from remedy.core.react_loop.errors import (
     is_billing_llm_api_error,
     is_thinking_tool_choice_error,

@@ -591,7 +591,7 @@ def test_begin_turn_reuses_pre_tier_no_dual_classify(monkeypatch):
 
 
 def test_begin_turn_accepts_pre_tier_without_reclassify():
-    """agent_react_loop passes pre_tier from send_policy; must not TypeError.
+    """react_loop passes pre_tier from send_policy; must not TypeError.
 
     Regression: unexpected pre_tier kwarg was swallowed by suppress(Exception)
     around begin_turn_metabolism → tier never set → L1 strip on agency turns.
