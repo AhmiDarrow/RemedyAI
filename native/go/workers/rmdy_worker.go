@@ -85,8 +85,8 @@ func (s *RMDYToolSession) Close() error {
 }
 
 // ZigProcessStarter spawns via remedy_core authorized hidden process.
-// Windows: Zig host. Linux: Go cannot load remedy_core in-process yet and Zig
-// process spawn is unsupported — returns a clear error (fail closed).
+// Windows/Linux: Zig host (dlopen libremedy_core + authorized spawn). Fail
+// closed on missing library, ABI mismatch, or unsupported GOOS — no os/exec.
 func ZigProcessStarter(home string) ProcessStarter {
 	return func(_ context.Context, argv []string, env map[string]string, cwd string) (*StartedProcess, error) {
 		key, err := secret.EnsureHostSigningKey(home)
