@@ -14,8 +14,8 @@ import (
 
 var alwaysForbidden = map[string]bool{"os/exec": true, "syscall": true, "plugin": true}
 
-// unsafeOwners may import "unsafe" (DPAPI DataBlob copies, Zig C ABI pointers).
-// Everyone else is denied.
+// unsafeOwners may import "unsafe" (DPAPI DataBlob copies, Zig C ABI pointers,
+// core DLL buffers). Everyone else is denied.
 var unsafeOwners = map[string]bool{"secret": true, "core": true}
 
 // Owned external deps: only the listed packages may import them (same pattern as
@@ -27,8 +27,8 @@ var externalOwners = map[string]string{
 	"github.com/Microsoft/go-winio":           "ipc",
 	"golang.org/x/sys":                        "ipc,state,secret,gateway,core",
 	"github.com/santhosh-tekuri/jsonschema/v6": "tools",
-	"golang.org/x/crypto":                     "connect",
-	"modernc.org/sqlite":                      "httpapi",
+	"golang.org/x/crypto":                      "connect",
+	"modernc.org/sqlite":                       "httpapi",
 }
 
 func main() {

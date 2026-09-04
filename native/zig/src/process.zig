@@ -41,6 +41,82 @@ pub fn runCapture(
     });
 }
 
+pub const SoftResult = struct {
+    exit_code: u32,
+    timed_out: bool,
+    stdout: []u8,
+    stderr: []u8,
+};
+
+/// Like `runCapture`, but on wall-clock timeout keeps stdout/stderr (exit 124)
+/// so callers such as `tailscale up` can recover a printed login URL.
+pub fn runCaptureSoft(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    capabilities: capability.Set,
+    argv: []const []const u8,
+    timeout: std.Io.Timeout,
+) !SoftResult {
+    try capabilities.require(.process_spawn);
+    try validateArguments(argv);
+
+    var child = try std.process.spawn(io, .{
+        .argv = argv,
+        .stdin = .ignore,
+        .stdout = .pipe,
+        .stderr = .pipe,
+        .create_no_window = true,
+    });
+    defer child.kill(io);
+
+    var multi_reader_buffer: std.Io.File.MultiReader.Buffer(2) = undefined;
+    var multi_reader: std.Io.File.MultiReader = undefined;
+    multi_reader.init(allocator, io, multi_reader_buffer.toStreams(), &.{ child.stdout.?, child.stderr.? });
+    defer multi_reader.deinit();
+
+    const stdout_reader = multi_reader.reader(0);
+    const stderr_reader = multi_reader.reader(1);
+
+    var timed_out = false;
+    while (multi_reader.fill(64, timeout)) |_| {
+        if (stdout_reader.buffered().len > max_output_bytes) return error.StreamTooLong;
+        if (stderr_reader.buffered().len > max_output_bytes) return error.StreamTooLong;
+    } else |err| switch (err) {
+        error.EndOfStream => {},
+        error.Timeout => timed_out = true,
+        else => |e| return e,
+    }
+
+    try multi_reader.checkAnyError();
+
+    const stdout_slice = try multi_reader.toOwnedSlice(0);
+    errdefer allocator.free(stdout_slice);
+    const stderr_slice = try multi_reader.toOwnedSlice(1);
+    errdefer allocator.free(stderr_slice);
+
+    if (timed_out) {
+        return .{
+            .exit_code = 124,
+            .timed_out = true,
+            .stdout = stdout_slice,
+            .stderr = stderr_slice,
+        };
+    }
+
+    const term = try child.wait(io);
+    const code: u32 = switch (term) {
+        .exited => |c| c,
+        .unknown => |u| u,
+        else => 1,
+    };
+    return .{
+        .exit_code = code,
+        .timed_out = false,
+        .stdout = stdout_slice,
+        .stderr = stderr_slice,
+    };
+}
+
 test "process primitive rejects missing rights before spawning" {
     const argv = [_][]const u8{"never-runs"};
     try std.testing.expectError(

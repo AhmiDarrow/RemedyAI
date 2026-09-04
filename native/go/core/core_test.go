@@ -39,7 +39,6 @@ func TestOpenFailsClosedMissingLib(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	if !os.IsNotExist(err) && err != ErrUnavailable {
-		// wrapped ErrUnavailable is fine
 		if !containsUnavailable(err) {
 			t.Fatalf("err=%v", err)
 		}
@@ -59,4 +58,44 @@ func containsUnavailable(err error) bool {
 		err = u.Unwrap()
 	}
 	return false
+}
+
+func TestFindLibraryPathIncludesCheckoutName(t *testing.T) {
+	path := FindLibraryPath()
+	if path == "" {
+		// No built DLL is fine; still ensure names are considered via env miss.
+		t.Setenv("REMEDY_NATIVE_CORE_LIB", "")
+		_ = FindLibraryPath()
+		return
+	}
+	base := filepath.Base(path)
+	switch base {
+	case "remedy_core.dll", "libremedy_core.so", "libremedy_core.dylib":
+	default:
+		t.Fatalf("unexpected library basename %q", base)
+	}
+}
+
+func TestLoadTailscaleStatusWhenDLLPresent(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows DLL load")
+	}
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+	dll := FindLibraryPath()
+	if dll == "" {
+		t.Skip("remedy_core.dll not built")
+	}
+	t.Setenv("REMEDY_NATIVE_CORE_LIB", dll)
+	ResetForTest()
+	if err := EnsureLoaded(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	raw, err := TailscaleStatusJSON()
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if len(raw) < 10 {
+		t.Fatalf("short json %q", raw)
+	}
 }

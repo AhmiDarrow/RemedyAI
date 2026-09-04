@@ -990,6 +990,35 @@ fn processFrom(handle: u64) Error!*Process {
     return @ptrFromInt(@as(usize, @intCast(handle)));
 }
 
+/// Fire-and-forget hidden CreateProcess with no job object. The child keeps
+/// running after this returns (installer UAC flows). Returns only the pid.
+pub fn spawnDetached(argv_json: []const u8, cwd: []const u8, env_json: []const u8) Error!u32 {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+
+    const argv = try host.parseArgv(gpa, argv_json);
+    const command_line = try host.commandLine(gpa, argv);
+    const directory: ?[*:0]const u16 = if (cwd.len == 0) null else (try host.utf8ToUtf16Z(gpa, cwd)).ptr;
+    const environment: ?*anyopaque = if (try host.parseEnv(gpa, env_json)) |pairs|
+        @ptrCast((try host.envBlock(gpa, pairs)).ptr)
+    else
+        null;
+
+    var startup = std.mem.zeroes(STARTUPINFOW);
+    startup.cb = @sizeOf(STARTUPINFOW);
+    startup.dwFlags = STARTF_USESHOWWINDOW;
+    startup.wShowWindow = SW_HIDE;
+    var info: PROCESS_INFORMATION = undefined;
+    const flags = CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT;
+    if (CreateProcessW(null, command_line.ptr, null, null, 0, flags, environment, directory, &startup, &info) == 0) {
+        return fail();
+    }
+    _ = CloseHandle(info.hThread);
+    _ = CloseHandle(info.hProcess);
+    return info.dwProcessId;
+}
+
 /// Create a hidden process inside a job that kills every descendant when the
 /// job handle closes, so `uv.exe -> python.exe` style trees never outlive us.
 pub fn spawnHidden(argv_json: []const u8, cwd: []const u8, env_json: []const u8) Error!Spawned {

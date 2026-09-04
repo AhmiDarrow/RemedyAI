@@ -1,5 +1,6 @@
-// Package core loads the Zig remedy_core C ABI (ConPTY, capture, policy tokens).
-// Fail-closed: missing or wrong-ABI libraries return ErrUnavailable.
+// Package core loads the Zig remedy_core C ABI (ConPTY, capture, HostSession,
+// Tailscale, policy tokens). Fail-closed: missing or wrong-ABI libraries
+// return ErrUnavailable.
 package core
 
 import (

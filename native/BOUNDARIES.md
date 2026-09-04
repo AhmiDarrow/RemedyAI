@@ -17,4 +17,4 @@ until Phase 17 gates a native slice on and proves rollback.
 It rejects direct process execution from Go, unsafe/syscall use, misplaced third-party
 dependencies, and Python coupling from the native Go runtime. Package `core` may import
 `unsafe` and `golang.org/x/sys` solely to load the Zig `remedy_core` C ABI (ConPTY, capture,
-policy tokens); every other package stays deny-by-default.
+HostSession, Tailscale, policy tokens); every other package stays deny-by-default.
