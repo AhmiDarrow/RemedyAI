@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from remedy.core.computer import desktop_uia
+from remedy.core.computer import guidance as desktop_uia
 from tests.harness.fake_host_binding import install_fake_host_uia
 from tests.harness.fake_win32 import (
     CallLog,
@@ -323,7 +323,7 @@ def test_focused_element_info_is_none_when_nothing_has_focus():
 
 
 def test_preferred_click_action_toggle_vs_invoke():
-    from remedy.core.computer.desktop_uia import preferred_click_action
+    from remedy.core.computer.guidance import preferred_click_action
 
     assert preferred_click_action("checkbox") == "toggle"
     assert preferred_click_action("switch") == "toggle"

@@ -318,15 +318,16 @@ def test_open_app_resolves_relative_in_search_dir(tmp_path: Path, monkeypatch):
     fake.write_bytes(b"MZ")
     launched: list[str] = []
 
-    def fake_popen(args, **_k):
-        launched.append(str(args[0]))
+    def fake_spawn(argv, **_k):
+        launched.append(str(argv[0]))
 
         class P:
             pid = 1
 
         return P()
 
-    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    monkeypatch.setattr("remedy.execution.process.spawn_hidden", fake_spawn)
+    monkeypatch.setattr("remedy.execution.process.retain_detached", lambda p: p)
     info = open_app("hello.exe", search_dirs=[tmp_path])
     assert info.get("method") == "project_path"
     assert launched and Path(launched[0]).name == "hello.exe"
@@ -372,15 +373,16 @@ def test_open_app_prefers_search_dirs_not_cwd(tmp_path: Path, monkeypatch):
     (proj / "hello.exe").write_bytes(b"MZ-proj")
     launched: list[str] = []
 
-    def fake_popen(args, **_k):
-        launched.append(str(args[0]))
+    def fake_spawn(argv, **_k):
+        launched.append(str(argv[0]))
 
         class P:
             pid = 1
 
         return P()
 
-    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    monkeypatch.setattr("remedy.execution.process.spawn_hidden", fake_spawn)
+    monkeypatch.setattr("remedy.execution.process.retain_detached", lambda p: p)
     prev = os.getcwd()
     try:
         os.chdir(cwd)
@@ -1780,7 +1782,7 @@ def test_desktop_snapshot_and_ref_store(tmp_path: Path):
 
 
 def test_uia_module_soft_import():
-    from remedy.core.computer.desktop_uia import uia_available, uia_control_snapshot
+    from remedy.core.computer.guidance import uia_available, uia_control_snapshot
 
     # Must not crash without comtypes
     avail = uia_available()

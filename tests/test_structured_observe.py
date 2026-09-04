@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from remedy.core.computer.desktop_uia import preferred_click_action, structured_observe_hint
+from remedy.core.computer.guidance import preferred_click_action, structured_observe_hint
 
 
 def test_controls_say_use_refs_not_pixels():
@@ -35,7 +35,7 @@ def test_click_prefers_invoke_then_center(monkeypatch):
         return {"ok": True, "message": f"{action} ok"}
 
     monkeypatch.setattr(
-        "remedy.core.computer.desktop_uia.element_action", fake_action
+        "remedy.core.computer.guidance.element_action", fake_action
     )
     ex = ComputerExecutor.__new__(ComputerExecutor)
     win = SimpleNamespace(

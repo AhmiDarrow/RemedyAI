@@ -918,7 +918,7 @@ class ComputerExecutor:
             if el is not None:
                 if surface == "desktop" and el.get("offscreen") and el.get("hwnd"):
                     with contextlib.suppress(Exception):
-                        from remedy.core.computer.desktop_uia import element_action
+                        from remedy.core.computer.guidance import element_action
                         from remedy.core.computer.elements import find_best_element
 
                         res = element_action(
@@ -974,7 +974,7 @@ class ComputerExecutor:
                 }
             if surface == "desktop" and el.get("offscreen") and el.get("hwnd") and win is not None:
                 with contextlib.suppress(Exception):
-                    from remedy.core.computer.desktop_uia import element_action
+                    from remedy.core.computer.guidance import element_action
 
                     res = element_action(
                         int(el["hwnd"]),
@@ -1178,7 +1178,7 @@ class ComputerExecutor:
                 ev["foreground"] = str(fg["title"])[:100]
                 ev["foreground_hwnd"] = int(fg.get("hwnd") or 0)
         with contextlib.suppress(Exception):
-            from remedy.core.computer.desktop_uia import focused_element_info
+            from remedy.core.computer.guidance import focused_element_info
 
             fi = focused_element_info()
             if fi:
@@ -1200,7 +1200,7 @@ class ComputerExecutor:
         """
         if el.get("offscreen") and el.get("hwnd"):
             with contextlib.suppress(Exception):
-                from remedy.core.computer.desktop_uia import element_action
+                from remedy.core.computer.guidance import element_action
 
                 res = element_action(
                     int(el["hwnd"]),
@@ -1221,7 +1221,7 @@ class ComputerExecutor:
         hwnd = el.get("hwnd")
         if hwnd and clicks == 1 and str(button or "left").lower() == "left":
             with contextlib.suppress(Exception):
-                from remedy.core.computer.desktop_uia import (
+                from remedy.core.computer.guidance import (
                     element_action,
                     preferred_click_action,
                 )
@@ -1390,7 +1390,7 @@ class ComputerExecutor:
             self.bridge.set_last_elements(elements, target="desktop")
             n_w = sum(1 for e in elements if str(e.get("ref", "")).startswith("w"))
             n_c = sum(1 for e in elements if str(e.get("ref", "")).startswith("c"))
-            from remedy.core.computer.desktop_uia import structured_observe_hint
+            from remedy.core.computer.guidance import structured_observe_hint
 
             hint_obs = structured_observe_hint(n_windows=n_w, n_controls=n_c)
             return public_result(
@@ -1847,7 +1847,7 @@ class ComputerExecutor:
             if vault_err is not None:
                 return vault_err
             if _desktop_vault_uia(el):
-                from remedy.core.computer.desktop_uia import element_action
+                from remedy.core.computer.guidance import element_action
 
                 res = element_action(
                     int(el["hwnd"]),
@@ -2341,7 +2341,7 @@ class ComputerExecutor:
         if act is ComputerAction.PAGE_TEXT:
             # Native page_text: read the actual CONTENT of a window via UIA
             # (edit/document values + labels) — Remedy can read what she typed.
-            from remedy.core.computer.desktop_uia import read_window_text
+            from remedy.core.computer.guidance import read_window_text
 
             hwnd = int(kwargs.get("hwnd") or 0)
             if not hwnd:
@@ -2410,7 +2410,7 @@ class ComputerExecutor:
                 if not (el.get("offscreen") and el.get("hwnd")):
                     return el
                 with contextlib.suppress(Exception):
-                    from remedy.core.computer.desktop_uia import element_action
+                    from remedy.core.computer.guidance import element_action
                     from remedy.core.computer.elements import find_best_element
 
                     res = element_action(

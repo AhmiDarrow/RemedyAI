@@ -147,7 +147,7 @@ async def test_hive_note_not_in_parent_search(tmp_path: Path):
 
 def test_vault_length_not_in_set_value_message():
     """Password set_value must not echo the secret or its length in the message."""
-    from remedy.core.computer import desktop_uia as uia
+    from remedy.core.computer import guidance as uia
     from tests.harness.fake_host_binding import install_fake_host_uia
     from tests.harness.fake_win32 import FakeUIAutomation, uia_element
 
@@ -858,7 +858,7 @@ def test_computer_fill_success_is_unverified(tmp_path, monkeypatch):
 
 
 def test_hwnd_uia_button_vault_refuses_no_set_value(tmp_path, monkeypatch):
-    from remedy.core.computer import desktop_uia as uia
+    from remedy.core.computer import guidance as uia
     from remedy.core.computer.host_binding import native
     from remedy.core.computer.executor import ComputerExecutor
     from remedy.core.computer.types import ComputerAction

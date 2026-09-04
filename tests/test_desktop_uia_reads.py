@@ -23,7 +23,7 @@ from typing import Any
 
 import pytest
 
-from remedy.core.computer import desktop_uia
+from remedy.core.computer import guidance as desktop_uia
 from remedy.core.computer import host_binding as H
 from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 from tests.harness.fake_host_binding import install_fake_host_uia, uia_element

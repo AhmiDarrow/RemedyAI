@@ -76,7 +76,7 @@ def harness_notepad_tree():
 
 def write_harness_contract_fixtures() -> list[Path]:
     """Field-for-field contract JSON from fake_host_binding (always available)."""
-    from remedy.core.computer import desktop_uia
+    from remedy.core.computer import guidance as desktop_uia
     from tests.harness.fake_host_binding import install_fake_host_uia
     from tests.harness.fake_win32 import FakeUIAutomation, uia_element
 
@@ -348,7 +348,7 @@ def try_live_capture() -> dict[str, Any]:
 
     Returns a status dict: ok, paths, error, source_window.
     """
-    from remedy.core.computer import desktop_uia
+    from remedy.core.computer import guidance as desktop_uia
 
     status: dict[str, Any] = {
         "ok": False,
