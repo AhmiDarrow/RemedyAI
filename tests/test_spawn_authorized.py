@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 from pathlib import Path
@@ -22,16 +23,12 @@ windows_with_core = pytest.mark.skipif(
 def test_signing_key(monkeypatch):
     key = bytes(range(32))
     monkeypatch.setenv("REMEDY_SPAWN_SIGNING_KEY", key.hex())
-    try:
+    with contextlib.suppress(H.HostError, NativeRuntimeUnavailableError, OSError):
         H.security_clear_signing_key()
-    except (H.HostError, NativeRuntimeUnavailableError, OSError):
-        pass
     H.security_set_signing_key(key)
     yield key
-    try:
+    with contextlib.suppress(H.HostError, NativeRuntimeUnavailableError, OSError):
         H.security_clear_signing_key()
-    except (H.HostError, NativeRuntimeUnavailableError, OSError):
-        pass
 
 
 @windows_with_core
@@ -42,7 +39,7 @@ def test_authorized_spawn_runs_cmd_with_token(test_signing_key, tmp_path: Path):
     pid, handle = H.process_spawn_authorized(
         argv,
         cwd=str(tmp_path),
-        env={"REMEDY_AUTH_CODE": "5", "SystemRoot": os.environ.get("SystemRoot", r"C:\Windows")},
+        env={"REMEDY_AUTH_CODE": "5", "SystemRoot": r"C:\Windows"},
         token=token,
         now_ms=now,
     )
@@ -60,7 +57,7 @@ def test_spawn_hidden_uses_authorized_path(test_signing_key, tmp_path: Path):
     with P.spawn_hidden(
         ["cmd", "/c", "exit %REMEDY_AUTH_CODE%"],
         cwd=tmp_path,
-        env={"REMEDY_AUTH_CODE": "9", "SystemRoot": os.environ.get("SystemRoot", r"C:\Windows")},
+        env={"REMEDY_AUTH_CODE": "9", "SystemRoot": r"C:\Windows"},
     ) as child:
         assert child.wait(10.0) == 9
 
@@ -69,7 +66,7 @@ def test_spawn_hidden_uses_authorized_path(test_signing_key, tmp_path: Path):
 def test_dangerous_basename_is_denied(test_signing_key):
     _ = test_signing_key
     # Absolute path required by validateArguments; basename still matches denylist.
-    sudo = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "shutdown.exe"
+    sudo = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32" / "shutdown.exe"
     argv = [str(sudo), "/?"]
     token, now = H.issue_process_spawn_token(argv)
     with pytest.raises(H.HostError) as raised:
@@ -98,7 +95,7 @@ def test_spawn_hidden_never_calls_unsigned_export(test_signing_key, tmp_path: Pa
     with P.spawn_hidden(
         ["cmd", "/c", "exit %REMEDY_AUTH_CODE%"],
         cwd=tmp_path,
-        env={"REMEDY_AUTH_CODE": "3", "SystemRoot": os.environ.get("SystemRoot", r"C:\Windows")},
+        env={"REMEDY_AUTH_CODE": "3", "SystemRoot": r"C:\Windows"},
     ) as child:
         assert child.wait(10.0) == 3
 
