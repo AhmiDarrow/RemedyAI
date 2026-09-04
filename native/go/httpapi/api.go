@@ -79,6 +79,11 @@ type Server struct {
 	schedCancel       context.CancelFunc
 	hiveMgr           *hive.Manager
 	hiveFS            *hiveStore
+
+	bridgeOnce sync.Once
+	hostBridge *HostBridge
+	termOnce   sync.Once
+	termReg    *terminalRegistry
 }
 
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
@@ -87,7 +92,7 @@ type Server struct {
 // scheduler jobs, hive roster/spawn/assign/retire, Connect management,
 // Connect me/stop, providers/models catalog, skills/library routes,
 // workspace/files/media routes, partner/approvals/plans/life-tasks/goals,
-// and optional WebUI static serving.
+// WebUI, computer-use host bridge, and ConPTY terminal routes.
 func New(cfg Config) (*Server, error) {
 	version := cfg.Version
 	if version == "" {
@@ -211,6 +216,21 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("POST /api/goals/activity/clear", s.handleClearGoalActivity)
 	s.mux.HandleFunc("PATCH /api/goals/{goal_id}", s.handlePatchGoal)
 	s.mux.HandleFunc("DELETE /api/goals/{goal_id}", s.handleDeleteGoal)
+	s.mux.HandleFunc("POST /api/computer/host/hello", s.handleComputerHostHello)
+	s.mux.HandleFunc("GET /api/computer/host/status", s.handleComputerHostStatus)
+	s.mux.HandleFunc("GET /api/computer/ui/command", s.handleComputerUICommand)
+	s.mux.HandleFunc("POST /api/computer/ui/command/ack", s.handleComputerUICommandAck)
+	s.mux.HandleFunc("POST /api/computer/capture", s.handleComputerCapture)
+	s.mux.HandleFunc("GET /api/computer/jobs/next", s.handleComputerJobsNext)
+	s.mux.HandleFunc("POST /api/computer/jobs/{job_id}/complete", s.handleComputerJobComplete)
+	s.mux.HandleFunc("POST /api/computer/jobs/{job_id}/cancel", s.handleComputerJobCancel)
+	s.mux.HandleFunc("OPTIONS /api/computer/a11y/push", s.handleComputerA11yPushOptions)
+	s.mux.HandleFunc("POST /api/computer/a11y/push", s.handleComputerA11yPush)
+	s.mux.HandleFunc("POST /api/terminal", s.handleTerminalOpen)
+	s.mux.HandleFunc("GET /api/terminal/{terminal_id}/stream", s.handleTerminalStream)
+	s.mux.HandleFunc("POST /api/terminal/{terminal_id}/input", s.handleTerminalInput)
+	s.mux.HandleFunc("POST /api/terminal/{terminal_id}/resize", s.handleTerminalResize)
+	s.mux.HandleFunc("DELETE /api/terminal/{terminal_id}", s.handleTerminalClose)
 	s.mountWebUI()
 	return s, nil
 }
