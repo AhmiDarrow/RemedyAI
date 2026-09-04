@@ -248,3 +248,97 @@ def test_stdio_tool_round_trip_web_search(monkeypatch: pytest.MonkeyPatch) -> No
     assert body["ok"] is True
     assert body["output"]["backend"] == "stub"
     assert body["output"]["results"][0]["title"] == "t"
+
+
+def test_web_fetch_bridges_polite_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    import remedy.core.agent_web_tools as web
+
+    monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
+    html = (
+        b"<!doctype html><html><head><title>Guide</title></head>"
+        b"<body><article><h1>Guide</h1><p>Hello partner.</p></article></body></html>"
+    )
+
+    def _fake_polite_fetch(url, *, max_chars, timeout, runtime=None, respect_robots=None):
+        assert url == "https://example.com/guide"
+        return url, html, "utf-8"
+
+    monkeypatch.setattr(web, "polite_fetch", _fake_polite_fetch)
+    out = worker._web_fetch({"url": "https://example.com/guide", "max_chars": 5000})
+    assert out["url"] == "https://example.com/guide"
+    assert out["final_url"] == "https://example.com/guide"
+    assert out["format"] == "markdown"
+    assert "Hello partner" in out["content"]
+    assert out.get("title") == "Guide"
+
+
+def test_web_fetch_requires_http_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    import remedy.core.agent_web_tools as web
+
+    monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
+    with pytest.raises(ValueError, match="http"):
+        worker._web_fetch({"url": "file:///etc/passwd"})
+
+
+def test_web_fetch_refuses_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    import remedy.core.agent_web_tools as web
+
+    monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: False)
+    with pytest.raises(PermissionError, match="disabled"):
+        worker._web_fetch({"url": "https://example.com/"})
+
+
+def test_stdio_tool_round_trip_web_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    import remedy.core.agent_web_tools as web
+
+    monkeypatch.setattr(web, "web_tools_enabled", lambda runtime=None: True)
+    monkeypatch.setattr(
+        web,
+        "polite_fetch",
+        lambda url, *, max_chars, timeout, runtime=None, respect_robots=None: (
+            url,
+            b"plain text body",
+            "utf-8",
+        ),
+    )
+
+    req = json.dumps(
+        {
+            "tool_id": "web.fetch",
+            "version": 1,
+            "input": {"url": "https://example.com/plain", "max_chars": 2000},
+        }
+    ).encode("utf-8")
+    corr = b"\x05" + b"\x00" * 15
+    inbound = _frame(worker._KIND_TOOL_REQUEST, req, corr)
+
+    class _Buf:
+        def __init__(self, data: bytes) -> None:
+            self._data = data
+            self._pos = 0
+            self.out = bytearray()
+
+        def read(self, n: int) -> bytes:
+            if self._pos >= len(self._data):
+                return b""
+            chunk = self._data[self._pos : self._pos + n]
+            self._pos += len(chunk)
+            return chunk
+
+        def write(self, data: bytes) -> int:
+            self.out.extend(data)
+            return len(data)
+
+        def flush(self) -> None:
+            return None
+
+    buf = _Buf(inbound)
+    worker.serve(buf, buf)  # type: ignore[arg-type]
+
+    raw = bytes(buf.out)
+    payload_len = struct.unpack_from("<I", raw, 12)[0]
+    body = json.loads(raw[32 : 32 + payload_len].decode("utf-8"))
+    assert body["ok"] is True
+    assert body["output"]["format"] == "text"
+    assert body["output"]["content"] == "plain text body"
+    assert body["output"]["url"] == "https://example.com/plain"

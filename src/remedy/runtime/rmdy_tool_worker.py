@@ -280,6 +280,62 @@ def _web_search(inp: Mapping[str, Any]) -> Mapping[str, Any]:
     return {"query": query, "backend": str(backend), "results": results}
 
 
+def _web_fetch(inp: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Bridge Tool ABI web.fetch to polite_fetch + HTML extract (SSRF-guarded)."""
+    from remedy.core.agent_web_tools import polite_fetch, web_tools_enabled
+
+    if not web_tools_enabled(None):
+        raise PermissionError("web tools are disabled")
+    url = str(inp.get("url") or "").strip()
+    if not url:
+        raise ValueError("url is required")
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("url must start with http:// or https://")
+    raw_cap = inp.get("max_chars", 50_000)
+    try:
+        cap = int(raw_cap) if raw_cap is not None else 50_000
+    except (TypeError, ValueError):
+        cap = 50_000
+    cap = max(1000, min(200_000, cap))
+
+    final_url, raw, charset = polite_fetch(
+        url, max_chars=max(cap * 4, 200_000), timeout=25.0, runtime=None
+    )
+    text = raw.decode(charset or "utf-8", errors="replace")
+    from remedy.core.html_extract import html_to_markdown, looks_like_html
+
+    out: dict[str, Any] = {
+        "url": url,
+        "final_url": str(final_url or url),
+        "content": text,
+        "format": "text",
+    }
+    truncated = False
+    if looks_like_html(raw):
+        extracted = html_to_markdown(text, max_chars=cap)
+        md = str(extracted.get("markdown") or "")
+        body = md.strip()
+        title = str(extracted.get("title") or "").strip()
+        if body:
+            out["content"] = body
+            out["format"] = "markdown"
+            if title:
+                out["title"] = title
+            truncated = f"…[truncated at {cap} chars]" in md
+        else:
+            if len(text) > cap:
+                out["content"] = text[:cap]
+                truncated = True
+            if title:
+                out["title"] = title
+    elif len(text) > cap:
+        out["content"] = text[:cap]
+        truncated = True
+    if truncated:
+        out["truncated"] = True
+    return out
+
+
 _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("text.slugify", 1): lambda inp: {"slug": _slugify(str(inp.get("text", "")))},
     ("text.word_count", 1): lambda inp: {"words": _word_count(str(inp.get("text", "")))},
@@ -287,6 +343,7 @@ _HANDLERS: dict[tuple[str, int], ToolHandler] = {
     ("workspace.list", 1): _workspace_list,
     ("workspace.write", 1): _workspace_write,
     ("web.search", 1): _web_search,
+    ("web.fetch", 1): _web_fetch,
 }
 
 

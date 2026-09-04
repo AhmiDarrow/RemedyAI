@@ -319,6 +319,57 @@ func RegisterPythonWorkerLocalMirrors(registry *Registry) error {
 	})); err != nil {
 		return err
 	}
+
+	if err := registry.Register(Descriptor{
+		ID:          "web.fetch",
+		Version:     1,
+		Description: "Fetch a public HTTP(S) URL as readable text (local mirror of Python worker)",
+		Runtime:     RuntimeGo,
+		Risk:        RiskReadOnly,
+		InputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["url"],
+			"properties":{
+				"url":{"type":"string","minLength":1},
+				"max_chars":{"type":"integer","minimum":1000,"maximum":200000}
+			},
+			"additionalProperties":false
+		}`),
+		OutputSchema: json.RawMessage(`{
+			"type":"object",
+			"required":["url","final_url","content","format"],
+			"properties":{
+				"url":{"type":"string"},
+				"final_url":{"type":"string"},
+				"content":{"type":"string"},
+				"format":{"type":"string","enum":["markdown","text"]},
+				"title":{"type":"string"},
+				"truncated":{"type":"boolean"}
+			},
+			"additionalProperties":false
+		}`),
+	}, ExecutorFunc(func(_ context.Context, request Request) (Result, error) {
+		var body struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(request.Input, &body); err != nil || strings.TrimSpace(body.URL) == "" {
+			return Result{}, ErrInvalidInput
+		}
+		url := strings.TrimSpace(body.URL)
+		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+			return Result{}, ErrInvalidInput
+		}
+		out, err := json.Marshal(map[string]any{
+			"url":       url,
+			"final_url": url,
+			"content":   "mirror fetch of " + url,
+			"format":    "text",
+			"title":     "mirror",
+		})
+		return Result{Output: out}, err
+	})); err != nil {
+		return err
+	}
 	return nil
 }
 
