@@ -1,9 +1,8 @@
-"""Prepare a host command: Zig owns prepare/scriptfile; Python keeps chain helpers."""
+"""Prepare a host command: Zig owns prepare/scriptfile and shell-chain expand."""
 
 from __future__ import annotations
 
 import os
-import re
 import shlex
 import shutil
 import sys
@@ -162,21 +161,6 @@ def _exe_stem(name: str) -> str:
     return head[:-4] if head.endswith(".exe") else head
 
 
-def _unquote_cmd_token(tok: str) -> str:
-    t = (tok or "").strip()
-    if len(t) >= 2 and t[0] == '"' and t[-1] == '"':
-        return t[1:-1].replace('""', '"')
-    return t
-
-
-def _argv_for_hidden_hop(part: str) -> list[str]:
-    """Argv for one ``&&`` hop. Strip cmd.exe's leftover quotes on Windows."""
-    hop = coerce_argv(part)
-    if os.name != "nt":
-        return hop
-    return [_unquote_cmd_token(tok) for tok in hop]
-
-
 @dataclass(frozen=True)
 class ChainHop:
     """One hop of an ``A && B`` chain the sandbox can run without cmd.exe."""
@@ -197,10 +181,17 @@ class ChainHop:
     def mkdir(paths: list[str]) -> ChainHop:
         return ChainHop(kind="mkdir", paths=tuple(paths))
 
-
-_IF_MKDIR = re.compile(
-    r"(?is)^\(\s*if\s+not\s+exist\s+(?:\"[^\"]*\"|\S+)\s+mkdir\s+(\"[^\"]*\"|\S+)\s*\)$"
-)
+    @staticmethod
+    def from_dict(raw: dict[str, Any]) -> ChainHop:
+        kind = str(raw.get("kind") or "")
+        if kind == "run":
+            return ChainHop.run([str(a) for a in (raw.get("argv") or [])])
+        if kind == "cd":
+            paths = [str(p) for p in (raw.get("paths") or [])]
+            return ChainHop.cd(paths[0] if paths else "")
+        if kind == "mkdir":
+            return ChainHop.mkdir([str(p) for p in (raw.get("paths") or [])])
+        raise ValueError(f"unknown chain hop kind: {kind!r}")
 
 
 def split_and_segments(text: str) -> list[str] | None:
@@ -251,97 +242,32 @@ def split_plain_and_chain(text: str) -> list[str] | None:
     return parts
 
 
-def _shell_chain_text(argv: list[str]) -> str | None:
-    if len(argv) < 3:
-        return None
-    head = _exe_stem(argv[0])
-    flag = str(argv[1]).lower()
-    if head == "cmd" and flag == "/c":
-        return str(argv[2]) if len(argv) == 3 else " ".join(str(a) for a in argv[2:])
-    if head in {"sh", "bash"} and flag == "-c":
-        return str(argv[2]) if len(argv) == 3 else " ".join(str(a) for a in argv[2:])
-    return None
-
-
-def _parse_cd_hop(text: str) -> str | None:
-    toks = _argv_for_hidden_hop(text)
-    if not toks or _exe_stem(toks[0]) != "cd":
-        return None
-    rest = list(toks[1:])
-    if rest and rest[0].lower() == "/d":
-        rest = rest[1:]
-    if len(rest) != 1:
-        return None
-    return rest[0]
-
-
-def _parse_one_mkdir(text: str) -> list[str] | None:
-    t = (text or "").strip()
-    matched = _IF_MKDIR.match(t)
-    if matched:
-        return [_unquote_cmd_token(matched.group(1))]
-    toks = _argv_for_hidden_hop(t)
-    if not toks or _exe_stem(toks[0]) not in {"mkdir", "md"}:
-        return None
-    paths = [p for p in toks[1:] if p not in {"-p", "--parents"} and not p.startswith("-")]
-    return paths or None
-
-
-def _parse_mkdir_hop(text: str) -> list[str] | None:
-    t = (text or "").strip()
-    if " & " in t and "&&" not in t:
-        paths: list[str] = []
-        for part in t.split(" & "):
-            one = _parse_one_mkdir(part.strip())
-            if not one:
-                return None
-            paths.extend(one)
-        return paths or None
-    return _parse_one_mkdir(t)
-
-
-def classify_chain_hop(
-    text: str,
-    *,
-    project_path: Path | str | None = None,
-) -> ChainHop | None:
-    """Map one ``&&`` segment to cd / mkdir / a hidden argv. None = needs a shell."""
-    cd = _parse_cd_hop(text)
-    if cd is not None:
-        return ChainHop.cd(cd)
-    mk = _parse_mkdir_hop(text)
-    if mk:
-        return ChainHop.mkdir(mk)
-    if not looks_like_plain_argv(text):
-        return None
-    hop = _argv_for_hidden_hop(text)
-    if not hop:
-        return None
-    if not Path(hop[0]).is_file():
-        resolved = resolve_which(hop[0], cwd=project_path)
-        if resolved:
-            hop[0] = resolved
-    return ChainHop.run(deflate_uv_run(hop, project_path=project_path))
-
-
 def expand_shell_chain(
     argv: list[str],
     *,
     project_path: Path | str | None = None,
 ) -> list[ChainHop] | None:
-    """Turn ``cmd /c A && B`` into hidden cd/mkdir/run hops."""
-    text = _shell_chain_text(argv)
-    if not text:
-        return None
-    parts = split_and_segments(text)
-    if not parts:
+    """Turn ``cmd /c A && B`` into hidden cd/mkdir/run hops (Zig only)."""
+    from remedy.core.computer.host_binding import HostError, shell_chain_expand
+
+    payload: dict[str, Any] = {"argv": [str(a) for a in argv]}
+    if project_path is not None:
+        payload["project_path"] = str(project_path)
+    try:
+        result = shell_chain_expand(payload)
+    except HostError:
+        raise
+    hops_raw = result.get("hops")
+    if not hops_raw:
         return None
     hops: list[ChainHop] = []
-    for part in parts:
-        hop = classify_chain_hop(part, project_path=project_path)
-        if hop is None:
+    for item in hops_raw:
+        if not isinstance(item, dict):
             return None
-        hops.append(hop)
+        try:
+            hops.append(ChainHop.from_dict(item))
+        except (TypeError, ValueError):
+            return None
     return hops if len(hops) >= 2 else None
 
 

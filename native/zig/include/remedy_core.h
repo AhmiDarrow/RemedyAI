@@ -620,6 +620,30 @@ int32_t remedy_core_stretch_format_whoami(
     uint8_t **out_utf8, size_t *out_len
 );
 
+/* ---- ABI 5 additive: shell-chain expand + execute ------------------------- */
+
+/* Expand cmd /c or sh -c "A && B" into hops JSON.
+ * Input: {"argv":[...], "project_path"?: "..."}.
+ * Output: {"hops": null} or {"hops":[{"kind":"cd|mkdir|run",...}]}.
+ * OK with hops null = not a chain (not an error). Caller frees. */
+int32_t remedy_core_shell_chain_expand(
+    const uint8_t *json_in, size_t json_in_len,
+    uint8_t **out_json, size_t *out_len
+);
+
+/* Execute a shell chain from argv or hops.
+ * Input: argv OR hops + cwd?/env?/timeout_ms?/project_path?.
+ * Output: {exit_code,stdout,stderr,duration_ms,cwd,timed_out,aborted,
+ * not_a_chain,hops_run}. Jail/policy denies return OK with exit_code -1 and
+ * stderr in the "Blocked by write jail" / "Blocked by security policy" family.
+ * abort_flag may be null; non-zero byte aborts between/during hops.
+ * Caller frees. */
+int32_t remedy_core_shell_chain_execute(
+    const uint8_t *json_in, size_t json_in_len,
+    const uint8_t *abort_flag,
+    uint8_t **out_json, size_t *out_len
+);
+
 /* ---- ABI 5 additive: Connect Tailscale management ------------------------- */
 
 /* UTF-8 JSON status object {installed,running,logged_in,tailnet_ipv4,version,

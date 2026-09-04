@@ -118,18 +118,22 @@ def test_translate_start_md_types_instead_of_os_open() -> None:
     assert "type" in r5.text.lower()
 
 
-def test_expand_and_chain_splits_git_without_cmd(monkeypatch) -> None:
+def _exe_stem(name: str) -> str:
+    head = str(name or "").replace("\\", "/").rsplit("/", 1)[-1].lower()
+    return head[:-4] if head.endswith(".exe") else head
+
+
+def test_expand_and_chain_splits_git_without_cmd() -> None:
     from remedy.execution.host import runner as host_runner
 
-    monkeypatch.setattr(
-        host_runner, "resolve_which", lambda name, cwd=None: name
-    )
     hops = host_runner.expand_and_chain_argv(
         ["cmd.exe", "/c", 'git add . && git commit -m "wip"']
     )
     assert hops is not None
-    assert hops[0] == ["git", "add", "."]
-    assert hops[1][:3] == ["git", "commit", "-m"]
+    assert _exe_stem(hops[0][0]) == "git"
+    assert hops[0][1:] == ["add", "."]
+    assert _exe_stem(hops[1][0]) == "git"
+    assert hops[1][1:3] == ["commit", "-m"]
     assert hops[1][3] == "wip"
     quoted = host_runner.split_plain_and_chain(
         'git commit -m "fix: a && b" && git status'
@@ -139,15 +143,14 @@ def test_expand_and_chain_splits_git_without_cmd(monkeypatch) -> None:
     assert host_runner.split_plain_and_chain("mkdir -p a && git add .") is None
 
 
-def test_expand_shell_chain_cd_and_mkdir(monkeypatch) -> None:
+def test_expand_shell_chain_cd_and_mkdir() -> None:
     from remedy.execution.host import runner as host_runner
 
-    monkeypatch.setattr(host_runner, "resolve_which", lambda name, cwd=None: name)
     cd_hops = host_runner.expand_shell_chain(["cmd.exe", "/c", "cd src && pytest -q"])
     assert cd_hops is not None
     assert [h.kind for h in cd_hops] == ["cd", "run"]
     assert cd_hops[0].paths == ("src",)
-    assert cd_hops[1].argv[0] == "pytest"
+    assert _exe_stem(cd_hops[1].argv[0]) == "pytest"
     mk_hops = host_runner.expand_shell_chain(
         ["cmd.exe", "/c", '(if not exist "out\\." mkdir "out") && git add .']
     )

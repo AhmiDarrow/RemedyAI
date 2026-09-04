@@ -349,6 +349,20 @@ _PROTOTYPES: dict[str, tuple[list[Any], Any]] = {
         [c_char_p, c_size_t, c_char_p, c_size_t],
         c_int32,
     ),
+    "remedy_core_shell_chain_expand": (
+        [c_char_p, c_size_t, POINTER(_BytePtr), POINTER(c_size_t)],
+        c_int32,
+    ),
+    "remedy_core_shell_chain_execute": (
+        [
+            c_char_p,
+            c_size_t,
+            POINTER(c_uint8),
+            POINTER(_BytePtr),
+            POINTER(c_size_t),
+        ],
+        c_int32,
+    ),
     "remedy_core_host_session_open": (
         [c_char_p, c_size_t, POINTER(c_uint64)],
         c_int32,
@@ -1507,6 +1521,64 @@ def write_jail_check_spawn(argv: Sequence[str], cwd: str | None = None) -> None:
             argv_raw, len(argv_raw), cwd_raw, len(cwd_raw)
         ),
     )
+
+
+def shell_chain_expand(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Call ``remedy_core_shell_chain_expand``; return ``{hops: null|list}``.
+
+    Missing symbol → :class:`HostError`.
+    """
+    encoded = _utf8(json.dumps(dict(payload), ensure_ascii=False, separators=(",", ":")))
+    try:
+        library = _lib()
+        fn = library.remedy_core_shell_chain_expand
+    except (AttributeError, NativeRuntimeUnavailableError) as exc:
+        raise HostError("shell_chain_expand", STATUS_UNSUPPORTED) from exc
+    ptr, length = _BytePtr(), c_size_t()
+    _check(
+        library,
+        "shell_chain_expand",
+        fn(encoded, len(encoded), ctypes.byref(ptr), ctypes.byref(length)),
+    )
+    result = _take_json(library, ptr, length)
+    if not isinstance(result, dict):
+        raise HostError("shell_chain_expand", STATUS_OPERATION_FAILED)
+    return result
+
+
+def shell_chain_execute(
+    payload: Mapping[str, Any],
+    *,
+    abort_flag: c_uint8 | None = None,
+) -> dict[str, Any]:
+    """Call ``remedy_core_shell_chain_execute``; return the execute result dict.
+
+    *abort_flag* is an optional ``ctypes.c_uint8`` polled by Zig (non-zero aborts).
+    Missing symbol → :class:`HostError`.
+    """
+    encoded = _utf8(json.dumps(dict(payload), ensure_ascii=False, separators=(",", ":")))
+    try:
+        library = _lib()
+        fn = library.remedy_core_shell_chain_execute
+    except (AttributeError, NativeRuntimeUnavailableError) as exc:
+        raise HostError("shell_chain_execute", STATUS_UNSUPPORTED) from exc
+    ptr, length = _BytePtr(), c_size_t()
+    flag_arg = ctypes.byref(abort_flag) if abort_flag is not None else None
+    _check(
+        library,
+        "shell_chain_execute",
+        fn(
+            encoded,
+            len(encoded),
+            flag_arg,
+            ctypes.byref(ptr),
+            ctypes.byref(length),
+        ),
+    )
+    result = _take_json(library, ptr, length)
+    if not isinstance(result, dict):
+        raise HostError("shell_chain_execute", STATUS_OPERATION_FAILED)
+    return result
 
 
 def process_spawn_authorized(
