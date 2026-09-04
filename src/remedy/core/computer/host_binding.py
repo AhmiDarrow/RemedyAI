@@ -9,7 +9,8 @@ ConPTY spawns use the authorized ABI (policy + capability tokens + write-jail
 
 Windows: host + UIA + ConPTY. Linux: host (X11/XTest) + AT-SPI a11y snapshot.
 ``host_op_prepare`` (structured ops + command-string prepare),
-``translate_posix_to_host``, and diagnose/dialect/stretch are portable.
+``translate_posix_to_host`` / ``looks_like_powershell`` /
+``rewrite_posix_argv``, and diagnose/dialect/stretch are portable.
 ``native()`` selects ``desktop_win`` / ``desktop_linux`` (no ``desktop_os`` twin).
 Other platforms: host/UIA/a11y/ConPTY calls report
 :data:`STATUS_UNSUPPORTED` (:class:`HostError`).
@@ -239,6 +240,14 @@ _PROTOTYPES: dict[str, tuple[list[Any], Any]] = {
         c_int32,
     ),
     "remedy_core_translate_posix_to_host": (
+        [c_char_p, c_size_t, POINTER(_BytePtr), POINTER(c_size_t)],
+        c_int32,
+    ),
+    "remedy_core_looks_like_powershell": (
+        [c_char_p, c_size_t, POINTER(c_uint8)],
+        c_int32,
+    ),
+    "remedy_core_rewrite_posix_argv": (
         [c_char_p, c_size_t, POINTER(_BytePtr), POINTER(c_size_t)],
         c_int32,
     ),
@@ -1144,6 +1153,49 @@ def translate_posix_to_host(
     result = _take_json(library, ptr, length)
     if not isinstance(result, dict):
         raise HostError("translate_posix_to_host", STATUS_OPERATION_FAILED)
+    return result
+
+
+def looks_like_powershell(command: str) -> bool:
+    """True when Zig classifies *command* as PowerShell (not POSIX/cmd)."""
+    library = _lib()
+    raw = _utf8(command or "")
+    flag = c_uint8()
+    _check(
+        library,
+        "looks_like_powershell",
+        library.remedy_core_looks_like_powershell(
+            raw, len(raw), ctypes.byref(flag)
+        ),
+    )
+    return bool(flag.value)
+
+
+def rewrite_posix_argv(
+    argv: Sequence[str],
+    *,
+    python_exe: str | None = None,
+    pwsh_exe: str | None = None,
+) -> dict[str, Any]:
+    """Call ``remedy_core_rewrite_posix_argv``; return ``{argv, notes}``."""
+    payload: dict[str, Any] = {"argv": [str(a) for a in argv]}
+    if python_exe:
+        payload["python_exe"] = python_exe
+    if pwsh_exe:
+        payload["pwsh_exe"] = pwsh_exe
+    encoded = _utf8(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    library = _lib()
+    ptr, length = _BytePtr(), c_size_t()
+    _check(
+        library,
+        "rewrite_posix_argv",
+        library.remedy_core_rewrite_posix_argv(
+            encoded, len(encoded), ctypes.byref(ptr), ctypes.byref(length)
+        ),
+    )
+    result = _take_json(library, ptr, length)
+    if not isinstance(result, dict):
+        raise HostError("rewrite_posix_argv", STATUS_OPERATION_FAILED)
     return result
 
 

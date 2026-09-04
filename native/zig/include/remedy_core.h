@@ -17,7 +17,8 @@ extern "C" {
  * tokens), signing-key set/clear, argv hash, token issue, authorized
  * one-shot exec capture (stdout/stderr + timeout/kill-tree), write-jail /
  * workdir roots (set/clear/check), HostSession orchestration (open/run/
- * cwd/close + wrap/split protocol), and host diagnose/dialect/stretch.
+ * cwd/close + wrap/split protocol), host diagnose/dialect/stretch, and
+ * looks_like_powershell / rewrite_posix_argv (argv-head twin of translate).
  * Production Python spawn/session paths use the authorized exports; the
  * unsigned process_spawn_hidden / conpty_spawn / host_session_open symbols
  * remain for low-level tests.
@@ -338,6 +339,23 @@ int32_t remedy_core_host_op_prepare(
  * {"text","changed","notes","untranslatable","noop"} — caller frees with
  * remedy_core_free. */
 int32_t remedy_core_translate_posix_to_host(
+    const uint8_t *json_in,
+    size_t json_in_len,
+    uint8_t **out_json,
+    size_t *out_len
+);
+
+/* 1 when command looks like PowerShell (not POSIX/cmd or a script name);
+ * 0 otherwise. Empty command → 0. Always OK when out_flag is non-null. */
+int32_t remedy_core_looks_like_powershell(
+    const uint8_t *command, size_t command_len,
+    uint8_t *out_flag
+);
+
+/* Rewrite a few POSIX argv heads (wc -l) for host_run. json_in is
+ * {"argv":[...],"python_exe"?: "...","pwsh_exe"?: "..."}. On success
+ * *out_json holds {"argv":[...],"notes":[...]} — caller frees. */
+int32_t remedy_core_rewrite_posix_argv(
     const uint8_t *json_in,
     size_t json_in_len,
     uint8_t **out_json,

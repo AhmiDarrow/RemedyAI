@@ -1272,6 +1272,151 @@ export fn remedy_core_translate_posix_to_host(
     return deliverBytes(translateToOwnedJson(input), out_json, out_len);
 }
 
+/// 1 when *command* looks like PowerShell; 0 otherwise (empty → 0).
+export fn remedy_core_looks_like_powershell(
+    command_ptr: ?[*]const u8,
+    command_len: usize,
+    out_flag: ?*u8,
+) callconv(.c) i32 {
+    const out = out_flag orelse return invalid_status;
+    const cmd = slice(command_ptr, command_len);
+    out.* = if (looksLikePowershell(cmd)) 1 else 0;
+    return ok_status;
+}
+
+const ArgvRewrite = struct {
+    argv: []const []const u8,
+    notes: []const []const u8,
+};
+
+fn argvStem(name: []const u8) []const u8 {
+    var s = name;
+    if (std.mem.lastIndexOfScalar(u8, s, '/')) |i| s = s[i + 1 ..];
+    if (std.mem.lastIndexOfScalar(u8, s, '\\')) |i| s = s[i + 1 ..];
+    if (endsWithIgnoreCase(s, ".exe")) s = s[0 .. s.len - 4];
+    return s;
+}
+
+/// Rewrite a few POSIX argv heads (`wc -l`) the host_run argv path never
+/// sent through the command-string translator.
+pub fn rewritePosixArgv(
+    arena: std.mem.Allocator,
+    argv: []const []const u8,
+    opts: TranslateOptions,
+) error{OutOfMemory}!ArgvRewrite {
+    if (argv.len == 0) return .{ .argv = argv, .notes = &.{} };
+    const head = argvStem(argv[0]);
+    const rest = argv[1..];
+    if (!eqlIgnoreCase(head, "wc")) {
+        return .{ .argv = argv, .notes = &.{} };
+    }
+    var has_lines = false;
+    for (rest) |t| {
+        if (std.mem.eql(u8, t, "-l") or std.mem.eql(u8, t, "--lines")) has_lines = true;
+    }
+    if (!has_lines) return .{ .argv = argv, .notes = &.{} };
+    var files: std.ArrayList([]const u8) = .empty;
+    defer files.deinit(arena);
+    for (rest) |t| {
+        if (std.mem.startsWith(u8, t, "-")) continue;
+        try files.append(arena, t);
+    }
+    if (files.items.len == 0) return .{ .argv = argv, .notes = &.{} };
+
+    const path = files.items[0];
+    var notes: std.ArrayList([]const u8) = .empty;
+    errdefer notes.deinit(arena);
+
+    if (opts.python_exe.len != 0) {
+        try appendNote(arena, &notes, "wc -l → python line count");
+        var win_p = try winPath(arena, path);
+        if (std.mem.indexOf(u8, win_p, "'''")) |_| {
+            win_p = try replaceLiteral(arena, win_p, "'''", "");
+        }
+        const code = try std.fmt.allocPrint(
+            arena,
+            "p=open(r'''{s}''',encoding='utf-8',errors='replace').read().splitlines();print(len(p))",
+            .{win_p},
+        );
+        const out = try arena.alloc([]const u8, 3);
+        out[0] = opts.python_exe;
+        out[1] = "-c";
+        out[2] = code;
+        return .{ .argv = out, .notes = try notes.toOwnedSlice(arena) };
+    }
+    if (opts.pwsh_exe.len != 0) {
+        try appendNote(arena, &notes, "wc -l → pwsh Measure-Object");
+        const escaped = try replaceLiteral(arena, path, "'", "''");
+        const ps = try std.fmt.allocPrint(
+            arena,
+            "(Get-Content -LiteralPath '{s}' | Measure-Object -Line).Lines",
+            .{escaped},
+        );
+        const out = try arena.alloc([]const u8, 4);
+        out[0] = opts.pwsh_exe;
+        out[1] = "-NoProfile";
+        out[2] = "-Command";
+        out[3] = ps;
+        return .{ .argv = out, .notes = try notes.toOwnedSlice(arena) };
+    }
+    try appendNote(
+        arena,
+        &notes,
+        "wc -l needs Python — install Python 3 or set REMEDY_PYTHON to python.exe",
+    );
+    return .{ .argv = argv, .notes = try notes.toOwnedSlice(arena) };
+}
+
+fn rewriteArgvToOwnedJson(json_in: []const u8) Error![]u8 {
+    var arena_state = std.heap.ArenaAllocator.init(host.allocator);
+    errdefer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const parsed = std.json.parseFromSliceLeaky(std.json.Value, arena, json_in, .{}) catch return error.InvalidArgument;
+    const object = switch (parsed) {
+        .object => |o| o,
+        else => return error.InvalidArgument,
+    };
+    const argv_v = object.get("argv") orelse return error.InvalidArgument;
+    const argv_arr = switch (argv_v) {
+        .array => |a| a.items,
+        else => return error.InvalidArgument,
+    };
+    var argv_list: std.ArrayList([]const u8) = .empty;
+    for (argv_arr) |item| {
+        const s = switch (item) {
+            .string => |str| str,
+            else => return error.InvalidArgument,
+        };
+        try argv_list.append(arena, s);
+    }
+    var opts: TranslateOptions = .{};
+    if (jsonStringField(object, "python_exe")) |p| opts.python_exe = p;
+    if (jsonStringField(object, "pwsh_exe")) |p| opts.pwsh_exe = p;
+
+    const result = rewritePosixArgv(arena, argv_list.items, opts) catch return error.OutOfMemory;
+    const encoded = host.jsonAlloc(.{
+        .argv = result.argv,
+        .notes = result.notes,
+    }) catch return error.OutOfMemory;
+    arena_state.deinit();
+    return encoded;
+}
+
+/// Rewrite POSIX argv heads for host_run. Input JSON:
+/// `{argv:[...], python_exe?: "...", pwsh_exe?: "..."}`.
+/// Output: `{argv:[...], notes:[...]}` — caller frees.
+export fn remedy_core_rewrite_posix_argv(
+    json_in: ?[*]const u8,
+    json_in_len: usize,
+    out_json: ?*?[*]u8,
+    out_len: ?*usize,
+) callconv(.c) i32 {
+    const input = slice(json_in, json_in_len);
+    if (input.len == 0) return invalid_status;
+    return deliverBytes(rewriteArgvToOwnedJson(input), out_json, out_len);
+}
+
 fn readFileAlloc(gpa: std.mem.Allocator, io: std.Io, path: []const u8) ![]u8 {
     var file = if (std.fs.path.isAbsolute(path))
         try std.Io.Dir.openFileAbsolute(io, path, .{})
@@ -1355,6 +1500,36 @@ test "shell_translate looksLikePowershell basics" {
     try std.testing.expect(!looksLikePowershell("start-dev"));
     try std.testing.expect(!looksLikePowershell("where powershell"));
     try std.testing.expect(!looksLikePowershell("mkdir -p docs && echo use powershell"));
+    var flag: u8 = 0;
+    try std.testing.expectEqual(ok_status, remedy_core_looks_like_powershell("Get-Service".ptr, "Get-Service".len, &flag));
+    try std.testing.expectEqual(@as(u8, 1), flag);
+    try std.testing.expectEqual(ok_status, remedy_core_looks_like_powershell("start-server".ptr, "start-server".len, &flag));
+    try std.testing.expectEqual(@as(u8, 0), flag);
+}
+
+test "shell_translate rewritePosixArgv wc -l" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const argv = [_][]const u8{ "wc", "-l", "src/data/file.ts" };
+    const got = try rewritePosixArgv(arena, &argv, .{ .python_exe = "C:\\Python\\python.exe" });
+    try std.testing.expectEqual(@as(usize, 3), got.argv.len);
+    try std.testing.expectEqualStrings("C:\\Python\\python.exe", got.argv[0]);
+    try std.testing.expectEqualStrings("-c", got.argv[1]);
+    try std.testing.expect(std.mem.indexOf(u8, got.argv[2], "len(p)") != null);
+    try std.testing.expect(got.notes.len >= 1);
+
+    const input =
+        \\{"argv":["wc","-l","file.txt"],"python_exe":"py.exe"}
+    ;
+    var out_ptr: ?[*]u8 = null;
+    var out_len: usize = 0;
+    const status = remedy_core_rewrite_posix_argv(input.ptr, input.len, &out_ptr, &out_len);
+    try std.testing.expectEqual(ok_status, status);
+    defer host.allocator.free(out_ptr.?[0..out_len]);
+    const raw = out_ptr.?[0..out_len];
+    try std.testing.expect(std.mem.indexOf(u8, raw, "py.exe") != null);
+    try std.testing.expect(std.mem.indexOf(u8, raw, "len(p)") != null);
 }
 
 test "shell_translate C ABI roundtrip mkdir" {
