@@ -1,7 +1,8 @@
-"""Sandboxed execution backends for safe skill and tool execution.
+"""Sandboxed subprocess execution for skills and tools.
 
-Supports subprocess isolation and Docker container-based isolation.
-All backends share the ExecutionResult contract.
+``SubprocessSandbox`` owns async hop orchestration, abort, and env scrub.
+Docker lives in ``remedy.execution.docker``. Process spawn/kill on Windows
+goes through ``remedy_core``; Zig HostSession owns the persistent shell host.
 """
 
 from __future__ import annotations

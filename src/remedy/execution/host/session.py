@@ -1,8 +1,8 @@
-"""Persistent host session — cwd/env survive; interactive prompts get killed.
+"""Persistent host session — thin binding over Zig HostSession.
 
-Default I/O is pipes (hidden, UTF-8). When a command needs a real console and
-ConPTY APIs are present, we attach a pseudo-console so progress/TUI programs
-do not hang on a pipe.
+Windows open/run/cwd/close and the sentinel protocol (wrap/split/VT/echo)
+live in ``remedy_core`` (ABI 5). POSIX keeps a piped live shell because Zig
+live open is Windows-only; protocol helpers still go through the Zig ABI.
 """
 
 from __future__ import annotations
@@ -21,15 +21,11 @@ from typing import Any
 _SENTINEL_PREFIX = "REMEDY_HOST_DONE_"
 _SESSIONS_GUARD = asyncio.Lock()
 
-# Every escape sequence a pseudoconsole can emit: OSC (title etc.), CSI
-# (cursor moves, colours, private modes such as ?9001h / ?25l), two-byte
-# ESC sequences, and the stray C0 controls (BEL, BS) that are not text.
-_VT_RE = re.compile(
-    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC ... BEL | ST
-    r"|\x1b\[[0-?]*[ -/]*[@-~]"  # CSI
-    r"|\x1b[ -/]*[@-~]"  # ESC + intermediate* + final
-    r"|[\x07\x08]"
-)
+# Expanded-sentinel check for the POSIX pipe reader only. Wrap/split ownership
+# is Zig; this regex matches ``host_session.findSentinel`` (digit or empty
+# code, ended by CR/LF/ESC) so we do not treat ConPTY-style unexpanded echoes
+# as completion if a POSIX test ever feeds them.
+_SENTINEL_DONE_RE = re.compile(rb":(-?\d*)(?=[\r\n\x1b])")
 
 _PROMPT_MARKERS = (
     b"password:",
@@ -42,11 +38,7 @@ _PROMPT_MARKERS = (
 
 
 def _child_exit_code(proc: Any) -> int | None:
-    """The child's exit code if it has already ended, else None.
-
-    asyncio.subprocess.Process exposes ``returncode`` but not ``poll``.
-    ``_ConPTYProcess`` has both — ``poll()`` is GetExitCodeProcess.
-    """
+    """The child's exit code if it has already ended, else None."""
     poll = getattr(proc, "poll", None)
     if callable(poll):
         with suppress(Exception):
@@ -71,12 +63,10 @@ class SessionResult:
 
 @dataclass
 class HostSession:
-    """One long-lived cmd/pwsh process. Not the default for bash_exec.
+    """One long-lived cmd/pwsh/posix process. Not the default for bash_exec.
 
-    On Windows the live session is owned by Zig ``remedy_core`` HostSession
-    (ABI 5). Protocol helpers stay available in Python for fixture parity;
-    production open/run/cwd/close go through ``host_binding`` with no soft
-    Python fallback around a failed Zig call.
+    Windows: Zig ``remedy_core`` HostSession owns spawn + sentinel I/O (no
+    Python ConPTY/pipe twin). POSIX: hidden pipes; wrap/split still Zig.
     """
 
     host: str = "cmd"
@@ -85,12 +75,12 @@ class HostSession:
     use_conpty: bool = False
     _proc: Any = field(default=None, init=False, repr=False)
     _zig_handle: int = field(default=0, init=False, repr=False)
-    _buf: bytearray = field(default_factory=bytearray, init=False, repr=False)
     _lock: asyncio.Lock | None = field(default=None, init=False, repr=False)
     _stdout_pending: asyncio.Task[bytes] | None = field(
         default=None, init=False, repr=False
     )
     started: bool = field(default=False, init=False)
+    _used_conpty: bool = field(default=False, init=False, repr=False)
 
     async def start(self) -> None:
         if self.started and self._alive():
@@ -111,7 +101,6 @@ class HostSession:
             from remedy.execution.sandbox import scrub_subprocess_env
 
             env = scrub_subprocess_env()
-        # Zig scrubSessionEnv also injects non-interactive defaults.
         handle = await asyncio.to_thread(
             host_binding.host_session_open,
             host=self.host,
@@ -167,69 +156,7 @@ class HostSession:
         assert self._lock is not None
         if self._zig_handle:
             return await self._run_zig(command.strip(), timeout=timeout)
-        with suppress(Exception):
-            from remedy.core.turn_context import register_turn_process
-
-            register_turn_process(self._proc)
-        token = uuid.uuid4().hex[:10]
-        sentinel = f"{_SENTINEL_PREFIX}{token}"
-        wrapped = _wrap_with_sentinel(self.host, command.strip(), sentinel)
-        try:
-            async with self._lock:
-                await self._send_raw(wrapped)
-                raw, timed_out, interactive, shell_exit = await self._read_until(
-                    sentinel.encode("ascii"), timeout=max(1.0, float(timeout))
-                )
-        finally:
-            with suppress(Exception):
-                from remedy.core.turn_context import unregister_turn_process
-
-                unregister_turn_process(self._proc)
-        text = raw.decode("utf-8", errors="replace")
-        code, body = _split_sentinel(
-            text,
-            sentinel,
-            host=self.host,
-            command=wrapped,
-            conpty=bool(getattr(self, "_used_conpty", False)),
-        )
-        cwd = ""
-        if shell_exit is not None:
-            # The child died while we waited for the sentinel (`exit`,
-            # `exit /b N`, the shell crashing). Returning a timeout here used
-            # to kill a process that was already gone and leave the next
-            # `run()` writing to a closed pipe.
-            self._abandon_proc()
-            note = f"the shell exited (code {shell_exit}) while running the command"
-            if note not in body:
-                body = f"{body}\n{note}" if body else note
-            return SessionResult(
-                exit_code=int(shell_exit),
-                stdout=body,
-                timed_out=False,
-                interactive=interactive,
-                cwd="",
-                host=self.host,
-                used_conpty=bool(getattr(self, "_used_conpty", False)),
-            )
-        if timed_out:
-            # Do not leave the timed-out command running in the shared shell.
-            with suppress(Exception):
-                from remedy.execution.process import kill_process_tree
-
-                kill_process_tree(self._proc)
-            self._abandon_proc()
-        else:
-            cwd = await self.current_cwd()
-        return SessionResult(
-            exit_code=code if not timed_out else -1,
-            stdout=body,
-            timed_out=timed_out,
-            interactive=interactive,
-            cwd=cwd,
-            host=self.host,
-            used_conpty=bool(getattr(self, "_used_conpty", False)),
-        )
+        return await self._run_posix(command.strip(), timeout=timeout)
 
     async def _run_zig(self, command: str, *, timeout: float) -> SessionResult:
         from remedy.core.computer import host_binding
@@ -257,6 +184,67 @@ class HostSession:
             used_conpty=bool(data.get("used_conpty", self._used_conpty)),
         )
 
+    async def _run_posix(self, command: str, *, timeout: float) -> SessionResult:
+        with suppress(Exception):
+            from remedy.core.turn_context import register_turn_process
+
+            register_turn_process(self._proc)
+        token = uuid.uuid4().hex[:10]
+        sentinel = f"{_SENTINEL_PREFIX}{token}"
+        wrapped = _wrap_with_sentinel(self.host, command, sentinel)
+        try:
+            assert self._lock is not None
+            async with self._lock:
+                await self._send_raw(wrapped)
+                raw, timed_out, interactive, shell_exit = await self._read_until(
+                    sentinel.encode("ascii"), timeout=max(1.0, float(timeout))
+                )
+        finally:
+            with suppress(Exception):
+                from remedy.core.turn_context import unregister_turn_process
+
+                unregister_turn_process(self._proc)
+        text = raw.decode("utf-8", errors="replace")
+        code, body = _split_sentinel(
+            text,
+            sentinel,
+            host=self.host,
+            command=wrapped,
+            conpty=False,
+        )
+        cwd = ""
+        if shell_exit is not None:
+            self._abandon_proc()
+            note = f"the shell exited (code {shell_exit}) while running the command"
+            if note not in body:
+                body = f"{body}\n{note}" if body else note
+            return SessionResult(
+                exit_code=int(shell_exit),
+                stdout=body,
+                timed_out=False,
+                interactive=interactive,
+                cwd="",
+                host=self.host,
+                used_conpty=False,
+            )
+        if timed_out:
+            with suppress(Exception):
+                from remedy.execution.process import kill_process_tree
+
+                kill_process_tree(self._proc)
+            self._abandon_proc()
+        else:
+            cwd = await self.current_cwd()
+        return SessionResult(
+            exit_code=code if not timed_out else -1,
+            stdout=body,
+            timed_out=timed_out,
+            interactive=interactive,
+            cwd=cwd,
+            host=self.host,
+            used_conpty=False,
+        )
+
     async def current_cwd(self) -> str:
         if not self._alive():
             return ""
@@ -282,7 +270,6 @@ class HostSession:
                 sentinel.encode("ascii"), timeout=8.0
             )
         if timed_out or shell_exit is not None:
-            # Same as run(): a wedged cwd probe must not leave ReadFile pending.
             if timed_out:
                 with suppress(Exception):
                     from remedy.execution.process import kill_process_tree
@@ -295,7 +282,7 @@ class HostSession:
             sentinel,
             host=self.host,
             command=wrapped,
-            conpty=bool(getattr(self, "_used_conpty", False)),
+            conpty=False,
         )
         del _code
         lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
@@ -353,11 +340,6 @@ class HostSession:
         data = text.encode("utf-8", errors="replace")
         if not data.endswith(b"\n"):
             data += b"\n"
-        if getattr(self, "_used_conpty", False):
-            # A pseudoconsole is a keyboard, not a pipe: cooked line input is
-            # submitted by Enter (CR). A bare LF is just typed into the line,
-            # so the shell never ran anything and every run() timed out.
-            data = data.replace(b"\r\n", b"\n").replace(b"\n", b"\r")
         proc.stdin.write(data)
         await proc.stdin.drain()
 
@@ -383,7 +365,6 @@ class HostSession:
             remaining = deadline - loop.time()
             if remaining <= 0:
                 return bytes(buf), True, interactive, None
-            # One outstanding read — never wait_for-cancel a blocking ConPTY ReadFile.
             if self._stdout_pending is None or self._stdout_pending.done():
                 self._stdout_pending = asyncio.ensure_future(proc.stdout.read(4096))
             done, _pending = await asyncio.wait(
@@ -405,24 +386,11 @@ class HostSession:
                 exited = _child_exit_code(proc)
                 if exited is not None:
                     return bytes(buf), False, interactive, exited
-                # The fake console ReadFile is non-blocking: empty while the
-                # child is still alive just means "nothing yet". A real
-                # blocking ReadFile returning empty is EOF, and poll() will
-                # have seen the death above. Sleep a beat so we do not spin.
                 await asyncio.sleep(min(0.05, remaining))
                 continue
             buf.extend(chunk)
-            # The sentinel means the command COMPLETED — check it first so a
-            # command that merely printed a prompt-like word (cat a file with
-            # "password:", git output with "are you sure") is never mistaken
-            # for a live prompt.
             if _sentinel_done(bytes(buf), marker):
                 return bytes(buf), False, interactive, None
-            # A real interactive prompt is the CURRENT unterminated line: the
-            # process is blocked on stdin, so the marker sits AFTER the last
-            # newline with nothing following it. Output that contains the marker
-            # followed by a newline is just text and must not kill the shared
-            # session (that was destroying legitimate commands + losing cwd/env).
             tail = bytes(buf).lower().rsplit(b"\n", 1)[-1]
             if any(m in tail for m in _PROMPT_MARKERS):
                 interactive = True
@@ -462,88 +430,23 @@ def _boot_commands(host: str) -> str:
 
 
 def _wrap_with_sentinel(host: str, command: str, sentinel: str) -> str:
-    if host == "pwsh":
-        return (
-            f"{command}\n"
-            f'Write-Output "{sentinel}:$LASTEXITCODE"\n'
-        )
-    if host == "cmd" or os.name == "nt":
-        return f"{command}\necho {sentinel}:%ERRORLEVEL%\n"
-    return f"{command}\necho {sentinel}:$?\n"
+    """Zig sentinel wrap (portable protocol helper)."""
+    from remedy.core.computer import host_binding
 
-
-def _sentinel_pattern(sentinel: bytes | str) -> re.Pattern[Any]:
-    """Match the sentinel only in its EXPANDED form: ``SENTINEL:<digits>`` at
-    the end of a line.
-
-    A pseudoconsole echoes what we type, so ``echo SENTINEL:%ERRORLEVEL%``
-    (or ``"SENTINEL:$LASTEXITCODE"``) appears in the stream before the command
-    has run. Requiring the character after the colon to be a digit or a line
-    end (``
-``, ``
-``, or the ESC that ConPTY uses instead of a newline)
-    rejects the echo, whose next character is ``%`` or ``$``. The digits may
-    be empty: PowerShell's ``$LASTEXITCODE`` is null until a native command
-    has run.
-    """
-    if isinstance(sentinel, bytes):
-        return re.compile(re.escape(sentinel) + rb":(-?\d*)(?=[\r\n\x1b])")
-    return re.compile(re.escape(sentinel) + r":(-?\d*)(?=[\r\n\x1b])")
+    return host_binding.host_session_wrap(host=host, command=command, sentinel=sentinel)
 
 
 def _sentinel_done(buf: bytes, sentinel: bytes) -> bool:
-    return _sentinel_pattern(sentinel).search(buf) is not None
-
-
-def strip_vt(text: str) -> str:
-    """Remove every terminal escape sequence a pseudoconsole may have added."""
-    return _VT_RE.sub("", text)
-
-
-def _find_ignoring_whitespace(haystack: str, needle: str, start: int = 0) -> tuple[int, int]:
-    """``(start, end)`` of *needle* in *haystack*, ignoring whitespace in both.
-
-    ConPTY may re-wrap an echoed command at the screen width or replace its
-    newlines with cursor moves, so the echo is the typed text modulo
-    whitespace. Returns ``(-1, -1)`` when absent.
-    """
-    want = "".join(needle.split())
-    if not want:
-        return -1, -1
-    chars: list[str] = []
-    index: list[int] = []
-    for i in range(start, len(haystack)):
-        ch = haystack[i]
-        if not ch.isspace():
-            chars.append(ch)
-            index.append(i)
-    pos = "".join(chars).find(want)
-    if pos < 0:
-        return -1, -1
-    return index[pos], index[pos + len(want) - 1] + 1
-
-
-def _strip_echo(body: str, command: str) -> str:
-    """Drop the console's echo of what we typed, keeping only what it printed.
-
-    *command* is the full wrapped text we sent: the owner's command followed
-    by the sentinel line. The echo of the sentinel line comes AFTER the
-    command's output, so everything from it on is cut; the echo of the command
-    itself (and anything before it: the boot commands, a prompt) is cut too.
-    """
-    lines = [ln for ln in command.splitlines() if ln.strip()]
-    if not lines:
-        return body
-    typed = "\n".join(lines[:-1]) if len(lines) > 1 else ""
-    sentinel_line = lines[-1]
-    s, _e = _find_ignoring_whitespace(body, sentinel_line)
-    if s >= 0:
-        body = body[:s]
-    if typed:
-        _s, e = _find_ignoring_whitespace(body, typed)
-        if e >= 0:
-            body = body[e:]
-    return body
+    """True when *buf* contains an expanded ``SENTINEL:<digits>`` line end."""
+    idx = 0
+    while True:
+        found = buf.find(sentinel, idx)
+        if found < 0:
+            return False
+        rest = buf[found + len(sentinel) :]
+        if _SENTINEL_DONE_RE.match(rest):
+            return True
+        idx = found + 1
 
 
 def _split_sentinel(
@@ -554,22 +457,16 @@ def _split_sentinel(
     command: str = "",
     conpty: bool = False,
 ) -> tuple[int, str]:
-    del host  # the sentinel grammar is the same for every host
-    m = _sentinel_pattern(sentinel).search(text)
-    if m is None:
-        return -1, strip_vt(text).strip() if conpty else text
-    num = m.group(1)
-    try:
-        code = int(num) if num else 0
-    except ValueError:
-        code = 0
-    body = text[: m.start()]
-    if conpty:
-        body = _strip_echo(strip_vt(body), command)
-    return code, body.strip()
+    """Zig sentinel split (portable protocol helper)."""
+    del host
+    from remedy.core.computer import host_binding
 
-
-# -- ConPTY (opt-in via use_conpty; pipes remain the default) ---------------
+    return host_binding.host_session_split(
+        text=text,
+        sentinel=sentinel,
+        command=command,
+        conpty=conpty,
+    )
 
 
 def conpty_available() -> bool:
@@ -582,25 +479,6 @@ def conpty_available() -> bool:
         return bool(spawn_conpty_supported())
     except Exception:
         return False
-
-
-async def _try_conpty_exec(
-    argv: list[str],
-    *,
-    cwd: str | None,
-    env: dict[str, str],
-) -> Any | None:
-    """Spawn via Zig ConPTY when available.
-
-    Returns ``None`` only when ConPTY is unsupported so the caller can use
-    pipes. A failed spawn after the probe said available raises — no soft
-    Python fallback around ``remedy_core``.
-    """
-    if not conpty_available():
-        return None
-    from remedy.execution.host.conpty import spawn_conpty
-
-    return await spawn_conpty(argv, cwd=cwd, env=env)
 
 
 # Per-chat-session host shells. Do not reuse across session_id or start cwd.

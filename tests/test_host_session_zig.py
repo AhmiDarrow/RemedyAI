@@ -1,4 +1,4 @@
-"""Phase 3: Zig HostSession protocol + live orchestration parity."""
+"""Phase 3: Zig HostSession protocol + live orchestration (owns the shell host)."""
 
 from __future__ import annotations
 
@@ -8,10 +8,6 @@ import pytest
 
 from remedy.core.computer import host_binding
 from remedy.core.computer.host_binding import HostError
-from remedy.execution.host.session import (
-    _split_sentinel,
-    _wrap_with_sentinel,
-)
 from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
 WINDOWS = sys.platform == "win32"
@@ -38,10 +34,18 @@ requires_core = pytest.mark.skipif(not _core_available(), reason="remedy_core no
         ("posix", "echo hello", "REMEDY_HOST_DONE_abc"),
     ],
 )
-def test_zig_wrap_matches_python(host: str, command: str, sentinel: str) -> None:
-    zig = host_binding.host_session_wrap(host=host, command=command, sentinel=sentinel)
-    py = _wrap_with_sentinel(host, command, sentinel)
-    assert zig == py
+def test_zig_wrap(host: str, command: str, sentinel: str) -> None:
+    wrapped = host_binding.host_session_wrap(host=host, command=command, sentinel=sentinel)
+    assert wrapped.startswith(command + "\n")
+    assert sentinel in wrapped
+    if host == "pwsh":
+        assert "$LASTEXITCODE" in wrapped
+    elif host == "cmd" or WINDOWS:
+        # Zig (and the retired Python twin) use cmd ERRORLEVEL whenever the
+        # process is on Windows, even if the dialect label is "posix".
+        assert "%ERRORLEVEL%" in wrapped
+    else:
+        assert "$?" in wrapped
 
 
 @requires_core
@@ -55,13 +59,11 @@ def test_zig_wrap_matches_python(host: str, command: str, sentinel: str) -> None
         ("hello\r\nREMEDY_HOST_DONE_abc:0\x1b[5;1H", 0, "hello"),
     ],
 )
-def test_zig_split_matches_python(text: str, code: int, body: str) -> None:
+def test_zig_split(text: str, code: int, body: str) -> None:
     zig_code, zig_body = host_binding.host_session_split(
         text=text, sentinel="REMEDY_HOST_DONE_abc"
     )
-    py_code, py_body = _split_sentinel(text, "REMEDY_HOST_DONE_abc")
     assert (zig_code, zig_body) == (code, body)
-    assert (zig_code, zig_body) == (py_code, py_body)
 
 
 @requires_core
@@ -85,6 +87,26 @@ def test_zig_host_session_echo_round_trip() -> None:
         assert "host-session-ok" in (result.get("stdout") or "")
     finally:
         host_binding.host_session_close(handle)
+
+
+@requires_core
+@windows_only
+@pytest.mark.asyncio
+async def test_python_host_session_is_thin_zig_binding() -> None:
+    """HostSession on Windows must open/run/close only through Zig."""
+    from remedy.execution.host.session import HostSession
+
+    sess = HostSession(host="cmd", use_conpty=False)
+    try:
+        await sess.start()
+        assert sess._zig_handle
+        assert sess._proc is None
+        res = await sess.run("echo thin-binding-ok", timeout=20.0)
+        assert res.timed_out is False
+        assert "thin-binding-ok" in res.stdout
+    finally:
+        await sess.close()
+    assert sess._zig_handle == 0
 
 
 @requires_core
