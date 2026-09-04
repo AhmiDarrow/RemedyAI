@@ -778,13 +778,15 @@ def test_the_sentinel_is_read_in_its_expanded_form(text: str, code: int, body: s
 )
 def test_an_echoed_unexpanded_sentinel_is_not_a_completion(echoed: str) -> None:
     from remedy.core.computer import host_binding
-    from remedy.execution.host.session import _sentinel_done
 
-    assert _sentinel_done(echoed.encode(), b"REMEDY_HOST_DONE_abc") is False
+    # Unexpanded echo of the sentinel template is not completion.
     assert host_binding.host_session_split(text=echoed, sentinel="REMEDY_HOST_DONE_abc")[0] == -1
-    assert _sentinel_done(
-        (echoed + "REMEDY_HOST_DONE_abc:0\r\n").encode(), b"REMEDY_HOST_DONE_abc"
+    # Expanded SENTINEL:0 after the echo is completion.
+    code, _body = host_binding.host_session_split(
+        text=echoed + "REMEDY_HOST_DONE_abc:0\r\n",
+        sentinel="REMEDY_HOST_DONE_abc",
     )
+    assert code == 0
 
 
 @requires_core

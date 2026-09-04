@@ -186,7 +186,8 @@ def prepare_host_op(
     """Prepare argv from a structured HostOp (no command-string parsing).
 
     All kinds including ``raw`` go through ``remedy_core_host_op_prepare``
-    (Zig). ConPTY is ABI 5 via ``host_binding``; policy remains Python.
+    (Zig). ConPTY is ABI 5 via ``host_binding``. Process policy is Zig;
+    tool allow/ask/deny is ``PolicyEngine``.
     """
     from remedy.core.computer.host_binding import (
         STATUS_INVALID_ARGUMENT,
