@@ -102,6 +102,8 @@ type Server struct {
 
 	updatesMu    sync.Mutex
 	updatesCache map[string]updatesCacheEntry
+
+	appCmd *appControlBus
 }
 
 // New builds a server with ping/status/turn-active, auth bootstrap, settings,
@@ -155,6 +157,7 @@ func New(cfg Config) (*Server, error) {
 		lifeHub:   newLifeTaskHub(),
 		hiveMgr:   hive.New(context.Background(), 64),
 		hiveFS:    openHiveStore(home),
+		appCmd:    newAppControlBus(),
 	}
 	_ = s.approvals.SyncFromConfig(LoadConfig(homeDir))
 	if err := s.openEventBus(home); err != nil {
@@ -185,8 +188,22 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/memory/search", s.handleMemorySearch)
 	s.mux.HandleFunc("GET /api/memory/facts", s.handleMemoryFacts)
 	s.mux.HandleFunc("POST /api/memory/persona-wipe", s.handleMemoryPersonaWipe)
+	s.mux.HandleFunc("GET /api/agents", s.handleListAgents)
+	s.mux.HandleFunc("GET /api/commands", s.handleListCommands)
+	s.mux.HandleFunc("GET /api/app/command", s.handleAppCommand)
+	s.mux.HandleFunc("GET /api/scratch", s.handleGetScratch)
+	s.mux.HandleFunc("PUT /api/scratch", s.handlePutScratch)
+	s.mux.HandleFunc("GET /api/diagnostics", s.handleDiagnostics)
+	s.mux.HandleFunc("GET /api/self-inject/rounds", s.handleSelfInjectRounds)
+	s.mux.HandleFunc("GET /api/coordination/presence", s.handleCoordinationPresence)
+	s.mux.HandleFunc("GET /api/continuity/dashboard", s.handleContinuityDashboard)
+	s.mux.HandleFunc("GET /api/nanoswarm/status", s.handleNanoswarmStatus)
+	s.mux.HandleFunc("GET /api/nanoswarm/token/status", s.handleNanoswarmTokenStatus)
+	s.mux.HandleFunc("POST /api/projects/scan", s.handleProjectsScan)
 	s.mux.HandleFunc("GET /api/sessions", s.handleListSessions)
 	s.mux.HandleFunc("POST /api/sessions", s.handleCreateSession)
+	s.mux.HandleFunc("POST /api/sessions/bulk-project", s.handleBulkSetSessionProject)
+	s.mux.HandleFunc("POST /api/sessions/import", s.handleImportSession)
 	s.mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
 	s.mux.HandleFunc("PATCH /api/sessions/{id}", s.handleUpdateSession)
 	s.mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
@@ -197,6 +214,7 @@ func New(cfg Config) (*Server, error) {
 	s.mux.HandleFunc("GET /api/sessions/{id}/messages", s.handleListMessages)
 	s.mux.HandleFunc("POST /api/sessions/{id}/messages", s.handleSendMessage)
 	s.mux.HandleFunc("POST /api/sessions/{id}/messages/stream", s.handleStreamMessage)
+	s.mux.HandleFunc("POST /api/sessions/{id}/messages/{msg_id}/edit", s.handleEditFromMessage)
 	s.mux.HandleFunc("POST /api/sessions/{id}/abort", s.handleAbortSession)
 	s.mux.HandleFunc("GET /api/sessions/{id}/export", s.handleExportSession)
 	s.mux.HandleFunc("POST /api/sessions/{id}/steer", s.handleSteerSession)
