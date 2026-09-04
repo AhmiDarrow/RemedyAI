@@ -19,6 +19,16 @@ windows_with_core = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def _clear_write_jail_between_tests():
+    """Sandbox/hop tests may leave Zig write-jail roots set process-wide."""
+    with contextlib.suppress(H.HostError, NativeRuntimeUnavailableError, OSError):
+        H.write_jail_clear()
+    yield
+    with contextlib.suppress(H.HostError, NativeRuntimeUnavailableError, OSError):
+        H.write_jail_clear()
+
+
 @pytest.fixture
 def test_signing_key(monkeypatch):
     key = bytes(range(32))
