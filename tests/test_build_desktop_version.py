@@ -1,4 +1,4 @@
-"""Sidecar PE version resource helpers (Defender / Wacatac mitigations)."""
+"""Desktop staging helpers — Go runtime + Zig core into desktop/bin."""
 
 from __future__ import annotations
 
@@ -24,50 +24,43 @@ def bd():
     return _load_build_desktop()
 
 
-def test_version_tuple_semver(bd) -> None:
-    assert bd._version_tuple("0.11.1") == (0, 11, 1, 0)
-    assert bd._version_tuple("1.2.3") == (1, 2, 3, 0)
-    assert bd._version_tuple("0.11.1-rc1") == (0, 11, 1, 0)
-    assert bd._version_tuple("2") == (2, 0, 0, 0)
-
-
-def test_sidecar_bin_paths_linux_has_no_exe(bd, monkeypatch) -> None:
+def test_runtime_bin_paths_linux_has_no_exe(bd, monkeypatch) -> None:
     monkeypatch.setattr(bd.sys, "platform", "linux")
     monkeypatch.setenv("TAURI_ENV_TARGET_TRIPLE", "x86_64-unknown-linux-gnu")
-    plain, triple = bd.sidecar_bin_paths()
-    assert plain.name == "remedy-desktop"
-    assert triple.name == "remedy-desktop-x86_64-unknown-linux-gnu"
+    plain, triple = bd.runtime_bin_paths()
+    assert plain.name == "remedy-runtime"
+    assert triple.name == "remedy-runtime-x86_64-unknown-linux-gnu"
 
 
-def test_sidecar_bin_paths_windows_keeps_exe(bd, monkeypatch) -> None:
+def test_runtime_bin_paths_windows_keeps_exe(bd, monkeypatch) -> None:
     monkeypatch.setattr(bd.sys, "platform", "win32")
     monkeypatch.setenv("TAURI_ENV_TARGET_TRIPLE", "x86_64-pc-windows-msvc")
-    plain, triple = bd.sidecar_bin_paths()
-    assert plain.name == "remedy-desktop.exe"
-    assert triple.name == "remedy-desktop-x86_64-pc-windows-msvc.exe"
+    plain, triple = bd.runtime_bin_paths()
+    assert plain.name == "remedy-runtime.exe"
+    assert triple.name == "remedy-runtime-x86_64-pc-windows-msvc.exe"
 
 
-def test_write_sidecar_version_file_has_product_identity(bd, tmp_path, monkeypatch) -> None:
-    """Empty PE identity is a Defender ML signal — resource must name Remedy."""
-    # Redirect generated file under tmp_path
-    monkeypatch.setattr(bd, "ROOT", tmp_path)
-    out = bd.write_sidecar_version_file("0.11.1")
-    assert out.is_file()
-    text = out.read_text(encoding="utf-8")
-    for needle in (
-        "CompanyName",
-        "Remedy",
-        "FileDescription",
-        "Remedy Desktop",
-        "FileVersion",
-        "0.11.1",
-        "OriginalFilename",
-        "remedy-desktop.exe",
-        "ProductName",
-        "ProductVersion",
-        "filevers=(0, 11, 1, 0)",
+def test_no_pyinstaller_or_remedy_desktop_sidecar(bd) -> None:
+    """Packaging path stages runtime+core; no frozen remedy-desktop build."""
+    source = BUILD_DESKTOP.read_text(encoding="utf-8")
+    for banned in (
+        "PyInstaller",
+        "pyinstaller",
+        "ensure_pyinstaller",
+        "write_sidecar_version_file",
+        "core_library_add_binary",
+        "SIDECAR_EXCLUDES",
+        "--onefile",
+        "--add-binary",
     ):
-        assert needle in text, f"missing {needle!r}"
+        assert banned not in source, banned
+    assert "cmd/remedy-runtime" in source
+    assert not hasattr(bd, "write_sidecar_version_file")
+    assert not hasattr(bd, "ensure_pyinstaller")
+    assert not hasattr(bd, "core_library_add_binary")
+    assert hasattr(bd, "runtime_bin_paths")
+    assert hasattr(bd, "stage_core")
+    assert hasattr(bd, "build_runtime")
 
 
 def test_sync_versions_stamps_package_lock(bd, tmp_path, monkeypatch) -> None:

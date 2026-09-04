@@ -180,17 +180,26 @@ def _build_desktop_module():
     return module
 
 
-def test_build_desktop_bundles_the_core_library_at_the_archive_root(tmp_path: Path) -> None:
-    """The sidecar carries the Zig core where sys._MEIPASS resolves it."""
-    import os
+def test_build_desktop_stages_runtime_and_core_not_pyinstaller(tmp_path: Path) -> None:
+    """Local packaging stages Go runtime + Zig core into desktop/bin."""
     import sys
 
     import pytest
 
     build_desktop = _build_desktop_module()
     source = (ROOT / "scripts" / "build_desktop.py").read_text("utf-8")
-    assert "--add-binary" in source
-    assert "core_library_add_binary(core_library)" in source, "build() must pass the core to PyInstaller"
+    for banned in (
+        "PyInstaller",
+        "pyinstaller",
+        "--add-binary",
+        "core_library_add_binary",
+        "write_sidecar_version_file",
+        "--onefile",
+    ):
+        assert banned not in source, banned
+    assert "go" in source and "cmd/remedy-runtime" in source
+    assert "zig build" in source
+    assert "remedy-runtime" in source
 
     expected = {
         "win32": "remedy_core.dll",
@@ -200,13 +209,14 @@ def test_build_desktop_bundles_the_core_library_at_the_archive_root(tmp_path: Pa
     default = build_desktop.default_core_library_path()
     assert default.name == expected
     assert default.parent.parent == ROOT / "native" / "zig" / "zig-out"
+    assert build_desktop.staged_core_path().name == expected
+    assert build_desktop.staged_core_path().parent == build_desktop.DESKTOP_BIN
 
-    library = tmp_path / expected
-    args = build_desktop.core_library_add_binary(library)
-    assert args[0] == "--add-binary"
-    src, dest = args[1].rsplit(os.pathsep, 1)
-    assert src == str(library)
-    assert dest == ".", "destination must be the archive root (sys._MEIPASS)"
+    plain, triple = build_desktop.runtime_bin_paths()
+    assert plain.parent == build_desktop.DESKTOP_BIN
+    assert plain.name.startswith("remedy-runtime")
+    assert "remedy-desktop" not in plain.name
+    assert triple.name.startswith("remedy-runtime-")
 
     with pytest.raises(SystemExit):
         build_desktop.resolve_core_library(tmp_path / "missing" / expected)
@@ -215,7 +225,7 @@ def test_build_desktop_bundles_the_core_library_at_the_archive_root(tmp_path: Pa
     with pytest.raises(SystemExit):
         build_desktop.resolve_core_library(wrong_name)
 
-    assert "required_abi = 5" in source
+    assert "REQUIRED_CORE_ABI = 5" in source
     assert "remedy_core_abi_version()" in source
 
     parser_help = source[source.index("__main__") :]

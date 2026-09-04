@@ -1,29 +1,30 @@
-"""PyInstaller build script for Remedy Desktop.
+"""Stage Go remedy-runtime + Zig remedy_core for Desktop packaging.
 
-Creates a standalone executable for the remedy CLI server (``remedy-desktop``),
-suitable for bundling as a Tauri sidecar.
+Packaged Desktop and local ``tauri build`` / ``tauri:dev`` (with
+``REMEDY_RUNTIME_SIDECAR=1``) need:
 
-The Zig native core travels inside the sidecar. PyInstaller receives it via
-``--add-binary`` with the archive root as destination, so at run time the
-onefile bootloader extracts it next to the frozen interpreter and
-``remedy.runtime.native_runtime`` resolves it through ``sys._MEIPASS``. The
-library is looked up at ``native/zig/zig-out`` (``bin/remedy_core.dll`` on
-Windows, ``lib/libremedy_core.so`` on Linux, ``lib/libremedy_core.dylib`` on
-macOS), where ``cd native/zig && zig build -Doptimize=ReleaseSafe`` installs
-it. The build refuses to run without it: a sidecar that silently lacks the
-core would report ``not-installed`` on every native call.
+* ``desktop/bin/remedy-runtime`` (+ Tauri target-triple copy) — ``externalBin``
+* ``desktop/bin/remedy_core.dll`` / ``libremedy_core.so`` / ``libremedy_core.dylib``
+  — Tauri resource
+
+Release CI (``desktop-release.yml``) builds the same artifacts inline. This
+script is the local equivalent so developers do not hand-copy binaries.
+Legacy ``remedy-desktop`` onefile sidecars are not built or staged.
 
 Usage:
-    python scripts/build_desktop.py                      # build standalone exe
-    python scripts/build_desktop.py --clean              # clean build from scratch
-    python scripts/build_desktop.py --core-lib PATH      # bundle this core library
+    python scripts/build_desktop.py                      # build + stage
+    python scripts/build_desktop.py --clean              # wipe desktop/bin first
+    python scripts/build_desktop.py --core-lib PATH      # stage this core library
     python scripts/build_desktop.py --ci                 # release mode (version gate)
+    python scripts/build_desktop.py --skip-runtime       # only stage Zig core
+    python scripts/build_desktop.py --skip-core          # only build Go runtime
 """
 
 from __future__ import annotations
 
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -36,17 +37,12 @@ DIST_DIR = ROOT / "dist"
 NSIS_DIR = (
     ROOT / "desktop" / "src-tauri" / "target" / "release" / "bundle" / "nsis"
 )
+GO_MOD = ROOT / "native" / "go"
+ZIG_DIR = ROOT / "native" / "zig"
 
-
-# Heavy optional packages that must never be frozen into the sidecar.
-SIDECAR_EXCLUDES = (
-    "torch", "torchvision", "torchaudio", "functorch",
-    "chatterbox", "transformers", "tokenizers", "safetensors",
-    "faster_whisper", "ctranslate2", "kokoro_onnx", "onnxruntime",
-    "espeakng_loader", "phonemizer",
-    "cupy", "cv2", "scipy", "sklearn", "pandas", "matplotlib", "av",
-    "triton", "tensorboard", "numba", "llvmlite", "huggingface_hub", "hf_xet",
-)
+# Keep in lockstep with remedy.runtime.native_runtime._ABI_VERSION and
+# REMEDY_CORE_ABI_VERSION in native/zig/include/remedy_core.h.
+REQUIRED_CORE_ABI = 5
 
 
 def _get_root_version() -> str:
@@ -59,11 +55,7 @@ def _get_root_version() -> str:
 
 
 def sync_versions() -> str:
-    """Stamp desktop manifests from pyproject (package.json, lock, tauri, cargo).
-
-    package-lock root version was previously left stale — npm tooling and
-    release check scripts then disagree with the sidecar PE version.
-    """
+    """Stamp desktop manifests from pyproject (package.json, lock, tauri, cargo)."""
     v = _get_root_version()
     changes = []
 
@@ -129,12 +121,7 @@ def sync_versions() -> str:
 
 
 def check_third_party_notices() -> None:
-    """Fail the build when a shipped dependency is missing from the notices.
-
-    MIT / BSD / ISC / Apache-2.0 / OFL-1.1 all require their notice to travel
-    with the binary, so a dependency added without regenerating the file is a
-    licence problem, not a cosmetic one.
-    """
+    """Fail the build when a shipped dependency is missing from the notices."""
     script = ROOT / "scripts" / "gen_third_party_notices.py"
     if not script.exists():
         print("WARNING: gen_third_party_notices.py missing — notices not verified")
@@ -150,174 +137,8 @@ def check_third_party_notices() -> None:
         sys.exit(1)
 
 
-def ensure_pyinstaller():
-    """Ensure PyInstaller is available."""
-    try:
-        subprocess.run(
-            [sys.executable, "-m", "PyInstaller", "--version"],
-            capture_output=True,
-            check=True,
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Installing pyinstaller via uv...")
-        subprocess.check_call(
-            ["uv", "add", "--dev", "pyinstaller"], cwd=str(ROOT)
-        )
-
-
-def _version_tuple(version: str) -> tuple[int, int, int, int]:
-    """Parse semver-ish string into a 4-part Windows FILEVERSION tuple."""
-    core = version.split("+", 1)[0].split("-", 1)[0]
-    parts: list[int] = []
-    for p in core.split("."):
-        try:
-            parts.append(int(p))
-        except ValueError:
-            parts.append(0)
-    while len(parts) < 4:
-        parts.append(0)
-    return (parts[0], parts[1], parts[2], parts[3])
-
-
-def write_sidecar_version_file(version: str) -> Path:
-    """Write a PyInstaller --version-file so the sidecar has real PE identity.
-
-    Empty CompanyName/ProductName/FileVersion (0.0.0.0) is a common Windows
-    Defender ML signal for Trojan:Win32/Wacatac.!ml and Bearfoos.!ml on
-    PyInstaller onefile binaries. Always stamp product metadata at build time.
-    """
-    out = ROOT / "build" / "pyinstaller" / "remedy-desktop-version.txt"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    maj, min_, pat, build = _version_tuple(version)
-    # PyInstaller version-file format (VSVersionInfo). Keep ASCII-safe.
-    content = f"""# UTF-8
-#
-# Remedy Desktop sidecar PE version resource (generated by build_desktop.py)
-VSVersionInfo(
-  ffi=FixedFileInfo(
-    filevers=({maj}, {min_}, {pat}, {build}),
-    prodvers=({maj}, {min_}, {pat}, {build}),
-    mask=0x3f,
-    flags=0x0,
-    OS=0x40004,
-    fileType=0x1,
-    subtype=0x0,
-    date=(0, 0)
-  ),
-  kids=[
-    StringFileInfo(
-      [
-      StringTable(
-        u'040904B0',
-        [StringStruct(u'CompanyName', u'Remedy'),
-        StringStruct(u'FileDescription', u'Remedy Desktop local API sidecar'),
-        StringStruct(u'FileVersion', u'{version}'),
-        StringStruct(u'InternalName', u'remedy-desktop'),
-        StringStruct(u'LegalCopyright', u'Copyright (c) Remedy contributors'),
-        StringStruct(u'OriginalFilename', u'remedy-desktop.exe'),
-        StringStruct(u'ProductName', u'Remedy Desktop'),
-        StringStruct(u'ProductVersion', u'{version}')])
-      ]),
-    VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
-  ]
-)
-"""
-    out.write_text(content, encoding="utf-8")
-    print(f"Wrote sidecar version resource: {out} (v{version})")
-    return out
-
-
-def get_hidden_imports() -> list[str]:
-    """Return the list of hidden imports needed for the remedy server."""
-    return [
-        # Core dependencies
-        "aiohttp",
-        "aiohttp.client",
-        "aiohttp.client_ws",
-        "aiohttp.web",
-        "aiohttp.resolver",
-        "fastapi",
-        "fastapi.middleware",
-        # Optional multipart (dev); frozen builds use JSON+base64 uploads
-        "multipart",
-        "multipart.multipart",
-        "multipart.decoders",
-        "multipart.exceptions",
-        "uvicorn",
-        "uvicorn.loops",
-        "uvicorn.loops.auto",
-        "uvicorn.loops.asyncio",
-        "uvicorn.protocols",
-        "uvicorn.protocols.http",
-        "uvicorn.protocols.http.auto",
-        "uvicorn.protocols.http.h11_impl",
-        "uvicorn.protocols.websockets",
-        "pydantic",
-        "pydantic.deprecated",
-        "yaml",
-        "rich",
-        "rich.console",
-        "rich.table",
-        "rich.panel",
-        "rich.prompt",
-        "remedy",
-        "remedy.interfaces",
-        "remedy.interfaces.cli",
-        "remedy.interfaces.api",
-        "remedy.interfaces.attachments",
-        "remedy.interfaces.config",
-        "remedy.bundled_skills",
-        "remedy.core",
-        "remedy.core.agent",
-        "remedy.core.runtime",
-        "remedy.core.security",
-        "remedy.core.providers",
-        "remedy.memory",
-        "remedy.memory.store",
-        "remedy.skills",
-        "remedy.skills.tool_registry",
-        "remedy.skills.registry",
-        "remedy.gateway",
-        "remedy.gateway.router",
-        "remedy.models",
-        "remedy.core.errors",
-        "remedy.i18n",
-        # Networking / streaming
-        "aiosignal",
-        "frozenlist",
-        "multidict",
-        "yarl",
-        "charset_normalizer",
-        "charset_normalizer.md",
-        "cffi",
-        "_cffi_backend",
-        # ASGI / servers
-        "h11",
-        "httptools",
-        "websockets",
-        # Standard library modules commonly missed
-        "email",
-        "email.mime",
-        "email.mime.text",
-        "json",
-        "logging",
-        "logging.config",
-        "argparse",
-        "asyncio",
-        "concurrent.futures",
-        "multiprocessing",
-        "sqlite3",
-        "sqlite3.dbapi2",
-        "xml",
-        "xml.etree",
-        "xml.etree.ElementTree",
-        "html",
-        "http",
-    ]
-
-
 def core_library_name() -> str:
-    """File name ``native_runtime._load_zig`` looks for on this platform."""
+    """File name the loader and Tauri resources expect on this platform."""
     if sys.platform == "win32":
         return "remedy_core.dll"
     if sys.platform == "darwin":
@@ -332,11 +153,7 @@ def default_core_library_path() -> Path:
 
 
 def resolve_core_library(override: str | Path | None = None) -> Path:
-    """The Zig core to bundle, or exit with a message that says how to get one.
-
-    The file must carry the exact name the loader searches for; a differently
-    named override would be packed but never found inside the sidecar.
-    """
+    """The Zig core to stage, or exit with a message that says how to get one."""
     expected = core_library_name()
     path = Path(override).expanduser() if override else default_core_library_path()
     if not path.is_file():
@@ -349,7 +166,7 @@ def resolve_core_library(override: str | Path | None = None) -> Path:
     if path.name != expected:
         print(
             f"ERROR: --core-lib must point at a file named {expected} "
-            f"(got {path.name}); the sidecar loader only resolves that name."
+            f"(got {path.name}); the Desktop resource only resolves that name."
         )
         sys.exit(1)
     try:
@@ -362,32 +179,18 @@ def resolve_core_library(override: str | Path | None = None) -> Path:
     except (AttributeError, OSError, TypeError, ValueError) as exc:
         print(f"ERROR: {path} does not load as the Remedy native core: {exc}")
         sys.exit(1)
-    # Keep in lockstep with remedy.runtime.native_runtime._ABI_VERSION and
-    # REMEDY_CORE_ABI_VERSION in native/zig/include/remedy_core.h.
-    required_abi = 5
-    if abi != required_abi:
+    if abi != REQUIRED_CORE_ABI:
         print(
-            f"ERROR: {path} reports ABI {abi}; the sidecar requires ABI "
-            f"{required_abi}. Rebuild with: cd native/zig && "
+            f"ERROR: {path} reports ABI {abi}; Desktop requires ABI "
+            f"{REQUIRED_CORE_ABI}. Rebuild with: cd native/zig && "
             "zig build -Doptimize=ReleaseSafe"
         )
         sys.exit(1)
     return path.resolve()
 
 
-def core_library_add_binary(path: Path) -> list[str]:
-    """PyInstaller arguments that place the core at the archive root.
-
-    ``.`` as destination puts the file directly under ``sys._MEIPASS`` (the
-    onefile extraction directory), which is one of the loader's search roots.
-    """
-    return ["--add-binary", f"{path}{os.pathsep}."]
-
-
-def sidecar_target_triple() -> str:
-    """Rust target triple Tauri uses for externalBin (`remedy-desktop-<triple>`)."""
-    import platform
-
+def target_triple() -> str:
+    """Rust target triple Tauri uses for externalBin (``remedy-runtime-<triple>``)."""
     env_triple = os.environ.get("TAURI_ENV_TARGET_TRIPLE", "").strip()
     if env_triple:
         return env_triple
@@ -411,31 +214,101 @@ def sidecar_target_triple() -> str:
     return f"{arch}-unknown-linux-gnu"
 
 
-def sidecar_bin_paths() -> tuple[Path, Path]:
-    """Plain PyInstaller output and the Tauri-triple copy.
+def runtime_bin_paths() -> tuple[Path, Path]:
+    """Plain Go output and the Tauri-triple copy under ``desktop/bin``.
 
-    Windows: ``remedy-desktop.exe`` + ``remedy-desktop-x86_64-pc-windows-msvc.exe``.
-    Linux: ``remedy-desktop`` + ``remedy-desktop-x86_64-unknown-linux-gnu`` (no .exe).
+    Windows: ``remedy-runtime.exe`` + ``remedy-runtime-x86_64-pc-windows-msvc.exe``.
+    Linux: ``remedy-runtime`` + ``remedy-runtime-x86_64-unknown-linux-gnu`` (no .exe).
     """
     suffix = ".exe" if sys.platform == "win32" else ""
-    triple = sidecar_target_triple()
+    triple = target_triple()
     return (
-        DESKTOP_BIN / f"remedy-desktop{suffix}",
-        DESKTOP_BIN / f"remedy-desktop-{triple}{suffix}",
+        DESKTOP_BIN / f"remedy-runtime{suffix}",
+        DESKTOP_BIN / f"remedy-runtime-{triple}{suffix}",
     )
 
 
-def build(cache_clean: bool = False, ci: bool = False, core_lib: str | None = None):
-    """Build the standalone remedy-desktop executable via PyInstaller."""
-    print(f"Building Remedy Desktop exe... (root={ROOT})")
+def staged_core_path() -> Path:
+    """Where Tauri ``bundle.resources`` expects the Zig core."""
+    return DESKTOP_BIN / core_library_name()
 
-    # Always sync package.json / tauri.conf / Cargo.toml from pyproject so CI
-    # and local builds never embed mismatched versions.
+
+def _run(cmd: list[str], *, cwd: Path) -> None:
+    print(f"Running: {' '.join(cmd)} (cwd={cwd})")
+    subprocess.check_call(cmd, cwd=str(cwd))
+
+
+def build_runtime() -> tuple[Path, Path]:
+    """Compile Go ``remedy-runtime`` into ``desktop/bin`` with the Tauri triple copy."""
+    plain, triple_path = runtime_bin_paths()
+    DESKTOP_BIN.mkdir(parents=True, exist_ok=True)
+    _run(
+        [
+            "go",
+            "build",
+            "-trimpath",
+            "-ldflags",
+            "-s -w",
+            "-o",
+            str(plain),
+            "./cmd/remedy-runtime",
+        ],
+        cwd=GO_MOD,
+    )
+    if not plain.is_file():
+        print(f"ERROR: go build produced no binary at {plain}")
+        sys.exit(1)
+    shutil.copy2(plain, triple_path)
+    size_mb = plain.stat().st_size / (1024 * 1024)
+    print(f"Runtime: {plain} ({size_mb:.1f} MB)")
+    print(f"Sidecar: {triple_path}")
+    return plain, triple_path
+
+
+def build_zig_core() -> Path:
+    """Build the Zig shared library into ``native/zig/zig-out``."""
+    _run(["zig", "build", "-Doptimize=ReleaseSafe"], cwd=ZIG_DIR)
+    built = default_core_library_path()
+    if not built.is_file():
+        print(f"ERROR: zig build produced no library at {built}")
+        sys.exit(1)
+    return built
+
+
+def stage_core(core_lib: str | Path | None = None, *, build_if_missing: bool = True) -> Path:
+    """Copy the Zig core into ``desktop/bin`` for Tauri resources.
+
+    Builds with zig only when the library is missing (pass ``--core-lib`` to
+    stage a specific artifact without rebuilding).
+    """
+    path = Path(core_lib).expanduser() if core_lib else default_core_library_path()
+    if not path.is_file():
+        if core_lib or not build_if_missing:
+            resolve_core_library(core_lib)  # exits with the missing-file message
+        print(f"Native core missing at {path}; building with zig…")
+        path = build_zig_core()
+    resolved = resolve_core_library(path)
+    DESKTOP_BIN.mkdir(parents=True, exist_ok=True)
+    dest = staged_core_path()
+    shutil.copy2(resolved, dest)
+    size_kb = dest.stat().st_size / 1024
+    print(f"Core: {dest} ({size_kb:.1f} KB)")
+    return dest
+
+
+def build(
+    cache_clean: bool = False,
+    ci: bool = False,
+    core_lib: str | None = None,
+    skip_runtime: bool = False,
+    skip_core: bool = False,
+) -> None:
+    """Build and stage remedy-runtime + remedy_core into ``desktop/bin``."""
+    print(f"Staging Desktop native artifacts… (root={ROOT})")
+
     v = sync_versions()
     if ci:
         print(f"[CI] Stamped version {v} across manifests before build")
-        # Optional: REMEDY_RELEASE_VERSION must match pyproject when set
-        # (used by release workflow to catch tag/input skew).
         expected = os.environ.get("REMEDY_RELEASE_VERSION", "").lstrip("v").strip()
         if expected and expected != v:
             print(
@@ -446,100 +319,46 @@ def build(cache_clean: bool = False, ci: bool = False, core_lib: str | None = No
 
     check_third_party_notices()
 
-    core_library = resolve_core_library(core_lib)
-    print(f"Native core: {core_library}")
-
-    ensure_pyinstaller()
-
+    if cache_clean and DESKTOP_BIN.exists():
+        shutil.rmtree(DESKTOP_BIN)
+        print(f"Cleaned {DESKTOP_BIN}")
     DESKTOP_BIN.mkdir(parents=True, exist_ok=True)
 
-    if cache_clean:
-        pyinstaller_work = ROOT / "build" / "pyinstaller"
-        if pyinstaller_work.exists():
-            shutil.rmtree(pyinstaller_work)
-        print("Cleaned PyInstaller cache.")
+    # Drop leftover legacy remedy-desktop binaries so a stale sidecar cannot
+    # be mistaken for the packaged launch path.
+    for stale in DESKTOP_BIN.glob("remedy-desktop*"):
+        stale.unlink(missing_ok=True)
+        print(f"Removed legacy sidecar: {stale.name}")
 
-    hidden_imports = get_hidden_imports()
-    icon_path = ROOT / "desktop" / "src-tauri" / "icons" / "icon.ico"
+    if not skip_runtime:
+        build_runtime()
+    else:
+        print("Skipping Go remedy-runtime (--skip-runtime)")
 
-    src_path = str(ROOT / "src")
-    cmd = [
-        sys.executable,
-        "-m",
-        "PyInstaller",
-        "--onefile",
-        "--name",
-        "remedy-desktop",
-        "--distpath",
-        str(DESKTOP_BIN),
-        "--workpath",
-        str(ROOT / "build" / "pyinstaller"),
-        "--specpath",
-        str(ROOT / "build" / "pyinstaller"),
-        "--noupx",  # UPX packing raises AV false-positive rates dramatically
-        # Prefer repo src/ over any older site-packages remedy-ai install
-        "--paths",
-        src_path,
-        "--add-data",
-        f"{ROOT / 'src' / 'remedy'}{os.pathsep}remedy",
-        "--add-data",
-        f"{ROOT / 'pyproject.toml'}{os.pathsep}.",
-        *core_library_add_binary(core_library),
-    ]
-    if sys.platform == "win32":
-        # PE identity + no console — Windows-only PyInstaller flags.
-        version_file = write_sidecar_version_file(v)
-        cmd.extend(["--noconsole", "--version-file", str(version_file)])
-        if icon_path.is_file():
-            cmd.extend(["--icon", str(icon_path)])
-        else:
-            print(f"WARNING: sidecar icon missing at {icon_path} (PE will lack icon resource)")
+    if not skip_core:
+        # --core-lib: stage the given file (no zig rebuild). Otherwise build.
+        stage_core(core_lib, build_if_missing=core_lib is None)
+    else:
+        print("Skipping Zig remedy_core (--skip-core)")
 
-    for hi in hidden_imports:
-        cmd.extend(["--hidden-import", hi])
-
-    # Optional extras are runtime downloads, never sidecar payload. A dev
-    # machine with remedy-ai[voice]/[voice-hq] installed otherwise ships a
-    # 2.6 GB sidecar (torch alone is 3.8 GB unpacked) — CI builds from
-    # `uv sync --dev` and never sees them, so guard it here too.
-    for mod in SIDECAR_EXCLUDES:
-        cmd.extend(["--exclude-module", mod])
-
-    # Entry point
-    cmd.extend([
-        "--collect-all",
-        "remedy",
-        "--collect-all",
-        "multipart",
-        "--hidden-import",
-        "remedy.interfaces.xai_auth",
-        # CLI is a package after modular split (cli/__init__.py + main)
-        str(ROOT / "src" / "remedy" / "interfaces" / "cli" / "__main__.py"),
-    ])
-
-    print(f"Running: {' '.join(cmd)}")
-    env = os.environ.copy()
-    # Force analysis/import from this checkout (editable installs can lag).
-    env["PYTHONPATH"] = src_path + os.pathsep + env.get("PYTHONPATH", "")
-    subprocess.check_call(cmd, cwd=str(ROOT), env=env)
-
-    plain, sidecar_path = sidecar_bin_paths()
-    if not plain.is_file():
-        print(f"\nERROR: Build failed — no sidecar at {plain}")
-        sys.exit(1)
-    size_mb = plain.stat().st_size / (1024 * 1024)
-    print(f"\nBuild complete: {plain} ({size_mb:.1f} MB)")
-    shutil.copy2(plain, sidecar_path)
-    print(f"Sidecar: {sidecar_path}")
+    print(f"\nStaged under {DESKTOP_BIN}")
 
 
 if __name__ == "__main__":
     import argparse
 
-    p = argparse.ArgumentParser(description="Build Remedy Desktop standalone exe")
-    p.add_argument("--clean", action="store_true", help="Clean PyInstaller cache before build")
+    p = argparse.ArgumentParser(
+        description="Stage Go remedy-runtime + Zig remedy_core for Desktop"
+    )
     p.add_argument(
-        "--stage", action="store_true", help="Copy final installer to dist/ dir"
+        "--clean",
+        action="store_true",
+        help="Remove desktop/bin before staging",
+    )
+    p.add_argument(
+        "--stage",
+        action="store_true",
+        help="Copy final NSIS installer to dist/ (after tauri build)",
     )
     p.add_argument(
         "--ci",
@@ -549,11 +368,27 @@ if __name__ == "__main__":
     p.add_argument(
         "--core-lib",
         metavar="PATH",
-        help="Zig core library to bundle (default: native/zig/zig-out/{bin,lib}/)",
+        help="Zig core library to stage (default: build native/zig ReleaseSafe)",
+    )
+    p.add_argument(
+        "--skip-runtime",
+        action="store_true",
+        help="Do not build Go remedy-runtime",
+    )
+    p.add_argument(
+        "--skip-core",
+        action="store_true",
+        help="Do not build/stage Zig remedy_core",
     )
     args = p.parse_args()
 
-    code = build(cache_clean=args.clean, ci=args.ci, core_lib=args.core_lib)
+    build(
+        cache_clean=args.clean,
+        ci=args.ci,
+        core_lib=args.core_lib,
+        skip_runtime=args.skip_runtime,
+        skip_core=args.skip_core,
+    )
 
     if args.stage:
         candidates = sorted(
@@ -569,5 +404,3 @@ if __name__ == "__main__":
             print(f"\nStaged installer: {dest} ({size_mb:.1f} MB)")
         else:
             print("\nNo NSIS installer found — run tauri build first.")
-
-    raise SystemExit(code)

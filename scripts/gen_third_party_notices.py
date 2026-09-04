@@ -1,9 +1,9 @@
 """Generate the third-party notices file that ships with Remedy Desktop.
 
 Remedy redistributes other people's code: npm packages in the web bundle,
-Rust crates linked into the Tauri binary, and Python distributions frozen
-into the sidecar. MIT / BSD / ISC / Apache-2.0 / OFL-1.1 all require their
-notice to travel with the binary, and nothing in the installer carried one.
+Rust crates linked into the Tauri binary, and Python packages used by the
+local worker/CLI surface. MIT / BSD / ISC / Apache-2.0 / OFL-1.1 all require
+their notice to travel with the binary, and nothing in the installer carried one.
 
 Output: ``desktop/public/THIRD_PARTY_NOTICES.txt``. Vite copies ``public/``
 verbatim into ``desktop/dist``, which is both the app's frontend and the
@@ -48,8 +48,8 @@ _SPDX_ALIAS = {
 }
 _COPYRIGHT_TEMPLATES = frozenset({"MIT", "BSD-3-Clause", "BSD-2-Clause", "ISC"})
 
-# Heavy optional packages never frozen into the sidecar — keep in sync with
-# build_desktop.SIDECAR_EXCLUDES (attributing them would be a lie, not a risk).
+# Heavy optional packages never attributed as installer payload (voice/vision
+# downloads). Attributing them here would claim they ship in the NSIS/deb bundle.
 SIDECAR_EXCLUDES = frozenset(
     {
         "torch", "torchvision", "torchaudio", "functorch",
@@ -61,14 +61,14 @@ SIDECAR_EXCLUDES = frozenset(
     }
 )
 
-# Developer tooling that lives in the same venv but is never frozen.
+# Developer tooling that lives in the same venv but never ships in Desktop.
 DEV_ONLY = frozenset(
     {
         "pytest", "pytest-asyncio", "pytest-cov", "ruff", "mypy", "mypy-extensions",
-        "pyinstaller", "pyinstaller-hooks-contrib", "coverage", "iniconfig", "pluggy",
+        "coverage", "iniconfig", "pluggy",
         "uv", "uv-build", "build", "twine", "wheel", "setuptools", "pip",
         "nodeenv", "identify", "pre-commit", "virtualenv", "distlib", "filelock",
-        "types-pyyaml", "types-requests", "altgraph", "pefile",
+        "types-pyyaml", "types-requests",
     }
 )
 
@@ -328,7 +328,7 @@ def npm_components() -> list[Component]:
 
 
 # --------------------------------------------------------------------------
-# Python — distributions frozen into the sidecar by PyInstaller.
+# Python — declared dependency closure used by the worker/CLI surface.
 # --------------------------------------------------------------------------
 
 
@@ -363,26 +363,10 @@ def _runtime_closure() -> set[str]:
         return set()
 
 
-def _pyinstaller_extras() -> set[str]:
-    """Packages the last PyInstaller analysis actually swept into the sidecar.
-
-    Freezing is not limited to declared deps — an import anywhere in the tree
-    pulls a package in. Reading the build's own table of contents keeps the
-    notice honest about what really ships.
-    """
-    toc = ROOT / "build" / "pyinstaller" / "remedy-desktop" / "Analysis-00.toc"
-    if not toc.exists():
-        return set()
-    found = set()
-    for m in re.finditer(r"([A-Za-z0-9_.\-]+)-[0-9][^\\/'\"]*\.dist-info", _read_full(toc)):
-        found.add(_canon(m.group(1)))
-    return found
-
-
 def python_components() -> list[Component]:
     import importlib.metadata as md
 
-    wanted = _runtime_closure() | _pyinstaller_extras()
+    wanted = _runtime_closure()
     wanted = {n for n in wanted if n not in SIDECAR_EXCLUDES and n not in DEV_ONLY}
     wanted.discard("remedy-ai")
 

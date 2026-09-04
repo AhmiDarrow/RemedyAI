@@ -46,9 +46,6 @@ server = [
     "uvicorn>=0.51.0,<1",
     "python-multipart>=0.0.9,<1",
 ]
-desktop-build = [
-    "pyinstaller>=6.21.0",
-]
 # Local speech: Kokoro-82M TTS (Apache-2.0 model, MIT runtime) +
 # faster-whisper STT (MIT). Optional — base install stays light.
 voice = [
@@ -163,7 +160,6 @@ exclude = [
 dev = [
     "httpx>=0.28.1",
     "mypy>=1.15.0",
-    "pyinstaller>=6.21.0",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-xdist>=3.8.0",
