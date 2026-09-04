@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -267,11 +268,14 @@ func TestWebhookPathsSkipAPIBearer(t *testing.T) {
 func TestGenericWebhookHappyPath(t *testing.T) {
 	s := newWebhookTestServer(t)
 	var n atomic.Int32
+	var mu sync.Mutex
 	var got gateway.Event
 	s.messengerGW.RegisterHandler(func(ctx context.Context, ev gateway.Event) error {
 		if ev.Kind == gateway.EventWebhook {
-			n.Add(1)
+			mu.Lock()
 			got = ev
+			mu.Unlock()
+			n.Add(1)
 		}
 		return nil
 	})
@@ -293,26 +297,29 @@ func TestGenericWebhookHappyPath(t *testing.T) {
 		t.Fatalf("body=%#v", body)
 	}
 	waitAtomic(t, &n, 1)
-	if got.Channel != gateway.ChannelAPI || got.SourceID != "ci" {
-		t.Fatalf("event meta channel=%s source=%s", got.Channel, got.SourceID)
+	mu.Lock()
+	ev := got
+	mu.Unlock()
+	if ev.Channel != gateway.ChannelAPI || ev.SourceID != "ci" {
+		t.Fatalf("event meta channel=%s source=%s", ev.Channel, ev.SourceID)
 	}
-	if got.Payload["event"] != "push" {
-		t.Fatalf("payload event=%v", got.Payload["event"])
+	if ev.Payload["event"] != "push" {
+		t.Fatalf("payload event=%v", ev.Payload["event"])
 	}
-	data, _ := got.Payload["data"].(map[string]any)
+	data, _ := ev.Payload["data"].(map[string]any)
 	switch x := data["x"].(type) {
 	case float64:
 		if x != 1 {
-			t.Fatalf("payload data=%#v", got.Payload["data"])
+			t.Fatalf("payload data=%#v", ev.Payload["data"])
 		}
 	case json.Number:
 		if x.String() != "1" {
-			t.Fatalf("payload data=%#v", got.Payload["data"])
+			t.Fatalf("payload data=%#v", ev.Payload["data"])
 		}
 	default:
-		t.Fatalf("payload data=%#v", got.Payload["data"])
+		t.Fatalf("payload data=%#v", ev.Payload["data"])
 	}
-	rawKeep, _ := got.Payload["raw"].(string)
+	rawKeep, _ := ev.Payload["raw"].(string)
 	if !strings.Contains(rawKeep, `"event":"push"`) {
 		t.Fatalf("raw snippet=%q", rawKeep)
 	}
