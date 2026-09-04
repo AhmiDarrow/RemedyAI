@@ -81,8 +81,8 @@ def register_ship_tools(runtime: Any) -> None:
         import asyncio
         from pathlib import Path
 
-        from remedy.execution.process import create_hidden_subprocess_exec
         from remedy.execution.env import unattended_vcs_env
+        from remedy.execution.process import create_hidden_subprocess_exec
 
         proj = _project()
         cwd = Path(proj).expanduser() if proj else Path.cwd()
@@ -118,8 +118,8 @@ def register_ship_tools(runtime: Any) -> None:
         import asyncio
         from pathlib import Path
 
-        from remedy.execution.process import create_hidden_subprocess_exec
         from remedy.execution.env import unattended_vcs_env
+        from remedy.execution.process import create_hidden_subprocess_exec
 
         proj = _project()
         cwd = Path(proj).expanduser() if proj else Path.cwd()
