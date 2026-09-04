@@ -13,10 +13,11 @@ import (
 
 // PublicPaths need no Bearer token (health / readiness / loopback bootstrap).
 var PublicPaths = map[string]struct{}{
-	"/api/ping":                 {},
-	"/api/status":               {},
-	"/api/turn-active":          {},
-	"/api/auth/local-bootstrap": {},
+	"/api/ping":                         {},
+	"/api/status":                       {},
+	"/api/turn-active":                  {},
+	"/api/auth/local-bootstrap":         {},
+	"/api/assistant/google/callback":    {}, // browser OAuth redirect; state is one-time
 }
 
 const unauthorizedDetail = "Missing or invalid Bearer token. " +
