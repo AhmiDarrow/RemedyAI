@@ -1,0 +1,84 @@
+{
+  "name": "remedy_record_framing",
+  "notes": "Exact u32be|nonce12|ciphertext framing and encrypt_record blobs from live Python remedy.connect.record (product Noise keys = post_split).",
+  "source": "remedy.connect.record",
+  "max_record": 65536,
+  "nonce_len": 12,
+  "tag_len": 16,
+  "max_plaintext": 65508,
+  "init_static_priv_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+  "init_eph_priv_hex": "3333333333333333333333333333333333333333333333333333333333333333",
+  "resp_static_priv_hex": "2222222222222222222222222222222222222222222222222222222222222222",
+  "resp_eph_priv_hex": "4444444444444444444444444444444444444444444444444444444444444444",
+  "handshake_msg0_payload_hex": "0707070707070707070707070707070707070707070707070707070707070707",
+  "pack_vectors": [
+    {
+      "nonce_hex": "000000000000000000000000",
+      "ciphertext_hex": "",
+      "record_hex": "0000000c000000000000000000000000",
+      "length": 12
+    },
+    {
+      "nonce_hex": "000000000100000000000000",
+      "ciphertext_hex": "78",
+      "record_hex": "0000000d00000000010000000000000078",
+      "length": 13
+    },
+    {
+      "nonce_hex": "ffffffffffffffffffffffff",
+      "ciphertext_hex": "00000000000000000000000000000000",
+      "record_hex": "0000001cffffffffffffffffffffffff00000000000000000000000000000000",
+      "length": 28
+    },
+    {
+      "nonce_hex": "000102030405060708090a0b",
+      "ciphertext_hex": "636970686572abababababababababababababababababababab",
+      "record_hex": "00000026000102030405060708090a0b636970686572abababababababababababababababababababab",
+      "length": 38
+    }
+  ],
+  "encrypt_i_to_r": [
+    {
+      "plaintext_hex": "",
+      "nonce_hex": "000000000000000000000000",
+      "ciphertext_hex": "d770e193020b0475218942a3a1807b32",
+      "record_hex": "0000001c000000000000000000000000d770e193020b0475218942a3a1807b32",
+      "nonce_counter": 0
+    },
+    {
+      "plaintext_hex": "68656c6c6f2d7265636f7264",
+      "nonce_hex": "000000000100000000000000",
+      "ciphertext_hex": "47309b29f0eb0afafc608f2106033add0af579bbbd43ec6532948bdd",
+      "record_hex": "0000002800000000010000000000000047309b29f0eb0afafc608f2106033add0af579bbbd43ec6532948bdd",
+      "nonce_counter": 1
+    },
+    {
+      "plaintext_hex": "70686f6e652d746f2d686f7374",
+      "nonce_hex": "000000000200000000000000",
+      "ciphertext_hex": "9b94c5d124418bccd1618dafdd64182f03892e2fbfa33116b710b235bc",
+      "record_hex": "000000290000000002000000000000009b94c5d124418bccd1618dafdd64182f03892e2fbfa33116b710b235bc",
+      "nonce_counter": 2
+    },
+    {
+      "plaintext_hex": "746f6b656e2d6e657665722d6c6f67",
+      "nonce_hex": "000000000300000000000000",
+      "ciphertext_hex": "0fcd843be102ea89d1fff0c94278a15b8a4812f46045b3a8537b9477b834e3",
+      "record_hex": "0000002b0000000003000000000000000fcd843be102ea89d1fff0c94278a15b8a4812f46045b3a8537b9477b834e3",
+      "nonce_counter": 3
+    }
+  ],
+  "encrypt_r_to_i": [
+    {
+      "plaintext_hex": "686f73742d746f2d70686f6e65",
+      "nonce_hex": "000000000000000000000000",
+      "ciphertext_hex": "0cd3f95cf7085648f5f299f43105bd7ed87f0349ca51398f9182d4903a",
+      "record_hex": "000000290000000000000000000000000cd3f95cf7085648f5f299f43105bd7ed87f0349ca51398f9182d4903a",
+      "nonce_counter": 0
+    }
+  ],
+  "reject": {
+    "oversize_length_field_hex": "00010001",
+    "too_short_length_hex": "0000000b",
+    "truncated_claim12_hex": "0000000c"
+  }
+}

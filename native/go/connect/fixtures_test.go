@@ -53,6 +53,7 @@ func TestFixtureFilesPresent(t *testing.T) {
 		"noise_ik_snow.json",
 		"noise_ik_pair_secret.json",
 		"noise_ik_post_split.json",
+		"record_framing.json",
 	}
 	dir := fixtureDir(t)
 	for _, name := range required {
