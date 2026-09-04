@@ -147,29 +147,27 @@ async def _run_exec(
 ) -> tuple[int, str, str]:
     from remedy.execution.env import unattended_vcs_env
 
+    import subprocess
+
     env = unattended_vcs_env(argv)
     try:
-        from remedy.execution.process import create_hidden_subprocess_exec
+        from remedy.execution.process import run_hidden_async
 
-        proc = await create_hidden_subprocess_exec(
-            *argv,
+        completed = await run_hidden_async(
+            argv,
             cwd=str(repo),
             env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            stdin=asyncio.subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
-        try:
-            out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except TimeoutError:
-            with suppress(Exception):
-                proc.kill()
-            return 124, "", f"timeout {argv[:3]}"
         return (
-            int(proc.returncode or 0),
-            (out_b or b"").decode("utf-8", "replace"),
-            (err_b or b"").decode("utf-8", "replace"),
+            int(completed.returncode or 0),
+            str(completed.stdout or ""),
+            str(completed.stderr or ""),
         )
+    except subprocess.TimeoutExpired:
+        return 124, "", f"timeout {argv[:3]}"
     except FileNotFoundError:
         return 127, "", f"{argv[0]} not found"
     except Exception as exc:  # noqa: BLE001

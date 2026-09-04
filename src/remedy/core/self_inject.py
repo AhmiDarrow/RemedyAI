@@ -146,34 +146,29 @@ async def _git_out(
     said why — it simply stopped. A timeout is reported as a failed git call,
     which the callers already know how to handle.
     """
+    import subprocess
+
     from remedy.execution.env import unattended_vcs_env
-    from remedy.execution.process import create_hidden_subprocess_exec
+    from remedy.execution.process import run_hidden_async
 
     env = unattended_vcs_env(["git"])
-    proc = await create_hidden_subprocess_exec(
-        "git",
-        "-C",
-        str(repo),
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        stdin=asyncio.subprocess.DEVNULL,  # a prompt must fail, not hang
-        env=env,
-    )
+    argv = ["git", "-C", str(repo), *args]
     try:
-        out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
-    except TimeoutError:
-        with suppress(ProcessLookupError, OSError):
-            proc.kill()
-        with suppress(Exception):
-            await proc.wait()
+        completed = await run_hidden_async(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
         joined = " ".join(args)
         logger.warning("git %s in %s timed out after %.0fs", joined, repo, timeout_s)
         return 1, "", f"git {joined} timed out after {timeout_s:.0f}s"
     return (
-        int(proc.returncode or 0),
-        (out_b or b"").decode("utf-8", "replace"),
-        (err_b or b"").decode("utf-8", "replace"),
+        int(completed.returncode or 0),
+        str(completed.stdout or ""),
+        str(completed.stderr or ""),
     )
 
 

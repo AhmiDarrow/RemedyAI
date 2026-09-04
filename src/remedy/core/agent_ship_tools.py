@@ -78,11 +78,11 @@ def register_ship_tools(runtime: Any) -> None:
                 st.phase = "done"
 
     async def _run_git(args: list[str], *, timeout: float = 120.0) -> tuple[int, str, str]:
-        import asyncio
+        import subprocess
         from pathlib import Path
 
         from remedy.execution.env import unattended_vcs_env
-        from remedy.execution.process import create_hidden_subprocess_exec
+        from remedy.execution.process import run_hidden_async
 
         proj = _project()
         cwd = Path(proj).expanduser() if proj else Path.cwd()
@@ -91,35 +91,32 @@ def register_ship_tools(runtime: Any) -> None:
         env = unattended_vcs_env(["git"])
 
         try:
-            proc = await create_hidden_subprocess_exec(
-                "git",
-                *args,
+            completed = await run_hidden_async(
+                ["git", *args],
                 cwd=str(cwd),
                 env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                stdin=asyncio.subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
             )
-            try:
-                out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except TimeoutError:
-                with contextlib.suppress(Exception):
-                    proc.kill()
-                return 124, "", f"timeout after {timeout}s"
-            out = (out_b or b"").decode("utf-8", errors="replace")
-            err = (err_b or b"").decode("utf-8", errors="replace")
-            return int(proc.returncode or 0), out, err
+            return (
+                int(completed.returncode or 0),
+                str(completed.stdout or ""),
+                str(completed.stderr or ""),
+            )
+        except subprocess.TimeoutExpired:
+            return 124, "", f"timeout after {timeout}s"
         except FileNotFoundError:
             return 127, "", "git not found on PATH"
         except Exception as e:
             return 1, "", str(e)
 
     async def _run_gh(args: list[str], *, timeout: float = 180.0) -> tuple[int, str, str]:
-        import asyncio
+        import subprocess
         from pathlib import Path
 
         from remedy.execution.env import unattended_vcs_env
-        from remedy.execution.process import create_hidden_subprocess_exec
+        from remedy.execution.process import run_hidden_async
 
         proj = _project()
         cwd = Path(proj).expanduser() if proj else Path.cwd()
@@ -127,26 +124,23 @@ def register_ship_tools(runtime: Any) -> None:
             cwd = cwd.parent
         env = unattended_vcs_env(["gh"])
         try:
-            proc = await create_hidden_subprocess_exec(
-                "gh",
-                *args,
+            completed = await run_hidden_async(
+                ["gh", *args],
                 cwd=str(cwd),
                 env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                stdin=asyncio.subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
             )
-            try:
-                out_b, err_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except TimeoutError:
-                with contextlib.suppress(Exception):
-                    proc.kill()
-                return 124, "", f"timeout after {timeout}s"
-            out = (out_b or b"").decode("utf-8", errors="replace")
-            err = (err_b or b"").decode("utf-8", errors="replace")
-            return int(proc.returncode or 0), out, err
+            return (
+                int(completed.returncode or 0),
+                str(completed.stdout or ""),
+                str(completed.stderr or ""),
+            )
+        except subprocess.TimeoutExpired:
+            return 124, "", f"timeout after {timeout}s"
         except FileNotFoundError:
-            return 127, "", "gh CLI not found on PATH"
+            return 127, "", "gh not found on PATH"
         except Exception as e:
             return 1, "", str(e)
 

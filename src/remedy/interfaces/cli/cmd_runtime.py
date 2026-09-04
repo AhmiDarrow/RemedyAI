@@ -474,7 +474,6 @@ def _find_npm() -> str:
 
 def _desktop_launch() -> None:
     """Find and launch the installed Remedy Desktop Tauri app (Windows only today)."""
-    import subprocess
     import sys
 
     if sys.platform != "win32":
@@ -501,15 +500,13 @@ def _desktop_launch() -> None:
     if prog.exists():
         candidate_paths.append(prog / "Remedy Desktop" / "Remedy Desktop.exe")
 
-    # Detach from this console and never flash an extra console for the GUI app.
-    from remedy.execution.process import popen_hidden
-
-    new_group = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+    # Detach via Zig authorized spawn; retain the job handle so the GUI lives.
+    from remedy.execution.process import retain_detached, spawn_hidden
 
     for p in candidate_paths:
         if p.exists():
             console.print(f"[green]Launching: {p}[/green]")
-            popen_hidden([str(p)], close_fds=True, creationflags=new_group)
+            retain_detached(spawn_hidden([str(p)]))
             return
 
     console.print("[yellow]Installed desktop app not found.[/yellow]")

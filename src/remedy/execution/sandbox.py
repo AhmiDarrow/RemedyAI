@@ -261,15 +261,12 @@ class SubprocessSandbox(Sandbox):
         safe_env.setdefault("PYTHONUTF8", "1")
 
         try:
-            from remedy.core.turn_context import (
-                current_abort_event,
-                is_turn_aborted,
-                register_turn_process,
-                unregister_turn_process,
-            )
-            from remedy.execution.process import (
-                create_hidden_subprocess_exec,
-            )
+            import subprocess
+
+            from remedy.core.computer.host_binding import HostError
+            from remedy.core.turn_context import is_turn_aborted
+            from remedy.execution.process import run_hidden_async
+            from remedy.runtime.native_runtime import NativeRuntimeUnavailableError
 
             if is_turn_aborted():
                 return ExecutionResult(
@@ -278,63 +275,45 @@ class SubprocessSandbox(Sandbox):
                     duration_ms=(time.monotonic() - start) * 1000,
                 )
 
-            proc = await create_hidden_subprocess_exec(
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                stdin=asyncio.subprocess.DEVNULL,
-                cwd=str(workdir) if workdir else None,
-                env=safe_env,
-            )
-            register_turn_process(proc)
-
+            # Zig authorized exec-capture (no soft CREATE_NO_WINDOW pipe path).
             try:
-                abort_ev = current_abort_event()
-                try:
-                    loop = asyncio.get_running_loop()
-                    ev_loop = getattr(abort_ev, "_loop", None)
-                    if ev_loop is not None and ev_loop is not loop:
-                        abort_ev = None
-                except Exception:
-                    abort_ev = None
-                stdout, stderr = await _communicate_or_abort(
-                    proc,
-                    timeout_seconds=timeout_seconds,
-                    abort_event=abort_ev,
+                completed = await run_hidden_async(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_seconds,
+                    cwd=str(workdir) if workdir else None,
+                    env=safe_env,
                 )
-                if stdout is None and stderr is None:
-                    elapsed = (time.monotonic() - start) * 1000
-                    if is_turn_aborted():
-                        return ExecutionResult(
-                            exit_code=-1,
-                            stderr="Aborted (session stop) — shell killed",
-                            duration_ms=elapsed,
-                        )
-                    return ExecutionResult(
-                        exit_code=-1,
-                        stderr=f"Command timed out after {timeout_seconds}s",
-                        duration_ms=elapsed,
-                    )
+            except subprocess.TimeoutExpired:
                 elapsed = (time.monotonic() - start) * 1000
                 return ExecutionResult(
-                    exit_code=proc.returncode or 0,
-                    stdout=_clip_output(
-                        stdout.decode("utf-8", errors="replace") if stdout else "",
-                        "stdout",
-                    ),
-                    stderr=_clip_output(
-                        stderr.decode("utf-8", errors="replace") if stderr else "",
-                        "stderr",
-                    ),
+                    exit_code=-1,
+                    stderr=f"Command timed out after {timeout_seconds}s",
                     duration_ms=elapsed,
                 )
-            finally:
-                unregister_turn_process(proc)
-        except OSError as e:
             elapsed = (time.monotonic() - start) * 1000
+            if is_turn_aborted():
+                return ExecutionResult(
+                    exit_code=-1,
+                    stderr="Aborted (session stop) — shell killed",
+                    duration_ms=elapsed,
+                )
+            return ExecutionResult(
+                exit_code=int(completed.returncode or 0),
+                stdout=_clip_output(str(completed.stdout or ""), "stdout"),
+                stderr=_clip_output(str(completed.stderr or ""), "stderr"),
+                duration_ms=elapsed,
+            )
+        except (OSError, HostError, NativeRuntimeUnavailableError, ValueError) as e:
+            elapsed = (time.monotonic() - start) * 1000
+            if isinstance(e, OSError):
+                err = _spawn_error_stderr(command, e)
+            else:
+                err = f"OS error: {e}"
             return ExecutionResult(
                 exit_code=-1,
-                stderr=_spawn_error_stderr(command, e),
+                stderr=err,
                 duration_ms=elapsed,
             )
 
