@@ -276,12 +276,9 @@ func (c *DiscordChannel) sessionOnce(ctx context.Context) error {
 	}()
 
 	identifySent := false
-	var hbCancel context.CancelFunc
-	defer func() {
-		if hbCancel != nil {
-			hbCancel()
-		}
-	}()
+	heartbeatStarted := false
+	hbCtx, hbCancel := context.WithCancel(ctx)
+	defer hbCancel()
 
 	for {
 		select {
@@ -334,12 +331,10 @@ func (c *DiscordChannel) sessionOnce(ctx context.Context) error {
 				}
 				identifySent = true
 			}
-			if hbCancel != nil {
-				hbCancel()
+			if !heartbeatStarted {
+				heartbeatStarted = true
+				go c.heartbeat(hbCtx, ws)
 			}
-			var hbCtx context.Context
-			hbCtx, hbCancel = context.WithCancel(ctx)
-			go c.heartbeat(hbCtx, ws)
 		case 0:
 			if t == "READY" {
 				if sid, _ := d["session_id"].(string); sid != "" {

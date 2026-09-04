@@ -29,6 +29,29 @@ from remedy.interfaces.wizard import ensure_setup_before_launch
 from remedy.memory.store import MemoryStore
 
 
+class _NullStream:
+    """File-like for frozen windowed builds where sys.stdout/stderr are None."""
+
+    def write(self, data) -> None:
+        pass
+
+    def flush(self) -> None:
+        pass
+
+    def isatty(self) -> bool:
+        return False
+
+    def fileno(self) -> int:
+        raise OSError("no console attached")
+
+
+def _ensure_stdio() -> None:
+    """Never let logging see a None stdout/stderr (PyInstaller --noconsole)."""
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name, None) is None:
+            setattr(sys, name, _NullStream())
+
+
 def _repo_root() -> Path | None:
     here = Path(__file__).resolve()
     for candidate in (here.parents[3], here.parents[4] if len(here.parents) > 4 else None):
@@ -113,6 +136,7 @@ def _is_loopback_host(host: str) -> bool:
 
 def _cmd_serve(args) -> None:
     """Hand production :7400 to ``remedy-runtime``. No Python uvicorn dual-serve."""
+    _ensure_stdio()
     try:
         home = resolve_cli_home(args.home)
     except UnsafeHomeError as exc:
